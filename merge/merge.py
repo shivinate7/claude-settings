@@ -18,7 +18,7 @@
                           Record-claim head). A FAIL or an unknown stops the step with the step lines and the log: nothing pushed, not
                           marked ready, and no flag lifts it. A repo with no list runs no ready check, and one line says so.
                           Cost per draft-step ready: one ci-job run per job of the list, and one worktree; the run time is unmeasured for a step subset
-                          (the 3600 s lint bound applies). No new file but ci-job's own log.
+                          (the 3600 s lint bound applies), and a head that lacks the default base's tip adds one merge commit, one more local `git merge` start and no more pushes (still one). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
                           A confirm in the cloud needs a lane-lint PASS for the head's sha. Any pull request skips it, a lane PR included, when the all-jobs-passed rollup is green on that exact head:
                           then it skips the lint and prints one `merge: lane lint skipped ...` line naming the rollup and the head's first 9 characters.
@@ -150,8 +150,9 @@
                           lane lines (a lane the roadmap's live file shows done and safe to archive) and `hold (` lines (a lane not to archive now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane; the last clears when the step's status is set to todo or done), then a summary line. A lane that waits (a step not done, an open pull, an open item) prints no line, except a lane only stale drafts hold: that prints one `joint (close #N ...; archive archive/<branch> ...; archive lane <id>)` line, counted among the lanes to archive. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
                           posts nothing; any session may run it. An unreadable build or a missing --live exits 1: unknown, never empty.
-  merge <pr> --ready      a lane's one act on its own draft: the draft step of --confirm (rebuild the records page, run the repo's ready
-                          checks, push the page, ask the host to mark the PR ready) and nothing more. A PR that is ready already is left as it is. It
+  merge <pr> --ready      a lane's one act on its own draft: the draft step of --confirm (on the default branch, merge origin/<base> into
+                          the head when the head lacks its tip and the merge is clean; rebuild the records page; run the repo's ready checks on that
+                          final tree; one plain push of the merge commit and the page commit; ask the host to mark the PR ready) and nothing more. A PR that is ready already is left as it is. It
                           never merges, takes no lock and needs no merge role. A red head or a head that conflicts with the base is not marked ready.
                           A repo with merge.readyChecks gets the pre-ready run: the checks, the debt-close lint and the open-PR clash (the head against every
                           other open PR on its base), each one line `pass NAME`, `fail NAME: why` or `unknown NAME: why`, before any push. A PR on a base
@@ -3835,9 +3836,21 @@ def fast_checks(root, cfg, n, host, info):
         drop_worktree(root, tmp, wt)
     return 0
 
+def merge_base_in(wt, base, branch):
+    """Merge origin/<base> into the head checked out in `wt`: a merge commit, parents the head then the tip, no fast-forward. -> its sha.
+    Local only: nothing is pushed. The caller has read the merge as clean (holds_base), so a merge that fails here is a Stop, and the tree is left as it was."""
+    c, out = git(wt, *identity(wt), "merge", "--no-ff", "-q", "-m", f"Merge origin/{base} into {branch}", f"origin/{base}")
+    if c:
+        git(wt, "merge", "--abort")
+        raise Stop(f"the merge of origin/{base} into {branch} failed, so nothing was pushed {BASE_CITE}: {' '.join(out.split())[:200]}")
+    return git(wt, "rev-parse", "HEAD")[1]
+
 def draft_step(root, cfg, n, host, info):
     """`merge <pr> --confirm` on a draft: rebuild the records page on the head, push it, mark the pull request ready, and
     stop. So the branch is final at ready, and the ready confirm pushes nothing (decision records-index-at-merge).
+    On the default base, a head that lacks the tip but merges cleanly with it first gets a merge commit of origin/<base> (owner ruling, waiting-page
+    item 840 a): the page is rebuilt on the merged tree, a stale page is one more commit, the ready checks run once on that final tree, and one plain push sends both.
+    A conflict, a Record-claim head and a base other than the default push no merge. A failed merge, check or push leaves the pull request a draft.
     Takes no lock, claims no number and never merges: a claim stays at the ready confirm.
     A repo that declares merge.readyChecks also runs them first, on the tree the step would push, before any push and before the
     ready mark, on every path (the ready checks, decision lanes-run-no-full-ci-job). One ci-job run per job, in one worktree."""
@@ -3867,15 +3880,20 @@ def draft_step(root, cfg, n, host, info):
                 stale, stands = holds_base(wt, f"origin/{base}", info["head"])
                 if stale:  # holds_base ends with the remedy
                     raise Stop(("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " Nothing was pushed.")
+                merged = None
                 if stands:
-                    say(f"merge: {stands}. The green run stands.")
+                    say(f"merge: {stands}. The green run stands. {base} is merged into {info['branch']} before the push.")
+                    merged = merge_base_in(wt, base, info["branch"])  # the clean merge holds_base read; the page and the checks below read its tree
                 rebuilt = rebuild_records(wt)
                 sha = commit_claim(wt, None) if rebuilt else None
                 if checks:
-                    run_ready_checks(wt, n, base, checks, pre=pre)  # on the page commit when there is one, so what is checked is what is pushed
-                if rebuilt:
+                    run_ready_checks(wt, n, base, checks, pre=pre)  # on the final tree, so what is checked is what is pushed
+                if rebuilt or merged:
                     push_branch(wt, info["branch"])
-                    say(f"merge: the records page pushed to {info['branch']} at {sha[:9]}.")
+                    if merged:
+                        say(f"merge: {base} merged into {info['branch']} at {merged[:9]} and pushed.")
+                    if rebuilt:
+                        say(f"merge: the records page pushed to {info['branch']} at {sha[:9]}.")
                 else:
                     say(f"merge: the records page on {info['branch']} at {info['head'][:9]} is current. Nothing was pushed.")
         finally:
