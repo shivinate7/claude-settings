@@ -70,8 +70,8 @@ Page URL keys and the retired roadmap URL: skill `roadmap`, first paragraph.
 ## Update a repo's pages
 
 A batch that changes `page.html` republishes each waiting page this account can reach, before the
-batch report. The pages are the `waiting-page` keys of the repos' extras files, read by
-`live_pages()` in `~/.claude/lint/layout.py`.
+batch report. The pages are the first links of the waiting-page entries in the repos' extras files,
+else their old `waiting-page` keys, read by `live_pages()` in `~/.claude/lint/layout.py`.
 
 1. Fetch each page with `Artifact` action `read` into one folder, as `<artifact id>.html`. A page
    that cannot be read gets an empty `<artifact id>.unreadable`. A read that gives a summary, not

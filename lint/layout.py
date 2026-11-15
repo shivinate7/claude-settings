@@ -257,12 +257,21 @@ def artifact_id(url):
     home of "same artifact", so the /artifact/ and /code/artifact/ forms of one page compare equal."""
     if not isinstance(url, str):
         return ""
-    found = url.split("#", 1)[0].split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+    found = _bare_link(url).rsplit("/", 1)[-1]
     return "" if found == "artifact" else found
 
 
+def _bare_link(url):
+    """`url` with its fragment, its query and a trailing slash removed."""
+    return url.split("#", 1)[0].split("?", 1)[0].rstrip("/")
+
+
 def is_waiting_page_url(root, url):
-    """True when `url` names the waiting page of `root` (same artifact id) in any account's link, false for a repo with no page."""
+    """True when `url` is a claude.ai artifact link (ARTIFACT_URL, after _bare_link) that names the waiting page of `root`
+    (same artifact id) in any account's link, false for a repo with no page. A URL on another host or with another path
+    is false, even with the page's id as its last segment."""
+    if not isinstance(url, str) or not ARTIFACT_URL.fullmatch(_bare_link(url)):
+        return False
     wanted = artifact_id(url)
     return bool(wanted) and any(artifact_id(link["url"]) == wanted for link in _page_links(root))
 
