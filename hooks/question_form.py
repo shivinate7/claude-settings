@@ -1900,7 +1900,7 @@ def departs_ruling_hits(text, candidates) -> list:
     hits, seen = [], set()
     for line in candidates:
         rid, _, body = line.partition(": ")
-        if not body or rid in seen or rid.startswith(("decisions/", "debts/")):
+        if not body or rid in seen or RECORD_REF.match(rid):
             continue
         shared = len(focus & _words(RULED_META.sub("", body)))
         # Half the line's own topic words: a long line that brushes a ruling on two or three words is another topic.
