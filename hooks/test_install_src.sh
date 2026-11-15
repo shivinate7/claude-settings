@@ -5318,6 +5318,121 @@ caseR2() {
 }
 
 
+# ---- caseR3, caseR4, caseR5: a cloud install whose landing fails writes no install record and does not exit 0 quietly ----
+# r345_check NAME REC: the install that just ran (rc, out) left no record at REC, and it either exited non-zero or said it
+# will retry. Calls bad() and returns 1 at the first miss. The record gate reads INSTALL_FAILED only, and a failed landing
+# (land_failed) sets FAILED_SUBS only, so a run whose landing failed writes the record at the tip and exits 0.
+r345_check() {
+  if [ -f "$2" ]; then bad "$1" "a landing failed, yet the install wrote the record at the tip (exit $rc): the record gate reads INSTALL_FAILED, and land_failed sets FAILED_SUBS only"; return 1; fi
+  if [ "$rc" -eq 0 ] && ! printf '%s\n' "$out" | grep -qi 'will retry'; then bad "$1" "a landing failed, yet the install exited 0 with no record and no retry line (install problems: $(install_problems))"; return 1; fi
+  return 0
+}
+# caseR3: a landed folder that cannot be made. Every folder install.sh lands ships files, so a failed mkdir there also fails
+# the copy into it, and put_file sets INSTALL_FAILED: that run exits 1 and writes no record, so the real folders cannot go red
+# here. This case adds one landed folder with no files, zz-empty, to the fixture's landed-dirs.txt and puts a file where that
+# folder must be. The mkdir is then the only failure.
+caseR3() {
+  name="caseR3: a cloud install whose landed folder cannot be made writes no install record and does not exit 0 quietly"
+  fx="$work/r3-fx"; h="$work/r3-home"; scratch="$work/r3-scratch"; bin="$work/r3-bin"
+  mkdir -p "$h/.claude-cfg" "$scratch"
+  make_github_fixture "$fx"
+  printf '\nzz-empty\n' >> "$fx/src/landed-dirs.txt"
+  git -C "$fx/src" add -A
+  git -C "$fx/src" -c user.email=t@example.com -c user.name=t commit -q -m "landed folder with no files"
+  git -C "$fx/src" push -q "$fx/bare.git" HEAD:refs/heads/main
+  printf 'a file where the folder must be\n' > "$h/.claude-cfg/zz-empty"
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin"
+  if [ ! -f "$h/.claude-cfg/agents/builder.md" ]; then
+    bad "$name" "scope: the agents folder did not land (install exit $rc: $(install_problems)), so the run did not reach the case"
+    return
+  fi
+  if [ ! -f "$h/.claude-cfg/zz-empty" ]; then
+    bad "$name" "scope: the file where zz-empty must be was replaced, so its mkdir did not fail"
+    return
+  fi
+  r345_check "$name" "$h/.claude-cfg/.claude-settings-install.json" || return
+  ok "$name"
+}
+# caseR4: a folder of the owner's sits where a shipped file lands. land_dir keeps it and calls land_failed for agents. No
+# copy fails, so the run lands everything else and the record gate sees no INSTALL_FAILED.
+caseR4() {
+  name="caseR4: a cloud install that keeps the owner's folder at a shipped file's name writes no install record and does not exit 0 quietly"
+  fx="$work/r4-fx"; h="$work/r4-home"; scratch="$work/r4-scratch"; bin="$work/r4-bin"
+  mkdir -p "$h/.claude-cfg/agents/builder.md" "$scratch"
+  printf 'my notes\n' > "$h/.claude-cfg/agents/builder.md/notes.txt"
+  make_github_fixture "$fx"
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin"
+  if ! printf '%s\n' "$out" | grep -q 'a folder of yours sits where the file agents/builder.md lands'; then
+    bad "$name" "scope: the install did not keep the owner's folder at agents/builder.md (install exit $rc: $(install_problems))"
+    return
+  fi
+  r345_check "$name" "$h/.claude-cfg/.claude-settings-install.json" || return
+  ok "$name"
+}
+# caseR5: the skills copy fails after rm -rf, with no root trick. The config folder's path is made long (16 components of
+# 200 bytes), so a copy under it runs past PATH_MAX (4096 bytes) while the clone's copy stays short. The first install copies
+# r5-deep whole and writes its record. The fixture then adds a file four folders deep in r5-deep, past the limit under the
+# config folder. The second install's tree hash matches the copy it recorded, so it removes the copy (rm -rf) and the copy
+# fails. The first run's record is removed, so the second run's record is the only one that can exist.
+caseR5() {
+  name="caseR5: a cloud install whose skills copy fails after rm -rf writes no install record and does not exit 0 quietly"
+  fx="$work/r5-fx"; h="$work/r5-home"; scratch="$work/r5-scratch"; bin="$work/r5-bin"
+  mkdir -p "$h" "$scratch"
+  r5_cfg="$h"
+  for i in $(seq 1 16); do r5_cfg="$r5_cfg/$(printf 'd%0199d' "$i")"; done
+  mkdir -p "$r5_cfg"
+  r5_rec="$r5_cfg/.claude-settings-install.json"
+  r5_k=$(printf 'k%0199d' 0)
+  make_github_fixture "$fx"
+  mkdir -p "$fx/src/skills/r5-deep"
+  printf 'a skill with one file\n' > "$fx/src/skills/r5-deep/SKILL.md"
+  git -C "$fx/src" add -A
+  git -C "$fx/src" -c user.email=t@example.com -c user.name=t commit -q -m "skill for the copy case"
+  git -C "$fx/src" push -q "$fx/bare.git" HEAD:refs/heads/main
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin" main "CLAUDE_CONFIG_DIR=$r5_cfg"
+  if [ "$rc" -ne 0 ] || [ ! -f "$r5_cfg/skills/r5-deep/SKILL.md" ] || [ ! -f "$r5_rec" ]; then
+    bad "$name" "setup: the first install did not copy r5-deep and write its record (install exit $rc: $(install_problems))"
+    return
+  fi
+  rm -f "$r5_rec"
+  mkdir -p "$fx/src/skills/r5-deep/$r5_k/$r5_k/$r5_k/$r5_k"
+  printf 'deep\n' > "$fx/src/skills/r5-deep/$r5_k/$r5_k/$r5_k/$r5_k/deep.md"
+  git -C "$fx/src" add -A
+  git -C "$fx/src" -c user.email=t@example.com -c user.name=t commit -q -m "deep file in the skill"
+  git -C "$fx/src" push -q "$fx/bare.git" HEAD:refs/heads/main
+  r5_dest="$r5_cfg/skills/r5-deep/$r5_k/$r5_k/$r5_k/$r5_k/deep.md"
+  r5_src="$h/claude-settings/skills/r5-deep/$r5_k/$r5_k/$r5_k/$r5_k/deep.md"
+  if [ "${#r5_dest}" -le 4095 ] || [ "${#r5_src}" -ge 4096 ]; then
+    bad "$name" "scope: the seed does not put the copy past PATH_MAX (copy path ${#r5_dest} bytes, clone path ${#r5_src} bytes)"
+    return
+  fi
+  cloud_install "$h" "$scratch" "$bin" main "CLAUDE_CONFIG_DIR=$r5_cfg"
+  if [ ! -f "$r5_cfg/agents/builder.md" ]; then
+    bad "$name" "scope: the agents folder did not land on the second run (install exit $rc: $(install_problems)), so the run did not reach the case"
+    return
+  fi
+  if [ -n "$(find "$r5_cfg/backups/skills" -name 'r5-deep*' 2>/dev/null)" ]; then
+    bad "$name" "scope: the second run backed the old copy up instead of removing it, so the rm -rf did not run"
+    return
+  fi
+  if [ ! -f "$r5_src" ]; then
+    bad "$name" "scope: the clone has no deep file, so an absent copy proves nothing (install problems: $(install_problems))"
+    return
+  fi
+  if [ -n "$(find "$r5_cfg/skills/r5-deep" -name deep.md 2>/dev/null)" ]; then
+    bad "$name" "scope: the deep file was copied, so the skills copy did not fail"
+    return
+  fi
+  r345_check "$name" "$r5_rec" || return
+  ok "$name"
+}
+
 # ---- caseL: the merge allow rules come from the source checkout, and the log says what was written ----
 # The log names `merge allow rules`, not `merge --confirm allow rules`: the file holds the role rules as well as the confirm rules.
 # allow_case NAME HAS [SETTINGS]: a session's own checkout at $work/NAME-co with settings.json `{}`. HAS=1 adds this repo's
@@ -6448,6 +6563,9 @@ run caseP4
 run caseP5
 run caseR1
 run caseR2
+run caseR3
+run caseR4
+run caseR5
 run caseL1
 run caseL2
 run caseL3
