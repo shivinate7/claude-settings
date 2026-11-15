@@ -16984,7 +16984,7 @@ class ReviewedList(ReviewEnv):
 
     def test_the_newest_log_at_the_fix_head_decides_what_the_fix_inherits(self):
         # a log at the fix head that already has a fix check (one fix verifier per record), or one with no round
-        # (a bare hold), gives nothing, and no older log at that head is read past it
+        # (a bare hold), gives nothing, and no older log at that head is read past it. With nothing inherited, a passing fix verifier still ends review (owner, waiting-page item 858 a, 2026-11-15 11:39 CST)
         round_fail = ("Round 1: reviewer, sonnet, FAIL",)
         fixed = record_text(head=REVIEW_OLD_HEAD, rounds=round_fail, fix=(fix_verifier_line(head="2e" * 20),))
         bare_hold = record_text(head=REVIEW_OLD_HEAD, rounds=(), net="negative")
@@ -16995,16 +16995,16 @@ class ReviewedList(ReviewEnv):
                 host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)],
                                                   [older, review_comment(3, 7, newest_earlier), later, lint_of(7, REVIEW_HEAD)])
                 self.assertEqual(rc, 0, out + err)
-                self.assertRegex(list_line(self, out, 7), r"open: the fix check passed, but no round is recorded")
+                self.assertRegex(list_line(self, out, 7), r"done: the fix verifier passed")
 
     def test_a_fix_verifier_reads_no_round_from_a_log_at_another_head_or_pr(self):
-        # the round is read only from the log whose Head is the fix check's reviewed head, and only on the same pull request
+        # the round is read only from the log whose Head is the fix check's reviewed head, and only on the same pull request. Nothing inherited still reads done (owner, waiting-page item 858 a, 2026-11-15 11:39 CST)
         other = review_comment(1, 7, record_text(head="2e" * 20, rounds=("Round 1: reviewer, sonnet, FAIL",)))
         wrong_pr = review_comment(2, 8, record_text(n=8, head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",)))
         later = review_comment(3, 7, record_text(rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD),)))
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [other, wrong_pr, later, lint_of(7, REVIEW_HEAD)])
         self.assertEqual(rc, 0, out + err)
-        self.assertRegex(list_line(self, out, 7), r"open: the fix check passed, but no round is recorded")
+        self.assertRegex(list_line(self, out, 7), r"done: the fix verifier passed")
 
     def test_a_pr_with_no_record_is_named_on_the_no_record_line(self):
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
