@@ -339,6 +339,10 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_ci_scope.py
 
+      - name: install.sh shard pins
+        if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
+        run: python3 lint/test_install_src_shards.py
+
       - name: Green head reader fixture suite
         run: python3 lint/test_green_head.py
 
@@ -1283,8 +1287,14 @@ jobs:
     # A push to main starts no macOS runner, and a pull_request starts it only when its own flags are true: a step-level skip still starts a runner (R61).
     # A schedule and a dispatch run it. all-jobs-passed reads the skip as green through scope-skips.
     # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Newest 29 completed push runs on main, latest attempt of each (run 42445434802 to run 43184587111):
-    # 29 green, median 23.0, slowest 31.3 min (run 43184587111). The stopgap ends with roadmap step time-pinned-tests-go.
+    # 29 green, median 23.0, slowest 31.3 min (run 43184587111). Those runs are the old shape: one leg that ran the whole install suite. Each of the two legs now runs half of it; unmeasured.
+    # The stopgap ends with roadmap step time-pinned-tests-go.
     timeout-minutes: 75
+    # The install suite runs half its cases per leg (INSTALL_SRC_SHARD, hooks/test_install_src.sh); every other step runs on leg 1/2 only.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ['1/2', '2/2']
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request' }}
@@ -1293,39 +1303,42 @@ jobs:
           persist-credentials: false
 
       - name: Report the shell this job actually runs
-        if: ${{ needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request' }}
+        if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && matrix.shard == '1/2' }}
         run: |
           /bin/bash --version | head -n1
           command -v bash
           bash --version | head -n1
       - name: Shell syntax check, install.sh
-        if: ${{ needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request' }}
+        if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && matrix.shard == '1/2' }}
         run: bash -n install.sh
       - name: install.sh checkout-detection suite
         if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
-        # Own cap, 45 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The step ran 1293 s (21.6 min) in run 43184587111 and 1221 s in run 43164094808.
+        # Own cap, 45 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Measured basis is the old shape, the whole suite in one step:
+        # 22.4 min, n=5 (the audit). Each leg now runs half the cases; the new shape is unmeasured.
         timeout-minutes: 45
+        env:
+          INSTALL_SRC_SHARD: ${{ matrix.shard }}
         run: sh hooks/test_install_src.sh
       - name: install_from_main suite
-        if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
+        if: ${{ ((needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true') && matrix.shard == '1/2' }}
         run: sh merge/test_install_from_main.sh
       - name: ios-ship fixture suite (/bin/bash 3.2)
-        if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
+        if: ${{ ((needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true') && matrix.shard == '1/2' }}
         run: /bin/bash lint/test_ios_ship.sh
       - name: ios-ship fixture suite (bash on PATH)
-        if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
+        if: ${{ ((needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true') && matrix.shard == '1/2' }}
         run: bash lint/test_ios_ship.sh
       - name: sim-test fixture suite (/bin/bash 3.2)
-        if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
+        if: ${{ ((needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true') && matrix.shard == '1/2' }}
         run: /bin/bash lint/test_sim_test.sh
       - name: sim-test fixture suite (bash on PATH)
-        if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
+        if: ${{ ((needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true') && matrix.shard == '1/2' }}
         run: bash lint/test_sim_test.sh
       - name: duo-fold fixture suite (/bin/bash 3.2)
-        if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
+        if: ${{ ((needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true') && matrix.shard == '1/2' }}
         run: /bin/bash lint/test_duo_fold.sh
       - name: duo-fold fixture suite (bash on PATH)
-        if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
+        if: ${{ ((needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true') && matrix.shard == '1/2' }}
         run: bash lint/test_duo_fold.sh
 
   # The owner runs this repo on macOS. Before this job, every Python suite in the checks
