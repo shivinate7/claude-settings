@@ -2578,17 +2578,37 @@ class PinnedHarness(Job):
                 text = f.read()
         return rc, lines, out + text
 
-    def publish_stable(self, at):
-        """The stable branch of the claude-settings origin, at commit `at`. The origin is a bare copy of the fixture made now,
-        so it holds every commit made so far; the branch is set in it by update-ref. The fixture's clone fetches it from that
-        origin, as CI reads it. -> at."""
+    def publish_origin(self):
+        """The claude-settings origin of the fixture: a bare copy of it, made now, so it holds every commit made so far. The
+        fixture's clone reads its branches from there, as it reads CI's. -> the origin's path."""
         home = tempfile.mkdtemp(prefix="origin-", dir=RUN_FOLDER)
         self.addCleanup(shutil.rmtree, home, True)
         bare = os.path.join(home, "origin.git")
         subprocess.run(["git", "clone", "-q", "--bare", self.source, bare], check=True, env=ENV)
-        git_in(bare, "update-ref", "refs/heads/stable", at)
         git_in(self.source, "remote", "add", "origin", bare)
+        return bare
+
+    def publish_stable(self, at):
+        """The stable branch of the origin, at commit `at`, set in it by update-ref. -> at."""
+        git_in(self.publish_origin(), "update-ref", "refs/heads/stable", at)
         return at
+
+    def unreachable_origin_env(self):
+        """PATH with a git first that fails each fetch and ls-remote the way a dead network does, and runs every other git call
+        for real. -> the env that puts it first."""
+        bin_dir = tempfile.mkdtemp(prefix="deadgit-", dir=RUN_FOLDER)
+        script = ('#!/bin/sh\n'
+                  'case " $* " in\n'
+                  '  *" fetch "*|*" ls-remote "*)\n'
+                  '    echo "fatal: unable to access \'https://github.com/shivinate7/claude-settings/\': Could not resolve host: github.com" >&2\n'
+                  '    exit 128 ;;\n'
+                  'esac\n'
+                  'exec "%s" "$@"\n') % shutil.which("git")
+        path = os.path.join(bin_dir, "git")
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(script)
+        os.chmod(path, 0o755)
+        return {"PATH": os.pathsep.join([bin_dir, os.environ.get("PATH", "")])}
 
     def run_pinned(self, ref, *flags, env=None):
         """One run of the step pinned to `ref` (a sha or a branch name). -> (rc, verdict lines, the output and the log)."""
@@ -2915,6 +2935,25 @@ class PinnedHarness(Job):
         rc, lines, text = self.run_step(ste, "--lint", "--base", "origin/main")
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "--lint did not PASS a stale pin\n" + text)
         self.assertTrue(any(PIN_NOTE_MARKER in ln for ln in text.splitlines()), "--lint printed no pin note for a stale pin behind the stable head\n" + text)
+
+    def test_a_stale_pin_with_an_origin_that_holds_stable_reads_unknown_when_the_fetch_fails(self):
+        """The harm this stops: origin holds a stable head past the pin and the fetch of it fails, so the pin was judged against
+        this copy's HEAD, which is the pin, and passed as the same lint. It reads unknown, exit 2, and the fetch's reason prints."""
+        pin = self.add_ste_lint(change=False)  # this copy's HEAD is the pin
+        self.stable_moves_past_the_pin(pin)  # origin's stable branch is past the pin
+        self.pin_child("ste-lint", pin)
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        rc, lines, text = self.run_step(ste, "--step", "STE lint", "--base", "origin/main", env=self.unreachable_origin_env())
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), "a stale pin judged after a failed stable fetch did not read unknown, never PASS\n" + text)
+        self.assertIn("Could not resolve host", text, "the unknown line does not print the fetch's reason\n" + text)
+
+    def test_a_stale_pin_with_an_origin_that_has_no_stable_branch_still_exits_three_under_step(self):  # the control
+        pin = self.add_ste_lint()  # this copy's HEAD is one commit past the pin, so the pin differs from it
+        self.publish_origin()  # origin holds no stable branch, so the fetch of it finds no such ref
+        self.pin_child("ste-lint", pin)
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        rc, lines, text = self.run_step(ste, "--step", "STE lint", "--base", "origin/main")
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "a stale pin with no stable branch on origin did not exit 3 under --step\n" + text)
 
     @unittest.skipUnless(os.name == "posix", "the git stub is a shell script")
     def test_the_export_is_deleted_after_a_pass_and_after_an_unknown(self):
