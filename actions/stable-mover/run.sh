@@ -1,15 +1,23 @@
 #!/usr/bin/env bash
 # The stable mover's one step. Run in a checkout whose origin is the repo. HEAD_SHA is the commit of a
-# finished main run and RUN_CONCLUSION is that run's conclusion. It moves origin's stable branch to
-# HEAD_SHA only when the run succeeded, HEAD_SHA is on origin's main, and HEAD_SHA descends from stable (a
-# fast-forward). GH_TOKEN, when set, authenticates the push; a local origin needs none.
+# finished main run, RUN_CONCLUSION is that run's conclusion, RUN_EVENT is its event and RUN_PROVEN is "true"
+# when the push skip proved a push run. It moves origin's stable branch to HEAD_SHA only when the run succeeded,
+# the run covers the slow legs (a schedule run, which runs every job, or a push run the push skip proved: a green
+# Linux-only push run does not, owner page item 880, 11:53 CST Nov 15), HEAD_SHA is on origin's main, and HEAD_SHA
+# descends from stable (a fast-forward). GH_TOKEN, when set, authenticates the push; a local origin needs none.
 set -u
 head="${HEAD_SHA:-}"
 conclusion="${RUN_CONCLUSION:-}"
+event="${RUN_EVENT:-}"
+proven="${RUN_PROVEN:-}"
 
 [ -n "$head" ] || { echo "stable-mover: HEAD_SHA is not set" >&2; exit 2; }
 if [ "$conclusion" != "success" ]; then
   echo "stable-mover: refused: the run concluded '${conclusion:-unknown}', not 'success'; stable stays where it is" >&2
+  exit 1
+fi
+if [ "$event" != "schedule" ] && { [ "$event" != "push" ] || [ "$proven" != "true" ]; }; then
+  echo "stable-mover: refused: a '${event:-unknown}' run${proven:+ (proven=$proven)} does not cover the slow legs; stable stays where it is" >&2
   exit 1
 fi
 git cat-file -e "$head^{commit}" 2>/dev/null || { echo "stable-mover: refused: $head is not a commit in this checkout" >&2; exit 1; }
