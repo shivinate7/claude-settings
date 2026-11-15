@@ -62,7 +62,7 @@ HEADER_CORE = ("combine-train: dry run, no push, no gh pr ready or merge. Readin
                "(d) the fast checks run once per round on its leading tip; (e) --lint runs once on a folded batch's final tree; "
                "(f) each member is merge-tested against origin/main first, and a clash with main leaves by name.")
 HEADER = HEADER_CORE + " Queue schema: the tool's own."
-REST_HEADER = (HEADER_CORE + " Queue read from GitHub, reads only: (g) the queue order is the PR number, ascending, because REST holds no priority "
+REST_HEADER = (HEADER_CORE + " Readings (g) and (h), the queue read from GitHub, reads only: (g) the queue order is the PR number, ascending, because REST holds no priority "
                "and an owner's priority list is not read here; (h) the state of a ready PR is its CI reading: pending is the in-ci batch, the first green "
                "is the next-in-line batch, the other green ones are the queued batch that folds, red is left out by name, unknown is not queued.")
 
