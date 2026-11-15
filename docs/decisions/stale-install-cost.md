@@ -24,14 +24,16 @@ Proof, in `hooks/test_reinstall_stale.py`:
 - Read counts: `hooks/test_reinstall_stale.py::StaleInstall::test_current_makes_one_ls_remote_and_no_install` (one read, no fetch or clone). `hooks/test_reinstall_stale.py::StaleInstall::test_second_turn_after_reinstall_is_silent` (the next prompt makes one read and no install). `hooks/test_reinstall_stale.py::StaleInstall::test_behind_origin_reinstalls_once_and_names_both_shas` (one read, one installer run). `hooks/test_reinstall_stale.py::StaleInstall::test_ls_remote_timeout_reports_unknown_and_installs_nothing` and `hooks/test_reinstall_stale.py::StaleInstall::test_ls_remote_failure_reports_unknown_and_installs_nothing` (one read, one unknown line, no install).
 - No git outside a cloud session: `hooks/test_reinstall_stale.py::StaleInstall::test_not_cloud_is_silent_with_no_git_call`.
 - Cost text: `hooks/test_reinstall_stale.py::HookFile::test_docstring_states_the_cost` checks that the docstring names process starts, network reads, the per-turn frequency, no timer and no long-lived process. It checks the words, not the numbers.
-- Not pinned (unmeasured): the python start count, since no case counts starts. The claim that the hook writes no file. The `git show` reads of a reinstall. The `git diff` read is pinned at one by `hooks/test_reinstall_stale.py::StaleInstall::test_failed_local_diff_prints_restart_unknown_line`.
+- Not pinned (unmeasured): the python start count, since no case counts starts. The `git show` reads of a reinstall. The `git diff` read is pinned at one by `hooks/test_reinstall_stale.py::StaleInstall::test_failed_local_diff_prints_restart_unknown_line`.
 
-Retry cost, debt `reinstall-no-backoff` (the hook reruns the installer on each prompt, with no backoff):
+Retry backoff (owner, 2026-11-15 11:33 CST, waiting-page item 871 b; closes debt `reinstall-no-backoff`):
 
-- Record behind the tip after a failed install. The installer writes the record only after a clean install, so the older record stays. Each prompt then runs one `git ls-remote` and one installer run. The debt holds the time.
-- Installer exits 0, but its files stay short of the tip. The record is rewritten at the short sha, and the hook prints "reinstall did not reach". The next prompt runs the same retry.
-- Failed first install. No record is written, so there is no retry and no read. The hook prints `install freshness unknown (no install record)` on each prompt until a record exists.
-- Pinned: one installer run inside one prompt, `hooks/test_reinstall_stale.py::StaleInstall::test_installer_exit_3_prints_one_failure_line_and_runs_once`. Not pinned: the retry across prompts (unmeasured).
+- Where it is remembered: `<config dir>/.claude-settings-install-attempt.json`, `{tip, epoch}`. The installer writes it at the start of a hook-driven cloud run (`write_attempt_stamp` in `install.sh`, told the tip by the hook through `CS_STALE_TIP`). It removes it only when the record it writes is at that tip. The hook writes nothing.
+- A fresh stamp for the current tip means an install failed, timed out, fell short of the tip, or is still running. The hook then runs no installer and prints "reinstall skipped (install started at <tip7> not finished, retry in <N> s)". A new tip, an older stamp or an unreadable stamp runs the installer as before. A later success clears the stamp.
+- Length: 900 s, `CLAUDE_SETTINGS_REINSTALL_BACKOFF` replaces it. The worst failed run is about 75 s, so one retry per 15 min caps the retry at under 10% of the time, against every prompt before. The number is a choice. How long real failures last and how often prompts come are unmeasured. The length is fixed, not doubling.
+- Cost: no timer, no long-lived process, no file written by the hook. A skipped prompt still makes the one `git ls-remote`. The installer writes one small file per hook-driven run.
+- Failed first install: no record is written, so no retry and no read; the hook prints `install freshness unknown (no install record)` on each prompt until a record exists.
+- Pinned: `hooks/test_reinstall_stale.py::StaleInstallBackoff` (skip within the backoff, run after it, a new tip, a garbled stamp, the env override, the stamp kept after a failure, a timeout and a short record, cleared on success, `CS_STALE_TIP` passed to the installer, no file written on a skipped prompt). The installer side runs for real in `hooks/test_install_src.sh` cases `stale_stamp1` to `stale_stamp7`. Not pinned: a lock wait, and a retry exactly at the backoff.
 
 Kind: process
 Home: hooks/stale_install.py
