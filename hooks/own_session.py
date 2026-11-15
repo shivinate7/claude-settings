@@ -103,6 +103,15 @@ def own_session_read(transcript, own_id, created=False):
     return _scan(transcript, own_id, created)[:3]
 
 
+def own_record_and_created(transcript, own_id):
+    """(tags, parent, made): the own record of own_session_read with `created` on, and made, the {session id: tags} of
+    the sessions the transcript's create_session calls started and no archive_session call names (created_sessions).
+    One read of the transcript serves both."""
+    made = {}
+    tags, _, parent, _ccr = _scan(transcript, own_id, True, made)
+    return tags, parent, made
+
+
 def own_session_ccr(transcript, own_id):
     """The whole `ccr` dict of the newest get_session result whose ccr.id is own_id, else None. The
     branch and source fields of the record are read from it (lane-closes-after-records).

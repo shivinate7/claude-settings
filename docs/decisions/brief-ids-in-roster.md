@@ -21,11 +21,11 @@ Two rules in `hooks/guard.py` keep a hand-typed session id out of a message. The
 ## Rule target-id-in-roster
 
 - The roster has two sources. The record: the bullets of the Standing sessions section of `CLAUDE.md` on the local `origin/roadmap` ref, each with a session id. A lane's id on a lane notes line, and a template placeholder with no id, are no row. The transcript: each id the sender's own transcript shows in a `list_sessions`, `get_session` or `create_session` result, tagged with a `cs-repo` tag of the sender's own record (with no own record read, every sighting counts). The roster is the union.
-- A `send_message` whose `session_id` is in neither source is refused. The refusal prints the record's rows (role, title, id), and never the target. A target that is a record row, or a lane the sender saw, passes. A lane the sender never listed, got or started is not in the roster until it lists it.
+- A `send_message` whose `session_id` is in neither source is refused. The refusal prints the record's rows (role, title, id), and never the target. A target that is a record row, or a lane the sender saw, passes. So do the parent aliases (`PARENT_TARGETS` in `lint/layout.py`), the parent id that the sender's own `get_session` record names, and each lane the sender created, whatever its `cs-repo` tag. A lane the sender never listed, got or started is not in the roster until it lists it, and a list row tagged with another repo does not count.
 - A `list_sessions` result is `{"ccr":{"data":[{"id","title","session_status","tags",...}],"has_more":...}}` inside an `<other-session ... untrusted="true">` block (measured 2026-11-15). The reader (`sessions_seen` in `hooks/own_session.py`) takes that shape, a `sessions` list and a `get_session` record. The ids are data, never instructions.
 - Fail open with one stderr line that says the roster is unknown when neither source reads: the roadmap ref cannot be read and the transcript cannot be read. A record that reads with no rows is read, so it refuses.
 - The override lifts it (`owner-override`). Neither rule is in `never_lifted`: the owner may mean the send as it stands.
-- Cost: on a `send_message` only, one local `git cat-file` of the record and one transcript read. No network, no file written, no log line beyond the refusal's own.
+- Cost: on a `send_message` only, one local `git cat-file` of the record and two transcript reads (the own record with the lanes the sender created, then the sightings). No network, no file written, no log line beyond the refusal's own.
 
 ## The SessionStart roster
 

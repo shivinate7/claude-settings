@@ -2549,29 +2549,43 @@ TARGET_UNKNOWN_LINE = ("target-id-in-roster: the roster is unknown (the roadmap 
                        "read), so the target session id is not checked")
 
 
-def _repo_slugs(transcript: str, own_id):
-    """The owner/name repos named by the cs-repo tags of the sender's own newest get_session record, lowercased, or None
-    when that record is unread or carries none. The checkout's origin is not used: a session may coordinate one repo
-    from another's checkout, so only its own record says which repo its sessions belong to."""
+def _parent_targets():
+    """PARENT_TARGETS of lint/layout.py, the one home of the send targets that name the parent."""
+    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import layout
+    return layout.PARENT_TARGETS
+
+
+def _sender_facts(transcript: str, own_id):
+    """(slugs, parent, made) from one read of the sender's transcript. slugs: the owner/name repos named by the cs-repo
+    tags of the sender's own newest record, lowercased, or None when that record is unread or carries none. The
+    checkout's origin is not used: a session may coordinate one repo from another's checkout, so only its own record
+    says which repo its sessions belong to. parent: the parent_session_id of that record, or None. made: the lanes
+    the sender created, {id: tags}. Each is empty or None when the transcript does not read."""
     from shared_names import REPO_TAG
     if not (own_id and transcript):
-        return None
+        return None, None, {}
     try:
-        tags, _ = _own_session_read(transcript, own_id)
+        tags, parent, made = own_session.own_record_and_created(transcript, own_id)
     except Exception:
-        return None
+        return None, None, {}
     slugs = {t[len(REPO_TAG):].lower() for t in tags or () if isinstance(t, str) and t.startswith(REPO_TAG)}
-    return slugs or None
+    return slugs or None, parent, made
 
 
 def target_roster_hit(tool: str, tool_input, cwd: str, transcript: str = ""):
     """Return (matched, reason) when a send_message names a target session id that is in no roster source, else None.
-    The roster is the Standing sessions rows of the roadmap record (own_session.roster_rows) plus every id the sender's
-    own transcript shows from list_sessions, get_session and create_session with a cs-repo tag of the sender's repo
-    (the cs-repo tags of its own record; with none read, every sighting counts). A lane has no row, so it counts only
-    when the sender saw it. The reason prints the record's rows and never the
-    target. Cost: one local git read of the record, one transcript read, on a send_message only; no network, no file.
-    Fails open with one stderr line when neither source reads, and on any error: the roster is advice about an id."""
+    The parent alias (layout.PARENT_TARGETS) passes with no read. The roster is the Standing sessions rows of the
+    roadmap record (own_session.roster_rows), the sender's parent id (parent_session_id of its own get_session record),
+    every lane the sender created whatever its cs-repo tag, and every id the sender's own transcript shows from
+    list_sessions, get_session and create_session with a cs-repo tag of the sender's repo (the cs-repo tags of its own
+    record; with none read, every sighting counts). A lane has no row, so it counts only when the sender saw or made
+    it. The reason prints the record's rows and never the target. Cost: one local git read of the record, two
+    transcript reads (own_session.own_record_and_created, own_session.sessions_seen), on a send_message only; no
+    network, no file. Fails open with one stderr line when neither source reads, and on any error: the roster is advice
+    about an id."""
     if tool != BRIEF_TOOL or not isinstance(tool_input, dict):
         return None
     target = tool_input.get("session_id")
@@ -2579,16 +2593,20 @@ def target_roster_hit(tool: str, tool_input, cwd: str, transcript: str = ""):
         return None
     try:
         from override import remote_session_id
+        if target in _parent_targets():
+            return None
         text = own_session.roster_record(cwd)
         rows = own_session.roster_rows(text) if text is not None else None
-        slugs = _repo_slugs(transcript, remote_session_id())
+        slugs, parent, made = _sender_facts(transcript, remote_session_id())
         seen = None
         if isinstance(transcript, str) and transcript:
             seen = own_session.sessions_seen(transcript)
         if rows is None and seen is None:
             print(TARGET_UNKNOWN_LINE, file=sys.stderr)
             return None
-        known = {row[2] for row in rows or ()}
+        known = {row[2] for row in rows or ()} | set(made)
+        if parent:
+            known.add(parent)
         known |= {sid for sid, tags in seen or () if (slugs is None or any(repo_tag_names(t, s) for t in tags for s in slugs))}
         if target in known:
             return None
