@@ -5,8 +5,9 @@ Reads one JSON object on stdin (the SessionEnd hook payload: `cwd` is the ending
 working directory). Resolves the git repository that `cwd` sits in -- the PRIMARY checkout, not
 a linked worktree's own path, see `git_reads.primary_checkout`'s own docstring for why that
 distinction matters -- and runs `janitor/sweep.py <that root> --confirm --session-end` there. The
-run judges branches and worktrees in that repository only, stops proven orphans machine-wide like
-the scheduled job, and skips the loose-process report. Always exits 0.
+run judges branches and worktrees in that repository only, stops proven dead-rooted servers rooted in
+that repository only, and skips the loose-process report. Other repositories' dead servers wait for
+the daily job. Always exits 0.
 
 FAILS OPEN, ON PURPOSE. This script's own job is to let the session end; it is never the thing
 that decides whether a branch or a worktree is reapable. Every way this script itself can go
