@@ -2,7 +2,7 @@
 
 ## Ruling
 
-Open: is one `git ls-remote` of origin per cloud prompt acceptable? Not ruled. Filed 2026-11-15 03:14 CST, no owner answer yet.
+Open: is one `git ls-remote` of origin per cloud prompt acceptable? Not ruled. Filed on waiting-page item 870, no owner answer yet.
 
 The hook is `hooks/stale_install.py`, a UserPromptSubmit hook. It reinstalls the hooks when origin's tip moves past the installed sha. It starts a new process on every prompt. Rule `outcomes-mechanize-rules` (root CLAUDE.md) allows tracking reads on demand inside a process already running, never on every tool call. The three timer exceptions under owner ruling `stall-watch-exceptions-180a` are the stall watch, the CI wake and the daily job. This hook is none of the three, so no ruling covers it.
 
@@ -22,7 +22,7 @@ Proof, in `hooks/test_reinstall_stale.py`:
 - Read counts: `hooks/test_reinstall_stale.py::StaleInstall::test_current_makes_one_ls_remote_and_no_install` (one read, no fetch or clone). `hooks/test_reinstall_stale.py::StaleInstall::test_second_turn_after_reinstall_is_silent` (the next prompt makes one read and no install). `hooks/test_reinstall_stale.py::StaleInstall::test_behind_origin_reinstalls_once_and_names_both_shas` (one read, one installer run). `hooks/test_reinstall_stale.py::StaleInstall::test_ls_remote_timeout_reports_unknown_and_installs_nothing` and `hooks/test_reinstall_stale.py::StaleInstall::test_ls_remote_failure_reports_unknown_and_installs_nothing` (one read, one unknown line, no install).
 - No git outside a cloud session: `hooks/test_reinstall_stale.py::StaleInstall::test_not_cloud_is_silent_with_no_git_call`.
 - Cost text: `hooks/test_reinstall_stale.py::HookFile::test_docstring_states_the_cost` checks that the docstring names process starts, network reads, the per-turn frequency, no timer and no long-lived process. It checks the words, not the numbers.
-- Not pinned (unmeasured): the python start count, since no case counts starts. The claim that the hook writes no file. The local git reads of a reinstall.
+- Not pinned (unmeasured): the python start count, since no case counts starts. The claim that the hook writes no file. The `git show` reads of a reinstall. The `git diff` read is pinned at one by `hooks/test_reinstall_stale.py::StaleInstall::test_failed_local_diff_prints_restart_unknown_line`.
 
 Retry cost, debt `reinstall-no-backoff` (the hook reruns the installer on each prompt, with no backoff):
 
