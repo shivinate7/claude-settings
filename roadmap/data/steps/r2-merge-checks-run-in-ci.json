@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Express lane from the unlanded ledger; detail is in the ledger row.",
  "source": "coordinator 12:44 CST Nov 13, retrospective unlanded ledger (branch restart-plan, commit 2c0b173e, plans/unlanded-ledger-2026-11-13.md)",
- "note": "Doing, express lane started from the retrospective's unlanded ledger. The ledger row holds the detail; this step was created by triage from the lane's name, with no brief text of its own yet. Lane session_013NEJL1N8ka7rSDKNoCyriZ.",
+ "note": "Doing, express lane started from the retrospective's unlanded ledger. The ledger row holds the detail; this step was created by triage from the lane's name, with no brief text of its own yet. Lane session_013NEJL1N8ka7rSDKNoCyriZ. 23:40 CST Nov 14: slice 1 merged as #3251 (23:38:08 CST, merge commit 59ad9b461457; REST by triage); the lane starts its notes PR (coordinator 23:39). Later slices open, status stays doing.",
  "updatedAt": "2026-11-13T12:43:41-06:00"
 }
