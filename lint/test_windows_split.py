@@ -6,7 +6,7 @@ dropped, none run twice); (2) at least MIN_JOBS `windows-latest` jobs carry thos
 Cut F adds: the guard suite has its own Windows job (GUARD_JOB) and runs off it nowhere else; its
 slice (GUARD_TESTS=windows-slice) runs only on pull_request; the guard mutation test has its own
 Linux job (MUTATE_JOB) and runs nowhere else; both jobs skip on the `guard` scope flag. A scoped job's
-job-level if, if any, holds only the draft guard; its scope condition sits in each step
+job-level if, if any, holds only the draft guard, or a macOS job's scope skip (macos_scope_skip_ok); its scope condition sits in each step
 (read_scope_condition, step_rest), so a step cannot run outside the scope condition.
 
 Why not rule_audit.py: it reads step names only. This needs job boundaries and `run:` lines.
@@ -16,13 +16,14 @@ CHECKS_YML overrides the path (used for red runs on a scratch copy).
 CiCoverage also proves every tracked test file has a run step: test_*.py, test_*.sh, test_*.mjs, *.test.mjs,
 *.test.js and *.test.ps1. A file the mod-test collector prints is covered by the step that runs that collector.
 
-SplitJobs does the same for the Linux split (checks, checks-merge-install) and the macOS split (checks-macos, checks-macos-b):
+SplitJobs does the same for the Linux split (the four jobs of CHECKS_SUITE_JOBS) and the macOS split (checks-macos, checks-macos-b):
 each suite runs in exactly one job of its split, with its pinned `if:` and `shell:`. It also reads the Linux guard split
 (checks-guard, checks-guard-2): the guard suite runs in one shard per job, each with its GUARD_SHARD value, and both shards
 are named in the all-jobs-passed and ci-done needs.
 
 Run with:  python3 lint/test_windows_split.py -v
 """
+import itertools
 import json
 import os
 import re
@@ -71,102 +72,111 @@ REQUIRED = [
 
 
 # The suites the single `checks` job ran (Linux) and the single `checks-macos` job ran (macOS) before the split, each with
-# its step's `if:` and `shell:`. checks-merge-install and checks-macos-b took some of them, so each suite runs in exactly one
-# job of its split. A suite is a run of a test file, a mutation test or the mod tests. The Linux pair is CHECKS_SUITE_JOBS,
-# its one home in lint/workflow_steps.py; the macOS lists stay here.
+# its step's `if:` and `shell:`. checks-hooks, checks-rest, checks-merge-install, checks-install-checkout and checks-merge-git took some
+# of them (Linux), and checks-macos-b some of the macOS ones, so each suite runs in exactly one job of its split. A suite is a run of a
+# test file, a mutation test or the mod tests. The Linux jobs are CHECKS_SUITE_JOBS, its one home in lint/workflow_steps.py; the macOS
+# lists stay here.
 LINUX_SPLIT = CHECKS_SUITE_JOBS
 LINUX_CODE = "needs.scope.outputs.code == 'true'"
 LINUX_CODE_SWEEP = f"{LINUX_CODE} && needs.scope.outputs.sweep == 'true'"
 LINUX_SWEEP = "needs.scope.outputs.sweep == 'true'"
 LINUX_MODS = "!cancelled() && needs.scope.outputs.mods == 'true'"
+# The scope condition on a step that reads no .md file, unwrapped as unwrap() reads an `if:`. lint/test_checks_step_scope.py pins which steps take it.
+NO_MD_SCOPE_CONDITION = "needs.scope.outputs.code == 'true' || github.event_name != 'pull_request'"
 LINUX_SUITES = {
     "python3 actions/test_action_metadata.py": (LINUX_CODE, None),
     "python3 actions/code-check/test_action.py": (LINUX_CODE, None),
     "python3 actions/test_ruling_kind_records_dir.py": (LINUX_CODE, None),
     "python3 janitor/test_sweep.py": (LINUX_CODE_SWEEP, None),
     "python3 janitor/mutate_sweep.py": (LINUX_SWEEP, None),
-    "python3 hooks/test_config_watch.py": (None, None),
-    "python3 hooks/test_config_watch_fast_exit.py": (None, None),
+    "python3 hooks/test_config_watch.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 hooks/test_config_watch_fast_exit.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_shared_names.py": (None, None),
     "python3 hooks/test_precompact_handoff.py": (None, None),
-    "python3 hooks/test_cc_version_check.py": (None, None),
+    "python3 hooks/test_cc_version_check.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_handoff_wave2.py": (None, None),
-    "python3 hooks/test_decision_watch.py": (None, None),
+    "python3 hooks/test_decision_watch.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_reply_judge.py": (None, None),
-    "python3 hooks/test_prose_judge.py": (None, None),
+    "python3 hooks/test_prose_judge.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_sendmessage_state.py": (None, None),
-    "python3 hooks/test_refusal_note.py": (None, None),
-    "python3 hooks/test_call_judge.py": (None, None),
+    "python3 hooks/test_refusal_note.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 hooks/test_call_judge.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_question_form.py": (None, None),
-    "python3 hooks/test_rm_prompt_answer.py": (None, None),
+    "python3 hooks/test_rm_prompt_answer.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_agent_brief.py": (None, None),
     "python3 hooks/test_blind_brief.py": (None, None),
-    "python3 hooks/test_local_time.py": (None, None),
+    "python3 hooks/test_local_time.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_probe.py": (None, None),
-    "python3 hooks/test_ci_wake.py": (None, None),
-    "python3 hooks/test_feedback_inbox.py": (None, None),
-    "python3 hooks/test_waiting_export.py": (None, None),
+    "python3 hooks/test_ci_wake.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 hooks/test_feedback_inbox.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 hooks/test_waiting_export.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_daily_note.py": (None, None),
-    "python3 hooks/test_nowindow.py": (None, None),
-    "python3 hooks/test_auto_mode_allow.py": (None, None),
-    "python3 hooks/test_stall_watch.py": (None, None),
-    "python3 hooks/test_stall_watch_stop.py": (None, None),
-    "python3 hooks/test_sim_boot_record.py": (None, None),
+    "python3 hooks/test_nowindow.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 hooks/test_auto_mode_allow.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 hooks/test_stall_watch.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 hooks/test_stall_watch_stop.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 hooks/test_sim_boot_record.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_wrappers.py": (None, None),
+    "python3 hooks/test_scratchpad_owner.py": (None, None),
     "python3 hooks/test_checks_never_raise.py": (None, None),
-    "python3 hooks/test_session_start.py": (None, None),
+    "python3 hooks/test_session_start.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 hooks/test_session_role.py": (None, None),
+    "python3 lint/test_claude_role.py": (None, None),
+    "python3 lint/test_guard_merge_imports.py": (None, None),
+    "python3 lint/test_refusal_route.py": (None, None),
     "python3 lint/test_report_guard.py": (None, None),
     "python3 lint/test_ste_autofix.py": (LINUX_CODE, None),
-    "python3 hooks/test_ruling_home.py": (None, None),
-    "python3 lint/test_ruling_census.py": (None, None),
+    "python3 hooks/test_ruling_home.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 lint/test_ruling_census.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_rule_audit.py": (None, None),
     "python3 lint/test_stale_cites.py": (None, None),
-    "python3 lint/test_guard_log_report.py": (None, None),
-    "python3 lint/test_verdict.py": (None, None),
-    "python3 lint/test_wait_pid.py": (None, None),
-    "python3 lint/test_tracked_tree.py": (None, None),
-    "python3 lint/test_test_git.py": (None, None),
-    "python3 lint/test_notes_union_merge.py": (None, None),
+    "python3 lint/test_guard_log_report.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 lint/test_verdict.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 lint/test_wait_pid.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 lint/test_tracked_tree.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 lint/test_test_git.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 lint/test_notes_union_merge.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_ci_job.py": (None, None),
-    "python3 lint/test_windows_split.py": (None, None),
-    "python3 lint/test_all_jobs_passed.py": (None, None),
-    "python3 lint/test_ci_scope.py": (None, None),
+    "python3 lint/test_windows_split.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 lint/test_all_jobs_passed.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 lint/test_ci_scope.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 lint/test_checks_step_scope.py": (None, None),
     "python3 lint/test_rm_shim.py": (LINUX_CODE, None),
     "python3 hooks/test_mutate_shared.py": (None, None),
-    "python3 hooks/test_mutate_report.py": (None, None),
+    "python3 hooks/test_mutate_report.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_mutate_js.py": (None, None),
     "python3 hooks/test_mutate_replay.py": (None, None),
     "python3 lint/test_check_landed_dirs.py": (None, None),
     "python3 lint/test_settings_matcher.py": (None, None),
-    "python3 lint/test_hook_platform_exit.py": (None, None),
+    "python3 lint/test_hook_platform_exit.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_check_hook_stubs.py": (None, None),
-    "python3 lint/test_check_hook_dup_names.py": (None, None),
+    "python3 lint/test_check_hook_dup_names.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_check_record_slugs.py": (None, None),
     "python3 lint/test_check_red_run.py": (None, None),
-    "python3 lint/test_find_copies.py": (None, None),
-    "python3 lint/test_find_time_pinned.py": (None, None),
+    "python3 lint/test_find_copies.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 lint/test_find_time_pinned.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_check_mod_versions.py": (None, None),
     "python3 lint/test_hook_catalog.py": (None, None),
     "python3 lint/test_layout.py": (None, None),
-    "python3 lint/test_label_once.py": (None, None),
-    "python3 lint/test_repo_colour.py": (None, None),
+    "python3 lint/test_label_once.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 lint/test_repo_colour.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_retired_repos.py": (None, None),
-    "python3 skills/waiting-page/test_stale_pages.py": (None, None),
-    "python3 skills/waiting-page/test_splice.py": (None, None),
-    "python3 lint/test_check_artifact_cites.py": (None, None),
-    "python3 skills/roadmap/test_build.py": (None, None),
-    "python3 lint/test_check_shared_resources.py": (None, None),
-    "python3 lint/test_check_ios_mockup.py": (None, None),
+    "python3 skills/waiting-page/test_stale_pages.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 skills/waiting-page/test_splice.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 lint/test_check_artifact_cites.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 skills/roadmap/test_build.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 lint/test_check_shared_resources.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 lint/test_check_ios_mockup.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_compliance_probes.py": (None, None),
     "python3 lint/test_check_claude_md_size.py": (None, None),
     "python3 lint/test_check_glossary.py": (None, None),
     "python3 lint/test_retired_names.py": (None, None),
     "python3 skills/project-ops/tests/test_scaffold.py": (None, None),
-    "python3 skills/ios-apps/tests/test_new_app.py": (None, None),
+    "python3 skills/ios-apps/tests/test_new_app.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_check_ruling_kind.py": (None, None),
     "python3 lint/test_check_silent_undo.py": (None, None),
     "python3 lint/test_check_comment_narration.py": (None, None),
-    "python3 lint/test_check_unknown_reads_contract.py": (None, None),
+    "python3 lint/test_check_unknown_reads_contract.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/check_unknown_reads_contract.py": (LINUX_CODE, None),
     "python3 lint/test_check_agent_models.py": (None, None),
     "python3 lint/test_agent_push_form.py": (None, None),
@@ -177,7 +187,7 @@ LINUX_SUITES = {
     "python3 janitor/test_install_launchd.py": (LINUX_CODE, None),
     "python3 janitor/test_install_schtasks.py": (LINUX_CODE, None),
     "python3 actions/ste-lint/test_action.py": (None, None),
-    "python3 actions/playwright-setup/test_action.py": (None, None),
+    "python3 actions/playwright-setup/test_action.py": (NO_MD_SCOPE_CONDITION, None),
     "node actions/stamp/test_stamp.mjs": (None, None),
     "node lint/test_scanner_traps.mjs": (None, None),
     "bash actions/stamp/test_action.sh": (None, "bash"),
@@ -215,11 +225,11 @@ MAC_PICK_RUNS_ON = (f"${{{{ (github.event_name == 'pull_request' && github.event
                     f"&& fromJSON('[\"macos-latest\"]') || fromJSON({MAC_PICK}) }}}}")
 # R61 part 1: a push starts no macOS runner. Each job named here keeps `github.event_name != 'push'` as its job-level if.
 MACOS_JOBS = ("shell-macos", "checks-macos", "checks-macos-b")
-# R61 part 3: the 03:17 nightly's gate job, and the one scope output it reads (the gate's skip).
+# R61 part 3: the 03:17 nightly's skip job, and the one scope output it reads (the skip job's output).
 NIGHTLY_SKIP_JOB = "nightly-skip"
 PUSH_SKIP_JOB = "push-skip"
 SCOPE_NEEDS = {NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB}  # scope's if reads each skip job's skip output, so it needs both
-# The values the gate's skip output can hold: unset (''), skip (`true`) or run (`false`). A guard predicate must give one answer for all.
+# The values the skip job's output can hold: unset (''), skip (`true`) or run (`false`). A guard predicate must give one answer for all.
 SKIP_VALUES = ("", "true", "false")
 MAC_OWN = "(needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()"
 MAC_CODE = f"{MAC_OWN} && needs.scope.outputs.code == 'true'"
@@ -342,7 +352,7 @@ FLAG_OF = {GUARD_JOB: "guard", MUTATE_JOB: "guard", SHOOT_JOB: "shoot", "checks-
            "checks-guard-2": "checks_guard"}
 FLAG_OF[WAITING_PAGE_JOB] = "shoot"
 FLAG_OF.update({name: "guard" for name in MUTATE_JOBS})
-# The lint jobs run on every PR with no scope condition: the Linux pair, read from its one home CHECKS_SUITE_JOBS.
+# The lint jobs run on every PR with no scope condition: the Linux jobs, read from their one home CHECKS_SUITE_JOBS.
 LINT_JOBS = CHECKS_SUITE_JOBS
 # all-jobs-passed is the one required check. Its needs are checked in lint/test_all_jobs_passed.py.
 ALL_JOBS_PASSED_JOB = "all-jobs-passed"
@@ -458,9 +468,78 @@ def unwrap(raw):
     return s[3:-2].strip() if s.startswith("${{") and s.endswith("}}") else s
 
 
+# The records-only skip (ci-scope.sh's records_only_skip output, read as needs.scope.outputs.records_only_skip) turns off some
+# run steps. A step that takes the condition ends in it: `(E) && RECORDS_ONLY_CONDITION`, or `success() && RECORDS_ONLY_CONDITION` when it has no if:. Which steps take it:
+#   CONDITIONED_JOBS: every run step. A static trace found the Windows guard suite reads no records page.
+#   SPLIT_CONDITIONED_JOBS: only the run steps named by scope_named_steps(), each with the scope condition as its if:.
+#   UNCONDITIONED_JOBS: no run step.
+RECORDS_ONLY_CONDITION = "needs.scope.outputs.records_only_skip != 'true'"
+CONDITIONED_JOBS = ("checks-windows-guard", "checks-windows-guard-2", "checks-windows-guard-3", "checks-windows-merge",
+              "checks-windows-merge-2", "checks-windows-merge-3", "checks-windows-merge-4", "checks-windows-merge-5",
+              "checks-windows-rest", "checks-windows-rest-2")
+SPLIT_CONDITIONED_JOBS = ("checks-hooks", "checks-rest")
+UNCONDITIONED_JOBS = ("checks",)
+SPEC_JOBS = CONDITIONED_JOBS + SPLIT_CONDITIONED_JOBS + UNCONDITIONED_JOBS
+
+
+def scope_named_steps():
+    """The step names that take the condition in SPLIT_CONDITIONED_JOBS: NO_MD and NAMES_ONLY of lint/test_checks_step_scope.py, the one
+    home of those lists. Imported here, not at the top, because that module imports this one."""
+    from test_checks_step_scope import NAMES_ONLY, NO_MD
+    return set(NO_MD) | set(NAMES_ONLY)
+
+
+def drop_condition(expr):
+    """An `if:` expression without the records-only condition: `(E) && RECORDS_ONLY_CONDITION` gives E, and `success() && RECORDS_ONLY_CONDITION` gives None, the
+    no-if: default. Any other expression, or None, comes back as it is."""
+    if expr == f"success() && {RECORDS_ONLY_CONDITION}":
+        return None
+    m = re.fullmatch(rf"\((.+)\) && {re.escape(RECORDS_ONLY_CONDITION)}", expr or "")
+    return m.group(1) if m else expr
+
+
 def step_if(st):
-    """A step's `if:` expression, or None when the step has none."""
-    return unwrap(st.get("if"))
+    """A step's `if:` expression with the records-only condition taken off, or None when the step has none. The pins read a step's
+    own condition this way, and condition_problems pins the condition."""
+    return drop_condition(unwrap(st.get("if")))
+
+
+def condition_problem(name, st):
+    """None when run step `st` of job `name` ends in the condition, `(E) && RECORDS_ONLY_CONDITION` or `success() && RECORDS_ONLY_CONDITION`; else the problem, named."""
+    raw = unwrap(st.get("if"))
+    if raw == f"success() && {RECORDS_ONLY_CONDITION}" or re.fullmatch(rf"\(.+\) && {re.escape(RECORDS_ONLY_CONDITION)}", raw or ""):
+        return None
+    return f"{name} / {st.get('name') or st.get('run')}: the if: is not `(E) && {RECORDS_ONLY_CONDITION}` (or `success() && {RECORDS_ONLY_CONDITION}` with no if:): {raw!r}"
+
+
+def condition_spec_problem(name, st):
+    """None when run step `st` of job `name` has the condition the spec gives it, else the problem, named. A step the spec does not
+    condition has no condition. A step it conditions has condition_problem's form."""
+    label = st.get("name") or st.get("run")
+    if name in UNCONDITIONED_JOBS or (name in SPLIT_CONDITIONED_JOBS and label not in scope_named_steps()):
+        if RECORDS_ONLY_CONDITION in (st.get("if") or ""):
+            return f"{name} / {label}: the if: carries the records-only condition, which the spec does not give this step: {unwrap(st.get('if'))!r}"
+        return None
+    return condition_problem(name, st)
+
+
+def condition_problems(text, jobs=SPEC_JOBS):
+    """condition_spec_problem for each run step of each job in `jobs`. Also one problem for each named job the workflow lacks, for a
+    job with no run step, and for a split job with no run step named by scope_named_steps(), so a check never passes on nothing."""
+    found = all_jobs(text)
+    problems = []
+    for name in jobs:
+        if name not in found:
+            problems.append(f"{name}: no such job in checks.yml")
+            continue
+        runs = [st for st in found[name]["steps"] if "run" in st]
+        if not runs:
+            problems.append(f"{name}: no run step, so the condition has nothing to check")
+            continue
+        if name in SPLIT_CONDITIONED_JOBS and not any(st.get("name") in scope_named_steps() for st in runs):
+            problems.append(f"{name}: no run step is named by scope_named_steps(), so the condition has nothing to check")
+        problems += [p for p in (condition_spec_problem(name, st) for st in runs) if p]
+    return problems
 
 
 def paren_prefix(expr):
@@ -575,7 +654,7 @@ def draft_guard_only(expr):
 
 
 # R62: the full Windows suite runs on a ready pull_request whatever the flags say. Its steps carry the draft guard, bare (checkout and
-# setup) or as `(draft guard) && E`. A suite step's E reads code at most, the push gate, and never the job's own flag.
+# setup) or as `(draft guard) && E`. A suite step's E reads code at most, the push condition, and never the job's own flag.
 DRAFT_GUARD = "github.event_name != 'pull_request' || !github.event.pull_request.draft"
 SWEEP_STEP_CMDS = ("python3 janitor/mutate_sweep.py", "python janitor/mutate_sweep.py")
 SWEEP_JOBS = ("checks-macos", "checks-windows-sweep")
@@ -588,7 +667,7 @@ def sweep_union(own):
 
 def full_suite_problems(name, job):
     """R62 for a full-suite job (full_suite_job). Every step carries the draft guard, bare or as `(draft guard) && E`. A suite
-    step keeps !cancelled(), and its E reads code at most (the push gate on the steps that have one). No step reads the job's
+    step keeps !cancelled(), and its E reads code at most (the push condition on the steps that have one). No step reads the job's
     own flag: a ready pull_request runs the suite whatever the flags say."""
     problems = []
     for st in job["steps"]:
@@ -649,9 +728,11 @@ def job_check_problems(name, job, flag=None):
         return problems + ([] if expr == SHARD_JOB_IF else [f"{name}: shard job if is {expr}, want {SHARD_JOB_IF}"])
     if name in LINT_JOBS:  # they run on every PR: no scope condition, and a job-level if only when it is the draft guard
         return problems + ([] if expr is None or draft_guard_only(expr) else [f"{name}: job-level if: {expr}"])
-    # R61 part 1: a macOS job may keep the push guard as its job-level if (a step-level skip still starts its runner).
-    if expr is not None and not draft_guard_only(expr) and not (name in MACOS_JOBS and push_guard_only(expr)):
-        return problems + [f"{name}: scoped job keeps a job-level if, its scope condition belongs in its steps: {expr}"]
+    # A macOS job's job-level if is its scope skip (macos_scope_skip_ok): the push guard and its own flags. A step-level skip still starts its runner.
+    if expr is not None and not draft_guard_only(expr) and not (name in MACOS_JOBS and macos_scope_skip_ok(name, expr)):
+        why = ("is not its scope skip (the push guard and its own flags)" if name in MACOS_JOBS
+               else "keeps a job-level if, its scope condition belongs in its steps")
+        return problems + [f"{name}: job-level if {why}: {expr}"]
     if full_suite_job(name):
         return problems + full_suite_problems(name, job)
     if name in SWEEP_JOBS:
@@ -863,7 +944,7 @@ def split_homes(text, jobs, cmd):
 
 def pin_problems(name, st, cmd, want_if, want_shell, want_env=None):
     """A suite's step keeps the `if:` and `shell:` pinned for it, and its env: none, or the shard value (want_env)."""
-    got_if, got_env = unwrap(step_key(st, "if")), step_env(st)
+    got_if, got_env = drop_condition(unwrap(step_key(st, "if"))), step_env(st)
     problems = []
     if got_if != want_if:
         problems.append(f"{name}: {cmd!r} if is {got_if!r}, want {want_if!r}")
@@ -1090,6 +1171,7 @@ class WindowsSplit(unittest.TestCase):
 
     def test_scope_job_checks_every_other_job(self):
         self.assertEqual(scope_problems(self.text), [])
+        self.assertEqual(condition_problems(self.text), [], "a run step does not carry the records-only condition the spec gives it")
         # The guard and mutate jobs skip on the
         # guard flag. Named failure: a cut job runs or never runs on push, schedule and dispatch.
         jobs = all_jobs(self.text)
@@ -1157,6 +1239,7 @@ class WindowsSplit(unittest.TestCase):
 
     def test_suites_keep_their_conditions(self):
         self.assertEqual(hardening_problems(self.text), [])
+        self.assertEqual(condition_problems(self.text), [], "a run step does not carry the records-only condition the spec gives it")
 
     def test_a_comment_that_names_a_shard_value_is_no_home(self):
         # Rows: a full-line comment, a trailing comment on a shard key, and a comment after a lone apostrophe.
@@ -1203,7 +1286,7 @@ class WindowsSplit(unittest.TestCase):
         self.assertTrue(placement_problems(doc(REQUIRED[:8], REQUIRED[7:14], REQUIRED[14:])))
 
     def test_checker_sees_the_merge_slice_defects(self):
-        scope_condition = DRAFT_GUARD  # R62: the draft guard is the scope condition; the code gate rides in each step's own condition
+        scope_condition = DRAFT_GUARD  # R62: the draft guard is the scope condition; the code condition rides in each step's own condition
         full_e = unwrap(IF_PIN["python merge/test_merge.py"])
         slice_e = "!cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true'"
 
@@ -1224,11 +1307,11 @@ class WindowsSplit(unittest.TestCase):
                     "env:\n  MERGE_TESTS: windows-slice\n" + good,
                     good.replace("    steps:\n", "    steps:\n      - run: echo MERGE_TESTS=windows-slice >> $GITHUB_ENV\n")):
             self.assertTrue(any("MERGE_TESTS appears 1 times" in p for p in hardening_problems(bad)), bad)
-        self.assertTrue(hardening_problems(doc(full=full_e.replace("needs.scope.outputs.code == 'true' || ", ""))))  # the push gate dropped
+        self.assertTrue(hardening_problems(doc(full=full_e.replace("needs.scope.outputs.code == 'true' || ", ""))))  # the push condition dropped
         self.assertTrue(any("reads scope flags" in p for p in hardening_problems(doc(full=full_e.replace("outputs.code", "outputs.checks_windows_merge")))))  # own flag read
 
     def test_checker_sees_the_shard_defects(self):
-        scope_condition = DRAFT_GUARD  # R62: the base job's steps carry the draft guard, and the code gate rides in the full step
+        scope_condition = DRAFT_GUARD  # R62: the base job's steps carry the draft guard, and the code condition rides in the full step
         full_e = unwrap(IF_PIN[GUARD_CMD])
         slice_e = "!cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true'"
 
@@ -1282,6 +1365,8 @@ class WindowsSplit(unittest.TestCase):
 
     def test_the_guard_suite_has_its_own_windows_job(self):
         self.assertEqual(guard_problems(self.text), [])
+        guard_jobs = [n for n in CONDITIONED_JOBS if n.startswith(GUARD_JOB)]
+        self.assertEqual(condition_problems(self.text, guard_jobs), [], "a guard job's run step does not end in the records-only condition")
 
     def test_checks_sets_no_guard_family(self):
         self.assertEqual([p for p in guard_problems(self.text) if "GUARD_FAMILY" in p], [])
@@ -1291,7 +1376,7 @@ class WindowsSplit(unittest.TestCase):
         self.assertTrue(bad)
 
     def test_checker_sees_the_guard_slice_and_mutate_defects(self):
-        scope_condition = DRAFT_GUARD  # R62: the draft guard is the scope condition; the code gate rides in the full step
+        scope_condition = DRAFT_GUARD  # R62: the draft guard is the scope condition; the code condition rides in the full step
         full_e = unwrap(IF_PIN[GUARD_CMD])
         slice_e = "!cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true'"
 
@@ -1310,7 +1395,7 @@ class WindowsSplit(unittest.TestCase):
         self.assertTrue(guard_problems(doc(extra="    env:\n      GUARD_TESTS: windows-slice\n")))  # job-level env
         self.assertTrue(guard_problems(doc(job_if="needs.scope.outputs.code == 'true'")))  # a job-level if on the scoped job
         self.assertTrue(guard_problems(doc(full=full_e.replace("outputs.code", "outputs.checks_windows"))))  # reads its own flag
-        self.assertTrue(guard_problems(doc(full=full_e.replace("needs.scope.outputs.code == 'true' || ", ""))))  # push gate dropped
+        self.assertTrue(guard_problems(doc(full=full_e.replace("needs.scope.outputs.code == 'true' || ", ""))))  # push condition dropped
         self.assertTrue(guard_problems(doc(scope_condition_="needs.scope.outputs.guard == 'true'")))  # a step without the draft guard
         self.assertTrue(guard_problems(doc(more="  checks-windows:\n    runs-on: windows-latest\n    needs: scope\n"
                                                "    if: ${{ needs.scope.outputs.checks_windows == 'true' }}\n"
@@ -1399,7 +1484,7 @@ def without_need(text, job, name):
 
 
 class SplitJobs(unittest.TestCase):
-    """The Linux split (checks, checks-merge-install) and the macOS split (checks-macos, checks-macos-b): each suite of the old
+    """The Linux split (the four jobs of CHECKS_SUITE_JOBS) and the macOS split (checks-macos, checks-macos-b): each suite of the old
     single job runs in exactly one job of its split, with its pinned `if:` and `shell:` and no env (LINUX_SUITES, MACOS_SUITES)."""
 
     def setUp(self):
@@ -1408,6 +1493,38 @@ class SplitJobs(unittest.TestCase):
 
     def test_each_linux_suite_runs_once_in_its_split(self):
         self.assertEqual(linux_split_problems(self.text), [])
+        linux_conditioned = [n for n in SPEC_JOBS if n in LINUX_SPLIT]
+        self.assertEqual(condition_problems(self.text, linux_conditioned), [], "a Linux split job's run step does not carry the records-only condition the spec gives it")
+
+    def test_every_lint_form_step_stays_in_the_checks_job(self):
+        """`merge --lane-lint` runs the `checks` job by name (bin/ci-job checks --lint), so a lint step moved into another Linux
+        split job would run in CI but never in lane lint. What counts as a lint step is bin/ci-job's one definition (is_lint),
+        read from it, never copied. Three times a merge of main put one in checks-hooks or checks-rest."""
+        import importlib.machinery
+        import importlib.util
+        loader = importlib.machinery.SourceFileLoader("ci_job_for_split", os.path.join(HERE, "..", "bin", "ci-job"))
+        ci_job = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+        loader.exec_module(ci_job)
+        stray = []
+        for job in CHECKS_SUITE_JOBS:
+            if job == "checks":
+                continue
+            for step in step_blocks(job_block(self.text, job)):
+                if ci_job.is_lint(step):
+                    stray.append((job, step_key(step, "name") or ci_job.uses(step)))
+        self.assertEqual(stray, [])
+
+    def test_no_step_name_repeats_across_the_checks_split(self):
+        """A step run twice by the split reads as one step. The setup steps carry no name."""
+        seen, repeat = set(), []
+        for job in CHECKS_SUITE_JOBS:
+            for step in step_blocks(job_block(self.text, job)):
+                name = step_key(step, "name")
+                if name:
+                    if name in seen:
+                        repeat.append(name)
+                    seen.add(name)
+        self.assertEqual(repeat, [])
 
     def test_each_macos_suite_runs_once_in_its_split_and_the_guard_slice_in_checks_macos(self):
         self.assertEqual(macos_split_problems(self.text), [])
@@ -1416,20 +1533,26 @@ class SplitJobs(unittest.TestCase):
         # The shard values are counted as homes in hardening_problems, so a stray one (here at job level) is a named problem.
         leak = self.text.replace("    steps:\n", "    env:\n      GUARD_SHARD: 1/2\n    steps:\n", 1)
         self.assertEqual(hardening_problems(self.text), [])
+        self.assertEqual(condition_problems(self.text), [], "a run step does not carry the records-only condition the spec gives it")
         self.assertTrue([p for p in hardening_problems(leak) if "GUARD_SHARD appears" in p])
 
     def test_checker_sees_the_linux_split_defects(self):
         rows = [(c, i, s, {}) for c, (i, s) in LINUX_SUITES.items()]
-        half = len(rows) // 2
 
-        def doc(rs):
-            return split_doc({"checks": ("ubuntu-latest", rs[:half]), "checks-merge-install": ("ubuntu-latest", rs[half:])})
+        def doc(rs, extra=()):
+            """The rows cut into one contiguous share per job of LINUX_SPLIT; each (job, row) in `extra` is a copy added to that job."""
+            cuts = [len(rs) * k // len(LINUX_SPLIT) for k in range(len(LINUX_SPLIT) + 1)]
+            jobs = {job: list(rs[cuts[k]:cuts[k + 1]]) for k, job in enumerate(LINUX_SPLIT)}
+            for job, row in extra:
+                jobs[job].append(row)
+            return split_doc({job: ("ubuntu-latest", share) for job, share in jobs.items()})
 
         self.assertEqual(linux_split_problems(doc(rows)), [])
         c0, i0, s0, _ = rows[0]
         bad = {
             "a suite dropped": doc(rows[1:]),
-            "a suite run twice": doc(rows + [rows[-1]]),
+            "a suite run twice in one job": doc(rows, extra=[(LINUX_SPLIT[-1], rows[-1])]),
+            "a suite run in two jobs": doc(rows, extra=[(LINUX_SPLIT[1], rows[0])]),  # rows[0] is in the first job
             "a suite's if changed": doc([(c0, "needs.scope.outputs.code == 'false'", s0, {})] + rows[1:]),
             "a suite's shell added": doc([(c0, i0, "bash", {})] + rows[1:]),
             "a suite's env set": doc([(c0, i0, s0, {"BASE_REF": "main"})] + rows[1:]),
@@ -1585,12 +1708,20 @@ class SplitJobs(unittest.TestCase):
                 with self.subTest(job=job, shard=shard):
                     self.assertTrue(check(without_need(planned, job, shard)), f"{shard} left out of {job}")
 
+    def test_ci_done_needs_checks_install_checkout_and_checks_merge_git(self):
+        # Named failure: a split job runs on a pull request but is not in ci-done's needs, so a red run posts no wake comment for it.
+        needs_of, _, _ = fan_in_rules()
+        self.assertIsNotNone(job_block(self.text, "ci-done"), "checks.yml has no ci-done job")
+        needs = needs_of(job_block(self.text, "ci-done")) or []
+        self.assertEqual([j for j in ("checks-install-checkout", "checks-merge-git") if j not in needs], [],
+                         "ci-done's needs lack a Linux split job")
+
 
 # ---- R61 (owner pick b, 15:29 CST Nov 12): macOS runs once per batch. The macOS jobs skip a push at job level, checks-macos
-# runs one mac-tagged guard slice, and the 03:17 nightly is gated on main's head. Each helper reads checks.yml text; each
+# runs one mac-tagged guard slice, and the 03:17 nightly is conditioned on main's head. Each helper reads checks.yml text; each
 # case reads the real file, so it is red until the change lands.
 
-# The scope condition's truth table on a run: (event, draft, the gate's skip output, scope runs?). An unset output is ''.
+# The scope condition's truth table on a run: (event, draft, the skip job's output, scope runs?). An unset output is ''.
 NIGHTLY_TRUTH = (("push", False, "", True), ("pull_request", False, "", True), ("pull_request", True, "", False),
                  ("workflow_dispatch", False, "", True), ("schedule", False, "false", True), ("schedule", False, "", True),
                  ("schedule", False, "true", False))
@@ -1614,7 +1745,7 @@ def push_guard_only(expr):
 
 def schedule_only(expr):
     """True when a job-level `if:` runs on a schedule and nowhere else: false on a push, a pull_request and a workflow_dispatch.
-    Like push_guard_only, its answer must match for every gate value."""
+    Like push_guard_only, its answer must match for every skip value."""
     e = unwrap(expr)
     if not e:
         return False
@@ -1630,42 +1761,79 @@ def push_guard_jobs(text):
     return sorted(n for n, j in all_jobs(text).items() if j["if"] is not None and push_guard_only(j["if"]))
 
 
-def macos_push_guard_problems(text):
-    """R61 part 1: each MACOS_JOBS job keeps the push guard as its job-level if, and no other job has one. A step-level skip still
-    starts the macOS runner, so the guard sits on the job."""
+def scope_skips_module():
+    """testing/scope_skips.py, the one home of the macOS scope skip. Imported when a case asks, not at import: the product rules import
+    this module from a pinned copy of lint/ that holds no testing/ folder (actions/push-skip/test_action.sh)."""
+    testing = os.path.join(HERE, "..", "testing")
+    if testing not in sys.path:
+        sys.path.insert(0, testing)
+    import scope_skips  # noqa: E402  the one home of the macOS scope skip (testing/scope_skips.py)
+    return scope_skips
+
+
+def macos_scope_skips():
+    """Each macOS job's scope flags, scope_skips.MACOS_SCOPE_SKIPS."""
+    return scope_skips_module().MACOS_SCOPE_SKIPS
+
+
+def macos_scope_skip_ok(name, expr):
+    """True when `expr` is macOS job `name`'s job-level if, its scope skip: false on a push, true on a schedule and a
+    workflow_dispatch, and on a pull_request true exactly when one of the job's own flags is "true". It reads no other flag,
+    so a flag of another job cannot start this one."""
+    flags = macos_scope_skips().get(name)
+    if not flags or not expr or set(re.findall(r"needs\.scope\.outputs\.(\w+)", expr)) != set(flags):
+        return False
+    try:
+        for values in itertools.product(("true", "false"), repeat=len(flags)):
+            vals = dict(zip(flags, values))
+            if eval_with(expr, "push", vals) or not eval_with(expr, "schedule", vals) or not eval_with(expr, "workflow_dispatch", vals):
+                return False
+            if eval_with(expr, "pull_request", vals) != ("true" in values):
+                return False
+        return True
+    except Exception:
+        return False
+
+
+def macos_scope_skip_problems(text):
+    """Each MACOS_JOBS job's job-level if is its scope skip (macos_scope_skip_ok). A step-level skip still starts the macOS runner, so
+    its scope skip sits on the job. No job outside the macOS jobs holds the push guard alone."""
     jobs = all_jobs(text)
     problems = []
+    if sorted(macos_scope_skips()) != sorted(MACOS_JOBS):
+        problems.append(f"the macOS scope skip names {sorted(macos_scope_skips())}, want the macOS jobs {sorted(MACOS_JOBS)}")
     for name in MACOS_JOBS:
         job = jobs.get(name)
         if job is None:
             problems.append(f"no {name} job")
         elif job["if"] is None:
-            problems.append(f"{name} has no job-level if: a push still starts its macOS runner")
-        elif not push_guard_only(job["if"]):
-            problems.append(f"{name} job-level if is not the push guard: {job['if']}")
-    if push_guard_jobs(text) != sorted(MACOS_JOBS):
-        problems.append(f"the push guard is a job-level if on {push_guard_jobs(text)}, want {sorted(MACOS_JOBS)}")
+            problems.append(f"{name} has no job-level if: a pull_request with no macOS path still starts its macOS runner")
+        elif not macos_scope_skip_ok(name, job["if"]):
+            problems.append(f"{name} job-level if is not its scope skip: {job['if']}")
+    for name in push_guard_jobs(text):
+        if name not in MACOS_JOBS:
+            problems.append(f"{name} has the push guard as its job-level if and is not a macOS job")
     return problems
 
 
 def skip_job_problems(text):
-    """R61 part 3: the nightly gate is an ubuntu job with no job-level if, so it runs on every event: a skipped gate would skip every
+    """R61 part 3: the nightly skip job is an ubuntu job with no job-level if, so it runs on every event: a skipped one would skip every
     job behind scope, since a skipped ancestor skips a job whose own if holds no status function. It reads no flag and needs no other job."""
     nightly_skip = all_jobs(text).get(NIGHTLY_SKIP_JOB)
     if nightly_skip is None:
-        return [f"no {NIGHTLY_SKIP_JOB} job: a scheduled run has no gate to read"]
+        return [f"no {NIGHTLY_SKIP_JOB} job: a scheduled run has nothing to read"]
     problems = []
     if nightly_skip["if"] is not None:
-        problems.append(f"{NIGHTLY_SKIP_JOB} if is {nightly_skip['if']}, want none: a skipped gate skips every job behind scope")
+        problems.append(f"{NIGHTLY_SKIP_JOB} if is {nightly_skip['if']}, want none: if it is skipped, every job behind scope skips")
     if not (nightly_skip["os"] or "").startswith("ubuntu"):
         problems.append(f"{NIGHTLY_SKIP_JOB} runs on {nightly_skip['os']}, want ubuntu")
     return problems
 
 
 def skip_block_problems(text):
-    """R61 part 3: the gate's own block holds a timeout, exactly read-only actions and contents, and a skip output that a step sets."""
+    """R61 part 3: the skip job's own block holds a timeout, exactly read-only actions and contents, and a skip output that a step sets."""
     if NIGHTLY_SKIP_JOB not in all_jobs(text):
-        return [f"no {NIGHTLY_SKIP_JOB} job: a scheduled run has no gate to read"]
+        return [f"no {NIGHTLY_SKIP_JOB} job: a scheduled run has nothing to read"]
     block = job_block(text, NIGHTLY_SKIP_JOB) or ""
     problems = []
     if not re.search(r"^    timeout-minutes:[ \t]*\d+", block, re.M):
@@ -1679,7 +1847,7 @@ def skip_block_problems(text):
     return problems
 
 
-def scope_skip_problems(text):
+def scope_waits_on_skip_jobs_problems(text):
     """R61 part 3: scope needs both skip jobs, and its if skips a scheduled run exactly when nightly-skip says skip. A skipped
     scope skips every job through needs; an unset or failed skip job reads '' and runs everything (unknown is not skip)."""
     sc = all_jobs(text).get("scope") or {}
@@ -1690,16 +1858,16 @@ def scope_skip_problems(text):
     if expr is None:
         return problems + ["scope has no if"]
     # A job whose needed job is skipped is skipped too, unless its if holds a status function at the top level. The truth table
-    # below reads always() as true, so it cannot see this: a push, where the gate is skipped, would skip scope and every job.
+    # below reads always() as true, so it cannot see this: a push, where the skip job is skipped, would skip scope and every job.
     if not any(c in ("always()", "!cancelled()") for c in top_level_conjuncts(expr)):
-        problems.append("scope if has no top-level always() or !cancelled() conjunct: a skipped gate skips scope and every job")
+        problems.append("scope if has no top-level always() or !cancelled() conjunct: if the skip job is skipped, scope and every job skip")
     for event, draft, skip, runs in NIGHTLY_TRUTH:
         try:
             got = eval_if(expr, event, "true", draft=draft, nightly_skip=skip)
         except Exception as ex:
             return problems + [f"scope if is unreadable ({ex!r}): {expr}"]
         if got != runs:
-            problems.append(f"scope on {event} (draft {draft}, gate skip {skip!r}) runs {got}, want {runs}")
+            problems.append(f"scope on {event} (draft {draft}, skip output {skip!r}) runs {got}, want {runs}")
     return problems
 
 
@@ -1752,8 +1920,27 @@ class MacOnceByBatch(unittest.TestCase):
             self.text = f.read()
 
     def test_each_macos_job_skips_a_push_at_job_level(self):
-        # Named failure: a macOS job has no job-level push guard, so a push starts its runner; a step-level skip still starts it.
-        self.assertEqual(macos_push_guard_problems(self.text), [])
+        # Named failure: a macOS job has no job-level scope skip, so a push or a pull_request with no macOS path starts its runner.
+        self.assertEqual(macos_scope_skip_problems(self.text), [])
+
+    def test_the_macos_scope_skip_skips_a_push_and_a_pull_request_with_its_flags_off(self):
+        # Named failure: a pull_request with every flag of a macOS job off still starts it. Also a push starts it, or a schedule
+        # or a dispatch skips it. Each job is read over every value of its own flags.
+        jobs = all_jobs(self.text)
+        for name in MACOS_JOBS:
+            expr = jobs.get(name, {}).get("if")
+            self.assertIsNotNone(expr, f"{name} has no job-level if")
+            flags = macos_scope_skips()[name]
+            for values in itertools.product(("true", "false"), repeat=len(flags)):
+                vals = dict(zip(flags, values))
+                with self.subTest(job=name, flags=vals):
+                    self.assertFalse(eval_with(expr, "push", vals), f"{name} runs on a push")
+                    self.assertTrue(eval_with(expr, "schedule", vals), f"{name} does not run on a schedule")
+                    self.assertTrue(eval_with(expr, "workflow_dispatch", vals), f"{name} does not run on a workflow_dispatch")
+                    if "true" in values:
+                        self.assertTrue(eval_with(expr, "pull_request", vals), f"{name} does not run on a pull_request with flags {vals}")
+                    else:
+                        self.assertFalse(eval_with(expr, "pull_request", vals), f"{name} runs on a pull_request with every flag off: {expr}")
 
     def test_the_macos_jobs_still_run_on_a_pull_request_a_schedule_and_a_dispatch(self):
         # Named failure: the push guard also skips the batch PR's macOS proof, or the scheduled or manual macOS run.
@@ -1769,37 +1956,40 @@ class MacOnceByBatch(unittest.TestCase):
         self.assertEqual(macos_slice_problems(self.text), [])
 
     def test_the_nightly_skip_is_an_ubuntu_job_with_no_job_level_if(self):
-        # Named failure: no gate job, or one with a job-level if, so it is skipped on a pull request and every job behind scope skips.
+        # Named failure: no skip job, or one with a job-level if, so it is skipped on a pull request and every job behind scope skips.
         self.assertEqual(skip_job_problems(self.text), [])
 
     def test_the_nightly_skip_holds_a_timeout_read_only_permissions_and_a_skip_output(self):
-        # Named failure: the gate can write, has no cap, or has no skip output for scope to read.
+        # Named failure: the skip job can write, has no cap, or has no skip output for scope to read.
         self.assertEqual(skip_block_problems(self.text), [])
 
     def test_scope_waits_on_the_skip_and_skips_a_scheduled_run_only_when_the_skip_says_skip(self):
-        # Named failure: a scheduled run reruns a green main, or a skipped gate skips a push or a red run.
-        self.assertEqual(scope_skip_problems(self.text), [])
+        # Named failure: a scheduled run reruns a green main, or a skipped nightly-skip job skips a push or a red run.
+        self.assertEqual(scope_waits_on_skip_jobs_problems(self.text), [])
 
     def test_checker_sees_the_push_guard_defects(self):
-        # The control: the push guard on a macOS job, with its scope condition in the steps, passes. Each defect is flagged.
+        # The control: the macOS scope skip on a macOS job, with its scope condition in the steps, passes. Each defect is flagged.
         def job_text(name, if_):
             text = split_doc({name: ("macos-latest", [(MACOS_GUARD, MAC_CODE, None, {})])})
             return text.replace("    needs: scope\n", f"    needs: scope\n    if: ${{{{ {if_} }}}}\n", 1)
 
-        self.assertEqual(job_check_problems("checks-macos", all_jobs(job_text("checks-macos", "github.event_name != 'push'"))["checks-macos"]), [])
+        expr = scope_skips_module().scope_skip_expr("checks-macos")
+        self.assertEqual(job_check_problems("checks-macos", all_jobs(job_text("checks-macos", expr))["checks-macos"]), [])
         bad = {
             "a push-only guard": ("checks-macos", "github.event_name == 'push'"),
             "a pull-request-only guard": ("checks-macos", "github.event_name == 'pull_request'"),
             "the push guard on a Windows job": ("checks-windows", "github.event_name != 'push'"),
-            "the push guard with a flag": ("checks-macos", "github.event_name != 'push' && needs.scope.outputs.checks_macos == 'true'"),
-            "the push guard reads the gate": ("checks-macos", "github.event_name != 'push' && needs.nightly-skip.outputs.skip != 'true'"),
+            "the scope skip without the push guard": ("checks-macos", "needs.scope.outputs.checks_macos == 'true' || needs.scope.outputs.sweep == 'true' || github.event_name != 'pull_request'"),
+            "the push guard with checks_macos and no sweep": ("checks-macos", "github.event_name != 'push' && (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request')"),
+            "the push guard with a flag of another job": ("checks-macos", "github.event_name != 'push' && (needs.scope.outputs.checks_windows == 'true' || needs.scope.outputs.sweep == 'true' || github.event_name != 'pull_request')"),
+            "the push guard reads the skip job": ("checks-macos", "github.event_name != 'push' && needs.nightly-skip.outputs.skip != 'true'"),
         }
         for label, (name, if_) in bad.items():
             with self.subTest(defect=label):
                 self.assertTrue(job_check_problems(name, all_jobs(job_text(name, if_))[name]), label)
 
     def test_checker_sees_the_nightly_skip_defects(self):
-        # The control: an ubuntu gate with no job-level if, its timeout, read-only permissions and skip output passes, and so does
+        # The control: an ubuntu skip job with no job-level if, its timeout, read-only permissions and skip output passes, and so does
         # a scope that waits on it. Each defect below is flagged, and only the named defect.
         # Trailing comments on the if, the cap, the permissions and the outputs headers, and a # inside a quoted step, read as
         # text or as a comment as YAML does: none of them changes the answer.
@@ -1813,16 +2003,16 @@ class MacOnceByBatch(unittest.TestCase):
                  "      - run: echo scope\n")
         self.assertEqual(skip_job_problems("jobs:\n" + nightly_skip), [])
         self.assertEqual(skip_block_problems("jobs:\n" + nightly_skip), [])
-        self.assertEqual(scope_skip_problems("jobs:\n" + scope + nightly_skip), [])
+        self.assertEqual(scope_waits_on_skip_jobs_problems("jobs:\n" + scope + nightly_skip), [])
         # A scope that waits on nightly-skip alone is the defect this scope check names.
-        self.assertTrue(scope_skip_problems("jobs:\n" + scope.replace("    needs:\n      - nightly-skip\n      - push-skip\n",
-                                                                      "    needs:\n      - nightly-skip\n") + nightly_skip))
+        self.assertTrue(scope_waits_on_skip_jobs_problems("jobs:\n" + scope.replace("    needs:\n      - nightly-skip\n      - push-skip\n",
+                                                                                    "    needs:\n      - nightly-skip\n") + nightly_skip))
         # The control, with !cancelled() as the status function: it passes too.
-        self.assertEqual(scope_skip_problems("jobs:\n" + scope.replace("always()", "!cancelled()") + nightly_skip), [])
+        self.assertEqual(scope_waits_on_skip_jobs_problems("jobs:\n" + scope.replace("always()", "!cancelled()") + nightly_skip), [])
         skip_bad = {
-            "the gate skips on a pull request": nightly_skip.replace(
+            "the skip job skips on a pull request": nightly_skip.replace(
                 "    runs-on:", "    if: ${{ github.event_name == 'schedule' }}  # the 03:17 run only\n    runs-on:", 1),
-            "the gate on macOS": nightly_skip.replace("ubuntu-latest", "macos-latest"),
+            "the skip job on macOS": nightly_skip.replace("ubuntu-latest", "macos-latest"),
         }
         for label, text in skip_bad.items():
             with self.subTest(defect=label):
@@ -1840,14 +2030,14 @@ class MacOnceByBatch(unittest.TestCase):
             "scope does not wait on push-skip": scope.replace("      - push-skip\n", ""),
             "scope ignores nightly-skip": scope.replace(" && needs.nightly-skip.outputs.skip != 'true'", ""),
             "a draft PR runs": scope.replace("!github.event.pull_request.draft", "true"),
-            # R61 part 3 status function: without a top-level always() or !cancelled(), a skipped gate skips scope on push.
+            # R61 part 3 status function: without a top-level always() or !cancelled(), if the skip job is skipped, scope skips on push.
             "scope without a status function": scope.replace("always() && ", ""),
             "always() only inside a quoted string": scope.replace("always() && (", "'always()' && ("),
             "always() only under an or": scope.replace("always() && (", "(always() || github.event_name == 'push') && ("),
         }
         for label, text in scope_bad.items():
             with self.subTest(defect=label):
-                self.assertTrue(scope_skip_problems("jobs:\n" + text + nightly_skip), label)
+                self.assertTrue(scope_waits_on_skip_jobs_problems("jobs:\n" + text + nightly_skip), label)
 
 
 FULL_SUITE_BASES = (GUARD_JOB, "checks-windows-merge", "checks-windows-rest")
@@ -1870,6 +2060,17 @@ def runs_on(job, st, event, flag_value, draft):
     if job["if"] is not None and not eval_if(job["if"], event, flag_value, draft=draft):
         return False
     expr = step_if(st)
+    return expr is None or eval_if(expr, event, flag_value, draft=draft)
+
+
+def runs_with_condition(job, st, event, flag_value, draft, skip_value):
+    """runs_on with the records-only skip output set to `skip_value`. It reads the raw `if:` texts, since runs_on reads each step's
+    condition with the records-only condition taken off."""
+    def pin(raw):
+        return None if raw is None else raw.replace("needs.scope.outputs.records_only_skip", repr(skip_value))
+    if job["if"] is not None and not eval_if(pin(job["if"]), event, flag_value, draft=draft):
+        return False
+    expr = pin(st.get("if"))
     return expr is None or eval_if(expr, event, flag_value, draft=draft)
 
 
@@ -1914,7 +2115,7 @@ class SweepOnReadyPull(unittest.TestCase):
         self.assertTrue(eval_if(expr, "pull_request", "true"), f"{job} sweep step does not run on a ready pull_request: {expr}")
 
     def test_both_sweep_mutations_run_on_a_ready_pull_request_whatever_their_platform_flag_says(self):
-        # Named failure: a sweep step is gated on its platform's scope flag, so a ready PR whose flag is false skips the mutation.
+        # Named failure: a sweep step is conditioned on its platform's scope flag, so a ready PR whose flag is false skips the mutation.
         for label, cmd_jobs, cmd in self.sweep_steps():
             flag = PLATFORM_SWEEP_FLAG[label]
             job, st = self.sweep_home(cmd_jobs, cmd)
@@ -1973,6 +2174,8 @@ class ReadyPullShards(unittest.TestCase):
                 want = read_scope_condition(jobs[base])
                 self.assertIsNotNone(want, f"{base} steps carry no one scope condition")
                 self.assertEqual(read_scope_condition(jobs[name]), want, f"{name} scope condition is not {base}'s")
+        # A shard's run steps end in the records-only condition, as its base job's do.
+        self.assertEqual(condition_problems(self.text, shards), [], "a shard's run step does not end in the records-only condition")
 
     def test_the_windows_guard_job_keeps_its_full_suite_and_has_no_slice_step(self):
         # Named failure: checks-windows-guard still runs the windows-slice guard step, so a ready PR runs its cases twice.
@@ -2014,13 +2217,18 @@ class ReadyPullFullSuite(unittest.TestCase):
         return names
 
     def test_a_docs_only_ready_pull_request_runs_every_step_of_the_full_suite_jobs(self):
-        # Named failure: a step of a full-suite job is gated on a scope flag or on code, which a docs-only PR leaves false.
+        # Named failure: a step of a full-suite job is conditioned on a scope flag or on code, which a docs-only PR leaves false.
+        # The records-only condition is the one a ready pull_request does not meet: with it shut, no run step runs.
         for name in self.suite_jobs():
             job = self.jobs[name]
             for st in job["steps"]:
                 with self.subTest(job=name, step=step_label(st)):
                     self.assertTrue(runs_on(job, st, "pull_request", "false", draft=False),
                                     f"{name} step {step_label(st)!r} does not run on a ready pull_request with every scope flag false")
+                if "run" in st:
+                    with self.subTest(job=name, step=step_label(st), condition="shut"):
+                        self.assertFalse(runs_with_condition(job, st, "pull_request", "false", draft=False, skip_value="true"),
+                                         f"{name} step {step_label(st)!r} runs on a ready pull_request with the records-only condition shut")
 
     def test_a_shard_job_skips_a_draft_pull_request_at_job_level_and_runs_a_ready_one(self):
         # Control, green on the old code: the draft skip is the shard job's own if, and it stays.
@@ -2095,7 +2303,7 @@ class ScanCases(unittest.TestCase):
         self.assertEqual(step_if(job["steps"][0]), "needs.scope.outputs.code == 'true'")
 
 
-# Mod and map-skill tests: one step in each of the jobs checks (Linux), checks-windows and checks-macos, on
+# Mod and map-skill tests: one step in each of the jobs checks-rest (Linux), checks-windows and checks-macos, on
 # the `mods` scope flag. The step runs .github/scripts/mod-tests.sh with no argument, and that script is the
 # one home of both suites. A copy of either suite in a run step would drift, so no step may hold one. The
 # script finds every *.test.mjs and *.test.js file under mods/ except node_modules, so a new mods/<name>/
@@ -2103,7 +2311,7 @@ class ScanCases(unittest.TestCase):
 # The checker self-tests (ModTestStepChecker) run on synthetic text and pass now: they show each defect is
 # seen. MOD_SCRIPT_NAME marks the step that runs the script.
 MOD_FLAG = "mods"
-MOD_JOBS = ["checks", "checks-windows", "checks-macos"]
+MOD_JOBS = ["checks-rest", "checks-windows", "checks-macos"]
 MOD_SCRIPT_NAME = "mod-tests.sh"
 MOD_CMD = "bash .github/scripts/mod-tests.sh"
 MOD_SCRIPT = os.environ.get("MOD_TESTS_SH") or os.path.join(HERE, "..", ".github", "scripts", MOD_SCRIPT_NAME)
@@ -2416,24 +2624,24 @@ class ModTestStepChecker(unittest.TestCase):
                        "          find mods -name '*.test.mjs' -print\n")
         inline_skill = "      - name: Skill\n        run: |\n          cd skills/plain-english-map/tests\n          node --test\n"
         defects = {
-            "no step in checks": mod_doc(steps=only("checks", "")),
+            "no step in checks-rest": mod_doc(steps=only("checks-rest", "")),
             "step missing from checks-windows": mod_doc(steps=only("checks-windows", "")),
             "step missing from checks-macos": mod_doc(steps=only("checks-macos", "")),
             "step passes an argument": mod_doc(steps=only("checks-macos", MOD_STEP.replace(".sh\n", ".sh mods\n"))),
-            "step passes skill": mod_doc(steps=only("checks", MOD_STEP.replace(".sh\n", ".sh skill\n"))),
-            "step calls another script": mod_doc(steps=only("checks", MOD_STEP.replace("mod-tests.sh", "mod-tests.sh; echo"))),
+            "step passes skill": mod_doc(steps=only("checks-rest", MOD_STEP.replace(".sh\n", ".sh skill\n"))),
+            "step calls another script": mod_doc(steps=only("checks-rest", MOD_STEP.replace("mod-tests.sh", "mod-tests.sh; echo"))),
             "two steps in one job": mod_doc(steps=only("checks-windows", MOD_STEP + MOD_STEP)),
-            "inline copy of the mod glob in checks": mod_doc(extra={"checks": inline_glob}),
+            "inline copy of the mod glob in checks-rest": mod_doc(extra={"checks-rest": inline_glob}),
             "inline copy of the mod glob in checks-windows": mod_doc(extra={"checks-windows": inline_glob}),
-            "inline copy of the skill run": mod_doc(extra={"checks": inline_skill}),
-            "old mod step kept beside the new one": mod_doc(steps=only("checks", inline_glob + MOD_STEP)),
+            "inline copy of the skill run": mod_doc(extra={"checks-rest": inline_skill}),
+            "old mod step kept beside the new one": mod_doc(steps=only("checks-rest", inline_glob + MOD_STEP)),
             "wrong flag": mod_doc(steps=only("checks-windows", MOD_STEP.replace("outputs.mods", "outputs.code"))),
             "no !cancelled()": mod_doc(steps=only("checks-macos", MOD_STEP.replace("!cancelled() && ", ""))),
-            "reads the event": mod_doc(steps=only("checks", MOD_STEP.replace("== 'true' }}", "== 'true' && github.event_name != 'pull_request' }}"))),
+            "reads the event": mod_doc(steps=only("checks-rest", MOD_STEP.replace("== 'true' }}", "== 'true' && github.event_name != 'pull_request' }}"))),
             "no shell": mod_doc(steps=only("checks-windows", MOD_STEP.replace("        shell: bash\n", ""))),
             "shell sh": mod_doc(steps=only("checks-macos", MOD_STEP.replace("shell: bash", "shell: sh"))),
             "shell pwsh": mod_doc(steps=only("checks-windows", MOD_STEP.replace("shell: bash", "shell: pwsh"))),
-            "continue-on-error": mod_doc(steps=only("checks", MOD_STEP.replace("        shell: bash\n", "        shell: bash\n        continue-on-error: true\n"))),
+            "continue-on-error": mod_doc(steps=only("checks-rest", MOD_STEP.replace("        shell: bash\n", "        shell: bash\n        continue-on-error: true\n"))),
             "no checkout": mod_doc(checkout=False),
             "a step after the mod step": mod_doc(extra={"checks-macos": "      - run: echo\n"}),
             "scope lacks the mods output": mod_doc(scope_out=False),
@@ -2452,10 +2660,10 @@ class ModTestStepChecker(unittest.TestCase):
         # Rows: a comment that names the script is no step, and a `run: |` block that holds only the script line is
         # the step. Named failure: a commented-out step reads as present, or a block step as absent.
         commented = "      # run: bash .github/scripts/mod-tests.sh\n"
-        self.assertTrue(mods_step_problems(mod_doc(steps=only("checks", commented))))
+        self.assertTrue(mods_step_problems(mod_doc(steps=only("checks-rest", commented))))
         block = MOD_STEP.replace(f"run: {MOD_CMD}\n", f"run: |\n          {MOD_CMD}\n")
-        self.assertEqual(mods_step_problems(mod_doc(steps=only("checks", block))), [])
-        trailing = mod_doc(extra={"checks": "      # find mods -name '*.test.mjs'\n"})
+        self.assertEqual(mods_step_problems(mod_doc(steps=only("checks-rest", block))), [])
+        trailing = mod_doc(extra={"checks-rest": "      # find mods -name '*.test.mjs'\n"})
         self.assertEqual(mods_step_problems(trailing), [])  # a comment line is not a run
 
     def test_the_script_checker_sees_each_defect(self):
