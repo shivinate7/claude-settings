@@ -48,6 +48,9 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   request the relay names. Its Never covers names each act in CONSULTANT_MERGE_REFUSED, the reason flags,
   a head the relay did not name, a merge with no `--head`, a yes that started at triage with no consultant
   relay, and a session not tagged cs-build:batch-runner (decision `auto-mode-owner-acts`).
+  Its Covers text says the merge tool refuses a live head that is not the relayed head and names the
+  only commits that may sit past it, scopes "reads no review record" to `relayed_head_holds` itself,
+  and says the merge tool does not check the head flag against the relay.
 - One "Batch Runner Merge:" entry quotes the same derived merge command with the head flag
   (`--head <sha>`) in its Covers text. Its Covers text names the coordinator that sends the merge go
   (cs-build:coordinator), the batch runner (cs-build:batch-runner), `merge go`, and the pull request
@@ -639,6 +642,29 @@ class ConsultantRelayedMergeYesIsAllowed(unittest.TestCase):
                       "Covers text must say the merge tool reads no review record")
         self.assertNotRegex(entry, r"(?i)with no record",
                             "the entry must not say a head is allowed with no record")
+
+    def test_head_text_says_the_merge_tool_refuses_a_head_that_is_not_the_relayed_head(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("refuses a live head that is not the relayed head", bounds_text(entry),
+                      "Covers text must say the merge tool refuses a live head that is not the relayed head")
+
+    def test_head_text_names_the_only_commits_allowed_between_the_heads(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("except one that sits on it with only a Record-claim commit, its revert or a page-only commit between",
+                      bounds_text(entry),
+                      "Covers text must name the only commits a live head may carry past the relayed head")
+
+    def test_head_text_scopes_the_no_review_record_read_to_relayed_head_holds(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("`relayed_head_holds` itself reads no review record", bounds_text(entry),
+                      "Covers text must scope the no-review-record read to relayed_head_holds itself")
+
+    def test_head_text_says_the_merge_tool_does_not_check_the_head_against_the_relay(self):
+        entry = self.consultant_merge_entry()
+        flag = head_flag()
+        self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the relayed head")
+        self.assertIn("The merge tool does not check `%s` against the relay" % flag, bounds_text(entry),
+                      "Covers text must say the merge tool does not check `%s` against the relay" % flag)
 
     def test_covers_says_triage_forwards_what_the_consultant_relayed(self):
         entry = self.consultant_merge_entry()
