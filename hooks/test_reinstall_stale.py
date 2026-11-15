@@ -807,7 +807,7 @@ class LocalRefresh(unittest.TestCase):
         fx, old, new = behind(self._testMethodName)
         run = fx.run_hook(cloud=False, stub_exit="1")
         self.assertEqual(len(fx.installer_runs()), 1, "scope: the local installer did not run once")
-        self.assertEqual(run.lines, [PREFIX + "reinstall failed (exit 1)"],
+        self.assertEqual(run.lines, ["claude-settings: reinstall failed (exit 1)"],
                          "want one failure line, and no reinstalled line; stderr: %s" % run.tail())
 
 
