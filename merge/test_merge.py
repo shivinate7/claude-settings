@@ -1108,8 +1108,8 @@ class ClaudeMdFlag(Env):
     - The timeout seam: `merge.sh` is patched for the one `git diff` call whose args hold a `...` range (the PR-paths
       read). Any other call goes to the real `sh`. A case that never reaches that call fails, so a changed read cannot pass blind.
     - The match is case-insensitive on the whole rule-file path; the line prints the path as git names it.
-    - The waiting-page line (exact path skills/waiting-page/page.html) reads the same PR paths and uses the same seams. Its cases are
-      the last four of the class. A read that fails prints an UNKNOWN line that names page.html, never silence."""
+    - The waiting-page line (exact path skills/waiting-page/page.html) reads the same PR paths and uses the same seams. Its cases
+      come after the rule-file cases, at the end of the class. A read that fails prints an UNKNOWN line that names page.html, never silence."""
 
     def line(self, path):
         return f"merge: #7 changes {path}, a rule file every session loads."
@@ -1308,7 +1308,7 @@ class ClaudeMdFlag(Env):
         """The UNKNOWN lines of the waiting page: a read that could not run, named by its file."""
         return [l for l in out.splitlines() if l.startswith("merge: #7 ") and "UNKNOWN:" in l and "page.html" in l]
 
-    def test_a_merged_pr_that_changes_the_waiting_page_prints_one_republish_line_after_the_merged_as_line(self):
+    def test_a_merged_pr_that_changes_the_page_prints_one_republish_line_after_the_merged_as_line(self):
         self.pr_writes({self.PAGE_PATH: "<!doctype html>\n"})
         rc, out = self.run_merge("7", "--confirm")
         self.assert_flagged(rc, out)  # the merge landed; page.html is no rule file, so no rule-file line
@@ -1318,14 +1318,14 @@ class ClaudeMdFlag(Env):
         merged_at = [i for i, l in enumerate(lines) if l.startswith("merge: #7 merged as ")]
         self.assertGreater(lines.index(self.PAGE_LINE), merged_at[0], "the republish line came before the merged-as line\n" + out)
 
-    def test_a_pr_that_changes_only_other_files_of_the_waiting_page_skill_prints_no_waiting_page_line(self):
+    def test_a_pr_that_changes_only_other_files_of_the_page_skill_prints_no_line_for_the_page(self):
         self.pr_writes({"skills/waiting-page/SKILL.md": "# waiting page\n", "docs/notes.md": "x\n"})
         rc, out = self.run_merge("7", "--confirm")
         self.assert_flagged(rc, out)  # the merge landed first, so the absence below is a read that ran and found no page.html
         self.assertEqual(self.page_flags(out), [], "a diff without page.html printed a republish line\n" + out)
         self.assertEqual(self.page_unknowns(out), [], "a diff that was read printed an UNKNOWN line for page.html\n" + out)
 
-    def test_an_unreadable_changed_paths_list_prints_an_unknown_line_for_the_waiting_page(self):
+    def test_an_unreadable_changed_paths_list_prints_an_unknown_line_for_the_page(self):
         self.pr_writes({self.PAGE_PATH: "<!doctype html>\n"})
         seen = self.unreadable(lambda args: (128, "fatal: bad revision"))
         rc, out = self.run_merge("7", "--confirm")
@@ -1337,7 +1337,7 @@ class ClaudeMdFlag(Env):
         merged_at = [i for i, l in enumerate(lines) if l.startswith("merge: #7 merged as ")]
         self.assertGreater(lines.index(unknown[0]), merged_at[0], "the UNKNOWN line came before the merged-as line\n" + out)
 
-    def test_a_near_miss_of_the_waiting_page_path_prints_no_waiting_page_line(self):
+    def test_a_near_miss_of_the_page_path_prints_no_line_for_the_page(self):
         self.pr_writes({"other/page.html": "x\n", "skills/waiting-page/page.html.bak": "x\n",
                         "skills/waiting-page/page.htm": "x\n", "CLAUDE.md": "rules\n"})
         rc, out = self.run_merge("7", "--confirm")
@@ -1345,13 +1345,13 @@ class ClaudeMdFlag(Env):
         self.assertEqual(self.page_flags(out), [], "a near-miss path printed a republish line\n" + out)
         self.assertEqual(self.page_unknowns(out), [], "a near-miss path printed an UNKNOWN line for page.html\n" + out)
 
-    def test_a_pr_that_renames_the_waiting_page_away_still_prints_the_republish_line(self):
+    def test_a_pr_that_renames_the_page_away_still_prints_the_republish_line(self):
         self.pr_renames([(self.PAGE_PATH, "docs/old-page.md")])  # --no-renames lists the old path as a removal, so the line still prints
         rc, out = self.run_merge("7", "--confirm")
         self.assert_flagged(rc, out)  # the merge landed; neither path is a rule file
         self.assertEqual(self.page_flags(out), [self.PAGE_LINE], "a rename away from page.html printed no republish line\n" + out)
 
-    def test_a_pr_that_deletes_the_waiting_page_still_prints_the_republish_line(self):
+    def test_a_pr_that_deletes_the_page_still_prints_the_republish_line(self):
         self.pr_renames([(self.PAGE_PATH, None)])
         rc, out = self.run_merge("7", "--confirm")
         self.assert_flagged(rc, out)  # the merge landed; no rule file moved

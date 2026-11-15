@@ -2183,10 +2183,10 @@ class UnreadStale(FolderCase):
 
 
 class SessionLine(unittest.TestCase):
-    """`--session-line <root> --main-checkout <dir>` (rule page-stale, decision page-stale-publish). The stamp is the record file
-    roadmap/data/meta/page-built.json on origin/roadmap when that file is there, else the local stamp
-    <git common dir>/waiting-page-built. A repo whose extras name a waiting page prints one line: the behind line when the stamp
-    is not main's blob sha, the no-stamp line when neither source holds a stamp. A repo with no waiting page prints nothing.
+    """`--session-line <root> --main-checkout <dir>` (rule page-stale, decision page-stale-publish). The stamps are the record file
+    roadmap/data/meta/page-built.json on origin/roadmap and the local stamp <git common dir>/waiting-page-built. A repo whose extras
+    name a waiting page prints nothing when either stamp equals main's blob sha, prints the behind line when stamps exist and none
+    equals it, and prints the no-stamp line when neither source holds a stamp. A repo with no waiting page prints nothing.
     Every run exits 0 and prints no traceback. Each silence case asserts that before it asserts the silence."""
 
     run_script = Stale.run_script  # the one script-run helper of this file: it reads no instance state
@@ -2243,7 +2243,7 @@ class SessionLine(unittest.TestCase):
     def test_1_a_record_equal_to_main_prints_nothing_even_over_a_stale_local_stamp(self):
         root = self.root()
         self.roadmap(root, self.record(self.main_blob))
-        self.local_stamp(root, self.other_blob)  # the record file is the stamp while it is there: this stale local stamp is not read
+        self.local_stamp(root, self.other_blob)  # the record equals main's blob, so the page is not behind whatever the local stamp says
         r = self.session_run(root)
         self.assert_clean(r)
         self.assertEqual(r.stdout, "", "a record equal to main's blob printed a line:\n" + r.stdout)
@@ -2263,6 +2263,17 @@ class SessionLine(unittest.TestCase):
         self.assert_clean(r)
         lines = r.stdout.splitlines()
         self.assertEqual(len(lines), 1, "want one session line for a record behind main:\n" + r.stdout)
+        self.assertIn(self.BEHIND, lines[0], "the line does not say the page is behind main's page.html: " + lines[0])
+
+    def test_2_both_stamps_differing_from_main_prints_the_behind_line(self):
+        root = self.root()
+        self.roadmap(root, self.record(self.other_blob))
+        third = write_text(os.path.join(self.tmp.name, "third.html"), "<!doctype html>\n<title>Queue, third</title>\n")
+        self.local_stamp(root, git(self.main, "hash-object", third).stdout.strip())  # a second stamp, and it is not main's either
+        r = self.session_run(root)
+        self.assert_clean(r)
+        lines = r.stdout.splitlines()
+        self.assertEqual(len(lines), 1, "want one session line when both stamps differ from main:\n" + r.stdout)
         self.assertIn(self.BEHIND, lines[0], "the line does not say the page is behind main's page.html: " + lines[0])
 
     def test_3_no_record_and_no_local_stamp_prints_the_no_stamp_line(self):
@@ -2320,7 +2331,7 @@ class SessionLine(unittest.TestCase):
                 self.assertEqual(len(lines), 1, "want one no-stamp line for a record with no usable blob:\n" + r.stdout)
                 self.assertTrue(lines[0].startswith(self.NO_STAMP), "the line does not start with the no-stamp text: " + lines[0])
 
-    def test_6_a_repo_with_no_waiting_page_prints_nothing(self):
+    def test_6_a_repo_without_the_page_prints_nothing(self):
         root = self.root("nopage", extras=False)
         self.roadmap(root, self.record(self.other_blob))  # a record behind main: the silence must come from the missing page
         r = self.session_run(root)
