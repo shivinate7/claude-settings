@@ -16903,21 +16903,49 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
         self.assertNotIn("Traceback", err)
 
     def test_a_fix_check_chained_from_a_head_that_descends_from_the_reviewed_head_is_accepted(self):
-        # The newest earlier record reads done: a sonnet PASS fix check from `pre`, on `fixed`. `plain` is one commit on `fixed`, so it descends from the
-        # reviewed head (git merge-base --is-ancestor). The fix check starts at `plain`, and the head is one plain commit on `plain`. The record is
-        # accepted, and it names the delta the verifier read: the fix check starts at `plain` and the record's head is the new head. On main the fix
-        # check must start at the newest record's own head, so this case is refused: the red.
+        # The newest earlier record reads done: a sonnet PASS fix check from `pre`, on `fixed`. The head is two plain commits on `fixed`, so it descends
+        # from the reviewed head (git merge-base --is-ancestor). The fix check starts at `fixed`, the record's own Head, and the record is accepted. It
+        # names the delta fixed..head: the fix check's start and the record's head.
         fx = self.real_commits()
         prior = self.prior_text(fx)
         self.assertEqual(record_state(self, prior, head=fx.fixed), "done", "fixture: the newest earlier record does not read done, so the case tests nothing")
-        self.assertTrue(self.is_ancestor(fx.fixed, fx.plain), "fixture: plain does not descend from the reviewed head, so the case tests nothing")
-        head = self.chained_head(fx, fx.plain, "chain.txt")
-        rc, out, err = self.run_fix_after_prior(fx, prior, head, base=fx.plain)
+        head = self.chained_head(fx, self.chained_head(fx, fx.fixed, "chain1.txt"), "chain2.txt")
+        self.assertTrue(self.is_ancestor(fx.fixed, head), "fixture: the head does not descend from the reviewed head, so the case tests nothing")
+        rc, out, err = self.run_fix_after_prior(fx, prior, head, base=fx.fixed)
         self.assertEqual(rc, 0, "a fix check chained from a head that descends from the reviewed head, after a sonnet PASS fix check, was refused:\n" + out + err)
         self.assertNotIn("Traceback", err)
         rec = parse_text(self, posted_body(self, out))
-        self.assertEqual((rec["head"], rec["fix"]), (head, (fx.plain, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS")),
-                         "the printed record does not name the delta plain..head: its fix check start and its head")
+        self.assertEqual((rec["head"], rec["fix"]), (head, (fx.fixed, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS")),
+                         "the printed record does not name the delta fixed..head: its fix check start and its head")
+
+    def test_a_fix_check_started_at_a_plain_commit_above_the_reviewed_head_is_refused(self):
+        # The head is one plain commit on `plain`, so it descends from `plain` and from the reviewed head. Control: the fix check started at the
+        # reviewed head is accepted. The start must be the newest record's Head, so a start at `plain` is refused, with the start refusal's text.
+        fx = self.real_commits()
+        prior = self.prior_text(fx)
+        head = self.chained_head(fx, fx.plain, "chain.txt")
+        self.assertTrue(self.is_ancestor(fx.plain, head), "fixture: the head does not descend from plain, so the case tests nothing")
+        rc, out, err = self.run_fix_after_prior(fx, prior, head, base=fx.fixed)
+        self.assertEqual(rc, 0, "control: a fix check started at the reviewed head was refused:\n" + out + err)
+        rc, out, err = self.run_fix_after_prior(fx, prior, head, base=fx.plain)
+        self.assertEqual(rc, 2, "a fix check started at plain, a commit above the reviewed head, was accepted:\n" + out + err)
+        self.assertIn("the reviewed head must be the Head of the newest earlier review log", err, "the refusal is not the start refusal:\n" + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_a_plain_head_off_main_with_a_fix_check_started_at_the_reviewed_head_is_refused(self):
+        # Control: a plain commit on the reviewed head, with the fix check started there, is accepted. The refused head is one commit on main, which
+        # holds no commit of `fixed`. The start is the record's own Head, so only the ancestry of the head refuses the case.
+        fx = self.real_commits()
+        prior = self.prior_text(fx)
+        rc, out, err = self.run_fix_after_prior(fx, prior, self.chained_head(fx, fx.fixed, "own.txt"), base=fx.fixed)
+        self.assertEqual(rc, 0, "control: a fix check from the newest record's own head was refused:\n" + out + err)
+        head = self.chained_head(fx, fx.main, "outside.txt")
+        self.assertFalse(self.is_ancestor(fx.fixed, head), "fixture: the head off main holds the reviewed head, so the case tests nothing")
+        rc, out, err = self.run_fix_after_prior(fx, prior, head, base=fx.fixed)
+        self.assertEqual(rc, 2, "a plain head off main, with the fix check started at the reviewed head, was accepted:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
+        self.assertNotIn("Traceback", err)
 
     def test_a_fix_check_from_a_base_that_does_not_descend_from_the_reviewed_head_is_refused(self):
         # Control: the same chain from the newest record's own head is accepted. The refused bases are `main`, which is no descendant of `fixed`, and
