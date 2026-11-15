@@ -338,7 +338,7 @@ class T(unittest.TestCase):
         untagged PPID-1 stub. `wait-pid <that pid>` must wait for the job and exit 0."""
         stall = load_stall_watch_tests()
         env = {k: v for k, v in os.environ.items() if k != TAG}
-        job = "env %s=%s sleep %s; echo done" % (TAG, SESSION, LIFE)   # `; echo` keeps a stub shell above the job
+        job = "env %s=%s tail -f /dev/null; echo done" % (TAG, SESSION)   # never ends, and no planned pause: `; echo` keeps a stub shell above the job
         rc, text, _secs, _cmd = stall.run_rewritten(job, shell="/bin/sh", env=env)
         for line in text.splitlines():   # the wrapper exits on a stall, before its own `rm -f LOG`
             log = stall.LOG_RE.search(line) if line.startswith("Log: ") else None
