@@ -12,7 +12,8 @@ fresh from its file, so a missing file fails the case with its name, not at impo
 
 Fixtures are throwaway git repos under this run's folder. Each holds the registry entry in
 .claude/layout-extras.json and, on a record branch, the page's store: <export>/items/<id>.json and
-<export>/answers/<id>.json, written as the export writes them (two-space indent). The record branch and the export
+<export>/answers/<id>.json, written as the export writes them (two-space indent). One fixture holds its store on
+origin's ref alone, with no local branch. The record branch and the export
 folder are not the defaults, so a hard-coded name fails. A fixture is built once per run and read by every case
 that names it. The judge never writes to a fixture.
 
@@ -61,6 +62,7 @@ EXTRAS = {
     "artifacts": [{"id": "fixture-page", "url": PAGE_URL, "role": "waiting-page",
                    "account": "fixture", "export": EXPORT}],
 }
+ROADMAP_BRANCH = "roadmap"  # the record branch of the origin-only fixtures: held on origin, with no local branch
 CLAIM = "item 874 is already answered."
 NO_CLAIM = "item 874 is open and waits on the owner."
 SHARED = {}
@@ -89,6 +91,13 @@ def git(repo, *args):
 def ref_holds(repo, ref, path):
     """True when `ref` holds a file at `path`."""
     done = subprocess.run(["git", "-C", repo, "cat-file", "-e", "%s:%s" % (ref, path)], capture_output=True,
+                          text=True, env=GIT_ENV, timeout=HANG_GUARD)
+    return done.returncode == 0
+
+
+def has_ref(repo, ref):
+    """True when `ref` exists in a fixture repo."""
+    done = subprocess.run(["git", "-C", repo, "show-ref", "--verify", "--quiet", ref], capture_output=True,
                           text=True, env=GIT_ENV, timeout=HANG_GUARD)
     return done.returncode == 0
 
@@ -131,29 +140,36 @@ def write_store(folder, items=(), answers=()):
         write_json(os.path.join(folder, EXPORT, "answers", row["id"] + ".json"), body)
 
 
-def make_store(folder, items=(), answers=(), origin_answers=(), extras=True, record=True):
+def make_store(folder, items=(), answers=(), origin_answers=(), extras=True, record=True, branch=RECORD_BRANCH,
+               origin_only=False):
     """A fixture repo. The default branch holds the registry entry. The record branch holds the store. Each
-    origin answer is committed only on refs/remotes/origin/<record branch>, so the local record branch lacks it."""
+    origin answer is committed only on refs/remotes/origin/<record branch>, so the local record branch lacks it.
+    origin_only commits the whole store on refs/remotes/origin/<record branch> and leaves no local branch of that name."""
     os.makedirs(folder)
     git(folder, "init", "-q")
     if extras:
-        write_json(os.path.join(folder, ".claude", "layout-extras.json"), EXTRAS)
+        write_json(os.path.join(folder, ".claude", "layout-extras.json"), dict(EXTRAS, **{"record-branch": branch}))
     write_text(os.path.join(folder, "README.md"), "fixture\n")
     git(folder, "add", "-A")
     git(folder, "commit", "-q", "-m", "fixture: default branch")
     default = git(folder, "rev-parse", "--abbrev-ref", "HEAD").strip()
     if record:
-        git(folder, "checkout", "-q", "-b", RECORD_BRANCH)
+        git(folder, "checkout", "-q", "-b", branch)
         write_store(folder, items, answers)
         git(folder, "add", "-A")
         git(folder, "commit", "-q", "-m", "fixture: record branch")
+        if origin_only:
+            git(folder, "update-ref", "refs/remotes/origin/" + branch, "HEAD")
+            git(folder, "checkout", "-q", default)
+            git(folder, "branch", "-q", "-D", branch)
+            return folder
         if origin_answers:
             git(folder, "checkout", "-q", "-b", "fixture-origin")
             write_store(folder, (), origin_answers)
             git(folder, "add", "-A")
             git(folder, "commit", "-q", "-m", "fixture: origin answers")
-            git(folder, "update-ref", "refs/remotes/origin/" + RECORD_BRANCH, "HEAD")
-            git(folder, "checkout", "-q", RECORD_BRANCH)
+            git(folder, "update-ref", "refs/remotes/origin/" + branch, "HEAD")
+            git(folder, "checkout", "-q", branch)
             git(folder, "branch", "-q", "-D", "fixture-origin")
     git(folder, "checkout", "-q", default)
     return folder
@@ -366,6 +382,34 @@ class PassTests(unittest.TestCase):
         assert_allowed(self, judge(self, CREATE_TOOL, {"prompt": "Review PR 3506 and report back."}, repo),
                        "Review PR 3506 and report back.")
 
+    def test_wait_for_an_answer_as_a_condition_passes(self):
+        repo = refusing()
+        assert_refused(self, send(self, "item 874 is already answered.", repo), "874",
+                       "item 874 is already answered.")  # scope: the bare claim is refused
+        sentence = "Wait for item 874 to be answered."
+        assert_allowed(self, send(self, sentence, repo), sentence)
+
+    def test_start_after_an_answer_as_a_condition_passes(self):
+        repo = refusing()
+        assert_refused(self, send(self, "item 874 is already answered.", repo), "874",
+                       "item 874 is already answered.")  # scope: the bare claim is refused
+        sentence = "Start lane B after item 874 is answered."
+        assert_allowed(self, send(self, sentence, repo), sentence)
+
+    def test_a_need_for_an_answer_passes(self):
+        repo = refusing()
+        assert_refused(self, send(self, "item 874 is already answered.", repo), "874",
+                       "item 874 is already answered.")  # scope: the bare claim is refused
+        sentence = "Item 874 needs to be answered."
+        assert_allowed(self, send(self, sentence, repo), sentence)
+
+    def test_a_move_to_the_all_answered_list_passes(self):
+        repo = refusing()
+        assert_refused(self, send(self, "item 874 is already answered.", repo), "874",
+                       "item 874 is already answered.")  # scope: the bare claim is refused
+        sentence = "Move item 874 to all answered items."
+        assert_allowed(self, send(self, sentence, repo), sentence)
+
 
 class RefuseTests(unittest.TestCase):
     def test_a_claim_with_no_owner_answer_is_refused(self):
@@ -455,6 +499,32 @@ class RefuseTests(unittest.TestCase):
         message = "Item 874 has been\nanswered by the owner."
         assert_refused(self, send(self, message, refusing()), "874", message, echo=False)
 
+    def test_all_before_the_claim_word_still_claims(self):
+        # "all" is a list name only in "the all answered items"; here it says item 874 is answered.
+        sentence = "Item 874 and item 875 are all answered."
+        assert_refused(self, send(self, sentence, refusing()), "874", sentence)
+
+    def test_all_before_approved_still_claims(self):
+        sentence = "Item 874 is all approved."
+        assert_refused(self, send(self, sentence, refusing()), "874", sentence)
+
+    def test_once_before_a_past_answer_still_claims(self):
+        # "once" with a past verb reports that the answer came first; it sets no condition on a later step.
+        sentence = "I merged once item 874 was answered."
+        assert_refused(self, send(self, sentence, refusing()), "874", sentence)
+
+    def test_before_a_past_action_still_claims(self):
+        sentence = "Before I merged I confirmed item 874 was approved."
+        assert_refused(self, send(self, sentence, refusing()), "874", sentence)
+
+    def test_a_claim_followed_by_a_consequence_is_refused(self):
+        sentence = "Item 874 is answered, so I merged it."
+        assert_refused(self, send(self, sentence, refusing()), "874", sentence)
+
+    def test_a_coordinator_citation_is_not_an_owner_citation(self):
+        sentence = "Item 874 was answered (coordinator, 2026-11-15 13:30 CST)."
+        assert_refused(self, send(self, sentence, refusing()), "874", sentence)
+
 
 class StoreStateTests(unittest.TestCase):
     def test_an_item_with_a_last_answer_passes(self):
@@ -503,6 +573,30 @@ class StoreStateTests(unittest.TestCase):
                         "the full-size store holds no item 400 file")
         sentence = "item 400 is already answered."
         assert_refused(self, send(self, sentence, repo), "400", sentence)
+
+    def test_an_owner_answer_held_on_origin_roadmap_passes(self):
+        # A repo whose record branch is held on origin alone: the store and the owner's answer to item 883 are there.
+        repo = shared("origin-roadmap", branch=ROADMAP_BRANCH, origin_only=True, items=[item(883)],
+                      answers=[answer(883)])
+        ref = "refs/remotes/origin/" + ROADMAP_BRANCH
+        self.assertFalse(has_ref(repo, "refs/heads/" + ROADMAP_BRANCH),
+                         "a local %s branch exists: the case would read local, not origin" % ROADMAP_BRANCH)
+        self.assertTrue(ref_holds(repo, ref, EXPORT + "/answers/answer-883.json"),
+                        "origin's %s holds no answer to item 883" % ROADMAP_BRANCH)
+        sentence = "Item 883 was answered."
+        open_repo = shared("origin-roadmap-open", branch=ROADMAP_BRANCH, origin_only=True, items=[item(883)])
+        assert_refused(self, send(self, sentence, open_repo), "883", sentence)  # scope: no answer, so refused
+        assert_allowed(self, send(self, sentence, repo), sentence)
+
+    def test_the_same_text_on_origin_roadmap_refuses_an_item_with_no_answer(self):
+        repo = shared("origin-roadmap-open", branch=ROADMAP_BRANCH, origin_only=True, items=[item(883)])
+        ref = "refs/remotes/origin/" + ROADMAP_BRANCH
+        self.assertTrue(ref_holds(repo, ref, EXPORT + "/items/item-883.json"),
+                        "origin's %s holds no item 883 file" % ROADMAP_BRANCH)
+        self.assertFalse(ref_holds(repo, ref, EXPORT + "/answers/answer-883.json"),
+                         "origin's %s already holds an answer to item 883" % ROADMAP_BRANCH)
+        sentence = "Item 883 was answered."
+        assert_refused(self, send(self, sentence, repo), "883", sentence)
 
 
 class CostTests(unittest.TestCase):
