@@ -11,8 +11,8 @@ the skills, the agents, and the generated settings.json under <config>/installs/
 <config>/.cs-current onto that folder switches the install. Each <config>/<sub>/<file>,
 <config>/skills/<name>, <config>/hooks/guard.d and <config>/settings.json is a link through .cs-current.
 A failed run leaves the old generation whole and the install record as it was. A rename never runs while
-the live settings.json names a hook file that is already gone. A generation older than an hour is removed;
-a younger one and the current one stay.
+the live settings.json names a hook file that is already gone. A generation retired more than an hour ago is removed;
+one retired within the hour, and the current one, stay.
 
 Two classes. Refresh holds the new claims: each one fails on the tree it is written for, and a red there
 names the named cause or, where the fault point or the link is absent, a scope check that comes first.
@@ -75,6 +75,8 @@ OLD_ID = "20250101000000101"
 YOUNG_ID = "20261115101010202"
 OLD_AGE = 2 * 3600
 YOUNG_AGE = 600
+LIVE_THEN_OLD_AGE = 3 * 3600  # made 3 h before the switch that retires it: old by creation, new by retirement
+RETIRED_AGE = 2 * 3600  # retired 2 h ago: past the hour
 INSTALL_GUARD = 180
 PROBE_GUARD = 60
 HOOK_PATH = re.compile(r"\bhooks/([A-Za-z0-9_.-]+\.py)\b")
@@ -614,6 +616,38 @@ class Refresh(FirstInstall):
         self.assertTrue(os.path.isdir(young), "a generation ten minutes old was pruned by the refresh")
         self.assertTrue(os.path.islink(fx.current), "scope: .cs-current is not a link after the refresh")
         self.assertTrue(os.path.isdir(os.path.realpath(fx.current)), ".cs-current names a folder that is not there")
+
+    def test_h_a_generation_counts_its_age_from_the_switch_that_retires_it(self):
+        fx = self.installed("h-retire")
+        self.assertTrue(os.path.islink(fx.current), "scope: .cs-current is not a link, so there is no generation to age")
+        first = fx.current_target()
+        gen1 = os.path.join(fx.cfg, first)
+        age(gen1, LIVE_THEN_OLD_AGE)  # live until the next switch, so its age must count from that switch
+        probe = Probe(fx)
+        try:
+            self.assertEqual(probe.line(), "started", "fixture: the probe did not start")
+            fx.advance()
+            done = fx.install()
+            self.assertEqual(done.returncode, 0, "the refresh exited %d: %s" % (done.returncode, tail(done)))
+            self.assertNotEqual(fx.current_target(), first, "scope: the refresh did not switch .cs-current")
+            self.assertTrue(os.path.isdir(gen1), "generation 1 was removed by the run that retired it: a generation "
+                                                 "counts its age from its creation, not from its retirement")
+            fx.advance()
+            done = fx.install()
+            self.assertEqual(done.returncode, 0, "the second refresh exited %d: %s" % (done.returncode, tail(done)))
+            got = probe.answer()
+        finally:
+            probe.close()
+        self.assertEqual(got, "old", "a hook started in generation 1 imported %r after a second refresh within the "
+                                     "hour: generation 1 was not whole" % got)
+        second = fx.current_target()
+        age(gen1, RETIRED_AGE)  # retired 2 h ago, so a later run must remove it
+        fx.advance()
+        done = fx.install()
+        self.assertEqual(done.returncode, 0, "the third refresh exited %d: %s" % (done.returncode, tail(done)))
+        self.assertNotEqual(fx.current_target(), second, "scope: the third refresh did not switch .cs-current")
+        self.assertFalse(os.path.exists(gen1), "a generation retired 2 hours ago is still under installs/ after a "
+                                               "later refresh")
 
     def test_f1_settings_json_is_a_link_through_the_current_link(self):
         fx = self.installed("f1-settings")

@@ -2353,23 +2353,36 @@ skills_bak1() {
   rm -rf "$h"
 }
 
-# A hand edit of a linked skill is not backed up (decision copy-mode-overwrites-no-backup: an installer overwrites its
-# own old copy and keeps no backup). A cloud run links each skill through its generation (decision install-hooks-whole),
-# so the edit lands in that generation. The next run replaces the skill's content through the new generation, with no
-# backup under backups/ and no copy under skills/. The one-time move of an older real copy is a different path.
+# A hand edit of a linked skill is backed up, and never kept in skills/ (decision copy-mode-overwrites-no-backup, its skill
+# paragraph: a skill backup goes to backups/skills/<name>.<time>, and a copy that is neither the recorded tree nor the
+# source is backed up). A cloud run links each skill through its generation (decision install-hooks-whole), so the edit
+# lands in the live generation's skills/<name>. The refresh backs that folder up, the new generation's skill is the
+# shipped one, and an unedited skill gets no backup. The one-time move of an older real copy is skills2.
 skills_bak2() {
-  name="skills_bak2: a hand edit of a linked skill is replaced by the next run with no backup, under backups/ or skills/"
+  name="skills_bak2: a hand edit of a linked skill is backed up under backups/skills/, never kept in skills/; an unedited skill is not"
   skills_bak_setup skills_bak2
+  mkdir -p "$co/skills/plain-skill"
+  printf 'plain v1\n' > "$co/skills/plain-skill/SKILL.md"
   skills_bak_run
+  if [ $rc -ne 0 ]; then
+    bad "$name" "the first install exited $rc: $out"; rm -rf "$h"; return
+  fi
+  if [ ! -L "$cfg/skills/fresh-prose" ] || [ "$(cat "$cfg/skills/plain-skill/SKILL.md" 2>/dev/null)" != "plain v1" ]; then
+    bad "$name" "scope: the skills did not land as links through the generation, so no edit reaches one"; rm -rf "$h"; return
+  fi
   printf 'hand edit\n' > "$cfg/skills/fresh-prose/SKILL.md"
   skills_bak_run
   bak=$(ls -d "$cfg/backups/skills/"fresh-prose.* 2>/dev/null | head -n1)
-  kept=$(grep -rl --exclude-dir=installs 'hand edit' "$cfg" 2>/dev/null)
+  held=$(ls "$cfg/backups/skills" 2>/dev/null)
+  edited=$(cat "$bak/SKILL.md" 2>/dev/null)
+  misplaced=$(find -L "$cfg/skills" -type f -exec grep -l 'hand edit' {} + 2>/dev/null)
   if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
-  elif [ -n "$bak" ]; then bad "$name" "a hand edit was backed up under $bak; copy-mode-overwrites-no-backup keeps none"
-  elif has_bak "$cfg/skills"; then bad "$name" "skills/ holds a .bak.* entry"
-  elif [ -n "$kept" ]; then bad "$name" "the hand edit survives outside the generation, under: $kept"
-  elif [ "$(cat "$cfg/skills/fresh-prose/SKILL.md")" != "v1" ]; then bad "$name" "skill was not refreshed"
+  elif [ -z "$bak" ]; then bad "$name" "no backup of the hand-edited skill under backups/skills/ after the refresh"
+  elif [ "$edited" != "hand edit" ]; then bad "$name" "the backup under $bak does not hold the hand edit"
+  elif [ "$held" != "${bak##*/}" ]; then bad "$name" "backups/skills holds more than the edited skill: $held"
+  elif has_bak "$cfg/skills"; then bad "$name" "skills/ holds a .bak.* entry: $(ls "$cfg/skills")"
+  elif [ -n "$misplaced" ]; then bad "$name" "the hand edit is under skills/, not only in backups/skills/: $misplaced"
+  elif [ "$(cat "$cfg/skills/fresh-prose/SKILL.md")" != "v1" ]; then bad "$name" "skills/fresh-prose is not the shipped content after the refresh"
   else ok "$name"; fi
   rm -rf "$h"
 }
