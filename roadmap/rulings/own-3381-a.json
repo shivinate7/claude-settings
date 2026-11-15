@@ -6,5 +6,6 @@
  "quote": "a",
  "source": "Consultant 01:43 CST Nov 15 to triage, relaying the owner's \"a\" of 01:43 CST; coordinator 01:45 CST Nov 15 to triage (follow-up step name, lane, release to runner 10). Not owner-typed here.",
  "status": "open",
+ "supersedes_none": "supersedes no earlier ruling: it answers owner item 865 once and lifts the hold on PR 3381 only; decision hold-unsafe-after-round-3 stays in force for every other PR",
  "step": "start-session-not-pretooluse"
 }
