@@ -1009,8 +1009,9 @@ def _plain_words(words):
 
 # A file read as input (`< f`, `$(< f)`): a word that names a file, not one that runs it.
 _INPUT_READ = re.compile(r"(?<![<\d])<(?![<(])[ \t]*[^\s;&|<>()\"'`]+")
-# The wrappers that run the next command word and nothing of their own: `env A=1 cat f` runs cat.
-_PASS_THROUGH = {"sudo", "env", "command", "nohup", "nice", "time", "doas", "timeout", "builtin"}
+# The wrappers that run the next command word and nothing of their own: `env A=1 cat f` runs cat. The rest of
+# COMMAND_WRAPPERS start another program (xargs, verdict, python, python3) or run a file as the command (exec).
+_PASS_THROUGH = COMMAND_WRAPPERS - {"xargs", "verdict", "python", "python3", "exec", "!", "&"}
 
 
 def _command_runner(runner):
