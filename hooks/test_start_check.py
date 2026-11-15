@@ -56,24 +56,27 @@ subprocess.Popen = refuse
 os.system = refuse
 os.popen = refuse
 sys.path.insert(0, hooks)
-import guard
-
-real_read_load = guard.read_load
-
-
-def read_load():
-    sys.stderr.write("READ\n")
-    if patch.get("read_error"):
-        raise OSError("the probe read failed")
-    if "reading" in patch:
-        return patch["reading"]
-    return real_read_load()
+hidden = patch.get("hide", [])
+for name in hidden:
+    sys.modules[name] = None
+if "guard" not in hidden:
+    import guard
+    real_read_load = guard.read_load
 
 
-guard.read_load = read_load
-guard.is_cloud = lambda: bool(patch.get("cloud"))
-if "load_full" in patch:
-    guard.load_full = lambda reading: list(patch["load_full"])
+    def read_load():
+        sys.stderr.write("READ\n")
+        if patch.get("read_error"):
+            raise OSError("the probe read failed")
+        if "reading" in patch:
+            return patch["reading"]
+        return real_read_load()
+
+
+    guard.read_load = read_load
+    guard.is_cloud = lambda: bool(patch.get("cloud"))
+    if "load_full" in patch:
+        guard.load_full = lambda reading: list(patch["load_full"])
 code = 0
 try:
     runpy.run_path(hook, run_name="__main__")
@@ -140,6 +143,14 @@ def assert_silent(test, run, cause):
     test.assertEqual(run.out.strip(), "", "%s: want no stdout, got %r" % (cause, run.out))
     test.assertEqual(run.code, 0, "%s: want exit 0, got %s" % (cause, run.code))
     test.assertNotIn("Traceback", run.err, "%s: the hook raised an error" % cause)
+
+
+def assert_fails_open(test, run, cause):
+    """No stdout and exit 0. stderr may carry one line, and no more."""
+    test.assertEqual(run.out.strip(), "", "%s: want no stdout, got %r" % (cause, run.out))
+    test.assertEqual(run.code, 0, "%s: want exit 0, got %s" % (cause, run.code))
+    lines = [line for line in run.err.splitlines() if line.strip()]
+    test.assertLessEqual(len(lines), 1, "%s: stderr has %d lines, want at most one" % (cause, len(lines)))
 
 
 def listing(root):
@@ -331,6 +342,20 @@ class FailOpen(unittest.TestCase):
             with self.subTest(payload=text):
                 run = run_hook(case, text, {"reading": FULL})
                 assert_silent(self, run, "payload %r on a full reading" % text)
+
+    def test_guard_import_failure_on_a_haiku_startup_fails_open(self):
+        case = new_case()
+        scope = run_hook(case, payload_text(case, model=HAIKU), {"reading": NORMAL})
+        stop_of(self, scope, "scope: startup on model %s with guard importable" % HAIKU)
+        subject = run_hook(case, payload_text(case, model=HAIKU), {"hide": ["guard"]})
+        assert_fails_open(self, subject, "startup on model %s with the guard import failing" % HAIKU)
+
+    def test_guard_import_failure_on_a_full_machine_startup_fails_open(self):
+        case = new_case()
+        scope = run_hook(case, payload_text(case), {"reading": FULL})
+        stop_of(self, scope, "scope: startup on a full reading with guard importable")
+        subject = run_hook(case, payload_text(case), {"hide": ["guard"]})
+        assert_fails_open(self, subject, "startup on a full reading with the guard import failing")
 
 
 class CostProof(unittest.TestCase):
