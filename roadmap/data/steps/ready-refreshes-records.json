@@ -1,0 +1,12 @@
+{
+ "id": "ready-refreshes-records",
+ "title": "`merge --ready` runs the records step and pushes it before it marks a PR ready, so a ready PR never carries a stale records page",
+ "phase": "now",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "why": "Coordinator 05:47 CST Nov 15 (relayed; triage read no PR or log). Lane ready-refreshes-records (session_013NEJL2x8RHNnMo2B3gWMxy, sonnet, guard or check: yes) started on the consultant's order of 05:46 CST: consultant's pick under the owner's 20:18 CST Nov 14 words, not an owner-typed pick. Fix: `merge --ready` runs the records step and pushes it before it marks a PR ready. Cost it stops (coordinator's relay): the merge tool refused ready PRs #3255 and #3472 tonight for a stale records page, each costing a full extra CI run. The lane also hunts any other refusal that only shows after the ready run. The lane is told to report whether any record names an owner of `merge.readyChecks` (triage's 04:30 CST read found none; see step ready-check-names-tree). Kin steps (all exist, checked 05:46 CST): records-page-before-ready (doing, older lane; the same class, and its ruling own-830-c-ci-scope-green-before-head kept the refusal at merge and the ready records push), records-stale-refuses-on-ready (done), ready-push-merges-main (doing), ready-pr-touched-tests, ready-check-names-tree. Not an alias of records-page-before-ready: that step's open fix is rebuilding before the ready run in general; this lane's fix is the `--ready` push alone. Overlap is the lane's first read.",
+ "source": "coordinator 05:47 CST Nov 15, relayed by triage",
+ "note": "Doing. Lane session_013NEJL2x8RHNnMo2B3gWMxy. Guard or check change: round 3 and the net-value test apply. No hand-in yet.",
+ "lane": "session_013NEJL2x8RHNnMo2B3gWMxy",
+ "updatedAt": "2026-11-15T05:47:00-06:00"
+}
