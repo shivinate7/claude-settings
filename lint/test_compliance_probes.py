@@ -3934,6 +3934,290 @@ class ClaudeMdCitesAction(unittest.TestCase):
         self.assertNotIn("github.event.pull_request.body", self.step(), "step two's env reads the PR body from the event")
 
 
+# The facts group. A decision record may carry one `Facts:` line directly under its `State:` line. Its claims, split by
+# `;`, are `pr <N> open|merged` and `ref <name> present|absent`, and each is checked against a live value. The group reads
+# those values from the JSON file FACTS_FIXTURE names: "pr:<N>" and "ref:<name>" keys map to the live value. A key the file
+# lacks, a null value, or a file that cannot be read makes the group unknown. The group never reads a State line's prose.
+FACTS_FIXTURE = "FACTS_FIXTURE"
+FACTS_LIVE_ENV = ("GH_TOKEN", "GITHUB_TOKEN", "GH_REPO", "GITHUB_REPOSITORY", "GH_HOST")  # the caller's, stripped per case
+FACTS_DEAD_PROXY = "http://127.0.0.1:9"  # nothing listens on this port, so a stray network call fails at once
+
+# Copies, so the cases pin the State prose of these two records as origin/main held them, before any Facts line.
+PRE_FIX_STABLE_BRANCH = """# The stable branch moves only to a green main commit
+
+## The ruling
+
+Owner approved the design with the refuter's changes, 2026-11-12 09:48 CST, relayed by the coordinator at 09:50 CST. Under R42 part 2, sessions and installers run from a branch named `stable` on origin. A workflow run moves it after a green push run of checks on main. The move is fast-forward only.
+
+State: target, not live. The mover is open pull request 2793. No `stable` branch is on origin yet.
+
+- Trigger: `workflow_run` on the checks workflow's completion, for a push run on main that ends in success.
+- Move: fast-forward `stable` to that run's head sha. A move that is not a fast-forward is refused. The job never force-pushes.
+- A red or cancelled push run leaves `stable` where it is.
+- Installers and the merge tool read `stable`. Their fallback is decision `stable-fallback-warn`.
+
+Why: a red main is never installed, because `stable` does not move onto it. Restart plan, entry R42 part 2.
+
+Alternative not taken: a last job in the checks workflow, on push to main, in place of a separate workflow file. Refuter, 2026-11-11 22:58 CST, simpler route (b). The design names the `workflow_run` trigger. The owner approved the design in the ruling above.
+
+Kind: process
+Home: docs/plans/restart-plan.md
+"""
+
+PRE_FIX_FALLBACK_WARN = """# Installers and the merge tool fall back to main when stable is missing
+
+## The ruling
+
+Orchestrator pick, not an owner ruling, recorded 2026-11-12 15:27 CST under R42 part 2. Installers and the merge tool run from `origin/stable` (decision `stable-branch`). When `origin/stable` is missing, they fall back to `origin/main` and print one WARN line.
+
+State: target, not live. Installers are open pull request 2819. The stable mover is open pull request 2793. Both are open drafts. The merge tool's code is `merge/launch.py`, which runs from `origin/main` today.
+
+- One WARN line per run, not one per call.
+- The owner may overturn this pick. It is not a ruling.
+
+Reason: a repo with no `stable` branch yet would otherwise fail to install or merge.
+
+Kind: process
+Home: docs/plans/restart-plan.md
+"""
+
+
+def decision(state, facts=None):
+    """A decision record: a title, a ruling paragraph, its State line, and a Facts line under that when `facts` is given."""
+    lines = ["# Fixture decision", "", "## The ruling", "", "Fixture ruling text that states no fact.", "", "State: %s" % state]
+    if facts is not None:
+        lines.append("Facts: %s" % facts)
+    return "\n".join(lines) + "\n"
+
+
+def with_facts(text, facts):
+    """`text` with a Facts line directly under each State line."""
+    out = []
+    for line in text.splitlines():
+        out.append(line)
+        if line.startswith("State:"):
+            out.append("Facts: %s" % facts)
+    return "\n".join(out) + "\n"
+
+
+def facts_repo(test, records):
+    """A child with each of `records` ({slug: text}) tracked in its decisions folder."""
+    repo = Repo(test)
+    for slug, text in records.items():
+        repo.write("%s/%s.md" % (kind_path("decisions"), slug), text)
+    return repo
+
+
+def facts_lines(slug, text):
+    """The `file:line` of each Facts line of record `slug`, as the probe names them, in line order."""
+    return ["%s/%s.md:%d" % (kind_path("decisions"), slug, number)
+            for number, line in enumerate(text.splitlines(), 1) if line.startswith("Facts:")]
+
+
+def facts_fixture(test, values):
+    """A fact file holding `values` ({"pr:2793": "merged", ...}), removed when the case ends. Returns its path."""
+    handle, path = tempfile.mkstemp(suffix=".json", dir=RUN_FOLDER)
+    with os.fdopen(handle, "w", encoding="utf-8") as out:
+        json.dump(values, out)
+    test.addCleanup(os.remove, path)
+    return path
+
+
+def run_facts(root, fixture=None, env=None):
+    """(exit code, stdout, stderr) of `compliance_probes.py facts <root>`, with the facts read from `fixture` (a path).
+    The caller's live-reader variables are stripped, so a case never reads a token of the caller's."""
+    run_env = dict(os.environ)
+    for key in FACTS_LIVE_ENV + (FACTS_FIXTURE,):
+        run_env.pop(key, None)
+    if fixture is not None:
+        run_env[FACTS_FIXTURE] = fixture
+    run_env.update(env or {})
+    done = subprocess.run([sys.executable, PROBES, "facts", root], env=run_env, capture_output=True, text=True)
+    return done.returncode, done.stdout, done.stderr
+
+
+def items_at(out, where):
+    """Every item line that names `where`, a file and line."""
+    pattern = re.compile(re.escape(where) + r"(?!\d)")
+    return [line for line in out.splitlines()[1:] if pattern.search(line)]
+
+
+class Facts(unittest.TestCase):
+    """Each claim of a record's Facts line is checked against its live value. A false, unreadable, malformed or misplaced
+    Facts line is named at its file and line. A record with no Facts line, or prose alone, is never checked."""
+
+    def assert_gap(self, repo, fixture, where, claim=None, live=None):
+        """The probe exits 1 and names the item at `where`, with `claim` and `live` in that item when they are given."""
+        code, out, err = run_facts(repo.root, fixture)
+        item = item_for(out, where)
+        self.assertIsNotNone(item, "the Facts line at %s is not named: %s%s" % (where, out, err))
+        if claim is not None:
+            self.assertIn(claim, item, "the item at %s does not name the claim: %s" % (where, item))
+        if live is not None:
+            self.assertIn(live, item, "the item at %s does not name the live value: %s" % (where, item))
+        self.assertEqual(code, 1, "the gap at %s exits with the wrong code: %s%s" % (where, out, err))
+        return out
+
+    def assert_unknown(self, repo, fixture=None, env=None):
+        """The probe exits 2 and says unknown. An unreadable fact is never a pass."""
+        code, out, err = run_facts(repo.root, fixture, env)
+        self.assertTrue(head(out).startswith("facts: unknown"), "the unreadable fact is not named unknown: %s%s" % (out, err))
+        self.assertEqual(code, 2, "an unknown group exits with the wrong code: %s%s" % (out, err))
+
+    def assert_clear(self, repo, fixture=None):
+        """The probe reads the records and clears them: in shape, exit 0."""
+        code, out, err = run_facts(repo.root, fixture)
+        self.assertTrue(head(out).startswith("facts: in shape"), "the records are refused or not read: %s%s" % (out, err))
+        self.assertEqual(code, 0, "the verdict is in shape but the exit is not 0: %s%s" % (out, err))
+        return out
+
+    def test_harness_control_an_existing_group_is_green_on_this_checkout(self):  # green control: lanecap, no facts involved
+        repo = Repo(self)
+        repo.write("README.md")
+        done = subprocess.run([sys.executable, PROBES, "lanecap", repo.root], capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, "the existing lanecap group does not run green: %s%s" % (done.stdout, done.stderr))
+
+    def test_a_pr_claim_open_while_the_pr_is_merged_is_a_gap_naming_file_line_claim_and_live_value(self):
+        text = decision("Target, not live. The mover is open pull request 2793.", facts="pr 2793 open")
+        repo = facts_repo(self, {"stable-branch": text})
+        self.assert_gap(repo, facts_fixture(self, {"pr:2793": "merged"}), facts_lines("stable-branch", text)[0],
+                        claim="pr 2793 open", live="merged")
+
+    def test_a_ref_claim_absent_while_the_branch_is_present_is_a_gap(self):
+        text = decision("Target, not live. No `stable` branch is on origin yet.", facts="ref stable absent")
+        repo = facts_repo(self, {"stable-branch": text})
+        self.assert_gap(repo, facts_fixture(self, {"ref:stable": "present"}), facts_lines("stable-branch", text)[0],
+                        claim="ref stable absent", live="present")
+
+    def test_claims_that_are_all_true_are_in_shape(self):
+        text = decision("Target, not live.", facts="pr 2793 merged; ref stable present")
+        repo = facts_repo(self, {"stable-branch": text})
+        self.assert_clear(repo, facts_fixture(self, {"pr:2793": "merged", "ref:stable": "present"}))
+
+    def test_a_fact_the_fixture_lacks_is_unknown_never_0(self):
+        text = decision("Target, not live.", facts="pr 2793 merged")
+        self.assert_unknown(facts_repo(self, {"stable-branch": text}), facts_fixture(self, {}))
+
+    def test_a_fact_the_fixture_holds_as_null_is_unknown_never_0(self):
+        text = decision("Target, not live.", facts="pr 2793 merged")
+        self.assert_unknown(facts_repo(self, {"stable-branch": text}), facts_fixture(self, {"pr:2793": None}))
+
+    def test_a_fact_source_that_cannot_be_read_is_unknown_never_0(self):
+        text = decision("Target, not live.", facts="pr 2793 merged")
+        missing = os.path.join(RUN_FOLDER, "no-such-facts.json")
+        self.assert_unknown(facts_repo(self, {"stable-branch": text}), missing)
+
+    def test_no_fixture_and_no_token_is_unknown_without_a_network_call(self):
+        text = decision("Target, not live.", facts="pr 2793 merged")
+        gh_config = os.path.join(RUN_FOLDER, "no-gh-config")  # an empty gh config: no stored token to read
+        os.makedirs(gh_config, exist_ok=True)
+        env = {"GH_CONFIG_DIR": gh_config, "HTTPS_PROXY": FACTS_DEAD_PROXY, "https_proxy": FACTS_DEAD_PROXY,
+               "HTTP_PROXY": FACTS_DEAD_PROXY, "http_proxy": FACTS_DEAD_PROXY}
+        self.assert_unknown(facts_repo(self, {"stable-branch": text}), None, env)
+
+    def test_a_prose_only_state_with_no_facts_line_is_never_checked(self):
+        prose = "Target, not live. The mover is open pull request 2793."
+        twin = decision(prose, facts="pr 2793 open")  # scope first: a record with a false Facts line is read
+        repo = facts_repo(self, {"mover-twin": twin, "mover-prose": decision(prose)})
+        code, out, err = run_facts(repo.root, facts_fixture(self, {"pr:2793": "merged"}))
+        self.assertIsNotNone(item_for(out, facts_lines("mover-twin", twin)[0]),
+                             "the record with a Facts line is not read, so the case proves nothing: %s%s" % (out, err))
+        self.assertNotIn("mover-prose.md", out, "a record with no Facts line is checked: %s" % out)
+        self.assertEqual(code, 1, "the false twin should exit 1: %s%s" % (out, err))
+
+    def test_a_prose_only_state_alone_is_in_shape(self):
+        text = decision("Target, not live. The mover is open pull request 2793.")
+        self.assert_clear(facts_repo(self, {"mover-prose": text}), facts_fixture(self, {"pr:2793": "merged"}))
+
+    def test_past_tense_or_conditional_state_prose_with_a_true_facts_line_is_in_shape(self):
+        prose = "Target, not live. The mover was open pull request 2793 until it merged; the stable branch would follow it."
+        fixture = facts_fixture(self, {"pr:2793": "merged"})
+        scope = decision(prose, facts="pr 2793 open")  # scope first: the Facts line is read, so a false one is a gap
+        self.assert_gap(facts_repo(self, {"mover": scope}), fixture, facts_lines("mover", scope)[0], claim="pr 2793 open")
+        self.assert_clear(facts_repo(self, {"mover": decision(prose, facts="pr 2793 merged")}), fixture)
+
+    def assert_malformed(self, claim):
+        text = decision("Target, not live.", facts=claim)
+        repo = facts_repo(self, {"mover": text})
+        self.assert_gap(repo, facts_fixture(self, {"pr:12": "open", "ref:stable": "present"}), facts_lines("mover", text)[0],
+                        claim=claim)
+
+    def test_a_pr_number_that_is_not_a_number_is_a_gap(self):
+        self.assert_malformed("pr abc open")
+
+    def test_a_ref_state_other_than_present_or_absent_is_a_gap(self):
+        self.assert_malformed("ref stable maybe")
+
+    def test_a_pr_state_other_than_open_or_merged_is_a_gap(self):
+        self.assert_malformed("pr 12 closed")
+
+    def test_a_facts_line_with_a_line_between_it_and_state_is_a_gap(self):
+        text = "# Fixture decision\n\nState: Target, not live.\nA sentence between the two lines.\nFacts: pr 2793 merged\n"
+        repo = facts_repo(self, {"mover": text})
+        self.assert_gap(repo, facts_fixture(self, {"pr:2793": "merged"}), facts_lines("mover", text)[0])
+
+    def test_a_facts_line_above_its_state_line_is_a_gap(self):
+        text = "# Fixture decision\n\nFacts: pr 2793 merged\nState: Target, not live.\n"
+        repo = facts_repo(self, {"mover": text})
+        self.assert_gap(repo, facts_fixture(self, {"pr:2793": "merged"}), facts_lines("mover", text)[0])
+
+    def test_a_second_facts_line_is_a_gap_at_that_line(self):
+        text = decision("Target, not live.", facts="pr 2793 merged") + "Facts: pr 2793 merged\n"
+        repo = facts_repo(self, {"mover": text})
+        self.assert_gap(repo, facts_fixture(self, {"pr:2793": "merged"}), facts_lines("mover", text)[1])
+
+    def test_a_facts_line_with_no_state_line_is_a_gap(self):
+        text = "# Fixture decision\n\nFacts: pr 2793 merged\n"
+        repo = facts_repo(self, {"mover": text})
+        self.assert_gap(repo, facts_fixture(self, {"pr:2793": "merged"}), facts_lines("mover", text)[0])
+
+    def test_pre_fix_stable_branch_record_with_its_facts_line_is_red(self):
+        text = with_facts(PRE_FIX_STABLE_BRANCH, "pr 2793 open; ref stable absent")
+        repo = facts_repo(self, {"stable-branch": text})
+        fixture = facts_fixture(self, {"pr:2793": "merged", "pr:2819": "merged", "ref:stable": "present"})
+        where = facts_lines("stable-branch", text)[0]
+        out = self.assert_gap(repo, fixture, where, claim="pr 2793 open", live="merged")
+        self.assertTrue(any("ref stable absent" in line and "present" in line for line in items_at(out, where)),
+                        "the ref claim is not named with its live value: %s" % out)
+
+    def test_pre_fix_fallback_warn_record_with_its_facts_line_is_red(self):
+        text = with_facts(PRE_FIX_FALLBACK_WARN, "pr 2819 open; pr 2793 open")
+        repo = facts_repo(self, {"stable-fallback-warn": text})
+        fixture = facts_fixture(self, {"pr:2793": "merged", "pr:2819": "merged", "ref:stable": "present"})
+        where = facts_lines("stable-fallback-warn", text)[0]
+        out = self.assert_gap(repo, fixture, where, claim="pr 2819 open", live="merged")
+        self.assertTrue(any("pr 2793 open" in line and "merged" in line for line in items_at(out, where)),
+                        "the pr 2793 claim is not named with its live value: %s" % out)
+
+    def test_a_count_claim_is_a_gap_and_the_true_claim_beside_it_is_not_named(self):
+        text = decision("Target, not live.", facts="pr 2793 merged; 211 commits behind main")
+        repo = facts_repo(self, {"mover": text})
+        out = self.assert_gap(repo, facts_fixture(self, {"pr:2793": "merged"}), facts_lines("mover", text)[0],
+                              claim="211 commits behind main")
+        self.assertFalse(any("pr 2793 merged" in line for line in out.splitlines()[1:]),
+                         "the true claim is named as a gap: %s" % out)
+
+    def test_no_decision_record_is_in_shape(self):  # empty state
+        repo = Repo(self)
+        repo.write("README.md")
+        self.assert_clear(repo, facts_fixture(self, {}))
+
+    def test_full_size_folder_names_only_its_one_false_claim(self):  # full size: 240 records, more than the 232 here
+        texts, values = {}, {}
+        for number in range(240):
+            pr = 1000 + number
+            claim = "pr %d open" % pr if number == 239 else "pr %d merged" % pr  # the false one is the last record
+            texts["record-%03d" % number] = decision("Target, not live.", facts=claim)
+            values["pr:%d" % pr] = "merged"
+        repo = facts_repo(self, texts)
+        where = facts_lines("record-239", texts["record-239"])[0]
+        code, out, err = run_facts(repo.root, facts_fixture(self, values))
+        self.assertIsNotNone(item_for(out, where), "the last record is not read: %s%s" % (out, err))
+        gaps = [line for line in out.splitlines()[1:] if kind_path("decisions") + "/" in line]
+        self.assertEqual(len(gaps), 1, "the folder names %d items, not its one false claim: %s" % (len(gaps), out))
+        self.assertEqual(code, 1, "the gap exits with the wrong code: %s%s" % (out, err))
+
+
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
