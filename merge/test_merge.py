@@ -25,6 +25,7 @@ import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shall
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
 import stale_cites  # noqa: E402  the guard's rule dirs, one home (lint/stale_cites.py)
 import layout  # noqa: E402  where each kind of record lives, one home (lint/layout.py)
+import ruled_store  # noqa: E402  the one reader of the ruling store (lint/ruled_store.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "hooks"))  # append: no hook module shadows one this suite imports
 import guard as hook_guard  # noqa: E402  is_test_rel, the one home of what a test path is (hooks/guard.py)
 CITE_HOMES = audit.cite_homes()  # read live from the repo when this run starts
@@ -15833,10 +15834,10 @@ ACCEPT_AT = "2026-11-15 01:50 CST"
 ACCEPT_LINE = f"Owner accepted: {ACCEPT_ID}, {ACCEPT_AT}"
 UNLINKED_HEAD = "e5" * 20  # a head no record names: a push that is not a clean merge of main
 
-def pr3381_text(accepted=(), net="negative", rounds=REVIEW_FAILED_THREE, fix=()):
-    """A guard change's record at REVIEW_HEAD: Guard or check yes, `rounds`, then `fix` and `accepted` lines. record_text puts both after the rounds
-    and before Net value, which is where the owner's line goes."""
-    return record_text(rounds=rounds, kind="normal", guard="yes", net=net, n=ACCEPT_PR, fix=(*fix, *accepted))
+def pr3381_text(accepted=(), net="negative", rounds=REVIEW_FAILED_THREE, fix=(), n=ACCEPT_PR):
+    """A guard change's record at REVIEW_HEAD on pull request `n`: Guard or check yes, `rounds`, then `fix` and `accepted` lines. record_text puts
+    both after the rounds and before Net value, which is where the owner's line goes."""
+    return record_text(rounds=rounds, kind="normal", guard="yes", net=net, n=n, fix=(*fix, *accepted))
 
 def accepted_record(test, text):
     """-> the parsed record of `text`, which must parse. The old parser refuses a record with the owner's line, and this names that."""
@@ -15844,9 +15845,12 @@ def accepted_record(test, text):
     test.assertIsNotNone(rec, "parse_review refused the record, so its Owner accepted line is not read:\n" + text)
     return rec
 
-def ruling_files(rid=ACCEPT_ID, inside=None):
-    """origin/roadmap's file for ruling `rid`. Its own id is `inside` when given, so a file can name another id than its own name."""
-    return {merge.RULED_STORE_PATH.format(id=rid): json.dumps({"id": inside or rid}) + "\n"}
+def ruling_files(rid=ACCEPT_ID, inside=None, **fields):
+    """origin/roadmap's file for ruling `rid`: an open entry that check_entry passes. Its id is `inside` when given, so a file can name another id
+    than its own name. `fields` replace the entry's own keys, for the cases that break one."""
+    entry = {"id": inside or rid, "at": "2026-11-15T01:43:00-06:00", "ruling": "fixture: the owner's ruling", "source": "fixture",
+             "status": "open", "supersedes_none": "fixture: the ruling names no guard rule", **fields}
+    return {merge.RULED_STORE_PATH.format(id=rid): json.dumps(entry) + "\n"}
 
 def process_starts(action):
     """-> (what action returns, the argv of each process it starts). Every process a call starts goes through subprocess.Popen, so this counts
@@ -16033,22 +16037,84 @@ class OwnerAcceptedHold(ScopedRepo, ReviewEnv):
         self.assertEqual(len(starts), 1, f"a negative record with the line starts {len(starts)} process(es), want the one ruling read: {starts!r}")
         self.assertIn(merge.RULED_STORE_PATH.format(id=ACCEPT_ID), str(starts[0]), "the one process does not read the cited ruling: %r" % (starts[0],))
 
+    def test_a_ruling_of_another_pull_request_does_not_lift_the_hold(self):
+        # scope: a record on pull request N lifts on a ruling named own-N-letters that the store holds, letters plural included
+        self.publish({**ruling_files(), **ruling_files("own-3381-ab"), **ruling_files("own-3400-a"), **ruling_files("r59")})
+        for line in (ACCEPT_LINE, f"Owner accepted: own-3381-ab, {ACCEPT_AT}"):
+            with self.subTest(line=line):
+                self.assertEqual(self.live(accepted_record(self, pr3381_text(accepted=(line,))))[0], "done",
+                                 "fixture: a ruling named for the record's own number does not lift the hold: " + line)
+        self.assertEqual(self.live(accepted_record(self, pr3381_text(accepted=(f"Owner accepted: own-3400-a, {ACCEPT_AT}",), n=3400)))[0], "done",
+                         "fixture: a ruling named for pull request 3400 does not lift the hold on it")
+        # subject: the same record on pull request 3400, citing the ruling of 3381 that the store holds
+        state, why = self.live(accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,), n=3400)))
+        self.assertEqual(state, "held", f"pull request 3400 citing own-3381-a reads {state}: a ruling of another pull request lifts the hold: {why!r}")
+
+    def test_a_bare_slug_ruling_does_not_lift_the_hold(self):
+        self.publish({**ruling_files(), **ruling_files("r59")})
+        self.assertEqual(self.live(accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,))))[0], "done", "fixture: the record's own ruling does not lift the hold")
+        state, why = self.live(accepted_record(self, pr3381_text(accepted=(f"Owner accepted: r59, {ACCEPT_AT}",))))
+        self.assertEqual(state, "held", f"a bare slug, r59, lifts the hold on pull request 3381: {state}: {why!r}")
+
+    def test_a_closed_ruling_does_not_lift_the_hold(self):
+        self.publish({**ruling_files(), **ruling_files("own-3381-c", status="closed")})
+        self.assertEqual(self.live(accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,))))[0], "done", "fixture: the open ruling does not lift the hold")
+        state, why = self.live(accepted_record(self, pr3381_text(accepted=(f"Owner accepted: own-3381-c, {ACCEPT_AT}",))))
+        self.assertEqual(state, "held", f"a closed ruling lifts the hold: {state}: {why!r}")
+
+    def test_a_ruling_that_fails_check_entry_does_not_lift_the_hold(self):
+        # each defect in turn: an `at` with no time zone, and a ruling text that is missing
+        self.publish({**ruling_files(), **ruling_files("own-3381-c", at="2026-11-15T01:43:00"), **ruling_files("own-3381-d", ruling=None)})
+        self.assertEqual(self.live(accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,))))[0], "done", "fixture: the valid ruling does not lift the hold")
+        for rid in ("own-3381-c", "own-3381-d"):
+            with self.subTest(ruling=rid):
+                state, why = self.live(accepted_record(self, pr3381_text(accepted=(f"Owner accepted: {rid}, {ACCEPT_AT}",))))
+                self.assertEqual(state, "held", f"{rid}, which fails check_entry, lifts the hold: {state}: {why!r}")
+
+    def test_an_unchecked_ruling_does_not_lift_the_hold(self):
+        # triage has not read what this ruling supersedes, so it never governs (the reader's unchecked rule)
+        self.publish({**ruling_files(), **ruling_files("own-3381-c", supersedes_none="unread: triage has not read what it supersedes")})
+        self.assertEqual(self.live(accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,))))[0], "done", "fixture: the checked ruling does not lift the hold")
+        state, why = self.live(accepted_record(self, pr3381_text(accepted=(f"Owner accepted: own-3381-c, {ACCEPT_AT}",))))
+        self.assertEqual(state, "held", f"an unchecked ruling lifts the hold: {state}: {why!r}")
+
+    def test_the_lift_takes_the_ruling_from_the_one_store_reader(self):
+        # The reader's entries decide. With the reader reporting no entry, the record stays held, though the copy in git holds the ruling.
+        self.publish(ruling_files())
+        rec = accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,)))
+        entry = json.loads(next(iter(ruling_files().values())))
+        with unittest.mock.patch.object(ruled_store, "read_store", return_value=([entry], "ok")):
+            self.assertEqual(self.live(rec)[0], "done", "fixture: the reader's entry for the ruling does not lift the hold")
+        with unittest.mock.patch.object(ruled_store, "read_store", return_value=([], "absent")):
+            state, why = self.live(rec)
+        self.assertEqual(state, "held", f"the reader reports no entry for the ruling, yet the record reads {state}: {why!r}")
+
+    def test_a_clean_merge_of_main_does_not_lift_the_hold(self):
+        # the lift applies at the live head only: a record held at its Head stays held after a clean merge of main
+        self.publish(ruling_files())
+        rec = accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,)))
+        self.assertEqual(self.live(rec)[0], "done", "fixture: the accepted record does not read done at its own head")
+        with unittest.mock.patch.object(merge, "clean_merges_after", return_value=True):
+            state, why = self.live(rec, live=UNLINKED_HEAD)
+        self.assertEqual(state, "held", f"after a clean merge of main the record reads {state}, not held as at its Head: {why!r}")
+
 class OwnerAcceptedWrite(ScopedRepo, ReviewEnv):
     """`merge <pr> --review-record --accepted <ruling id>,<time>` prints the Owner accepted line directly before Net value, and changes nothing
     else. The ruling is on origin/roadmap here, so a writer that reads the store finds it."""
 
     def test_the_writer_prints_the_line_directly_before_net_value(self):
-        self.on("roadmap", ruling_files(), start="main")
+        # pull request 7 cites its own ruling, own-7-a: the scope bind names the record's number
+        self.on("roadmap", ruling_files("own-7-a"), start="main")
         argv = ("7", "--review-record", "--kind", "normal", "--guard", "yes", "--head", self.head(),
                 "--round", "1:reviewer:sonnet:FAIL", "--round", "2:reviewer:sonnet:FAIL", "--round", "3:reviewer:sonnet:FAIL",
                 "--net-value", "negative")
         rc, out, err = self.run_args(*argv)  # the scope: the same record with no line prints
         self.assertEqual(rc, 0, out + err)
-        rc, out, err = self.run_args(*argv, "--accepted", f"{ACCEPT_ID},{ACCEPT_AT}")
+        rc, out, err = self.run_args(*argv, "--accepted", f"own-7-a,{ACCEPT_AT}")
         self.assertEqual(rc, 0, out + err)
         body = posted_body(self, out)
         lines = body.splitlines()
-        self.assertEqual(lines[lines.index("Net value: negative") - 1], ACCEPT_LINE,
+        self.assertEqual(lines[lines.index("Net value: negative") - 1], f"Owner accepted: own-7-a, {ACCEPT_AT}",
                          "the accepted line is not directly before Net value:\n" + body)
         self.assertEqual(parse_text(self, body)["net"], "negative")
 
@@ -16783,6 +16849,13 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
     def test_a_net_negative_pass_prior_refuses_the_fix_verifier(self):
         fx = self.real_commits()
         self.assert_refused_after(fx, self.prior_text(fx, net="negative"), "held")
+
+    def test_an_owner_accepted_negative_prior_is_no_fix_base(self):
+        # pin (green on today's code): the fix-check gate reads review_state, which holds a negative record whatever its owner line says
+        fx = self.real_commits()
+        accepted = record_text(head=fx.fixed, rounds=REVIEW_PASS, net="negative",
+                               fix=(fix_verifier_line(verdict="PASS", head=fx.pre), f"Owner accepted: own-7-a, {ACCEPT_AT}"))
+        self.assert_refused_after(fx, accepted, "held")
 
     def test_a_design_reviewer_fail_on_the_prior_refuses_the_fix_verifier(self):
         fx = self.real_commits()
@@ -19637,6 +19710,12 @@ class ReplacementCarry(ReviewEnv):
     def test_replacement_5b_a_held_source_record_reads_held_on_the_replacement(self):
         self.reviewed_line(self.carry_host(per_issue=self.source_issue(self.source_record(net="negative"), self.source_lint())), REVIEW_HEAD, "held",
                            "the carried record does not read its own verdict, held, on the replacement")
+
+    def test_replacement_5d_an_owner_accepted_source_record_stays_held_on_the_replacement(self):
+        # pin (green on today's code): the carry path reads no ruling, so the source's owner line lifts nothing on a replacement
+        record = self.source_record(net="negative", fix=(f"Owner accepted: own-{REPLACES_SOURCE}-a, {ACCEPT_AT}",))
+        self.reviewed_line(self.carry_host(per_issue=self.source_issue(record, self.source_lint())), REVIEW_HEAD, "held",
+                           "a carried source record with the owner's line reads other than held on the replacement")
 
     def test_replacement_5c_a_failed_fix_verifier_on_the_source_reads_open_on_the_replacement(self):
         failed_fix = fix_verifier_line(verdict="FAIL", head="1e" * 20)
