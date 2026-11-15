@@ -1,10 +1,11 @@
 {
  "id": "page-tests-served-font",
- "at": "2026-11-09T19:47:00-06:00",
- "title": "Waiting-page layout tests run in the served font and in DejaVu, and each head is proved by a dispatched checks run.",
- "ruling": "Coordinator, 19:47, 20:07 and 20:14 CST Nov 9: fix the font cause of the CI-only page failures. Test layout claims in the served font and in DejaVu, re-pin from main's page, keep the OFL text beside the fonts, and prove each head with a dispatched checks run.",
- "quote": "Coordinator 2026-11-09 19:47, 20:07 and 20:14 CST: fix the font cause; test layout claims in the served font and in DejaVu; re-pin from main's page; keep the OFL text beside the fonts; prove each head with a dispatched checks run.",
- "source": "PR 2347 body, Rulings section; round-1 record comment 6759178978 repeats \"(coordinator, 2026-11-09 19:47 CST)\" Filed by triage 11:47 CST Nov 13 from backlog-drain's close-evidence (#3154); the words are the PR text, relayed by a lane, not a direct owner quote unless the source says so.",
+ "at": "2026-11-15T12:13:51-06:00",
+ "title": "The waiting-page lane proves on the PR run only, with no hand-started full run per head.",
+ "ruling": "Owner 12:13 CST Nov 15, page item 884 answer a: the waiting-page lane keeps its font tests (served font and DejaVu, re-pinned from main's page, OFL text beside the fonts) and proves each change on the PR run only. No full run is started by hand on each head. This overrules the earlier words \"prove each head with a dispatched checks run\" (coordinator, PR 2347 body).",
+ "quote": "No: the lane keeps its tests and proves on the PR run only",
+ "source": "page item 884 (key page-tests-served-font), owner answer a (optionId pr-run-only) saved 2026-11-15T18:13:51Z, no note. Who said it: owner (page). Overrules the coordinator's words from PR 2347's body, Rulings section.",
  "status": "open",
- "step": "notes-fix-page"
+ "step": "notes-fix-page",
+ "supersedes_none": "read against main 2026-11-15 (page item 884 context): no decision or ruling answers this for the page lane; it narrows rule roles-each-layer-proves-once only by restating it"
 }
