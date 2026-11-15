@@ -85,6 +85,26 @@ repo_case("--ready from this checkout's repo is allowed for a session with no cs
 for _command in (f"{MERGE_SHIM} 5 --ready", f"{MERGE_SHIM} --repo-dir '{REPO_A}' 5 --ready", f"cd '{REPO_A}' && {MERGE_SHIM} 5 --ready"):
     sh("lane --ready is refused with no merge role file: " + _command, _command, "deny", cwd=REPO_A, env=CLOUD_ENV, transcript=TX_A,
        config=LT_EMPTY)  # cwd is the lane's own repo, so the repo proof passes and only the lane's refusal can deny
+# A lane's `update_pull_request` with draft false marks a pull request ready, which the batch runner does (ruling own-lanes-merge-claude-
+# settings-prs). So a lane's record is refused on that call, on its own pull request and on another. Today only the records page's freshness
+# is judged (guard.py refuse_ready_page), so these are red on the current guard. The refusal's rule is not pinned: the fix names it.
+def lane_mcp_ready(name, expected, transcript, **tool_input):
+    add(name, expected, tool="mcp__github__update_pull_request", cwd=REPO_A, transcript=transcript, env=CLOUD_ENV, config=LT_EMPTY,
+        **tool_input)
+
+
+lane_mcp_ready("lane MCP update with draft false on its own pull request is refused", "deny", TX_A, owner="o", repo="a", pullNumber=5, draft=False)
+lane_mcp_ready("lane MCP update with draft false on another pull request is refused", "deny", TX_A, owner="o", repo="a", pullNumber=9,
+               draft=False)
+# Controls, green on the current guard and kept: a batch runner, or a session with no cs-build tag, may mark ready. A lane may edit a title
+# and may set draft true, a return to draft, since neither marks a pull request ready.
+lane_mcp_ready("MCP update with draft false from a batch runner is allowed", "allow", TX_RUNNER_A, owner="o", repo="a", pullNumber=5,
+               draft=False)
+lane_mcp_ready("MCP update with draft false from a session with no cs-build tag is allowed", "allow", TX_SOLO_A, owner="o", repo="a",
+               pullNumber=5, draft=False)
+lane_mcp_ready("lane MCP update that edits a title and does not touch draft is allowed", "allow", TX_A, owner="o", repo="a", pullNumber=5,
+               title="retitled")
+lane_mcp_ready("lane MCP update with draft true, a return to draft, is allowed", "allow", TX_A, owner="o", repo="a", pullNumber=5, draft=True)
 # gh-write-cloud: the merge tool is no gh write, so a cloud merge it runs is allowed. merge-confirm-repo also judges it, so these run in
 # REPO_A with the lane record that names its repo: the allow is then gh-write-cloud's own, not a refusal of a missing record.
 for _command in ("merge 12 --confirm", MERGE_SHIM + " 12 --confirm"):
