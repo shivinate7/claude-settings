@@ -156,12 +156,17 @@ def job_count() -> int:
 def skip_reason(only_on):
     """Return why a mutation marked `only_on` does not run on this platform, or None to run it.
 
-    `only_on` is "posix" or "windows", for a mutation whose broken code path only exists on one
-    platform (e.g. a POSIX-only `ps` arm never reached on Windows). A mutation that carries no
+    `only_on` is "posix", "windows" or "linux", for a mutation whose broken code path only exists on
+    one platform (e.g. a POSIX-only `ps` arm never reached on Windows, or a /proc read that macOS
+    lacks too). A mutation that carries no
     `only_on` at all runs on every platform, and this returns None for it too.
     """
     if only_on is None:
         return None
+    if only_on == "linux":
+        if sys.platform.startswith("linux"):
+            return None
+        return "linux-only, this platform is %s" % sys.platform
     here = "windows" if sys.platform.startswith("win") else "posix"
     if only_on == here:
         return None
