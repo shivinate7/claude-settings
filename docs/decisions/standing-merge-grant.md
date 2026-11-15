@@ -4,7 +4,7 @@
 
 Owner rulings, 2026-10-10, 2026-10-29 16:47 CDT, 2026-10-29 20:33 CDT, 2026-10-30 15:06 CDT, 2026-11-01 17:37 CST, 2026-11-01 19:23 CST, 2026-11-02 14:02 CST, 2026-11-02 15:14 CST and 2026-11-02 15:38 CST. Owner rulings, 2026-11-13 13:12 CST, 2026-11-13 14:17 CST, 2026-11-13 23:40 CST and 2026-11-15 11:12 CST. The coordinator holds a standing merge grant in claude-settings and in every repo of the owner (`shivinate7`). It is not a fixed list of repos. The batch runner merges under the coordinator's grant, so it has the same scope.
 
-Owner, 2026-11-01 21:34 CST: a batch runner runs every merge under the coordinator's grant. The coordinator never merges.
+Owner, 2026-11-01 21:34 CST: a batch runner runs every merge under the coordinator's grant. The coordinator never merges. The batch-runner clause is overtaken for a lane's own claude-settings PR (ruling `own-lanes-merge-claude-settings-prs`, 11:12 CST Nov 15).
 
 - Owner, 19:23 CST, typed in the pr-acts-grant lane session: `yes coordinators can merge across repos that is okay it doens't need to juts be in its repo`.
 - Owner, 17:37 CST, relayed by the coordinator: `YOU HAVE EXPLICIT APPROVAL FOR ANY AND ALL REPOS YOU WANT OF MINE TO MARK PR READY, MERGE, REVIEW, ETC.` Per the 19:23 ruling, "REVIEW" there means reviewer agents.
@@ -41,7 +41,7 @@ The owner's words, 2026-10-29 16:47 CDT, in web chat:
 - "on the other repos too for now"
 
 - A batch runner merges by pull request with the merge tool of each repo, on green checks and a done review (record `pr-review-record`) where one is required. The coordinator never merges (owner ruling, 2026-11-01 21:34 CST). A batch runner never asks the owner to merge. A lane session that a coordinator started merges its own claude-settings PR (ruling `own-lanes-merge-claude-settings-prs`); in other repos that ruling changes nothing.
-- The batch runner still builds the batches. It runs every merge under the coordinator's grant. It holds no grant of its own.
+- The batch runner still builds the batches. It runs every merge under the coordinator's grant, except a lane's own claude-settings PR (ruling `own-lanes-merge-claude-settings-prs`). It holds no grant of its own.
 - Auto mode allows that merge: `settings.json` `autoMode.allow`, entry "Batch Runner Merge" (owner, 2026-11-07 13:27 CST; decision `auto-mode-owner-acts`).
 - A batch runner's merge names the head its CI ran on, with `--head <sha>`. The coordinator's merge go carries that head (coordinator, 2026-11-08 12:55 CST; same ruling as decision `auto-mode-owner-acts`).
 - While another owner repo's own sessions are not working, the claude-settings coordinator works there only as decision `session-tiers` (the session tiers) allows (bullet "A coordinator in another repo"; owner, 2026-10-30 13:22 and 13:25 CDT). A repo is not working when the session list shows no live session for it. The coordinator uses the agents it starts in its own session to build, review and batch. A batch runner merges under the same grant and the same checks. It never widens what that repo's tools accept, because a shared tool never grows a second form (decision `uniform-over-variants`: a repo matches a shared format).
