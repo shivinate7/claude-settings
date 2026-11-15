@@ -654,7 +654,7 @@ class ConsultantRelayedMergeYesIsAllowed(unittest.TestCase):
                       bounds_text(entry),
                       "Covers text must name the only commits a live head may carry past the relayed head")
 
-    def test_head_text_scopes_the_no_review_record_read_to_relayed_head_holds(self):
+    def test_head_text_scopes_the_no_review_log_read_to_relayed_head_holds(self):
         entry = self.consultant_merge_entry()
         self.assertIn("`relayed_head_holds` itself reads no review record", bounds_text(entry),
                       "Covers text must scope the no-review-record read to relayed_head_holds itself")
