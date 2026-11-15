@@ -6,8 +6,7 @@ Every session that starts from source `startup` gets two checks at its own start
 
 The checks flag. They do not stop. `start_check.py` `main` prints one line: SessionStart `additionalContext`. It has no `continue` and no `stopReason`. The two checks are the model floor (decision `agent-model-cap`, the agent model cap) and the full-machine load brake (decision `machine-load-brake`, the machine-load brake). The coordinator picked a flag over a stop (08:40 CST, 2026-11-15). The owner has not ruled; owner confirmation is open.
 
-The flag text tells the session what to do. It addresses a session tagged `cs-build:lane`, read with `get_session` and passing no session_id: that session does no work and tells its parent it started in this state. A session that is not a lane (the owner's own) goes on. Known gap: the flag text in `start_check.py` `flag_text` still names `parent_session_id`, not the lane tag. A builder must change it.
-
+The flag text tells the session what to do. It addresses a session tagged `cs-build:lane`, read with `get_session` and passing no session_id: that session does no work and tells its parent it started in this state. A session that is not a lane (the owner's own) goes on.
 Decision `start-session-not-pretooluse` (start_session is not judged at PreToolUse) left both checks lost from the caller's side. This record moves both checks to the started session, as flags. It does not move the handoff check.
 
 ## Why the started session
@@ -29,8 +28,7 @@ The hook acts on source `startup` only. A resume, compact, clear or fork prints 
 
 Departs from: main stops no `start_session` at full. The load brake does not reach that tool (`machine-load-brake`; since PR 3501). Main still refuses Agent, Task and Workflow starts at full. This hook flags every startup below the floor, and every local startup at full load.
 
-It flags rather than stops, because the hook cannot tell a lane from an owner session. `start_check.py` `flag_text` reads only the source and the model, so it reads no lane tag. The flag text tells the session to read its own tags with `get_session`. The lane check is that session's own read. `machine-load-brake`, lane sessions, says: "A `parent_session_id` alone makes no lane: triage and the batch runner carry one." The earlier plan to stop owner sessions at full no longer applies: an owner session goes on after the flag.
-
+It flags rather than stops, because the hook cannot tell a lane from an owner session. `start_check.py` `flag_text` reads only the source and the model, so it reads no lane tag. The flag text tells the session to read its own tags with `get_session`. The lane check is that session's own read. `machine-load-brake`, lane sessions, says: "A `parent_session_id` alone makes no lane: triage and the batch runner carry one."
 Coordinator pick, 08:40 CST Nov 15: a flag, not a stop. This is not an owner ruling. Owner confirmation: open.
 
 ## Why both the hook and the audit flag a Haiku start
@@ -47,11 +45,12 @@ A model can ignore the flag. The text says what to do, but nothing enforces it. 
 
 ## Unknown
 
-All three are unmeasured. No command settles them here.
+All four are unmeasured. No command settles them here.
 
 1. Whether the desktop app delivers SessionStart `additionalContext` to a `start_session` session. If not, the flag never reaches the model.
 2. Whether a `start_session` session runs its startup SessionStart hook at all. If not, neither check (`start_check.py` `flag_text`) runs there.
-3. Cloud delivery. `install.sh` drops startup entries from the generated cloud `settings.json` (install.sh:1062). It runs them in the refresh hook's child (install.sh:1176-1200), where the JSON line shares stdout with plain-text startup hooks such as daily_note and session_start.sh. Whether a cloud session receives the flag is unmeasured. The cloud tests run the hook directly, not through install.sh.
+3. Cloud delivery. The generated cloud settings step of `install.sh` drops startup entries from the cloud `settings.json`. The startup loop in the refresh hook's child runs them instead. There the JSON line shares stdout with plain-text startup hooks such as daily_note and session_start.sh. Whether a cloud session receives the flag is unmeasured. The cloud tests run the hook directly, not through `install.sh`.
+4. Lane tag at first read. `session-tiers` sets the lane tag on `create_session` calls. Whether a `start_session` session already carries `cs-build:lane` at its first `get_session` is unmeasured. If the tag is set after the start, the session reads no tag and goes on.
 
 ## Cost
 
@@ -59,7 +58,7 @@ Per `outcomes-mechanize-rules` (the rule that each hook states its cost):
 
 - Process starts: one hook process per `startup`, started by the harness. The hook starts no child process. `hooks/test_start_check.py` class `CostProof` proves it: `test_a_braked_startup_starts_no_process_and_writes_no_file`, `test_a_model_floor_flag_starts_no_process_and_writes_no_file` and `test_an_unflagged_startup_reads_the_load_and_starts_no_process`. Class `HarnessControls` proves the import starts none: `test_control_importing_guard_starts_no_process`.
 - Reads: the payload. A local startup also reads the load once: one memory counter and one `statfs`. A cloud startup reads no load.
-- Files written: none on success. If guard fails to import, its crash writer (`hooks/guard.py`, lines 686-694) appends one `guard-crash` line to `guard.log`. That follows a retry of up to 5 s (`_LOAD_WAIT_SECONDS`), inside a 10 s timeout.
+- Files written: none on success. If guard fails to import, the guard-crash writer in `hooks/guard.py` appends one `guard-crash` line to `guard.log`. That follows a retry of up to 5 s (`_LOAD_WAIT_SECONDS`), inside a 10 s timeout.
 - Timer, watcher or log: none. `start_check.py` `main` writes no log line on success. The crash line above is the only log write.
 - How often: once per startup. Not on resume, compact, clear or fork.
 
