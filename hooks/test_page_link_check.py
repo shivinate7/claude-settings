@@ -22,7 +22,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import test_waiting_export as twe  # noqa: E402  the shared fixtures and run_stop (one home)
-from shared_names import MACHINE_TAGS  # noqa: E402  the machine notice tags, one home
+from shared_names import MACHINE_TAGS, TASK_NOTIFICATION_TAG  # noqa: E402  the machine notice tags, one home
 import layout  # noqa: E402  the registry and the waiting page id (lint/layout.py)
 
 LINK = "https://claude.ai/artifact/"  # the link form the reason names
@@ -33,6 +33,11 @@ FROZEN_NAMES = ("feedback_guard", "settings.json")  # the frozen hook and settin
 
 
 # --------------------------------------------------------------------------- fixtures
+
+def page_of(root):
+    """The repo's waiting page URL, read through layout."""
+    return layout.waiting_page(root)  # glossary-ok: layout's function name, a code name the glossary keeps
+
 
 def page_repo(name, extras=None):
     """A repo whose copy has a commit at 17:00 and one at 20:00, so the 19:00 write is covered by the export."""
@@ -47,7 +52,7 @@ def queue_repo(name):
     """A repo whose waiting page is QUEUE_ID, so a link to PAGE_URL names another artifact."""
     root = page_repo(name, extras=twe.registry(page_id=twe.QUEUE_ID, page_url=twe.QUEUE_URL))
     twe.check("%s scope: the waiting page id is %s" % (name.upper(), twe.QUEUE_ID),
-              layout.artifact_id(layout.waiting_page(root)) == twe.QUEUE_ID, layout.waiting_page(root))
+              layout.artifact_id(page_of(root)) == twe.QUEUE_ID, page_of(root))
     return root
 
 
@@ -56,8 +61,8 @@ def no_page_repo(name):
     data = json.loads(twe.registry())
     data["artifacts"] = [a for a in data["artifacts"] if a["role"] != "waiting-page"]
     root = twe.make_repo(name, json.dumps(data))
-    twe.check("%s scope: the repo names no waiting page" % name.upper(), layout.waiting_page(root) == "unknown",
-              layout.waiting_page(root))
+    twe.check("%s scope: the repo names no waiting page" % name.upper(), page_of(root) == "unknown",
+              page_of(root))
     return root
 
 
@@ -198,7 +203,7 @@ def case_g08_write_to_an_unexported_collection_passes():
     twe.expect_pass("G08", twe.run_stop("g08", page_repo("g08"), records))
 
 
-def case_g09_repo_without_a_waiting_page_passes():
+def case_g09_repo_without_a_page_passes():
     """P01 in a repo with no waiting page: there is no link to print."""
     twe.expect_pass("G09", twe.run_stop("g09", no_page_repo("g09"), page_turn("Done.")))
 
@@ -227,6 +232,57 @@ def case_g13_full_size_turn_that_ends_with_the_link_passes():
     twe.expect_pass("G13", twe.run_stop("g13", page_repo("g13"), records))
 
 
+# --------------------------------------------------------------------------- later wakes (A) and meta stamps (B)
+
+def wake_records():
+    """Three wakes after a reply: a task notification, a system reminder and a framed cross-session peer message.
+    None starts a turn, and none is the owner's message."""
+    peer = twe.rec(twe.at(19, 5), "user", "<cross-session-message>\nLane merged.\n</cross-session-message>")
+    peer["origin"] = {"kind": "peer", "fromSession": "session_lane"}
+    return [twe.rec(twe.at(19, 3), "user", TASK_NOTIFICATION_TAG + "\nLane done.\n"),
+            twe.rec(twe.at(19, 4), "user", MACHINE_TAGS[0] + "\nA reminder.\n"), peer]
+
+
+def case_a01_write_covered_by_a_linked_reply_passes_after_a_wake():
+    """The write's reply named the link before three wakes, and the last reply after them names none. The write is
+    covered by the linked reply, so no link is owed again."""
+    records = page_turn("Link: " + twe.PAGE_URL) + wake_records() + [twe.say(twe.at(19, 6), "Lane merged.")]
+    twe.expect_pass("A01", twe.run_stop("a01", page_repo("a01"), records))
+
+
+def case_a02_write_after_a_covered_wake_still_blocks():
+    """A01 with one change: the turn posts an item after the wake. That write is owed its own link."""
+    records = (page_turn("Link: " + twe.PAGE_URL) + wake_records()
+               + twe.page_write(twe.at(19, 6), tid="w2", doc_id="fb-2") + [twe.say(twe.at(19, 8), "Lane merged.")])
+    expect_link_block("A02", twe.run_stop("a02", page_repo("a02"), records))
+
+
+def case_b01_meta_page_update_with_nothing_to_do_passes():
+    """A turn whose only page write stamps meta/page. The stamp is no item, so no link is owed."""
+    records = ([twe.owner(twe.at(18, 50))]
+               + twe.page_write(twe.at(19), action="update", collection=None, doc_id=None, path="meta/page")
+               + [twe.say(twe.at(19, 2), "Nothing to do.")])
+    twe.expect_pass("B01", twe.run_stop("b01", page_repo("b01"), records))
+
+
+def case_b02_meta_stamp_with_an_item_write_still_blocks():
+    """B01 with one change: an item is posted in the same turn, so that write is owed its link."""
+    records = ([twe.owner(twe.at(18, 50))]
+               + twe.page_write(twe.at(19), action="update", collection=None, doc_id=None, path="meta/page")
+               + twe.page_write(twe.at(19, 2), tid="w2", doc_id="fb-2")
+               + [twe.say(twe.at(19, 4), "Nothing to do.")])
+    expect_link_block("B02", twe.run_stop("b02", page_repo("b02"), records))
+
+
+def case_b03_groups_and_asks_writes_still_block():
+    """Posting to the other exported collections is still a write that owes the link: groups and asks."""
+    for collection in ("groups", "asks"):
+        label = "b03-" + collection
+        expect_link_block("B03 %s" % collection,
+                          twe.run_stop(label, page_repo(label), page_turn("Nothing to do.", collection=collection,
+                                                                          doc_id="x1")))
+
+
 CASES = (
     case_p01_writes_page_reply_lacks_id_blocks,
     case_p02_update_of_the_page_blocks,
@@ -247,11 +303,16 @@ CASES = (
     case_g06_errored_write_passes,
     case_g07_write_to_another_artifact_passes,
     case_g08_write_to_an_unexported_collection_passes,
-    case_g09_repo_without_a_waiting_page_passes,
+    case_g09_repo_without_a_page_passes,
     case_g10_another_session_is_the_writer_passes,
     case_g11_empty_transcript_passes,
     case_g12_unreadable_transcript_passes,
     case_g13_full_size_turn_that_ends_with_the_link_passes,
+    case_a01_write_covered_by_a_linked_reply_passes_after_a_wake,
+    case_a02_write_after_a_covered_wake_still_blocks,
+    case_b01_meta_page_update_with_nothing_to_do_passes,
+    case_b02_meta_stamp_with_an_item_write_still_blocks,
+    case_b03_groups_and_asks_writes_still_block,
 )
 
 
