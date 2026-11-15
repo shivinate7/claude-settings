@@ -134,15 +134,20 @@ RELAYED_REFUSED = (("peer session's message", "peer session's message"), ("page 
                    ("no counted line", "no `counted` line in this session"))
 # The closed-item clause of the Relayed Grant entry (ruling own-753-a). A closed item counts only as a routed
 # close, which page_grant.routed_close reads (rule 4, ruling own-748-b-rule-4): status closed, a non-blank
-# `lane` and `home`, no arbiter, and `lastAnswer.at` equal to the answer's `at`. An arbiter overturn counts too.
-# A closed item that is neither stays refused. These tokens are the clause the entry's Never covers must name.
+# `lane` and `home`, no arbiter, `lastAnswer.at` equal to the answer's `at`, and --as-lane equal to `lane` (the
+# receiver's own lane, ruling own-844-a). An arbiter overturn counts too. A closed item that is neither stays refused.
+# These tokens are the clause the entry's Never covers must name.
 RELAYED_CLOSED = (("closed item", "a closed item"), ("routed close", "routed close"),
                   ("lane", "`lane`"), ("home", "`home`"), ("lastAnswer.at", r"`lastAnswer\.at`"),
-                  ("arbiter overturn", "arbiter overturn"))
+                  ("--as-lane", "--as-lane"), ("arbiter overturn", "arbiter overturn"))
 # The order of that clause, which the tokens above do not fix: a closed item is neither a routed close (it keeps
 # `lane`, `home` and the answer whose time matches `lastAnswer.at`) nor an arbiter overturn. Words may be added
 # inside the parenthesis. A reversed clause or an either/or clause refuses a routed close, the opposite of the ruling.
 RELAYED_CLOSED_ORDER = r"closed item that is neither a routed close.*lane.*home.*lastAnswer\.at.*nor an arbiter overturn"
+# --as-lane sits inside the routed-close parenthesis, after `lastAnswer.at` and before "nor an arbiter overturn",
+# where the check that page_grant.routed_close runs with the receiver's own lane is named.
+RELAYED_CLOSED_AS_LANE_ORDER = (r"closed item that is neither a routed close.*lane.*home.*lastAnswer\.at"
+                                r".*--as-lane.*nor an arbiter overturn")
 # Each term the Relayed Grant entry's Covers text names for its one settings change.
 RELAYED_SETTINGS_COVERS = (("one settings change", "one settings change"),
                            ("label names the settings file and entry", r"label.*?settings file.*?entry"),
@@ -477,6 +482,13 @@ class RelayedGrantIsAllowed(unittest.TestCase):
         self.assertRegex(clause, "(?i)" + RELAYED_CLOSED_ORDER,
                          "Never covers does not say a closed item is neither a routed close nor an arbiter overturn, "
                          "in that order")
+
+    def test_never_covers_puts_as_lane_inside_the_routed_close(self):
+        clause = never_covers(allow_entry(RELAYED))
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Grant entry")
+        self.assertRegex(clause, "(?i)" + RELAYED_CLOSED_AS_LANE_ORDER,
+                         "Never covers does not put --as-lane inside the routed close, after lastAnswer.at and "
+                         "before nor an arbiter overturn")
 
     def test_never_covers_wins_over_covers(self):
         entry = allow_entry(RELAYED)
