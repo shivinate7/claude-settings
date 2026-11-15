@@ -35,9 +35,10 @@ or empty `Departs from:` line (a bullet or bold label is read), a line with no s
 "—", " - " or " -- ") or an empty or placeholder side, and a change side whose first clause (before ";") says
 nothing changes (a restatement of main) refuse as `question-departs`: the rule building-port-keeps-behaviour,
 in decision port-keeps-behaviour. departs_hit is its one predicate; lint/report_guard.py calls it too.
-The page writer's last three rules run after the form: `option-letter-keys` (an option's key is its
+The page writer's last four rules run after the form: `option-letter-keys` (an option's key is its
 position's letter, and a label that opens with a letter tag names that letter), `option-letters-frozen` (an option keeps the
-key, id and label it was shown with, and each option has a unique id) and `rework-off-page` (an open item never says it is being reworked).
+key, id and label it was shown with, and each option has a unique id), `pick-letter-matches-label` (a pick sentence's letter
+and words name one option; runs after option-letters-frozen) and `rework-off-page` (an open item never says it is being reworked).
 `option-labels-match-chat` runs in hooks/guard.py after all of those, because it reads the session's transcript, which item_hit never sees:
 page_label_hit(writes, transcript_path) -> (rule, matched). A chat question cites its item ("Page item: <id>") and writes "a) <text>" per
 option; a write of that item whose label for a letter differs from the chat's text for it is refused (chat_page_label_hit).
@@ -1377,30 +1378,47 @@ def frozen_letters_hit(op: str, data) -> str:
 
 # ------------------------------------------------------------------ a pick sentence's letter and words name one option
 #
-# docs/decisions/option-keys-are-letters.md, rule `pick-letter-matches-label`, built against a named incident (incident
-# in the record): a why said "Pick a" in the words of option b. A pick sentence is `pick X` or `option X` (X a letter),
-# then an optional colon, dash, paren or quote, then words. When the words are the start of the label of one other
-# option and not of X's own label, the label decides and the write is refused. Words that fit two other labels are
-# not plain, so the rule passes them: it asks and never guesses.
+# docs/decisions/option-keys-are-letters.md, rule `pick-letter-matches-label`, built against a named incident
+# (incident in the record): a why said "Pick a" in the words of option b. A pick sentence is `pick X` or `option X`
+# (X a letter, in emphasis or followed by `)`), then an optional colon, dash, paren, quote or line break, then words.
+# An option fits when its label is the start of the text after the letter, whatever follows (a "(Recommended)", comma or
+# dash tail), or the sentence's words are the start of the label. When exactly one other option fits and X's own label
+# does not, the label decides and the write is refused. Two fitting labels are not plain, so the rule passes them: it
+# asks and never guesses.
 PICK_LETTER_RULE = "pick-letter-matches-label"
-PICK_SENTENCE = re.compile(
-    r"\b(?:pick|option)[ \t]+([A-Za-z])\b[*_`]*[ \t]*[:\-\u2014\u2013(\"'\u201c\u2018]*[ \t]*([^.;\n)?!]*)", re.I)
+PICK_WORD = r"\b(?:pick|option)[ \t]+[*_`]*([A-Za-z])\b"
+PICK_SENTENCE = re.compile(  # the text runs to the next pick sentence or the end of the field
+    PICK_WORD + r"[*_`]*[\s:\-\u2014\u2013()\"'\u201c\u201d\u2018\u2019]*(.*?)(?=" + PICK_WORD + r"|\Z)", re.I | re.S)
 PICK_LETTER_REASON = ("A pick sentence in an item must name the letter of the option whose words it uses: the label "
-                      "decides. Write the letter that the label has, or reword the sentence so its words are no option's "
-                      "label. (decision option-keys-are-letters, rule pick-letter-matches-label)")
+                      "decides. Write the letter the label has. "
+                      "(decision option-keys-are-letters, rule pick-letter-matches-label)")
+PICK_FOLD_MARKS = str.maketrans({c: " " for c in "\"()\u201c\u201d"})
+
+
+def _pick_fold(text) -> str:
+    """_fold, with double quotes and parentheses made spaces: the form a pick's words and a label are compared in."""
+    return _fold(str(text).translate(PICK_FOLD_MARKS)).strip()
 
 
 def _label_fold(label) -> str:
-    """The folded label without its letter tag: the form chat_page_label_hit compares a chat text with."""
+    """The folded label without its letter tag, in the form a pick's words are compared in."""
     tag = LABEL_TAG.match(label)
-    return _fold(label[tag.end():] if tag else label)
+    return _pick_fold(label[tag.end():] if tag else label)
+
+
+def _pick_fits(rest, words, label) -> bool:
+    """True when the label starts the text after the letter (up to a word boundary), or the sentence's words are the
+    label's start (_chat_short_form)."""
+    if rest.startswith(label) and (len(rest) == len(label) or not rest[len(label)].isalnum()):
+        return True
+    return bool(words) and _chat_short_form(words, label)
 
 
 def pick_letter_hit(data) -> str:
     """The matched text when an open waiting-page decision that carries `options` holds, in an item text field, a pick
-    sentence whose words are the start of exactly one other option's label and not of its own letter's label (the
-    words are read as _chat_short_form reads a chat text), else "". The text names the label and its real letter.
-    A task, a note, a closed item, a write with no options, and words that fit no label or two labels pass."""
+    sentence whose text fits exactly one other option's label and not its own letter's label (see _pick_fits), else "".
+    The text names the label and its real letter. A task, a note, a closed item, a write with no options, and a pick that
+    fits no label or two labels pass."""
     if not _open_decision(data) or not isinstance(data.get("options"), list):
         return ""
     labels = {}
@@ -1410,10 +1428,11 @@ def pick_letter_hit(data) -> str:
             labels[_letter_of(i)] = (label, _label_fold(label))
     for text in _item_text_fields(data):
         for m in PICK_SENTENCE.finditer(text):
-            letter, words = m.group(1).lower(), _fold(m.group(2))
-            if not words:
+            letter, rest = m.group(1).lower(), _pick_fold(m.group(2))
+            if not rest:
                 continue
-            fits = [(k, v[0]) for k, v in labels.items() if _chat_short_form(words, v[1])]
+            words = _pick_fold(re.split(r"[.;\n)?!]", m.group(2), 1)[0])
+            fits = [(k, v[0]) for k, v in labels.items() if _pick_fits(rest, words, v[1])]
             if any(k == letter for k, _ in fits) or len(fits) != 1:
                 continue
             key, label = fits[0]
