@@ -6,10 +6,17 @@ Each repo that keeps records has one generated index page, `docs/records.md`. It
 debt with a one-line gist. Only the merge tool rebuilds the page. A branch never edits the page by hand.
 
 Until the cutover (decision `all-repos-switch-together`), the tool rebuilds the page on the integration branch before the branch goes ready. After it, the tool rebuilds the page on each lane branch before that PR merges. `merge <pr> --confirm`
-on a draft PR is that step, and it never merges. It refuses a head that does not hold the base tip, as
-`--confirm` does, and a head that carries a claim. It commits the page alone, pushes it, and stops: mark
-the PR ready, then run `--confirm` again. The tool sends no GraphQL, so the batch runner marks the PR ready
-by its session's route (route pr-ready-mcp-cloud), after the draft run of the pushed head shows (skill
+on a draft PR is that step (`draft_step`), and it never merges main. On the default base, it refuses a head that
+conflicts with the base or cannot be read (`holds_base`), and a head whose last commit carries a Record-claim (`head_claim`). It commits the page
+alone, pushes it, and stops: mark the PR ready, then run `--confirm` again. A head that lacks the tip but merges
+cleanly is not refused. `merge <pr> --ready` runs the same step with `merge_main=True`. On the default base, it first
+merges origin/<base> into a head that lacks the tip and merges cleanly (`merge_base_in`; owner ruling
+`own-840-a-ready-merges-main-skip-page-commits`, page item 840 a, 2026-11-14 19:56 CST; ruling file on branch
+`roadmap`). Any merge and any stale page commit go out in one plain push. Neither command merges a pull request.
+The batch runner readies a PR only with `merge <pr> --ready`, never by a bare MCP or `gh` mark.
+A mark that skips the step leaves the page unrebuilt. `--confirm` then refuses it and costs a second CI run (PR 3255 and PR 3472, 2026-11-15).
+The tool sends no GraphQL, so its own mark is always refused (`Host.ready`). A successful `--ready` exits 0 and prints "stays a draft (".
+So the ready route has three steps, in this order. One: `merge <pr> --ready`, which does what its help text says (merge main when the head lacks the tip, rebuild the page, run the declared ready checks, push when anything changed). Two: after the draft run of the head shows, the runner marks the PR ready by its session's route (route pr-ready-mcp-cloud). Three: `merge <pr> --confirm`. The tool's printed hint gives steps two and three (skill
 ci-hygiene). So the branch is final at ready, and the ready run is the merge run. The step claims no
 record numbers. It takes no merge lock. A PR that turns draft after the first read is the one case: the step runs
 under the lock that confirm already took, and releases it.
@@ -23,9 +30,9 @@ Record-claim on a base with no stamp kinds first reverts that claim commit, sinc
 claim head. A push that changes only docs/records.md after a head whose run was fully green starts no
 second full run of the jobs. CI scope turns off the job and suite flags for that push
 (owner, 2026-11-14 15:02 CST, ruling own-830-c; `.github/scripts/ci-scope.sh`, `green-head.sh`). Those flags
-cover the macOS, Windows, pointer, guard, shoot, mutation and sweep work. CI scope also gates every run step of
-the Windows guard, merge and rest jobs. It gates only the steps of checks-hooks and checks-rest that main already
-skips on a docs-only pull request. It also gates the mutation report. Steps that read a .md file and the `checks`
+cover the macOS, Windows, pointer, guard, shoot, mutation and sweep work. CI scope also turns off every run step of
+the Windows guard, merge and rest jobs. It turns off only the steps of checks-hooks and checks-rest that main already
+skips on a docs-only pull request. It also turns off the mutation report. Steps that read a .md file and the `checks`
 lint job still run, because the records page is a .md file. Checkout and setup steps still start. The merge
 tool still refuses a ready PR with a stale page, and the records push before ready stays. A current page makes no
 commit. A claim stays at confirm under the lock, so its numbers are free on the base tip, as before. The
