@@ -1671,7 +1671,9 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
     `idle_since` over STALE_DRAFT_HOURS before the live read, its `unarchived_epoch` the int 0 (joint_pulls), and no open
     pull whose title or branch holds the word records. A stale draft with no head sha gives no joint line: the lane
     keeps waiting. The merge summary counts a joint line among the lanes to archive.
-    Cost: it reads the live file's rows already loaded, and runs no process and opens no file of its own.
+    Cost: it reads the live file's rows already loaded, and runs no process and opens no file of its own. A joint
+    lane tagged cs-archive-ready:<slug> takes the handoff check above like a plain entry: it adds the one batched
+    `git cat-file`, and its joint line ends with the HOLD flag when the handoff is not on the record branch.
     """
     why = live_why(work)
     if why:
@@ -1749,12 +1751,13 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
                        % (" ".join(doing), sid))
             continue
         if joint:
-            out.append("joint (close %s; archive %s; archive lane %s)" % (
+            entry = "joint (close %s; archive %s; archive lane %s)" % (
                 " ".join("#%d" % p["number"] for p in joint),
-                " ".join(sorted({"archive/" + p["branch"] for p in joint})), sid))
-            continue
-        topic = next((t[len(TOPIC_TAG):].strip() for t in tags if t.startswith(TOPIC_TAG) and t[len(TOPIC_TAG):].strip()), "-")
-        entry = "%s (%s; topic %s)" % (row["id"], " ".join(mine), topic)
+                " ".join(sorted({"archive/" + p["branch"] for p in joint})), sid)
+        else:
+            topic = next((t[len(TOPIC_TAG):].strip() for t in tags if t.startswith(TOPIC_TAG) and t[len(TOPIC_TAG):].strip()), "-")
+            entry = "%s (%s; topic %s)" % (row["id"], " ".join(mine), topic)
+        # A joint line archives the lane too, so it takes the same handoff check as a plain entry.
         slugs = [t[len(ARCHIVE_READY_TAG):].strip() for t in tags if t.startswith(ARCHIVE_READY_TAG)]
         bad = [s for s in slugs if not s or "/" in s or ".." in s or "\n" in s or "\r" in s]
         if bad:
