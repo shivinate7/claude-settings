@@ -56,7 +56,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    session then moves the pin in a lane of its own. No bot and no schedule moves it. That tool reads
    only the `ste-lint` and `zizmor` pins. Other claude-settings pins can drift unseen.
    Other pins keep full-SHA pinning. Which bot, if any, bumps them is set per repo.
-8. **Batch lanes.** Degen and home switch to the per-lane flow on stable now (ruling `own-degen-home-switch-now`, degen and home switch now). Every other child repo waits for the drain, and the batch rules below stay live there until the cutover (decision `all-repos-switch-together`).
+8. **Batch lanes.** Degen and home (ruling `own-degen-home-switch-now`, degen and home switch now) and q_max, banchi, mailaudit, ios-adblock and joyous (ruling `own-820-c-five-repos`, per-lane merge for five more repos) use the per-lane flow on stable now. Every other child repo waits for the drain, and the batch rules below stay live there until the cutover (decision `all-repos-switch-together`).
 
    Per-lane flow (in use in degen and home; target, not live elsewhere): each lane PR merges alone through the merge tool, on its own green run and the review its risk needs (rule `git-integration-branch-merge`). Each lane PR goes ready once, after its last review and lane lint (decision `draft-until-reviewed`). After a merge, main's run skips when a passing PR run proved the tree (rule `roles-each-layer-proves-once`). A breaking merge is one after which main's newest finished run is red. Its revert PR is an ordinary lane PR, merged with `--base-red-ok` (decision `no-merge-onto-red-main`). After a red main, merges resume when the revert merges with its tree proven, with the revert's own run still going (owner ruling `own-823-b-revert-merge-lifts-red`, 2026-11-14 15:04 CST, which made pick 745 b live). While main is red, a lane that touches none of the blamed paths may merge (owner pick 746 b; target, not live: the blame step is not built).
 
@@ -158,7 +158,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    PASS fix verifier, a merge whose second parent is not on main. The first fix verifier on a log with
    no Fix check line meets no merge-shape test, so the verifier's read is the check there. The lane never works around the refusal. A FAIL starts a
    new lane at round 1.
-   Until the cutover, every repo except degen and home batches across sessions too (`git-integration-branch-merge`).
+   Until the cutover, every repo except degen, home, q_max, banchi, mailaudit, ios-adblock and joyous batches across sessions too (`git-integration-branch-merge`).
 9. **Wait without loops.** Wait for the CI-wake notice that follows `gh pr ready`. A push starts no
    notice. In cloud, mark ready by MCP `update_pull_request` `draft: false` (route
    pr-ready-mcp-cloud); the same CI-wake notice is meant to follow (decision `ci-wait-reads-run-status`; unmeasured in cloud), so
