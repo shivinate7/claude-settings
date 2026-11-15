@@ -1,0 +1,14 @@
+{
+ "id": "surface-page-link-in-chat",
+ "title": "The waiting-page writer prints the page link in chat whenever it posts or changes items",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Owner asked four times, never filed: \"link the artifact in session here for me to click/popout\" (Nov 12 12:50 CST); \"surface the artifact in session ple\" (Nov 12 21:33 CST); \"resurface the artifact for me\" (Nov 13 00:44 CST); \"surface the artifact in chat pls\" (Nov 14 23:02 CST). Read: triage's page-asks table (scratchpad owner_page_asks.md, row A14); grep of steps, rulings and plans found no home. Ask: whenever the waiting-page writer posts, changes or closes items, its chat reply carries the page link (one line, https://claude.ai/artifact/<id> for the repo's page), as a skill line in skills/waiting-page and, if a check can see it, a guard; the form is a session habit, not a page change. The lane picks the form; it is undoable. Not read by triage: how the skill words the chat reply today, and whether any hook already prints the link.",
+ "source": "owner comments and chat, Nov 12 12:50 CST to Nov 14 23:02 CST; page-asks pass 00:35 CST Nov 15",
+ "note": "Filed 00:19 CST Nov 15 by triage. Ready, no lane. Tracker: the coordinator. Not built.",
+ "updatedAt": "2026-11-15T00:19:00-06:00"
+}
