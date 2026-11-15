@@ -1,0 +1,15 @@
+{
+ "id": "own-853-a-keep-836-b-one-wait",
+ "at": "2026-11-15T11:57:48-06:00",
+ "title": "Keep: the Stop check keeps one wait per ready PR (owner pick a on item 853).",
+ "ruling": "Owner, page item 853 (taken-836-b-one-wait), option a \"Keep: the pick stands\", saved 11:57:48 CST Nov 15: the coordinator's pick of item 836 option b (the Stop check keeps one wait per ready PR), taken 20:20 CST Nov 14 under his \"Nothing can't be undone don't wait on me\", is now the owner's own pick. It replaces the coordinator-pick status of ruling coord-836-b-one-wait-per-ready-pr; the build under step ci-wait-stop-needs-checkin stands. Cost accepted: a green line with no PR must close all waits or none, a new rule to write and test. Covers the act a names, no variant.",
+ "source": "waiting/answers/taken-836-b-one-wait.json (2026-11-15T17:57:48Z = 11:57:48 CST Nov 15, choice a, optionId keep-taken-836-b-one-wait, no note). Owner; filed by triage.",
+ "status": "open",
+ "step": "ci-wait-stop-needs-checkin",
+ "supersedes": [
+  {
+   "kind": "ruling",
+   "ref": "coord-836-b-one-wait-per-ready-pr (coordinator pick of 20:20 CST Nov 14; now the owner's own pick, same act)"
+  }
+ ]
+}

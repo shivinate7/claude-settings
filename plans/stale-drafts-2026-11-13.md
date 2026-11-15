@@ -342,3 +342,25 @@ Live file 873f59b51 (readAt 09:31:05 CST). Main's build lists 358 drafts over 12
 ## Sighting, close pass ordered 11:52 CST Nov 15 (consultant, relayed)
 
 The consultant ordered the stale-drafts close pass now (ruling p' R45 part 2). The auto-mode classifier refused triage's worker brief at 11:56 CST as relayed (the clock read 11:48 at filing): "[Destructive or Unwanted Actions]", no override line. Possible false alarm; unmeasured. No PR closed. Pending the owner's word.
+
+## Close list and holds, 11:59 CST Nov 15 (coordinator, relayed; consultant 12:15 after the 12:27 REST reset)
+
+Filed by triage 12:05 CST Nov 15. The close pass is still blocked: the owner's exact-act line has not arrived, and no PR is closed by this section.
+
+Stale-245 audit counts (coordinator 11:57 CST): SUPERSEDED 3, DUPLICATE 15, KEEP 98, ABANDONED 129.
+
+Strong 10, to close under the owner's exact-act line:
+- #1314 (merged #2571)
+- #1509 (main 8705f9a93)
+- #2173 (merged #3239; rule-only by pick 743 a)
+- #1708 (to #2991)
+- #1748 (to #2709)
+- #2463 (to #3019)
+- #2844 (to #2963, 13 of 14 identical)
+- #2938 (to #2987, 9 of 9)
+- #2909 (to #2912, 1 of 1)
+- #3281 (to #3336 and #3294, 11 of 11)
+
+Holds: #2300, #2572, #1377 (the ledger raises an owner question), #1517, #3331, #3332, #3333, #3368.
+
+83 ABANDONED with no ledger "keep": list in the coordinator's 11:59 message, not filed. They are not closed; closing is triage's call. Caveats: a silent 24 h is not proven dead; #2097 is unproven; #1619, #2893 and #3117 carry #2993 batch titles (check #2993 first); 19 of the 245 carry "Reopened: closed unmerged in an unexplained bulk loop", so a repeat close needs a comment that says why.

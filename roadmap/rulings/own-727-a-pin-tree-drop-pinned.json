@@ -1,0 +1,15 @@
+{
+ "id": "own-727-a-pin-tree-drop-pinned",
+ "at": "2026-11-15T11:57:48-06:00",
+ "title": "Keep pin_tree, port per-step pins onto it, drop --pinned (owner pick a).",
+ "ruling": "Owner, page item 727 (pick-1938-pin-design), option a \"Keep `pin_tree`, port the per-step pins onto it, drop `--pinned` (coordinator's pick)\", saved 11:57:48 CST Nov 15: ste-lint under --lint runs the pinned copy through main's `pin_tree` (a git archive); PR #1938's worktree machinery, signal cleanup and dead-run sweep are not used; the `--pinned` flag set by merge's ready check is dropped. The item text adds, from the retrospective (12:15 CST Nov 13, undoable): `pin_tree` first resolves a moving ref (the stable branch CI uses) to its commit, then archives it; the lane keeps exit 3 on a stale pin and compares to the stable branch head when it resolves. The owner did not veto those additions. Covers the act a names, no variant.",
+ "source": "waiting/answers/pick-1938-pin-design.json (2026-11-15T17:57:48Z = 11:57:48 CST Nov 15, choice a, optionId archive, no note). Owner; filed by triage.",
+ "status": "open",
+ "step": "lane-lint-runs-local-tools",
+ "supersedes": [
+  {
+   "kind": "code",
+   "ref": "main bin/ci-job `--pinned` flag set by merge/merge.py ready check, and PR #1938's worktree-based pinned tree (not adopted)"
+  }
+ ]
+}

@@ -1,0 +1,15 @@
+{
+ "id": "own-713-a-reply-page-item-plus-lines",
+ "at": "2026-11-15T11:57:48-06:00",
+ "title": "A reply that holds options carries the page item plus its option lines in chat (owner pick a).",
+ "ruling": "Owner, page item 713 (drain-3006-reply-form), option a \"Page item plus option lines\", saved 11:57:48 CST Nov 15: when a reply to the owner holds options, chat keeps `Page item: <id>` plus the `a) <label>` lines, as main's guard option-labels-match-chat enforces; PR #3006 is rebuilt to match, not main changed to match it. This narrows R18's \"chat holds one line, on the page, item N\" for a reply that holds options only; a reply with no options keeps one line. Cost accepted: about one line per option (15 to 30 words each, unmeasured per reply). Covers the act a names, no variant.",
+ "source": "waiting/answers/drain-3006-reply-form.json (2026-11-15T17:57:48Z = 11:57:48 CST Nov 15, choice a, optionId page-and-lines, no note). Owner; filed by triage.",
+ "status": "open",
+ "step": "option-keys-match-chat",
+ "supersedes": [
+  {
+   "kind": "ruling",
+   "ref": "r18: chat holds one line \"on the page, item N\" (narrowed: a reply that holds options keeps the page item plus its a) <label> lines)"
+  }
+ ]
+}

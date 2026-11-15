@@ -7,9 +7,9 @@
  "lane": "session_013NEJKykLSFQfrFcXTV97NV",
  "owner": "triage",
  "blockedBy": [],
- "why": "11:57 CST Nov 15 (coordinator, relayed; not owner-typed): lane started on the consultant's relay of the owner's item 880 words (11:53 CST); ruling own-880-free-slots. Guard or check: yes. Lane push-skip-measure folds into it (step push-skip-measure). No PR yet; triage read none.",
+ "why": "11:57 CST Nov 15 (coordinator, relayed; not owner-typed): lane started on the consultant's relay of the owner's item 880 words (11:53 CST); ruling own-880-free-slots. Guard or check: yes. Lane push-skip-measure folds into it (step push-skip-measure). No PR yet; triage read none.\n\n12:05 CST Nov 15 (coordinator 11:59, relayed; consultant 12:12): two items added to the lane: ci-scope skips Windows guard shards when no guard input is touched; and shard test_install_src.sh by function name on macOS.",
  "source": "coordinator 11:57 CST Nov 15 (relayed)",
  "note": "Lane session_013NEJKykLSFQfrFcXTV97NV. Guard or check: yes. Links: step push-skip-measure (folded in), ruling own-880-free-slots.",
- "updatedAt": "2026-11-15T12:02:00-06:00",
+ "updatedAt": "2026-11-15T12:05:00-06:00",
  "blocked": null
 }

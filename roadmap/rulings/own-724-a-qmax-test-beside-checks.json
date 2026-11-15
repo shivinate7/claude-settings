@@ -1,0 +1,16 @@
+{
+ "id": "own-724-a-qmax-test-beside-checks",
+ "at": "2026-11-15T11:57:48-06:00",
+ "title": "q_max may start test beside checks on the batch run; checks must run more effectively (owner pick a, with note).",
+ "ruling": "Owner, page item 724 (pick-qmax-test-beside-checks), option a \"Start both together on the batch run\", saved 11:57:48 CST Nov 15, with his note verbatim: \"note that while both can run in parallel is what immapproving im not saying to do these runs that often anywyas remember how i say tjese checks need to ofcur more effectively its aprt of our larger ci plans\". Plain pick: q_max starts `test` beside `checks` on the batch run (its only full run), so `test` stops waiting on `checks` (q_max D-718, the spend gate, narrowed for that run). TRIAGE'S READING of the note (a reading, not the owner's words): he approves only that the two may run in parallel; he does NOT want these runs to happen more often; the checks should happen more effectively, as part of the larger CI plans (ci-once-per-batch, R64). The pick adds no run and no trigger. Cost the owner accepted: a red `checks` still spends the `test` minutes. Covers the act a names, no variant; the file change belongs to the lane under the larger CI plans.",
+ "quote": "note that while both can run in parallel is what immapproving im not saying to do these runs that often anywyas remember how i say tjese checks need to ofcur more effectively its aprt of our larger ci plans",
+ "source": "waiting/answers/pick-qmax-test-beside-checks.json (2026-11-15T17:57:48Z = 11:57:48 CST Nov 15, choice a, optionId side-by-side, note \"note that while both can run in parallel is what immapproving im not saying to do these runs that often anywyas remember how i say tjese checks need to ofcur more effectively its aprt of our larger ci plans\"). Owner; filed by triage.",
+ "status": "open",
+ "step": "tci-11-qmax-shards",
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "q_max decision D-718 (ci-spend-gate): `test` has needs: [checks] and starts only after the cheap checks pass (q_max checks.yml, read by runner 11 12:22 CST Nov 13); narrowed for the batch run only"
+  }
+ ]
+}
