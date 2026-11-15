@@ -1739,7 +1739,7 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int, local_se
                     continue
                 import session_role
                 judged, record = session_role.local_judgement(local_session)
-                if not judged or (record and record["role"] in ROLE_TIERS and repo and record.get("repo") == repo):  # glossary-ok: ROLE_TIERS is the existing name
+                if not judged or (record and record["role"] in MERGE_ROLES and repo and record.get("repo") == repo):
                     continue
                 return True
             from override import remote_session_id
