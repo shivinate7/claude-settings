@@ -247,6 +247,16 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        could not judge, when that commit covers a triplet already in the tree or the chain
                        runs merge, pull, rebase, cherry-pick, stash pop or apply, or am.
                        (commit-refuses-conflict-markers)
+  red-run              deny. A `git push` whose range (the one conflict-markers reads, less the commits the
+                       default base holds) has a non-merge commit that adds lines to a test path and has no
+                       valid `Red-run:` trailer, judged by `judge` in lint/check_red_run.py, the one home. A
+                       commit in the same call before the push counts, read from its `-m` text (an `--amend`
+                       with none keeps the commit's own); a message the guard cannot read, a failed read and a
+                       default base it cannot read are no hit. The refusal for a flagged tip names only
+                       commit and push; for a flagged commit below the tip (under a merge at the tip too) it
+                       names commit, rebase and push; for a branch rewritten since its push it names no
+                       command. Cost: one `git log` per push, more only when a commit is a gap.
+                       (red-run-trailer-on-test-commits)
   octopus-push         deny. A `git push` whose range (the pushed ref, else HEAD, less every ref of the pushed
                        remote, else origin) adds a merge commit of more than two parents; a merge that a
                        ref of the pushed remote already holds passes. A dry run and a destination named main or master are
@@ -565,7 +575,7 @@ while True:
         _loading = "guard_core"
         import guard_core
         from guard_core import (
-            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
+            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, own_heredoc_bodies, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
@@ -606,7 +616,7 @@ while True:
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
-            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
+            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit, self_role_child_hit, self_role_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
@@ -1813,27 +1823,6 @@ def heredoc_offsets(segments, ends, bodies_kept=True):
             queue += [d for d in found if not any(line.strip() == d for line in segment.split("\n")[1:])]
             reading = bodies_kept and bool(queue) and end == "\n"
     return offsets
-
-
-def own_heredoc_bodies(segment: str, raw: str, before: int):
-    """Return the bodies of the heredocs whose headers sit inside this segment, in order. A heredoc
-    of another command (`cat <<A && git commit -F - <<B`) is not the message.
-
-    `before` is the count of headers in the segments ahead of this one. Raw is walked as the
-    shell reads it (_split_heredocs): each header outside quotes and comments takes the next body
-    in turn, and a body line is never read for headers. This segment takes the bodies `before`
-    onward, one per header it holds, so two commits with the same text each take their own body.
-    Raw is walked twice, bash's reading and the contraction reading, as split_segments does, and
-    the bodies of both are judged: a lone `'` can hide a header from one reading, never both.
-    """
-    count = len(heredoc_heads(segment)[0])
-    if not count:
-        return []
-    texts = []
-    for contractions_are_text in (False, True):   # bash's reading, then the contraction reading
-        found = [body for _, body, _ in _split_heredocs(raw, contractions_are_text)[1]]
-        texts.extend(found[before:before + count])
-    return list(dict.fromkeys(texts))   # the readings often agree: judge each body once
 
 
 def message_texts(segment: str, raw: str, where: str, before: int, titles: bool = False):
@@ -3831,6 +3820,98 @@ def role_round_model(rounds, role, n, kind="other"):
     return ROLE_ROUND_FALLBACK.get((role, n, kind))
 
 
+# THE REVIEW ROWS (decision agent-model-cap, "The round rows", second table). A table under the header `Kind | Guard or check |
+# Rounds owed after a pass | Last round | Net value owed after a failed last round` gives each change's review policy: the key is
+# (kind, guard), the value (owed, last, net): the round a pass must reach to end the review, the final round, and whether a failed
+# final round still owes its net value. review_policy_table is the one reader; the merge tool and lint read it through the guard.
+# A row the record lacks or cannot read falls back to REVIEW_POLICY_FALLBACK, which equals the shipped rows.
+REVIEW_POLICY_HEADER = ["kind", "guard or check", "rounds owed after a pass", "last round", "net value owed after a failed last round"]
+REVIEW_POLICY_KINDS = ("normal", "delete-only", "docs-only")
+REVIEW_POLICY_CAP = 3  # rule roles-review-cap-three: no row names a last round above this
+REVIEW_POLICY_FALLBACK = {("normal", "no"): (1, 3, False), ("normal", "yes"): (1, 3, True),
+                          ("delete-only", "no"): (1, 1, False), ("delete-only", "yes"): (1, 3, True),
+                          ("docs-only", "no"): (0, 3, False)}  # docs-only has no yes row: it touches no guard or check
+
+
+def review_policy_rows(pointer_root):
+    """[(cells, row text)] for each row of the record's review rows table, the cells as written (lowercase, backticks dropped), or
+    None when the record cannot be read. Only the table under the review header is read; its separator line is left out."""
+    text = _role_record_text(pointer_root)
+    if text is None:
+        return None
+    rows, inside = [], False
+    for line in text.splitlines():
+        if not line.lstrip().startswith("|"):
+            inside = False
+            continue
+        cells = [cell.strip().replace("`", "").lower() for cell in line.strip().strip("|").split("|")]
+        if cells == REVIEW_POLICY_HEADER:
+            inside = True
+        elif inside and not all(re.fullmatch(r":?-+:?", cell) for cell in cells):
+            rows.append((cells, line.strip()))
+    return rows
+
+
+def review_policy_row(cells):
+    """((kind, guard), (owed, last, net)) of one review row's cells, or None when the row is malformed: not five cells, a kind outside
+    REVIEW_POLICY_KINDS, a guard word other than yes or no, a round cell that is not a number, a last round outside 1..REVIEW_POLICY_CAP,
+    owed above last, or a net word other than yes or no, or a docs-only row with Guard or check yes (a docs-only change has none)."""
+    if len(cells) != len(REVIEW_POLICY_HEADER):
+        return None
+    kind, guard, owed, last, net = cells
+    if kind not in REVIEW_POLICY_KINDS or guard not in ("yes", "no") or net not in ("yes", "no"):
+        return None
+    if kind == "docs-only" and guard == "yes":
+        return None
+    if not (re.fullmatch(r"\d+", owed, re.ASCII) and re.fullmatch(r"\d+", last, re.ASCII)):
+        return None
+    if not 1 <= int(last) <= REVIEW_POLICY_CAP or int(owed) > int(last):
+        return None
+    return (kind, guard), (int(owed), int(last), net == "yes")
+
+
+def review_policy_table(pointer_root):
+    """{(kind, guard): (owed, last, net)} of the record's well-formed review rows, the first row for a key winning, or None when the
+    record cannot be read or holds no well-formed row. The one reader of the review rows."""
+    table = {}
+    for cells, _ in review_policy_rows(pointer_root) or ():
+        row = review_policy_row(cells)
+        if row:
+            table.setdefault(*row)
+    return table or None
+
+
+def review_policy(rows, kind, guard):
+    """(owed, last, net) for a change of this kind and Guard or check: its row in `rows` (review_policy_table's read, or None), else
+    REVIEW_POLICY_FALLBACK."""
+    return (rows or {}).get((kind, guard)) or REVIEW_POLICY_FALLBACK[(kind, guard)]
+
+
+def review_policy_drift(pointer_root):
+    """One line per problem in the review rows, [] when none or when the record cannot be read (the lint check reports that as unknown):
+    a malformed row, a (kind, guard) key that two well-formed rows hold (the first wins, so the second is dead), and a record that holds no
+    review row at all (a missing table, a renamed header or a header with no row), where the guard runs on REVIEW_POLICY_FALLBACK.
+    Lint-time only, like role_round_drift."""
+    rows = review_policy_rows(pointer_root)
+    if rows is None:
+        return []
+    if not rows:
+        return ["the record holds no review row (a missing table, a header other than `%s`, or a header with no row), so the guard runs on "
+                "its built-in fallback" % " | ".join(REVIEW_POLICY_HEADER)]
+    lines, seen = [], set()
+    for cells, text in rows:
+        row = review_policy_row(cells)
+        if row is None:
+            lines.append("review row is malformed (a kind of %s, a Guard or check of yes or no, docs-only with Guard or check no, whole-number "
+                         "round cells with a last round of 1 to %d and no more owed than last, and a net value of yes or no): %s"
+                         % (", ".join(REVIEW_POLICY_KINDS), REVIEW_POLICY_CAP, text))
+        elif row[0] in seen:
+            lines.append("review row repeats the key %s, Guard or check %s, which an earlier row holds: %s" % (row[0] + (text,)))
+        else:
+            seen.add(row[0])
+    return lines
+
+
 def role_round_drift(pointer_root):
     """One line per round row whose model the guard cannot rank, [] when none or when the record cannot be read (the lint check
     reports that as unknown). Lint-time only, like role_list_drift."""
@@ -4866,8 +4947,14 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 6c2. A commit or push that would carry all three conflict markers in one file (rule conflict-markers).
     # Cost: per judged commit, one `git rev-parse --show-toplevel --verify -q HEAD` (one more for an add in
     # another folder) and one `git diff --check`; none for an add alone, or a command with no commit or push.
-    kind, matched = conflict_markers_hit(stripped, cwd)
-    if matched:
+    # A push of a test commit with no Red-run trailer is refused here too (rule red-run): it shares the push's
+    # range, and adds one `git log` per push. A commit in the same call, before the push, is read from its
+    # `-m` text; guard_merge states the cost.
+    kind, matched = conflict_markers_hit(stripped, cwd, is_test_rel, raw)
+    if kind == "red-run":
+        red_reason, red_shown = red_run_reason(matched)
+        refuse(tool, "deny", "red-run", red_reason, red_shown)
+    elif matched:
         markers_reason = (CONFLICT_MARKERS_CHAIN_REASON if kind == "chain" else
                           CONFLICT_MARKERS_PUSH_REASON if kind == "push" else CONFLICT_MARKERS_REASON)
         refuse(tool, "deny", "conflict-markers", markers_reason.format(file=matched), matched)

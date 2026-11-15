@@ -33,7 +33,7 @@ sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import workflow_steps as ws  # noqa: E402  the one home of the step parser
 from test_ci_scope import run as scope_run  # noqa: E402  ci-scope.sh run in a temp repo: the one home of the scope run
-from test_windows_split import NO_MD_SCOPE_CONDITION, eval_if  # noqa: E402  the one home of the `if:` evaluator and of the scope condition
+from test_windows_split import NO_MD_SCOPE_CONDITION, eval_if, drop_condition, unwrap  # noqa: E402  the one home of the `if:` evaluator, the scope condition and the condition's form
 
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
 WORKFLOW = ".github/workflows/checks.yml"
@@ -406,8 +406,9 @@ ALLOWED = {
         "CLAUDE.md", "output-styles/shiv-stylisms.md", "skills/waiting-page/SKILL.md", "skills/waiting-page/reference/copies-and-accounts.md",
         "skills/waiting-page/reference/designs.md", "skills/waiting-page/reference/repo-pages.md",
         "skills/waiting-page/reference/republish.md", "skills/waiting-page/reference/routing-and-sessions.md",
-        "tests/fixture/docs/map/core.md", "tests/fixture/docs/map/traces/home.md",
-    ], "paths that run() commits into temp git repos"),
+        "tests/fixture/docs/map/core.md", "tests/fixture/docs/map/traces/home.md", "docs/records.md",
+    ], "paths that run() commits into temp git repos; the records-only skip fixtures name the generated page as the one file a records "
+       "push changes; the file reads no tracked .md at run time"),
     "lint/test_find_copies.py": ([
         ".github/pull_request_template.md", "reference/document.md", "skills/impeccable/SKILL.md",
         "skills/impeccable/reference/document.md", "skills/plain-english-map/SKILL.md",
@@ -649,10 +650,13 @@ class ChecksStepBase(unittest.TestCase):
 class ScopeConditionOnNoMdSteps(ChecksStepBase):
     def test_each_no_md_and_names_only_step_carries_the_scope_condition(self):
         steps = self.steps()
+        checks = {identity(st) for st in ws.step_blocks(ws.job_block(read_repo(WORKFLOW), JOB))}
         for name in NO_MD + NAMES_ONLY:
             with self.subTest(step=name):
                 got = if_of(self.named(steps, name))
-                self.assertEqual(got, SCOPE_CONDITION, "step %r: if is %r, want the scope condition" % (name, got))
+                # Outside the checks job, the records-only condition may follow the scope condition: `${{ (SCOPE) && RECORDS_ONLY_CONDITION }}`.
+                conditioned_ok = name not in checks and drop_condition(unwrap(got)) == NO_MD_SCOPE_CONDITION
+                self.assertTrue(got == SCOPE_CONDITION or conditioned_ok, "step %r: if is %r, want the scope condition" % (name, got))
 
 
 class UnscopedAndPrOnlySteps(ChecksStepBase):

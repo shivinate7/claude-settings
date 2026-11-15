@@ -4569,7 +4569,7 @@ class LintCheckReviewed(tm.ReviewEnv):
 class LintCheckJoin(tm.CloudSession):
     """The batch runner's join: `merge <pr> --confirm` in a cloud session with the batch-runner role refuses a pull request whose live head has
     no lane-lint PASS (decision lanes-run-no-full-ci-job). The refusal comes before any claim, push or merge, and names `merge --lane-lint <pr>`.
-    The comment list is read through the gh shim, the list the review record reads. A failed read of it refuses the join as lane lint unknown. GhHalf's helpers are called unbound and its setUp is mirrored: subclassing GhHalf would run its cases again."""
+    The comment list is read through the gh shim, the list the review record reads. A failed read of it refuses the join as lane lint unknown. GhHalf's helpers are called unbound and its setUp is mirrored: subclassing GhHalf would run its cases again. RecordsEnv's tool_page, use_fake_records and assert_page_scope are called unbound for the same reason."""
 
     def setUp(self):
         super().setUp()
@@ -4896,16 +4896,32 @@ class LintCheckJoin(tm.CloudSession):
         self.claim_steps(linted, self.head("feat"))
 
     def test_a_pass_under_one_records_page_commit_lets_the_join_go_ahead(self):
-        # the page commit the merge tool pushes after review: the records page alone, under PAGE_SUBJECT, with no Record-claim trailer
+        # the page commit the merge tool pushes after review: the records page alone, under PAGE_SUBJECT, with no Record-claim trailer, and the page
+        # the generator writes for its tree (claim_only carries a page commit only when page_is_generated proves it)
         linted = self.head("feat")
-        self.feat_commit({merge.RECORDS_PAGE: tm.page("rebuilt")}, merge.PAGE_SUBJECT)
+        tm.RecordsEnv.use_fake_records(self)
+        page = tm.RecordsEnv.tool_page(self, linted)
+        tm.RecordsEnv.assert_page_scope(self, page, linted)
+        tm.sh(self.co, "git", "push", "-q", "origin", f"{page}:refs/heads/feat")
         self.claim_steps(linted, self.head("feat"), "a records-page commit")
 
     def test_a_pass_under_a_claim_commit_and_a_records_page_commit_lets_the_join_go_ahead(self):
         linted = self.head("feat")
-        self.feat_commit({"docs/decisions/d901.md": tm.record("D-901", "d901")}, "Claim record numbers", "Record-claim: D-901")
-        self.feat_commit({merge.RECORDS_PAGE: tm.page("rebuilt")}, merge.PAGE_SUBJECT)
+        claim = self.feat_commit({"docs/decisions/d901.md": tm.record("D-901", "d901")}, "Claim record numbers", "Record-claim: D-901")
+        tm.RecordsEnv.use_fake_records(self)
+        tm.sh(self.co, "git", "fetch", "-q", "origin")  # the claim was pushed from the other clone: the page is built on it here
+        page = tm.RecordsEnv.tool_page(self, claim)
+        tm.RecordsEnv.assert_page_scope(self, page, claim)
+        tm.sh(self.co, "git", "push", "-q", "origin", f"{page}:refs/heads/feat")
         self.claim_steps(linted, self.head("feat"), "a claim commit and a records-page commit")
+
+    def test_a_hand_page_under_the_page_subject_does_not_let_the_join_go_ahead(self):  # control: the generator's bytes, not the subject, make the carry
+        linted = self.head("feat")
+        tm.RecordsEnv.use_fake_records(self)
+        page = tm.RecordsEnv.tool_page(self, linted, rebuild=False, hand=tm.page("rebuilt"))
+        tm.RecordsEnv.assert_page_scope(self, page, linted)
+        tm.sh(self.co, "git", "push", "-q", "origin", f"{page}:refs/heads/feat")
+        self.assert_refused([lint_comment(2, linted)], "a hand-written records page under PAGE_SUBJECT")
 
 
     def side_commit(self):
