@@ -43,7 +43,7 @@ A coordinator's pick (rule `pick-judge`, decision pick-cites-ruling-before-send)
 `SendMessage`) from a session tagged cs-build:coordinator (own_session.own_session_read, plus the add and remove of a later own
 set_session_tags call; unlike guard.lane_session_hit, another cs-build: tag does not void it) whose text (the `message` of send_message and SendMessage, the `prompt` of create_session; a title or a summary
 alone is not judged) states a pick must cite a ruling. On send_message a statement is a whole
-word pick, picks, picked, picking, hold, holds, held or holding (not `hold on`, `pick up`, `on hold`, `hold the call` or a hyphen id). On create_session and
+word pick, picks, picked, picking, hold, holds, held or holding (PICK_WORD; its comment holds the chatter and exception rules). On create_session and
 SendMessage it is a marker only (PICK_BRIEF_MARKER): a `Pick:`, `Hold:`, `Decision:`, `Coordinator pick` or `Coordinator hold` line
 or clause, or `my pick`, `picked`, `the pick is`. The brief template's "no longer holds" costs no call. A pick must cite a ruling
 (a plan R-number, a decision, debt or step id, a `page item N`) or say `no ruling found: <what was searched>`.
@@ -427,13 +427,16 @@ PICK_NO_CITE = (
     "(a plan R-number, `decision <slug>`, `step <slug>`, `debt <slug>` or a page item number), or the line "
     "`no ruling found: <what was searched>`, and send it again. A message that states no pick can be reworded so it does not.")
 PICK_WEIGH = "Treat it as a past ruling to weigh: a later ruling may supersede it."
-# A statement word is pick, picks, picked, picking, hold, holds, held or holding. Chatter is no statement: `hold on`, `on hold`,
-# `hold the call` or `hold the meeting` (a meeting hold), any pick form or holds, held, holding before `up` (`pick up`, `held
-# up`), and a word with a hyphen beside it (a hyphenated record id such as hold-unsafe-after-round-3). The bare `hold up` is a
-# statement ("Hold up the merge"): only the imperative reads as one.
+# A statement word is pick, picks, picked, picking, hold, holds, held or holding, as a whole word. Chatter, no statement: `hold on`,
+# `on hold`, `holding company`, a word with a hyphen beside it (a hyphen record id), and `up` after a pick form, holds, held or
+# holding (`pick up`, `held up`, `The CI is holding up the merge`). Three exceptions count: the bare `hold up`, `holding up` at a
+# sentence start ("Holding up PR 12"), and any `hold the call` or `hold the meeting` unless only a clock time follows
+# (`hold the call at 3pm.`).
 PICK_WORD = re.compile(
     r"(?<![\w-])(?<!\bon[ \t])(?:(?:pick|picks|picked|picking|holds|held|holding)(?![ \t]+up\b)|hold)(?![\w-])"
-    r"(?![ \t]+on\b)(?![ \t]+the[ \t]+(?:call|meeting)\b)", re.I)
+    r"(?![ \t]+(?:on|company)\b)"
+    r"(?![ \t]+the[ \t]+(?:call|meeting)[ \t]+at[ \t]+(?:noon|\d{1,2}(?::\d{2})?[ \t]*(?:[ap]\.?m\.?)?)[ \t]*(?:[.!?]|$))"
+    r"|(?:^|[.!?;][ \t]+)[ \t>*_`#+\d.)-]*holding[ \t]+up(?![\w-])", re.I | re.M)
 # A brief tool (create_session `prompt`, SendMessage `message`) carries plain prose such as "If a claim no longer holds", so a
 # bare hold, holds or held states no pick there. A statement is a marker: a line or sentence that starts with `Pick:`, `Hold:`,
 # `Decision:`, `Coordinator pick` or `Coordinator hold` (after markdown lead characters), or the words `my pick`, `picked`
