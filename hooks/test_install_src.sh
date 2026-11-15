@@ -4949,6 +4949,7 @@ stable_fixture() {
 default_cloud_install() {
   out=$(cd "$2" && env -i PATH="$3:$PATH" HOME="$1" CLAUDE_CONFIG_DIR="$1/.claude-cfg" \
         GIT_CEILING_DIRECTORIES="$2" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" \
         bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 }
@@ -5249,7 +5250,7 @@ r1_check() {
   return 0
 }
 caseR1() {
-  name="caseR1: a cloud install writes the install record (ref, sha, source, installer), with CLAUDE_SETTINGS_REF=main and set to a non-default branch"
+  name="caseR1: a cloud install writes the install record (ref, sha, source, installer), with CLAUDE_SETTINGS_REF=main and set to stable"
   fx="$work/r1-fx"; bin="$work/r1-bin"
   make_github_fixture "$fx"
   git -C "$fx/src" checkout -q -b stable
