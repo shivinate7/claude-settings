@@ -7,7 +7,7 @@
  "lane": "session_013NEJL32DjpWSN8KkRiC69i",
  "owner": "triage",
  "blockedBy": [],
- "why": "Degen ledger D21: iPhone lanes pick test kinds by guess, so presses and gestures go untested or every test launches the app.",
+ "why": "Degen ledger D21: iPhone lanes pick test kinds by guess, so presses and gestures go untested or every test launches the app.\n\nGitHub REST read 00:08 CST Nov 15 (Degen feedback status pass, triage fork; no diff read): #3092 (ios-apps starter: UI tests tap through one centre function) is an open draft. Not read: whether a PR carries the skill's test-shape section.",
  "source": "retrospective 21:38 CST Nov 12; plans/degen-report-2026-11-12.md (restart-plan 4b915b4d), row D21",
  "note": "Add a test-shape section to skills/ios-apps and its starter: pure rules in swift test; render tests at every shipped size with no app launch; one or two XCUITest smoke cases per screen for presses, gestures and navigation; taps at the drawn shape's centre through one helper; waits on state, never on time. Extends decision test-practices P1 and P5. Where each kind runs follows SKILL.md:23-24 and decision swift-tests-at-milestones.",
  "updatedAt": "2026-11-12T23:18:28-06:00"
