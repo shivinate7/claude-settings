@@ -7,7 +7,7 @@ debt with a one-line gist. Only the merge tool rebuilds the page. A branch never
 
 Until the cutover (decision `all-repos-switch-together`), the tool rebuilds the page on the integration branch before the branch goes ready. After it, the tool rebuilds the page on each lane branch before that PR merges. `merge <pr> --confirm`
 on a draft PR is that step (`draft_step`), and it never merges main. On the default base, it refuses a head that
-conflicts with the base or cannot be read (`holds_base`), and a head that carries a Record-claim. It commits the page
+conflicts with the base or cannot be read (`holds_base`), and a head whose last commit carries a Record-claim (`head_claim`). It commits the page
 alone, pushes it, and stops: mark the PR ready, then run `--confirm` again. A head that lacks the tip but merges
 cleanly is not refused. `merge <pr> --ready` runs the same step with `merge_main=True`. On the default base, it first
 merges origin/<base> into a head that lacks the tip and merges cleanly (`merge_base_in`; owner ruling
