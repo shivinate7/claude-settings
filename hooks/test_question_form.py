@@ -446,7 +446,7 @@ def case_str_replace_bare_problem_lines():
 def case_str_replace_bare_to_malformed_stake():
     # A Problem line that is not a labelled stake line is refused as no stake: PROBLEM_LABEL matches the new line and
     # PROBLEM_LINE does not. That covers a stake outside the set, a stake with no text, and a line with no parenthesised
-    # stake at all. A page item carries no stood pick (owner ruling, 13:04 CST Nov 13), so a bare line swapped for
+    # stake at all. A page item carries no stood pick, so a bare line swapped for
     # another bare line is refused too. A bare line swapped for a labelled stake line is allowed.
     context_replace("that swaps a bare Problem line for a stake outside the set is refused as no stake",
                     "Problem: which job runs it.", "Problem (internals): which job runs it.", (STAKE_RULES, "Problem"))

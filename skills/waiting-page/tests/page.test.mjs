@@ -303,7 +303,7 @@ test("related items share one frame with one sentence, in the most urgent tier o
   assert.match(await card(page, items[0]).locator(".top").textContent(), /goes with No\. 2/);
 });
 
-// A stands item is an ordinary item (owner ruling, 13:04 CST Nov 13): no Pick stands tier, no option preselected,
+// A stands item is an ordinary item: it has no section of its own, no option is preselected,
 // and nothing is sent until the owner presses. The star stays.
 test("a stands item sits in its normal tier, with no Pick stands tier", async (t) => {
   const s1 = mk("stand-tier", 7, { stands: true });
@@ -2088,9 +2088,9 @@ test("a group stays together at its best member's rank", async (t) => {
 test("rank never moves an item across tiers", async (t) => {
   const items = [mk("calm-rank0", 1, { rank: 0 }), mk("hold-rank9", 2, { holds: "A lane waits.", rank: 9 }), mk("due-rank0", 3, { by: "2030-01-01T00:00:00Z", rank: 0 })];
   const page = await open(t, { items }); if (!page) return;
-  const tiers = await order(page);
-  assert.deepEqual(tiers.map((x) => x[0]), ["tier-holds", "tier-due", "tier-calm"]);
-  assert.deepEqual(tiers.map((x) => x[1]), [["hold-rank9"], ["due-rank0"], ["calm-rank0"]]);
+  const sections = await order(page);
+  assert.deepEqual(sections.map((x) => x[0]), ["tier-holds", "tier-due", "tier-calm"]);
+  assert.deepEqual(sections.map((x) => x[1]), [["hold-rank9"], ["due-rank0"], ["calm-rank0"]]);
 });
 
 // The skill's text: SKILL.md plus every reference/*.md, since its steps moved into reference/. A check on what the skill says reads all of it.
@@ -8466,7 +8466,7 @@ const WT_PR_URL = (pr) => `https://github.com/${WT_REPO}/pull/${pr}`;
 // The copy may name the repo as " in q_max", since the page does not know its own repo yet (notes, section 1). Either form is the copy.
 const RUN_COPY = /^waits on a CI run( in q_max)?$/;
 const PR_COPY = (pr) => new RegExp(`^waits on PR #${pr}( in q_max)?$`);
-const OPEN_TIERS = ["tier-holds", "tier-due", "tier-calm"];
+const OPEN_SECTIONS = ["tier-holds", "tier-due", "tier-calm"];
 // No. 154 as the writer keeps it: a decision with its last answer on lastAnswer and no answers record. Each case adds the fields it tests.
 const no154 = (over = {}) => mk("wt-154", 154, { title: "Pick the merge order for the q_max fix", ...over });
 const ANSWERED = { choice: "a", at: WT_AT };
@@ -8529,7 +8529,7 @@ test("page-item-waits-on: No. 154 with waits and no lastAnswer stays an open ask
   const it = no154({ waits: { repo: WT_REPO, pr: 1011 } });
   const page = await open(t, { items: [it] }); if (!page) return;
   const home = await sectionOf(page, it);
-  assert.ok(OPEN_TIERS.includes(home), `No. 154 with no lastAnswer is in ${home}, not in an open tier`);
+  assert.ok(OPEN_SECTIONS.includes(home), `No. 154 with no lastAnswer is in ${home}, not in an open tier`);
   const link = card(page, it).locator(`.top a[href="${WT_PR_URL(1011)}"]`);
   await need(link, "No. 154 with no lastAnswer has no wait span linking PR #1011");
   assert.match(await linkWords(link), PR_COPY(1011), "the wait span does not read 'waits on PR #1011'");
@@ -8605,7 +8605,7 @@ test("page-item-waits-on: a run or PR number that is malformed with lastAnswer s
   const page = await open(t, { items: bad }); if (!page) return;
   for (const it of bad) {
     const home = await sectionOf(page, it);
-    assert.ok(OPEN_TIERS.includes(home), `${it.title} is in ${home}, not in an open tier`);
+    assert.ok(OPEN_SECTIONS.includes(home), `${it.title} is in ${home}, not in an open tier`);
     assert.equal(await card(page, it).locator(".top a").count(), 0, `${it.title} draws a wait link`);
   }
 });
