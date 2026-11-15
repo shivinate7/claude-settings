@@ -1316,9 +1316,9 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
 
 
 # ---- merge --role: the tier is read from this session's own get_session record
-ROLE_TIERS = ("batch-runner", "standing")
-STANDING_TIER = "standing"  # ruling own-tiny-fixes-b: a standing session, not a batch runner, merges its own small edit
-STANDING_ROLES = ("coordinator", "triage")  # the cs-build tags that prove the standing tier (decision session-tiers)
+ROLE_TIERS = ("batch-runner", "standing")  # glossary-ok: existing name
+STANDING_ROLE = "standing"  # ruling own-tiny-fixes-b: a standing session, not a batch runner, merges its own small edit
+STANDING_HOLDERS = ("coordinator", "triage")  # the cs-build tags that prove the standing session role (decision session-tiers)  # glossary-ok: session-tiers is the decision
 ROLE_TAG_PREFIX = BUILD_TAG
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
@@ -1352,7 +1352,7 @@ def merge_tool_args(segment: str):
 
 
 def role_call_of(segment: str):
-    """Return the tier word after the role flag when the segment runs the merge tool with it, else None.
+    """Return the role word after the role flag when the segment runs the merge tool with it, else None.
 
     A role flag with no value gives ''.
     """
@@ -1384,24 +1384,24 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
     prove, else ''. Fails closed inside the clause: any error in the reads is a refusal, because the
     allow rule has no classifier behind it and the guard-wide crash path fails open."""
     for segment in split_segments(stripped):
-        tier = role_call_of(segment) if segment.strip() else None
-        if tier is None:
+        role = role_call_of(segment) if segment.strip() else None
+        if role is None:
             continue
         try:  # cost: one transcript read, only on a role-flag call
             from override import remote_session_id
             own_id = remote_session_id()
             if own_id and transcript:
-                if tier == STANDING_TIER:  # a tag set after the record may have changed the role, so that record proves nothing
+                if role == STANDING_ROLE:  # a tag set after the record may have changed the role, so that record proves nothing
                     tags, tagged_after = _own_session_read(transcript, own_id)
-                    if tags is not None and not tagged_after and any(ROLE_TAG_PREFIX + r in tags for r in STANDING_ROLES):
+                    if tags is not None and not tagged_after and any(ROLE_TAG_PREFIX + r in tags for r in STANDING_HOLDERS):
                         continue
-                    return "merge role " + tier
+                    return "merge role " + role
                 tags = _own_get_session_tags(transcript, own_id)
-                if tier in ROLE_TIERS and tags is not None and ROLE_TAG_PREFIX + tier in tags:
+                if role in ROLE_TIERS and tags is not None and ROLE_TAG_PREFIX + role in tags:  # glossary-ok: ROLE_TIERS is the existing name
                     continue
         except Exception:
             pass
-        return "merge role " + tier
+        return "merge role " + role
     return ""
 
 
