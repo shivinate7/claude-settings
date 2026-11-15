@@ -163,9 +163,9 @@ for the guard test file split.
   coordinator for this". Box answer before 10:58 CST: "Add consultant role". A sixth session role, the
   consultant. The owner starts it on demand in claude-settings; no coordinator starts it. It talks with
   the owner, runs read-only audits, keeps one plan file rewritten in place, and sends each ruling to
-  triage. A finding about another repo goes to that repo's triage. It builds and merges, through its own subagents, when the owner names the work (owner, 2026-11-15 12:09 CST).
+  triage. A finding about another repo goes to that repo's triage. It builds and merges, through its own agents, when the owner names the work (owner, 2026-11-15 12:09 CST).
   It also makes the docs and small rule-text fixes that any standing session makes, and runs a lane-sized fix
-  it identifies as its own subagents (owner, 2026-11-15 14:10 CST). It decides
+  it identifies as its own agents (owner, 2026-11-15 14:10 CST). It decides
   nothing; an arbiter decides, a consultant helps the owner decide. It ends when its plan lands. The
   name "advisor" is not used, since the built-in advisor (`advisorModel`) has it. Home: decision
   session-tiers and GLOSSARY.md.
