@@ -4756,8 +4756,9 @@ def carries_by_tree(h, rec_head, live, main):
     else CARRY_BY_MERGE when the tree of `live` is exactly git's clean merge of `rec_head` and main's current tip (merge_state "clean", run against
     refs/remotes/origin/<main> in the host's checkout after fetch_main_once; never the first parent of `live`). `main` is the branch name, or a function
     that returns it: it is read only when the trees differ, so an equal tree carries with no default branch read. An edited or conflicted merge
-    carries nothing. A merge git cannot read (a commit the checkout lacks after merge_state's one fetch, a git without merge-tree --write-tree), a failed
-    fetch of main, no `main` and a commit read that names no tree raise Stop, so the caller reads unknown, never None.
+    carries nothing. A merge git cannot read (a commit the checkout lacks after merge_state's one fetch, a git without merge-tree --write-tree), a fetch
+    of main that exits non-zero, no `main` and a commit read that names no tree raise Stop, so the caller reads unknown, never None. A fetch of main
+    that times out or cannot start raises that error (fetch_main_once).
     The one home of the carry; the lane lint stays equal-tree (lint_carried). Cost: two commit reads; when the trees differ also fetch_main_once's one
     fetch a run, then merge_state's reads: four git rev-parse starts and one git merge-tree start per read, plus its one fetch_branch_heads a run when a
     commit is missing."""
