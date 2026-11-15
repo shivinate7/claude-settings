@@ -549,13 +549,14 @@ def load_debt_retire():
     import check_debt_retire
     return check_debt_retire
 
-def debt_check(wt, base_ref, host, info, n):
+def debt_check(wt, base_ref, host, info, n=None):
     """The debt-close lint (lint/check_debt_retire.py): each debt the branch closes has its Retire check run on the head.
-    CI runs it on every pull request (checks.yml), so confirm does not run it: its checks wait reads CI's verdict. The preview calls this
-    and skips it when the head's CI reads green; on any other read (red, pending, unknown) it runs, so the preview names the finding.
+    CI runs it on every pull request (checks.yml), so confirm does not run it: its checks wait reads CI's verdict. The preview passes `n` and
+    skips it when the head's CI reads green; on any other read (red, pending, unknown) it runs, so the preview names the finding. With no `n`
+    (the pre-ready run) it always runs.
     A finding, red or unknown or prose, refuses. No reason flag lifts it. A cited run is judged against the PR head, never the worktree
     HEAD: the claim commit goes on top of the PR head, and a run on the head is still the run of this PR."""
-    if host.head_state(n) == "green":
+    if n is not None and host.head_state(n) == "green":
         return
     debt = load_debt_retire()
     try:
@@ -3707,10 +3708,10 @@ def step_verdicts(raw, checks, state):
             rows.append(("unknown", name, detail))
     return rows
 
-def debt_verdict(wt, base, host, info, n):
+def debt_verdict(wt, base, host, info):
     """-> (verdict, "debt retire", detail): the debt-close lint (debt_check) on the tree `wt`. Unread and any read that could not run are unknown, a Dropped finding is a fail."""
     try:
-        debt_check(wt, f"origin/{base}", host, info, n)
+        debt_check(wt, f"origin/{base}", host, info)
     except Unread as e:
         return "unknown", "debt retire", " ".join(str(e).split())
     except Dropped as e:
@@ -3769,7 +3770,7 @@ def pre_ready_rows(wt, n, base, checks, pre):
     state = "fail" if "fail" in states else "unknown" if "unknown" in states else "pass"
     if pre:
         root, host, info = pre
-        rows += [debt_verdict(wt, base, host, info, n), clash_verdict(root, n, base, host, info)]
+        rows += [debt_verdict(wt, base, host, info), clash_verdict(root, n, base, host, info)]
     say(*[f"{v} {name}" + (f": {d}" if d else "") for v, name, d in rows])
     return rows, (state, lines, log)
 
@@ -3919,7 +3920,7 @@ def ready_page_state(root, n, host):
         with shared_deadline(READY_PAGE_CLEANUP_SECONDS):
             drop_worktree(root, tmp, wt)
 
-LOCK_TTL_SECONDS = 1200  # unmeasured. confirm waits on no CI run under the lock. extend_for lengthens it for a rate wait and before each debt check and undo check (UNDO_CHECK_LOCK_SECONDS and debt_check_lock_seconds), so a crashed run frees the lock in 20 minutes before the first check and about 65 minutes once the undo check began, at any merge.deadlineMinutes
+LOCK_TTL_SECONDS = 1200  # unmeasured. confirm waits on no CI run under the lock. extend_for lengthens it for a rate wait and before each undo check (UNDO_CHECK_LOCK_SECONDS), so a crashed run frees the lock in 20 minutes before the first check and about 65 minutes once the undo check began, at any merge.deadlineMinutes
 UNDO_CHECK_LOCK_SECONDS = 3600  # unmeasured: undo_check has no time bound of its own. The lock covers this long before each call of it
 
 def debt_check_lock_seconds():
