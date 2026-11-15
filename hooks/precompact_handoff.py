@@ -1313,10 +1313,9 @@ def _lag_merge_kind(use):
     name, given = use.get("name"), use.get("input")
     if not isinstance(given, dict):
         return None
-    if "merge" in str(name):
-        import guard_merge
-        if name in guard_merge.MERGE_TOOLS:
-            return "tool"
+    import guard_merge
+    if name in guard_merge.MERGE_TOOLS:  # before any substring test: a merge tool's name need not hold "merge"
+        return "tool"
     command = given.get("command")
     if isinstance(command, str) and "--confirm" in command:
         import guard_core
@@ -1338,7 +1337,9 @@ def _lag_relay(use, send_tools):
 
 def _lag_line_time(line):
     """The epoch time in the last "timestamp" field of a raw transcript line (bytes), read without a JSON decode, or
-    None. The last one, since the record's own sits after its content."""
+    None. The last one, since the record's own sits after its message, and a "timestamp" in the message text comes
+    before it. A user record's toolUseResult sits after its own, so a result that holds a "timestamp" field can
+    shadow it; the merge and role lines this scan reads sit in assistant records, which end no later."""
     i = line.rfind(b'"timestamp"')
     found = _LAG_STAMP.match(line, i) if i >= 0 else None
     return _entry_time({"timestamp": found.group(1).decode("ascii", "replace")}) if found else None
@@ -1359,8 +1360,12 @@ def _lag_scan_after(after, pattern, _transcript):
     lines after the handoff's mtime (newest first, as (time, bytes)). A line is decoded only when it names a
     merge, a ruling or a role, and a result line only when it holds the id of a call that waits on one."""
     asks, hits = [], []  # asks: (time, id, whether the result text must show the merge)
+    import guard_merge
+    # A merge tool's name need not hold "merge", so the names join the words that mark a line worth decoding.
+    words = re.compile(b"|".join([_LAG_WORDS.pattern] + [re.escape(n.encode("utf-8")) for n in guard_merge.MERGE_TOOLS]),
+                       re.I)
     for when, line in reversed(after):
-        rec = _lag_main_assistant(line) if when is not None and _LAG_WORDS.search(line) else None
+        rec = _lag_main_assistant(line) if when is not None and words.search(line) else None
         if rec is None:
             continue
         for use in _transcript.tool_uses(rec):
@@ -1384,7 +1389,10 @@ def _lag_scan_after(after, pattern, _transcript):
     landed = None
     for when, i, needs_line in asks:
         failed, text = results.get(i, (True, ""))
-        if not failed and (not needs_line or _LAG_MERGED.search(text)) and (landed is None or when > landed):
+        # The shell merge tool prints the success line before it can exit non-zero (a failed ff_main or afterMerge,
+        # merge/merge.py), so for a shell call the line proves the landing even in an error result.
+        proved = bool(_LAG_MERGED.search(text)) if needs_line else not failed
+        if proved and (landed is None or when > landed):
             landed = when
     return landed, hits
 
