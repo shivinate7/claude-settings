@@ -26,12 +26,13 @@ every entry text only. A guard rule id is the first token of the ref, with a tra
 An entry whose store file was added or changed in a commit on STORE_REF made at or after CUTOFF_AT must name what it
 supersedes when the kind is "ruling": the first token of the ref is the exact `id` of an entry in the store whose `at` is
 strictly earlier than its own (check_store). A file last changed before CUTOFF_AT is not checked. `check` reads that
-scope with one `git log --since` over the store folder; a failed log reads unknown, like an unreadable store.
+scope with one `git log -m` over the store folder, filtered by commit date here. A failed log, or a shallow repo (its
+log ends early), reads unknown, like an unreadable store.
 
 Cost: this module keeps no process and no timer and writes no file. ruled_entries starts two read-only git processes
-(one ls-tree, one cat-file --batch). open_entries starts one more cat-file --batch, and only when an open entry
-names `lands_in`. check_store adds one git log, and one more cat-file --batch only when an open entry names a `step`. A missing ref, a
-missing folder or a failed git start gives [], never an error.
+(one ls-tree, one cat-file --batch). open_entries starts one more cat-file --batch, and only when an open entry names `lands_in`. check_store
+adds one rev-parse (the shallow test), one git log and, only when an open entry names a `step`, one more cat-file
+--batch; its listing, when it fails, costs one more rev-parse, to tell a missing ref from a lost tree. A missing ref, a missing folder or a failed git start gives [], never an error.
 
 An unchecked entry (`supersedes_none` starts with "unread": triage has not read what it supersedes) informs a session
 and is marked "(unchecked, not law)" in the past-ruling search. It never governs a guard: ruling_for_guard and
@@ -124,16 +125,21 @@ def entry_instant(entry):
     return parse_at(entry.get("at")) or _FAR_PAST
 
 
-def _load(repo_dir, ref):
+def _load(repo_dir, ref, strict=False):
     """(entries, state, bad, files) of the store at `ref` in repo_dir. `bad` lists a problem line for each store file
-    that is not a JSON object; `files` is each entry's path in the store, in the order of `entries`. See read_store for
-    the rest."""
+    that is not a JSON object; `files` is each entry's path in the store, in the order of `entries`. `strict` makes a
+    listing that fails on a ref that resolves read "unreadable" (a lost tree), at the cost of one rev-parse; without it
+    that listing reads "absent", so the session-start hook starts no extra git process. See read_store for the rest."""
     try:
         code, listing = _git(repo_dir, ["ls-tree", "-z", "--name-only", ref, STORE_DIR])
         if code is None:
             return [], "unreadable", [], []
         names = [n.decode("utf-8", "replace") for n in listing.split(b"\0") if n.endswith(b".json")]
-        if code != 0 or not names:
+        if code != 0:
+            # A ref that resolves but will not list has lost an object; only a ref that does not resolve is absent.
+            lost = strict and _git(repo_dir, ["rev-parse", "--verify", "--quiet", ref + "^{commit}"])[0] == 0
+            return [], "unreadable" if lost else "absent", [], []
+        if not names:
             return [], "absent", [], []
         specs = ["%s:%s" % (ref, name) for name in names]
         blobs = _batch_blobs(repo_dir, specs)
@@ -161,7 +167,7 @@ def _load(repo_dir, ref):
 def read_store(repo_dir, ref=STORE_REF):
     """(entries, state) of the store at `ref` in repo_dir, oldest first by instant. state is "ok" (also an empty
     folder that exists), "absent" (no such ref, folder or repo) or "unreadable" (git cannot start, or fails after the
-    listing worked). A file that is not a JSON object is skipped. Never raises."""
+    listing worked; `check` also reads a lost tree so, see _load). A file that is not a JSON object is skipped. Never raises."""
     return _load(repo_dir, ref)[:2]
 
 
@@ -350,13 +356,26 @@ def _steps_of(entry):
 
 
 def _recent_files(repo_dir):
-    """The set of store paths added or changed in a commit on STORE_REF made at or after CUTOFF_AT, from one git log;
-    None when the log cannot be read (git cannot start, or exits nonzero, as on a lost parent commit)."""
-    code, out = _git(repo_dir, ["log", "--since=" + CUTOFF_AT.isoformat(), "--name-only", "-z", "--format=",
-                                STORE_REF, "--", STORE_DIR])
+    """The set of store paths added or changed in a commit on STORE_REF made at or after CUTOFF_AT; None when that cannot
+    be read: a shallow repo (its log ends early), git that cannot start, or a log that exits nonzero (a lost commit).
+    One git log walks the whole history, with -m so that a merge counts as the change it makes against each parent, and
+    its commits are filtered by committer date here, never by --since: git stops a --since walk at the first older
+    commit, which hides a file changed on a branch whose commits are dated before the cutoff but merged after it."""
+    code, out = _git(repo_dir, ["rev-parse", "--is-shallow-repository"])
+    if code != 0 or out.strip() != b"false":
+        return None
+    code, out = _git(repo_dir, ["log", "-m", "--no-renames", "--name-only", "-z", "--format=%x01%ct", STORE_REF, "--",
+                                STORE_DIR])
     if code != 0:
         return None
-    return {n.decode("utf-8", "replace") for n in out.split(b"\0") if n}
+    cutoff = int(CUTOFF_AT.timestamp())
+    recent = set()
+    for record in out.split(b"\1")[1:]:
+        stamp, *names = record.split(b"\0")
+        if int(stamp) >= cutoff:
+            # git ends the format line of a commit that has names with a newline, which the first name carries.
+            recent.update(n.decode("utf-8", "replace") for n in (m.removeprefix(b"\n") for m in names) if n)
+    return recent
 
 
 def _ruling_ref_problems(entries, files, recent):
@@ -388,7 +407,7 @@ def _ruling_ref_problems(entries, files, recent):
 
 def _check_state(repo_dir):
     """(problems, state) of the store: the problem lines of check_store and the read state of read_store."""
-    entries, state, bad, files = _load(repo_dir, STORE_REF)
+    entries, state, bad, files = _load(repo_dir, STORE_REF, strict=True)
     problems = list(bad)
     for entry in entries:
         rid = entry.get("id", "?")
