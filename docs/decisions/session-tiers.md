@@ -108,6 +108,14 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session roles and how 
   - "... you should really be messaging triage for this part to save context, etc, it's a learning experience for me."
   - The line names whose job it is. The owner's reason was saving context.
   - The session then routes it.
+- **Delegation duties** (rule `roles-orchestrator-never-builds`). Trigger: the owner's complaint, 2026-11-15 00:17 CST, relayed by the consultant at 00:24 CST: "none of the role sessions ... they rarely delegate or act in parallel and they often drop stuff when they cud be multitasking". The per-role duties below are the lane's proposal, ratified with one edit by the consultant, relayed by the coordinator at 00:37 CST; not an owner ruling. The no-build limit never meant "do not delegate reads".
+  - Evidence: a read-only Explore audit at 00:27 CST, a sample of calls (not 12 h; thinking text and runner 11 unread; counts are in the brief of step `role-sessions-fan-out`, not re-counted here). It found no agent calls by two batch runners and the consultant in the calls read. The coordinator's reported loss was dropped items (its own words), not slow reads.
+  - Every spawner: independent calls go in one turn. A read-only sweep or sort goes to an Explore.
+  - Batch runner: its lint, REST reads and per-PR checks run in parallel. It still marks ready only while no job is queued, and merges one PR at a time (no merge during a batch run).
+  - Triage: keeps its filings, and sends its checks and sorts to agents.
+  - Consultant: sends an item-by-item loop to one read-only Explore for the whole list.
+  - Coordinator: a wake batches its reads in one turn and lists every lane's `needs_action` in one call. Rule `parallelism-keep-going` starts each ready item with its questions answered.
+  - Not built: a check. A count of consecutive one-call read turns would be an unmeasured cost, and a dropped item shows in no transcript count.
 - **Work follows size** (owner, 2026-11-10 14:55 CST, relayed by the retrospective session, G12: "yes A this is good"). Any lane builds a short list of edits itself when nothing can run in parallel. Otherwise it fans out to agents. This holds whoever started the lane (the build rule in CLAUDE.md, Work follows size).
   - Tiny-fix ruling `own-tiny-fixes-b` (a tiny fix is a docs-only edit or a rule-text fix under 40 lines) (owner, 2026-11-15 00:50 CST, relayed by the consultant). The owner's typed answer was "so B". It followed his 00:49 CST words: "one reviewer before it merges" thats still just another subagent within the same session tho? it doesnt need a spawn
     - Any standing session except the arbiter sends one agent for a docs-only edit or a small rule-text fix. A fix is small when it stays under 40 lines (the bound in rule `roles-orchestrator-never-builds`). The agent is a record-writer.
