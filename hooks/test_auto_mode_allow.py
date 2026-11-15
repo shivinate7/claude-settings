@@ -171,8 +171,8 @@ MERGE_REVIEW_REFUSED = tuple((flag, "`%s`" % flag) for flag in MERGE_REVIEW_NEVE
     ("gh pr merge", r"`gh pr merge`"), ("any push", r"\bany push\b"), ("force push", r"force[- ]push"),
     ("any other merge form", "any other merge form"),
     ("a session not tagged cs-build:lane", r"not tagged `cs-build:lane`"))
-# The "Merge Tool Read Checks:" entry. READ_CHECKS_DROPPED holds the words its owner ruling dropped: none may appear
-# outside the entry's Never covers sentence. The other constants are what the entry still names.
+# The "Merge Tool Read Checks:" entry. READ_CHECKS_DROPPED holds the refusal words the entry must not carry, so a
+# classifier reading it sees no refusal name. The other constants are what the entry still names.
 READ_CHECKS_DROPPED = (("the Incident sentence", r"(?i)\bincident:"), ("the refusal name", r"(?i)merge without review"),
                        ("the word refused", r"(?i)\brefused\b"), ("the word refusal", r"(?i)\brefusals?\b"))
 READ_CHECKS_FLAGS = ("--reviewed", "--review-record", "--lane-lint")
