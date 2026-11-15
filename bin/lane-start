@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-# lane-start <slug> <topic> <grant-line> <brief-file> [--repo owner/name]: print the create_session fields of one lane start
+# lane-start <slug> <topic> <grant-line> <brief-file> [--repo owner/name] [--transcript <file>]: print the create_session fields of one lane start
 # as one JSON object. The values come from hooks/shared_names.py, and the start is checked with the guard's own lane-start
-# rules (guard.lane_start_hits) before it prints, so a printed start is one the guard lets through.
+# rules (guard.lane_start_hits) before it prints, so a printed start is one the guard lets through. The start tags its
+# step, so the guard also reads this session's transcript for a live lane on the step (lane-step-dup). --transcript names
+# that file; with none, the helper cannot read the list and judges the other rules only, and the guard judges the step on
+# the real call.
 # Exit 2: a wrong argument count, a brief file that cannot be read, no repo, or a broken rule (the refusal is on stderr, and
 # nothing is on stdout). The repo is --repo, else the checkout's own (git_reads.github_repo). Writes no file.
 import json, os, sys
@@ -12,19 +15,20 @@ from shared_names import (  # noqa: E402  the one home of the lane start's value
     CREATE_SESSION_TOOL, LANE_BRIEF_MARKER, LANE_EFFORT, LANE_GRANT_MARKER, LANE_MODEL, LANE_SOURCE_HOST,
     lane_brief_line, lane_start_tags, lane_title,
 )
-USAGE = "usage: lane-start <slug> <topic> <grant-line> <brief-file> [--repo owner/name]"
+USAGE = "usage: lane-start <slug> <topic> <grant-line> <brief-file> [--repo owner/name] [--transcript <file>]"
 
 
 def parse(argv):
-    """(slug, topic, grant, brief file, repo or None), or None for a wrong argument count."""
-    repo, rest = None, list(argv)
-    if "--repo" in rest:
-        at = rest.index("--repo")
-        if at + 1 >= len(rest):
-            return None
-        repo = rest[at + 1]
-        del rest[at:at + 2]
-    return (*rest, repo) if len(rest) == 4 else None
+    """(slug, topic, grant, brief file, repo or None, transcript or None), or None for a wrong argument count."""
+    values, rest = {}, list(argv)
+    for flag in ("--repo", "--transcript"):
+        if flag in rest:
+            at = rest.index(flag)
+            if at + 1 >= len(rest):
+                return None
+            values[flag] = rest[at + 1]
+            del rest[at:at + 2]
+    return (*rest, values.get("--repo"), values.get("--transcript")) if len(rest) == 4 else None
 
 
 def brief_body(text):
@@ -41,7 +45,7 @@ def main(argv):
     if not parsed:
         print(USAGE, file=sys.stderr)
         return 2
-    slug, topic, grant, brief_file, repo = parsed
+    slug, topic, grant, brief_file, repo, transcript = parsed
     try:
         with open(brief_file, encoding="utf-8") as handle:
             body = brief_body(handle.read())
@@ -63,7 +67,8 @@ def main(argv):
     }
     # An explicit --repo may name a repo other than the checkout's, which the repo-tag rule compares to; the guard judges
     # that on the real call. The checkout is passed only when the repo came from it, where the tag matches by build.
-    hits = guard.lane_start_hits(CREATE_SESSION_TOOL, fields, "" if explicit else os.getcwd())
+    hits = guard.lane_start_hits(CREATE_SESSION_TOOL, fields, "" if explicit else os.getcwd(), transcript or "",
+                                 judge_step=transcript is not None)
     if hits:
         print(hits[0][0] + ": " + guard.lane_start_text(hits), file=sys.stderr)
         return 2

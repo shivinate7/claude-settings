@@ -411,9 +411,10 @@ Other tools, in `judge` order:
                        non-text title is refused. A call with no lane tag passes. Runs after lane-start-settings.
                        An override lifts it. (agent-model-cap)
   lane start, one pass
-                       A `create_session` call with a lane tag from a session is judged by all seven lane-start
-                       rules at once, in this order: lane-one-topic, brief-ids-in-roster, agent-model-floor,
-                       lane-effort-pin, lane-repo-tag, lane-start-settings, lane-title-slug (`lane_start_hits`).
+                       A `create_session` call with a lane tag from a session is judged by every lane-start rule
+                       at once, in this order: lane-one-topic, brief-ids-in-roster, agent-model-floor,
+                       lane-effort-pin, lane-repo-tag, lane-start-settings, lane-title-slug, then lane-step-dup
+                       part one (`lane_start_hits`). The open-pull-request part of lane-step-dup stays a rule of its own.
                        It is refused once, under the first broken rule's name. With two or more broken, the reason
                        opens with `N lane-start rules broken:` and lists each as `<rule>: <remedy>`, each remedy
                        unchanged; with one, the reason is that rule's own. An override names one rule: it lifts
@@ -3186,11 +3187,13 @@ def lane_title_hit(tool: str, tool_input) -> str:
 LANE_START_COUNT = "%d lane-start rules broken:"
 
 
-def lane_start_hits(tool: str, tool_input, cwd: str, transcript: str = "") -> list:
+def lane_start_hits(tool: str, tool_input, cwd: str, transcript: str = "", judge_step: bool = True) -> list:
     """[(rule, reason, matched)] for each lane-start rule a create_session call that tags a lane breaks, in judge order,
-    or [] for a call that is no lane start or breaks none. The one collection, read by judge() and by bin/lane-start, so the
+    or [] for a call that is no lane start or breaks none. The seven rules come first; lane-step-dup (part one, the live
+    carrier read from `transcript`) follows them. The one collection, read by judge() and by bin/lane-start, so the
     helper checks its own start with the rules the guard applies. Each rule is judged by its own function, so a read that
-    fails open there fails open here."""
+    fails open there fails open here. `judge_step` False leaves lane-step-dup out, for a caller with no transcript to
+    read: with none, step_dup_hit can only answer "unknown", which is a refusal."""
     if not is_lane_create_session(tool, tool_input):
         return []
     hits = []
@@ -3215,6 +3218,9 @@ def lane_start_hits(tool: str, tool_input, cwd: str, transcript: str = "") -> li
     lane_title = lane_title_hit(tool, tool_input)
     if lane_title:
         hits.append(("lane-title-slug", LANE_TITLE_REASON, lane_title))
+    doubled = step_dup_hit(tool, tool_input, transcript) if judge_step else None
+    if doubled:
+        hits.append(("lane-step-dup", doubled[1], doubled[0]))
     return hits
 
 
@@ -7146,11 +7152,12 @@ def judge(payload) -> None:
         if briefed:
             refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
 
-    # A brief or a create naming a step another live session of the repo carries (rule lane-step-dup). It is no lane-start
-    # rule of the one pass: a lane start that passes the seven is judged for it next.
-    doubled = step_dup_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
-    if doubled:
-        refuse(tool, "deny", "lane-step-dup", doubled[1], doubled[0])
+    # A brief naming a step another live session of the repo carries (rule lane-step-dup). A lane start is judged for it
+    # in the one pass above (lane_start_hits), after the seven.
+    if not lane_start:
+        doubled = step_dup_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+        if doubled:
+            refuse(tool, "deny", "lane-step-dup", doubled[1], doubled[0])
     # The same call, for an open lane pull request that holds the step (rule lane-step-dup, part two).
     held = step_pr_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
     if held:
