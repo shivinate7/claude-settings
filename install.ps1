@@ -17,6 +17,21 @@ $RepoDir   = if ($ScriptPath) { Split-Path -Parent $ScriptPath } else { '' }
 # git with the error preference off: a failing native call must not throw. Output on stdout only.
 function Get-Git { $ErrorActionPreference = 'Continue'; & git @args 2>$null }
 function Get-FullDir([string]$p) { [IO.Path]::GetFullPath($p).TrimEnd('\') }
+# The commit the pinned checkout of the clone $dir belongs at: origin's stable as last fetched, which
+# merge/install_from_main.sh keeps current. A clone with no origin/stable, and CLAUDE_SETTINGS_REF=main (the
+# recovery, as in install.sh), pin the clone's local main as before. $null when there is no such commit.
+$PinRef = if ($env:CLAUDE_SETTINGS_REF) { $env:CLAUDE_SETTINGS_REF } else { 'stable' }
+function Get-PinCommit([string]$dir) {
+    $c = $null
+    if ($PinRef -ne 'main') { $c = Get-Git -C $dir rev-parse --verify -q "refs/remotes/origin/${PinRef}^{commit}" }
+    if (-not $c) { $c = Get-Git -C $dir rev-parse --verify -q refs/heads/main }
+    return $c
+}
+# The words for Get-PinCommit's answer in a message.
+function Get-PinWhat([string]$dir) {
+    if ($PinRef -ne 'main' -and (Get-Git -C $dir rev-parse --verify -q "refs/remotes/origin/${PinRef}^{commit}")) { return "origin/$PinRef" }
+    return 'local main'
+}
 $CloneDir = $RepoDir     # the clone that holds .git\hooks; $RepoDir moves to the pinned checkout below
 $IsLinked = $false
 # An install from a linked worktree would point the global config at a temp
@@ -36,12 +51,12 @@ if ($RepoDir) {
                 Write-Host "claude-settings: ERROR: $RepoDir is a linked git worktree; run the installer from the main clone$(if ($m) { " $m" })."
                 exit 1
             }
-            $mainAt = Get-Git -C $RepoDir rev-parse --verify -q refs/heads/main
+            $mainAt = Get-PinCommit $RepoDir
             Get-Git -C $RepoDir symbolic-ref -q HEAD | Out-Null
             $onBranch = $LASTEXITCODE -eq 0
             $headAt = Get-Git -C $RepoDir rev-parse HEAD
             if ($onBranch -or -not $mainAt -or "$headAt" -ne "$mainAt") {
-                Write-Host "claude-settings: ERROR: the pinned checkout $RepoDir is not detached at local main; run merge/install_from_main.sh from the clone $m to move it."
+                Write-Host "claude-settings: ERROR: the pinned checkout $RepoDir is not detached at $(Get-PinWhat $RepoDir); run merge/install_from_main.sh from the clone $m to move it."
                 exit 1
             }
             $CloneDir = Get-FullDir $m
@@ -111,13 +126,15 @@ try {
 # at the clone, whose branch changes. Made here when missing; only merge/install_from_main.sh
 # moves it. A clone with no main branch stays unpinned.
 if (-not $IsLinked -and (Test-Path -LiteralPath (Join-Path $RepoDir '.git'))) {
-    $MainCommit = Get-Git -C $RepoDir rev-parse --verify -q refs/heads/main
+    $MainCommit = Get-PinCommit $RepoDir
     if ($LASTEXITCODE -eq 0 -and $MainCommit) {
+        # The one WARN for the fallback (as install.sh): no origin/$PinRef, so the pin follows local main.
+        if ($PinRef -ne 'main' -and (Get-PinWhat $RepoDir) -eq 'local main') { Log "WARN: $RepoDir holds no origin/$PinRef, so the pinned checkout follows local main" }
         $Pin = (Get-FullDir $RepoDir) + '-live'
         if (-not (Test-Path -LiteralPath $Pin)) {
             $err = & { $ErrorActionPreference = 'Continue'; & git -C $RepoDir worktree add -q --detach --lock --reason 'claude-settings live pin' $Pin $MainCommit 2>&1 }
             if ($LASTEXITCODE -ne 0) { Log "ERROR: cannot make the pinned checkout ${Pin}: $(($err | ForEach-Object { "$_" }) -join ' '); fix that and run install.ps1 again."; Exit-Install 1 }
-            Log "made the pinned checkout $Pin at main"
+            Log "made the pinned checkout $Pin at $(Get-PinWhat $RepoDir)"
         } else {
             $pc = Get-Git -C $Pin rev-parse --path-format=absolute --git-common-dir
             $rc = Get-Git -C $RepoDir rev-parse --path-format=absolute --git-common-dir
@@ -128,7 +145,7 @@ if (-not $IsLinked -and (Test-Path -LiteralPath (Join-Path $RepoDir '.git'))) {
             Get-Git -C $Pin symbolic-ref -q HEAD | Out-Null
             $pinOnBranch = $LASTEXITCODE -eq 0
             if ($pinOnBranch -or "$(Get-Git -C $Pin rev-parse HEAD)" -ne "$MainCommit") {
-                Log "ERROR: the pinned checkout $Pin is not detached at local main; run merge/install_from_main.sh from the clone $RepoDir to move it."
+                Log "ERROR: the pinned checkout $Pin is not detached at $(Get-PinWhat $RepoDir); run merge/install_from_main.sh from the clone $RepoDir to move it."
                 Exit-Install 1
             }
             # Lock an unlocked pin, so the janitor sweep never removes it; a locked one stays as it is.
