@@ -13069,6 +13069,35 @@ class RedMainBrake(Env):
         self.assert_refused_as_not_the_revert(out, B)
 
 
+    def assert_exact_undo_in_other(self, head, breaking):
+        """Scope first, read in the other clone, which holds every commit of the fixture: main is `breaking`, and the head's tree is the first parent's
+        tree, so the head is the exact undo. The test clone is not fetched here, so what it holds is what the run starts with."""
+        sh(self.other, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.other, "git", "rev-parse", "origin/main"), breaking, "the fixture's main head is not the breaking merge")
+        self.assertEqual(sh(self.other, "git", "rev-parse", f"{head}^{{tree}}"), sh(self.other, "git", "rev-parse", f"{breaking}^1^{{tree}}"),
+                         "the fixture's pull request head is not the exact undo of the breaking merge")
+
+    def test_a_revert_lift_reads_a_pull_request_head_the_test_clone_lacks(self):
+        # red_base fetches the pull request head before the revert check: the test clone has neither the head nor the breaking merge before the run
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        head = self.pr_head_after(B, drops=self.DROPS_LANE, from_main=True)
+        self.assert_exact_undo_in_other(head, B)
+        self.assertNotEqual(merge.git(self.co, "cat-file", "-e", f"{head}^{{commit}}")[0], 0, "the test clone holds the pull request head before the run, so the run fetches nothing")
+        runs, jobs = self.breaking_page(B, A)
+        rc, out, _ = self.go(runs, jobs, "--base-red-ok", "revert of the breaking merge")
+        self.merged(rc, out)
+        self.assertEqual(merge.git(self.co, "cat-file", "-e", f"{head}^{{commit}}")[0], 0, "the pull request head is not in the clone after the lift, so the revert check did not read it")
+
+    def test_a_revert_check_whose_diff_against_the_base_errors_is_unknown(self):
+        # only the second diff, of the head against origin/main (the empty check), fails by a git error: the exact revert reaches it, and it refuses
+        self.assert_revert_check_unknown(lambda B, head: lambda args: "diff" in args and "--quiet" in args and head in args and "origin/main" in args, "git error")
+
+    def test_a_revert_check_whose_diff_against_the_base_times_out_is_unknown(self):
+        # only the second diff, of the head against origin/main, times out: the exact revert reaches it, and it refuses
+        self.assert_revert_check_unknown(lambda B, head: lambda args: "diff" in args and "--quiet" in args and head in args and "origin/main" in args, "timeout")
+
+
 class PinnedMismatchStopsMain(Env):
     """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
     def test_main_refuses_before_taking_the_lock(self):
