@@ -29,7 +29,7 @@ A coordinator's message that states a pick or a hold cites the ruling it rests o
 
 The mistakes, all 2026-11-12 (CST), all by a coordinator:
 
-- 12:06 (a): a mailbox default was held, against page item 556 a and plan R49. The hook reads a page answer only when the text cites it and origin/roadmap holds it, and it reads plan R49, so the judge can refuse on either; unmeasured on a real record.
+- 12:06 (a): a mailbox default was held, against page item 556 a and plan R49. The hook reads a page answer only when the text cites it and origin/roadmap holds it. The hook also reads plan R49, so the judge can refuse on either. Unmeasured on a real record.
 - 12:04 (b): plan R22 point 3 was cited for something R22 does not say. The judge reads the R22 text.
 - 12:30 (c): a route was offered against step `prose-tending-contract`. Whether the judge refuses it on a real step note is unmeasured.
 
