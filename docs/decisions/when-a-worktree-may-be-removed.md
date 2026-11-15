@@ -102,7 +102,7 @@ Owner ruling, 2026-10-14: the session-end sweep (`sweep.py --confirm`, no `--att
 - It is clean, unlocked, and idle 4 hours. No live session and no process has a cwd inside it.
 - Its tip is on GitHub, read after the run's fetch (see Safe work). Two reads must both pass: `git ls-remote --heads` read now lists a head that holds HEAD (owner ruling 2026-10-14: the read is live, never a local `origin/*` ref alone; a listed head the clone lacks is dropped), and `git branch -r --contains HEAD` is not empty.
 
-A read that fails or cannot tell keeps the tree. The report line names its path and the reason `unreadable-subject`. The rule needs nothing from the repo: whatever its `package.json` defines, the sweep runs no script the repo supplies.
+A read that fails or cannot tell keeps the tree. The report line names its path and the reason `unreadable-subject`. The sweep runs no script the repo supplies, whatever its `package.json` defines.
 
 Reason: a lane pushes `HEAD:<lane>` from a local branch of another name, so a branch-upstream read called many trees never pushed. The test-author makes its red-run checkout under `<repo>/.claude/worktrees/` and names it `agent-<something>`, so this rule covers it. A checkout with another name under that folder is not covered.
 
