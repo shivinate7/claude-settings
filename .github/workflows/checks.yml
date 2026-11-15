@@ -1026,6 +1026,14 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_idle_lanes.py
 
+      - name: Lost-work rows fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 merge/test_lost_work.py
+
+      - name: Local holds_head fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 merge/test_holds_head.py
+
       - name: Combine-train tool fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_combine_train.py
