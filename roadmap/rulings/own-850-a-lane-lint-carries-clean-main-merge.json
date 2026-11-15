@@ -1,0 +1,10 @@
+{
+ "id": "own-850-a-lane-lint-carries-clean-main-merge",
+ "at": "2026-11-14T23:04:25-06:00",
+ "title": "The lane lint carries across a clean merge of main, in the tool-proved form only",
+ "ruling": "Owner, saved on the waiting page 23:04 CST Nov 14 (05:04:25Z), picked a on page item 850 (pick-lane-lint-carry-main-merge): \"850 a\". Option a, exact text: \"Carry the lane lint across a clean merge of main; the merge tool proves it: two parents, the second on main, the tree equals git's own merge, nothing else changed\". Its gain: no 8 to 12 min lint after each move of main (6 lints and 56 min this evening, runner 10's read, unverified by triage). Its cost, as shown: the lint's pass then covers a tree it never ran on; batch CI and the PR's own run still run it. Covers the act a names and no variant: the lane lint carries only across a merge the tool proves in that form. Not covered: a merge with any other change, a conflict-resolved merge, a merge whose tree differs from git's own merge, an unreadable merge-tree (reads unknown, not carried), or any other lint-carried form. This LIFTS his earlier ruling \"a repo changes to fit a shared tool, never the tool to fit a repo\" for this one act only; he picked the widening option knowingly (the item carried that line, widens true) over the coordinator's recommended b. It is a check change: review rounds, red first and the net-value test apply. The coordinator decides which lane builds it (lane review-carries-by-tree is the likely one). Kin: own-846-a-clean-merge-main-no-verifier, own-847-a-line-19-same-exception, own-lint-skip-green-rollup-a; steps carry-forgives-main-merge, lint-carries-page-commit-no-stamp, merge-lint-skip-green-rollup.",
+ "quote": "850 a",
+ "source": "Owner page save on item 850 (pick-lane-lint-carry-main-merge) 23:04 CST Nov 14, comment thread 96a95445 (answers doc, choice a, 05:04:25.937Z); filed by triage",
+ "status": "open",
+ "step": "carry-forgives-main-merge"
+}
