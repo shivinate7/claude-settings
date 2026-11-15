@@ -3525,10 +3525,10 @@ class AlignedEdges(AlignedSteps, unittest.TestCase):
         self.assertEqual(code, 2, "an unreadable base did not make the group unknown: %s%s" % (out, err))
         self.assertTrue(head(out).startswith("aligned: unknown"), out)
 
-    def test_an_empty_pr_is_clear(self):  # green control: base and head are the same commit, so the diff is empty
+    def test_an_empty_pr_is_clear(self):  # green control: base is the head commit, so the diff is empty
         base, _ = self.cited()
         repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
-        self.assert_clear(repo, base=repo.base_sha)
+        self.assert_clear(repo, base=commit_sha(repo.root, "HEAD"))
 
     def test_this_checkout_runs_the_group_and_is_clear_with_no_change(self):  # green control: the live full-size files
         head_sha = commit_sha(CHECKOUT, "HEAD")
