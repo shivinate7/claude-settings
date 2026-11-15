@@ -4274,6 +4274,63 @@ class Facts(unittest.TestCase):
                          "State: Target, not live.", "Facts: pr 2793 merged", "", "```", "Facts: pr 1 open", "```", ""])
         self.assert_clear(facts_repo(self, {"mover": text}), facts_fixture(self, {"pr:2793": "merged", "pr:1": "open"}))
 
+    def test_a_dash_list_facts_label_under_state_is_a_gap(self):
+        self.assert_near_miss_is_a_gap("- Facts: pr 1 open")
+
+    def test_a_bold_dash_list_facts_label_under_state_is_a_gap(self):
+        self.assert_near_miss_is_a_gap("- **Facts:** pr 1 open")
+
+    def test_a_quoted_facts_label_under_state_is_a_gap(self):
+        self.assert_near_miss_is_a_gap("> Facts: pr 1 open")
+
+    def test_a_singular_fact_label_under_state_is_a_gap(self):
+        self.assert_near_miss_is_a_gap("Fact: pr 1 open")
+
+    def test_a_full_width_colon_facts_label_under_state_is_a_gap(self):
+        self.assert_near_miss_is_a_gap("Facts： pr 1 open")
+
+    def assert_line_after_facts_is_a_gap(self, following):
+        """The line after a Facts line must be blank or the end of the file. A line that is not blank is a gap naming it, and
+        its item says so in the word "blank": a claim cut off by a hard wrap is not a whole line."""
+        text = ("# Fixture decision\n\n## The ruling\n\nFixture ruling text.\n\nState: Target, not live.\n"
+                "Facts: pr 1 merged\n%s\n" % following)
+        where = "%s/mover.md:%d" % (kind_path("decisions"), len(text.splitlines()))  # the following line is the last one
+        repo = facts_repo(self, {"mover": text})
+        code, out, err = run_facts(repo.root, facts_fixture(self, {"pr:1": "merged", "pr:2": "merged"}))
+        item = item_for(out, where)
+        self.assertIsNotNone(item, "the line after the Facts line at %s is not named: %s%s" % (where, out, err))
+        self.assertIn("blank", item, "the item does not say the line after the Facts line must be blank: %s" % item)
+        self.assertEqual(code, 1, "the gap exits with the wrong code: %s%s" % (out, err))
+
+    def test_a_state_line_right_after_a_facts_line_is_a_gap(self):
+        self.assert_line_after_facts_is_a_gap("State: x")
+
+    def test_a_facts_line_right_after_a_facts_line_is_a_gap(self):
+        self.assert_line_after_facts_is_a_gap("Facts: pr 1 merged")
+
+    def test_a_hard_wrapped_facts_line_does_not_pass_with_its_second_line_unread(self):
+        self.assert_line_after_facts_is_a_gap("pr 2 merged")
+
+    def test_a_trailing_semicolon_is_a_gap_that_names_the_empty_claim(self):
+        text = decision("Target, not live.", facts="pr 1 merged;")
+        repo = facts_repo(self, {"mover": text})
+        where = facts_lines("mover", text)[0]
+        code, out, err = run_facts(repo.root, facts_fixture(self, {"pr:1": "merged"}))
+        item = item_for(out, where)
+        self.assertIsNotNone(item, "the trailing semicolon at %s is not named: %s%s" % (where, out, err))
+        self.assertIn("empty", item, "the item does not name the empty claim in words: %s" % item)
+        self.assertEqual(code, 1, "the gap exits with the wrong code: %s%s" % (out, err))
+
+    def test_a_true_facts_line_then_a_blank_line_and_a_bullet_list_is_in_shape(self):  # green control
+        text = ("# Fixture decision\n\n## The ruling\n\nFixture ruling text.\n\nState: Target, not live.\n"
+                "Facts: pr 1 merged\n\n- first bullet\n- second bullet\n")
+        self.assert_clear(facts_repo(self, {"mover": text}), facts_fixture(self, {"pr:1": "merged"}))
+
+    def test_the_checkouts_own_decision_records_hold_no_claims_and_are_in_shape(self):  # green control: the real records
+        code, out, err = run_facts(os.path.dirname(HERE), facts_fixture(self, {}))
+        self.assertTrue(head(out).startswith("facts: in shape"), "the real decision records are refused or not read: %s%s" % (out, err))
+        self.assertEqual(code, 0, "the real decision records exit with the wrong code: %s%s" % (out, err))
+
     def test_no_decision_record_is_in_shape(self):  # empty state
         repo = Repo(self)
         repo.write("README.md")
