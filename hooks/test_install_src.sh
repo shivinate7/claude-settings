@@ -6408,10 +6408,11 @@ SH
 }
 
 # ---- stale_stamp: the attempt stamp a cloud run writes when CS_STALE_TIP is set (hooks/stale_install.py reads it) ----
-# With CS_STALE_TIP set to a 40-hex commit, a cloud run writes $CLAUDE_DIR/.claude-settings-install-attempt.json at its
-# start, as {"tip": CS_STALE_TIP, "epoch": <clock>}. A record that names that same commit removes it. The cases keep the
-# stamp when the record names another tip (stale_stamp2), when the landing fails (3), and when the run aborts before it
-# lands (7). They pin that no stamp is written when the spec says so (stale_stamp4, 5, 6).
+# With CS_STALE_TIP set to a 40-hex commit, a cloud run writes $CLAUDE_DIR/.claude-settings-install-attempt.json before
+# it takes the install lock, as {"tip": CS_STALE_TIP, "epoch": <clock>}. A record that names that same commit removes it.
+# The cases keep the stamp when the record names another tip (stale_stamp2), when the landing fails (3), when the run
+# aborts before it lands (7), and when the install lock is held (8). They pin that no stamp is written when the spec
+# says so (stale_stamp4, 5, 6).
 # stale_stamp1 is red on the old code only through the stamp an earlier run left behind.
 STALE_STAMP_EPOCH=1700000000
 STALE_FAKE_TIP=0123456789abcdef0123456789abcdef01234567
@@ -6601,6 +6602,30 @@ stale_stamp7() {
     bad "$name" "scope: an install record was written although the fetch was refused"
   else
     p=$(stamp_problem "$(stale_stamp_file "$h")" "$tip")
+    if [ -n "$p" ]; then bad "$name" "$p"; else ok "$name"; fi
+  fi
+}
+
+# stale_stamp8: the install lock is held by another install, so the run exits 1 at the lock, before it fetches or lands
+# anything. The stamp is written before the lock is taken, so the run still leaves the stamp at CS_STALE_TIP, and the
+# next turn backs off. The held lock is a fresh lock file, which take_install_lock does not age out before its wait.
+# CLAUDE_SETTINGS_LOCK_WAIT=0 makes the run give up at once. A stalled install holds the same file.
+stale_stamp8() {
+  name="stale_stamp8: a cloud run that fails on the held install lock keeps the attempt stamp at CS_STALE_TIP"
+  h="$work/ss8-home"; scratch="$work/ss8-scratch"; bin="$work/ss8-bin"; lock="$h/.claude-cfg/.claude-settings-install.lock"
+  mkdir -p "$h/.claude-cfg" "$scratch"
+  default_home "$h"
+  printf '%s\n' held-by-test > "$lock"
+  make_curl_stub "$bin" fail-tarball; make_date_stub "$bin"
+  cloud_install "$h" "$scratch" "$bin" main "CS_STALE_TIP=$STALE_FAKE_TIP" "CLAUDE_SETTINGS_LOCK_WAIT=0"
+  if [ "$rc" -ne 1 ]; then
+    bad "$name" "scope: install.sh exited $rc, want 1 for the held lock: $(install_problems)"
+  elif ! printf '%s\n' "$out" | grep -q 'another install holds the lock'; then
+    bad "$name" "scope: the run did not fail on the install lock: $(install_problems)"
+  elif [ "$(head -n 1 "$lock" 2>/dev/null)" != held-by-test ]; then
+    bad "$name" "scope: the run took the held install lock away"
+  else
+    p=$(stamp_problem "$(stale_stamp_file "$h")" "$STALE_FAKE_TIP")
     if [ -n "$p" ]; then bad "$name" "$p"; else ok "$name"; fi
   fi
 }
@@ -6810,6 +6835,7 @@ run stale_stamp4
 run stale_stamp5
 run stale_stamp6
 run stale_stamp7
+run stale_stamp8
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
