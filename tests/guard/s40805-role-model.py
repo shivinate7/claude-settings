@@ -1145,7 +1145,7 @@ REVIEW_GUARD_MARKER = "Guard or check: yes"  # the review record's line; see the
 GUARD_NO_LINE = "Guard or check: no"
 
 # A reviewer on Sonnet passes with the marker at a line start: on line 1 or later, on any round, with text after it on
-# its line, and as a whole brief. The row still reads its Haiku pin, so a Haiku reviewer with the marker passes too.
+# its line, and as a whole brief. A Haiku reviewer with the marker is refused at the step-up, below.
 role_model_allow("role-model: reviewer on sonnet with the guard marker on line 1 is allowed", "reviewer", "sonnet",
                  REVIEW_GUARD_MARKER + "\nCheck the guard diff.")
 role_model_allow("role-model: reviewer on sonnet with the guard marker on line 3 is allowed", "reviewer", "sonnet",
@@ -1160,8 +1160,12 @@ role_model_allow("role-model: reviewer on sonnet with the guard marker at the en
                  "reviewer", "sonnet", "Check the diff.\n" * 399 + REVIEW_GUARD_MARKER)
 role_model_allow("role-model: reviewer on sonnet as a Task with the guard marker is allowed", "reviewer", "sonnet",
                  REVIEW_GUARD_MARKER + "\nCheck the guard diff.", tool="Task")
-role_model_allow("role-model: reviewer on haiku with the guard marker is allowed (its own row)", "reviewer", "haiku",
-                 REVIEW_GUARD_MARKER + "\nCheck the guard diff.")
+# A guard-marked first-round reviewer below its `1 guard` row (sonnet) is refused at the step-up. The reason is a literal
+# here, never read from the guard, and it names the row's model.
+add("role-model: reviewer on haiku with the guard marker is denied at the step-up (its 1 guard row is sonnet)",
+    "deny", STEP_UP, tool="Agent", config=ROLE_REAL_CFG,
+    carries=("Reviewer round 1 on a guard or check change runs on Sonnet. Spawn it with model sonnet.",),
+    **role_input("reviewer", "haiku", REVIEW_GUARD_MARKER + "\nCheck the guard diff."))
 # A marker line may start with leading blanks: the brief table's line-start rows allow them, and a brief indents its
 # template line. The first-pass brief is the case, since only the marker lifts Sonnet there.
 role_model_allow("role-model: reviewer on sonnet on Round 1 with the guard marker after two spaces is allowed", "reviewer",

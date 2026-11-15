@@ -113,7 +113,7 @@ Reason the ceiling is a refusal and no ask (owner, 2026-11-01 17:25 CST, item 12
 
 **The floor.** Every role but the five Haiku roles has Sonnet as the floor. `HAIKU_ROLES` in
 `hooks/guard.py` is the one list. Guard rule `agent-model-floor` refuses an `Agent`, `Task`, `Workflow`
-`agent()`, `start_session` or `create_session` call whose `model` holds "haiku", unless the role is a Haiku role.
+`agent()` or `create_session` call whose `model` holds "haiku", unless the role is a Haiku role. A `start_session` call is not refused: no PreToolUse hook sees it (decision `start-session-not-pretooluse`). Its PostToolUse audit flags a start whose `model` holds "haiku" and tells the session to stop the new one. The started session's own SessionStart hook also flags that start, and nothing stops it (decision `start-checks-after-call`, the start checks run in the started session).
 `lint/check_agent_models.py` fails a Haiku `model:` in `agents/*.md` or `skills/*/SKILL.md` frontmatter,
 unless the file is a Haiku role. It also fails an `agents/*.md` body that states the agent's own model in fixed text, or whose report header has a `<model>` slot and no `powered by the model named` line. The spawn's model reaches the agent through its system prompt, so a body names that line as the source. `agents/plan.md` pins Plan.
 
@@ -177,8 +177,8 @@ repo has nothing to work in. A lane with no model starts on the coordinator's mo
 passes both on every lane start. The rule runs after `lane-repo-tag`. An owner override lifts it.
 Known gaps: a lane tag set after the start is not judged, and `start_session` is not judged (both inherited from the
 lane effort pin and the lane repo tag). Only `create_session` tagged `cs-build:lane` is a lane start to the guard,
-because `start_session` carries no tags field. Mac lanes start by `start_session` (decision `lanes-start-as-agents`),
-so they pass this rule unjudged; the owner decides whether to judge them. The rule checks that a model is present, not
+because `start_session` carries no tags field and reaches no PreToolUse hook (decision `start-session-not-pretooluse`).
+Mac lanes start by `start_session` (decision `lanes-start-as-agents`), so they pass this rule unjudged; the owner decides whether to judge them. The rule checks that a model is present, not
 which model.
 Kind of risk: likely. Landed 2026-11-08.
 
@@ -198,7 +198,7 @@ the brief. A line that starts with it counts. When the brief's first non-blank l
 leftmost marker on that line also counts if it is `Round N of 3`, such as "Builder, Round 3 of 3. Lane ...". A
 leftmost `Try N of 3` there adds nothing. Owner ruling 2026-10-29 16:29 CDT: a round-3
 builder on Opus just runs, with no approval. The first-line form is case-sensitive. Later lines count only
-when they start with the marker. A builder's old `Try 3 of 3` still counts until note `try-marker-sunset`. A round 2 reviewer runs on Sonnet. A round 3 reviewer runs Sonnet; its refusal names Sonnet only, and Opus needs the owner's override (2026-11-01 17:25 CST, item 127, pick a). A try 3 builder needs Opus.
+when they start with the marker. A builder's old `Try 3 of 3` still counts until note `try-marker-sunset`. A round 2 reviewer runs on Sonnet. A round 3 reviewer runs Sonnet; its refusal names Sonnet only, and Opus needs the owner's override (2026-11-01 17:25 CST, item 127, pick a). A try 3 builder needs Opus. A guard-marked round 1 reviewer must run its `1 guard` row's model (coordinator ruling 01:20 CST Nov 15, lane spawn-model-below-role); an unmarked brief is not refused, the merge tool's record check covers it.
 
 **No pin, and the ceiling is a refusal.** The variable is a true fallback: it decides only the spawns that name no
 model and whose definition names no model. Every agent file pins a model now (`agents/builder.md` pins
@@ -282,7 +282,7 @@ brief lifts the refusal. A call whose model or `agentType` the scan cannot read 
 a Haiku role. The step-up skips an unread brief. A Workflow `agent()` call that sets its model through a variable is unseen by all four
 checks. A call that names no model is unseen by the floor and the Opus ceiling. The step-up still judges it: a builder
 brief with `Round 3 of 3` is refused. The role row refuses it on an Agent or Task call only, when the role's agent file
-pins no model (`floor-workflow-runtime-models`, `model-ceiling-no-after-read`). The refusal never reads a `start_session` on Opus.
+pins no model (`floor-workflow-runtime-models`, `model-ceiling-no-after-read`). The refusal never reads a `start_session` on Opus, and no hook reads it before the call (decision `start-session-not-pretooluse`).
 
 A step grant also lifts the Opus spawn refusal (owner, 2026-10-29 13:44 CDT: grants live in the roadmap).
 Triage writes the owner's grant in the `grants` field of the lane's roadmap step. The step names its
