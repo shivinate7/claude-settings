@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Item reply back</title>
 <style id="harnesscss">
-/* Harness only: the toolbar and frames around the drawn screen. The screen itself is page.html's own CSS (#pagecss) plus this lane's changes (#newcss). */
+/* Harness only: the toolbar and frames around the drawn screen. The screen itself is page.html's own CSS (#pagecss, with the F1 and F2 fixes marked in place) plus this lane's changes (#newcss). */
 :root { --h-bg: #eef0f3; --h-ink: #161b22; --h-muted: #565f6b; --h-line: #cfd5dd; --h-btn: #ffffff; --h-on: #161b22; --h-on-ink: #ffffff; color-scheme: light; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; } }
 :root[data-theme="dark"] { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; }
@@ -1054,7 +1054,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 </script>
 
 <script type="text/plain" id="newcss">
-/* ---- New for item-reply-back. Today's rules above are page.html's own, unchanged. ---- */
+/* ---- New for item-reply-back. The rules above are page.html's own, except three lines marked "Fix F1" or "Fix F2". ---- */
 html.coarse .askhint .kbd { display: none; } /* Mockup stand-in for @media (pointer: coarse) at 390. */
 /* Widened homes. page.html scopes these ask-thread rules to .askc, so they never match in an item card.
    Builder: drop ".askc" from each home rule (".askc .thread .myreply" becomes ".thread .myreply", and so on). Do not add a card copy.

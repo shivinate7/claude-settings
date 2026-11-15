@@ -143,6 +143,8 @@ No. 41 in the card states is answered with its filing pending ("Filing pending, 
     `@container card (max-width: 30rem) { .askc.folded .fwait .ftext, .card > .fwait .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; } }`.
   - Markup, pick "Message blocks": `askAnswer` returns `h("div", { class: "msg" }, <lhead>, <reply>)`, then its `.filed` line as a thread child.
     `lineEl` (line 2129) wraps its `Reply from <owner>` lhead and `.reply` in one `div.msg`. `askMine` and `threadEl` change only through `askAnswer`.
+    No selector or test needs the session's `.lhead` or `.reply` as a direct child of `.thread`: `.thread > .last:has(+ .reply)` (line 307) meets only
+    the item's `p.ctx.reply`, which stays unwrapped, and page.test.mjs line 3500 reads only `.thread` and `.replyend`.
 
 ## 10. Work outside this folder (for the builder and the writer)
 
@@ -211,6 +213,9 @@ moves ask and item threads together, so both options change ask threads too.
     Today all flip at 520px. The shape change is the same: one cut line becomes two.
   - Checked: no unnamed `@container` rule applies inside a card or an ask (all sit under `.svwrap` or `.parked`), so the new container captures none.
     No `position: fixed` element sits inside a card or an ask (`.bar`, `.dsheet` and the tips sit outside).
+    The container also makes each card a stacking context and the containing block for absolute children. Each absolute child in a card
+    already has a positioned parent (`.opt`, `.btn.mv`, `.opt .dif`), and the one tip (`.btn.mv` `::after`) opens upward, so nothing moves. No rule uses `cq*` units.
+  - Builder: each card and ask must take its width from its parent (block flow or a `1fr` track). Inline-size containment shrinks a box that sizes to its content.
 - Other option, not drawn: always clamp to two lines, with no query. Gain: no breakpoint and no state to screenshot.
   Lose: on a wide card a short reply is the same, but a long one takes two lines where one fits today.
 - Open, outside the findings: the folded row `.frow` (page.html:863, 908, 953) still reads the screen width at 520px. Between 516px and 520px
@@ -233,6 +238,8 @@ the session's reply, the opened line's thread and the folded `.fwait`.
   - Result: no script or console error, no sideways scroll in the page, a card, an ask, a thread, a `.myreply`, a `.msg` or a `.fwait`, and no margin on a `.thread` child.
   - The check went red on a broken copy (the margin put back, `.reply` set to `white-space: pre`): margins and overflows found in `line-on` and `long`.
   - With labels on, the "New:" tags hang 8px past a thread at 360 and 390. That is the sample label, not the screen.
+- `check_designs.mjs` on the PR head's page, with this mockup in `designData`, each pick as a two-option item: picks 1, 4 and 11 as above,
+  and pick 12 (`gap-blocks` / `#pick-blocks`, `gap-one` / `#pick-onegap`). All exited 0 with `problem: null`. A bad focus exits 1.
 - impeccable critique, Nov 15, single-context (no agent tool). The detector found nothing in the static markup.
   - Fixed: the `gap-blocks` label was cut at 390; it is shorter now.
   - Open, outside this folder: at 360 the card's "Filing pending, sent" pill (`.ans`) wraps to two lines. The fold words wrap to three lines at 360.
