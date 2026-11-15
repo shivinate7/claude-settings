@@ -600,10 +600,11 @@ class Env(unittest.TestCase):
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "rival"); sh(o, "git", "push", "-q", "origin", "feat")
         return sh(o, "git", "rev-parse", "HEAD")
 
-    def main_moves(self, files=None):
-        """A person pushes a commit to main from the second clone. Default: a path no batch touches (elsewhere.txt); `files` ({path: text}) names others."""
+    def main_moves(self, files=None, start="origin/main"):
+        """A person pushes a commit to main from the second clone. Default: a path no batch touches (elsewhere.txt); `files` ({path: text}) names others.
+        `start` is the commit the new one sits on: a lane's head makes main's tip a descendant of that head."""
         o = self.other
-        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", start)
         for path, text in (files or {"elsewhere.txt": "main moved\n"}).items():
             put(os.path.join(o, path), text)
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "main moves"); sh(o, "git", "push", "-q", "origin", "main")
@@ -20060,6 +20061,16 @@ class DraftReady(CloudSession):
         rc, out, err = self.run_args("101", "--ready")
         return rc, out + err
 
+    def refuse_merge_commits(self):
+        """git's pre-merge-commit hook in the clone the run merges in, which every worktree of it shares: it refuses after git has made the
+        merge, so the merge fails on a read that was clean. -> the log path the hook writes to: one line per file it finds with conflict
+        markers in the tree it merged, so a file exists only when there are some."""
+        log = os.path.join(self.t, "merge-markers.log").replace("\\", "/")  # a forward-slash path reads the same in the hook's shell
+        put_lf(os.path.join(self.co, ".git", "hooks", "pre-merge-commit"),
+               f"#!/bin/sh\ngrep -rl '^<<<<<<< ' . >> \"{log}\" 2>/dev/null\necho 'refused by the test' >&2\nexit 1\n")
+        os.chmod(os.path.join(self.co, ".git", "hooks", "pre-merge-commit"), 0o755)
+        return log
+
     def test_a_lane_draft_the_host_will_not_mark_ready_stays_a_draft_with_its_reason(self):  # re-pointed from the batch's --ready (act 4)
         self.lane(101)
         self.host.batch_pulls[101]["draft"] = True
@@ -20269,6 +20280,64 @@ class DraftReady(CloudSession):
         self.assertIn("is ready already", text)
         self.assertEqual(self.host.readies, [], "--ready on a ready pull request asked the host to mark it ready:\n" + text)
         self.assertFalse(self.host.batch_pulls[101]["draft"], "a ready pull request went back to draft:\n" + text)
+
+    # Cases for the draft step's own merge: the turned-draft call of --confirm, the merge commit that holds_base's clean read promises, and
+    # the failed merge. Each is green on the current code and red under the named mutant.
+
+    def test_a_pull_request_that_turns_draft_after_its_preview_read_pushes_no_merge_of_main(self):  # mutant: merge_main=True on the turned-draft call
+        old = self.lane(101, page=True, debt=True)
+        self.main_moves()
+        self.host.batch_pulls[101]["draft"] = False  # ready at the preview read, a draft from the read after the lock on
+        real, reads = self.host.pr, []
+
+        def turning(number):
+            info = real(number)
+            info["draft"] = bool(reads)
+            reads.append(number)
+            return info
+        with unittest.mock.patch.object(self.host, "pr", side_effect=turning):
+            rc, text = self.run_merge("101", "--confirm")
+        self.assertEqual(len(reads), 2, "setup: the run did not read the pull request at the preview and again after the lock:\n" + text)
+        self.assertEqual(self.head("lane-101"), old, "a confirm of a pull request that turned draft pushed a merge of main:\n" + text)
+        self.assertEqual(self.lane_pushes(), [], "a confirm of a pull request that turned draft pushed to the lane:\n" + text)
+        self.assertEqual(rc, 0, text)
+        self.assertIn("is current. Nothing was pushed.", text)
+
+    def test_a_head_that_is_an_ancestor_of_main_gets_a_merge_commit_not_a_fast_forward(self):  # mutant: --no-ff dropped from merge_base_in
+        old = self.lane(101, page=True, debt=True)
+        self.main_moves(start="origin/lane-101")  # main moves on from the lane's own commit, so a fast-forward is possible
+        tip = self.rev("origin/main")
+        self.assertEqual(self.parents(tip), [old], "setup: main's tip is not a child of the head")
+        self.host.batch_pulls[101]["draft"] = True
+        rc, text = self.ready_run()
+        pushed = self.head("lane-101")
+        self.assertEqual(self.parents(pushed), [old, tip], "the push is not a merge commit of the head and main's tip, but a fast-forward:\n" + text)
+        self.assertEqual(self.lane_pushes(), [pushed], "the run pushed the lane other than once:\n" + text)
+        self.assertEqual(rc, 0, text)
+
+    def test_a_merge_that_fails_after_a_clean_read_stops_the_draft_step_and_pushes_nothing(self):  # mutant: the failed-merge check dropped
+        old = self.lane(101, debt=True)
+        self.main_moves()  # the lane lacks main's tip; the merge with it reads clean, then git refuses to commit it
+        markers = self.refuse_merge_commits()
+        self.host.batch_pulls[101]["draft"] = True
+        real, calls = merge.git, []
+
+        def recording(cwd, *a, **k):
+            calls.append(a)
+            return real(cwd, *a, **k)
+        with unittest.mock.patch.object(merge, "git", recording):
+            rc, text = self.ready_run()
+        self.assertEqual(rc, 1, "a merge that failed after its clean read did not stop the draft step:\n" + text)
+        self.assertIn("the merge of origin/main into lane-101 failed, so nothing was pushed", text)
+        self.assertEqual(self.head("lane-101"), old, "a failed merge moved the lane:\n" + text)
+        self.assertEqual(self.lane_pushes(), [], "a failed merge pushed to the lane:\n" + text)
+        self.assertEqual(self.host.readies, [], "a draft whose merge failed was marked ready:\n" + text)
+        self.assertTrue(self.host.batch_pulls[101]["draft"], "a draft whose merge failed went ready:\n" + text)
+        self.assertTrue(any("--abort" in a for a in calls), "the failed merge was not aborted:\n" + text)
+        self.assertTrue(os.path.exists(markers), "setup: the merge never reached its commit, so the pre-merge-commit hook did not run:\n" + text)
+        with open(markers, encoding="utf-8") as f:  # the hook's shell creates the file on its redirect: a file with no lines is no marker
+            marked = f.read()
+        self.assertEqual(marked, "", "the merged tree holds conflict markers in:\n" + marked)
 
 # `merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: the open pull requests that already touch a failing case or a named file.
 # The incident's fixtures: red main run 42559512356 failed two brief-destructive-git cases, and open pull 2390 already fixes them.
