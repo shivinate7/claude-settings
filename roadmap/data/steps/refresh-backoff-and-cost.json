@@ -7,8 +7,8 @@
  "lane": "",
  "owner": "coordinator",
  "blockedBy": [],
- "why": "11:39 CST Nov 15 (coordinator, relayed, not read by triage): the coordinator started a lane for items 870 a and 871 b (owner answers read by the coordinator). Design reply first; stacks on #3487. Guard or check: yes. Sonnet, round 1. Item-owner lane cloud-hooks-stale-copy was told to check its answers for 870, 871 and 866 and write receipts. Lane id not relayed.\n\n11:45 CST Nov 15 (coordinator 11:40 CST, lane words, relayed; triage read no code): design reply part 2: the stamp file is written by install.sh, not by the hook; the backoff is a fixed 900 s; the 900 s figure is unmeasured. Guard or check: yes. Stacks on PR 3487.",
+ "why": "11:39 CST Nov 15 (coordinator, relayed, not read by triage): the coordinator started a lane for items 870 a and 871 b (owner answers read by the coordinator). Design reply first; stacks on #3487. Guard or check: yes. Sonnet, round 1. Item-owner lane cloud-hooks-stale-copy was told to check its answers for 870, 871 and 866 and write receipts. Lane id not relayed.\n\n11:45 CST Nov 15 (coordinator 11:40 CST, lane words, relayed; triage read no code): design reply part 2: the stamp file is written by install.sh, not by the hook; the backoff is a fixed 900 s; the 900 s figure is unmeasured. Guard or check: yes. Stacks on PR 3487.\n\n[13:17 CST Nov 15, triage] Coordinator pick: the lane runs a fresh sonnet full-read reviewer and records it as round 2. Lane was stuck on the reviewer-model clash (debt draft reviewer-model-pinned-to-row in roadmap/outbox/triage.md; PR #3538). (source: coordinator 13:17 CST, relayed by triage; not owner-typed, undoable)",
  "source": "Coordinator 11:39 CST Nov 15 (relayed, not read by triage)",
  "note": "Doing. Guard or check: yes. Stacks on PR 3487. Lane id not relayed. Filed 11:40 CST Nov 15.",
- "updatedAt": "2026-11-15T11:45:00-06:00"
+ "updatedAt": "2026-11-15T13:22:00-06:00"
 }
