@@ -29,6 +29,4 @@ runs:
       shell: bash
       env:
         BASE_SHA: origin/${{ github.base_ref }}
-      run: |
-        git -C "$GITHUB_WORKSPACE" fetch --no-tags origin roadmap:refs/remotes/origin/roadmap || echo "ruled-store: unknown, roadmap not fetched"
-        python3 "${{ github.action_path }}/../../lint/ruled_store.py" records "$GITHUB_WORKSPACE" --changed "$BASE_SHA"
+      run: python3 "${{ github.action_path }}/../../lint/ruled_store.py" records "$GITHUB_WORKSPACE" --changed "$BASE_SHA" --fetch

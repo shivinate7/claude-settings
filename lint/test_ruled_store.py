@@ -760,6 +760,14 @@ class RecordCiteTests(RepoCase):
         unclosed = RECORD_BEFORE + "<!-- never closed\nsee own-820-c-five-repos\n"
         self.assertEqual(len(ruled_store.check_records(self.repo_with(unclosed))[0]), 1)
 
+    def test_fetch_that_fails_prints_unknown_and_still_reads_the_store(self):
+        repo = self.repo_with(RECORD_BEFORE)
+        proc = subprocess.run([sys.executable, MODULE, "records", repo, "--fetch", "--report"], capture_output=True,
+                              text=True, timeout=60)
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("unknown, the roadmap branch was not fetched", proc.stdout)
+        self.assertIn(NEW_ID, proc.stdout, "a failed fetch stopped the read of the store already there")
+
     def test_a_file_that_is_not_utf8_prints_its_name_and_never_crashes(self):
         repo = self.repo_with(RECORD_AFTER)
         with open(os.path.join(self.folder, "bad-bytes.md"), "wb") as f:

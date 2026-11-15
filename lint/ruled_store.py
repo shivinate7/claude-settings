@@ -4,7 +4,7 @@
     python3 lint/ruled_store.py --session-line REPO   the lines the session-start hook prints, or nothing
     python3 lint/ruled_store.py list REPO             every open entry in full
     python3 lint/ruled_store.py check REPO            exit 1 on a store problem (check_store)
-    python3 lint/ruled_store.py records REPO [--changed BASE] [--report]
+    python3 lint/ruled_store.py records REPO [--changed BASE] [--report] [--fetch]
                                                       exit 1 on a Markdown file that cites a ruling and not the later
                                                       ruling that overtakes it (check_records)
 
@@ -29,6 +29,8 @@ check_records reads each tracked Markdown file of the checkout. A ruling Y overt
 `supersedes` holds a "ruling" ref that names X's id, or (fallback, prose) when one sentence of Y's `ruling` names X's id
 beside an overtaking verb (OVERTAKE). A file that cites X by id and never cites Y by id is stale on that question.
 A cite inside an HTML comment is no cite. Only an id of two or more words joined by "-" counts (ELIGIBLE_ID).
+
+`records --fetch` starts one `git fetch` of the roadmap branch first, and a failed fetch prints unknown and goes on.
 
 Cost: this module keeps no process and no timer and writes no file. ruled_entries starts two read-only git processes
 (one ls-tree, one cat-file --batch). open_entries starts one more cat-file --batch, and only when an open entry
@@ -489,6 +491,10 @@ def check_records(repo_dir, only=None):
 
 def _records(repo_dir, rest):
     only = None
+    if "--fetch" in rest:
+        code, _out = _git(repo_dir, ["fetch", "--no-tags", "origin", "%s:refs/remotes/%s" % (STORE_REF.split("/", 1)[1], STORE_REF)])
+        if code != 0:
+            print("ruled-store: unknown, the roadmap branch was not fetched")
     if "--changed" in rest:
         at = rest.index("--changed")
         if at + 1 >= len(rest):
