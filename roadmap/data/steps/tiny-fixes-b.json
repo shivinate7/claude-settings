@@ -1,0 +1,13 @@
+{
+ "title": "Write the owner's tiny-fixes ruling into session-tiers",
+ "phase": "now",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Ruling own-tiny-fixes-b (owner 00:50 CST Nov 15, \"so B\", relayed by the consultant 00:55): any standing session sends one agent for a docs-only edit or small rule-text fix, one Sonnet reviewer in the same session for rule text, and merges its PR itself on green. Coordinator's call (00:51 CST): the lane writes the decision text in docs/decisions/session-tiers.md, extending \"Work follows size\", and sends the coordinator the CLAUDE.md sentence; the consultant's workflow PR carries that sentence. Lane started 00:51 CST Nov 15; session id verified by get_session 00:54 CST: lane tiny-fixes-b, running, connected, branch tiny-fixes-b, parent the coordinator, tag cs-step:tiny-fixes-b.",
+ "source": "Ruling own-tiny-fixes-b; coordinator message 00:51 CST Nov 15.",
+ "note": "Done check: session-tiers carries the ruling and the coordinator holds the CLAUDE.md sentence. Triage read no diff.",
+ "lane": "session_013NEJL3pt8rspTsUuxzqCTc",
+ "updatedAt": "2026-11-15T00:54:00-06:00"
+}
