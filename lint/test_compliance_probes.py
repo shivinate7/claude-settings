@@ -8,16 +8,21 @@ folder, a vendored screenshot script, a generated token file, a cited cap and an
 PROBES_UNDER_TEST names the script under test (default: the one beside this file).
 """
 import contextlib
+import http.server
 import importlib.util
 import io
 import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
+import urllib.error
+import urllib.request
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -3939,7 +3944,7 @@ class ClaudeMdCitesAction(unittest.TestCase):
 # those values from the JSON file FACTS_FIXTURE names: "pr:<N>" and "ref:<name>" keys map to the live value. A key the file
 # lacks, a null value, or a file that cannot be read makes the group unknown. The group never reads a State line's prose.
 FACTS_FIXTURE = "FACTS_FIXTURE"
-FACTS_LIVE_ENV = ("GH_TOKEN", "GITHUB_TOKEN", "GH_REPO", "GITHUB_REPOSITORY", "GH_HOST")  # the caller's, stripped per case
+FACTS_LIVE_ENV = ("GH_TOKEN", "GITHUB_TOKEN", "GH_REPO", "GITHUB_REPOSITORY", "GH_HOST", "FACTS_REPO")  # stripped per case
 FACTS_DEAD_PROXY = "http://127.0.0.1:9"  # nothing listens on this port, so a stray network call fails at once
 
 # Copies, so the cases pin the State prose of these two records as origin/main held them, before any Facts line.
@@ -4040,6 +4045,51 @@ def items_at(out, where):
     """Every item line that names `where`, a file and line."""
     pattern = re.compile(re.escape(where) + r"(?!\d)")
     return [line for line in out.splitlines()[1:] if pattern.search(line)]
+
+
+GITHUB_API = "https://api.github.com"  # the probe's live reads; FactsLive sends them to a stub instead
+FACTS_LIVE_REPO = "owner/repo"
+REPO_PATH = "/repos/%s" % FACTS_LIVE_REPO
+REF_STABLE_PATH = "/repos/%s/git/ref/heads/stable" % FACTS_LIVE_REPO
+PULL_PATH = "/repos/%s/pulls/" % FACTS_LIVE_REPO
+
+
+class StubGitHub(http.server.BaseHTTPRequestHandler):
+    """A local stand-in for the GitHub API. Its `routes` map a request path to (status, body, mode): mode "json" sends the
+    body; "garbage" sends a line that is no HTTP status; "short" promises 100 bytes and sends 8."""
+
+    def do_GET(self):
+        status, body, mode = self.server.routes.get(self.path, (404, b"", "json"))
+        if mode == "garbage":
+            self.wfile.write(b"NOT AN HTTP STATUS LINE\r\n")
+        elif mode == "short":
+            self.send_response(200)
+            self.send_header("Content-Length", "100")
+            self.end_headers()
+            self.wfile.write(b'{"state"')
+        else:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass  # the output a case reads is the probe's, not the stub's
+
+
+def json_route(status, value):
+    return (status, json.dumps(value).encode("utf-8"), "json")
+
+
+def stub_github(test, routes):
+    """Start the stub on 127.0.0.1 with `routes`. Returns its base URL; the server stops when the case ends."""
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), StubGitHub)
+    server.routes = routes
+    test.addCleanup(server.server_close)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    test.addCleanup(server.shutdown)
+    return "http://127.0.0.1:%d" % server.server_address[1]
 
 
 class Facts(unittest.TestCase):
@@ -4197,6 +4247,33 @@ class Facts(unittest.TestCase):
         self.assertFalse(any("pr 2793 merged" in line for line in out.splitlines()[1:]),
                          "the true claim is named as a gap: %s" % out)
 
+    def assert_near_miss_is_a_gap(self, line):
+        """A line that reads like a Facts line, directly under a State line, is a gap at its own line, even when its claim is
+        true: the fixture holds pr 1 open, so only the near miss can refuse the record."""
+        text = "# Fixture decision\n\n## The ruling\n\nFixture ruling text.\n\nState: Target, not live.\n%s\n" % line
+        number = text.splitlines().index(line) + 1
+        where = "%s/mover.md:%d" % (kind_path("decisions"), number)
+        self.assert_gap(facts_repo(self, {"mover": text}), facts_fixture(self, {"pr:1": "open"}), where)
+
+    def test_a_bold_facts_label_under_state_is_a_gap(self):
+        self.assert_near_miss_is_a_gap("**Facts:** pr 1 open")
+
+    def test_an_indented_facts_label_under_state_is_a_gap(self):
+        self.assert_near_miss_is_a_gap("  Facts: pr 1 open")
+
+    def test_a_lowercase_facts_label_under_state_is_a_gap(self):
+        self.assert_near_miss_is_a_gap("facts: pr 1 open")
+
+    def test_a_fenced_state_and_facts_pair_is_not_read_as_a_claim(self):
+        text = "\n".join(["# Fixture decision", "", "## The ruling", "", "A worked example follows.", "", "```",
+                         "State: target, not live.", "Facts: pr 2793 open", "```", ""])
+        self.assert_clear(facts_repo(self, {"example": text}), facts_fixture(self, {"pr:2793": "merged"}))
+
+    def test_a_fenced_facts_line_beside_a_real_one_is_not_a_second_line(self):
+        text = "\n".join(["# Fixture decision", "", "## The ruling", "", "A worked example follows.", "",
+                         "State: Target, not live.", "Facts: pr 2793 merged", "", "```", "Facts: pr 1 open", "```", ""])
+        self.assert_clear(facts_repo(self, {"mover": text}), facts_fixture(self, {"pr:2793": "merged", "pr:1": "open"}))
+
     def test_no_decision_record_is_in_shape(self):  # empty state
         repo = Repo(self)
         repo.write("README.md")
@@ -4216,6 +4293,109 @@ class Facts(unittest.TestCase):
         gaps = [line for line in out.splitlines()[1:] if kind_path("decisions") + "/" in line]
         self.assertEqual(len(gaps), 1, "the folder names %d items, not its one false claim: %s" % (len(gaps), out))
         self.assertEqual(code, 1, "the gap exits with the wrong code: %s%s" % (out, err))
+
+
+class FactsLive(unittest.TestCase):
+    """The live path of the facts group. Its GitHub reads go to a stub server, and any other URL is refused, so no case
+    reaches the network. An absent ref is trusted only when the repo itself reads; a status other than 200 or 404, a
+    timeout and a broken response are unknown, never a pass or a gap."""
+
+    def live(self, repo, routes=None, hang=False):
+        """(exit code, stdout) of the facts group on `repo`, run in this process. `hang`: every read times out."""
+        base = stub_github(self, routes or {})
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # no proxy: the stub is local
+
+        def stubbed(request, timeout=None, **_):
+            url = request.full_url
+            if not url.startswith(GITHUB_API):
+                raise urllib.error.URLError("the facts cases reach the stub only, not %s" % url)
+            if hang:
+                raise socket.timeout("timed out")
+            fetch = urllib.request.Request(base + url[len(GITHUB_API):], headers=dict(request.header_items()))
+            return opener.open(fetch, timeout=timeout)
+
+        env = {"GITHUB_TOKEN": "test-token", "FACTS_REPO": FACTS_LIVE_REPO}
+        probes = load_probes()
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, env), mock.patch.object(urllib.request, "urlopen", stubbed):
+            for key in (FACTS_FIXTURE, "GH_TOKEN", "GITHUB_REPOSITORY"):
+                os.environ.pop(key, None)
+            try:
+                with contextlib.redirect_stdout(out):
+                    code = probes.main(["facts", repo.root])
+            except Exception as err:  # a traceback is a red: the group must end as an unknown exit 2
+                self.fail("the probe raised %s, not an unknown exit: %s" % (type(err).__name__, err))
+        return code, out.getvalue()
+
+    def record(self, claim):
+        """A child with one record whose Facts line holds `claim`, and that line's `file:line`."""
+        text = decision("Target, not live.", facts=claim)
+        return facts_repo(self, {"stable-branch": text}), facts_lines("stable-branch", text)[0]
+
+    def assert_unknown(self, repo, routes, hang=False):
+        code, out = self.live(repo, routes, hang)
+        self.assertTrue(head(out).startswith("facts: unknown"), "the unreadable fact is not named unknown: %s" % out)
+        self.assertEqual(code, 2, "an unknown group exits with the wrong code: %s" % out)
+
+    def test_a_ref_404_with_the_repo_unreadable_is_unknown_not_absent(self):
+        repo, _ = self.record("ref stable absent")
+        self.assert_unknown(repo, {REF_STABLE_PATH: json_route(404, {}), REPO_PATH: json_route(404, {})})
+
+    def test_a_ref_present_claim_with_the_repo_unreadable_is_unknown(self):
+        repo, _ = self.record("ref stable present")
+        self.assert_unknown(repo, {REF_STABLE_PATH: json_route(404, {}), REPO_PATH: json_route(404, {})})
+
+    def test_a_ref_404_with_the_repo_readable_passes_an_absent_claim(self):  # green control
+        repo, _ = self.record("ref stable absent")
+        code, out = self.live(repo, {REF_STABLE_PATH: json_route(404, {}), REPO_PATH: json_route(200, {"name": "repo"})})
+        self.assertTrue(head(out).startswith("facts: in shape"), "the absent ref is refused: %s" % out)
+        self.assertEqual(code, 0, "the in-shape verdict exits %d: %s" % (code, out))
+
+    def test_a_ref_404_with_the_repo_readable_names_a_present_claim_as_absent(self):  # green control
+        repo, where = self.record("ref stable present")
+        code, out = self.live(repo, {REF_STABLE_PATH: json_route(404, {}), REPO_PATH: json_route(200, {"name": "repo"})})
+        item = item_for(out, where)
+        self.assertIsNotNone(item, "the present claim at %s is not named: %s" % (where, out))
+        self.assertIn("absent", item, "the item does not name the live value absent: %s" % item)
+        self.assertEqual(code, 1, "the gap exits with the wrong code: %s" % out)
+
+    def test_a_403_on_the_ref_is_unknown(self):  # green control
+        repo, _ = self.record("ref stable absent")
+        self.assert_unknown(repo, {REF_STABLE_PATH: json_route(403, {"message": "Forbidden"})})
+
+    def test_a_closed_unmerged_pr_is_a_gap_for_an_open_claim(self):  # green control
+        repo, where = self.record("pr 12 open")
+        code, out = self.live(repo, {PULL_PATH + "12": json_route(200, {"state": "closed", "merged": False})})
+        item = item_for(out, where)
+        self.assertIsNotNone(item, "the open claim at %s is not named: %s" % (where, out))
+        self.assertIn("closed", item, "the item does not name the live value closed: %s" % item)
+        self.assertEqual(code, 1, "the gap exits with the wrong code: %s" % out)
+
+    def test_a_closed_unmerged_pr_is_a_gap_for_a_merged_claim(self):  # green control
+        repo, where = self.record("pr 12 merged")
+        code, out = self.live(repo, {PULL_PATH + "12": json_route(200, {"state": "closed", "merged": False})})
+        item = item_for(out, where)
+        self.assertIsNotNone(item, "the merged claim at %s is not named: %s" % (where, out))
+        self.assertIn("closed", item, "the item does not name the live value closed: %s" % item)
+        self.assertEqual(code, 1, "the gap exits with the wrong code: %s" % out)
+
+    def test_a_merged_pr_passes_its_merged_claim(self):  # green control
+        repo, _ = self.record("pr 12 merged")
+        code, out = self.live(repo, {PULL_PATH + "12": json_route(200, {"state": "closed", "merged": True})})
+        self.assertTrue(head(out).startswith("facts: in shape"), "the merged claim is refused: %s" % out)
+        self.assertEqual(code, 0, "the in-shape verdict exits %d: %s" % (code, out))
+
+    def test_a_timeout_on_the_live_read_is_unknown(self):  # green control: the timeout is raised, not waited for
+        repo, _ = self.record("pr 12 merged")
+        self.assert_unknown(repo, {}, hang=True)
+
+    def test_a_bad_status_line_from_github_is_unknown_not_a_traceback(self):
+        repo, _ = self.record("ref stable absent")
+        self.assert_unknown(repo, {REF_STABLE_PATH: (200, b"", "garbage")})
+
+    def test_an_incomplete_body_from_github_is_unknown_not_a_traceback(self):
+        repo, _ = self.record("ref stable absent")
+        self.assert_unknown(repo, {REF_STABLE_PATH: (200, b"", "short")})
 
 
 def tearDownModule():
