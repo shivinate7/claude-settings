@@ -3653,7 +3653,7 @@ def step_up_hit(tool: str, tool_input) -> str:
 def step_up_reason(prompt: str, role, model, rounds=None) -> str:
     """The step-up refusal for a brief whose marker and model disagree, or "". The model each marker needs is its round row
     (role_round_model; `rounds` is role_round_table's read, read here when not given). The second round must name its row's model exactly.
-    A later round or a fix verifier must not name a model below its row; above it passes here, and the Opus ceiling judges Opus."""
+    A later round, a fix verifier or a guard-marked reviewer brief must not name a model below its row; above it passes here, and the Opus ceiling judges Opus."""
     model = str(model or "").strip().lower()
     role = role_key(role)
     if rounds is None:
@@ -3669,6 +3669,10 @@ def step_up_reason(prompt: str, role, model, rounds=None) -> str:
         want = role_round_model(rounds, role, ROLE_ROUND_FIX)
         if want and (not model or (named is not None and named < ROLE_MODEL_RANK.index(want))):
             return "Reviewer fix verifier runs on %s. Spawn it with model %s." % (want.capitalize(), want)
+    if role == "reviewer" and review_guard_marked(prompt):
+        want = role_round_model(rounds, role, "1", "guard")
+        if want and (not model or (named is not None and named < ROLE_MODEL_RANK.index(want))):
+            return "Reviewer round 1 on a guard or check change runs on %s. Spawn it with model %s." % (want.capitalize(), want)
     if role == "builder" and builder_third_round(prompt):
         want = role_round_model(rounds, role, "3")
         if want and (named is None or named < ROLE_MODEL_RANK.index(want)):
