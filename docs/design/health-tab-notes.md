@@ -54,12 +54,18 @@ an option. The choice sits on `#healthTab`, `#healthViewBtn` and `#healthTable`.
 4. Grades: shape and colour, never colour alone. Pick: four marks drawn as inline SVG in
    `currentColor`, so forced-colors mode keeps the shape.
    - Broken: a filled octagon with a cross, `--holds`.
-   - Has issues: a ring half filled, `--due`.
+   - Has issues: a bare exclamation mark (a wedge bar over a dot), `--due`.
    - Not measured: a dashed ring, `--muted`.
    - Healthy: a filled ring with a check, `--good`.
-   Gain: no mark reuses a Questions shape with a new meaning. The square, triangle, ring, dot and
-   diamond stay Questions'. The check ring keeps its "done, nothing to do" meaning. The dashed ring
-   keeps its "unknown" meaning. Loss: the half ring is new and needs the key once.
+   Gain: no mark reuses a Questions or Ask shape with a new meaning. The square, triangle, ring, dot
+   and diamond stay Questions'. The half filled ring is main's Ask mark (`.g.wait` in page.html, in
+   `--acc`), which shows on the Health tab too, in the Ask head. So Has issues gets the one shape on
+   the page that is not drawn on a circle or a polygon: the exclamation mark. It says "look here"
+   with no colour, so it holds for colour-blind eyes and in forced-colors mode. It reads at 14 and 16
+   px in light and dark. The check ring keeps its "done, nothing to do" meaning. The dashed ring keeps
+   its "unknown" meaning. Loss: the exclamation mark has less ink than the octagon and the check ring
+   beside it, so amber rows look a little lighter. No warning triangle: `.g.due` is already an amber
+   triangle.
    Departs from: page.html `.rg.unk`, which draws unknown in `--due` (amber). Here unknown is grey, as
    the brief says. Amber on the page then means two things. Question: should `.rg.unk` turn grey
    everywhere?

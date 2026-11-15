@@ -299,12 +299,13 @@ const KIND = { hooks: "Hooks", checks: "Checks", skills: "Skills" };
 const GRADES = [["bad", "Broken"], ["iss", "Has issues"], ["unm", "Not measured"], ["ok", "Healthy"]];
 const GWORD = Object.fromEntries(GRADES);
 
-/* The four marks. Healthy: a filled ring with a check. Has issues: a ring half filled. Broken: a filled octagon with a cross.
+/* The four marks. Healthy: a filled ring with a check. Has issues: a bare exclamation mark, the one mark not drawn on a circle.
+   Broken: a filled octagon with a cross.
    Not measured: a dashed ring, the page's unknown shape. */
 function mark(g, extra) {
   const a = ` class="gr ${g}${extra ? " " + extra : ""}" viewBox="0 0 16 16" aria-hidden="true" focusable="false"`;
   if (g === "ok") return `<svg${a}><circle cx="8" cy="8" r="7.5" fill="currentColor"/><path class="cut" d="M4.6 8.3l2.2 2.2 4.6-4.8" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-  if (g === "iss") return `<svg${a}><circle cx="8" cy="8" r="6.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 1.4a6.6 6.6 0 0 0 0 13.2z" fill="currentColor"/></svg>`;
+  if (g === "iss") return `<svg${a}><path d="M5.4 2.8a2.6 2.6 0 0 1 5.2 0L9.4 9.4a1.4 1.4 0 0 1-2.8 0z" fill="currentColor"/><circle cx="8" cy="14" r="1.8" fill="currentColor"/></svg>`;
   if (g === "bad") return `<svg${a}><path d="M5.2 0.6h5.6l4.6 4.6v5.6l-4.6 4.6H5.2L0.6 10.8V5.2z" fill="currentColor"/><path class="cut" d="M5.4 5.4l5.2 5.2M10.6 5.4l-5.2 5.2" stroke-width="2" stroke-linecap="round"/></svg>`;
   return `<svg${a}><circle cx="8" cy="8" r="6.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-dasharray="2.6 2.1"/></svg>`;
 }
