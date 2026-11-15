@@ -881,6 +881,62 @@ class WindowsBash(unittest.TestCase):
                          "the reinstall ran %r, not the path git_bash gave (%r)" % (launched[0][0], fake_bash))
 
 
+# Stands in for an older clone's installer: it records each run and has no narrow mode, so its text lacks CS_STABLE_ONLY.
+OLD_INSTALLER = r'''#!/bin/sh
+printf 'run:%s\n' "$*" >> "$STUB_COUNTER"
+exit 0
+'''
+
+
+class RecordedInstaller(unittest.TestCase):
+    """The run form follows the record's installer, not CLAUDE_CODE_REMOTE. An installer whose path ends
+    merge/install_from_main.sh is the narrow form (CS_STABLE_ONLY=1, run in the clone, no --cloud). Any other
+    installer is the cloud form (`bash <installer> --cloud`, no CS_STABLE_ONLY). A local record whose installer
+    text lacks CS_STABLE_ONLY is too old for the narrow form, so the hook runs nothing and says unknown."""
+
+    def test_local_installer_without_narrow_mode_runs_nothing_and_says_unknown(self):
+        fx, old, new = behind(self._testMethodName)
+        self.assertNotEqual(fx.origin_tip("main"), fx.record_sha(), "scope: origin is not ahead of the record")
+        write_file(os.path.join(fx.source, "install.sh"), OLD_INSTALLER, mode=0o755)
+        self.assertNotIn("CS_STABLE_ONLY", read_text(os.path.join(fx.source, "install.sh")),
+                         "scope: the installer text names CS_STABLE_ONLY")
+        run = fx.run_hook(cloud=False)
+        self.assertEqual(fx.installer_runs(), [],
+                         "the hook ran the old installer %r, want none: its text lacks CS_STABLE_ONLY"
+                         % fx.installer_runs())
+        StaleInstall.assert_unknown(self, run)
+
+    def test_local_session_with_cloud_style_record_runs_the_cloud_form(self):
+        fx, old, new = behind(self._testMethodName)
+        record = json.loads(read_text(fx.record_path))
+        self.assertTrue(record["installer"].endswith(os.sep + "install.sh"), "scope: the record installer is %r"
+                        % record["installer"])
+        run = fx.run_hook(cloud=False)
+        self.assertEqual(fx.installer_runs(), ["--cloud"],
+                         "a local session with a cloud-style record ran %r, want the cloud form `bash <installer> --cloud`; "
+                         "stderr: %s" % (fx.installer_runs(), run.tail()))
+        self.assertEqual(fx.installer_env().get("CS_STABLE_ONLY"), "unset",
+                         "the cloud form got CS_STABLE_ONLY=%r, want it unset" % fx.installer_env().get("CS_STABLE_ONLY"))
+
+    def test_cloud_session_with_narrow_record_runs_the_narrow_form(self):
+        fx, old, new = behind(self._testMethodName)
+        narrow = os.path.join(fx.source, "merge", "install_from_main.sh")
+        write_file(narrow, STUB, mode=0o755)
+        write_file(fx.record_path, json.dumps({"ref": "main", "sha": old, "source": fx.source,
+                                              "installer": narrow}) + "\n")
+        self.assertTrue(json.loads(read_text(fx.record_path))["installer"].endswith(
+            os.path.join("merge", "install_from_main.sh")), "scope: the record installer is not the narrow installer")
+        run = fx.run_hook(cloud=True)
+        self.assertEqual(fx.installer_runs(), [""],
+                         "a cloud session with a narrow record ran %r, want the narrow form with no --cloud; "
+                         "stderr: %s" % (fx.installer_runs(), run.tail()))
+        seen = fx.installer_env()
+        self.assertEqual(seen.get("CS_STABLE_ONLY"), "1", "the narrow form got CS_STABLE_ONLY=%r, want 1"
+                         % seen.get("CS_STABLE_ONLY"))
+        self.assertEqual(seen.get("CWD"), os.path.realpath(fx.source),
+                         "the narrow form ran in %r, want the clone %r" % (seen.get("CWD"), fx.source))
+
+
 class HookFile(unittest.TestCase):
     """Static reads of the hook source and of settings.json. The behaviour cases above prove the rest."""
 
