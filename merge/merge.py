@@ -249,6 +249,7 @@ GRANT_CITE = "(decision standing-merge-grant, a pull request GitHub reads BLOCKE
 STAMP_CITE = "(decision one-shared-record-stamp, the claim runs only on the default base)"
 RECORDS_CITE = "(decision records-index-at-merge, only the merge tool rebuilds the records page, before the branch goes ready)"
 UNDO_CITE = "(decision silent-undo-check-design, a branch that silently undoes earlier work does not merge)"
+DEBT_DEFERRED = "deferred to confirm: no run exists yet"  # a draft's runnable close: the ready PR's CI step runs its Retire test
 DEBT_CITE = "(decision debt-close-runs-retire, a debt closes only when its Retire check passes on the head)"
 RED_CITE = "(rule git-red-main-reverts, a red main takes only the revert of the blamed commit)"
 CANCELLED_NO_RED = "was cancelled with no red job"  # base_state words an unknown cancelled run with it; red_base reads it back to give the cancelled run its own headline
@@ -488,20 +489,21 @@ def lift_message(lifts):
     """-> the merge commit message for the lifts of this run, one line per flag, or None when no check was lifted (GitHub's default message stays)."""
     return "\n".join(f"Reason flag: {flag}: {reason}" for flag, reason in lifts.items()) or None
 
-def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_head=None):
+def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_head=None, draft=False):
     """The shared silent-undo lint (lint/check_silent_undo.py), run on the branch before anything is pushed.
     A finding refuses. An unreadable history refuses too, unless the run has the reason flag
     --undo-check-unknown-ok "<reason>", which Claude may type with a reason: that is the way out when the check cannot run (octopus merge,
     git older than 2.38, shallow clone). A lift is logged and returns its reason, for record_lift; it does not excuse a finding.
     An Unknown that carries findings (an octopus merge the check could not read, beside a note it saw revived) refuses as Dropped,
-    naming the findings and the UNKNOWN, and the reason flag cannot lift it. Any other pass returns None."""
+    naming the findings and the UNKNOWN, and the reason flag cannot lift it. Any other pass returns None.
+    draft: the PR is a draft, whose debt closes are deferred to the ready PR's CI step, so a deferred close excuses no delete."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
     import check_silent_undo as undo
     # The scan is slow on a merge-heavy branch and merge runs it twice. Its answer depends only on the head, the base tip, the PR body,
     # the default refs it reads, and the cited runs (through the PR head). The key holds no run answer, so the second call reuses
     # the first when the key is unchanged, also for a run that a Retire-run excuse rests on (a run is tied to the PR head, and the checks wait reads CI's verdict on the pushed head).
     try:
-        key = (wt, *(git(wt, "rev-parse", "--verify", "-q", r + "^{commit}")[1].strip() for r in ("HEAD", base_ref, "origin/HEAD", "origin/main", "main")), pr_body, retire_head)
+        key = (wt, *(git(wt, "rev-parse", "--verify", "-q", r + "^{commit}")[1].strip() for r in ("HEAD", base_ref, "origin/HEAD", "origin/main", "main")), pr_body, retire_head, draft)
         if not (key[1] and key[2]) or key not in UNDO_MEMO:  # a head or base that does not resolve is never reused; a hit skips the scan and its beat
             c, n = git(wt, "rev-list", "--count", f"{base_ref}..HEAD")
             say(f"merge: scanning for silent undos ({n.strip() if not c else '?'} commits) ...")  # the scan can run for minutes
@@ -516,7 +518,7 @@ def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_h
             beater = threading.Thread(target=beat, daemon=True)
             beater.start()
             try:
-                UNDO_MEMO[key] = undo.check(wt, base_ref, "HEAD", tool=RECORDS, pr_body=pr_body, run_state=run_state, retire_head=retire_head)  # a base with no generator: the page is judged by the generator that rebuilds it
+                UNDO_MEMO[key] = undo.check(wt, base_ref, "HEAD", tool=RECORDS, pr_body=pr_body, run_state=run_state, retire_head=retire_head, draft=draft)  # a base with no generator: the page is judged by the generator that rebuilds it
             finally:  # the beat stops, and is joined, before any line below: no beat prints after "scan done"
                 done.set()
                 beater.join()
@@ -554,13 +556,15 @@ def debt_check(wt, base_ref, host, info, n=None):
     CI runs it on every pull request (checks.yml), so confirm does not run it: its checks wait reads CI's verdict. The preview passes `n` and
     skips it when the head's CI reads green; on any other read (red, pending, unknown) it runs, so the preview names the finding. With no `n`
     (the pre-ready run) it always runs.
+    A draft runs no Retire test: each close that names one is deferred to the ready PR's CI step, printed per slug, and returned as a list of slugs (empty for a ready PR).
     A finding, red or unknown or prose, refuses. No reason flag lifts it. A cited run is judged against the PR head, never the worktree
     HEAD: the claim commit goes on top of the PR head, and a run on the head is still the run of this PR."""
     if n is not None and host.head_state(n) == "green":
-        return
+        return []
     debt = load_debt_retire()
+    deferred = []
     try:
-        found = debt.check(wt, base_ref, info["head"], pr_body=info.get("body", ""), run_state=lambda url: host.cited_run(url), isolate=True)
+        found = debt.check(wt, base_ref, info["head"], pr_body=info.get("body", ""), run_state=lambda url: host.cited_run(url), isolate=True, draft=info["draft"], deferred=deferred)
     except debt.Unknown as e:
         raise Unread(f"the debt-close check could not read the history: {e}\n{DEBT_CITE}")
     if found:
@@ -568,6 +572,9 @@ def debt_check(wt, base_ref, host, info, n=None):
         if all(f.kind == "unknown" for f in found):  # each is a check that could not run: no finding is proven
             raise Unread(text)
         raise Dropped(text)
+    for slug in deferred:
+        say(f"merge: debt {slug}: {DEBT_DEFERRED}")
+    return deferred
 
 def say(*lines):
     text = "\n".join(lines)  # one line each: the preview is a list of indented lines, never one long line
@@ -3632,7 +3639,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     tmp, wt = open_worktree(root, info, base)  # the same tree confirm checks
     try:
         try:
-            undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"])
+            undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"], draft=info["draft"])
             debt_check(wt, f"origin/{base}", host, info, n)
             refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok)
             stale, stands = holds_base(wt, f"origin/{base}", info["head"])
@@ -3711,14 +3718,14 @@ def step_verdicts(raw, checks, state):
 def debt_verdict(wt, base, host, info):
     """-> (verdict, "debt retire", detail): the debt-close lint (debt_check) on the tree `wt`. Unread and any read that could not run are unknown, a Dropped finding is a fail."""
     try:
-        debt_check(wt, f"origin/{base}", host, info)
+        deferred = debt_check(wt, f"origin/{base}", host, info)
     except Unread as e:
         return "unknown", "debt retire", " ".join(str(e).split())
     except Dropped as e:
         return "fail", "debt retire", "\n".join(str(e).splitlines()[:-1]).strip()  # without the cite line
     except (Stop, subprocess.TimeoutExpired, OSError) as e:
         return "unknown", "debt retire", " ".join(str(e).split())
-    return "pass", "debt retire", ""
+    return "pass", "debt retire", "; ".join(f"debt {slug}: {DEBT_DEFERRED}" for slug in deferred)
 
 def clash_verdict(root, n, base, host, info):
     """-> (verdict, "open-PR clash", detail): the head of PR `n` against every other open PR on `base`, by cross_measure with scope PRE_READY_CLASH_SCOPE. A head that does not merge

@@ -801,7 +801,7 @@ def generated_page(cwd, head, paths, upstream="origin/main", tool=None):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def retire_excuses(cwd, upstream, head, pr_body, run_state, paths):
+def retire_excuses(cwd, upstream, head, pr_body, run_state, paths, draft=False):
     """{debt path: reason} for deleted debts among `paths` whose `Retire-run` cite the debt-close check accepts (decision
     debt-close-runs-retire). Fails closed: no run reader, an unreadable debt read, or a missing check excuses nothing."""
     if run_state is None:
@@ -809,13 +809,13 @@ def retire_excuses(cwd, upstream, head, pr_body, run_state, paths):
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import check_debt_retire  # lazy: it imports this module at its top
-        got = check_debt_retire.retired(cwd, upstream, head, pr_body, run_state, isolate=True, paths=paths)
+        got = check_debt_retire.retired(cwd, upstream, head, pr_body, run_state, isolate=True, paths=paths, draft=draft)
     except Exception:  # ImportError, its Unknown, any failed read: a finding stays
         return {}
     return {p: why for p, why in got.items() if p in paths}
 
 
-def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=None, retire_head=None):
+def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=None, retire_head=None, draft=False):
     """(problem lines, ALLOWED notes); no problems is green. Raises Unknown; for a merge of three or more parents it raises
     only after every other read, with the findings in .problems and .notes. Reads only the commits
     upstream gained after the branch was cut: from where the branch's own first-parent line left
@@ -855,7 +855,7 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
         ok = dict(ok, **{page: "the page is the generator's output for the head"})
     open_paths = {p for p, _ in items if p not in ok}
     if open_paths:
-        ok = dict(retire_excuses(cwd, upstream, retire_head or h, pr_body, run_state, open_paths), **ok)
+        ok = dict(retire_excuses(cwd, upstream, retire_head or h, pr_body, run_state, open_paths, draft), **ok)
     bad, notes = judge(items, ok)
     notes += misplaced(cwd, "%s..%s" % (upstream, h)) if bad else []
     if octopus:

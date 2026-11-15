@@ -226,8 +226,10 @@ def closes(wt, base_ref, head):
     return debt, closed, head, mb, tracked
 
 
-def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout):
-    """The one judgment of a closed debt: a Finding, None when its Retire holds, or SKIP when the rename is no close."""
+def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout, draft=False, deferred=None):
+    """The one judgment of a closed debt: a Finding, None when its Retire holds, or SKIP when the rename is no close.
+    draft: a close that names a runnable test runs nothing here. Its slug goes in `deferred` and the answer is None: the ready PR's CI step runs the test.
+    With no `deferred` list the deferral has nowhere to be recorded, so the close is an unknown finding, never a silent pass."""
     slug = os.path.basename(old)[:-3]
     try:
         lines = records.show(wt, base_ref, old)  # the base tip's Retire, the one the base holds now
@@ -237,6 +239,11 @@ def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_stat
     if new != old and debt(new) and text == retire_text(records.show(wt, head, new)):
         return SKIP
     todo = spans(text, tracked)
+    if todo and draft:
+        if deferred is None:
+            return Finding(slug, "unknown", "debt %s: its Retire check is deferred on a draft, and no list was given to record the deferral. Retire: %s" % (slug, text))
+        deferred.append(slug)
+        return None
     if todo:
         got = None
         for span in todo:
@@ -265,11 +272,13 @@ def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_stat
     return Finding(slug, *got)
 
 
-def check(wt, base_ref, head="HEAD", timeout=TIMEOUT, pr_body="", run_state=None, isolate=False):
+def check(wt, base_ref, head="HEAD", timeout=TIMEOUT, pr_body="", run_state=None, isolate=False, draft=False, deferred=None):
     """[Finding] for each debt that `head` closes against `base_ref` and whose Retire step does not hold. Raises Unknown.
     run_state(url) -> (conclusion, head sha) of a workflow run, or raises.
     isolate: run each test in its own scratch worktree of `head` (the merge tool and the CLI do), so nothing it writes reaches `wt` or its main checkout but through a linked `node_modules` (link_packages);
-    off, a test runs in `wt` itself."""
+    off, a test runs in `wt` itself.
+    draft: no close runs a Retire test, because the ready PR's CI step judges every close. The slug of each close deferred this way is appended to `deferred`.
+    A prose close, a cited run and a rename that is no close are judged as on a ready PR."""
     got = closes(wt, base_ref, head)
     if not got:
         return []
@@ -277,16 +286,17 @@ def check(wt, base_ref, head="HEAD", timeout=TIMEOUT, pr_body="", run_state=None
     cited = cites(pr_body)
     found = []
     for old, new in closed:
-        one = judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout)
+        one = judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout, draft, deferred)
         if isinstance(one, Finding):
             found.append(one)
     return found
 
 
-def retired(wt, base_ref, head="HEAD", pr_body="", run_state=None, isolate=False, timeout=TIMEOUT, paths=None):
+def retired(wt, base_ref, head="HEAD", pr_body="", run_state=None, isolate=False, timeout=TIMEOUT, paths=None, draft=False):
     """{debt path at base: reason} for each deleted debt whose slug the PR body cites and whose judgment gives no Finding (the
     silent-undo check excuses that path's delete). A rename out of the folder is no delete: the file's lines live on at the new
     path. paths, when given, limits the judged closes: an unflagged or uncited close is never judged, so its run is never read.
+    draft: a close that names a runnable test is deferred to CI, not proven, so it excuses no delete.
     Raises Unknown."""
     cited = cites(pr_body)
     got = closes(wt, base_ref, head) if cited else None
@@ -296,7 +306,7 @@ def retired(wt, base_ref, head="HEAD", pr_body="", run_state=None, isolate=False
     res = {}
     for old, new in closed:
         slug = os.path.basename(old)[:-3]
-        if new == old and slug in cited and (paths is None or old in paths) and judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout) is None:
+        if new == old and slug in cited and (paths is None or old in paths) and judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout, draft) is None:
             res[old] = "%s: %s -- %s, the debt-close check holds" % (CITE, slug, cited[slug])
     return res
 
