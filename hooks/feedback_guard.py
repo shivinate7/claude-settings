@@ -252,7 +252,7 @@ LINK_REASON = (
     "Page link not printed: this turn wrote to the page, and the last reply names no link to it. End the"  # glossary-ok: the skill's own name, below
     " last reply with the page link as one line, %s, then stop (waiting-page skill, section \"Print the page"  # glossary-ok: the skill's own name
     " link\").")
-LINK_CITE = " (roadmap step surface-page-link-in-chat)"
+LINK_CITE = " (rule questions-go-to-owner, roadmap step surface-page-link-in-chat)"
 LINK_FORM = "https://claude.ai/artifact/%s"  # the form the reason names, with the page id from layout
 ONCE_HOME = "once:"  # the home prefix of a [note] that records a one-shot approval: `once:<act>`
 STANDING_HOMES = "a [ruling] item whose home is a tracked file, or a [page] item `page:<n>` with its send"
@@ -1595,13 +1595,16 @@ def main():
         except Exception as e:  # advisory: a crash passes, and says so
             ln_reason, ln_note = None, FAIL_OPEN_LINK % (" ".join(str(e).split()) or type(e).__name__)
         out = inbox_stop(hook)
-        blocks = ([ex_reason + EXPORT_CITE] if ex_reason else []) + ([ln_reason + LINK_CITE] if ln_reason else [])
         notes = [n for n in (ex_note, ln_note) if n]
-        if blocks and hook.get("stop_hook_active"):
-            notes += [b.rsplit(" (", 1)[0] for b in blocks]  # no second block; the owner still reads it
-        elif blocks:
-            prior = out.get("reason")
-            out.update(decision="block", reason=(prior + " " if prior else "") + " ".join(blocks))
+        lead = (out["reason"] + " ") if out.get("reason") else ""
+        if (ex_reason or ln_reason) and hook.get("stop_hook_active"):
+            notes += [r for r in (ex_reason, ln_reason) if r]  # no second block; the owner still reads it
+        elif ex_reason and ln_reason:  # one site per case, so each names its own cite (the cite ratchet reads each)
+            out.update(decision="block", reason=lead + ex_reason + EXPORT_CITE + " " + ln_reason + LINK_CITE)
+        elif ex_reason:
+            out.update(decision="block", reason=lead + ex_reason + EXPORT_CITE)
+        elif ln_reason:
+            out.update(decision="block", reason=lead + ln_reason + LINK_CITE)
         if notes:
             out["systemMessage"] = " ".join(filter(None, [out.get("systemMessage")] + notes))
         if out:
