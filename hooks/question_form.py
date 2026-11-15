@@ -1442,12 +1442,6 @@ def pick_letter_hit(data) -> str:
     return ""
 
 
-def pick_letter_reason(matched) -> str:
-    """The deny reason of rule pick-letter-matches-label: its fixed text and the matched text, which names the label and
-    its real letter. refuse() prints the reason only, so the matched text goes into it here."""
-    return PICK_LETTER_REASON + " " + str(matched)
-
-
 # ------------------------------------------------------------------ the page's option letters mean the chat's
 #
 # docs/decisions/option-keys-are-letters.md, rule `option-labels-match-chat`, built against a named incident
@@ -1893,7 +1887,7 @@ PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "pr
                 "item-field-page-only": PAGE_ONLY_REASON,
                 DEPARTS_RULE: PAGE_DEPARTS_REASON,
                 "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON,
-                LABELS_RULE: LABELS_REASON, FROZEN_RULE: FROZEN_REASON}
+                LABELS_RULE: LABELS_REASON, FROZEN_RULE: FROZEN_REASON, PICK_LETTER_RULE: PICK_LETTER_REASON}
 CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Write the Problem line as "
                      "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s. "
                      "(decision owner-judge-test, a decision reaches the owner only when he can judge it)"

@@ -18,9 +18,8 @@ Two layers, one file:
         The letter is checked on the matched text only: the static part of a reason carries standalone letters, so a
         letter in the reason proves nothing.
 
-Red on the round-1 build (82a58829): the spelling forms of section 4 pass unrefused, the reason still carries the reword
-remedy, and the record names neither the no-options limit nor the shared-tool ruling. Each pass case is a control and stays
-green there.
+Section 4 pins the spelling forms (tails, quotes, a bold letter, a line break), a reason that gives no reword remedy, and
+a record that names the no-options limit and the shared-tool ruling. Each pass case is a control.
 
 Standard library only, no test runner. Run from the repository root:
 
@@ -257,7 +256,7 @@ def case_docs_name_the_rule():
           "docs/decisions/option-keys-are-letters.md does not name the rule")
 
 
-# ------------------------------------------------------------------ 4. round 2: the spelling forms, the reason, the record
+# ------------------------------------------------------------------ 4. the spelling forms, the reason, the record
 
 SHARED_TOOL = "a repo changes to fit a shared tool"
 QUESTIONS_DOC = os.path.join(tcj.REPO, "docs", "decisions", "questions-go-to-owner.md")

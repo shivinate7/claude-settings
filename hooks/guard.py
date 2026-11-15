@@ -7214,7 +7214,7 @@ def judge(payload) -> None:
         if rule == "option-letters-frozen":
             refuse(tool, "deny", "option-letters-frozen", question_form.PAGE_REASONS["option-letters-frozen"], matched)
         if rule == "pick-letter-matches-label":
-            refuse(tool, "deny", "pick-letter-matches-label", question_form.pick_letter_reason(matched), matched)
+            refuse(tool, "deny", "pick-letter-matches-label", question_form.PAGE_REASONS["pick-letter-matches-label"] + " " + str(matched), matched)
         if rule == "rework-off-page":
             refuse(tool, "deny", "rework-off-page", question_form.PAGE_REASONS["rework-off-page"], matched)
         if rule == "question-form":
