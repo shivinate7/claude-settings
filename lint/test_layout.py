@@ -752,7 +752,7 @@ class SetWaitingPage(Tree):
         return run([os.path.join(LINT, "layout.py"), "set-waiting-page", root or self.tree, url or self.URL, account],
                    cwd or self.sub)
 
-    def test_set_waiting_page_has_no_default_account_label(self):
+    def test_set_page_has_no_default_account_label(self):
         """The account label is a required argument: a call with no label is a TypeError, and writes nothing."""
         with self.assertRaises(TypeError, msg="set_waiting_page(root, url) took no account label: the call did not raise TypeError"):
             self.layout.set_waiting_page(self.tree, self.URL)
@@ -819,7 +819,7 @@ class SetWaitingPage(Tree):
 class Registry(Tree):
     """The artifacts registry: each claude.ai artifact a repo holds is one entry under "artifacts" in its extras file.
     An entry's claude.ai links are a list, one {account, url} per account label; a session opens the link of its own
-    account (owner ruling, 2026-11-15 13:16 CST). Each entry has its git export path, required. The waiting page is the
+    account. Each entry has its git export path, required. The waiting page is the
     entry whose role is "waiting-page". The old "waiting-page" key stays a fallback after it."""
     PAGE = "https://claude.ai/artifact/page01"
     OLD = "https://claude.ai/artifact/old001"
@@ -1018,9 +1018,8 @@ class Registry(Tree):
                          "an id of 32 characters was refused")
 
     def test_an_entry_with_no_export_key_is_refused_and_names_export(self):
-        """Owner ruling, 2026-11-15 13:16 CST: the git export path of each entry is required, and `false` holds it. This
-        replaces the old default (artifacts/<id>, or the waiting-data folder for the waiting page), which the earlier case of
-        this name expected when no export key was set."""
+        """The git export path of each entry is required, and `false` holds it. An entry with no export key is refused,
+        and the refusal names the entry."""
         for entry in (self.queue_entry(), self.page_entry()):
             entry = dict(entry)
             del entry["export"]
@@ -1071,7 +1070,7 @@ class Registry(Tree):
 
     def test_an_entry_with_its_export_but_no_collections_still_needs_collections(self):
         """Control: an entry with a path and no collections is still refused for its collections. Its export path is given,
-        since the path is required (owner ruling, 2026-11-15 13:16 CST), so the collections are the refusal left."""
+        since the path is required, so the collections are the refusal left."""
         self.assertLinkShapeReads()
         self.registry([{"id": "ext001", "role": "page", "export": "artifacts/ext001",
                         "links": [{"account": "other-account", "url": "https://claude.ai/artifact/ext001"}]}])
@@ -1123,34 +1122,34 @@ class Registry(Tree):
         self.registry([self.queue_entry()])
         self.assertEqual(self.waiting(), "unknown", "a queue-page entry was read as the waiting page")
 
-    def test_a_waiting_page_link_that_is_not_an_artifact_link_is_an_error(self):
+    def test_a_page_link_that_is_not_an_artifact_link_is_an_error(self):
         self.assertLinkShapeReads()
         self.registry([self.page_entry(links=[{"account": "work", "url": "https://example.com/x"}])])
         with self.assertRaises(self.layout.LayoutError, msg="a waiting-page link that is not an artifact link was not an error"):
             self.layout.waiting_page(self.tree)
 
-    def test_waiting_page_reads_the_link_of_the_account_asked_for(self):
+    def test_page_reads_the_link_of_the_account_asked_for(self):
         self.registry([self.page_entry(links=[{"account": "work", "url": self.PAGE},
                                               {"account": "outlook", "url": self.OTHER}])])
         self.assertTakes(self.layout.waiting_page, "account")
         self.assertEqual(self.waiting(account="outlook"), self.OTHER, "the link of the account asked for was not read")
 
-    def test_waiting_page_without_an_account_reads_the_first_link(self):
+    def test_page_without_an_account_reads_the_first_link(self):
         self.registry([self.page_entry(links=[{"account": "work", "url": self.PAGE},
                                               {"account": "outlook", "url": self.OTHER}])])
         self.assertEqual(self.waiting(), self.PAGE, "with no account the first link was not read")
 
-    def test_waiting_page_for_an_account_with_no_link_reads_the_first_link(self):
+    def test_page_for_an_account_with_no_link_reads_the_first_link(self):
         self.registry([self.page_entry(links=[{"account": "work", "url": self.PAGE},
                                               {"account": "outlook", "url": self.OTHER}])])
         self.assertTakes(self.layout.waiting_page, "account")
         self.assertEqual(self.waiting(account="gmail"), self.PAGE, "an account with no link did not read the first link")
 
-    def test_waiting_page_with_no_link_at_all_is_unknown(self):
+    def test_page_with_no_link_at_all_is_unknown(self):
         self.registry([self.page_entry(links=[])])
         self.assertEqual(self.waiting(), "unknown", "a waiting-page entry with no link was read as a page")
 
-    def test_is_waiting_page_url_is_true_for_any_link_of_the_waiting_entry(self):
+    def test_is_page_url_is_true_for_any_link_of_the_waiting_entry(self):
         self.registry([self.page_entry(links=[{"account": "work", "url": self.PAGE},
                                               {"account": "outlook", "url": self.OTHER}])])
         for url in (self.PAGE, self.OTHER, self.OTHER.replace("/artifact/", "/code/artifact/")):
@@ -1158,12 +1157,12 @@ class Registry(Tree):
                 self.assertTrue(self.call(self.layout.is_waiting_page_url, self.tree, url),
                                 "a link of the waiting entry is not the waiting page: %s" % url)
 
-    def test_is_waiting_page_url_is_false_for_a_link_of_another_entry(self):
+    def test_is_page_url_is_false_for_a_link_of_another_entry(self):
         self.registry([self.page_entry(), self.queue_entry()])
         self.assertFalse(self.call(self.layout.is_waiting_page_url, self.tree, self.QUEUE),
                          "a link of the queue entry was read as the waiting page")
 
-    def test_set_waiting_page_adds_the_named_accounts_link_and_keeps_the_others(self):
+    def test_set_page_adds_the_named_accounts_link_and_keeps_the_others(self):
         self.registry([self.page_entry()])
         self.assertTakes(self.layout.set_waiting_page, "account")
         self.assertTrue(self.call(self.layout.set_waiting_page, self.tree, self.OTHER, account="outlook"),
@@ -1174,13 +1173,13 @@ class Registry(Tree):
         self.assertNotIn("url", stored, "set_waiting_page wrote an entry-level url")
         self.assertNotIn("account", stored, "set_waiting_page wrote an entry-level account")
 
-    def test_set_waiting_page_with_the_current_label_writes_the_current_account(self):
+    def test_set_page_with_the_current_label_writes_the_current_account(self):
         self.registry([self.page_entry(links=[])])
         self.assertTrue(self.call(self.layout.set_waiting_page, self.tree, self.OTHER, "current"), "the link was not written")
         self.assertEqual(self.stored("page01")["links"], [{"account": "current", "url": self.OTHER}],
                          "with no account the link was not written as the current account")
 
-    def test_set_waiting_page_updates_only_the_named_accounts_link(self):
+    def test_set_page_updates_only_the_named_accounts_link(self):
         self.registry([self.page_entry(links=[{"account": "work", "url": self.PAGE},
                                               {"account": "outlook", "url": self.OLD}])])
         self.assertTakes(self.layout.set_waiting_page, "account")
@@ -1190,7 +1189,7 @@ class Registry(Tree):
                                                           {"account": "outlook", "url": self.OTHER}],
                          "the other account's link changed, or the named one did not")
 
-    def test_set_waiting_page_for_the_same_artifact_on_that_account_is_false_and_writes_nothing(self):
+    def test_set_page_for_the_same_artifact_on_that_account_is_false_and_writes_nothing(self):
         self.registry([self.page_entry()])
         self.assertTakes(self.layout.set_waiting_page, "account")
         extras = os.path.join(self.tree, *EXTRAS.split("/"))
@@ -1202,7 +1201,7 @@ class Registry(Tree):
         with open(extras, "rb") as handle:
             self.assertEqual(handle.read(), before, "the same artifact on the same account rewrote the extras file")
 
-    def test_set_waiting_page_refuses_an_email_as_account_and_writes_nothing(self):
+    def test_set_page_refuses_an_email_as_account_and_writes_nothing(self):
         self.registry([self.page_entry()])
         self.assertTakes(self.layout.set_waiting_page, "account")
         extras = os.path.join(self.tree, *EXTRAS.split("/"))

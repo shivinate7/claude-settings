@@ -426,8 +426,8 @@ class NotCounted(Base):
         r = self.check(self.repo(artifacts=entries), self.pair(), pick="a")
         self.assertNotCounted(r, "page URL is not the registered waiting page")
 
-    def test_page_url_that_is_another_account_link_of_the_waiting_page_counted(self):
-        """The waiting entry holds one link per account (owner ruling, 2026-11-15 13:16 CST): the link of another account is
+    def test_page_url_that_is_another_account_link_of_the_page_counted(self):
+        """The waiting entry holds one link per account. The link of another account is
         the waiting page too, so a grant made from that account counts."""
         entries = registry()
         entries[1] = dict(entries[1], links=[{"account": "main", "url": PAGE_URL}, {"account": "outlook", "url": OUTLOOK_URL}])
