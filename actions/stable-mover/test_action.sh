@@ -154,6 +154,10 @@ run_mover "$ws" "$green" success schedule false
 if [ "$mover_rc" -eq 2 ]; then ok "an unreadable origin exits 2 (UNKNOWN)"
 else fail "unreadable origin: the mover exited $mover_rc, wanted 2 (UNKNOWN)"; fi
 
+# The proof step (action.yml, step `proof`) decides which push runs count as proven. Its cases run the step as the runner does,
+# from test_proof_step.py, which takes this run folder.
+if python3 "$here/test_proof_step.py" "$work"; then ok "proof step cases"; else fail "proof step cases (the lines above name them)"; fi
+
 if [ "$fails" -eq 0 ]; then echo "stable-mover: all cases pass"; exit 0; fi
 echo "stable-mover: $fails failed"
 exit 1

@@ -10,7 +10,8 @@ workflow-level group lets a skipped pull request run cancel a pending green move
 
 FileCases reads .github/workflows/stable.yml of this checkout. ScannerCases feeds fixture text to the same readers, so
 a comment that names a key, a block body that holds one, and a lone quote in text do not change what is found.
-The job block and the folded `if:` come from lint/workflow_steps.py, the one home of the workflow reader.
+The job block and the folded `if:` come from lint/workflow_steps.py, the one home of the workflow reader. CallerWire reads the
+mover step's `with:` (head-sha, conclusion, event, run-id) from the same reader: the run facts the mover judges (item 880).
 """
 import os
 import re
@@ -19,7 +20,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from workflow_steps import block_scalar, drop_comment, job_block  # noqa: E402  the one home of the workflow reader
+from workflow_steps import block_scalar, drop_comment, job_block, step_blocks, step_key, step_with  # noqa: E402  the one home of the workflow reader
 
 WORKFLOW = os.path.join(HERE, "..", ".github", "workflows", "stable.yml")
 JOB = "move"
@@ -161,6 +162,62 @@ class ScannerCases(unittest.TestCase):
         text = workflow("jobs:", "  move:", "    runs-on: ubuntu-latest", "  other:", "    concurrency:",
                         "      group: y", "    runs-on: ubuntu-latest")
         self.assertIsNone(job_concurrency(job_block(text, JOB)))
+
+
+MOVER_USES = "$/actions/stable-mover"
+
+
+def mover_with(text):
+    """The `with:` of the move job's step that uses the stable mover, as {name: raw value}. Read by the step reader of
+    lint/workflow_steps.py, so a comment, a quoted value or a sibling step's key is never the mover's."""
+    block = job_block(text, JOB)
+    if block is None:
+        return None
+    steps = [s for s in step_blocks(block) if step_key(s, "uses") == MOVER_USES]
+    return step_with(steps[0]) if len(steps) == 1 else None
+
+
+class CallerWire(unittest.TestCase):
+    """The run facts the caller passes the mover (owner page item 880, 11:53 CST Nov 15). The mover refuses or moves stable on
+    these: a hard-coded or missing event or run id lets a Linux-only push run move stable, or reads the wrong run's jobs."""
+
+    def mover_inputs(self):
+        with open(WORKFLOW, encoding="utf-8") as f:
+            with_ = mover_with(f.read())
+        self.assertIsNotNone(with_, "scope: the move job has no single step that uses %s, so no case judges the mover's inputs" % MOVER_USES)
+        self.assertTrue(with_, "scope: the mover step has no with: block, so no case judges the mover's inputs")
+        return with_
+
+    def test_the_mover_step_passes_each_run_fact_from_the_workflow_run(self):
+        with_ = self.mover_inputs()
+        for key, want in (("head-sha", "${{ github.event.workflow_run.head_sha }}"),
+                          ("conclusion", "${{ github.event.workflow_run.conclusion }}"),
+                          ("event", "${{ github.event.workflow_run.event }}"),
+                          ("run-id", "${{ github.event.workflow_run.id }}")):
+            with self.subTest(key=key):
+                self.assertIn(key, with_, "the mover step has no `%s:` input, so the mover cannot judge the run it is given" % key)
+                self.assertEqual(with_[key], want,
+                                 "the mover's %s input must come from the workflow run, and it is %r" % (key, with_.get(key)))
+
+
+class WithReaderCases(unittest.TestCase):
+    """The mover's `with:` reader on fixture text: a commented key and a lone quote in a comment are text, not inputs."""
+
+    def test_a_commented_with_key_is_not_an_input(self):
+        text = workflow("jobs:", "  move:", "    steps:", "      - name: m", "        uses: $/actions/stable-mover", "        with:",
+                        "          # event: push", "          head-sha: ${{ github.event.workflow_run.head_sha }}")
+        with_ = mover_with(text)
+        self.assertIsNotNone(with_, "scope: the fixture has no mover step, so the case proves nothing")
+        self.assertNotIn("event", with_, "a commented `event:` line is text, so the mover has no event input in this fixture")
+
+    def test_a_lone_quote_in_an_inline_comment_is_dropped_from_the_input(self):
+        text = workflow("jobs:", "  move:", "    steps:", "      - name: m", "        uses: $/actions/stable-mover", "        with:",
+                        "          run-id: ${{ github.event.workflow_run.id }}  # don't read another run",
+                        "          event: ${{ github.event.workflow_run.event }}")
+        with_ = mover_with(text)
+        self.assertIsNotNone(with_, "scope: the fixture has no mover step, so the case proves nothing")
+        self.assertEqual(with_.get("run-id"), "${{ github.event.workflow_run.id }}",
+                         "the inline comment holds a lone quote, which is text, and the input value ends before the comment")
 
 
 if __name__ == "__main__":
