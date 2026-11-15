@@ -2145,7 +2145,7 @@ def case_pick_chatter_passes_untouched():
 
 
 def case_pick_call_and_meeting_holds_are_picks():
-    # A hold of the call or the meeting is a pick unless the text is only a clock time (lane pick on a round-1 review finding). Each text
+    # A hold of the call or the meeting is a pick unless the text is only a clock time. Each text
     # below names plan R49, a cite, so it reaches the judge once with R49's text. Its uncited twin, with the mailbox rule in
     # place of R49, is denied in code with no model call.
     control = pick_run("coordinator hold: keep the lane parked until the run ends.")
