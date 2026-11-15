@@ -8,9 +8,7 @@ The suite contract the builder implements:
   A bad value (0/2, 3/2, x, or an empty value) exits non-zero, writes a message to stderr that names INSTALL_SRC_SHARD,
   and selects no case.
 
-Every suite call here passes --list, so no case runs. On the old code `--list` is a name filter that
-matches no case, which is why the shard cases are red there. A bad value run without --list would run
-all 174 cases on the old code.
+Every suite call here passes --list, so no case runs. These tests check which cases a run selects, not their results.
 
 Run with:  python3 lint/test_install_src_shards.py -v
 """
@@ -34,7 +32,7 @@ RUN_CMD = "python3 lint/test_install_src_shards.py"  # the run line of the job c
 SHARD_ENV = "INSTALL_SRC_SHARD"
 # Env the suite reads from its caller. Stripped from every call, so the caller's shell cannot change what a call selects.
 STRIPPED_ENV = (SHARD_ENV, "INSTALL_SH_UNDER_TEST", "SESSION_START_SH_UNDER_TEST")
-# A run line may repeat only as a named exception: name -> reason. Empty on ae13fcab, where no run line repeats.
+# A run line may repeat only as a named exception: name -> reason. Empty: no run line repeats.
 KNOWN_DUPLICATE_RUNS = {}
 NAME = re.compile(r"[A-Za-z_]\w*")
 
@@ -55,7 +53,7 @@ def defined_functions():
 def list_cases(shard=None, suite=SUITE):
     """The suite run with --list, under INSTALL_SRC_SHARD=shard when given. -> (exit code, case names, stdout, stderr).
 
-    Names are the identifier lines of stdout. The summary line the old code prints is not one. `suite` is the script run.
+    Names are the identifier lines of stdout. A summary line is not one. `suite` is the script run.
     """
     env = {k: v for k, v in os.environ.items() if k not in STRIPPED_ENV}
     if shard is not None:
@@ -68,13 +66,13 @@ def list_cases(shard=None, suite=SUITE):
 
 class ShardListsEveryCaseOnce(unittest.TestCase):
     def test_every_run_line_names_one_defined_function(self):
-        # Control, green on the old code: the run list and the functions it names agree.
+        # Each run line names a function the suite defines.
         runs = run_names()
         self.assertTrue(runs, "the suite's run_cases lists no case")
         self.assertEqual(sorted(set(runs) - defined_functions()), [], "a run line names no defined function")
 
     def test_a_run_line_repeats_only_as_a_named_exception(self):
-        # Control, green on the old code: no run line repeats, and KNOWN_DUPLICATE_RUNS is empty.
+        # A run line repeats only when KNOWN_DUPLICATE_RUNS names it.
         counts = Counter(run_names())
         self.assertEqual(sorted(n for n, c in counts.items() if c > 1), sorted(KNOWN_DUPLICATE_RUNS),
                          "a run line repeats without a named exception in KNOWN_DUPLICATE_RUNS")
@@ -146,7 +144,7 @@ class ListCountsOnlyExecutedCalls(unittest.TestCase):
     GHOSTS = "\n: <<'GHOST_HEREDOC'\nrun ghost_heredoc\nGHOST_HEREDOC\n: '\nrun ghost_quoted\n'\n"
 
     def test_a_run_word_in_a_heredoc_or_quoted_block_is_not_listed(self):
-        # Red on 7c0ddeb8: --list read every `run X` text line, so both ghosts were listed (176 names, not 174).
+        # --list names only the calls the suite makes. A `run` word in a heredoc or a quoted block is text, not a call.
         # The oracle is the real suite's --list, which names the calls it makes and no others.
         with open(SUITE, encoding="utf-8") as f:
             text = f.read()
