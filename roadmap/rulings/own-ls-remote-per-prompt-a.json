@@ -1,0 +1,11 @@
+{
+ "id": "own-ls-remote-per-prompt-a",
+ "at": "2026-11-15T11:33:40-06:00",
+ "title": "One ls-remote per cloud prompt is accepted; a follow-up lane adds decision text and a cost test.",
+ "ruling": "Owner, page item 870 (pick-ls-remote-per-prompt), option a, \"Accept one ls-remote per cloud prompt; add decision text and a cost test in a follow-up lane (recommended by the coordinator and the lane)\", saved on the page at 11:33 CST Nov 15 (2026-11-15T17:33:40Z), typed on the page, no note. ACT COVERED: accepting one ls-remote per cloud prompt (hooks/stale_install.py:123), and adding decision text and a cost test in a follow-up lane. The lane start is the coordinator's act, not started at filing. Covers that act only: no other change, no other lane, no merge. Item owner: lane cloud-hooks-stale-copy (session_013NEJKzpBdiBYXja9cj5CoP) via the coordinator. Home: PR 3487; step merge-mail-refreshes-sessions; hooks/stale_install.py:123; step stable-refresh-mid-session (the per-prompt read) also relevant. Reopens if the owner says otherwise.",
+ "quote": "a",
+ "source": "waiting/answers/pick-ls-remote-per-prompt.json (2026-11-15T17:33:40Z, choice a), read by triage; owner typed on the page.",
+ "status": "open",
+ "supersedes_none": "supersedes no earlier ruling: grep of roadmap/rulings for step merge-mail-refreshes-sessions, stable-refresh-mid-session, item 870 and ls-remote found none",
+ "step": "merge-mail-refreshes-sessions"
+}

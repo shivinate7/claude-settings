@@ -1,0 +1,11 @@
+{
+ "id": "own-reinstall-backoff-b",
+ "at": "2026-11-15T11:33:40-06:00",
+ "title": "A reinstall backoff is built in a follow-up lane now.",
+ "ruling": "Owner, page item 871 (pick-reinstall-no-backoff), option b, \"Build a backoff in a follow-up lane now\", saved on the page at 11:33 CST Nov 15 (2026-11-15T17:33:40Z), typed on the page, no note. ACT COVERED: building a reinstall backoff in a follow-up lane now (debt reinstall-no-backoff). The lane start is the coordinator's act, not started at filing. Covers that act only: no other change, no other lane, no merge. Item owner: lane cloud-hooks-stale-copy (session_013NEJKzpBdiBYXja9cj5CoP) via the coordinator. Home: PR 3487; step merge-mail-refreshes-sessions; debt reinstall-no-backoff; step install-record-after-warning is kin. Reopens if the owner says otherwise.",
+ "quote": "b",
+ "source": "waiting/answers/pick-reinstall-no-backoff.json (2026-11-15T17:33:40Z, choice b), read by triage; owner typed on the page.",
+ "status": "open",
+ "supersedes_none": "supersedes no earlier ruling: grep of roadmap/rulings for step merge-mail-refreshes-sessions, install-record-after-warning, item 871 and debt reinstall-no-backoff found none",
+ "step": "merge-mail-refreshes-sessions"
+}

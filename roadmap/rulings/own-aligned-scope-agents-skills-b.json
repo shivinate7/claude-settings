@@ -1,0 +1,11 @@
+{
+ "id": "own-aligned-scope-agents-skills-b",
+ "at": "2026-11-15T11:33:40-06:00",
+ "title": "The aligned check also covers agents/ and skills/ Markdown, in a follow-up lane.",
+ "ruling": "Owner, page item 872 (pick-aligned-scope-agents-skills), option b, \"Add agents/ and skills/ Markdown to the check in a follow-up lane\", saved on the page at 11:33 CST Nov 15 (2026-11-15T17:33:40Z), typed on the page, no note. ACT COVERED: adding agents/ and skills/ Markdown to the rules-decisions-aligned check, as one follow-up lane. The lane start is the coordinator's act (item owner), not started at filing. Covers that act only: no other change, no other lane, no merge. Item owner: lane rules-decisions-aligned (session_013NEJKzbYsMZZPNx5LnoNMN) via the coordinator. Home: PR 3492 (merged); debt aligned-skips-agents-skills; step rules-decisions-aligned. Reopens if the owner says otherwise.",
+ "quote": "b",
+ "source": "waiting/answers/pick-aligned-scope-agents-skills.json (2026-11-15T17:33:40Z, choice b), read by triage; owner typed on the page.",
+ "status": "open",
+ "supersedes_none": "supersedes no earlier ruling: grep of roadmap/rulings for step rules-decisions-aligned, item 872 and debt aligned-skips-agents-skills found none",
+ "step": "rules-decisions-aligned"
+}

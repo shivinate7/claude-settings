@@ -1,0 +1,11 @@
+{
+ "id": "own-ruling-names-overtaken-a",
+ "at": "2026-11-15T11:33:40-06:00",
+ "title": "The check requires the overtaken ruling's id in `supersedes`.",
+ "ruling": "Owner, page item 877 (ruling-names-overtaken), option a, \"Require the overtaken ruling's id in `supersedes` (recommended by the coordinator)\", saved on the page at 11:33 CST Nov 15 (2026-11-15T17:33:40Z), typed on the page, owner's note, typed on the page, verbatim: \"what diffs old prs from new ones in a sense to confirm they dont just share a similar name\". ACT COVERED: requiring the overtaken ruling's id in `supersedes` in the check of step record-vs-later-ruling-check. Reading of the note: unread (triage does not know what it asks; the consultant has been asked). The note may narrow the act, so it is not applied until read. Covers that act only: no other change, no other lane, no merge. Item owner: the coordinator (session_013NEJL1gw6EdrSyvHkTUEx6). Home: step record-vs-later-ruling-check; decision ruled-store-one-home; lane record-vs-later-ruling-check (PR 3507). Reopens if the owner says otherwise.",
+ "quote": "a",
+ "source": "waiting/answers/ruling-names-overtaken.json (2026-11-15T17:33:40Z, choice a), read by triage; owner typed on the page.",
+ "status": "open",
+ "supersedes_none": "supersedes no earlier ruling: grep of roadmap/rulings for step record-vs-later-ruling-check, decision ruled-store-one-home and item 877 found none",
+ "step": "record-vs-later-ruling-check"
+}

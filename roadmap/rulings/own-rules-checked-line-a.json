@@ -1,0 +1,11 @@
+{
+ "id": "own-rules-checked-line-a",
+ "at": "2026-11-15T11:33:40-06:00",
+ "title": "The required Rules checked line stays as built.",
+ "ruling": "Owner, page item 873 (pick-rules-checked-line-friction), option a, \"Keep the required Rules checked line as built\", saved on the page at 11:33 CST Nov 15 (2026-11-15T17:33:40Z), typed on the page, owner's note, typed on the page, verbatim: \"and remember it shudnt check the rules only to defer to them its checking them to ensure the rot is cleaned deeply\". ACT COVERED: keeping the required Rules checked line as built in PR 3492. Triage's reading of the note (triage's, not the owner's; the consultant has been asked to confirm): the line exists to find and clean stale rules, not to excuse a change by pointing at them. Covers that act only: no other change, no other lane, no merge. Item owner: lane rules-decisions-aligned (session_013NEJKzbYsMZZPNx5LnoNMN) via the coordinator. Home: PR 3492; step rules-decisions-aligned. Reopens if the owner says otherwise.",
+ "quote": "a",
+ "source": "waiting/answers/pick-rules-checked-line-friction.json (2026-11-15T17:33:40Z, choice a), read by triage; owner typed on the page.",
+ "status": "open",
+ "supersedes_none": "supersedes no earlier ruling: grep of roadmap/rulings for step rules-decisions-aligned and item 873 found none",
+ "step": "rules-decisions-aligned"
+}

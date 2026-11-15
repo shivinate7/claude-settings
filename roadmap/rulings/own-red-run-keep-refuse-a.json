@@ -1,0 +1,11 @@
+{
+ "id": "own-red-run-keep-refuse-a",
+ "at": "2026-11-15T11:33:40-06:00",
+ "title": "The Red-run refusal stays as built; it does not become a warning.",
+ "ruling": "Owner, page item 875 (pick-red-run-warn-vs-refuse), option a, \"Keep refuse, as built (recommended by the coordinator)\", saved on the page at 11:33 CST Nov 15 (2026-11-15T17:33:40Z), typed on the page, no note. ACT COVERED: keeping main's refusal of a lone commit of test lines with no valid Red-run trailer, as built in PR 3496. Changes no code. Covers that act only: no other change, no other lane, no merge. Item owner: the coordinator (session_013NEJL1gw6EdrSyvHkTUEx6). Home: PR 3496 (merged earlier); step red-run-warn-before-commit. Reopens if the owner says otherwise.",
+ "quote": "a",
+ "source": "waiting/answers/pick-red-run-warn-vs-refuse.json (2026-11-15T17:33:40Z, choice a), read by triage; owner typed on the page.",
+ "status": "open",
+ "supersedes_none": "supersedes no earlier ruling: grep of roadmap/rulings for step red-run-warn-before-commit and item 875 found none",
+ "step": "red-run-warn-before-commit"
+}
