@@ -6586,11 +6586,10 @@ class ReadyChecksRun(unittest.TestCase):
         self.assertEqual(len(calls), 1, calls)  # precondition: one ci-job run for the one ready check
         self.assertNotIn("--pinned", calls[0], "the ready checks still pass --pinned, which ci-job no longer takes: %s" % calls[0])
 
-    def test_the_ready_checks_keep_their_step_names_and_base(self):  # the control: the argv --pinned joins is unchanged
+    def test_the_ready_checks_keep_their_step_names_and_base(self):
         calls = self.ci_job_calls(["check invariants", "records page"])
         self.assertEqual(len(calls), 1, calls)
-        argv = [a for a in calls[0][2:] if a != "--pinned"]
-        self.assertEqual(argv, ["checks", "--step", "check invariants", "--step", "records page", "--base", "origin/main"], calls[0])
+        self.assertEqual(calls[0][2:], ["checks", "--step", "check invariants", "--step", "records page", "--base", "origin/main"], calls[0])
 
 class ClaimSkipped(Env):
     """A base with no stamp kinds: the claim and the numbering check are skipped, and stamp.mjs never runs."""
