@@ -2840,17 +2840,22 @@ def case_str_replace_keeps_the_waiting_line():
 
 
 def case_recommended_list_is_the_multi_form():
-    # The list form holds the multi and ranked decisions: a list of distinct keys, each naming an option.
-    page("a recommended list that names every option, in order, passes", "set",
-         entry_of(rec_item(options=copy.deepcopy(PLAIN_OPTIONS), recommended=["a", "b"])), None)
-    page("a recommended list of one key passes", "set",
-         entry_of(rec_item(options=copy.deepcopy(PLAIN_OPTIONS), recommended=["b"])), None)
-    page("an empty recommended list is refused, naming the recommendation", "set",
-         entry_of(rec_item(options=copy.deepcopy(PLAIN_OPTIONS), recommended=[])), (FORM_RULE, "recommend"))
+    # The list form holds the multi and ranked decisions: a list of distinct keys, each naming an option. The page
+    # marks such an item with its drawn `multi` or `ranked` flag, so these cases carry the flag.
+    page("a multi item whose recommended list names every option, in order, passes", "set",
+         entry_of(rec_item(options=copy.deepcopy(PLAIN_OPTIONS), multi=True, recommended=["a", "b"])), None)
+    page("a multi item whose recommended list is one key passes", "set",
+         entry_of(rec_item(options=copy.deepcopy(PLAIN_OPTIONS), multi=True, recommended=["b"])), None)
+    page("a ranked item whose recommended list is in rank order passes", "set",
+         entry_of(rec_item(options=copy.deepcopy(PLAIN_OPTIONS), ranked=True, recommended=["b", "a"])), None)
+    page("an empty recommended list on a multi item is refused, naming the recommendation", "set",
+         entry_of(rec_item(options=copy.deepcopy(PLAIN_OPTIONS), multi=True, recommended=[])), (FORM_RULE, "recommend"))
     page("a recommended list that repeats a key is refused, naming the recommendation", "set",
-         entry_of(rec_item(options=copy.deepcopy(PLAIN_OPTIONS), recommended=["a", "a"])), (FORM_RULE, "recommend"))
+         entry_of(rec_item(options=copy.deepcopy(PLAIN_OPTIONS), multi=True, recommended=["a", "a"])),
+         (FORM_RULE, "recommend"))
     page("a recommended list that names an option not there is refused, naming the recommendation", "set",
-         entry_of(rec_item(options=copy.deepcopy(PLAIN_OPTIONS), recommended=["a", "z"])), (FORM_RULE, "recommend"))
+         entry_of(rec_item(options=copy.deepcopy(PLAIN_OPTIONS), multi=True, recommended=["a", "z"])),
+         (FORM_RULE, "recommend"))
 
 
 def case_recommend_exemptions_pass():
