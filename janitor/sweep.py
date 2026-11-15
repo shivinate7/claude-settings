@@ -525,16 +525,40 @@ def own_agent_lock_verdict(reason: str):
     if alive is not False:
         return None if alive is None else False
     holder = int(found.group(1))
-    current = os.getpid()
+    current, child = os.getpid(), None
     for _ in range(MAX_CLIMB):
         if current == holder:
-            return True
+            return True if child is None else _started_no_later(holder, child)
         if current <= 1:
             return False
-        current = _parent_pid(current)
+        child, current = current, _parent_pid(current)
         if current is None:
             return None
     return None
+
+
+def _start_ticks(pid: int):
+    """Field 22 of /proc/PID/stat (clock ticks since boot, 10 ms), or None where it cannot be read."""
+    try:
+        with open("/proc/%d/stat" % pid, encoding="utf-8") as handle:
+            return int(handle.read().rsplit(")", 1)[1].split()[22 - 3])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _started_no_later(parent: int, child: int):
+    """True when PARENT did not start after CHILD, so it can be CHILD's real parent. False when it
+    started later: Windows recycles a dead parent's pid to an unrelated, newer process (the same
+    order test as `_is_orphan_windows`). None when either start could not be read. `ps` times have
+    a one-second grain, so a parent and child started in one second tie on them; ticks break the
+    tie where /proc has them, and an unbroken tie reads as the real parent."""
+    starts = [git_reads._process_start_ms(pid) for pid in (parent, child)]
+    if any(start is None or start is git_reads.PROCESS_START_UNREADABLE for start in starts):
+        return None
+    if starts[0] != starts[1]:
+        return starts[0] < starts[1]
+    ticks = [_start_ticks(pid) for pid in (parent, child)]
+    return None in ticks or ticks[0] <= ticks[1]
 
 
 def _own_lock_ready(where: str, path: str, batch, idle):
