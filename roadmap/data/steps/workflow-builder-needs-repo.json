@@ -1,0 +1,14 @@
+{
+ "id": "workflow-builder-needs-repo",
+ "title": "A consultant workflow can build in claude-settings: its builder gets a worktree from a session whose cwd is not a repo",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Coordinator 01:18 CST Nov 15 (relayed; triage read no file, and the journal path it names does not exist in this container, so the findings are unread): consultant workflow wf_c68f11fe-182 confirmed 7 stale CLAUDE.md sentences (Sonnet diff plus refute pass). 3 are the round-3 sentences PR 3464 fixes; the other 4 went into lane settings-docs-stale-switch-text (coordinator's pick, undoable; the lane judges the weaker ones and lists owner calls). The gap: a consultant workflow cannot build in claude-settings. Its builder cannot make a worktree from the consultant's session: the hand-made-worktree guard refuses, EnterWorktree is refused in a subagent, and the cwd is /home/user, not a repo. So the workflow's fixes go nowhere. Related step resume-guard-workflow-agents mentions worktrees for workflow agents (not read for overlap). Triage grep of step file names found no step on this gap.",
+ "source": "Coordinator message 01:18 CST Nov 15; workflow journal path given, unread here.",
+ "note": "Filed 01:17 CST Nov 15 by triage. Todo, coordinator names the lane. Not built. Overlap with resume-guard-workflow-agents unchecked.",
+ "updatedAt": "2026-11-15T01:17:00-06:00"
+}
