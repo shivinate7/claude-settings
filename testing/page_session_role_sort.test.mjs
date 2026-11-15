@@ -2,7 +2,7 @@
 // Blocking sorts by arrival, new before seen, the most `stops` (a group takes its best member's), rank, then age. Each order
 // is worked out at load and kept. A Blocking card's top row shows "stops N", a group head shows its count once, and each tier
 // head has one line that names its key.
-//   NODE_PATH=<dir with playwright> node --test skills/waiting-page/tests/page_session_role_sort.test.mjs
+//   NODE_PATH=<dir with playwright> node --test testing/page_session_role_sort.test.mjs
 // The stub database and open() below are a copy of page.test.mjs's, trimmed to what these cases use. That file runs its
 // cases when it is imported, so its helpers cannot be imported, and moving them into a shared module would edit the file
 // the repo sub-group cases also change.
@@ -12,10 +12,10 @@ import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { needEnv } from "../../../testing/skip-locally-fail-in-ci.mjs";
+import { needEnv } from "./skip-locally-fail-in-ci.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const html = fs.readFileSync(path.join(HERE, "..", "page.html"), "utf8");
+const html = fs.readFileSync(path.join(HERE, "..", "skills", "waiting-page", "page.html"), "utf8");
 const require = createRequire(import.meta.url);
 const ORIGIN = "http://waiting.test/";
 let browser;
