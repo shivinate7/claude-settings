@@ -1469,7 +1469,7 @@ def diff_changes(root, base, head):
     done = git_ok(root, "-c", "core.quotePath=false", "diff", "--unified=0", "--no-renames", "--no-color",
                   "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", "%s...%s" % (base, head), "--")
     if done is None or done.returncode != 0:
-        raise CannotRun("the diff %s...%s cannot be read" % (base[:12], head[:12]))
+        raise CannotRun("the diff %s...%s cannot be read: in CI, check out with `fetch-depth: 0` so the PR base is there" % (base[:12], head[:12]))
     changed, hunks, path, old = {}, {}, None, None
     rows, i = done.stdout.decode("utf-8", "replace").split("\n"), 0
     while i < len(rows):
