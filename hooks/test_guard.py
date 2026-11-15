@@ -117,6 +117,7 @@ FAMILIES = {
     "linked-node-modules": "a dependency install or a recursive delete through a node_modules that is a link",
     "env": "environment files",
     "argv": "process arguments: a ps, pgrep or /proc form that prints other processes' full arguments is refused; pid-and-name forms, quoted or heredoc text and the guard's own readers pass",
+    "heredoc-text": "a guarded word held as text in a heredoc body: gh-write-cloud, draft-pr and process-args refuse only the words a shell would run, so a text-only body passes, and each real run still refuses",
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "hook-bypass": "a git commit, merge or push that skips the git hooks: core.hooksPath on the command or in the environment, --no-verify, and -n on commit; the mutation tool's own exemption",
     "merge": "merge into main, draft pull requests and the merge guard",
