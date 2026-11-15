@@ -83,7 +83,7 @@ Notes: the shared-tree gaps `git update-ref -d`, `git rm -rf .` and `git read-tr
 | `load-brake` | machine-load-brake | "a call that starts a lane or an agent reads the machine's load. A busy or full machine refuses new lanes and agents" | exact | exact | a busy machine refuses a background Agent | - |
 | `guard-crash` | guard-hooks-fail-closed | "a guard that times out or crashes does not ... except a missing guard module, which refuses" | exact | exact | a raise is allowed and logged; a missing module is denied | rule rewrite: the guard index line says only "allowed"; add the missing-module deny |
 
-Notes: create_session is not a start tool for load-brake, so a lane session starts on a full machine; the decision names start_session only (owner question). `narrated-tail` logs as live-stream with no index line.
+Notes: create_session is not a start tool for load-brake, so a lane session starts on a full machine; the decision named start_session only (owner question). Since decision `start-session-not-pretooluse`, no PreToolUse hook sees start_session, so the brake reads Agent, Task and Workflow only. `narrated-tail` logs as live-stream with no index line.
 
 ## C. Agents, models, roles and worktrees
 
@@ -94,7 +94,7 @@ Notes: create_session is not a start tool for load-brake, so a lane session star
 | `session-home` | an-agent-outside-its-home-tree-must-stop | "The owner's ask is 'refuse writes in the primary checkout', and these write it." | looser | exact | a session whose home is gone runs `git clean -fd` in the primary: clean is not in the write verb list | tool fix: add clean to SESSION_HOME_GIT_VERBS |
 | `agent-role-model` | agent-model-cap | "A spawn that names a model above its role's row is denied." | exact | exact | a round-1 reviewer on sonnet is denied | - |
 | `agent-role-model-unread` | agent-model-cap | "A table or agents folder in the pointer checkout that cannot be read passes the spawn and logs one line." | exact | exact | an unread table passes and is noted | - |
-| `agent-model-floor` | agent-model-cap | "Guard rule `agent-model-floor` refuses an Agent, Task, Workflow agent() or start_session call whose model holds haiku." | looser | exact | create_session with model haiku passes: the floor reads start_session only | tool fix: read create_session in floor_hit too |
+| `agent-model-floor` | agent-model-cap | "Guard rule `agent-model-floor` refuses an Agent, Task, Workflow agent() or create_session call whose model holds haiku. A start_session call is flagged after the call, by its PostToolUse audit (decision `start-session-not-pretooluse`)." | exact | exact | none: floor_hit reads create_session; start_session reaches no PreToolUse hook | - |
 | `roles-third-round-steps-up` | roles-third-round-steps-up | "Third try: Opus. A builder's third try ... its brief carries `Round 3 of 3`." | exact | exact | a builder's round 3 on sonnet is denied | - |
 | `agent-model-cap` | agent-model-cap | "Any other spawn runs Opus only when the owner names it." | looser | exact | Explore with model opus and no `Audit:` marker passes unasked; the table gives plain Explore haiku | tool fix: exempt Explore only with the `Audit:` marker |
 | `lane-effort-pin` | agent-model-cap | "A lane runs at medium effort" | exact | exact | a lane create_session whose effort is not `medium`, or whose prompt has no Grant line, is denied | - |
