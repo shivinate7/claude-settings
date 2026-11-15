@@ -23,6 +23,9 @@ The contract these cases read (the tool's own output; the labels are exact):
   a fast check with no home: `unknown (fast-checks-before-ready not landed)`.
   a git that is not on PATH: exit 2, one `unknown` line that names git, no traceback.
   exit: 0 ok, 1 something left out or a failed check, 2 unknown or cannot run.
+  --from-rest (no --queue): the queue is read from GitHub through merge.Host, which the --from-rest cases replace with a stub (no network):
+    the open pulls, each head, and each CI reading (head_read). The header then also names readings (g) and (h). The GET-only case
+    runs the real Host against a fake gh that refuses every write. --from-rest with --queue, or with neither, exits 2.
 """
 import ast
 import atexit
@@ -48,7 +51,7 @@ import merge  # noqa: E402  merge.CI_JOB is the one home of a ci-job run; these 
 TOOL = os.path.join(HERE, "combine_train.py")
 MERGE_PY = os.path.join(HERE, "merge.py")
 READY = ["STE lint", "split guard", "cost pins", "scaffold", "debt retire", "open-PR clash"]
-GIT_WRAPPERS = {"merge_tree", "conflicting_files", "ci_job_run", "ready_job_groups"}  # the merge.py names the tool may reach; ready_job_groups splits the ready checks by job, no run
+GIT_WRAPPERS = {"merge_tree", "conflicting_files", "ci_job_run", "ready_job_groups", "Host"}  # the merge.py names the tool may reach; ready_job_groups splits the ready checks by job, no run; Host is the one GitHub home (--from-rest reads)
 NO_HOME = "unknown (fast-checks-before-ready not landed)"
 SIX = ["members in", "members left out", "clash rate", "dry-round minutes", "lint minutes", "CI minutes"]
 PASS_WORD = re.compile(r"(?<!not a )(?<!not )(?<!no )\b(?:pass(?:es|ed)?|ok)\b", re.I)  # a claim of pass ("pass", "passed", "ok"), not "not a pass" or "not ok"
@@ -233,10 +236,11 @@ def ticking_clock(step=60.0):
     return clock
 
 
-def run_tool(queue, root, mode="pass", lint=False, clock=None, ci_job=None, shims=None, job_steps=None):
+def run_tool(queue, root, mode="pass", lint=False, clock=None, ci_job=None, shims=None, job_steps=None, argv=None, host=None):
     """Run the tool in-process: main() with merge.CI_JOB at the fake ci-job (or `ci_job`), FAKE_CI_MODE set, and the folder
     `shims` first on PATH. `job_steps` ({job: [steps]}) is the steps each job holds: the fake reads a step another job holds as unknown.
-    None lets every step through. -> (exit code, stdout, stderr, ci_calls), where each ci-job argv is a list."""
+    None lets every step through. `argv` replaces the argv built from `queue` (the --from-rest cases give one); `host` is the class
+    patched in as merge.Host (None: the real one). -> (exit code, stdout, stderr, ci_calls), where each ci-job argv is a list."""
     import combine_train  # the tool; imported here so a missing tool fails the case that runs it, not the whole suite
     log = os.path.join(scratch("ci-"), "ci-calls.jsonl")
     env = {"FAKE_CI_MODE": mode, "FAKE_CI_LOG": log}
@@ -244,10 +248,12 @@ def run_tool(queue, root, mode="pass", lint=False, clock=None, ci_job=None, shim
         env["FAKE_CI_JOB_STEPS"] = json.dumps(job_steps)
     if shims:
         env["PATH"] = shims + os.pathsep + os.environ.get("PATH", "")
-    argv = ["--queue", queue, "--root", root] + (["--lint"] if lint else [])
+    if argv is None:
+        argv = ["--queue", queue, "--root", root] + (["--lint"] if lint else [])
     out, err = io.StringIO(), io.StringIO()
     with unittest.mock.patch.dict(os.environ, env), \
             unittest.mock.patch.object(merge, "CI_JOB", ci_job or fake_ci_job()), \
+            unittest.mock.patch.object(merge, "Host", host or merge.Host), \
             contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         rc = combine_train.main(argv, clock=clock)
     return rc, out.getvalue(), err.getvalue(), calls(log)
@@ -357,6 +363,12 @@ class Controls(unittest.TestCase):
         self.assertNotIn("combine_train", imported_names(MERGE_PY),
                          "merge.py imports the tool, so the tool could alter a merge verdict")
 
+    def test_control_queue_mode_reads_no_github(self):
+        root = make_repo({"x.txt": "line a\n"}, checks=READY)
+        heads = [(1, add_pr(root, 1, {"f1.txt": "1\n"}))]
+        log = []
+        run_tool(queue_file(heads, [("Q", "queued", [1])]), root, clock=ticking_clock(), host=stub_host([], {}, log))
+        self.assertEqual(log, [], "--queue mode read GitHub through merge.Host, so the queue file is not the only queue it reads: %r" % log)
 
     def test_control_pass_reader_sees_the_tool_pass_word_ok(self):
         self.assertTrue(claims_pass("batch Q (queued, folded): #3\nround 1, leading tip #3: fast checks ok"),
@@ -728,7 +740,376 @@ class MergeWrapperOnly(unittest.TestCase):
         self.assertTrue(used & {"merge_tree", "conflicting_files"},
                         "the dry folds must use merge.merge_tree or merge.conflicting_files, it uses %s" % sorted(used))
         self.assertLessEqual(used, GIT_WRAPPERS,
-                             "the tool reaches into merge.py beyond the git wrapper and the one ci-job run: %s" % sorted(used - GIT_WRAPPERS))
+                             "the tool reaches into merge.py beyond the git wrapper, the one ci-job run and the one Host: %s" % sorted(used - GIT_WRAPPERS))
+
+
+# ---------------------------------------------------------------- --from-rest: the queue read from GitHub through merge.Host
+
+REPO = "fixture-owner/fixture-repo"  # a name for the stub and the fake gh only: no network is reached
+STATE_WORD = re.compile(r"\b(pending|green|red|unknown|in-ci|next-in-line|queued)\b", re.I)
+# (number, draft) in the order the REST list returns them, not PR order; the verdicts are head_read's (verdict, detail)
+SPLIT = [(3, False), (5, False), (1, False), (4, False), (2, False), (6, True)]
+SPLIT_VERDICTS = {1: ("pending", "STE lint"), 2: ("green", ""), 3: ("pending", "STE lint"),
+                  4: ("green", ""), 5: ("green", ""), 6: ("green", "")}
+
+REST_GH = '''import json, re, sys
+LOG = __LOG__
+DATA = __DATA__
+args = sys.argv[1:]
+with open(LOG, "a", encoding="utf-8") as f:
+    f.write(json.dumps(args) + "\\n")
+if args[:2] in (["run", "list"], ["run", "view"]):
+    print("[]")
+    sys.exit(0)
+if args[:1] != ["api"]:
+    sys.stderr.write("refused by the test shim: gh " + " ".join(args[:2]) + "\\n")
+    sys.exit(1)
+if "-X" in args:
+    method = args[args.index("-X") + 1]
+else:
+    method = "POST" if any(a in ("-f", "-F", "--input") for a in args) else "GET"
+route = args[1]
+if method != "GET":
+    sys.stderr.write("refused by the test shim: " + method + " " + route + "\\n")
+    sys.exit(1)
+with open(DATA, encoding="utf-8") as f:
+    rows = json.load(f)
+if re.fullmatch(r"repos/[^/]+/[^/]+/pulls", route):
+    body = rows if "page=1" in args else []
+elif re.fullmatch(r"repos/[^/]+/[^/]+/pulls/\\d+", route):
+    hit = [r for r in rows if r["number"] == int(route.rsplit("/", 1)[1])]
+    if not hit:
+        sys.stderr.write("refused by the test shim: no pull request " + route + "\\n")
+        sys.exit(1)
+    body = hit[0]
+elif re.fullmatch(r"repos/[^/]+/[^/]+/commits/[0-9a-f]+/check-runs", route):
+    body = {"check_runs": []}
+elif re.fullmatch(r"repos/[^/]+/[^/]+/commits/[0-9a-f]+/status", route):
+    body = {"statuses": []}
+else:
+    sys.stderr.write("refused by the test shim: no route " + route + "\\n")
+    sys.exit(1)
+if "-i" in args:
+    print("HTTP/2.0 200 OK")
+    print()
+print(json.dumps(body))
+'''
+
+
+def stub_host(rows, verdicts, log):
+    """-> a stand-in class for merge.Host, with no network. pages("pulls") answers `rows` (the REST rows, in the order given), pr(n)
+    answers Host.info of row n, and head_read(n) answers verdicts[n], a (verdict, detail) pair. Each call is appended to `log`; the
+    constructor's keyword arguments are logged as ("init", kwargs). Any other Host method raises AssertionError, so a call this stub
+    does not answer never reaches the network."""
+    by_number = {r["number"]: r for r in rows}
+
+    class Stub:
+        def __init__(self, *args, **kwargs):
+            log.append(("init", kwargs))
+            self.repo = kwargs.get("repo")
+
+        def pages(self, rel, key=None, fields=None):
+            log.append(("pages", rel, fields))
+            if rel != "pulls":
+                raise AssertionError("the tool read %r through Host.pages; the stub answers only the open pulls" % rel)
+            return [dict(r) for r in rows]
+
+        def pr(self, n):
+            log.append(("pr", n))
+            if n not in by_number:
+                raise AssertionError("the tool asked Host.pr for #%s, which is not an open pull request" % n)
+            return merge.Host.info(by_number[n])
+
+        def head_read(self, n, nothing_is_green=False):
+            log.append(("head_read", n))
+            if n not in verdicts:
+                raise AssertionError("the tool read the CI of #%s, and the stub has no reading for it" % n)
+            return verdicts[n]
+
+        def __getattr__(self, name):
+            if name.startswith("__"):
+                raise AttributeError(name)
+            raise AssertionError("the tool called Host.%s, which the stub does not answer" % name)
+
+    return Stub
+
+
+def rest_pull(number, sha, draft=False):
+    """One open pull request as GET pulls lists it: the fields Host reads."""
+    return {"number": number, "draft": draft, "state": "open", "merged": False, "head": {"sha": sha, "ref": "pr-%d" % number},
+            "base": {"ref": "main"}, "mergeable": True, "mergeable_state": "clean", "body": "", "created_at": None, "changed_files": 1}
+
+
+def publish_head(root, number):
+    """Copy branch pr-N of `root` to refs/pull/N/head of origin, as GitHub serves a pull request head: the ref the tool's fetch reads."""
+    origin = git_ok(root, "config", "--get", "remote.origin.url").strip()
+    git_ok(origin, "fetch", "-q", root, "refs/heads/pr-%d:refs/pull/%d/head" % (number, number))
+
+
+def cut_pulls(root, specs):
+    """specs: [(number, draft)] in the order the REST list returns them. Each PR is a branch cut from origin/main in `root` that touches
+    its own file, and its head is published on origin. -> the REST rows, in spec order."""
+    rows = []
+    for n, draft in specs:
+        sha = add_pr(root, n, {"f%d.txt" % n: "%d\n" % n})
+        publish_head(root, n)
+        rows.append(rest_pull(n, sha, draft))
+    return rows
+
+
+def run_rest(root, rows, verdicts, argv_extra=(), clock=None, shims=None):
+    """The tool with --from-rest against the stub Host. -> (exit code, stdout, stderr, ci_calls, host log)."""
+    log = []
+    rc, out, err, ci = run_tool(None, root, clock=clock or ticking_clock(), shims=shims, host=stub_host(rows, verdicts, log),
+                                argv=["--from-rest", "--root", root, *argv_extra])
+    return rc, out, err, ci, log
+
+
+def write_rest_gh(rows):
+    """A `gh` for the real Host: it answers the reads of the queue from `rows`, logs the argv of every call, and refuses every
+    write (any method but GET) and every gh command that is not a read. -> (folder, log path)."""
+    folder = scratch("rest-gh-")
+    log = os.path.join(folder, "gh-calls.jsonl")
+    data = os.path.join(folder, "rows.json")
+    with open(data, "w", encoding="utf-8") as f:
+        json.dump(rows, f)
+    path = os.path.join(folder, "gh")
+    body = REST_GH.replace("__LOG__", json.dumps(log)).replace("__DATA__", json.dumps(data))
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("#!%s\n%s" % (sys.executable, body))
+    os.chmod(path, 0o755)
+    return folder, log
+
+
+def method_of(api_args):
+    """The HTTP method of one `gh api` argv, as gh reads it: -X when given, POST when a field is sent, else GET."""
+    if "-X" in api_args:
+        return api_args[api_args.index("-X") + 1]
+    return "POST" if any(a in ("-f", "-F", "--input") for a in api_args) else "GET"
+
+
+def batch_for(out, state):
+    """-> (name, block) of the one batch whose header names `state` (in-ci, next-in-line or queued), or (None, None)."""
+    order, blocks = batch_blocks(out)
+    hits = [name for name in order if re.search(r"\b%s\b" % re.escape(state), blocks[name][0])]
+    if len(hits) != 1:
+        return None, None
+    return hits[0], blocks[hits[0]]
+
+
+def before_batches(out):
+    """The lines of `out` before its first batch line: the queue the tool printed."""
+    lines = []
+    for line in out.splitlines():
+        if BATCH_RE.match(line):
+            break
+        lines.append(line)
+    return lines
+
+
+class FromRestQueue(unittest.TestCase):
+    """The queue read from GitHub. Each case states its claim; a red here is the missing behaviour named in the message."""
+
+    def split_root(self):
+        root = make_repo({"README.md": "x\n"}, checks=READY)
+        return root, cut_pulls(root, SPLIT)
+
+    def assert_read_over_rest(self, log):
+        self.assertTrue([e for e in log if e[0] == "pages" and e[1] == "pulls"],
+                        "the tool made no REST read of the open pulls, so its queue is not read from GitHub")
+
+    def test_in_ci_batch_holds_every_pending_ready_pr_in_pr_order(self):
+        root, rows = self.split_root()
+        rc, out, err, ci, log = run_rest(root, rows, SPLIT_VERDICTS)
+        self.assert_read_over_rest(log)
+        name, block = batch_for(out, "in-ci")
+        self.assertIsNotNone(block, "no in-ci batch line: the pending ready PRs #1 and #3 are not printed as one frozen batch: %r" % out[:300])
+        self.assertEqual(header_members(block), [1, 3], "the in-ci batch must hold the pending ready PRs #1 and #3, in PR order")
+
+    def test_first_green_ready_pr_in_pr_order_is_next_in_line_alone(self):
+        root, rows = self.split_root()
+        rc, out, err, ci, log = run_rest(root, rows, SPLIT_VERDICTS)
+        self.assert_read_over_rest(log)
+        name, block = batch_for(out, "next-in-line")
+        self.assertIsNotNone(block, "no next-in-line batch line: the first green ready PR in PR order, #2, is not printed alone: %r" % out[:300])
+        self.assertEqual(header_members(block), [2], "the next-in-line batch must be the first green ready PR in PR order, #2, and nothing else")
+
+    def test_other_green_ready_prs_fold_as_one_queued_batch_and_the_run_passes(self):
+        root, rows = self.split_root()
+        rc, out, err, ci, log = run_rest(root, rows, SPLIT_VERDICTS)
+        self.assert_read_over_rest(log)
+        name, block = batch_for(out, "queued")
+        self.assertIsNotNone(block, "no queued batch line: the green ready PRs #4 and #5 are not folded as one queued batch: %r" % out[:300])
+        self.assertEqual(header_members(block), [4, 5], "the queued batch must fold the green ready PRs #4 and #5 after the next-in-line one")
+        self.assertEqual(rc, 0, "clean members with passing checks, and no PR left out or unknown: exit 0, got %r" % rc)
+
+    def test_draft_pr_is_not_in_the_queue(self):
+        root, rows = self.split_root()
+        rc, out, err, ci, log = run_rest(root, rows, SPLIT_VERDICTS)
+        self.assert_read_over_rest(log)
+        self.assertTrue(any(re.search(r"#1\b", line) for line in out.splitlines()),
+                        "the tool printed no line for ready #1, so the check that the draft #6 is left out proves nothing")
+        named = [line for line in out.splitlines() if re.search(r"#6\b", line) and not re.search(r"draft", line, re.I)]
+        self.assertEqual(named, [], "the draft #6 is in the queue or a batch, though a draft is not ready: %r" % named)
+
+    def test_queue_prints_one_line_per_ready_pr_with_its_state_before_the_folds(self):
+        root, rows = self.split_root()
+        rc, out, err, ci, log = run_rest(root, rows, SPLIT_VERDICTS)
+        self.assert_read_over_rest(log)
+        queue = before_batches(out)
+        for n in (1, 2, 3, 4, 5):
+            lines = [line for line in queue if re.search(r"#%d\b" % n, line)]
+            self.assertEqual(len(lines), 1, "the queue the tool read must print one line for ready #%d before the folds; it prints %d" % (n, len(lines)))
+            self.assertTrue(STATE_WORD.search(lines[0]), "the queue line for #%d names no state: %r" % (n, lines[0]))
+
+    def test_red_ready_pr_is_left_out_by_name_and_the_run_exits_1(self):
+        root = make_repo({"README.md": "x\n"}, checks=READY)
+        rows = cut_pulls(root, [(1, False), (2, False), (3, False)])
+        rc, out, err, ci, log = run_rest(root, rows, {1: ("green", ""), 2: ("red", "STE lint"), 3: ("green", "")})
+        self.assert_read_over_rest(log)
+        self.assertIn("left out #2: red (STE lint)", [line.strip() for line in out.splitlines()],
+                      "a red ready PR must print `left out #2: red (STE lint)` by name: %r" % out[:300])
+        self.assertEqual(rc, 1, "a red ready PR counts as left out, so the run exits 1, got %r" % rc)
+
+    def test_unknown_ready_pr_prints_unknown_is_not_queued_and_exits_2(self):
+        root = make_repo({"README.md": "x\n"}, checks=READY)
+        rows = cut_pulls(root, [(1, False), (2, False), (3, False)])
+        rc, out, err, ci, log = run_rest(root, rows, {1: ("green", ""), 2: ("unknown", "a gh call timed out"), 3: ("green", "")})
+        self.assert_read_over_rest(log)
+        lines = [line for line in out.splitlines() if re.search(r"#2\b", line) and "unknown (a gh call timed out)" in line]
+        self.assertTrue(lines, "an unknown ready PR must print `unknown (a gh call timed out)` on a line that names #2: %r" % out[:300])
+        queued = set()
+        for name, block in batch_blocks(out)[1].items():
+            queued.update(header_members(block))
+        self.assertNotIn(2, queued, "an unknown ready PR is not queued, so #2 must be in no batch")
+        self.assertEqual(rc, 2, "an unknown ready PR makes the exit code 2, got %r" % rc)
+
+    def test_from_rest_with_queue_refuses_with_exit_2_and_says_the_flags_conflict(self):
+        root = make_repo({"README.md": "x\n"}, checks=READY)
+        log = []
+        rc, out, err, ci = run_tool(None, root, argv=["--from-rest", "--queue", queue_file([], []), "--root", root], host=stub_host([], {}, log))
+        self.assertEqual(rc, 2, "--from-rest with --queue must refuse with exit 2, got %r" % rc)
+        text = out + err
+        refusal = [line for line in text.splitlines() if "--from-rest" in line and "--queue" in line]
+        self.assertTrue(refusal, "the refusal does not name both --from-rest and --queue: %r" % text[:300])
+        self.assertTrue(any(word in line.lower() for line in refusal for word in ("both", "together", "one of", "conflict")),
+                        "the refusal names both flags but does not say they cannot be given together: %r" % refusal)
+        self.assertEqual(log, [], "a refused run made a REST call: %r" % log)
+
+    def test_neither_flag_refuses_with_exit_2_and_names_both_sources(self):
+        root = make_repo({"README.md": "x\n"}, checks=READY)
+        log = []
+        rc, out, err, ci = run_tool(None, root, argv=["--root", root], host=stub_host([], {}, log))
+        self.assertEqual(rc, 2, "with neither --from-rest nor --queue the run must refuse with exit 2, got %r" % rc)
+        text = out + err
+        self.assertIn("--from-rest", text, "the refusal for neither flag does not name --from-rest as the other source: %r" % text[:300])
+        self.assertEqual(log, [], "a refused run made a REST call: %r" % log)
+
+    def test_failed_fetch_leaves_the_pr_unknown_and_never_passes(self):
+        root = make_repo({"README.md": "x\n"}, checks=READY)
+        rows = cut_pulls(root, [(1, False), (2, False), (3, False), (4, False)])
+        verdicts = {1: ("pending", "STE lint"), 2: ("green", ""), 3: ("green", ""), 4: ("green", "")}
+        git_ok(root, "remote", "set-url", "origin", os.path.join(scratch("gone-"), "no-origin"))  # the fetch has nothing to read
+        rc, out, err, ci, log = run_rest(root, rows, verdicts)
+        self.assert_read_over_rest(log)
+        lines = out.splitlines()
+        for n in (3, 4):
+            self.assertTrue(any(re.search(r"#%d\b" % n, line) and "unknown" in line for line in lines),
+                            "a queued PR whose fetch failed must print unknown: no unknown line names #%d: %r" % (n, out[:300]))
+        self.assertEqual([line for line in claims_pass(out) if "#" in line], [], "a PR whose fetch failed claims a pass")
+        self.assertEqual(rc, 2, "a failed fetch is unknown, so the run exits 2, got %r" % rc)
+
+    def test_one_git_fetch_per_run_for_the_queued_heads(self):
+        root = make_repo({"README.md": "x\n"}, checks=READY)
+        rows = cut_pulls(root, [(1, False), (2, False), (3, False), (4, False)])
+        verdicts = {1: ("pending", "STE lint"), 2: ("green", ""), 3: ("green", ""), 4: ("green", "")}
+        shims, git_log = write_shims()
+        rc, out, err, ci, log = run_rest(root, rows, verdicts, shims=shims)
+        self.assert_read_over_rest(log)
+        fetches = [c for c in calls(git_log) if c[0] == "git" and "fetch" in c]
+        self.assertEqual(len(fetches), 1, "the queued heads take one git fetch per run, the tool ran %d" % len(fetches))
+
+    def test_wall_seconds_line_is_measured_by_the_injected_clock(self):
+        root, rows = self.split_root()
+        rc, out, err, ci, log = run_rest(root, rows, SPLIT_VERDICTS, clock=ticking_clock(step=60.0))
+        self.assert_read_over_rest(log)
+        raw = value(out.splitlines(), "wall seconds")
+        wall = number_of(raw)
+        self.assertIsNotNone(wall, "no `wall seconds:` line with a measured number: got %r" % raw)
+        self.assertTrue(wall > 0 and wall % 60 == 0,
+                        "wall seconds must be the span the injected clock measured (a multiple of its 60 s step), got %r" % wall)
+
+    def test_header_names_readings_g_and_h_for_the_rest_queue(self):
+        root, rows = self.split_root()
+        rc, out, err, ci, log = run_rest(root, rows, SPLIT_VERDICTS)
+        self.assert_read_over_rest(log)
+        header = out.splitlines()[0] if out.splitlines() else ""
+        self.assertIn("(g)", header, "the header must name reading (g), the PR-number order of the queue: %r" % header)
+        self.assertIn("(h)", header, "the header must name reading (h), the state by CI of each ready PR: %r" % header)
+
+    def test_repo_flag_is_the_repo_the_host_reads(self):
+        root, rows = self.split_root()
+        refused = None
+        try:
+            rc, out, err, ci, log = run_rest(root, rows, SPLIT_VERDICTS, argv_extra=("--repo", REPO))
+        except SystemExit as e:  # the argument parser refuses an unknown flag: a failure that names it, not a crash
+            refused = e.code
+        self.assertIsNone(refused, "the argument parser rejects --repo (exit %s), so the flag cannot set the repo the Host reads" % refused)
+        self.assert_read_over_rest(log)
+        repos = [entry[1].get("repo") for entry in log if entry[0] == "init"]
+        self.assertIn(REPO, repos, "--repo must reach merge.Host as its repo: the Host was built with %r" % repos)
+
+    def test_empty_rest_queue_prints_the_header_and_no_batch_and_exits_0(self):
+        root = make_repo({"README.md": "x\n"}, checks=READY)
+        rc, out, err, ci, log = run_rest(root, [], {})
+        self.assert_read_over_rest(log)
+        self.assertEqual(batch_blocks(out)[0], [], "an empty list of open pulls must print no batch")
+        self.assertEqual(rc, 0, "an empty queue has nothing left out and nothing failed: exit 0, got %r" % rc)
+
+    def test_full_size_rest_queue_of_101_ready_prs_reads_every_one_in_pr_order(self):
+        root = make_repo({"README.md": "x\n"}, checks=READY)
+        rows = [rest_pull(n, "%040x" % n) for n in range(1, 102)]  # no PR is queued, so no head is fetched
+        verdicts = {n: ("pending", "STE lint") for n in range(1, 101)}
+        verdicts[101] = ("green", "")
+        rc, out, err, ci, log = run_rest(root, rows, verdicts)
+        self.assert_read_over_rest(log)
+        name, block = batch_for(out, "in-ci")
+        self.assertIsNotNone(block, "no in-ci batch line for the 100 pending ready PRs: %r" % out[:300])
+        self.assertEqual(header_members(block), list(range(1, 101)), "the in-ci batch must hold #1 to #100 in PR order")
+        name, block = batch_for(out, "next-in-line")
+        self.assertIsNotNone(block, "no next-in-line batch line for the green ready PR #101")
+        self.assertEqual(header_members(block), [101], "the next-in-line batch must be #101 alone")
+        self.assertEqual(rc, 0, "nothing left out and nothing unknown: exit 0, got %r" % rc)
+
+    def test_open_pulls_are_read_through_host_pages_with_state_open(self):
+        root, rows = self.split_root()
+        rc, out, err, ci, log = run_rest(root, rows, SPLIT_VERDICTS)
+        self.assert_read_over_rest(log)
+        self.assertIn(("pages", "pulls", {"state": "open"}), log,
+                      "the open pulls must be read through Host.pages(\"pulls\", fields={\"state\": \"open\"}): the log has %r" % log)
+
+    def test_tool_reads_github_only_through_merge_host(self):
+        used = merge_names_used(TOOL)
+        self.assertIn("Host", used, "the tool does not read GitHub through merge.Host, the one home of the REST reads: it uses %s" % sorted(used))
+
+    def test_every_rest_call_is_a_get_and_every_other_gh_call_is_a_read(self):
+        root = make_repo({"README.md": "x\n"}, checks=READY)
+        rows = cut_pulls(root, [(1, False), (2, False), (3, True)])
+        shims, gh_log = write_rest_gh(rows)
+        refused = None
+        try:  # --repo names the repo, so the fixture's local origin is not parsed for one
+            rc, out, err, ci = run_tool(None, root, clock=ticking_clock(), shims=shims, argv=["--from-rest", "--root", root, "--repo", REPO])
+        except SystemExit as e:
+            refused = e.code
+        self.assertIsNone(refused, "the argument parser rejects --repo (exit %s), so no REST read can name its repo" % refused)
+        gh = calls(gh_log)
+        api = [a for a in gh if a[:1] == ["api"]]
+        self.assertTrue(api, "the tool made no REST call (gh api), so the GET check proves nothing")
+        self.assertTrue(any(re.fullmatch(r"repos/[^/]+/[^/]+/pulls", a[1]) for a in api),
+                        "the tool never read the open pulls over REST: %r" % api)
+        self.assertEqual([a for a in api if method_of(a) != "GET"], [], "the tool sent a REST call that is not a GET")
+        self.assertEqual([a for a in gh if a[:1] != ["api"] and a[:2] not in (["run", "list"], ["run", "view"])], [],
+                         "the tool ran a gh command that is not a read")
 
 
 if __name__ == "__main__":
