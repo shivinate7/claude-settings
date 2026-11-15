@@ -1,0 +1,10 @@
+{
+ "id": "own-label-pick-taken-by-label",
+ "at": "2026-11-15T00:26:00-06:00",
+ "title": "A pick whose label is plain is taken by its label, never handed back to the owner",
+ "ruling": "Consultant 00:26 CST Nov 15 (its reading, not owner-typed; under own-consultant-speaks-for-owner and the owner's 20:18 CST Nov 14 words \"Nothing can't be undone don't wait on me\", own-goal-dont-wait-on-me): when a session writes a pick sentence whose letter does not match its own label text, the pick is taken by the label if the label is plain, never handed back to the owner. Prompted by the owner's 00:22 CST Nov 15 report of another repo's triage session: the coordinator wrote \"pick a\" for a fix that was a bookmark plus 100 rows a page; in item 251 that is option b (a is 100 rows only); the triage session wrote this on the item and left the pick for the owner. Item 251 (that repo; not read by triage, unverified) takes b by its label. Scope: the act each pick names, never a variant (rule outcomes-grant-covers-named-act). Does not lift: a label that is not plain (two options fit it: ask), a permission refusal, or the owner's ruling \"a repo changes to fit a shared tool, never the tool to fit a repo\". Reopens if the owner says otherwise. Home of the build: step option-keys-match-chat (shown letters never change; a stored pick carries its label).",
+ "quote": "In item 251 that is option b, since a is 100 rows only. I wrote this on the item and left the pick for you.",
+ "source": "Owner 00:22 CST Nov 15, relayed by the consultant 00:26 CST Nov 15; filed by triage",
+ "status": "open",
+ "step": "option-keys-match-chat"
+}
