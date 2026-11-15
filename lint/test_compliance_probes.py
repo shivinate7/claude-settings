@@ -3520,7 +3520,7 @@ class AlignedEdges(AlignedSteps, unittest.TestCase):
         repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
         self.assert_refused(repo, where, ALIGNED_ROUND, drop=("HEAD_SHA",))
 
-    def test_an_unreadable_diff_names_the_full_depth_remedy(self):  # debt aligned-pin-bump-needs-full-depth
+    def test_an_unreadable_diff_names_the_full_depth_remedy(self):
         base, _ = self.cited()
         repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
         code, out, err = self.probe_pr(repo, base="1" * 40)
