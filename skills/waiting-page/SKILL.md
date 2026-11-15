@@ -44,6 +44,10 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   box, and say in one line that the repo has no waiting page.
 - Never guess a URL, and never use the page of another repo.
 
+## Print the page link
+
+Whenever the writer posts, changes or closes an item, its chat reply for that turn carries the page link as one line, `https://claude.ai/artifact/<id>`, the repo's page from "Find the page". A closed item and a change count too: the owner opens the page from chat (owner asks, Nov 12 12:50 CST to Nov 14 23:02 CST; roadmap step `surface-page-link-in-chat`). The Stop check `page_link_check` in `hooks/feedback_guard.py` blocks a turn that wrote the page and whose last reply lacks the page id. A repo with no page prints no link.
+
 ## The database
 
 Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `answered`) from `~/.claude/bin/now-central --iso`, never from memory.
