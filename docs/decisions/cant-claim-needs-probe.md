@@ -72,7 +72,7 @@ If the transcript reader does not load, the check prints UNKNOWN to stderr and d
 
 ## Cost
 
-Every Stop that holds a human message reads the reply and runs `_turn_acks`, whether or not the reply holds a cannot-phrase. `_turn_acks` scans the whole transcript for peer messages and sends to a parent. It scans the transcript again for the session's own record only when it finds both. The caller then scans back through the transcript for the last incoming message. The turn's tool calls are read only for a reply sentence that holds a cannot-phrase. The check starts no process, writes no file, and starts no timer or log.
+Every Stop that holds a human message runs the ack scan (report_guard.py _turn_acks), whether or not the reply holds a cannot-phrase. That scan reads the whole transcript for peer messages and sends to a parent. It reads the transcript again for the session's own record only when it finds both (report_guard.py _own_lane_read). The caller then finds the last incoming message (_transcript.py last_incoming_index). The turn's tool calls are read only for a reply sentence that holds a cannot-phrase (report_guard.py cannot_problem). The check starts no process, writes no file, and starts no timer or log.
 
 Rule `outcomes-mechanize-rules` (each check states its cost and a test proves it) applies. No test proves zero process starts and zero file writes, so the cost is stated, not proven.
 
