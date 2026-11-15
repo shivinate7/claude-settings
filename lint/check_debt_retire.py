@@ -14,10 +14,13 @@ check reads that debt's Retire paragraph from the base and runs what it names, o
             green and on the PR head or a commit above it. A cite also clears a check that could not run here (unknown);
             a red check is never cleared by a cite.
 
-Exit 1 on any finding. Design: decision debt-close-runs-retire.
+Exit 1 on any finding. CI runs this CLI on a pull request (checks.yml): it reads the PR body from the event file
+(GITHUB_EVENT_PATH) and a cited run through `gh` (GH_TOKEN). With no event file the body is unread, so a close that
+needs a cite reads unknown, never prose. Design: decision debt-close-runs-retire.
 """
 import argparse
 import contextlib
+import json
 import os
 import re
 import shutil
@@ -38,6 +41,8 @@ INTERPRETERS = {".py": ["python3"], ".mjs": ["node", "--test"], ".sh": ["bash"]}
 TEST_NAME = re.compile(r"^(?:test_[^/]+\.(?:py|mjs|sh)|[^/]+_test\.py|[^/]+\.test\.mjs)$")
 SPAN = re.compile(r"`([^`\s]+)`")  # no space inside: a lone backtick in prose never swallows the real span after it
 CITE_LINE = re.compile(r"\s*(\S+)\s+--\s+(\S+)\s*$")
+CHILD_SECRETS = ("GH_TOKEN", "GITHUB_TOKEN")  # the CLI reads a cited run with them; a check child gets neither
+RUN_URL_ID = re.compile(r"/actions/runs/(\d+)")
 
 
 class Finding:
@@ -127,9 +132,11 @@ def run_span(wt, span, timeout):
     exe = shutil.which(argv[0])
     if not exe:
         return "unknown", "%s is not on PATH, so %s did not run" % (argv[0], span)
+    env = {k: v for k, v in os.environ.items() if k not in CHILD_SECRETS}  # the PR head's test code never reads the CLI's token
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     try:
         r = _nowindow.run([exe, *argv[1:], span], cwd=wt, capture_output=True, encoding="utf-8", errors="replace",
-                                  timeout=timeout, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+                                  timeout=timeout, env=env)
     except subprocess.TimeoutExpired:
         return "unknown", "%s ran past %d s" % (span, timeout)
     except OSError as e:
@@ -148,6 +155,37 @@ def cites(pr_body):
         if m:
             res[m.group(1)] = m.group(2)
     return res
+
+
+def run_route(url):
+    """The REST route, under repos/<owner>/<repo>/, of the workflow run a URL names. The one home of the cited-run read's route: the CLI and the merge tool both call it. Raises ValueError for a URL that names no run."""
+    m = RUN_URL_ID.search(url)
+    if not m:
+        raise ValueError("%s is not a workflow run URL" % url)
+    return "actions/runs/" + m.group(1)
+
+
+def parse_run(out):
+    """(conclusion, head sha) from the JSON a run read returned. conclusion is None while the run is going. Raises ValueError, KeyError or TypeError on any other reply."""
+    d = json.loads(out)
+    return d["conclusion"], d["head_sha"]
+
+
+def gh_run_state(url):
+    """(conclusion, head sha) of the run at `url`, read with `gh api` in the current repository. The CLI's run_state; the merge tool reads through its own gh retries and shares run_route and parse_run. Raises when the read fails."""
+    r = _nowindow.run(["gh", "api", "repos/{owner}/{repo}/" + run_route(url)], capture_output=True, encoding="utf-8", errors="replace")
+    if r.returncode:
+        raise RuntimeError(" ".join((r.stdout + r.stderr).split())[:300] or "gh exited %d" % r.returncode)
+    return parse_run(r.stdout)
+
+
+def event_body(path):
+    """The pull request body of the event file at `path` ("" for a null body), or None when it cannot be read: no path, no file, no JSON, or no pull_request in it."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)["pull_request"]["body"] or ""
+    except (OSError, TypeError, ValueError, KeyError):
+        return None
 
 
 def judge_run(wt, head, url, run_state):
@@ -220,7 +258,7 @@ def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_stat
         return None
     if got[0] == "prose":
         got = "prose", ("debt %s closes with a Retire that names no runnable check. Retire: %s\n"
-                        "Name a test file in backticks in the Retire line, or cite a passing run in the PR body: `%s: %s -- <run URL>`."
+                        "Name a test file in backticks in the Retire line, or cite a passing run in the PR body: `%s: %s -- <run URL>`. A cite added after the CI run needs a new push to count."
                         % (slug, text or "(no Retire line)", CITE, slug))
     else:
         got = got[0], "debt %s: %s" % (slug, got[1])
@@ -275,14 +313,21 @@ def main(argv):
     ap.add_argument("--strict", action="store_true", help="unknown exits 1 (also when env CI is set)")
     ap.add_argument("--repo", default=os.getcwd())
     a = ap.parse_args(argv)
+    body = event_body(os.environ.get("GITHUB_EVENT_PATH", ""))
     try:
-        found = check(a.repo, a.upstream, a.head, isolate=True)
+        found = check(a.repo, a.upstream, a.head, pr_body=body or "", run_state=gh_run_state, isolate=True)
     except Unknown as e:
         say("debt-retire: UNKNOWN: %s" % e)
         return 1 if (a.strict or os.environ.get("CI")) else 0
+    unread = [f for f in found if f.kind == "prose"] if body is None else []  # no body read: a cite may exist, so the close is unproven, not refused
     for f in found:
-        say("debt-retire: FAIL (%s): %s" % (f.kind, f.text))
-    return 1 if found else 0
+        if f not in unread:
+            say("debt-retire: FAIL (%s): %s" % (f.kind, f.text))
+    for f in unread:
+        say("debt-retire: UNKNOWN: debt %s names no runnable check, and the PR body was not read (no pull request event file), so a Retire-run cite is unproven" % f.slug)
+    if len(unread) < len(found):
+        return 1
+    return 1 if unread and (a.strict or os.environ.get("CI")) else 0
 
 
 if __name__ == "__main__":
