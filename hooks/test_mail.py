@@ -108,7 +108,8 @@ MAIL_HOOK = os.path.join(REPO, "hooks", "mail.py")
 REFUSED = "refs/heads/mail"
 SCRUBBED = ("CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "MAILBOX_REPO", "MAILBOX_CACHE",
             "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
-            "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_SSH", "GIT_SSH_COMMAND", "CLAUDE_CODE_EXECPATH", "AI_AGENT")
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_SSH", "GIT_SSH_COMMAND", "CLAUDE_CODE_EXECPATH", "AI_AGENT",
+            "MAILBOX_HOLD_OFF")
 IDENTITY = {"GIT_AUTHOR_NAME": "Mail Test", "GIT_AUTHOR_EMAIL": "mail-test@example.invalid",
             "GIT_COMMITTER_NAME": "Mail Test", "GIT_COMMITTER_EMAIL": "mail-test@example.invalid"}
 # A second machine's identity. Two takers with one identity and one address can build byte-identical
@@ -214,7 +215,9 @@ def turn_start_lines(payload, env):
 
 
 def scrubbed_environ():
-    return {key: value for key, value in os.environ.items() if key not in SCRUBBED}
+    env = {key: value for key, value in os.environ.items() if key not in SCRUBBED}
+    env["MAILBOX_HOLD_OFF"] = "1"  # a case never depends on the host platform; MacHold removes it
+    return env
 
 
 def fixture_env(home, extra=None):
@@ -229,6 +232,12 @@ def fixture_env(home, extra=None):
 
 def git(cwd, args, env, input_text=None, binary=False):
     """binary=True returns bytes. Text mode turns a lone CR into a newline, and the CRLF cases look for that CR."""
+    if isinstance(input_text, bytes):
+        # Text-mode stdin on Windows turns each LF into CRLF, so a CRLF fixture would reach git as CR CR LF.
+        result = subprocess.run(["git", *args], cwd=cwd, env=env, input=input_text, capture_output=True, timeout=60)
+        if result.returncode:
+            raise RuntimeError("fixture git %s failed: %s" % (args[0], result.stderr.decode("utf-8", "replace").strip()))
+        return result.stdout if binary else result.stdout.decode("utf-8", "replace")
     mode = {} if binary else {"text": True, "encoding": "utf-8", "errors": "replace"}
     result = subprocess.run(["git", *args], cwd=cwd, env=env, input=input_text,
                             capture_output=True, timeout=60, **mode)
@@ -275,10 +284,13 @@ class Store:
             return git(self.path, ["cat-file", "blob", "%s:%s" % (self.tip(), path)], self.env, binary=True)
         return git(self.path, ["show", "%s:%s" % (self.tip(), path)], self.env)
 
-    def seed(self, addr, mid, kind, sender, body, re_id="-"):
-        """Land one message on the mail ref with fixture plumbing, so a send bug cannot mask a read or take case."""
-        text = ("Msg %s from %s to %s kind %s re %s try 1\nReply-to: %s\n\n%s\n"
-                % (mid, sender, addr, kind, re_id, sender, body))
+    def seed(self, addr, mid, kind, sender, body, re_id="-", eol="\n", body_eol=None):
+        """Land one message on the mail ref with fixture plumbing, so a send bug cannot mask a read or take case.
+        eol ends the header lines and the blank line after them; body_eol ends the body (default: eol). A line ending
+        other than LF is written as bytes, so text-mode stdin on Windows does not turn each LF into CRLF."""
+        body_eol = eol if body_eol is None else body_eol
+        text = ("Msg %s from %s to %s kind %s re %s try 1%sReply-to: %s%s%s%s%s"
+                % (mid, sender, addr, kind, re_id, eol, sender, eol, eol, body, body_eol))
         index = os.path.join(self.path, "seed.index")
         env = dict(self.env, GIT_INDEX_FILE=index)
         if os.path.exists(index):
@@ -288,7 +300,8 @@ class Store:
             git(self.path, ["read-tree", "--empty"], env)
         else:
             git(self.path, ["read-tree", tip], env)
-        blob = git(self.path, ["hash-object", "-w", "--stdin"], self.env, input_text=text).strip()
+        data = text.encode("utf-8") if "\r" in text else text
+        blob = git(self.path, ["hash-object", "-w", "--stdin"], self.env, input_text=data).strip()
         git(self.path, ["update-index", "--add", "--cacheinfo",
                         "100644,%s,mail/%s/%s.md" % (blob, addr, mid)], env)
         tree = git(self.path, ["write-tree"], env).strip()
@@ -694,6 +707,7 @@ class Offline(MailCase):
                                 "control: the turn never read the remote: %d git starts" % len(starts.git_starts()))
         self.assertFalse([line for line in lines if line.startswith(UNKNOWN)],
                          "a healthy empty store printed 'mail unknown:': %r" % lines)
+        self.assertEqual(lines, [], "a store with no mail ref printed a line: %r" % lines)
 
 
 class Cost(MailCase):
@@ -1073,6 +1087,101 @@ class SshBatchDefault(MailCase):
                          % command)
 
 
+class MacNotHeld(MailCase):
+    """No platform is held by default (step mail-mac-unhold)."""
+
+    def test_no_platform_is_held(self):
+        self.assertEqual(MAIL_MODULE.HELD_PLATFORMS, (), "a platform is held by default: %r" % (MAIL_MODULE.HELD_PLATFORMS,))
+
+    def test_mac_turn_start_lists_the_message_with_no_hold_off(self):
+        store = self.store()
+        mid = "0a1b2c3d4ebb"
+        store.seed("cloud/sess-b", mid, "request", "cloud/sess-a", "Body marker: mac-open\n")
+        reader = self.machine("b", store, session="sess-b")
+        reader.env.pop("MAILBOX_HOLD_OFF")
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+            lines = turn(reader)
+        self.assertEqual(len(listed_with(lines, mid)), 1, "a Mac turn start is still held: %r" % lines)
+
+
+class MacHold(MailCase):
+    """Step mail-mac-unhold: the hold mechanism for a platform in HELD_PLATFORMS. The cases below patch the tuple to
+    ("darwin",) and prove the turn-start line and the `mail` command are both held there, and that MAILBOX_HOLD_OFF=1 lifts
+    the hold. The default tuple is empty; `MacNotHeld` pins that."""
+
+    def setUp(self):
+        super().setUp()
+        for module in (MAIL_MODULE, cli_module().mail):  # bin/mail holds its own copy of hooks/mail.py
+            patch = mock.patch.object(module, "HELD_PLATFORMS", ("darwin",))
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def seeded_reader(self, hold_off=False):
+        store = self.store()
+        mid = "0a1b2c3d4eaa"
+        store.seed("cloud/sess-b", mid, "request", "cloud/sess-a", "Body marker: mac-hold\n")
+        reader = self.machine("b", store, session="sess-b")
+        if hold_off:
+            reader.env["MAILBOX_HOLD_OFF"] = "1"
+        else:
+            reader.env.pop("MAILBOX_HOLD_OFF")
+        return mid, store, reader
+
+    def test_linux_turn_start_lists_the_message(self):
+        mid, _, reader = self.seeded_reader()
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "linux"):
+            lines = turn(reader)
+        self.assertEqual(len(listed_with(lines, mid)), 1, "control: a Linux turn does not list the message: %r" % lines)
+
+    def test_mac_turn_start_prints_nothing_for_an_open_message(self):
+        mid, _, reader = self.seeded_reader()
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+            lines = turn(reader)
+        self.assertEqual(lines, [], "a Mac turn start read the mailbox before its check passed: %r" % lines)
+
+    def test_mac_turn_start_lists_the_message_with_the_hold_off(self):
+        mid, _, reader = self.seeded_reader(hold_off=True)
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+            lines = turn(reader)
+        self.assertEqual(len(listed_with(lines, mid)), 1, "MAILBOX_HOLD_OFF=1 on a Mac did not lift the hold: %r" % lines)
+
+    def test_mac_send_is_refused_and_stores_nothing(self):
+        mid, store, reader = self.seeded_reader()
+        tip = store.tip()
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+            code, out, err = cli_in_process(reader, "send", "--to", "cloud/sess-a", "--kind", "inform",
+                                            "--body-file", self.body("held-send"))
+        self.assertEqual(code, 2, "a held Mac send exited %r, not 2: %r %r" % (code, out, err))
+        self.assertIn("held", err, "the refusal does not say the mailbox is held: %r" % err)
+        self.assertNotIn("sent", out, "a held Mac send printed sent: %r" % out)
+        self.assertEqual(store.tip(), tip, "a held Mac send moved the mail ref")
+
+    def test_mac_read_is_refused(self):
+        mid, _, reader = self.seeded_reader()
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+            code, out, err = cli_in_process(reader, "read", "--addr", "cloud/sess-b")
+        self.assertEqual(code, 2, "a held Mac read exited %r, not 2: %r %r" % (code, out, err))
+        self.assertNotIn(mid, out, "a held Mac read listed the message: %r" % out)
+        self.assertIn("held", err, "the held read printed no refusal: %r" % err)
+        self.assertNotIn("MAILBOX_HOLD_OFF", err, "the held refusal names the variable that lifts the hold: %r" % err)
+
+    def test_only_one_lifts_the_hold(self):
+        for value in ("0", "false", ""):
+            with self.subTest(value=value), mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+                self.assertTrue(MAIL_MODULE.held({"MAILBOX_HOLD_OFF": value}), "MAILBOX_HOLD_OFF=%r lifted the hold" % value)
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+            self.assertFalse(MAIL_MODULE.held({"MAILBOX_HOLD_OFF": "1"}), "MAILBOX_HOLD_OFF=1 did not lift the hold")
+
+    def test_mac_send_runs_with_the_hold_off(self):
+        mid, store, reader = self.seeded_reader(hold_off=True)
+        tip = store.tip()
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+            code, out, err = cli_in_process(reader, "send", "--to", "cloud/sess-a", "--kind", "inform",
+                                            "--body-file", self.body("open-send"))
+        self.assertEqual(code, 0, "the Mac check send exited %r with the hold off: %r %r" % (code, out, err))
+        self.assertNotEqual(store.tip(), tip, "the Mac check send stored nothing")
+
+
 class AgeUnknown(MailCase):
     def healthy_line(self, store, mid):
         """The turn-start line of a machine whose git log works, so each failing case has a line to compare."""
@@ -1428,6 +1537,16 @@ class MailboxOff(MailCase):
         read = run_cli(receiver, "read", "0123456789ab")
         self.assertEqual(read.returncode, 2,
                          "MAILBOX_REPO unset: mail read exited %d, not 2: %s" % (read.returncode, combined(read)))
+
+
+class SettingsDefault(unittest.TestCase):
+    """The mailbox store is a default of every session: settings.json `env` names it, so no session sets it by hand."""
+
+    def test_settings_env_names_the_mailbox_store(self):
+        with open(os.path.join(REPO, "settings.json"), encoding="utf-8") as handle:
+            env = json.load(handle).get("env", {})
+        self.assertEqual(env.get("MAILBOX_REPO"), "https://github.com/shivinate7/session-mailbox.git",
+                         "settings.json env has no MAILBOX_REPO default, so a session reads no mail: %r" % env.get("MAILBOX_REPO"))
 
 
 if __name__ == "__main__":
