@@ -472,9 +472,11 @@ Other tools, in `judge` order:
                        premise's `Source:` (a path, a 7+ hex hash, a backticked command, a record slug); with
                        no token, any one read-type call. No evidence: a Write or Edit of any file, an Agent
                        call, a send or PR-write tool, a call that failed, any agent record (isSidechain or
-                       agent_id), and the handoff itself. A `never` stamp (`Checked never`, `Checked: never`, `Re-checked
-                       never`) on a premise that is not a `ruling` is refused whether new, restamped or
-                       unchanged, and no read backs it. An unchanged dated stamp, a `ruling`
+                       agent_id), and the handoff itself. A never stamp (the first word of the value is `never`, case-blind,
+                       trailing punctuation allowed: `Checked never`, `Re-checked never yet.`) on a premise
+                       that is not a `ruling` is refused whether new, restamped or unchanged; a read does
+                       not lift it. Open escapes: a new line with no stamp, `**Checked:** never`, `Checked (never)`
+                       and the reader's own gaps (precompact-handoff, item 15). An unchanged dated stamp, a `ruling`
                        premise, a deleted line and a handoff with no premise lines pass. The reason gives one remedy line per
                        unbacked premise, naming its token or "any read". No transcript_path, an unreadable
                        transcript, handoff or prompt, and a failed import allow. An override lifts it. Cost:

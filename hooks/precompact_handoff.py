@@ -672,17 +672,26 @@ def _stamp_value(stamp):
     return _STAMP_LEAD.sub("", stamp, count=1) if stamp else ""
 
 
+_NEVER_FIRST = re.compile(r"never(?![\w-])")
+
+
+def _is_never(stamp):
+    """True when the first word of the stamp's value is `never` (`stamp` is already lowercased): `never`, `never yet`,
+    `never, unverified`. A value that holds never later (`2026-11-09 (never failed)`) or starts `never-` is not."""
+    return bool(_NEVER_FIRST.match(_stamp_value(stamp)))
+
+
 def _judged_kind(old, pid, kind):
     """The kind that judges premise `pid`: its kind in `before` (`old`), else its own kind in `after`."""
     return old[pid][0] if pid in old else kind
 
 
 def never_stamped(before, after, name=None):
-    """The ids of the premises of `after` that are not a ruling (by `_judged_kind`) and whose stamp value is `never`,
-    unchanged or not. No read backs such a stamp. `name` is the marker's premises name, when the caller has it."""
+    """The ids of the premises of `after` that are not a ruling (by `_judged_kind`) and whose stamp value starts with
+    the word `never`, unchanged or not. A read does not lift such a stamp. `name` is the marker's premises name, when the caller has it."""
     old = premise_stamps(before, name)
     return {pid for pid, (kind, _source, stamp) in premise_stamps(after, name).items()
-            if _judged_kind(old, pid, kind) != PREMISE_KINDS[0] and _stamp_value(stamp) == "never"}
+            if _judged_kind(old, pid, kind) != PREMISE_KINDS[0] and _is_never(stamp)}
 
 
 def stamp_changes(before, after, name=None):
@@ -699,7 +708,7 @@ def stamp_changes(before, after, name=None):
             stamp = None
         if not _stamp_value(was):
             was = None
-        if _judged_kind(old, pid, kind) == PREMISE_KINDS[0] or (stamp == was and _stamp_value(stamp) != "never"):
+        if _judged_kind(old, pid, kind) == PREMISE_KINDS[0] or (stamp == was and not _is_never(stamp)):
             continue
         need.append((pid, source_tokens(source)))
     return need
