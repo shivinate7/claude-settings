@@ -59,8 +59,8 @@ an option. The choice sits on `#healthTab`, `#healthViewBtn` and `#healthTable`.
    - Healthy: a filled ring with a check, `--good`.
    Gain: no mark reuses a Questions or Ask shape with a new meaning. The square, triangle, ring, dot
    and diamond stay Questions'. The half filled ring is main's Ask mark (`.g.wait` in page.html, in
-   `--acc`), which shows on the Health tab too, in the Ask head. So Has issues gets the one shape on
-   the page that is not drawn on a circle or a polygon: the exclamation mark. It says "look here"
+   `--acc`), which shows on the Health tab too, in the Ask head. So Has issues gets the one grade,
+   Questions or Ask mark not drawn on a circle or a polygon: the exclamation mark. It says "look here"
    with no colour, so it holds for colour-blind eyes and in forced-colors mode. It reads at 14 and 16
    px in light and dark. The check ring keeps its "done, nothing to do" meaning. The dashed ring keeps
    its "unknown" meaning. Loss: the exclamation mark has less ink than the octagon and the check ring
