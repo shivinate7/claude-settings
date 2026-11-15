@@ -1,0 +1,10 @@
+{
+ "id": "own-328-c",
+ "at": "2026-11-15T00:20:00-06:00",
+ "title": "q_max failed-run reason: drop 326 a and show the row's reason as is (no code); revisit on q_max.",
+ "ruling": "Consultant's pick under the owner's 20:18 CST Nov 14 words (own-consultant-speaks-for-owner), not owner-typed, relayed 00:20 CST Nov 15. Page item 328 (qmax-d369-error-source), option c: drop 326 a and show the row's reason as is. The owner's 00:09 CST Nov 15 save was 'none of these', note 'whichever is easiest and then leave this as a note to come back to on q_max'; the consultant reads c as the easiest, because it needs no code. Trade, told to the owner on the item: c gives up his own 326 a ('hide only the provider's text'), so the provider's raw text can reach the screen (usually a fault such as 'prompt is too long' or an overload, never the key). Item 328 is closed (00:20 CST). The q_max revisit note is on step qmax-d369-failed-reason. Triage read none of q_max's code, so whether anything is built is unknown. The item still carries a `pick` field of a from an earlier session, which triage did not change. Reopens if the owner says otherwise.",
+ "quote": "none of these (whichever is easiest and then leave this as a note to come back to on q_max)",
+ "source": "Owner page save 00:09 CST Nov 15 on item 328 (quote); consultant message 00:20 CST Nov 15 to triage (the pick, withdrawing b).",
+ "status": "open",
+ "step": "qmax-d369-failed-reason"
+}
