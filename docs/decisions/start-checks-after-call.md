@@ -49,7 +49,8 @@ Per `outcomes-mechanize-rules` (the rule that each hook states its cost):
 
 - Process starts: one hook process per `startup`, started by the harness. The hook starts no child process. `hooks/test_start_check.py` class `CostProof` proves it: `test_a_braked_startup_starts_no_process_and_writes_no_file`, `test_a_model_floor_stop_starts_no_process_and_writes_no_file` and `test_an_unbraked_startup_reads_the_load_and_starts_no_process`. Class `HarnessControls` proves the import starts none: `test_control_importing_guard_starts_no_process`.
 - Reads: the payload. A local startup also reads the load once: one memory counter and one `statfs`. A cloud startup reads no load.
-- Files written: none, by those cases. The tests set `PYTHONDONTWRITEBYTECODE`, so they do not show a bytecode cache. A real first run may write one under `hooks/__pycache__`. Unmeasured.
+- Files written: none, by those cases.
+- Bytecode cache: Python may write one for the imported guard module on a first run. The hook does not write it itself (`start_check.py` `main`), and the test sets `PYTHONDONTWRITEBYTECODE`, so it cannot see it. Unmeasured.
 - Timer, watcher or log: none. `start_check.py` `main` writes no log line.
 - How often: once per startup. Not on resume, compact, clear or fork.
 
