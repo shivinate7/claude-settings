@@ -2853,15 +2853,17 @@ class RetireCite(unittest.TestCase):
         """(slug, kind) of each close the debt-close check gives this PR: the kind the case is about."""
         return sorted((f.slug, f.kind) for f in D.check(self.r.dir, "origin/main", head, pr_body=body, run_state=runs))
 
-    def silent(self, head, body="", runs=None, strict=False):
+    def silent(self, head, body="", runs=None, strict=False, draft=None):
         """(problems, notes) of the silent-undo check on `head`, cited by `body` with the reader `runs`.
         strict: the case needs the excuse, so check() must take run_state; a missing parameter is a named red.
         Otherwise the reader is passed only when check() takes it, so on a check without the parameter the case
-        reads the finding it keeps."""
+        reads the finding it keeps. draft: passed only when check() takes it, as the reader is."""
         params = inspect.signature(C.check).parameters
         if strict:
             self.assertIn("run_state", params, NO_EXCUSE)
         kw = {"run_state": runs} if "run_state" in params else {}
+        if draft is not None and "draft" in params:
+            kw["draft"] = draft
         return C.check(self.r.dir, "origin/main", head, pr_body=body, **kw)
 
     @staticmethod
@@ -2930,6 +2932,22 @@ class RetireCite(unittest.TestCase):
         self.assertEqual(self.scope(head, body, Runs(boom)), [(self.SLUG, "unknown")], "scope")
         problems, notes = self.silent(head, body, Runs(boom))
         self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+
+    def test_a_draft_head_hands_the_draft_flag_to_retired(self):
+        """The silent-undo check passes its draft flag on to retired(), which excuses no deferred close (coordinator pick A).
+        The fixture's cite names a successful run of the head, so retired() is asked for the excuse: the flag must reach it."""
+        head, body = self.two_cited_closes()
+        asked = []
+        real = D.retired
+
+        def retired(*a, **k):
+            asked.append(k)
+            return real(*a, **k)
+
+        with unittest.mock.patch.object(D, "retired", retired):
+            self.silent(head, body, Runs(("success", head)), draft=True)
+        self.assertTrue(asked, "scope: the silent-undo check asked retired() for no excuse")
+        self.assertIs(asked[0].get("draft"), True, "check() did not pass the draft flag to retired()")
 
     def test_a_green_cite_does_not_excuse_a_retire_test_that_fails(self):
         self.land({self.DEBT: debt(self.RED_RETIRE)})

@@ -19701,9 +19701,27 @@ class DraftReady(CloudSession):
         DebtRetire.pr_on_debt(self, test_exit)
         DebtRetire.ci_closes_a_debt(self, "green")
 
+    DEFERRED = "deferred to confirm: no run exists yet"  # debt_check's line for a draft's close, and the detail of its pass (coordinator pick A)
+
+    def ready_fast_checks(self):
+        """`merge 7 --fast-checks` with the ready checks answering pass -> (rc, text). The ready check must run, or the case proves nothing.
+        The caller sets merge.readyChecks first (ready_checks_on_main), once per case: a second config commit would find nothing to commit."""
+        with self.ready_check_answers("pass") as ran:
+            rc, out, err = self.run_args("7", "--fast-checks")
+        text = out + err
+        self.assertTrue(ran, "scope: the pre-ready run made no ready-check call: " + text)
+        return rc, text
+
+    def marking_test(self, exit_code):
+        """A Retire test that writes self.marker when it runs, then exits with `exit_code`. The marker is the proof that a run happened."""
+        self.marker = os.path.join(self.t, "retire-ran.txt")
+        return "import pathlib, sys\npathlib.Path(%r).write_text('ran', encoding='utf-8')\nsys.exit(%d)\n" % (self.marker, exit_code)
+
     def test_fast_checks_refuses_a_red_debt_close_even_with_green_head_ci(self):
         """The pre-ready route (--fast-checks: pre_ready_rows, debt_verdict, debt_check) runs the debt-close lint with no CI gate: a host that reads
-        green CI on the head does not lift a close whose Retire check is red. Ruling R2 (owner, 14:07 CST Nov 10) keeps the CI gate for the preview only."""
+        green CI on the head does not lift a close whose Retire check is red. Ruling R2 (owner, 14:07 CST Nov 10) keeps the CI gate for the preview only.
+        A ready PR's red close refuses here (the first half). The same close on a draft is deferred to confirm (the second half, coordinator
+        pick A): the same route passes it and names the deferral."""
         self.ready_checks_on_main()
         self.debt_close_on_green_head(1)  # the close's own Retire test is red
         with self.ready_check_answers("pass") as ran:
@@ -19715,6 +19733,11 @@ class DraftReady(CloudSession):
         self.assertIn("fail debt retire", text, "the pre-ready run did not fail the debt-close lint for a red Retire check with green head CI: " + text)
         self.assertEqual(rc, 1, "the pre-ready run exited %s, not 1, with a red debt close: %s" % (rc, text))
         names_kind(self, text, "retire-target", "red")
+        self.host.draft = True  # the draft twin: the same close, the same route
+        rc, text = self.ready_fast_checks()
+        self.assertIn("pass debt retire", text, "a draft's red debt close was refused by the pre-ready run, not passed to confirm: " + text)
+        self.assertIn(self.DEFERRED, text, "a draft's red debt close passed with no deferral named: " + text)
+        self.assertEqual(rc, 0, "the pre-ready run exited %s, not 0, for a draft whose only close is deferred: %s" % (rc, text))
 
     def test_fast_checks_passes_a_debt_close_whose_retire_check_holds_with_green_head_ci(self):
         """The control of the case above: the same pre-ready route, green head CI, and a close whose Retire check holds. The debt line passes."""
@@ -19727,6 +19750,77 @@ class DraftReady(CloudSession):
         self.assertIn("pass open-PR clash", text, "scope: the open-PR clash is not a pass: " + text)
         self.assertIn("pass debt retire", text, "the debt-close lint did not pass a close whose Retire check holds: " + text)
         self.assertEqual(rc, 0, "the pre-ready run exited %s, not 0, with a passing debt close: %s" % (rc, text))
+
+    def test_fast_checks_on_a_draft_runs_no_retire_test_for_a_runnable_close(self):
+        """A draft's close whose Retire test would exit 1 is not run: the test writes its marker only when it runs, and the draft's pre-ready
+        run leaves it unwritten (coordinator pick A)."""
+        self.ready_checks_on_main()
+        DebtRetire.pr_on_debt(self, 1, test_text=self.marking_test(1))
+        self.host.draft = True
+        rc, text = self.ready_fast_checks()
+        self.assertIn("debt retire", text, "scope: the pre-ready run printed no debt-close line: " + text)
+        self.assertFalse(os.path.exists(self.marker), "a draft's close ran its Retire test: the test wrote its marker: " + text)
+        self.assertEqual(rc, 0, "the pre-ready run exited %s, not 0, for a draft whose only close is deferred: %s" % (rc, text))
+
+    def test_fast_checks_on_a_draft_prints_the_deferred_line_for_its_close(self):
+        self.ready_checks_on_main()
+        self.debt_close_on_green_head(1)
+        self.host.draft = True
+        rc, text = self.ready_fast_checks()
+        self.assertIn("merge: debt retire-target: %s" % self.DEFERRED, text, "a draft's close printed no deferred line: " + text)
+
+    def test_fast_checks_on_a_ready_pr_prints_no_deferred_line_for_its_close(self):  # control: the ready PR keeps its local run
+        self.ready_checks_on_main()
+        self.debt_close_on_green_head(1)
+        rc, text = self.ready_fast_checks()
+        self.assertIn("fail debt retire", text, "scope: the ready PR's red close was not refused: " + text)
+        self.assertNotIn(self.DEFERRED, text, "a ready PR's close was deferred to confirm: " + text)
+
+    def test_fast_checks_verdict_for_a_draft_with_only_deferred_closes_is_a_pass_naming_the_deferral(self):
+        self.ready_checks_on_main()
+        self.debt_close_on_green_head(1)
+        self.host.draft = True
+        rc, text = self.ready_fast_checks()
+        lines = [line for line in text.splitlines() if line.startswith("pass debt retire")]
+        self.assertTrue(lines, "a draft's debt-close verdict is not a pass: " + text)
+        self.assertIn(self.DEFERRED, lines[0], "the draft's pass line does not carry the deferral: " + lines[0])
+        self.assertEqual(rc, 0, "the pre-ready run exited %s, not 0, for a draft whose only close is deferred: %s" % (rc, text))
+
+    def test_debt_check_hands_the_draft_flag_and_a_deferred_list_to_the_check(self):
+        self.ready_checks_on_main()
+        self.debt_close_on_green_head(1)
+        self.host.draft = True
+        calls = DebtRetire.stub_retire_check(self)
+        self.ready_fast_checks()
+        self.assertTrue(calls, "scope: the pre-ready run called no debt check")
+        kw = calls[0][1]
+        self.assertIs(kw.get("draft"), True, "debt_check did not pass the draft flag to check()")
+        self.assertIsInstance(kw.get("deferred"), list, "debt_check did not pass a deferred list to check()")
+
+    def test_preview_hands_the_draft_flag_to_the_silent_undo_check(self):
+        DebtRetire.pr_on_debt(self, 0)
+        self.host.draft = True
+        import check_silent_undo
+        seen = []
+
+        def check(*a, **k):
+            seen.append(k)
+            return [], []
+
+        patch = unittest.mock.patch.object(check_silent_undo, "check", check)
+        patch.start()
+        self.addCleanup(patch.stop)
+        rc, out = self.run_merge("7")
+        self.assertTrue(seen, "scope: the preview ran no silent-undo check: " + out)
+        self.assertIs(seen[0].get("draft"), True, "the silent-undo check was not told the PR is a draft: " + out)
+
+    def test_a_ready_pr_debt_refusal_names_no_forbidden_target(self):  # control: the refusal text is as it was
+        self.ready_checks_on_main()
+        self.debt_close_on_green_head(1)
+        rc, text = self.ready_fast_checks()
+        self.assertIn("fail debt retire", text, "scope: the ready PR's red close was not refused: " + text)
+        for forbidden in ("--force", "--no-verify", merge.UNDO_FLAG, merge.RED_FLAG):
+            self.assertNotIn(forbidden, text, "the ready PR's refusal names %s, which no debt check takes: %s" % (forbidden, text))
 
     def test_ready_alone_marks_a_lane_draft_ready_once_and_merges_nothing(self):  # per-lane, from the Q2 pick: --ready is not batch-only
         self.lane(101)

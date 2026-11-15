@@ -7,7 +7,7 @@ working folder to the file named by RETIRE_MARKS, so a case shows that a Retire 
 No case waits on a clock. The Retire-run cases pass a fake run_state, so no case reads the network.
 The CI entry cases (CiEntry, CiWorkflow) run the CLI on a PATH with no gh, and read checks.yml by its steps.
 """
-import atexit, json, os, re, shutil, subprocess, sys, tempfile, unittest, unittest.mock
+import atexit, inspect, json, os, re, shutil, subprocess, sys, tempfile, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -122,6 +122,21 @@ class Case(unittest.TestCase):
 
     def findings(self, head=None, pr_body="", run_state=None):
         return D.check(self.dir, self.base, head=head or self.head, pr_body=pr_body, run_state=run_state)
+
+    def draft_findings(self, deferred=None, draft=True, pr_body="", run_state=None):
+        """The findings of this head read as a draft's: `draft`, and the `deferred` list when one is given. A check with no
+        draft parameter runs as it always did, so a case reads that check's answer, never a TypeError."""
+        kw = {}
+        if "draft" in inspect.signature(D.check).parameters:
+            kw["draft"] = draft
+            if deferred is not None:
+                kw["deferred"] = deferred
+        return D.check(self.dir, self.base, head=self.head, pr_body=pr_body, run_state=run_state, **kw)
+
+    def draft_retired(self, draft, pr_body, run_state):
+        """retired() for this head with the draft flag, when retired() takes it (see draft_findings)."""
+        kw = {"draft": draft} if "draft" in inspect.signature(D.retired).parameters else {}
+        return D.retired(self.dir, self.base, head=self.head, pr_body=pr_body, run_state=run_state, **kw)
 
     def ran(self):
         """(script name, working folder) for each fixture script that ran, in the order it ran."""
@@ -557,6 +572,91 @@ class RetireRun(Case):
         body = "Retire-run: d-prose -- %s\n" % RUN_URL
         self.assertEqual(pairs(self.findings(pr_body=body)), [("d-prose", "unknown")], "scope")
         self.assertEqual(self.retired_of(body, None), {})
+
+
+class DraftClose(Case):
+    """A draft's close runs no local Retire test (coordinator pick A; decision debt-close-runs-retire). The ready PR's
+    CI step judges every close, so a draft defers a close whose Retire names a runnable test: the slug is listed and nothing runs. A close
+    that needs no run keeps its answer on a draft: a prose Retire refuses, a cite is read, and a rename is no close. The `_control` cases
+    are green on the old check by design: they hold what a draft must keep."""
+
+    def test_d1_a_draft_close_with_a_runnable_retire_runs_nothing_and_defers_its_slug(self):
+        self.repo(debts={"d-fail": FAIL})
+        self.change(rm=["docs/debts/d-fail.md"])
+        deferred = []
+        found = self.draft_findings(deferred=deferred)
+        self.assertEqual(self.ran(), [], "a draft's close ran its Retire test in the head folder")
+        self.assertEqual(pairs(found), [], "a draft's deferred close gave a finding")
+        self.assertEqual(deferred, ["d-fail"], "a draft's runnable close was not deferred")
+
+    def test_d1_control_the_same_close_on_a_ready_pr_runs_its_retire_test(self):
+        self.repo(debts={"d-fail": FAIL})
+        self.change(rm=["docs/debts/d-fail.md"])
+        found = self.draft_findings(draft=False, deferred=[])
+        self.assertEqual(self.ran(), [("test_fail.py", self.dir)], "a ready PR's close did not run its Retire test")
+        self.assertEqual(pairs(found), [("d-fail", "red")], "a ready PR's red close gave no red finding")
+
+    def test_d2_control_a_draft_close_with_a_prose_retire_still_refuses(self):
+        self.repo(debts={"d-prose": PROSE})
+        self.change(rm=["docs/debts/d-prose.md"])
+        deferred = []
+        found = self.draft_findings(deferred=deferred)
+        self.assertEqual(pairs(found), [("d-prose", "prose")], "a draft's prose close is not refused")
+        self.assertEqual(deferred, [], "a prose close was deferred, though no run is named to defer")
+
+    def test_d3_control_a_draft_prose_close_with_a_green_cite_passes_by_the_cite(self):
+        self.repo(debts={"d-prose": PROSE})
+        self.change(rm=["docs/debts/d-prose.md"])
+        runs = Runs(("success", self.head))
+        found = self.draft_findings(deferred=[], pr_body="Retire-run: d-prose -- %s\n" % RUN_URL, run_state=runs)
+        self.assertEqual(runs.urls, [RUN_URL], "scope: the cited run was not read")
+        self.assertEqual(pairs(found), [], "a green cited run did not clear a draft's prose close")
+
+    def test_d4_control_a_draft_prose_close_with_a_red_cite_refuses(self):
+        self.repo(debts={"d-prose": PROSE})
+        self.change(rm=["docs/debts/d-prose.md"])
+        runs = Runs(("failure", self.head))
+        found = self.draft_findings(deferred=[], pr_body="Retire-run: d-prose -- %s\n" % RUN_URL, run_state=runs)
+        self.assertEqual(runs.urls, [RUN_URL], "scope: the cited run was not read")
+        self.assertEqual(pairs(found), [("d-prose", "red")], "a red cited run did not refuse a draft's prose close")
+
+    def test_d5_a_draft_close_with_no_deferred_list_is_unknown_not_a_pass(self):
+        self.repo(debts={"d-fail": FAIL})
+        self.change(rm=["docs/debts/d-fail.md"])
+        found = self.draft_findings()
+        self.assertEqual(self.ran(), [], "a draft close with no deferred list ran its Retire test")
+        self.assertEqual(pairs(found), [("d-fail", "unknown")], "a draft close with no deferred list was not an unknown finding")
+
+    def test_d6_a_deferred_draft_close_excuses_no_silent_delete(self):
+        self.repo(debts={"d-pass": PASS})
+        self.change(rm=["docs/debts/d-pass.md"])
+        got = self.draft_retired(True, pr_body="Retire-run: d-pass -- %s\n" % RUN_URL, run_state=Runs(("success", self.head)))
+        self.assertEqual(self.ran(), [], "a draft's close ran its Retire test, so retired() judged it")
+        self.assertNotIn("docs/debts/d-pass.md", got, "a draft's deferred close excused a silent delete")
+
+    def test_d6_control_a_ready_pr_cited_passing_close_is_excused(self):
+        self.repo(debts={"d-pass": PASS})
+        self.change(rm=["docs/debts/d-pass.md"])
+        got = self.draft_retired(False, pr_body="Retire-run: d-pass -- %s\n" % RUN_URL, run_state=Runs(("success", self.head)))
+        self.assertIn("docs/debts/d-pass.md", got, "a ready PR's cited, passing close is no longer excused")
+
+    def test_d7_two_runnable_draft_closes_are_both_deferred_and_neither_runs(self):
+        self.repo(debts={"d-pass": PASS, "d-fail": FAIL})
+        self.change(rm=["docs/debts/d-pass.md", "docs/debts/d-fail.md"])
+        deferred = []
+        found = self.draft_findings(deferred=deferred)
+        self.assertEqual(self.ran(), [], "a draft's close ran its Retire test")
+        self.assertEqual(pairs(found), [], "a draft's deferred closes gave a finding")
+        self.assertEqual(sorted(deferred), ["d-fail", "d-pass"], "a draft did not defer both runnable closes")
+
+    def test_d8_control_a_draft_that_closes_no_debt_defers_and_runs_nothing(self):
+        self.repo(debts={"d-fail": FAIL})
+        self.change(write={"other.txt": "unrelated\n"})
+        deferred = []
+        found = self.draft_findings(deferred=deferred)
+        self.assertEqual(self.ran(), [], "a draft with no close ran a Retire test")
+        self.assertEqual(pairs(found), [], "a draft with no close gave a finding")
+        self.assertEqual(deferred, [], "a draft with no close deferred a slug")
 
 
 class TemplateExcuses(unittest.TestCase):
