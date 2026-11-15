@@ -1,7 +1,7 @@
 # section 43500
 FAMILY = "brief-ids-in-roster"  # the role-word brief cases, and the decision record checks at the end of this section
 
-# ---- Session roster at start (decision brief-ids-in-roster, which holds the owner's ruling and its time). Three parts:
+# ---- Session roster at start (decision brief-ids-in-roster, which holds the ruling and its time). Three parts:
 # 1. A brief to a standing session (triage, batch runner) whose first line is a role-word line (`Brief:`,
 #    `Triage brief:`, `Batch runner brief:`) is read by the bare-id check, as a Grant or Lane brief is. The quote escape
 #    is unchanged.
