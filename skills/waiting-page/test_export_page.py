@@ -2315,7 +2315,7 @@ class All(Base):
         self.assertEqual(read_text(os.path.join(queue, "items", "q1.json")), canonical(item(2)), "the queue's item did not land")
         self.assertFalse(os.path.exists(os.path.join(queue, "answers")), "an artifact exported a collection its entry does not list")
 
-    def test_the_waiting_page_entry_exports_each_receipt_to_its_export_path(self):
+    def test_the_registry_entry_exports_each_receipt_to_its_export_path(self):
         worktree = self.out("worktree")
         r = self.run_all(self.repo(), self.fetched_all(self.docs()), worktree)
         self.assertEqual(r.returncode, 0, shown(r))
