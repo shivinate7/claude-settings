@@ -74,7 +74,6 @@ OWNER_STAKES = ("goal", "money", "risk", "rule", "cannot undo")
 _STAKES = "|".join(re.escape(s) for s in OWNER_STAKES)
 GOAL_LINE = re.compile(r"^[ \t]*Goal:[ \t]*\S", re.I | re.M)
 PROBLEM_LABEL = re.compile(r"^[ \t]*Problem\b", re.I | re.M)
-PROBLEM_STAKE_OPEN = re.compile(r"^[ \t]*Problem[ \t]*\(", re.I | re.M)
 PROBLEM_LINE = re.compile(r"^[ \t]*Problem[ \t]*\((?:%s)\):[ \t]*\S" % _STAKES, re.I | re.M)
 # A Based on line starts `Based on (` or `Based on:`; prose that starts "Based on the log" is not one.
 BASED_LABEL = re.compile(r"^[ \t]*Based on[ \t]*[(:]", re.I | re.M)
@@ -947,23 +946,18 @@ def _filled(value) -> bool:
 
 def form_str_replace_hit(entry):
     """(rule, matched) when a str_replace on `context` removes a Goal, Problem or Based on line, or swaps
-    the Problem line for a malformed one. It carries no `data`, so it is read from old_str and new_str."""
+    the Problem line for one that names no stake from the set. It carries no `data`, so it is read from old_str and new_str."""
     if entry.get("field") != "context":
         return PASS
     old, new = str(entry.get("old_str") or ""), str(entry.get("new_str") or "")
     if GOAL_LINE.search(old) and not GOAL_LINE.search(new):
         return FORM_RULE, "context edit that removes the Goal line"
-    # A stake in old_str stays a stake. A bare Problem line in old_str (stored before the stake rule held
-    # for every item) may be edited, but not removed.
-    if PROBLEM_LINE.search(old) and not PROBLEM_LINE.search(new):
+    # Any Problem line in old_str, a stake line or a bare one stored before the stake rule held, may only
+    # become a labelled stake line. A page item carries no stood pick, so no edit keeps a bare line.
+    if PROBLEM_LABEL.search(old) and not PROBLEM_LINE.search(new):
         if PROBLEM_LABEL.search(new):
             return STAKE_RULE, "context edit that leaves a Problem line with no stake, or one outside the set"
         return FORM_RULE, "context edit that removes the Problem line"
-    if PROBLEM_LABEL.search(old) and not PROBLEM_LABEL.search(new):
-        return FORM_RULE, "context edit that removes the Problem line"
-    # A bare Problem line may become another bare line, but not one that names a stake the set lacks.
-    if PROBLEM_LABEL.search(old) and PROBLEM_STAKE_OPEN.search(new) and not PROBLEM_LINE.search(new):
-        return STAKE_RULE, "context edit that leaves a Problem line with no stake, or one outside the set"
     if BASED_LABEL.search(old) and not BASED_LABEL.search(new):
         return FORM_RULE, "context edit that removes the Based on line"
     hit = placeholder_form_hit(new)
