@@ -3131,12 +3131,9 @@ def refuse_incomplete_tree(wt, head, base, tree=None):
 
 def mergeable_into_branch(info):
     """True when lane_lint may push a merge commit to the pull request's branch: the pull request is open and its head lives in its base's repository. A fork's
-    branch is not ours to push to, and a repository that GitHub no longer names (None) is never assumed to be ours. A pr() with no repository fields (the test fake) is not gated on them."""
-    if info["state"] != "OPEN":
-        return False
-    if "head_repo" not in info:
-        return True
-    return info["head_repo"] is not None and info["head_repo"] == info.get("base_repo")
+    branch is not ours to push to. A repository that GitHub no longer names (None) and an info with no repository field are never assumed to be ours."""
+    head_repo = info.get("head_repo")
+    return info["state"] == "OPEN" and head_repo is not None and head_repo == info.get("base_repo")
 
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_tests=False, mutate_run=True, pre_join=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
@@ -3146,7 +3143,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     Once those pass, the merged tree is made a commit (`git commit-tree`, first parent the base tip, second the head) and the lint worktree checks it out, so every step
     and the touched tests read the files of the merge, not the head's older copy, and a diff of the base against HEAD or the work tree shows only the lane's own changes.
     The first parent is the base tip that merge_reason merged, never a later read of origin/<base>. A commit-tree or checkout that fails is an UnknownStop, which no flag lifts.
-    A pull request on the default branch, not an integration PR and not a `pre_join` call, whose head holds no Record-claim and lacks that base tip is linted as M instead:
+    A pull request on the default branch that is open, has its head in its base's repository (mergeable_into_branch), is not an integration PR, is not a `pre_join` call, whose head the caller's checkout holds (an ancestor of its HEAD) and holds no Record-claim, and lacks that base tip is linted as M instead:
     the merge commit of the head (first parent) and the tip (second), made with base_merge_message and the tree merge_reason read. The lint commit's second parent is then M,
     and ci-job gets M as CI_JOB_HEAD_SHA, so its `github.event.pull_request.head.sha` is M. For any other target the second parent is the head, and CI_JOB_HEAD_SHA is the head.
     M is pushed only after the lint, the mutation test and the touched tests all pass (a plain push of M to the pull request's branch, never forced). A refused push (the branch moved) is a Stop
@@ -3215,8 +3212,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             raise Stop("\n".join([*([f"the lint of {head[:9]} against {base} FAILs:", *fails] if fails else []), stop if stop else LANE_LINT_REMEDY]))
         # A pull request on the default branch whose head lacks the tip the merge read: M, the merge commit of the head and that tip, is what the lint reads and a
         # pass pushes (never read again from origin/<base>). Any other target lints a merge commit of the tip and the head that is never pushed.
-        # An unreadable ancestry (None) is no push, as is a Record-claim head: a merge commit on top would hide the claim from own_claim.
-        if (target.isdigit() and mergeable_into_branch(info) and not is_integration_pr(info) and not pre_join and base == default_branch(root)
+        # The caller owns the branch only when its checkout holds the pushed head, so a wrong PR number pushes nothing. An unreadable ancestry (None) is no push, as is a Record-claim head: a merge commit on top would hide the claim from own_claim.
+        if (target.isdigit() and mergeable_into_branch(info) and ancestor(root, head, "HEAD") is True and not is_integration_pr(info) and not pre_join and base == default_branch(root)
                 and not head_claim(wt, head) and ancestor(wt, merged[1], head) is False):
             c, made = git(wt, *identity(wt), "commit-tree", merged[0], "-p", head, "-p", merged[1], "-m", base_merge_message(base, info["branch"]))
             if c:
