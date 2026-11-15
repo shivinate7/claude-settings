@@ -1196,6 +1196,22 @@ class WindowsGuardShards(unittest.TestCase):
         shards = guard_shards_run(run(["hooks/café.py"]))
         self.assertEqual(set(shards.values()), {True}, f"a guard shard is off for the non-ASCII guard input hooks/café.py: {shards}")
 
+    # An added file under a landed dir turns the shards on. The landed-dir pass reads the added names newline-separated, so git's
+    # quoted non-ASCII name matches no landed dir. The ASCII file is the control; the two runs must differ on windows_guard alone.
+    # Named failure: a non-ASCII file added under bin/ leaves the guard shards off.
+    def test_an_added_non_ascii_file_under_a_landed_dir_turns_the_guard_shards_on(self):
+        plain = run(["bin/plain.sh"])
+        cafe = run(["bin/café.sh"])
+        with self.subTest("control: the ASCII name"):
+            self.assertEqual(set(guard_shards_run(plain).values()), {True}, f"a guard shard is off for bin/plain.sh: {plain}")
+        with self.subTest("windows_guard for the non-ASCII name"):
+            self.assertEqual(cafe.get("windows_guard"), "true", f"windows_guard is off for the added bin/café.sh: {cafe}")
+        with self.subTest("the other flags, against the ASCII name"):
+            def without_windows_guard(got):
+                return {n: v for n, v in got.items() if n != "windows_guard"}
+            self.assertEqual(without_windows_guard(cafe), without_windows_guard(plain),
+                             "bin/café.sh and bin/plain.sh differ on a flag other than windows_guard")
+
     # The gate reads the flags on push, schedule and dispatch too: those events run everything, so the shards run.
     def test_push_schedule_and_dispatch_turn_the_guard_shards_on_for_a_docs_only_diff(self):
         for event in ("push", "schedule", "workflow_dispatch"):
