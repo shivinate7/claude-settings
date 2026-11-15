@@ -20,11 +20,13 @@ hook's environment. The hook names no branch of its own. The installer also gets
 SessionStart entry fires on, so install.sh runs no startup entry for a reinstall in a running session.
 
 The attempt stamp. The installer also gets CS_STALE_TIP=<tip>, replacing any inherited value. With it, install.sh
-writes <config dir>/.claude-settings-install-attempt.json ({"tip", "epoch"}) when its run starts, and removes it
-when its record lands at that tip. A failed, timed-out or short run leaves it. Before a reinstall this hook reads it.
+writes <config dir>/.claude-settings-install-attempt.json ({"tip", "epoch"}) when its run starts, before it takes the
+install lock, and removes it when its record lands at that tip. A failed, timed-out or short run leaves it, and so
+does a run that exits 1 waiting on the lock. Before a reinstall this hook reads it.
 A stamp for the same tip, younger than the backoff (900 s; CLAUDE_SETTINGS_REINSTALL_BACKOFF replaces it, positive
 number only), prints "reinstall skipped (install started at <tip7> not finished, retry in N s)" and runs no installer.
-An absent, unreadable, garbled, other-tip or aged stamp lets the reinstall run.
+An absent, unreadable, garbled, other-tip, aged or future-dated stamp (an epoch later than the clock is not
+trusted) lets the reinstall run.
 
 Cost: one python process start per turn. At most one `git ls-remote` per turn (a network read, bounded by
 CLAUDE_SETTINGS_FETCH_TIMEOUT seconds, default 10), none outside a cloud session. The origin URL is read from the
@@ -143,14 +145,17 @@ def backoff():
 
 def skip_line(tip):
     """The skip line when the stamp names this tip and is younger than the backoff, else None. An absent, unreadable,
-    garbled, other-tip or aged stamp is None: the reinstall runs."""
+    garbled, other-tip, aged or future-dated stamp is None: the reinstall runs."""
     try:
         with open(os.path.join(config_dir(), STAMP_NAME), encoding="utf-8") as handle:
             stamp = json.load(handle)
         epoch = stamp["epoch"]
         if stamp["tip"] != tip or isinstance(epoch, bool) or not isinstance(epoch, (int, float)):
             return None
-        left = math.ceil(epoch + backoff() - time.time())
+        now = time.time()
+        if epoch > now:
+            return None
+        left = math.ceil(epoch + backoff() - now)
     except (OSError, ValueError, KeyError, TypeError, OverflowError):
         return None
     if left <= 0:
