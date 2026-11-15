@@ -34,6 +34,7 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 RUN_FOLDER = _test_temp.run_folder()
+sys.path.append(HERE)  # the lag cases import guard_core and session_role from hooks/
 
 FAILED = []
 
@@ -858,11 +859,9 @@ def quiet_exit(proc):
 
 
 def case_nudge_compaction_rebases_overhead():
-    """A 300k first entry: the overhead is 300k, so before the compaction 380k blocks (messages 80k) and
-    after it nothing reaches a checkpoint. Today the overhead stays 300k at every size after the
-    compaction, so 276k and 340k stay quiet at bucket -1. The fix re-bases on the first post-compaction
-    entry, 30k: the 200k floor sits at total 230k, so 276k blocks; a repeat is quiet; the top sits at
-    total 334k, so 340k blocks."""
+    """A 300k first entry sets the overhead at 300k, so before the compaction 380k blocks (messages 80k).
+    A compaction re-bases the overhead on the first entry after it, 30k: the 200k floor sits at total
+    230k, so 276k blocks; a repeat is quiet; the top sits at total 334k, so 340k blocks."""
     c = Case("ncmp1")
     try:
         pre = [usage_line(300000)]
@@ -2495,14 +2494,25 @@ OWNER_PROMPT_WANTS = (
     ("a page item named by its number", r"\bnumber\b"),
     ("none when empty", r"\bnone\b"),
 )
-# The audit hook logs each process start the hook makes, to the file named by OWNER_WAITS_AUDIT_LOG.
+# The audit hook logs each process start the hook makes, to the file named by OWNER_WAITS_AUDIT_LOG. With
+# OWNER_WAITS_AUDIT_FILES set it also logs each write (an open for write) and each new directory, as
+# "write <path>" and "mkdir <path>". The log fd is opened before the hook, so the hook's own log write is no event.
 AUDIT_WRAPPER = "\n".join([
     "import os, runpy, sys",
     "log = os.environ['OWNER_WAITS_AUDIT_LOG']",
+    "fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND)",
+    "WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC",
+    "def note(text):",
+    "    os.write(fd, (text + '\\n').encode('utf-8'))",
     "def audit(event, args):",
     "    if event.startswith(('subprocess.', 'os.exec', 'os.spawn', 'os.posix_spawn', 'os.fork', 'os.system')):",
-    "        with open(log, 'a', encoding='utf-8') as f:",
-    "            f.write(event + '\\n')",
+    "        note(event)",
+    "    elif os.environ.get('OWNER_WAITS_AUDIT_FILES'):",
+    "        if event == 'open' and (isinstance(args[1], str) and any(c in args[1] for c in 'wax+')",
+    "                                or isinstance(args[2], int) and args[2] & WRITE_FLAGS):",
+    "            note('write ' + str(args[0]))",
+    "        elif event == 'os.mkdir' and not os.path.exists(args[0]):",
+    "            note('mkdir ' + str(args[0]))",
     "sys.addaudithook(audit)",
     "sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[1])))",
     "sys.argv = sys.argv[1:]",
@@ -2604,10 +2614,14 @@ def config_state(cfg):
     return state
 
 
-def run_audited(c, args, payload):
-    """Case.run, with an audit hook in the interpreter that logs each process start the hook makes."""
+def run_audited(c, args, payload, files=False):
+    """Case.run, with an audit hook in the interpreter that logs each process start the hook makes. files also
+    logs its writes and new directories, and turns off bytecode writes: the import system's, not the hook's."""
     env = c.env()
     env["OWNER_WAITS_AUDIT_LOG"] = os.path.join(c.root, "audit.log")
+    if files:
+        env["OWNER_WAITS_AUDIT_FILES"] = "1"
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
     return subprocess.run([sys.executable, "-c", AUDIT_WRAPPER, MODULE] + list(args),
                           input=json.dumps(payload), capture_output=True, text=True, env=env, cwd=c.repo)
 
@@ -2950,21 +2964,19 @@ def case_owner_waits_answer_key_is_the_act():
         c.cleanup()
 
 
-def plain_lines(pairs):
-    """Bash calls and their successful results. No coordinator tag text anywhere."""
+def plain_lines(pairs, ts=OWNER_TS):
+    """Bash calls and their successful results, all stamped ts. No coordinator tag text anywhere."""
     lines = []
     for i in range(pairs):
         tu = "tu-p%d" % i
-        lines.append(bash_call(tu, "echo step-%04d" % i))
-        lines.append(tool_result("step-%04d done" % i, OWNER_TS, is_error=False, tool_use_id=tu))
+        lines.append(bash_call(tu, "echo step-%04d" % i, ts=ts))
+        lines.append(tool_result("step-%04d done" % i, ts, is_error=False, tool_use_id=tu))
     return lines
 
 
-def gap_with_decodes(c, lines):
-    """owner_waits_gap over these transcript lines, in-process, as (reason, error, JSON decodes it made).
-    Every json.loads reaches JSONDecoder.raw_decode, so counting there sees a parse in any module."""
-    tp = os.path.join(c.root, "cost-transcript.jsonl")
-    write_transcript(tp, lines)
+def decodes_of(thunk):
+    """thunk() in-process, as (its value, the JSON decodes it made). Every json.loads reaches
+    JSONDecoder.raw_decode, so counting there sees a parse in any module."""
     decodes = [0]
     original = json.decoder.JSONDecoder.raw_decode
 
@@ -2974,11 +2986,23 @@ def gap_with_decodes(c, lines):
 
     json.decoder.JSONDecoder.raw_decode = counting
     try:
-        with Env(CLAUDE_CONFIG_DIR=c.cfg, CLAUDE_CODE_REMOTE_SESSION_ID=None):
-            reason, err = call_under_test("owner_waits_gap", {"session_id": c.session_id, "transcript_path": tp})
+        value = thunk()
     finally:
         json.decoder.JSONDecoder.raw_decode = original
-    return reason, err, decodes[0]
+    return value, decodes[0]
+
+
+def gap_with_decodes(c, lines):
+    """owner_waits_gap over these transcript lines, in-process, as (reason, error, JSON decodes it made)."""
+    tp = os.path.join(c.root, "cost-transcript.jsonl")
+    write_transcript(tp, lines)
+
+    def owner_gap():
+        with Env(CLAUDE_CONFIG_DIR=c.cfg, CLAUDE_CODE_REMOTE_SESSION_ID=None):
+            return call_under_test("owner_waits_gap", {"session_id": c.session_id, "transcript_path": tp})
+
+    (reason, err), decodes = decodes_of(owner_gap)
+    return reason, err, decodes
 
 
 def case_owner_waits_cost_skips_plain_transcripts():
@@ -3242,6 +3266,7 @@ LAG_MERGE_MCP = "mcp__github__merge_pull_request"
 LAG_MERGE_ARGS = {"owner": "example-org", "repo": "example-repo", "pullNumber": 2046}
 LAG_MERGE_CMD = "merge 2046 --confirm"
 LAG_RULING = "The owner's ruling is on the page; the page writer may act on it."
+LAG_MERGED_LINE = "merge: #2046 merged as 1a2b3c4d5."  # the merge tool's success line (merge/merge.py)
 
 
 def lag_handoff(c, mtime=LAG_MTIME):
@@ -3263,7 +3288,12 @@ def merge_call(ts, ok=True, bash=False):
         call = bash_call(tu, LAG_MERGE_CMD, ts=ts)
     else:
         call = tool_call(tu, LAG_MERGE_MCP, LAG_MERGE_ARGS, ts)
-    content = "merged #2046" if ok else "merge refused: the checks are not green"
+    if not ok:
+        content = "merge refused: the checks are not green"
+    elif bash:
+        content = LAG_MERGED_LINE
+    else:
+        content = "merged #2046"  # the MCP merge's result is GitHub's text, not a merge.py line
     return [call, tool_result(content, ts, is_error=not ok, tool_use_id=tu)]
 
 
@@ -3530,6 +3560,233 @@ def case_lag_writes_no_file_and_starts_no_process():
         c.cleanup()
 
 
+# --- handoff lag: which merge results, relays and role lines count ------------------------------
+# The merge tool's own result lines (merge/merge.py). A success says "merged as <sha>"; the draft preview,
+# the draft step and the claim push say no merge happened. Each is a successful Bash result, so its text
+# alone tells them apart. The cite that merge.py adds after the claim push is left out.
+LAG_NOT_MERGED = (
+    ("draft preview", "merge: #2046 is a draft. This is a preview only; --confirm on a draft is the records "
+                      "step, and it never merges."),
+    ("draft step", "merge: #2046 is ready now. No pull request was merged. When its run is green, run --confirm "
+                   "again to merge."),
+    ("stays a draft", "merge: #2046 stays a draft (checks pending). Mark it ready after its draft run shows, then "
+                      "run --confirm again to merge. No pull request was merged."),
+    ("claim push", "merge: the claim is pushed to lane-merge-order at 1a2b3c4d5. Nothing was merged. Run "
+                   "--confirm again when the new head is green."),
+)
+LAG_REQUESTS = (
+    ("a request", "Need a ruling on merge order before I touch the page."),
+    ("a question", "Is the ruling on merge order in yet? I can wait."),
+)
+COST_TAIL_PAIRS = 100000  # 200k lines: Bash calls and their results, all before the handoff's mtime
+
+
+def hooks_name(module, attr):
+    """The name `attr` of hooks/<module>.py, read by import. None, with the failure written as a failed check,
+    when it is missing: the case stops there and the run goes on."""
+    try:
+        return getattr(__import__(module), attr)
+    except Exception as e:
+        check("handoff lag (scope): %s is read from hooks/%s.py" % (attr, module), False,
+              "%s: %s" % (type(e).__name__, e))
+        return None
+
+
+def shell_merge(name, ts, text=LAG_MERGED_LINE):
+    """A merge-tool call through the shell tool `name`, with its result text (the success line by default)."""
+    tu = "tu-merge-%s" % name.lower()
+    return [tool_call(tu, name, {"command": LAG_MERGE_CMD}, ts),
+            tool_result(text, ts, is_error=False, tool_use_id=tu)]
+
+
+def big_tail_lines():
+    """A full-size transcript: 200k lines before the handoff's mtime, then a merge after it, last."""
+    return plain_lines(COST_TAIL_PAIRS, ts=BEFORE_ISO) + merge_call(LAG_AFTER, bash=True)
+
+
+def case_lag_merge_result_without_a_merge_stays_quiet():
+    """Merge, Bash, no merge: a successful `merge <pr> --confirm` whose result says no merge happened (the draft
+    preview, the draft step, the stays-a-draft line, the claim push) stays quiet. One Case each: a block stores
+    its event, so a second block on the same event would read as quiet."""
+    for i, (label, text) in enumerate(LAG_NOT_MERGED):
+        c = Case("lag_nomerge_%d" % i)
+        try:
+            lag_handoff(c)
+            p = lag_stop(c, plain_lines(2) + shell_merge("Bash", LAG_AFTER, text=text))
+            check("handoff lag (merge result, %s: no merge): quiet" % label, quiet_exit(p),
+                  "out=%r" % (p.stdout or "")[:200])
+        finally:
+            c.cleanup()
+
+
+def case_lag_merge_shell_tools_block():
+    """Merge, shell tool: a successful `merge <pr> --confirm` through each shell tool the guard reads
+    (guard_core.SHELL_TOOLS) blocks after the mtime. Bash is the control."""
+    names = hooks_name("guard_core", "SHELL_TOOLS")
+    if names is None:
+        return
+    for name in names:
+        c = Case("lag_shell_%s" % name.lower())
+        try:
+            lag_blocks(c, "merge, %s merge tool" % name, shell_merge(name, LAG_AFTER))
+        finally:
+            c.cleanup()
+
+
+def case_lag_relay_request_or_question_stays_quiet():
+    """Ruling relay, a request or a question: a send whose message asks (`Need a ruling ...`, no `?`) or holds a
+    `?` stays quiet. A send that reports a ruling blocks (case_lag_ruling_relay_blocks). One Case each, as above."""
+    for i, (label, message) in enumerate(LAG_REQUESTS):
+        c = Case("lag_ask_%d" % i)
+        try:
+            lag_handoff(c)
+            p = lag_stop(c, plain_lines(2) + ruling_relay(LAG_AFTER, message=message))
+            check("handoff lag (ruling relay, %s): quiet" % label, quiet_exit(p), "out=%r" % (p.stdout or "")[:200])
+        finally:
+            c.cleanup()
+
+
+def case_lag_role_fenced_stays_quiet():
+    """Role change, fenced: a `Role: lane` line inside a ``` fence is text the session quotes, never its role."""
+    c = Case("lag_role_fence")
+    try:
+        lag_handoff(c)
+        quoted = "The line reads:\n```\nRole: lane\n```"
+        p = lag_stop(c, plain_lines(2) + role_line(LAG_AFTER, quoted))
+        check("handoff lag (role line in a fence): quiet", quiet_exit(p), "out=%r" % (p.stdout or "")[:200])
+    finally:
+        c.cleanup()
+
+
+def case_lag_role_restated_stays_quiet():
+    """Role change, restated: a role line that repeats the session's last role line is no change. The first line
+    sits before the handoff's mtime, and the restatement after it stays quiet."""
+    c = Case("lag_role_same")
+    try:
+        lag_handoff(c)
+        lines = plain_lines(2) + role_line(LAG_BEFORE, "Role: coordinator") + role_line(LAG_AFTER, "Role: coordinator")
+        p = lag_stop(c, lines)
+        check("handoff lag (role restated, same as the last role line): quiet", quiet_exit(p),
+              "out=%r" % (p.stdout or "")[:200])
+    finally:
+        c.cleanup()
+
+
+def case_lag_role_change_names_come_from_session_roles():
+    """Role change, names: each role in SESSION_ROLES (hooks/session_role.py, the list bin/claude-role starts)
+    blocks as a change from another role. The hook must take the names from that constant: `batch-runner` is in
+    the list, and a hook's own copy that says `batch runner` would not match it."""
+    roles = hooks_name("session_role", "SESSION_ROLES")
+    if roles is None:
+        return
+    names = list(roles)
+    check("handoff lag role (scope): SESSION_ROLES holds more than one role", len(names) > 1, "names: %r" % names)
+    for i, name in enumerate(names):
+        prior = names[(i + 1) % len(names)]
+        c = Case("lag_role_name_%d" % i)
+        try:
+            lag_handoff(c)
+            lines = plain_lines(2) + role_line(LAG_BEFORE, "Role: %s" % prior) + role_line(LAG_AFTER, "Role: %s" % name)
+            p = lag_stop(c, lines)
+            check("handoff lag role change (%s, from %s): the Stop blocks" % (name, prior), stop_reason(p) is not None,
+                  "stdout: %r" % (p.stdout or "")[:200])
+        finally:
+            c.cleanup()
+
+
+def case_lag_cost_parses_a_tail_of_a_full_size_transcript():
+    """Cost (parse), full size: the lag check on a 200k-line transcript, its bulk before the handoff's mtime and one
+    merge after it, finds the merge and json-parses under a tenth of the lines. The measure is the count of JSON
+    decodes, not a time, which varies with the machine. It counts the lag check alone: run_nudge's checkpoint parse
+    already decodes every line."""
+    c = Case("lag_cost_parse")
+    try:
+        lag_handoff(c)
+        lines = big_tail_lines()
+        tp = os.path.join(c.root, "full-transcript.jsonl")
+        write_transcript(tp, lines)
+        payload = {"session_id": c.session_id, "transcript_path": tp}
+
+        def lag_check():
+            with Env(CLAUDE_CONFIG_DIR=c.cfg, CLAUDE_CODE_REMOTE_SESSION_ID=None):
+                return call_under_test("handoff_lag_event", payload)
+
+        (newest, err), decodes = decodes_of(lag_check)
+        check("handoff lag cost (parse, full size): the lag check runs without error", err is None,
+              "error: %r" % err)
+        check("handoff lag cost (parse, full size): the merge after the mtime is the newest event",
+              err is None and newest == epoch(LAG_AFTER), "got %r want %r" % (newest, epoch(LAG_AFTER)))
+        check("handoff lag cost (parse, full size): %d JSON decodes for %d lines, under a tenth"
+              % (decodes, len(lines)), decodes * 10 < len(lines), "%d decodes for %d lines" % (decodes, len(lines)))
+    finally:
+        c.cleanup()
+
+
+def case_audit_watch_sees_a_write_and_a_spawn():
+    """Control for the cost run: the audit wrapper, run over a script that writes one file and starts one child,
+    logs both. Without this, a run that logs nothing could be a watch that sees nothing."""
+    c = Case("audit_control")
+    try:
+        script = os.path.join(c.root, "write_and_spawn.py")
+        put(script, "import os, subprocess, sys\n"
+                    "open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'made.txt'), 'w').close()\n"
+                    "subprocess.run([sys.executable, '-c', 'pass'], check=True)\n")
+        log = os.path.join(c.root, "control-audit.log")
+        env = c.env()
+        env["OWNER_WAITS_AUDIT_LOG"] = log
+        env["OWNER_WAITS_AUDIT_FILES"] = "1"
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        subprocess.run([sys.executable, "-c", AUDIT_WRAPPER, script], capture_output=True, text=True, env=env,
+                       cwd=c.root)
+        events = []
+        if os.path.isfile(log):
+            with open(log, "r", encoding="utf-8") as f:
+                events = [ln.strip() for ln in f if ln.strip()]
+        check("audit watch (control): the write is logged",
+              any(e.startswith("write ") and e.endswith("made.txt") for e in events), "events: %r" % events[:5])
+        check("audit watch (control): the process start is logged",
+              any(e.startswith("subprocess.") for e in events), "events: %r" % events[:5])
+    finally:
+        c.cleanup()
+
+
+def case_lag_cost_full_size_starts_no_process_and_creates_no_file():
+    """Cost (run), full size: the audited Stop over the same 200k-line transcript blocks on the merge after the
+    mtime, starts no process, and writes no file but nudge.json and makes no directory. The audit hook logs each
+    process start, and each write or new directory, of the hook's interpreter."""
+    c = Case("lag_cost_run")
+    try:
+        lag_handoff(c)
+        put(c.nudge_path(), json.dumps({"bucket": -1}))
+        before = config_state(c.cfg)
+        tp = os.path.join(c.root, "full-transcript.jsonl")
+        write_transcript(tp, big_tail_lines())
+        payload = {"session_id": c.session_id, "transcript_path": tp,
+                   "hook_event_name": "Stop", "stop_hook_active": False}
+        proc = run_audited(c, ["--nudge"], payload, files=True)
+        check("handoff lag cost (run, full size): the audited Stop blocks on the merge after the mtime",
+              stop_reason(proc) is not None, "stdout: %r" % (proc.stdout or "")[:200])
+        events = audit_events(c)
+        procs = [e for e in events if not e.startswith(("write ", "mkdir "))]
+        check("handoff lag cost (run, full size): the run starts no process", not procs, "started: %r" % procs[:5])
+        nudge = os.path.normcase(os.path.normpath(c.nudge_path()))
+        writes = [e[len("write "):] for e in events if e.startswith("write ")]
+        check("handoff lag cost (run, full size): the audit sees the nudge.json write (control: the watch is live)",
+              nudge in [os.path.normcase(os.path.normpath(w)) for w in writes], "writes: %r" % writes[:5])
+        stray = [w for w in writes if os.path.normcase(os.path.normpath(w)) != nudge]
+        check("handoff lag cost (run, full size): the run writes no file but nudge.json", not stray,
+              "writes: %r" % stray[:5])
+        made = [e for e in events if e.startswith("mkdir ")]
+        check("handoff lag cost (run, full size): the run makes no directory", not made, "made: %r" % made[:5])
+        after = config_state(c.cfg)
+        nudge_rel = os.path.relpath(c.nudge_path(), c.cfg)
+        changed = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k) and k != nudge_rel)
+        check("handoff lag cost (run, full size): the config dir changes no file but nudge.json", not changed,
+              "changed: %r" % changed)
+    finally:
+        c.cleanup()
+
+
 def main() -> int:
     case_prompt_names_audit_agent()
     case_precompact_writes_digest_and_state()
@@ -3643,6 +3900,15 @@ def main() -> int:
     case_lag_handoff_rewrite_clears_then_new_event_blocks()
     case_lag_full_size_transcript_still_blocks()
     case_lag_writes_no_file_and_starts_no_process()
+    case_lag_merge_result_without_a_merge_stays_quiet()
+    case_lag_merge_shell_tools_block()
+    case_lag_relay_request_or_question_stays_quiet()
+    case_lag_role_fenced_stays_quiet()
+    case_lag_role_restated_stays_quiet()
+    case_lag_role_change_names_come_from_session_roles()
+    case_lag_cost_parses_a_tail_of_a_full_size_transcript()
+    case_audit_watch_sees_a_write_and_a_spawn()
+    case_lag_cost_full_size_starts_no_process_and_creates_no_file()
 
     if FAILED:
         print()
