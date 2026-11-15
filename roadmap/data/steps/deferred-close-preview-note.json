@@ -1,0 +1,14 @@
+{
+ "id": "deferred-close-preview-note",
+ "title": "A draft's preview prints 'deferred to confirm' on a close a cited green run would clear, not BLOCKED",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Record (coordinator 00:08 CST Nov 15, relaying lane debt-close-reads-ci's round 1 note on PR #3452, head 446866008e21; the lane's report, not read by triage): lint/check_debt_retire.py:242-245, judge_close runs the deferred branch before the cite is read, so a draft's preview prints BLOCKED on a delete that a cited green run would clear when the PR is ready. Preview-only, merge unaffected. The lane's preferred fix is to print 'deferred to confirm' as a note instead of BLOCKED. It needs a code change and a fresh review round, so it is a later step after #3452 merges. A note, not a debt: no incident yet. Kin: step debt-close-reads-ci.",
+ "source": "coordinator 00:08 CST Nov 15 (to triage), lane debt-close-reads-ci round 1",
+ "note": "Filed 00:08 CST Nov 15 by triage. Ready, no lane, a later step after #3452 merges. Preview-only, merge unaffected. Not built.",
+ "updatedAt": "2026-11-15T00:08:00-06:00"
+}
