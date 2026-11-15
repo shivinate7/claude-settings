@@ -1045,12 +1045,10 @@ def wait_pushed_head(host, n, info, end, want=None):
         info = host.pr(n)
     return info
 
-def sort_comment(c, records, lints, number=None, pointers=None):
-    """Sort the issue comment `c` into `records` ({PR number: [(body, created_at, updated_at)]}), `lints` ({PR number: [bodies]}) or, when given,
-    `pointers` ({PR number: [bodies]}): a review record when the review record marker is its whole first line, a lane-lint comment when the lint
-    marker is and the author is the repo's owner, a replaced pointer when REPLACED_MARKER is its whole first line (any author: the tool posts as
-    whichever account runs it). The number is `number` when given (a read of one issue), else the comment's issue_url. One home of the sort, for
-    the repo-wide and the per-issue read."""
+def sort_comment(c, records, lints, number=None):
+    """Sort the issue comment `c` into `records` ({PR number: [(body, created_at, updated_at)]}) or `lints` ({PR number: [bodies]}): a review record
+    when the review record marker is its whole first line, a lane-lint comment when the lint marker is and the author is the repo's owner. The
+    number is `number` when given (a read of one issue), else the comment's issue_url. One home of the sort, for the repo-wide and the per-issue read."""
     body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
     n = number if number is not None else int(m.group(1)) if m else None
     first = body.splitlines()[:1]
@@ -1058,8 +1056,13 @@ def sort_comment(c, records, lints, number=None, pointers=None):
         records.setdefault(n, []).append((body, c.get("created_at"), c.get("updated_at")))
     elif n is not None and first == [LANE_LINT_MARKER] and c.get("author_association") == LANE_LINT_AUTHOR:
         lints.setdefault(n, []).append(body)
-    elif n is not None and pointers is not None and first == [REPLACED_MARKER]:
-        pointers.setdefault(n, []).append(body)
+
+def sort_pointer(c, pointers):
+    """Sort the issue comment `c` into `pointers` ({PR number: [bodies]}) when REPLACED_MARKER is its whole first line (any author: the tool posts as
+    whichever account runs it). The number is the comment's issue_url, as sort_comment reads it."""
+    body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
+    if m and body.splitlines()[:1] == [REPLACED_MARKER]:
+        pointers.setdefault(int(m.group(1)), []).append(body)
 
 class Host:
     """The GitHub half: `gh` for the pull request, the required checks, the wait and the merge.
@@ -1265,7 +1268,8 @@ class Host:
         A failed read is a Stop. The one home of the comment read: review_records, review_comments, the lane-lint check and reopen_dropped each take their part."""
         records, lints, pointers = {}, {}, {}
         for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
-            sort_comment(c, records, lints, pointers=pointers)
+            sort_comment(c, records, lints)
+            sort_pointer(c, pointers)
         return records, lints, pointers
 
     def source_comments(self, m):
