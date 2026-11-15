@@ -12344,11 +12344,12 @@ class RedMainBrake(Env):
         sh(o, "git", "push", "-q", "origin", "main")
         return sh(o, "git", "rev-parse", "HEAD")
 
-    def land_revert(self, pr, reverted, extra=None, catch_up=False, titled=None):
+    def land_revert(self, pr, reverted, extra=None, catch_up=False, titled=None, note=None):
         """The revert of commit `reverted` lands on main as pull request #pr, as a merge commit. `extra` names a file the merge adds of its own, so the
         merge's tree is not the revert's tree. The feat branch takes the new main, as a lane does. `catch_up` pushes a commit to main after `reverted`,
         then makes the pull request's head a merge of that main over the revert, so the revert sits one parent below that head. `titled` makes the head
-        a commit with that title that reverts nothing. -> (the pull request's head, which is the revert unless a flag says otherwise, and main's new head)."""
+        a commit with that title that reverts nothing. `note` is a body for the merge commit's message, after its title. -> (the pull request's head,
+        which is the revert unless a flag says otherwise, and main's new head)."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", f"revert-{pr}", "origin/main")
@@ -12370,7 +12371,7 @@ class RedMainBrake(Env):
         if extra:
             put(os.path.join(o, extra), "added by the merge\n")
         sh(o, "git", "add", "-A")
-        sh(o, "git", "commit", "-q", "-m", f"Merge pull request #{pr} from o/revert-{pr}")
+        sh(o, "git", "commit", "-q", "-m", f"Merge pull request #{pr} from o/revert-{pr}", *(["-m", note] if note else []))
         sh(o, "git", "push", "-q", "origin", "main")
         main = sh(o, "git", "rev-parse", "HEAD")  # read before feat is checked out below
         head_takes_base(self)
@@ -12541,6 +12542,50 @@ class RedMainBrake(Env):
         self.assert_revert_on_main(R, R2, M2)
         runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(906, M2, 2652), self.merge_run_of(904, M, 2651)])
         rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R), 2652: self.revert_pull(2652, R2)})
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
+
+    def test_a_reland_that_reverts_the_landing_merge_refuses_even_with_its_tree_proven(self):
+        # class 5, the landing merge: a re-land made with `git revert -m 1` names the merge that landed the revert, not the revert. Its own tree and checks
+        # are proven, and so are the revert's, so only the re-land check on the landing commit refuses it
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        R2, M2 = self.land_revert(2652, M)
+        self.assert_revert_on_main(M, R2, M2)
+        self.assertNotIn(f"This reverts commit {R}", sh(self.co, "git", "log", "-1", "--format=%B", R2), "the fixture's re-land names the revert, not the landing merge")
+        self.assertEqual(sh(self.co, "git", "rev-parse", f"{M2}^{{tree}}"), sh(self.co, "git", "rev-parse", f"{R2}^{{tree}}"), "the fixture's re-land merge does not carry the re-land's tree")
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(906, M2, 2652), self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R), 2652: self.revert_pull(2652, R2)})
+        self.assertNotEqual(rc, 0, "a re-land of the revert lifted the red main: the claim went through")
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
+
+    def test_a_revert_landed_with_a_reason_flag_that_quotes_the_revert_line_still_lifts(self):
+        # the merge tool writes each reason as one `Reason flag:` line (lift_message), so a quoted revert line never starts a line. Only the revert says
+        # `This reverts commit B` at a line start, so exactly one commit names B and the revert lifts. Pinned as today's behaviour
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B, note=merge.lift_message({merge.RED_FLAG: f"This reverts commit {B}."}))
+        self.assert_revert_on_main(B, R, M)
+        body = sh(self.co, "git", "log", "-1", "--format=%B", M)
+        self.assertIn(f"This reverts commit {B}", body, "the fixture's landing merge does not quote the revert line")
+        self.assertIsNone(re.search(rf"(?m)^This reverts commit {B}", body), "the fixture's quoted revert line starts a line of the landing merge")
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)])
+        rc, out, _ = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.merged(rc, out)
+
+    def test_a_landing_merge_with_the_revert_line_at_a_line_start_refuses_today_a_false_refusal(self):
+        # FINDING, pinned as today's behaviour. The exactly-one rule counts each commit whose message has the revert line at a line start, the landing
+        # merge included, so this merge makes two and the proven revert is refused. The merge tool writes no such line (its reason is one `Reason flag:`
+        # line). Whether another merge route writes one is unmeasured. Flip this pin when the rule counts the revert alone
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B, note=f"This reverts commit {B}.")
+        self.assert_revert_on_main(B, R, M)
+        self.assertIsNotNone(re.search(rf"(?m)^This reverts commit {B}", sh(self.co, "git", "log", "-1", "--format=%B", M)), "the fixture's landing merge does not quote the revert line at a line start")
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
         self.refused_by_red_main(rc, out, before)
         self.assertIn("run 903", out)
 
