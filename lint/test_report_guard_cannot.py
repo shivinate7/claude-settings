@@ -37,6 +37,10 @@ PROBE_RULE = "cant-claim-needs-probe"  # the probe form: a claim of an act outsi
 OPEN_PR = "mcp__github__create_pull_request"
 REFUSED_ROW_ID = "r-archive"
 ROW_REFUSED = hook_base.route_row(REFUSED_ROW_ID, "archive_session", "refused", surface="local")
+# This session as a lane, and the parent that sends it work. The ids are the ones the lane fixture names (one home).
+LANE_ENV = trg.QuestionReachesPageTests.LANE_ENV
+LANE_ID = trg.QuestionReachesPageTests.LANE_ID
+PARENT = trg.QuestionReachesPageTests.PARENT
 # Words a remedy must not name: the act a refusal is about (git-remedy-never-names-target).
 ACT_WORDS = re.compile(r"\bPR\b|pull request|\bopen\b|\bpush\b|\bmerge\b|\bgit\b|\bgh\b|mcp__", re.I)
 # The weren't forms of the be-form claims, with straight and curly apostrophes. Two cases build lines from them.
@@ -140,7 +144,7 @@ def why_yours_replies(line):
             ("input", trg.assistant_text(input_report("Push the branch from your computer.", line))))
 
 
-class CannotClaimTests(unittest.TestCase):
+class CannotClaimTests(trg.SameTurnWriter, unittest.TestCase):
     def setUp(self):
         self.run_dir = tempfile.mkdtemp(dir=trg.RUN_FOLDER)
         self.addCleanup(shutil.rmtree, self.run_dir, True)
@@ -152,10 +156,11 @@ class CannotClaimTests(unittest.TestCase):
 
     # ---- the Stop run and its verdict
 
-    def stop(self, records, active=False, refused=(), rows=(), guard=trg.REPORT_GUARD):
+    def stop(self, records, active=False, refused=(), rows=(), guard=trg.REPORT_GUARD, env_id=None):
         """The Stop decision for `records`, or None. The route-rows file and the refusals file sit in this case's
         folder, and the surface is pinned to local so a row's outcome reads on it. `guard` is the script run; a case
-        that runs an installed copy passes that copy's report_guard.py."""
+        that runs an installed copy passes that copy's report_guard.py. `env_id` is this session's remote id (a lane
+        sets it); None is owner-facing, and the caller's own value is stripped."""
         hook_base.write_route_rows(self.rows, list(rows))
         hook = {"hook_event_name": "Stop", "transcript_path": trg.write_transcript(records, self.run_dir),
                 "stop_hook_active": active, "cwd": self.run_dir}
@@ -169,7 +174,10 @@ class CannotClaimTests(unittest.TestCase):
                                              "reason": "refused"}) + "\n")
         env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, HOME=self.home)
         env[hook_base.ROUTE_ROWS_ENV] = self.rows
-        run = trg.run_guard(guard, hook, env=hook_base.surface_env(env, "local"))
+        env = hook_base.surface_env(env, "local")  # strips the caller's remote id, so the lane id is set after it
+        if env_id:
+            env[hook_base.REMOTE_SESSION_ENV] = env_id
+        run = trg.run_guard(guard, hook, env=env)
         self.assertEqual(run.returncode, 0, "the Stop hook exited non-zero: " + run.stderr[-300:])
         self.assertNotIn("Traceback", run.stderr, "the Stop hook crashed: " + run.stderr[-300:])
         return json.loads(run.stdout) if run.stdout.strip() else None
@@ -2880,6 +2888,51 @@ class CannotClaimTests(unittest.TestCase):
                     self.assert_blocked_for(out, NO_TRY, line)
                 else:
                     self.assert_probe_blocked(out, line)
+
+    # ---- probe lines by what they name: a backtick span that names an object, a count, a judgement, and the parent's ack of
+    # a send to @parent. The red cases fail on the line the check misreads. The ack case passes, and its mutant turns it red.
+
+    def test_cc_red_probe_backtick_object_is_no_probe_result(self):
+        # Catches: a backtick span read as the named check of a probe. A span that names the object of the act (a file, a
+        # target, a host) is no probe result, so the claim with no call in its turn is refused.
+        for line in ("I cannot import `inbox.mbox` myself.", "I can't run `make build` here.",
+                     "I cannot reach `mail.example.com` from this session."):
+            with self.subTest(line=line):
+                self.assert_probe_blocked(self.stop([trg.human("run it"), trg.assistant_text(line)]), line)
+
+    def test_cc_red_probe_bare_count_after_a_comma_is_no_http_status(self):
+        # Catches: a bare three-digit count after a comma read as an HTTP status (the status pattern matches ", 500"), so the
+        # line names a check and passes with no call. The count is a number of rows, which no status is.
+        line = "I cannot import it myself, 500 rows."
+        self.assert_probe_blocked(self.stop([trg.human("import it"), trg.assistant_text(line)]), line)
+
+    def test_cc_pass_probe_judgement_or_ability_is_no_act(self):
+        # Catches: a verb of judgement or an ability on the work (determine, predict, confirm, explain, see why, decide, fix,
+        # ship) read as an act outside the table, so a claim that no system can answer is refused for a probe. A judgement
+        # has no system to probe.
+        lines = ("I can't determine that from the diff.", "I can't predict how long it will take.", "I can't confirm that.",
+                 "I can't explain why it failed.", "I can't see why the test fails.", "I can't decide between A and B.",
+                 "I can't fix this in one line.", "We can't ship this without the migration.")
+        for line in lines:
+            with self.subTest(line=line):
+                out = self.stop([trg.human("review the change"), trg.assistant_text(line)])
+                self.assert_passes(out, "a claim of judgement or ability, not of an act: %r" % line)
+
+    def test_cc_pass_parent_ack_of_a_send_to_parent_keeps_the_turn(self):
+        # Catches: _turn_acks giving the parent's id no parent targets, so the parent's message to a send of @parent starts a
+        # turn. The send then falls out of the turn, and the claim after it has no call in its turn and is refused for a
+        # probe. The lane record names the parent, so the parent's message acks the send. Scope first: another peer's message
+        # is no ack, so the same claim still blocks; then the subject: the parent's ack keeps the send in the turn.
+        line = "I cannot import it myself."
+        lane = self.call("mcp__claude-code-remote__get_session", {"session_id": LANE_ID},
+                         result=json.dumps({"ccr": {"id": LANE_ID, "tags": ["cs-build:lane"], "parent_session_id": PARENT}}))
+        send = self.call("SendMessage", {"to": "@parent", "message": "status?"}, result="sent")
+        other = [*lane, trg.human("check the import"), *send, trg.peer_msg("got it", from_session="session_peer"),
+                 trg.assistant_text(line)]
+        self.assert_probe_blocked(self.stop(other, env_id=LANE_ENV), line)
+        acked = [*lane, trg.human("check the import"), *send, trg.peer_msg("got it", from_session=PARENT),
+                 trg.assistant_text(line)]
+        self.assert_passes(self.stop(acked, env_id=LANE_ENV), "a probe claim after the parent acks its send to @parent")
 
 
 if __name__ == "__main__":
