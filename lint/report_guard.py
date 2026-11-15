@@ -76,8 +76,9 @@ kind and incident: decision answered-needs-source. Cost: regex over the reply, n
 
 After a compaction, each report also holds a `Recovered:` line and a `Handoff gave:` line (each
 may say `none`) in the report blockquote, until one lands (`compaction-carry`, decision
-precompact-handoff, item 'Recovered line after compaction'). A label counts only where it starts an item: at line start, after a
-report label, or after "; " or ". ". A compaction is the newest `compact_boundary` system record.
+precompact-handoff, item 'Recovered line after compaction'). A label counts only where it starts an item: at line start (after
+a bullet, and after a Done-item tag BUILT, RECORDED or OTHER that follows the bullet), after a report label, or after "; " or
+". ". A compaction is the newest `compact_boundary` system record.
 Each line is tracked alone: any main-session reply after it that holds the line satisfies that
 demand; the current reply counts by its blockquote. A bare `Recovered:` takes the lines below it as
 its items; with nothing below, it is missing. While the Recovered demand is pending, each item of
@@ -955,11 +956,15 @@ def asks_a_question(text):
 # compaction-carry: after a compaction the session reports two lines, `Recovered:` (what it got back
 # from git, the page or a digest) and `Handoff gave:` (what the handoff supplied that the summary
 # did not), each until one lands. A label counts only where it starts an item: at line start (after
-# `>`, a bullet, and bold, backtick or quote marks), right after a report label, or after "; " or
-# ". ". So a mid-sentence "recovered:" or a backticked name of the guard is never a carry line.
+# `>`, a bullet, a Done-item tag (BUILT, RECORDED or OTHER) after that bullet, and bold, backtick or
+# quote marks), right after a report label, or after "; " or ". ". So a mid-sentence "recovered:" or a
+# backticked name of the guard is never a carry line, and neither is a bullet tagged with a non-Done word.
 CARRY_MARKS = "*_`\"'“”‘’"
-CARRY_START = (r"(?:^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]+)?(?:\*\*(?:%s):?\*\*:?[ \t]*)?|[.;][ \t]+)"
-               r"[%s]*" % ("|".join(re.escape(label) for label in LABEL_ORDER), re.escape(CARRY_MARKS)))
+DONE_TAG = r"(?-i:BUILT|RECORDED|OTHER)"
+CARRY_START = (r"(?:^[ \t]*(?:>[ \t]*)*"
+               r"(?:(?:[-*+]|\d+[.)])[ \t]+(?:\*{0,2}" + DONE_TAG + r"\*{0,2}:?\*{0,2}[ \t]*)?)?"
+               + r"(?:\*\*(?:%s):?\*\*:?[ \t]*)?|[.;][ \t]+)[%s]*"
+               % ("|".join(re.escape(label) for label in LABEL_ORDER), re.escape(CARRY_MARKS)))
 CARRY_LINES = (
     ("Recovered", re.compile(CARRY_START + r"recovered(?:\*\*)?:", re.I | re.M)),
     ("Handoff gave", re.compile(CARRY_START + r"handoff gave(?:\*\*)?:", re.I | re.M)),
@@ -1077,8 +1082,10 @@ def recovered_problem(records, text):
     missing = [name for name in pending if not carry_present(name, block)]
     reasons = []
     if missing:
-        reasons.append("a compaction came before this report and no %s line has landed since" %
-                       " or ".join(missing))
+        reasons.append("a compaction came before this report and no %s line has landed since; the line forms are "
+                       "`Recovered: <item> (git|page|digest)` or `Recovered: none`, and `Handoff gave: <items>` "
+                       "or `Handoff gave: none`; a label counts where it starts an item in the report blockquote, "
+                       "also after a bullet and a Done-item tag" % " line and no ".join(missing))
     bad = unsourced_recovered_item(block) if "Recovered" in pending else ""
     if bad:
         reasons.append("the Recovered item %r names no source (git, page or digest)" % bad)

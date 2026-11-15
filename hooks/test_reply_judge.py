@@ -1427,14 +1427,14 @@ def case_prompt_flags_a_visual_pick_that_only_links():
     sentences = rule_sentences(run, LINK_ONLY_ASK)
     check("prompt: a sentence flags a pick between visual options that only links to them",
           has_pin(sentences, ("flag",), ("visual", "look"), ("link",), ("folder", "repo", "file")), sentences)
-    check("prompt: a sentence names the exception, a pointer to the waiting-page item that carries the designs",
-          has_pin(sentences, ("waiting",), ("item",), ("design",), ("never flag", "fine", "not a breach")), sentences)
+    check("prompt: a sentence names the exception, a pointer to the page item that carries the designs",
+          has_pin(sentences, ("the page",), ("item",), ("design",), ("never flag", "fine", "not a breach")), sentences)
     check("prompt: a sentence says each option needs its own picture",
           has_pin(sentences, ("picture", "image", "design"), ("each option", "every option")), sentences)
 
 
 # --------------------------------------------------------------------------- c164
-# A session answers a waiting-page comment by rewriting the item, never by a comment-thread reply:
+# A session answers a page comment by rewriting the item, never by a comment-thread reply:
 # a rebuilt page drops its threads (decision questions-go-to-owner, "Answer on the page, not in a
 # comment thread").
 
@@ -1444,11 +1444,11 @@ THREAD_REPLY = (
 )
 
 
-def case_prompt_flags_a_thread_reply_to_a_waiting_page_comment():
+def case_prompt_flags_a_thread_reply_to_a_page_comment():
     run = run_hook(THREAD_REPLY, answer=OK_ANSWER)
     sentences = rule_sentences(run, THREAD_REPLY)
-    check("prompt: a sentence flags a waiting-page comment answered in a comment thread",
-          has_pin(sentences, ("flag",), ("waiting-page", "waiting page"), ("comment",), ("thread",)),
+    check("prompt: a sentence flags a page comment answered in a comment thread",
+          has_pin(sentences, ("flag",), ("a page comment",), ("comment",), ("thread",)),
           sentences)
     check("prompt: a sentence says the session rewrites the item instead",
           has_pin(sentences, ("thread",), ("rewrit",), ("item",)), sentences)
@@ -1457,10 +1457,10 @@ def case_prompt_flags_a_thread_reply_to_a_waiting_page_comment():
 def case_prompt_spares_a_reply_that_rewrote_the_item():
     run = run_hook(THREAD_REPLY, answer=OK_ANSWER)
     sentences = rule_sentences(run, THREAD_REPLY)
-    check("prompt: never flag a reply that says it rewrote or updated the waiting-page item",
+    check("prompt: never flag a reply that says it rewrote or updated the page item",
           has_pin(sentences, ("never flag",), ("rewrote", "updated"), ("item",)), sentences)
-    check("prompt: the thread-reply example names the waiting-page thread",
-          has_pin(sentences, ("flag",), ("replied on the waiting-page thread",)), sentences)
+    check("prompt: the thread-reply example names the page thread",
+          has_pin(sentences, ("flag",), ("replied on the page thread",)), sentences)
     check("prompt: never flag a reply in a PR review thread or on another artifact",
           has_pin(sentences, ("never flag",), ("pr review thread",), ("another artifact",)), sentences)
 
@@ -2129,6 +2129,17 @@ def case_claude_md_counts_rule_names_the_github_rest_api_and_not_a_search():
     check("claude.md: the counts rule says a search is not a count source", "not a search" in rule, rule[-300:])
 
 
+# --------------------------------------------------------------------------- glossary
+# The judge prompt is prose a reviewer reads, so it uses the glossary's names. lint/check_glossary.py reads
+# hooks/reply_judge.py whole and fails on a "not" name in it. The case reads that check's exit code only.
+
+def case_glossary_check_passes_on_reply_judge():
+    proc = subprocess.run([sys.executable, "lint/check_glossary.py", "hooks/reply_judge.py"],
+                          cwd=REPO_ROOT, capture_output=True, text=True)
+    check("glossary: lint/check_glossary.py exits 0 on hooks/reply_judge.py, read whole",
+          proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr))
+
+
 CASES = (
     case_stop_hook_active_never_calls_model,
     case_ignored_stop_imports_no_guard_family_module,
@@ -2176,7 +2187,7 @@ CASES = (
     case_prompt_spares_irreversible_and_goal_picks,
     case_undoable_pick_finding_logs_its_rule,
     case_prompt_flags_a_visual_pick_that_only_links,
-    case_prompt_flags_a_thread_reply_to_a_waiting_page_comment,
+    case_prompt_flags_a_thread_reply_to_a_page_comment,
     case_prompt_spares_a_reply_that_rewrote_the_item,
     case_blocked_on_reply_is_judged_off_sample,
     case_prompt_flags_a_port_question_marked_blocking,
@@ -2229,6 +2240,7 @@ CASES = (
     case_searching_with_a_digit_is_judged_off_sample,
     case_prompt_flag_sentence_exempts_only_a_search_rest_confirms,
     case_claude_md_counts_rule_names_the_github_rest_api_and_not_a_search,
+    case_glossary_check_passes_on_reply_judge,
 )
 
 
