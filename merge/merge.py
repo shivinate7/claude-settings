@@ -5244,7 +5244,7 @@ def lost_work_branches(h, open_refs):
     try:
         record = layout.record_branch(root)
     except layout.LayoutError as e:  # BranchNameError names the key; an unreadable extras file names itself
-        return [], ' '.join(str(e).split())[:300]
+        return [], f"{' '.join(str(e).split())[:300]} {READ_CITE}"
     fetched = h.fetch_lost_work_refs()
     if fetched[0]:
         return [], f"git fetch of the branches failed: {' '.join(fetched[1].split())[:300]} {READ_CITE}"
