@@ -9,8 +9,8 @@
  "lane": "archive-flow",
  "pr": 2848,
  "blockedBy": [],
- "updatedAt": "2026-11-15T13:00:00-06:00",
- "why": "[12:57 CST Nov 15, triage] Coordinator's pick 3: lane archive-flow (carries #2848) keeps #2848's claims and makes them true. It lints and hands in #2917, #2817 and #2922 first, and #2848 last. #2848 adds no glossary row and touches 3 files. (source: coordinator 12:57 CST, relayed by triage; not owner-typed, undoable) New step; none existed.",
+ "updatedAt": "2026-11-15T13:14:00-06:00",
+ "why": "[12:57 CST Nov 15, triage] Coordinator's pick 3: lane archive-flow (carries #2848) keeps #2848's claims and makes them true. It lints and hands in #2917, #2817 and #2922 first, and #2848 last. #2848 adds no glossary row and touches 3 files. (source: coordinator 12:57 CST, relayed by triage; not owner-typed, undoable) New step; none existed.\n\n[13:11 CST Nov 15, triage] archive-flow merges #2817's head into #2848. Order: #2917 first, #2922 stacks on #2817, #2848 last with a fresh round 1. (source: coordinator 13:11 CST, relayed by triage; not owner-typed)",
  "source": "coordinator 12:57 CST, relayed by triage; not owner-typed",
  "note": "Doing. Order: #2917, #2817, #2922, then #2848. #2848 adds no glossary row, touches 3 files. Guard or check: unverified (not relayed; triage read no PR)."
 }
