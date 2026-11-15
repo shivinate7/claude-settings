@@ -1432,8 +1432,10 @@ retired_owner_dir_flow() {
   out3=$(retired_run "$co" "$h" "$cfg" "$mode"); rc3=$?
   kept3=$(grep -rl 'owner keeps this' "$cfg" 2>/dev/null)
 
-  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ] || [ $rc3 -ne 0 ]; then
-    echo "install.sh exited rc1=$rc1 rc2=$rc2 rc3=$rc3: $out1 / $out2 / $out3"
+  # In cloud mode a kept owner folder fails the landing (exit 1, no install record), so run 2 wants 1 there.
+  want2=0; [ "$mode" = cloud ] && want2=1
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne $want2 ] || [ $rc3 -ne 0 ]; then
+    echo "install.sh exited rc1=$rc1 rc2=$rc2 (want $want2) rc3=$rc3: $out1 / $out2 / $out3"
   elif [ -z "$kept2" ]; then
     echo "owner.txt was lost by the run that still ships the name"
   elif [ -z "$kept3" ]; then
