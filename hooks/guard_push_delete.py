@@ -632,6 +632,12 @@ def push_refspecs(args):
     return remote, plain
 
 
+def push_every_remote(args):
+    """The remote word of a push that sends every branch (`--all`, `--branches`, `--mirror`), else None. '' is a push that names no remote."""
+    _force, mirror, every, _includes, _unpinned, _leased, _delete, _upstream, remote, _plain = _push_parse(args)
+    return remote if mirror or every else None
+
+
 def push_verdict(args, cwd: str, overrides=None) -> str:
     """'' for an allowed push, else 'ask' or 'deny', for the `git push` arguments `args`.
 
@@ -751,6 +757,14 @@ def _push_goes_to_network(remote: str, cwd: str, current, overrides=None, resolv
     if resolved is not None:
         resolved["name"] = remote
     return _push_url_is_network(get("remote." + remote + ".pushurl") or get("remote." + remote + ".url"))
+
+
+def push_remote_name(remote: str, cwd: str, overrides=None) -> str:
+    """The configured name of the remote a push goes to, by the chain `_push_goes_to_network` walks. '' when the push names a URL or a
+    path, or the config cannot be read: the caller cannot name the remote."""
+    resolved = {}
+    _push_goes_to_network(remote, cwd, lambda: _push_current_branch(cwd), overrides, resolved)
+    return resolved.get("name", "")
 
 
 def _glob_reach(spec: str):

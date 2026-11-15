@@ -267,7 +267,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        tool, while the pull request's newest review record is for an older head than its live head on
                        GitHub. A clean merge of main and the merge tool's records-page commit keep a record, so a push
                        over them passes. A pull request with no record passes (a first round). A review read that cannot
-                       run refuses as unknown. A dry run and a destination named main or master are left out. Cost: one
+                       run, a newest record that does not parse, and a push whose branch cannot be named (a variable, a
+                       substitution, --all, --mirror) refuse as unknown. Only a push to origin counts; a fork's pull
+                       request is not held. A dry run and a destination named main or master are left out. Cost: one
                        paged read of the open pull requests per pushed ref; more only when one holds the branch.
                        (handed-in-push-needs-record)
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
@@ -4851,6 +4853,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     hits = [] if POWERSHELL_CALL[0] else rm_after_cd_hits(stripped)
     if hits:
         refuse(tool, "deny", "rm-after-cd", rm_after_cd_reason(hits), "; ".join(hits))
+    # 4c. A push to the branch of a pull request whose newest review record is for an older head, or whose record
+    # read cannot run (rule handed-in-push-needs-record). Read before the force-push ask below, so no answer to that
+    # ask can pass a push this check refuses. Cost: guard_merge states it; none outside a repo that uses the merge
+    # tool, for a dry run, or for a main or master destination.
+    matched = handed_in_push_hit(texts, stripped, cwd, read_verb)
+    if matched:
+        refuse(tool, "deny", "handed-in-push-needs-record", matched[0], matched[1])
     for segment in (part for text in texts for part in split_segments(text)):
         for args, where, overrides in _push_calls(segment, stripped, cwd):
             verdict = push_verdict(args, where, overrides)
@@ -4972,13 +4981,6 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = octopus_push_hit(stripped, cwd, read_verb)
     if matched:
         refuse(tool, "deny", "octopus-push", OCTOPUS_PUSH_REASON.format(sha=matched), matched)
-
-    # 6c4. A push to the branch of a pull request whose newest review record is for an older head, or whose record
-    # read cannot run (rule handed-in-push-needs-record). Cost: guard_merge states it; none outside a repo that uses the
-    # merge tool, for a dry run, or for a main or master destination.
-    matched = handed_in_push_hit(stripped, cwd, read_verb)
-    if matched:
-        refuse(tool, "deny", "handed-in-push-needs-record", matched[0], matched[1])
 
     # 7. A frozen path. The command is read as a shell reads it: a script's own strings are text, and its
     # shell spots are lines of their own (`shell_write_hit`).

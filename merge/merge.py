@@ -1221,19 +1221,22 @@ class Host:
     @classmethod
     def info(cls, d):
         """-> the pr() fields of one REST pull request object: a single read, or a row of the list read (which has no mergeable fields: UNKNOWN)."""
+        head_repo, base_repo = ((d[side].get("repo") or {}).get("full_name") for side in ("head", "base"))
         return {"head": d["head"]["sha"], "branch": d["head"]["ref"], "base": d["base"]["ref"],
                 "state": "MERGED" if d.get("merged") else d["state"].upper(),
                 "mergeable": cls.MERGEABLE[d.get("mergeable")], "merge_state": (d.get("mergeable_state") or "unknown").upper(),
                 "draft": bool(d.get("draft")), "body": d.get("body") or "", "created": d.get("created_at"),
-                "changed_files": d.get("changed_files")}  # only --review-record reads the count; pr_files stops on a missing one
+                "changed_files": d.get("changed_files"),  # only --review-record reads the count; pr_files stops on a missing one
+                "fork": bool(head_repo) and head_repo != base_repo}  # the head branch lives in a repo other than the base's: a push to origin's branch of that name is no push to it
 
     def open_prs(self):
         """-> [(number, pr() fields)] of every open pull request, all pages. A failed read is a Stop, never an empty list."""
         return [(d["number"], self.info(d)) for d in self.pages("pulls", fields={"state": "open"})]
 
-    def batch_pr(self, branch):
-        """-> (number, pr() fields) of the open pull request whose head is `branch`, or None. Two of them is a Stop: the batch is not told apart."""
-        hits = [row for row in self.open_prs() if row[1]["branch"] == branch]
+    def batch_pr(self, branch, forks=True):
+        """-> (number, pr() fields) of the open pull request whose head is `branch`, or None. Two of them is a Stop: the batch is not told apart.
+        `forks` False leaves out a pull request whose head branch is in a fork: it holds no branch of this repo (handed_in_push)."""
+        hits = [row for row in self.open_prs() if row[1]["branch"] == branch and (forks or not row[1]["fork"])]
         if len(hits) > 1:
             raise Stop(f"{len(hits)} open pull requests have the head {branch}: close all but one {FREEZE_CITE}")
         return hits[0] if hits else None
@@ -4761,8 +4764,8 @@ def carry_source(h, m, live):
     tree of its Head equals the tree of `live` (same_tree); a different tree, an unparsable newest record and a record for another number carry
     nothing. A failed read raises Stop. Cost: Host.source_comments, which reads issue `m` once a run, then two commit reads."""
     rows = h.source_comments(m)[0].get(m)
-    rec = parse_review(rows[-1][0]) if rows else None
-    if not rec or rec["n"] != m or not same_tree(h, rec["head"], live):
+    rec = newest_record(m, [r[0] for r in rows or []])[0]
+    if not rec or not same_tree(h, rec["head"], live):
         return None
     return rec, rows[-1]
 
@@ -4786,10 +4789,15 @@ def restart_remedies(h, n, last, head):
 REVIEW_SURVIVAL_UNKNOWN = "whether only clean merges of main follow the reviewed head is unknown"  # the why of a stale record whose clean-merge read could not run
 
 def live_review_state(h, rec, live, main, claims=None, earlier=(), source=None):
-    """-> (state, why) of the parsed record `rec` for the live head `live`: the one home of that read, for `merge --reviewed` (reviewed_read) and the
-    lane Stop hook (lint/report_guard.py). It is review_state, except that a stale record whose live head is its Head plus clean merges of main
+    """-> (state, why) of live_review_read, which holds the read and its cost: the form `merge --reviewed` (reviewed_read) and the lane Stop hook
+    (lint/report_guard.py) take."""
+    return live_review_read(h, rec, live, main, claims, earlier, source)[:2]
+
+def live_review_read(h, rec, live, main, claims=None, earlier=(), source=None):
+    """-> (state, why, unread) of the parsed record `rec` for the live head `live`: the one home of that read. It is review_state, except that a stale
+    record whose live head is its Head plus clean merges of main
     (clean_merges_after) reads as it does at its Head (decision pr-review-record). A clean-merge read that cannot run keeps the state stale, and
-    the why says REVIEW_SURVIVAL_UNKNOWN and why. Cost: clean_merges_after's, only for a stale record. `main` is the repo's default branch, never the pull request's own base
+    the why says REVIEW_SURVIVAL_UNKNOWN and why; `unread` is True then, and only then (handed_in_push reads it, never the why). Cost: clean_merges_after's, only for a stale record. `main` is the repo's default branch, never the pull request's own base
     (a merge of a stacked pull request's base is no merge of main): the caller names it, because Host.pr rewrites the host's base on every read. The record survives a clean merge of main only,
     and with `claims` (the stamp config path, clean_merges_after's) a claim commit too.
     `source` is the number a replacement pull request names as its source (replaces_source), given only when the pull request has no record of its own
@@ -4801,21 +4809,21 @@ def live_review_state(h, rec, live, main, claims=None, earlier=(), source=None):
             got = carry_source(h, source, live)
             rows = h.source_comments(source)[0].get(source) or []  # cached by carry_source: the source's records, whose earlier ones the walk back reads
         except (Stop, subprocess.TimeoutExpired, OSError) as e:
-            return "unknown", f"whether the record of #{source} carries by tree is unknown ({' '.join(str(e).split())[:300]})"
+            return "unknown", f"whether the record of #{source} carries by tree is unknown ({' '.join(str(e).split())[:300]})", False
         if got is None:
-            return "none", f"no record of #{source} carries to this head by tree"
+            return "none", f"no record of #{source} carries to this head by tree", False
         state, why = review_state(got[0], got[0]["head"], own_records(source, [r[0] for r in rows[:-1]]))
-        return state, f"carried from #{source} by tree; {why}"
+        return state, f"carried from #{source} by tree; {why}", False
     state, why = review_state(rec, live, earlier)
     if state != "stale":
-        return state, why
+        return state, why, False
     try:
         if not clean_merges_after(h, rec["head"], live, main, claims):
-            return state, why
+            return state, why, False
     except (Stop, subprocess.TimeoutExpired, OSError) as e:
-        return state, f"{why}; {REVIEW_SURVIVAL_UNKNOWN} ({' '.join(str(e).split())[:300]})"
+        return state, f"{why}; {REVIEW_SURVIVAL_UNKNOWN} ({' '.join(str(e).split())[:300]})", True
     state, why = review_state(rec, rec["head"], earlier)
-    return state, why + "; the head is the reviewed head plus clean merges of main"
+    return state, why + "; the head is the reviewed head plus clean merges of main", False
 
 def rollup_green(h, n, head):
     """True only when the ROLLUP_JOB rows of the newest run on `head` are all a pass and no older run's red row survives `superseded`. The newest run is the largest id in
@@ -4904,25 +4912,35 @@ def own_records(n, bodies):
     """-> the parsed records among `bodies` that name pull request `n`, in order: the earlier records review_state walks back through."""
     return [e for e in (parse_review(b) for b in bodies) if e and e["n"] == n]
 
+def newest_record(n, bodies):
+    """-> (rec, bad) for the review-record comment bodies `bodies` of pull request `n`, oldest first. `rec` is the newest one parsed, None when there is none or
+    it does not parse or names another number; `bad` is True in that second case: a record is there and cannot be read."""
+    rec = parse_review(bodies[-1]) if bodies else None
+    if rec is not None and rec["n"] != n:
+        rec = None
+    return rec, bool(bodies) and rec is None
+
 def handed_in_push(h, n, live, main, claims=None):
     """-> (verdict, why) for a push to the branch of pull request `n` whose head on GitHub is `live`: "allow", "refuse" or "unknown" (step
     handed-in-push-needs-record, decision pr-review-record). A push moves the head, so a record for an older head must be posted before the next one.
-    It refuses only when the newest record of `n` is stale at `live` (live_review_state, the one home of that read: a clean merge of main and the
-    tool's own records-page commit keep a record, so a push over them is allowed). A pull request with no record, or whose newest record does not parse
-    or names another number, is allowed: its first round is the known gap, which a record for no head cannot close. A comment read that cannot run, and a
-    clean-merge read that cannot run, are "unknown", never allow. `main` is the repo's default branch, as live_review_state takes it. Cost: one paged
-    read of the pull request's comments, and clean_merges_after's reads only for a stale record. Step fix-push-needs-fail-record folds into this check."""
+    It refuses only when the newest record of `n` is stale at `live` (live_review_read, the one home of that read: a clean merge of main and the
+    tool's own records-page commit keep a record, so a push over them is allowed). A pull request with no record is allowed: its first round is the
+    known gap, which a record for no head cannot close. A newest record that does not parse or names another number, a comment read that cannot run
+    and a clean-merge read that cannot run are "unknown", never allow. `main` is the repo's default branch, as live_review_state takes it. Cost: one
+    paged read of the pull request's comments, and clean_merges_after's reads only for a stale record. Step fix-push-needs-fail-record folds into this check."""
     try:
-        rows = h.source_comments(n)[0].get(n) or []
+        bodies = [r[0] for r in h.source_comments(n)[0].get(n) or []]
     except (Stop, subprocess.TimeoutExpired, OSError) as e:
         return "unknown", f"the review comments of #{n} could not be read ({' '.join(str(e).split())[:300]})"
-    rec = parse_review(rows[-1][0]) if rows else None
-    if rec is None or rec["n"] != n:
+    rec, bad = newest_record(n, bodies)
+    if bad:
+        return "unknown", f"the newest review record of #{n} cannot be read: it does not parse, or it names another pull request"
+    if rec is None:
         return "allow", f"#{n} has no review record to keep"
-    state, why = live_review_state(h, rec, live, main, claims, own_records(n, [r[0] for r in rows[:-1]]))
+    state, why, unread = live_review_read(h, rec, live, main, claims, own_records(n, bodies[:-1]))
     if state != "stale":
         return "allow", why
-    return ("unknown" if REVIEW_SURVIVAL_UNKNOWN in why else "refuse"), why
+    return ("unknown" if unread else "refuse"), why
 
 def reviewed_read(h, cfgrel=None):
     """-> the lines of `merge --reviewed`, built before any is printed so a failed read prints none. Two list reads (the open pull requests, then the
@@ -4949,8 +4967,7 @@ def reviewed_read(h, cfgrel=None):
                 bare.append(f"#{n}")
                 continue
         else:
-            rec = parse_review(bodies[-1])
-            rec = rec if rec and rec["n"] == n else None
+            rec = newest_record(n, bodies)[0]
             state, why = live_review_state(h, rec, sha, main, cfgrel, own_records(n, bodies[:-1]))
         if state == "done":
             lint = lint_state(lints.get(n, []), sha)

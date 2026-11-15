@@ -24,7 +24,8 @@ from guard_pointer import (
     pointer_checkout,
 )
 from guard_push_delete import (
-    DEFAULT_BRANCH_FALLBACK, push_calls, push_destinations, push_refspecs, push_target,
+    DEFAULT_BRANCH_FALLBACK, push_calls, push_destinations, push_every_remote, push_refspecs, push_remote_name, push_target,
+    _push_config,
 )
 
 
@@ -869,8 +870,13 @@ def _push_refs(segment, stripped, cwd, args, skip=()):
     names, except a destination in `skip`. The tracking ref is `refs/remotes/<remote>/<dest>`, the named
     remote else origin. A source that does not resolve (a `$(...)`, a backtick, a glob, a typo) is read as
     HEAD. Everything comes from the arguments alone, with no git read beyond the destinations."""
-    named = push_refspecs(args)
     where, overrides = push_target(segment, stripped, cwd)
+    yield from _push_refs_at(where, overrides, args, skip)
+
+
+def _push_refs_at(where, overrides, args, skip=()):
+    """`_push_refs` for a push whose directory and config overrides are known: `_push_calls` yields them for a push nested in a wrapper."""
+    named = push_refspecs(args)
     if named is None or not where or not os.path.isdir(where):
         return
     specs = named[1] or [""]
@@ -1046,10 +1052,12 @@ def octopus_push_hit(stripped: str, cwd: str, read_verb) -> str:
 # A push moves the head and stales the record of the head the last round reviewed, so a second push before that record is posted leaves
 # the round unrecorded. The verdict is merge.handed_in_push, the one home: it refuses only a stale record, so a push with no record
 # (a first round), over the record of the live head, over a clean merge of main or the merge tool's records-page commit passes.
-# Judged only in a repo that uses the merge tool, for a destination other than main or master (push-main asks about those) and not for a
-# dry run. Cost: per pushed ref one paged read of the open pull requests; only when one holds the branch, one paged read of its comments,
-# and for a stale record the clean-merge reads (commit reads, a compare per merge). All share MERGE_READ_TIMEOUT. A read that cannot
-# run refuses as unknown (decision guard-hooks-fail-closed).
+# Judged only in a repo that uses the merge tool, for a push to origin (the remote the merge tool and gh read), for a destination other than
+# main or master (push-main asks about those) and not for a dry run. A pull request whose head is in a fork holds no branch of origin.
+# The pushes are those of `_push_calls`, as the force-push loop reads them: wrappers and command substitutions included.
+# Cost: per pushed ref one paged read of the open pull requests; only when one holds the branch, one paged read of its comments, and for a
+# stale record the clean-merge reads (commit reads, a compare per merge). A remote named by URL or path reads one `git config`. All gh reads
+# share MERGE_READ_TIMEOUT. A read that cannot run, or a push whose branch this reader cannot name, refuses as unknown (decision guard-hooks-fail-closed).
 HANDED_IN_PUSH_STALE_REASON = (
     "Rule (Git, handed-in-push-needs-record; decision handed-in-push-needs-record): this push goes to the branch of #{n}, whose newest "
     "review record is stale at its live head {head}: {why}. A push moves the head again, so the round that reviewed the live head "
@@ -1058,51 +1066,85 @@ HANDED_IN_PUSH_STALE_REASON = (
 )
 HANDED_IN_PUSH_UNKNOWN_REASON = (
     "Rule (Git, guard-hooks-fail-closed; decision handed-in-push-needs-record): whether the review record of the pull request this push "
-    "goes to is stale is unknown: {detail}. A read that cannot run refuses the push. Remedy: retry when the read works."
+    "goes to is stale is unknown: {detail}. A read that cannot run refuses the push. Remedy: retry when the read works, or push a branch "
+    "name this check can read."
 )
+_EXPANDED_PUSH = re.compile(r"\bpush\b[^;&|\n]*[$`]")  # the quoted-text blanking of push_calls drops a `"$(...)"` word, so the segment is read as written
+
+
+def _pushes_to_origin(where, remote, overrides):
+    """True when the push's remote is origin, False when it is another configured remote, None when that cannot be told: a URL or a path that
+    is not origin's own spelling, or a config that cannot be read."""
+    name = push_remote_name(remote, where, overrides)
+    if name:
+        return name == "origin"
+    origin = _push_config(where, "remote.origin.url", overrides)
+    return True if remote and origin and remote == origin else None
 
 
 def _handed_in_push_read(where, dest):
-    """-> (verdict, number, head, why) for a push to `dest`: verdict is "none" when no open pull request holds the branch, else merge.handed_in_push's
-    allow, refuse or unknown. Never raises: an unloadable tool, a Stop, a timeout and any other failure are one unknown with its cause."""
+    """-> (verdict, number, head, why) for a push to `dest`: verdict is "none" when no open pull request of this repo holds the branch, else
+    merge.handed_in_push's "allow", "refuse" or "unknown". Never raises: an unloadable tool, a Stop, a timeout and any other failure are one
+    unknown with its cause."""
     module = merge_module()
     if module is None:
         return "unknown", 0, "", "the merge tool could not be loaded"
     try:
         with module.shared_deadline(MERGE_READ_TIMEOUT):
             host = module.Host(cwd=where)
-            main = (_merge_configs(where) or [{}])[0].get("defaultBranch") or host.base
-            held = [d for d in host.open_pulls() if d["head"]["ref"] == dest]
-            if not held:
+            row = host.batch_pr(dest, forks=False)
+            if row is None:
                 return "none", 0, "", ""
-            if len(held) > 1:
-                return "unknown", 0, "", "%d open pull requests have the head %s" % (len(held), dest)
-            n, live = held[0]["number"], held[0]["head"]["sha"]
-            verdict, why = module.handed_in_push(host, n, live, main)
-            return verdict, n, live, why
+            n, info = row
+            main = (_merge_configs(where) or [{}])[0].get("defaultBranch") or host.base
+            verdict, why = module.handed_in_push(host, n, info["head"], main)
+            return verdict, n, info["head"], why
     except subprocess.TimeoutExpired:  # its text names the resolved program path
         return "unknown", 0, "", "a read timed out after %d s" % MERGE_READ_TIMEOUT
     except Exception as e:  # a Stop, a missing gh, malformed JSON: all unread
         return "unknown", 0, "", " ".join(str(e).split()) or type(e).__name__
 
 
-def handed_in_push_hit(stripped: str, cwd: str, read_verb):
-    """(reason, matched) for the first `git push` in the command that goes to the branch of a pull request whose newest review record is
-    stale at the live head, or whose record read cannot run; else None. Each segment is judged from its own command word. `read_verb("push",
-    args)` is true for a dry run, which sends nothing."""
-    for segment in split_segments(stripped):
-        call = git_call_of(segment) if segment.strip() else None
-        if call is None or call[0] != "push" or read_verb("push", call[1]):
+def _handed_in_push_unknown(detail):
+    return HANDED_IN_PUSH_UNKNOWN_REASON.format(detail=cap_safe(detail, 200)), "push, review record read unknown"
+
+
+def handed_in_push_hit(texts, stripped: str, cwd: str, read_verb):
+    """(reason, matched) for the first `git push` among `texts` (the command and its substitutions) that goes to the branch of a pull request
+    whose newest review record is stale at the live head, or whose record read cannot run, or whose branch cannot be named; else None. Each
+    segment is judged from its own command word, and a push inside `bash -c` or a substitution as `_push_calls` reads it. `read_verb("push",
+    args)` is true for a dry run, which sends nothing. A push that deletes or sends tags only moves no head: it passes."""
+    reads = {}
+    for segment in (part for text in texts for part in split_segments(text)):
+        if not segment.strip():
             continue
-        for where, _source, dest, _tracking, _remote, _memo in _push_refs(segment, stripped, cwd, call[1], DEFAULT_BRANCH_FALLBACK):
-            if not dest or not uses_merge_tool(where):
+        for args, where, overrides in _push_calls(segment, stripped, cwd):
+            if read_verb("push", args) or not where or not os.path.isdir(where) or not uses_merge_tool(where):
                 continue
-            verdict, n, live, why = _handed_in_push_read(where, dest)
-            if verdict == "refuse":
-                return (HANDED_IN_PUSH_STALE_REASON.format(n=n, head=live[:9], head_full=live, why=cap_safe(why, 200)),
-                        "push to #%d at %s" % (n, live[:9]))
-            if verdict == "unknown":
-                return HANDED_IN_PUSH_UNKNOWN_REASON.format(detail=cap_safe(why, 200)), "push, review record read unknown"
+            every = push_every_remote(args)
+            named = push_refspecs(args)
+            if every is None and named is None:
+                continue
+            counts = _pushes_to_origin(where, named[0] if every is None else every, overrides)
+            if counts is False:
+                continue
+            if counts is None:
+                return _handed_in_push_unknown("the remote this push goes to cannot be told from origin")
+            if every is not None:
+                return _handed_in_push_unknown("this push names every branch, so the branch of a pull request it reaches cannot be named")
+            if _EXPANDED_PUSH.search(segment):
+                return _handed_in_push_unknown("this push names a branch through a shell variable or a substitution")
+            for _where, _source, dest, _tracking, _remote, _memo in _push_refs_at(where, overrides, args, DEFAULT_BRANCH_FALLBACK):
+                if not dest or "*" in dest:
+                    return _handed_in_push_unknown("the branch this push goes to cannot be named")
+                if (where, dest) not in reads:
+                    reads[where, dest] = _handed_in_push_read(where, dest)
+                verdict, n, live, why = reads[where, dest]
+                if verdict == "refuse":
+                    return (HANDED_IN_PUSH_STALE_REASON.format(n=n, head=live[:9], head_full=live, why=cap_safe(why, 200)),
+                            "push to #%d at %s" % (n, live[:9]))
+                if verdict == "unknown":
+                    return _handed_in_push_unknown(why)
     return None
 
 
