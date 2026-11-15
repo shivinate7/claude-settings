@@ -3,10 +3,11 @@
 
 Run: python3 merge/test_reviewed_cursor.py
 The fixtures are test_merge.py's: PullsHost serves the repo's comments (honor_since answers `since` as GitHub does, now pins the Host
-clock), and CloudSession gives each case its own config dir. Main reads every comment on every run, so the cursor facts are red there.
+clock, page_size and between_pages make a read page through them with a change between two pages), and CloudSession gives each case its
+own config dir. Main reads every comment on every run, so the cursor facts are red there.
 A case checks its scope (which read ran) before its subject (the lines printed). A check that main also passes is a green control.
 """
-import datetime, json, os, shutil, unittest
+import datetime, errno, json, os, pathlib, shutil, unittest, unittest.mock
 
 import test_merge as tm  # noqa: E402  the git half's fixtures; importing it runs none of its cases
 
@@ -24,6 +25,16 @@ REPO_NAME = "o/r"  # the repo the fixture's host names: its cache's key (reviewe
 ALPHA, BETA = "o/alpha", "o/beta"  # two repos whose hosts have no name: each is named by the full_name its bare repo route reads
 EARLY = "2026-10-01T12:00:00Z"  # before the cursor less the overlap: a warm read from the cursor never returns it
 DEPTH = 100000  # a state file this deep makes json.loads raise RecursionError
+
+
+def at(secs):
+    """The ISO UTC time of epoch second `secs`, as GitHub writes it."""
+    return datetime.datetime.fromtimestamp(secs, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+WAIT = 900  # the Host clock's rate-limit wait between page 1 and page 2 of the paged case
+EDIT_AT = at(CLOCK0 + 60)  # the log is edited inside the read, after its page 1 was served
+LATE_AT = at(CLOCK0 + 660)  # a comment posted during the wait, 600 s after the edit: updated after the read began
 
 
 def nested(head):
@@ -118,12 +129,13 @@ class ReviewedCursor(tm.CloudSession):
         super().setUp()
         self.clock = CLOCK0  # the Host clock: a case moves it to age the cache
 
-    def run_reviewed(self, comments, pulls=None, repo=REPO_NAME, full_name=None, cwd=None):
+    def run_reviewed(self, comments, pulls=None, repo=REPO_NAME, full_name=None, cwd=None, page_size=None, between_pages=None):
         """-> (host, out): one `merge --reviewed` over the open pulls (default: #7 at REVIEW_HEAD, created at FLOOR) and the repo's comments,
-        which the host serves as `since` filters them. The host names its repo by `repo`, or, when that is None, by the full_name its bare
-        repo route reads. The run exits 0 or the case fails; a crash fails the case, named by what raised it."""
+        which the host serves as `since` filters them, page_size to a page. The host names its repo by `repo`, or, when that is None, by the
+        full_name its bare repo route reads. The run exits 0 or the case fails; a crash fails the case, named by what raised it."""
         pulls = pulls or [tm.batch_pull(7, tm.REVIEW_HEAD, created_at=FLOOR)]
-        host = tm.PullsHost(pulls, {}, comments=comments, honor_since=True, now=lambda: self.clock, repo=repo, full_name=full_name, cwd=cwd)
+        host = tm.PullsHost(pulls, {}, comments=comments, honor_since=True, now=lambda: self.clock, repo=repo, full_name=full_name, cwd=cwd,
+                            page_size=page_size, between_pages=between_pages)
         try:
             rc, out, err = self.run_args("--reviewed", host=host)
         except Exception as e:
@@ -227,6 +239,46 @@ class ReviewedCursor(tm.CloudSession):
         self.assert_from_cursor(host, T1)
         self.assertRegex(tm.list_line(self, after, 7), rf"^#7 feat7 {tm.REVIEW_HEAD[:9]} bad: ")
 
+    def mid_read_change(self, host, page):
+        """The between_pages hook of the paged case: after page 1 is served, the log is edited at EDIT_AT, and the Host clock moves on by WAIT,
+        so page 2 is read after the edit. self.hook_pages keeps the page numbers the hook ran after."""
+        self.hook_pages.append(page)
+        if page != 1:
+            return
+        edited = tm.review_comment(1, 7, "<!-- review-record -->\nPR: #7\n", created=T1, updated=EDIT_AT)
+        host.comments = [edited if c["id"] == 1 else c for c in host.comments]
+        self.clock = CLOCK0 + WAIT
+
+    def warm_read_across_a_change(self):
+        """Shared step of the paged cases: a cold read at CLOCK0 caches the passing log. The warm read starts at CLOCK0 and pages through the
+        comments two to a page. The comment posted during the wait is the newest, so it is last in the list and page 2 holds it. The change
+        (mid_read_change) lands between page 1 and page 2. -> (host, out): the warm read's host and lines."""
+        comments = [*padding(), own_log(1, created=T1), tm.lint_of(7, tm.REVIEW_HEAD)]
+        posted = tm.review_comment(9, 8, "LGTM", created=LATE_AT)
+        self.run_reviewed(comments)
+        self.hook_pages = []
+        host, out = self.run_reviewed([*comments, posted], page_size=2, between_pages=self.mid_read_change)
+        self.assertEqual(self.hook_pages, [1], "the change did not land between page 1 and page 2 of the warm read")
+        return host, out
+
+    def test_a_cursor_stored_across_a_change_between_pages_is_no_later_than_the_read_start(self):
+        host, _ = self.warm_read_across_a_change()
+        self.assert_from_cursor(host, T1)
+        cursor = self.cursor()["cursor"]
+        self.assertLessEqual(when(cursor), when(at(CLOCK0)), f"the read began at {at(CLOCK0)} but stored cursor {cursor}: a page read after the start moved the cursor past the start")
+
+    def test_a_warm_read_after_a_change_between_pages_sees_the_edited_log(self):
+        host, _ = self.warm_read_across_a_change()
+        cursor = self.cursor()["cursor"]
+        host, out = self.run_reviewed(host.comments)
+        self.assert_from_cursor(host, cursor)
+        self.assertRegex(tm.list_line(self, out, 7), rf"^#7 feat7 {tm.REVIEW_HEAD[:9]} bad: ", "the warm read after the change printed the edited log as done")
+
+    def test_a_cursor_stored_when_every_comment_predates_the_read_is_their_newest_updated_time(self):
+        host, _ = self.run_reviewed(standard_comments())
+        self.assert_full_read(host)
+        self.assertEqual((self.cursor() or {}).get("cursor"), T1, "a read whose comments all predate its start stored a cursor other than their newest updated time")
+
     def test_a_cache_that_cannot_be_trusted_is_a_full_read_then_rebuilt(self):
         comments = standard_comments()
         for name, content, rebuilds in DAMAGES:
@@ -322,6 +374,45 @@ class ReviewedCursor(tm.CloudSession):
         data = self.state()
         self.assertEqual((data.get("session"), data.get("role")), (tm.ROLE_SESSION, "batch-runner"), "the cursor write changed the session or the role")
         self.assertIsNotNone(self.cursor(), "the --reviewed run wrote no cursor under reviewed_cursor")
+
+    def run_with_unreadable_reread(self, comments):
+        """One `merge --reviewed` whose state file reads fine at the first read and raises OSError from the second read on: the re-read
+        that comes before the cursor write. The error is raised by the read itself, so the file on disk is never changed. -> (host, out, refused),
+        where refused lists the state reads that raised."""
+        real, reads, refused = pathlib.Path.read_text, [], []
+
+        def flaky(path, *args, **kwargs):
+            if os.path.normpath(os.fspath(path)) == os.path.normpath(self.role_file):
+                reads.append(path)
+                if len(reads) > 1:
+                    refused.append(path)
+                    raise OSError(errno.EIO, "injected read error")
+            return real(path, *args, **kwargs)
+
+        with unittest.mock.patch.object(pathlib.Path, "read_text", flaky):
+            host, out = self.run_reviewed(comments)
+        return host, out, refused
+
+    def test_an_unreadable_state_at_the_cursor_write_keeps_the_session_and_the_role(self):
+        self.put_state({"session": tm.ROLE_SESSION, "role": "batch-runner"})
+        _host, _out, refused = self.run_with_unreadable_reread(standard_comments())
+        self.assertTrue(refused, "the state file was not read again before the cursor write, so the injected read error hit nothing")
+        data = self.state()
+        self.assertEqual((data.get("session"), data.get("role")), (tm.ROLE_SESSION, "batch-runner"), "the cursor write over an unreadable state file dropped the session or the role")
+
+    def test_an_unreadable_state_at_the_cursor_write_leaves_the_file_byte_for_byte_and_prints_the_full_read(self):
+        comments = standard_comments()
+        self.reset_state()
+        _host, cold = self.run_reviewed(comments)
+        self.put_state({"session": tm.ROLE_SESSION, "role": "batch-runner"})
+        with open(self.role_file, "rb") as f:
+            before = f.read()
+        host, out, refused = self.run_with_unreadable_reread(comments)
+        self.assertTrue(refused, "the state file was not read again before the cursor write, so the injected read error hit nothing")
+        self.assert_full_read(host)
+        self.assertEqual(out, cold, "an unreadable state file at the cursor write changed the printed lines")
+        with open(self.role_file, "rb") as f:
+            self.assertEqual(f.read(), before, "the cursor write changed the state file although its re-read was unreadable")
 
     def test_read_merge_role_reads_a_file_with_only_the_cursor_as_no_role(self):
         cache = {"floor": FLOOR, "cursor": T1, "full_at": CLOCK0, "rows": []}

@@ -12591,16 +12591,20 @@ class PullsHost(merge.Host):
     `honor_since` makes the comment list answer `since` as GitHub does: only the comments updated after it. Off, every comment is listed.
     `full_name` is the OWNER/NAME that the bare repo route answers, which Host.api reads for a host with no repo name (root_host reads it so);
     None fails that read, as a checkout with no GitHub repo does. `cwd` is Host.cwd, the checkout the run is in.
-    `bodies` maps a pull request number to its body, as `pulls/<n>` and the open list give it (a replacement names its source pull request in that body)."""
+    `bodies` maps a pull request number to its body, as `pulls/<n>` and the open list give it (a replacement names its source pull request in that body).
+    `page_size` serves the comment list (as honor_since filters it) in pages of that many comments; `between_pages(host, n)` runs once page n is
+    served and before page n+1 is read, so a case can change the comments or the clock while a read pages through them. None: one page."""
     def __init__(self, pulls, check_rows, pulls_error=None, required=("checks",), workflow_runs=None, ignore=None, compares=None, compare_error=None,
                  base_compare_error=None, comments=(), comments_error=None, count_gh=False, files=None, files_error=None, changed_files=None, repo=None,
-                 commits=None, trees=None, now=time.time, honor_since=False, full_name=None, cwd=None, bodies=None, per_issue=None, per_issue_error=None):
+                 commits=None, trees=None, now=time.time, honor_since=False, full_name=None, cwd=None, bodies=None, per_issue=None, per_issue_error=None,
+                 page_size=None, between_pages=None):
         super().__init__(list(required), base="main", minute=60, now=now, pause=lambda s: None, ignore=ignore, repo=repo, cwd=cwd)
         self.bodies = dict(bodies or {})  # pull request number -> its body
         self.per_issue = {int(k): list(v) for k, v in (per_issue or {}).items()}  # issue number -> its comments, served by issues/<n>/comments in the order given
         self.per_issue_error = {int(k): v for k, v in (per_issue_error or {}).items()}  # issue number -> the message of a failed read of its comments
         self.full_name = full_name
         self.honor_since = honor_since
+        self.page_size, self.between_pages = page_size, between_pages
         self.pulls = [{**d, "body": self.bodies[d["number"]]} if d["number"] in self.bodies else d for d in pulls]
         self.check_rows, self.pulls_error = check_rows, pulls_error
         self.comments, self.comments_error = list(comments), comments_error  # the repo-wide issue comments, oldest first
@@ -12717,8 +12721,8 @@ class PullsHost(merge.Host):
                 raise merge.Stop(self.comments_error)
             if self.honor_since:
                 since = iso_time(fields["since"])
-                return [c for c in self.comments if iso_time(c["updated_at"]) > since]
-            return self.comments
+                return self.paged(lambda: [c for c in self.comments if iso_time(c["updated_at"]) > since])
+            return self.paged(lambda: self.comments)
         m = re.fullmatch(r"commits/([^/]+)/check-runs", rel)
         if m:
             return self.check_rows.get(m.group(1), [])
@@ -12729,6 +12733,21 @@ class PullsHost(merge.Host):
                 raise merge.Stop(self.files_error)
             return self.files
         raise AssertionError("unexpected read: " + rel)
+
+    def paged(self, listed):
+        """-> the comments `listed()` gives, served page_size to a page (all of them when page_size is None). `listed` is asked again for each page,
+        so a change that between_pages makes shows on the pages read after it."""
+        if self.page_size is None:
+            return listed()
+        out, n = [], 0
+        while True:
+            items = listed()
+            out += items[n * self.page_size:(n + 1) * self.page_size]
+            if (n + 1) * self.page_size >= len(items):
+                return out
+            if self.between_pages:
+                self.between_pages(self, n + 1)
+            n += 1
 
 class HeadReadNoBatchRead(unittest.TestCase):
     """head_read over scripted reads: a settled head makes no read of the open pull requests."""
