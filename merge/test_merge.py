@@ -12815,7 +12815,7 @@ class RedMainBrake(Env):
         self.refused_by_red_main(rc, out, before)
         self.assertIn("run 903", out)
 
-    # The narrowed lift (ruling own-791-2-narrow-revert-first, coordinator-relayed, 00:27 CST, 2026-11-15): under --base-red-ok, a red base that names a
+    # The narrowed lift (decision no-merge-onto-red-main): under --base-red-ok, a red base that names a
     # breaking merge lifts only for the pull request whose net diff against main undoes exactly that merge commit, the tree `git revert -m 1 <sha>` gives.
     # Each case has a real breaking merge, so the check reads a commit. Scope first: each case asserts the head's tree before its subject runs.
     DROPS_LANE = "Drops-lines: lane-2650.txt -- the revert of the breaking merge deletes the lane's file"
