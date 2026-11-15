@@ -264,12 +264,14 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        counts every remote's refs. Cost: one `git rev-list` per pushed ref, and one `git
                        config` more per pushed ref for such a remote. (octopus-push-refused)
   handed-in-push-needs-record  deny. A `git push` to the branch of an open pull request, in a repo that uses the merge
-                       tool, while the pull request's newest review record is for an older head than its live head on
-                       GitHub. A clean merge of main and the merge tool's records-page commit keep a record, so a push
-                       over them passes. A pull request with no record passes (a first round). A review read that cannot
-                       run, a newest record that does not parse, and a push whose branch cannot be named (a variable, a
-                       substitution, --all, --mirror) refuse as unknown. Only a push to origin counts; a fork's pull
-                       request is not held. A dry run and a destination named main or master are left out. Cost: one
+                       tool, while the pull request's newest review log is for an older head than its live head on
+                       GitHub. A clean merge of main and the merge tool's records-page commit keep a review log, so a
+                       push over them passes. A pull request with no review log passes (a first round), and so does a
+                       push whose open pull requests read cannot run: it names no pull request. A review log read that
+                       cannot run, a newest review log that does not parse, and a push whose folder or branch cannot be
+                       named (a variable, a substitution, --all, --mirror) refuse as unknown. Only a push to origin
+                       counts; a fork's pull request is not held. A dry run and a destination named main or master are
+                       left out. Cost: one
                        paged read of the open pull requests per pushed ref; more only when one holds the branch.
                        (handed-in-push-needs-record)
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
@@ -4853,7 +4855,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     hits = [] if POWERSHELL_CALL[0] else rm_after_cd_hits(stripped)
     if hits:
         refuse(tool, "deny", "rm-after-cd", rm_after_cd_reason(hits), "; ".join(hits))
-    # 4c. A push to the branch of a pull request whose newest review record is for an older head, or whose record
+    # 4c. A push to the branch of a pull request whose newest review log is for an older head, or whose review log
     # read cannot run (rule handed-in-push-needs-record). Read before the force-push ask below, so no answer to that
     # ask can pass a push this check refuses. Cost: guard_merge states it; none outside a repo that uses the merge
     # tool, for a dry run, or for a main or master destination.

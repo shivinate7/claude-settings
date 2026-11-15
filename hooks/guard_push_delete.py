@@ -525,10 +525,13 @@ def push_text(segment: str, script: str = "") -> str:
     return PUSH_QUOTED.sub(" ", segment)
 
 
-def push_calls(segment: str, script: str = ""):
+def push_calls(segment: str, script: str = "", written: bool = False):
     """(subcommand, arguments) of each `git` call in the live text of one segment: the one
-    reader of git calls for a push. Each line of push_text is its own command."""
-    for line in push_text(segment, script).split("\n"):
+    reader of git calls for a push. Each line of push_text is its own command. `written` keeps
+    quoted multi-word words as shlex reads them, so a `"$(git rev-parse ...)"` refspec stays a
+    word whose shell shape a caller can test, where push_text would blank it."""
+    text = _push_scan(segment, script) if written else push_text(segment, script)
+    for line in text.split("\n"):
         yield from guard_core.git_calls(line)
 
 
@@ -623,10 +626,11 @@ def _colon_delete(delete, plain):
 
 def push_refspecs(args):
     """(remote, refspecs) of a push that names the refs it sends, else None: `--all`, `--branches`,
-    `--mirror`, a deletion and a tags-only push send no range this reader can name. The remote is ''
-    when none is named, and the refspecs are empty for a bare push."""
+    `--mirror`, a push that only deletes and a tags-only push send no range this reader can name. The
+    remote is '' when none is named, and the refspecs are empty for a bare push. A `:ref` beside a
+    sending refspec stays in the list, so it lines up with push_destinations; callers skip it."""
     _force, mirror, every, _includes, _unpinned, _leased, delete, _upstream, remote, plain = _push_parse(args)
-    delete = _colon_delete(delete, plain)
+    delete = delete or bool(plain) and all(spec.startswith(":") for spec in plain)
     if mirror or every or delete or (_push_tags_only(args) and not plain):
         return None
     return remote, plain

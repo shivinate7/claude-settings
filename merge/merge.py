@@ -1233,10 +1233,12 @@ class Host:
         """-> [(number, pr() fields)] of every open pull request, all pages. A failed read is a Stop, never an empty list."""
         return [(d["number"], self.info(d)) for d in self.pages("pulls", fields={"state": "open"})]
 
-    def batch_pr(self, branch, forks=True):
+    def batch_pr(self, branch, forks=True, rows=None):
         """-> (number, pr() fields) of the open pull request whose head is `branch`, or None. Two of them is a Stop: the batch is not told apart.
-        `forks` False leaves out a pull request whose head branch is in a fork: it holds no branch of this repo (handed_in_push)."""
-        hits = [row for row in self.open_prs() if row[1]["branch"] == branch and (forks or not row[1]["fork"])]
+        `forks` False leaves out a pull request whose head branch is in a fork: it holds no branch of this repo (handed_in_push). `rows` is an
+        open_prs() result the caller already read, so a caller can tell a list read that fails from a match that is a Stop."""
+        rows = self.open_prs() if rows is None else rows
+        hits = [row for row in rows if row[1]["branch"] == branch and (forks or not row[1]["fork"])]
         if len(hits) > 1:
             raise Stop(f"{len(hits)} open pull requests have the head {branch}: close all but one {FREEZE_CITE}")
         return hits[0] if hits else None
