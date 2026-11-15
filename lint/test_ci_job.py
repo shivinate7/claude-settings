@@ -19,6 +19,8 @@ Lint mode: a --lint run that picks no lint step is unknown, exit 2; a lint step 
 unknown when it is skipped; a lint step that runs only off a pull request reads skipped, and the run still exits 0.
 ParallelLint: --lint runs its lint steps at once (CI_JOB_LINT_WORKERS, else the cpu count up to 4), keeps the printed
 lines and each step's log lines in workflow order, and treats an install step as a barrier. Overlap is proven by rendezvous.
+LocalActionUnderLint: --lint runs a local uses: action only when its action.yml passes the gate; FAIL beats unknown, and each refusal
+names its file, line or value and runs no step. A plain run never runs one.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -2181,6 +2183,189 @@ class ZizmorBranches(Job):
         rc, lines, out = self.run_job(self.REMOTE, args=self.LINT, script=ci_job, env=env)
         self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
         self.assertIn("no run.sh: looked for", lines[0], out)
+
+
+PROBE = '''import sys
+# Stands in for lint/probe.py: it writes the file its second argument names, so a case can see that it ran, then exits
+# with the code its first argument names.
+rc, marker = sys.argv[1], sys.argv[2]
+open(marker, "w").close()
+sys.exit(int(rc))
+'''
+ENV_PR_BODY = "      env:\n        PR_BODY: ${{ github.event.pull_request.body }}\n"  # an env the runner cannot read
+
+
+def composite_action(*steps):
+    """An action.yml of composite steps; each step's text sits under runs: steps: at four spaces."""
+    return "name: probe-check\ndescription: a test action\nruns:\n  using: composite\n  steps:\n" + "".join(steps)
+
+
+def action_step(name, run, extra=""):
+    """One composite step under shell: bash, then `extra`, its own lines such as an env: or an if:."""
+    return "    - name: %s\n      shell: bash\n      run: %s\n%s" % (name, run, extra)
+
+
+def probe_step(name, rc, marker, extra=""):
+    """A step that runs the probe through the action's own folder, as the composite action writes it."""
+    return action_step(name, "python3 ${{ github.action_path }}/../../lint/probe.py %s %s" % (rc, marker), extra)
+
+
+class LocalActionUnderLint(Job):
+    """--lint runs a local uses: action (`$/actions/<name>`) when its action.yml passes the gate: composite, and every step a
+    bash run: whose lines are lint commands. The action prints one verdict line, FAIL beating unknown. A refusal prints
+    unknown naming the file, the line or the value it refused, and runs no step. A plain run never runs a local action."""
+
+    git = LintTools.git  # the fixture's git helper and lane builder: LintTools' one home, called here, never copied
+    lane = LintTools.lane
+    ACTION = step("Probe check", uses="$/actions/probe-check")
+    PLAIN = step("Plain lint", "python3 lint/probe.py 0 plain.marker")
+    BOTH = (ACTION, PLAIN)  # the action, then a plain lint step that passes, so the run has a lint step that ran
+    LINT = ("--lint", "--base", "origin/main")
+
+    def commit_lane(self, action):
+        """Commits the lane: the probe, and the action's action.yml when `action` is not None. Call it before run_job, so a
+        folder made for a stub or a PATH is not committed with the lane."""
+        files = {"lint/probe.py": PROBE}
+        if action is not None:
+            files["actions/probe-check/action.yml"] = action
+        self.lane(files)
+
+    def only_tools(self, *tools):
+        """A PATH of symlinks to the named tools and no other, so a step finds no python3."""
+        bin_dir = os.path.join(self.root, "only-tools")
+        os.makedirs(bin_dir)
+        for tool in tools:
+            os.symlink(shutil.which(tool), os.path.join(bin_dir, tool))
+        return {"PATH": bin_dir}
+
+    def ran(self, name):
+        return os.path.exists(os.path.join(self.root, name))
+
+    def assert_one_line(self, lines, out):
+        """The workflow step prints exactly one line, its verdict."""
+        named = [ln for ln in lines if "Probe check: " in ln]
+        self.assertEqual(len(named), 1, "the action's step did not print one line\n" + out)
+
+    @unittest.skipIf(os.name == "nt", "the PATH holds symlinks to bash and git: POSIX only")
+    def test_a_local_action_with_python3_missing_reads_unknown_naming_python3(self):
+        self.commit_lane(composite_action(probe_step("Probe", 0, "pass.marker")))
+        rc, lines, out = self.run_job(self.ACTION, args=self.LINT, env=self.only_tools("bash", "git"))
+        self.assertEqual(rc, 2, out)
+        self.assertIn("python3", lines[0], out)  # the reason: the tool the action's probe runs
+
+    def test_a_local_action_whose_probe_exits_1_reads_fail(self):
+        self.commit_lane(composite_action(probe_step("Probe", 1, "fail.marker")))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL", "PASS"]), out)
+        self.assert_one_line(lines, out)
+        self.assertTrue(self.ran("fail.marker"), "the probe did not run\n" + out)
+
+    def test_a_local_action_whose_probe_exits_2_also_reads_fail(self):
+        self.commit_lane(composite_action(probe_step("Probe", 2, "error.marker")))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL", "PASS"]), out)
+
+    def test_a_passing_local_action_reads_pass(self):
+        self.commit_lane(composite_action(probe_step("Probe", 0, "pass.marker")))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS", "PASS"]), out)
+        self.assert_one_line(lines, out)
+        self.assertTrue(self.ran("pass.marker"), "the probe did not run\n" + out)
+
+    def test_a_failing_step_beats_an_unknown_step_in_one_action(self):
+        self.commit_lane(composite_action(probe_step("Probe", 1, "fail.marker"),
+                                          probe_step("Needs PR body", 0, "env.marker", extra=ENV_PR_BODY)))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL", "PASS"]), out)
+
+    def test_an_unknown_step_with_no_failing_step_makes_the_action_unknown_not_pass(self):
+        self.commit_lane(composite_action(probe_step("Probe", 0, "pass.marker"),
+                                          probe_step("Needs PR body", 0, "env.marker", extra=ENV_PR_BODY)))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
+        self.assertIn("github.event.pull_request.body", lines[0], out)  # the reason: the env the runner cannot read
+
+    def test_a_local_action_with_no_action_yml_reads_unknown_naming_the_file(self):
+        self.commit_lane(None)
+        rc, lines, out = self.run_job(step("New check", uses="$/actions/new-check"), self.PLAIN, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
+        self.assertIn("new-check/action.yml", lines[0], out)
+
+    def test_a_local_action_that_is_not_composite_reads_unknown_naming_the_runtime(self):
+        node = "name: probe-check\ndescription: a test action\nruns:\n  using: node20\n  main: index.js\n"
+        self.commit_lane(node)
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
+        self.assertIn("node20", lines[0], out)
+
+    def test_a_local_action_with_a_nested_uses_step_reads_unknown_naming_that_action(self):
+        self.commit_lane(composite_action("    - name: Nested\n      uses: actions/checkout@v4\n"))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
+        self.assertIn("actions/checkout@v4", lines[0], out)
+
+    def test_a_local_action_whose_env_needs_the_pr_body_reads_unknown_naming_the_expression(self):
+        self.commit_lane(composite_action(probe_step("Needs PR body", 0, "env.marker", extra=ENV_PR_BODY)))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
+        self.assertIn("github.event.pull_request.body", lines[0], out)
+
+    def test_a_local_action_with_an_npm_ci_line_reads_unknown_and_runs_no_step(self):
+        self.commit_lane(composite_action(probe_step("Probe", 0, "probe.marker"), action_step("Install", "npm ci")))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT, env=self.stub_path(npm=self.NPM_OK))
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
+        self.assertIn("npm ci", lines[0], out)  # the reason: the line the gate refused
+        self.assertFalse(self.ran("probe.marker"), "the probe ran although a later line failed the gate\n" + out)
+        self.assertEqual(self.npm_calls(), "(no npm call)", out)
+
+    def test_a_local_action_with_a_curl_line_reads_unknown_and_runs_no_step(self):
+        self.commit_lane(composite_action(probe_step("Probe", 0, "probe.marker"),
+                                          action_step("Fetch", "curl -sS -o tool.sh https://example.invalid/tool.sh")))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT, env=self.stub_path(curl='echo "$*" >> curl-calls.txt'))
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
+        self.assertIn("curl", lines[0], out)  # the reason: the line the gate refused
+        self.assertFalse(self.ran("probe.marker"), "the probe ran although a later line failed the gate\n" + out)
+        self.assertFalse(self.ran("curl-calls.txt"), "the curl line ran\n" + out)
+
+    def test_a_local_action_with_no_steps_reads_unknown_naming_the_file(self):
+        self.commit_lane("name: probe-check\ndescription: a test action\nruns:\n  using: composite\n  steps: []\n")
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)  # a pass that ran nothing proved nothing
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
+        self.assertIn("probe-check/action.yml", lines[0], out)
+
+    def test_a_local_action_step_with_a_false_if_is_skipped_and_its_run_is_not_made(self):
+        off = probe_step("Off branch", 0, "off.marker", extra="      if: github.event_name != 'pull_request'\n")
+        self.commit_lane(composite_action(probe_step("Probe", 0, "pass.marker"), off))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS", "PASS"]), out)
+        self.assertFalse(self.ran("off.marker"), "the if-false step ran\n" + out)
+
+    def test_the_serial_and_parallel_lint_print_the_same_lines(self):
+        self.commit_lane(composite_action(probe_step("Probe", 1, "fail.marker")))
+        rc, serial, out = self.run_job(*self.BOTH, args=self.LINT, env={"CI_JOB_LINT_WORKERS": "1"})
+        self.assertEqual((rc, self.verdicts(serial)), (1, ["FAIL", "PASS"]), out)
+        rc, parallel, out = self.run_job(*self.BOTH, args=self.LINT, env={"CI_JOB_LINT_WORKERS": "2"})
+        self.assertEqual(normal(parallel), normal(serial), "the parallel run printed other lines than the serial one\n" + out)
+
+    # Controls: each reads the same today and after the change. The probe as a plain run: step proves the fixture works.
+
+    def test_the_same_probe_as_a_plain_run_step_reads_fail(self):
+        self.commit_lane(None)
+        rc, lines, out = self.run_job(step("Probe", "python3 lint/probe.py 1 fail.marker"), self.PLAIN, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL", "PASS"]), out)
+        self.assertTrue(self.ran("fail.marker"), out)
+
+    def test_a_remote_uses_under_lint_is_still_not_run(self):
+        self.commit_lane(None)
+        rc, lines, out = self.run_job(step("Remote check", uses="example-org/other-repo/actions/fetch@v1"),
+                                      self.PLAIN, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
+
+    def test_a_plain_run_does_not_run_a_local_action(self):
+        self.commit_lane(composite_action(probe_step("Probe", 1, "fail.marker")))
+        rc, lines, out = self.run_job(self.ACTION)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["not run locally"]), out)
+        self.assertFalse(self.ran("fail.marker"), "a plain run ran the local action\n" + out)
 
 
 HARNESS = '''import os, sys
