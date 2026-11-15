@@ -3297,10 +3297,18 @@ def hold(kind):  # the first such call starts a helper that keeps this process's
         open(os.path.join(d, "held"), "w").close()
         import subprocess
         subprocess.Popen([sys.executable, "-c", "import time; time.sleep(%d)" % h["seconds"]])
+def ratelimit_lines():
+    """The budget headers of a reply. A case sets S["ratelimit"] = {remaining, limit, reset}: a value of None leaves its header out, and any other value is printed as it is
+    (a text value gives a header that is not a number). Unset, the reply carries the one header every older case reads: remaining 4999."""
+    rl = S.get("ratelimit")
+    if rl is None:
+        return "X-Ratelimit-Remaining: 4999\r\n"
+    lines = [f"X-Ratelimit-{name}: {rl[key]}\r\n" for name, key in (("Remaining", "remaining"), ("Limit", "limit"), ("Reset", "reset")) if rl.get(key) is not None]
+    return "".join(lines)
 def finish(text, code, include=False, link=None):
     if include and not (code and not re.search(r"\(HTTP \d{3}\)\s*$", text)):  # a transport error has no HTTP reply, so no header block
         got = int(re.search(r"\(HTTP (\d{3})\)\s*$", text).group(1)) if code else 200
-        sys.stdout.buffer.write(("HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nX-Ratelimit-Remaining: 4999\r\n%s\r\n" % (got, "Error" if code else "OK", "Link: %s\r\n" % link if link else "")).encode())
+        sys.stdout.buffer.write(("HTTP/1.1 %d %s\r\nContent-Type: application/json\r\n%s%s\r\n" % (got, "Error" if code else "OK", ratelimit_lines(), "Link: %s\r\n" % link if link else "")).encode())
     print(text)
     sys.exit(code)
 def graphql():
@@ -17708,17 +17716,36 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(host.gh_calls[4], "rules/branches/main", "the ruleset read comes before the classic protection")
         self.assertEqual(host.gh_calls[5:], ["branches/main/protection/required_status_checks"])
 
-    def test_a_ready_pr_with_a_record_and_no_lint_comment_reads_the_rollup_first(self):
-        # The same fixture without the lint comment: the join reads the head's rollup (rollup_green: its check runs, then its statuses), head_state
-        # reads the same two again, then the ruleset and the protection. Eight calls
+    def test_a_ready_pr_with_a_record_and_no_lint_comment_reads_its_head_checks_once(self):
+        # The same fixture without the lint comment: the join reads the head's rollup (rollup_green: its check runs, then its statuses), and head_state
+        # takes those rows as read, with no second read. Then the ruleset and the protection, once each. Six calls (the brief for PR 1 of the GitHub
+        # API budget, item 4: each head's checks are read once per run).
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, {REVIEW_HEAD: [batch_run("checks", "completed", "success")]},
                                           count_gh=True)
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(host.gh_calls, ["pulls", "issues/comments", f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status",
-                                         f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status", "rules/branches/main",
-                                         "branches/main/protection/required_status_checks"],
-                         "a ready pull request with a record and no lint comment must read the head's rollup before its CI state")
+                                         "rules/branches/main", "branches/main/protection/required_status_checks"],
+                         "a ready pull request's head checks are read twice (the rollup, then head_state), or the ruleset or protection is read more than once")
+
+    def test_three_ready_prs_read_each_head_once_and_the_protection_once_per_run(self):
+        # Ruling (the brief for PR 1 of the GitHub API budget, item 4): the check runs and the statuses of each head are read once per pull request, and the
+        # branch protection and the ruleset of the base once per run, not once per pull request (decision pr-review-record, the cost).
+        shas = {7: REVIEW_HEAD, 8: REVIEW_OLD_HEAD, 9: "5" * 40}
+        pulls = [batch_pull(n, sha) for n, sha in shas.items()]
+        comments = [review_comment(n, n, record_text(n=n, head=sha, rounds=REVIEW_PASS)) for n, sha in shas.items()]
+        rows = {sha: [batch_run("checks", "completed", "success")] for sha in shas.values()}
+        host, rc, out, err = self.listing(pulls, comments, rows, count_gh=True)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(len(host.gh_calls), 2 + 2 * len(shas) + 2, f"the reads are not the one set per run: {host.gh_calls}")  # scope: the calls, before each route
+        for n, sha in shas.items():
+            for route in ("check-runs", "status"):
+                with self.subTest(pr=n, route=route):
+                    self.assertEqual(host.gh_calls.count(f"commits/{sha}/{route}"), 1,
+                                     f"#{n}: the head's {route} was read {host.gh_calls.count(f'commits/{sha}/{route}')} times, want once")
+        self.assertEqual(host.gh_calls.count("branches/main/protection/required_status_checks"), 1,
+                         "the base's branch protection was read once per pull request, not once per run")
+        self.assertEqual(host.gh_calls.count("rules/branches/main"), 1, "the base's ruleset was read once per pull request, not once per run")
 
     def test_a_draft_with_a_record_reads_no_head_checks(self):
         host, rc, out, err = self.listing([batch_pull(9, REVIEW_HEAD, draft=True)], [review_comment(1, 9, record_text(n=9, rounds=REVIEW_PASS))],
@@ -23088,6 +23115,256 @@ class StaleBatchCites(unittest.TestCase):
             text = getattr(merge, name, "")
             with self.subTest(constant=name):
                 self.assertIsNone(re.search(r"\bline \d+\b", text), f"{name} cites a line number, which moves: {text!r}")
+
+
+# ---- The GitHub API budget (the brief for PR 1 of the GitHub API budget work): the budget of each reply, the refusal of a bulk read below the floor, the in-run memo,
+# `-i` on every api call, and `merge --audit-prs`. The cases run the real Host through the fake gh, because the budget and the -i flag are read in
+# Host.gh, which PullsHost replaces. The floor is a tenth of the limit the replies name. The reset is the clock time in CST (UTC-6).
+RESET_EPOCH = 1800000000  # 08:00 UTC, which is 02:00 CST
+RESET_CST = time.strftime("%H:%M", time.gmtime(RESET_EPOCH - 6 * 3600)) + " CST"  # the clock time a refusal names
+
+def bulk_kw():
+    """{"bulk": True} when Host.pages takes the mark. The old code does not, so its read goes out unmarked, and the case fails on the call that
+    went out, never on a TypeError (P3)."""
+    return {"bulk": True} if "bulk" in inspect.signature(merge.Host.pages).parameters else {}
+
+def refusal_of(read):
+    """-> the text of the exception `read` raises, or None when it returns. A refusal's class is the builder's, so any exception is read as the refusal, and the case checks its text."""
+    try:
+        read()
+    except Exception as e:
+        return str(e)
+    return None
+
+def recorded_ints(obj):
+    """The whole numbers an object holds in its own attributes, one level down. Where a Host keeps a budget is the builder's choice, so a case reads the values."""
+    found = set()
+    for v in vars(obj).values():
+        for x in (v.values() if isinstance(v, dict) else v if isinstance(v, (list, tuple, set)) else (v,)):
+            if isinstance(x, int) and not isinstance(x, bool):
+                found.add(x)
+    return found
+
+def route_count_line(text, route, count):
+    """The line, among the last few output lines, that names `route` with its call count `count`. None when there is none."""
+    tail = [l for l in text.splitlines() if l.strip()][-6:]
+    return next((l for l in tail if route in l and re.search(rf"(?<!\d){count}(?!\d)", l)), None)
+
+def tree_of(root):
+    """-> {relative path: size} of every file under root, git's folder left out. A case compares the tree before and after a run."""
+    found = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d != ".git"]
+        for f in filenames:
+            p = os.path.join(dirpath, f)
+            found[os.path.relpath(p, root)] = os.path.getsize(p)
+    return found
+
+def sha_of(k):
+    """A head sha for pull request k: 40 hex digits of a digest, so they differ in their first nine (the line may print a short sha)."""
+    import hashlib  # local: the one digest per pull request number, and no module-level import for one helper
+    return hashlib.sha1(f"pr{k}".encode()).hexdigest()
+
+class GhApiBudget(Env):
+    """Each case primes the budget with one ordinary read, then makes the call under test. The priming read is never bulk, so it is never refused."""
+    set, calls, gh_host = GhHalf.set, GhHalf.calls, GhHalf.gh_host
+
+    def setUp(self):
+        super().setUp()
+        gh_case_setup(self)
+
+    def budget(self, remaining, limit=5000, reset=RESET_EPOCH):
+        self.set(ratelimit={"remaining": remaining, "limit": limit, "reset": reset})
+
+    def call_count(self):
+        return len([l for l in self.calls().splitlines() if l.strip()])
+
+    def gh_api_argv(self):
+        """Spies on merge.sh, the seam every gh call passes through. -> the argv of each `gh api` call, in order."""
+        seen, real = [], merge.sh
+
+        def spy(args, *a, **k):
+            if list(args[:2]) == ["gh", "api"]:
+                seen.append(list(args))
+            return real(args, *a, **k)
+        patch = unittest.mock.patch.object(merge, "sh", spy)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return seen
+
+    def primed_host(self):
+        """A Host whose one ordinary read has recorded the budget the replies carry."""
+        h = self.gh_host()
+        h.pages("pulls", fields={"state": "open"})
+        return h
+
+    def bulk_read_below(self, remaining, limit):
+        """-> (refusal or None, calls before, calls after) of one bulk read at `remaining` of `limit`."""
+        self.budget(remaining, limit)
+        h = self.primed_host()
+        before = self.call_count()
+        refusal = refusal_of(lambda: h.pages("pulls", fields={"state": "open"}, **bulk_kw()))
+        return refusal, before, self.call_count()
+
+    # ---- the budget of each reply, and -i on every call
+
+    def test_every_api_and_pages_call_passes_dash_i(self):
+        seen = self.gh_api_argv()
+        h = self.gh_host()
+        h.api("pulls/7")
+        h.pages("pulls", fields={"state": "open"})
+        h.api("issues/7/comments", method="POST", fields={"body": "x"})
+        self.assertEqual(len(seen), 3, f"the three calls did not each reach gh: {seen}")  # scope: the calls, before their flags
+        for argv in seen:
+            self.assertIn("-i", argv, f"a gh api call went out without -i, so its reply's budget headers are not read: {' '.join(argv)}")
+
+    def test_an_api_call_returns_its_body_with_no_header_block(self):  # control: green on the old code
+        c, out = self.gh_host().api("pulls/7")
+        self.assertEqual(c, 0, out)
+        self.assertEqual(json.loads(out)["number"], 7, "the reply kept its header block, or is not the body: " + out[:120])
+
+    def test_the_budget_of_one_reply_is_recorded_with_no_extra_call(self):
+        self.budget(499)
+        h = self.primed_host()
+        self.assertEqual(self.call_count(), 1, "recording the budget made a gh call of its own")  # scope: the one call, before its record
+        self.assertIn(499, recorded_ints(h), "the Host holds no remaining count of 499 from the reply's X-Ratelimit-Remaining")
+        self.assertIn(5000, recorded_ints(h), "the Host holds no limit of 5000 from the reply's X-Ratelimit-Limit")
+
+    # ---- the refusal: a bulk read below a tenth of the limit
+
+    def test_a_bulk_read_just_under_a_tenth_of_a_15000_limit_is_refused_before_any_call(self):
+        refusal, before, after = self.bulk_read_below(1499, 15000)
+        self.assertIsNotNone(refusal, f"a bulk read at 1499 of 15000 went out: it was not refused (calls {before} then {after})")
+        self.assertIn("1499", refusal, "the refusal does not name the remaining count 1499: " + refusal)
+        self.assertIn(RESET_CST, refusal, f"the refusal does not name the reset time {RESET_CST}: " + refusal)
+        self.assertEqual(after, before, "the refused read still made a gh call")
+
+    def test_a_bulk_read_at_exactly_a_tenth_of_a_15000_limit_goes_out(self):  # control: green on the old code
+        refusal, before, after = self.bulk_read_below(1500, 15000)
+        self.assertIsNone(refusal, "a bulk read at 1500 of 15000 is not under the floor, and was refused: " + str(refusal))
+        self.assertEqual(after, before + 1, "the read at the floor did not go out")
+
+    def test_a_bulk_read_under_a_tenth_of_a_5000_limit_is_refused(self):
+        refusal, before, after = self.bulk_read_below(499, 5000)
+        self.assertIsNotNone(refusal, f"a bulk read at 499 of 5000 went out: it was not refused (calls {before} then {after})")
+        self.assertIn("499", refusal, "the refusal does not name the remaining count 499: " + refusal)
+        self.assertEqual(after, before, "the refused read still made a gh call")
+
+    def test_a_bulk_read_of_1000_of_5000_goes_out_because_the_floor_is_a_fraction(self):  # control: an absolute floor of 1500 would refuse it
+        refusal, before, after = self.bulk_read_below(1000, 5000)
+        self.assertIsNone(refusal, "a bulk read at 1000 of 5000 is above a tenth of the limit, and was refused: " + str(refusal))
+        self.assertEqual(after, before + 1, "the read above the floor did not go out")
+
+    def test_a_bulk_read_is_never_refused_without_a_usable_budget(self):  # control: green on the old code
+        for label, rl in (("header missing", {"remaining": None, "limit": 5000}),
+                          ("remaining not a number", {"remaining": "lots", "limit": 5000}),
+                          ("limit missing", {"remaining": 1, "limit": None})):
+            with self.subTest(replies=label):
+                self.set(ratelimit=rl)
+                h = self.primed_host()
+                before = self.call_count()
+                refusal = refusal_of(lambda: h.pages("pulls", fields={"state": "open"}, **bulk_kw()))
+                self.assertIsNone(refusal, f"a bulk read was refused with no usable budget ({label}): {refusal}")
+                self.assertEqual(self.call_count(), before + 1, f"the read did not go out ({label})")
+
+    def test_an_ordinary_read_and_a_write_are_never_refused_below_the_floor(self):  # control: green on the old code
+        self.budget(1, 5000)
+        h = self.primed_host()
+        before = self.call_count()
+        c, out = h.api("pulls/7")
+        self.assertEqual(c, 0, "an ordinary read below the floor was refused or failed: " + out)
+        c2, out2 = h.api("issues/7/comments", method="POST", fields={"body": "x"})
+        self.assertEqual(c2, 0, "a write below the floor was refused or failed: " + out2)
+        self.assertEqual(self.call_count(), before + 2, "a read or a write below the floor did not go out")
+
+    # ---- the in-run memo: a repeated GET is one call, and a write clears it
+
+    def test_a_repeated_get_of_the_same_route_and_query_is_one_call(self):
+        h = self.gh_host()
+        first = h.pages("pulls", fields={"state": "open"})
+        second = h.pages("pulls", fields={"state": "open"})
+        self.assertEqual(self.call_count(), 1, "the second identical GET went to gh: the run keeps no memo of its reads")
+        self.assertEqual(second, first, "the memo returned a different body than the read it repeats")
+
+    def test_a_repeated_get_with_a_different_query_is_a_new_call(self):  # control: green on the old code
+        h = self.gh_host()
+        h.api("pulls/7", fields={"a": "1"})
+        h.api("pulls/7", fields={"a": "2"})
+        self.assertEqual(self.call_count(), 2, "two GETs with different queries were not two calls")
+
+    def test_a_write_clears_the_memo(self):  # control: green on the old code, and it must stay green when the memo lands
+        h = self.gh_host()
+        h.api("pulls/7")
+        h.api("issues/7/comments", method="POST", fields={"body": "x"})
+        h.api("pulls/7")
+        self.assertEqual(self.call_count(), 3, "a GET after a write was served without a call")
+
+
+class AuditPrs(Env):
+    """`merge --audit-prs`: one line per open pull request from the bulk open-PR list and one repo-wide comment read, then the calls of each route
+    printed at the end. Runs through the fake gh, not PullsHost: PullsHost answers gh itself, bypassing Host.gh where the call count is taken, and its
+    list reply has no Link header, so a 300-PR list would read as its first 100."""
+    set, calls, gh_host = GhHalf.set, GhHalf.calls, GhHalf.gh_host
+
+    def setUp(self):
+        super().setUp()
+        gh_case_setup(self)
+
+    def open_prs(self, n):
+        return [(f"feat{k}", sha_of(k), "main", k) for k in range(1, n + 1)]
+
+    def call_routes(self):
+        """The route of each gh call the run made, in order: the second word of each call's line in the fake's log."""
+        return [l.split()[1] for l in self.calls().splitlines() if l.strip()]
+
+    def audit(self):
+        """-> (exit code, output, routes, temp files made, checkout tree before, after) of one `merge --audit-prs`."""
+        before = tree_of(self.co)
+        with unittest.mock.patch.object(tempfile, "mkstemp", wraps=tempfile.mkstemp) as made:
+            rc, out, err = self.run_args("--audit-prs", host=self.gh_host())
+        return rc, out + err, self.call_routes(), made.call_count, before, tree_of(self.co)
+
+    def test_three_hundred_open_prs_print_one_line_each_for_four_calls_or_fewer(self):
+        self.set(open_prs=self.open_prs(300), issue_comments=[])
+        rc, text, routes, _made, _before, _after = self.audit()
+        lines = text.splitlines()
+        printed = [k for k in range(1, 301) if len([l for l in lines if sha_of(k)[:9] in l]) == 1]
+        self.assertEqual(len(printed), 300, f"the audit printed one line for {len(printed)} of 300 open pull requests (exit {rc}): {text[:200]}")
+        self.assertLessEqual(len(routes), 4, f"the audit made {len(routes)} gh calls for 300 open pull requests, want 4 or fewer: {routes}")
+        self.assertTrue(set(routes) <= {"pulls", "issues/comments"}, f"the audit read a route other than the open-PR list and the comments, a per-PR call: {routes}")
+        self.assertEqual(routes.count("pulls"), 3, "the open-PR list of 300 is three pages of 100, one call each")
+        self.assertEqual(routes.count("issues/comments"), 1, "the repo-wide comment read is one call")
+
+    def test_the_audit_ends_with_the_calls_of_each_route(self):
+        self.set(open_prs=self.open_prs(300), issue_comments=[])
+        rc, text, routes, _made, _before, _after = self.audit()
+        self.assertTrue(any(sha_of(k)[:9] in text for k in (1, 300)), f"the audit printed no PR line, so no count to print (exit {rc})")  # scope first
+        self.assertIsNotNone(route_count_line(text, "pulls", routes.count("pulls")),
+                             f"the last lines name no call count of {routes.count('pulls')} for the open-PR list: {text[-200:]}")
+        self.assertIsNotNone(route_count_line(text, "issues/comments", routes.count("issues/comments")),
+                             f"the last lines name no call count of {routes.count('issues/comments')} for the comment read: {text[-200:]}")
+
+    def test_the_audit_writes_no_file_and_takes_no_temp_file(self):
+        self.set(open_prs=self.open_prs(300), issue_comments=[])
+        rc, text, _routes, made, before, after = self.audit()
+        self.assertTrue(any(sha_of(k)[:9] in text for k in (1, 300)), f"the audit printed no PR line, so it did not run (exit {rc})")  # scope first
+        self.assertEqual(made, 0, "the audit took a temp file (mkstemp), a write the cost case forbids")
+        self.assertEqual(after, before, "the audit wrote into the checkout: " + str(sorted(set(after.items()) ^ set(before.items()))[:5]))
+
+    def test_a_bulk_read_below_the_floor_stops_the_audit_and_names_the_count_and_reset(self):
+        self.set(open_prs=self.open_prs(300), issue_comments=[], ratelimit={"remaining": 499, "limit": 5000, "reset": RESET_EPOCH})
+        rc, text, routes, _made, _before, _after = self.audit()
+        self.assertIn("499", text, f"the audit's refusal does not name the remaining count 499 (exit {rc}): {text[-200:]}")
+        self.assertIn(RESET_CST, text, f"the audit's refusal does not name the reset time {RESET_CST}: {text[-200:]}")
+        self.assertEqual(len(routes), 1, f"the audit read a page after the replies said the budget was under the floor: {routes}")
+
+    def test_zero_open_prs_read_the_list_and_the_comments_only_and_print_their_counts(self):
+        self.set(open_prs=[], issue_comments=[])
+        rc, text, routes, _made, _before, _after = self.audit()
+        self.assertIsNotNone(route_count_line(text, "pulls", 1), f"the empty audit names no call count of 1 for the open-PR list (exit {rc}): {text[-200:]}")
+        self.assertIsNotNone(route_count_line(text, "issues/comments", 1), f"the empty audit names no call count of 1 for the comment read: {text[-200:]}")
+        self.assertEqual(rc, 0, f"the empty audit did not run: {text[-200:]}")
+        self.assertEqual(sorted(routes), ["issues/comments", "pulls"], f"the empty audit made other calls: {routes}")
 
 
 if __name__ == "__main__":
