@@ -59,10 +59,16 @@ def git(cwd, *a):
     return subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
+GUARD_INPUTS_REL = ".github/guard-inputs.txt"  # the one list of guard inputs (ci-scope.sh's windows_guard reads it)
+REAL_GUARD_INPUTS = "real"  # run()'s guard_inputs default: the repo's own list is copied into the base when the repo has one
+
+
 def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref="", green=None,
-        green_sibling=False, green_head=None, contents=None, facts=None, merged=None):
+        green_sibling=False, green_head=None, contents=None, facts=None, merged=None, guard_inputs=REAL_GUARD_INPUTS):
     """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit. `head_ref` is HEAD_REF,
     empty when not given, so no HEAD_REF of the caller's environment reaches the script.
+    `guard_inputs` is the text of .github/guard-inputs.txt in the base: the repo's own list by default (none when the repo has
+    no list yet), a text in its place, or None for no list at all (the gate's unreadable case).
     `green` (a list of paths) is the pull request's earlier head, committed before the head commit, so the whole diff against
     the base holds it too. `green_sibling` puts that earlier head on a branch off the base instead: a commit HEAD does not
     descend from. GREEN_HEAD is the earlier head's sha (empty when there is none) unless `green_head` gives another value.
@@ -86,6 +92,13 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
         with open(os.path.join(HERE, "..", "landed-dirs.txt")) as f:
             real = f.read()
         open(os.path.join(d, "landed-dirs.txt"), "w").write(real if landed is None else chr(10).join(landed) + chr(10))
+        # The base holds the guard inputs list the same way: the repo's own, `guard_inputs` in its place, or none.
+        if guard_inputs == REAL_GUARD_INPUTS:
+            guard_inputs = open(os.path.join(HERE, "..", GUARD_INPUTS_REL)).read() if os.path.isfile(
+                os.path.join(HERE, "..", GUARD_INPUTS_REL)) else None
+        if guard_inputs is not None:
+            os.makedirs(os.path.join(d, ".github"), exist_ok=True)
+            open(os.path.join(d, GUARD_INPUTS_REL), "w").write(guard_inputs)
         for p in existing:  # in the base commit, so the head commit modifies them
             os.makedirs(os.path.dirname(os.path.join(d, p)), exist_ok=True)
             open(os.path.join(d, p), "w").write("old\n")
@@ -1121,12 +1134,14 @@ SNAPSHOT_DIFFS = [
 
 def guard_shards_run(got, event="pull_request"):
     """-> {job: bool}: whether each Windows guard shard's full-suite step runs for the outputs `got` (run()'s dict) on `event`.
-    Only the step's own `if:` is read. The job-level if keys on the event alone, so it does not carry the gate."""
+    Only the step's own `if:` is read. The job-level if keys on the event alone, so it does not carry the gate. Each shard must
+    hold exactly one full guard step: a renamed job or step fails here, and never reads as a shard that is off."""
     jobs = split.windows_jobs(open(split.CHECKS, encoding="utf-8").read())
     out = {}
     for name in GUARD_SHARDS:
         steps = [st for st in jobs.get(name, {"steps": []})["steps"] if split.key(st) == split.GUARD_CMD]
-        out[name] = len(steps) == 1 and (steps[0].get("if") is None or split.eval_with(steps[0]["if"], event, got))
+        assert len(steps) == 1, f"{name} holds {len(steps)} full guard steps, want 1"
+        out[name] = steps[0].get("if") is None or split.eval_with(steps[0]["if"], event, got)
     return out
 
 
@@ -1182,10 +1197,15 @@ class WindowsGuardShards(unittest.TestCase):
         shards = guard_shards_run(run([]))
         self.assertEqual(set(shards.values()), {True}, f"a guard shard is off for an empty diff: {shards}")
 
-    # run()'s base holds no .github/guard-inputs.txt, so the list is unreadable. The gate fails safe: the shards run.
+    # No list in the base: the list is unreadable. The gate fails safe, and the shards run for a docs-only diff.
     def test_an_unreadable_guard_list_turns_the_guard_shards_on(self):
-        shards = guard_shards_run(run(["docs/x.md"]))
+        shards = guard_shards_run(run(["docs/x.md"], guard_inputs=None))
         self.assertEqual(set(shards.values()), {True}, f"a guard shard is off when the guard list is unreadable: {shards}")
+
+    # A list with no glob in it (comments only) reads as empty, and the gate fails safe the same way.
+    def test_an_empty_guard_list_turns_the_guard_shards_on(self):
+        shards = guard_shards_run(run(["docs/x.md"], guard_inputs="# comments only\n\n"))
+        self.assertEqual(set(shards.values()), {True}, f"a guard shard is off when the guard list has no glob: {shards}")
 
     # A records-only push after a green head turns every flag off, the shards with them.
     def test_a_records_only_push_turns_the_guard_shards_off(self):

@@ -276,6 +276,8 @@ FIXTURE_NAMES = {
 def read_globs(path=GUARD_INPUTS):
     """The list's globs, in file order: each line with its `#` comment and surrounding space taken off, blank lines dropped.
     A `#` starts a comment anywhere on a line, so a glob cannot hold one."""
+    if not os.path.isfile(path):
+        return []  # no list yet: no glob matches, so each case that needs one names the paths it leaves uncovered
     with open(path, encoding="utf-8") as f:
         return [s for s in (line.split("#", 1)[0].strip() for line in f) if s]
 
@@ -366,7 +368,6 @@ class GuardInputsList(unittest.TestCase):
         self.assertEqual(read_globs(path), ["hooks/*", "lint/*", "tests/guard/*"])
 
     def globs(self):
-        self.assertTrue(os.path.isfile(GUARD_INPUTS), f"the guard inputs list is missing: {GUARD_INPUTS_REL}")
         return read_globs()
 
     # Named failure: a file the guard suite reads is not in the list, so a diff to it runs no guard shard.
