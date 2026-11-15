@@ -1178,6 +1178,18 @@ class InstalledRootTests(Fixture):
             forms.update((p, p.replace(os.sep, "/")))
         return forms
 
+    def sibling_repo(self):
+        """A second repo: a copy of this fixture, its .git and origin/main included, in a folder of its own."""
+        root = os.path.join(tempfile.mkdtemp(dir=RUN_FOLDER, prefix="repo_"), "repo")
+        shutil.copytree(self.tree, root, symlinks=True)
+        self.addCleanup(tracked_tree.rm_tree, os.path.dirname(root))
+        return root
+
+    @staticmethod
+    def git_in(root, *args):
+        return subprocess.run(["git", "-C", root, "-c", "user.email=t@t", "-c", "user.name=t", *args],
+                              check=True, capture_output=True, encoding="utf-8").stdout
+
     def test_cloud_copy_run_from_a_repo_folder_reads_the_repo_glossary(self):
         self.install_copy()
         self.assertFalse(os.path.islink(self.installed), "scope: the cloud shape is a copy, not a link")
@@ -1243,6 +1255,47 @@ class InstalledRootTests(Fixture):
         self.assertNotIn("Traceback", out, "the installed copy did not start\n" + out)
         self.assertNotIn("cannot be read", out, "the installed copy did not read the repo's GLOSSARY.md\n" + out)
         self.assertEqual(code, 0, out)
+
+    def test_symlinked_install_run_from_another_repo_reads_that_repo(self):
+        """Local shape: the link points into repo A, but the run is in repo B. The check reads B's glossary and B's
+        changes, not A, the link target."""
+        self.install_links()
+        repo_b = self.sibling_repo()
+        with open(os.path.join(repo_b, "GLOSSARY.md"), "a", encoding="utf-8", newline="\n") as f:
+            f.write("| gizmo | A gadget. | `docs/handoff.md` | `gadget` |\n")  # a not name only B's glossary holds
+        self.git_in(repo_b, "add", "-A")
+        self.git_in(repo_b, "commit", "-q", "-m", "base")
+        self.git_in(repo_b, "update-ref", "refs/remotes/origin/main", "HEAD")
+        with open(os.path.join(repo_b, "docs", "gadget.md"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("# Gadget\n")  # untracked, and only B holds it
+        self.assertTrue(os.path.islink(self.installed), "scope: the local shape is a symlink into repo A")
+        self.assertFalse(os.path.exists(os.path.join(self.tree, "docs", "gadget.md")), "scope: repo A holds the file")
+        self.assertIn("?? docs/gadget.md", self.git_in(repo_b, "status", "--porcelain"),
+                      "scope: repo B's file is not untracked")
+        code, out = self.run_check(script=os.path.join(repo_b, "lint", "check_glossary.py"), cwd=repo_b)
+        self.assertEqual(code, 1, "control: repo B's own copy must flag its untracked file\n" + out)
+        self.assertIn("docs/gadget.md", out, "control: repo B's own copy must name its file\n" + out)
+        code, out = self.run_check(script=self.installed, cwd=repo_b)
+        self.assertNotIn("Traceback", out, "the installed copy did not start\n" + out)
+        self.assertNotIn("cannot be read", out, "the installed copy did not read a GLOSSARY.md\n" + out)
+        self.assertEqual(code, 1, "the installed copy read the link target's repo, not repo B's changes\n" + out)
+        self.assertIn("docs/gadget.md", out, "the installed copy did not flag repo B's untracked file\n" + out)
+
+    def test_cloud_copy_run_from_a_repo_with_no_glossary_names_that_repos_path(self):
+        """Cloud shape, run from repo B with no GLOSSARY.md: the FAIL names B's glossary path."""
+        self.install_copy()
+        repo_b = self.sibling_repo()
+        os.remove(os.path.join(repo_b, "GLOSSARY.md"))
+        self.assertFalse(os.path.exists(os.path.join(repo_b, "GLOSSARY.md")), "scope: repo B has a GLOSSARY.md")
+        self.assertFalse(os.path.exists(os.path.join(self.home, ".claude", "GLOSSARY.md")),
+                         "scope: a GLOSSARY.md sits beside the installed copy")
+        code, out = self.run_check("docs/notes.md", script=self.installed, cwd=self.tree)
+        self.assertEqual(code, 0, "control: the installed copy must pass from a repo with a glossary\n" + out)
+        code, out = self.run_check("docs/notes.md", script=self.installed, cwd=repo_b)
+        self.assertNotIn("Traceback", out, "the installed copy did not start\n" + out)
+        self.assertEqual(code, 1, "the check passed in a repo with no glossary\n" + out)
+        self.assertTrue(any(form in out for form in self.spellings(os.path.join(repo_b, "GLOSSARY.md"))),
+                        "the FAIL line does not name repo B's GLOSSARY.md\n" + out)
 
 
 class RepoGlossaryTests(unittest.TestCase):
