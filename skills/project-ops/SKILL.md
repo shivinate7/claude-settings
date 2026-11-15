@@ -7,7 +7,7 @@ This skill packages the way the claude-settings project on claude.ai works, so a
 adopt it. The owner decides when a repo adopts it. Never set it up in a repo without the owner's grant.
 
 The model assumes a claude.ai project: one coordinator session per repo starts every other
-session. It starts triage and the batch runner together, as a trio, before any lane.
+session except the consultant, which the owner starts. It starts triage and the batch runner together, as a trio, before any lane.
 Without a project, each session holds one or more roles, and the owner acts as the coordinator.
 
 ## What it packages
@@ -32,7 +32,7 @@ Without a project, each session holds one or more roles, and the owner acts as t
   `waiting-page`, "Make a repo's page".
 - **The outbox.** `roadmap/outbox/`, one file per session, for non-urgent notes to triage. Its
   README gives the format. `templates/operating-model.md` says when to message instead.
-- **Briefs and role handoffs.** `templates/brief.md` and `templates/role-handoff.md`. `scripts/brief_from_step.py <step>`
+- **Briefs and role handoffs.** `templates/brief*.md` and `templates/role-handoff.md`. `scripts/brief_from_step.py <step>`
   fills the brief from a step file and the rulings that name it.
 
 A role handoff note and a session handoff are two cases of one meaning: notes one holder writes so the next

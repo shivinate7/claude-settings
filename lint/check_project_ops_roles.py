@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
 from check_skill_model_rows import live_lines  # noqa: E402  the one home for fences and multi-line comments
 
-RECORD = os.path.join(ROOT, *layout.path(ROOT, "decisions").split("/"), "session-tiers.md")
+RECORD = os.path.join(ROOT, *layout.path(ROOT, "decisions").split("/"), "session-tiers.md")  # glossary-ok: the record's file name
 TEMPLATES = os.path.join(ROOT, "skills", "project-ops", "templates")
 MODEL = os.path.join(TEMPLATES, "operating-model.md")
 SENTENCE = re.compile(r"The session roles are the same on local and cloud: ([^.]*)\.")
