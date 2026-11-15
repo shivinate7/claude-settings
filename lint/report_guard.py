@@ -43,7 +43,7 @@ incoming message, a peer's included; the ack of a send this turn made to the wri
 starts no turn. Owner-facing session: a send to
 the page writer (the `writer` in the newest meta/page read, else the repo's extras key `page-writer`), or an ArtifactData set, update or batch under
 collection items to this repo's page; the question box (main session) counts only in a repo with no page. Lane (own get_session record tagged cs-build:lane, or with a
-parent): a send to @parent, the parent id or the writer; @parent counts only in a lane. A promise or a page link passes nothing. A
+parent, and not tagged cs-build:triage, the page writer): a send to @parent, the parent id or the writer; @parent counts only in a lane. A promise or a page link passes nothing. A
 repo with no waiting page gets a systemMessage and no block, unless the session is a lane. This check
 does not wait for a git write: the reply's labels are what it reads. Cost: no file written. Reads: the
 transcript this hook already holds. Only on a turn that asks with no send to the writer: the
@@ -94,7 +94,7 @@ stop_hook_active rewrite too, which never blocks on a refusal (decision refusals
 Cost: one stat per Stop when the session had no refusal.
 
 The triage hold (a roadmap build's `stalled step:` lines): a session whose own newest get_session record carries
-cs-build:triage (hooks/guard_merge.py _own_tier_proved) cannot end a turn while the newest roadmap build output in its
+cs-build:triage (hooks/guard_merge.py _own_role_proved) cannot end a turn while the newest roadmap build output in its
 transcript (the result of a Bash run of build.py) has an entry line, `stalled step: <id> (...)` or
 `stalled step: item <n> (...)`. An unknown line is no entry. The hold also covers a Stop after a refusal
 (stop_hook_active), which it releases only when the report's Input Needed section names every entry's id and item
@@ -154,7 +154,8 @@ checkout the global rules file names (the copied cloud layout); a tool it cannot
 (the PR, then its issue comments, every page); a Stop with no claim, or in an owner-facing session, reads nothing. A failed read, or an error in the check, never
 blocks: it adds a systemMessage that says UNKNOWN. Cost: 2 gh reads per claimed PR in a lane Stop, plus the guard_merge and merge module imports; no file,
 process kept or timer. A stale record adds the clean-merge read (merge/merge.py clean_merges_after): one commit read and one compare per merge
-commit, local git starts, and at most one `git fetch origin`, all inside the review check's REVIEW_CHECK_BUDGET. A stop_hook_active rewrite is not checked.
+commit, local git starts, and at most one `git fetch origin`, all inside the review check's REVIEW_CHECK_BUDGET. A records-page commit in the walk adds one
+temporary worktree, one `git show` and one run of the records generator, once per such commit. A stop_hook_active rewrite is not checked.
 """
 import bisect
 import datetime
@@ -1183,6 +1184,17 @@ def _own_lane_read(path, own_id):
     return tags is not None and (LANE_TAG in tags or bool(parent)), parent
 
 
+PAGE_WRITER_ROLE = "triage"  # the session role that always writes the waiting page
+
+
+def _is_page_writer(path):
+    """True when this session's own newest get_session record carries cs-build:triage: the triage session is the
+    repo's page writer, whatever parent id its record names (guard_merge's one triage reader)."""
+    _hooks_on_path()
+    from guard_merge import _own_role_proved as session_role_proved
+    return session_role_proved(path, PAGE_WRITER_ROLE)
+
+
 def _turn_acts(records, turn, acks):
     """(main-session tool uses, the send targets of each) in the turn. `turn` ends at the last incoming
     message; when that message is the ack of a send from a session in `acks`, the turn reaches back past it."""
@@ -1204,7 +1216,9 @@ def question_problem(records, turn, text, hook):
     with no result, a failed result or a non-delivered one does not. A transcript writer counts on the send alone.
     A read whose result names no writer keeps the refusal's old text. The question box counts
     only in a repo with no waiting page. A send to @parent reaches no one there.
-    Lane: a send to the parent or the page writer; a send to @parent counts only in a lane.
+    Lane: a send to the parent or the page writer; a send to @parent counts only in a lane. A session whose own
+    newest get_session record carries cs-build:triage is the page writer, not a lane, though its record names a
+    parent: it is owner-facing, so its items write to this repo's page passes.
     Cost: nothing past the text check when the turn has no question or sends to the writer. Else the own-record
     import and a transcript read, only in a session with a remote id. A lane reads no layout; an owner-facing
     turn with no counted send reads the extras file for the writer key (`layout.page_writer_key`) first, when the transcript
@@ -1225,7 +1239,11 @@ def question_problem(records, turn, text, hook):
             acks[parent] = {parent} | PARENT_TARGETS
             uses, sends = _turn_acts(records, turn, acks)
         wanted = ({parent} if parent else set()) | ({writer} if writer else set()) | PARENT_TARGETS
-        return ("" if any(t & wanted for t in sends) else LANE_REFUSAL), ""
+        if any(t & wanted for t in sends):
+            return "", ""
+        if not _is_page_writer(hook.get("transcript_path")):
+            return LANE_REFUSAL, ""
+        # The triage session names a parent id in its record but is the page writer: its items write counts too.
     root = repo_root(hook.get("cwd"))
     if not writer and root and not page_read_ran(records):
         writer = layout.page_writer_key(root)
@@ -3078,8 +3096,8 @@ def triage_hold(hook, records, active):
         if not entries:
             return ""
         _hooks_on_path()
-        from guard_merge import _own_tier_proved
-        if not _own_tier_proved(hook.get("transcript_path"), HOLD_TIER):
+        from guard_merge import _own_role_proved
+        if not _own_role_proved(hook.get("transcript_path"), HOLD_TIER):  # glossary-ok: HOLD_TIER is the existing name
             return ""
         if active and _names_every(input_needed_section(last_reply(hook)), entries):
             return ""

@@ -37,6 +37,7 @@
     "tests-guard": {"path": "tests/guard"},
     "tools": {"path": "tools"}
   },
+  "page-writer": "session_013NEJKzCzoWhfP8FMCPtQU6",
   "rolled-out": true,
   "visibility": "public",
   "waiting-page": "https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx"
