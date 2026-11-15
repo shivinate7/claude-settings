@@ -14049,8 +14049,8 @@ class MergeRoleCheck(CloudSession):
         return err
 
     # ---- the constants and the reader
-    # decision session-tiers: a batch runner merges; ruling own-tiny-fixes-b (owner 2026-11-15 00:50 CST) adds `standing`, the one
-    # tier a standing session records to merge its own small edit. The coordinator and the triage are still no merge role.
+    # decision session-tiers: a batch runner merges. Ruling own-tiny-fixes-b adds `standing`, the one tier a coordinator or triage
+    # records to merge its own small edit. The coordinator and the triage are still no merge role.
     def test_the_merge_roles_are_the_batch_runner_and_standing(self):
         self.assertEqual(set(merge.MERGE_ROLES), {"batch-runner", "standing"})
 
@@ -14243,7 +14243,7 @@ class MergeRoleCheck(CloudSession):
                 rc, out, err = self.run_main("--role", tier)
                 self.assertNotEqual(rc, 0, out + err)
                 self.assertTrue(err.strip(), "the refusal said nothing on stderr")
-                for named in ("coordinator", "batch-runner", "standing"):  # standing: ruling own-tiny-fixes-b, 2026-11-15 00:50 CST
+                for named in ("coordinator", "batch-runner", "standing"):  # standing is a tier word too: a refusal names none (ruling own-tiny-fixes-b)
                     self.assertNotIn(named, err)
 
     def test_the_role_refusal_names_the_lane_lint_step(self):
@@ -14281,7 +14281,7 @@ OWN_PR_BODY = "Small edit.\n\n" + OWN_SESSION_LINK + "\n"
 OTHER_PR_BODY = "Small edit.\n\nhttps://claude.ai/code/session_another_session\n"
 
 class StandingMergeRole(CloudSession):
-    """ruling own-tiny-fixes-b (owner 2026-11-15 00:50 CST, PR #3465): a standing session (a coordinator or a triage, decision session-tiers)
+    """Ruling own-tiny-fixes-b: a standing session (a coordinator or a triage, decision session-tiers)
     records the `standing` merge role and merges its OWN small edit through the merge tool, on green. The gate sits after the pull request
     read and before the lock or any claim. The pull request is this session's own when its body names this session's link. Every file is a
     doc or rule text (CLAUDE.md, agents, skills), no file is a guard path (guard_hits), CI is green, and rule text has one Sonnet review
@@ -14373,7 +14373,7 @@ class StandingMergeRole(CloudSession):
                 self.own_pr([(path, "modified", 1)])
                 self.assert_standing_refused()
 
-    # ---- the gate refuses: CI is not green on the head
+    # ---- the gate refuses: the head's checks are red
     def test_an_own_docs_pr_with_red_ci_is_refused_under_standing(self):
         self.own_pr([("docs/notes.md", "modified", 1)])
         self.host.checks = (False, "a check is red: checks: fail")
@@ -14388,7 +14388,7 @@ class StandingMergeRole(CloudSession):
         self.assert_standing_refused()
 
     # ---- the gate refuses: rule text needs one Sonnet review record on the live head
-    def test_a_rule_text_pr_with_no_review_record_is_refused_under_standing(self):
+    def test_a_rule_text_pr_with_no_review_log_is_refused_under_standing(self):
         self.own_pr([("CLAUDE.md", "modified", 1)])
         self.scripted_records()
         self.assert_standing_refused()

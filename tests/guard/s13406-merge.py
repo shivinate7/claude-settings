@@ -518,7 +518,7 @@ LANE_TAGS = ["cs-build:lane", "cs-repo:o/r"]
 RUNNER_TAGS = ["cs-build:batch-runner", "cs-repo:o/r"]
 COORD_TAGS = ["cs-build:coordinator", "cs-repo:o/r"]
 TRIAGE_TAGS = ["cs-build:triage", "cs-repo:o/r"]  # the record branch's one writer (roadmap-one-writer)
-# decision session-tiers, ruling own-tiny-fixes-b (owner 2026-11-15 00:50 CST): a standing session is a coordinator or a triage.
+# decision session-tiers, ruling own-tiny-fixes-b: a standing session is a coordinator or a triage.
 ARBITER_TAGS = ["cs-build:arbiter", "cs-repo:o/r"]
 CONSULTANT_TAGS = ["cs-build:consultant", "cs-repo:o/r"]
 MERGE_SHIM = "~/.claude/bin/merge"
@@ -954,15 +954,15 @@ role_refuse("a lone quote inside a string does not hide the real call",
 role_refuse("a lone quote in a comment does not hide the call on the next line",
           "echo done # it's\n" + MERGE_SHIM + " --role batch-runner", role_path("lane"))
 
-# ruling own-tiny-fixes-b (owner 2026-11-15 00:50 CST, PR #3465): a standing session, a coordinator or a triage, records the
-# `standing` tier, so it may merge its own small edit. Only the own newest record with a coordinator or triage tag allows it.
-# The refusal never names the tier word or the role flag: a lane must not learn which tier passes.
-STANDING_TIER = "standing"
+# Ruling own-tiny-fixes-b: a standing session, a coordinator or a triage, records the `standing` tier, so it may merge its
+# own small edit. Only the own newest record with a coordinator or triage tag allows it. The refusal never names the tier
+# word or the role flag: a lane must not learn which tier passes.
+STANDING_ROLE = "standing"
 
 
 def standing_refuse(name, command, transcript, env=ROLE_ENV, **kw):
     """A `merge --role standing` the guard refuses. The reason names its rule, never the role flag and never the tier word."""
-    sh("merge-role-proof: " + name, command, "deny", rule=ROLE_RULE, lacks=ROLE_FLAG + (STANDING_TIER,),
+    sh("merge-role-proof: " + name, command, "deny", rule=ROLE_RULE, lacks=ROLE_FLAG + (STANDING_ROLE,),
        transcript=transcript, env=env, cwd=NOGIT, **kw)
 
 
@@ -971,12 +971,12 @@ def standing_allow(name, command, transcript, env=ROLE_ENV, **kw):
     sh("merge-role-proof: " + name, command, "allow", silent=True, transcript=transcript, env=env, cwd=NOGIT, **kw)
 
 
-STANDING_CMD = MERGE_SHIM + " --role " + STANDING_TIER
+STANDING_CMD = MERGE_SHIM + " --role " + STANDING_ROLE
 standing_allow("a coordinator records standing: its own record names cs-build:coordinator", STANDING_CMD, role_path("coordinator"))
 standing_allow("a triage records standing: its own record names cs-build:triage", STANDING_CMD, role_path("triage"))
 for _standing_prefix in ("", "cd somewhere && "):
     for _standing_form in (MERGE_SHIM, "bin/merge", "python3 merge/merge.py", "python3 merge/launch.py"):
-        _standing_cmd = _standing_prefix + _standing_form + " --role " + STANDING_TIER
+        _standing_cmd = _standing_prefix + _standing_form + " --role " + STANDING_ROLE
         standing_allow(_standing_cmd + " allows a coordinator's own record", _standing_cmd, role_path("coordinator"))
         standing_allow(_standing_cmd + " allows a triage's own record", _standing_cmd, role_path("triage"))
 # A lane, an arbiter, a consultant, a batch runner, or a record with no standing tag is refused.
