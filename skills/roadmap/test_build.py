@@ -3140,7 +3140,8 @@ class ReadyAndDraftRows(UpkeepFixture):
 
     def test_draft_whose_only_lane_has_ended_is_listed_as_stale(self):
         # c1's only lane is completed, so c1 holds no live lane and its draft is stale. c2's lane is running:
-        # its draft stays unlisted.
+        # its draft stays unlisted. The live pulls list still names both pulls, as the publisher writes it, so
+        # the stalled-step row does not read c1 as stalled; the draft row reads REST and ignores them.
         self.commit_step("c1", status="doing")
         self.commit_step("c2", status="doing", order=2)
         self.serve_pulls([self.rest_draft(1001, "c1", 780), self.rest_draft(1002, "c2", 780)])
@@ -3148,7 +3149,8 @@ class ReadyAndDraftRows(UpkeepFixture):
             session_row("session_done", "SESSION_STATUS_IDLE", self.REPO, "cs-build:lane", "cs-step:c1",
                         status_bucket=BUCKET_COMPLETED),
             session_row("session_run", "SESSION_STATUS_RUNNING", self.REPO, "cs-build:lane", "cs-step:c2",
-                        status_bucket=BUCKET_WORKING)])
+                        status_bucket=BUCKET_WORKING)],
+            pulls=[dict(self.mark(1001), branch="c1"), dict(self.mark(1002), branch="c2")])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1001 (c1)"]))
 
