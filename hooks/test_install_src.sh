@@ -2440,6 +2440,26 @@ skills_bak6() {
   rm -rf "$h"
 }
 
+# ---- skills backups, runtime files: a __pycache__ written into the live generation is not a hand edit ----
+# A skill's script run through the live link writes __pycache__/*.pyc into the generation. Those files are not
+# edits, so an unedited skill that holds one is not backed up.
+skills_bak7() {
+  name="skills_bak7: a __pycache__ file written into the live generation's skill is not a hand edit, so an unedited skill is not backed up"
+  skills_bak_setup skills_bak7
+  skills_bak_run
+  if [ $rc -ne 0 ]; then bad "$name" "the first install exited $rc: $out"; rm -rf "$h"; return; fi
+  live="$cfg/.cs-current/skills/fresh-prose"
+  if [ ! -f "$live/SKILL.md" ]; then bad "$name" "scope: no live generation skill at $live"; rm -rf "$h"; return; fi
+  mkdir -p "$live/__pycache__" && printf 'bytecode\n' > "$live/__pycache__/x.cpython-311.pyc"
+  skills_bak_run
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
+  elif [ -n "$(ls "$cfg/backups/skills" 2>/dev/null)" ]; then bad "$name" "an unedited skill was backed up: $(ls "$cfg/backups/skills")"
+  elif has_bak "$cfg/skills"; then bad "$name" "skills/ holds a .bak.* entry: $(ls "$cfg/skills")"
+  elif [ "$(cat "$cfg/skills/fresh-prose/SKILL.md")" != "v1" ]; then bad "$name" "skill content wrong"
+  else ok "$name"; fi
+  rm -rf "$h"
+}
+
 # ---- copy-mode case: a fake `ln` that copies instead of linking must not pile up .bak entries
 # across repeated runs. Git Bash's `ln -sfn` on a Windows account without symlink rights makes a
 # real copy, so the next run sees a real file/dir where land_dir()/land_skills_dir() expect a
@@ -6605,6 +6625,7 @@ run skills_bak3
 run skills_bak4
 run skills_bak5
 run skills_bak6
+run skills_bak7
 run copymode_case1
 run backup_case1
 run backup_case2
