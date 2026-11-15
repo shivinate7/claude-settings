@@ -7,6 +7,7 @@ Every session that starts from source `startup` gets two checks at its own start
 The checks flag. They do not stop. `start_check.py` `main` prints one line: SessionStart `additionalContext`. It has no `continue` and no `stopReason`. The two checks are the model floor (decision `agent-model-cap`, the agent model cap) and the full-machine load brake (decision `machine-load-brake`, the machine-load brake). The coordinator picked a flag over a stop (08:40 CST, 2026-11-15). The owner has not ruled; owner confirmation is open.
 
 The flag text tells the session what to do. It addresses a session tagged `cs-build:lane`, read with `get_session` and passing no session_id: that session does no work and tells its parent it started in this state. A session that is not a lane (the owner's own) goes on.
+
 Decision `start-session-not-pretooluse` (start_session is not judged at PreToolUse) left both checks lost from the caller's side. This record moves both checks to the started session, as flags. It does not move the handoff check.
 
 ## Why the started session
@@ -29,6 +30,7 @@ The hook acts on source `startup` only. A resume, compact, clear or fork prints 
 Departs from: main stops no `start_session` at full. The load brake does not reach that tool (`machine-load-brake`; since PR 3501). Main still refuses Agent, Task and Workflow starts at full. This hook flags every startup below the floor, and every local startup at full load.
 
 It flags rather than stops, because the hook cannot tell a lane from an owner session. `start_check.py` `flag_text` reads only the source and the model, so it reads no lane tag. The flag text tells the session to read its own tags with `get_session`. The lane check is that session's own read. `machine-load-brake`, lane sessions, says: "A `parent_session_id` alone makes no lane: triage and the batch runner carry one."
+
 Coordinator pick, 08:40 CST Nov 15: a flag, not a stop. This is not an owner ruling. Owner confirmation: open.
 
 ## Why both the hook and the audit flag a Haiku start
