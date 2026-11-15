@@ -954,7 +954,7 @@ class ReviewRecordTests(unittest.TestCase):
         git_in("update-ref", "refs/remotes/origin/roadmap", commit)
 
     def accepted_body(self, accepted=True, net="negative"):
-        """PR 12's record at LIVE in PR 3381's shape: Guard or check yes, three FAIL rounds, Net value `net`. With `accepted`, the owner's line
+        """A guard change's record at LIVE: Guard or check yes, three FAIL rounds, Net value `net`. With `accepted`, the owner's line
         sits directly before Net value, where the form puts it."""
         body = record(head=LIVE, n=PR, rounds=[(1, "reviewer", "sonnet", "FAIL"), (2, "reviewer", "sonnet", "FAIL"), (3, "reviewer", "sonnet", "FAIL")],
                       guard="yes", net=net)

@@ -15824,7 +15824,7 @@ class ReviewEnv(Env):
 # A change with Net value negative is held (decision hold-unsafe-after-round-3). The owner can accept that loss in the record: one line
 # `Owner accepted: <ruling id>, <YYYY-MM-DD HH:MM CST|CDT>`, directly before Net value. parse_review reads it into rec["accepted"]. Only
 # live_review_state reads the ruling: one git read of origin/roadmap at merge.RULED_STORE_PATH, whose own id must be the cited one.
-# review_state stays pure, so it holds a negative record whatever the line says. The cases use PR 3381's shape: Guard or check yes,
+# review_state stays pure, so it holds a negative record whatever the line says. The cases use a guard change's shape: Guard or check yes,
 # three FAIL rounds, Net value negative.
 
 ACCEPT_PR = 3381
@@ -15834,7 +15834,7 @@ ACCEPT_LINE = f"Owner accepted: {ACCEPT_ID}, {ACCEPT_AT}"
 UNLINKED_HEAD = "e5" * 20  # a head no record names: a push that is not a clean merge of main
 
 def pr3381_text(accepted=(), net="negative", rounds=REVIEW_FAILED_THREE, fix=()):
-    """PR 3381's record at REVIEW_HEAD: Guard or check yes, `rounds`, then `fix` and `accepted` lines. record_text puts both after the rounds
+    """A guard change's record at REVIEW_HEAD: Guard or check yes, `rounds`, then `fix` and `accepted` lines. record_text puts both after the rounds
     and before Net value, which is where the owner's line goes."""
     return record_text(rounds=rounds, kind="normal", guard="yes", net=net, n=ACCEPT_PR, fix=(*fix, *accepted))
 
