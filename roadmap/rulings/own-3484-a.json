@@ -1,0 +1,11 @@
+{
+ "id": "own-3484-a",
+ "at": "2026-11-15T03:01:00-06:00",
+ "title": "PR 3484 (message-time-from-clock): pick (a), consultant pick under the owner's 20:18 words; reverses local-time-central's 'separator required' sentence",
+ "ruling": "Consultant pick (a), 03:01 CST Nov 15, under the owner's 20:18 CST Nov 14 words (\"Any sorta hook/rule/guardrail that goes against that is just plain stale\"; \"Nothing can't be undone don't wait on me\"). Consultant pick, not owner-typed; reopens if the owner says otherwise. It answered through the coordinator; triage did not ask on its own. ACT COVERED: PR 3484 (guard change, step message-time-from-clock), head 2fe1ee09eac9 (GitHub read: 2fe1ee09eac90c2a2d37e85fe39787972f736df2, open draft, clean). It reverses the sentence in decision local-time-central, Form, that says the header starts with a label, then a separator (`,`, `:` or a spaced dash), then the time. The coordinator's phrase \"separator required\" is the PR's paraphrase of that sentence. NOT COVERED: any other guard change, any other PR.",
+ "quote": "a",
+ "source": "Coordinator 03:01 CST Nov 15 to triage, relaying the consultant's pick (a) at 03:01 CST; decision local-time-central, Form sentence (line 28 on main, read by triage). Consultant pick, not owner-typed.",
+ "status": "open",
+ "supersedes_none": "supersedes no earlier ruling: it modifies one sentence of decision local-time-central (the Form sentence that requires a separator), not an earlier owner ruling; the rest of that decision stays in force",
+ "step": "message-time-from-clock"
+}
