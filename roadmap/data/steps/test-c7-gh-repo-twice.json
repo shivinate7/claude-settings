@@ -1,0 +1,14 @@
+{
+ "id": "test-c7-gh-repo-twice",
+ "title": "test_c7 in lint/test_check_debt_retire.py fails in the cloud: GH_REPO logged twice",
+ "priority": "next",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "triage",
+ "blockedBy": [],
+ "updatedAt": "2026-11-15T15:58:00-06:00",
+ "why": "[15:56 CST Nov 15, triage] lint/test_check_debt_retire.py test_c7 fails in the cloud (the stand-in python3 logs GH_REPO twice; the same failure on a scratch copy of main, per the lane). Blocks the clean lane-lint PASS of #3552 (the lane's alignment probe also reads unknown in the cloud without the PR body: known gap lanes-cannot-run-lane-lint). Queued by triage 15:56 CST, not started, undoable. Guard or check: yes (unverified). (source: lane lane-lint-merges-main's 15:53 CST report via the coordinator, relayed by triage; lane-read, unverified by triage; not owner-typed, undoable) New step.",
+ "source": "lane lane-lint-merges-main via the coordinator 15:53 CST, relayed by triage; not owner-typed",
+ "note": "Todo. lint/test_check_debt_retire.py test_c7 fails in the cloud (the stand-in python3 logs GH_REPO twice; the same failure on a scratch copy of main, per the lane). Blocks the clean lane-lint PASS of #3552 (the lane's alignment probe also reads unknown in the cloud without the PR body: known gap lanes-cannot-run-lane-lint). Queued by triage 15:56 CST, not started, undoable. Guard or check: yes (unverified)."
+}

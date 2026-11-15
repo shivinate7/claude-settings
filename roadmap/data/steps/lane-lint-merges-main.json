@@ -1,0 +1,16 @@
+{
+ "id": "lane-lint-merges-main",
+ "title": "Lane lane-lint-merges-main (#3552): lane lint merges main into the caller's PR branch",
+ "priority": "now",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "triage",
+ "lane": "lane-lint-merges-main",
+ "pr": 3552,
+ "blockedBy": [],
+ "updatedAt": "2026-11-15T15:58:00-06:00",
+ "why": "[15:56 CST Nov 15, triage] Lane lane-lint-merges-main (#3552) makes `merge --lane-lint` push a merge commit to the caller's own PR branch when behind main. Two questions and the picks: (1) option b: the test_c7 fix goes first (step test-c7-gh-repo-twice), hand-in lint via runner 10; (2) the settings.json auto-mode entry \"Merge Tool Read Checks\" (says --lane-lint merges nothing) is left as is, the mismatch named in the PR body (triage default 15:55 CST; debt draft lane-lint-entry-says-merges-nothing in roadmap/outbox/triage.md). (source: lane lane-lint-merges-main's 15:53 CST report via the coordinator, relayed by triage; lane-read, unverified by triage; not owner-typed, undoable) New step.",
+ "source": "lane lane-lint-merges-main via the coordinator 15:53 CST, relayed by triage; not owner-typed",
+ "note": "Doing. Lane lane-lint-merges-main (#3552) makes `merge --lane-lint` push a merge commit to the caller's own PR branch when behind main. Two questions and the picks: (1) option b: the test_c7 fix goes first (step test-c7-gh-repo-twice), hand-in lint via runner 10; (2) the settings.json auto-mode entry \"Merge Tool Read Checks\" (says --lane-lint merges nothing) is left as is, the mismatch named in the PR body (triage default 15:55 CST; debt draft lane-lint-entry-says-merges-nothing in roadmap/outbox/triage.md). Guard or check: yes (unverified)."
+}
