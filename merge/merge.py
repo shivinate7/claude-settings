@@ -5563,6 +5563,7 @@ def is_rule_text(path):
 def standing_refusal(h, n, info, head):
     """-> why a standing session may not merge pull request `n`, or "" when it may (ruling own-tiny-fixes-b). It must be the session's own, and every file
     a doc or rule text outside the guard paths. The head's own checks must be green, and rule text needs one sonnet reviewer record on the relayed head `head`.
+    A rule-text pull request is also small: at most STANDING_MAX_LINES added lines (additions only) and STANDING_MAX_FILES files. A docs-only one skips the bound.
     The text names no tier and no flag, so a lane learns nothing from it (git-remedy-never-names-target)."""
     if not own_session_link(info.get("body")):
         return "this session did not open this pull request, so it may not merge it."
