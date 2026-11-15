@@ -883,7 +883,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .thread .myreply { display: grid; gap: 4px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); min-width: 0; }
 .thread .myreply .lhead { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
 .thread .myreply .reply { font-size: 16px; }
-.thread .myreply + .lhead, .thread .reply + .myreply { margin-top: 4px; }
+.thread .msg { display: grid; gap: 4px; min-width: 0; }
 /* The thread's end: the line that answers Send reply and Undo, then Reply or the reply box. */
 .replyend { display: grid; gap: 8px; min-width: 0; }
 .replyend > .btn.replybtn { justify-self: start; min-height: 44px; }
@@ -891,6 +891,8 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .replyform textarea { background: var(--surface); }
 .replyform .askrow .btn.rx { grid-column: 3; min-height: 48px; }
 @media (max-width: 520px) { .replyform .askrow .btn.rx { grid-column: 1; grid-row: 2; justify-self: start; } }
+/* The host of a folded reply is the query container, so the reply reads its card's width, not the screen's. */
+.card, .askc { container: card / inline-size; }
 /* A folded thread with a reply that waits or a new answer to one: the row stays one button; the reply shows under it, outside the fold. */
 /* The same waiting reply under a folded sunk item card (.card > .fwait): the card pads its own edge, so it adds only a small inset. */
 .askc.folded .fwait, .card > .fwait { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 2px 12px; margin: 0; min-width: 0; }
@@ -899,7 +901,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .askc.folded .fwait > .g, .card > .fwait > .g { margin-top: 5px; }
 .askc.folded .fwait .ftext, .card > .fwait .ftext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .askc.folded .fwait .astate, .card > .fwait .astate { grid-column: 2; }
-@media (max-width: 520px) { .askc.folded .fwait .ftext, .card > .fwait .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; } }
+@container card (max-width: 30rem) { .askc.folded .fwait .ftext, .card > .fwait .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; } }
 /* Mark read: it shares the thread's end with Reply, Reply first. It is the quieter act, kept 44 px. Off while a reply waits: a dashed edge, with the reason beside it. */
 .replyend .endrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }
 .replyend .endrow > .btn { min-height: 44px; }
@@ -955,7 +957,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 /* The opened line: the open ask card's shape, with its home and number in the head. */
 .askc.rline.ropen .ahead .fno { font: 600 13.5px var(--mono); color: var(--acc); }
 .askc.rline.ropen .rtitle { margin: 0; font: 600 16px/1.4 var(--body); max-width: 70ch; }
-.askc.rline.ropen .thread { display: grid; gap: 6px; padding: 10px 12px; border-radius: 8px; background: var(--ground); min-width: 0; }
+.askc.rline.ropen .thread { display: grid; gap: 8px; padding: 10px 12px; border-radius: 8px; background: var(--ground); min-width: 0; }
 .askc .thread .filed a { color: var(--acc); }
 /* An item line sits in the Answered section's list, beside the cards that still wait to be filed. */
 .tier.sunk .rlist > .askc { scroll-margin-top: 64px; }
@@ -2349,7 +2351,7 @@ function lineEl(it, dl) {
     h("div", { class: "ahead" }, glyph("done"), h("span", { class: "fno" }, "No. " + n), homeTag(it.home), mark,
       h("button", { class: "morebtn", type: "button", id: "lfold-" + k, "aria-expanded": "true", onclick: toggle }, "Fold")),
     h("h3", { class: "rtitle", id: "lt-" + n }, it.title),
-    h("div", { class: "thread" }, answer, rp ? h("p", { class: "lhead" }, "Reply from " + it.owner) : null, rp ? h("p", { class: "reply" }, rp) : null, ...itemReps(it).flatMap((r) => askMine(r, "Reply from ")), h("p", { class: "filed" }, lineWhere(it))),
+    h("div", { class: "thread" }, answer, rp ? h("div", { class: "msg" }, h("p", { class: "lhead" }, "Reply from " + it.owner), h("p", { class: "reply" }, rp)) : null, ...itemReps(it).flatMap((r) => askMine(r, "Reply from ")), h("p", { class: "filed" }, lineWhere(it))),
     lineEnd(it, dl), markRowLine(g));
 }
 // The end of an opened line's thread: Reply, then Mark read, or the reply box (itemReplyEnd, askReplyEnd). Only a line with a reply has Reply.
@@ -3087,7 +3089,7 @@ const askWaitWords = (a) => (typeof a.owner === "string" && a.owner.trim() && va
 // word: "Answer from " in the Asks list; "Reply from " in an item's thread, where "answer" is the owner's own word for what he sent.
 function askAnswer(a, word = "Answer from ") {
   const when = fmt(a.answered) || "", fl = typeof a.home === "string" && a.home.trim() ? a.home.trim() : "";
-  return [h("p", { class: "lhead" }, word + askOwner(a) + (when ? ", " + when : "")), h("p", { class: "reply" }, askReply(a)),
+  return [h("div", { class: "msg" }, h("p", { class: "lhead" }, word + askOwner(a) + (when ? ", " + when : "")), h("p", { class: "reply" }, askReply(a))),
     fl ? h("p", { class: "filed" }, "Filed in ", homeLink(fl), fmt(a.filed) ? ", " + fmt(a.filed) : "") : null];
 }
 // The owner's reply, nested in its thread, with the answer to it after it.
