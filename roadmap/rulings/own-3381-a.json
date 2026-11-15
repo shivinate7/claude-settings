@@ -1,0 +1,10 @@
+{
+ "id": "own-3381-a",
+ "at": "2026-11-15T01:43:00-06:00",
+ "title": "PR 3381: merge as is and accept the three start-check losses; the load brake and the other checks come back as a follow-up",
+ "ruling": "Owner's word \"a\", 01:43 CST Nov 15, relayed by the consultant at 01:43 CST (relayed, not owner-typed here). It answers owner item 865 (pick-3381-accept-checks-loss): the round-3 reviewer judged the net safety value of PR 3381 negative and the change was parked (decision hold-unsafe-after-round-3). The owner accepts the loss: the model floor and the handoff-unread check on a session start become flag-only after the call (debt start-session-checks-after), and the full-machine load brake on a start is gone (debt start-session-load-unbraked). ACT COVERED: merging PR 3381 as is, by the normal merge route (released to runner 10 by the coordinator at 01:45 CST; head cdb68f8d8d6a read live at 01:43 CST). Follow-up: step start-checks-after-call (lane session_013NEJKzvNSpeqiQVskuCLsv): the load brake first, then the model floor and handoff-unread checks, with no start_session name back in PreToolUse. Both debts stay open until the follow-up merges. NOT COVERED: any other check loss, any other PR. The hold on 3381 lifts. Reopens if the owner says otherwise.",
+ "quote": "a",
+ "source": "Consultant 01:43 CST Nov 15 to triage, relaying the owner's \"a\" of 01:43 CST; coordinator 01:45 CST Nov 15 to triage (follow-up step name, lane, release to runner 10). Not owner-typed here.",
+ "status": "open",
+ "step": "start-session-not-pretooluse"
+}
