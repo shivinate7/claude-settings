@@ -314,22 +314,88 @@ def is_repo_join(call):
             and bool(call.args) and isinstance(call.args[0], ast.Name) and call.args[0].id == "REPO")
 
 
+def literal_pieces(node):
+    """-> the str pieces of a tuple or list literal of string constants, else None."""
+    if isinstance(node, (ast.Tuple, ast.List)) and all(isinstance(e, ast.Constant) and isinstance(e.value, str) for e in node.elts):
+        return tuple(e.value for e in node.elts)
+    return None
+
+
+def literal_names(tree):
+    """-> {name: [pieces]}: each name the module assigns a tuple or list literal of string constants, with each such literal."""
+    out = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            pieces = literal_pieces(node.value)
+            if pieces is not None:
+                out.setdefault(node.targets[0].id, []).append(pieces)
+    return out
+
+
+def alternatives(arg, names):
+    """-> the piece tuples one join argument can stand for, or None when it cannot be read: a string constant is one piece; a
+    starred tuple or list literal, or a starred name bound to one, is each of its literals."""
+    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+        return [(arg.value,)]
+    if isinstance(arg, ast.Starred):
+        pieces = literal_pieces(arg.value)
+        if pieces is not None:
+            return [pieces]
+        if isinstance(arg.value, ast.Name) and arg.value.id in names:
+            return names[arg.value.id]
+    return None
+
+
+def join_paths(args, names):
+    """-> the paths a join's arguments (after REPO) can name. An argument that cannot be read ends the run in progress; each run
+    of readable arguments names every combination of their pieces, joined with `/`."""
+    paths, combos = [], [()]
+    for arg in list(args) + [None]:
+        alts = alternatives(arg, names) if arg is not None else None
+        if arg is None or alts is None:
+            paths += ["/".join(c) for c in combos if c]
+            combos = [()]
+        else:
+            combos = [c + a for c in combos for a in alts]
+    return paths
+
+
+def helper_paths(tree, names):
+    """-> [(path, line)] for each helper: a def whose *vararg a repo join spreads, called with readable arguments. Each call names
+    the join's pieces before and after the spread, around the call's own arguments."""
+    out = []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, ast.FunctionDef) or fn.args.vararg is None:
+            continue
+        for join in ast.walk(fn):
+            if not (isinstance(join, ast.Call) and is_repo_join(join)):
+                continue
+            spread = [i for i, a in enumerate(join.args) if i > 0 and isinstance(a, ast.Starred)
+                      and isinstance(a.value, ast.Name) and a.value.id == fn.args.vararg.arg]
+            if not spread:
+                continue
+            before, after = join.args[1:spread[0]], join.args[spread[0] + 1:]
+            for call in ast.walk(tree):
+                if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == fn.name:
+                    out += [(p, call.lineno) for p in join_paths(before + list(call.args) + after, names)]
+    return out
+
+
 def named_in_source(source, rel, tracked):
     """-> [(path, line)] for the module text `source` (`rel` names it in a syntax error): each string constant that equals a
-    tracked file, and each os.path.join(REPO, ...) whose other arguments are all string constants spelling a tracked file. A
-    join with a variable piece is not read here: the trace in TRACED_READS covers what ran. The ast reads the strings, so a
-    comment names nothing."""
+    tracked file; each os.path.join(REPO, ...) whose arguments name a tracked file, where an argument is a string constant, a
+    starred tuple or list literal, or a starred name bound to one in this module; and each call of a helper that spreads its
+    *parts into such a join. An argument the scan cannot read is not joined across: the trace in TRACED_READS covers what ran.
+    The ast reads the strings, so a comment names nothing."""
     tree = ast.parse(source, rel)
+    names = literal_names(tree)
     hits = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in tracked:
             hits.append((node.value, node.lineno))
         elif isinstance(node, ast.Call) and is_repo_join(node):
-            pieces = node.args[1:]
-            if pieces and all(isinstance(a, ast.Constant) and isinstance(a.value, str) for a in pieces):
-                joined = "/".join(a.value for a in pieces)
-                if joined in tracked:
-                    hits.append((joined, node.lineno))
+            hits += [(p, node.lineno) for p in join_paths(node.args[1:], names) if p in tracked]
+    hits += [(p, line) for p, line in helper_paths(tree, names) if p in tracked]
     return hits
 
 
