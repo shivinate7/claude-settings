@@ -1,0 +1,12 @@
+{
+ "id": "recovered-label-under-deviations",
+ "title": "The precompact handoff prompt and decision guard-remedy-not-to-owner put Recovered: and Handoff gave: under Deviations, but the guard accepts them under Next",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "01:15 CST Nov 15 (coordinator, data; debt (b) from lane deviations-means-departure, PR 3462): hooks/precompact_handoff_prompt.md and decision guard-remedy-not-to-owner put \"Recovered:\" and \"Handoff gave:\" under Deviations; the Recovered guard (lint/report_guard.py, recovered_problem) accepts them under Next. A session that follows the prompt gets refused or files a carry line in the wrong place. Kin: step recovered-guard-remedy (guard refusal text; owner item 860). Neither file read by triage. Which side moves (the prompt and the decision, or the guard) is not decided here.",
+ "source": "Coordinator message 01:15 CST Nov 15; lane deviations-means-departure (PR 3462).",
+ "updatedAt": "2026-11-15T01:15:00-06:00"
+}

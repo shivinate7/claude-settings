@@ -1,0 +1,13 @@
+{
+ "id": "rules-decisions-aligned",
+ "title": "A changed decision record must update the rule lines that cite it (a guard or check)",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "01:15 CST Nov 15 (coordinator, data; consultant brief 01:14 CST): lane rules-decisions-aligned, session_013NEJKzbYsMZZPNx5LnoNMN, started 01:14 CST. Read by get_session at 01:15 CST: running, connected, created 01:13 CST, tag cs-step:rules-decisions-aligned, parent the coordinator. Ask: a changed record must update the rule lines that cite it; guard/check. Triage read no code and no brief beyond the relay.",
+ "source": "Coordinator message 01:15 CST Nov 15, relaying the consultant brief of 01:14 CST.",
+ "lane": "session_013NEJKzbYsMZZPNx5LnoNMN",
+ "updatedAt": "2026-11-15T01:15:00-06:00"
+}

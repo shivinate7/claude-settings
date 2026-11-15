@@ -1,0 +1,12 @@
+{
+ "id": "guard-marker-missing-no-flag",
+ "title": "A guard change reviewed on haiku because the spawner left out the guard marker reads as no deviation",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "01:15 CST Nov 15 (coordinator, data; debt (c) from lane deviations-means-departure, PR 3462): a guard or check change was reviewed on haiku because the spawner left out the marker (Guard or check: yes at a line start); once PR 3462 lands, a haiku round 1 that matches its row is not listed as a departure, so this case reads as no deviation and nothing flags the missing marker. Kin: steps reviewer-round-1-model-vs-marker, spawn-guard-marker-any-line, explore-audit-marker (all unread for this). Not checked against the rule text by triage.",
+ "source": "Coordinator message 01:15 CST Nov 15; lane deviations-means-departure (PR 3462).",
+ "updatedAt": "2026-11-15T01:15:00-06:00"
+}
