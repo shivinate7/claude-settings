@@ -3448,6 +3448,10 @@ ALIGNED_NESTED = ("docs/skills/x.md", "myagents/x.md")
 ALIGNED_RUN_PY = "skills/x/run.py"
 ALIGNED_RUN_PY_TEXT = "# Decision `%s` holds the round rules.\n" % ALIGNED_ROUND
 ALIGNED_RUN_PY_EDITED = "# Decision `%s` holds the round rules and a fix check.\n" % ALIGNED_ROUND
+# An edit to the citing sentence itself: the sentence that holds the code-span citation, so the record is demanded.
+ALIGNED_CITE_EDITED = ALIGNED_CITE.replace("holds the round rules.", "holds the round rules and a fix check.")
+ALIGNED_PARA_FIRST = "Run the check first."  # a sentence with no citation, on the line above a citing sentence
+ALIGNED_PARA_CITE = "Decision `%s` holds the rule." % ALIGNED_ROUND  # the citing sentence of that paragraph
 
 
 class AlignedScopeSkillsAgents(AlignedSteps, unittest.TestCase):
@@ -3455,7 +3459,7 @@ class AlignedScopeSkillsAgents(AlignedSteps, unittest.TestCase):
     name a `files` count read the scope first, so a clear is never a file the probe did not read."""
 
     def test_a_citing_sentence_changed_without_its_record_is_refused_under_skills_or_agents(self):
-        changed, _ = unit_file(ALIGNED_CITE + " A second sentence.")
+        changed, _ = unit_file(ALIGNED_CITE_EDITED)
         for rel in ALIGNED_SCOPE_PATHS:
             with self.subTest(rel=rel):
                 base, where = self.cited(rel=rel)
@@ -3476,7 +3480,7 @@ class AlignedScopeSkillsAgents(AlignedSteps, unittest.TestCase):
                 self.assert_refused(repo, where, ALIGNED_ROUND, "Rules checked:")
 
     def test_a_record_and_its_citing_sentence_under_skills_or_agents_changed_together_pass(self):  # green control
-        changed, _ = unit_file(ALIGNED_CITE + " A second sentence.")
+        changed, _ = unit_file(ALIGNED_CITE_EDITED)
         for rel in ALIGNED_SCOPE_PATHS:
             with self.subTest(rel=rel):
                 base, _ = self.cited(rel=rel)
@@ -3508,7 +3512,7 @@ class AlignedScopeSkillsAgents(AlignedSteps, unittest.TestCase):
                 self.assert_clear(self.pr(base, change), files=0)
 
     def test_a_folder_that_only_ends_in_skills_or_agents_is_out_of_scope(self):  # green control
-        changed, _ = unit_file(ALIGNED_CITE + " A second sentence.")
+        changed, _ = unit_file(ALIGNED_CITE_EDITED)
         for rel in ALIGNED_NESTED:
             base, _ = self.cited(rel=rel)
             changes = (("the citing sentence", {rel: changed}),
@@ -3516,6 +3520,24 @@ class AlignedScopeSkillsAgents(AlignedSteps, unittest.TestCase):
             for label, change in changes:
                 with self.subTest(rel=rel, changed=label):
                     self.assert_clear(self.pr(base, change), files=0)
+
+    def test_an_edit_to_the_sentence_before_a_citing_one_in_a_skill_paragraph_is_in_shape(self):
+        # Both sentences share one paragraph, one per line. Only the first changes: the citing sentence is not edited.
+        text, _ = para_file([ALIGNED_PARA_FIRST, ALIGNED_PARA_CITE])
+        base = {ALIGNED_SKILL: text, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38)}
+        edited, _ = para_file(["Run the check now.", ALIGNED_PARA_CITE])
+        self.assert_clear(self.pr(base, {ALIGNED_SKILL: edited}))
+
+    def test_an_edit_to_the_citing_sentence_alone_in_a_skill_paragraph_is_refused(self):  # green control
+        text, first = para_file([ALIGNED_PARA_FIRST, ALIGNED_PARA_CITE])
+        base = {ALIGNED_SKILL: text, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38)}
+        edited, _ = para_file([ALIGNED_PARA_FIRST, ALIGNED_PARA_CITE.replace("holds the rule.", "holds the rule and a fix check.")])
+        self.assert_refused(self.pr(base, {ALIGNED_SKILL: edited}), "%s:%d" % (ALIGNED_SKILL, first + 1),
+                            ALIGNED_ROUND, "Rules checked:")
+
+    def test_an_unclosed_fence_in_an_untouched_skill_file_does_not_make_a_docs_only_pr_unknown(self):
+        base = {"skills/u/SKILL.md": "```\n- an unclosed fence in a skill file\n", "docs/notes.md": "Old note.\n"}
+        self.assert_clear(self.pr(base, {"docs/notes.md": "New note.\n"}))
 
 
 class AlignedScanner(AlignedSteps, unittest.TestCase):
