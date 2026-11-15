@@ -125,6 +125,10 @@ EARLIER = "2026-11-10T09:00:00-06:00"  # a commit well before the cutoff
 BRANCH_COMMIT = "2026-11-15T10:30:00-06:00"  # a branch commit, dated before the cutoff, merged after it
 BACK_DATED_TIP = "2026-11-15T11:00:00-06:00"  # a commit on top of a later-dated one, dated before the cutoff
 MERGED_AT = "2026-11-15T12:05:00-06:00"  # the merge that brings the branch commit onto the store ref
+MAIN_LINE_O1 = "2026-11-12T10:00:00-06:00"  # the main-line commit that adds o1, before the cutoff
+SIDE_S1 = "2026-11-16T09:00:00-06:00"  # the side-branch commit that adds s1, after the cutoff
+MERGE_NOV16 = "2026-11-16T10:00:00-06:00"  # the merge of the side branch into the store ref
+NOV16_AT = "2026-11-16T08:00:00-06:00"  # s1's own at, after the cutoff
 CAUSE_NO_RULING = "names no ruling in the store"
 CAUSE_NOT_EARLIER = "names a ruling not earlier than it"
 CAUSE_BAD_REF = "ruling ref is empty or not a string"
@@ -1057,6 +1061,58 @@ class CostAndCliTests(RepoCase):
         self.assertEqual(fixture.git(repo, "rev-parse", "--is-shallow-repository"), "true",
                          "scope: the repo did not read as shallow")
         self.assertUnknown(self.run_check(repo))
+
+    def test_check_exits_three_when_the_store_tip_commit_cannot_be_read(self):
+        repo = self.make_repo("lost-tip", store=fixture.ruling_files({"ok": fixture.entry("ok")}))
+        self.assertEqual(self.run_check(repo).returncode, 0, "control: the intact store did not check clean")
+        tip = fixture.git(repo, "rev-parse", fixture.STORE_REF)
+        loose = os.path.join(repo, ".git", "objects", tip[:2], tip[2:])
+        self.assertTrue(os.path.isfile(loose), "scope: the tip commit is not a loose object that can be removed")
+        os.remove(loose)
+        self.assertEqual(fixture.git(repo, "rev-parse", fixture.STORE_REF), tip, "scope: the ref no longer resolves")
+        listing = _nowindow.run([VCS, "-C", repo, "ls-tree", "-z", "--name-only", fixture.STORE_REF,
+                                 RULINGS_DIR + "/"], capture_output=True, env=ENV, timeout=60)
+        self.assertNotEqual(listing.returncode, 0, "scope: the listing still reads with the tip commit gone")
+        self.assertUnknown(self.run_check(repo))
+
+    def test_check_exits_three_when_one_blob_of_three_cannot_be_read(self):
+        repo = self.make_repo("lost-blob-three", store=fixture.ruling_files({
+            "r1": target_entry("r1", at=EARLIER),
+            "r2": target_entry("r2", at=EARLIER),
+            "r3": checking_entry("r3", "Rule-one keeps the apps.", at=AT),
+        }), when=AFTER_CUTOFF)
+        self.assertFlaggedRef(self.run_check(repo), "r3")
+        blob = fixture.git(repo, "rev-parse", "%s:%s/r3.json" % (fixture.STORE_REF, RULINGS_DIR))
+        loose = os.path.join(repo, ".git", "objects", blob[:2], blob[2:])
+        self.assertTrue(os.path.isfile(loose), "scope: the r3 blob is not a loose object that can be removed")
+        os.remove(loose)
+        found = _nowindow.run([VCS, "-C", repo, "cat-file", "-e", blob], capture_output=True, env=ENV, timeout=60)
+        self.assertNotEqual(found.returncode, 0, "scope: the r3 blob still reads")
+        self.assertUnknown(self.run_check(repo))
+
+    def test_a_merge_checks_only_the_file_it_adds_to_the_main_line(self):
+        def store(name, s1_ref):
+            repo = self.make_repo(name)
+            r1 = {"r1": target_entry("r1", at=EARLIER)}
+            o1 = {"o1": fixture.entry("o1", at=AT, ruling="Owner: an old free-text ruling.",
+                                      supersedes=[{"kind": "ruling", "ref": "Rule-one keeps the apps."}])}
+            s1 = {"s1": checking_entry("s1", s1_ref, at=NOV16_AT)}
+            base = fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files(r1), self.root, when=EARLIER)
+            main = fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files({**r1, **o1}), self.root,
+                                     parents=(base,), when=MAIN_LINE_O1)
+            side = fixture.point_ref(repo, "refs/heads/side", fixture.ruling_files({**r1, **s1}), self.root,
+                                     parents=(base,), when=SIDE_S1)
+            fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files({**r1, **o1, **s1}), self.root,
+                              parents=(main, side), when=MERGE_NOV16)
+            return repo
+
+        ok = self.run_check(store("merge-ok", "r1 keeps the store to one place"))
+        self.assertEqual(ok.returncode, 0, "the merged store did not check clean: %s" % (ok.stdout + ok.stderr))
+        bad = self.run_check(store("merge-bad", "Rule-one keeps the apps."))
+        self.assertFlaggedRef(bad, "s1")
+        self.assertFalse(any(names(line, "o1") and names(line, "ruling")
+                             for line in (bad.stdout + bad.stderr).splitlines()),
+                         "the merge flagged o1, whose last change on the main line is before the cutoff")
 
     def test_check_on_an_absent_store_exits_zero_and_is_not_unknown(self):
         repo = self.make_repo("absent", main={"README.md": "main\n"})
