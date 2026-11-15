@@ -24,13 +24,14 @@ Proof, in `hooks/test_reinstall_stale.py`:
 - Read counts: `hooks/test_reinstall_stale.py::StaleInstall::test_current_makes_one_ls_remote_and_no_install` (one read, no fetch or clone). `hooks/test_reinstall_stale.py::StaleInstall::test_second_turn_after_reinstall_is_silent` (the next prompt makes one read and no install). `hooks/test_reinstall_stale.py::StaleInstall::test_behind_origin_reinstalls_once_and_names_both_shas` (one read, one installer run). `hooks/test_reinstall_stale.py::StaleInstall::test_ls_remote_timeout_reports_unknown_and_installs_nothing` and `hooks/test_reinstall_stale.py::StaleInstall::test_ls_remote_failure_reports_unknown_and_installs_nothing` (one read, one unknown line, no install).
 - No git read for a local session with no install record: `hooks/test_reinstall_stale.py::StaleInstall::test_local_without_record_is_silent_with_no_git_call`. One read for a local session with a current record: `hooks/test_reinstall_stale.py::LocalRefresh::test_local_current_makes_one_ls_remote_read`.
 - Cost text: `hooks/test_reinstall_stale.py::HookFile::test_docstring_states_the_cost` checks that the docstring names process starts, network reads, the per-turn frequency, no timer and no long-lived process. It checks the words, not the numbers.
-- Not pinned (unmeasured): the python start count, since no case counts starts. The claim that the hook writes no file. The `git show` reads of a reinstall. The `git diff` read is pinned at one by `hooks/test_reinstall_stale.py::StaleInstall::test_failed_local_diff_prints_restart_unknown_line`.
+- No file written by the hook: `hooks/test_reinstall_stale.py::NoWrites` snapshots the config dir before and after a current local check, a failing cloud check and a failing local check, and finds no change.
+- Not pinned (unmeasured): the python start count, since no case counts starts. The `git show` reads of a reinstall. The `git diff` read is pinned at one by `hooks/test_reinstall_stale.py::StaleInstall::test_failed_local_diff_prints_restart_unknown_line`.
 
 Retry cost, debt `reinstall-no-backoff` (the hook reruns the installer on each prompt, with no backoff):
 
 - Record behind the tip after a failed install. The installer writes the record only after a clean install, so the older record stays. Each prompt then runs one `git ls-remote` and one installer run. The debt holds the time.
 - Installer exits 0, but its files stay short of the tip. The record is rewritten at the short sha, and the hook prints "reinstall did not reach". The next prompt runs the same retry.
-- Failed first install. No record is written, so there is no retry and no read. The hook prints `install freshness unknown (no install record)` on each prompt until a record exists.
+- Failed first install. No record is written, so there is no retry and no read. A cloud session prints `install freshness unknown (no install record)` on each prompt until a record exists. A local session with no record prints nothing.
 - Pinned: one installer run inside one prompt, `hooks/test_reinstall_stale.py::StaleInstall::test_installer_exit_3_prints_one_failure_line_and_runs_once`. Not pinned: the retry across prompts (unmeasured).
 
 Kind: process
