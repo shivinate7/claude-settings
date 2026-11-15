@@ -301,9 +301,10 @@ def tracked_files():
 
 
 def guard_reader_files():
-    """hooks/test_guard.py, then the tests/guard/*.py sections it loads."""
+    """hooks/test_guard.py, the tests/guard/*.py sections it loads, and each hooks/ or lint/ module its import closure reaches."""
     sections = sorted(f"tests/guard/{n}" for n in os.listdir(os.path.join(ROOT, "tests", "guard")) if n.endswith(".py"))
-    return ["hooks/test_guard.py"] + sections
+    modules = sorted(p for p in import_closure(("hooks/test_guard.py",)) if p.startswith(("hooks/", "lint/")))
+    return sorted(set(["hooks/test_guard.py"] + sections + modules))
 
 
 def is_repo_join(call):
