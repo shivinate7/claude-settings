@@ -18,7 +18,7 @@
                           Record-claim head). A FAIL or an unknown stops the step with the step lines and the log: nothing pushed, not
                           marked ready, and no flag lifts it. A repo with no list runs no ready check, and one line says so.
                           Cost per draft-step ready: one ci-job run per job of the list, and one worktree; the run time is unmeasured for a step subset
-                          (the 3600 s lint bound applies), and a head that lacks the default base's tip adds one merge commit, one more local `git merge` start and no more pushes (still one). No new file but ci-job's own log.
+                          (the 3600 s lint bound applies), and a head that lacks the default base's tip adds one merge commit, one more local `git merge` start and one push even when its page is current (a head that holds the tip with a current page pushes none; any head pushes at most once). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
                           A confirm in the cloud needs a lane-lint PASS for the head's sha. Any pull request skips it, a lane PR included, when the all-jobs-passed rollup is green on that exact head:
                           then it skips the lint and prints one `merge: lane lint skipped ...` line naming the rollup and the head's first 9 characters.
@@ -151,9 +151,11 @@
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
                           posts nothing; any session may run it. An unreadable build or a missing --live exits 1: unknown, never empty.
   merge <pr> --ready      a lane's one act on its own draft: the draft step of --confirm (on the default branch, merge origin/<base> into
-                          the head when the head lacks its tip and the merge is clean; rebuild the records page; run the repo's ready checks on that
-                          final tree; one plain push of the merge commit and the page commit; ask the host to mark the PR ready) and nothing more. A PR that is ready already is left as it is. It
-                          never merges, takes no lock and needs no merge role. A red head or a head that conflicts with the base is not marked ready.
+                          the head when the head lacks its tip and the merge is clean; rebuild the records page; run the repo's ready checks: the ci-job
+                          steps on that final tree, the debt-close lint and the open-PR clash on the pre-merge head; one plain push of the merge commit and
+                          the page commit, either one alone, or no push when the head holds the tip and its page is current; ask the host to mark the PR
+                          ready) and nothing more. A PR that is ready already is left as it is. It
+                          merges no pull request, takes no lock and needs no merge role. A red head or a head that conflicts with the base is not marked ready.
                           A repo with merge.readyChecks gets the pre-ready run: the checks, the debt-close lint and the open-PR clash (the head against every
                           other open PR on its base), each one line `pass NAME`, `fail NAME: why` or `unknown NAME: why`, before any push. A PR on a base
                           other than the default branch is checked on the merge of its head with that base.
@@ -3805,7 +3807,7 @@ def ready_job_groups(checks):
 
 def pre_ready_rows(wt, n, base, checks, pre):
     """The pre-ready run: one ci-job run per job of `merge.readyChecks` `checks` in the tree `wt` (ready_job_groups), then, when `pre` is (root, host, info), the debt-close lint
-    on `wt` and the open-PR clash of the PR's head, each once. Prints one verdict line per check, `pass NAME`, `fail NAME: why` or `unknown NAME: why`, all before any
+    and the open-PR clash of the PR's head info["head"] (the lint reads it through `wt`'s git), each once. Prints one verdict line per check, `pass NAME`, `fail NAME: why` or `unknown NAME: why`, all before any
     refusal; NAME is the declared entry.
     -> (rows, (state, lines, log)): rows of (verdict, name, detail), and the jobs' ci_job_run answers combined: state fail over unknown over pass, lines and log joined.
     Each job's steps are read from that job's own lines, so a step name two jobs hold reads only its own job.
@@ -3906,9 +3908,9 @@ def merge_base_in(wt, base, branch):
 def draft_step(root, cfg, n, host, info, merge_main=False):
     """`merge <pr> --confirm` on a draft: rebuild the records page on the head, push it, mark the pull request ready, and
     stop. So the branch is final at ready, and the ready confirm pushes nothing (decision records-index-at-merge).
-    merge_main (only `merge <pr> --ready` passes it): on the default base, a head that lacks the tip but merges cleanly with it first gets a merge commit of origin/<base>: the page is rebuilt on the merged tree, a stale page is one more commit, the ready checks run once on that final tree, and one plain push sends both. Without it, as on `--confirm`, a head that lacks the tip pushes no merge.
+    merge_main (only `merge <pr> --ready` passes it): on the default base, a head that lacks the tip but merges cleanly with it first gets a merge commit of origin/<base>: the page is rebuilt on the merged tree, a stale page is one more commit, the ready checks run once (the ci-job steps on that final tree; the debt-close lint and the open-PR clash on the pre-merge head info["head"]), and one plain push sends the merge commit and any page commit. Without it, as on `--confirm`, a head that lacks the tip pushes no merge.
     A conflict, a Record-claim head and a base other than the default push no merge. A failed merge, check or push leaves the pull request a draft.
-    Takes no lock, claims no number and never merges: a claim stays at the ready confirm.
+    Takes no lock, claims no number and merges no pull request: a claim stays at the ready confirm.
     A repo that declares merge.readyChecks also runs them first, on the tree the step would push, before any push and before the
     ready mark, on every path (the ready checks, decision lanes-run-no-full-ci-job). One ci-job run per job, in one worktree."""
     base = info["base"]
@@ -3946,7 +3948,7 @@ def draft_step(root, cfg, n, host, info, merge_main=False):
                 rebuilt = rebuild_records(wt)
                 sha = commit_claim(wt, None) if rebuilt else None
                 if checks:
-                    run_ready_checks(wt, n, base, checks, pre=pre)  # the ci-job steps and the debt lint read the final tree in wt; the open-PR clash reads the pre-merge head in info
+                    run_ready_checks(wt, n, base, checks, pre=pre)  # the ci-job steps read the final tree in wt; the debt-close lint (its diff and each Retire test's scratch worktree) and the open-PR clash read the pre-merge head in info
                 if rebuilt or merged:
                     push_branch(wt, info["branch"])
                     if merged:
@@ -3959,9 +3961,9 @@ def draft_step(root, cfg, n, host, info, merge_main=False):
             drop_worktree(root, tmp, wt)
     ok, why = host.ready(n)
     if ok:
-        say(f"merge: #{n} is ready now. Nothing was merged. When its run is green, run --confirm again to merge.")
+        say(f"merge: #{n} is ready now. No pull request was merged. When its run is green, run --confirm again to merge.")
     else:
-        say(f"merge: #{n} stays a draft ({' '.join(why.split()) or 'no reason given'}). Mark it ready after its draft run shows, then run --confirm again to merge. Nothing was merged.")
+        say(f"merge: #{n} stays a draft ({' '.join(why.split()) or 'no reason given'}). Mark it ready after its draft run shows, then run --confirm again to merge. No pull request was merged.")
     return 0
 
 READY_PAGE_CLEANUP_SECONDS = 10  # the worktree's removal gets its own budget: a read that spent its deadline must still clean up
@@ -5318,7 +5320,7 @@ def build_parser():
     p.add_argument("--with", dest="with_prs", default=None, metavar="PR,PR,...", help="with --lane-lint on a PR number: also check the head against each named open PR (a comma list), even one of another session")
     p.add_argument("--touched-tests", action="store_true", help="with --lane-lint: after the lint passes, run the test files the diff touches in the lint worktree; a failing test refuses, a timeout is unknown (lifted by --lint-unknown-ok)")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
-    p.add_argument("--ready", action="store_true", help="mark a lane's draft pull request ready, once: the records step and the repo's ready checks, then the host's mark; a ready pull request is left as it is; merges nothing, takes no lock")
+    p.add_argument("--ready", action="store_true", help="mark a lane's draft pull request ready, once: on the default branch a merge of origin/<base> into a head that lacks its tip, the records step and the repo's ready checks, then the host's mark; a ready pull request is left as it is; merges no pull request, takes no lock")
     p.add_argument("--fast-checks", action="store_true", help="the pre-ready run on a dry merge of the pull request onto its base, read-only: one pass, fail or unknown line per check; takes no lock, pushes nothing, marks nothing ready, posts nothing")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
