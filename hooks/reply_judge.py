@@ -78,6 +78,7 @@ COUNT_SUB = "reply-judge"  # <config dir>/state/reply-judge/<sha256 of session_i
 LEAD = re.compile(r"^[\s>]*(?:\*\*)?\s*")
 TAIL = re.compile(r"^\s*(?:\*\*)?\s*:?\s*(?:\*\*)?\s*")
 EMPTY_ITEM = re.compile(r"^[\W_]*(none|n/a|nothing)?[\W_]*$", re.I)
+NONE_LED = re.compile(r"^[\W_]*(none|n/a|nothing)\b", re.I)  # "None, with a note": empty unless the note asks
 TABLE_SEPARATOR = re.compile(r"^[\s>]*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$", re.M)
 BLOCKED_ON = re.compile(r"\bblocked\s+on\b", re.I)
 # \b counts "_" as a word character, so it would miss search_issues; these bounds take "_" as a break
@@ -274,8 +275,8 @@ def count_this_stop(session_id):
 
 
 def has_input_needed(reply):
-    """True when the reply has an Input Needed label line with an item that is not empty or none.
-    A reply with no such words returns False before report_guard loads. If LABEL_ORDER cannot be
+    """True when the reply has an Input Needed label line with an item that is not empty or none. A none-led
+    note counts only when it asks. A reply with no such words returns False before report_guard loads. If LABEL_ORDER cannot be
     read, return True (judge this Stop) and print one stderr line."""
     if "input needed" not in reply.casefold():
         return False
@@ -283,7 +284,7 @@ def has_input_needed(reply):
         lint = os.path.join(HERE, "..", "lint")
         if lint not in sys.path:
             sys.path.append(lint)
-        from report_guard import LABEL_ORDER
+        from report_guard import LABEL_ORDER, QUESTION_MARK_RE, QUOTED_RE
         want = next(l for l in LABEL_ORDER if "input" in l.casefold()).casefold()
         labels = {l.casefold() for l in LABEL_ORDER}
     except Exception as exc:
@@ -301,7 +302,12 @@ def has_input_needed(reply):
                 item.append(rest)
         elif inside:
             item.append(line.lstrip("> \t"))
-    return not EMPTY_ITEM.match(" ".join(item))
+    text = " ".join(item)
+    if EMPTY_ITEM.match(text):
+        return False
+    if NONE_LED.match(text):  # the note holds an item only when it asks, by a "?" outside quotes and backticks
+        return bool(QUESTION_MARK_RE.search(QUOTED_RE.sub("", text)))
+    return True
 
 
 def log_finding(session_id, stop_n, reason):

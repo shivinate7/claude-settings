@@ -2836,7 +2836,8 @@ LIST_ITEM = re.compile(r"^[ ]{0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)")
 
 def prose_questions(text):
     """The reply's own prose lines that hold a sentence ending in `?`, outside fenced code, indented code and code
-    spans. A blockquote line counts. Indented code opens after a blank line or another code line, as in CommonMark;
+    spans, and a "?" inside quotes is no question (QUOTED_RE, as asks_a_question reads it). A blockquote line
+    counts. Indented code opens after a blank line or another code line, as in CommonMark;
     inside a list an indented line is list text, never code."""
     found, fenced, code_ok, in_list = [], False, True, False
     for line in text.splitlines():
@@ -2858,7 +2859,7 @@ def prose_questions(text):
             in_list = True
         elif not indented:
             in_list = False
-        if SENTENCE_QUESTION.search(CODE_SPAN.sub("", body)):
+        if SENTENCE_QUESTION.search(QUOTED_RE.sub("", CODE_SPAN.sub("", body))):
             found.append(body)
     return found
 
