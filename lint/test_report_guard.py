@@ -2009,6 +2009,38 @@ class CompactionCarryTests(unittest.TestCase):
         self.assertBlocksNaming(out, "ruling X")
         self.assertIn("names no source", out["reason"], "the refusal does not say the item names no source")
 
+    def test_cc_red_tag_after_a_non_done_label_does_not_count(self):
+        # Catches: a Done tag (BUILT, RECORDED or OTHER) after a Deviations, Input Needed or Next label is read as the
+        # tag of a carry line, so the line counts. Only the Done label takes a Done tag.
+        for tag in ("BUILT", "RECORDED", "OTHER"):
+            with self.subTest(label="Done", tag=tag):
+                reply = ("> **Done** %s: Recovered: x from PR #978 (git)\n> **Deviations**\n> - Handoff gave: none\n"
+                         "> **Next** ship it" % tag)
+                self.assertIsNone(self.stop(self.compacted_turn(reply)),
+                                  "a Done-tagged Recovered line after the Done label does not count")
+        layouts = {
+            "Deviations": "> **Done** BUILT abc123\n> **Deviations** %(item)s\n> - %(other)s\n> **Next** ship it",
+            "Input Needed": "> **Done** BUILT abc123\n> **Deviations**\n> - %(other)s\n> **Input Needed** %(item)s\n"
+                            "> **Next** ship it",
+            "Next": "> **Done** BUILT abc123\n> **Deviations**\n> - %(other)s\n> **Next** %(item)s",
+        }
+        items = {"OTHER": ("x (git)", "x"), "BUILT": ("x from PR #978 (git)", "x from PR #978"),
+                 "RECORDED": ("x from PR #978 (git)", "x from PR #978")}
+        for label, layout in layouts.items():
+            for tag in ("BUILT", "RECORDED", "OTHER"):
+                recovered, handed = items[tag]
+                for name, text, other in (("Recovered", recovered, "Handoff gave: none"),
+                                          ("Handoff gave", handed, "Recovered: none")):
+                    with self.subTest(label=label, tag=tag, name=name):
+                        # Scope first: with no carry label on the item, this layout still demands the line.
+                        bare = layout % {"item": "%s: %s" % (tag, text), "other": other}
+                        self.assertOnlyMissing(self.stop(self.compacted_turn(bare)), name)
+                        reply = layout % {"item": "%s: %s: %s" % (tag, name, text), "other": other}
+                        out = self.stop(self.compacted_turn(reply))
+                        self.assertIsNotNone(out, "the %s tag after **%s** counts as the %s line; only the Done label "
+                                                  "takes a Done tag" % (tag, label, name))
+                        self.assertOnlyMissing(out, name)
+
 
 class CompactionCarryCostTests(unittest.TestCase):
     """The compaction-carry check reads the transcript it already opens: no process, and no file
