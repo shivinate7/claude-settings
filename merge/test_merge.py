@@ -4826,6 +4826,12 @@ class GhHalf(Env):
             self.assertIn("route pr-draft-mcp-cloud", text)
             self.assertNotIn("owner's computer", text)
 
+    def test_the_stale_page_remedy_runs_the_ready_step_before_confirm(self):
+        # The cloud order: back to draft, `merge 7 --ready` on the draft, the ready mark, then `merge 7 --confirm`. A claim's remedy
+        # carries the same order after its revert.
+        for claim in ("", "c1"):
+            assert_cloud_order(self, merge.stale_page_remedy(7, claim))
+
     def test_a_draft_head_with_all_jobs_passed_required_stops_at_once_with_the_remedy(self):
         # The wait path. Every check and run skipped: red stops the wait on the first read, not at the 45 minute deadline.
         self.set(checks_seq=[[("all-jobs-passed", "skipping", ""), ("scope", "skipping", "")]], runs_seq=[[("checks", "completed", "skipped")]])
@@ -8861,6 +8867,20 @@ def put_lf(path, text):
     with open(path, "w", newline="\n") as f:
         f.write(text)
 
+def assert_cloud_order(test, text, n=7):
+    """A remedy in the cloud route's order, by first occurrence in `text`: back to draft, then `merge <n> --ready` on the draft, then the
+    MCP ready mark (`draft=false` or route pr-ready-mcp-cloud), then `merge <n> --confirm`. Each step is its own assert, so a failure
+    names one cause. A remedy that keeps `--confirm` ahead of `--ready` fails, even when it also names `--ready`."""
+    ready, confirm = text.find(f"merge {n} --ready"), text.find(f"merge {n} --confirm")
+    test.assertNotEqual(ready, -1, f"the remedy does not name `merge {n} --ready`:\n{text}")
+    test.assertNotEqual(confirm, -1, f"the remedy does not name `merge {n} --confirm`:\n{text}")
+    test.assertLess(ready, confirm, f"the remedy names `merge {n} --confirm` before `merge {n} --ready`:\n{text}")
+    draft = text.find("to draft")
+    test.assertNotEqual(draft, -1, f"the remedy does not return #{n} to draft first:\n{text}")
+    test.assertLess(draft, ready, f"the remedy names `merge {n} --ready` before the return to draft:\n{text}")
+    test.assertRegex(text[ready:confirm], r"draft\W{1,2}false|pr-ready-mcp-cloud",
+                     f"the remedy has no MCP ready mark between `merge {n} --ready` and `merge {n} --confirm`:\n{text}")
+
 class RecordsEnv(Env):
     """Helpers for the records-page cases. Holds no test."""
     def use_fake_records(self):
@@ -8967,19 +8987,19 @@ class RecordsEnv(Env):
         self.on("feat", files, "Claim record numbers\n\nRecord-claim: D-002")
 
     def assert_remedy(self, text):
-        """The remedy in order: back to draft, `merge 7 --confirm` on the draft, then ready."""
-        self.assertRegex(text, r"draft[\s\S]*merge 7 --confirm[\s\S]*ready", text)
+        """The remedy in the cloud order: back to draft, `merge 7 --ready` on the draft, the ready mark, then `merge 7 --confirm`."""
+        assert_cloud_order(self, text)
 
     def assert_revert_remedy(self, text):
-        """The remedy for a head that holds a Record-claim on a base that stamps nothing for it: revert that claim commit,
-        then the records step on the draft. The draft step refuses a claim head, so `merge 7 --confirm` is never named before the revert."""
+        """The remedy for a head that holds a Record-claim on a base that stamps nothing for it: revert that claim commit, then the
+        cloud order on the draft. The draft step refuses a claim head, so neither `merge 7 --ready` nor `merge 7 --confirm` is named before the revert."""
         self.assertRegex(text, r"holds a Record-claim", text)
         self.assertRegex(text, r"[Rr]evert[^.]*claim", text)
         revert = re.search(r"[Rr]evert", text)
         before, after = text[:revert.start()], text[revert.start():]
+        self.assertNotIn("merge 7 --ready", before, text)
         self.assertNotIn("merge 7 --confirm", before, text)
-        self.assertIn("records step", after, text)
-        self.assertIn("draft", after, text)
+        assert_cloud_order(self, after)
 
     def assert_refused_on_ready(self, rc, out, refs_before):
         """A ready pull request with a stale page and nothing to claim or resume: refused before any check wait, with nothing
@@ -9198,10 +9218,11 @@ class RecordsRebuild(RecordsEnv):
     - When: after the claim, only when the pull request's base is the default branch (the claim's own rule). The rebuild
       runs with or without stamp kinds (claude-settings itself has `kinds: []`).
     - A stale page on a ready pull request with no claim to make or resume is refused before any wait. Nothing is pushed
-      or claimed, the lock is freed, and the refusal names the remedy: back to draft, `merge <n> --confirm` on the draft,
-      then ready. The draft step is where a stale page heals. A head that holds a Record-claim on a base with no stamp
-      kinds is refused the same way, but its remedy is the revert of that claim commit, then the records step on the draft:
-      the draft step refuses a claim head, so it is never named first. The preview's records line gives the same remedy.
+      or claimed, the lock is freed, and the refusal names the remedy in the cloud order: back to draft, `merge <n> --ready`
+      on the draft, the ready mark after its draft run shows, then `merge <n> --confirm`. The `--ready` draft step is where a
+      stale page heals. A head that holds a Record-claim on a base with no stamp kinds is refused the same way, but its remedy
+      is the revert of that claim commit, then the same order: the draft step refuses a claim head, so no step of the order is
+      named before the revert. The preview's records line gives the same remedy.
     - The claim and the rebuild share one commit. With a claim: "Claim record numbers", with its Record-claim trailer, and
       the page in the same commit. A resumed claim with a stale page: the subject "Rebuild the records page", and no
       Record-claim trailer. The head is read green once, before the page commit is pushed; nothing waits on the new sha.
@@ -9260,8 +9281,8 @@ class RecordsRebuild(RecordsEnv):
         self.assert_refused_on_ready(rc, out, refs_before)
 
     def test_a_claim_head_on_a_base_with_no_stamp_kinds_refuses_a_stale_page_and_names_the_revert(self):
-        # The base stamps nothing, so the head's Record-claim is not resumed. The draft step refuses a claim head, so the old
-        # remedy (back to draft, then --confirm on the draft) loops. The path that works is to revert that claim commit first.
+        # The base stamps nothing, so the head's Record-claim is not resumed. The draft step refuses a claim head, so a remedy that
+        # names `merge <n> --ready` or `--confirm` before the revert loops. The path that works is to revert that claim commit first.
         self.kinds_off()
         self.claim_head({"debts/gap-one.md": DEBT_TEXT})
         refs_before = self.refs()
@@ -9376,6 +9397,22 @@ class RecordsRebuild(RecordsEnv):
         self.assert_revert_remedy(line)
         self.assertEqual(self.refs(), before)
         self.assertEqual(self.worktrees(), 1)
+
+    def test_the_stale_page_remedy_takes_its_ready_step_from_the_ready_hint(self):
+        # One home: the remedy's ready step is the text the --ready run prints after its "stays a draft (" reason, so the two cannot drift.
+        self.kinds_off()
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})  # a stale page on a ready pull request
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        remedy = self.preview_line(out, "records")
+        self.assertIn("to draft", remedy, out)  # precondition: the preview carries the remedy
+        self.host.draft = True
+        self.host.ready_refuse = "the host refused the change to ready"
+        rc, out = self.run_merge("7", "--ready")
+        self.assertEqual(rc, 0, out)
+        found = re.search(r"stays a draft \([^)]*\)\. (.*?) No pull request was merged\.", out)
+        self.assertIsNotNone(found, "the --ready run printed no hint after its stays-a-draft reason:\n" + out)
+        self.assertIn(found.group(1), remedy, "the remedy's ready step is not the text the --ready hint prints:\n" + remedy + "\n" + out)
 
     def test_the_ready_preview_does_not_refuse_a_claim_to_make_or_a_claim_held(self):
         # The refusal is for a stale page with nothing to claim or resume. A claim to make, and a claim the head holds, do not refuse.
@@ -9661,10 +9698,10 @@ class RecordsRebuild(RecordsEnv):
 
     def test_the_draft_preview_hints_the_push_when_the_head_holds_the_base_tip(self):
         self.kinds_off()
-        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})  # a stale page; the head holds the base tip, so --confirm on the draft pushes it
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})  # a stale page; the head holds the base tip, so --ready on the draft pushes it
         before = self.refs()
         out = self.draft_preview()
-        self.assertIn("--confirm on the draft", self.preview_line(out, "records"), out)
+        self.assertIn("merge 7 --ready on the draft", self.preview_line(out, "records"), out)
         self.assertEqual(self.refs(), before)
 
     def assert_refused_draft_preview_hints_no_push(self, out, state):
@@ -9673,6 +9710,7 @@ class RecordsRebuild(RecordsEnv):
         self.assertIn("refuses", base, out)
         self.assertIn("rebuild", self.preview_line(out, "records"), f"precondition: the page is stale\n{out}")
         self.assertNotIn("--confirm on the draft", self.preview_line(out, "records"), f"hints a push that --confirm refuses\n{out}")
+        self.assertNotIn("merge 7 --ready on the draft", self.preview_line(out, "records"), f"hints a push that --ready refuses\n{out}")
 
     def test_the_draft_preview_hints_no_push_when_the_head_is_behind(self):
         # The draft step refuses a head that does not hold the base tip and conflicts with it, so there is no push to promise.
@@ -9708,7 +9746,7 @@ class RecordsRebuild(RecordsEnv):
         out = self.draft_preview()
         claim = self.preview_line(out, "claim")
         self.assertIn("already claimed (D-002)", claim, out)  # precondition: the head holds the claim
-        self.assertIn("--confirm` on the draft first", claim, out)
+        self.assertIn("merge 7 --ready` on the draft first", claim, out)
 
     def test_prepare_a_pushed_page_with_a_refused_ready_does_not_read_as_a_failure(self):
         # The real host's ready() always returns (False, why), so every draft step ends here. The push worked, so no line says "could not".
