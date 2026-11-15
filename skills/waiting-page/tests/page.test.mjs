@@ -4201,9 +4201,9 @@ const LONG_ANS = { id: "ask-rpl-long", text: "a".repeat(400), at: "2026-10-31T08
 const LAY_ITEM_OWED = { id: "ask-lay-owed", text: IRP_TEXT, at: "2026-10-30T08:00:00Z", item: IRP_OWED.id };
 const LAY_ITEM_ANS = { id: "ask-lay-ans", text: IRP_TEXT, at: "2026-10-30T08:00:00Z", item: IRP_ANS.id };
 const LAYOUT_CASES = [
-  { name: "an ask thread, with an answered reply and a waiting reply", sel: `#row-${RPL_ROOT} .thread`, msgs: true,
+  { name: "an ask thread, with an answered reply and a waiting reply", sel: `#row-${RPL_ROOT} .thread`, wait: RPL_WAIT.id, msgs: true,
     setup: { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED, [RPL_DEEP.id]: RPL_DEEP, [RPL_WAIT.id]: RPL_WAIT } }, storage: RPL_NEW } },
-  { name: "an item card thread, with the session's reply and a waiting reply", sel: `#thread-${IRP_OWED.id}`, msgs: false,
+  { name: "an item card thread, with the session's reply and a waiting reply", sel: `#thread-${IRP_OWED.id}`, wait: LAY_ITEM_OWED.id, msgs: false,
     setup: { items: [IRP_OWED], dbExtra: { asks: { [LAY_ITEM_OWED.id]: LAY_ITEM_OWED } }, storage: VISIT } },
 ];
 // The thread's direct children with their vertical margins, its row gap, and the row gap of each message block.
@@ -4218,6 +4218,8 @@ const threadStyle = (page, sel) => page.evaluate((s) => {
 for (const c of LAYOUT_CASES) for (const scheme of ["light", "dark"]) for (const width of LAYOUT_WIDTHS) test(`${c.name} takes no vertical margin on its children and spaces them with gap, ${width} wide, ${scheme} scheme`, async (t) => {
   const page = await open(t, { ...c.setup, viewport: { width, height: 800 }, scheme }); if (!page) return;
   await mustHave(page, c.sel, "the thread " + c.sel);
+  // The waiting reply is in the thread, so the margin check reads a sibling that the thread really holds.
+  await mustHave(page, `${c.sel} .myreply[id="${c.wait}"]`, "the waiting reply " + c.wait + " in the thread");
   const s = await threadStyle(page, c.sel);
   const margins = s.kids.filter(([, top, bottom]) => top !== "0px" || bottom !== "0px");
   assert.deepEqual(margins, [], "a child of the thread has a vertical margin: " + JSON.stringify(margins));
