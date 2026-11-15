@@ -1,0 +1,11 @@
+{
+ "id": "ready-mcp-mark-guard",
+ "title": "A guard refuses marking a PR ready through the GitHub MCP tool when no `merge N --ready` run was made on it",
+ "phase": "later",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "why": "Coordinator 05:50 CST Nov 15 (relayed; triage read neither PR). Option (b) of step ready-refreshes-records, not picked: the coordinator took (a), a record-only rewrite. Two incidents (relayed): #3255 marked ready by MCP at 04:25 CST and #3472 at 05:40 CST; each ready PR then met a stale records page at confirm, because the MCP mark skips the records step that `merge N --ready` runs. Why it waits: no second guard-worthy incident since the rewrite, and a cloud false-alarm risk (`--ready`'s own mark may be refused by GraphQL; the lane's read, unchecked). Kin: github-mcp-writes-judged (the guard judges GitHub MCP writes, todo), ci-wake-mcp-ready (done), runner-ready-mark-check-in. Cost of the guard unmeasured. Revisit if the rewrite does not stop the refusals (runner 10 reports any refusal on `merge N --ready` for #3255 and #3496).",
+ "source": "coordinator 05:50 CST Nov 15, relayed by triage",
+ "note": "Low, later. Only if the record rewrite in ready-refreshes-records does not stop MCP ready marks that skip the records step. Two incidents relayed.",
+ "updatedAt": "2026-11-15T05:50:00-06:00"
+}
