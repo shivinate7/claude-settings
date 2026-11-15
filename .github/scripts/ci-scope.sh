@@ -171,6 +171,13 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
     if added=$(git diff --name-only --diff-filter=A --no-renames "$range" 2>/dev/null); then
       whole_read=1
       grep -Eq "^($dirs)/" <<< "$added" && on="$on $W $S code guard windows_guard "
+      # windows_guard alone reads the added names NUL-separated: the newline form quotes a non-ASCII name, which matches no
+      # landed dir. A failed read turns the flag on.
+      if added_z=$(set -o pipefail; git diff --name-only --diff-filter=A --no-renames -z "$range" 2>/dev/null | tr '\0' '\n'); then
+        grep -Eq "^($dirs)/" <<< "$added_z" && on="$on windows_guard "
+      else
+        on="$on windows_guard "
+      fi
     else
       on="$on $ALL windows_guard "
     fi
