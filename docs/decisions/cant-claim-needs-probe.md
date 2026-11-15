@@ -88,7 +88,7 @@ Rule `outcomes-mechanize-rules` (each check states its cost and a test proves it
 
 Decision `claims-carry-backing`, part (vi), has a ruling from 2026-11-07 23:50 CST: "only a table act is a claim." Its measure, 12 of 12 phrase hits false on 400 main commit messages, covers commit messages only. Commit messages have no turns, and that check had no zero-tool-call condition. So the measure does not cover this check.
 
-The false-alarm rate on real replies is unmeasured. The predicate has run on no real reply. The transcripts in `~/.claude/projects` come from one session tree: three files, the session and two of its subagents. No labelled set of real replies exists. A rate needs one.
+The false-alarm rate on real replies is unmeasured. The predicate has run on no real reply. The transcripts in `~/.claude/projects` come from one session tree: three files, the session and two of its agents. No labelled set of real replies exists. A rate needs one.
 
 Decision `guard-that-cries-wolf-is-spent` (a guard that goes red when nothing is wrong is spent) sets the bar: a check that fires on right replies teaches the reader to scroll past it. Rule `verification-trust-guard-after-red` (trust a guard once it goes red on the defect it guards) sets the test: the lane's first red case is the incident reply, a turn with no tool call that says "I cannot import it myself."
 

@@ -91,7 +91,7 @@ FACT_OPENERS = ("why", "how", "whether", "if")  # a clause object; what and wher
 FIND_VERBS = ("see", "find", "spot", "notice", "identify")
 ACCESS_NOUNS = _PERMISSION_NOUNS + OUTAGE_NOUNS + (
     "access", "credential", "credentials", "token", "key", "login", "password", "vpn", "tunnel", "secret", "account",
-    "certificate", "cert", "sign-in", "grant", "approval")
+    "certificate", "cert", "sign-in", "grant", "approval")  # glossary-ok: the noun a reply uses for an access need; the predicate must match it
 _WORK_UNITS = tuple(unit for unit in SIZE_UNITS if unit != "ms") + (
     "steps?", "pass(?:es)?", "go", "PRs?", "edits?", "changes?", "patch(?:es)?", "diffs?")
 _FACT_RE = re.compile(r"^(?:(?:%s)\b|\w+(?:\s+(?:out|up))?\s+(?:%s)\b)" % (
