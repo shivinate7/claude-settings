@@ -1,0 +1,15 @@
+{
+  "id": "reply-judge-glossary-names",
+  "title": "The reply judge's prompt says \"page\", not \"waiting-page\", where the glossary check flags it",
+  "status": "done",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "session_013NEJL2rSrtzjr1zoz22qEg",
+  "owner": "coordinator",
+  "blockedBy": [],
+  "why": "Found on PR 2963: check_glossary.py hooks/reply_judge.py failed on main at line 114 (glossary row page lists waiting page as an avoided name), so any PR that adds a line to the judge prompt failed the lane lint. PR 3461 changes words only (three phrases), re-points three test pins, adds case_glossary_check_passes_on_reply_judge. No glossary exemption, no change to which rule the judge applies. Unmeasured: the live judge's reading of the renamed prompt (model mocked in tests). Triage read no diff; PR body read by REST.",
+  "source": "coordinator 03:05 CST Nov 15 (relayed)",
+  "note": "Filed 03:07 CST Nov 15 by triage after the merge. DONE: the whole step is PR 3461. REST read 03:07 CST: state closed, merged true, merged_at 09:05:23Z (03:05:23 CST), head 6ad1927a87fe, base 20963a214992, 2 files, 25 additions, 13 deletions; merge commit d8c75ee0f7c8 read by list_commits on main.",
+  "pr": 3461,
+  "updatedAt": "2026-11-15T03:07:00-06:00"
+}
