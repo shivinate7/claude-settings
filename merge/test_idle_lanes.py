@@ -278,13 +278,14 @@ class IdleLanesCli(unittest.TestCase):
         return found[0]
 
     def land_steps(self, stems):
-        """Commit one done step per stem on the record branch, numbered from 3 (c1 and c2 are in setUp)."""
+        """Commit one done step per stem on the record branch, numbered from 3 (c1 to c3 are in setUp, so a stem
+        already there changes nothing and the commit may be empty)."""
         roadmap.git(self.repo, "checkout", "-q", "roadmap")
         for order, stem in enumerate(stems, start=3):
             step = dict(roadmap.STEP, order=order, status="done")
             (self.repo / "roadmap" / "data" / "steps" / (stem + ".json")).write_text(json.dumps(step), encoding="utf-8")
         roadmap.git(self.repo, "add", "-A")
-        roadmap.git(self.repo, "commit", "-q", "-m", "steps " + ", ".join(stems))
+        roadmap.git(self.repo, "commit", "-q", "--allow-empty", "-m", "steps " + ", ".join(stems))
 
     def assert_unknown_never_clear(self, out, sid):
         """Lane `sid` is flagged unknown, on its line or as an entry naming it, and no line reads it clear."""
