@@ -1290,6 +1290,10 @@ const WRAP_REPLY = mk("wrap-reply", 43, { status: "closed", closed: "2026-11-09T
 const WRAP_LINE = { what: "the Lands in line", items: [WRAP_DEST], box: ".dest" };
 const WRAP_REPLY_CASE = { what: "the thread reply in an answered line", items: [DECISION, WRAP_REPLY], open: WRAP_REPLY, box: "#tier-answered .thread .reply" };
 const WRAP_TRADE = { what: "the option's trade-off text", items: [WRAP_TR], box: ".opt .tr div > span:not(.s)" };
+// The filed line of an opened answer reads "The record stays in <home>.", so a 90-character home is the unbroken word in .askc .thread .filed.
+// The same home sets the min-content of the line's home tag row, so that tag is hidden for the width measure: another lane owns it.
+const WRAP_FILED = mk("wrap-filed", 44, { status: "closed", closed: "2026-11-09T15:00:00Z", home: UNBROKEN });
+const WRAP_FILED_CASE = { what: "the filed line of an opened answer", items: [DECISION, WRAP_FILED], open: WRAP_FILED, box: "#tier-answered .thread .filed", hide: ".hometag" };
 async function openWrap(t, c, { width = 1280, scheme = "light" } = {}) {
   const page = await open(t, { items: c.items, viewport: { width, height: 900 }, scheme }); if (!page) return null;
   if (c.open) {
@@ -1299,13 +1303,15 @@ async function openWrap(t, c, { width = 1280, scheme = "light" } = {}) {
   return page;
 }
 
-for (const c of [WRAP_LINE, WRAP_REPLY_CASE, WRAP_TRADE]) {
+for (const c of [WRAP_LINE, WRAP_REPLY_CASE, WRAP_TRADE, WRAP_FILED_CASE]) {
   for (const width of [360, 390, 430]) {
     for (const scheme of ["light", "dark"]) {
       test(`${c.what} with an unbroken 90-character word never widens the Questions tab, at ${width} wide, ${scheme} scheme`, async (t) => {
         const page = await openWrap(t, c, { width, scheme }); if (!page) return;
         const box = page.locator(c.box).filter({ hasText: UNBROKEN });
         assert.equal(await box.count(), 1, `no ${c.what} holds the unbroken word`);
+        // c.hide: elements taken out of the page for this measure, such as the home tag another lane owns.
+        if (c.hide) await page.evaluate((sel) => document.querySelectorAll(sel).forEach((e) => { e.style.display = "none"; }), c.hide);
         const { sw, iw } = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth }));
         assert.ok(sw <= iw, `${c.what} widens the page to ${sw} px on a ${iw} px screen`);
       });
@@ -2566,6 +2572,51 @@ test("repo sub-groups control: the Answered section and its rail row draw no rep
   assert.equal((await repoGroups(page, "answered")).length, 0, "the Answered section draws repo sub-groups");
   assert.deepEqual(await railChipsIn(page, "answered"), ["ans-alpha", "ans-beta", "ans-own"], "the Answered rail row is not newest first");
   assert.equal((await railRuns(page, "answered")).length, 0, "the Answered rail row draws repo chip runs");
+});
+
+// Answered by repo (the designer's questions-sorted-answered mockup): the Answered section draws one sub-group per repo, this repo first,
+// then each other repo at its first answer's place, newest first inside each. The rail's Answered row draws the same runs.
+// Names start "repo sub-groups answered:". The control above keeps the old flat Answered order and is not changed here.
+const ansLine = (n, repo, sent) => mk("ans-" + n, n, { status: "closed", closed: sent, lastAnswer: { choice: "a", at: sent, note: "" }, repo, reply: "Filed.", home: "step " + n });
+// The mockup's six answers. Flat newest first is 61 59 60 58 55 57; this repo's three come first, then ledger-app's two, then trail-notes' one.
+const ANS_REPOS = [
+  ansLine(61, "acme/sample-repo", "2026-11-15T16:40:00Z"), ansLine(59, "acme/sample-repo", "2026-11-15T14:05:00Z"),
+  ansLine(55, "acme/sample-repo", "2026-11-14T21:00:00Z"), ansLine(60, "acme/ledger-app", "2026-11-15T11:00:00Z"),
+  ansLine(57, "acme/ledger-app", "2026-11-14T15:00:00Z"), ansLine(58, "acme/trail-notes", "2026-11-15T09:00:00Z"),
+];
+// The sub-groups of the Answered section, in page order: each head's text with its whitespace removed (the tile, the name, the count) and
+// the lines in it, by number. null when the section is not on the page.
+const answeredGroups = (page) => page.evaluate(() => {
+  const section = document.getElementById("tier-answered");
+  if (!section) return null;
+  return [...section.querySelectorAll('[role="group"][aria-labelledby]')].map((g) => {
+    const head = document.getElementById(g.getAttribute("aria-labelledby"));
+    return { head: head ? head.textContent.replace(/\s+/g, "") : "", cards: [...g.querySelectorAll("article.askc, article.card")].map((c) => c.id.replace(/^(line|item)-/, "")) };
+  });
+});
+
+test("repo sub-groups answered: the Answered section draws one sub-group per repo, this repo first, newest first inside each", async (t) => {
+  const page = await open(t, { items: [DECISION, ...ANS_REPOS], meta: SAMPLE }); if (!page) return;
+  const groups = await answeredGroups(page);
+  assert.ok(groups, "the Answered section is not on the page");
+  assert.equal(groups.length, 3, `the Answered section draws ${groups.length} repo sub-groups, not one per repo (3)`);
+  assert.deepEqual(cardsOf(groups), [["61", "59", "55"], ["60", "57"], ["58"]], "the Answered sub-groups are not this repo first, then each repo at its first answer's place, newest first inside each");
+});
+
+test("repo sub-groups answered: the Answered section line says This repo first.", async (t) => {
+  const page = await open(t, { items: [DECISION, ...ANS_REPOS], meta: SAMPLE }); if (!page) return;
+  const line = page.locator("#tier-answered .rsub");
+  assert.equal(await line.count(), 1, "the Answered section has no section line");
+  assert.match(await line.textContent(), /This repo first\./, "the Answered section line does not say This repo first.");
+});
+
+test("repo sub-groups answered: the rail's Answered row draws one run per repo, each with its tile and name", async (t) => {
+  const page = await open(t, { items: [DECISION, ...ANS_REPOS], meta: SAMPLE }); if (!page) return;
+  const runs = await railRuns(page, "answered");
+  assert.ok(runs, "the rail has no Answered row");
+  assert.equal(runs.length, 3, `the Answered row holds ${runs.length} repo runs, not 3`);
+  assert.deepEqual(runs.map((r) => r.first), ["Ssample-repo", "Lledger-app", "Ttrail-notes"], "a repo's run in the Answered row does not start with its tile and name");
+  assert.deepEqual(runs.map((r) => r.chips), [["ans-61", "ans-59", "ans-55"], ["ans-60", "ans-57"], ["ans-58"]], "the Answered row's runs do not follow the answered order inside each repo");
 });
 
 // Case 8: inside a repo's sub-group the order stays: an arrival first, then new before seen, then rank, then age.
