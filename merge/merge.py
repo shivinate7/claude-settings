@@ -4466,6 +4466,12 @@ def review_state(rec, head):
 
 REVIEW_MERGE_WALK = 50  # the most commits (clean merges of main) clean_merges_after walks between a record's head and the live head
 
+def fetch_heads_if_missing(h, root, *shas):
+    """Make the run's one fetch_branch_heads, stored on h.heads_fetch, when the checkout `root` lacks one of `shas` and the run has made none yet
+    (a branch head that a main-only checkout lacks). The one home of that step (merge_state, carries_by_tree). Cost: at most one fetch a run."""
+    if missing_commits(root, *shas) and getattr(h, "heads_fetch", None) is None:
+        h.heads_fetch = fetch_branch_heads(root)
+
 def merge_state(h, parents, tree):
     """-> (state, why): how the merge commit whose parents are `parents` and whose tree is `tree` relates to git's own merge of them (merge_tree,
     run in the host's checkout). States: "clean" (git's merge is clean and has exactly `tree`), "edited" (clean, and `tree` differs), "conflicted"
@@ -4473,8 +4479,7 @@ def merge_state(h, parents, tree):
     or no tree named), never read as clean or conflicted. `why` is one line for "unknown", else "". When a parent is missing, the first call of a
     run makes one fetch_branch_heads (a branch head that a main-only checkout lacks); a fork's head is on no branch of origin, so it stays unknown."""
     root = h.cwd or "."
-    if missing_commits(root, *parents) and getattr(h, "heads_fetch", None) is None:
-        h.heads_fetch = fetch_branch_heads(root)
+    fetch_heads_if_missing(h, root, *parents)
     state, merged, files = merge_tree(root, *parents)
     if state == "unknown":
         fetched = getattr(h, "heads_fetch", None)
@@ -4570,15 +4575,18 @@ def carries_by_tree(h, rec_head, live, main):
     else CARRY_BY_MERGE when the tree of `live` is the tree of git's clean merge of `rec_head` and the tip of `main` (merge_tree against
     refs/remotes/origin/<main> in the host's checkout, the tip the clean-merge walk reads; never the first parent of `live`). The tree must equal git's
     merge exactly, with no edit beyond it. A conflicted merge carries nothing. A merge-tree that cannot run (a commit the checkout lacks, a git
-    without merge-tree --write-tree), an empty `main` and a commit read that names no tree raise Stop, so the caller reads unknown, never None.
+    without merge-tree --write-tree), an empty `main` and a commit read that names no tree raise Stop, so the caller reads unknown, never None. A commit the
+    checkout lacks is fetched once first (fetch_heads_if_missing) and stays unknown if the fetch does not bring it.
     The one home of the carry; the lane lint stays equal-tree (lint_carried). Cost: two commit reads, and one merge_tree start (two rev-parse starts
-    and one merge-tree start) per read when the trees differ."""
+    and one merge-tree start) per read when the trees differ, plus at most one fetch_branch_heads a run."""
     live_tree = tree_of(h, live)
     if tree_of(h, rec_head) == live_tree:
         return CARRY_BY_TREE
     if not main:
         raise Stop(f"no default branch is read, so the tip of main is unknown {READ_CITE}")
-    state, merged, files = merge_tree(h.cwd or ".", rec_head, f"refs/remotes/origin/{main}")
+    root, tip = h.cwd or ".", f"refs/remotes/origin/{main}"
+    fetch_heads_if_missing(h, root, rec_head, tip)
+    state, merged, files = merge_tree(root, rec_head, tip)
     if state == "unknown":
         raise Stop(f"git's merge of {rec_head[:9]} and main cannot be read: {' '.join(files)} {READ_CITE}")
     return CARRY_BY_MERGE if state == "clean" and merged == live_tree else None
