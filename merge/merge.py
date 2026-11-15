@@ -1266,7 +1266,7 @@ class Host:
 
     def source_comments(self, m):
         """-> (records, lints) of issue `m`, in issue_comments' shapes ({m: [...]}, so each holds the list for `m`, oldest first): the comments a
-        replacement pull request carries from its source (step review-carries-by-tree). Always one paged read of issues/<m>/comments, once a run per
+        replacement pull request carries from its source (step review-carries-by-tree), and those of the pull request a push goes to (handed_in_push). Always one paged read of issues/<m>/comments, once a run per
         `m`: the repo-wide issue_comments read is windowed by `since`, so what it holds of `m` is a part of `m`'s list and never the whole. A failed
         read is a Stop: the caller reads it as unknown, never as no carry. Cost: one paged read per named source."""
         cache = self.__dict__.setdefault("source_rows", {})
@@ -4903,6 +4903,26 @@ def lint_check(h, n, info, root, cfgrel):
 def own_records(n, bodies):
     """-> the parsed records among `bodies` that name pull request `n`, in order: the earlier records review_state walks back through."""
     return [e for e in (parse_review(b) for b in bodies) if e and e["n"] == n]
+
+def handed_in_push(h, n, live, main, claims=None):
+    """-> (verdict, why) for a push to the branch of pull request `n` whose head on GitHub is `live`: "allow", "refuse" or "unknown" (step
+    handed-in-push-needs-record, decision pr-review-record). A push moves the head, so a record for an older head must be posted before the next one.
+    It refuses only when the newest record of `n` is stale at `live` (live_review_state, the one home of that read: a clean merge of main and the
+    tool's own records-page commit keep a record, so a push over them is allowed). A pull request with no record, or whose newest record does not parse
+    or names another number, is allowed: its first round is the known gap, which a record for no head cannot close. A comment read that cannot run, and a
+    clean-merge read that cannot run, are "unknown", never allow. `main` is the repo's default branch, as live_review_state takes it. Cost: one paged
+    read of the pull request's comments, and clean_merges_after's reads only for a stale record. Step fix-push-needs-fail-record folds into this check."""
+    try:
+        rows = h.source_comments(n)[0].get(n) or []
+    except (Stop, subprocess.TimeoutExpired, OSError) as e:
+        return "unknown", f"the review comments of #{n} could not be read ({' '.join(str(e).split())[:300]})"
+    rec = parse_review(rows[-1][0]) if rows else None
+    if rec is None or rec["n"] != n:
+        return "allow", f"#{n} has no review record to keep"
+    state, why = live_review_state(h, rec, live, main, claims, own_records(n, [r[0] for r in rows[:-1]]))
+    if state != "stale":
+        return "allow", why
+    return ("unknown" if REVIEW_SURVIVAL_UNKNOWN in why else "refuse"), why
 
 def reviewed_read(h, cfgrel=None):
     """-> the lines of `merge --reviewed`, built before any is printed so a failed read prints none. Two list reads (the open pull requests, then the

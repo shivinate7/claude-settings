@@ -1042,6 +1042,70 @@ def octopus_push_hit(stripped: str, cwd: str, read_verb) -> str:
     return ""
 
 
+# ---- a push to the branch of a pull request whose newest review record is for an older head (rule handed-in-push-needs-record)
+# A push moves the head and stales the record of the head the last round reviewed, so a second push before that record is posted leaves
+# the round unrecorded. The verdict is merge.handed_in_push, the one home: it refuses only a stale record, so a push with no record
+# (a first round), over the record of the live head, over a clean merge of main or the merge tool's records-page commit passes.
+# Judged only in a repo that uses the merge tool, for a destination other than main or master (push-main asks about those) and not for a
+# dry run. Cost: per pushed ref one paged read of the open pull requests; only when one holds the branch, one paged read of its comments,
+# and for a stale record the clean-merge reads (commit reads, a compare per merge). All share MERGE_READ_TIMEOUT. A read that cannot
+# run refuses as unknown (decision guard-hooks-fail-closed).
+HANDED_IN_PUSH_STALE_REASON = (
+    "Rule (Git, handed-in-push-needs-record; decision handed-in-push-needs-record): this push goes to the branch of #{n}, whose newest "
+    "review record is stale at its live head {head}: {why}. A push moves the head again, so the round that reviewed the live head "
+    "has no record yet. Remedy: have that round's review record posted for the live head (`merge {n} --review-record --head {head_full} "
+    "--kind K --guard yes|no --round N:ROLE:MODEL:VERDICT` prints it), then retry the push."
+)
+HANDED_IN_PUSH_UNKNOWN_REASON = (
+    "Rule (Git, guard-hooks-fail-closed; decision handed-in-push-needs-record): whether the review record of the pull request this push "
+    "goes to is stale is unknown: {detail}. A read that cannot run refuses the push. Remedy: retry when the read works."
+)
+
+
+def _handed_in_push_read(where, dest):
+    """-> (verdict, number, head, why) for a push to `dest`: verdict is "none" when no open pull request holds the branch, else merge.handed_in_push's
+    allow, refuse or unknown. Never raises: an unloadable tool, a Stop, a timeout and any other failure are one unknown with its cause."""
+    module = merge_module()
+    if module is None:
+        return "unknown", 0, "", "the merge tool could not be loaded"
+    try:
+        with module.shared_deadline(MERGE_READ_TIMEOUT):
+            host = module.Host(cwd=where)
+            main = (_merge_configs(where) or [{}])[0].get("defaultBranch") or host.base
+            held = [d for d in host.open_pulls() if d["head"]["ref"] == dest]
+            if not held:
+                return "none", 0, "", ""
+            if len(held) > 1:
+                return "unknown", 0, "", "%d open pull requests have the head %s" % (len(held), dest)
+            n, live = held[0]["number"], held[0]["head"]["sha"]
+            verdict, why = module.handed_in_push(host, n, live, main)
+            return verdict, n, live, why
+    except subprocess.TimeoutExpired:  # its text names the resolved program path
+        return "unknown", 0, "", "a read timed out after %d s" % MERGE_READ_TIMEOUT
+    except Exception as e:  # a Stop, a missing gh, malformed JSON: all unread
+        return "unknown", 0, "", " ".join(str(e).split()) or type(e).__name__
+
+
+def handed_in_push_hit(stripped: str, cwd: str, read_verb):
+    """(reason, matched) for the first `git push` in the command that goes to the branch of a pull request whose newest review record is
+    stale at the live head, or whose record read cannot run; else None. Each segment is judged from its own command word. `read_verb("push",
+    args)` is true for a dry run, which sends nothing."""
+    for segment in split_segments(stripped):
+        call = git_call_of(segment) if segment.strip() else None
+        if call is None or call[0] != "push" or read_verb("push", call[1]):
+            continue
+        for where, _source, dest, _tracking, _remote, _memo in _push_refs(segment, stripped, cwd, call[1], DEFAULT_BRANCH_FALLBACK):
+            if not dest or not uses_merge_tool(where):
+                continue
+            verdict, n, live, why = _handed_in_push_read(where, dest)
+            if verdict == "refuse":
+                return (HANDED_IN_PUSH_STALE_REASON.format(n=n, head=live[:9], head_full=live, why=cap_safe(why, 200)),
+                        "push to #%d at %s" % (n, live[:9]))
+            if verdict == "unknown":
+                return HANDED_IN_PUSH_UNKNOWN_REASON.format(detail=cap_safe(why, 200)), "push, review record read unknown"
+    return None
+
+
 def _untracked_names(where, specs):
     """The untracked, not-ignored files that `git add` would stage: all of them under the top folder when `specs`
     is None, else those the pathspecs name. At most _UNTRACKED_CAP, in git's order. A failed read gives none."""

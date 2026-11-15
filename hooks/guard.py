@@ -263,6 +263,13 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        left out; push-main asks about the latter. A remote named by a URL or a path
                        counts every remote's refs. Cost: one `git rev-list` per pushed ref, and one `git
                        config` more per pushed ref for such a remote. (octopus-push-refused)
+  handed-in-push-needs-record  deny. A `git push` to the branch of an open pull request, in a repo that uses the merge
+                       tool, while the pull request's newest review record is for an older head than its live head on
+                       GitHub. A clean merge of main and the merge tool's records-page commit keep a record, so a push
+                       over them passes. A pull request with no record passes (a first round). A review read that cannot
+                       run refuses as unknown. A dry run and a destination named main or master are left out. Cost: one
+                       paged read of the open pull requests per pushed ref; more only when one holds the branch.
+                       (handed-in-push-needs-record)
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
   config-edit          noted. A write to a project's own settings or hooks. See below.
@@ -616,7 +623,7 @@ while True:
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
-            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
+            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, handed_in_push_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit, self_role_child_hit, self_role_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
@@ -4965,6 +4972,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = octopus_push_hit(stripped, cwd, read_verb)
     if matched:
         refuse(tool, "deny", "octopus-push", OCTOPUS_PUSH_REASON.format(sha=matched), matched)
+
+    # 6c4. A push to the branch of a pull request whose newest review record is for an older head, or whose record
+    # read cannot run (rule handed-in-push-needs-record). Cost: guard_merge states it; none outside a repo that uses the
+    # merge tool, for a dry run, or for a main or master destination.
+    matched = handed_in_push_hit(stripped, cwd, read_verb)
+    if matched:
+        refuse(tool, "deny", "handed-in-push-needs-record", matched[0], matched[1])
 
     # 7. A frozen path. The command is read as a shell reads it: a script's own strings are text, and its
     # shell spots are lines of their own (`shell_write_hit`).
