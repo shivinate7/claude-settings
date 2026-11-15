@@ -1,0 +1,86 @@
+{
+  "about": "Receipts deleted from the waiting page on consultant ruling 02:48 CST Nov 15 2026 (own-no-receipt-for-chat-answer): no reader, no record for a chat answer; lastAnswer on the item is the record. Copy taken before the delete.",
+  "collection": "receipts",
+  "page": "https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx",
+  "receipts": [
+    {
+      "doc": {
+        "at": "2026-11-15T06:09:16.492Z",
+        "choice": "a",
+        "filed": "2026-11-15T06:11:40Z",
+        "label": "A: Add the form: equal tree plus a clean merge of main, exact tree only, an unreadable merge-tree reads unknown",
+        "n": 849,
+        "note": "",
+        "optionId": "carry-equal-tree-plus-clean-merge",
+        "read": "2026-11-15T06:12:00Z",
+        "writtenBy": "written by triage for the consultant's read (read time approx)"
+      },
+      "doc_id": "pick-carry-clean-merge-replacement",
+      "item": 849,
+      "version": 2
+    },
+    {
+      "doc": {
+        "filed": "2026-11-15T05:43:46Z",
+        "filedRef": "roadmap/rulings/own-records-page-fresh-review.json (consultant's pick b under own-consultant-speaks-for-owner and the owner's 20:18 words, not owner-typed; relayed by the coordinator 23:43 CST Nov 14)",
+        "read": "2026-11-15T05:45:00Z",
+        "writtenBy": "written by triage for the consultant's read"
+      },
+      "doc_id": "pick-records-page-clean-merge-tree",
+      "item": 851,
+      "version": 2
+    },
+    {
+      "doc": {
+        "at": "2026-11-15T06:16:00Z",
+        "choice": "1",
+        "filed": "2026-11-15T06:17:53Z",
+        "label": "Skip the debt step's run only when the shards ran on this tree: read the shard result and the scope flag; run the suite as now when the flag is false or the tree differs",
+        "n": 852,
+        "note": "consultant's pick under the owner's 20:18 CST Nov 14 words, not owner-typed; the owner's own save (00:09 CST Nov 15) was: \"2 (B or A are good since botj avoid repeat run, ask consultant)\"; ruling own-852-1; reopens if the owner says otherwise",
+        "optionId": "skip-only-when-shards-ran-this-tree",
+        "read": "2026-11-15T06:12:00Z",
+        "writtenBy": "written by triage for the consultant's read (read time approx)"
+      },
+      "doc_id": "pick-debt-step-skip-guard-rerun",
+      "item": 852,
+      "version": 2
+    },
+    {
+      "doc": {
+        "at": "2026-11-15T06:20:33Z",
+        "choice": "c",
+        "filed": "2026-11-15T06:23:04Z",
+        "label": "Drop 326 a: show the row's reason as is",
+        "n": 328,
+        "note": "consultant's pick under the owner's 20:18 CST Nov 14 words, not owner-typed (consultant 00:20 CST Nov 15, withdrawing b); the owner's own save (00:09 CST Nov 15) was: \"none of these (whichever is easiest and then leave this as a note to come back to on q_max)\"; ruling own-328-c; revisit note on step qmax-d369-failed-reason; reopens if the owner says otherwise",
+        "optionId": "drop-326-a",
+        "read": "2026-11-15T06:12:00Z",
+        "writtenBy": "written by triage for the consultant's read (read time approx)"
+      },
+      "doc_id": "qmax-d369-error-source",
+      "item": 328,
+      "version": 2
+    },
+    {
+      "doc": {
+        "filed": "2026-11-15T06:51:35Z",
+        "read": "2026-11-15T06:50:00Z",
+        "writtenBy": "written by triage for the consultant's chat read"
+      },
+      "doc_id": "pick-standing-sessions-tiny-fixes",
+      "item": 861,
+      "version": 2
+    },
+    {
+      "doc": {
+        "filed": "2026-11-15T07:45:29Z",
+        "read": "2026-11-15T07:43:00Z",
+        "writtenBy": "written by triage for the consultant's chat read"
+      },
+      "doc_id": "pick-3381-accept-checks-loss",
+      "item": 865,
+      "version": 2
+    }
+  ]
+}
