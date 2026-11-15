@@ -280,11 +280,11 @@ def guard_decision(case, done):
 class FixtureTests(unittest.TestCase):
     """The fixture is what the refusal cases say it is. These pass on any tree, and a fixture fault fails here first."""
 
-    def test_the_registry_reads_the_export_folder_of_a_waiting_page(self):
+    def test_the_registry_reads_the_export_folder_of_a_page(self):
         repo = refusing()
         entries = layout.artifacts(repo)
         self.assertEqual(len(entries), 1, "the fixture registry holds %d artifact entries, not 1" % len(entries))
-        self.assertEqual(entries[0]["role"], layout.WAITING_ROLE, "the fixture entry is not the waiting page")
+        self.assertEqual(entries[0]["role"], layout.WAITING_ROLE, "the fixture entry is not the page")
         self.assertEqual(entries[0]["export"], EXPORT, "the fixture entry exports to %r, not %r"
                          % (entries[0]["export"], EXPORT))
         self.assertEqual(layout.record_branch(repo), RECORD_BRANCH, "the fixture names another record branch")
@@ -420,7 +420,7 @@ class RefuseTests(unittest.TestCase):
         sentence = "Item 874 is already answered."
         assert_refused(self, send(self, sentence, refusing()), "874", sentence)
 
-    def test_a_waiting_page_item_with_an_option_letter_is_refused(self):
+    def test_a_page_item_with_an_option_letter_is_refused(self):
         sentence = "waiting-page item 806 d approved by the owner."
         assert_refused(self, send(self, sentence, refusing()), "806", sentence)
 
