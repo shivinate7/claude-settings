@@ -1835,6 +1835,17 @@ test("an owner of 80 characters or fewer is shown whole; the sighted long owner 
   assert.match(text, /posted by tria…[,.]/);
 });
 
+test("a cut owner never splits an emoji, and a blank owner shows ?", async (t) => {
+  const emoji = { ...DECISION, owner: "a".repeat(78) + "😀" + "bbb" };
+  const blank = { ...DECISION, id: "pick-blank", n: 30, owner: "   " };
+  const page = await open(t, { items: [emoji, blank] }); if (!page) return;
+  await takePick(page, emoji); await takePick(page, blank); await send(page);
+  await page.waitForFunction(() => window.__sent.length === 1);
+  const text = (await sent(page))[0].text;
+  assert.ok(!/[\ud800-\udbff](?![\udc00-\udfff])/.test(text), "a cut left half an emoji");
+  assert.match(text, /Owners: a{78}😀…, \?\./);
+});
+
 test("pressing Send again while a batch is in flight does nothing", async (t) => {
   const page = await open(t, { comments: { can: "available", sendDelay: 600 } }); if (!page) return;
   await takePick(page, DECISION);
