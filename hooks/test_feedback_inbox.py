@@ -4069,13 +4069,14 @@ def case_repeat_notes_home_is_never_a_candidate_for_its_item():
     marks the item."""
     root = backlog_repo("repeat-notes-home")
     cfg = new_cfg()
-    home_line, other_line = ("- fb-1102-1 [task] -> docs/debts/notes.md",
-                             "- fb-1102-2 [task] -> docs/debts/notes.md")
+    notes_home = "/".join(("docs", "debts", "notes.md"))
+    home_line, other_line = ("- fb-1102-1 [task] -> " + notes_home,
+                             "- fb-1102-2 [task] -> " + notes_home)
     write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [home_line, other_line])])
     answer = json.dumps({"repeats": [{"id": "fb-1102-1", "ref": NOTE_REF}, {"id": "fb-1102-2", "ref": TODO_REF}]})
     p, calls = stop(cfg, NEW_SID, root, answer=answer)
     check("notes home: one model call for both items", len(calls) == 1, p.desc())
-    check("notes home: the item homed to docs/debts/notes.md is not marked against its own notes line",
+    check("notes home: the item homed to the notes file is not marked against its own notes line",
           inbox_line(cfg, NEW_SID, "fb-1102-1") == home_line, inbox_line(cfg, NEW_SID, "fb-1102-1"))
     check("notes home control: the item still marks against a todo line of another file",
           inbox_line(cfg, NEW_SID, "fb-1102-2") == other_line + " repeats " + TODO_REF,
