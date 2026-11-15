@@ -6,6 +6,8 @@
 # Run it from the repository root:
 #
 #   sh hooks/test_install_src.sh [case ...]   # names given: run only those cases
+#   sh hooks/test_install_src.sh --list       # print the case names this run selects, run nothing, exit 0
+#   INSTALL_SRC_SHARD=1/2 sh hooks/test_install_src.sh   # run shard 1 of 2: every other case by run order
 #
 # Every case uses a temp HOME and a temp CLAUDE_CONFIG_DIR so the real /root/.claude is
 # never touched. SESSION_START_SH lets a case point at a different copy of
@@ -17,6 +19,50 @@
 # Windows has its own test, under the real Git Bash uname: hooks/test_install_windows.sh.
 
 set -u
+
+# Selection, read before any case runs. INSTALL_SRC_SHARD=i/k runs only the cases at run-list positions p with
+# (p - 1) % k == i - 1, round-robin in run order. Unset runs every case. A set value that is not i/k with
+# 1 <= i <= k exits 2 before any case runs; an empty value is bad too, so a CI matrix that passes none fails
+# loudly instead of running every case on each leg. --list prints the selected names and exits 0, running nothing.
+# Names left in "$@" filter the cases, as before.
+LIST_ONLY=0
+for arg in "$@"; do
+  shift
+  if [ "$arg" = "--list" ]; then LIST_ONLY=1; else set -- "$@" "$arg"; fi
+done
+ONLY=" $* "
+SHARD_I=1
+SHARD_K=1
+shard_bad() {
+  printf 'INSTALL_SRC_SHARD=%s is not i/k with 1 <= i <= k (for example 1/2); no case ran\n' "$INSTALL_SRC_SHARD" >&2
+  exit 2
+}
+if [ "${INSTALL_SRC_SHARD+set}" = set ]; then
+  case "$INSTALL_SRC_SHARD" in
+    */*/*|*/|/*|'') shard_bad ;;
+    */*) ;;
+    *) shard_bad ;;
+  esac
+  SHARD_I=${INSTALL_SRC_SHARD%%/*}
+  SHARD_K=${INSTALL_SRC_SHARD#*/}
+  for n in "$SHARD_I" "$SHARD_K"; do
+    case "$n" in ''|0*|*[!0-9]*) shard_bad ;; esac
+    [ "${#n}" -le 9 ] || shard_bad
+  done
+  [ "$SHARD_I" -le "$SHARD_K" ] || shard_bad
+fi
+# True when the case at run-list position $1 (1-based) belongs to this shard.
+shard_has() { [ $(( ($1 - 1) % SHARD_K )) -eq $(( SHARD_I - 1 )) ]; }
+# True when case $1 passes the name filter in ONLY.
+name_wanted() { [ "$ONLY" = "  " ] || case "$ONLY" in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+if [ "$LIST_ONLY" = 1 ]; then
+  pos=0
+  for name in $(sed -n 's/^run \([^ ]*\)$/\1/p' "$0"); do
+    pos=$((pos + 1))
+    if shard_has "$pos" && name_wanted "$name"; then printf '%s\n' "$name"; fi
+  done
+  exit 0
+fi
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/../lint/_test_git.sh"  # test-run signing opt-out
@@ -5914,10 +5960,11 @@ caseM19() {
 # session_start.sh cases) gets the same redirect as every other case.
 default_home "$work/runner-home"; HOME="$work/runner-home"; export HOME
 
-# Optional case filter: `sh hooks/test_install_src.sh caseF4 caseF6` runs only those cases.
-# No arguments runs every case. lint/check_unknown_reads_contract.py uses it.
-ONLY=" $* "
-run() { [ "$ONLY" = "  " ] || case "$ONLY" in *" $1 "*) ;; *) return 0 ;; esac; "$1"; }
+# Case filter and shard, both read at the top (ONLY, SHARD_I, SHARD_K). `sh hooks/test_install_src.sh caseF4 caseF6`
+# runs only those cases; no arguments runs every case. lint/check_unknown_reads_contract.py uses the names.
+# POS counts every run call, so a shard holds the same cases whatever the name filter says.
+POS=0
+run() { POS=$((POS + 1)); shard_has "$POS" && name_wanted "$1" || return 0; "$1"; }
 
 run case1
 run case2
