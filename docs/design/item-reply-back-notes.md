@@ -235,7 +235,8 @@ the session's reply, the opened line's thread and the folded `.fwait`.
 ## Checked
 
 - Nov 15, the F1 and F2 fixes (Playwright, Chromium, headless; labels off): 21 states at 360, 390, 430, 800 and 1280, light and dark (210 runs).
-  - Result: no script or console error, no sideways scroll in the page, a card, an ask, a thread, a `.myreply`, a `.msg` or a `.fwait`, and no margin on a `.thread` child.
+  - Result: no script or console error, and no margin on a `.thread` child.
+  - Result: no sideways scroll in the page, a card, an ask, a thread, a `.myreply`, a `.msg` or a `.fwait`.
   - The check went red on a broken copy (the margin put back, `.reply` set to `white-space: pre`): margins and overflows found in `line-on` and `long`.
   - With labels on, the "New:" tags hang 8px past a thread at 360 and 390. That is the sample label, not the screen.
 - `check_designs.mjs` on the PR head's page, with this mockup in `designData`, each pick as a two-option item: picks 1, 4 and 11 as above,
