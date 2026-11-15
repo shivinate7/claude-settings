@@ -47,6 +47,7 @@
         "hooks/required_check.py",
         "lint/check_silent_undo.py",
         "merge/merge.py",
+        "merge/combine_train.py",
         "merge/launch.py",
         "merge/repaired_merges.py"
       ]
@@ -60,6 +61,7 @@
       "quiet": true,
       "covers": [
         "hooks/ci_wake.py",
+        "hooks/ci_wait_cap.py",
         "hooks/action_pin.py",
         "hooks/pin_note.py",
         "skills/ci-hygiene"
@@ -76,6 +78,7 @@
         "hooks/blind_brief.py",
         "hooks/guard_branch_worktree.py",
         "hooks/guard_pointer.py",
+        "hooks/session_role.py",
         "hooks/own_session.py",
         "lint/check_shared_resources.py",
         "lint/check_ios_mockup.py",

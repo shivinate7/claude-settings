@@ -2449,7 +2449,7 @@ test("repo sub-groups control: the Answered section and its rail row draw no rep
   assert.equal((await railRuns(page, "answered")).length, 0, "the Answered rail row draws repo chip runs");
 });
 
-// Case 8: inside a repo's sub-group the order stays: an arrival first, then new before seen, then rank, then age.
+// Case 8: inside a repo's sub-group the order stays: an arrival first, then new before seen, then rank, then age (newest first).
 test("repo sub-groups: inside a repo's sub-group the order stays: an arrival first, then new before seen, rank, and age", async (t) => {
   const items = [
     inRepo("own-1", 9, "acme/sample-repo", { added: at(1), rank: 0 }),
@@ -2466,7 +2466,7 @@ test("repo sub-groups: inside a repo's sub-group the order stays: an arrival fir
   assert.equal(groups.length, 2, `tier-calm draws ${groups.length} repo sub-groups, not 2`);
   const alpha = groups.find((g) => g.cards.includes("a-r1"));
   assert.ok(alpha, "no sub-group holds alpha's cards");
-  assert.deepEqual(alpha.cards, ["a-arrival", "a-r1", "a-r2", "a-old", "a-young", "a-seen"], "alpha's sub-group does not keep arrival, new before seen, rank, then age");
+  assert.deepEqual(alpha.cards, ["a-arrival", "a-r1", "a-r2", "a-young", "a-old", "a-seen"], "alpha's sub-group does not keep arrival, new before seen, rank, then age (newest first, owner ruling page-newest-first, 2026-11-12 21:37 CST)");
 });
 
 // ---------------------------------------------------------------- a reply or a step since the last visit
