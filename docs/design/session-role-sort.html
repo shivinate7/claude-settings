@@ -70,7 +70,7 @@ body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 s
     <button data-t="light">Light</button><button data-t="dark">Dark</button>
     <button id="labBtn">Labels on</button>
   </div>
-  <p>Deep links: <code>#s=page|single-repo|groups|no-repo|last-sent|empty|key-stops|key-rank|key-oldest|order-pin|order-free|order-az|seen-once|rail-plain</code>, <code>&amp;w=all|390|800|1280</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;hide=&lt;state&gt;,...</code>. Every order on this page is worked out by the sort the notes pick, not placed by hand. Drawn from page.html at main 87daa5b50. Notes: section-sort-notes.md.</p>
+  <p>Deep links: <code>#s=page|single-repo|groups|no-repo|last-sent|empty|key-stops|key-rank|key-oldest|order-pin|order-free|order-az|seen-once|rail-plain</code>, <code>&amp;w=all|390|800|1280</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;hide=&lt;state&gt;,...</code>. Every order on this page is worked out by the sort the notes pick, not placed by hand. Drawn from page.html at main 87daa5b50. Notes: session-role-sort-notes.md.</p>
 </header>
 <main id="stage"></main>
 
@@ -1205,21 +1205,22 @@ const mem = (e) => e.members || [e];
 const repoOf = (it) => it.repo || THIS; // an item with no `repo` sits under this repo
 const nStops = (e) => new Set(mem(e).flatMap((x) => x.stops || [])).size; // a group counts each stopped thing once
 const rk = (e) => Math.min(...mem(e).map((x) => (Number.isFinite(x.rank) ? x.rank : Infinity)));
-const age = (e) => Math.min(...mem(e).map((x) => Date.parse(x.added)));
+const age = (e) => Math.max(...mem(e).map((x) => Date.parse(x.added))); // a group sits at its newest member, as page.html's born()
+const ageOld = (e) => Math.min(...mem(e).map((x) => Date.parse(x.added)));
 const dl = (e) => Math.min(...mem(e).map((x) => (x.by ? Date.parse(x.by) : Infinity)));
 const seenE = (e) => mem(e).every((x) => x.seen);
 const num = (a, b) => (a === b ? 0 : a < b ? -1 : 1);
 // A group sits under the repo of its member that stops the most, this repo on a tie.
 const eRepo = (e) => repoOf(mem(e).slice().sort((a, b) => nStops(b) - nStops(a) || (repoOf(a) === THIS ? -1 : repoOf(b) === THIS ? 1 : 0))[0]);
-// The key inside a tier. Blocking: most stopped first, then triage's rank, then oldest. The other tiers keep today's keys.
+// The key inside a tier. Blocking: most stopped first, then triage's rank, then newest. The other tiers keep today's keys.
 const KEYS = {
-  stops: (a, b) => nStops(b) - nStops(a) || num(rk(a), rk(b)) || age(a) - age(b),
-  rank: (a, b) => num(rk(a), rk(b)) || age(a) - age(b),
-  oldest: (a, b) => age(a) - age(b),
+  stops: (a, b) => nStops(b) - nStops(a) || num(rk(a), rk(b)) || age(b) - age(a),
+  rank: (a, b) => num(rk(a), rk(b)) || age(b) - age(a),
+  oldest: (a, b) => ageOld(a) - ageOld(b),
 };
 function cmpFor(k, key) {
-  const f = k === "holds" ? KEYS[key || "stops"] : k === "due" ? (a, b) => num(rk(a), rk(b)) || num(dl(a), dl(b)) || age(a) - age(b)
-    : k === "calm" ? (a, b) => num(rk(a), rk(b)) || (mem(a)[0].kind === mem(b)[0].kind ? age(a) - age(b) : mem(a)[0].kind === "decision" ? -1 : 1) : KEYS.rank;
+  const f = k === "holds" ? KEYS[key || "stops"] : k === "due" ? (a, b) => num(rk(a), rk(b)) || num(dl(a), dl(b)) || age(b) - age(a)
+    : k === "calm" ? (a, b) => num(rk(a), rk(b)) || (mem(a)[0].kind === mem(b)[0].kind ? age(b) - age(a) : mem(a)[0].kind === "decision" ? -1 : 1) : KEYS.rank;
   // New before seen stays first (settled, owner ask Nov 1); an arrival after load would sit ahead of both.
   return (a, b) => (seenE(a) ? 1 : 0) - (seenE(b) ? 1 : 0) || f(a, b);
 }
@@ -1232,9 +1233,9 @@ function subgroups(k, entries, o = {}) {
 }
 // The order line under the tier head. Each tier names its own key, so no sentence repeats.
 const LINES = {
-  holds: { stops: "Most stopped work first, then triage's order, then oldest.", rank: "Triage's order first, then oldest.", oldest: "Oldest first." },
-  due: "Triage's order first, then nearest deadline, then oldest.",
-  calm: "Triage's order first, then decisions, then oldest.",
+  holds: { stops: "Most stopped work first, then triage's order, then newest.", rank: "Triage's order first, then newest.", oldest: "Oldest first." },
+  due: "Triage's order first, then nearest deadline, then newest.",
+  calm: "Triage's order first, then decisions, then newest.",
 };
 // The repo words show only when the tier holds this repo and at least one other, so the line is always true.
 function lineFor(k, groups, o = {}) {

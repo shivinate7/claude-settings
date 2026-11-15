@@ -31,7 +31,11 @@ an option. The choice sits on `#healthTab`, `#healthViewBtn` and `#healthTable`.
      every tab. It fits a 320 phone: with Designs shown the bar is four tabs. They keep one row while they
      fit, and Designs wraps above the tabs when they do not (as main does). The page never scrolls
      sideways. Below 500 px the padding, gaps and reserved count boxes shrink, and below 400 px the
-     label shrinks too (`.tabs:has(#tabD:not([hidden]))` rules in page.html).
+     label shrinks too (`.tabs:has(#tabD:not([hidden]))` rules in page.html). The three-tab bar
+     (Designs hidden) also shrinks at 400 px and below, to 15 px type, 5 px padding and a 2.5ch count
+     box. The mockup draws 16 px at 360 and 390. The built page keeps the shrink, because it is what
+     keeps one row at 320 (design review, 2026-11-15). Questions and Status tabs get narrower at 360
+     (measured 121.9 to 106.7 px and 63.6 to 58.5 px against the sort lane's head) and none wraps.
      Each tab stays 44 px tall. Loss: one more tab.
      It changes the one-page ruling (Oct 27, 12:15 CDT; `one-page-notes.md` item 2), which names
      Questions, Status and Designs.

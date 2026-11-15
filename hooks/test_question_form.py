@@ -2729,7 +2729,7 @@ def case_judged_mixed_writes_all_returned():
 
 # ------------------------------------------------------------------ stops: the entries Blocking counts are named in holds
 #
-# Design notes docs/design/section-sort-notes.md, ruling Q1 and point 1: `stops` is a list of what an answer stops, each entry a
+# Design notes docs/design/session-role-sort-notes.md, ruling Q1 and point 1: `stops` is a list of what an answer stops, each entry a
 # lane slug, a PR number or a step id. holds names them in words, so the two cannot drift. The rule id is not fixed by the
 # brief, so each case takes any refusal, other than item-field-rendered, that names the entry it refuses.
 

@@ -1,13 +1,13 @@
 # Waiting page, steps tier-items-sorted and answered-sections-by-repo: design notes
 
-Mockup: `docs/design/section-sort.html`. Screen: `skills/waiting-page/page.html` (main 87daa5b50).
+Mockup: `docs/design/session-role-sort.html`. Screen: `skills/waiting-page/page.html` (main 87daa5b50).
 Deep links: `#s=page|single-repo|groups|no-repo|last-sent|empty|key-stops|key-rank|key-oldest|order-pin|order-free|order-az|seen-once|rail-plain`,
 `&w=all|390|800|1280`, `&t=light|dark`, `&lab=off`, `&hide=<state>,...`.
 Sizes: phone 390, mid 800 and wide 1280, light and dark. `layout.py devices` prints `unknown` for this repo,
 so the sizes come from the brief. Mid 800 is drawn because page.html has a breakpoint at 960.
 The mockup draws with page.html's own `<style>` (lines 8 to 953). Each new rule reads a page token; it adds no colour.
 Every order on the mockup comes from one sort function in its script (the pick below), not from hand placing.
-Options are named by name, never by a letter: the waiting page stamps its own letters.
+Options are named by name, never by a letter: the page stamps its own letters.
 
 Owner's outcome (2026-11-12 11:19 CST): the tiers are long and unsorted. He must find the item that matters
 most first: what stops the most work, then the newest.

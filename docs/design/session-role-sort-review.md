@@ -1,6 +1,6 @@
 # Waiting page sort and repo sub-groups: review record
 
-Lane waiting-page-sorting. Mockup `docs/design/section-sort.html`, notes `section-sort-notes.md`.
+Lane waiting-page-sorting. Mockup `docs/design/session-role-sort.html`, notes `session-role-sort-notes.md`.
 Written by the lane from the reviewers' reports; the reviewers' roles cannot write in the repo.
 
 ## Design review (design reviewer, opus)
