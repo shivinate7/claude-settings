@@ -4791,7 +4791,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                                 "push to a stray branch")
 
     # 5. The environment file. This layer reads the command BEFORE normalization.
-    refusal, logged = env_refusal(strip_heredoc_bodies(raw, per_body=True))   # a data body drops, a script body stays
+    words_run = strip_heredoc_bodies(raw, per_body=True)   # a data body drops, a script body stays
+    refusal, logged = env_refusal(words_run)
     if not refusal:
         refusal, logged = env_heredoc_refusal(raw)
     if refusal:
@@ -4801,7 +4802,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # It runs before steps 6 and 6b so a cloud pr merge or pr create gets the MCP remedy, not one that names the
     # refused form.
     if is_cloud():
-        for text, _in_message in _substitutions(stripped)[0]:
+        for text, _in_message in _substitutions(words_run)[0]:
             for seg in split_segments(text):
                 label = gh_write_of(seg) if seg.strip() else ""
                 if label:
@@ -4809,7 +4810,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 5c. A command that prints other processes' full arguments (rule process-args). Judged per
     # command word from the parsed segments, so quoted text and a heredoc body never fire it.
-    matched = process_args_hit(raw, stripped)
+    matched = process_args_hit(raw, words_run)
     if matched:
         refuse(tool, "deny", "process-args", PROCESS_ARGS_REASON, matched)
 
@@ -4851,7 +4852,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "roadmap-one-writer", RECORD_REASON, matched)
 
     # 6b. A pull request opened without --draft.
-    for text, _in_message in _substitutions(stripped)[0]:
+    for text, _in_message in _substitutions(words_run)[0]:
         if any(undrafted_pr_create(seg) for seg in split_segments(text) if seg.strip()):
             refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
 

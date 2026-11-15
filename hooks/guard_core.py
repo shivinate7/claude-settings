@@ -1007,19 +1007,44 @@ def _plain_words(words):
     return [word[2:] if word.startswith("./") else word for word in words if not re.match(r"\w+=", word)]
 
 
+# A file read as input (`< f`, `$(< f)`): a word that names a file, not one that runs it.
+_INPUT_READ = re.compile(r"(?<![<\d])<(?![<(])[ \t]*[^\s;&|<>()\"'`]+")
+# The wrappers that run the next command word and nothing of their own: `env A=1 cat f` runs cat.
+_PASS_THROUGH = {"sudo", "env", "command", "nohup", "nice", "time", "doas", "timeout", "builtin"}
+
+
+def _command_runner(runner):
+    """`runner` for a reader that tells a file that is only read from one that runs (`_runs_written_file`)."""
+    def read(word):
+        return runner(word)
+    read.plain_reads = True
+    return read
+
+
 def _runs_written_file(text: str, headers, runner=_RUNNER) -> str:
     """The word that runs a file a heredoc writes, else '': the first `runner` word of its pipeline (by default a
     shell, an interpreter or a wrapper: `sh < f`, `cat f | sh`, `timeout 5 sh f`), or the file itself when it is
     the command (`./f`). A read such as `wc -c f` runs nothing. The word is compared as written, so `$HOME/f`
-    matches only itself."""
+    matches only itself. A `runner` from `_command_runner` also reads a file named only as an input (`x=$(< f)`),
+    a `.` that is not at command position (`find .`) and a pass-through wrapper (`env A=1 cat f`) as running nothing."""
+    plain = getattr(runner, "plain_reads", False)
     written = {word for header in headers for word in _plain_words(_WRITE_TARGET.findall(header))}
     for pipeline in re.split(r"\n|;|&&|\|\||&", _WRITE_TARGET.sub(" ", text)) if written else ():
-        stages = [_plain_words(_WORDS(stage)) for stage in pipeline.split("|")]
-        runs = next((word.rsplit("/", 1)[-1] for words in stages for word in words
-                     if runner(word.rsplit("/", 1)[-1])), "")
-        for words in stages:
+        pieces = pipeline.split("|")
+        stages = [_plain_words(_WORDS(stage)) for stage in pieces]
+        commands = []
+        for stage in pieces if plain else ():
+            words = _plain_words(_WORDS(_INPUT_READ.sub(" ", stage)))
+            at = _walk_wrappers(tuple(words))[0]
+            commands.append(words[at] if at is not None else "")
+
+        def runs_it(word):
+            base = word.rsplit("/", 1)[-1]
+            return runner(base) and not (plain and (base in _PASS_THROUGH or (base == "." and "." not in commands)))
+        runs = next((word.rsplit("/", 1)[-1] for words in stages for word in words if runs_it(word)), "")
+        for number, words in enumerate(stages):
             for at, word in enumerate(words):
-                if word in written and (runs or at == 0):
+                if word in written and (runs or (word == commands[number] if plain else at == 0)):
                     return runs or word
     return ""
 
@@ -1074,7 +1099,7 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False, per_body: bool = F
         if not per_body or walks[0] != walks[1] or _FED_SHELL(text):
             return cmd
         first = _SHELL_FIRST if shells_only else _INTERPRETER_FIRST
-        runner = _SHELL_RUNNER if shells_only else _RUNNER
+        runner = _command_runner(_SHELL_RUNNER if shells_only else _RUNNER)
         keep = [number for number, header in enumerate(headers)
                 if first(header) or _PIPED_SHELL(header) or _runs_written_file(text, [header], runner)
                 or not _feeds_data(header, shells_only)]
