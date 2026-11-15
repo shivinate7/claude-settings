@@ -3541,8 +3541,8 @@ class AlignedEdges(AlignedSteps, unittest.TestCase):
         self.assertEqual(code, 0, "this checkout with no change is refused: %s%s" % (out, err))
 
 
-# Round 2 (units, folders, deleted records). A unit is one sentence, from the previous rule anchor to its own; the paragraph
-# shapes below are built here, in the shape of CLAUDE.md:13-38, and never copied from the live file.
+# A unit is one sentence, from the previous rule anchor to its own. The paragraph shapes below are built here, in the
+# shape of CLAUDE.md:13-38, so no case copies the live file.
 ALIGNED_OTHER = "other-decision"  # a second record that a sentence of the same paragraph cites
 ALIGNED_OTHER_RECORD = "docs/decisions/%s.md" % ALIGNED_OTHER
 ALIGNED_OTHER_CHECKED = "Rules checked: %s %s no change" % (ALIGNED_OTHER, ALIGNED_DASH)
@@ -3690,7 +3690,7 @@ class AlignedDeleted(AlignedSteps, unittest.TestCase):
         self.assert_refused(repo, where, ALIGNED_ROUND)
 
 
-# Round 3. CLAUDE.md:38 holds five anchored sentences on one physical line of about 3000 characters. A sentence counts as
+# CLAUDE.md:38 holds five anchored sentences on one physical line of about 3000 characters. A sentence counts as
 # changed only when its text is new: the removed lines of the same diff hold the old text. Physical lines do not decide it.
 SAME_FILLER = "This sentence keeps its wording and runs on across the synthetic line, as the live file does. " * 6
 
@@ -3716,8 +3716,8 @@ def with_sentence(sentences, index, old, new):
 
 
 class AlignedSameLine(AlignedSteps, unittest.TestCase):
-    """Round 3, items (1a) to (1d): sentences are units on one physical line. The unit of change is the sentence's text, not
-    its line, and a moved sentence with unchanged text is not a change."""
+    """Sentences are units on one physical line. The unit of change is the sentence's text, not its line, and a moved
+    sentence with unchanged text is not a change."""
 
     def same_line_base(self):
         """(base files, the paragraph's line): the five sentences on one line of CLAUDE.md, and both records they cite."""
@@ -3765,8 +3765,8 @@ class AlignedSameLine(AlignedSteps, unittest.TestCase):
 
 
 class AlignedVendor(AlignedSteps, unittest.TestCase):
-    """Round 3, item (2): a vendored or untracked CLAUDE.md that the probe cannot parse is not a rule file of this repo, so it
-    does not make the group unknown."""
+    """A vendored or untracked CLAUDE.md that the probe cannot parse is not a rule file of this repo, so it does not make
+    the group unknown."""
 
     def test_an_untracked_vendor_claude_md_with_an_unclosed_fence_does_not_fail_the_group(self):
         base, where = self.cited()
@@ -3786,9 +3786,9 @@ class AlignedVendor(AlignedSteps, unittest.TestCase):
                     os.remove(path)
 
 
-# Round 4. A sentence's text is judged against the file's base side, rebuilt from head and the hunks. Two shapes that the
-# removed-line text alone gets wrong: a sentence that wraps, with only a sibling on its last line edited; a whole line
-# deleted beside a citing sentence.
+# A sentence's text is judged against the file's base side, rebuilt from head and the hunks. Two shapes the removed-line
+# text alone gets wrong: a sentence that wraps, with only a sibling on its last line edited; a whole line deleted beside a
+# citing sentence.
 ALIGNED_GONE_LINE = "Sentence X keeps its own wording and is deleted. <!-- rule:gone-x -->"
 ALIGNED_WRAP_LINES = [
     "**Review.** The citing sentence begins on this line and keeps going",
@@ -3799,8 +3799,8 @@ ALIGNED_WRAP_LINES = [
 
 
 class AlignedWrapped(AlignedSteps, unittest.TestCase):
-    """Round 4, items (i) and (ii): an edit that touches a wrapped citing sentence's last line, or a deleted line beside a
-    citing sentence, is no change for that sentence. A record that did not change is not demanded."""
+    """An edit that touches a wrapped citing sentence's last line, or a deleted line beside a citing sentence, is no change
+    for that sentence. A record that did not change is not demanded."""
 
     def test_a_sibling_edit_on_the_last_line_of_a_wrapped_citing_sentence_is_no_change_for_it(self):
         base, _ = para_base(ALIGNED_WRAP_LINES)
