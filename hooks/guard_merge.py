@@ -895,7 +895,7 @@ def _red_run_module():
     """lint/check_red_run.py, imported from the lint folder beside this file's folder, the one home of the
     rule. It waits for the first push that needs it, and raises ImportError in a copy of the hooks with no lint
     folder beside it. The caller reads that as no hit."""
-    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    lint = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
     import check_red_run

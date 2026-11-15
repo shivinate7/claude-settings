@@ -7,7 +7,7 @@ Read it through cap_minutes(). Standard library only.
 import json
 import os
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 
 
 def cap_path():

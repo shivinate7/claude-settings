@@ -62,7 +62,7 @@ import os
 import re
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 from check_skill_model_rows import skill_names  # noqa: E402  one home for "a skill is a folder with SKILL.md"
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)

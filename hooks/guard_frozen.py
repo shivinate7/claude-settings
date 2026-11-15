@@ -64,6 +64,11 @@ CONFIG_FROZEN_DIRS = (
     # included. The two shapes that hide the path from PreToolUse, `python3 -c` and a script file,
     # are not covered here and `config_watch.py` reports a lost baseline as unknown, never clear.
     os.path.normcase("state"),
+    # `installs` holds each cloud install generation and `.cs-current` is the link that names the live one
+    # (decision install-hooks-whole). Every landed hook, guard module and skill resolves into the live
+    # generation, so a write there is a write to a hook by its real path, outside the `hooks` entry above.
+    os.path.normcase("installs"),
+    os.path.normcase(".cs-current"),
 )
 # skills/ is NOT frozen whole: a person's own skills under ~/.claude/skills stay writable.
 # Only the skills this repo ships are frozen, one name per entry, because a skill's frontmatter

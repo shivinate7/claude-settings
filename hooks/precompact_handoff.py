@@ -99,7 +99,7 @@ import shutil
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 try:
     from shared_names import config_dir  # noqa: E402  the one home of the config dir
 except ImportError:  # a copy by need: the hook lands before its sibling in an install, and must still build its digest
@@ -194,7 +194,7 @@ def required_sections():
     when the prompt cannot be read: the check then fails open."""
     path = prompt_path()
     if not os.path.exists(path):
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "precompact_handoff_prompt.md")
+        path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "precompact_handoff_prompt.md")
     return _marker_names(path)
 
 
@@ -754,7 +754,7 @@ def backed_premises(transcript, need, handoff):
             isinstance(pair, (list, tuple)) and len(pair) == 2 and isinstance(pair[0], str)
             and isinstance(pair[1], (list, tuple)) for pair in need):
         return None
-    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    lint = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lint")
     if lint not in sys.path:
         sys.path.insert(0, lint)
     try:
@@ -1495,7 +1495,7 @@ def cc_version_check(env=None, config=None):
             CC_TAIL))[:CC_MAX_LINE]
     blob, key = found
     facts = cc_facts(blob)
-    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", CC_BASELINE),
+    with open(os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", CC_BASELINE),
               encoding="utf-8") as f:
         base = json.load(f)
     changes = []

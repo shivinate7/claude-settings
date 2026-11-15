@@ -50,7 +50,7 @@ import re
 import sys
 from datetime import date, datetime, timedelta, timezone
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 for sub in (HERE, os.path.join(HERE, "..", "lint")):
     if sub not in sys.path:
         sys.path.insert(0, sub)

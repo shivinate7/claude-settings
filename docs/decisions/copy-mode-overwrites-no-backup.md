@@ -8,7 +8,7 @@ Owner: in copy mode, an installer overwrites its own old copy and keeps no backu
 - A backup from an older installer, named `settings.json.bak.<time>` with no pid, stays.
 - If the backup fails, the install stops before it replaces settings.json or removes an older backup.
 
-Skill backups: a skill backup never lands in `skills/` or any folder Claude Code scans. It goes to `backups/skills/<name>.<time>` under the config dir. Older `skills/<name>.bak.*` folders are moved there, never deleted. A cloud run records a tree hash of each skill it copies, in `backups/skill-copies/`. It replaces a copy with no backup when the copy matches that record or the source. Any other copy is backed up. The hash covers file names and contents only, so a mode, empty-folder or symlink-only change is replaced with no backup. The move takes only folders named `<name>.bak.<14 digits>`.
+Skill backups: a skill backup never lands in `skills/` or any folder Claude Code scans. It goes to `backups/skills/<name>.<time>` under the config dir. Older `skills/<name>.bak.*` folders are moved there, never deleted. A cloud run links each skill through its generation (`install-hooks-whole`). An older cloud run left a skill as a real copy. The link replaces it once. A copy that matches the tree hash recorded in `backups/skill-copies/`, or the source, goes with no backup. Any other copy is backed up. The hash covers file names and contents only, so a mode, empty-folder or symlink-only change is replaced with no backup. The move takes only folders named `<name>.bak.<14 digits>`.
 
 Why no backup: Git Bash `ln -s` makes a copy, so each install backed up the last copy. The `.bak` entries piled up and loaded as duplicate skills.
 

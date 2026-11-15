@@ -46,7 +46,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 # The folder guard_tree copies from. Read at call time, so a test can point it elsewhere.
-HOOKS_DIR = os.path.dirname(os.path.abspath(__file__))
+HOOKS_DIR = os.path.dirname(os.path.realpath(__file__))
 
 # How many red lines a wrong cause prints before it stops. A wrong cause usually carries one or
 # two, and the bound keeps a mutation that breaks half the suite from burying the rest of the run.
@@ -525,7 +525,7 @@ def ast_mutants(source: str, limit=None, seed: int = 0, lines=None):
 
 # The JavaScript and TypeScript engine runs in its own process, because its parser is the typescript
 # package (hooks/mutate_js.mjs). Cost: one `node` start per file mutated.
-JS_ENGINE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mutate_js.mjs")
+JS_ENGINE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "mutate_js.mjs")
 JS_ENGINE_TIMEOUT = 120
 
 
