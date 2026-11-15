@@ -69,7 +69,8 @@
                           default branch, and its config is read from it. A root whose read fails, or whose folder is
                           missing or unreadable, prints `repo DIR: unknown (REASON)`; the other roots print in full, and the run exits 1.
                           Cost: the gh calls of one --reviewed per root; no new process, file or timer.
-  merge --audit-prs       one line per open PR: number, branch, head, draft or ready, mergeable state (UNKNOWN: the list does not carry it), the newest
+  merge --audit-prs [-C PATH]
+                          one line per open PR: number, branch, head, draft or ready, mergeable state (UNKNOWN: the list does not carry it), the newest
                           review record's last round and verdict, and the lane-lint state at that head. Then the gh calls of each route. It stops, with
                           the remaining count, the limit and the reset time, when the GitHub API budget is under a tenth (decision gh-api-budget).
                           Cost: one call per 100 open PRs and one per page of repo comments; no per-PR call, no file, no new process or timer.
@@ -1663,13 +1664,20 @@ class Host:
         return held, [x for x in pending if x not in held]
 
     def runs(self, sha):
-        """The workflow runs of `sha`, less the ignored ones."""
+        """The workflow runs of `sha`, less the ignored ones. Kept in the GET memo for the run, so superseded, head_state and run_state read a head's
+        list once; any write through api clears it, and a merge under the lock (use_memo off) reads it fresh. A failed read is never kept."""
+        key = ("runs", sha)
+        if self.use_memo and key in self.memo:
+            return list(self.memo[key])
         c, out = self.gh(["run", "list", *self._repo_args(), "--commit", sha, "--limit", "100", "--json", "status,conclusion,name,workflowDatabaseId,databaseId"], self.cwd)
         try:
             runs = json.loads(out)
         except ValueError:
             raise Stop("gh run list failed " + READ_CITE + ": " + out)
-        return [r for r in runs if r["name"] not in self.ignore]
+        runs = [r for r in runs if r["name"] not in self.ignore]
+        if self.use_memo and not c:
+            self.memo[key] = runs
+        return list(runs)
 
     def run_state(self, sha):
         """-> (red, pending) from the workflow runs of `sha`. A run that is not completed holds the wait even
@@ -5184,7 +5192,7 @@ def own_records(n, bodies):
 def reviewed_read(h, cfgrel=None):
     """-> the lines of `merge --reviewed`, built before any is printed so a failed read prints none. Two list reads (the open pull requests, then the
     repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and the workflow run list (`head_state`'s `gh run list`) of its head,
-    read once (the lint step's rollup read and the CI state share them), and the ruleset and the branch protection once a run (decision pr-review-record, the cost;
+    read once (the lint step's rollup read and the CI state share them through the memo; Host.runs keeps the run list there, so a head whose check rows link two runs reads it once too), and the ruleset and the branch protection once a run (decision pr-review-record, the cost;
     decision gh-api-budget). The two list reads are bulk reads: each stops when the budget is under a tenth. The comment list pages every comment of the repo since the oldest open pull request.
     The same list holds the lane-lint comments: a done record counts as done only with a lane-lint PASS at the live head (lint_state), else its line
     names `merge --lane-lint <n>`; no extra call. A ready pull request with no such PASS adds one rollup_green read (the check runs and the commit
@@ -5243,9 +5251,11 @@ def audit_prs(h):
             review = "none"
         elif not rec:
             review = "unreadable"
-        else:
-            i, role, _model, verdict = rec["rounds"][-1]
-            review = f"round {i} {verdict} ({role})" + ("" if rec["head"] == sha else ", at an older head")
+        else:  # a record may hold a fix check and no round line (parse_review), so its fix check stands in for the last round
+            i, role, _model, verdict = rec["rounds"][-1] if rec["rounds"] else (None, None, None, None)
+            fix = rec["fix"]
+            review = (f"round {i} {verdict} ({role})" if i else f"fix check {fix[3]} ({fix[1]})" if fix else "no round")
+            review += "" if rec["head"] == sha else ", at an older head"
         lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {'draft' if d.get('draft') else 'ready'} {(d.get('mergeable_state') or 'unknown').upper()} "
                      f"review: {review}; lint: {lint_state(lints.get(n, []), sha)}")
     return lines or ["no open pull requests."], [f"{method} {route}: {count}" for (method, route), count in sorted(h.route_counts.items())]
@@ -5914,7 +5924,7 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--lint-unknown-ok goes with --lane-lint")
         if a.pr is not None and not a.pr.isdigit():
             p.error(f"argument pr: invalid int value: {a.pr!r}")
-    if a.audit_prs and any(v != p.get_default(k) for k, v in vars(a).items() if k != "audit_prs"):
+    if a.audit_prs and any(v != p.get_default(k) for k, v in vars(a).items() if k not in ("audit_prs", "repo_dir")):  # -C names the checkout to audit, not a second mode
         p.error("--audit-prs stands alone")
     if a.idle_lanes or a.touches or a.release_check or a.audit_prs:
         pass  # stands alone: checked above
