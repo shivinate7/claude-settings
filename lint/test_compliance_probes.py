@@ -3274,12 +3274,12 @@ ALIGNED_FILLER = ["- Repo note %d: this repo keeps its own lane labels." % n for
 ALIGNED_RULES_CHECKED = "Rules checked: %s %s no change" % (ALIGNED_ROUND, ALIGNED_DASH)
 
 
-def aligned_record(line38):
+def aligned_record(line38, home=ALIGNED_HOME):
     """A record of 43 lines: line 38 is `line38`, and the Home line names the anchor that citing units use."""
     lines = ["Fixture record line %d: text that no citing unit holds." % n for n in range(1, 38)]
     lines.append(line38)
     lines += ["Fixture record line %d: more text." % n for n in range(39, 42)]
-    lines += ["Kind: process", "Home: rule:%s" % ALIGNED_HOME]
+    lines += ["Kind: process", "Home: rule:%s" % home]
     return "\n".join(lines) + "\n"
 
 
@@ -3318,8 +3318,9 @@ class AlignedSteps:
     """The steps the aligned cases share: a child on origin/main that holds a record and its citing units, one PR branch
     that changes some of them, and the probe run with that PR's env. Not `run`: that name is unittest's own."""
 
-    def pr(self, base, change):
-        """A child on origin/main holding `base` ({path: text}), and a PR branch on it that writes `change`."""
+    def pr(self, base, change, delete=()):
+        """A child on origin/main holding `base` ({path: text}), and a PR branch on it that writes `change` and removes
+        the paths in `delete`."""
         repo = Repo(self, origin=True)
         for rel, text in base.items():
             repo.write(rel, text)
@@ -3328,6 +3329,8 @@ class AlignedSteps:
         repo.branch("pr")
         for rel, text in change.items():
             repo.write(rel, text)
+        for rel in delete:
+            repo.git("rm", "-q", "-f", rel)
         return repo.commit("change")
 
     def cited(self, unit=ALIGNED_CITE, rel="CLAUDE.md", line38=ALIGNED_LINE38):
@@ -3536,6 +3539,155 @@ class AlignedEdges(AlignedSteps, unittest.TestCase):
         self.assertTrue(out.startswith("aligned: "), "the probe did not run on this checkout: %s%s" % (out, err))
         self.assertNotIn("n/a", head(out), "a claude-settings checkout must run the group, not print n/a")
         self.assertEqual(code, 0, "this checkout with no change is refused: %s%s" % (out, err))
+
+
+# Round 2 (units, folders, deleted records). A unit is one sentence, from the previous rule anchor to its own; the paragraph
+# shapes below are built here, in the shape of CLAUDE.md:13-38, and never copied from the live file.
+ALIGNED_OTHER = "other-decision"  # a second record that a sentence of the same paragraph cites
+ALIGNED_OTHER_RECORD = "docs/decisions/%s.md" % ALIGNED_OTHER
+ALIGNED_OTHER_CHECKED = "Rules checked: %s %s no change" % (ALIGNED_OTHER, ALIGNED_DASH)
+ALIGNED_PARA_BEFORE = ALIGNED_FILLER[:6]  # six units put a paragraph at line 13, where CLAUDE.md:13-38 starts
+ALIGNED_LEAD = "**Review.** Earlier sentence one holds its own rule. <!-- rule:alpha-one -->"
+ALIGNED_LEAD_EDITED = "**Review.** Earlier sentence one holds a changed rule. <!-- rule:alpha-one -->"
+ALIGNED_TAIL = "Closing sentence has no citation. <!-- rule:alpha-three -->"
+ALIGNED_CITE_LINE = "Decision `%s` holds the round rules. <!-- rule:%s -->" % (ALIGNED_ROUND, ALIGNED_HOME)
+ALIGNED_CITE_LINE_EDITED = ("Decision `%s` holds the round rules and a fix check. <!-- rule:%s -->"
+                            % (ALIGNED_ROUND, ALIGNED_HOME))
+# The driver runs the real CLI with listing refused for one path. This user is root, so chmod cannot lock a folder.
+ALIGNED_DRIVER = (
+    "import os, runpy, sys\n"
+    "locked, mode, probe, root = sys.argv[1:5]\n"
+    "def refuse(real):\n"
+    "    def wrapped(path='.', *args, **kwargs):\n"
+    "        if os.path.abspath(path) == locked:\n"
+    "            raise PermissionError(13, 'Permission denied', path)\n"
+    "        return real(path, *args, **kwargs)\n"
+    "    return wrapped\n"
+    "if mode == 'listdir':\n"
+    "    os.listdir = refuse(os.listdir)\n"
+    "else:\n"
+    "    os.scandir = refuse(os.scandir)\n"
+    "sys.argv = [probe, 'aligned', root]\n"
+    "runpy.run_path(probe, run_name='__main__')\n"
+)
+
+
+def other_record():
+    return aligned_record(ALIGNED_LINE38, home="other-home")
+
+
+def para_file(lines, before=ALIGNED_PARA_BEFORE):
+    """A rule file: `before` units, a blank line, then one paragraph of `lines`, one physical line each, no blank line
+    between. Returns (text, the paragraph's first line number)."""
+    return "\n\n".join(list(before)) + "\n\n" + "\n".join(lines) + "\n", 2 * len(before) + 1
+
+
+def para_base(lines):
+    """(base files, the paragraph's first line): CLAUDE.md with the paragraph, and both records it cites."""
+    text, first = para_file(lines)
+    return {"CLAUDE.md": text, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38), ALIGNED_OTHER_RECORD: other_record()}, first
+
+
+def short_paragraph():
+    """Four sentences: an earlier one that cites the other record, the cited sentence third, then a tail with no citation."""
+    return [ALIGNED_LEAD, "Earlier sentence two cites `%s` and stays as it is. <!-- rule:alpha-two -->" % ALIGNED_OTHER,
+            ALIGNED_CITE_LINE, ALIGNED_TAIL]
+
+
+def long_paragraph():
+    """The shape of CLAUDE.md:13-38: one paragraph of 26 physical lines, a bold lead, an anchor ending each sentence, and
+    the record cited in the last line. Sentence two cites the other record."""
+    lines = [ALIGNED_LEAD]
+    for n in range(1, 25):
+        if n == 2:
+            text = "Sentence two cites `%s` and keeps its wording." % ALIGNED_OTHER
+        else:
+            text = "Sentence %d keeps its own wording in the synthetic rule paragraph." % n
+        lines.append("%s <!-- rule:synth-%d -->" % (text, n))
+    lines.append(ALIGNED_CITE_LINE)
+    return lines
+
+
+class AlignedUnits(AlignedSteps, unittest.TestCase):
+    """Items (a), (b) and (c): a unit is one sentence, so an edit to an earlier sentence of the same paragraph does not
+    clear a cited record, a change to the cited sentence names that sentence's line, and that line demands only the records
+    that sentence cites."""
+
+    def test_an_earlier_sentence_edit_in_the_same_paragraph_does_not_clear_the_cited_record(self):
+        lines = short_paragraph()
+        base, first = para_base(lines)
+        edited, _ = para_file([ALIGNED_LEAD_EDITED] + lines[1:])
+        repo = self.pr(base, {"CLAUDE.md": edited, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_refused(repo, "CLAUDE.md:%d" % (first + 2), ALIGNED_ROUND, body=ALIGNED_OTHER_CHECKED)
+
+    def test_a_change_at_the_last_sentence_demands_only_the_records_that_sentence_cites(self):
+        lines = short_paragraph()
+        base, first = para_base(lines)
+        edited, _ = para_file(lines[:2] + [ALIGNED_CITE_LINE_EDITED] + lines[3:])
+        repo = self.pr(base, {"CLAUDE.md": edited})
+        code, out, err = self.probe_pr(repo)
+        cite = first + 2
+        self.assertIsNotNone(item_for(out, "CLAUDE.md:%d" % cite),
+                             "the refusal does not name the sentence's line %d: %s%s" % (cite, out, err))
+        self.assertIsNone(item_for(out, "CLAUDE.md:%d" % first),
+                          "the refusal names the paragraph's first line, not the sentence: %s" % out)
+        self.assertNotIn(ALIGNED_OTHER, out, "the refusal demands a record the changed sentence does not cite: %s" % out)
+        self.assertIn(ALIGNED_ROUND, out, "the refusal does not name the record the sentence cites: %s" % out)
+        self.assertEqual(code, 1, "the refusal exits with the wrong code: %s%s" % (out, err))
+
+    def test_a_real_shape_paragraph_with_an_earlier_edit_is_refused_at_its_sentence(self):
+        lines = long_paragraph()
+        base, first = para_base(lines)
+        cite = first + len(lines) - 1  # CLAUDE.md:38 in the live shape
+        edited_lines = list(lines)
+        edited_lines[5] = "Sentence 5 changed earlier in the same paragraph. <!-- rule:synth-5 -->"
+        edited, _ = para_file(edited_lines)
+        repo = self.pr(base, {"CLAUDE.md": edited, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_refused(repo, "CLAUDE.md:%d" % cite, ALIGNED_ROUND, body=ALIGNED_OTHER_CHECKED)
+
+
+class AlignedFolders(AlignedSteps, unittest.TestCase):
+    """Item (d): a folder the probe cannot read is unknown, exit 2 with a verdict line, never clear and never a traceback."""
+
+    def locked_run(self, repo, locked, mode):
+        """(exit code, stdout, stderr) of the real CLI on `repo`, with listing refused for the path `locked`."""
+        env = pr_env(repo.base_sha, commit_sha(repo.root, "HEAD"))
+        done = subprocess.run([sys.executable, "-c", ALIGNED_DRIVER, locked, mode, PROBES, repo.root], env=env,
+                              capture_output=True, text=True)
+        return done.returncode, done.stdout, done.stderr
+
+    def test_an_unreadable_folder_in_the_rule_walk_is_unknown(self):
+        text, _ = unit_file(ALIGNED_CITE)
+        base = {"docs/rules/locked/review.md": text, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38)}
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        locked = os.path.join(repo.root, "docs", "rules", "locked")
+        code, out, err = self.locked_run(repo, locked, "scandir")
+        self.assertTrue(out.startswith("aligned: "), "the probe did not run: %s%s" % (out, err))
+        self.assertEqual(code, 2, "an unreadable folder in the rule walk was read as clear: %s%s" % (out, err))
+        self.assertTrue(head(out).startswith("aligned: unknown"), out)
+
+    def test_an_unreadable_decisions_folder_is_unknown_with_a_verdict_not_a_traceback(self):
+        base, _ = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        locked = os.path.join(repo.root, "docs", "decisions")
+        code, out, err = self.locked_run(repo, locked, "listdir")
+        self.assertNotIn("Traceback", err, "an unreadable decisions folder raised a traceback, not a verdict: %s" % err)
+        self.assertTrue(head(out).startswith("aligned: unknown"), "no unknown verdict line: %s%s" % (out, err))
+        self.assertEqual(code, 2, "an unreadable decisions folder did not exit 2: %s%s" % (out, err))
+
+
+class AlignedDeleted(AlignedSteps, unittest.TestCase):
+    """Item (e): a PR that deletes a record still refuses the units that cite it, by its anchor or by its slug."""
+
+    def test_a_deleted_record_cited_only_by_its_anchor_is_refused(self):
+        base, where = self.cited(unit=ALIGNED_ANCHOR)
+        repo = self.pr(base, {}, delete=(ALIGNED_RECORD,))
+        self.assert_refused(repo, where, ALIGNED_ROUND)
+
+    def test_a_deleted_record_cited_only_by_its_slug_is_refused(self):  # green control: the slug form already counts it
+        base, where = self.cited()
+        repo = self.pr(base, {}, delete=(ALIGNED_RECORD,))
+        self.assert_refused(repo, where, ALIGNED_ROUND)
 
 
 def tearDownModule():
