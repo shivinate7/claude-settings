@@ -180,9 +180,15 @@ def _effects_hit(pairs):
 # <what changes>` must hold both sides, and the change side must not say there is no change. This is the
 # one predicate: the chat box, a page decision and the report's Input Needed pick all call it.
 DEPARTS_RULE = "question-departs"
-# The one pattern for a Departs from line: at a line start, with an optional bullet ("- ", "* ") and an
-# optional bold label ("**Departs from:**"). Group 1 is the rest of the line; a CR from CRLF is no part of it.
-DEPARTS_LINE = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?(?:\*\*)?Departs from(?:\*\*)?:(?:\*\*)?([^\n]*)", re.I | re.M)
+
+
+def labelled_line(label):
+    """The one pattern for a labelled line: at a line start, with an optional bullet ("- ", "* ") and an optional
+    bold label ("**Departs from:**"). Group 1 is the rest of the line; a CR from CRLF is no part of it."""
+    return re.compile(r"^[ \t]*(?:[-*+][ \t]+)?(?:\*\*)?" + label + r"(?:\*\*)?:(?:\*\*)?([^\n]*)", re.I | re.M)
+
+
+DEPARTS_LINE = labelled_line("Departs from")
 # The separator: an em dash, spaced or not, or " - " or " -- ". The first one splits the line.
 DEPARTS_SEPARATOR = re.compile(r"\s*\u2014\s*|\s+--?\s+")
 # Whole words and phrases that say the change side restates main. "stay", "remain" and "kept" are not
@@ -1870,8 +1876,11 @@ def departs_text(text) -> str:
 
 
 # A Based on (ruling) line: the question names the ruling it builds on (the kind check is BASED_LINE's, this reads the text).
-BASED_RULING_LINE = re.compile(r"^[ \t]*Based on[ \t]*\(ruling\):[ \t]*([^\n]*)", re.I | re.M)
+BASED_RULING_LINE = labelled_line(r"Based on[ \t]*\(ruling\)")
 DEPARTS_SHARED_MIN = 3
+# Words of a form-shaped Departs from line ("main adds a check to the form field line") that every such line holds:
+# they never count toward the overlap, or one generic ruling refuses them all. Not in STOPWORDS: other checks keep them.
+DEPARTS_GENERIC = frozenset(("main", "adds", "check", "line", "form", "field"))
 # A ruled-store candidate ends with its metadata; the check reads the ruling only, since a supersedes ref holds topic words.
 RULED_META = re.compile(r" \((?:owner [^()]*; open, not on main; supersedes .*)\)(?: \(unchecked, not law\))?$", re.S)
 
@@ -1880,7 +1889,7 @@ def departs_ruling_hit(text, candidates):
     """(ruling id, candidate line) of the first open ruling whose words share DEPARTS_SHARED_MIN or more with the Departs
     from lines of `text`, when no `Based on (ruling)` line of `text` names that id (bare or with `ruled:`); else ("", "").
     A candidate counts when its id starts `ruled:` or is a step id, never `decisions/` or `debts/`. An `Unvetted:` line skips it."""
-    focus = _words(departs_text(text))
+    focus = _words(departs_text(text)) - DEPARTS_GENERIC
     if not focus or has_unvetted(text):
         return "", ""
     cited = " ".join(BASED_RULING_LINE.findall(text))
@@ -1891,7 +1900,8 @@ def departs_ruling_hit(text, candidates):
         bare = rid[len("ruled:"):] if rid.startswith("ruled:") else rid
         if len(focus & _words(RULED_META.sub("", body))) < DEPARTS_SHARED_MIN:
             continue
-        if not re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(bare), cited):
+        # A "/" before the id is a record path (`decisions/<stem>`), not the step ruling.
+        if not re.search(r"(?<![\w/-])%s(?![\w-])" % re.escape(bare), cited):
             return rid, line
     return "", ""
 
