@@ -1,0 +1,16 @@
+{
+ "id": "saved-comment-owner-ellipsis",
+ "title": "Lane saved-comment-owner-ellipsis (PR #3536)",
+ "priority": "now",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "triage",
+ "lane": "saved-comment-owner-ellipsis",
+ "pr": 3536,
+ "blockedBy": [],
+ "updatedAt": "2026-11-15T13:16:00-06:00",
+ "why": "[13:11 CST Nov 15, triage] Branch saved-comment-owner-cut holds only a mistaken amend; the lane pushes it to archive/saved-comment-owner-cut. The remote delete waits for a computer-side session (standing grant, claude-settings .claude/CLAUDE.md \"Acts the cloud refuses\"). Lane lint runs through runner 10 (worktree guard gap). Follow-up check filed as step owner-field-writer-check. (coordinator 13:11 CST, relayed by triage; not owner-typed, undoable) New step; none existed.",
+ "source": "coordinator 13:11 CST, relayed by triage; not owner-typed",
+ "note": "Doing. Branch saved-comment-owner-cut holds only a mistaken amend; the lane pushes it to archive/saved-comment-owner-cut. The remote delete waits for a computer-side session (standing grant, claude-settings .claude/CLAUDE.md \"Acts the cloud refuses\"). Lane lint runs through runner 10 (worktree guard gap). Guard or check: unverified (not relayed)."
+}

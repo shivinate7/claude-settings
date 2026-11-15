@@ -1,0 +1,14 @@
+{
+ "id": "owner-field-writer-check",
+ "title": "Page-writer check: an item's owner field is a role or lane slug only",
+ "priority": "now",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "triage",
+ "blockedBy": [],
+ "updatedAt": "2026-11-15T13:16:00-06:00",
+ "why": "[13:11 CST Nov 15, triage] A page-writer check that a page item's owner field is a role or lane slug only, never \"role (session id)\". Asked by lane saved-comment-owner-ellipsis (PR #3536, 13:10 CST). Triage 13:11 CST: already ruled by the waiting-page skill's owner field rule, so no owner question; queued as its own lane, not that PR. (coordinator 13:11 CST, relayed by triage; not owner-typed, undoable) New step.",
+ "source": "coordinator 13:11 CST, relayed by triage; not owner-typed",
+ "note": "A page-writer check that a page item's owner field is a role or lane slug only, never \"role (session id)\". Asked by lane saved-comment-owner-ellipsis (PR #3536, 13:10 CST). Triage 13:11 CST: already ruled by the waiting-page skill's owner field rule, so no owner question; queued as its own lane, not that PR. Guard or check: yes (unverified; triage read no PR)."
+}
