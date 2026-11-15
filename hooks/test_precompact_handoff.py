@@ -3592,11 +3592,12 @@ def hooks_name(module, attr):
         return None
 
 
-def shell_merge(name, ts, text=LAG_MERGED_LINE):
-    """A merge-tool call through the shell tool `name`, with its result text (the success line by default)."""
+def shell_merge(name, ts, text=LAG_MERGED_LINE, is_error=False):
+    """A merge-tool call through the shell tool `name`, with its result text (the success line by default).
+    is_error True is a result the shell tool flags as failed, whatever its text says."""
     tu = "tu-merge-%s" % name.lower()
     return [tool_call(tu, name, {"command": LAG_MERGE_CMD}, ts),
-            tool_result(text, ts, is_error=False, tool_use_id=tu)]
+            tool_result(text, ts, is_error=is_error, tool_use_id=tu)]
 
 
 def big_tail_lines():
@@ -3631,6 +3632,70 @@ def case_lag_merge_shell_tools_block():
             lag_blocks(c, "merge, %s merge tool" % name, shell_merge(name, LAG_AFTER))
         finally:
             c.cleanup()
+
+
+def case_lag_shell_merge_error_with_line_blocks():
+    """Merge, Bash, is_error with the success line: the line is the proof the merge landed. merge/merge.py says
+    `merge: #N merged as <sha>` before it can exit 1 (a failed ff_main or after_merge), so the result still blocks.
+    Control: the same error result with no success line stays quiet."""
+    c = Case("lag_bash_err_line")
+    try:
+        lag_blocks(c, "merge, Bash, error result with the success line",
+                   shell_merge("Bash", LAG_AFTER, is_error=True))
+    finally:
+        c.cleanup()
+    c = Case("lag_bash_err_noline")
+    try:
+        lag_handoff(c)
+        text = "merge: #2046 is not merged: the checks are not green."
+        p = lag_stop(c, plain_lines(2) + shell_merge("Bash", LAG_AFTER, text=text, is_error=True))
+        check("handoff lag (merge, Bash, error result with no success line): quiet", quiet_exit(p),
+              "out=%r" % (p.stdout or "")[:200])
+    finally:
+        c.cleanup()
+
+
+def case_lag_merge_tool_without_merge_in_name_blocks():
+    """Merge tool named without `merge`: a name in guard_merge.MERGE_TOOLS counts even when it lacks the substring.
+    The hook reads a name for `merge` before it reads MERGE_TOOLS (precompact_handoff._lag_merge_kind). The Stop runs
+    in a child process, which a patch here cannot reach, so the seam is in-process: MERGE_TOOLS is patched on
+    hooks/guard_merge.py, the module the hook imports, and handoff_lag_event is called. Control: a name outside
+    MERGE_TOOLS without `merge` stays quiet."""
+    import guard_merge
+    check("handoff lag (MERGE_TOOLS seam): the hook's guard_merge is hooks/guard_merge.py",
+          os.path.samefile(guard_merge.__file__, os.path.join(HERE, "guard_merge.py")),
+          "file: %r" % guard_merge.__file__)
+    land = "mcp__github__land_pull_request"
+    c = Case("lag_land_tool")
+    saved = guard_merge.MERGE_TOOLS
+    try:
+        guard_merge.MERGE_TOOLS = (land,)
+        lag_handoff(c)
+        tp = os.path.join(c.root, "land.jsonl")
+
+        def lag_event_at(lines):
+            write_transcript(tp, lines)
+            with Env(CLAUDE_CONFIG_DIR=c.cfg):
+                return call_under_test("handoff_lag_event",
+                                       {"session_id": c.session_id, "transcript_path": tp})
+
+        value, err = lag_event_at(plain_lines(2))
+        check("handoff lag (MERGE_TOOLS name, scope): a plain transcript is quiet",
+              value is None and err is None, "value=%r err=%r" % (value, err))
+        value, err = lag_event_at(plain_lines(2) + [
+            tool_call("tu-land", land, LAG_MERGE_ARGS, LAG_AFTER),
+            tool_result("merged #2046", LAG_AFTER, is_error=False, tool_use_id="tu-land")])
+        check("handoff lag (MERGE_TOOLS name without merge): a successful call after the mtime counts",
+              value is not None and err is None, "value=%r err=%r" % (value, err))
+        other = "mcp__github__get_pull_request"
+        value, err = lag_event_at(plain_lines(2) + [
+            tool_call("tu-get", other, LAG_MERGE_ARGS, LAG_AFTER),
+            tool_result("#2046 open", LAG_AFTER, is_error=False, tool_use_id="tu-get")])
+        check("handoff lag (name outside MERGE_TOOLS, no merge in it): quiet",
+              value is None and err is None, "value=%r err=%r" % (value, err))
+    finally:
+        guard_merge.MERGE_TOOLS = saved
+        c.cleanup()
 
 
 def case_lag_relay_request_or_question_stays_quiet():
@@ -3902,6 +3967,8 @@ def main() -> int:
     case_lag_writes_no_file_and_starts_no_process()
     case_lag_merge_result_without_a_merge_stays_quiet()
     case_lag_merge_shell_tools_block()
+    case_lag_shell_merge_error_with_line_blocks()
+    case_lag_merge_tool_without_merge_in_name_blocks()
     case_lag_relay_request_or_question_stays_quiet()
     case_lag_role_fenced_stays_quiet()
     case_lag_role_restated_stays_quiet()
