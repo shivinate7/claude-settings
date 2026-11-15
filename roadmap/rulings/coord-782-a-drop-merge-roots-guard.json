@@ -1,0 +1,10 @@
+{
+ "id": "coord-782-a-drop-merge-roots-guard",
+ "at": "2026-11-14T20:29:00-06:00",
+ "title": "Coordinator's pick under the owner's 20:18 words: drop the merge-roots guard and close its stack's PRs (item 782 a)",
+ "ruling": "COORDINATOR'S PICK, not the owner's own. Coordinator 20:27 CST Nov 14 took the option of page item 782 (pick-guard-small-meaning) whose label reads \"(recommended)\": a, drop the guard and close the stack's PRs. Taken under the owner's 20:18 CST Nov 14 words \"Nothing can't be undone don't wait on me\" and ruling own-consultant-speaks-for-owner. Consistent with owner ruling own-715-c-guard-replay (\"keep it only if a replay shows no false refusals and the build is small; otherwise drop it\"): the lane measured about 275 hook lines plus 755 test lines as a 38-commit stack on an old base (the lane's numbers, unchecked by triage), and the replay needs a session on the owner's computer. Option a has no widens flag and widens no shared tool. Covers the act option a names, never a variant; undo route: archive the stack's branches before deleting them (rule shared-trees-archive-then-delete), PRs can be reopened. If the owner disagrees, say so and it reopens. ITEM NOT CLOSED: the page holds an owner answer act=park saved 19:21 CST Nov 13 (01:21Z Nov 14), before his 20:18 words. A park is the owner setting the item aside; whether his later 'don't wait on me' lifts it is not named, so triage (fork) left the item open and the answers doc in place; the parent decides.",
+ "quote": "coordinator 20:27 CST Nov 14 (relayed to triage): \"Item 782 pick-guard-small-meaning: I take its label-recommended option (non-widening), mine, under his 20:18 and 20:22 words; file it as my pick and close it.\"",
+ "source": "Coordinator message to triage 20:27 CST Nov 14 (data); filed by triage (fork) 20:29 CST Nov 14. Item text read on the page, version 1.",
+ "status": "open",
+ "step": "runner-repos-in-parallel"
+}
