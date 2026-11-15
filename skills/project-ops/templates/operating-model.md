@@ -10,7 +10,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
 - **Coordinator.** One per repo. It is the one session that starts other sessions. It starts
   triage and the batch runner together, as a trio, before any lane. It holds lane state
   and writes each lane brief. It starts each lane in roadmap order, with `model` (the lane row's),
-  `source_url` (the repo) and effort `medium`. It sets the tags `cs-repo`, `cs-build:lane`, `cs-step`
+  `source_url` (the repo), effort `medium` and `title` `Lane <branch slug>: <task>`. It sets the tags `cs-repo`, `cs-build:lane`, `cs-step`
   and `cs-topic`. Its whole brief is the first prompt, and it opens with the Grant line. It talks with the owner. Before a fix lane for a red CI case, it runs
   `~/.claude/bin/merge --touches --run <run id>` and reads each open PR named (decision `session-tiers`, "Who starts which session"). On a local session, the load
   brake, not a number, decides how many lanes run at once. It does not rotate (see below).
@@ -152,7 +152,7 @@ parent, or miss a message while busy.
   `pr-review-record`). That push makes the record stale, so the lane posts a new review log for the
   new head. When the repo holds a standing merge grant, the batch runner merges under it. The owner is
   not asked.
-- A session that waits on CI sets a one-time check-in when it starts to wait, and again after each red job, each wider apart.
+- A session that waits on CI sets a one-time check-in when it starts to wait, and again after each red job, each wider apart, never past 55 minutes.
 - Stall check: at each wake, a standing session asks whether any lane, PR or batch moved since its last
   turn. When none moved and work is ready, it finds why and acts, or tells the owner what blocks it.
   A turn that ends waiting on a named event sets a one-time check-in for that event. It sets the next one only when a new named event arrives, such as a red job, never on a wake from anything else.
@@ -189,7 +189,9 @@ parent, or miss a message while busy.
 ## Briefs
 
 - A brief for a lane or a local session goes in `briefs/<step>-<slug>.md` on the record branch,
-  from `brief.md`. Its full text also goes in the step's `ask` field.
+  built by `scripts/brief_from_step.py <step>` from the step file and the rulings that name it. The tool fills
+  `brief.md`'s fixed sections and leaves the Grant, Base, Topic, Fences, files and done-check markers for the coordinator.
+  Its full text also goes in the step's `ask` field.
 - When a ruling changes a step, update the brief file and the `ask` copy in the same turn.
 
 ## Portability
