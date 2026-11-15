@@ -382,6 +382,7 @@ WRAPPER_VALUE_FLAGS = {
 # them. Their value flags sit here so `_wrapper_flags` skips the same way.
 WRAPPER_VALUE_FLAGS.update({
     "stdbuf": {"-i", "-o", "-e"}, "caffeinate": {"-t", "-w"},
+    "ionice": {"-c", "--class", "-n", "--classdata", "-p", "--pid", "-P", "--pgid", "-u", "--uid"},
     "flock": {"-w", "-E", "--timeout", "--conflict-exit-code"},
     "docker": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
     "podman": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
@@ -1046,6 +1047,27 @@ def _feeds_data(header: str, scripts: bool) -> bool:
     return fed
 
 
+def own_heredoc_bodies(segment: str, raw: str, before: int):
+    """Return the bodies of the heredocs whose headers sit inside this segment, in order. A heredoc
+    of another command (`cat <<A && git commit -F - <<B`) is not the message.
+
+    `before` is the count of headers in the segments ahead of this one. Raw is walked as the
+    shell reads it (_split_heredocs): each header outside quotes and comments takes the next body
+    in turn, and a body line is never read for headers. This segment takes the bodies `before`
+    onward, one per header it holds, so two commits with the same text each take their own body.
+    Raw is walked twice, bash's reading and the contraction reading, as split_segments does, and
+    the bodies of both are judged: a lone `'` can hide a header from one reading, never both.
+    """
+    count = len(heredoc_heads(segment)[0])
+    if not count:
+        return []
+    texts = []
+    for contractions_are_text in (False, True):   # bash's reading, then the contraction reading
+        found = [body for _, body, _ in _split_heredocs(raw, contractions_are_text)[1]]
+        texts.extend(found[before:before + count])
+    return list(dict.fromkeys(texts))   # the readings often agree: judge each body once
+
+
 def strip_heredoc_bodies(cmd: str, shells_only: bool = False, per_body: bool = False) -> str:
     """Drop the body of every heredoc, and keep every header line. `shells_only` keeps a body
     only when a shell reads it, for a rule that judges shell lines. One body that runs keeps every body in
@@ -1302,6 +1324,10 @@ def pathspec_from_file_flag(arg: str) -> bool:
 # spaced form are read, because git takes either. This one stays a raw-text regex: it is outside
 # this fix's scope (the recorded debt named only `_run_dir`'s `cd`/`git -C` reading).
 GIT_WORK_TREE_RE = re.compile(r"--work-tree(?:=|\s+)(['\"]?)([^'\";&|\s]+)\1")
+# A git-dir entry that shows a replay in progress: its staged change is git's copy plus what the agent
+# resolved. A MERGE_MSG without MERGE_HEAD is a `cherry-pick -n` or `revert -n`. The one home: the builder-diff
+# read (hooks/guard.py) and the red-run commit read (hooks/guard_merge.py) both ask it.
+REPLAY_MARKS = ("CHERRY_PICK_HEAD", "REVERT_HEAD", "SQUASH_MSG", "MERGE_MSG", "rebase-merge", "rebase-apply")
 
 
 CD_WORDS = ("cd", "chdir", "pushd", "set-location", "push-location")
@@ -2346,7 +2372,7 @@ FIND_EXEC_ACTIONS = ("-exec", "-execdir", "-ok", "-okdir")
 
 def wrapped_commands(tokens, at: int, strict: bool = False):
     """The command texts the runner at `tokens[at]` starts, else []. Read: `docker|podman exec`,
-    `kubectl exec ... --`, `find -exec ... ;`, `su -c`, `flock FILE`, `stdbuf`, `unbuffer`,
+    `kubectl exec ... --`, `find -exec ... ;`, `su -c`, `flock FILE`, `stdbuf`, `ionice`, `unbuffer`,
     `caffeinate`, `watch`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as
     `sh -c`. `watch` joins its words with spaces and hands the line to `sh -c`, so its text is that
     line.
@@ -2376,7 +2402,7 @@ def wrapped_commands(tokens, at: int, strict: bool = False):
         rest, skip = rest[1:], 1   # the container
     elif word == "flock":
         skip = 1   # the lock file
-    elif word not in ("stdbuf", "unbuffer", "caffeinate"):
+    elif word not in ("stdbuf", "ionice", "unbuffer", "caffeinate"):
         return []
     index, flags = _wrapper_flags(word, rest, 0)
     if strict and word in ("docker", "podman"):

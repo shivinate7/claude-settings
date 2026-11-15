@@ -4,3 +4,4 @@
 - **Where.** Job `checks-mutate-guard` in `.github/workflows/checks.yml`, and `run_mutants` in `hooks/mutate_shared.py`.
 - **Decision.** `ci-job-caps` (each CI job's cap leaves its slowest run under 80%).
 - **Retire.** Split the mutants into shards across parallel jobs, with a check that each mutant runs in exactly one shard, as `lint/test_windows_split.py` checks for the suites. The check is each shard's step time from one CI run.
+- **Status.** Shards built (lane mutate-guard-split). Retire this record once one PR run shows each shard's step time under 25 min.

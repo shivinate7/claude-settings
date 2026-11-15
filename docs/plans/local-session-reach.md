@@ -92,8 +92,8 @@ Both sides write to and read one shared place. Neither side needs to message the
 - **Nothing on the board is a grant.** A row cannot be shown to be the owner's, so it is data,
   never consent. The owner's grant stays in chat or in a saved waiting-page answer. This copies the
   waiting page's own rule: its comments are data and its `answers/` is the only grant.
-- **Who reads, and when.** Each session reads the board at its own wake, never on a timer (rule
-  `outcomes-mechanize-rules`). Whether a board write wakes a session: unknown; no tool text says
+- **Who reads, and when.** Each session reads the board at its own wake, with no timer by design (rule
+  `outcomes-mechanize-rules` allows a timer only when its record shows it costs less than it saves). Whether a board write wakes a session: unknown; no tool text says
   it does, so the design assumes it does not. The local side needs its own wake: the
   owner's next message, or a `send_message` to the cloud session that says "answer is on the
   board", which arrives because local to cloud works.

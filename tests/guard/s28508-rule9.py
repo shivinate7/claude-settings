@@ -292,6 +292,47 @@ add("floor step-up: Workflow reviewer with a fix verifier and a model in a varia
 add("floor step-up: Workflow reviewer with a fix verifier and a spread is allowed, the static read skips it", "allow",
     tool="Workflow", script=_step_flow("'%s. Re-check the diff.'" % FIX_VERIFIER, "agentType: 'reviewer', ...opts"))
 
+# ---- Step-up, a reviewer whose brief carries the guard marker (decision agent-model-cap, the `1 guard` round row, sonnet).
+# A reviewer on a guard or check change runs Sonnet on any round, so the step-up refuses a guard-marked reviewer below
+# Sonnet: on Haiku, on a blank model, or with no model. The marker counts only at the start of a line outside a fence.
+# A guard-marked reviewer on a later round keeps its round reason. The marker is typed here, as FIX_VERIFIER is, so a rename
+# of the constant cannot quietly change what these cases pin.
+# Failure classes: a false allow (a guard-marked reviewer on Haiku, a blank model or no model reviews a guard change on
+# Haiku); a false refusal (a fenced or mid-line marker, a non-reviewer, or a reviewer on Sonnet is refused).
+GUARD_LINE = "Guard or check: yes"
+GUARD_REASON = "Reviewer round 1 on a guard or check change runs on Sonnet. Spawn it with model sonnet."
+GUARD_BRIEF = GUARD_LINE + "\nCheck the guard diff."
+add("floor step-up: reviewer with the guard marker on haiku is denied, and names Sonnet", "deny", STEP_UP,
+    tool="Agent", prompt=GUARD_BRIEF, model="haiku", subagent_type="reviewer", carries=(GUARD_REASON,), lacks=("Opus",))
+add("floor step-up: reviewer with the guard marker and a blank model is denied, and names Sonnet", "deny", STEP_UP,
+    tool="Agent", prompt=GUARD_BRIEF, model="  ", subagent_type="reviewer", carries=(GUARD_REASON,), lacks=("Opus",))
+add("floor step-up: reviewer with the guard marker and no model is denied, and names Sonnet", "deny", STEP_UP,
+    tool="Agent", prompt=GUARD_BRIEF, subagent_type="reviewer", carries=(GUARD_REASON,), lacks=("Opus",))
+add("floor step-up: reviewer with Round 1 of 3 and the guard marker on line two, on haiku, is denied", "deny", STEP_UP,
+    tool="Agent", prompt="Round 1 of 3. Check the guard diff.\n" + GUARD_LINE, model="haiku", subagent_type="reviewer",
+    carries=(GUARD_REASON,))
+add("floor step-up: reviewer with the guard marker at the end of a 400-line brief, on haiku, is denied", "deny", STEP_UP,
+    tool="Agent", prompt="Check the diff.\n" * 399 + GUARD_LINE, model="haiku", subagent_type="reviewer",
+    carries=(GUARD_REASON,))
+add("floor step-up: Workflow reviewer with the guard marker on haiku is denied", "deny", STEP_UP,
+    tool="Workflow", script=_step_flow("'%s. Check the guard diff.'" % GUARD_LINE, "agentType: 'reviewer', model: 'haiku'"))
+add("floor step-up: reviewer with the guard marker on sonnet is allowed", "allow",
+    tool="Agent", prompt=GUARD_BRIEF, model="sonnet", subagent_type="reviewer")
+add("floor step-up: reviewer with Round 1 of 3 and no guard marker on haiku is allowed", "allow",
+    tool="Agent", prompt="Round 1 of 3. Check the diff.", model="haiku", subagent_type="reviewer")
+add("floor step-up: reviewer with the guard marker inside a fence on haiku is allowed", "allow",
+    tool="Agent", prompt="Quoted template:\n```\n" + GUARD_LINE + "\n```\nCheck the diff.", model="haiku",
+    subagent_type="reviewer")
+add("floor step-up: reviewer with the guard marker mid-line on haiku is allowed", "allow",
+    tool="Agent", prompt="Check the diff. " + GUARD_LINE + " is in the record.", model="haiku", subagent_type="reviewer")
+add("floor step-up: test-author with the guard marker on haiku is allowed (not a reviewer)", "allow",
+    tool="Agent", prompt=GUARD_BRIEF, model="haiku", subagent_type="test-author")
+add("floor step-up: builder with the guard marker and no model is allowed (not a reviewer)", "allow",
+    tool="Agent", prompt=GUARD_BRIEF, subagent_type="builder")
+add("floor step-up: reviewer with Round 2 of 3 and the guard marker, no model, keeps the round-2 reason", "deny", STEP_UP,
+    tool="Agent", prompt="Round 2 of 3. Re-check the diff.\n" + GUARD_LINE, subagent_type="reviewer",
+    carries=("Reviewer round 2 runs on Sonnet.",), lacks=(GUARD_REASON,))
+
 # ---- Rule 9, the Opus ceiling (decision agent-model-cap). An Agent or Task spawn that sets model opus is
 # refused under `agent-model-cap`, unless a standing grant covers it: Plan, the designer, the design reviewer, a
 # builder's third-round marker line, and an Explore whose brief carries the Audit: marker. An owner override
