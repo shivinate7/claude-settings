@@ -195,7 +195,7 @@ A bare `rule:<id>` with no "known exemption" never passes a departure. Text is c
 `$PY $P/lint/compliance_probes.py restates .` finds a child unit that copies the text of a claude-settings
 record. A child names the record and keeps only what applies to its repo (decision child-cites-not-copies).
 The fix goes in the child: replace the copy with the record's name.
-It reads the same files and units as Supersede. It reads the records from the decisions folder of the
+It reads the units of Supersede's files, plus `docs/rules/**/*.md`, the shared rule files and the layout's rules folder. It reads the records from the decisions folder of the
 parent clone, never the child's own. It holds no copy of them. Before it compares, it drops headings, `Kind:`,
 `Plan:` and `Home:` lines, HTML comments, code spans, numbers and time zones, on both sides. Quoted text is read.
 
@@ -208,9 +208,26 @@ An item names the file, the line and the record. It never prints record text.
 | --- | --- |
 | 0 | `restates: in shape - M file(s) read`, or `restates: n/a - this is claude-settings` |
 | 1 | `restates: out - N line(s) to read in M file(s)`, one item line per hit |
-| 2 | `restates: unknown`: the records folder cannot be read or holds no record, a tracked file of the child cannot be read, or a code fence is still open at the end of a file |
+| 2 | `restates: unknown`: the records folder cannot be read or holds no record, a rule file of the child or its layout cannot be read, or a code fence is still open at the end of a file |
 
 Child CI runs the same probe through the action `actions/claude-md-cites`, after `actions/checkout`.
+
+## Aligned
+
+`$PY $P/lint/compliance_probes.py aligned .` runs in a pull request, with `BASE_SHA` set (the action sets it to the base branch).
+`HEAD_SHA` defaults to `HEAD`. `PR_BODY` defaults to the body in the event file that `GITHUB_EVENT_PATH` names. It finds a record and a rule unit that cites it moving apart. Either the record changes and no citing unit
+does, or a citing unit changes and its record does not. A unit cites a record by its slug alone in a
+code span, or by the `<!-- rule:X -->` anchor the record's `Home:` line names. A PR body line
+`Rules checked: <record> — no change` clears one record (decision child-cites-not-copies). It reads one
+`git diff` and writes nothing. The fix goes in the PR: change the unit, or add the line to the PR body and push a commit.
+
+| Exit | Group line |
+| --- | --- |
+| 0 | `aligned: in shape - ...` |
+| 1 | `aligned: out - N line(s) to read in M file(s)`, one item line per hit: record, file and line |
+| 2 | `aligned: unknown`: `BASE_SHA` is missing, the diff cannot be read, a record or rule file cannot be read, or a gap is found and no PR body can be read |
+
+Child CI runs it as the second step of `actions/claude-md-cites`, on `pull_request` runs only.
 
 ## Hooks
 
