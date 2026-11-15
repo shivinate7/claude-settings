@@ -277,16 +277,19 @@ def run_rewritten(command, shell="/bin/sh", timeout=40, mark=None, env=None, qui
     return rc, text, secs, cmd
 
 
+def flag_value(cmd, flag):
+    """The word after ` flag ` in a rewrite, read by the shell lexer. The one home of that parse. The
+    wrapper writes `;` straight after some values, so a lexer that splits punctuation off reads the value
+    as one token. A missing flag gives None."""
+    tail = cmd.split(" %s " % flag, 1)
+    if len(tail) != 2:
+        return None
+    return shlex.shlex(tail[1], posix=True, punctuation_chars=True).get_token()
+
+
 def job_files(cmd):
-    """The LOG and BEAT paths a rewrite names, read off its --log and --beat flags. The one home of
-    that parse. The wrapper writes `;` straight after the beat path, so a lexer that splits punctuation
-    off reads the path as one token. A missing flag gives None."""
-    def flag_value(flag):
-        tail = cmd.split(" %s " % flag, 1)
-        if len(tail) != 2:
-            return None
-        return shlex.shlex(tail[1], posix=True, punctuation_chars=True).get_token()
-    return flag_value("--log"), flag_value("--beat")
+    """The LOG and BEAT paths a rewrite names, read off its --log and --beat flags. A missing flag gives None."""
+    return flag_value(cmd, "--log"), flag_value(cmd, "--beat")
 
 
 def stall_problems(rc, text, secs, sleep_args=None):
@@ -446,10 +449,96 @@ def silence_after_the_leading_pause_still_stalls():
 
 @posix_case
 def a_later_pause_gets_no_allowance():
-    """3b5. `true; sleep 30` at quiet 2: only a leading pause is expected, so this stalls within about 4 s"""
+    """3b5. `true; sleep 30` at quiet 2: a trailing pause with no command after it gets no allowance, so this stalls within about 4 s"""
     rc, text, secs, _cmd = run_rewritten("true; sleep 30")
     problems = stall_problems(rc, text, secs, sleep_args="sleep 30")
     reap()
+    return problems
+
+
+def quiet_window(command, want, exact=False):
+    """Problems with the quiet window a rewrite gives its watcher: one --quiet flag, and its value at least
+    `want` seconds, or exactly `want` when exact. The value is read as a float, so `inf` reads too."""
+    n = command.count(" --quiet ")
+    problems = expect(n == 1, f"{n} --quiet flags in the rewrite, want 1")
+    if n != 1:
+        return problems
+    raw = flag_value(command, "--quiet")
+    try:
+        quiet = float(raw)
+    except (TypeError, ValueError):
+        return problems + [f"--quiet is {raw!r}, not a number"]
+    if exact:
+        return problems + expect(quiet == want, f"quiet window {raw} s, want {want} s")
+    return problems + expect(quiet >= want, f"quiet window {raw} s, want {want} s or more")
+
+
+@posix_case
+def cd_then_pause_gets_a_window_of_600_seconds():
+    """3b7. `cd DIR && sleep 600 && echo done` gets a quiet window of 600 s or more. Control, run first:
+    `sleep 600; echo done` gets one"""
+    problems = ["control: " + p for p in quiet_window(rewrite("sleep 600; echo done")[0], 600)]
+    problems += quiet_window(rewrite("cd %s && sleep 600 && echo done" % new_dir())[0], 600)
+    return problems
+
+
+@posix_case
+def pause_after_a_list_item_gets_a_window_of_600_seconds():
+    """3b8. `echo a; sleep 600; echo b` gets a quiet window of 600 s or more. Control, run first:
+    `sleep 600; echo done` gets one"""
+    problems = ["control: " + p for p in quiet_window(rewrite("sleep 600; echo done")[0], 600)]
+    problems += quiet_window(rewrite("echo a; sleep 600; echo b")[0], 600)
+    return problems
+
+
+@posix_case
+def unreadable_pause_gets_a_window_of_600_seconds():
+    """3b9. `sleep $X; echo done` gets a quiet window of 600 s or more: the guard allows a background pause
+    followed by a command, whatever its length. Control, run first: `sleep 600; echo done` gets one"""
+    problems = ["control: " + p for p in quiet_window(rewrite("sleep 600; echo done")[0], 600)]
+    problems += quiet_window(rewrite("sleep $X; echo done")[0], 600)
+    return problems
+
+
+@posix_case
+def five_minutes_and_thirty_seconds_gets_their_sum():
+    """3b10. `sleep 5m 30s; cmd` gets a quiet window of 330 s or more: GNU sleep adds its operands, so the
+    pause is 330 s. Control, run first: `sleep 330; cmd` gets one"""
+    problems = ["control: " + p for p in quiet_window(rewrite("sleep 330; cmd")[0], 330)]
+    problems += quiet_window(rewrite("sleep 5m 30s; cmd")[0], 330)
+    return problems
+
+
+@posix_case
+def quoted_hash_before_a_pause_gets_its_window():
+    """3b11. `echo '# x'; sleep 600; echo b`: a `#` in quotes is text, so the pause after it gets a window of
+    600 s or more. Control, run first: `sleep 600; echo done` gets one"""
+    problems = ["control: " + p for p in quiet_window(rewrite("sleep 600; echo done")[0], 600)]
+    problems += quiet_window(rewrite("""echo '# x'; sleep 600; echo b""")[0], 600)
+    return problems
+
+
+@posix_case
+def lone_quote_before_a_pause_gets_its_window():
+    """3b12. `echo "it's"; sleep 600; echo b`: a lone quote in text does not hide the pause after it, so it gets
+    a window of 600 s or more. Control, run first: `sleep 600; echo done` gets one"""
+    problems = ["control: " + p for p in quiet_window(rewrite("sleep 600; echo done")[0], 600)]
+    problems += quiet_window(rewrite("""echo "it's"; sleep 600; echo b""")[0], 600)
+    return problems
+
+
+@posix_case
+def sleep_text_in_quotes_comments_or_a_heredoc_is_no_pause():
+    """3b13. `sleep 600` written as text gets no allowance: inside quotes, after a `#`, or in a heredoc body.
+    Each keeps the base window of 2 s. Control, run first: a real pause, `sleep 600; echo done`, gets 600 s or more"""
+    problems = ["control: " + p for p in quiet_window(rewrite("sleep 600; echo done")[0], 600)]
+    texts = [
+        'echo "sleep 600; x"',
+        "echo x # sleep 600; echo y",
+        "cat <<'EOF'\nsleep 600; x\nEOF\necho b",
+    ]
+    for text in texts:
+        problems += [f"{text.splitlines()[0]!r}: {p}" for p in quiet_window(rewrite(text)[0], 2, exact=True)]
     return problems
 
 
