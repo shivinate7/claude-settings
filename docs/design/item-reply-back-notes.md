@@ -1,10 +1,11 @@
 # Waiting page, step item-reply-back: reply to Claude's reply on an item (design notes)
 
 Mockup: `docs/design/item-reply-back.html`. Screen: `skills/waiting-page/page.html` at main 39e378f1. Its CSS (lines 8–953)
-is copied whole into the mockup, with main's Mark read words. Only `#newcss` is new.
-Deep links: `#s=closed|open-empty|open-typed|open-over|just-sent|undone|waiting|answered|folded-waiting|failed|owed|owed-off|line-inside|line-on|line-folded|line-asks`,
-`&w=all|390|800|1280`, `&t=light|dark`, `&lab=off`, `&hide=<state>,...`. Each state is a `data-state` element in `#pics`.
-Sizes: phone 390, mid 800 and wide 1280, as the brief names. `layout.py devices` prints `unknown` for this repo.
+is copied into `#pagecss`, with main's Mark read words. `#newcss` holds this step's widened rules. The F1 and F2 fixes
+(items 12 and 13) edit three `#pagecss` lines in place, each marked `Fix F1` or `Fix F2`.
+Deep links: `#s=closed|open-empty|open-typed|open-over|just-sent|undone|waiting|answered|folded-waiting|failed|owed|owed-off|line-inside|line-on|line-folded|line-asks|gap-blocks|gap-one|long|long-folded|long-line`,
+`&w=all|360|390|430|800|1280`, `&t=light|dark`, `&lab=off`, `&hide=<state>,...`. Each state is a `data-state` element in `#pics`.
+Sizes: phones 360, 390 and 430, mid 800 and wide 1280. `layout.py devices` prints `unknown` for this repo, so the sizes come from the briefs.
 Themes: light and dark. In the frames, Reply opens the box and Close shuts it.
 Why: owner on item 278, Nov 6 12:58 CST: he had to edit his old answer to answer back. Step item-reply-back.
 This extends the ask reply (ask-reply-back-notes) to item cards. It is one home: the same box, Send, Undo, lock and line.
@@ -133,6 +134,15 @@ No. 41 in the card states is answered with its filing pending ("Filing pending, 
 - `.thread .reply` then also matches today's `p.ctx.reply`. It sets the same three values as `.ctx`, so nothing changes.
   The `closed` state labels that thread "Today:".
 - New: `.card > .fwait { padding: 0 4px }`, since the card pads its own edge. Only option "Inside the thread box" adds `.thread > .replyend`.
+- The F1 and F2 fixes, against PR #2778 head 3d6d93ea `page.html` (main's merge moves each line up by one):
+  - Line 874, delete: `.thread .myreply + .lhead, .thread .reply + .myreply { margin-top: 4px; }`.
+    Write in its place: `.thread .msg { display: grid; gap: 4px; min-width: 0; }`.
+  - Line 946, `.askc.rline.ropen .thread`: change `gap: 6px` to `gap: 8px`.
+  - Before line 884, add: `.card, .askc { container: card / inline-size; }`.
+  - Line 890, replace the `@media (max-width: 520px)` rule with:
+    `@container card (max-width: 30rem) { .askc.folded .fwait .ftext, .card > .fwait .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; } }`.
+  - Markup, pick "Message blocks": `askAnswer` returns `h("div", { class: "msg" }, <lhead>, <reply>)`, then its `.filed` line as a thread child.
+    `lineEl` (line 2129) wraps its `Reply from <owner>` lhead and `.reply` in one `div.msg`. `askMine` and `threadEl` change only through `askAnswer`.
 
 ## 10. Work outside this folder (for the builder and the writer)
 
@@ -175,6 +185,48 @@ Defect for the builder (not a design choice): an open item that is answered and 
 `itemHere` is true for it (it is in `state.items`), so its reply records are kept out of Asks, and `lineEl` does not draw them.
 His reply then shows nowhere, and the line has no Reply. That is item 278's own case. Pick "On its line" fixes it the same way.
 
+## 12. Thread spacing: gap on the parent (design review F1, ux-gap-on-parent)
+
+The design review failed screens 3 (`waiting`) and 4-opened (`line-on`): `page.html:874` spaces children of the grid `.thread`
+with `margin-top: 4px`. Today a message's head sits 8px from its words, and messages sit 12px apart. Step thread-gap-container-query
+moves ask and item threads together, so both options change ask threads too.
+
+- Option "Message blocks" (pick; `#s=gap-blocks`, focus `#pick-blocks`; also drawn in every state). A session's message (lhead, text)
+  is one `.msg` block with a 4px gap, as `.myreply` and `.receipt.last` already are. `.thread` keeps its 8px gap between blocks.
+  This is layout.md's own remedy: split the list into stacks inside an outer stack.
+  - Gain: one rhythm for all three message kinds: 4px inside, 8px between. A head sits nearer its own words than the box above.
+  - Lose: a markup change in `askAnswer` and `lineEl`. Messages sit 8px apart, not 12px.
+- Option "One gap" (`#s=gap-one`, focus `#pick-onegap`). Delete the margin rule only. Every part sits 8px from the next.
+  - Gain: CSS only. Lose: "Reply from" sits as far from the box above as from its own words.
+- The opened line's thread (`page.html:946`) has `gap: 6px`, off the 4px step (tokens.md). Both options set it to 8px, the `.thread` gap.
+- Departs from: `page.html` `.thread .myreply + .lhead` (the 12px between messages). Not blocking.
+
+## 13. The folded reply reads its card's width (design review F2, ux-component-reads-its-box)
+
+`page.html:890` clamps `.fwait .ftext` to two lines with `@media (max-width: 520px)`, a screen width, on a shared component.
+
+- Pick: the host is the query container, as layout.md says (the parent sets `container-type`). `.card, .askc { container: card / inline-size; }`,
+  then `@container card (max-width: 30rem)` holds the two-line clamp. 30rem (480px) is on the 4px step.
+  - Flip points, measured: an item card at 551px of screen or less; an ask in the Asks list at about 522px; an item line in Answered at 515px.
+    Today all flip at 520px. The shape change is the same: one cut line becomes two.
+  - Checked: no unnamed `@container` rule applies inside a card or an ask (all sit under `.svwrap` or `.parked`), so the new container captures none.
+    No `position: fixed` element sits inside a card or an ask (`.bar`, `.dsheet` and the tips sit outside).
+- Other option, not drawn: always clamp to two lines, with no query. Gain: no breakpoint and no state to screenshot.
+  Lose: on a wide card a short reply is the same, but a long one takes two lines where one fits today.
+- Open, outside the findings: the folded row `.frow` (page.html:863, 908, 953) still reads the screen width at 520px. Between 516px and 520px
+  an item line's row is two lines while its `.fwait` is one. Moving `.frow` to the same container is a small follow-up in the same lane.
+- Departs from: `page.html:890` (the 520px screen query). Not blocking.
+
+## 14. Long unbroken words
+
+States `long`, `long-folded` and `long-line` put one pasted run link (no spaces, 150 characters) in the item's `Reply:`, his reply,
+the session's reply, the opened line's thread and the folded `.fwait`.
+
+- On the PR head no new rule is needed: `page.html:854` gives every `.thread .reply` `overflow-wrap: anywhere`, and `.ctx` has it too.
+  Main's `.thread .reply` at line 312 has none, but on main no item-card `.reply` lacks it: `p.ctx.reply` takes `.ctx`'s, and `.askc .thread .reply` has its own.
+- The clamped `.ftext` breaks into two lines and ends with an ellipsis in Chromium, with or without `overflow-wrap`. Safari: unmeasured.
+- Measured: no sideways scroll in the page, a card, an ask, a thread or a `.fwait` at 360, 390, 430, 800 and 1280, light and dark.
+
 ## Checked
 
 - Playwright, Chromium (headless): 16 states at 390, 800 and 1280, light and dark (96 runs). Each run reloads the frame.
@@ -192,7 +244,7 @@ His reply then shows nowhere, and the line has no Reply. That is item 278's own 
   - Fixed: a "New:" label on the small New reply mark was clipped to "a new …". It is now dropped, and the caption carries it.
   - Open:
     - Fold words with four parts wrap to two lines at 390.
-    - The widened home `.thread .reply + .myreply` spaces siblings with a margin, against ux-gap-on-parent (guidance). It is main's rule, kept as is.
+    - The widened home `.thread .reply + .myreply` spaced siblings with a margin, against house rule ux-gap-on-parent. Fixed by item 12.
     - The owed card holds two text boxes (item 1).
     - The hold's stated reason (keep the reply on its card) no longer holds after the "On its line" pick: the closed line keeps the reply. The hold only delays the close. The owner ruled on page item 542, 11:06 CST Nov 13: #2778 merges as built, and a "Close now" button becomes a new step.
 - impeccable critique, Nov 12 (single-context again: no agent tool). The detector found nothing in the static markup.
