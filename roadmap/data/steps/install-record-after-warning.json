@@ -1,0 +1,14 @@
+{
+  "id": "install-record-after-warning",
+  "title": "install.sh writes the install record after a failed settings merge or pointer write, so the stale-install hook can read a half-landed copy as current",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "",
+  "owner": "coordinator",
+  "blockedBy": [],
+  "why": "Source: lane cloud-hooks-stale-copy (PR #3020), Sonnet full review PASS at head 7f71cf292b17, no safety hole; coordinator 02:49 CST Nov 15, relayed. Triage read PR #3020 on GitHub at 02:49 CST (open draft, same head, mergeable clean) and read no code: every line number below is the lane's. Finding 1: install.sh lines 1104, 1107 and 814 (a settings.json merge failure, the cp fallback when jq is missing, and the CLAUDE.md pointer write) log a WARNING but exit 0 and write the install record. The lane's probe: record written, settings.json absent. The lane calls it a design call. Finding 3: install.sh:1258: a failed run keeps an earlier record; if that record's sha equals the unmoved tip, the hook stays silent about a half-landed copy; no test. Same family as finding 1: the record can claim an install that did not fully land. Triage's judgment: a DEBT, not a note, because a cloud session without jq is a normal state Claude can hit, and the hook's silence then hides a stale or half-built install, which is the harm the whole step exists to stop. Unmeasured: how often jq is missing in a cloud session; whether the record could instead carry a 'partial' marker the hook reads. First act of a lane: reproduce the lane's probe on main after #3020 merges; then decide fail-the-install, a partial marker, or accept (a design call that needs the coordinator's pick, and the owner's if it changes what the hook prints). A change to what the hook says is not a guard verdict, but test it red first. Finding 2 is a note, not a debt (a wrong comment, install.sh:678-679): the comment says a missing record retries, but with no record at all the hook prints 'install freshness unknown (no install record)' and installs nothing (pinned by hooks/test_reinstall_stale.py:541), so the comment is wrong for a failed first install. Fix it in the same lane or with the next edit to install.sh. Kin: cloud-hooks-stale-copy, merge-mail-refreshes-sessions, reinstall-no-backoff.",
+  "source": "coordinator 02:49 CST Nov 15, from lane cloud-hooks-stale-copy",
+  "note": "Filed 02:49 CST Nov 15 by triage. A debt: likely hit in normal work (no jq). Starts after #3020 merges. Findings 1 and 3 here; finding 2 is a note in this why.",
+  "updatedAt": "2026-11-15T02:49:00-06:00"
+}
