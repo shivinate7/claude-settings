@@ -1145,6 +1145,12 @@ def handed_in_push_hit(texts, stripped: str, cwd: str, read_verb):
             named = push_refspecs(args)
             if every is None and named is None:
                 continue
+            if not where and cwd:
+                # push_target gives no folder only for a segment shlex cannot read, and that is an unclosed quote: the shell stops at it with a
+                # syntax error and sends nothing. The quote hides the words after it, so the whitespace-split read the push comes from (a
+                # commit message that names `git push`, a refspec word cut by the quote) is no destination. The force-push ask below reads the
+                # same text and keeps its own verdict.
+                continue
             if not where or _shell_shaped(where):
                 # The shell names the folder at run time, so neither its remotes nor whether it uses the merge tool can be read. A push
                 # whose every destination is main or master is push-main's to ask about. A literal folder that is not there fails git
