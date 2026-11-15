@@ -2924,6 +2924,7 @@ def ci_job_run(wt, *args, notes=None, raw=None, head_sha=None):
 
 MUTATE_JOB, MUTATE_STEP = "checks-mutate-guard", "Guard mutation test"  # the old one-job head: its job and step, whose run: line and timeout-minutes the lint reads. A sharded head names each step MUTATE_STEP + ", shard i/M", one job each
 MUTATE_TEST_FILE = re.compile(r"hooks/mutate_[^/]*\.(?:py|mjs)")
+MUTATE_HEARTBEAT_SECONDS = 60  # gap between the running lines of one shard run; read at call time. A shard runs many minutes and its stdout is captured, so without them the lint is silent
 MUTATE_SKIPPED = "mutation test run skipped here: it runs at the lane's hand-off lint"  # printed wherever the lint skips the run: a pre-join lint whose hand-off PASS names the head
 
 def mutate_report_counts(out):
@@ -2976,7 +2977,7 @@ def mutate_run_check(wt):
             raise Stop(f"the head's checks.yml has no job with the step for shard {', '.join(absent) or 'numbers in 1 to ' + str(total)} of the mutation test (shard N of {total} absent), so its mutation test run cannot start. {LANE_LINT_REMEDY}")
         steps = [(shards[n][0], shards[n][1], f"{n}/{total}") for n in range(1, total + 1)]
     else:
-        steps = [(MUTATE_JOB, next((st for st in step_blocks(job_block(text, MUTATE_JOB)) if step_key(st, "name") == MUTATE_STEP), None), None)]
+        steps = [(MUTATE_JOB, next((st for st in step_blocks(job_block(text, MUTATE_JOB)) if step_key(st, "name") == MUTATE_STEP), None), None)]  # shard None: its progress lines label it 1/1
     caps = job_caps([text])
     plan = []  # every run is read before the first starts, so a job whose run or cap cannot be read stops the lint with no run made
     for job, step, shard in steps:
@@ -2989,20 +2990,32 @@ def mutate_run_check(wt):
             if step_env(step).get("MUTATE_SHARD") != shard:
                 raise Stop(f"the step for shard {shard} of job {job} in the head's checks.yml does not set MUTATE_SHARD to {shard}, so its mutation test run cannot start. {LANE_LINT_REMEDY}")
             env["MUTATE_SHARD"] = shard
-        plan.append((job, body, cap, env))
+        plan.append((job, body, cap, env, shard or "1/1"))
 
-    def run_one(job, body, cap, env):
+    def run_one(job, body, cap, env, label):
         start = time.monotonic()
         start_error = ""
+        tag = f"mutation test shard {label}"
+        say(f"{tag}: start, job {job}, cap {cap} min")
+        stop, interval = threading.Event(), MUTATE_HEARTBEAT_SECONDS
+        def heartbeat():  # the runner's stdout is captured, so these lines are the only sign a long shard is alive; no mutant id, as none is read here
+            while not stop.wait(interval):
+                say(f"{tag}: running, {round(time.monotonic() - start)} s")
+        beat = threading.Thread(target=heartbeat, name="mutate-heartbeat", daemon=True)
+        beat.start()
         try:
             c, out = sh(shlex.split(body), cwd=wt, env=env, timeout=cap * 60, live_stderr=True)
         except subprocess.TimeoutExpired:
             c, out = None, ""
         except (OSError, ValueError) as e:  # the command could not start (no such program, not executable, a bad quote): a FAIL, never a traceback or a pass
             c, out, start_error = None, "", f"{type(e).__name__}: {e}"
+        finally:  # every path ends the thread, so none outlives the call or prints after the end line
+            stop.set()
+            beat.join()
         wall = round(time.monotonic() - start) if c is not None else cap * 60
         counts = mutate_report_counts(out)
         killed, survived, unknown, unread, tally, wrong = counts or (0, 0, 0, 0, False, 0)
+        say(f"{tag}: end, {wall} s, killed {killed}, survived {survived}, unknown {unknown}")
         failures = []
         if start_error:
             return "mutation test run did not start", [f"the mutation test command could not start ({start_error}), so no mutation test run was made"]
@@ -3026,8 +3039,8 @@ def mutate_run_check(wt):
         return f"mutation test run {wall} s, killed {killed}, survived {survived}, unknown {unknown}, {'fail' if failures else 'pass'}", failures
 
     summaries = []
-    for job, body, cap, env in plan:
-        summary, failures = run_one(job, body, cap, env)
+    for job, body, cap, env, label in plan:
+        summary, failures = run_one(job, body, cap, env, label)
         if not sharded:
             return summary, failures
         summaries.append(f"{job}: {summary}")
