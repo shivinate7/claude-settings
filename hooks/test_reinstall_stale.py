@@ -315,10 +315,10 @@ class Fixture:
     def show(self, rev, rel):
         return self.git("-C", self.seed, "show", "%s:%s" % (rev, rel))
 
-    def write_record(self, ref, sha):
+    def write_record(self, ref, sha, installer="install.sh"):
         self.ref = ref
         record = {"ref": ref, "sha": sha, "source": self.source,
-                  "installer": os.path.join(self.source, "install.sh")}
+                  "installer": os.path.join(self.source, *installer.split("/"))}
         write_file(self.record_path, json.dumps(record) + "\n")
 
     def record_sha(self):
@@ -391,12 +391,15 @@ class Fixture:
             return []
 
 
-def behind(name, changes=HOOK_ONLY, layout="checkout", ref="main"):
-    """A cloud fixture whose record holds the base sha while origin has moved on by one commit."""
+def behind(name, changes=HOOK_ONLY, layout="checkout", ref="main", installer="install.sh"):
+    """A fixture whose record holds the base sha while origin has moved on by one commit. The record names
+    `installer`, a path under the clone; a path other than install.sh gets NARROW_WRAPPER there."""
     fx = Fixture(name)
     old = fx.base
     fx.clone(layout)
-    fx.write_record(ref, old)
+    if installer != "install.sh":
+        write_file(os.path.join(fx.source, *installer.split("/")), NARROW_WRAPPER, mode=0o755)
+    fx.write_record(ref, old, installer)
     return fx, old, fx.advance(changes)
 
 
@@ -746,8 +749,10 @@ class LocalRefresh(unittest.TestCase):
     that the installer is run as `bash <installer>` with no --cloud, in the clone, with CS_STABLE_ONLY=1."""
 
     def test_local_tip_moved_runs_the_recorded_installer_once_in_the_clone(self):
-        fx, old, new = behind(self._testMethodName)
+        fx, old, new = behind(self._testMethodName, installer=NARROW)
         self.assertNotEqual(fx.origin_tip("main"), fx.record_sha(), "scope: origin is not ahead of the record")
+        self.assertTrue(json.loads(read_text(fx.record_path))["installer"].endswith(os.path.join("merge", "install_from_main.sh")),
+                        "scope: the record does not name the narrow installer")
         run = fx.run_hook(cloud=False)
         self.assertEqual(fx.installer_runs(), [""],
                          "want one local installer run with no --cloud; got %r; stderr: %s"
@@ -804,7 +809,7 @@ class LocalRefresh(unittest.TestCase):
         self.assertEqual(fx.installer_runs(), [], "the installer ran for an unknown local ref")
 
     def test_local_installer_failure_prints_one_failure_line(self):
-        fx, old, new = behind(self._testMethodName)
+        fx, old, new = behind(self._testMethodName, installer=NARROW)
         run = fx.run_hook(cloud=False, stub_exit="1")
         self.assertEqual(len(fx.installer_runs()), 1, "scope: the local installer did not run once")
         self.assertEqual(run.lines, ["claude-settings: reinstall failed (exit 1)"],
@@ -881,6 +886,14 @@ class WindowsBash(unittest.TestCase):
                          "the reinstall ran %r, not the path git_bash gave (%r)" % (launched[0][0], fake_bash))
 
 
+# The narrow installer's path in a local fixture. A record that names it is a local record under the run-form rule.
+NARROW = "merge/install_from_main.sh"
+# Stands in for NARROW in a local fixture. Its text carries CS_STABLE_ONLY, so the blocker lets it run, and it hands its
+# arguments and environment to the stub installer at the clone root, which logs them and does the work.
+NARROW_WRAPPER = r'''#!/bin/sh
+# CS_STABLE_ONLY: stands in for merge/install_from_main.sh; the stub installer at the clone root does the work.
+exec sh "$(dirname "$0")/../install.sh" "$@"
+'''
 # Stands in for an older clone's installer: it records each run and has no narrow mode, so its text lacks CS_STABLE_ONLY.
 OLD_INSTALLER = r'''#!/bin/sh
 printf 'run:%s\n' "$*" >> "$STUB_COUNTER"
