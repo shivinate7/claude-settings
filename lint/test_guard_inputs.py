@@ -269,6 +269,7 @@ FIXTURE_NAMES = {
     "install.test.ps1": "a name inside a fixture's text",
     "actions/stamp/stamp.mjs": "a name inside a fixture command string",
     "actions/stamp/test_stamp.mjs": "a name inside a fixture command string",
+    "bin/ci-job": "a constant compared with endswith on a command's script operand, never opened (hooks/guard_stream.py:246)",
     "bin/merge": "a command string",
     "bin/wait-pid": "a command string",
 }
