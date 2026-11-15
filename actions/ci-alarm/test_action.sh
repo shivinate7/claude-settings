@@ -176,11 +176,32 @@ t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs rea
 runs_are "$(gh_run ci failure 2026-01-02 u1 push 1)" "$(gh_run ci success 2026-01-01 u0 push 2)"
 t red latest-red-opens-issue
 runs_are "$(gh_run ci success 2026-01-02 u1 push 1)" "$(gh_run ci failure 2026-01-01 u0 push 2)"
+jobs_of 1 checks:success
 t green red-then-fixed-is-quiet
 runs_are "$(gh_run alarm failure 2026-01-02 u1 push 1)"
 t green own-workflow-is-ignored
 runs_are "$(gh_run ci success 2026-01-02 u1 push 1)" "$(gh_run deploy timed_out 2026-01-01 u2 push 2)"
+jobs_of 1 checks:success
 t red one-red-workflow-among-green
+
+# The empty push run (decision no-merge-onto-red-main): a green run of the push group that ran no suite job is no verdict unless it carries
+# evidence (push-skip success and scope skipped). The alarm judges the group's newest run that is not empty, as merge.py does.
+runs_are "$(gh_run ci success 2026-01-02 https://runs/green-2 push 2)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 push 1)"
+jobs_of 1 checks:failure
+jobs_of 2 push-skip:success scope:success checks:skipped
+t red empty-green-push-without-evidence-does-not-hide-an-older-red-push "" "" https://runs/red-1
+runs_are "$(gh_run ci success 2026-01-02 https://runs/green-2 workflow_dispatch 2)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 push 1)"
+jobs_of 1 checks:failure
+jobs_of 2 scope:success checks:skipped
+t red empty-green-dispatch-without-evidence-does-not-hide-an-older-red-push "" "" https://runs/red-1
+runs_are "$(gh_run ci success 2026-01-02 https://runs/green-2 push 2)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 push 1)"
+jobs_of 1 checks:failure
+jobs_of 2 push-skip:success scope:skipped checks:skipped
+t green empty-green-push-with-evidence-clears-an-older-red-push "" ""
+runs_are "$(gh_run ci success 2026-01-02 https://runs/green-2 push 2)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 push 1)"
+jobs_of 1 checks:failure
+jobs_of 2 scope:success
+t unknown empty-green-push-whose-jobs-read-fails-is-unknown "api *actions/runs/2/jobs*"
 
 # A red run is cleared by a newer green run of the other group only when that run passes every job of the red run.
 runs_are "$(gh_run ci success 2026-01-02 https://runs/green-2 push 2)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 schedule 1)"
@@ -263,7 +284,8 @@ t green cancelled-run-is-not-red "" "" "" none
 runs_are "$(gh_run ci success 2026-01-02 u1 schedule 2)" "$(gh_run ci failure 2026-01-01 u0 schedule 1)"
 t green red-schedule-is-cleared-by-a-newer-green-schedule "" "" "" none
 runs_are "$(gh_run ci success 2026-01-02 u1 workflow_dispatch 2)" "$(gh_run ci failure 2026-01-01 u0 push 1)"
-t green red-push-is-cleared-by-a-newer-green-dispatch "" "" "" none
+jobs_of 2 checks:success
+t green red-push-is-cleared-by-a-newer-green-dispatch "" "" "" actions/runs/2/jobs
 runs_are "$(gh_run pages failure 2026-01-02 u1 dynamic 1)"
 t green failed-pages-build-is-not-judged
 runs_are "$(gh_run old failure 2026-01-02 u1 push 1)"
