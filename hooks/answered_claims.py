@@ -14,7 +14,7 @@ ANSWERED_NEGATOR_RE). A sentence is the prose of one paragraph: its lines are jo
 sentence that ends in `?`, the word used as a list name ("the answered list", "all answered items"), as a
 condition ("until item 5 is answered", "after item 5 is answered") or as a need ("needs to be answered"), a
 sentence that takes the claim back at its end ("..., and it is not"), and a claim that cites the owner and a time
-in parentheses ("(owner, 2026-11-15 13:30 CST)"). Fenced blocks are skipped. An inline code span
+in parentheses ("(owner, <date> <time> CST)"). Fenced blocks are skipped. An inline code span
 is skipped, except one that holds only an item number. A claim by an item id slug alone is not judged.
 
 The page's data is read from git, never from the live page. The folder and the record branch come from
@@ -46,7 +46,7 @@ CLAIM_WORD = re.compile(r"(?<![\w-])(?:answered|approved|ruled)(?![\w-])", re.I)
 ITEM_NUM = r"#?\d+[a-z]?"  # a letter after the number is the item's own suffix ("874d")
 ITEM_LIST = r"(?:\s*,\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+|\s*[&/]\s*)"
 ITEM_REF = re.compile(r"(?<!\w)items?\s+%s(?:%s%s)*(?!\w)|(?<!\w)page:%s(?!\w)" % (ITEM_NUM, ITEM_LIST, ITEM_NUM, ITEM_NUM), re.I)
-# The owner's citation that the remedy asks for: "(owner, 2026-11-15 13:30 CST)". Only "owner" counts, and a time.
+# The owner's citation that the remedy asks for: "(owner, <date> <time> CST)". Only "owner" counts, and a time.
 OWNER_CITE = re.compile(r"\(\s*owner\s*,[^()]*?\b\d{1,2}:\d{2}\b[^()]*\)", re.I)
 # "answered" as a name or a condition, not as a claim.
 LIST_NAME_BEFORE = re.compile(r"\b(?:the|an?|each|every|any|these|those|its|their)\s+$", re.I)
@@ -71,9 +71,9 @@ QUESTION_END = re.compile(r"\?[*_)\"'\s]*$")
 GREP_LINE = re.compile(r"^[^:]+:[^:]*/(items|answers)/[^:/]+\.json:\s{2}\"(n|lastAnswer)\":\s*(\d*)")
 GREP_PATH = re.compile(r"^([^:]+:[^:]*/(?:items|answers)/[^:/]+\.json):")
 REASON = ("The page data in git shows no owner answer for item %s, so this sentence claims an answer the owner has not "
-          "given: \"%s\". Cite the owner's answer and its time in parentheses, such as (owner, 2026-11-15 13:30 CST), or "
+          "given: \"%s\". Cite the owner's answer and its time in parentheses, such as (owner, <date> <time> CST), or "
           "say \"recommended, not answered\". If the owner "
-          "answered after the last export, the page writer exports first (skill waiting-page). An owner override "
+          "answered after the last export, the page writer exports first. An owner override "
           "lifts this refusal. (decision answered-claims-match-page, a claim of an answer matches the page)")
 
 

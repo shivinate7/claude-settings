@@ -82,8 +82,8 @@ owner never gave. Risk kind: incident.
 - A claim sentence starts at most two processes. Both are `git`: `git for-each-ref`, then one `git grep`. The
   second runs only when a ref exists. One 5 second deadline covers both. The layout and folder reads open files
   only.
-- Files written: none. A refusal writes the one guard.log line that every refusal writes.
-- Runs: once per call to one of the three judged tools.
+- Files written: none. A refusal appends to guard.log, as every refusal does.
+- Runs on each call to one of the three judged tools.
 - Tests that prove the zero-process part: `test_a_message_with_no_claim_starts_no_process` and
   `test_a_tool_that_is_not_judged_starts_no_process` in `hooks/test_answered_claims.py`.
 
