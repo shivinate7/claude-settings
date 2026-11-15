@@ -2829,6 +2829,48 @@ def case_update_judges_only_the_fields_it_carries():
          entry_of({"kind": "decision", "why": "A keeps the allow list to one form."}), None)
 
 
+def case_kindless_update_with_a_goal_line_needs_the_waiting_line():
+    # The guard cannot see the stored kind, so an update with no kind is a decision when its context carries a Goal
+    # line: that line is the decision form. A context with no Goal line is a task's, and passes.
+    page("a kindless update whose context has no Goal line (a task) passes", "update",
+         entry_of({"context": TASK_WHY}), None)
+    page("a kindless update whose context has a Goal line and a Waiting on line passes", "update",
+         entry_of({"context": form_text()}), None)
+    page("a kindless update whose context has a Goal line and no Waiting on line is refused, naming Waiting on",
+         "update", entry_of({"context": form_text(waiting=None)}), (FORM_RULE, "Waiting on"))
+    page("a kindless update with a Goal line and a blank Waiting on line is refused, naming Waiting on",
+         "update", entry_of({"context": form_text(waiting="Waiting on:")}), (FORM_RULE, "Waiting on"))
+
+
+def case_update_null_recommendation_is_refused():
+    # A null key names no option, so it is no recommendation. A null `recommended` beside a valid `pick` passes: the
+    # valid key is the recommendation the page draws.
+    page("an update with kind decision and a valid recommended key passes", "update",
+         entry_of({"kind": "decision", "recommended": "a"}), None)
+    page("an update with kind decision, recommended null and a valid pick passes", "update",
+         entry_of({"kind": "decision", "recommended": None, "pick": "a"}), None)
+    page("an update with kind decision and recommended null is refused, naming the recommendation", "update",
+         entry_of({"kind": "decision", "recommended": None}), (FORM_RULE, "recommend"))
+    page("an update with kind decision and pick null is refused, naming the recommendation", "update",
+         entry_of({"kind": "decision", "pick": None}), (FORM_RULE, "recommend"))
+    page("an update with kind decision and both keys null is refused, naming the recommendation", "update",
+         entry_of({"kind": "decision", "recommended": None, "pick": None}), (FORM_RULE, "recommend"))
+
+
+def case_waiting_on_line_is_the_pages_line():
+    # The page draws the first context line that starts `Waiting on:` at column 0, with text after the colon
+    # (skills/waiting-page/page.html, the waitline split). A bold, bulleted, lower-case or indented label is a line the
+    # page does not draw, so a set whose only such line is that form has no Waiting on line.
+    page("a plain Waiting on line at column 0, with text after the colon, passes", "set",
+         entry_of(rec_item(context=form_text(waiting=WAIT_LINE_TEXT))), None)
+    for label, line in (("bold label", "**Waiting on:** nothing stopped; the lane acts next."),
+                        ("bullet", "- Waiting on: nothing stopped; the lane acts next."),
+                        ("lower-case label", "waiting on: nothing stopped; the lane acts next."),
+                        ("indented label", "  Waiting on: nothing stopped; the lane acts next.")):
+        page("a Waiting on line in the %s form, which the page does not draw, is refused, naming Waiting on" % label,
+             "set", entry_of(rec_item(context=form_text(waiting=line))), (FORM_RULE, "Waiting on"))
+
+
 def case_str_replace_keeps_the_waiting_line():
     context_replace("that removes the Waiting on line is refused, naming Waiting on",
                     form_text(), form_text(waiting=None), (FORM_RULE, "Waiting on"))
@@ -2982,6 +3024,8 @@ def main():
     for case in (case_recommend_base_passes, case_recommend_missing_or_unknown_is_refused,
                  case_legacy_pick_is_the_recommendation, case_why_is_required, case_waiting_on_line_is_required,
                  case_update_judges_only_the_fields_it_carries, case_str_replace_keeps_the_waiting_line,
+                 case_kindless_update_with_a_goal_line_needs_the_waiting_line, case_update_null_recommendation_is_refused,
+                 case_waiting_on_line_is_the_pages_line,
                  case_recommended_list_is_the_multi_form, case_recommend_exemptions_pass,
                  case_recommend_applies_to_a_port_and_a_set_without_kind, case_five_real_forms,
                  case_five_real_forms_as_written, case_widens_reason_no_longer_leaves_recommended_out,
