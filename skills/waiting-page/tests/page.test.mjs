@@ -9836,3 +9836,21 @@ test("a multi answer carries a list of labels, one per tick, beside its list of 
   assert.match(a.label[0], /^a: Red$/i);
   assert.match(a.label[1], /^c: Green$/i);
 });
+
+// Owner 13:14 CST Nov 12: a number on the page must say it is not a database id or a slug (step page-n-meaning-doc).
+const N_MEANING = /item number: the stable number you answer by; not a database id/i;
+test("an open card's item number says it is the stable answer number, not a database id", async (t) => {
+  const page = await open(t, { items: [DECISION, TASK] });
+  if (!page) return;
+  for (const it of [DECISION, TASK]) {
+    const title = await card(page, it).locator(".top .num").getAttribute("title");
+    assert.match(title, N_MEANING, "No. " + it.n + " carries no label saying what the number is: " + title);
+  }
+});
+test("a ruling card's item number says it is the stable answer number, not a database id", async (t) => {
+  const page = await open(t, { items: [DECISION, ARBITER] });
+  if (!page) return;
+  await need(card(page, ARBITER), "the closed arbiter item has no card");
+  const title = await page.locator(`#item-${ARBITER.id} .num`).first().getAttribute("title");
+  assert.match(title, N_MEANING, "the ruling's number carries no label saying what it is: " + title);
+});
