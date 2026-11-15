@@ -1363,7 +1363,7 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
         name = _triplet_file(found)
         if readable and name:
             return "commit", name
-        if red_hit:   # read from the index at hook time, whatever step runs before the commit: a miss costs a later push refusal
+        if red_hit:   # read from the index at hook time, whatever command runs before the commit: a miss costs a later push refusal
             return "red-run-commit", red_hit
         if not readable:
             blind_commit = True

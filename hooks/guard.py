@@ -249,12 +249,14 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        could not judge, when that commit covers a triplet already in the tree or the chain
                        runs merge, pull, rebase, cherry-pick, stash pop or apply, or am.
                        (commit-refuses-conflict-markers)
-  red-run              deny. A `git push` whose range (the one conflict-markers reads, less the commits the
-                       default base holds) has a non-merge commit that adds lines to a test path and has no
+  red-run              deny. A `git commit` with no push after it, or a `git push` whose range (the one
+                       conflict-markers reads, less the commits the default base holds) has a non-merge commit that adds lines to a test path and has no
                        valid `Red-run:` trailer, judged by `judge` in lint/check_red_run.py, the one home. A
                        commit in the same call before the push counts, read from its `-m` text (an `--amend`
                        with none keeps the commit's own); a message the guard cannot read, a failed read and a
-                       default base it cannot read are no hit. The refusal for a flagged tip names only
+                       default base it cannot read are no hit. A lone `git commit` (no push after it in the
+                       call) that stages added lines on a test path is judged too, by its own `-m` text; a
+                       merge or other replay in progress is no hit. The refusal for a flagged tip names only
                        commit and push; for a flagged commit below the tip (under a merge at the tip too) it
                        names commit, rebase and push; for a branch rewritten since its push it names no
                        command. Cost: one `git log` per push, more only when a commit is a gap.
