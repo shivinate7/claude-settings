@@ -70,6 +70,8 @@
                           (pr N) over 12 h old; a lane row with no status_bucket enum name reads unknown. d: the lane is archived. e: the head ref
                           names a doing step whose lane is absent or archived. A lane read that cannot run prints `lost-work #N unknown: WHY; owner
                           coordinator` and exits 1. Cost: the live file and the record branch, read once; git reads for a state-a candidate; no gh call.
+                          State f's git reads: a `git fetch` of all branches into refs/lost-work/*, a fetch of refs/pull/*/head, three for-each-ref
+                          reads, one rev-list over the pull request heads, and one rev-list for each candidate branch.
   merge --reviewed --live FILE --ledger [--out FILE] --verdicts FILE [--subsumed FILE]
                           the lost-work ledger: one JSON row per lost-work PR and per branch in state f, ordered by pr, each with the keys pr, step,
                           state, group, review_log, age_h, commits_not_on_main, subsumed_by, files, verdict, sorted; then `unsorted: N`, the rows with no
@@ -1370,7 +1372,7 @@ class Host:
     def holds_head_gh(self, head, other):
         """True when the commit or branch `other` contains `head`: GitHub's compare of head...other reads ahead or identical. Any failed read raises Stop.
         One gh call per read, and it never touches the clone, so the callers that must not fetch use it: the lane Stop hook (lint/report_guard.py reads
-        clean_merges_after), the join and the fix check. The lost-work rows read holds_head, which is local git."""
+        clean_merges_after), the join and the fix verifier. The lost-work rows read holds_head, which is local git."""
         c, out = self.api(f"compare/{head}...{other}")
         try:
             if c:
@@ -5174,7 +5176,7 @@ def reviewed_read(h, cfgrel=None, facts=None):
     statuses, two more `gh` calls): a green all-jobs-passed on the live head reads `lint skipped`, as the join (lint_check) does, and the state stays done. Each record's clean-merge walk judges against the host's base at entry, the repo's default branch, never the pull
     request's own base. A claim commit on the reviewed head carries both the record and the lint (claim_only, with the stamp config `cfgrel`), as
     the join reads it; that reads git in the host's checkout, and fetches a pull request head it lacks.
-    `facts`, when a dict is given, gains {number: (state, created_at of its own newest review log)} for each open pull request, (None, None) for one with
+    `facts`, when a dict is given, gains {number: (the log's own state, never a lint state, created_at of its own newest review log)} for each open pull request, (None, None) for one with
     no log of its own (a carried log is no log of its own here): what lost_work_rows reads, from the same two list reads, so it adds no gh call.
     With `facts` the open pull request rows come back too: -> (lines, pulls)."""
     main, cfgrel, root = h.base, cfgrel or DEFAULT_CONFIG, h.cwd or "."
@@ -5198,6 +5200,7 @@ def reviewed_read(h, cfgrel=None, facts=None):
             rec = parse_review(bodies[-1])
             rec = rec if rec and rec["n"] == n else None
             state, why = live_review_state(h, rec, sha, main, cfgrel, own_records(n, bodies[:-1]))
+        log_state = state  # the log's own state, kept before a missing lane-lint turns the line's state into a lint state; lost_work_rows judges the log
         if state == "done":
             lint = lint_state(lints.get(n, []), sha)
             if lint == "none" and lint_carried(root, cfgrel, d["base"]["ref"], n, lint_passed(lints.get(n, [])), sha, h, source_lint_passed(h, n, d.get("body"))[1]):
@@ -5208,7 +5211,7 @@ def reviewed_read(h, cfgrel=None, facts=None):
                 state, why = LINT_NOT_READY[lint][0], f"{LINT_NOT_READY[lint][1]}. Run `merge --lane-lint {n}`"
         ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
         if facts is not None and bodies:
-            facts[n] = (state, rows[n][-1][1])
+            facts[n] = (log_state, rows[n][-1][1])
         lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}; CI {ci}")
     lines += [f"no record: {', '.join(bare)}"] if bare else []
     return lines if facts is None else (lines, pulls)
@@ -5338,6 +5341,7 @@ def lost_work_rows(h, pulls, facts, live, found=None):
             rows.append((key, f"lost-work #{n} ({key}): {text}; owner {owner or LOST_WORK_OWNER[key]}"))
 
         def unread(text):
+            text = text if READ_CITE in text else f"{text} {READ_CITE}"
             rows.append(("unknown", f"lost-work #{n} unknown: {text}; owner {LOST_WORK_UNKNOWN_OWNER}"))
 
         lane = sessions.get(session)
@@ -5381,6 +5385,8 @@ def lost_work_rows(h, pulls, facts, live, found=None):
                         row("e", f"head ref {ref} names step {sid}, doing, and its lane {owner or '(none)'} is gone")
             if session is not None and lane is None and not any(key == "e" for key, _text in rows):  # silence would read as a healthy lane
                 unread(f"the footer names {session}, which the live file's lanes do not list, so what its lane is doing is unread")
+            elif session is None and state is None:  # no footer and no log: nothing names a lane to read, and silence would read as a healthy one
+                unread("the pull request body has no session footer and no review log, so its lane is unread")
         out += [text for _key, text in sorted(rows)]
         unknown = unknown or any(key == "unknown" for key, _text in rows)
         if found is not None:
