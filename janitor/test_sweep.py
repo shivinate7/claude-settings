@@ -10180,6 +10180,34 @@ class OwnAgentLockTests(unittest.TestCase):
         self.assertEqual(decision["action"], "keep", "reaped through a stale parent link: %s" % decision["reason"])
         self.assertTrue(decision["reason"].startswith("locked:"), "kept for another reason: %s" % decision["reason"])
 
+    def test_an_ancestor_that_started_in_the_same_tick_as_its_child_is_still_own(self):
+        # ps shows whole seconds and /proc shows ticks, so a parent and its child can read equal
+        # starts. An equal start can be the real parent, so the lock stays the session's own.
+        ancestor = os.getpid() + 1
+        parents = {os.getpid(): ancestor, ancestor: 1}
+        real = sweep._parent_pid
+        with mock.patch.object(sweep, "stale_agent_lock_verdict", return_value=False), \
+                mock.patch.object(sweep.git_reads, "_process_start_ms", return_value=1795000000000), \
+                mock.patch.object(sweep, "_proc_start_ticks", return_value=123456), \
+                mock.patch.object(sweep, "_parent_pid",
+                                  side_effect=lambda pid: parents[pid] if pid in parents else real(pid)) as read:
+            verdict = sweep.own_agent_lock_verdict("claude agent agent-tie (pid %d)" % ancestor)
+        self.assertEqual(read.call_args_list[:1], [mock.call(os.getpid())], "the parent read did not start here")
+        self.assertIs(verdict, True, "an equal start read as a stale parent link: %r" % verdict)
+
+    def test_a_lock_held_by_pid_one_as_our_parent_is_own(self):
+        # Pid 1 can be this process's host (a container's init). The holder check comes before the
+        # stop at pid 1, so a lock held by pid 1 is the session's own. The live read is mocked alive,
+        # since a pid-1 start read is platform-specific.
+        parents = {os.getpid(): 1}
+        real = sweep._parent_pid
+        with mock.patch.object(sweep, "stale_agent_lock_verdict", return_value=False), \
+                mock.patch.object(sweep, "_parent_pid",
+                                  side_effect=lambda pid: parents[pid] if pid in parents else real(pid)) as read:
+            verdict = sweep.own_agent_lock_verdict("claude agent agent-init (pid 1)")
+        self.assertEqual(read.call_args_list[:1], [mock.call(os.getpid())], "the parent read did not start here")
+        self.assertIs(verdict, True, "a lock held by pid 1 read as not ours: %r" % verdict)
+
     def test_an_unreadable_ancestor_read_keeps_the_own_lock(self):
         # Red on the positive arm today (kept as "locked: ..."). The negative arm keeps today, but the
         # read itself does not exist yet: `sweep._parent_pid` is the name the new walk must use.
