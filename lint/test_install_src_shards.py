@@ -5,7 +5,7 @@ The suite contract the builder implements:
   INSTALL_SRC_SHARD=i/k (1-based i, k >= 1) runs only the cases whose position in the file's `run` list
   satisfies (pos - 1) % k == i - 1: round-robin in run order. Unset runs every case.
   `--list` prints the selected case names, one per line, runs nothing, and exits 0.
-  A bad value (0/2, 3/2, x) exits non-zero, writes a message to stderr that names INSTALL_SRC_SHARD,
+  A bad value (0/2, 3/2, x, or an empty value) exits non-zero, writes a message to stderr that names INSTALL_SRC_SHARD,
   and selects no case.
 
 Every suite call here passes --list, so no case runs. On the old code `--list` is a name filter that
@@ -14,8 +14,9 @@ all 174 cases on the old code.
 
 The shell-macos pins read the job with lint/workflow_steps.py. The shape they accept: a `strategy.matrix`
 of the shards i/k for 1 <= i <= k; the install step takes its shard from its own step `env`; and every
-other run step of the job keeps its name, run string and original condition, with one matrix-leg gate
-wrapped around that condition, so it runs on one leg only.
+other run step of the job keeps its name and run string, and its `if` is its original condition with the
+matrix-leg test appended: `(S) && C && matrix.<key> == 'i/k'` for `(S) && C`, and `(S) && matrix.<key> == 'i/k'`
+for a bare scope condition S. So every step's scope prefix stays `(S)`, the one condition test_windows_split reads.
 
 Run with:  python3 lint/test_install_src_shards.py -v
 """
@@ -29,6 +30,7 @@ from collections import Counter
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
+from test_windows_split import paren_prefix, unwrap  # noqa: E402  the one home of the scope prefix reader (G)
 
 REPO = os.path.abspath(os.path.join(HERE, ".."))
 SUITE = os.path.join(REPO, "hooks", "test_install_src.sh")
@@ -39,8 +41,15 @@ STRIPPED_ENV = (SHARD_ENV, "INSTALL_SH_UNDER_TEST", "SESSION_START_SH_UNDER_TEST
 # A run line may repeat only as a named exception: name -> reason. Empty on ae13fcab, where no run line repeats.
 KNOWN_DUPLICATE_RUNS = {}
 NAME = re.compile(r"[A-Za-z_]\w*")
-# The gate form the shape takes: `${{ (<original condition>) && matrix.<key> == '<i/k>' }}`.
-GATE = re.compile(r"\$\{\{ \((.*)\) && matrix\.(\w+) == '([^']*)' \}\}")
+# The leg test a run step's `if` ends with: `${{ <scope prefix and original condition> && matrix.<key> == '<i/k>' }}`.
+GATE = re.compile(r"\$\{\{ (.*) && matrix\.(\w+) == '([^']*)' \}\}")
+
+
+def leg_gate(orig, key, leg):
+    """The `if` of a run step on matrix leg `key` == `leg`, for its original condition `orig`. A bare scope condition
+    takes its parentheses first, so its scope prefix is `(S)`; `(S) && C` keeps its prefix and gets the leg test appended."""
+    base = f"({orig})" if orig == SCOPE_ORIG else orig
+    return f"${{{{ {base} && matrix.{key} == '{leg}' }}}}"
 
 SCOPE_ORIG = "needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request'"
 SCOPE_CODE_ORIG = f"({SCOPE_ORIG}) && needs.scope.outputs.code == 'true'"
@@ -175,7 +184,7 @@ class ShardsAreBalancedByCount(unittest.TestCase):
 
 
 class BadShardValueRunsNothing(unittest.TestCase):
-    BAD_VALUES = ("0/2", "3/2", "x")
+    BAD_VALUES = ("0/2", "3/2", "x", "")
 
     def test_each_bad_value_exits_non_zero_names_the_variable_and_selects_no_case(self):
         for value in self.BAD_VALUES:
@@ -242,12 +251,25 @@ class ShellMacosRunsTheShardsByMatrix(unittest.TestCase):
         by_name = {step_key(s, "name"): s for s in others}
         for name, _run, orig in OTHER_STEPS:
             with self.subTest(step=name):
-                m = GATE.fullmatch(step_key(by_name[name], "if") or "")
-                self.assertIsNotNone(m, f"{name!r} has no matrix-leg gate, so it runs on every leg; want "
-                                        f"${{{{ ({orig}) && matrix.<key> == 'i/k' }}}}")
-                self.assertEqual(m.group(1), orig, f"{name!r}: the gate does not wrap its original condition")
-                self.assertIn(m.group(2), keys, f"{name!r}: the gate reads matrix.{m.group(2)}, which the matrix does not hold")
-                self.assertIn(m.group(3), legs, f"{name!r}: the gate names {m.group(3)!r}, which is no matrix value")
+                cond = step_key(by_name[name], "if") or ""
+                m = GATE.fullmatch(cond)
+                self.assertIsNotNone(m, f"{name!r} has no matrix-leg test, so it runs on every leg")
+                key, leg = m.group(2), m.group(3)
+                self.assertIn(key, keys, f"{name!r}: the gate reads matrix.{key}, which the matrix does not hold")
+                self.assertIn(leg, legs, f"{name!r}: the gate names {leg!r}, which is no matrix value")
+                self.assertEqual(cond, leg_gate(orig, key, leg),
+                                 f"{name!r}: the gate is not the one shape (the leg test appended to the original condition)")
+
+    def test_every_shell_macos_step_has_one_scope_prefix(self):
+        # Control shape read by test_windows_split (read_scope_condition): the scope prefix of every step's `if` is one
+        # condition. A gate that wraps the original condition gives the scoped steps the prefix `(S) && C`, so they disagree.
+        self.assertTrue(self.steps, "shell-macos has no steps")
+        conds = {(step_key(s, "name") or step_key(s, "uses")): step_key(s, "if") for s in self.steps}
+        self.assertEqual(sorted(n for n, c in conds.items() if c is None), [],
+                         "a shell-macos step has no `if`, so it carries no scope condition")
+        prefixes = {paren_prefix(unwrap(c)) or unwrap(c) for c in conds.values()}
+        self.assertEqual(sorted(prefixes), [SCOPE_ORIG],
+                         "the shell-macos steps' scope prefixes are not the one scope condition")
 
 
 if __name__ == "__main__":
