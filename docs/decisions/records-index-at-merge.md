@@ -13,8 +13,10 @@ cleanly is not refused. `merge <pr> --ready` runs the same step with `merge_main
 merges origin/<base> into a head that lacks the tip and merges cleanly (`merge_base_in`; owner ruling
 `own-840-a-ready-merges-main-skip-page-commits`, page item 840 a, 2026-11-14 19:56 CST; ruling file on branch
 `roadmap`). Any merge and any stale page commit go out in one plain push. Neither command merges a pull request.
-The tool sends no GraphQL, so the batch runner marks the PR ready
-by its session's route (route pr-ready-mcp-cloud), after the draft run of the pushed head shows (skill
+The batch runner readies a PR only with `merge <pr> --ready`, never by a bare MCP or `gh` mark.
+A mark that skips the step leaves the page unrebuilt. `--confirm` then refuses it and costs a second CI run (PR 3255 and PR 3472, 2026-11-15).
+The tool sends no GraphQL, so its own mark is always refused (`Host.ready`). A successful `--ready` exits 0 and prints "stays a draft (".
+So the ready route has three steps, in this order. One: `merge <pr> --ready`, which does what its help text says (merge main when the head lacks the tip, rebuild the page, run the declared ready checks, push when anything changed). Two: after the draft run of the head shows, the runner marks the PR ready by its session's route (route pr-ready-mcp-cloud). Three: `merge <pr> --confirm`. The tool's printed hint gives steps two and three (skill
 ci-hygiene). So the branch is final at ready, and the ready run is the merge run. The step claims no
 record numbers. It takes no merge lock. A PR that turns draft after the first read is the one case: the step runs
 under the lock that confirm already took, and releases it.
