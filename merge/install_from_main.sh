@@ -6,6 +6,9 @@
 # fast-forwards to origin/main. With no origin/stable (missing, pruned or not fetchable), the pin goes to local
 # main and the run prints one WARN line naming stable; with CLAUDE_SETTINGS_REF=main (the recovery), to local main with no WARN. Makes the pinned checkout
 # when it is missing. install.sh and install.ps1 make it too, because they also run on their own.
+# CS_STABLE_ONLY=1 (the local hook's refresh, hooks/stale_install.py) is the narrow mode: it fetches only origin's
+# CLAUDE_SETTINGS_REF and never reads, fetches or moves local main. With REF=main, or with no origin REF, it exits 1
+# with one stderr line and moves nothing. Lock, pin move and install are the same code.
 # Windows (MINGW, MSYS, CYGWIN) runs install.ps1; elsewhere install.sh.
 # A step that cannot move or install prints one stderr line naming the fix and exits 1.
 #
@@ -40,7 +43,13 @@ clone=$(git worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')
 [ -n "$clone" ] || fail "no git clone found here; run merge/install_from_main.sh from inside the clone"
 pin="$clone-live"
 no_main="no branch named main, so $pin cannot move; create it with git branch main origin/main, then run merge/install_from_main.sh"
-git rev-parse --verify -q refs/heads/main >/dev/null || fail "$no_main"   # fail fast, before any lock wait
+STABLE_ONLY=0; [ "${CS_STABLE_ONLY:-}" = 1 ] && STABLE_ONLY=1
+if [ "$STABLE_ONLY" = 1 ]; then
+  # The narrow mode (the local hook's refresh) never reads or moves local main, so it cannot follow main either.
+  [ "${CLAUDE_SETTINGS_REF:-stable}" != main ] || fail "CS_STABLE_ONLY=1 cannot follow main, because it never moves local main; run merge/install_from_main.sh without it"
+else
+  git rev-parse --verify -q refs/heads/main >/dev/null || fail "$no_main"   # fail fast, before any lock wait
+fi
 REASON="claude-settings live pin"
 
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
@@ -203,6 +212,15 @@ pin_commit() {
 # install would put unpushed work live. When origin cannot be reached, local main is the source as before, with one WARN line.
 # A branch checked out on main moves with merge --ff-only, so its files and index follow; update-ref would leave them behind.
 sync_main() {
+  if [ "$STABLE_ONLY" = 1 ]; then
+    # Fetch $REF only. Local main, and any checkout holding it, is never touched. No origin $REF means no move: the pin
+    # must never follow local main here, or the hook would report "did not reach" on every turn.
+    tmo=""; command -v timeout >/dev/null 2>&1 && tmo="timeout 30"
+    git remote get-url origin >/dev/null 2>&1 || fail "CS_STABLE_ONLY=1 needs a remote named origin; nothing was moved"
+    GIT_TERMINAL_PROMPT=0 $tmo git fetch -q origin "+refs/heads/$REF:refs/remotes/origin/$REF" >/dev/null 2>&1 \
+      || fail "could not fetch origin $REF (origin lacks it, or is unreachable); nothing was moved"
+    return 0
+  fi
   git remote get-url origin >/dev/null 2>&1 || return 0
   tmo=""; command -v timeout >/dev/null 2>&1 && tmo="timeout 30"
   if ! GIT_TERMINAL_PROMPT=0 $tmo git fetch -q origin "+refs/heads/main:refs/remotes/origin/main" >/dev/null 2>&1; then

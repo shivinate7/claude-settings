@@ -1233,7 +1233,7 @@ if [ "$CLOUD" = 1 ] && command -v jq >/dev/null 2>&1 && [ -f "$SRC/settings.json
   done
 fi
 
-# Cloud, a whole install: record what this run installed, for hooks/stale_install.py. ref is $REF as this run
+# A whole install (cloud, or local with every folder landed): record what this run installed, for hooks/stale_install.py. ref is $REF as this run
 # resolved it, sha is the source clone's HEAD, the commit the files came from (after a failed refresh, or a clone
 # the refresh left on a local commit, it is that commit, not origin's tip, which is the truth), source and installer
 # say where to run it again. No HEAD, no record: the hook then reports the freshness as unknown instead of reading a
@@ -1246,8 +1246,20 @@ record_install() {
   fi
   ri_file="$CLAUDE_DIR/.claude-settings-install.json"
   ri_esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+  ri_src="$SRC"; ri_inst="$SRC/install.sh"
+  if [ "$CLOUD" != 1 ]; then
+    # Local: SRC is the pin worktree, which a later move replaces. The hook runs the clone's helper in the clone,
+    # whose .git directory holds origin's url (a worktree's .git is a file).
+    ri_common=$(git -C "$SRC" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+    case "$ri_common" in */.git) ri_src="${ri_common%/.git}" ;; esac
+    ri_inst="$ri_src/merge/install_from_main.sh"
+    if [ ! -f "$ri_inst" ]; then
+      log "WARN: no install record written: $ri_src has no merge/install_from_main.sh"
+      return 0
+    fi
+  fi
   if printf '{"ref": "%s", "sha": "%s", "source": "%s", "installer": "%s"}\n' \
-       "$(ri_esc "$REF")" "$ri_sha" "$(ri_esc "$SRC")" "$(ri_esc "$SRC/install.sh")" > "$ri_file.cs-new" \
+       "$(ri_esc "$REF")" "$ri_sha" "$(ri_esc "$ri_src")" "$(ri_esc "$ri_inst")" > "$ri_file.cs-new" \
      && mv -f "$ri_file.cs-new" "$ri_file"; then
     :
   else
@@ -1255,7 +1267,8 @@ record_install() {
     log "WARN: could not write the install record $ri_file"
   fi
 }
-[ "$CLOUD" = 1 ] && [ "$INSTALL_FAILED" = 0 ] && [ -n "$SRC" ] && record_install
+# A local record needs every folder landed: land_failed sets INSTALL_FAILED only in the cloud.
+[ "$INSTALL_FAILED" = 0 ] && [ -n "$SRC" ] && { [ "$CLOUD" = 1 ] || [ -z "$FAILED_SUBS" ]; } && record_install
 
 # Marks a local install has landed here, so the NEXT local run treats a real file/dir at a
 # landed name as its own earlier copy rather than a person's. See the comment above its

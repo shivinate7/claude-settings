@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""UserPromptSubmit hook: in a cloud session, reinstall the hooks when origin's tip moved past the installed sha, and say so.
+"""UserPromptSubmit hook: reinstall the hooks when origin's tip moved past the installed sha, and say so.
 
-A cloud session copies hooks at start, so a hook merged later stays stale for the whole session. Each turn this
-hook reads the install record that install.sh --cloud writes (<config dir>/.claude-settings-install.json: ref,
-sha, source, installer). It asks origin for the recorded ref's tip and acts on the answer:
+A cloud session copies hooks at start, and a local session loads them at start, so a hook merged later stays stale
+for the whole session. Each turn this hook reads the install record that install.sh writes (<config dir>/.claude-settings-install.json: ref,
+sha, source, installer): a cloud run (install.sh --cloud) and a local whole install both write it. It asks origin for the recorded ref's tip and acts on the answer:
 - tip equals the recorded sha: prints nothing.
-- tip differs: runs the recorded installer once (`install.sh --cloud`), then reads the record again. A record now at
+- tip differs: runs the recorded installer once, then reads the record again. A cloud session runs
+  `bash <installer> --cloud`. A local session runs `bash <installer>` (the clone's merge/install_from_main.sh) in the
+  source clone, with CS_STABLE_ONLY=1: that fetches only the recorded ref and never moves local main. The bash is the one
+  hooks/git_bash.py finds, never a bare `bash`. A record now at
   the tip prints one line naming both 7-character shas. A record still at another sha (the installer exited 0 but
   its files did not come from the tip: its fetch missed it, or the source clone stayed on another commit) prints "reinstall did not reach <tip> (record at <sha>)", never "reinstalled". A second
   line follows when a changed path needs a new session to read it again: CLAUDE.md, output-styles/,
@@ -13,14 +16,17 @@ sha, source, installer). It asks origin for the recorded ref's tip and acts on t
   prints "reinstall failed (exit N)" and is not retried that turn. An installer past its timeout gets SIGTERM, so
   install.sh's EXIT trap releases its lock, then SIGKILL after a short wait; it prints "reinstall failed (timed out
   after N s)".
+- a local session with no record (an install from before the record existed, or install.ps1, which writes none)
+  prints nothing and makes no git call.
 - the record, the origin URL or the read fails: prints one "install freshness unknown (reason)" line and installs
   nothing. Unknown is never reported as current.
 The ref comes only from the record: the installer gets it as CLAUDE_SETTINGS_REF, replacing any value in the
 hook's environment. The hook names no branch of its own. The installer also gets a CS_HOOK_INPUT whose source no
 SessionStart entry fires on, so install.sh runs no startup entry for a reinstall in a running session.
 
-Cost: one python process start per turn. At most one `git ls-remote` per turn (a network read, bounded by
-CLAUDE_SETTINGS_FETCH_TIMEOUT seconds, default 10), none outside a cloud session. The origin URL is read from the
+Cost: one python process start per turn, local sessions too. At most one `git ls-remote` per turn (a network
+read, bounded by CLAUDE_SETTINGS_FETCH_TIMEOUT seconds, default 10), and none for a local session with no record. The hook
+itself writes 0 files. The origin URL is read from the
 source clone's .git/config, with no git call. A reinstall adds one installer run and, to find the restart line,
 a few local git reads in the source clone. No timer, no long-lived process, no file written here (the installer
 writes the record).
@@ -28,6 +34,7 @@ writes the record).
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -35,6 +42,10 @@ try:
     import _nowindow  # the one home of a no-window child start; a flat hooks/ file
 except ImportError:  # the helper lands a moment after the hook in an install; a hook never dies for it
     _nowindow = subprocess
+try:
+    import git_bash  # the one home of bash resolution; a flat hooks/ file
+except ImportError:  # lands a moment after the hook in an install; off Windows a PATH scan stands in
+    git_bash = None
 
 RECORD_NAME = ".claude-settings-install.json"
 SHORT = 7
@@ -188,15 +199,38 @@ def stop_group(proc):
     proc.wait()
 
 
+def find_bash():
+    """The bash that runs the installer: git_bash's pick on Windows (never the WSL launcher), PATH's elsewhere."""
+    if git_bash is not None:
+        return git_bash.find_git_bash()
+    return shutil.which("bash") if os.name != "nt" else None
+
+
+def is_cloud():
+    return os.environ.get("CLAUDE_CODE_REMOTE") == "true"
+
+
 def reinstall(record):
     """Runs the recorded installer once. Returns None on success, else the failure text. The installer runs in its
-    own session so a stop reaches its children. Its output goes nowhere: the hook prints its own lines."""
+    own session so a stop reaches its children. Its output goes nowhere: the hook prints its own lines.
+    Local: the installer is the clone's merge/install_from_main.sh, run in the clone in its narrow mode. Its lock wait
+    ends 20 s before the timeout, so a second session's installer reports a failure before the hook stops it."""
     limit = install_timeout()
     env = dict(os.environ, CLAUDE_SETTINGS_REF=record["ref"], CS_HOOK_INPUT=INSTALL_HOOK_INPUT)
+    bash = find_bash()
+    if not bash:
+        return "reinstall failed (no bash found)"
+    argv, cwd = [bash, record["installer"]], None
+    if is_cloud():
+        argv.append("--cloud")
+        env.pop("CS_STABLE_ONLY", None)
+    else:
+        env["CS_STABLE_ONLY"] = "1"
+        env["CLAUDE_SETTINGS_LOCK_WAIT"] = str(max(5, int(limit) - 20))
+        cwd = record["source"]
     try:
-        proc = _nowindow.Popen(["bash", record["installer"], "--cloud"], stdin=subprocess.DEVNULL,
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env,
-                                start_new_session=True)
+        proc = _nowindow.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                env=env, cwd=cwd, start_new_session=True)
     except OSError as err:
         return "reinstall failed (%s)" % err
     try:
@@ -209,11 +243,10 @@ def reinstall(record):
 
 def check():
     """The lines to print for one turn."""
-    if os.environ.get("CLAUDE_CODE_REMOTE") != "true":
-        return []
     record, reason = load_record()
     if record is None:
-        return [unknown(reason)]
+        # A local install from before the record existed has none: silent, not unknown.
+        return [] if not is_cloud() and reason == "no install record" else [unknown(reason)]
     url = origin_url(record["source"])
     if url is None:
         return [unknown("no origin url in %s" % record["source"])]
