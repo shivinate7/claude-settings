@@ -78,7 +78,7 @@ def linux_only(sha=HEAD, created=LATE, id_=None):
     return run("push", sha=sha, created=created, id_=id_, jobs=jobs)
 
 
-def gate(runs=None, raw=None, head=HEAD, token=None, run_id=None):
+def run_skip(runs=None, raw=None, head=HEAD, token=None, run_id=None):
     """Run the gate once on a stand-in read. Returns a dict: rc, value (the one skip value, or None), text (stdout and stderr) and
     summary (the step summary the gate wrote, '' when none)."""
     folder = os.path.join(RUN_FOLDER, uuid.uuid4().hex)
@@ -114,7 +114,7 @@ def gate(runs=None, raw=None, head=HEAD, token=None, run_id=None):
 class NightlySkip(unittest.TestCase):
     def nightly_skip(self, **kwargs):
         self.assertTrue(os.path.isfile(SKIP), SKIP_MISSING)
-        got = gate(**kwargs)
+        got = run_skip(**kwargs)
         self.assertEqual(got["rc"], 0, "the gate exits %d, so the nightly job fails on the gate: %s" % (got["rc"], got["text"][-300:]))
         return got["value"], got["text"]
 
@@ -208,7 +208,7 @@ class NightlySkipFailureClasses(unittest.TestCase):
 
     def value(self, runs, **kwargs):
         self.assertTrue(os.path.isfile(SKIP), SKIP_MISSING)
-        got = gate(runs=runs, **kwargs)
+        got = run_skip(runs=runs, **kwargs)
         self.assertEqual(got["rc"], 0, "the gate exits %d: %s" % (got["rc"], got["text"][-300:]))
         return got["value"]
 
@@ -276,19 +276,19 @@ class NightlySkipRange(unittest.TestCase):
 
     def test_the_range_line_names_the_green_daily_head_this_head_and_the_merges_after_it(self):
         # Named failure: the gate prints no range line, so the daily's log and summary hold no record of what it covers.
-        got = gate(runs=[run("schedule", created=OLDER, sha=OTHER), proven(sha=MERGE, created=MID), proven(sha=HEAD, created=LATE)])
+        got = run_skip(runs=[run("schedule", created=OLDER, sha=OTHER), proven(sha=MERGE, created=MID), proven(sha=HEAD, created=LATE)])
         want = "range: %s..%s (2 merges)" % (OTHER, HEAD)
         self.assertIn(want, got["text"], "the log has no range line naming the green daily, this head and the 2 push runs after it")
         self.assertIn(want, got["summary"], "the step summary has no range line naming the green daily, this head and the 2 push runs after it")
 
     def test_the_range_line_counts_no_push_run_from_before_the_green_daily(self):
         # Named failure: the count takes every push run, so the push run before the green daily is counted too.
-        got = gate(runs=[run("push", created=BEFORE, sha=MERGE), run("schedule", created=OLDER, sha=HEAD)])
+        got = run_skip(runs=[run("push", created=BEFORE, sha=MERGE), run("schedule", created=OLDER, sha=HEAD)])
         self.assertIn("range: %s..%s (0 merges)" % (HEAD, HEAD), got["text"], "a push run before the green daily is in the range")
 
     def test_the_range_line_says_unknown_with_no_green_daily(self):
         # Named failure: a daily with no green one before it prints a range from nothing, not the unknown line.
-        got = gate(runs=[run("schedule", conclusion="failure", created=OLDER), proven(created=MID)])
+        got = run_skip(runs=[run("schedule", conclusion="failure", created=OLDER), proven(created=MID)])
         self.assertIn("range: unknown (no green daily)", got["text"], "a run with no green daily must print the unknown range line")
         self.assertIn("range: unknown (no green daily)", got["summary"], "the unknown range line must reach the step summary too")
 
