@@ -11,6 +11,7 @@ Temp files: the run folder of lint/_test_temp.py (decision test-temp-standard).
 """
 import contextlib
 import io
+import json
 import os
 import re
 import shutil
@@ -595,29 +596,98 @@ class HandoffCheck(TempDest):
                 self.assertEqual(self.cli(*args)[0], 2)
 
 
+REPO_RULESETS = "repos/acme/widgets/rulesets"  # the rulesets route of the fake repo
+ADMIN_ROLE = 5  # 5 is the id the ruling's form assumes and is unconfirmed against a live ruleset
+
+
+def ruled_ruleset(ruleset_id, branch="main"):
+    """A ruleset in the form decision `main-branch-protection` sets: the rollup as its one required check, deletion and force-push blocked,
+    the Admin role bypassing on pull requests only. The cases copy it from here."""
+    rollup = {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": protect.REQUIRED_CHECK}]}}
+    return {"id": ruleset_id, "name": "ruleset-%d" % ruleset_id, "target": "branch", "enforcement": "active",
+            "conditions": {"ref_name": {"include": ["refs/heads/" + branch], "exclude": []}},
+            "rules": [rollup, {"type": "deletion"}, {"type": "non_fast_forward"}],
+            "bypass_actors": [{"actor_type": "RepositoryRole", "actor_id": ADMIN_ROLE, "bypass_mode": "pull_request"}]}
+
+
+def summary(ruleset_id):
+    """A ruleset as the list read gives it: no conditions, no rules, which only its own read gives."""
+    return {"id": ruleset_id, "name": "ruleset-%d" % ruleset_id, "target": "branch"}
+
+
+def list_page(args, items):
+    """The items a list read gives for `args`, as gh api gives them: page `page` (1 when not given) of `per_page` items (30 when not given,
+    100 at most), or every item under --paginate."""
+    if "--paginate" in args:
+        return list(items)
+    fields = dict(args[i + 1].split("=", 1) for i, a in enumerate(args[:-1]) if a == "-f")
+    size = max(1, min(int(fields.get("per_page", 30)), 100))
+    n = int(fields.get("page", 1))
+    return list(items)[(n - 1) * size:n * size]
+
+
 class Protect(unittest.TestCase):
-    """c189 part 4: adopting a repo sets branch protection with its one required check (the rollup), so no repo starts with none. A fake `gh` records each call."""
+    """Adopting a repo sets a ruleset on its default branch that requires its one required check (the rollup), so no repo starts with none
+    (decision `main-branch-protection`). A fake `gh` records each call."""
 
     def required(self):
         return protect.REQUIRED_CHECK  # the one home of the name (protect.py): no case copies it
 
-    def run_protect(self, *argv, existing=None, other_rules=False):
+    def run_protect(self, *argv, existing=None, other_rules=False, rulesets=(), details=None, write_error=None):
+        """`existing` is the classic required checks (None: no classic protection), `other_rules` a classic protection with no check rule. `rulesets`
+        are the repo's ruleset summaries, `details` each one's full object by id, and `write_error` the (code, output) every ruleset write answers.
+        A list read gives the page it asks for (list_page)."""
         calls = []
+        details = details or {}
 
         def gh(args, body=None):
             calls.append((list(args), body))
-            if "GET" in args:
-                if args[-1].endswith("/required_status_checks"):
-                    if existing is not None:
-                        return 0, '{"contexts": %s}' % __import__("json").dumps(existing)
-                    return 1, "HTTP 404: Required status checks not enabled" if other_rules else "HTTP 404: Branch not protected"
+            method, route = args[args.index("-X") + 1], args[-1]
+            if method == "GET" and route.endswith("/required_status_checks"):
+                if existing is not None:
+                    return 0, '{"contexts": %s}' % json.dumps(existing)
+                return 1, "HTTP 404: Required status checks not enabled" if other_rules else "HTTP 404: Branch not protected"
+            if method == "GET" and route.endswith("/protection"):
                 return (0, '{"required_pull_request_reviews": {"required_approving_review_count": 1},"enforce_admins": {"enabled": true}}') if other_rules else (1, "HTTP 404: Branch not protected")
+            if route.split("?")[0] == REPO_RULESETS:
+                if method == "GET":
+                    return 0, json.dumps(list_page(args, rulesets))
+                if method == "POST":
+                    return write_error or (0, '{"id": 42}')
+            m = re.fullmatch(r"repos/acme/widgets/rulesets/(\d+)", route)
+            if m and method == "GET":
+                return (0, json.dumps(details[int(m.group(1))])) if int(m.group(1)) in details else (1, "HTTP 404: Not Found")
+            if m and method == "PUT":
+                return write_error or (0, "{}")
             return 0, "{}"
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = protect.main(list(argv), gh=gh)
         self.last_stderr = err.getvalue()  # what a refusal printed to stderr, alone
         return code, out.getvalue() + err.getvalue(), calls
+
+    def confirm(self, **kw):
+        return self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--confirm", **kw)
+
+    def writes(self, calls):
+        """Every call that changes something, as (method, route, body)."""
+        return [(a[a.index("-X") + 1], a[-1], b) for a, b in calls if a[a.index("-X") + 1] != "GET"]
+
+    def ruleset_post(self, calls, consequence):
+        """The body of the run's one POST to the repo's rulesets. Scope first: a run with no such POST fails here, and `consequence` says what that costs."""
+        posts = [(m, r, b) for m, r, b in self.writes(calls) if (m, r) == ("POST", REPO_RULESETS)]
+        self.assertEqual(len(posts), 1, "no ruleset POST to the repo's rulesets (writes: %r), so %s" % ([(m, r) for m, r, _ in self.writes(calls)], consequence))
+        return posts[0][2]
+
+    def rule_types(self, body):
+        return [r["type"] for r in body.get("rules", [])]
+
+    def required_contexts(self, body):
+        return [c["context"] for r in body.get("rules", []) if r["type"] == "required_status_checks"
+                for c in r["parameters"]["required_status_checks"]]
+
+    def classic_writes(self, calls):
+        return [(m, r) for m, r, _ in self.writes(calls) if "/protection" in r]
 
     def test_the_required_check_is_the_rollup(self):
         self.assertEqual(protect.REQUIRED_CHECK, "all-jobs-passed")  # the one literal of the name in this file
@@ -629,29 +699,175 @@ class Protect(unittest.TestCase):
         self.assertIn(self.required(), out)
         self.assertIn("--confirm", out)
 
-    def test_an_unprotected_branch_gets_protection_with_the_checks(self):
-        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--confirm")
+    def test_an_unprotected_branch_gets_a_ruleset_by_post(self):
+        code, out, calls = self.confirm()
         self.assertEqual(code, 0, out)
-        puts = [c for c in calls if "PUT" in c[0]]
-        self.assertEqual(len(puts), 1, calls)
-        self.assertIn("repos/acme/widgets/branches/main/protection", puts[0][0])
-        self.assertEqual(puts[0][1]["required_status_checks"]["contexts"], [self.required()])
-        body = puts[0][1]
-        self.assertIs(body["required_status_checks"]["strict"], False, "the PUT must set strict to False")
-        self.assertIs(body["enforce_admins"], True, "the PUT must set enforce_admins to True (admins are included)")
+        self.ruleset_post(calls, "main has no ruleset to set")
 
-    def test_a_protected_branch_gets_its_checks_set_in_place(self):
-        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--confirm", existing=["old"])
+    def test_the_ruleset_is_active_and_applies_to_main(self):
+        code, out, calls = self.confirm()
         self.assertEqual(code, 0, out)
-        patches = [c for c in calls if "PATCH" in c[0]]
-        self.assertEqual(len(patches), 1, calls)
-        self.assertEqual(patches[0][1]["contexts"], [self.required()])
-        self.assertFalse([c for c in calls if "PUT" in c[0]], calls)
+        body = self.ruleset_post(calls, "it cannot be active on main")
+        self.assertEqual(body.get("enforcement"), "active", "the ruleset must be active, not disabled or in evaluate mode")
+        self.assertIn("refs/heads/main", body.get("conditions", {}).get("ref_name", {}).get("include", []), "the ruleset must name main")
 
-    def test_checks_already_set_change_nothing(self):
-        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--confirm", existing=[self.required()])
+    def test_the_ruleset_requires_only_the_rollup_check(self):
+        code, out, calls = self.confirm()
         self.assertEqual(code, 0, out)
-        self.assertFalse([c for c in calls if "GET" not in c[0]], calls)
+        body = self.ruleset_post(calls, "it cannot require the rollup")
+        self.assertEqual(self.required_contexts(body), [self.required()], "the ruleset must require the rollup and no other check")
+
+    def test_the_ruleset_blocks_deletion(self):
+        code, out, calls = self.confirm()
+        self.assertEqual(code, 0, out)
+        body = self.ruleset_post(calls, "it cannot block deletion")
+        self.assertIn("deletion", self.rule_types(body), "the ruleset must block deletion of main")
+
+    def test_the_ruleset_blocks_force_pushes(self):
+        code, out, calls = self.confirm()
+        self.assertEqual(code, 0, out)
+        body = self.ruleset_post(calls, "it cannot block force pushes")
+        self.assertIn("non_fast_forward", self.rule_types(body), "the ruleset must block force pushes to main")
+
+    def test_only_the_admin_role_may_bypass(self):
+        code, out, calls = self.confirm()
+        self.assertEqual(code, 0, out)
+        body = self.ruleset_post(calls, "it cannot name a bypass")
+        self.assertEqual([(b.get("actor_type"), b.get("actor_id")) for b in body.get("bypass_actors", [])],
+                         [("RepositoryRole", ADMIN_ROLE)], "the Admin role is the only bypass actor")
+
+    def test_the_admin_bypass_is_on_pull_requests_only(self):
+        code, out, calls = self.confirm()
+        self.assertEqual(code, 0, out)
+        body = self.ruleset_post(calls, "it cannot name a bypass mode")
+        self.assertEqual([b.get("bypass_mode") for b in body.get("bypass_actors", [])], ["pull_request"],
+                         "the bypass holds on pull requests only, never on a direct push")
+
+    def test_an_existing_ruleset_on_main_is_updated_in_place(self):
+        stale = ruled_ruleset(9)
+        stale["rules"] = [r for r in stale["rules"] if r["type"] != "deletion"]  # the form before the deletion block was added
+        code, out, calls = self.confirm(rulesets=[summary(9)], details={9: stale})
+        self.assertEqual(code, 0, out)
+        self.assertEqual([(m, r) for m, r, _ in self.writes(calls)], [("PUT", REPO_RULESETS + "/9")],
+                         "the stale ruleset on main is PUT in place, and no second ruleset is POSTed")
+        self.assertIn("deletion", self.rule_types(self.writes(calls)[0][2]), "the PUT restores the deletion block")
+
+    def test_a_ruleset_already_in_the_ruled_form_is_left_alone(self):
+        code, out, calls = self.confirm(rulesets=[summary(9)], details={9: ruled_ruleset(9)})
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.writes(calls), [], "a ruleset already in the ruled form has nothing to set")
+
+    def test_a_classic_protection_is_left_alone_and_the_ruleset_is_added(self):
+        code, out, calls = self.confirm(existing=["old"])
+        self.assertEqual(code, 0, out)
+        self.ruleset_post(calls, "a classic protected main still needs the ruleset")
+        self.assertEqual(self.classic_writes(calls), [], "the classic protection is not written: its removal is a later act")
+
+    def test_the_ruleset_list_is_read_past_its_first_page(self):
+        stale = ruled_ruleset(101)
+        stale["rules"] = [r for r in stale["rules"] if r["type"] != "deletion"]
+        # protect.py asks for 100 to a page: a full first page of 100, and main's ruleset is the 101st, on page 2
+        rulesets = [summary(i) for i in range(1, 102)]
+        details = {i: ruled_ruleset(i, branch="dev-%d" % i) for i in range(1, 101)}
+        details[101] = stale
+        code, out, calls = self.confirm(rulesets=rulesets, details=details)
+        self.assertEqual(code, 0, out)
+        self.assertEqual([(m, r) for m, r, _ in self.writes(calls)], [("PUT", REPO_RULESETS + "/101")],
+                         "main's ruleset is on page 2: it is PUT, not POSTed as a second ruleset")
+
+    def test_a_ruleset_not_active_on_main_is_set_active(self):
+        for mode in ("disabled", "evaluate"):
+            with self.subTest(mode=mode):
+                stale = ruled_ruleset(9)
+                stale["enforcement"] = mode
+                code, out, calls = self.confirm(rulesets=[summary(9)], details={9: stale})
+                self.assertEqual(code, 0, out)
+                self.assertEqual([(m, r) for m, r, _ in self.writes(calls)], [("PUT", REPO_RULESETS + "/9")],
+                                 "a ruleset on main in %s mode is not in the ruled form, so it is PUT" % mode)
+                self.assertEqual(self.writes(calls)[0][2].get("enforcement"), "active", "the PUT sets the ruleset active")
+
+    def test_a_ruleset_requiring_other_checks_is_set_to_the_rollup_alone(self):
+        stale = ruled_ruleset(9)
+        stale["rules"][0] = {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": self.required()}, {"context": "lint"}]}}
+        code, out, calls = self.confirm(rulesets=[summary(9)], details={9: stale})
+        self.assertEqual(code, 0, out)
+        self.assertEqual([(m, r) for m, r, _ in self.writes(calls)], [("PUT", REPO_RULESETS + "/9")],
+                         "a ruleset that also requires lint is not in the ruled form, so it is PUT")
+        self.assertEqual(self.required_contexts(self.writes(calls)[0][2]), [self.required()], "the PUT requires the rollup alone")
+
+    def test_a_ruleset_missing_the_force_push_block_is_set(self):
+        stale = ruled_ruleset(9)
+        stale["rules"] = [r for r in stale["rules"] if r["type"] != "non_fast_forward"]
+        code, out, calls = self.confirm(rulesets=[summary(9)], details={9: stale})
+        self.assertEqual(code, 0, out)
+        self.assertEqual([(m, r) for m, r, _ in self.writes(calls)], [("PUT", REPO_RULESETS + "/9")],
+                         "a ruleset without the force-push block is not in the ruled form, so it is PUT")
+        self.assertIn("non_fast_forward", self.rule_types(self.writes(calls)[0][2]), "the PUT blocks force pushes to main")
+
+    def test_a_ruleset_with_another_bypass_is_set_to_the_admin_role_on_pull_requests(self):
+        wrong = {
+            "bypass on every push": [{"actor_type": "RepositoryRole", "actor_id": ADMIN_ROLE, "bypass_mode": "always"}],
+            "another role": [{"actor_type": "RepositoryRole", "actor_id": ADMIN_ROLE + 1, "bypass_mode": "pull_request"}],
+            "no bypass": [],
+        }
+        for name, actors in wrong.items():
+            with self.subTest(bypass=name):
+                stale = ruled_ruleset(9)
+                stale["bypass_actors"] = actors
+                code, out, calls = self.confirm(rulesets=[summary(9)], details={9: stale})
+                self.assertEqual(code, 0, out)
+                self.assertEqual([(m, r) for m, r, _ in self.writes(calls)], [("PUT", REPO_RULESETS + "/9")],
+                                 "a ruleset whose bypass is %s is not in the ruled form, so it is PUT" % name)
+                self.assertEqual(self.writes(calls)[0][2].get("bypass_actors"),
+                                 [{"actor_type": "RepositoryRole", "actor_id": ADMIN_ROLE, "bypass_mode": "pull_request"}],
+                                 "the PUT bypass is the Admin role on pull requests only")
+
+    def test_an_in_form_ruleset_with_extra_rules_is_left_alone(self):
+        ruled = ruled_ruleset(9)
+        ruled["rules"] += [{"type": "pull_request", "parameters": {"required_approving_review_count": 1}}, {"type": "required_signatures"}]
+        code, out, calls = self.confirm(rulesets=[summary(9)], details={9: ruled})
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.writes(calls), [], "a ruleset in the ruled form with rules the form does not name has nothing to set")
+
+    def test_a_put_keeps_the_other_rules_the_ruled_form_does_not_name(self):
+        stale = ruled_ruleset(9)
+        stale["rules"] = [r for r in stale["rules"] if r["type"] != "deletion"] + [{"type": "pull_request", "parameters": {"required_approving_review_count": 1}}]
+        code, out, calls = self.confirm(rulesets=[summary(9)], details={9: stale})
+        self.assertEqual(code, 0, out)
+        self.assertEqual([(m, r) for m, r, _ in self.writes(calls)], [("PUT", REPO_RULESETS + "/9")], "the stale ruleset is PUT in place")
+        self.assertIn("pull_request", self.rule_types(self.writes(calls)[0][2]), "the PUT keeps the held pull_request rule")
+
+    def test_a_put_keeps_the_strict_setting_of_the_held_required_checks(self):
+        stale = ruled_ruleset(9)
+        stale["rules"] = [r for r in stale["rules"] if r["type"] != "deletion"]
+        stale["rules"][0]["parameters"]["strict_required_status_checks_policy"] = True
+        code, out, calls = self.confirm(rulesets=[summary(9)], details={9: stale})
+        self.assertEqual(code, 0, out)
+        self.assertEqual([(m, r) for m, r, _ in self.writes(calls)], [("PUT", REPO_RULESETS + "/9")], "the stale ruleset is PUT in place")
+        strict = [r["parameters"].get("strict_required_status_checks_policy") for r in self.writes(calls)[0][2]["rules"] if r["type"] == "required_status_checks"]
+        self.assertEqual(strict, [True], "the PUT keeps the held strict setting")
+
+    def test_a_put_keeps_the_conditions_of_the_held_ruleset(self):
+        stale = ruled_ruleset(9)
+        stale["rules"] = [r for r in stale["rules"] if r["type"] != "deletion"]
+        stale["conditions"] = {"ref_name": {"include": ["refs/heads/main"], "exclude": ["refs/heads/hotfix-*"]}}
+        code, out, calls = self.confirm(rulesets=[summary(9)], details={9: stale})
+        self.assertEqual(code, 0, out)
+        self.assertEqual([(m, r) for m, r, _ in self.writes(calls)], [("PUT", REPO_RULESETS + "/9")], "the stale ruleset is PUT in place")
+        self.assertEqual(self.writes(calls)[0][2].get("conditions"), stale["conditions"], "the PUT keeps the held conditions")
+
+    def test_a_put_keeps_the_name_of_the_held_ruleset(self):
+        stale = ruled_ruleset(9)
+        stale["rules"] = [r for r in stale["rules"] if r["type"] != "deletion"]
+        stale["name"] = "main-guard"
+        code, out, calls = self.confirm(rulesets=[summary(9)], details={9: stale})
+        self.assertEqual(code, 0, out)
+        self.assertEqual([(m, r) for m, r, _ in self.writes(calls)], [("PUT", REPO_RULESETS + "/9")], "the stale ruleset is PUT in place")
+        self.assertEqual(self.writes(calls)[0][2].get("name"), "main-guard", "the PUT keeps the held ruleset's name")
+
+    def test_a_ruleset_write_the_api_refuses_exits_1(self):
+        code, out, calls = self.confirm(write_error=(1, "HTTP 422: Validation Failed"))
+        self.assertEqual(code, 1, "a ruleset write the API refuses must exit 1\n" + out)
 
     def test_no_checks_is_refused(self):
         for checks in (["--check", ""], ["--check", "  "], []):
@@ -686,26 +902,14 @@ class Protect(unittest.TestCase):
     def test_an_empty_check_name_is_not_counted(self):
         code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "", "--check", self.required(), "--confirm")
         self.assertEqual(code, 0, out)
-        puts = [c for c in calls if "PUT" in c[0]]
-        self.assertEqual(len(puts), 1, calls)
-        self.assertEqual(puts[0][1]["required_status_checks"]["contexts"], [self.required()])
+        body = self.ruleset_post(calls, "the empty name cannot be checked")
+        self.assertEqual(self.required_contexts(body), [self.required()], "the empty name is no check: the ruleset names the rollup alone")
 
     def test_the_same_name_twice_is_one_check(self):
         code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--check", f" {self.required()}\t", "--confirm")
         self.assertEqual(code, 0, "the same name twice is one check: exit 0 expected\n" + out)
-        puts = [c for c in calls if "PUT" in c[0]]
-        self.assertEqual(len(puts), 1, "the same name twice: one PUT expected\n" + str(calls))
-        self.assertEqual(puts[0][1]["required_status_checks"]["contexts"], [self.required()], "the same name twice: contexts must hold the name once")
-
-    def test_the_patch_leaves_strict_alone(self):
-        _, _, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--confirm", existing=["old"])
-        self.assertNotIn("strict", [c for c in calls if "PATCH" in c[0]][0][1])
-
-    def test_a_branch_protected_without_a_check_rule_is_refused_not_replaced(self):  # a PUT would drop its review rule and restrictions
-        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--confirm", other_rules=True)
-        self.assertEqual(code, 1, out)
-        self.assertFalse([c for c in calls if "GET" not in c[0]], calls)
-        self.assertIn("required_pull_request_reviews", out)
+        body = self.ruleset_post(calls, "the repeated name cannot be checked")
+        self.assertEqual(self.required_contexts(body), [self.required()], "the same name twice: the ruleset must name the check once")
 
 
 if __name__ == "__main__":
