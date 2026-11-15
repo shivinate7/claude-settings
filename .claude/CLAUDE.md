@@ -34,8 +34,8 @@ output style load in each session on each repo.
   23:40 CST, waiting-page item 806 d). The batch runner may push a plain merge of main into a PR that a lane
   has handed in, with no clock rule. A lane that pushes again to a handed-in branch says so first. No rebase,
   no force push. A conflict that changes behaviour goes back to the coordinator. Each new head gets a fix
-  verifier and a fresh review log. Source: decision `standing-merge-grant`, which its coordinator tiny-fix exception does not reach.
+  verifier and a fresh review log. Source: decision `standing-merge-grant`.
 - **Overlaps between lane branches** (owner, 2026-11-13 14:17 CST, typed in runner 10's chat: "you have a
   standing grant to act on overlaps by me, owner"). The batch runner may act on overlaps between lane branches.
   Runner 10 reads that as a plain merge of one lane's head into another lane's branch, under the limits of the
-  bullet above. The owner has not confirmed that reading. Source: decision `standing-merge-grant`, which its coordinator tiny-fix exception does not reach.
+  bullet above. The owner has not confirmed that reading. Source: decision `standing-merge-grant`.
