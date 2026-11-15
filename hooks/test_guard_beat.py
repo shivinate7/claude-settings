@@ -19,6 +19,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import types
 import unittest
 from collections import namedtuple
@@ -111,14 +112,22 @@ def watched_run(name, heartbeat):
     with open(job_file, "wb") as out:
         job = subprocess.Popen(SUITE_CMD, stdout=out, stderr=subprocess.STDOUT,
                                env=suite_env(heartbeat, beat_file), start_new_session=True)
+    # The watcher counts the CPU time of the process tree it watches as life (decision stall-watch), and a family
+    # run works all the while. So it watches a stand-in that blocks on a pipe, uses no CPU, and exits when the
+    # job ends: the beat file stays the only thing it can read.
+    standin = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"], stdin=subprocess.PIPE)
+    waiter = threading.Thread(target=lambda: (job.wait(), standin.stdin.close()), daemon=True)
+    waiter.start()
     try:
-        watcher = subprocess.run([sys.executable, WATCHER, "--watch-pid", str(job.pid), "--log", idle_file,
+        watcher = subprocess.run([sys.executable, WATCHER, "--watch-pid", str(standin.pid), "--log", idle_file,
                                   "--quiet", WATCH_QUIET, "--beat", beat_file],
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=TIMEOUT)
         job_rc = job.wait(timeout=TIMEOUT)
     finally:
         if job.poll() is None:
             kill_job(job)
+        waiter.join(timeout=30)
+        standin.wait(timeout=30)
     with open(job_file, "rb") as f:
         job_out = f.read().decode("utf-8", "replace")
     return Watched(watcher.returncode, watcher.stdout.decode("utf-8", "replace"), job_rc, job_out)
