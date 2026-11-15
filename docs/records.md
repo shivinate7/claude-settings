@@ -1,6 +1,6 @@
 # Records index
 
-This page lists every record in this repo: the rules in the rule files that `lint/rule_audit.py` RULE_FILES names, and the files in `docs/decisions/`, `docs/debts/` and `docs/plans/`. A script writes it. Do not edit it by hand.
+This page lists every record in this repo: the rules in `CLAUDE.md`, and the files in `docs/decisions/`, `docs/debts/` and `docs/plans/`. A script writes it. Do not edit it by hand.
 
 The merge tool writes this page again when a pull request merges, so a pull request need not carry a fresh one. To write it by hand, run `python3 lint/hook_catalog.py` from the claude-settings checkout, with `--root` set to this repo. The check on the default branch fails when the page is stale.
 
@@ -53,7 +53,12 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `git-ci-done-comment-wakes` | A run that ends red posts one PR comment, which wakes the session that watches the PR (decision `ci-wait-reads-run-status`). | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-never-discard-output` | Keep git write output. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-remedy-never-names-target` | A refusal's printed remedy never names the forbidden target. | [`CLAUDE.md`](../CLAUDE.md) |
+| `git-slug-then-claim-number` | Never allocate a numbered record on a branch. | [`CLAUDE.md`](../CLAUDE.md) |
+| `git-cite-by-id` | Ids, not paths. | [`CLAUDE.md`](../CLAUDE.md) |
+| `git-record-own-file-per-kind` | Give each record its own file, one folder per kind. | [`CLAUDE.md`](../CLAUDE.md) |
+| `git-one-record-per-question` | One record per question. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-integration-branch-merge` | Each lane PR merges alone through the merge tool, on its own green run and the review its risk needs. | [`CLAUDE.md`](../CLAUDE.md) |
+| `verification-screens-verdict` | If the repo has screens, check each screen at every size and theme it ships in. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-browser-login-only-needed` | Prefer a headless or isolated browser over my own, and use my login only when needed. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-announce-own-screen` | Before a window or a screen capture lands on my screen, say so in one line. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-trust-guard-after-red` | Trust a guard only once it goes red on the defect it guards. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -63,6 +68,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `verification-verify-against-repo` | Verify long work against the repo, not your status line. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-never-dry-run-refusal-list` | Never dry-run a refusal list. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-newest-that-passes` | Take the newest version that passes its checks. | [`CLAUDE.md`](../CLAUDE.md) |
+| `verification-checked-reader-for-numbers` | If this repo lints markdown, give every published number and path a checked reader. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-report-unknown-reads` | Verify a claim before you rely on it, a document's own claims too. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-counts-from-rest` | Counts and states (open, closed, merged, CI status) come from the GitHub REST API, not a search. | [`CLAUDE.md`](../CLAUDE.md) |
 | `tokens-never-load-whole-doc` | Never load a long document whole. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -94,7 +100,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `output-never-paste-passing-output` | Rules for replies to me, and not to agents, live in the `shiv-stylisms` output style. | [`CLAUDE.md`](../CLAUDE.md) |
 | `output-bring-decisions-as-question` | Bring my choices as a question with options and a recommendation. | [`CLAUDE.md`](../CLAUDE.md) |
 | `output-answer-has-a-home` | An answer to a question I bring is a ruling. | [`CLAUDE.md`](../CLAUDE.md) |
-| `questions-go-to-owner` | While an agent, a lane or a background command of this session runs, or starts in the same response, never open a question box. | [`CLAUDE.md`](../CLAUDE.md) |
+| `questions-go-to-owner` | Bring each question to me. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-order-of-labels` | Done, Deviations, Input Needed, Next. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-done-format` | Done: one line per item, BUILT, RECORDED, or OTHER. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-done-names-models` | A Done item that agents built or reviewed names each one's role and model, such as "(builder sonnet, reviewer sonnet)". | [`CLAUDE.md`](../CLAUDE.md) |
@@ -103,41 +109,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `reports-no-report-when-nothing-landed` | No report when nothing landed. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-batch-pace-numbers` | After each merge, the report also gives four pace numbers, as OTHER items under Done. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-offer-sweep-after-merge` | When a session's last PR has merged and no lane is open, its final report offers one command under Next: `python3 ~/.claude/janitor/sweep.py --root <repo> --attended --fast`, preview first, then with `--confirm`. | [`CLAUDE.md`](../CLAUDE.md) |
-| `output-start-with-point` | Lead with the result. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `style-cut-narration` | Cut narration and recaps. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `style-limits-kept-silently` | Keep to a limit or rule silently. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `output-tracking-turn-one-line` | Once an objective is underway, assume nobody reads until the user returns. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `output-landing-turn-ends-with-report` | A turn that lands a commit, push, merge or opened PR is not a tracking turn: it ends with the report. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `output-never-echo-agent-report` | Never echo an agent's report or describe a screenshot. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `style-simple-answer-short` | Answer a simple question in 1 to 3 sentences. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `style-full-detail-on-request` | If the user asks for full detail, give it. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `style-keep-critical-full` | Keep these at full length: error reports, failing output, security warnings, and confirmations for destructive actions. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `style-correct-over-brief` | Never trade correctness for brevity. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `reports-blockquote-no-fence` | Put a report to the user in one blockquote with bold labels. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `style-plain-words` | Use plain words everywhere. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `style-question-form` | Give each question with two or more options the question form, in the question box, in this order: `Goal: <the goal>` in the user's terms; `Problem (<stake>): <the problem in one plain sentence, and why it needs their word>`. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `style-question-inside-box` | Put all a question needs inside the question box: its text, its options, or an option's preview. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `output-never-hand-off-doable-step` | Do an act yourself before you hand it to me. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `style-hand-off-cleanup` | Access that made a thing can remove it: a thing you made, you clean up yourself. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `style-hand-off-irreversible` | "Can't" and "shouldn't" differ. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `style-hand-off-runs-as-is` | When the act is mine, give the most direct way: the exact button path, or each command as its own fenced block. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `style-hand-off-gh-login` | A gh command block opens, after its `cd`, with `gh auth switch -u shivinate7`, or `-u ssemwal-cdc` where shivinate7 has no access (decision `act-in-place`: the owner acts where he reads). | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `style-hand-off-one-shell` | On Windows, a pasted block is PowerShell 5.1-safe. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `style-offer-screen-takeover` | Where a screen tool can do it, offer to take over the screen. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `style-press-has-link` | An option or step that asks the owner to press in a web app carries a link to that exact page, on the option or task that presses. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `style-command-in-item` | A step never sends the owner to a file for a command. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `style-table-gold-column` | A table that compares things carries a column for what good looks like: the gold standard or the target. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `style-time-central-24h` | Give times in US Central, 24-hour clock, with the zone on every time, such as 21:40 CDT. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `style-no-unmeasured-estimate` | Give no time estimate for agent work. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `style-status-is-report` | When I ask for status, answer with the report shape: Done, Deviations, Input Needed, Next. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `style-offer-override-line` | When a refusal prints an override line, offer that line to me as a ready answer to accept or copy. | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `style-wrong-session-one-line` | When I name the wrong session, or bring work that belongs to another session, say in one line whose job it is, then route it (`session-tiers`, the session roles). | [`output-styles/shiv-stylisms.md`](../output-styles/shiv-stylisms.md) |
-| `git-slug-then-claim-number` | Never allocate a numbered record on a branch. | [`skills/fresh-prose/SKILL.md`](../skills/fresh-prose/SKILL.md) |
-| `git-cite-by-id` | Ids, not paths. | [`skills/fresh-prose/SKILL.md`](../skills/fresh-prose/SKILL.md) |
-| `git-record-own-file-per-kind` | Give each record its own file, one folder per kind. | [`skills/fresh-prose/SKILL.md`](../skills/fresh-prose/SKILL.md) |
-| `git-one-record-per-question` | One record per question. | [`skills/fresh-prose/SKILL.md`](../skills/fresh-prose/SKILL.md) |
-| `verification-checked-reader-for-numbers` | If this repo lints markdown, give every published number and path a checked reader. | [`skills/fresh-prose/SKILL.md`](../skills/fresh-prose/SKILL.md) |
-| `verification-screens-verdict` | If the repo has screens, check each screen at every size and theme it ships in. | [`skills/design-review/SKILL.md`](../skills/design-review/SKILL.md) |
 
 ## Rulings
 
