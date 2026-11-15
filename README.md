@@ -23,7 +23,7 @@ stays in the clone. The mods install from the marketplace instead (decision
 | `docs/design/` | The house UX rules. |
 | `bin/` | The command launchers: `merge`, `verdict`, `ste-changed`, `claude-janitor`, and `ci-job`, which runs every step of one workflow job here and prints one verdict per step. Also `ios-ship`, the shared tool that ships iOS apps from the Mac (see "Shipping iOS apps"), `sim-test`, which runs `xcodebuild test` on one phone simulator, and `sim-lease`, the queue and lease it takes first (see "Simulator tests"), `duo-fold`, which folds the iPhone Duo and reads the angle back, and `shoot`, which takes one screenshot per route, width and theme from a repo's `.claude/shoot.json` and prints one verdict line. |
 | `janitor/` | The machine-wide sweep for orphaned worktrees, branches, and listeners. See `janitor/GUIDE.md`. |
-| `merge/` | The code of the `merge` command. It runs from the clone, and nothing installs a copy. `bin/merge` starts it. |
+| `merge/` | The code of the `merge` command. It runs from the clone, and nothing installs a copy. `bin/merge` starts it. `combine_train.py` is a standalone dry tool beside it: it folds a queue file's batches on temporary trees and never pushes. |
 | `actions/` | Composite GitHub Actions this repo publishes (`stamp`, `ste-lint`, `playwright-setup`). Callers pin them by commit SHA. |
 | `mods/`, `.claude-plugin/` | The vendored mods, and the marketplace file that lists them. |
 | `githooks/` | Git hooks for a repo, such as `main-ref`. |
@@ -172,7 +172,7 @@ Run it from inside the repo, or name the repo's checkout with `-C PATH` (`--repo
 merge <pr>              preview: what it would claim and merge. Presses nothing.
 merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, merge, move the local main, clean up.
                         A confirm that pushes a claim commit stops there: run it again to merge. NAME shows in the lock to a waiting run.
-merge <pr> --ready      mark a lane's draft ready, once: the records step and the repo's ready checks, then the mark. Merges nothing, takes no lock.
+merge <pr> --ready      mark a lane's draft ready, once: on the default branch, a merge of origin/main into a head that lacks its tip (when clean), the records step, and the repo's ready checks, then at most one push (none when the head holds the tip and its page is current) and the mark. Merges no PR, takes no lock.
 merge --unlock [BRANCH] remove the merge lock on BRANCH (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
 merge -C PATH <pr> ...  act in the checkout at PATH, not the one the process stands in. Works with every form above and with --lane-lint. The last -C wins.
 merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...] [--net-value V]
