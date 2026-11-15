@@ -1,0 +1,10 @@
+{
+  "id": "own-tiny-fixes-b",
+  "at": "2026-11-15T00:50:00-06:00",
+  "title": "Any standing session sends one agent for a docs-only edit or a small rule-text fix and merges its PR itself on green",
+  "ruling": "Owner 00:50 CST Nov 15, page item 861 b, typed in chat and relayed verbatim by the consultant: any standing session sends one agent for a docs-only edit or a small rule-text fix. For rule text, one Sonnet reviewer agent runs in the same session, with no separate spawn (his 00:49 CST words). The session then merges that PR itself through the merge tool, on green. Edits that change a guard, a check or code still go to a lane. Contradiction read by triage: decision session-tiers and standing-merge-grant hold that the coordinator never merges and a batch runner runs every merge (owner 2026-11-01 21:34 CST); relayed-yes (claude-settings .claude/CLAUDE.md) covers one named PR. This ruling reverses the 2026-11-01 ruling for these two kinds of edit only. Kept as his word. Open: whether the merge tool accepts a standing session's merge call without a change is unread.",
+  "quote": "owner 00:49 CST: \"one reviewer before it merges thats still just another subagent within the same session tho? it doesnt need a spawn\"; owner 00:50 CST: \"so B\"",
+  "source": "Consultant 00:55 CST Nov 15, relaying the owner's chat words verbatim; coordinator message; page item 861 closed 00:51 CST; filed by triage.",
+  "status": "open",
+  "step": "role-sessions-fan-out"
+}
