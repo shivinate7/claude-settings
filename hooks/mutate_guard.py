@@ -3058,12 +3058,12 @@ MUTATIONS = [
     # RULE roadmap-one-writer. A push to the record branch needs the triage tag in the own record, with no
     # set_session_tags call after it.
     ("roadmap-one-writer: the triage tag is not checked, so any own record is a proof",
-     '            return tags is not None and not tagged_after and ROLE_TAG_PREFIX + tier in tags',
+     '            return tags is not None and not tagged_after and ROLE_TAG_PREFIX + role in tags',
      '            return tags is not None and not tagged_after', "guard",
      "a lane's push that names roadmap is refused"),
     ("roadmap-one-writer: a set_session_tags call after the record is ignored",
-     '            return tags is not None and not tagged_after and ROLE_TAG_PREFIX + tier in tags',
-     '            return tags is not None and ROLE_TAG_PREFIX + tier in tags', "guard",
+     '            return tags is not None and not tagged_after and ROLE_TAG_PREFIX + role in tags',
+     '            return tags is not None and ROLE_TAG_PREFIX + role in tags', "guard",
      "a triage record with a set_session_tags call after it is refused a push to roadmap"),
     ("roadmap-one-writer: a push never counts as reaching the record branch",
      '            if {record, DEFAULT_RECORD_BRANCH} & set(push_destinations(args, where, overrides)) and (',
