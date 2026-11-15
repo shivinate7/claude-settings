@@ -295,7 +295,7 @@ add("floor step-up: Workflow reviewer with a fix verifier and a spread is allowe
 # ---- Step-up, a reviewer whose brief carries the guard marker (decision agent-model-cap, the `1 guard` round row, sonnet).
 # A reviewer on a guard or check change runs Sonnet on any round, so the step-up refuses a guard-marked reviewer below
 # Sonnet: on Haiku, on a blank model, or with no model. The marker counts only at the start of a line outside a fence.
-# A guard-marked reviewer on Round 2 keeps its round reason. The marker is typed here, as FIX_VERIFIER is, so a rename
+# A guard-marked reviewer on a later round keeps its round reason. The marker is typed here, as FIX_VERIFIER is, so a rename
 # of the constant cannot quietly change what these cases pin.
 # Failure classes: a false allow (a guard-marked reviewer on Haiku, a blank model or no model reviews a guard change on
 # Haiku); a false refusal (a fenced or mid-line marker, a non-reviewer, or a reviewer on Sonnet is refused).

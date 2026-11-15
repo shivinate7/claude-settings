@@ -1160,7 +1160,7 @@ role_model_allow("role-model: reviewer on sonnet with the guard marker at the en
                  "reviewer", "sonnet", "Check the diff.\n" * 399 + REVIEW_GUARD_MARKER)
 role_model_allow("role-model: reviewer on sonnet as a Task with the guard marker is allowed", "reviewer", "sonnet",
                  REVIEW_GUARD_MARKER + "\nCheck the guard diff.", tool="Task")
-# A guard-marked round 1 reviewer below its `1 guard` row (sonnet) is refused at the step-up. The reason is a literal
+# A guard-marked first-round reviewer below its `1 guard` row (sonnet) is refused at the step-up. The reason is a literal
 # here, never read from the guard, and it names the row's model.
 add("role-model: reviewer on haiku with the guard marker is denied at the step-up (its 1 guard row is sonnet)",
     "deny", STEP_UP, tool="Agent", config=ROLE_REAL_CFG,
