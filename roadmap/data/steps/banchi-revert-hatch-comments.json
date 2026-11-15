@@ -1,0 +1,11 @@
+{
+ "title": "banchi: code comments still say the revert hatch is printed in every refusal",
+ "phase": "later",
+ "status": "todo",
+ "repo": "banchi",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "09:03 CST Nov 15 (coordinator 09:02 CST, relayed from lane child-gap-banchi's final report; triage read no banchi repo). Two comments still say the revert hatch is 'printed in every refusal': scripts/revert-audit.py docstring (lines 39-40) and scripts/githooks/pre-push (line 44). Banchi decisions D133 and D042 now say no refusal prints it. Harm it stops: a session reads the stale comment and trusts a hatch no refusal prints. Needs a code lane; not started. The lane's words, unchecked by triage.",
+ "note": "Not started. Low. Found by lane child-gap-banchi (stopped); banchi #1102 merged without these two comments.",
+ "updatedAt": "2026-11-15T09:03:00-06:00"
+}
