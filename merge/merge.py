@@ -4662,7 +4662,7 @@ def comment_rows(h, since, seen=None):
     """-> [{id, issue, kind, body, created, updated}] of the repo's review log and lane-lint comments updated since `since`, in the list's order
     (created, oldest first): one list read. issue is the number from the comment's issue_url; kind is ROW_LOG when the review log marker is the whole
     first line, or ROW_LINT when the lane-lint marker is, and the author is the repo's owner. A timestamp the read did not give is None. `seen`, a list,
-    gets the (id, updated_at) of every comment the read returned, rows or not: the newest updated_at is a safe cursor, and an id with no row is a comment
+    gets the (id, updated_at) of every comment the read returned, rows or not: the newest updated_at, capped at the read start, is the cursor, and an id with no row is a comment
     edited so it is no row any more. A failed read is a Stop.
     The kind test is sort_comment's; this adds the row shape. issue_comments and the reviewed cursor's cache both take their rows from it. A module function, not a Host
     method: a test fake borrows issue_comments and has only `pages`."""
@@ -4745,8 +4745,11 @@ def reviewed_rows(h, floor):
     within REVIEWED_FULL_REREAD_SECS, gives its rows plus the comments updated since its cursor less REVIEWED_OVERLAP_SECS, merged by comment id (an edit
     replaces its row; a returned comment that no longer gives a row drops its cached one), oldest first.
     Anything else (no or invalid cache, an older pull request reopened, a stale cache, a repo whose name cannot be read) is a full read from `floor`, as
-    before the cursor; a repo with no name reads and writes no cache. The cursor is the newest updated_at read, never a wall clock. One write of the file
-    follows; a failed write never fails the read."""
+    before the cursor; a repo with no name reads and writes no cache. The cursor is the newest updated_at read, capped at the host's clock when the read
+    began: a comment that changes between page fetches carries an updated_at later than that start, and a cursor past the start would skip the change on
+    the next read. One write of the file follows, only when the state file reads again just before it; a failed write never fails the read.
+    Accepted limit: a comment deleted between two page fetches of one read can shift the pages and hide another comment from that read; the next warm
+    --reviewed may list it stale for up to REVIEWED_FULL_REREAD_SECS, and the merge gate reads in full."""
     key = repo_key(h)
     now = getattr(h, "now", time.time)()  # a test fake has no clock
     state, readable = read_state() if key else ({}, False)
@@ -4768,12 +4771,13 @@ def reviewed_rows(h, floor):
     newest += [iso_secs(u) for _cid, u in seen]
     top = max((t for t in newest if t is not None), default=None)
     if top is not None and readable:
-        entry["cursor"] = iso_stamp(top)
+        entry["cursor"] = iso_stamp(min(top, now))  # never past the read's start: see the docstring
         if valid_reviewed_cache(entry) and entry != cache:
             with contextlib.suppress(OSError):
-                state = read_state()[0]  # read again: the role may have been written since the first read
-                caches = state.get("reviewed_cursor")
-                write_state({**state, "reviewed_cursor": {**(caches if isinstance(caches, dict) else {}), key: entry}})
+                state, still_readable = read_state()  # read again: the role may have been written since the first read
+                if still_readable:  # an unreadable file is left as it is: writing over it would drop the session and the role
+                    caches = state.get("reviewed_cursor")
+                    write_state({**state, "reviewed_cursor": {**(caches if isinstance(caches, dict) else {}), key: entry}})
     return rows
 
 def reviewed_read(h, cfgrel=None):
