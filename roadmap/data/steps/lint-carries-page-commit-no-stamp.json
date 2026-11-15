@@ -1,0 +1,14 @@
+{
+ "id": "lint-carries-page-commit-no-stamp",
+ "title": "The lane lint carries across the tool's own records-page commit in this repo, as line 82 of pr-review-record says, so a `--ready` no longer discards the lint",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJKzVWixDqQgAjMzTCgV",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Request (coordinator 21:38 CST Nov 14; triage read no code, PR or record; every fact below is the lane's read, unverified by triage). Lane review-carries-by-tree (session_013NEJKzVWixDqQgAjMzTCgV) read at 21:37 CST, main 6a0a6fa161: claim_only (merge/merge.py:1926) returns False at once when base_stamp gives no kinds, and this repo has none, so the lane lint never carries across the tool's own records-page commit. The record walk (clean_merges_after) has no such gate, so the record carries. Decision pr-review-record line 82 says both carry: the lane reads the code as wrong and the line as right. Measured on #3440: lint PASS at f2ef8191, `--ready` page commit 32a077b40ab8, `--reviewed` reads \"no lint\". Cost this evening (runner 10's measure, unverified): every lint run before a `--ready` is lost, 8 to 12 min each; 7 repeat lints at 56 min, part of them from main merges. Fix to build: test page_only / page_is_generated before the `not kinds` return; red case first. It is a guard or check change (verdict can change): review rounds and the net-value test apply (rule roles-review-cap-three). The coordinator's pick, undoable, no widening beyond line 82 (a grant covers the act it names, never a variant). Start it after step carry-forgives-main-merge, same lane. Kin: carry-forgives-main-merge (replacement PR; carry and `--fix-check` gate), merge-lint-skip-green-rollup, records-page-before-ready. Item 850 (open question: carry the lint across a clean merge of main) is a DIFFERENT gap: this step is the tool's own page commit, which line 82 already says should carry, so it may shrink item 850's cost; item 850 is not changed. Interim runner order (coordinator, undoable, until this step's lint carries): MARK FIRST, LINT IN PARALLEL: runner 10 marks a handed-in head without waiting for the lint, and runs the lane lint beside it.",
+ "source": "coordinator 21:38 CST Nov 14 (the lane's read 21:37 CST)",
+ "note": "Filed 21:40 CST Nov 14 by triage. READY, owner coordinator, lane review-carries-by-tree after carry-forgives-main-merge. Fix: test page_only/page_is_generated before the `not kinds` return in claim_only; red case first; guard/check change (review rounds, net-value test). Lane's read, unverified by triage. Interim runner order (coordinator): mark first, lint in parallel, until the lint carries. Item 850 is a different gap and is unchanged.",
+ "updatedAt": "2026-11-14T21:40:00-06:00"
+}
