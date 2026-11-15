@@ -2828,6 +2828,20 @@ class PinnedHarness(Job):
         self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), "a ref nothing holds did not read unknown, never PASS\n" + text)
         self.assertNotIn("fixture harness", text, "the local copy ran for a ref it could not resolve\n" + text)
 
+    def test_a_zizmor_pin_under_lint_runs_its_own_run_sh(self):
+        rc, lines, text = self.run_step(self.zizmor_step(self.pin_a), "--lint", "--base", "origin/main", env=self.pipx_env())
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "--lint did not PASS the zizmor run.sh at the pin\n" + text)
+        self.assertIn("fixture zizmor: lenient", text, "--lint ran the local strict run.sh, not the one at the pin\n" + text)
+
+    def test_two_steps_at_different_pins_each_run_their_own_tree(self):
+        """Each step runs the tree of its own pin: the fixture's HEAD (the strict commit) first, which FAILs, and the lenient
+        commit second, which PASSes. One tree shared by both steps would read them alike."""
+        pin_strict = git_in(self.source, "rev-parse", "main")  # the fixture's main is the strict commit
+        steps = step("Code check", uses="shivinate7/claude-settings/actions/code-check@%s" % pin_strict) + \
+            step("Code check again", uses="shivinate7/claude-settings/actions/code-check@%s" % self.pin_a)
+        rc, lines, text = self.run_step(steps, "--step", "Code check", "--step", "Code check again", "--base", "origin/main")
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL", "PASS"]), "the two steps did not each run their own pin's tree\n" + text)
+
     @unittest.skipUnless(os.name == "posix", "the git stub is a shell script")
     def test_the_export_is_deleted_after_a_pass_and_after_an_unknown(self):
         tmp = tempfile.mkdtemp(prefix="tmp-", dir=RUN_FOLDER)  # TMPDIR for the run: each export is made here
