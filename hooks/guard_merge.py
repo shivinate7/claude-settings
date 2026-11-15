@@ -1062,14 +1062,14 @@ def octopus_push_hit(stripped: str, cwd: str, read_verb) -> str:
 # pull request, so the push passes with one stderr line. A later read that cannot run refuses as unknown (decision handed-in-push-needs-record),
 # and so does a folder or a branch this reader cannot name.
 HANDED_IN_PUSH_STALE_REASON = (
-    "Rule (Git, handed-in-push-needs-record; decision handed-in-push-needs-record): this push goes to the branch of #{n}, whose newest "
-    "review log is stale at its live head {head}: {why}. A push moves the head again, so the round that reviewed the live head "
-    "has no review log yet. Remedy: have that round's review log posted for the live head (`merge {n} --review-record --head {head_full} "  # glossary-ok: the flag --review-record stays
+    "Rule (Git, handed-in-push-needs-record; decision handed-in-push-needs-record): this push goes to the branch of #%d, whose newest "
+    "review log is stale at its live head %s: %s. A push moves the head again, so the round that reviewed the live head "
+    "has no review log yet. Remedy: have that round's review log posted for the live head (`merge %d --review-record --head %s "  # glossary-ok: the flag --review-record stays
     "--kind K --guard yes|no --round N:ROLE:MODEL:VERDICT` prints it), then retry the push."
 )
 HANDED_IN_PUSH_UNKNOWN_REASON = (
     "Rule (Git, handed-in-push-needs-record; decision handed-in-push-needs-record): whether the review log of the pull request this push "
-    "goes to is stale is unknown: {detail}. A read that cannot run refuses the push. Remedy: retry when the read works, or push a branch "
+    "goes to is stale is unknown: %s. A read that cannot run refuses the push. Remedy: retry when the read works, or push a branch "
     "name this check can read from a folder it can read."
 )
 HANDED_IN_PUSH_LOOKUP_NOTE = "handed-in-push-needs-record: unknown: the open pull requests could not be read, so the push passes: {detail}"
@@ -1115,10 +1115,6 @@ def _handed_in_push_read(where, dest):
         return "unknown", 0, "", " ".join(str(e).split()) or type(e).__name__
 
 
-def _handed_in_push_unknown(detail):
-    return HANDED_IN_PUSH_UNKNOWN_REASON.format(detail=cap_safe(detail, 200)), "push, review log read unknown"
-
-
 def _shell_shaped(word):
     """True for a word the shell expands before git reads it: a variable, a `$( )` or a backtick."""
     return "$" in word or "`" in word
@@ -1147,7 +1143,7 @@ def handed_in_push_hit(texts, stripped: str, cwd: str, read_verb):
                 # before it sends anything, so it is passed on below to the force-push ask.
                 if every is None and named[1] and all(d in DEFAULT_BRANCH_FALLBACK for d in push_destinations(args, where, overrides)):
                     continue
-                return _handed_in_push_unknown("the folder this push runs in cannot be resolved")
+                return HANDED_IN_PUSH_UNKNOWN_REASON % cap_safe("the folder this push runs in cannot be resolved", 200), "push, review log read unknown"
             if not os.path.isdir(where):
                 continue
             if not uses_merge_tool(where):
@@ -1156,14 +1152,14 @@ def handed_in_push_hit(texts, stripped: str, cwd: str, read_verb):
             if counts is False:
                 continue
             if counts is None:
-                return _handed_in_push_unknown("the remote this push goes to cannot be told from origin")
+                return HANDED_IN_PUSH_UNKNOWN_REASON % cap_safe("the remote this push goes to cannot be told from origin", 200), "push, review log read unknown"
             if every is not None:
-                return _handed_in_push_unknown("this push names every branch, so the branch of a pull request it reaches cannot be named")
+                return HANDED_IN_PUSH_UNKNOWN_REASON % cap_safe("this push names every branch, so the branch of a pull request it reaches cannot be named", 200), "push, review log read unknown"
             if any(_shell_shaped(spec) for spec in named[1]):
-                return _handed_in_push_unknown("this push names a branch through a shell variable or a substitution")
+                return HANDED_IN_PUSH_UNKNOWN_REASON % cap_safe("this push names a branch through a shell variable or a substitution", 200), "push, review log read unknown"
             for _where, _source, dest, _tracking, _remote, _memo in _push_refs_at(where, overrides, args, DEFAULT_BRANCH_FALLBACK):
                 if not dest or "*" in dest:
-                    return _handed_in_push_unknown("the branch this push goes to cannot be named")
+                    return HANDED_IN_PUSH_UNKNOWN_REASON % cap_safe("the branch this push goes to cannot be named", 200), "push, review log read unknown"
                 if (where, dest) not in reads:
                     reads[where, dest] = _handed_in_push_read(where, dest)
                 verdict, n, live, why = reads[where, dest]
@@ -1173,10 +1169,9 @@ def handed_in_push_hit(texts, stripped: str, cwd: str, read_verb):
                         print(HANDED_IN_PUSH_LOOKUP_NOTE.format(detail=cap_safe(why, 200)), file=sys.stderr)
                     continue
                 if verdict == "refuse":
-                    return (HANDED_IN_PUSH_STALE_REASON.format(n=n, head=live[:9], head_full=live, why=cap_safe(why, 200)),
-                            "push to #%d at %s" % (n, live[:9]))
+                    return HANDED_IN_PUSH_STALE_REASON % (n, live[:9], cap_safe(why, 200), n, live), "push to #%d at %s" % (n, live[:9])
                 if verdict == "unknown":
-                    return _handed_in_push_unknown(why)
+                    return HANDED_IN_PUSH_UNKNOWN_REASON % cap_safe(why, 200), "push, review log read unknown"
     return None
 
 

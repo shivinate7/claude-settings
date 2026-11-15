@@ -18,7 +18,7 @@ Rule `handed-in-push-needs-record` in `hooks/guard.py` refuses a `git push` to t
 - The remedy has the review log posted for the live head, then the push retried. It names no branch.
 - Step `fix-push-needs-fail-record` folds into this check: its FAIL-round case is this check with a FAIL review log, and it needs no second check (`building-one-home-per-capability`).
 - Not read: a claim commit on top of the reviewed head (the call passes no stamp config to the walk), so a push over one reads stale. The merge tool pushes claims at the join, not a lane. MCP file writes (`create_or_update_file`, `push_files`), which move a pull request's head with no `git push` (a note in the debt store).
-- Cost: per pushed ref one paged read of the open pull requests (gh REST). A named remote costs one `git config --get-regexp`, and a remote named by a URL or a path one `git config --get`. When a pull request holds the branch, one paged read of its comments, and for a stale review log one commit read per commit walked and one compare per merge. All share `MERGE_READ_TIMEOUT`. No log, file or process stays. Unmeasured.
+- Cost, unmeasured: per pushed ref one paged read of the open pull requests (gh REST), unmeasured. A named remote costs one `git config --get-regexp` (unmeasured), and a remote named by a URL or a path one `git config --get` (unmeasured). When a pull request holds the branch, one paged read of its comments is unmeasured too. One commit read per commit walked for a stale review log is unmeasured too. One compare per merge is unmeasured too. All share `MERGE_READ_TIMEOUT`. No log, file or process stays.
 
 Protected by the `handed-in-push` cases in `hooks/test_guard.py`.
 

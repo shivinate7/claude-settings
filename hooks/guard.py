@@ -4880,9 +4880,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # read cannot run (rule handed-in-push-needs-record). Read before the force-push ask below, so no answer to that
     # ask can pass a push this check refuses. Cost: guard_merge states it; none outside a repo that uses the merge
     # tool, for a dry run, or for a main or master destination.
-    matched = handed_in_push_hit(texts, stripped, cwd, read_verb)
-    if matched:
-        refuse(tool, "deny", "handed-in-push-needs-record", matched[0], matched[1])
+    stale_push = handed_in_push_hit(texts, stripped, cwd, read_verb)
+    if stale_push:
+        refuse(tool, "deny", "handed-in-push-needs-record", stale_push[0], stale_push[1])
     for segment in (part for text in texts for part in split_segments(text)):
         for args, where, overrides in _push_calls(segment, stripped, cwd):
             verdict = push_verdict(args, where, overrides)
