@@ -2356,12 +2356,20 @@ class LocalActionUnderLint(Job):
         rc, parallel, out = self.run_job(*self.BOTH, args=self.LINT, env={"CI_JOB_LINT_WORKERS": "2"})
         self.assertEqual(normal(parallel), normal(serial), "the parallel run printed other lines than the serial one\n" + out)
 
-    def test_a_local_action_with_a_false_outer_if_is_skipped_and_does_not_run(self):
+    def test_a_local_action_with_an_outer_if_that_condition_cannot_read_reads_unknown_and_does_not_run(self):
         outer = step("Probe check", uses="$/actions/probe-check", **{"if": "github.event_name == 'push'"})
         self.commit_lane(composite_action(probe_step("Probe", 1, "probe.marker")))
         rc, lines, out = self.run_job(outer, self.PLAIN, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
+        self.assertIn("an if: this runner cannot read", lines[0], out)  # the reason: the text plan() gives
+        self.assertFalse(self.ran("probe.marker"), "the action ran although its outer if cannot be read\n" + out)
+
+    def test_a_local_action_with_an_outer_if_that_is_false_on_a_pull_request_is_skipped(self):
+        outer = step("Probe check", uses="$/actions/probe-check", **{"if": "github.event_name != 'pull_request'"})
+        self.commit_lane(composite_action(probe_step("Probe", 1, "probe.marker")))
+        rc, lines, out = self.run_job(outer, self.PLAIN, args=self.LINT)
         self.assertEqual((rc, self.verdicts(lines)), (0, ["skipped", "PASS"]), out)
-        self.assertFalse(self.ran("probe.marker"), "the action ran although its outer if is false\n" + out)
+        self.assertFalse(self.ran("probe.marker"), "the action ran although its outer if is false on a pull request\n" + out)
 
     def test_a_local_action_with_an_outer_continue_on_error_reads_unknown_and_does_not_run(self):
         outer = step("Probe check", uses="$/actions/probe-check", continue_on_error="true")
