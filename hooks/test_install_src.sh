@@ -2335,8 +2335,9 @@ skills_bak_setup() {
   mkdir -p "$co/skills/fresh-prose"
   printf 'v1\n' > "$co/skills/fresh-prose/SKILL.md"
 }
+# SKILLS_BAK_PATH, when set, is the PATH of this run: a case puts a shim folder first on it.
 skills_bak_run() {
-  out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" \
+  out=$(cd "$co" && env -i PATH="${SKILLS_BAK_PATH:-$PATH}" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" \
         bash ./install.sh --cloud 2>&1); rc=$?
 }
 
@@ -2480,6 +2481,36 @@ skills_bak8() {
   elif [ "$held" != "${bak##*/}" ]; then bad "$name" "backups/skills holds more than the edited skill: $held"
   elif has_bak "$cfg/skills"; then bad "$name" "skills/ holds a .bak.* entry: $(ls "$cfg/skills")"
   elif [ "$(cat "$cfg/skills/fresh-prose/SKILL.md")" != "v1" ]; then bad "$name" "skills/fresh-prose is not the shipped content after the refresh"
+  else ok "$name"; fi
+  rm -rf "$h"
+}
+
+# A refresh whose switch fails after a hand-edited skill was backed up leaves that skill whole in the live generation:
+# the backup is a copy. A mv in its place would take the live folder out before the switch.
+skills_bak9() {
+  name="skills_bak9: a refresh that fails at the switch, after a hand-edited skill is backed up, leaves that skill whole in the live generation"
+  skills_bak_setup skills_bak9
+  printf 'helper\n' > "$co/skills/fresh-prose/helper.txt"
+  skills_bak_run
+  if [ $rc -ne 0 ]; then bad "$name" "the first install exited $rc: $out"; rm -rf "$h"; return; fi
+  live="$cfg/.cs-current/skills/fresh-prose"
+  if [ "$(cat "$live/SKILL.md" 2>/dev/null)" != "v1" ] || [ "$(cat "$live/helper.txt" 2>/dev/null)" != "helper" ]; then
+    bad "$name" "scope: the live generation's skill is not the shipped one"; rm -rf "$h"; return
+  fi
+  printf 'hand edit\n' > "$cfg/skills/fresh-prose/SKILL.md"
+  before_gen=$(readlink "$cfg/.cs-current")
+  fake="$work/skills_bak9-bin"; mkdir -p "$fake"
+  real_mv=$(command -v mv)
+  printf '#!/bin/sh\ncase "$*" in *.cs-current.cs-new*) echo "mv: injected failure" >&2; exit 1;; esac\nexec %s "$@"\n' "$real_mv" > "$fake/mv"
+  chmod +x "$fake/mv"
+  SKILLS_BAK_PATH="$fake:$PATH"; skills_bak_run; SKILLS_BAK_PATH=
+  bak=$(ls -d "$cfg/backups/skills/"fresh-prose.* 2>/dev/null | head -n1)
+  if ! printf '%s\n' "$out" | grep -q 'injected failure'; then bad "$name" "scope: the injected switch failure did not happen, so the case proves nothing: $out"
+  elif [ -z "$bak" ]; then bad "$name" "scope: no backup was made before the failure, so the failure was not after the backup"
+  elif [ $rc -eq 0 ]; then bad "$name" "install.sh exited 0 although the switch failed"
+  elif [ "$(readlink "$cfg/.cs-current")" != "$before_gen" ]; then bad "$name" "the live generation moved although the switch failed"
+  elif [ "$(cat "$live/SKILL.md" 2>/dev/null)" != "hand edit" ] || [ "$(cat "$live/helper.txt" 2>/dev/null)" != "helper" ]; then
+    bad "$name" "the hand-edited skill is not whole in the live generation after the failed refresh"
   else ok "$name"; fi
   rm -rf "$h"
 }
@@ -6651,6 +6682,7 @@ run skills_bak5
 run skills_bak6
 run skills_bak7
 run skills_bak8
+run skills_bak9
 run copymode_case1
 run backup_case1
 run backup_case2
