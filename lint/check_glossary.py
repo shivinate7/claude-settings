@@ -57,8 +57,26 @@ import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_
 from rule_audit import ANCHOR_RE, RULE_FILES  # noqa: E402  the one home of the rule marker list
 import diff_moves  # noqa: E402  the one home of a moved line (lint/diff_moves.py)
 
-ROOT = os.path.dirname(HERE)
 GLOSSARY = "GLOSSARY.md"
+
+
+def find_root():
+    """The repo this check reads: the one the script lives in (also through a per-file symlink install), else the
+    one it runs from. A cloud copy sits in ~/.claude/lint, whose parent holds no GLOSSARY.md."""
+    own = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    if os.path.isfile(os.path.join(own, GLOSSARY)):
+        return own
+    try:
+        r = _nowindow.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, encoding="utf-8")
+        top = r.stdout.strip() if r.returncode == 0 else ""
+    except OSError:  # no git on PATH
+        top = ""
+    if top and os.path.isfile(os.path.join(top, GLOSSARY)):
+        return os.path.normpath(top)
+    return os.path.dirname(HERE)
+
+
+ROOT = find_root()
 SECTION = "## Terms"
 NONE = ("", "-", "—")  # a "not" cell that lists no name
 THIS_SENSE = " (this sense)"  # `issue (this sense)`: read in paths, anchors and slugs, not in code names
@@ -756,7 +774,7 @@ def main(args):
         return 1
     text = read(GLOSSARY)
     if text is None:
-        print("check_glossary: FAIL: %s cannot be read" % GLOSSARY)
+        print("check_glossary: FAIL: %s cannot be read" % os.path.join(ROOT, GLOSSARY))
         return 1
     table = rows(text)
     if not table:  # a parser that finds nothing must not read as clean
