@@ -38,11 +38,13 @@ NAME = re.compile(r"[A-Za-z_]\w*")
 
 
 def run_names():
-    """The case names in run_cases, the suite's one run list, in file order. A repeated name stays repeated. A `run` word
-    elsewhere (a heredoc, a quoted block) is text: the suite never calls it, so it names no case."""
+    """The case names in the suite's final region, its one run list, in file order. The region starts at the
+    `# Optional case filter` line and runs to the end of the file. A repeated name stays repeated. A `run` word above
+    that line (a heredoc, a quoted block) is text: the suite never calls it, so it names no case."""
     with open(SUITE, encoding="utf-8") as f:
-        m = re.search(r"^run_cases\(\) \{\n(.*?)^\}\n", f.read(), re.M | re.S)
-    return re.findall(r"^run (\S+)$", m.group(1), re.M) if m else []
+        text = f.read()
+    m = re.search(r"^# Optional case filter", text, re.M)
+    return re.findall(r"^run (\S+)$", text[m.start():], re.M) if m else []
 
 
 def defined_functions():
@@ -68,7 +70,7 @@ class ShardListsEveryCaseOnce(unittest.TestCase):
     def test_every_run_line_names_one_defined_function(self):
         # Each run line names a function the suite defines.
         runs = run_names()
-        self.assertTrue(runs, "the suite's run_cases lists no case")
+        self.assertTrue(runs, "the suite's final region lists no case")
         self.assertEqual(sorted(set(runs) - defined_functions()), [], "a run line names no defined function")
 
     def test_a_run_line_repeats_only_as_a_named_exception(self):
@@ -161,6 +163,19 @@ class ListCountsOnlyExecutedCalls(unittest.TestCase):
         self.assertEqual([n for n in copied if "ghost" in n], [],
                          "--list names a `run` word that is no call the suite makes")
         self.assertEqual(copied, real, "the copy's --list differs from the real suite's, with no ghost name in it")
+
+
+class RunListStaysInTheFinalRegion(unittest.TestCase):
+    def test_no_run_line_sits_above_the_final_region(self):
+        # Scope first: the filter comment that opens the final region must exist. The run list stays there, where
+        # main keeps it, so a case another PR appends at the end does not conflict with a list that moved.
+        with open(SUITE, encoding="utf-8") as f:
+            text = f.read()
+        marker = re.search(r"^# Optional case filter", text, re.M)
+        self.assertIsNotNone(marker, "the suite has no `# Optional case filter` line that opens the final region")
+        above = re.findall(r"^run ", text[:marker.start()], re.M)
+        self.assertEqual(above, [], f"{len(above)} run line(s) sit above the final region, want none")
+        self.assertTrue(run_names(), "the final region holds no run line")
 
 
 class ShardPinsRunInChecksJob(unittest.TestCase):
