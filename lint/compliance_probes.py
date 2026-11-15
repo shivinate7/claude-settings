@@ -114,8 +114,10 @@ hooks: the clone's settings.json `.hooks` against the live settings.json `.hooks
 facts: a decision record's `Facts:` line against live values. The line sits directly under the record's `State:`
   line. Its claims, split by `;`, take two forms only: `pr <N> open|merged` and `ref <name> present|absent`. A
   record with no `Facts:` line is never read, and the group never reads `State:` prose. A claim that is false, a
-  form the group does not read (a count, a typo), a second `Facts:` line, or a `Facts:` line with no `State:`
-  line directly above it is one item, `  <claim>: <file>:<line> <live value>`. A pull request closed without a
+  form the group does not read (a count, a typo), an empty claim, a second `Facts:` line, a `Facts:` line with no
+  `State:` line directly above it, a line after a `Facts:` line that is not blank, or a line outside a code fence
+  that reads like a Facts line in another dress (a list or quote mark, emphasis, `Fact:`, a full-width colon) is
+  one item, `  <claim>: <file>:<line> <live value>`. A pull request closed without a
   merge reads as `closed`, so a claim of open or merged is a gap. Live values come from one function: the
   GitHub REST API, with GITHUB_TOKEN or GH_TOKEN, for the repo in FACTS_REPO, else GITHUB_REPOSITORY. Env
   FACTS_FIXTURE names a JSON file of "pr:<N>" and "ref:<name>" keys instead, for tests. No token, no repo, an
@@ -1665,7 +1667,10 @@ FACTS_PR = re.compile(r"pr ([0-9]+) (open|merged)")
 FACTS_REF = re.compile(r"ref ([A-Za-z0-9._/-]+) (present|absent)")
 FACTS_REPO_FORM = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 FACTS_TIMEOUT = 20  # seconds per request: a hung API read must end as unknown, not stall the job
-FACTS_LABEL = re.compile(r"[\s*_]*facts[\s*_]*:", re.I)  # a line that reads like a Facts line, in any dress
+# A line that reads like a Facts line in any dress: a list, quote or heading mark, a numbered-list prefix, emphasis, the
+# singular word, a full-width colon. `[^\S\n]` keeps the multi-line search below from running across a line end.
+# Each mark is one character or one numbered-list prefix, so the match stays linear on a long run of marks.
+FACTS_LABEL = re.compile(r"[^\S\n]*(?:(?:[-*_>#`]|[0-9]+[.)])[^\S\n]*)*facts?(?:[*_`]|[^\S\n])*[:：]", re.I)
 FACTS_LABEL_LINE = re.compile(r"^" + FACTS_LABEL.pattern, re.I | re.M)
 FACTS_FORMS = "a claim reads `pr <N> open|merged` or `ref <name> present|absent`"
 FACTS_VALUES = {"pr": ("open", "merged", "closed"), "ref": ("present", "absent")}
@@ -1735,8 +1740,9 @@ def fact_value(kind, key):
 
 def facts_claims(text, rel):
     """([(line number, claim text or None, why it is a gap or None)], the Facts lines read): one entry per claim of
-    the record's one well-placed Facts line, plus one per Facts line that is misplaced or a second, and one per line
-    that reads like a Facts line but is not the exact `Facts:` form. A line inside a code fence is never read."""
+    the record's one well-placed Facts line, plus one per Facts line that is misplaced or a second, one per line
+    that reads like a Facts line but is not the exact `Facts:` form, one per line after a Facts line that is not
+    blank, and one per empty claim. A line inside a code fence is never read."""
     lines = text.splitlines()
     outside = {n for _, _, rows in paragraph_rows(text, rel) for n, _ in rows}
     out, seen = [], 0
@@ -1746,6 +1752,9 @@ def facts_claims(text, rel):
         if not line.startswith("Facts:"):
             out.append((number, line.strip(), "the label is not the exact `Facts:` at the start of the line"))
             continue
+        # A claim cut off by a hard wrap would pass with its second line unread, so the Facts line ends its paragraph.
+        if number < len(lines) and lines[number].strip():
+            out.append((number + 1, lines[number].strip(), "the line after a Facts line must be blank or the end of the file"))
         seen += 1
         if seen > 1:
             out.append((number, line, "a record holds one Facts line"))
@@ -1753,7 +1762,10 @@ def facts_claims(text, rel):
             out.append((number, line, "the Facts line is not directly under a State line"))
         else:
             for claim in line[len("Facts:"):].split(";"):
-                out.append((number, claim.strip(), None))
+                if claim.strip():
+                    out.append((number, claim.strip(), None))
+                else:
+                    out.append((number, "empty claim", "a `;` has no claim after it, or two `;` stand together"))
     return out, seen
 
 
