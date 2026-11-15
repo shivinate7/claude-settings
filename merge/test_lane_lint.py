@@ -17,12 +17,15 @@ prints cost the same per lint. The wrong-cause loop runs six lints. A stub exits
 at any exit code, and a tally at exit 1 fails. Measured: the 30 mutation cases took 16.1 s in one run, with the module's import, before the shard
 cases were added; their time and lint-run count are unmeasured since. The shard cases (test_mutation_test_shard_*) run checks-mutate-guard's shard
 jobs: a clean lint starts three mutate stubs (unmeasured), and a stop or a FAIL starts fewer.
+The progress cases (test_mutation_test_progress_*) check the lines a shard run prints: a start and an end line per shard, and heartbeat
+lines while a shard runs (merge.MUTATE_HEARTBEAT_SECONDS, patched small or huge). Their slow shards sleep inside the mutate stub: 1 s in the
+heartbeat case (shard 2/3 of two runs), 0.6 s in the timeout case. Their clean runs use the fake clock. Measured: unmeasured.
 BatchHeadMutation (class BatchHeadMutation) lints a touched lane's head at the batch runner's pre-join call, `--lane-lint <pr>`, through the gh shim,
 in a cloud session with the batch-runner role or with none; the shim's comment list holds the hand-off PASS record. Cost per case: one ci-job stub
 start, and one mutate stub start where the run starts. Its times are unmeasured since the batch-build cases were removed.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
-import ast, atexit, contextlib, importlib.util, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
+import ast, atexit, contextlib, importlib.util, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, threading, time, unittest, unittest.mock, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -261,14 +264,15 @@ MUTATE_STEP = "Guard mutation test"  # the step of that job whose run: line is t
 MUTATE_SHARD_STEP = "Guard mutation test, shard 1/3"  # main's name for that step: the first of three shard jobs, which the split made of the one job
 WORKFLOW_REL = ".github/workflows/checks.yml"
 MUTATE_LOG = "mutate-calls.jsonl"  # one line per start of a mutate stub, in this case's folder
-MUTATE_STUB ='''import json, os, subprocess, sys
-LOG, OUT, ERR, RC, SHARDS = __LOG__, __OUT__, __ERR__, __RC__, __SHARDS__
+MUTATE_STUB ='''import json, os, subprocess, sys, time
+LOG, OUT, ERR, RC, SHARDS, SLEEPS = __LOG__, __OUT__, __ERR__, __RC__, __SHARDS__, __SLEEPS__
 def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
 shard = os.environ.get("MUTATE_SHARD")
 with open(LOG, "a", encoding="utf-8") as f:
     print(json.dumps({"argv": sys.argv, "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "shard": shard,
                       "detached": subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True).returncode != 0}), file=f)
+time.sleep(SLEEPS.get(shard, 0))  # a shard that runs long: its run lasts this many seconds
 OUT, ERR, RC = SHARDS.get(shard, (OUT, ERR, RC))
 sys.stdout.write(OUT)
 sys.stderr.write(ERR)
@@ -276,11 +280,12 @@ sys.exit(RC)
 '''
 
 
-def mutate_script(log, out="", err="", rc=0, shards=None):
+def mutate_script(log, out="", err="", rc=0, shards=None, sleeps=None):
     """The file a lane commits as the mutate command's script: it logs its start to `log` with its MUTATE_SHARD, prints `out` and `err`, and exits
-    `rc`. `shards` maps a MUTATE_SHARD value such as "2/3" to the (out, err, rc) of that shard's run; the other runs print `out`, `err` and `rc`."""
+    `rc`. `shards` maps a MUTATE_SHARD value such as "2/3" to the (out, err, rc) of that shard's run; the other runs print `out`, `err` and `rc`.
+    `sleeps` maps a MUTATE_SHARD value to the seconds that shard's run takes before it prints; the other runs take none."""
     return (MUTATE_STUB.replace("__LOG__", repr(log)).replace("__OUT__", repr(out)).replace("__ERR__", repr(err))
-            .replace("__RC__", repr(rc)).replace("__SHARDS__", repr(shards or {})))
+            .replace("__RC__", repr(rc)).replace("__SHARDS__", repr(shards or {})).replace("__SLEEPS__", repr(sleeps or {})))
 
 
 def mutate_report(made, killed, crashed, survived):
@@ -404,6 +409,48 @@ def counts_missing(text, counts):
     return None
 
 
+HEARTBEAT_THREAD = "mutate-heartbeat"  # the name merge.py gives the thread that prints a shard's heartbeat lines
+HEARTBEAT_FAST = 0.2  # MUTATE_HEARTBEAT_SECONDS where a case needs heartbeats: a shard that runs for a second or more prints several
+HEARTBEAT_NEVER = 3600  # MUTATE_HEARTBEAT_SECONDS where a case must print none: no shard in these cases runs for an hour
+SHARD_EVENT = re.compile(r"mutation test shard (\d+)/(\d+): (start|end|running)\b")  # the progress line of one shard, as merge.py prints it
+
+
+def heartbeat_every(seconds):
+    """A patch of merge.MUTATE_HEARTBEAT_SECONDS to `seconds`. create=True: a merge with no such constant still runs the case, and the case's
+    assert names the line that is missing."""
+    return unittest.mock.patch.object(merge, "MUTATE_HEARTBEAT_SECONDS", seconds, create=True)
+
+
+def shard_events(text):
+    """-> [(n, M, kind)] of the shard progress lines in `text`, in print order: kind is start, end or running."""
+    return [(int(n), int(m), kind) for n, m, kind in SHARD_EVENT.findall(text)]
+
+
+def shard_lines(text, n, m, kind):
+    """-> the lines of `text` that announce `kind` for shard n of m."""
+    return [ln for ln in text.splitlines() if any(g == (str(n), str(m), kind) for g in SHARD_EVENT.findall(ln))]
+
+
+def elapsed_shown(line):
+    """True when a progress line shows elapsed seconds: a number with a unit, read after the `shard n/M:` label, so the label's digits do not count."""
+    return re.search(r"\b\d+(?:\.\d+)?\s*s(?:ec(?:onds?)?)?\b", line.split(": ", 1)[-1]) is not None
+
+
+def masked_verdict(text):
+    """-> the PASS lines of `text` with each wall time in seconds masked, so two runs of one verdict compare equal whatever their real clock read."""
+    return [re.sub(r"\b\d+ s\b", "N s", line) for line in pass_lines(text)]
+
+
+def progress_passes(text):
+    """-> the progress lines of `text` that start with PASS:. Empty when no progress line reads as a pass."""
+    return [ln for ln in text.splitlines() if ln.startswith("PASS:") and "mutation test shard" in ln]
+
+
+def live_heartbeat_threads():
+    """-> the heartbeat threads that are alive now."""
+    return [t for t in threading.enumerate() if t.name == HEARTBEAT_THREAD]
+
+
 class WallClock:
     """The wall clock of one lint run: time.time, time.monotonic and time.perf_counter read it. It starts at the real time and moves only by advance()."""
 
@@ -433,13 +480,18 @@ class LaneFixture(CiJobStub, tm.CloudSession):
 
     def run_lane(self, *argv, cloud=False):
         """-> (rc, stdout and stderr together) of merge in the lane checkout. A refused command line fails the case with its reason."""
+        rc, out, err = self.lane_streams(*argv, cloud=cloud)
+        return rc, out + err
+
+    def lane_streams(self, *argv, cloud=False):
+        """-> (rc, stdout, stderr) of merge in the lane checkout. A refused command line fails the case with its reason."""
         rc, out, err = self.run_main(*argv, **({} if cloud else {"CLAUDE_CODE_REMOTE": None}))
         if rc == 2 and "error:" in err:  # argparse refused the command line
             last = err.strip().splitlines()[-1]
             if "unrecognized arguments" in last and "--lane-lint" in last:
                 self.fail("the mode does not exist: " + last)
             self.fail("argparse refused the command line: " + last)
-        return rc, out + err
+        return rc, out, err
 
     def assert_lint_merge(self, lint_head, head, base, repo=None):
         """The lint's HEAD is the merge commit of origin/<base> (first parent) and the head (second parent): the lint reads the merged files,
@@ -1120,7 +1172,12 @@ class LaneLint(LaneFixture):
 
     def timed_lint(self, seconds, *argv):
         """Run merge in the lane checkout with the wall clock faked: each mutation test run returns `seconds` after it starts, and no real time passes.
-        The mutate log is cleared first. -> (rc, stdout and stderr together)."""
+        -> (rc, stdout and stderr together). timed_lint_streams is the same run with the streams apart."""
+        rc, out, err = self.timed_lint_streams(seconds, *argv)
+        return rc, out + err
+
+    def timed_lint_streams(self, seconds, *argv):
+        """timed_lint with the streams apart: -> (rc, stdout, stderr). The mutate log is cleared first."""
         if os.path.exists(self.mutate_log):
             os.remove(self.mutate_log)
         real_sh, clock = merge.sh, WallClock()
@@ -1135,7 +1192,7 @@ class LaneLint(LaneFixture):
 
         with unittest.mock.patch.object(merge, "sh", sh_timed), unittest.mock.patch("time.time", clock.now), \
                 unittest.mock.patch("time.monotonic", clock.now), unittest.mock.patch("time.perf_counter", clock.now):
-            return self.run_lane(*argv)
+            return self.lane_streams(*argv)
 
     def assert_mutation_test_runs_at(self, head, count):
         """The mutate command ran `count` times, each in a detached tree on the lint's merge commit of `head` into main, and every tree is gone afterwards."""
@@ -1153,11 +1210,12 @@ class LaneLint(LaneFixture):
         """The mutate command ran once, in a detached tree on the lint's merge commit of `head` into main, and both trees are gone afterwards."""
         self.assert_mutation_test_runs_at(head, 1)
 
-    def push_sharded_lane(self, jobs, shards=None):
+    def push_sharded_lane(self, jobs, shards=None, sleeps=None):
         """The lane's commit: the mutate script, which prints a clean 694-mutant report except for the shards `shards` names
-        ({MUTATE_SHARD value: (out, err, rc)}), and checks.yml with the shard jobs `jobs` names. -> the lane's head."""
+        ({MUTATE_SHARD value: (out, err, rc)}), takes the seconds `sleeps` names ({MUTATE_SHARD value: s}) before each run ends,
+        and checks.yml with the shard jobs `jobs` names. -> the lane's head."""
         _, script = real_mutate_job()
-        return self.push_lane({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0), shards=shards),
+        return self.push_lane({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0), shards=shards, sleeps=sleeps),
                                WORKFLOW_REL: sharded_workflow(jobs)})
 
     def test_mutation_test_touched_file_reads_670_unknown_fails_and_names_the_counts_and_time(self):
@@ -1570,6 +1628,98 @@ class LaneLint(LaneFixture):
         rc, text = self.timed_lint(60, "--lane-lint", "7")
         self.assertNotEqual(rc, 0, "the lint passed a head whose checks.yml has no shard 2/3: " + text)
         self.assertIn("2/3", text, "the stop does not name the missing shard 2/3: " + text)
+
+    def test_mutation_test_progress_clean_sharded_head_prints_start_and_end_for_each_shard_in_order(self):  # the progress lines of a clean sharded run
+        jobs = shard_jobs()
+        self.use_ci_job(PASSING, 0)
+        head = self.push_sharded_lane(jobs)
+        with heartbeat_every(HEARTBEAT_NEVER):
+            rc, out, err = self.timed_lint_streams(60, "--lane-lint", "7")
+        self.assertEqual(rc, 0, "the lint refused a sharded head whose three shard runs are clean: " + out + err)
+        self.assertEqual(shard_events(out), [(n, 3, kind) for n in (1, 2, 3) for kind in ("start", "end")],
+                         "the progress lines are not a start and an end for shard 1/3, 2/3 and 3/3, in that order: " + out)
+        for n in (1, 2, 3):
+            (end,) = shard_lines(out, n, 3, "end")
+            self.assertTrue(wall_time_shown(end, 60), "the end line of shard %d/3 shows no elapsed seconds of its run: %s" % (n, end))
+            self.assertIsNone(counts_missing(end, {"killed": 694, "survived": 0, "unknown": 0}),
+                              "the end line of shard %d/3 does not show its tally: %s" % (n, end))
+        self.assertEqual(progress_passes(out), [], "a progress line of the clean sharded run starts with PASS: " + out)
+        self.assertEqual(len(pass_lines(out)), 1, "the clean sharded run does not print one PASS line: " + out)
+        self.assert_mutation_test_runs_at(head, 3)
+
+    def test_mutation_test_progress_slow_shard_prints_heartbeats_naming_it_and_changes_no_verdict(self):  # a heartbeat is a progress line: rc and the verdict stay as they were
+        self.use_ci_job(PASSING, 0)
+        self.push_sharded_lane(shard_jobs(), sleeps={"2/3": 1})
+        with heartbeat_every(HEARTBEAT_FAST):
+            rc_beat, out_beat, err_beat = self.lane_streams("--lane-lint", "7")
+        beats = shard_lines(out_beat, 2, 3, "running")
+        self.assertGreaterEqual(len(beats), 2, "the slow shard 2/3 printed %d heartbeat lines in a 1 s run at a %s s interval, want at least 2: %s"
+                                % (len(beats), HEARTBEAT_FAST, out_beat))
+        self.assertTrue(all(elapsed_shown(b) for b in beats), "a heartbeat line of shard 2/3 shows no elapsed seconds: " + "\n".join(beats))
+        with heartbeat_every(HEARTBEAT_NEVER):
+            rc_never, out_never, err_never = self.lane_streams("--lane-lint", "7")
+        self.assertEqual(rc_never, 0, "the slow clean run did not pass with no heartbeat: " + out_never + err_never)
+        self.assertEqual(rc_beat, rc_never, "the heartbeat changed the exit code: %d, want %d" % (rc_beat, rc_never))
+        self.assertEqual(len(masked_verdict(out_never)), 1, "the slow clean run prints no one PASS line: " + out_never)
+        self.assertEqual(masked_verdict(out_beat), masked_verdict(out_never), "the heartbeat changed the verdict line: " + out_beat)
+        self.assertEqual(progress_passes(out_beat + out_never), [], "a progress line starts with PASS: " + out_beat)
+        self.assertEqual([ev for ev in shard_events(out_never) if ev[2] == "running"], [],
+                         "a run at a %d s heartbeat interval printed heartbeat lines: %s" % (HEARTBEAT_NEVER, out_never))
+
+    def test_mutation_test_progress_failing_shard_prints_its_end_and_starts_no_later_shard(self):  # the FAIL decides the lint: its end line prints, and shard 3/3 does not start
+        self.use_ci_job(PASSING, 0)
+        self.push_sharded_lane(shard_jobs(), shards={"2/3": (real_tally(693, survived=1), "", 1)})
+        with heartbeat_every(HEARTBEAT_NEVER):
+            rc, out, err = self.timed_lint_streams(60, "--lane-lint", "7")
+        self.assertEqual(rc, 1, "the lint passed a head whose shard 2/3 run let a mutant survive: " + out + err)
+        ends = shard_lines(out, 2, 3, "end")
+        self.assertEqual(len(ends), 1, "the failing shard 2/3 printed %d end lines, want one: %s" % (len(ends), out))
+        self.assertIsNone(counts_missing(ends[0], {"killed": 693, "survived": 1, "unknown": 0}),
+                          "the end line of the failing shard 2/3 does not show its tally: " + ends[0])
+        self.assertEqual(shard_events(out), [(1, 3, "start"), (1, 3, "end"), (2, 3, "start"), (2, 3, "end")],
+                         "the progress lines are not those of shards 1/3 and 2/3 with no later shard: " + out)
+        self.assertIn("FAILs: the diff touches a mutation test file, and its", out + err, "the FAIL text lost its opening: " + out + err)
+        self.assertIn("job %s: 1 mutant survived" % SHARD_JOBS[1], out + err, "the FAIL text does not name the failing shard's survivor: " + out + err)
+        self.assertIn("killed 693, survived 1, unknown 0, fail", out + err, "the FAIL text does not carry the failing run's counts and verdict: " + out + err)
+        self.assertEqual([c["shard"] for c in self.mutation_test_calls()], ["1/3", "2/3"],
+                         "the lint started a shard after the one that failed, or did not start the one before it: " + out + err)
+
+    def test_mutation_test_progress_timed_out_shard_prints_start_and_end_and_no_heartbeat_thread_outlives_it(self):  # a shard at its cap is a FAIL, and its heartbeat thread ends with the call
+        self.use_ci_job(PASSING, 0)
+        self.push_sharded_lane(shard_jobs(), sleeps={"2/3": 0.6})
+        self.assertEqual(live_heartbeat_threads(), [], "precondition: a heartbeat thread is alive before the run, so the case probes nothing")
+        real_sh = merge.sh
+
+        def sh_timing_out_on_shard_2(args, *rest, **kwargs):
+            if mutation_test_run(args) and (kwargs.get("env") or {}).get("MUTATE_SHARD") == "2/3":
+                real_sh(args, *rest, **kwargs)  # the run takes its sleep, while the heartbeats print; then it is past its cap
+                raise subprocess.TimeoutExpired(args, kwargs.get("timeout"))
+            return real_sh(args, *rest, **kwargs)
+
+        with heartbeat_every(HEARTBEAT_FAST), unittest.mock.patch.object(merge, "sh", sh_timing_out_on_shard_2):
+            rc, out, err = self.lane_streams("--lane-lint", "7")
+        self.assertEqual(rc, 1, "the lint did not FAIL a shard run that timed out: " + out + err)
+        self.assertEqual(pass_lines(out), [], "the lint printed a PASS line for a shard run that timed out: " + out)
+        self.assertEqual(len(shard_lines(out, 2, 3, "start")), 1, "the timed-out shard 2/3 printed no start line: " + out)
+        self.assertEqual(len(shard_lines(out, 2, 3, "end")), 1, "the timed-out shard 2/3 printed no end line: " + out)
+        for t in live_heartbeat_threads():
+            t.join(timeout=2 * HEARTBEAT_FAST)
+        self.assertEqual(live_heartbeat_threads(), [], "a heartbeat thread outlived the call that ran its shard: " + out)
+
+    def test_mutation_test_progress_one_job_head_prints_start_and_end_for_its_one_shard(self):  # a head with no shard step: its one run prints a start and an end too
+        body, script = real_mutate_job()
+        self.use_ci_job(PASSING, 0)
+        head = self.push_lane({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0)), WORKFLOW_REL: workflow_of(body)})
+        with heartbeat_every(HEARTBEAT_NEVER):
+            rc, out, err = self.timed_lint_streams(437, "--lane-lint", "7")
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(shard_events(out), [(1, 1, "start"), (1, 1, "end")],
+                         "the one-job head's run does not print one start and one end line for shard 1/1: " + out)
+        (end,) = shard_lines(out, 1, 1, "end")
+        self.assertTrue(wall_time_shown(end, 437), "the end line of the one-job run shows no elapsed seconds of its run: " + end)
+        self.assertIsNone(counts_missing(end, {"killed": 694, "survived": 0, "unknown": 0}), "the end line of the one-job run does not show its tally: " + end)
+        self.assertEqual(progress_passes(out), [], "a progress line of the one-job run starts with PASS: " + out)
+        self.assert_one_mutation_test_run(head)
 
 
 # The stack cross-measure (roadmap step stack-cross-measure): `merge --lane-lint <pr>` checks the PR's head against each other open PR of its
