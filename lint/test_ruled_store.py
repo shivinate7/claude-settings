@@ -129,6 +129,7 @@ MAIN_LINE_O1 = "2026-11-12T10:00:00-06:00"  # the main-line commit that adds o1,
 SIDE_S1 = "2026-11-16T09:00:00-06:00"  # the side-branch commit that adds s1, after the cutoff
 MERGE_NOV16 = "2026-11-16T10:00:00-06:00"  # the merge of the side branch into the store ref
 NOV16_AT = "2026-11-16T08:00:00-06:00"  # s1's own at, after the cutoff
+RENAMED_1230 = "2026-11-15T12:30:00-06:00"  # a pure rename of a file, after the cutoff and after its add
 CAUSE_NO_RULING = "names no ruling in the store"
 CAUSE_NOT_EARLIER = "names a ruling not earlier than it"
 CAUSE_BAD_REF = "ruling ref is empty or not a string"
@@ -1194,6 +1195,64 @@ class CostAndCliTests(RepoCase):
         proc = self.run_check(repo)
         self.assertEqual(proc.returncode, 0, "a deleted entry file was read: %s" % (proc.stdout + proc.stderr))
         self.assertEqual(proc.stdout + proc.stderr, "", "a deleted entry file raised output")
+
+    def ruling_text(self, rid, ref, **over):
+        """The store file text of entry `rid`, dated AT, whose only supersedes is the ruling ref `ref`."""
+        body = fixture.entry(rid, at=AT, supersedes=[{"kind": "ruling", "ref": ref}])
+        body.update(over)
+        return fixture.ruling_files({rid: body})["%s/%s.json" % (RULINGS_DIR, rid)]
+
+    def path_history(self, name, steps):
+        """A store that keeps r1, then one commit per (when, path, text) step, oldest first. Each commit's tree is r1
+        plus that one file. Returns (repo, shas): the commit shas in order."""
+        repo = self.make_repo(name)
+        keep = fixture.ruling_files({"r1": target_entry("r1", at=EARLIER)})
+        shas, parent = [], None
+        for when, path, text in steps:
+            tree = {**keep, path: text}
+            parent = fixture.point_ref(repo, fixture.STORE_REF, tree, self.root,
+                                       parents=(parent,) if parent else (), when=when)
+            shas.append(parent)
+        return repo, shas
+
+    def test_a_pure_rename_after_the_cutoff_keeps_a_recent_entry_checked(self):
+        def build(name, ref):
+            return self.path_history(name, [
+                (AFTER_CUTOFF, "%s/n1.json" % RULINGS_DIR, self.ruling_text("n1", ref)),
+                (RENAMED_1230, "%s/n2.json" % RULINGS_DIR, self.ruling_text("n1", ref)),
+            ])
+
+        good, _shas = build("recent-rename-ok", "r1 keeps the store to one place")
+        self.assertEqual(self.run_check(good).returncode, 0, "control: a valid ref on the renamed entry did not pass")
+        repo, shas = build("recent-rename", "zzz bad")
+        self.assertIn("R100", self.rename_status(repo, shas[0], shas[1]), "scope: the move is not a pure rename")
+        self.assertFlaggedRef(self.run_check(repo), "n1")
+
+    def test_a_chain_of_pure_renames_after_the_cutoff_keeps_a_recent_entry_checked(self):
+        def build(name, ref):
+            return self.path_history(name, [
+                (AFTER_CUTOFF, "%s/n1.json" % RULINGS_DIR, self.ruling_text("n1", ref)),
+                (RENAMED_1230, "%s/n2.json" % RULINGS_DIR, self.ruling_text("n1", ref)),
+                (TARGET_LATER, "%s/n3.json" % RULINGS_DIR, self.ruling_text("n1", ref)),
+            ])
+
+        good, _shas = build("chain-rename-ok", "r1 keeps the store to one place")
+        self.assertEqual(self.run_check(good).returncode, 0, "control: a valid ref on the renamed chain did not pass")
+        repo, shas = build("chain-rename", "zzz bad")
+        self.assertIn("R100", self.rename_status(repo, shas[1], shas[2]), "scope: the second move is not a pure rename")
+        self.assertFlaggedRef(self.run_check(repo), "n1")
+
+    def test_a_chain_of_pure_renames_of_an_old_entry_after_the_cutoff_stays_unchecked(self):
+        repo, shas = self.path_history("old-chain", [
+            (EARLIER, "%s/o1.json" % RULINGS_DIR, self.ruling_text("o1", "Rule-one keeps the apps.")),
+            (AFTER_CUTOFF, "%s/o2.json" % RULINGS_DIR, self.ruling_text("o1", "Rule-one keeps the apps.")),
+            (RENAMED_1230, "%s/o3.json" % RULINGS_DIR, self.ruling_text("o1", "Rule-one keeps the apps.")),
+        ])
+        self.assertIn("R100", self.rename_status(repo, shas[0], shas[1]), "scope: the first move is not a pure rename")
+        self.assertIn("R100", self.rename_status(repo, shas[1], shas[2]), "scope: the second move is not a pure rename")
+        proc = self.run_check(repo)
+        self.assertEqual(proc.returncode, 0, "an old entry renamed twice after the cutoff was checked: %s"
+                         % (proc.stdout + proc.stderr))
 
     def test_check_on_an_absent_store_exits_zero_and_is_not_unknown(self):
         repo = self.make_repo("absent", main={"README.md": "main\n"})
