@@ -639,6 +639,36 @@ class UpkeepFixture(Fixture):
         _, out = self.build_from_main("--live", str(self.live), expect=expect)
         return out
 
+    # argparse's refusal of a flag the build does not know: exit 2, with this text in the output.
+    NO_SOURCE_FLAG = "unrecognized arguments"
+
+    def source_out(self, source, live=True):
+        """(code, output) of a build from main that names the sessions source `source`. None names no flag, so the
+        default run. A build that raises fails the case with a named cause. A build that predates the flag refuses it
+        (exit 2, NO_SOURCE_FLAG), so the run repeats without the flag: the case's asserts then fail on the old
+        behaviour, not on the refusal. Only test_the_build_accepts_the_sessions_source_flag carries the refusal, the
+        way SINCE_FALLBACK's case carries the missing constant."""
+        self.on_main()
+        argv = ["--repo", str(self.repo), "--out", str(self.out)]
+        if live:
+            argv += ["--live", str(self.live)]
+        flag = [] if source is None else ["--sessions-source", source]
+        try:
+            code, out = run_build(*argv, *flag)
+            if code == 2 and flag and self.NO_SOURCE_FLAG in out:
+                code, out = run_build(*argv)
+        except Exception as err:
+            self.fail("the build raised %s instead of reading the row as one unknown entry" % type(err).__name__)
+        return code, out
+
+    def register_source(self, name, reader):
+        """A context that registers `reader` as the sessions source `name` in build.SESSION_SOURCES. A build without
+        the registry gets the name as a module attribute instead, so the case runs and fails on its own assert, not on
+        an AttributeError (SINCE_FALLBACK's reason)."""
+        if hasattr(build, "SESSION_SOURCES"):
+            return mock.patch.dict(build.SESSION_SOURCES, {name: reader})
+        return mock.patch.object(build, "SESSION_SOURCES", {name: reader}, create=True)
+
     def summary_counts(self, out):
         """{row label: count} in the order the upkeep line prints them. Fails when the output has no upkeep line."""
         line = re.search(r"^upkeep: (.*)$", out, re.M)
@@ -3585,6 +3615,186 @@ class StaleDraftRestRead(UpkeepFixture):
                 self.assertRegex(detail, r"REST read: 2 stale-looking drafts?\b", detail)
                 for named in ("#1001", "#1002", "old-1001", "old-1002"):
                     self.assertNotIn(named, detail, "the unusable read named a draft: %s" % named)
+
+
+class SessionsSource(UpkeepFixture):
+    """The stale-draft row takes its sessions from a named source: `--sessions-source NAME`, default `live-file`. The
+    registry build.SESSION_SOURCES maps a name to a reader that returns (liveRows-style rows, None) or (None, why). A name
+    the registry does not hold reads the row `unknown (sessions source NAME is not wired)`. A reader that raises or returns
+    a bad shape reads the row unknown. A reader's rows replace the live file's sessions for the lane check, and that check
+    no longer needs a fresh live file. held and reviewLog still come from the live pulls rows, so a stale draft with no
+    live row reads unknown."""
+
+    DRAFT = ReadyAndDraftRows.DRAFT
+    UNWIRED = "unknown (sessions source %s is not wired)"
+
+    def test_the_build_accepts_the_sessions_source_flag(self):
+        # The one case that carries the flag's red: a build that predates the flag refuses it with exit 2.
+        self.on_main()
+        code, out = run_build("--repo", str(self.repo), "--out", str(self.out), "--sessions-source", "live-file")
+        self.assertNotEqual(code, 2, "the build refused --sessions-source: %s" % out.strip().splitlines()[-1])
+
+    def test_no_flag_and_the_live_file_name_read_the_same_row(self):
+        # The control: the default run lists the stale draft, and the explicit live-file name reads the same row.
+        self.serve_pulls([self.rest_draft(1001, "c1", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "c1")])
+        _, bare = self.source_out(None)
+        self.assertEqual(self.row(bare, self.DRAFT), (1, "#1001 (c1)"), "the default run lost the stale draft")
+        _, named = self.source_out("live-file")
+        self.assertEqual(self.row(named, self.DRAFT), self.row(bare, self.DRAFT), "live-file reads differently from no flag")
+
+    def test_the_default_run_never_calls_a_registered_reader(self):
+        reader = mock.Mock(return_value=({"session-a": ["c1"]}, None))
+        self.serve_pulls([self.rest_draft(1001, "c1", 780)])
+        with self.register_source("fake", reader):
+            _, out = self.source_out(None, live=False)
+        self.assertFalse(reader.called, "the default run read a registered sessions source")
+        count, detail = self.row(out, self.DRAFT)
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown (sessions not read: ") and "--live" in detail, detail)
+        self.assertNotIn("#1001", detail)
+
+    def test_an_unwired_name_reads_one_unknown_entry_that_names_it(self):
+        reader = mock.Mock(return_value=({"session-a": ["c1"]}, None))
+        self.serve_pulls([self.rest_draft(1001, "c1", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "c1")])
+        with self.register_source("fake", reader):
+            _, out = self.source_out("nope")
+        self.assertFalse(reader.called, "a name the registry does not hold read a registered source")
+        self.assertEqual(self.row(out, self.DRAFT), (1, self.UNWIRED % "nope"))
+
+    def test_an_unwired_name_never_reads_clear_when_no_draft_is_stale(self):
+        self.serve_pulls(self.fresh_rows(1001, 2))
+        self.publish(sessions=[])
+        _, out = self.source_out("nope")
+        self.assertEqual(self.row(out, self.DRAFT), (1, self.UNWIRED % "nope"),
+                         "a clean read under an unwired name read the row clear")
+
+    def test_a_reader_that_raises_reads_one_unknown_entry_and_does_not_crash(self):
+        reader = mock.Mock(side_effect=RuntimeError("the session list is down"))
+        self.serve_pulls([self.rest_draft(1001, "c1", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "c1")])
+        with self.register_source("fake", reader):
+            _, out = self.source_out("fake")
+        self.assertTrue(reader.called, "the named reader was not called")
+        count, detail = self.row(out, self.DRAFT)
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown ("), detail)
+        self.assertNotIn("#1001", detail, "a raising reader let the stale draft through")
+
+    def test_a_reader_with_a_bad_shape_reads_one_unknown_entry(self):
+        bad = {"not a tuple": 7,
+               "a tuple of three": ({"session-a": ["c1"]}, None, None),
+               "a tuple of one": ({"session-a": ["c1"]},),
+               "rows is a list": (["c1"], None),
+               "a session's steps are not a list": ({"session-a": "c1"}, None),
+               "a step id is not text": ({"session-a": [7]}, None),
+               "a session key is not text": ({7: ["c1"]}, None),
+               "neither rows nor why": (None, None)}
+        self.serve_pulls([self.rest_draft(1001, "c1", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "c1")])
+        for name, value in bad.items():
+            with self.subTest(name):
+                reader = mock.Mock(return_value=value)
+                with self.register_source("fake", reader):
+                    _, out = self.source_out("fake")
+                self.assertTrue(reader.called, "the named reader was not called")
+                count, detail = self.row(out, self.DRAFT)
+                self.assertEqual(count, 1, "the row was %r" % (detail,))
+                self.assertTrue(detail.startswith("unknown ("), detail)
+                self.assertNotIn("#1001", detail, "a bad shape let the stale draft through")
+
+    def test_a_reader_that_gives_a_why_reads_that_why_in_the_unknown_entry(self):
+        reader = mock.Mock(return_value=(None, "the session list timed out"))
+        self.serve_pulls([self.rest_draft(1001, "c1", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "c1")])
+        with self.register_source("fake", reader):
+            _, out = self.source_out("fake")
+        self.assertTrue(reader.called, "the named reader was not called")
+        count, detail = self.row(out, self.DRAFT)
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown (") and "the session list timed out" in detail, detail)
+        self.assertNotIn("#1001", detail)
+
+    def test_reader_rows_hold_a_draft_whatever_the_live_file_is(self):
+        # The lane check needs no fresh live file: no file, a file read 90 minutes ago, and an unreadable file all hold c1.
+        reader = mock.Mock(return_value=({"session-a": ["c1"]}, None))
+        self.serve_pulls([self.rest_draft(1001, "c1", 780)])
+        # Each state: how the live file is set up, and whether the build gets a --live argument at all.
+        states = {"no --live file": (lambda: None, False),
+                  "a live file read 90 minutes ago": (lambda: self.publish(read_at=iso_ago(90), sessions=[]), True),
+                  "an unreadable live file": (lambda: self.write_live("{not json"), True)}
+        for name, (write, live) in states.items():
+            with self.subTest(name):
+                reader.reset_mock()
+                write()
+                with self.register_source("fake", reader):
+                    _, out = self.source_out("fake", live=live)
+                self.assertTrue(reader.called, "the named reader was not called")
+                self.assertEqual(self.row(out, self.DRAFT), (0, ""), "a held draft was listed or read unknown")
+
+    def test_reader_rows_replace_the_live_files_sessions(self):
+        # The live file's session holds c1, but the reader's rows hold only c2. #1001 (c1) is listed; #1002 (c2) is held.
+        reader = mock.Mock(return_value=({"session-b": ["c2"]}, None))
+        self.serve_pulls([self.rest_draft(1001, "c1", 780), self.rest_draft(1002, "c2", 780)])
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")],
+                     pulls=[self.live_pull(1001, "c1"), self.live_pull(1002, "c2")])
+        with self.register_source("fake", reader):
+            _, out = self.source_out("fake")
+        self.assertTrue(reader.called, "the named reader was not called")
+        count, detail = self.row(out, self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (1, ["#1001 (c1)"]),
+                         "the live file's session still held #1001 beside the reader's rows")
+
+    def test_a_reader_without_a_live_row_leaves_a_stale_draft_unknown_not_listed(self):
+        # No --live file: the reader holds c1, so #1001 is skipped. #1002 has no live pulls row, so its marks are unread.
+        reader = mock.Mock(return_value=({"session-a": ["c1"]}, None))
+        self.serve_pulls([self.rest_draft(1001, "c1", 780), self.rest_draft(1002, "lone", 780)])
+        with self.register_source("fake", reader):
+            _, out = self.source_out("fake", live=False)
+        self.assertTrue(reader.called, "the named reader was not called")
+        count, detail = self.row(out, self.DRAFT)
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown (#1002 "), detail)
+        self.assertNotIn("#1001", detail, "the draft the reader holds was named")
+
+    def test_a_fresh_live_file_with_no_sessions_list_still_feeds_a_registered_reader(self):
+        # The reader holds c1, and #1002's live row is held. The file has no sessions list, and #1003 is listed.
+        reader = mock.Mock(return_value=({"session-a": ["c1"]}, None))
+        self.serve_pulls([self.rest_draft(1001, "c1", 780), self.rest_draft(1002, "held-draft", 780),
+                          self.rest_draft(1003, "lone", 780)])
+        self.publish(pulls=[self.live_pull(1001, "c1"), dict(self.mark(1002), branch="held-draft", held=True),
+                            self.live_pull(1003, "lone")])
+        with self.register_source("fake", reader):
+            _, out = self.source_out("fake")
+        self.assertTrue(reader.called, "the named reader was not called")
+        count, detail = self.row(out, self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (1, ["#1003 (lone)"]))
+
+    def test_an_empty_reader_read_is_known_and_lists_the_drafts_with_live_rows(self):
+        reader = mock.Mock(return_value=({}, None))
+        self.serve_pulls([self.rest_draft(1001, "c1", 780), self.rest_draft(1002, "lone", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "c1"), self.live_pull(1002, "lone")])
+        with self.register_source("fake", reader):
+            _, out = self.source_out("fake")
+        self.assertTrue(reader.called, "the named reader was not called")
+        count, detail = self.row(out, self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (2, ["#1001 (c1)", "#1002 (lone)"]),
+                         "an empty read was read unknown, not known")
+
+    def test_a_full_page_of_drafts_splits_by_a_full_size_reader_read(self):
+        # One hundred stale drafts on one full page. The reader holds the even steps' sessions: fifty held, fifty listed.
+        drafts = [self.rest_draft(1000 + n, "step-%03d" % n, 780) for n in range(100)]
+        rows = {"session-%03d" % n: ["step-%03d" % n] for n in range(0, 100, 2)}
+        reader = mock.Mock(return_value=(rows, None))
+        self.serve_pulls(drafts)
+        self.publish(sessions=[], pulls=[self.live_pull(1000 + n, "step-%03d" % n) for n in range(1, 100, 2)])
+        with self.register_source("fake", reader):
+            _, out = self.source_out("fake")
+        self.assertTrue(reader.called, "the named reader was not called")
+        count, detail = self.row(out, self.DRAFT)
+        expected = sorted("#%d (step-%03d)" % (1000 + n, n) for n in range(1, 100, 2))
+        self.assertEqual((count, self.entries(detail)), (50, expected))
 
 
 class DoneWithoutCheck(UpkeepFixture):
