@@ -12,6 +12,10 @@ runs as the runner runs a composite step: bash --noprofile --norc -eo pipefail. 
 lines the step's --jq filter would print, exits with the code its case sets, and logs its argv. The --jq filter itself is
 not run. Needs bash, as actions/stable-mover/test_action.sh does. test_action.sh passes its run folder; run alone, this file
 makes its own and removes it.
+
+The wire is read too (owner page item 880, 11:53 CST Nov 15): the mover step takes its proof from the proof step's output, so a
+mover that reads a fixed "true" would move stable on a Linux-only push run. MoverWire reads the env of each step in action.yml by
+line; the caller's `with:` is read by lint/test_stable_workflow.py.
 """
 import os
 import re
@@ -23,7 +27,7 @@ import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "lint"))
-from workflow_steps import block_scalar  # noqa: E402  the one home of the workflow step reader
+from workflow_steps import block_scalar, drop_comment  # noqa: E402  the one home of the workflow step reader
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
 
 ACTION = os.path.join(HERE, "action.yml")
@@ -143,6 +147,123 @@ class ProofStep(unittest.TestCase):
         got = self.run_step("push", filler + PROVEN)
         self.assert_jobs_read(got)
         self.assertEqual(got["proven"], ["true"], "a run with more jobs than one page is proven when its proof lines are in the read")
+
+
+MOVER_STEP = "Fast-forward stable to the green head"
+PROOF_STEP = "Read the push-skip proof of a push run"
+
+
+def action_step(text, name):
+    """The lines of the composite step named `name` in action.yml, from its `    - name:` line to the next step; None when absent.
+    A composite step's `- name:` is at 4 spaces, its keys at 6 and its env keys at 8."""
+    lines = text.split("\n")
+    start = next((i for i, ln in enumerate(lines) if ln == "    - name: " + name), None)
+    if start is None:
+        return None
+    end = next((j for j in range(start + 1, len(lines)) if lines[j].startswith("    - ")), len(lines))
+    return lines[start:end]
+
+
+def step_env(lines):
+    """The step's own `env:` as {name: value}. Only keys at 8 spaces under the 6-space `env:` count: a comment is no key, a body
+    under a later `run:` is no key, and an inline comment is dropped (drop_comment), as the runner reads it."""
+    found, inside = {}, False
+    for i, ln in enumerate(lines):
+        if re.match(r"^      env:[ \t]*$", ln):
+            inside = True
+            continue
+        if not inside:
+            continue
+        m = re.match(r"^        ([\w-]+):[ \t]*(.*?)[ \t]*$", ln)
+        if m:
+            value = drop_comment(m.group(2))
+            body = block_scalar(value, lines[i + 1:], 9)
+            found[m.group(1)] = value if body is None else body
+        elif ln.strip() and not ln.startswith("        "):
+            inside = False
+    return found
+
+
+def step_value(lines, key):
+    """The step's own 6-space `key:` value, comment dropped, or None."""
+    for ln in lines:
+        m = re.match(r"^      %s:[ \t]*(.*?)[ \t]*$" % re.escape(key), ln)
+        if m:
+            return drop_comment(m.group(1))
+    return None
+
+
+def action_text():
+    with open(ACTION, encoding="utf-8") as f:
+        return f.read()
+
+
+class MoverWire(unittest.TestCase):
+    """The inputs and the proof reach each step of action.yml as the action means them."""
+
+    def step_lines(self, name):
+        lines = action_step(action_text(), name)
+        self.assertIsNotNone(lines, "scope: action.yml has no step named %r, so no case judges its wire" % name)
+        return lines
+
+    def test_the_mover_takes_its_proof_from_the_proof_step_output(self):
+        # Mistake: a mover that reads a fixed "true" moves stable on a Linux-only push run, whose proof is false.
+        env = step_env(self.step_lines(MOVER_STEP))
+        self.assertTrue(env, "scope: the mover step has no env: block, so no case judges its proof wire")
+        self.assertEqual(env.get("RUN_PROVEN"), "${{ steps.proof.outputs.proven }}",
+                         "the mover step must read the proof step's output, so a push run the proof rejects cannot move stable: RUN_PROVEN is %r"
+                         % env.get("RUN_PROVEN"))
+
+    def test_the_mover_takes_the_run_facts_from_the_inputs(self):
+        # Mistake: a mover that hard-codes the event moves stable on a run of any event, as a schedule run, whatever it was.
+        env = step_env(self.step_lines(MOVER_STEP))
+        self.assertTrue(env, "scope: the mover step has no env: block, so no case judges its run facts")
+        for key, want in (("HEAD_SHA", "${{ inputs.head-sha }}"), ("RUN_CONCLUSION", "${{ inputs.conclusion }}"),
+                          ("RUN_EVENT", "${{ inputs.event }}")):
+            with self.subTest(key=key):
+                self.assertEqual(env.get(key), want, "the mover step must read %s from the action input, and it reads %r" % (key, env.get(key)))
+
+    def test_the_proof_step_takes_its_run_and_event_from_the_inputs(self):
+        # Mistake: a proof step that hard-codes its event or run reads the wrong run's jobs, or proves a schedule run it never read.
+        lines = self.step_lines(PROOF_STEP)
+        env = step_env(lines)
+        self.assertTrue(env, "scope: the proof step has no env: block, so no case judges its inputs")
+        for key, want in (("RUN_EVENT", "${{ inputs.event }}"), ("RUN_ID", "${{ inputs.run-id }}")):
+            with self.subTest(key=key):
+                self.assertEqual(env.get(key), want, "the proof step must read %s from the action input, and it reads %r" % (key, env.get(key)))
+
+    def test_the_proof_step_has_the_id_the_mover_reads(self):
+        # Mistake: the proof step is renamed, and the mover reads an output that no step writes.
+        self.assertEqual(step_value(self.step_lines(PROOF_STEP), "id"), "proof",
+                         "the proof step must have id `proof`, the id the mover step reads its output from")
+
+
+class EnvReaderCases(unittest.TestCase):
+    """The env reader on fixture text: a comment, a later step's body or a lone quote never changes what is read."""
+
+    def test_a_commented_env_key_is_not_a_key(self):
+        lines = ["    - name: m", "      env:", '        # RUN_PROVEN: "true"', "        RUN_EVENT: ${{ inputs.event }}", "      run: echo"]
+        env = step_env(lines)
+        self.assertNotIn("RUN_PROVEN", env, "a commented key is text, so RUN_PROVEN is not read")
+        self.assertEqual(env, {"RUN_EVENT": "${{ inputs.event }}"})
+
+    def test_a_key_in_a_run_body_is_not_an_env_key(self):
+        # The body is a multi-line block: its `#` line and its key-shaped line are script text, not env.
+        lines = ["    - name: m", "      env:", "        RUN_EVENT: a", "      run: |", "        # a note in the script",
+                 '        RUN_PROVEN: "true"', "        echo x"]
+        env = step_env(lines)
+        self.assertNotIn("RUN_PROVEN", env, "a key under a later run: body is script text, so RUN_PROVEN is not read")
+        self.assertEqual(env, {"RUN_EVENT": "a"})
+
+    def test_a_hash_inside_a_quoted_value_is_text(self):
+        lines = ["    - name: m", "      env:", '        RUN_ID: "run #${{ inputs.run-id }}"', "      run: echo"]
+        self.assertEqual(step_env(lines), {"RUN_ID": '"run #${{ inputs.run-id }}"'},
+                         "a # inside a quoted value is text, so the whole quoted value is read")
+
+    def test_a_lone_quote_in_an_inline_comment_is_dropped(self):
+        lines = ["    - name: m", "      env:", "        RUN_EVENT: ${{ inputs.event }}  # don't", "      run: echo"]
+        self.assertEqual(step_env(lines), {"RUN_EVENT": "${{ inputs.event }}"},
+                         "the inline comment holds a lone quote, which is text, and the value ends before the comment")
 
 
 if __name__ == "__main__":
