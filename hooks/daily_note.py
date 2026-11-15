@@ -57,7 +57,8 @@ for sub in (HERE, os.path.join(HERE, "..", "lint")):
 
 MAX_WINDOW = 7    # days
 MAX_LINE = 240    # characters in one failure line
-READER = os.path.normpath(os.path.join(HERE, "..", "lint", "guard_log_report.py"))
+# The Read path names the stable linked path, so it comes from abspath: realpath would name one generation.
+READER = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint", "guard_log_report.py"))
 
 
 def central_day(at):

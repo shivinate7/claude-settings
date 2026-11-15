@@ -870,12 +870,19 @@ sha256_of() {
 }
 
 # Move $1 to the skill backup folder as $2.<time>. A name that is taken gets the pid added.
+# With a third argument "copy" the folder is copied, not moved: it is the live generation's own skill, which a
+# running session still reads, so it must stay whole until the switch.
 backup_skill() {
   mkdir -p "$SKILL_BAK_DIR"
   BAK="$SKILL_BAK_DIR/$2.$(date +%Y%m%d%H%M%S)"
   [ ! -e "$BAK" ] || BAK="$BAK.$$"
-  mv "$1" "$BAK"
-  log "existing $1 moved to $BAK"
+  if [ "${3:-}" = copy ]; then
+    cp -r "$1" "$BAK" || { log "could not back up $1 to $BAK"; return 1; }
+    log "existing $1 copied to $BAK"
+  else
+    mv "$1" "$BAK"
+    log "existing $1 moved to $BAK"
+  fi
 }
 
 # An older installer left skills/<name>.bak.<time> folders. Move each out of skills/.
@@ -938,7 +945,8 @@ land_skills_dir() {
 # and settings.json is then a link through $CLAUDE_DIR/.cs-current, and one rename of that link switches the
 # install to the new folder. The link targets name no generation, so a refresh makes links only for new names.
 # A copy that fails removes the stage and leaves the old generation whole: the run exits 1 and writes no record.
-# A generation older than an hour is removed after a good switch, never the current one.
+# A generation retired more than an hour ago (its mtime, touched at the switch) is removed after a good switch,
+# never the current one.
 GEN_ROOT="$CLAUDE_DIR/installs"
 GEN_CUR="$CLAUDE_DIR/.cs-current"
 GEN_STAGE="$GEN_ROOT/$INSTALL_ID_VALUE.tmp"
@@ -1063,9 +1071,45 @@ gen_link() {
   [ "$gl_had" = 1 ] || GEN_NEW="$GEN_NEW$1$NL"
 }
 
+# gen_skill_backups: before the switch, each skill of the live generation that matches neither the tree hash this
+# installer recorded for it nor the shipped source is a hand edit: it is copied to backups/skills (the live folder
+# stays whole, a running session reads it). An unedited skill, or one whose source changed since, gets no backup.
+# A backup that fails fails the run, so no edit is lost.
+gen_skill_backups() {
+  while IFS= read -r gb_rel; do
+    case "$gb_rel" in skills/*) ;; *) continue ;; esac
+    gb_name=${gb_rel#skills/}; gb_live="$GEN_CUR/$gb_rel"
+    [ -d "$gb_live" ] || continue
+    gb_have=$(tree_hash "$gb_live")
+    [ "$gb_have" != "$(cat "$SKILL_COPY_DIR/$gb_name" 2>/dev/null)" ] || continue
+    [ "$gb_have" != "$(tree_hash "$GEN_DIR/$gb_rel")" ] || continue
+    backup_skill "$gb_live" "$gb_name" copy || return 1
+  done <<EOF
+$GEN_LINKS
+EOF
+}
+
+# gen_record_skills: after a good switch, record the tree hash of each skill this run shipped, the hash a later
+# refresh compares the live skill with.
+gen_record_skills() {
+  mkdir -p "$SKILL_COPY_DIR" || return 0
+  while IFS= read -r gr_rel; do
+    case "$gr_rel" in skills/*) ;; *) continue ;; esac
+    gr_rec="$SKILL_COPY_DIR/${gr_rel#skills/}"
+    tree_hash "$GEN_DIR/$gr_rel" > "$gr_rec.cs-new" && mv -f "$gr_rec.cs-new" "$gr_rec"
+  done <<EOF
+$GEN_LINKS
+EOF
+  return 0
+}
+
 # gen_switch: one rename of the link .cs-current onto the new generation. A failure leaves it as it was.
+# The outgoing generation is touched first, so its age for gen_prune counts from this retirement, not from its
+# creation: a hook that started in it may still run for an hour.
 gen_switch() {
   gs_to="installs/$INSTALL_ID_VALUE"; gs_tmp="$GEN_CUR.cs-new"
+  gs_old=$(readlink "$GEN_CUR" 2>/dev/null)
+  [ -z "$gs_old" ] || [ "$gs_old" = "$gs_to" ] || touch "$CLAUDE_DIR/$gs_old" 2>/dev/null
   rm -f "$gs_tmp"
   ln -s "$gs_to" "$gs_tmp" || return 1
   if [ -L "$GEN_CUR" ]; then
@@ -1104,7 +1148,7 @@ gen_land() {
     log "could not rename $GEN_STAGE to $GEN_DIR; the old install stays as it was"; gen_abort; return 1
   fi
   if [ -L "$GEN_CUR" ]; then
-    if ! gen_links_all || ! gen_switch; then
+    if ! gen_skill_backups || ! gen_links_all || ! gen_switch; then
       while IFS= read -r gl_rel; do
         [ -n "$gl_rel" ] && rm -f "$CLAUDE_DIR/$gl_rel"
       done <<EOF
@@ -1238,6 +1282,7 @@ if [ "$CLOUD" != 1 ]; then
   retire_and_record
 elif [ "$GEN_OK" = 1 ]; then
   gen_note_all
+  gen_record_skills
   retire_and_record
   [ "$INSTALL_FAILED" != 0 ] || gen_prune
 fi
