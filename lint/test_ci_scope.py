@@ -1182,6 +1182,14 @@ class WindowsGuardShards(unittest.TestCase):
                 shards = guard_shards_run(run(paths))
                 self.assertEqual(set(shards.values()), {False}, f"a guard shard runs for the docs-only diff {paths}: {shards}")
 
+    # The case table's fail-safe arm names these two all-on, but the windows_guard pass reads only the three gate paths it
+    # names itself. Named failure: a change to the attributes file or the green-head reader leaves the guard shards off.
+    def test_a_gitattributes_or_green_head_change_turns_the_guard_shards_on(self):
+        for paths in ([".gitattributes"], [".github/scripts/green-head.sh"]):
+            with self.subTest(paths=paths):
+                shards = guard_shards_run(run(paths))
+                self.assertEqual(set(shards.values()), {True}, f"a guard shard is off for the fail-safe path {paths}: {shards}")
+
     # The gate reads the flags on push, schedule and dispatch too: those events run everything, so the shards run.
     def test_push_schedule_and_dispatch_turn_the_guard_shards_on_for_a_docs_only_diff(self):
         for event in ("push", "schedule", "workflow_dispatch"):
