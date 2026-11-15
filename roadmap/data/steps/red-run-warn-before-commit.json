@@ -1,14 +1,14 @@
 {
  "id": "red-run-warn-before-commit",
  "title": "A lane sees \"a test-file edit needs a Red-run: trailer\" before its first commit, not after",
- "status": "todo",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "unread: not yet in the session list at 00:35 CST Nov 15",
  "owner": "coordinator",
  "blockedBy": [],
  "why": "Incident (coordinator 16:24 CST Nov 14, from the note in the #3421 lane's 15:28 report; triage read none; n=1): lane root-clause-done-at-fix-check had to squash and force push #3421 because a test-file edit needed a Red-run: trailer and the lane learned it after committing. Harm: a rewrite of pushed history on a PR branch (kin: rule shared-trees-no-destructive-git; the force push was not asked to the owner as far as triage read). Guard (the coordinator's proposal): the lane sees the warning before its first commit. First act of a lane: find where the trailer is checked today (kin: steps red-run-pre-push, red-run-trailer-fits-mutant-proof) and move or add the warning at commit time; red then green: a commit of a test file without the trailer prints the warning before the commit lands. Rule: building-mistake-names-its-guard. KIN 20:07 CST Nov 14 (coordinator 20:07, data; g1's note, no new step): g1's commit-time run of check_red_run on a staged test edit is the kin of this step.",
  "source": "coordinator 16:24 CST Nov 14 (from the #3421 lane's 15:28 report)",
- "note": "Filed 16:25 CST Nov 14 by triage. Tracker: the coordinator. Queued, not started. Kin: red-run-pre-push.",
- "updatedAt": "2026-11-14T20:08:06-06:00"
+ "note": "Filed 16:25 CST Nov 14 by triage. Tracker: the coordinator. Started 00:34 CST Nov 15 (coordinator, consultant 00:32: start every step whose questions are answered); lane id not sent, and the new lane was not yet in the session list at 00:35 CST. Kin: red-run-pre-push.",
+ "updatedAt": "2026-11-15T00:35:00-06:00"
 }
