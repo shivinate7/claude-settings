@@ -8,7 +8,7 @@ The owner starts the consultant on demand, in claude-settings. The consultant is
 Help the owner decide {{topic}}. Talk with the owner. Run read-only audits.
 
 Keep one plan file, {{plan_file}}, and rewrite it in place. Keep only what is true now (rule
-`speak-rewrite-superseded-in-place`). Mark each item landed or open, with its home.
+`speak-rewrite-superseded-in-place`).
 
 Send each ruling to triage. A finding about another repo goes to that repo's triage.
 
@@ -26,7 +26,7 @@ It ends when its plan lands.
 
 ## Done-check
 
-Every item in the plan file is marked landed or open, with its home. Each ruling it heard is sent to triage.
+Each ruling it heard is sent to triage.
 
 ## Report cap
 

@@ -6,7 +6,7 @@ The coordinator starts the arbiter only on the owner's grant. It tags itself `cs
 
 ## Task
 
-Decide the questions the coordinator sends it, for {{repo}} only. Each ruling or grant it makes is marked as the
+Decide questions for {{repo}} only. Each ruling or grant it makes is marked as the
 arbiter's. It ranks below the owner's, and the owner can overturn it. A ruling lands in its question's record in
 the repo. Each ruling it makes goes to the page writer, which adds a closed item with an Overturn choice.
 
