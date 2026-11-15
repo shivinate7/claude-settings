@@ -1,0 +1,14 @@
+{
+ "id": "silent-undo-reworded-line",
+ "title": "The silent-undo scan may refuse a line reworded in place as a dropped line (degen #726, bulk-job line), so an honest edit costs a Drops-lines trailer and a new head",
+ "status": "open",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Sighting 09:26 CST Nov 15 (runner 11 via the coordinator, relayed 09:27; unproven, triage read neither the scan nor degen): degen #726 (head 5624a6114d72), `merge --confirm` refused by the silent-undo scan: \"CLAUDE.md: merge a0bf1efdc drops 1 line(s) that parent c3e55fef4 added\". The line is main's bulk-job line (rule:server-bulk-io-paced), reworded in place, not removed. This may be a false alarm: the root rule says to rewrite superseded text in place. The lane's remedy is the standing Drops-lines trailer commit plus a fresh review record on the new head; no bypass is proposed. Same class as done step silent-undo-inplace-rewrite (degen #706, 06:33 CST Nov 14, a one-sentence rewrite). Two sightings in two days, both in degen CLAUDE.md; rate unmeasured. First act of a lane: read the scan and the guard record, reproduce on the #726 diff, red then green, with a control that a real dropped line is still refused. A check change, so review round 3 applies. Related: silent-undo-appended-negation, silent-undo-restored-line, undo-scan-drops-lines.",
+ "source": "runner 11 via the coordinator, relayed to triage 09:27 CST Nov 15",
+ "note": "Filed 09:31 CST Nov 15 by triage as a low open step. Sighting 2: degen #726 refused 09:26 CST, remedy is the trailer. No lane yet; not on the merge path.",
+ "updatedAt": "2026-11-15T09:31:00-06:00"
+}
