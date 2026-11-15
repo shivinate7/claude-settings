@@ -133,10 +133,14 @@ def install_timeout():
 
 def remote_tip(url, ref):
     """(sha, None), or (None, reason). One git ls-remote of the recorded ref."""
+    # No prompt can reach the terminal: git's own prompt is off, ssh may not ask (BatchMode), and off Windows the child
+    # has its own session, so it has no controlling terminal for /dev/tty.
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
+    detach = {"start_new_session": True} if os.name != "nt" else {}
     try:
         done = _nowindow.run(["git", "ls-remote", url, "refs/heads/" + ref], capture_output=True, text=True,
-                              timeout=fetch_timeout(), env=env)
+                              timeout=fetch_timeout(), env=env, **detach)
     except subprocess.TimeoutExpired:
         return None, "the read of origin timed out"
     except OSError as err:
@@ -210,24 +214,43 @@ def is_cloud():
     return os.environ.get("CLAUDE_CODE_REMOTE") == "true"
 
 
+def is_narrow(installer):
+    """True when the recorded installer is a clone's merge/install_from_main.sh, the one with the stable-only mode."""
+    return installer.replace("\\", "/").split("/")[-2:] == ["merge", "install_from_main.sh"]
+
+
+def installer_unknown(record):
+    """The reason a local session cannot run the recorded installer, or None. An installer whose text lacks
+    CS_STABLE_ONLY predates the stable-only mode: run as the narrow form it would move local main."""
+    try:
+        with open(record["installer"], encoding="utf-8", errors="replace") as handle:
+            text = handle.read()
+    except OSError as err:
+        return "could not read the installer %s: %s" % (record["installer"], err.strerror or err)
+    if "CS_STABLE_ONLY" not in text:
+        return "the installer %s has no stable-only mode; update that clone" % record["installer"]
+    return None
+
+
 def reinstall(record):
     """Runs the recorded installer once. Returns None on success, else the failure text. The installer runs in its
     own session so a stop reaches its children. Its output goes nowhere: the hook prints its own lines.
-    Local: the installer is the clone's merge/install_from_main.sh, run in the clone in its narrow mode. Its lock wait
-    ends 20 s before the timeout, so a second session's installer reports a failure before the hook stops it."""
+    The run form follows the record's installer, not the session: a clone's merge/install_from_main.sh runs in the
+    clone in its narrow mode, no --cloud; any other installer runs `bash <installer> --cloud`. The narrow form's lock
+    wait ends 20 s before the timeout, so a second session's installer reports a failure before the hook stops it."""
     limit = install_timeout()
     env = dict(os.environ, CLAUDE_SETTINGS_REF=record["ref"], CS_HOOK_INPUT=INSTALL_HOOK_INPUT)
     bash = find_bash()
     if not bash:
         return "reinstall failed (no bash found)"
     argv, cwd = [bash, record["installer"]], None
-    if is_cloud():
-        argv.append("--cloud")
-        env.pop("CS_STABLE_ONLY", None)
-    else:
+    if is_narrow(record["installer"]):
         env["CS_STABLE_ONLY"] = "1"
         env["CLAUDE_SETTINGS_LOCK_WAIT"] = str(max(5, int(limit) - 20))
         cwd = record["source"]
+    else:
+        argv.append("--cloud")
+        env.pop("CS_STABLE_ONLY", None)
     try:
         proc = _nowindow.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                 env=env, cwd=cwd, start_new_session=True)
@@ -255,6 +278,10 @@ def check():
         return [unknown(reason)]
     if tip == record["sha"]:
         return []
+    if not is_cloud():
+        reason = installer_unknown(record)
+        if reason:
+            return [unknown(reason)]
     failure = reinstall(record)
     if failure:
         return [PREFIX + failure]
