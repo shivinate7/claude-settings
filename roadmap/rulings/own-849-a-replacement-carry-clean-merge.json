@@ -1,0 +1,10 @@
+{
+ "id": "own-849-a-replacement-carry-clean-merge",
+ "at": "2026-11-15T00:09:16-06:00",
+ "title": "The carry and the --fix-check source gate accept a replacement PR whose tree equals the reviewed tree plus a clean merge of main (exact tree only).",
+ "ruling": "Owner, page item 849 (pick-carry-clean-merge-replacement), option a, saved on the page at 00:09:16 CST Nov 15 (06:09:16Z) with no note. Option a: add the form 'equal tree plus a clean merge of main, exact tree only, an unreadable merge-tree reads unknown' to the merge tool's carry (carry_source in merge/merge.py) and to the --fix-check source gate, for a replacement PR. Option a was marked widening ('Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo') and not starred; the coordinator recommended b. The item's first line read 'WITHDRAWN by the coordinator 20:16 CST Nov 14: a ruling answers it; no answer needed.' The owner saved a on it anyway, after seeing that line and the widening label; whether he meant it as a standing choice after the withdrawal is the parent's to confirm (flagged by triage 00:10 CST Nov 15). The grant covers the act it names: the carry and the --fix-check source gate on a replacement PR, exact tree only. It does not cover the lane lint (ruling own-850-a-lane-lint-carries-clean-main-merge rules that separately, tool-proved form only), a conflict-resolved merge, any other change riding in the merge, or an unreadable merge-tree (reads unknown, not carried). Check change: review rounds, red first, net-value test. The page item stays open: it is a withdrawn item and step waiting-page-item-withdraw is unbuilt, so triage did not close it.",
+ "quote": "a",
+ "source": "waiting/answers/pick-carry-clean-merge-replacement.json (06:09:16Z Nov 15 = 00:09:16 CST, choice a, optionId carry-equal-tree-plus-clean-merge, no note). Owner. The answers doc was left in place.",
+ "status": "open",
+ "step": "carry-forgives-main-merge"
+}
