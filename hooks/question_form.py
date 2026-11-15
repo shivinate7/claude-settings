@@ -927,9 +927,11 @@ def decision_form_hit(op: str, data):
         if data.get("kind") not in (None, "decision"):
             return PASS
     elif data.get("kind") is None:
-        # The guard cannot see the stored kind. An update with no kind is a decision when its context carries the
-        # decision form's Goal line; a context with no Goal line is a task's, and passes.
-        if not GOAL_LINE.search(str(data.get("context") or "")):
+        # The guard cannot see the stored kind. A Why yours line is the task marker, so a context that holds one is
+        # a task's and passes, even when a Goal line opens it. Otherwise an update with no kind is a decision when
+        # its context carries the decision form's Goal line; a context with no Goal line is a task's, and passes.
+        context = str(data.get("context") or "")
+        if WHY_YOURS_LINE.search(context) or not GOAL_LINE.search(context):
             return PASS
     elif data.get("kind") != "decision":
         return PASS
