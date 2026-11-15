@@ -23,6 +23,10 @@ Canary: every hook run must leave a `loaded` file (the sitecustomize ran) and, w
 reaches the reader, exactly one stub call naming the peer, with no agents call. Without them, a
 "no model call" pass proves nothing.
 
+Git: the sitecustomize also records every git start (kind git), so a rulings read is counted, not
+assumed. The past-ruling cases put the fixture repo only in the payload's cwd. The child's own cwd
+is a folder with no store, so a hook that reads the process cwd finds nothing and fails.
+
 Timing: the answer cases set READER_TIMEOUT to None, so a slow runner cannot cut the stub short. A stub
 that never answers ends at run_hook's cap as one FAIL line that names the case: a hang guard, not a speed
 check. Only the hang and hold cases set a short timeout, and they need it to fire.
@@ -35,15 +39,22 @@ import importlib.util
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import time
 import types
+import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.environ.get("SENDMESSAGE_STATE_UNDER_TEST") or os.path.join(HERE, "sendmessage_state.py")
-ROOT = tempfile.mkdtemp(prefix="sendmessage_state_cases_")
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lint"))
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+ROOT = _test_temp.run_folder()  # every temp file of this run, fixture repos included, lives under it
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 atexit.register(shutil.rmtree, ROOT, ignore_errors=True)  # a pass, a failed case or a crash leaves no folder
 STUB_DIR = os.path.join(ROOT, "stub")
 FAILED = []
@@ -61,6 +72,24 @@ HARNESS_CAP = HOLD_MS // 1000 + 30  # a hang guard for the harness call, never a
 STUB_SITE = r'''
 import json, os, subprocess
 _real_run = subprocess.run
+_real_popen = subprocess.Popen
+
+
+class _RecordingPopen(_real_popen):
+    """Writes one record per git start (subprocess.run and Popen both come here), then starts it as usual."""
+
+    def __init__(self, args, *a, **kw):
+        try:
+            argv = [str(x) for x in args] if isinstance(args, (list, tuple)) else [str(args)]
+            if argv and os.path.basename(argv[0]).lower() in ("git", "git.exe"):
+                with open(os.environ["SM_RECORD"], "a", encoding="utf-8") as f:
+                    f.write(json.dumps({"argv": argv, "kind": "git"}) + "\n")
+        except Exception:
+            pass  # a record that cannot be written never stops the git start
+        _real_popen.__init__(self, args, *a, **kw)
+
+
+subprocess.Popen = _RecordingPopen
 
 
 def _fake_run(argv, **kwargs):
@@ -217,6 +246,8 @@ class Run:
         self.wording_calls = [a for a in argv_lines(os.path.join(base, "calls.jsonl"), "wording") if "-p" in a]
         self.log = read_text(os.path.join(base, "config", "guard.log")) or ""
         self.agents_calls = [a for a in self.calls if a[:2] == ["agents", "--json"]]
+        self.git_starts = argv_lines(os.path.join(base, "calls.jsonl"), "git")
+        self.rulings_reads = [a for a in self.git_starts if any("roadmap" in x for x in a)]  # any git start naming the roadmap
 
     def deny(self):
         """The hookSpecificOutput of a deny, or None when stdout is empty."""
@@ -249,7 +280,7 @@ def point_reader_at_stub(cfg, base):
 
 def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=False,
              reader_mode="board", reader_seconds=NO_BOUND, direct=False, cap=120, wording=ALLOW,
-             override=None, base=None):
+             override=None, base=None, cwd=None):
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     cfg = os.path.join(base, "config")
@@ -259,7 +290,7 @@ def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=
     agents = os.path.join(base, "agents.json")
     with open(agents, "w", encoding="utf-8") as f:
         f.write(json.dumps(rows if rows is not None else []))
-    env = {k: v for k, v in os.environ.items() if not k.startswith("SM_")}
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("SM_", "GIT_"))}  # GIT_DIR would move the hook's git
     env.update({
         "CLAUDE_CONFIG_DIR": cfg,
         "PATH": STUB_DIR + os.pathsep + os.environ.get("PATH", ""),
@@ -284,14 +315,16 @@ def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=
             f.write(TIMED_HOOK % (HOOK, reader_seconds))
     started = time.monotonic()
     proc = subprocess.run([sys.executable, script], input=stdin_text, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", env=env, timeout=cap)
+                          encoding="utf-8", errors="replace", env=env, timeout=cap, cwd=cwd)
     return Run(proc, base, time.monotonic() - started)
 
 
-def hook_input(to=PEER, message="Status: the step is done, no change for you.", session=SID_A, agent=None):
+def hook_input(to=PEER, message="Status: the step is done, no change for you.", session=SID_A, agent=None, cwd=None):
     payload = {"session_id": session, "tool_name": "SendMessage", "tool_input": {"to": to, "message": message}}
     if agent:
         payload["agent_id"] = agent
+    if cwd:  # the payload's cwd: the repo the hook reads (Claude Code sends it on each tool call)
+        payload["cwd"] = cwd
     return json.dumps(payload)
 
 
@@ -627,6 +660,511 @@ def case_deny_ends_with_the_override_line():
     check("a deny for an agent's call names `override 15m`", "override 15m" in reason, detail(r))
 
 
+# ---- the past-ruling check: a settling message that cites a decision a ruling superseded
+#
+# The check reads the rulings store (the roadmap ref's roadmap/rulings tree) with git, in the payload's cwd.
+# Each past-ruling case runs the child with its own cwd in a folder with no store (the "plain" kind), and
+# puts the fixture repo only in the payload, so a hook that reads the process cwd finds no store and fails.
+
+
+class FixtureError(Exception):
+    """A fixture repo did not build. Its case records one FAIL line, and the other cases still run."""
+
+
+SETTLING = (  # one phrase per message: a check that matches only some of the phrases fails the others
+    ("settled", "This is settled."),
+    ("no owner item", "There is no owner item for it."),
+    ("already ruled", "It is already ruled."),
+    ("owner already decided", "The owner already decided it."),
+)
+SLUG = "action-pins-follow-sessions"  # the decision R44 supersedes: the incident's decision
+KEPT = "kept-decision"  # cited by no ruling's ref line
+FREE = "free-text-decision"  # named only in r46's free ruling text
+PREFIX = "action-pins"  # a true prefix of SLUG, cited by no ruling
+R44_PATH = "roadmap/rulings/r44.json"
+R44_REF = ('docs/decisions/%s.md: "Pins stay current on demand: the session that runs the tool sees the drift '
+           'and moves the pin. No bot and no schedule."' % SLUG)
+R44_TEXT = ("- **R44. Child repos follow claude-settings, with cited exceptions only.** Free text: decision %s "
+            "says pins move only when a session sees drift." % SLUG)
+R46_TEXT = "- **R46. Fixture ruling with a free-text mention only.** Free text: decision %s stands as written." % FREE
+R47_REF = "test-strategy-reset: Reset of the test strategy: the old plan applies no longer, and the new plan replaces it."
+R47_TEXT = "- **R47. Fixture ruling that replaces the test strategy.** Free text: a new strategy note, nothing more."
+R48_REF = ('docs/decisions/punct-case-decision.md: "CURRENT demand: the Session sees the DRIFT, and it moves on; '
+           'no SCHEDULE!"')  # the same key words as R44's sentence, in other case and punctuation
+R48_TEXT = "- **R48. Fixture ruling whose quoted sentence has other case and punctuation.** Free text: none."
+R49_TEXT = "- **R49. Fixture ruling that retires a whole decision by its docs path.** Free text: none."
+R50_TEXT = "- **R50. Fixture ruling that retires a whole decision by its bare slug.** Free text: none."
+LAST_SLUGS = ("list-oxford-last", "semi-last-decision", "paren-last-decision", "slash-last-decision")  # r51 retires each
+R51_TEXT = "- **R51. Fixture ruling that retires the last slug of each cite list.** Free text: none."
+R52_REF = "lint/report_guard.py:36: 'The refusal remedy never names an owner, per decision guard-remedy-not-to-owner.'"
+R52_TEXT = "- **R52. Fixture ruling whose code-style ref mentions a decision in the middle of its text.** Free text: none."
+KEY_SENTENCE = "The session sees the drift."  # two key words shared with R44's sentence: the deny threshold
+CITE_FORMS = ("docs/decisions/%s.md", "`docs/decisions/%s`", "decision %s", "decisions `%s`", "decision `%s`")
+GIT_IDENT = {"GIT_AUTHOR_NAME": "fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+             "GIT_COMMITTER_NAME": "fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid"}
+STORES = {}  # one fixture repo per kind, built on first use and shared by the cases of this run
+
+
+def settled_text(sentence, cite):
+    return "%s Pin the four actions to a main commit, per %s. %s" % (sentence, cite, KEY_SENTENCE)
+
+
+def ruling_json(rid, ruling, refs=()):
+    """refs: a ref string (kind main-sentence, the docs-path shape) or a {"kind", "ref"} dict."""
+    supersedes = [r if isinstance(r, dict) else {"kind": "main-sentence", "ref": r} for r in refs]
+    return json.dumps({"id": rid, "at": "2026-11-11T14:05:00-06:00", "ruling": ruling, "status": "open",
+                       "supersedes": supersedes, "title": "Fixture ruling %s." % rid}, indent=1) + "\n"
+
+
+def store_files():
+    """The rulings a real store holds: r44 supersedes SLUG in the docs-path shape, r47 supersedes a slug in the
+    slug-first shape, r46 names FREE in its free text, r48 quotes a sentence in other case and punctuation,
+    r49 and r50 retire a whole decision (no quoted sentence), and the filler brings the store to full size."""
+    files = {"r44.json": ruling_json("r44", R44_TEXT, (R44_REF,)), "r46.json": ruling_json("r46", R46_TEXT),
+             "r47.json": ruling_json("r47", R47_TEXT, ({"kind": "decision", "ref": R47_REF},)),
+             "r48.json": ruling_json("r48", R48_TEXT, (R48_REF,)),
+             "r49.json": ruling_json("r49", R49_TEXT, ("docs/decisions/bare-path-retired.md",)),
+             "r50.json": ruling_json("r50", R50_TEXT, ({"kind": "decision", "ref": "bare-slug-retired"},)),
+             "r51.json": ruling_json("r51", R51_TEXT, tuple({"kind": "decision", "ref": s} for s in LAST_SLUGS)),
+             "r52.json": ruling_json("r52", R52_TEXT, ({"kind": "main-sentence", "ref": R52_REF},))}
+    for n in range(1, 151):
+        files.setdefault("r%d.json" % n, ruling_json("r%d" % n, "Filler ruling %d, supersedes nothing." % n))
+    return files
+
+
+def git_out(repo, *args, check=True):
+    """One git call in a fixture repo. Identity and config come from the fixture, not the reader's environment."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(GIT_IDENT)
+    proc = subprocess.run(["git", "-C", repo, "-c", "commit.gpgsign=false", *args],
+                          capture_output=True, text=True, env=env, timeout=60)
+    if check and proc.returncode:
+        raise FixtureError("git %s in %s: %s" % (args[0], os.path.basename(repo), " ".join(proc.stderr.split())))
+    return proc
+
+
+def ref_resolves(repo, ref):
+    return git_out(repo, "rev-parse", "--verify", "--quiet", ref, check=False).returncode == 0
+
+
+def make_repo(name, rulings=None, ref="roadmap", origin_extra=None):
+    """A repo under the run folder, with a main commit. `rulings` (file name -> JSON text) makes a store commit
+    under roadmap/rulings/. `ref` names the store commit: "roadmap" (the local branch), "origin" (the
+    remote-tracking ref refs/remotes/origin/roadmap) or None (no store ref). With no rulings, the store commit
+    is the main commit, so the ref holds no rulings. `origin_extra` (file name -> JSON text) is committed on top
+    of the store as origin/roadmap, so the local ref can lack a ruling that origin has."""
+    repo = os.path.join(ROOT, name)
+    os.makedirs(repo)
+    git_out(repo, "init", "-q")
+    with open(os.path.join(repo, "README.md"), "w", encoding="utf-8") as f:
+        f.write("fixture\n")
+    git_out(repo, "add", "README.md")
+    main = git_out(repo, "commit-tree", git_out(repo, "write-tree").stdout.strip(), "-m", "main").stdout.strip()
+    git_out(repo, "update-ref", "refs/heads/main", main)
+    store = main
+    if rulings is not None:
+        folder = os.path.join(repo, "roadmap", "rulings")
+        os.makedirs(folder)
+        for fname, text in rulings.items():
+            with open(os.path.join(folder, fname), "w", encoding="utf-8") as f:
+                f.write(text)
+        git_out(repo, "add", "roadmap")
+        tree = git_out(repo, "write-tree").stdout.strip()
+        store = git_out(repo, "commit-tree", tree, "-p", main, "-m", "store").stdout.strip()
+    if ref == "roadmap":
+        git_out(repo, "update-ref", "refs/heads/roadmap", store)
+    elif ref == "origin":
+        git_out(repo, "update-ref", "refs/remotes/origin/roadmap", store)
+    if origin_extra:
+        folder = os.path.join(repo, "roadmap", "rulings")
+        os.makedirs(folder, exist_ok=True)
+        for fname, text in origin_extra.items():
+            with open(os.path.join(folder, fname), "w", encoding="utf-8") as f:
+                f.write(text)
+        git_out(repo, "add", "roadmap")
+        tree = git_out(repo, "write-tree").stdout.strip()
+        origin = git_out(repo, "commit-tree", tree, "-p", store, "-m", "origin").stdout.strip()
+        git_out(repo, "update-ref", "refs/remotes/origin/roadmap", origin)
+    return repo
+
+
+def drop_blob(repo, ref, path):
+    """Delete the loose object of one file's blob: the ref still resolves, and git cannot read that file."""
+    sha = git_out(repo, "rev-parse", "%s:%s" % (ref, path)).stdout.strip()
+    obj = os.path.join(repo, ".git", "objects", sha[:2], sha[2:])
+    os.chmod(obj, stat.S_IWRITE)  # git makes objects read-only, and Windows will not delete one otherwise
+    os.remove(obj)
+
+
+def store(kind):
+    """The fixture repo of one kind. Built once per run; no case writes to one."""
+    if kind not in STORES:
+        if kind == "full":
+            STORES[kind] = make_repo("full", store_files())
+        elif kind == "origin":
+            STORES[kind] = make_repo("origin-only", store_files(), ref="origin")
+        elif kind == "empty":
+            STORES[kind] = make_repo("empty", None, ref="roadmap")
+        elif kind == "absent":
+            STORES[kind] = make_repo("absent", None, ref=None)
+        elif kind == "stale-local":  # the local roadmap ref lacks r44, and origin/roadmap has it
+            full = store_files()
+            STORES[kind] = make_repo("stale-local", {k: v for k, v in full.items() if k != "r44.json"},
+                                     ref="roadmap", origin_extra={"r44.json": full["r44.json"]})
+        elif kind == "broken":
+            STORES[kind] = make_repo("broken", store_files())
+            drop_blob(STORES[kind], "roadmap", R44_PATH)
+        else:  # "plain": a folder that is no repository
+            STORES[kind] = os.path.join(ROOT, "plain")
+            os.makedirs(STORES[kind], exist_ok=True)
+    return STORES[kind]
+
+
+def past_run(text, kind, **kwargs):
+    """Run the hook on `text`, the payload's cwd in store `kind`, the child's own cwd in the plain folder."""
+    return run_hook(hook_input(message=text, cwd=store(kind)), reader_mode="idle", cwd=store("plain"), **kwargs)
+
+
+def denied(r):
+    """The deny's reason, or None when the hook did not deny. Output that is not a deny reads as no deny."""
+    try:
+        d = r.deny()
+    except (ValueError, KeyError, TypeError):
+        return None
+    if not d or d.get("permissionDecision") != "deny":
+        return None
+    return d.get("permissionDecisionReason", "")
+
+
+def store_text(repo, ref, path):
+    return git_out(repo, "show", "%s:%s" % (ref, path), check=False).stdout
+
+
+def check_allow_with_no_git(r, label):
+    check("%s: allow (exit 0, no output, no stderr)" % label, r.code == 0 and r.out == "" and r.err == "", detail(r))
+    check("%s: the send reaches the wording judge once" % label, len(r.wording_calls) == 1, detail(r))
+    check("%s: no git start at all (no store read, no pre-check)" % label, not r.git_starts,
+          detail(r) + " git=%r" % r.git_starts)
+
+
+def case_git_popen_is_recorded():
+    base = os.path.join(ROOT, "git-canary")
+    os.makedirs(base)
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("SM_", "GIT_"))}
+    env.update({"PYTHONPATH": STUB_DIR, "SM_LOADED_DIR": base, "SM_RECORD": os.path.join(base, "calls.jsonl")})
+    code = ("import subprocess\n"
+            "subprocess.run(['git', '--version'], capture_output=True)\n"
+            "subprocess.Popen(['git', '--version'], stdout=subprocess.DEVNULL).wait()\n")
+    subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=60)
+    starts = argv_lines(os.path.join(base, "calls.jsonl"), "git")
+    check("git recorder (canary): the stub loaded, and subprocess.run and Popen each recorded one git start",
+          os.path.exists(os.path.join(base, "loaded")) and len(starts) == 2, "starts=%r" % starts)
+
+
+def case_settled_superseded_is_denied():
+    text = store_text(store("full"), "roadmap", R44_PATH)
+    check("fixture: the full store's r44 ref line names docs/decisions/%s.md" % SLUG,
+          '"ref": "docs/decisions/%s.md' % SLUG in text, " ".join(text.split())[:160])
+    runs = {}
+    for phrase, sentence in SETTLING:
+        runs[phrase] = past_run(settled_text(sentence, "`decision %s`" % SLUG), "full")
+        reason = denied(runs[phrase])
+        check("settling phrase %r + superseded decision: deny, rule past-ruling, naming %s and r44" % (phrase, SLUG),
+              reason is not None and reason.startswith("past-ruling: ") and SLUG in reason and "r44" in reason,
+              detail(runs[phrase]))
+    r = runs["settled"]
+    check("settled + superseded decision: the check runs before the judges (no model call)",
+          not r.wording_calls and not r.model_calls, detail(r))
+    check("settled + superseded decision: one past-ruling deny line in guard.log",
+          r.log.count("\tdeny\tpast-ruling\t") == 1, detail(r) + " log=%r" % r.log)
+    check("settled + superseded decision: the store is read by one git start", len(r.rulings_reads) == 1, detail(r))
+
+
+def case_two_cited_ids_read_the_store_once():
+    r = past_run(settled_text(SETTLING[0][1], "`docs/decisions/%s.md` and `decision %s`" % (KEPT, SLUG)), "full")
+    reason = denied(r)
+    check("settled + two cited ids, one superseded: deny naming %s and r44" % SLUG,
+          reason is not None and SLUG in reason and "r44" in reason, detail(r))
+    check("settled + two cited ids: one store read, not one per id", len(r.rulings_reads) == 1, detail(r))
+
+
+def case_origin_only_store_is_read():
+    check("fixture: the origin-only store has no local roadmap ref",
+          not ref_resolves(store("origin"), "refs/heads/roadmap"))
+    r = past_run(settled_text(SETTLING[0][1], "`decision %s`" % SLUG), "origin")
+    reason = denied(r)
+    check("store on origin/roadmap only: deny naming %s and r44" % SLUG,
+          reason is not None and SLUG in reason and "r44" in reason, detail(r))
+
+
+def case_override_lifts_a_past_ruling_refusal():
+    r = past_run(settled_text(SETTLING[0][1], "`decision %s`" % SLUG), "full", override=(SID_A, TIMED))
+    check("past-ruling override: the send lands (exit 0, no output)", r.code == 0 and r.out == "", detail(r))
+    check("past-ruling override: one override line for past-ruling, no deny line",
+          r.log.count("\toverride\tpast-ruling\t") == 1 and "\tdeny\tpast-ruling\t" not in r.log,
+          detail(r) + " log=%r" % r.log)
+
+
+def case_settled_citing_an_unsuperseded_decision_is_allowed():
+    r = past_run(settled_text(SETTLING[1][1], "`docs/decisions/%s.md`" % KEPT), "full")
+    check("settled + a decision nothing supersedes: allow (exit 0, no output, no stderr)",
+          r.code == 0 and r.out == "" and r.err == "", detail(r))
+    check("settled + a decision nothing supersedes: the send reaches the wording judge once",
+          len(r.wording_calls) == 1, detail(r))
+    check("settled + a decision nothing supersedes: the store is read by one git start",
+          len(r.rulings_reads) == 1, detail(r))
+
+
+def case_unsettled_citing_a_superseded_decision_is_allowed_with_no_git():
+    r = past_run("Still checking whether `docs/decisions/%s.md` applies to the four actions." % SLUG, "full")
+    check_allow_with_no_git(r, "not settling, cites the superseded decision")
+
+
+def case_settled_citing_nothing_is_allowed_with_no_git():
+    r = past_run("This is settled: no change for you, the step is done.", "full")
+    check_allow_with_no_git(r, "settled, cites nothing")
+
+
+def case_cite_forms_are_caught():
+    for form in CITE_FORMS:
+        cite = form % SLUG
+        r = past_run(settled_text(SETTLING[2][1], cite), "full")
+        reason = denied(r)
+        check("cite form %s: deny naming %s and r44" % (cite, SLUG),
+              reason is not None and SLUG in reason and "r44" in reason, detail(r))
+    r = past_run("%s Don't reopen it.\n- decision %s. %s" % (SETTLING[0][1], SLUG, KEY_SENTENCE), "full")
+    reason = denied(r)
+    check("cite after a lone apostrophe and a newline: deny naming %s and r44" % SLUG,
+          reason is not None and SLUG in reason and "r44" in reason, detail(r))
+
+
+def case_absent_store_allows_silently():
+    absent = store("absent")
+    check("fixture: the absent repo has no roadmap ref, local or origin",
+          not ref_resolves(absent, "roadmap") and not ref_resolves(absent, "origin/roadmap"))
+    empty = store("empty")
+    check("fixture: the empty store's roadmap ref holds no rulings",
+          ref_resolves(empty, "roadmap")
+          and git_out(empty, "ls-tree", "-r", "--name-only", "roadmap", "--", "roadmap/rulings",
+                      check=False).stdout.strip() == "")
+    for kind, label in (("absent", "no roadmap ref"), ("empty", "a roadmap ref with no rulings"),
+                        ("plain", "no repo at all")):
+        r = past_run(settled_text(SETTLING[0][1], "`decision %s`" % SLUG), kind)
+        check("absent store (%s): allow silently (exit 0, no output, no stderr), the send reaches the judge" % label,
+              r.code == 0 and r.out == "" and r.err == "" and len(r.wording_calls) == 1, detail(r))
+
+
+def case_broken_store_fails_open_with_one_stderr_line():
+    broken = store("broken")
+    check("fixture: the broken store's roadmap ref resolves, and r44's blob is gone",
+          ref_resolves(broken, "roadmap")
+          and git_out(broken, "cat-file", "-e", "roadmap:%s" % R44_PATH, check=False).returncode != 0)
+    r = past_run(settled_text(SETTLING[3][1], "`decision %s`" % SLUG), "broken")
+    check("broken store: allow (exit 0, no output, no deny)", r.code == 0 and r.out == "", detail(r))
+    check("broken store: exactly one stderr line", len(r.err.strip().splitlines()) == 1, detail(r))
+    check("broken store: the send reaches the wording judge once", len(r.wording_calls) == 1, detail(r))
+
+
+def case_free_text_decision_is_not_superseded():
+    check("fixture: %s is in r46's free text and in no ref line" % FREE,
+          FREE in R46_TEXT and FREE not in R44_REF
+          and FREE in store_text(store("full"), "roadmap", "roadmap/rulings/r46.json"))
+    r = past_run(settled_text(SETTLING[1][1], "`docs/decisions/%s.md`" % FREE), "full")
+    check("free-text-only decision: allow (exit 0, no output, no stderr)", r.code == 0 and r.out == "" and r.err == "",
+          detail(r))
+    check("free-text-only decision: the send reaches the wording judge once", len(r.wording_calls) == 1, detail(r))
+    check("free-text-only decision: the store is read by one git start", len(r.rulings_reads) == 1, detail(r))
+
+
+def case_prefix_slug_does_not_match():
+    check("fixture: %s is a true prefix of %s" % (PREFIX, SLUG), SLUG.startswith(PREFIX + "-"))
+    r = past_run(settled_text(SETTLING[0][1], "`decision %s` and `docs/decisions/%s.md`" % (PREFIX, PREFIX)), "full")
+    check("prefix slug %s: allow (exit 0, no output, no stderr)" % PREFIX,
+          r.code == 0 and r.out == "" and r.err == "", detail(r))
+    check("prefix slug %s: the send reaches the wording judge once" % PREFIX, len(r.wording_calls) == 1, detail(r))
+    check("prefix slug %s: the store is read by one git start" % PREFIX, len(r.rulings_reads) == 1, detail(r))
+
+
+# ---- past-ruling check: a later slug in a list, the slug-first ref shape, more settling
+# phrases, negations, a payload with no cwd, a stale local ref, and the refusal's remedy text.
+
+
+def case_second_slug_in_a_list_is_caught():
+    check("fixture: test-practices is in no ref line, so only the later slug is superseded",
+          "test-practices" not in R44_REF + R47_REF)
+    for text in ("Settled, per decisions test-practices and %s. %s" % (SLUG, KEY_SENTENCE),
+                 "Settled. Decision: %s. %s" % (SLUG, KEY_SENTENCE),
+                 "Settled. decisions/%s.md. %s" % (SLUG, KEY_SENTENCE)):
+        r = past_run(text, "full")
+        reason = denied(r) or ""
+        check("second slug in a list (%r): deny naming %s and r44, not test-practices" % (text, SLUG),
+              reason.startswith("past-ruling: ") and SLUG in reason and "r44" in reason
+              and "test-practices" not in reason, detail(r))
+
+
+def case_slug_first_ref_shape_supersedes():
+    text = store_text(store("full"), "roadmap", "roadmap/rulings/r47.json")
+    check("fixture: r47's ref line is slug first: \"ref\": \"test-strategy-reset: ...\"",
+          '"ref": "test-strategy-reset: ' in text, " ".join(text.split())[:160])
+    r = past_run("Settled, per decision test-strategy-reset: the old plan applies no longer.", "full")
+    reason = denied(r) or ""
+    check("slug-first ref shape (r47): deny naming test-strategy-reset and r47",
+          reason.startswith("past-ruling: ") and "test-strategy-reset" in reason and "r47" in reason, detail(r))
+    r = past_run("Settled, per decision %s. %s" % (SLUG, KEY_SENTENCE), "full")
+    reason = denied(r) or ""
+    check("the docs-path ref shape (r44) still denies, naming %s and r44" % SLUG,
+          reason.startswith("past-ruling: ") and SLUG in reason and "r44" in reason, detail(r))
+
+
+def case_already_decided_phrase_denies():
+    r = past_run("Already decided: see decision %s. %s" % (SLUG, KEY_SENTENCE), "full")
+    reason = denied(r) or ""
+    check("'already decided' settles: deny naming %s and r44" % SLUG,
+          reason.startswith("past-ruling: ") and SLUG in reason and "r44" in reason, detail(r))
+
+
+def case_negated_settling_word_is_allowed():
+    for text in ("Not settled yet: decision %s may still apply. %s" % (SLUG, KEY_SENTENCE),
+                 "This isn't settled: decision %s may still apply. %s" % (SLUG, KEY_SENTENCE),
+                 "It is unsettled: decision %s may still apply. %s" % (SLUG, KEY_SENTENCE)):
+        r = past_run(text, "full")
+        check("negated settling word (%r): allow (exit 0, no output, no stderr), no git start, judge reached" % text,
+              r.code == 0 and r.out == "" and r.err == "" and not r.git_starts and len(r.wording_calls) == 1,
+              detail(r) + " git=%r" % r.git_starts)
+
+
+def case_no_cwd_allows_with_one_stderr_line():
+    r = run_hook(hook_input(message=settled_text(SETTLING[0][1], "`decision %s`" % SLUG)),
+                 reader_mode="idle", cwd=store("plain"))
+    lines = r.err.strip().splitlines()
+    check("no cwd in the payload: one stderr line saying the rulings store was not read",
+          len(lines) == 1 and "rulings store" in lines[0] and "not read" in lines[0], detail(r))
+    check("no cwd in the payload: allow (exit 0, no output), no git start",
+          r.code == 0 and r.out == "" and not r.git_starts, detail(r))
+
+
+def case_stale_local_ref_checks_origin():
+    repo = store("stale-local")
+    check("fixture: the local roadmap ref lacks r44, and origin/roadmap has it",
+          store_text(repo, "roadmap", R44_PATH) == ""
+          and '"ref": "docs/decisions/%s.md' % SLUG in store_text(repo, "origin/roadmap", R44_PATH))
+    r = past_run(settled_text(SETTLING[0][1], "`decision %s`" % SLUG), "stale-local")
+    reason = denied(r) or ""
+    check("local roadmap stale, origin/roadmap has the ruling: deny naming %s and r44" % SLUG,
+          reason.startswith("past-ruling: ") and SLUG in reason and "r44" in reason, detail(r))
+
+
+def case_refusal_remedy_is_generic():
+    r = past_run(settled_text(SETTLING[0][1], "`decision %s`" % SLUG), "full")
+    reason = denied(r) or ""
+    check("refusal names the decision and the ruling (r44)", SLUG in reason and "r44" in reason,
+          detail(r) + " reason=%r" % reason)
+    check("refusal has no 'reply without citing %s' sentence" % SLUG,
+          ("reply without citing %s" % SLUG) not in reason.lower(), detail(r) + " reason=%r" % reason)
+    check("refusal remedy is generic: re-check the later ruling, and an owner override lifts it",
+          "re-check" in reason.lower() and "override" in reason.lower(), detail(r) + " reason=%r" % reason)
+
+
+# ---- A quoted sentence refuses a reply only when the two share at least two key words. Key words:
+# lowercase words of 5+ letters in the sentence, minus question_form.STOPWORDS and minus the words of the
+# decision's own slug. A ref with no quoted sentence (a bare slug, or a docs path with nothing after) refuses
+# any settling cite of that decision.
+
+
+def case_real_sentence_refuses_a_reply_with_two_key_words():
+    check("fixture: r44's ref quotes the real sentence",
+          '"Pins stay current on demand: the session that runs the tool sees the drift and moves the pin. '
+          'No bot and no schedule."' in R44_REF)
+    r = past_run("Settled per decision %s: no bot, the session sees the drift and moves the pin" % SLUG, "full")
+    reason = denied(r) or ""
+    check("real r44 sentence, reply shares session, drift and moves: deny naming %s and r44" % SLUG,
+          reason.startswith("past-ruling: ") and SLUG in reason and "r44" in reason, detail(r))
+
+
+def case_reply_under_two_key_words_is_allowed():
+    r = past_run("Settled per decision %s: the zizmor twin runs in place" % SLUG, "full")
+    check("real r44 sentence, reply shares no key word: allow (exit 0, no output, no stderr), judge reached",
+          r.code == 0 and r.out == "" and r.err == "" and len(r.wording_calls) == 1, detail(r))
+
+
+def case_threshold_is_two_shared_key_words():
+    r = past_run("Settled per decision %s: the session stays put." % SLUG, "full")
+    check("exactly one shared key word (session): allow (exit 0, no output)",
+          r.code == 0 and r.out == "" and denied(r) is None, detail(r))
+    r = past_run("Settled per decision %s: the session sees the drift." % SLUG, "full")
+    reason = denied(r) or ""
+    check("exactly two shared key words (session, drift): deny naming %s and r44" % SLUG,
+          reason.startswith("past-ruling: ") and SLUG in reason and "r44" in reason, detail(r))
+
+
+def case_whole_decision_ref_refuses_any_settling_cite():
+    full = store("full")
+    check("fixture: r49 and r50 are whole-decision refs, with no quoted sentence",
+          '"ref": "docs/decisions/bare-path-retired.md"' in store_text(full, "roadmap", "roadmap/rulings/r49.json")
+          and '"ref": "bare-slug-retired"' in store_text(full, "roadmap", "roadmap/rulings/r50.json"))
+    for slug, rid in (("bare-path-retired", "r49"), ("bare-slug-retired", "r50")):
+        r = past_run("Settled, per decision %s." % slug, "full")
+        reason = denied(r) or ""
+        check("whole-decision ref (%s): deny with no key word shared, naming %s and %s" % (slug, slug, rid),
+              reason.startswith("past-ruling: ") and slug in reason and rid in reason, detail(r))
+
+
+def case_slug_words_do_not_count():
+    check("fixture: r47's quoted sentence has strategy and reset, which are slug words",
+          "strategy" in R47_REF and "reset" in R47_REF)
+    r = past_run("Settled per decision %s: pins and sessions follow the action." % SLUG, "full")
+    check("reply repeating only the slug's own words (pins, sessions, follow, action): allow, no deny",
+          denied(r) is None and r.code == 0 and r.out == "", detail(r))
+    r = past_run("Settled, per decision test-strategy-reset: the strategy reset and the test strategy.", "full")
+    check("reply repeating slug words the quoted sentence also has (strategy, reset): allow, no deny",
+          denied(r) is None and r.code == 0 and r.out == "", detail(r))
+
+
+def case_sentence_matches_case_and_punctuation_blind():
+    check("fixture: r48's quoted sentence is in other case and punctuation (Session, DRIFT)",
+          "Session" in R48_REF and "DRIFT" in R48_REF)
+    r = past_run("Settled per decision punct-case-decision: the session sees the drift.", "full")
+    reason = denied(r) or ""
+    check("stored sentence in other case and punctuation: two key words still deny, naming punct-case-decision and r48",
+          reason.startswith("past-ruling: ") and "punct-case-decision" in reason and "r48" in reason, detail(r))
+
+
+# ---- Cite parsing: every slug in a cite list counts, whatever separates them, and a code-style
+# ref that names a decision mid-text (no usable sentence after the cite) refuses no reply per decision.
+
+
+def case_every_slug_in_a_cite_list_is_kept():
+    text = store_text(store("full"), "roadmap", "roadmap/rulings/r51.json")
+    check("fixture: r51 retires each last slug whole, and names no first slug",
+          all('"ref": "%s"' % s in text for s in LAST_SLUGS)
+          and not any(s in text for s in ("test-practices", "question-form", "semi-first-decision",
+                                          "paren-first-decision", "slash-first-decision")))
+    for cited, last in (
+        ("Settled per decisions test-practices, question-form, and list-oxford-last.", "list-oxford-last"),
+        ("Settled: decisions semi-first-decision; semi-last-decision", "semi-last-decision"),
+        ("Settled (decisions paren-first-decision, paren-last-decision)", "paren-last-decision"),
+        ("Settled, per decisions slash-first-decision / slash-last-decision.", "slash-last-decision"),
+    ):
+        r = past_run(cited, "full")
+        reason = denied(r) or ""
+        check("cite list (%r): deny naming %s and r51" % (cited, last),
+              reason.startswith("past-ruling: ") and last in reason and "r51" in reason, detail(r))
+
+
+def case_mid_text_code_ref_does_not_refuse_per_decision():
+    text = store_text(store("full"), "roadmap", "roadmap/rulings/r52.json")
+    check("fixture: r52's only ref for guard-remedy-not-to-owner is a code-style line naming it mid-text",
+          "lint/report_guard.py:36" in text and "per decision guard-remedy-not-to-owner." in text
+          and '"ref": "guard-remedy-not-to-owner"' not in text)
+    r = past_run("Settled, per decision guard-remedy-not-to-owner: names its guard.", "full")
+    check("mid-text code ref, no usable sentence after the cite: allow (exit 0, no output, no stderr), judge reached",
+          r.code == 0 and r.out == "" and r.err == "" and len(r.wording_calls) == 1, detail(r))
+    r = past_run("Settled, per decision bare-slug-retired.", "full")
+    reason = denied(r) or ""
+    check("bare {kind: decision, ref: <slug>} still denies: deny naming bare-slug-retired and r50",
+          reason.startswith("past-ruling: ") and "bare-slug-retired" in reason and "r50" in reason, detail(r))
+
+
 def case_hook_runs():
     for case in (case_model_row_names_the_call,
                  case_wording_call_carries_its_model_and_no_effort,
@@ -641,17 +1179,175 @@ def case_hook_runs():
                  case_malformed_input_fails_open_with_no_deny,
                  case_model_failures_fail_open_with_no_deny,
                  case_reader_timeout_allows_with_one_plain_line,
-                 case_reader_that_holds_the_pipe_returns_before_the_child_ends):
+                 case_reader_that_holds_the_pipe_returns_before_the_child_ends,
+                 case_git_popen_is_recorded,
+                 case_settled_superseded_is_denied,
+                 case_two_cited_ids_read_the_store_once,
+                 case_origin_only_store_is_read,
+                 case_override_lifts_a_past_ruling_refusal,
+                 case_settled_citing_an_unsuperseded_decision_is_allowed,
+                 case_unsettled_citing_a_superseded_decision_is_allowed_with_no_git,
+                 case_settled_citing_nothing_is_allowed_with_no_git,
+                 case_cite_forms_are_caught,
+                 case_absent_store_allows_silently,
+                 case_broken_store_fails_open_with_one_stderr_line,
+                 case_free_text_decision_is_not_superseded,
+                 case_prefix_slug_does_not_match,
+                 case_second_slug_in_a_list_is_caught,
+                 case_slug_first_ref_shape_supersedes,
+                 case_already_decided_phrase_denies,
+                 case_negated_settling_word_is_allowed,
+                 case_no_cwd_allows_with_one_stderr_line,
+                 case_stale_local_ref_checks_origin,
+                 case_refusal_remedy_is_generic,
+                 case_real_sentence_refuses_a_reply_with_two_key_words,
+                 case_reply_under_two_key_words_is_allowed,
+                 case_threshold_is_two_shared_key_words,
+                 case_whole_decision_ref_refuses_any_settling_cite,
+                 case_slug_words_do_not_count,
+                 case_sentence_matches_case_and_punctuation_blind,
+                 case_every_slug_in_a_cite_list_is_kept,
+                 case_mid_text_code_ref_does_not_refuse_per_decision):
         try:
             case()
         except subprocess.TimeoutExpired as exc:  # run_hook's cap: one FAIL line naming the case, no traceback
             check(case.__name__, False, "the hook run hit its %s s cap (a hang guard)" % exc.timeout)
+        except FixtureError as exc:  # a fixture repo did not build: one FAIL line, and the other cases still run
+            check("fixture: %s" % case.__name__, False, " ".join(str(exc).split()))
+
+
+# What one SendMessage costs (decision sendmessage-state). The hook runs as a child under cost_probe.run_hook, which
+# stands in the model call and counts each child start. A malformed call starts nothing. The reader child is killed
+# with its process group at READER_TIMEOUT, and nothing in that group outlives the hook.
+
+POSIX_ONLY = unittest.skipIf(os.name == "nt", "the fake reader is a POSIX shell script and a process group")
+
+
+class CostTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.base = os.path.join(ROOT, "cost")  # a subfolder of this run's ROOT: the run removes ROOT, not this
+        os.makedirs(cls.base, exist_ok=True)
+        spec = importlib.util.spec_from_file_location("sendmessage_state_cost", HOOK)
+        cls.sm = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.sm)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.base, ignore_errors=True)
+
+    def folder(self):
+        return tempfile.mkdtemp(dir=self.base)
+
+    @staticmethod
+    def fake_node(folder, state):
+        """A `node` on PATH that prints `state`: the reader's answer, with no board read."""
+        bin_dir = os.path.join(folder, "bin")
+        os.makedirs(bin_dir)
+        path = os.path.join(bin_dir, "node")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("#!/bin/sh\necho %s\n" % state)
+        os.chmod(path, 0o755)
+        return bin_dir
+
+    def hook(self, stdin, state=None, folder=None):
+        folder = folder or self.folder()
+        env = {}
+        if state is not None:
+            env["PATH"] = self.fake_node(folder, state) + os.pathsep + os.environ.get("PATH", "")
+        return cost_probe.run_hook(HOOK, stdin, folder, [[{"ok": True}, None]], env=env)
+
+    @staticmethod
+    def send(to, message):
+        return json.dumps({"session_id": "cost-send", "tool_name": "SendMessage",
+                           "tool_input": {"to": to, "message": message}})
+
+    def test_a_malformed_call_starts_nothing(self):
+        run = self.hook("not json")
+        self.assertEqual((run["code"], run["models"], run["children"], run["files"], run["out"]), (0, [], [], [], ""))
+
+    @POSIX_ONLY
+    def test_a_plain_message_to_a_busy_receiver_costs_two_model_calls_and_one_reader_child(self):
+        run = self.hook(self.send("peer", "Done"), state="busy")
+        self.assertEqual(len(run["models"]), 2, "the wording call and the busy call; got %r" % run["models"])
+        self.assertEqual(sorted(m["timeout"] for m in run["models"]),
+                         sorted([self.sm.WORDING_TIMEOUT, self.sm.MODEL_TIMEOUT]))
+        self.assertEqual(cost_probe.names(run["children"]), ["node"],
+                         "one reader child and no other; got %r" % run["children"])
+        self.assertEqual(run["files"], [], "the reader writes no file under the config dir")
+
+    @POSIX_ONLY
+    def test_a_plain_message_to_an_idle_receiver_costs_one_model_call_and_one_reader_child(self):
+        run = self.hook(self.send("peer", "Done"), state="idle")
+        self.assertEqual(len(run["models"]), 1, "only the wording call; got %r" % run["models"])
+        self.assertEqual(cost_probe.names(run["children"]), ["node"])
+
+    def test_a_structured_message_costs_one_wording_call_and_no_reader(self):
+        run = self.hook(json.dumps({"session_id": "cost-send", "tool_name": "SendMessage",
+                                    "tool_input": {"to": ["peer"], "message": {"text": "Done"}}}))
+        self.assertEqual(len(run["models"]), 1, "the wording call only; got %r" % run["models"])
+        self.assertEqual(run["children"], [], "a structured message reads no board")
+
+    @POSIX_ONLY
+    def test_a_reader_that_hangs_is_killed_with_its_group_at_the_timeout(self):
+        folder = self.folder()
+        marker = os.path.join(folder, "spawned")
+        reader = os.path.join(folder, "reader.py")
+        with open(reader, "w", encoding="utf-8") as f:
+            f.write("import subprocess, sys, time\n"
+                    "subprocess.Popen([sys.executable, '-c', 'import time\\nwhile True: time.sleep(1)'])\n"
+                    "open(%r, 'w').close()\n"
+                    "time.sleep(600)\n" % marker)
+        with mock.patch.object(self.sm, "READER_TIMEOUT", 2), \
+                mock.patch.object(self.sm, "find_reader", lambda: reader), \
+                mock.patch.object(self.sm, "shutil", types.SimpleNamespace(which=lambda name: sys.executable)):
+            with cost_probe.children() as log:
+                state = self.sm.receiver_state("peer")
+        if log.procs:  # a failing case must not leave the reader running
+            self.addCleanup(cost_probe.stop_group, log.procs[0])
+        self.assertEqual(state, "unseen", "a reader that times out reads as unseen")
+        self.assertEqual(len(log.argvs), 1, "the hook starts one reader child; got %r" % log.argvs)
+        self.assertTrue(os.path.exists(marker), "the reader started its own child before the timeout, so the case is not vacuous")
+        leader = log.procs[0].pid
+        deadline = time.monotonic() + 5  # a bounded wait for the kill to land; a kill that never lands fails
+        left = cost_probe.group_members(leader)
+        while left and time.monotonic() < deadline:
+            time.sleep(0.05)
+            left = cost_probe.group_members(leader)
+        self.assertEqual(left, [], "nothing in the reader's group outlives the hook; still alive: %r" % left)
+
+    @POSIX_ONLY
+    def test_group_members_lists_the_live_group_when_proc_is_missing(self):
+        # macOS has no /proc. With /proc missing from the helper's view, group_members must list the live members
+        # of the group it is given, must not raise, and its own read must start no child that children() counts.
+        child = subprocess.Popen([sys.executable, "-c", "import time\nwhile True: time.sleep(1)"], start_new_session=True)
+        self.addCleanup(cost_probe.stop_group, child)
+        real_listdir = os.listdir
+
+        def listdir_without_proc(path="."):
+            if path == "/proc":
+                raise FileNotFoundError("No such file or directory: '/proc'")
+            return real_listdir(path)
+
+        argv = [sys.executable, "-c", "pass"]
+        with mock.patch.object(cost_probe.os, "listdir", listdir_without_proc):
+            self.assertRaises(FileNotFoundError, os.listdir, "/proc")  # the scope: /proc is missing in this case
+            with cost_probe.children() as log:
+                try:
+                    members = cost_probe.group_members(child.pid)
+                except OSError as err:
+                    self.fail("group_members raised %s with /proc missing" % type(err).__name__)
+                subprocess.run(argv, check=True)  # a known start, so the counter is live
+        self.assertEqual(log.argvs, [argv], "group_members starts no child that children() counts; got %r" % log.argvs)
+        self.assertEqual(members, [child.pid], "the one live member of the group it was given; got %r" % members)
 
 
 if __name__ == "__main__":
     write_launchers()
     case_find_reader()
     case_hook_runs()
+    if not cost_probe.run_class(CostTests):
+        FAILED.append("CostTests")
     if FAILED:
         print("%d check(s) failed" % len(FAILED))
     elif SKIPPED:

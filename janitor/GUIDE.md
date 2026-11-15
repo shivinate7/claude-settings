@@ -201,8 +201,11 @@ The preview lists each one in a "dead-rooted servers" section, with a reason.
 - The process is owned by the account running the sweep.
 
 An unreadable answer means keep. The signal, the grace period, and the report
-are the same as for a listener. This tier is machine-wide and not tied to a
-repository, so `janitor.roots` and `.claude/janitor.json` do not narrow it.
+are the same as for a listener. The daily job's run of this tier is machine-wide
+and not tied to a repository, so `janitor.roots` and `.claude/janitor.json` do not
+narrow it. The SessionEnd run stops only a dead-rooted server rooted in its own
+repository (owner ruling `own-828-a-sessionend-this-repo-only`, 2026-11-14 19:57:58
+CST). A server rooted elsewhere waits for the daily job.
 
 ## Simulators
 

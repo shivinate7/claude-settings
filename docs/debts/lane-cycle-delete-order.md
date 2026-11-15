@@ -1,9 +1,9 @@
 # A lane cycle loses the delete order
 
-**What.** `cut_lanes` deletes dependents first. In a cycle of lanes (A based on B, and B based on A), no lane is first, so it deletes in heads order. A failed delete in the cycle can then close a PR whose base is gone.
+**What.** A cycle of lanes (A based on B, and B based on A) had no first lane to delete, so a failed delete could close a pull request whose base was gone. Act 4 (per-lane merge) removed the batch cut that did this. A merge now deletes only its own pull request's branch, so no cycle is cut.
 
-**Where.** `merge/merge.py`, `cut_lanes`, the delete order.
+**Where.** None at head. The batch cut is gone from `merge/merge.py`.
 
-**Decision.** `merge-deletes-batch-lanes` (a merge deletes its batch's lane branches).
+**Decision.** `merge-deletes-batch-lanes` (a merge deletes its own branch only).
 
-**Retire.** Keep every lane of a cycle, with a line. Check: a fixture test with two lanes based on each other. Both are kept. Red on the current code, green after the fix.
+**Retire.** Runnable: `merge/test_merge.py`, case `CutLanes.test_a_lane_whose_tip_the_pr_head_merged_is_kept_and_only_the_pr_branch_is_cut`, which keeps two lanes after a merge and cuts only the PR's branch. The file runs whole. A merge that cuts a lane branch reads red.

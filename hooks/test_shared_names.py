@@ -30,6 +30,10 @@ sys.path.insert(0, HERE)
 sys.path.append(os.path.join(HERE, "..", "lint"))  # appended: a lint module never shadows a hook module
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 RUN = _test_temp.run_folder()  # removed when the suite ends
+# settings.json env sets MAILBOX_REPO for every session; local_time would read the live mailbox and print a second
+# line. These cases compare its one Central line, so no child sees a store.
+for _name in ("MAILBOX_REPO", "MAILBOX_CACHE"):
+    os.environ.pop(_name, None)
 HOOKS_UNDER_TEST = os.environ.get("HOOKS_UNDER_TEST") or HERE  # a fixture copy of hooks/ may be scanned instead
 
 # Today's values, pinned from hooks/guard_frozen.py and hooks/guard_core.py.
