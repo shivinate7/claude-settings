@@ -89,7 +89,8 @@ aligned: a record and the rule sentences that cite it change together in a pull 
   unset. It reads one `git diff --unified=0 BASE_SHA...HEAD_SHA` and the files on disk: the rule files and the Markdown
   under the top-level agents/ and skills/ folders, and the
   records of the child's own decisions folder (layout.candidates). A unit is one sentence: from the end of the
-  previous `<!-- rule:X -->` anchor, or the paragraph's start, to its own anchor. A sentence cites a record by its
+  previous `<!-- rule:X -->` anchor, or the paragraph's start, to its own anchor; in agents/ and skills/ a `.`, `!` or
+  `?` and a space outside a code span also end one, and a fence that never closes hides the rest of its file. A sentence cites a record by its
   slug alone in a code span, or by the anchor its Home line names, at base or at head (a deleted record is still
   cited). A sentence changed when a diff line touches it and its text, whitespace aside, is not a sentence of
   that file's base side, which the diff's hunks rebuild from the head file: an edit to a sibling on the same
