@@ -1,0 +1,12 @@
+{
+ "id": "merge-text-matches-820c",
+ "title": "Rewrite the merge-mode text in all-repos-switch-together and draft-until-reviewed so it matches ruling own-820-c-five-repos",
+ "phase": "now",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "why": "Consultant's pick, not owner-typed (consultant 09:03 CST Nov 15, relayed by the coordinator 09:04 CST; under the owner's 20:18 CST Nov 14 words; reopen if the owner says otherwise): confirmed ruling own-820-c-five-repos (owner 00:19 CST Nov 14, item 820 c): all five repos, mailaudit included, merge per lane now. The coordinator's 08:44 CST relay of 'mailaudit batch until the cutover' was wrong and is superseded. Lane merge-text-matches-820c (session_013NEJL4PYfJ9SGcLyzpv8k7, sonnet, docs-only, draft PR; relayed by the coordinator, triage read no PR) rewrites all-repos-switch-together.md line 11 and draft-until-reviewed.md line 9 in place, so the past-ruling guard stops quoting the stale text, and asks 'where else' in claude-settings. The first needs a fresh reviewer read, since it rewrites records that file an owner ruling (rule roles-solo-reviews-logic-diffs-only). Runner 10 merges. Cause: the stale text led the coordinator to relay a wrong pick (see step read-decision-before-pick). Checked at 09:03 CST: no earlier step carries this work (searched 820c, merge-text, orchestrator-may-merge); child-repos-decision-claude-md-gap is the wider child-repo step and holds a pointer to this one. Sister step: mailaudit-merge-text-820c.",
+ "source": "coordinator 09:04 CST Nov 15, relayed by triage",
+ "note": "Doing. Lane session_013NEJL4PYfJ9SGcLyzpv8k7 (sonnet, docs-only, draft PR to come), started 09:04 CST on the consultant's order (not owner-typed). Rewrites all-repos-switch-together.md line 11 and draft-until-reviewed.md line 9 to say per-lane merge in all five repos now (own-820-c-five-repos), then asks 'where else' in claude-settings. Fresh reviewer read needed. Runner 10 merges.",
+ "lane": "session_013NEJL4PYfJ9SGcLyzpv8k7",
+ "updatedAt": "2026-11-15T09:03:00-06:00"
+}
