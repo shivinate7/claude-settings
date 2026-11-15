@@ -65,10 +65,10 @@ Text: `ANSWERED_REASON`, rule `answered-needs-source` (a claim of "answered" nee
 
 ### Recovered guard (any reply whose report shape holds)
 
-Text: two inline facts in `recovered_problem`. The two line forms below live here only. The refusal states each form with its `none` variant. It adds that a label counts where it starts an item in the report blockquote, also after a bullet and a Done-item tag.
+Text: two inline facts in `recovered_problem`. The two line forms below live here only. The refusal states both Recovered forms, item-first and label-first (owner, waiting page item 860 pick b, 2026-11-15 11:34 CST), and the `none` variant. It adds that a label counts where it starts an item in the report blockquote, also after a bullet and a Done-item tag.
 
 - If a compaction came before this report, and the report has no carry line since, add the missing line under Deviations, inside the report's blockquote:
-  - `Recovered: <each fact, with its source: git, page or digest>`, or `Recovered: none`.
+  - `Recovered: <item> (git|page|digest)` (source last) or `Recovered: (git|page|digest) <item>` (source first), one per fact; or `Recovered: none`. Owner, waiting page item 860 pick b, 2026-11-15 11:34 CST.
   - `Handoff gave: <facts the handoff supplied that the summary did not>`, or `Handoff gave: none`.
 - If a Recovered item names no source, end it with git, page or digest. Items split on ";" outside parentheses. An item that starts with "none" or "nothing" needs no source.
 

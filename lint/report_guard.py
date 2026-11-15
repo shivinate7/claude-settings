@@ -1083,7 +1083,8 @@ def recovered_problem(records, text):
     reasons = []
     if missing:
         reasons.append("a compaction came before this report and no %s line has landed since; the line forms are "
-                       "`Recovered: <item> (git|page|digest)` or `Recovered: none`, and `Handoff gave: <items>` "
+                       "`Recovered: <item> (git|page|digest)`, `Recovered: (git|page|digest) <item>` or "
+                       "`Recovered: none`, and `Handoff gave: <items>` "
                        "or `Handoff gave: none`; a label counts where it starts an item in the report blockquote, "
                        "also after a bullet and a Done-item tag" % " line and no ".join(missing))
     bad = unsourced_recovered_item(block) if "Recovered" in pending else ""
