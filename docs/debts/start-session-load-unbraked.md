@@ -1,9 +1,9 @@
-# A session start meets no load brake
+# A session start is braked only after it starts
 
-**What.** `start_session` is no longer refused on a full machine. The load brake read the load only inside the PreToolUse guard, and that hook cannot list `start_session` (it makes the desktop app show its start card on every start). Mac lanes start by `start_session`, so a lane can start while memory is over 95% or the disk is under 5 GB free.
+**What.** The load brake does not refuse a `start_session` call. A started session's own start check stops a start on a full machine (`hooks/start_check.py`, decision `start-checks-after-call`, the start checks run in the started session). That stop works only if the desktop app honours it. Whether it does is unknown. Until the owner's test shows it, a lane can start on a full machine. Mac lanes start by `start_session`, which the PreToolUse guard cannot judge (decision `start-session-not-pretooluse`, start_session is not judged at PreToolUse).
 
-**Where.** `load_hit` and `START_TOOLS` in `hooks/guard.py` (the tool is listed, but no hook call reaches it). `hooks/start_session_audit.py` reads no load.
+**Where.** `hooks/start_check.py` (`stop_reason`). `load_hit` and `START_TOOLS` in `hooks/guard.py` list the tool, but no hook call reaches it. `hooks/start_session_audit.py` reads no load.
 
-**Decision.** `start-session-not-pretooluse` (start_session is not gated at PreToolUse). `machine-load-brake` (the machine-load brake).
+**Decision.** `start-session-not-pretooluse`. `start-checks-after-call`. `machine-load-brake` (the machine-load brake).
 
-**Retire.** Something stops a lane start on a full machine, and it adds no PreToolUse hook on `start_session`. One route: the coordinator's own Agent or Task call carries the check. Another: the audit stops a session started at full. The owner picks the route. Closed when a case in `hooks/test_guard.py` shows that start refused or stopped on a full reading. The case is red on today's code.
+**Retire.** The owner's test shows the desktop app honours `continue: false` from a started session's SessionStart hook. Closed when that test is recorded, and `hooks/test_start_check.py` is green on the head.
