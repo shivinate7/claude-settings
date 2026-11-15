@@ -18140,18 +18140,22 @@ class ReplacementCarry(ReviewEnv):
         self.reviewed_line(self.carry_host(per_issue=self.source_issue(self.source_record(), self.source_lint()), body="Carries #6\n"),
                            REVIEW_HEAD, "done", "a Carries #6 line did not name its source")
 
+    def git_merged(self, a, b):
+        """-> (rc, tree) of git's own merge of a and b in the checkout, as merge-tree --write-tree answers it: the first word is the tree."""
+        r = subprocess.run(["git", "merge-tree", "--write-tree", a, b], cwd=self.co, capture_output=True, text=True)
+        words = r.stdout.split()
+        return r.returncode, (words[0] if words else None)
+
+    def main_tip(self):
+        """The tip of main as the product code reads it: origin/main in the host checkout (refs/remotes/origin/<base>)."""
+        return sh(self.co, "git", "rev-parse", "origin/main")
+
     def merge_carry_fixture(self):
         """Real commits in the checkout, at small size, for the merge-tree carry. `H` is the record's head: it adds a.txt to the seed. `M` is main's
         tip: it adds b.txt to the seed, and is pushed to origin main and fetched, so refs/remotes/origin/main reads M (the ref the merge reads main's
         tip from). `L` is the live head, a re-cut off M whose tree is git's clean merge of H and M (the shape of #3429 and #3435, at small size). `L2`
         is L plus one file. `Hc` changes b.txt, so git's merge of Hc and M conflicts, and `Lc` holds that conflicted tree. `H_eq` is off the seed and
         holds H's tree. Each premise is read from git's own answers and asserted here, so a red case never rests on a wrong fixture."""
-        def git_merge(a, b):
-            """-> (rc, tree) of git's own merge of a and b, as merge-tree --write-tree answers it: the first word is the tree."""
-            r = subprocess.run(["git", "merge-tree", "--write-tree", a, b], cwd=self.co, capture_output=True, text=True)
-            words = r.stdout.split()
-            return r.returncode, (words[0] if words else None)
-
         def tree(c):
             return sh(self.co, "git", "rev-parse", f"{c}^{{tree}}")
 
@@ -18161,15 +18165,15 @@ class ReplacementCarry(ReviewEnv):
         Hc = self.git_commit(seed, {"b.txt": "record changes b\n"})
         sh(self.co, "git", "push", "-q", "origin", f"{M}:refs/heads/main")
         sh(self.co, "git", "fetch", "-q", "origin")
-        self.assertEqual(sh(self.co, "git", "rev-parse", "origin/main"), M, "fixture: origin/main is not the main tip M")
-        rc, merged = git_merge(H, M)
+        self.assertEqual(self.main_tip(), M, "fixture: origin/main is not the main tip M")
+        rc, merged = self.git_merged(H, M)
         self.assertEqual(rc, 0, "fixture: git's merge of the record's Head and main is not clean")
         L = self.git_commit(M, {"a.txt": "record head\n"})
         self.assertEqual(tree(L), merged, "fixture: the tree of L is not git's merge of H and M")
         self.assertNotEqual(tree(L), tree(H), "fixture: L holds H's own tree, so the carry is an equal-tree one")
         L2 = self.git_commit(M, {"a.txt": "record head\n", "x.txt": "extra\n"})
         self.assertEqual(sh(self.co, "git", "diff-tree", "-r", "--name-only", merged, tree(L2)), "x.txt", "fixture: L2 is not git's merge plus x.txt")
-        rc, conflicted = git_merge(Hc, M)
+        rc, conflicted = self.git_merged(Hc, M)
         self.assertEqual(rc, 1, "fixture: git's merge of Hc and main does not conflict")
         Lc = self.git_commit(M, {}, tree=conflicted)
         H_eq = self.git_commit(seed, {"a.txt": "record head\n"})
@@ -18288,6 +18292,23 @@ class ReplacementCarry(ReviewEnv):
         fx = self.merge_carry_fixture()
         state, why = self.merge_carried(self.merge_carry_host(fx, fx.L), fx.L)
         self.assertEqual(state, "none", f"a source with no record carried to a clean merge tree: {state}: {why}")
+
+    def test_merge_carry_11_a_main_moved_past_the_live_heads_parent_reads_none(self):  # pin: green on the code before the change
+        # L's first parent is the old main tip M, and its tree is git's merge of H and M. Main then moves to M2, so the carry must read the current
+        # tip, not L^1 or M: against M2 the merge of H differs from L's tree, so nothing carries.
+        fx = self.merge_carry_fixture()
+        M2 = self.git_commit(fx.M, {"c.txt": "main moved again\n"})
+        sh(self.co, "git", "push", "-q", "origin", f"{M2}:refs/heads/main")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(self.main_tip(), M2, "fixture: origin/main is not the moved main tip M2")
+        L = self.git_commit(fx.M, {}, tree=fx.merged)
+        self.facts(fx, [M2, L])
+        self.assertEqual(sh(self.co, "git", "rev-parse", f"{L}^1"), fx.M, "fixture: the first parent of L is not the old main tip M")
+        rc, moved = self.git_merged(fx.H, M2)
+        self.assertEqual(rc, 0, "fixture: git's merge of the record's Head and the moved main is not clean")
+        self.assertNotEqual(moved, fx.merged, "fixture: git's merge with the moved main has L's tree, so the case cannot tell the tips apart")
+        state, why = self.merge_carried(self.merge_carry_host(fx, L, self.source_record(fx.H)), L)
+        self.assertEqual(state, "none", f"a live tree that is git's merge of the record's Head and the old main tip carried against the moved main tip M2: {state}: {why}")
 
 class ReviewedRoots(ReviewEnv):
     """`merge --reviewed --root DIR [--root DIR ...]`. Output: one block per root, in the order given. A block is the header `repo <owner/name>:`,
