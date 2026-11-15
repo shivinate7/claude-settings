@@ -5048,7 +5048,7 @@ def lint_check(h, n, info, root, cfgrel):
     review record uses. No PASS that names the live head, a FAIL, an unreadable result, or a failed read is a Stop that names `merge --lane-lint <n>`; a failed read
     is `lane lint unknown`, never a pass. It runs before the lock, so nothing is claimed, pushed or merged. The caller passes info["head"] to confirm as
     linted_head, so a head pushed after this read is refused there. A PASS for an earlier head also counts when it carries to the
-    live head by a claim chain or clean merges of main only, and a PASS on the source a replacement names when its tree equals the live head's (lint_carried,
+    live head by a claim chain, or clean merges of main with at most a claim or generated page commit after the newest, and a PASS on the source a replacement names when its tree equals the live head's (lint_carried,
     the one home); one that does not carry, an unreadable merge-tree too, refuses as `no lane-lint PASS names this head`.
     The lint is skipped for any pull request, a lane PR or a batch integration PR, when the all-jobs-passed rollup (ROLLUP_JOB) is green on info["head"], the sha the
     merge takes: CI proved that head (rule roles-each-layer-proves-once). Green is the verdict of the newest run on that head, and an older run's red row that no newer pass or pending row of the same name clears
@@ -5084,7 +5084,7 @@ def reviewed_read(h, cfgrel=None):
     names `merge --lane-lint <n>`; no extra call. A ready pull request with no such PASS adds one rollup_green read (the check runs and the commit
     statuses, two more `gh` calls): a green all-jobs-passed on the live head reads `lint skipped`, as the join (lint_check) does, and the state stays done. Each record's clean-merge walk judges against the host's base at entry, the repo's default branch, never the pull
     request's own base. A claim commit on the reviewed head carries the record (claim_only, with the stamp config `cfgrel`). The lint carries to the
-    live head by a claim chain, clean merges of main only, or an equal tree with the source a replacement names (lint_carried, the one home), as the join reads it; a lint that does not
+    live head by a claim chain, clean merges of main with at most a claim or generated page commit after the newest, or an equal tree with the source a replacement names (lint_carried, the one home), as the join reads it; a lint that does not
     carry, an unreadable merge-tree too, reads `no lint` unless the rollup is green. That reads git in the host's checkout, and fetches a pull request head it lacks."""
     main, cfgrel, root = h.base, cfgrel or DEFAULT_CONFIG, h.cwd or "."
     pulls = h.pages("pulls", fields={"state": "open"})
@@ -5318,7 +5318,7 @@ def release_check(root, h, numbers, lints, root_why=None, cfgrel=None):
     the merge with the base tip is clean; and a base that is not the default branch is the head of a pull request in the call that passes.
     `root_why` says why the checkout root could not be read; then no check runs, and each number's one reason is that unknown.
     A claim commit on the reviewed head carries the record to the live head (claim_only, with the stamp config `cfgrel`, DEFAULT_CONFIG when None, as
-    main calls it). The lint carries by a claim chain, clean merges of main only, or, when the body names a source (replaces_source), an equal tree
+    main calls it). The lint carries by a claim chain, clean merges of main with at most a claim or generated page commit after the newest, or, when the body names a source (replaces_source), an equal tree
     (lint_carried, the one home), as `--reviewed` reads it; a lint that does not carry, an unreadable merge-tree too, reads
     `the lint ran on <sha>, not the live head <sha>`.
     Cost: one `pulls/N` read per number and one list read of the repo's comments since the oldest of them (every page), one fetch per distinct
