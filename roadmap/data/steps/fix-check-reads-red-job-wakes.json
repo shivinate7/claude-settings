@@ -1,0 +1,14 @@
+{
+  "id": "fix-check-reads-red-job-wakes",
+  "title": "The fix check reads red-job wakes",
+  "status": "doing",
+  "repo": "shivinate7/claude-settings",
+  "phase": "now",
+  "lane": "session_013NEJKz4FSdVUgu9fC5JMhw",
+  "owner": "triage",
+  "blockedBy": [],
+  "why": "12:43 CST Nov 15 (coordinator, relayed; its pick, none owner-typed, undoable; triage read no lane): NEW step, lane session_013NEJKz4FSdVUgu9fC5JMhw started, doing now. PRs #2860 and #2940. Guard or check: yes. Triage's reading: it changes what a check reads (reading from the name; unverified).",
+  "note": "The fix check reads red-job wakes. Guard or check: yes. Lane session_013NEJKz4FSdVUgu9fC5JMhw. PRs #2860 and #2940.",
+  "order": -300,
+  "updatedAt": "2026-11-15T12:50:00-06:00"
+}

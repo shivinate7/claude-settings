@@ -1,0 +1,15 @@
+{
+  "id": "export-holds-every-record",
+  "title": "The export holds every record",
+  "status": "doing",
+  "repo": "shivinate7/claude-settings",
+  "phase": "now",
+  "lane": "session_013NEJL1Qfnv7hnVTmkR9NTZ",
+  "owner": "triage",
+  "blockedBy": [],
+  "why": "12:43 CST Nov 15 (coordinator, relayed; its pick, none owner-typed, undoable; triage read no lane): NEW step, lane session_013NEJL1Qfnv7hnVTmkR9NTZ started, doing now. PR #3468. Guard or check: yes. Triage's reading: the export is a check on what the records hold (reading from the name; unverified).",
+  "note": "The export holds every record. Guard or check: yes. Lane session_013NEJL1Qfnv7hnVTmkR9NTZ. PR #3468.",
+  "order": -300,
+  "pr": 3468,
+  "updatedAt": "2026-11-15T12:50:00-06:00"
+}

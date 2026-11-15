@@ -1,0 +1,15 @@
+{
+  "id": "review-carries-live-head",
+  "title": "A review carry reads the live PR head",
+  "status": "doing",
+  "repo": "shivinate7/claude-settings",
+  "phase": "now",
+  "lane": "session_013NEJKzVWixDqQgAjMzTCgV",
+  "owner": "triage",
+  "blockedBy": [],
+  "why": "12:43 CST Nov 15 (coordinator, relayed; its pick, none owner-typed, undoable; triage read no lane): NEW step, lane session_013NEJKzVWixDqQgAjMzTCgV started, doing now. PR #3519. Guard or check: yes. Triage's reading: it changes the review-carry check's verdict (reading from the name; unverified).",
+  "note": "A review carry reads the live PR head. Guard or check: yes. Lane session_013NEJKzVWixDqQgAjMzTCgV. PR #3519.",
+  "order": -300,
+  "pr": 3519,
+  "updatedAt": "2026-11-15T12:50:00-06:00"
+}

@@ -1,0 +1,15 @@
+{
+  "id": "rebuild-2123",
+  "title": "Rebuild of #2123 with a stdlib-only launcher-file reader",
+  "status": "doing",
+  "repo": "shivinate7/claude-settings",
+  "phase": "now",
+  "lane": "session_013NEJL4Lqx759D54GPKCSc2",
+  "owner": "triage",
+  "blockedBy": [],
+  "why": "12:43 CST Nov 15 (coordinator, relayed; its pick, none owner-typed, undoable; triage read no lane): NEW step, lane session_013NEJL4Lqx759D54GPKCSc2 started, doing now. PR #3249. Guard or check: yes. Triage's reading: it edits hooks/shared_names.py, a hook; pick 1: a stdlib-only launcher-file reader in hooks/shared_names.py.",
+  "note": "Rebuild of #2123 with a stdlib-only launcher-file reader. Guard or check: yes. Lane session_013NEJL4Lqx759D54GPKCSc2. PR #3249.",
+  "order": -300,
+  "pr": 3249,
+  "updatedAt": "2026-11-15T12:50:00-06:00"
+}

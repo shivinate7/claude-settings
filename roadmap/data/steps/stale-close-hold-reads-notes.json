@@ -1,0 +1,13 @@
+{
+  "id": "stale-close-hold-reads-notes",
+  "title": "The stale-draft close pass reads every hold before it closes",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "owner": "triage",
+  "blockedBy": [],
+  "why": "12:43 CST Nov 15 (coordinator, relayed; its pick, none owner-typed, undoable). Guard or check: yes. Incident (triage's own miss, 12:36-12:42 CST): the close pass closed #2982, four stack bases and 13 plan-held PRs, all since reopened; #2984 too (it has a live lane).",
+  "note": "The stale-draft close pass's hold check must also read the hold lines in plans/stale-drafts-2026-11-13.md, step notes and why fields, and the base refs of open PRs (a PR that another open PR names as its base is not stale). Guard or check: yes.",
+  "order": 900,
+  "updatedAt": "2026-11-15T12:50:00-06:00"
+}

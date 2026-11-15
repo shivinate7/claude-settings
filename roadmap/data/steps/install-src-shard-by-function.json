@@ -1,0 +1,14 @@
+{
+  "id": "install-src-shard-by-function",
+  "title": "Install source split into shards by function",
+  "status": "doing",
+  "repo": "shivinate7/claude-settings",
+  "phase": "now",
+  "lane": "session_013NEJL1v6rTTEen8UAKXFHF",
+  "owner": "triage",
+  "blockedBy": [],
+  "why": "12:43 CST Nov 15 (coordinator, relayed; its pick, none owner-typed, undoable; triage read no lane): NEW step, lane session_013NEJL1v6rTTEen8UAKXFHF started, doing now. Guard or check: no. Triage's reading: an install-source layout change, no verdict moves (reading from the name; unverified).",
+  "note": "Install source split into shards by function. Guard or check: no. Lane session_013NEJL1v6rTTEen8UAKXFHF.",
+  "order": -300,
+  "updatedAt": "2026-11-15T12:50:00-06:00"
+}
