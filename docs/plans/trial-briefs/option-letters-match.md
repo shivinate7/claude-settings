@@ -1,0 +1,8 @@
+Lane brief: option-letters-match. You are a lane session (one lane, Opus). Coordinator: session_013NEJL2pASwRjgJDnsvnpNe. Batch runner 6: session_013NEJL3AqQUisjbiTcrCECQ.
+
+Owner incident, 16:12 CST: on another repo's waiting page, the option cards were keyed A to D, but their labels opened with the designers' letters B, D, A and C. His answer letter was ambiguous.
+Read the step: `git fetch origin roadmap && git show origin/roadmap:roadmap/data/steps/option-letters-match.json`.
+Task: one letter per option. Find the place that keys option cards (skills/waiting-page and its page template) and the form check (hooks/question_form.py, the one home). Make the check refuse an option whose label opens with a letter or a "(X)" tag that differs from its key. Keep page writes cheap; it adds no model call.
+Order: test-author (haiku) writes the incident case first and shows it red on main, plus a good case that passes. Builder (sonnet) makes it green. Reviewer round 1 (haiku) hunts false alarms, such as a label that starts with the word "A" or "I" in a sentence. Rounds 2-3 run sonnet with `Round N of 3` as the brief's first line. It changes a check's verdict, so it gets the net-value test after round 3.
+Rules: never EnterWorktree, confirm_repository_trust, request_computer_folder or create_session. Writing agents use Agent isolation 'worktree' and name their model. Run `~/.claude/bin/verdict ~/.claude/bin/ste-changed origin/main` and the touched test files.
+Done: draft PR on branch option-letters-match. Send batch runner 6 the branch, head commit and verdict. Report to me in 15 lines or fewer.
