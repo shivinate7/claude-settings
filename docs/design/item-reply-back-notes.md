@@ -229,6 +229,14 @@ the session's reply, the opened line's thread and the folded `.fwait`.
 
 ## Checked
 
+- Nov 15, the F1 and F2 fixes (Playwright, Chromium, headless; labels off): 21 states at 360, 390, 430, 800 and 1280, light and dark (210 runs).
+  - Result: no script or console error, no sideways scroll in the page, a card, an ask, a thread, a `.myreply`, a `.msg` or a `.fwait`, and no margin on a `.thread` child.
+  - The check went red on a broken copy (the margin put back, `.reply` set to `white-space: pre`): margins and overflows found in `line-on` and `long`.
+  - With labels on, the "New:" tags hang 8px past a thread at 360 and 390. That is the sample label, not the screen.
+- impeccable critique, Nov 15, single-context (no agent tool). The detector found nothing in the static markup.
+  - Fixed: the `gap-blocks` label was cut at 390; it is shorter now.
+  - Open, outside this folder: at 360 the card's "Filing pending, sent" pill (`.ans`) wraps to two lines. The fold words wrap to three lines at 360.
+
 - Playwright, Chromium (headless): 16 states at 390, 800 and 1280, light and dark (96 runs). Each run reloads the frame.
   - Result: no script error or console error, no sideways scroll in the page or the frame, no element past the frame edge.
   - Every Reply, reply-box button, live Undo and fold control is 44 px or taller.
