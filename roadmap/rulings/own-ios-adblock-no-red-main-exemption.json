@@ -1,0 +1,11 @@
+{
+ "id": "own-ios-adblock-no-red-main-exemption",
+ "at": "2026-11-15T08:43:00-06:00",
+ "title": "ios-adblock gets no red-main exemption: git-red-main-reverts holds there",
+ "ruling": "Consultant's pick, not owner-typed, undoable, under the owner's 20:18 CST Nov 14 words (consultant message stamped 08:44 CST Nov 15 by its own clock, relayed to triage; triage's clock read 08:43). ios-adblock has NO exemption from the red-main rule: while main's newest finished run is red, only the revert of the blamed commit merges (rule git-red-main-reverts), as in every repo. Why it came up: the child-gap audit lane for ios-adblock was expected to hand in an owner call 'ios-adblock bot-merge vs red-main brake' (step child-repos-decision-claude-md-gap, why, owner calls the coordinator expected; not posted as an owner item). The wording of the question as the lane or runner 12 asked it is not on the roadmap record; triage did not see the relayed child-repo owner calls. COVERED: ios-adblock keeps the red-main brake; no exemption for its bot merges. NOT COVERED: why the bot's merges trigger no push run (step adblock-bot-merge-no-ci), any other repo. A grant covers the named act, never a variant. Reopen if the owner says otherwise.",
+ "quote": "ios-adblock red-main exemption: none, so `git-red-main-reverts` holds.",
+ "source": "Consultant message to triage, stamped 08:44 CST Nov 15 by its clock: consultant's pick under the owner's 20:18 CST Nov 14 words; not owner-typed.",
+ "status": "open",
+ "supersedes_none": "supersedes no earlier ruling: it answers a new question (does ios-adblock get a red-main exemption) and leaves git-red-main-reverts unchanged",
+ "step": "child-repos-decision-claude-md-gap"
+}

@@ -1,0 +1,11 @@
+{
+ "id": "own-degen-dependabot-cooldown-keep",
+ "at": "2026-11-15T08:43:00-06:00",
+ "title": "Degen keeps the 7-day cooldown in its .github/dependabot.yml",
+ "ruling": "Consultant's pick, not owner-typed, undoable, under the owner's 20:18 CST Nov 14 words (consultant message stamped 08:44 CST Nov 15 by its own clock, relayed to triage; triage's clock read 08:43). Degen's dependabot cooldown stays as it is: KEEP. Why it came up: owner ruling own-834-b-pins-newest-passing (item 834, 18:37 CST Nov 14) says the `cooldown: default-days: 7` in degen's .github/dependabot.yml binds dependabot's own PRs only, and it does not say whether that setting should stay; it left that to degen's own file. This pick answers that open point. The question as runner 11 or the degen lane asked it is not on the roadmap record (triage did not see the relayed child-repo owner calls); only the point own-834-b left open is recorded. COVERED: the cooldown setting in degen's dependabot.yml stays; nothing changes. NOT COVERED: any waiting period for a lane's pin audit (own-834-b rules none), any other repo's dependabot file. A grant covers the named act, never a variant. Reopen if the owner says otherwise.",
+ "quote": "Degen dependabot cooldown: keep.",
+ "source": "Consultant message to triage, stamped 08:44 CST Nov 15 by its clock: consultant's pick under the owner's 20:18 CST Nov 14 words; not owner-typed.",
+ "status": "open",
+ "supersedes_none": "supersedes no earlier ruling: it answers the point own-834-b-pins-newest-passing left open (whether the dependabot setting stays) and leaves own-834-b unchanged",
+ "step": "degen-pins-newest"
+}
