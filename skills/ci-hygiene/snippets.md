@@ -232,10 +232,8 @@ gh pr ready <pr-number>                               # the CI-wake hook waits a
 gh run view <run-id> --json status,conclusion         # one read, after the notice
 ```
 
-The order on a lane's draft, in cloud: `merge <pr> --ready` on the draft (the records step), then the
-MCP `update_pull_request` call with `draft=false` after the draft run shows, then
-`merge <pr> --confirm`. A ready PR with a stale records page goes back to draft first (decision
-`records-index-at-merge`).
+The order of the draft step, the ready mark and `merge <pr> --confirm` is in decision
+`records-index-at-merge`.
 
 Never run `gh run watch`: it makes about 131 API calls a minute. Never send a command's output
 to `/dev/null`.

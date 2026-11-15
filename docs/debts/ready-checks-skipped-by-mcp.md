@@ -1,6 +1,6 @@
 # A ready mark by MCP or gh skips the ready checks
 
-**What.** A session that marks a draft ready by MCP `update_pull_request draft=false` or by `gh pr ready`, without running `merge <pr> --confirm` on the draft, skips `merge.readyChecks`. Claude is likely to do this in normal work: `READY_ROUTES` and the draft step's own remedy for a Record-claim head send sessions to MCP or gh to mark ready. The batch's CI run is the only backstop, and it costs a CI cycle.
+**What.** A session that marks a draft ready by MCP `update_pull_request draft=false` or by `gh pr ready`, without running `merge <pr> --ready` on the draft, skips `merge.readyChecks`. Claude is likely to do this in normal work: `READY_ROUTES` and the draft step's own remedy for a Record-claim head send sessions to MCP or gh to mark ready. The batch's CI run is the only backstop, and it costs a CI cycle.
 
 **Where.** `merge/merge.py` (`draft_step`, `READY_ROUTES`). `.github/stamp.json` `merge.readyChecks` in the repo that declares it.
 

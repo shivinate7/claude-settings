@@ -3885,8 +3885,8 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
 def ready_hint(n):
     """The one text of what follows a draft step that left the PR a draft: the ready mark after the draft run shows, then --confirm. The
     `--ready` run prints it after its stays-a-draft reason, and `stale_page_remedy` carries it, so the two orders cannot drift."""
-    return (f"Mark it ready after its draft run shows (in cloud: MCP update_pull_request draft=false, route pr-ready-mcp-cloud), "
-            f"then run merge {n} --confirm to merge.")
+    return (f"Mark it ready after its draft run shows (in cloud: MCP update_pull_request draft=false, route pr-ready-mcp-cloud; "
+            f"on a computer: gh pr ready {n}, route pr-ready-gh-cli-local), then run merge {n} --confirm to merge.")
 
 def stale_page_remedy(n, claim=""):
     """The one text of the remedy for a stale records page on a ready PR, for `confirm` and `preview`. The session returns the
@@ -4152,7 +4152,7 @@ def draft_step(root, cfg, n, host, info, merge_main=False):
                     if checks:
                         run_ready_checks(wt, n, base, checks, pre=pre)  # before the remedy: it has the session mark ready by hand, past the checks
                     raise Stop(f"{info['head'][:9]} on {info['branch']} holds a Record-claim ({claim}), so the draft step adds no page commit on top of it. "
-                               f"Mark #{n} ready by hand ({READY_ROUTES}), then run --confirm again. Nothing was pushed. {RECORDS_CITE}")
+                               f"{ready_hint(n)} The draft step leaves it to be marked ready by hand. Nothing was pushed. {RECORDS_CITE}")
                 stale, stands = holds_base(wt, f"origin/{base}", info["head"])
                 if stale:  # holds_base ends with the remedy
                     raise Stop(("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " Nothing was pushed.")
