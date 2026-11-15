@@ -20,7 +20,7 @@ A SessionStart hook is not a PreToolUse hook, and it does not list the start too
 
 The hook acts on source `startup` only. A resume, compact, clear or fork prints nothing.
 
-1. The model floor, first. `start_check.py` `flag_text` asks `guard.py` `floor_hit`, the one home of the floor. A model below the floor is flagged. The hook runs this check on local and cloud startups. Whether a cloud session receives the flag is unknown (see Unknown).
+1. The model floor, first. `start_check.py` `flag_text` asks `guard.py` `floor_hit`, the one home of the floor. A model below the floor is flagged. `start_check.py` `main` runs this check on local and cloud startups. Whether a cloud session receives the flag is unknown (see Unknown).
 2. The full-machine load brake, second. Local sessions only. `guard.py` `read_load` reads the load once. `guard.py` `load_full` names each reading over the full line: memory over 95% (`hooks/guard.py: LOAD_FULL_MEMORY = 95.0`), or disk free under the smaller of 5% and 5 GB. A cloud session skips this check, and only this one.
 3. The model is checked first, so a run prints one flag at most.
 4. It fails open. A failed import of `guard`, a bad payload, a payload that is not an object, or any error prints nothing and exits 0. A broken check lets a start through with no flag. That is the choice: a session must still start.
