@@ -314,12 +314,12 @@ def is_repo_join(call):
             and bool(call.args) and isinstance(call.args[0], ast.Name) and call.args[0].id == "REPO")
 
 
-def named_repo_files(rel, tracked):
-    """-> [(path, line)]: each string constant of repo file `rel` that equals a tracked file, and each os.path.join(REPO, ...)
-    whose other arguments are all string constants spelling a tracked file. A join with a variable piece is not read here: the
-    trace in TRACED_READS covers what ran. The ast reads the strings, so a comment names nothing."""
-    with open(os.path.join(ROOT, *rel.split("/")), encoding="utf-8") as f:
-        tree = ast.parse(f.read(), rel)
+def named_in_source(source, rel, tracked):
+    """-> [(path, line)] for the module text `source` (`rel` names it in a syntax error): each string constant that equals a
+    tracked file, and each os.path.join(REPO, ...) whose other arguments are all string constants spelling a tracked file. A
+    join with a variable piece is not read here: the trace in TRACED_READS covers what ran. The ast reads the strings, so a
+    comment names nothing."""
+    tree = ast.parse(source, rel)
     hits = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in tracked:
@@ -331,6 +331,12 @@ def named_repo_files(rel, tracked):
                 if joined in tracked:
                     hits.append((joined, node.lineno))
     return hits
+
+
+def named_repo_files(rel, tracked):
+    """named_in_source for the repo file `rel`."""
+    with open(os.path.join(ROOT, *rel.split("/")), encoding="utf-8") as f:
+        return named_in_source(f.read(), rel, tracked)
 
 
 def module_file(name):
@@ -400,6 +406,25 @@ class GuardInputsList(unittest.TestCase):
         named = {path for rel in guard_reader_files() for path, _ in named_repo_files(rel, tracked)}
         stale = sorted(n for n in FIXTURE_NAMES if n not in named)
         self.assertEqual(stale, [], f"FIXTURE_NAMES lists a name the guard suite no longer names: {stale}")
+
+    # Mutant reads, each one an unlisted tracked file joined from pieces. The scan must report the path in every shape. The
+    # plain consecutive shape is the control: it was already read. Named failure: a read joined through a variable, a literal
+    # list or a helper's *parts is invisible to the scan, so no glob is checked for the file it reads.
+    def test_a_read_joined_from_pieces_is_seen_in_every_shape(self):
+        target = "docs/decisions/session-tiers.md"
+        shapes = {
+            "a starred tuple held in a variable": 'parts = ("docs", "decisions", "session-tiers.md")\n'
+                                                   "text = open(os.path.join(REPO, *parts)).read()\n",
+            "a starred list literal": 'text = open(os.path.join(REPO, *["docs", "decisions", "session-tiers.md"])).read()\n',
+            "a helper that joins its *parts": 'def repo_path(*parts):\n    return os.path.join(REPO, *parts)\n'
+                                              'text = open(repo_path("docs", "decisions", "session-tiers.md")).read()\n',
+            "consecutive literal arguments": 'text = open(os.path.join(REPO, "docs", "decisions", "session-tiers.md")).read()\n',
+        }
+        header = "import os\nREPO = os.path.dirname(os.path.abspath(__file__))\n"
+        for shape, body in shapes.items():
+            with self.subTest(shape=shape):
+                hits = {path for path, _ in named_in_source(header + body, "hooks/mutant.py", {target})}
+                self.assertIn(target, hits, f"the scan does not see {target} read as {shape}: {sorted(hits)}")
 
     def test_the_import_walk_reaches_the_guard(self):
         self.assertIn("hooks/guard.py", import_closure(IMPORT_ROOTS))
