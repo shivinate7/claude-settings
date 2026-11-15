@@ -464,16 +464,18 @@ test("control: once the repo meta answers, the rail is shown and draws a chip pe
 
 // ---------------------------------------------------------------- Send while the list is held, and a long repo name
 
+// The page never preselects an answer (ruling page-never-preselects, docs/decisions/page-never-preselects.md, owner 2026-11-13 13:04 CST),
+// so Send stays off until the owner ticks an answer.
 test("while the repo meta is held the list is not drawn, so Send stays off; once the cards draw it stays off until an answer is ticked, then turns on", async (t) => {
   const s1 = mk("held-stand-one", 1), s2 = mk("held-stand-two", 2, { repo: "owner/other-repo" });
   const page = await open(t, { items: [s1, s2], meta: META, holdMeta: true }); if (!page) return;
-  assert.equal(await page.locator("#send").isDisabled(), true, "Send is live while the owner sees only the loading line");
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is off while the owner sees only the loading line");
   await page.evaluate(() => window.__releaseMeta());
   await page.waitForFunction("feed.meta === true");
   await page.waitForSelector(`#item-${s1.id}`);
-  assert.equal(await page.locator("#send").isDisabled(), true, "Send is live after the cards draw, before any answer is ticked");
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is off after the cards draw, before any answer is ticked");
   await choose(page, s1, "a");
-  assert.equal(await page.locator("#send").isDisabled(), false, "Send stays off after an answer is ticked");
+  assert.equal(await page.locator("#send").isDisabled(), false, "Send is on after an answer is ticked");
 });
 
 test("a long repo name in a sub-group head never makes the page scroll sideways", async (t) => {

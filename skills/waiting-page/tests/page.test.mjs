@@ -1291,7 +1291,10 @@ const WRAP_LINE = { what: "the Lands in line", items: [WRAP_DEST], box: ".dest" 
 const WRAP_REPLY_CASE = { what: "the thread reply in an answered line", items: [DECISION, WRAP_REPLY], open: WRAP_REPLY, box: "#tier-answered .thread .reply" };
 const WRAP_TRADE = { what: "the option's trade-off text", items: [WRAP_TR], box: ".opt .tr div > span:not(.s)" };
 // The filed line of an opened answer reads "The record stays in <home>.", so a 90-character home is the unbroken word in .askc .thread .filed.
-// The same home sets the min-content of the line's home tag row, so that tag is hidden for the width measure: another lane owns it.
+// Measured on 34312da1a with that home: the page is 717 px wide at 360, 390 and 430 px with .hometag shown, and the viewport width with it
+// hidden. The tag's nowrap text (666 px) gives the tag a 684 px box, so its row .ahead is 684 px wide and runs past its line. .hometag's
+// overflow hidden does not stop this: the tag's box is still 684 px, and .ahead takes that width. The tag's width is another lane's
+// (page-home-tag-cut-off), so this measure hides it and reads only the filed line.
 const WRAP_FILED = mk("wrap-filed", 44, { status: "closed", closed: "2026-11-09T15:00:00Z", home: UNBROKEN });
 const WRAP_FILED_CASE = { what: "the filed line of an opened answer", items: [DECISION, WRAP_FILED], open: WRAP_FILED, box: "#tier-answered .thread .filed", hide: ".hometag" };
 async function openWrap(t, c, { width = 1280, scheme = "light" } = {}) {
@@ -2564,6 +2567,8 @@ test("repo sub-groups: the rail row of a tier with two repos starts each repo's 
 });
 
 // Case 7: the Answered section and its rail row draw one sub-group per repo, this repo first, newest first inside each.
+// Cites step answered-sections-by-repo (the Answered section and its rail row, one sub-group per repo, this repo first) and page item 212
+// (taken by lane page-answered-sink).
 test("repo sub-groups answered: the Answered section and its rail row draw one sub-group per repo, this repo first, newest first inside each", async (t) => {
   const items = [inRepo("ans-own", 1, "acme/sample-repo"), inRepo("ans-alpha", 2, "acme/alpha"), inRepo("ans-beta", 3, "acme/beta"), inRepo("ans-own2", 4, "acme/sample-repo")];
   const answers = { ...answerOf(items[0], "a", { at: "2026-10-26T09:00:00Z" }), ...answerOf(items[1], "a", { at: "2026-10-28T09:00:00Z" }), ...answerOf(items[2], "a", { at: "2026-10-27T09:00:00Z" }), ...answerOf(items[3], "a", { at: "2026-10-29T09:00:00Z" }) };
