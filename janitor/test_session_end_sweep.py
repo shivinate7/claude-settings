@@ -727,8 +727,8 @@ class SweepIsToldItsTimeLeftAsADeadline(unittest.TestCase):
 
     def test_the_sweep_is_told_it_is_the_session_end_run(self):
         """The SessionEnd run passes `--session-end`: it judges branches and worktrees in its own
-        repository only, stops dead-rooted servers rooted in that repository only (owner ruling
-        own-828-a-sessionend-this-repo-only), and skips the loose-process report."""
+        repository only, stops dead-rooted servers rooted in that repository only (the daily job
+        covers the rest of the machine), and skips the loose-process report."""
         repo = os.path.join(ROOT, "session_end_flag_repo")
         make_repo(repo)
         calls = self.sweep_argv_for(repo, 0.0)
@@ -738,7 +738,7 @@ class SweepIsToldItsTimeLeftAsADeadline(unittest.TestCase):
 
 
 class SessionEndStopsOnlyServersInItsRepository(unittest.TestCase):
-    """Owner ruling own-828-a-sessionend-this-repo-only: the SessionEnd sweep stops a dead-rooted server
+    """The SessionEnd sweep stops a dead-rooted server
     only when the server's root is the repository that ended the session. A server rooted elsewhere on
     the machine waits for the daily job. Driven through `handle`, as a SessionEnd does: the sweep child
     runs in-process (`sweep.main`, as SessionEndFetchThrottle runs it), the machine's dead-rooted read is

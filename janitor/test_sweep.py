@@ -1766,8 +1766,8 @@ class LooseProcessTests(unittest.TestCase):
 # ----------------------------------------- the SessionEnd run's reads (janitor/sweep.py)
 #
 # The SessionEnd run (`--session-end`, `args.session_end`) reads no loose processes, reads the machine's
-# pid list once, and stops the proven dead-rooted orphans rooted in its own repository only (owner ruling
-# own-828-a-sessionend-this-repo-only). The scheduled job stops them in any repository.
+# pid list once, and stops the proven dead-rooted orphans rooted in its own repository only.
+# The scheduled job stops them in any repository.
 # The branch and worktree tiers stay one repository's. Every machine read below is answered from a
 # fixture table by `fake_process_table`, so a case decides the rule and not this machine's processes.
 # Each missing script path is real, under real folders, so `sweep._project_ancestor` decides exactly as
@@ -1900,7 +1900,7 @@ class SessionEndScopeTests(unittest.TestCase):
                       "the orphan under this repository's primary checkout was not signalled")
 
     def test_the_session_end_run_leaves_a_proven_orphan_in_another_repository_alone(self):
-        """Owner ruling own-828-a-sessionend-this-repo-only: the SessionEnd run stops dead-rooted
+        """The SessionEnd run stops dead-rooted
         servers rooted in its own repository only. A proven orphan whose script sat under another
         repository waits for the daily job, which signals it (test_the_daily_run_still_signals_another_repos_orphan)."""
         seen = sweep_over_fixture(self.fx, session_end=True,
@@ -1914,7 +1914,7 @@ class SessionEndScopeTests(unittest.TestCase):
     def test_the_session_end_run_leaves_a_parent_ancestor_orphan_alone(self):
         """A missing script under a folder that carries `.claude` has that folder as its project
         ancestor. That folder holds this repository but is not inside it, so the session-end run
-        leaves the orphan to the daily job (owner ruling own-828-a-sessionend-this-repo-only)."""
+        leaves the orphan to the daily job."""
         seen = sweep_over_fixture(self.fx, session_end=True,
                                   before=lambda: sweep.find_dead_rooted())
         self.assertIn(SCOPE_PIDS["ancestor"], pids_of(seen["before"]),
@@ -1942,7 +1942,7 @@ class SessionEndScopeTests(unittest.TestCase):
 
     def test_the_daily_run_still_signals_another_repos_orphan(self):
         """The daily job's pin for a proven orphan in another repository. The daily job is
-        machine-wide; the session-end run is not (owner ruling own-828-a-sessionend-this-repo-only)."""
+        machine-wide; the session-end run is not (decision `the-janitor-is-one-machine-wide-sweep`)."""
         seen = sweep_over_fixture(self.fx, session_end=False)
         self.assertIn(SCOPE_PIDS["other"], seen["signals"])
 
