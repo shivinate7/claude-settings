@@ -19,7 +19,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
-SESSION_ID = re.compile(r"\bsession_[A-Za-z0-9][A-Za-z0-9_-]*")
+# A session id such as session_abc. The field name session_id and the word session_start are not ids.
+SESSION_ID = re.compile(r"\bsession_(?!(?:id|start)\b)[A-Za-z0-9][A-Za-z0-9_-]*")
 
 
 def response_text(response, depth=0):
@@ -37,8 +38,8 @@ def response_text(response, depth=0):
 
 
 def started(response):
-    """False when the tool_response shows no session started: an error flag or a deny, or a response that is not text,
-    a list or a dict (a number cannot be read, so the audit says nothing)."""
+    """False when the tool_response shows no session started: an error flag or a refusal, or a response that is not
+    text, a list or a dict (a number cannot be read, so the audit says nothing)."""
     if not isinstance(response, (str, list, dict)):
         return False
     return not (isinstance(response, dict) and any(response.get(key) for key in ("is_error", "isError", "deny")))
