@@ -13444,6 +13444,7 @@ class PullsHost(merge.Host):
         self.files_error = files_error  # the (code, output) text of a failed files read
         self.changed_files = changed_files  # the changed_files count of `pulls/<n>`; None is the length of files
         self.workflow_runs = workflow_runs or {}  # sha -> the workflow runs `gh run list --commit <sha>` answers
+        self.run_reads = []  # the --commit sha of each `gh run list` this host answers, in order: the run list reads of a head
         self.compares, self.compare_error, self.base_compare_error = compares or {}, compare_error, base_compare_error  # the (code, output) of a failed read
         self.reads = []
         self.list_calls = []
@@ -13458,6 +13459,7 @@ class PullsHost(merge.Host):
 
     def gh(self, args, cwd=None):
         if args[:2] == ["run", "list"]:
+            self.run_reads.append(args[args.index("--commit") + 1])
             return 0, json.dumps(self.workflow_runs.get(args[args.index("--commit") + 1], []))
         if self.count_gh and args[0] == "api":
             rel = args[1].split("/", 3)[-1]  # repos/{owner}/{repo}/<rel>
@@ -14480,6 +14482,33 @@ class RepoDirFlag(RepoDirRuns, Env):
 
     def test_a_confirm_with_c_merges_in_the_named_checkout(self):
         self.assert_merged_in_named(*self.confirm_from(self.co, ["-C", self.b_co, "7", "--confirm"])[:2])
+
+    def test_audit_prs_with_c_is_accepted_and_reads_the_named_checkout(self):
+        """`--audit-prs -C <checkout>` reads that checkout, so -C is no second mode and is accepted (the stands-alone check refused it). audit_prs is
+        stood in for, as release_check is above. The Host main builds for the audit must carry the named checkout, so an accepted -C that is
+        ignored fails here."""
+        audited = []
+
+        def fake(h):
+            audited.append(h)
+            return ["no open pull requests."], []
+
+        for argv in self.spellings("--audit-prs"):
+            with self.subTest(spelling=argv[0]):
+                audited.clear()
+                with unittest.mock.patch.object(merge, "audit_prs", fake):
+                    rc, out, seen = self.run_from(self.co, argv)
+                self.assertNotIn("stands alone", out, "--audit-prs refused -C as a second mode: " + out)  # scope first
+                self.assertEqual(rc, 0, "--audit-prs with -C did not run (rc %r): %s" % (rc, out))
+                self.assertEqual(len(audited), 1, "the audit did not read a host (%d calls): %s" % (len(audited), out))
+                self.assertEqual(checkout_key(audited[0].built_with.get("cwd")), checkout_key(self.b_co),
+                                 "the audit's host was not built in the -C checkout: %r" % (audited[0].built_with,))
+
+    def test_audit_prs_with_a_pull_request_number_still_stands_alone(self):
+        """A control for the case above: --audit-prs beside a pull request number is still a usage error that names the mode."""
+        rc, out, seen = self.run_from(self.co, ["--audit-prs", "7"])
+        self.assertEqual(rc, 2, "--audit-prs beside a pull request number was not a usage error (rc %r): %s" % (rc, out))  # scope first
+        self.assertIn("--audit-prs stands alone", out, "the refusal does not name --audit-prs: " + out)
 
     def test_c_alone_with_reviewed_reads_the_named_checkout(self):
         """A control for the --root refusal: -C with --reviewed and no --root is not refused, and main takes the named checkout as the root it
@@ -17691,6 +17720,40 @@ class ReviewedList(ReviewEnv):
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments_error="reading issue comments from GitHub failed")
         self.assertEqual(rc, 1, out + err)
         self.assertEqual(out.strip(), "", out)
+
+    def run_list_reads(self, check_rows, runs):
+        """-> {head: gh run list reads} of one `merge --reviewed` over two ready pull requests, 7 at REVIEW_HEAD and 8 at REVIEW_OLD_HEAD. Each has a
+        passing record and no lane lint, and each head holds `check_rows` and the workflow runs `runs`. Both pull requests must be listed."""
+        heads = (REVIEW_HEAD, REVIEW_OLD_HEAD)
+        comments = [review_comment(1, 7, record_text(n=7, head=REVIEW_HEAD, rounds=REVIEW_PASS)),
+                    review_comment(2, 8, record_text(n=8, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))]
+        host = PullsHost([batch_pull(7, REVIEW_HEAD), batch_pull(8, REVIEW_OLD_HEAD)], {sha: list(check_rows) for sha in heads},
+                         comments=comments, workflow_runs={sha: runs for sha in heads})
+        rc, out, err = self.run_args("--reviewed", host=host)
+        self.assertEqual(rc, 0, out + err)
+        list_line(self, out, 7)
+        list_line(self, out, 8)
+        return {sha: host.run_reads.count(sha) for sha in heads}
+
+    def test_a_head_whose_check_rows_link_two_runs_reads_the_run_list_once(self):
+        """A draft run (101, its rollup job skipped) and a ready run (202, its rollup job passed) on each head: the check rows link two runs, so
+        superseded needs the run list. Each head's run list is one read. Today rollup_green, head_state's checks and run_state each reach Host.runs,
+        which keeps no memo, so each head reads it three times."""
+        rows = [{**batch_run(merge.ROLLUP_JOB, "completed", "skipped"), "details_url": job_link(101, 1)},
+                {**batch_run(merge.ROLLUP_JOB, "completed", "success"), "details_url": job_link(202, 1)}]
+        runs = [{"name": "checks", "status": "completed", "conclusion": "skipped", "databaseId": 101, "workflowDatabaseId": 1},
+                {"name": "checks", "status": "completed", "conclusion": "success", "databaseId": 202, "workflowDatabaseId": 1}]
+        reads = self.run_list_reads(rows, runs)
+        self.assertGreater(min(reads.values()), 0, "a head's run list was never read: %s" % reads)  # scope first
+        self.assertEqual(reads, {REVIEW_HEAD: 1, REVIEW_OLD_HEAD: 1}, "gh run list was read more than once for a head: %s" % reads)
+
+    def test_a_head_whose_check_rows_link_one_run_reads_the_run_list_once(self):
+        """The control for the case above: one run on each head, so superseded needs no run list, and the head's one read is the only one."""
+        rows = [{**batch_run(merge.ROLLUP_JOB, "completed", "success"), "details_url": job_link(202, 1)}]
+        runs = [{"name": "checks", "status": "completed", "conclusion": "success", "databaseId": 202, "workflowDatabaseId": 1}]
+        reads = self.run_list_reads(rows, runs)
+        self.assertGreater(min(reads.values()), 0, "a head's run list was never read: %s" % reads)  # scope first
+        self.assertEqual(reads, {REVIEW_HEAD: 1, REVIEW_OLD_HEAD: 1}, "gh run list was read more than once for a head: %s" % reads)
 
     def test_review_comments_reads_one_list_from_since_oldest_first(self):
         if getattr(merge.Host, "review_comments", None) is None:
@@ -23440,6 +23503,31 @@ class AuditPrs(Env):
         self.assertIsNotNone(route_count_line(text, "issues/comments", 1), f"the empty audit names no call count of 1 for the comment read: {text[-200:]}")
         self.assertEqual(rc, 0, f"the empty audit did not run: {text[-200:]}")
         self.assertEqual(sorted(routes), ["issues/comments", "pulls"], f"the empty audit made other calls: {routes}")
+
+    def test_a_newest_record_with_a_fix_check_and_no_round_lines_is_listed_and_does_not_crash(self):
+        """A record whose only line before Net value is a Fix check parses with no rounds. The audit's round summary then read the last round of
+        that empty list (merge.py audit_prs), and IndexError ended the run before it printed its line."""
+        head = sha_of(1)
+        body = record_text(n=1, head=head, rounds=(), fix=(fix_verifier_line("PASS", head=sha_of(9)),))
+        parsed = merge.parse_review(body)
+        self.assertIsNotNone(parsed, "fixture: parse_review refuses the record, so the audit never reaches its round summary")  # scope first
+        self.assertEqual(parsed["rounds"], [], "fixture: the record holds round lines")
+        self.set(open_prs=self.open_prs(1), issue_comments=[review_comment(1, 1, body)])
+        try:
+            rc, text, _routes, _made, _before, _after = self.audit()
+        except Exception as err:
+            self.fail(f"the audit raised {type(err).__name__} on a record with a Fix check and no round lines: {err}")
+        self.assertEqual(rc, 0, f"the audit exited {rc} on a record with a Fix check and no round lines: {text[-200:]}")
+        self.assertEqual(len([l for l in text.splitlines() if l.startswith("#1 ")]), 1, f"the audit printed no line for #1: {text[-200:]}")
+
+    def test_a_newest_record_with_a_round_is_listed_with_its_round_and_verdict(self):
+        """The control for the case above: a normal record with one passing round, on the head, is listed with that round and verdict."""
+        head = sha_of(1)
+        self.set(open_prs=self.open_prs(1), issue_comments=[review_comment(1, 1, record_text(n=1, head=head, rounds=REVIEW_PASS))])
+        rc, text, _routes, _made, _before, _after = self.audit()
+        line = printed(text, f"#1 feat1 {head[:9]}")
+        self.assertTrue(line, f"the audit printed no line for #1 at its head (exit {rc}): {text[-200:]}")  # scope first
+        self.assertIn("review: round 1 PASS (reviewer)", line, "the line does not name the newest record's round and verdict: " + line)
 
 
 if __name__ == "__main__":
