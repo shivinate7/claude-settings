@@ -14,10 +14,11 @@ THE CONTRACT THE CASES PIN (the builder meets it):
   names the lane session in the pull request body's footer, and the coordinator when the footer names none or that lane is archived (b-archived).
   An unreadable lane prints one line `lost-work #<n> unknown: <why>; owner coordinator` and names no state.
 - LOST_WORK_OWNER maps a, b, b-archived, c, d, e and f to their owners (the owner of f is the coordinator).
-- No lane mail: nothing is sent to a lane. State b lists every open or bad review log, and its row says the lane is not told.
+- No lane mail: nothing is sent to a lane.
 - a: a done review log older than LOST_WORK_DONE_HOURS (6 h), and neither another open pull request's head nor the base holds its head
   (Host.holds_head, the local-git reader).
-- b: an open or bad review log. Its owner is the footer's session, else the coordinator.
+- b: an open or bad review log whose created_at is older than LOST_WORK_DONE_HOURS (6 h) at h.now(). A younger log lists no row. A stale log
+  (its head moved since) is no b row: it reads under state c's rule. The owner is the footer's session, else the coordinator.
 - c: no review log (or a stale one, naming an older head), and the lane idle (status_bucket completed or review ready) with its newest thread
   (live file, `pr` = n) more than 12 h before h.now(). A lane row with no status_bucket reads unknown.
 - d: the pull request's lane session (footer) is archived.
@@ -274,24 +275,64 @@ class LostWorkRows(LostWorkFixture):
         lines = self.block(self.host())
         self.assertEqual(rows_for(lines, 7), [], "a state-a row for #7 whose head main already holds, so nothing is left to merge: %r" % lines)
 
-    # State b: an open or bad review log. Nothing is sent to a lane, so the row is the only word the lane gets.
+    # State b: an open or bad review log older than LOST_WORK_DONE_HOURS (6 h). Nothing is sent to a lane; a younger log lists no row, so a pull
+    # request under normal review does not read as lost.
 
     def test_b_open_review_log_lists_a_row_naming_its_lane(self):
-        self.pr(7, log="open", at=30)
+        self.pr(7, log="open", at=421)
         self.lane("session_a")
         self.publish()
         lines = self.block(self.host())
         self.assertEqual(rows_for(lines, 7), [("b", "session_a")], "no state-b row for #7 naming session_a, its lane: %r" % lines)
 
     def test_b_bad_review_log_lists_a_row_naming_its_lane(self):
-        self.pr(7, log="bad")
+        self.pr(7, log="bad", at=421)
         self.lane("session_a")
         self.publish()
         lines = self.block(self.host())
         self.assertEqual(rows_for(lines, 7), [("b", "session_a")], "no state-b row for #7, whose review log does not parse, naming session_a: %r" % lines)
 
+    def test_b_review_log_younger_than_six_hours_lists_no_row(self):
+        self.pr(7, log="open", at=10)
+        self.pr(9, log="bad", at=10, session="session_c")
+        self.pr(8, log="open", at=421, session="session_b")  # control: #8's log, 7 h old, lists its row in the same run
+        self.lane("session_a")
+        self.lane("session_b")
+        self.lane("session_c")
+        self.publish()
+        lines = self.block(self.host())
+        self.assertEqual(rows_for(lines, 8), [("b", "session_b")], "control: no state-b row for #8, whose open review log is 7 h old: %r" % lines)
+        self.assertEqual(rows_for(lines, 7), [], "a state-b row for #7, whose open review log is 10 min old, under the six-hour line: %r" % lines)
+        self.assertEqual(rows_for(lines, 9), [], "a state-b row for #9, whose bad review log is 10 min old, under the six-hour line: %r" % lines)
+
+    def test_b_review_log_seven_hours_old_lists_a_row(self):
+        self.pr(7, log="open", at=420)  # 7 h, which is 420 minutes: past the six-hour line
+        self.lane("session_a")
+        self.publish()
+        lines = self.block(self.host())
+        self.assertEqual(rows_for(lines, 7), [("b", "session_a")], "no state-b row for #7, whose open review log is 7 h old: %r" % lines)
+
+    def test_b_stale_review_log_older_than_six_hours_keeps_the_state_c_rule(self):
+        self.pr(7, log="open", at=421)
+        self.pr(8, log="open", at=421, session="session_b")  # control: #8's log at its own head, past six hours, lists its b row
+        self.lane("session_a", status=IDLE, bucket=roadmap.BUCKET_COMPLETED)
+        self.lane("session_b")
+        self.thread(7, minutes=781)
+        # The head of #7 moves: its open log names the old head, so the log is stale and counts as no log (state c's rule).
+        old = self.heads[7]
+        sha = self.commit_on(old, None, "newer")
+        roadmap.git(self.repo, "push", "-q", "origin", "%s:refs/pull/7/head" % sha)
+        self.heads[7] = sha
+        pull = next(p for p in self.pulls if p["number"] == 7)
+        pull["head"] = {**pull["head"], "sha": sha}
+        self.checks[sha] = self.checks[old]
+        self.publish()
+        lines = self.block(self.host())
+        self.assertEqual(rows_for(lines, 8), [("b", "session_b")], "control: no state-b row for #8, whose open review log is past six hours at its head: %r" % lines)
+        self.assertEqual(rows_for(lines, 7), [("c", owner_of("c"))], "#7's stale open log, older than six hours, should keep state c's rule, not state b: %r" % lines)
+
     def test_b_with_an_archived_lane_names_the_coordinator(self):
-        self.pr(7, log="open", at=30)
+        self.pr(7, log="open", at=421)
         self.lane("session_a", status=ARCHIVED, bucket=roadmap.BUCKET_COMPLETED)
         self.publish()
         rows = rows_for(self.block(self.host()), 7)
@@ -299,14 +340,14 @@ class LostWorkRows(LostWorkFixture):
         self.assertNotIn(("b", "session_a"), rows, "the state-b row for #7 names the archived session, not the coordinator: %r" % rows)
 
     def test_b_open_review_log_with_no_footer_names_the_coordinator(self):
-        self.pr(7, log="open", at=30, session=None)  # no session in the footer: no lane to name, so the coordinator owns the row
+        self.pr(7, log="open", at=421, session=None)  # no session in the footer: no lane to name, so the coordinator owns the row
         self.publish()
         rows = rows_for(self.block(self.host()), 7)
         self.assertEqual(rows, [("b", "coordinator")], "no state-b row for #7, whose body has no session footer, that names the coordinator: %r" % rows)
 
     def test_b_done_review_log_lists_no_b_row(self):
         self.pr(7, log="done", at=60)
-        self.pr(8, log="open", at=30, session="session_b")  # control: the open log of #8 lists its row in the same run
+        self.pr(8, log="open", at=421, session="session_b")  # control: the open log of #8 lists its row in the same run
         self.lane("session_a")
         self.lane("session_b")
         self.publish()
@@ -658,7 +699,7 @@ class LostWorkRows(LostWorkFixture):
         # stands for a file, so no row names one.
         self.pr(7, log="done", at=361)
         self.lane("session_a")
-        self.pr(8, log="open", at=30, session="session_b")
+        self.pr(8, log="open", at=421, session="session_b")
         self.lane("session_b")
         self.pr(9, log=None, session="session_c")
         self.lane("session_c", status=IDLE, bucket=roadmap.BUCKET_COMPLETED)
@@ -759,7 +800,7 @@ class LostWorkLedger(LostWorkFixture):
     def test_the_unsorted_count_is_one_number_over_all_rows(self):
         self.pr(7, log="done", at=361)
         self.lane("session_a")
-        self.pr(8, log="open", at=30, session="session_b")
+        self.pr(8, log="open", at=421, session="session_b")
         self.lane("session_b")
         self.pr(9, log="done", at=60, session="session_d")
         self.lane("session_d", status=ARCHIVED, bucket=roadmap.BUCKET_COMPLETED)
@@ -858,7 +899,7 @@ class LostWorkLedger(LostWorkFixture):
     def test_the_ledger_and_the_batch_review_name_the_same_states(self):
         self.pr(7, log="done", at=361)
         self.lane("session_a")
-        self.pr(8, log="open", at=30, session="session_b")
+        self.pr(8, log="open", at=421, session="session_b")
         self.lane("session_b")
         self.pr(9, log=None, session="session_c")
         self.lane("session_c", status=IDLE, bucket=roadmap.BUCKET_COMPLETED)
