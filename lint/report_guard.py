@@ -94,7 +94,7 @@ stop_hook_active rewrite too, which never blocks on a refusal (decision refusals
 Cost: one stat per Stop when the session had no refusal.
 
 The triage hold (a roadmap build's `stalled step:` lines): a session whose own newest get_session record carries
-cs-build:triage (hooks/guard_merge.py _own_tier_proved) cannot end a turn while the newest roadmap build output in its
+cs-build:triage (hooks/guard_merge.py _own_role_proved) cannot end a turn while the newest roadmap build output in its
 transcript (the result of a Bash run of build.py) has an entry line, `stalled step: <id> (...)` or
 `stalled step: item <n> (...)`. An unknown line is no entry. The hold also covers a Stop after a refusal
 (stop_hook_active), which it releases only when the report's Input Needed section names every entry's id and item
@@ -1190,7 +1190,7 @@ def _is_page_writer(path):
     """True when this session's own newest get_session record carries cs-build:triage: the triage session is the
     repo's page writer, whatever parent id its record names (guard_merge's one triage reader)."""
     _hooks_on_path()
-    from guard_merge import _own_tier_proved as session_role_proved  # glossary-ok: the name guard_merge exports
+    from guard_merge import _own_role_proved as session_role_proved
     return session_role_proved(path, PAGE_WRITER_ROLE)
 
 
@@ -3095,8 +3095,8 @@ def triage_hold(hook, records, active):
         if not entries:
             return ""
         _hooks_on_path()
-        from guard_merge import _own_tier_proved
-        if not _own_tier_proved(hook.get("transcript_path"), HOLD_TIER):
+        from guard_merge import _own_role_proved
+        if not _own_role_proved(hook.get("transcript_path"), HOLD_TIER):  # glossary-ok: HOLD_TIER is the existing name
             return ""
         if active and _names_every(input_needed_section(last_reply(hook)), entries):
             return ""

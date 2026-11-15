@@ -14,6 +14,8 @@ The contract these cases pin. A change to any of it changes these cases first.
 - skip=true when the push tree equals the tree of a batch-* head whose ready run passed every suite job, or of a merged pull
   request head whose newest checks.yml run is a green pull request run: all-jobs-passed and every suite job succeeded. A suite step
   that scope skipped does not stop the skip: after a passing PR run, narrowed or full, main runs none of its suites for that merge.
+  A macOS scope skip job skipped by its scope flags is no gap when the caller's scope-skips input names it, the run's scope job succeeded
+  and its all-jobs-passed succeeded. A skipped job that map does not name is still a gap.
 - Any read error, unknown state or unreadable record writes skip=false and says "unknown".
 
 The stand-in PRS_JSON, a JSON list of batch heads, is read by the older cases. The live cases answer the reads through FakeGitHub,
@@ -39,7 +41,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
-from test_windows_split import ALL_JOBS_PASSED_JOB, CHECKS, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB, all_jobs, eval_if  # noqa: E402  the one home of the checks.yml reader
+from test_windows_split import ALL_JOBS_PASSED_JOB, CHECKS, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB, all_jobs, eval_if, macos_scope_skips, scope_skips_module  # noqa: E402  the one home of the checks.yml reader
 from all_jobs_passed_rules import FAN_IN, needs_of, split_jobs  # noqa: E402  the one home of the needs reader
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the job parser
 import test_all_jobs_passed as all_jobs_home  # noqa: E402  the one home of the child workflow fixtures (CHILD_GOOD)
@@ -67,6 +69,9 @@ with open(CHECKS, encoding="utf-8") as _handle:
 NEEDED_JOBS, OFF_ON_PR, _SPLIT_PROBLEMS = split_jobs(CHECKS_TEXT)
 BOOKKEEPING = {"scope", ALL_JOBS_PASSED_JOB, FAN_IN, PUSH_SKIP_JOB, NIGHTLY_SKIP_JOB}
 SUITE_JOBS = sorted(name for name in NEEDED_JOBS if name not in BOOKKEEPING)
+SCOPE_SKIPPED = tuple(sorted(macos_scope_skips()))  # the macOS jobs a scope skip owns (testing/scope_skips.py MACOS_SCOPE_SKIPS): a skip they get is judged by the caller's map
+UNSKIPPABLE_SUITES = [name for name in SUITE_JOBS if name not in SCOPE_SKIPPED]  # no scope skip names it, so its skip is never proven
+SCOPE_JOB = "scope"  # the job that reads the scope flags; a scope skip needs its run to have succeeded
 ALL_RUN_JOBS = sorted(all_jobs(CHECKS_TEXT))  # every job of checks.yml is one check run on a pull request run
 
 
@@ -467,12 +472,13 @@ class SuiteRunsOfTheHead(LiveHead):
         value, _ = self.skip_on(runs)
         self.assertEqual(value, "false", "%s was re-run and the newer run failed, so the older success stands for nothing: skip=false" % name)
 
-    def test_every_suite_job_of_checks_yml_is_required_for_the_skip(self):
-        self.assertTrue(SUITE_JOBS, "the reader derived no suite job from checks.yml, so this case would prove nothing")
-        for name in SUITE_JOBS:
+    def test_every_unskippable_suite_job_of_checks_yml_is_required_for_the_skip(self):
+        # The scope-skip macOS jobs are left out: a skip that the caller's map, the scope run and the rollup prove is accepted (ScopeSkippedMacosBatchHead).
+        self.assertTrue(UNSKIPPABLE_SUITES, "the reader derived no suite no scope skip names job from checks.yml, so this case would prove nothing")
+        for name in UNSKIPPABLE_SUITES:
             with self.subTest(job=name):
                 value, _ = self.skip_on(ready_head_runs({name: {"conclusion": "skipped"}}))
-                self.assertEqual(value, "false", "%s is a suite job of checks.yml but skipping it still gives skip=true" % name)
+                self.assertEqual(value, "false", "%s is a suite job no scope skip owns, but skipping it still gives skip=true" % name)
 
     def test_a_head_with_no_check_runs_does_not_skip_the_push(self):
         value, _ = self.skip_on([])
@@ -501,9 +507,10 @@ def step(name, conclusion="success"):
     return {"name": name, "status": "completed", "conclusion": conclusion}
 
 
-def job_row(name, conclusion="success", steps=None):
-    """One job of a run, in the shape the jobs read returns. Its steps default to one that ran, as a job that passed has."""
-    return {"name": name, "status": "completed", "conclusion": conclusion, "steps": [step("Run")] if steps is None else steps}
+def job_row(name, conclusion="success", steps=None, status="completed"):
+    """One job of a run, in the shape the jobs read returns. Its steps default to one that ran, as a job that passed has. `status` is
+    completed unless the job is still running."""
+    return {"name": name, "status": status, "conclusion": conclusion, "steps": [step("Run")] if steps is None else steps}
 
 
 def full_run_jobs(changes=None):
@@ -649,6 +656,220 @@ class MergedPullRequest(LiveHead):
                           trees={HEAD: TREE, LANE_HEAD: TREE}, workflow_runs=[pull_request_run(1)], jobs={1: jobs})
         value, _ = self.skip_on(fake=fake)
         self.assertEqual(value, "true", "a green batch head with the push's tree still skips, whatever a narrowed merged pull request says")
+
+
+def scope_skip_changes(extra=None):
+    """ready_head_runs changes that skip each macOS scope skip job, as a pull request run skips a job whose scope flags are off."""
+    changes = {name: {"conclusion": "skipped"} for name in SCOPE_SKIPPED}
+    changes.update(extra or {})
+    return changes
+
+
+def scope_skip_job_changes(extra=None):
+    """full_run_jobs changes that skip each macOS scope skip job with no steps, as a job its own if skips has none."""
+    changes = {name: {"conclusion": "skipped", "steps": []} for name in SCOPE_SKIPPED}
+    changes.update(extra or {})
+    return changes
+
+
+class ScopeSkippedMacosBatchHead(LiveHead):
+    """A batch head whose scope-skip macOS jobs were skipped by their scope flags. A skip is proven when the caller's scope-skips map names the
+    job, the run's scope job succeeded and its all-jobs-passed succeeded. The refusal cases change one of those three, or the named
+    job's own result. The old code refuses every skip, so each refusal is green there; the positive cases are the red ones."""
+
+    def test_a_batch_head_whose_scope_skipped_macos_jobs_were_skipped_by_their_flags_skips_the_push(self):
+        runs = ready_head_runs(scope_skip_changes())
+        got = {r["name"]: r["conclusion"] for r in runs}
+        self.assertEqual({name: got.get(name) for name in SCOPE_SKIPPED}, {name: "skipped" for name in SCOPE_SKIPPED},
+                         "the fixture must skip each macOS scope skip job")
+        self.assertEqual((got.get(SCOPE_JOB), got.get(ROLLUP_NAME)), ("success", "success"),
+                         "the fixture's scope and all-jobs-passed runs must succeed")
+        value, text = self.skip_on(runs)
+        self.assertEqual(value, "true", "the scope-skipped macOS jobs were skipped by their flags, and the scope and rollup runs passed: skip=true (%s)"
+                         % text.strip()[-200:])
+
+    def test_each_scope_skipped_macos_job_skipped_alone_skips_the_push(self):
+        for name in SCOPE_SKIPPED:
+            with self.subTest(job=name):
+                value, _ = self.skip_on(ready_head_runs({name: {"conclusion": "skipped"}}))
+                self.assertEqual(value, "true", "%s was skipped by its scope flags, and the scope and rollup runs passed: skip=true" % name)
+
+    def test_a_scope_skip_beside_a_skipped_unskippable_suite_is_refused(self):
+        name = "checks-windows-rest"
+        self.assertIn(name, UNSKIPPABLE_SUITES, "%s is not a suite no scope skip names of checks.yml, so this case probes the wrong job" % name)
+        value, _ = self.skip_on(ready_head_runs(scope_skip_changes({name: {"conclusion": "skipped"}})))
+        self.assertEqual(value, "false", "%s was skipped and no scope skip owns it, so the scope skips do not prove the push: skip=false" % name)
+
+    def test_a_scope_skip_with_a_failed_rollup_is_refused(self):
+        value, _ = self.skip_on(ready_head_runs(scope_skip_changes({ROLLUP_NAME: {"conclusion": "failure"}})))
+        self.assertEqual(value, "false", "all-jobs-passed failed on the ready run, so it judged no skip: skip=false")
+
+    def test_a_scope_skip_with_no_rollup_run_is_refused(self):
+        value, _ = self.skip_on(ready_head_runs(scope_skip_changes({ROLLUP_NAME: None})))
+        self.assertEqual(value, "false", "the ready run has no all-jobs-passed run, so no rollup judged the skip: skip=false")
+
+    def test_a_scope_skip_with_a_failed_scope_run_is_refused(self):
+        value, _ = self.skip_on(ready_head_runs(scope_skip_changes({SCOPE_JOB: {"conclusion": "failure"}})))
+        self.assertEqual(value, "false", "the scope run failed, so the flags the skip was decided on are not known: skip=false")
+
+    def test_a_scope_skip_with_no_scope_run_is_refused(self):
+        value, _ = self.skip_on(ready_head_runs(scope_skip_changes({SCOPE_JOB: None})))
+        self.assertEqual(value, "false", "the ready run has no scope run, so the flags the skip was decided on are not known: skip=false")
+
+    def test_a_named_scope_skipped_macos_job_that_failed_is_refused(self):
+        self.assertTrue(SCOPE_SKIPPED, "the reader derived no macOS scope skip job from testing/scope_skips.py, so this case would prove nothing")
+        for name in SCOPE_SKIPPED:
+            with self.subTest(job=name):
+                value, _ = self.skip_on(ready_head_runs(scope_skip_changes({name: {"conclusion": "failure"}})))
+                self.assertEqual(value, "false", "%s failed on the ready run, so its scope skip is not proven: skip=false" % name)
+
+    def test_a_named_scope_skipped_macos_job_that_was_cancelled_is_refused(self):
+        self.assertTrue(SCOPE_SKIPPED, "the reader derived no macOS scope skip job from testing/scope_skips.py, so this case would prove nothing")
+        for name in SCOPE_SKIPPED:
+            with self.subTest(job=name):
+                value, _ = self.skip_on(ready_head_runs(scope_skip_changes({name: {"conclusion": "cancelled"}})))
+                self.assertEqual(value, "false", "%s was cancelled on the ready run, so its scope skip is not proven: skip=false" % name)
+
+    def test_a_named_scope_skipped_macos_job_still_in_progress_is_refused(self):
+        self.assertTrue(SCOPE_SKIPPED, "the reader derived no macOS scope skip job from testing/scope_skips.py, so this case would prove nothing")
+        for name in SCOPE_SKIPPED:
+            with self.subTest(job=name):
+                value, _ = self.skip_on(ready_head_runs(scope_skip_changes({name: {"conclusion": None, "status": "in_progress"}})))
+                self.assertEqual(value, "false", "%s is still in progress on the ready run, so its scope skip is not proven: skip=false" % name)
+
+    def test_a_named_scope_skipped_macos_job_that_failed_beside_an_older_skipped_run_is_refused(self):
+        self.assertTrue(SCOPE_SKIPPED, "the reader derived no macOS scope skip job from testing/scope_skips.py, so this case would prove nothing")
+        for name in SCOPE_SKIPPED:
+            with self.subTest(job=name):
+                runs = ready_head_runs(scope_skip_changes({name: {"conclusion": "failure", "started_at": LATE}}),
+                                       extra=[check_run(name=name, conclusion="skipped", started_at=EARLY)])
+                value, _ = self.skip_on(runs)
+                self.assertEqual(value, "false", "%s failed on the newer run beside an older skipped one, so the older skip proves nothing: skip=false" % name)
+
+
+class ScopeSkippedMacosCallerMap(LiveHead):
+    """The map a scope skip is proven by is the calling workflow's own scope-skips input, read from GITHUB_WORKSPACE: the push tree is the
+    head tree, so the caller's checks.yml is the run's. Each case gives the caller a checks.yml with its own input."""
+
+    def caller(self, map_json):
+        """A calling workspace whose checks.yml is this repo's, with its scope-skips input set to map_json. None removes the input."""
+        old = "          scope-skips: '%s'\n" % scope_skips_module().SCOPE_SKIPS_JSON
+        self.assertEqual(CHECKS_TEXT.count(old), 1, "this repo's checks.yml must set its scope-skips input once, or the caller fixture is wrong")
+        new = "" if map_json is None else "          scope-skips: '%s'\n" % map_json
+        caller = os.path.join(RUN_FOLDER, "caller-%s" % uuid.uuid4().hex)
+        os.makedirs(os.path.join(caller, ".github", "workflows"))
+        with open(os.path.join(caller, ".github", "workflows", "checks.yml"), "w", encoding="utf-8") as handle:
+            handle.write(CHECKS_TEXT.replace(old, new))
+        return caller
+
+    def test_a_caller_whose_map_names_the_scope_skipped_jobs_proves_their_skip(self):
+        caller = self.caller(scope_skips_module().SCOPE_SKIPS_JSON)
+        value, text = self.skip_on(ready_head_runs(scope_skip_changes()), extra_env={"GITHUB_WORKSPACE": caller})
+        self.assertEqual(value, "true", "the caller's map names each scope-skipped job, so their skips are proven: skip=true (%s)" % text.strip()[-200:])
+
+    def test_a_caller_with_no_scope_skips_input_refuses_a_scope_skip(self):
+        caller = self.caller(None)
+        value, _ = self.skip_on(ready_head_runs(scope_skip_changes()), extra_env={"GITHUB_WORKSPACE": caller})
+        self.assertEqual(value, "false", "the caller names no skipped job, so a scope skip is not proven: skip=false")
+
+    def test_a_job_the_callers_map_names_is_proven_when_skipped(self):
+        caller = self.caller('{"shell-macos":["shell_macos"]}')
+        value, text = self.skip_on(ready_head_runs({"shell-macos": {"conclusion": "skipped"}}), extra_env={"GITHUB_WORKSPACE": caller})
+        self.assertEqual(value, "true", "the caller's map names shell-macos, so its skip is proven: skip=true (%s)" % text.strip()[-200:])
+
+    def test_a_macos_job_the_callers_map_does_not_name_is_refused_when_skipped(self):
+        caller = self.caller('{"shell-macos":["shell_macos"]}')
+        value, _ = self.skip_on(ready_head_runs({"checks-macos": {"conclusion": "skipped"}}), extra_env={"GITHUB_WORKSPACE": caller})
+        self.assertEqual(value, "false", "the caller's map does not name checks-macos, so its skip is not proven: skip=false")
+
+
+class ScopeSkippedMacosMergedPullRequest(LiveHead):
+    """A merged lone-lane head whose newest checks.yml run skipped the scope-skip macOS jobs by their flags. The same three conditions as the
+    batch head apply: the caller's map names the job, the run's scope job succeeded and its all-jobs-passed succeeded."""
+
+    def fake_for(self, changes, extra=()):
+        """`extra` adds jobs of the same names beside the full run's, such as a skipped job beside a failed one of the same name."""
+        jobs = full_run_jobs(changes) + list(extra)
+        fake = FakeGitHub(pulls=[lane_pull()], trees={LANE_HEAD: TREE}, workflow_runs=[pull_request_run(1)], jobs={1: jobs})
+        return jobs, fake
+
+    def test_a_merged_pull_request_whose_scope_skipped_macos_jobs_were_skipped_by_their_flags_skips(self):
+        jobs, fake = self.fake_for(scope_skip_job_changes())
+        got = {job["name"]: job["conclusion"] for job in jobs}
+        self.assertEqual({name: got.get(name) for name in SCOPE_SKIPPED}, {name: "skipped" for name in SCOPE_SKIPPED},
+                         "the fixture must skip each macOS scope skip job")
+        self.assertEqual((got.get(SCOPE_JOB), got.get(ROLLUP_NAME)), ("success", "success"),
+                         "the fixture's scope and all-jobs-passed jobs must succeed")
+        value, text = self.skip_on(fake=fake)
+        self.assertEqual(value, "true", "the scope-skipped macOS jobs were skipped by their flags, and the scope and rollup jobs passed: skip=true (%s)"
+                         % text.strip()[-200:])
+
+    def test_each_scope_skipped_macos_job_skipped_alone_on_a_merged_pull_request_skips(self):
+        for name in SCOPE_SKIPPED:
+            with self.subTest(job=name):
+                _, fake = self.fake_for({name: {"conclusion": "skipped", "steps": []}})
+                value, _ = self.skip_on(fake=fake)
+                self.assertEqual(value, "true", "%s was skipped by its scope flags, and the scope and rollup jobs passed: skip=true" % name)
+
+    def test_a_scope_skip_beside_a_skipped_unskippable_suite_runs(self):
+        name = "checks-windows-rest"
+        self.assertIn(name, UNSKIPPABLE_SUITES, "%s is not a suite no scope skip names of checks.yml, so this case probes the wrong job" % name)
+        _, fake = self.fake_for(scope_skip_job_changes({name: {"conclusion": "skipped", "steps": []}}))
+        value, _ = self.skip_on(fake=fake)
+        self.assertEqual(value, "false", "%s was skipped and no scope skip owns it, so the scope skips do not prove the push: skip=false" % name)
+
+    def test_a_scope_skip_with_a_failed_rollup_job_runs(self):
+        _, fake = self.fake_for(scope_skip_job_changes({ROLLUP_NAME: {"conclusion": "failure"}}))
+        value, _ = self.skip_on(fake=fake)
+        self.assertEqual(value, "false", "all-jobs-passed failed on the newest run, so it judged no skip: skip=false")
+
+    def test_a_scope_skip_with_no_rollup_job_runs(self):
+        _, fake = self.fake_for(scope_skip_job_changes({ROLLUP_NAME: None}))
+        value, _ = self.skip_on(fake=fake)
+        self.assertEqual(value, "false", "the newest run has no all-jobs-passed job, so no rollup judged the skip: skip=false")
+
+    def test_a_scope_skip_with_a_failed_scope_job_runs(self):
+        _, fake = self.fake_for(scope_skip_job_changes({SCOPE_JOB: {"conclusion": "failure"}}))
+        value, _ = self.skip_on(fake=fake)
+        self.assertEqual(value, "false", "the scope job failed, so the flags the skip was decided on are not known: skip=false")
+
+    def test_a_scope_skip_with_no_scope_job_runs(self):
+        _, fake = self.fake_for(scope_skip_job_changes({SCOPE_JOB: None}))
+        value, _ = self.skip_on(fake=fake)
+        self.assertEqual(value, "false", "the newest run has no scope job, so the flags the skip was decided on are not known: skip=false")
+
+    def test_a_named_scope_skipped_macos_job_that_failed_on_a_merged_pull_request_runs(self):
+        self.assertTrue(SCOPE_SKIPPED, "the reader derived no macOS scope skip job from testing/scope_skips.py, so this case would prove nothing")
+        for name in SCOPE_SKIPPED:
+            with self.subTest(job=name):
+                _, fake = self.fake_for(scope_skip_job_changes({name: {"conclusion": "failure"}}))
+                value, _ = self.skip_on(fake=fake)
+                self.assertEqual(value, "false", "%s failed on the newest run, so its scope skip is not proven: skip=false" % name)
+
+    def test_a_named_scope_skipped_macos_job_that_was_cancelled_on_a_merged_pull_request_runs(self):
+        self.assertTrue(SCOPE_SKIPPED, "the reader derived no macOS scope skip job from testing/scope_skips.py, so this case would prove nothing")
+        for name in SCOPE_SKIPPED:
+            with self.subTest(job=name):
+                _, fake = self.fake_for(scope_skip_job_changes({name: {"conclusion": "cancelled"}}))
+                value, _ = self.skip_on(fake=fake)
+                self.assertEqual(value, "false", "%s was cancelled on the newest run, so its scope skip is not proven: skip=false" % name)
+
+    def test_a_named_scope_skipped_macos_job_still_in_progress_on_a_merged_pull_request_runs(self):
+        self.assertTrue(SCOPE_SKIPPED, "the reader derived no macOS scope skip job from testing/scope_skips.py, so this case would prove nothing")
+        for name in SCOPE_SKIPPED:
+            with self.subTest(job=name):
+                _, fake = self.fake_for(scope_skip_job_changes({name: {"conclusion": None, "status": "in_progress", "steps": []}}))
+                value, _ = self.skip_on(fake=fake)
+                self.assertEqual(value, "false", "%s is still in progress on the newest run, so its scope skip is not proven: skip=false" % name)
+
+    def test_a_named_scope_skipped_macos_job_that_failed_beside_a_skipped_job_of_its_name_runs(self):
+        self.assertTrue(SCOPE_SKIPPED, "the reader derived no macOS scope skip job from testing/scope_skips.py, so this case would prove nothing")
+        for name in SCOPE_SKIPPED:
+            with self.subTest(job=name):
+                _, fake = self.fake_for(scope_skip_job_changes({name: {"conclusion": "failure"}}),
+                                        extra=[job_row(name, "skipped", steps=[])])
+                value, _ = self.skip_on(fake=fake)
+                self.assertEqual(value, "false", "%s failed beside a skipped job of its name, so the skipped job proves nothing: skip=false" % name)
 
 
 class EventRefusal(LiveHead):

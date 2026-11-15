@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prints "checkout <toplevel> on <branch>, <n> dirty files" on start, resume and compaction, after one origin fetch per checkout. It prints the grant lines first, so a killed hook still delivers them. On resume it says when the recorded worktree is gone. Names the clone to cd to when the checkout is the live pin. Also warns on: core.worktree set in the shared git config; global rules that differ from this checkout; the claude-settings clone off main or behind origin; the default branch or local main behind or off origin; more than 50 agent worktrees; a check or fetch that could not run; a waiting page or grant file that differs from main's; a disarmed or unknown SessionEnd sweep. Prints the repo's caution level, or says it is unknown.
+# Prints "checkout <toplevel> on <branch>, <n> dirty files" on start, resume, compact, clear and fork, after one origin fetch per checkout. It prints the grant lines first, so a killed hook delivers them. On resume it says when the recorded worktree is gone. Names the clone to cd to when the checkout is the live pin. Also warns on: core.worktree set in the shared git config; global rules that differ from this checkout; the claude-settings clone off main or behind origin; the default branch or local main behind or off origin; more than 50 agent worktrees; a check or fetch that could not run; a waiting page or grant file that differs from main's; a disarmed or unknown SessionEnd sweep. Prints the caution level, or says it is unknown.
 # In a git tree it also patches the platform's Stop-hook script once so its unpushed nudge skips a merged branch; it says so when the patch is not applied.
 # Outside a git tree or without git, prints only the tier line. Always exits 0, nothing on stderr.
 
@@ -8,6 +8,23 @@ cwd=$(printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\
 [ -n "$cwd" ] || cwd=$(pwd)
 session_id=$(printf '%s' "$input" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
 source=$(printf '%s' "$input" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+
+# The launcher's role file (bin/claude-role sets CS_SESSION_ROLE): hooks/session_role.py records the role for this session id,
+# or removes the session's file when the variable is unset, so the guard and the merge tool can read a local session's tier
+# (decision session-tiers). Local sessions only; a cloud session reads its tags. Any failure is silent. Cost: one python
+# start and one small file write or delete per start, no process kept, no timer.
+if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
+  sr_script="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session_role.py"
+  [ -f "$sr_script" ] || sr_script="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/session_role.py"
+  if [ -f "$sr_script" ]; then
+    for sr_py in python3 python; do
+      sr_bin=$(command -v "$sr_py" 2>/dev/null) || continue
+      case "$sr_bin" in */WindowsApps/*) continue ;; esac
+      printf '%s' "$input" | "$sr_bin" "$sr_script" write >/dev/null 2>&1
+      break
+    done
+  fi
+fi
 
 # tier_line: a cloud session (the CLAUDE_CODE_REMOTE read install.sh makes) or a session with a
 # CLAUDE_CODE_REMOTE_SESSION_ID tells the session how to find its tier (decision session-tiers). A local
