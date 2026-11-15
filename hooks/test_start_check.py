@@ -39,6 +39,10 @@ SONNET = "claude-sonnet-5-5"
 OPUS = "claude-opus-5-1"
 MODEL_DECISION = "agent-model-cap"
 LOAD_DECISION = "machine-load-brake"
+LANE_TAG = "cs-build:lane"  # a lane is a session whose own get_session record carries this tag
+NO_WORK = ("no work", "do nothing", "not do any work")
+OWNER_WITHOUT_TAG = ("without the tag", "without " + LANE_TAG, "no " + LANE_TAG, "lacks the tag", "not tagged")
+OWNER_GOES_ON = ("goes on", "carries on", "may go on", "continues")
 Run = collections.namedtuple("Run", "code out err")
 
 # The driver runs as `python3 -c`. It patches guard before the hook file runs. It writes SPAWN to stderr when a
@@ -149,19 +153,26 @@ def flag_of(test, run, cause):
 
 
 def assert_flag_facts(test, context, named, decision, cause):
-    """The four facts the flag text carries. The model or the reading and the decision are named as they are. The lane
-    and owner clauses are pinned by their key tokens, not their wording: a lane is named by parent_session_id, it does
-    no work and tells its parent, and a session with no parent goes on."""
+    """The facts the flag text carries. The model or the reading and the decision are named as they are. A lane is a
+    session whose own get_session record carries the tag cs-build:lane: it does no work and tells its parent. A session
+    without the tag goes on. A parent_session_id alone is no test of a lane (decision machine-load-brake), so every
+    sentence that states the no-work rule must name the tag. The clauses are pinned by key tokens, not wording."""
     lower = context.lower()
     test.assertIn(named, context, "%s: the flag does not name %r" % (cause, named))
     test.assertIn(decision, context, "%s: the flag does not name the decision %s" % (cause, decision))
-    test.assertIn("parent_session_id", context, "%s: the flag does not name parent_session_id" % cause)
-    test.assertTrue(any(token in lower for token in ("no work", "do nothing", "not do any work")),
-                    "%s: the flag does not say a lane does no work" % cause)
+    test.assertIn(LANE_TAG, context, "%s: the flag does not name the lane tag %s" % (cause, LANE_TAG))
+    test.assertIn("get_session", context, "%s: the flag does not say to read the session with get_session" % cause)
+    test.assertTrue(any(token in lower for token in NO_WORK), "%s: the flag does not say a lane does no work" % cause)
     test.assertIn("parent", lower.replace("parent_session_id", ""),
                   "%s: the flag does not say a lane tells its parent" % cause)
-    test.assertTrue(any(token in lower for token in ("no parent", "without a parent", "without parent")),
-                    "%s: the flag does not say a session with no parent goes on" % cause)
+    test.assertTrue(any(token in lower for token in OWNER_WITHOUT_TAG),
+                    "%s: the flag does not say a session without the tag is the owner's" % cause)
+    test.assertTrue(any(token in lower for token in OWNER_GOES_ON),
+                    "%s: the flag does not say a session without the tag goes on" % cause)
+    for sentence in lower.replace(";", ".").split("."):
+        if any(token in sentence for token in NO_WORK):
+            test.assertIn(LANE_TAG, sentence,
+                          "%s: the no-work rule hangs on a test other than %s: %r" % (cause, LANE_TAG, sentence.strip()))
 
 
 def assert_silent(test, run, cause):
