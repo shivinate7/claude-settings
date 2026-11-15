@@ -1,0 +1,13 @@
+{
+ "id": "writer-never-writes-receipts",
+ "title": "A closing fork must not write receipts: the owning session writes them (candidate; cost unmeasured)",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Guard queued per rule building-mistake-names-its-guard (queued as step:writer-never-writes-receipts). Mistake: triage's close forks wrote the receipts doc themselves on six items closed since 20:00 CST Nov 14: 849 (pick-carry-clean-merge-replacement), 851 (pick-records-page-clean-merge-tree), 852 (pick-debt-step-skip-guard-rerun), 328 (qmax-d369-error-source), 861 (pick-standing-sessions-tiny-fixes), 865 (pick-3381-accept-checks-loss). Rule: skills/waiting-page/SKILL.md line 195 'receipts/<id>: written by the owning session, never by the page'; lines 286-288 'The writer never writes receipts'; Route and close step 1 (lines ~467-469): the owning session writes read, then filed. Read-only check (ArtifactData, 02:43 CST): all six receipts carry a read and filed time equal or within seconds of the close time (for 849, 852, 328, 861 read equals filed; 865 read 07:44:20Z, filed 07:44:50Z); the owner field on each names the coordinator, the consultant or a lane, never triage. So each receipt looks writer-written. Harm: a false 'read' time on the page, because the owning session never read or filed at that time. Older closes were not checked. Guard idea: the brief for a closing fork says 'the owning session writes the receipt; do not write receipts', and the page writer's close script or the fork brief template refuses a receipts/<id> write by the writer. Cost: unmeasured (one line in each close brief). The fix to triage's own brief applies from now: every closing fork brief says 'the owner session writes the receipt; do not write receipts'. Open: whether a writer-written receipt on a chat answer is acceptable (the skill says no; a consultant or owner ruling could allow it). Nothing was changed on the page: read-only check.",
+ "source": "Triage, 02:43 CST Nov 15, after the fork that closed item 865 reported writing its receipt and the skill text said the writer never does.",
+ "note": "Candidate guard; not built; owner coordinator. Six receipts looked writer-written (849 851 852 328 861 865); none rewritten.",
+ "updatedAt": "2026-11-15T02:43:00-06:00"
+}
