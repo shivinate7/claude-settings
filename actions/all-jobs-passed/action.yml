@@ -1,7 +1,8 @@
 name: All jobs passed
 description: >
   Fan-in check with two checks. It fails when any needed job failed, was cancelled or was skipped,
-  and, when `workflow` is set, when the calling workflow's wiring breaks the fan-in rules. The caller job
+  and, when `workflow` is set, when the calling workflow's wiring breaks the fan-in rules. A skipped job passes only
+  when `scope-skips` names it and its scope flags are false. The caller job
   MUST set `needs: [...]` and `if: always()`; without `always()` GitHub skips this job when a
   needed job fails, and a skipped required check reads as green.
 inputs:
@@ -12,6 +13,12 @@ inputs:
     description: "The calling workflow's path, such as .github/workflows/checks.yml. The caller job needs a checkout for it."
     required: false
     default: ''
+  scope-skips:
+    description: >
+      Optional. One JSON line {job: [scope flag, ...]}: a skipped job named there passes when the scope job succeeded and each listed
+      flag in needs.scope.outputs is exactly "false". Empty, a skipped job fails.
+    required: false
+    default: ''
 runs:
   using: composite
   steps:
@@ -20,4 +27,5 @@ runs:
       env:
         NEEDS: ${{ inputs.needs }}
         WORKFLOW: ${{ inputs.workflow }}
+        SCOPE_SKIPS: ${{ inputs.scope-skips }}
       run: bash "${{ github.action_path }}/run.sh"

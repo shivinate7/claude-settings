@@ -208,6 +208,7 @@ import shutil
 import subprocess
 import sys
 import time
+import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
@@ -219,6 +220,8 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lin
 # line. These cases check the Central line alone, so no child sees a store.
 for _name in ("MAILBOX_REPO", "MAILBOX_CACHE"):
     os.environ.pop(_name, None)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 LT_PATH =os.environ.get("LOCAL_TIME_UNDER_TEST") or os.path.join(HERE, "local_time.py")
 GUARD_PATH = os.environ.get("FEEDBACK_GUARD_UNDER_TEST") or os.path.join(HERE, "feedback_guard.py")
 PRECOMPACT_PATH = os.environ.get("PRECOMPACT_HANDOFF_UNDER_TEST") or os.path.join(
@@ -2310,6 +2313,77 @@ def case_grant_act_words_narrowed_passes():
                       homed(new_cfg(), "narrowed", (), text=text))
 
 
+# The grant line: a message's first line that starts `Grant:` and holds a Central time is the owner's record of
+# a grant. Its words are not read for grant words. Every other line is read as before.
+GRANT_LINE_CST = "Grant: merge any PR, owner 19:53 CST Nov 13"
+GRANT_LINE_CDT = "Grant: merge any PR, owner 19:53 CDT Nov 13"
+GRANT_LINE_NO_TIME = "Grant: merge all PRs"
+GRANT_BODY = "Rebase the lane on main, then run the checks."
+CENTRAL_TIME = re.compile(r"\d{1,2}:\d{2} C[SD]T")
+
+
+def block_lines(text):
+    """The lines of one block, read back the way the test reader reads an inbox block."""
+    blocks = read_blocks(render_block(text))
+    return blocks[0]["text"].split("\n") if blocks and blocks[0]["text"] is not None else []
+
+
+def case_grant_line_with_a_central_time_is_not_read_passes():
+    """A first line that starts `Grant:` and holds a Central time is not read for grant words. The first line
+    holds a grant word and an act word. The body holds neither, so each row passes. The lone line is the empty
+    body state. Red now: the first line blocks each row, as it holds a grant word and an act word."""
+    rows = (
+        ("the CST line with a clean body", GRANT_LINE_CST + "\n" + GRANT_BODY, ("- fb-0958-2 [note] -> noted",)),
+        ("the CDT line with a clean body", GRANT_LINE_CDT + "\n" + GRANT_BODY, ("- fb-0958-2 [note] -> noted",)),
+        ("the CST line alone", GRANT_LINE_CST, ()),
+    )
+    for label, text, items in rows:
+        first = text.split("\n")[0]
+        check("grant line, %s: the first line holds a Central time" % label,
+              CENTRAL_TIME.search(first) is not None, first)
+        check("grant line, %s: the Grant line is the block's first line" % label,
+              block_lines(text)[:1] == [first], block_lines(text))
+        expect_silent("grant line: %s passes" % label, homed(new_cfg(), "grant-line-time", items, text=text))
+
+
+def case_grant_line_body_is_still_read_blocks():
+    """The lines after a Grant line are read as before: a body line with a grant word and an act word blocks,
+    with no home. Green control: the message blocks today on its first line, and the fix must still block it on
+    this body line."""
+    text = GRANT_LINE_CST + "\napprove and merge it."
+    p = homed(new_cfg(), "grant-line-body", ("- fb-0958-2 [note] -> noted",), text=text)
+    expect_grant_block("grant line: a body line 'approve and merge it.' still blocks", p, text)
+
+
+def case_grant_line_not_first_still_blocks():
+    """A Grant line that is not the first line is read like any other line, so the message blocks with no home.
+    Green control: the fix must exempt the first line only."""
+    text = GRANT_BODY + "\n" + GRANT_LINE_CST
+    check("grant line not first: the Grant line is the block's second line",
+          block_lines(text)[1:2] == [GRANT_LINE_CST], block_lines(text))
+    p = homed(new_cfg(), "grant-line-second", ("- fb-0958-2 [note] -> noted",), text=text)
+    expect_grant_block("grant line: a Grant line that is not the first line still blocks", p, text)
+
+
+def case_grant_line_without_a_time_still_blocks():
+    """A first line that starts `Grant:` with no Central time is read as before, so the lone line blocks with no
+    home. Green control: the Central time is what exempts the line."""
+    check("grant line without a time: the line holds no Central time",
+          CENTRAL_TIME.search(GRANT_LINE_NO_TIME) is None, GRANT_LINE_NO_TIME)
+    p = homed(new_cfg(), "grant-line-no-time", (), text=GRANT_LINE_NO_TIME)
+    expect_grant_block("grant line: 'Grant: merge all PRs' with no time still blocks", p, GRANT_LINE_NO_TIME)
+
+
+def case_grant_line_fenced_text_is_not_read_passes():
+    """Fenced text after a Grant line is still not read. The first line holds a Central time and no act word, so
+    only the fence holds a grant word and an act word. Green control: it passes today, and the fix must keep the
+    fence unread."""
+    text = ("Grant: coordinator role, owner flywheel (2026-11-11 22:38 CST)\n"
+            "```\napprove and merge it.\n```\n" + GRANT_BODY)
+    p = homed(new_cfg(), "grant-line-fence", ("- fb-0958-2 [note] -> noted",), text=text)
+    expect_silent("grant line: fenced 'approve and merge it.' after a Grant line passes", p)
+
+
 def case_pick_letters_a_to_h_passes():
     """Pick letters are a to h. "1 y, 2 n" is no pick, so it passes with no send. Red now."""
     p = page_run(new_cfg(), "pick-yn", [("1 y, 2 n", ())], [owner_rec("1 y, 2 n"), said_rec("Noted.")],
@@ -3282,6 +3356,12 @@ def snapshot(folder):
 def written_between(before, after):
     """The relative paths that are new, or changed, between two snapshots."""
     return {rel for rel, state in after.items() if before.get(rel) != state}
+
+
+def bytes_written(before, after):
+    """The relative paths whose bytes are new or different between two snapshots. A rewrite with the same bytes is
+    no change here, unlike written_between, which reads the mtime too."""
+    return {rel for rel, (_, data) in after.items() if before.get(rel, (None, None))[1] != data}
 
 
 def git_counter(cfg):
@@ -4446,6 +4526,11 @@ CASES = (
     case_grant_fenced_text_is_not_scanned_passes,
     case_grant_needs_an_act_word_passes,
     case_grant_act_words_narrowed_passes,
+    case_grant_line_with_a_central_time_is_not_read_passes,
+    case_grant_line_body_is_still_read_blocks,
+    case_grant_line_not_first_still_blocks,
+    case_grant_line_without_a_time_still_blocks,
+    case_grant_line_fenced_text_is_not_read_passes,
     case_closed_note_without_a_home_blocks,
     case_closed_note_with_a_home_passes,
     case_task_open_step_home_passes,
@@ -4533,10 +4618,88 @@ def run_case(case):
         RED_CASES.append(case.__name__)
 
 
+# The cost of one judging Stop. The case repeat_cost_one_call_one_grep_and_two_files pins its counts. These cases pin
+# what it leaves out: the one git start that is not the grep, and a quiet Stop that starts no git at all.
+
+class CostTests(unittest.TestCase):
+    def judging_stop(self, name, answer=None):
+        """One capture, one new item, then the judging Stop. `answer` is the model's answer, and by default it names
+        the item as a repeat. Returns (exit codes of the capture and the Stop, the Stop's model calls, its git starts,
+        the relative paths whose bytes it changed under the config folder)."""
+        root = repeat_repo(name, step=True, debt=True)
+        cfg, sid = new_cfg(), name
+        env = git_counter(cfg)
+        captured = capture(cfg, sid, MSG_ONE, cwd=root)
+        add_item(cfg, sid, ITEM_LINE)
+        before = snapshot(cfg)
+        start = len(git_lines(env))
+        answer = repeat_answer(ITEM_ID) if answer is None else answer
+        stopped, calls = stop(cfg, sid, root, answer=answer, extra_env=env)
+        changed = bytes_written(before, snapshot(cfg))
+        return (captured.code, stopped.code), calls, git_lines(env, start), changed
+
+    def test_the_judging_stop_starts_one_grep_and_one_other_git_process(self):
+        codes, calls, lines, _ = self.judging_stop("cost-argv")
+        self.assertEqual(codes, (0, 0), "the capture and the judging Stop both exit 0; got %r" % (codes,))
+        self.assertEqual(len(calls), 1, "the judging Stop makes one model call; got %d" % len(calls))
+        self.assertEqual(grep_starts(lines), 1, "the judging Stop starts one git grep; got %r" % lines)
+        others = [ln for ln in lines if "grep" not in ln.split()]
+        self.assertEqual(len(others), 1, "one other git start; got %r" % others)
+        self.assertIn("rev-parse", others[0].split(), "the other start reads the repo root: %r" % others)
+        self.assertIn("--show-toplevel", others[0].split(), "the other start reads the repo root: %r" % others)
+
+    def test_a_judging_stop_writes_the_turn_state_and_the_inbox_and_no_other_file(self):
+        codes, _, _, changed = self.judging_stop("cost-files")
+        self.assertEqual(codes, (0, 0), "the capture and the judging Stop both exit 0; got %r" % (codes,))
+        self.assertEqual(changed, {turns_rel("cost-files"), inbox_rel("cost-files")},
+                         "a judging Stop writes its turn state and the inbox, and no other file; got %r"
+                         % sorted(changed))
+
+    def test_a_judging_stop_with_no_repeat_writes_the_turn_state_and_leaves_the_inbox_bytes(self):
+        codes, calls, _, changed = self.judging_stop("cost-no-repeat", answer=ANSWER_NONE)
+        self.assertEqual(codes, (0, 0), "the capture and the judging Stop both exit 0; got %r" % (codes,))
+        self.assertEqual(len(calls), 1, "the judging Stop makes one model call; got %d" % len(calls))
+        self.assertEqual(changed, {turns_rel("cost-no-repeat")},
+                         "a judging Stop with no repeat writes its turn state and no other file, the inbox's bytes "
+                         "included; got %r" % sorted(changed))
+
+    def test_a_quiet_stop_starts_no_git_process(self):
+        root = repeat_repo("cost-quiet", step=True, debt=True)
+        cfg, sid = new_cfg(), "cost-quiet"
+        env = git_counter(cfg)
+        capture(cfg, sid, MSG_ONE, cwd=root)
+        add_item(cfg, sid, ITEM_LINE)
+        first, first_calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID), extra_env=env)
+        self.assertEqual(first.code, 0, "the judging Stop exits 0; got %r" % (first.code,))
+        self.assertEqual(len(first_calls), 1, "the judging Stop makes one model call; got %d" % len(first_calls))
+        start = len(git_lines(env))
+        stopped, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID), extra_env=env)
+        self.assertEqual(stopped.code, 0, "a quiet Stop exits 0; got %r" % (stopped.code,))
+        self.assertEqual(calls, [], "a Stop with nothing new makes no model call")
+        self.assertEqual(git_lines(env, start), [], "a Stop with nothing new starts no git process")
+
+    def test_a_quiet_stop_changes_no_byte_under_the_config_folder(self):
+        root = repeat_repo("cost-quiet-bytes", step=True, debt=True)
+        cfg, sid = new_cfg(), "cost-quiet-bytes"
+        capture(cfg, sid, MSG_ONE, cwd=root)
+        add_item(cfg, sid, ITEM_LINE)
+        first, first_calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
+        self.assertEqual(first.code, 0, "the judging Stop exits 0; got %r" % (first.code,))
+        self.assertEqual(len(first_calls), 1, "the judging Stop makes one model call; got %d" % len(first_calls))
+        before = snapshot(cfg)
+        stopped, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
+        self.assertEqual(stopped.code, 0, "a quiet Stop exits 0; got %r" % (stopped.code,))
+        self.assertEqual(calls, [], "a Stop with nothing new makes no model call")
+        self.assertEqual(bytes_written(before, snapshot(cfg)), set(),
+                         "a quiet Stop changes no byte under the config folder")
+
+
 def main():
     try:
         for case in CASES:
             run_case(case)
+        if not cost_probe.run_class(CostTests):
+            RED_CASES.append("CostTests")
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
     if RED_CASES:
