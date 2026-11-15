@@ -107,9 +107,9 @@ def audit_folder(name):
     return folder
 
 
-def audit_expect(model, folder, setup, flagged, fragments=(), response="session started"):
+def audit_expect(model, folder, setup, flagged, fragments=(), response="session started", absent=()):
     """(ok, note) for one audit run. `setup(folder)` writes the handoff state first. A flagged start must print
-    additionalContext that holds each fragment; an unflagged start must print nothing."""
+    additionalContext that holds each fragment and none of `absent`; an unflagged start must print nothing."""
     if setup is not None:
         setup(folder)
     stdout, reason = audit_start(model, folder, response)
@@ -122,6 +122,9 @@ def audit_expect(model, folder, setup, flagged, fragments=(), response="session 
         return (not context), ("silent" if not context else "printed context: %s" % context[:80])
     if not context:
         return False, "the audit printed nothing for a start it should flag"
+    named = [fragment for fragment in absent if fragment in context]
+    if named:
+        return False, "the audit names %r as the new session" % named[0]
     missing = [fragment for fragment in fragments if fragment not in context]
     if missing:
         return False, "the audit's context lacks %r" % missing[0]
@@ -231,6 +234,30 @@ def audit_no_id_says_unread():
                         response={"content": [{"type": "text", "text": "done"}]})
 
 
+def audit_field_text_no_id_unread():
+    # The text holds a JSON field, not an id: the flag must not name the field as the session.
+    return audit_expect("haiku", audit_folder("field-text"), None, True, ("(id is unread)",),
+                        response='{"session_id":"local_x"}', absent=("(session_id)",))
+
+
+def audit_word_session_start_no_id_unread():
+    # A word that starts with session_ is not an id either.
+    return audit_expect("haiku", audit_folder("word-start"), None, True, ("(id is unread)",),
+                        response="session_start returned", absent=("(session_start)",))
+
+
+def audit_field_text_names_real_id():
+    # A field name before a real id: the flag names the id that follows, never the field.
+    return audit_expect("haiku", audit_folder("field-real-id"), None, True, ("(session_abc)",),
+                        response='{"session_id":"session_abc"}', absent=("(session_id)",))
+
+
+def audit_plain_text_real_id_control():
+    # Control: a real id in plain text is still named.
+    return audit_expect("haiku", audit_folder("plain-real-id"), None, True, ("(session_abc)",),
+                        response="session_abc started")
+
+
 def audit_bad_json_silent_exit0():
     return audit_text_silent("{not json", audit_folder("bad-json"))
 
@@ -286,6 +313,12 @@ for _label, _check in (
         ("fail open: a floor module that cannot import is silent, exit 0", audit_import_failure_silent_exit0),
         ("an errored start (is_error) with haiku prints nothing", audit_is_error_silent),
         ("an errored start (isError) with haiku prints nothing", audit_isError_silent),
-        ("a denied start with haiku prints nothing", audit_refused_silent)):
+        ("a denied start with haiku prints nothing", audit_refused_silent),
+        ("the flag does not name a JSON field as the session, and says the id is unread",
+         audit_field_text_no_id_unread),
+        ("the flag does not name the word session_start as the session, and says the id is unread",
+         audit_word_session_start_no_id_unread),
+        ("the flag names the real id after a field name, not the field", audit_field_text_names_real_id),
+        ("control: a real id in plain text is still named", audit_plain_text_real_id_control)):
     LOG_CHECKS_EXTRA.append(("start-session: " + _label, _check))
     FIXTURELESS_CHECKS.add(_check)
