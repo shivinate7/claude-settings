@@ -77,7 +77,7 @@ class PerJob(unittest.TestCase):
         self.assertIn("checks (cancelled)", got)
 
 
-NO_STEP_JOBS = {"all-jobs-passed", "ci-done"}
+NO_STEP_JOBS = {"all-jobs-passed", "ci-done", "push-skip", "nightly-skip"}  # the two skip jobs run only on push or schedule, so a wake step on a pull_request never fires
 
 
 def per_job_problems(text):
@@ -89,7 +89,7 @@ def per_job_problems(text):
         job = re.sub(r"^\s*#.*\n", "", job, flags=re.M)
         if not re.search(r"^    permissions:\s*\n(?:      [\w-]+: \w+\s*\n)*      pull-requests:\s*write\s*$", job, re.M):
             out.append(name + " lacks pull-requests: write")
-        step = re.search(r"- name: [^\n]*\n\s+if:\s*(.*)\n\s+uses:\s*\$/actions/ci-done-comment\s*\n\s*with:\s*\n\s*job:\s*(\S+)\s*$", job)
+        step = re.search(r"- name: [^\n]*\n\s+if:\s*(.*)\n\s+uses:\s*\$/actions/ci-done-comment\s*\n\s*with:\s*\n\s*job:\s*(\S+)(?:[ \t]+#[^\n]*)?\s*$", job)
         if not step:
             out.append(name + " has no ci-done-comment job step")
             continue

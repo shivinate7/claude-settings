@@ -45,7 +45,6 @@ jobs:
     permissions:
       contents: read
       actions: read
-      pull-requests: write
     outputs:
       skip: ${{ steps.decide.outputs.skip }}
     steps:
@@ -64,13 +63,6 @@ jobs:
           HEAD_SHA: ${{ github.sha }}
         run: python3 .github/scripts/nightly-skip.py
 
-      # A red job wakes the watching session at once; ci-done names any the step could not.
-      - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
-        uses: $/actions/ci-done-comment
-        with:
-          job: nightly-skip
-
   # The push skip job (decision push-skip-on-proven-tree; R62, step ci-linux-windows-once). It says skip when the push commit's tree
   # equals the head tree of a PR the commit belongs to (a batch-* PR, or a merged lone-lane PR) whose run passed: all-jobs-passed and
   # every suite job succeeded; a step scope skipped is no gap (the shared action actions/push-skip, ruling own-769-a-narrowed-pr-push).
@@ -83,7 +75,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: read
       checks: read
       actions: read
     outputs:
@@ -104,13 +96,6 @@ jobs:
           HEAD_SHA: ${{ github.sha }}
           PUSH_TREE: ${{ github.event.head_commit.tree_id }}
           EVENT: ${{ github.event_name }}
-
-      # A red job wakes the watching session at once; ci-done names any the step could not.
-      - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
-        uses: $/actions/ci-done-comment
-        with:
-          job: push-skip
 
   # Decides which jobs and suites a run needs (.github/scripts/ci-scope.sh). Every other job
   # needs it. An error in the script turns every flag on, never off. A job behind a scope flag always runs; its steps skip when the flag is off.
@@ -1351,7 +1336,7 @@ jobs:
         if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
         uses: $/actions/ci-done-comment
         with:
-          job: checks-waiting-page
+          job: checks-waiting-page  # glossary-ok: the job's existing id
 
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.

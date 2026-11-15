@@ -855,7 +855,8 @@ class LintMode(unittest.TestCase):
         # Each uses: step is matched by bin/ci-job's KNOWN_ACTION and LOCAL_ACTION, the patterns it plans lint steps from,
         # so no action name is copied here.
         ci_job = load_ci_job()
-        want, name, inside, failure_only = [], None, False, False
+        want, name, inside = [], None, False
+        failure_only = False
         with open(CHECKS, encoding="utf-8") as f:
             for line in f:
                 if re.match(r"^  [\w-]+:\s*$", line):
@@ -864,7 +865,8 @@ class LintMode(unittest.TestCase):
                     continue
                 m = re.match(r"^      - name: (.*?)\s*$", line)
                 if m:
-                    name, failure_only = m.group(1), False
+                    name = m.group(1)
+                    failure_only = False
                 if re.match(r"^        if: .*failure\(\)", line):
                     failure_only = True  # the red-job wake step runs only after a failed job: a lint run reads it `not run` (decision ci-wait-reads-run-status)
                 m = re.match(r"^        run: (python3 (?:lint|actions)/\S+\.py\b.*|bin/ste-changed\b.*|"
@@ -872,7 +874,9 @@ class LintMode(unittest.TestCase):
                 if m and "mutate" not in m.group(1):
                     want.append(name)
                 m = re.match(r"^        uses: (\S+)(?: #.*)?\s*$", line)
-                if m and not failure_only and (ci_job.KNOWN_ACTION.fullmatch(m.group(1)) or ci_job.LOCAL_ACTION.fullmatch(m.group(1))):
+                if failure_only:
+                    m = None  # a failure()-only step is no lint step
+                if m and (ci_job.KNOWN_ACTION.fullmatch(m.group(1)) or ci_job.LOCAL_ACTION.fullmatch(m.group(1))):
                     want.append(name)  # a known action, or this repo's own local action: ci-job plans each as a lint step
         self.assertGreater(len(want), 20)
         self.assertTrue({"Code check", ZIZMOR, "Rules and records move together"} <= set(want), want)
