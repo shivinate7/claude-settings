@@ -1,0 +1,385 @@
+#!/usr/bin/env python3
+"""Cases for hooks/start_check.py, the SessionStart hook. On a startup it stops the session when the machine is
+full (decision machine-load-brake) and when the model is below the floor (decision agent-model-cap). Stdlib only.
+Run it from the repository root:
+
+    python3 hooks/test_start_check.py
+
+Each case runs the hook as a subprocess, as Claude Code runs it: the SessionStart payload on stdin, the stop read
+back from stdout, the exit code read back. A driver patches the load reading, the cloud check and process spawning
+in hooks/guard.py, then runs the hook file, so no case reads the real machine load. A case that expects silence
+first checks that the same reading at startup prints one stop, so a hook that never ran cannot pass as silent.
+"""
+import collections
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+HOOK = os.path.join(HERE, "start_check.py")
+sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+RUN_FOLDER = _test_temp.run_folder()
+sys.path.insert(0, HERE)
+import guard  # noqa: E402  the one home of the load reading, the cloud check and the model floor (hooks/guard.py)
+
+HOOK_WAIT = 120  # a hang guard for the subprocess; no assert reads it
+ABSENT = object()  # a payload with no such key
+FULL = {"memory_pct": 96.0, "disk_free_gb": 50.0, "disk_total_gb": 100.0}
+BUSY = {"memory_pct": 90.0, "disk_free_gb": 50.0, "disk_total_gb": 100.0}
+NORMAL = {"memory_pct": 40.0, "disk_free_gb": 50.0, "disk_total_gb": 100.0}
+UNREAD = {"memory_pct": None, "disk_free_gb": None, "disk_total_gb": None}
+HAIKU = "claude-haiku-5-5"
+SONNET = "claude-sonnet-5-5"
+OPUS = "claude-opus-5-1"
+Run = collections.namedtuple("Run", "code out err")
+
+# The driver runs as `python3 -c`. It patches guard before the hook file runs. It writes SPAWN to stderr when a
+# process is started, and READ when the hook reads the load. A hook that is absent makes runpy raise, so the run
+# exits 1 with no stdout.
+DRIVER = r'''
+import json, os, runpy, subprocess, sys
+hooks, hook = os.environ["START_CHECK_HOOKS"], os.environ["START_CHECK_HOOK"]
+patch = json.loads(os.environ["START_CHECK_PATCH"])
+
+
+def refuse(*args, **kwargs):
+    sys.stderr.write("SPAWN\n")
+    raise OSError("a process was started")
+
+
+subprocess.Popen = refuse
+os.system = refuse
+os.popen = refuse
+sys.path.insert(0, hooks)
+import guard
+
+real_read_load = guard.read_load
+
+
+def read_load():
+    sys.stderr.write("READ\n")
+    if patch.get("read_error"):
+        raise OSError("the probe read failed")
+    if "reading" in patch:
+        return patch["reading"]
+    return real_read_load()
+
+
+guard.read_load = read_load
+guard.is_cloud = lambda: bool(patch.get("cloud"))
+if "load_full" in patch:
+    guard.load_full = lambda reading: list(patch["load_full"])
+code = 0
+try:
+    runpy.run_path(hook, run_name="__main__")
+except SystemExit as exc:
+    code = exc.code
+sys.exit(code)
+'''
+
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)
+
+
+def new_case():
+    """One folder per case under the run folder, with an empty cwd and a home that holds the config folder."""
+    case = tempfile.mkdtemp(dir=RUN_FOLDER)
+    os.makedirs(os.path.join(case, "home"))
+    os.makedirs(os.path.join(case, "cwd"))
+    return case
+
+
+def run_hook(case, stdin_text, patch=None, cloud=False, hook=HOOK):
+    env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
+    if cloud:
+        env["CLAUDE_CODE_REMOTE"] = "true"
+    home = os.path.join(case, "home")
+    env.update({"HOME": home, "USERPROFILE": home, "CLAUDE_CONFIG_DIR": os.path.join(home, ".claude"),
+                "PYTHONDONTWRITEBYTECODE": "1", "START_CHECK_HOOKS": HERE, "START_CHECK_HOOK": hook,
+                "START_CHECK_PATCH": json.dumps(dict(patch or {}, cloud=cloud))})
+    proc = subprocess.run([sys.executable, "-c", DRIVER], input=stdin_text.encode("utf-8"),
+                          cwd=os.path.join(case, "cwd"), env=env, capture_output=True, timeout=HOOK_WAIT)
+    return Run(proc.returncode, proc.stdout.decode("utf-8", "replace"), proc.stderr.decode("utf-8", "replace"))
+
+
+def payload_text(case, source="startup", model=ABSENT):
+    body = {"session_id": "start-check-cases", "cwd": os.path.join(case, "cwd"), "hook_event_name": "SessionStart"}
+    if source is not ABSENT:
+        body["source"] = source
+    if model is not ABSENT:
+        body["model"] = model
+    return json.dumps(body)
+
+
+def stop_of(test, run, cause):
+    """The stopReason of the one stop line the run printed. The line is a JSON object with continue false, and the
+    run exits 0."""
+    lines = [line for line in run.out.splitlines() if line.strip()]
+    test.assertEqual(len(lines), 1, "%s: want one stop line on stdout, got %d (exit %s)" % (cause, len(lines), run.code))
+    try:
+        out = json.loads(lines[0])
+    except ValueError:
+        test.fail("%s: the stop line is not JSON: %r" % (cause, lines[0]))
+    test.assertTrue(isinstance(out, dict) and out.get("continue") is False,
+                    "%s: the stop line lacks continue false: %r" % (cause, lines[0]))
+    reason = out.get("stopReason")
+    test.assertTrue(isinstance(reason, str) and reason, "%s: the stop line has no stopReason" % cause)
+    test.assertEqual(run.code, 0, "%s: want exit 0, got %s" % (cause, run.code))
+    return reason
+
+
+def assert_silent(test, run, cause):
+    """No stdout, exit 0, and no traceback: the hook fails open."""
+    test.assertEqual(run.out.strip(), "", "%s: want no stdout, got %r" % (cause, run.out))
+    test.assertEqual(run.code, 0, "%s: want exit 0, got %s" % (cause, run.code))
+    test.assertNotIn("Traceback", run.err, "%s: the hook raised an error" % cause)
+
+
+def listing(root):
+    """Every folder and file under root, relative to it, so a write of any name shows."""
+    found = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        for name in dirnames + filenames:
+            found.append(os.path.relpath(os.path.join(dirpath, name), root))
+    return sorted(found)
+
+
+class StartupLoadBrake(unittest.TestCase):
+    def test_full_memory_at_startup_stops_once_naming_the_reading(self):
+        case = new_case()
+        run = run_hook(case, payload_text(case), {"reading": FULL})
+        reason = stop_of(self, run, "startup on a full memory reading")
+        want = guard.load_full(FULL)
+        self.assertTrue(want, "scope: guard.load_full calls the full memory reading normal, so there is no text to expect")
+        self.assertIn(want[0], reason, "startup on a full memory reading: the stop does not name %r" % want[0])
+        self.assertIn("machine-load-brake", reason, "startup on a full memory reading: the stop does not name the decision")
+
+    def test_full_disk_at_startup_stops_once_naming_the_reading(self):
+        case = new_case()
+        disk = {"memory_pct": 40.0, "disk_free_gb": 4.9, "disk_total_gb": 100.0}
+        run = run_hook(case, payload_text(case), {"reading": disk})
+        reason = stop_of(self, run, "startup on a disk with 4.9 GB free of 100 GB")
+        want = guard.load_full(disk)
+        self.assertTrue(want, "scope: guard.load_full calls 4.9 GB free of 100 GB normal, so there is no text to expect")
+        self.assertIn(want[0], reason, "startup on a full disk: the stop does not name %r" % want[0])
+
+    def test_disk_full_line_is_the_smaller_of_five_percent_and_five_gb(self):
+        # The line for a 40 GB disk is 2 GB (five percent), not 5 GB.
+        case = new_case()
+
+        def small(free):
+            return {"memory_pct": 40.0, "disk_free_gb": free, "disk_total_gb": 40.0}
+
+        scope = run_hook(case, payload_text(case), {"reading": small(1.9)})
+        stop_of(self, scope, "scope: startup on a 40 GB disk with 1.9 GB free")
+        subject = run_hook(case, payload_text(case), {"reading": small(2.5)})
+        assert_silent(self, subject, "startup on a 40 GB disk with 2.5 GB free, above the 2 GB line")
+
+    def test_memory_exactly_at_the_full_line_is_not_full(self):
+        case = new_case()
+        scope = run_hook(case, payload_text(case), {"reading": dict(NORMAL, memory_pct=95.1)})
+        stop_of(self, scope, "scope: startup at 95.1% memory")
+        subject = run_hook(case, payload_text(case), {"reading": dict(NORMAL, memory_pct=95.0)})
+        assert_silent(self, subject, "startup at 95.0% memory, the full line itself")
+
+    def test_busy_machine_is_not_braked_at_startup(self):
+        case = new_case()
+        scope = run_hook(case, payload_text(case), {"reading": FULL})
+        stop_of(self, scope, "scope: startup on a full reading")
+        subject = run_hook(case, payload_text(case), {"reading": BUSY})
+        assert_silent(self, subject, "startup on a busy reading at 90% memory")
+
+    def test_unread_reading_prints_nothing(self):
+        case = new_case()
+        scope = run_hook(case, payload_text(case), {"reading": FULL})
+        stop_of(self, scope, "scope: startup on a full reading")
+        subject = run_hook(case, payload_text(case), {"reading": UNREAD})
+        assert_silent(self, subject, "startup on a reading with no value read")
+
+    def test_read_error_prints_nothing_and_exits_zero(self):
+        case = new_case()
+        scope = run_hook(case, payload_text(case), {"reading": FULL})
+        stop_of(self, scope, "scope: startup on a full reading")
+        subject = run_hook(case, payload_text(case), {"read_error": True})
+        assert_silent(self, subject, "startup when the load read raises")
+
+    def test_one_unread_value_does_not_hide_a_full_value(self):
+        case = new_case()
+        reading = {"memory_pct": 97.0, "disk_free_gb": None, "disk_total_gb": None}
+        run = run_hook(case, payload_text(case), {"reading": reading})
+        reason = stop_of(self, run, "startup with memory 97% and the disk unread")
+        want = guard.load_full(reading)
+        self.assertTrue(want, "scope: guard.load_full calls memory 97% with the disk unread full, so there is no text to expect")
+        self.assertIn(want[0], reason, "startup with memory 97% and the disk unread: the stop does not name %r" % want[0])
+
+    def test_a_reading_that_is_not_a_dict_prints_nothing(self):
+        case = new_case()
+        scope = run_hook(case, payload_text(case), {"reading": FULL})
+        stop_of(self, scope, "scope: startup on a full reading")
+        subject = run_hook(case, payload_text(case), {"reading": "full"})
+        assert_silent(self, subject, "startup when the load read returns a string")
+
+    def test_stop_text_comes_from_guard_load_full(self):
+        # The hook takes its words from guard.load_full, one home, so the probe text must reach the stop.
+        case = new_case()
+        run = run_hook(case, payload_text(case), {"reading": NORMAL, "load_full": ["probe reading text"]})
+        reason = stop_of(self, run, "startup where guard.load_full returns a probe reading")
+        self.assertIn("probe reading text", reason, "the stop does not carry the text guard.load_full returned")
+
+
+class BrakeOnlyAtStartup(unittest.TestCase):
+    def test_resume_compact_clear_and_fork_print_nothing_on_a_full_machine(self):
+        case = new_case()
+        scope = run_hook(case, payload_text(case, source="startup"), {"reading": FULL})
+        stop_of(self, scope, "scope: startup on a full reading")
+        for source in ("resume", "compact", "clear", "fork"):
+            with self.subTest(source=source):
+                run = run_hook(case, payload_text(case, source=source), {"reading": FULL})
+                assert_silent(self, run, "source %s on a full reading" % source)
+
+    def test_a_payload_with_no_source_prints_nothing(self):
+        case = new_case()
+        scope = run_hook(case, payload_text(case), {"reading": FULL})
+        stop_of(self, scope, "scope: startup on a full reading")
+        subject = run_hook(case, payload_text(case, source=ABSENT), {"reading": FULL})
+        assert_silent(self, subject, "a payload with no source key on a full reading")
+
+
+class CloudSession(unittest.TestCase):
+    def test_a_cloud_session_is_never_braked(self):
+        case = new_case()
+        scope = run_hook(case, payload_text(case), {"reading": FULL})
+        stop_of(self, scope, "scope: startup on a full reading, not cloud")
+        subject = run_hook(case, payload_text(case), {"reading": FULL}, cloud=True)
+        assert_silent(self, subject, "startup on a full reading in a cloud session")
+
+
+class ModelFloor(unittest.TestCase):
+    def test_haiku_at_startup_stops_once_naming_the_model_and_decision(self):
+        case = new_case()
+        run = run_hook(case, payload_text(case, model=HAIKU), {"reading": NORMAL})
+        reason = stop_of(self, run, "startup on model %s" % HAIKU)
+        want = guard.floor_hit(guard.SESSION_TOOL, {"model": HAIKU})
+        self.assertTrue(want, "scope: guard.floor_hit does not name %s below the floor" % HAIKU)
+        self.assertIn(want, reason, "startup on %s: the stop does not name the model" % HAIKU)
+        self.assertIn("agent-model-cap", reason, "startup on %s: the stop does not name the decision" % HAIKU)
+
+    def test_each_below_the_floor_spelling_stops(self):
+        for model in (HAIKU, "haiku", "Claude-Haiku-5-5"):
+            with self.subTest(model=model):
+                case = new_case()
+                run = run_hook(case, payload_text(case, model=model), {"reading": NORMAL})
+                stop_of(self, run, "startup on model %s" % model)
+
+    def test_sonnet_opus_and_no_model_print_nothing(self):
+        case = new_case()
+        scope = run_hook(case, payload_text(case, model=HAIKU), {"reading": NORMAL})
+        stop_of(self, scope, "scope: startup on model %s" % HAIKU)
+        for model in (SONNET, OPUS, ABSENT, "", None):
+            with self.subTest(model=model):
+                run = run_hook(case, payload_text(case, model=model), {"reading": NORMAL})
+                assert_silent(self, run, "startup on model %r" % (model,))
+
+    def test_the_floor_applies_only_at_startup(self):
+        case = new_case()
+        scope = run_hook(case, payload_text(case, model=HAIKU), {"reading": NORMAL})
+        stop_of(self, scope, "scope: startup on model %s" % HAIKU)
+        for source in ("resume", "compact", "clear", "fork"):
+            with self.subTest(source=source):
+                run = run_hook(case, payload_text(case, source=source, model=HAIKU), {"reading": NORMAL})
+                assert_silent(self, run, "source %s on model %s" % (source, HAIKU))
+
+    def test_a_haiku_startup_on_a_full_machine_gives_one_stop_naming_the_model(self):
+        # The model is checked before the load, so this stop names the model. One stop line only.
+        case = new_case()
+        run = run_hook(case, payload_text(case, model=HAIKU), {"reading": FULL})
+        reason = stop_of(self, run, "startup on model %s and a full reading" % HAIKU)
+        want = guard.floor_hit(guard.SESSION_TOOL, {"model": HAIKU})
+        self.assertTrue(want, "scope: guard.floor_hit does not name %s below the floor" % HAIKU)
+        self.assertIn(want, reason, "startup on %s and a full reading: the stop does not name the model" % HAIKU)
+        self.assertIn("agent-model-cap", reason, "startup on %s and a full reading: the stop does not name the decision" % HAIKU)
+
+
+class FailOpen(unittest.TestCase):
+    def test_bad_payloads_print_nothing_and_exit_zero_even_on_a_full_machine(self):
+        case = new_case()
+        scope = run_hook(case, payload_text(case), {"reading": FULL})
+        stop_of(self, scope, "scope: startup on a full reading")
+        bad = ("", "not json", "{", "[]", '"startup"', "null", "42", "{}", '{"source": 5}',
+               '{"source": null}', '{"source": ["startup"]}')
+        for text in bad:
+            with self.subTest(payload=text):
+                run = run_hook(case, text, {"reading": FULL})
+                assert_silent(self, run, "payload %r on a full reading" % text)
+
+
+class CostProof(unittest.TestCase):
+    def test_a_braked_startup_starts_no_process_and_writes_no_file(self):
+        case = new_case()
+        before = (listing(case), listing(HERE))
+        run = run_hook(case, payload_text(case), {"reading": FULL})
+        stop_of(self, run, "scope: startup on a full reading")
+        self.assertNotIn("SPAWN", run.err, "startup on a full reading started a process")
+        self.assertEqual((listing(case), listing(HERE)), before, "startup on a full reading wrote a file")
+
+    def test_a_model_floor_stop_starts_no_process_and_writes_no_file(self):
+        case = new_case()
+        before = (listing(case), listing(HERE))
+        run = run_hook(case, payload_text(case, model=HAIKU), {"reading": NORMAL})
+        stop_of(self, run, "scope: startup on model %s" % HAIKU)
+        self.assertNotIn("SPAWN", run.err, "a startup below the floor started a process")
+        self.assertEqual((listing(case), listing(HERE)), before, "a startup below the floor wrote a file")
+
+    def test_an_unbraked_startup_reads_the_load_and_starts_no_process(self):
+        # No reading is patched, so the hook reads the real load on this machine. The stop, if any, is not asserted.
+        case = new_case()
+        before = (listing(case), listing(HERE))
+        run = run_hook(case, payload_text(case, model=SONNET), {})
+        self.assertIn("READ", run.err, "scope: a startup did not read the load")
+        self.assertEqual(run.code, 0, "a startup that reads the load exits %s, want 0" % run.code)
+        self.assertNotIn("SPAWN", run.err, "a startup that reads the load started a process")
+        self.assertEqual((listing(case), listing(HERE)), before, "a startup that reads the load wrote a file")
+
+
+class HarnessControls(unittest.TestCase):
+    """Green on the code as it stands. They pin the guard readings the hook uses, and that the driver's patches
+    and spawn refusal reach guard, so a red above is the hook's and not the harness's."""
+
+    def test_control_load_full_names_the_memory_reading(self):
+        full = guard.load_full(FULL)
+        self.assertEqual(len(full), 1, "guard.load_full names %r for a full memory reading, want one line" % (full,))
+        self.assertIn("96.0", full[0])
+        self.assertEqual(guard.load_full(NORMAL), [], "guard.load_full names a normal reading as full")
+
+    def test_control_floor_reading_names_only_haiku(self):
+        self.assertEqual(guard.floor_hit(guard.SESSION_TOOL, {"model": HAIKU}), HAIKU)
+        self.assertEqual(guard.floor_hit(guard.SESSION_TOOL, {"model": SONNET}), "")
+
+    def test_control_driver_patch_reaches_guard(self):
+        case = new_case()
+        stand_in = os.path.join(case, "probe_hook.py")
+        with open(stand_in, "w", encoding="utf-8") as handle:
+            handle.write("import guard, json\nprint(json.dumps(guard.read_load()))\n")
+        run = run_hook(case, "{}", {"reading": FULL}, hook=stand_in)
+        self.assertEqual(run.code, 0, "the driver probe exits %s, want 0: %s" % (run.code, run.err[-200:]))
+        self.assertEqual(json.loads(run.out), FULL, "the driver's reading patch does not reach guard.read_load")
+
+    def test_control_importing_guard_starts_no_process(self):
+        case = new_case()
+        stand_in = os.path.join(case, "empty_hook.py")
+        with open(stand_in, "w", encoding="utf-8") as handle:
+            handle.write("pass\n")
+        run = run_hook(case, "{}", {}, hook=stand_in)
+        self.assertNotIn("SPAWN", run.err, "importing hooks/guard.py started a process")
+        self.assertEqual(run.code, 0, "the import probe exits %s, want 0" % run.code)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
