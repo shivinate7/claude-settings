@@ -2569,7 +2569,6 @@ def _sender_facts(transcript: str, own_id):
     checkout's origin is not used: a session may coordinate one repo from another's checkout, so only its own record
     says which repo its sessions belong to. parent: the parent_session_id of that record, or None. made: the lanes
     the sender created, {id: tags}. Each is empty or None when the transcript does not read."""
-    from shared_names import REPO_TAG
     if not (own_id and transcript):
         return None, None, {}
     try:
