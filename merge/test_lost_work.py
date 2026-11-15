@@ -46,6 +46,7 @@ import datetime
 import inspect
 import io
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -181,10 +182,10 @@ class LostWorkFixture(unittest.TestCase):
         roadmap.git(self.repo, "push", "-q", "origin", "%s:refs/heads/%s" % (sha, name))
         self.branches.append({"name": name})
 
-    def pr(self, n, parent=None, head_ref=None, session="session_a", log=None, at=60, files=None):
+    def pr(self, n, parent=None, head_ref=None, session="session_a", log=None, at=60, files=None, lint=True):
         """Open pull request n on main. `log` is "done", "open" or "bad", a review log posted `at` minutes before now (a done log comes with a
-        lane-lint PASS at its head, a bad one does not parse), or None for no review log. `session` is the lane session in the body's footer (None:
-        no footer). `files` (path -> text) are the files its commit adds."""
+        lane-lint PASS at its head unless `lint` is False, and a bad one does not parse), or None for no review log. `session` is the lane session
+        in the body's footer (None: no footer). `files` (path -> text) are the files its commit adds."""
         sha = self.commit_on(parent or self.main, files, "pr %d" % n)
         roadmap.git(self.repo, "push", "-q", "origin", "%s:refs/pull/%d/head" % (sha, n))
         self.heads[n] = sha
@@ -196,7 +197,7 @@ class LostWorkFixture(unittest.TestCase):
         elif log:
             rounds = ROUNDS_DONE if log == "done" else ROUNDS_OPEN
             self.comments.append(tm.review_comment(1000 + n * 10, n, tm.record_text(rounds=rounds, head=sha, n=n), created=iso_before(at)))
-            if log == "done":
+            if log == "done" and lint:
                 self.comments.append(tm.lint_of(n, sha))
 
     def lane(self, sid, status=RUNNING, bucket=roadmap.BUCKET_WORKING, step="c1"):
@@ -218,6 +219,17 @@ class LostWorkFixture(unittest.TestCase):
         h = tm.PullsHost(list(self.pulls), dict(self.checks), comments=list(self.comments), repo=REPO_SLUG, count_gh=count_gh)
         h.cwd, h.now = str(self.repo), (lambda: NOW)
         return h
+
+    @contextlib.contextmanager
+    def in_checkout(self):
+        """Run merge.main from the fixture's checkout, as a merge run starts inside its checkout: the command line reads the checkout at the
+        process directory (git rev-parse --show-toplevel), so a case that calls it must not depend on the directory the suite was started in."""
+        prior = os.getcwd()
+        os.chdir(str(self.repo))
+        try:
+            yield
+        finally:
+            os.chdir(prior)
 
     def block(self, h, live=True):
         """The lines of reviewed_block(h), read with the live file when `live`. A merge.py with no live= seam reads the lines alone, so the case
@@ -274,6 +286,30 @@ class LostWorkRows(LostWorkFixture):
         roadmap.git(self.repo, "push", "-q", "origin", "%s:refs/heads/main" % self.main)
         lines = self.block(self.host())
         self.assertEqual(rows_for(lines, 7), [], "a state-a row for #7 whose head main already holds, so nothing is left to merge: %r" % lines)
+
+    # A done review log with no lane-lint: the review read's state is the state of the log, so state a reads it as done (not as "no lint").
+
+    def test_a_done_log_with_no_lint_past_six_hours_lists_a_row(self):
+        self.pr(8, log="done", at=361, session="session_b")  # control: the same log with its lane-lint PASS lists its row
+        self.pr(7, log="done", at=361, lint=False)
+        self.lane("session_a", status=IDLE, bucket=roadmap.BUCKET_COMPLETED)  # #7's lane idle 13 h
+        self.lane("session_b")
+        self.thread(7, minutes=781)
+        self.publish()
+        lines = self.block(self.host())
+        self.assertEqual(rows_for(lines, 8), [("a", owner_of("a"))], "control: no state-a row for #8, a done log 361 minutes old with its lane-lint PASS: %r" % lines)
+        self.assertEqual(rows_for(lines, 7), [("a", owner_of("a"))], "no state-a row for #7, a done log 361 minutes old with no lane-lint: %r" % lines)
+
+    def test_a_done_log_with_no_lint_younger_than_six_hours_lists_no_row(self):
+        self.pr(8, log="done", at=361, lint=False, session="session_b")  # control: an old done log with no lane-lint lists its row
+        self.pr(7, log="done", at=60, lint=False)
+        self.lane("session_a")
+        self.lane("session_b", status=IDLE, bucket=roadmap.BUCKET_COMPLETED)
+        self.thread(8, minutes=781)
+        self.publish()
+        lines = self.block(self.host())
+        self.assertEqual(rows_for(lines, 8), [("a", owner_of("a"))], "control: no state-a row for #8, an old done log with no lane-lint: %r" % lines)
+        self.assertEqual(rows_for(lines, 7), [], "a row for #7, a done log 60 minutes old with no lane-lint, under the six-hour line: %r" % lines)
 
     # State b: an open or bad review log older than LOST_WORK_DONE_HOURS (6 h). Nothing is sent to a lane; a younger log lists no row, so a pull
     # request under normal review does not read as lost.
@@ -492,6 +528,40 @@ class LostWorkRows(LostWorkFixture):
         rows = rows_for(self.block(self.host()), 7)
         self.assertEqual([state for state, _why in rows], ["unknown"], "no unknown row for #7, whose footer session is absent from the live lanes: %r" % rows)
 
+    def test_a_pr_with_no_footer_and_no_log_lists_an_unknown_row(self):
+        # The controls first: a footer with no log and a live lane lists nothing, a log with no footer keeps its rows, and no unknown row shows.
+        self.pr(8, log=None, session="session_b")
+        self.pr(9, log="done", at=60, session=None)
+        self.pr(10, log="done", at=361, session=None)  # control: a done log past six hours with no footer lists its state-a row
+        self.lane("session_b")
+        self.publish()
+        lines = self.block(self.host())
+        self.assertEqual(rows_for(lines, 10), [("a", owner_of("a"))], "control: no state-a row for #10, a done log 361 minutes old with no footer: %r" % lines)
+        self.assertEqual(rows_for(lines, 8), [], "a row for #8, whose lane is live and whose footer names it: %r" % lines)
+        self.assertEqual(rows_for(lines, 9), [], "a row for #9, a healthy done log with no footer: %r" % lines)
+        self.pr(7, log=None, session=None)  # the subject: no footer and no review log, so the lane cannot be read
+        self.publish()
+        lines = self.block(self.host())
+        rows = rows_for(lines, 7)
+        self.assertEqual([state for state, _why in rows], ["unknown"], "no unknown row for #7, a PR with no footer and no review log: %r" % lines)
+        self.assertTrue(rows[0][1].endswith("; owner coordinator"), "the unknown row for #7 is not owned by the coordinator: %r" % rows)
+
+    def test_an_unknown_lane_row_carries_the_read_cite(self):
+        read_cite = getattr(merge, "READ_CITE", None)
+        if read_cite is None:
+            self.fail("merge.READ_CITE is not defined, so a lane-read unknown row has no decision to cite")
+        self.pr(7, log=None)
+        self.lane("session_a", status=IDLE, bucket=None)  # a lane row with no status_bucket: its unknown row
+        self.thread(7, minutes=2000)
+        self.pr(8, log=None, session="session_nowhere")  # a footer that names no live lane: its unknown row
+        self.publish()
+        lines = self.block(self.host())
+        for n in (7, 8):
+            unknown = [why for state, why in rows_for(lines, n) if state == "unknown"]
+            with self.subTest(pr=n):
+                self.assertEqual(len(unknown), 1, "scope: no unknown row for #%d: %r" % (n, lines))
+                self.assertIn(read_cite, unknown[0], "the unknown row for #%d does not carry the read cite %s: %r" % (n, read_cite, unknown[0]))
+
     # The plain run, and the live file's cost.
 
     def test_plain_reviewed_run_prints_the_lost_work_rows(self):
@@ -502,7 +572,7 @@ class LostWorkRows(LostWorkFixture):
         self.thread(8, minutes=781)
         self.publish()
         stdout = io.StringIO()
-        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(io.StringIO()):
+        with self.in_checkout(), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(io.StringIO()):
             try:
                 merge.main(["--reviewed", "--live", str(self.live)], host=self.host())
             except SystemExit:
@@ -712,6 +782,17 @@ class LostWorkRows(LostWorkFixture):
                 self.assertEqual(len(found), 1, "scope: no state-%s row for #%d: %r" % (state, n, lines))
                 self.assertIn("review log", found[0], "the state-%s row for #%d does not name the review log: %r" % (state, n, found[0]))
                 self.assertIsNone(re.search(r"\brecord\b", found[0]), "the state-%s row for #%d names a record where the review log stands: %r" % (state, n, found[0]))
+
+
+class LostWorkHelp(unittest.TestCase):
+    def test_the_live_reviewed_cost_names_the_lost_work_reads(self):
+        doc = merge.__doc__ or ""
+        start = doc.find("merge --reviewed [--root DIR ...] --live FILE")
+        end = doc.find("merge --reviewed --live FILE --ledger", start + 1) if start >= 0 else -1
+        section = doc[start:end] if start >= 0 and end > start else ""
+        self.assertTrue(section, "the usage text has no entry for merge --reviewed [--root DIR ...] --live FILE")
+        for needle in ("refs/lost-work", "rev-list"):
+            self.assertIn(needle, section, "the cost line under merge --reviewed --live FILE does not name %s: %r" % (needle, section[-300:]))
 
 
 class LostWorkOwners(unittest.TestCase):
@@ -955,7 +1036,7 @@ class LostWorkLedger(LostWorkFixture):
             argv += ["--subsumed", str(subsumed)]
         stdout, stderr = io.StringIO(), io.StringIO()
         rc = None
-        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        with self.in_checkout(), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             try:
                 rc = merge.main(argv, host=host)
             except SystemExit as e:
