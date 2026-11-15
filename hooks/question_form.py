@@ -8,8 +8,11 @@ question-form holds the ruling; rule `style-question-form` holds the text.
 
 ("", "") is a pass. hooks/call_judge.py calls chat_hit and page_item_hit; hooks/guard.py data_tool_hit calls
 page_item_hit, which filters the ArtifactData writes by collection and url and then calls item_hit; a write to another page gets only the check for an option keyed none. Nothing here writes a file. The only processes it starts are the git reads of past_rulings (the roadmap step notes, and the ruled store: one ls-tree, one cat-file, and one more when an entry names `lands_in`), for a caller that makes a model call anyway.
+departs_ruling_hit reads only text and candidates it is given: no process, no file.
 
-    past_rulings(text, repo_root) -> (candidates, unknown)   the decision, debt and step rulings the judge reads
+    past_rulings(text, repo_root, focus=None) -> (candidates, unknown)   the decision, debt and step rulings the judge
+                                              reads; `focus` (the Departs from text) ranks its overlap first under the caps
+    departs_ruling_hit(text, candidates) -> (ruling id, line)   an open ruling the Departs from line shares 3+ words with
     key_overlap(reply, earlier)   -> clashing option keys     lint/report_guard.py rule question-keys
 
 THE FORM. A decision on the page (in `context`), or a chat question with 2+ options (in `question`):
@@ -1834,6 +1837,7 @@ CHAT_REASONS = {"uniform-pick": CHAT_WIDENS_REASON, "press-link": CHAT_PRESS_LIN
 # ruling sentences of the `roadmap` ref's step notes (the 30 with the most word overlap). Closed page items are
 # always unknown: a hook cannot call the Artifact tool, and the decision records carry their rulings.
 # Cost: one git process, only when the caller already makes a model call; no file written.
+# `departs_ruling_hit` adds no process: it compares the Departs from line with the candidates already read.
 PAST_RULING_RULE = "past-ruling"
 UNVETTED_LINE = re.compile(r"^[ \t>*+-]*Unvetted:[ \t]*\S", re.I | re.M)
 UNREADABLE = "unreadable"
@@ -1858,6 +1862,38 @@ def has_unvetted(text) -> bool:
 
 def _words(text) -> set:
     return set(WORD.findall(str(text).lower())) - STOPWORDS
+
+
+def departs_text(text) -> str:
+    """The text of every Departs from line of `text`, both sides, joined: the topic the question says it departs on."""
+    return " ".join(DEPARTS_LINE.findall(str(text or "")))
+
+
+# A Based on (ruling) line: the question names the ruling it builds on (the kind check is BASED_LINE's, this reads the text).
+BASED_RULING_LINE = re.compile(r"^[ \t]*Based on[ \t]*\(ruling\):[ \t]*([^\n]*)", re.I | re.M)
+DEPARTS_SHARED_MIN = 3
+# A ruled-store candidate ends with its metadata; the check reads the ruling only, since a supersedes ref holds topic words.
+RULED_META = re.compile(r" \((?:owner [^()]*; open, not on main; supersedes .*)\)(?: \(unchecked, not law\))?$", re.S)
+
+
+def departs_ruling_hit(text, candidates):
+    """(ruling id, candidate line) of the first open ruling whose words share DEPARTS_SHARED_MIN or more with the Departs
+    from lines of `text`, when no `Based on (ruling)` line of `text` names that id (bare or with `ruled:`); else ("", "").
+    A candidate counts when its id starts `ruled:` or is a step id, never `decisions/` or `debts/`. An `Unvetted:` line skips it."""
+    focus = _words(departs_text(text))
+    if not focus or has_unvetted(text):
+        return "", ""
+    cited = " ".join(BASED_RULING_LINE.findall(text))
+    for line in candidates:
+        rid, _, body = line.partition(": ")
+        if not body or rid.startswith(("decisions/", "debts/")):
+            continue
+        bare = rid[len("ruled:"):] if rid.startswith("ruled:") else rid
+        if len(focus & _words(RULED_META.sub("", body))) < DEPARTS_SHARED_MIN:
+            continue
+        if not re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(bare), cited):
+            return rid, line
+    return "", ""
 
 
 def _ruling_text(body) -> str:
@@ -1983,9 +2019,9 @@ def _read_steps(root):
                 pass
 
 
-def _step_rulings(steps, words):
-    """The top STEP_TOP ruling units of the step notes by word overlap with `words`, as `<step id>: <text>`
-    lines. A unit is a sentence holding Ruling, owner or shiv, plus the sentence after it (a ruling's detail
+def _step_rulings(steps, words, focus=frozenset()):
+    """The top STEP_TOP ruling units of the step notes by word overlap with `words` (the overlap with `focus` first),
+    as `<step id>: <text>` lines. A unit is a sentence holding Ruling, owner or shiv, plus the sentence after it (a ruling's detail
     often sits there). Overlap 0 never counts."""
     scored = []
     for step_id, fields in sorted(steps.items()):
@@ -1997,15 +2033,15 @@ def _step_rulings(steps, words):
             unit = (sentence + " " + tail).strip()
             overlap = len(_words(unit) & words)
             if overlap:
-                scored.append((-overlap, len(scored), "%s: %s" % (step_id, unit)))
-    return [line for _, _, line in sorted(scored)[:STEP_TOP]]
+                scored.append((-len(_words(unit) & focus), -overlap, len(scored), "%s: %s" % (step_id, unit)))
+    return [line for *_, line in sorted(scored)[:STEP_TOP]]
 
 
-def _ruled_candidates(roots, unknown, words):
+def _ruled_candidates(roots, unknown, words, focus=frozenset()):
     """The open entries of the ruled store (lint/ruled_store.py, the one reader) whose ruling shares a word with the
     question (`words`, the step rulings' word test), as
-    `ruled:<id>: <ruling> (owner <at>; open, not on main; supersedes <refs>)`, the most shared words first and the
-    newest first among equal counts, at most RULED_TOP. An unchecked entry (supersedes_none starts with "unread") ends
+    `ruled:<id>: <ruling> (owner <at>; open, not on main; supersedes <refs>)`, the most words shared with `focus` first,
+    then the most shared with the question, then the newest, at most RULED_TOP. An unchecked entry (supersedes_none starts with "unread") ends
     with " (unchecked, not law)". The store is read from the first root that has one: the repo, else the
     claude-settings checkout. No store anywhere adds "ruled store (absent)"; a store git failed to read adds
     "ruled store (unreadable: git)"."""
@@ -2026,8 +2062,9 @@ def _ruled_candidates(roots, unknown, words):
             scored = [(len(_words(str(e.get("ruling", ""))) & words), e) for e in opened]
             newest = sorted((pair for pair in scored if pair[0]), key=lambda pair: ruled_store.entry_instant(pair[1]),
                             reverse=True)
-            # The sort is stable: most shared words first, and the newest first among equal counts.
-            for _count, entry in sorted(newest, key=lambda pair: -pair[0])[:RULED_TOP]:
+            # The sort is stable: focus overlap first, then shared words, and the newest first among equal counts.
+            ranked = sorted(newest, key=lambda pair: (-len(_words(str(pair[1].get("ruling", ""))) & focus), -pair[0]))
+            for _count, entry in ranked[:RULED_TOP]:
                 ruling = " ".join(str(entry.get("ruling", "")).split())[:INDEX_CAP]
                 mark = " (unchecked, not law)" if ruled_store.is_unchecked(entry) else ""
                 lines.append("ruled:%s: %s (owner %s; open, not on main; supersedes %s)%s"
@@ -2040,12 +2077,15 @@ def _ruled_candidates(roots, unknown, words):
     return []
 
 
-def past_rulings(question_text, repo_root):
+def past_rulings(question_text, repo_root, focus=None):
     """(candidates, unknown). `candidates` are lines `<id>: <text>`: the (up to eight) open ruled-store entries that share words with the question, as `ruled:<id>`, every decision and debt record, then the step
     rulings that share words with the question. `unknown` lists each source not searched: "<source> (absent)"
     for a source the repo does not have, "<source> (unreadable: ...)" for one that exists and failed, and always
-    "closed page items". Absent sources never refuse; unreadable ones do (see unreadable_sources)."""
+    "closed page items". Absent sources never refuse; unreadable ones do (see unreadable_sources). `focus` is the
+    Departs from text: the ruled-store and step rulings that share the most words with it rank first, so the caps
+    never cut the ruling on the Departs topic."""
     candidates, unknown, seen = [], [], set()
+    focus_words = _words(focus or "")
     roots = [repo_root]
     try:
         import guard_pointer  # the claude-settings checkout: the one home of the pointer line
@@ -2056,7 +2096,7 @@ def past_rulings(question_text, repo_root):
         unknown.append("claude-settings decision records (absent)")
     elif os.path.realpath(other) != os.path.realpath(repo_root):
         roots.append(other)
-    candidates += _ruled_candidates(roots, unknown, _words(question_text))
+    candidates += _ruled_candidates(roots, unknown, _words(question_text), focus_words)
     for folder, label in (("decisions", "decision records"), ("debts", "debt records")):
         found = False
         for root in roots if folder == "decisions" else roots[:1]:
@@ -2067,7 +2107,7 @@ def past_rulings(question_text, repo_root):
             unknown.append("%s (absent)" % label)
     steps, state = _read_steps(repo_root)
     if state == "ok":
-        candidates += _step_rulings(steps, _words(question_text))
+        candidates += _step_rulings(steps, _words(question_text), focus_words)
     elif state == "absent":
         unknown.append("roadmap step notes (absent)")
     else:

@@ -32,7 +32,9 @@ practice (note page-judge-dead-fragment-fields).
 Veto (an act no override lifts): an Explore spawn whose model field is neither sonnet nor opus. That
 is the Explore row of agent-model-cap, a model guard. Every other refusal is liftable.
 
-A question (a box with 2+ options, a page decision) also gets item 8, the past-ruling check: question_form.past_rulings
+A question (a box with 2+ options, a page decision) also gets item 8, the past-ruling check. First the Departs from lines
+are matched against the open rulings (question_form.departs_ruling_hit): a hit refuses with no model call, unless the
+question cites that ruling under `Based on (ruling)` or carries an `Unvetted:` line. Then question_form.past_rulings
 adds the decision, debt and step rulings to the same one model call. The check always runs; a task gets it too. When it cannot
 run (a model error, a source that exists and cannot be read, or a refusal that cites a record the model was not
 shown), the question is refused with the Unvetted remedy, unless its own text carries an `Unvetted:` line. An absent
@@ -366,15 +368,32 @@ def unvetted(payload, tool, args, rule, why, units):
 
 
 def past_ruling_context(payload, units):
-    """(prompt tail, candidate ids, unreadable sources) for the questions in `units`. Prints the one stderr line for
-    the sources not searched. The only process of a judged call besides the model runs here."""
+    """(prompt tail, candidates, unreadable sources) for the questions in `units`. Prints the one stderr line for
+    the sources not searched. The only process of a judged call besides the model runs here. The Departs from lines
+    rank the rulings first, so the caps keep the ruling on that topic."""
     import question_form
     cwd = payload.get("cwd") or ""
+    focus = " ".join(question_form.departs_text(marker) for marker, _ in units)
     candidates, unknown = question_form.past_rulings(" ".join(words for _, words in units),
-                                                     question_form._git_root_of(cwd) or cwd or os.getcwd())
+                                                     question_form._git_root_of(cwd) or cwd or os.getcwd(), focus)
     print(question_form.unknown_line(unknown), file=sys.stderr)
-    return (question_form.candidates_block(candidates, unknown), question_form.candidate_ids(candidates),
-            question_form.unreadable_sources(unknown))
+    return (question_form.candidates_block(candidates, unknown), candidates, question_form.unreadable_sources(unknown))
+
+
+DEPARTS_RULING_REASON = (
+    "the Departs from line shares its topic with the open ruling %s: %s Cite it under `Based on (ruling): %s`, or change "
+    "the question so it does not ask what that ruling settled.")
+
+
+def departs_ruling_refusal(units, candidates):
+    """The reason to refuse a question whose Departs from line meets an open ruling it does not cite, else ""."""
+    import question_form
+    for marker, _ in units:
+        rid, line = question_form.departs_ruling_hit(marker, candidates)
+        if rid:
+            return DEPARTS_RULING_REASON % (rid, " ".join(line.split())[:240], rid)
+    return ""
+
 
 
 def main():
@@ -413,9 +432,13 @@ def main():
             shown = json.dumps(args, ensure_ascii=False)
         tail, ids = "", []
         if units:
-            tail, ids, unreadable = past_ruling_context(payload, units)
+            tail, candidates, unreadable = past_ruling_context(payload, units)
+            ids = question_form.candidate_ids(candidates)
             if unreadable:
                 return unvetted(payload, tool, args, rule, "; ".join(unreadable), units)
+            reason = departs_ruling_refusal(units, candidates)  # a ruling the question ignores: no model call
+            if reason:
+                return refuse(payload, tool, args, question_form.PAST_RULING_RULE, reason)
         full = prompt % shown
         if reask:
             full += "\n" + NONE_DIRECTION_RULE  # after `%`, so the rule's text never meets the formatter
