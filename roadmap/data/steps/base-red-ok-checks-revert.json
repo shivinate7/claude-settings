@@ -1,0 +1,14 @@
+{
+ "id": "base-red-ok-checks-revert",
+ "title": "The merge tool checks that a --base-red-ok PR really is the revert of the breaking merge; any other PR stays refused",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJKzCZ1krtxV8AmLaddU",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Coordinator 20:32 CST Nov 14 (data; triage read no code): lane base-red-ok-checks-revert (session_013NEJKzCZ1krtxV8AmLaddU, sonnet; get_session 20:33 CST reads idle, connected, bucket review_ready) adds a merge-tool check that a `--base-red-ok` PR is the revert of the breaking merge. A PR that is not stays refused; an unreadable case reads unknown. It does not touch the no-prompt rule of #3097. Its first act sends the coordinator the route (how the tool finds the blamed commit) with a Departs from line. Basis: the consultant 20:32 CST picked option 2 (narrow first) on item 791: the only merge the owner's rules allow onto a red main is the revert of the blamed commit (git-red-main-reverts; git-never-merge-failing-ci); option 1 lets any merge typed with --base-red-ok and a reason run unprompted, so a non-revert can land on a red main unseen. Safe under either answer on item 791 (the owner's typed B and the consultant's 2 differ; item 791 stays open). Guard/check change: its verdict can change, so review rounds and the net-value test apply; it refuses what main refuses, and its allow-list is the constant the tool emits (building-allow-list-is-the-constant). #3097 (step allow-merge-base-red-ok) waits for item 791 and for this check. OVERLAP, unchecked: step merge-red-base-resume-on-merge (doing since 21:01 CST Nov 13; lane merge-tool-audit-fixes, session_013NEJL1k9L6aaoYwt9rkang, idle and disconnected at 20:33 CST) names the same half (\"--base-red-ok covers only that revert\"); whether that lane built it is unread. The new lane's first read also settles which step owns it; one home per capability.",
+ "source": "coordinator 20:32 CST Nov 14 (lane started); consultant 20:32 CST pick 2 on item 791",
+ "note": "Filed 20:34 CST Nov 14 by triage. Doing: lane session_013NEJKzCZ1krtxV8AmLaddU. Kin: allow-merge-base-red-ok, merge-red-base-resume-on-merge, revert-merge-lifts-red-main.",
+ "updatedAt": "2026-11-14T20:34:00-06:00"
+}
