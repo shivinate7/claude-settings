@@ -1,0 +1,45 @@
+name: stable
+
+# Moves the stable branch to a main commit whose checks run finished green. Sessions install from
+# stable, so a red main never reaches them. The job reads the run's result and runs no check of
+# its own. Only a push run on main counts: a pull request run never moves stable.
+# zizmor flags workflow_run as dangerous because it can run with a pull request's code or secrets.
+# It is safe here: the job's `if:` passes only a push run on main of this repository, no step checks
+# out pull request code (checkout takes a main sha), and the run's values reach the action through
+# env, never into a shell script.
+on:
+  workflow_run: # zizmor: ignore[dangerous-triggers]
+    workflows: [checks]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  move:
+    # One move at a time. The group is at job level, so a run whose `if:` skips (a pull request or red
+    # run) never enters it and cannot cancel a pending green move. Nothing cancels a running move.
+    concurrency:
+      group: stable
+      cancel-in-progress: false
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.event == 'push'
+      && github.event.workflow_run.head_branch == 'main'
+      && github.event.workflow_run.head_repository.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Move stable to the green head
+        uses: $/actions/stable-mover
+        with:
+          head-sha: ${{ github.event.workflow_run.head_sha }}
+          conclusion: ${{ github.event.workflow_run.conclusion }}
+          token: ${{ secrets.GITHUB_TOKEN }}

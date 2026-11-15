@@ -69,6 +69,9 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -77,7 +80,9 @@ GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(HERE, "guard.py")
 SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(REPO, "settings.json")
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(REPO, "lint"))
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 ROOT = _test_temp.run_folder()
 atexit.register(shutil.rmtree, ROOT, ignore_errors=True)
 STUB_DIR = os.path.join(ROOT, "stub")
@@ -389,9 +394,36 @@ PAGE_MARK, PAGE_MARK_B = "PAGEMARK-3f9c", "PAGEMARK-8d21"
 PAGE_OLD, PAGE_NEW = "PAGEOLD-5a0e", "PAGENEW-7c3d"
 
 
+def shown_of(options):
+    """The `shown` list a page write carries: each option's key, id and label, in order. A non-dict entry is skipped."""
+    return [{"key": o.get("key"), "id": o.get("id"), "label": o.get("label")} for o in options if isinstance(o, dict)]
+
+
+def with_frozen_fields(data, ids=True):
+    """A copy of a page write's data with the fields a session's write carries when it writes options: `shown`, the
+    options as first shown, and with `ids` an id on each option that has none (opt-<n>, n its 1-based position, never
+    a lone letter). An id the option already has, even "" or a repeat, is kept, so a case can write a bad id. Data with
+    no options list is copied unchanged. question_form.frozen_letters_hit (rule option-letters-frozen) reads both."""
+    found = dict(data)
+    options = data.get("options")
+    if not isinstance(options, list):
+        return found
+    filled = []
+    for i, option in enumerate(options):
+        if isinstance(option, dict):
+            option = dict(option)
+            if ids:
+                option.setdefault("id", "opt-%d" % (i + 1))
+        filled.append(option)
+    found["options"] = filled
+    found["shown"] = shown_of(filled)
+    return found
+
+
 def good_page_item(mark=PAGE_MARK, **over):
     """A waiting-page decision that passes the form. `mark` rides in option a's gain, so a case finds the item
-    in the prompt. `over` replaces fields, for a case that changes one."""
+    in the prompt. `over` replaces fields, for a case that changes one. Its options carry ids and `shown` (see
+    with_frozen_fields), so a case that replaces `options` gets a matching `shown` too."""
     context = "\n".join((GOAL_LINE, PROBLEM_LINE, *BASED_LINES, DEPARTS_LINE))
     item = {"kind": "decision", "title": "Ship the change today?", "status": "open", "context": context,
             "options": [{"key": "a", "label": "Ship it", "gain": "The change lands today. " + mark,
@@ -399,7 +431,7 @@ def good_page_item(mark=PAGE_MARK, **over):
                         {"key": "b", "label": "Hold it", "gain": "A reviewer reads it first.",
                          "lose": "The change lands a day later."}]}
     item.update(over)
-    return item
+    return with_frozen_fields(item)
 
 
 # A task item (kind task) is judged like a decision (coordinator follow-up after the Nov 1 11:51 CST ruling). Its
@@ -720,7 +752,7 @@ def case_page_batch_one_call():
     second = good_page_item(PAGE_MARK_B)
     writes = [{"op": "set", "collection": PAGE_ITEMS, "doc_id": "p1", "data": good_page_item()},
               {"op": "update", "collection": PAGE_ITEMS, "doc_id": "p2",
-               "data": {"kind": "decision", "context": second["context"], "options": second["options"]}}]
+               "data": with_frozen_fields({"kind": "decision", "context": second["context"], "options": second["options"]})}]
     r = run_hook(page_batch_input(writes), answer=ALLOW)
     prompt = r.calls[0]["prompt"] if r.calls else ""
     check("page batch: two qualifying item writes make exactly one model call, claude-opus-5-5",
@@ -1029,7 +1061,7 @@ def last_answer(note, choice="none", done=None):
 
 def reask_item(mark, note=REASK_NOTE, choice="none", done=None):
     """Data for an update of an answered decision: its options and the owner's note, no context."""
-    return {"options": good_page_item(mark)["options"], "lastAnswer": last_answer(note, choice, done)}
+    return with_frozen_fields({"options": good_page_item(mark)["options"], "lastAnswer": last_answer(note, choice, done)})
 
 
 def rule_detail(rule, r):
@@ -1069,7 +1101,7 @@ def case_options_without_note_lacks_rule():
     # Case 3: options with no lastAnswer is not a re-ask. The call still makes its one model call, so an early exit
     # cannot pass this check.
     rule = none_direction_rule()
-    r = run_hook(page_input("update", {"options": good_page_item()["options"]}), answer=ALLOW)
+    r = run_hook(page_input("update", with_frozen_fields({"options": good_page_item()["options"]})), answer=ALLOW)
     prompt = r.calls[0]["prompt"] if r.calls else ""
     check("no re-ask, options only: one model call, and no deny", len(r.calls) == 1 and r.code == 0 and r.out == ""
           and "\tdeny\t" not in r.log, detail(r))
@@ -1080,7 +1112,7 @@ def case_options_without_note_lacks_rule():
 def case_blank_note_lacks_rule():
     # Case 4: a note that is blank after strip is not a direction, so the write is not a re-ask.
     rule = none_direction_rule()
-    data = {"options": good_page_item()["options"], "lastAnswer": last_answer("  ")}
+    data = with_frozen_fields({"options": good_page_item()["options"], "lastAnswer": last_answer("  ")})
     r = run_hook(page_input("update", data), answer=ALLOW)
     prompt = r.calls[0]["prompt"] if r.calls else ""
     check("no re-ask, blank note: one model call, and no deny", len(r.calls) == 1 and r.code == 0 and r.out == ""
@@ -1259,7 +1291,7 @@ def case_widening_batch_holds_rule_once():
     rule = widening_rule()
     writes = [{"op": "set", "collection": PAGE_ITEMS, "doc_id": "p1", "data": good_page_item(PAGE_MARK)},
               {"op": "update", "collection": PAGE_ITEMS, "doc_id": "p2",
-               "data": {"options": good_page_item(PAGE_MARK_B)["options"]}}]
+               "data": with_frozen_fields({"options": good_page_item(PAGE_MARK_B)["options"]})}]
     r = run_hook(page_batch_input(writes), answer=ALLOW)
     check("widening batch: two option writes make one model call, and no deny", len(r.calls) == 1 and r.code == 0
           and r.out == "" and "\tdeny\t" not in r.log, detail(r))
@@ -1276,7 +1308,7 @@ def case_widening_absent_without_options():
     context = good_page_item()["context"]
     for label, inp, template in (
         ("a context-only update", page_input("update", {"context": context}), "PAGE_PROMPT"),
-        ("an update with context and empty options", page_input("update", {"context": context, "options": []}),
+        ("an update with context and empty options", page_input("update", with_frozen_fields({"context": context, "options": []})),
          "PAGE_PROMPT"),
         ("an AskUserQuestion box with options", question_input(), "QUESTION_PROMPT"),
         ("an Agent spawn", spawn_input("builder", model="sonnet"), "SPAWN_PROMPT"),
@@ -1296,6 +1328,7 @@ def case_widening_refusal_names_the_option():
     rule = widening_rule()
     item = good_page_item(PAGE_MARK)
     item["options"][1]["label"] = "Accept a second accepted form"
+    item = with_frozen_fields(item)  # the relabelled option is the item's first write, so its shown is the new label
     got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": item})
     check("widening refusal fixture: the item passes question_form.item_hit, so a refusal below is the judge's",
           got == ("", ""), got)
@@ -1542,15 +1575,16 @@ def case_past_ruling_cost():
     box = good_box(goal=CI_GOAL, problem=CI_PROBLEM, based=CI_BASED, options=CI_CHAT_OPTIONS)
     check("past ruling cost fixture: the box passes chat_hit", question_form.chat_hit(box) == ("", ""),
           question_form.chat_hit(box))
+    # Two git starts: the roadmap read, then the ruled store's ls-tree (one start when the store is absent).
     r = run_hook(question_input(box=box, cwd=CI_REPO), answer=ALLOW)
-    check("past ruling cost: a judged question runs one git process, the roadmap read",
-          len(r.calls) == 1 and r.git == 1, detail(r))
+    check("past ruling cost: a judged question runs two git processes, the roadmap read and the store's ls-tree",
+          len(r.calls) == 1 and r.git == 2, detail(r))
     item = good_page_item(title="Raise the CI milestone job cap?", context=CI_PAGE_CONTEXT, options=CI_PAGE_OPTIONS)
     p = run_hook(page_input("set", item, doc_id="c133", cwd=CI_REPO), answer=ALLOW)
-    check("past ruling cost: a judged page write runs one git process", len(p.calls) == 1 and p.git == 1, detail(p))
+    check("past ruling cost: a judged page write runs two git processes", len(p.calls) == 1 and p.git == 2, detail(p))
     q = run_hook(question_input(box=good_box(), cwd=BARE_REPO), answer=ALLOW)
-    check("past ruling cost: a judged question with no roadmap ref runs at most one git process",
-          len(q.calls) == 1 and q.git <= 1, detail(q))
+    check("past ruling cost: a judged question with no roadmap ref runs at most two git processes",
+          len(q.calls) == 1 and q.git <= 2, detail(q))
     f = run_hook(question_input(box=good_box(problem=None), cwd=CI_REPO), answer=ALLOW)
     check("past ruling cost: a box refused by the form makes no model call and no git process",
           f.calls == [] and f.git == 0 and (f.deny() or {}).get("permissionDecision") == "deny", detail(f))
@@ -1687,6 +1721,90 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
           "Unvetted:" in r.reason(), detail(r))
 
 
+# The cost of one fire of the judged tools: a question, a page write, an Agent spawn, and the two Opus reads.
+# A judged question or page write makes one model call, and its one child is the roadmap read, `git`. A tool
+# this hook does not judge, or a read of the page, starts nothing. The opus pair (opus_ask, then opus_scope, which
+# the local_time row's grant calls) makes one call each, and the two timeouts fit that row.
+
+class CostTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.folder = os.path.join(ROOT, "cost")  # a subfolder of this run's ROOT: the run removes ROOT, not this
+        os.makedirs(cls.folder, exist_ok=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.folder, ignore_errors=True)
+
+    def fire(self, stdin_text, answers=None):
+        folder = tempfile.mkdtemp(dir=self.folder)
+        return cost_probe.run_hook(HOOK, stdin_text, folder, answers)
+
+    def test_a_tool_this_hook_does_not_judge_starts_nothing(self):
+        run = self.fire(json.dumps({"session_id": SID_A, "tool_name": "Bash", "tool_input": {"command": "ls"}}))
+        self.assertEqual((run["code"], run["models"], run["children"], run["files"], run["out"]), (0, [], [], [], ""))
+
+    def test_a_read_of_the_page_starts_nothing(self):
+        run = self.fire(page_input("get", None, doc_id="c133", cwd=CI_REPO))
+        self.assertEqual((run["code"], run["models"], run["children"], run["files"]), (0, [], [], []))
+
+    def test_an_agent_spawn_costs_one_model_call_and_no_git_read(self):
+        # An Agent spawn has no question unit, so the past-ruling read (the one git read) never runs, even in a repo.
+        spawn = {"session_id": SID_A, "cwd": CI_REPO, "tool_name": "Agent",
+                 "tool_input": {"subagent_type": "builder", "model": "sonnet", "description": "build",
+                                "prompt": "Build the parser."}}
+        run = self.fire(json.dumps(spawn), [[json.loads(ALLOW), None]])
+        self.assertEqual((run["code"], len(run["models"])), (0, 1), "one spawn, one model call; got %r" % run["models"])
+        self.assertEqual(run["children"], [], "an Agent spawn starts no child, so no git read; got %r" % run["children"])
+        self.assertEqual(run["files"], [], "an allowed spawn writes no file; got %r" % run["files"])
+
+    def test_a_judged_page_write_costs_one_model_call_and_two_git_reads(self):
+        item = good_page_item(title="Raise the CI milestone job cap?", context=CI_PAGE_CONTEXT, options=CI_PAGE_OPTIONS)
+        run = self.fire(page_input("set", item, doc_id="c133", cwd=CI_REPO), [[json.loads(ALLOW), None]])
+        self.assertEqual(len(run["models"]), 1, "one judged write, one model call; got %r" % run["models"])
+        self.assertEqual(cost_probe.names(run["children"]), ["git", "git"],
+                         "the two children are the ruled-store ls-tree and the roadmap cat-file; got %r" % run["children"])
+        self.assertEqual(run["files"], [], "an allow writes no file")
+
+    def test_a_judged_question_costs_one_model_call_and_two_git_reads(self):
+        box = good_box(goal=CI_GOAL, problem=CI_PROBLEM, based=CI_BASED, options=CI_CHAT_OPTIONS)
+        run = self.fire(question_input(box=box, cwd=CI_REPO), [[json.loads(ALLOW), None]])
+        self.assertEqual(len(run["models"]), 1, "one judged question, one model call; got %r" % run["models"])
+        self.assertEqual(cost_probe.names(run["children"]), ["git", "git"],
+                         "the two children are the ruled-store ls-tree and the roadmap cat-file; got %r" % run["children"])
+        self.assertEqual(run["files"], [], "an allowed question writes no file; got %r" % run["files"])
+
+    def test_a_refused_page_write_adds_the_guard_log_line_and_no_other_file(self):
+        item = good_page_item(title="Raise the CI milestone job cap?", context=CI_PAGE_CONTEXT, options=CI_PAGE_OPTIONS)
+        run = self.fire(page_input("set", item, doc_id="c133", cwd=CI_REPO), [[{"ok": False, "reason": "no"}, None]])
+        self.assertEqual(len(run["models"]), 1)
+        self.assertEqual(cost_probe.names(run["children"]), ["git", "git"],
+                         "a refused write reads the ruled store and the roadmap as an allow does: two git children; got %r"
+                         % run["children"])
+        self.assertEqual(run["files"], ["guard.log"], "a refusal writes the guard log only; got %r" % run["files"])
+
+    def test_the_opus_ask_and_scope_cost_one_call_each_and_fit_the_local_time_row(self):
+        import call_judge
+        import decision_watch
+        ask = cost_probe.CountingModel(({"ok": True}, None))
+        with cost_probe.children() as started, mock.patch.object(decision_watch, "invoke_model", ask):
+            granted = call_judge.opus_ask("send opus judges")
+        self.assertTrue(granted)
+        self.assertEqual(len(ask.kwargs), 1, "the owner's ask makes one call")
+        self.assertEqual(ask.kwargs[0]["timeout"], call_judge.OPUS_ASK_TIMEOUT)
+        scope = cost_probe.CountingModel(({"ok": True, "roles": ["Explore"]}, None))
+        with cost_probe.children() as more, mock.patch.object(decision_watch, "invoke_model", scope):
+            roles = call_judge.opus_scope("send opus judges", ["an earlier prompt"])
+        self.assertEqual(roles, ["Explore"])
+        self.assertEqual(len(scope.kwargs), 1, "the scope read makes one call")
+        self.assertEqual(scope.kwargs[0]["timeout"], call_judge.OPUS_SCOPE_TIMEOUT)
+        self.assertEqual((started.argvs, more.argvs), ([], []), "neither read starts a child")
+        row = cost_probe.settings_timeout("local_time.py", "UserPromptSubmit")
+        self.assertIsNotNone(row, "settings.json has a UserPromptSubmit row for local_time.py")
+        self.assertLess(call_judge.OPUS_ASK_TIMEOUT + call_judge.OPUS_SCOPE_TIMEOUT, row,
+                        "the two reads, back to back, end before the row's hook timeout")
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -1717,6 +1835,8 @@ def main():
             case()
         except Exception as exc:
             check(case.__name__, False, "raised %s: %s" % (type(exc).__name__, exc))
+    if not cost_probe.run_class(CostTests):
+        FAILED.append("CostTests")
     print("FAIL: %d failed" % len(FAILED) if FAILED else "all checks passed")
     return 1 if FAILED else 0
 
