@@ -3295,14 +3295,18 @@ def commit_sha(root, rev):
     return subprocess.run(["git", "-C", root, "rev-parse", rev], capture_output=True, text=True, check=True).stdout.strip()
 
 
-def pr_env(base, head_sha, body=None, drop=()):
-    """The environment of one PR's probe run: the base and head shas, and PR_BODY when `body` is not None."""
+def pr_env(base, head_sha, body=None, drop=(), event=None):
+    """The environment of one PR's probe run: the base and head shas, PR_BODY when `body` is not None, and the event file
+    GITHUB_EVENT_PATH when `event` is given. The CI's own event file is never read: GITHUB_EVENT_PATH is removed first."""
     env = dict(os.environ)
+    env.pop("GITHUB_EVENT_PATH", None)
     env.update(BASE_SHA=base, HEAD_SHA=head_sha)
     if body is None:
         env.pop("PR_BODY", None)
     else:
         env["PR_BODY"] = body
+    if event is not None:
+        env["GITHUB_EVENT_PATH"] = event
     for key in drop:
         env.pop(key, None)
     return env
@@ -3338,9 +3342,10 @@ class AlignedSteps:
         text, line = unit_file(unit)
         return {rel: text, ALIGNED_RECORD: aligned_record(line38)}, "%s:%d" % (rel, line)
 
-    def probe_pr(self, repo, body=None, drop=(), base=None):
-        """(exit code, stdout, stderr) of the probe on the PR `repo` holds: its base, its head and its body."""
-        return run_aligned(repo.root, pr_env(base or repo.base_sha, commit_sha(repo.root, "HEAD"), body, drop))
+    def probe_pr(self, repo, body="", drop=(), base=None, event=None):
+        """(exit code, stdout, stderr) of the probe on the PR `repo` holds: its base, its head and its body. A body of ""
+        is a PR body that is present and empty; None leaves PR_BODY unset, so the probe reads the event file."""
+        return run_aligned(repo.root, pr_env(base or repo.base_sha, commit_sha(repo.root, "HEAD"), body, drop, event))
 
     def assert_refused(self, repo, where, *names, **kw):
         """The probe refuses the PR. It names the citing unit at `where` first, then exits 1, then names each of `names`."""
@@ -3382,12 +3387,10 @@ class AlignedRecord(AlignedSteps, unittest.TestCase):
         repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
         self.assert_refused(repo, where, ALIGNED_ROUND, body="Rules checked: other-record-slug %s no change" % ALIGNED_DASH)
 
-    def test_a_missing_pr_body_refuses_and_names_the_fix(self):
+    def test_an_empty_pr_body_refuses_and_names_the_fix(self):  # an unset body is in AlignedBody
         base, where = self.cited()
         repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
-        for body in (None, ""):
-            with self.subTest(body=body):
-                self.assert_refused(repo, where, ALIGNED_ROUND, "Rules checked:", body=body)
+        self.assert_refused(repo, where, ALIGNED_ROUND, "Rules checked:", body="")
 
     def test_a_citing_unit_change_without_its_record_is_refused(self):  # item 2, the reverse direction
         base, where = self.cited()
@@ -3481,7 +3484,7 @@ class AlignedCost(AlignedSteps, unittest.TestCase):
         probes = load_probes()
         base, _ = self.cited()
         repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
-        env = pr_env(repo.base_sha, commit_sha(repo.root, "HEAD"))
+        env = pr_env(repo.base_sha, commit_sha(repo.root, "HEAD"), body="")
         git_calls = []
         real_run = probes._nowindow.run
 
@@ -3512,13 +3515,10 @@ class AlignedEdges(AlignedSteps, unittest.TestCase):
         self.assertEqual(code, 2, "a missing BASE_SHA did not make the group unknown: %s%s" % (out, err))
         self.assertTrue(head(out).startswith("aligned: unknown"), out)
 
-    def test_a_missing_head_sha_is_unknown(self):
-        base, _ = self.cited()
+    def test_a_head_sha_unset_reads_the_checked_out_head(self):  # HEAD_SHA unset: the diff is base...HEAD, a refusal
+        base, where = self.cited()
         repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
-        code, out, err = run_aligned(repo.root, pr_env(repo.base_sha, commit_sha(repo.root, "HEAD"), drop=("HEAD_SHA",)))
-        self.assertTrue(head(out).startswith("aligned: "), "the probe did not run: %s%s" % (out, err))
-        self.assertEqual(code, 2, "a missing HEAD_SHA did not make the group unknown: %s%s" % (out, err))
-        self.assertTrue(head(out).startswith("aligned: unknown"), out)
+        self.assert_refused(repo, where, ALIGNED_ROUND, drop=("HEAD_SHA",))
 
     def test_an_unreadable_base_sha_is_unknown(self):
         base, _ = self.cited()
@@ -3815,6 +3815,123 @@ class AlignedWrapped(AlignedSteps, unittest.TestCase):
         text, _ = para_file([ALIGNED_CITE_LINE, ALIGNED_TAIL])
         repo = self.pr(base, {"CLAUDE.md": text})
         self.assert_clear(repo)
+
+
+# Step two runs one python line and reads no GitHub expression: the probe takes HEAD as the checked-out commit and the PR
+# body from the event file, so `bin/ci-job --lint` can run the step locally.
+ACTION_YML = os.path.join(os.path.dirname(HERE), "actions", "claude-md-cites", "action.yml")
+ALIGNED_STEP_RUN = re.compile(r'^python3 "\$\{\{ github\.action_path \}\}/\.\./\.\./lint/compliance_probes\.py" aligned '
+                              r'"\$GITHUB_WORKSPACE"$')
+
+
+def aligned_step(text):
+    """The blocks of the action's steps that run `aligned`, each as text from its `- name:` line."""
+    return [block for block in re.split(r"(?m)^    - name:", text)[1:]
+            if re.search(r"compliance_probes\.py[^\n]*\baligned\b", block)]
+
+
+class AlignedHead(AlignedSteps, unittest.TestCase):
+    """HEAD_SHA unset means the checked-out commit. The diff is still one git read, from base to HEAD."""
+
+    def test_head_unset_still_makes_one_git_call_on_base_to_head(self):
+        probes = load_probes()
+        base, _ = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        env = pr_env(repo.base_sha, commit_sha(repo.root, "HEAD"), ALIGNED_RULES_CHECKED, drop=("HEAD_SHA",))
+        git_calls = []
+        real_run = probes._nowindow.run
+
+        def counting(argv, *args, **kwargs):
+            git_calls.append(list(argv))
+            return real_run(argv, *args, **kwargs)
+
+        before = listing(repo.root)
+        with mock.patch.dict(os.environ, clear=True):
+            os.environ.update(env)
+            with mock.patch.object(probes._nowindow, "run", side_effect=counting):
+                code, out = in_process(repo.root, group="aligned", probes=probes)
+        self.assertTrue(any("diff" in argv for argv in git_calls), "the probe made no git diff read: %r" % git_calls)
+        self.assertEqual(len(git_calls), 1, "the probe made %d git calls, not one: %r" % (len(git_calls), git_calls))
+        self.assertIn("%s...HEAD" % repo.base_sha, " ".join(git_calls[0]), "the one git read is not base...HEAD: %r" % git_calls)
+        self.assertEqual(listing(repo.root), before, "the probe wrote a file or a folder")
+        self.assertEqual(code, 0, "a body that clears the gap did not clear it: %s" % out)
+
+
+class AlignedBody(AlignedSteps, unittest.TestCase):
+    """The PR body comes from env PR_BODY, else from the event file GITHUB_EVENT_PATH names. A gap with no body source is
+    unknown: the body is the only way to clear it, and without it the probe cannot tell a refusal from a clear."""
+
+    def scratch(self):
+        folder = tempfile.mkdtemp(prefix="aligned-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, folder, True)
+        return folder
+
+    def event(self, payload):
+        """The path of an event file that holds `payload`, a string."""
+        path = os.path.join(self.scratch(), "event.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+        return path
+
+    def gap(self):
+        """(the PR, where): a record change whose citing sentence is untouched, so the PR has a gap."""
+        base, where = self.cited()
+        return self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)}), where
+
+    def test_a_rules_checked_line_in_the_event_body_clears_the_gap(self):
+        repo, _ = self.gap()
+        event = self.event(json.dumps({"pull_request": {"body": ALIGNED_RULES_CHECKED}}))
+        self.assert_clear(repo, body=None, event=event)
+
+    def test_a_null_event_body_is_empty_and_clears_nothing(self):  # green control: a gap with an empty body is a refusal
+        repo, where = self.gap()
+        event = self.event(json.dumps({"pull_request": {"body": None}}))
+        self.assert_refused(repo, where, ALIGNED_ROUND, "Rules checked:", body=None, event=event)
+
+    def test_a_gap_with_no_body_source_is_unknown_never_a_refusal_or_a_clear(self):
+        repo, _ = self.gap()
+        sources = {
+            "no event file": None,
+            "an absent event file": os.path.join(self.scratch(), "absent.json"),
+            "a folder": self.scratch(),
+            "malformed JSON": self.event("{not json"),
+        }
+        for label, event in sources.items():
+            with self.subTest(source=label):
+                code, out, err = self.probe_pr(repo, body=None, event=event)
+                self.assertEqual(code, 2, "a gap with %s exits %d, not 2: %s%s" % (label, code, out, err))
+                self.assertTrue(head(out).startswith("aligned: unknown"), "no unknown verdict line: %s%s" % (out, err))
+
+    def test_no_gap_needs_no_body_source(self):  # green control: the citing sentence changed with its record
+        base, _ = self.cited()
+        changed, _ = unit_file(ALIGNED_CITE + " A second sentence.")
+        repo = self.pr(base, {"CLAUDE.md": changed, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_clear(repo, body=None)
+
+
+class ClaudeMdCitesAction(unittest.TestCase):
+    """Step two of the claude-md-cites action, read as text: one `python3` line, no export, no command substitution, and
+    an env that holds no PR body."""
+
+    def step(self):
+        with open(ACTION_YML, encoding="utf-8") as handle:
+            found = aligned_step(handle.read())
+        self.assertEqual(len(found), 1, "the action holds %d steps that run aligned, not one" % len(found))
+        return found[0]
+
+    def test_step_two_run_is_one_python_line(self):
+        runs = re.findall(r"(?m)^      run:(.*)$", self.step())
+        self.assertEqual(len(runs), 1, "step two has %d run lines, not one" % len(runs))
+        self.assertRegex(runs[0].strip(), ALIGNED_STEP_RUN, "step two's run is not the one python line: %r" % runs[0])
+
+    def test_step_two_has_no_export(self):
+        self.assertNotIn("export", self.step(), "step two still exports a variable")
+
+    def test_step_two_has_no_command_substitution(self):
+        self.assertNotIn("$(", self.step(), "step two still runs a command substitution")
+
+    def test_step_two_env_holds_no_pull_request_body(self):
+        self.assertNotIn("github.event.pull_request.body", self.step(), "step two's env reads the PR body from the event")
 
 
 def tearDownModule():
