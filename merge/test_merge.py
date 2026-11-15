@@ -14074,6 +14074,14 @@ class StandingMergeRole(CloudSession):
     def test_an_own_docs_pr_with_red_ci_is_refused_under_standing(self):
         self.own_pr([("docs/notes.md", "modified", 1)])
         self.host.checks = (False, "a check is red: checks: fail")
+        self.host.state = "red: checks: fail"  # the head reads red, as the red-head cases above set it (head_state reads this)
+        self.assert_standing_refused()
+
+    def test_an_own_code_pr_with_a_sonnet_record_is_refused_under_standing(self):
+        # the code check alone: a valid Sonnet record on the live head is present, so only the file kind refuses this PR
+        self.commit_feat({"tools/note.py": "X = 1\n"})
+        self.own_pr([("tools/note.py", "added", 1)])
+        self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, PASS",)))
         self.assert_standing_refused()
 
     # ---- the gate refuses: rule text needs one Sonnet review record on the live head
