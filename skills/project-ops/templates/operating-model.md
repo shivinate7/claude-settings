@@ -189,7 +189,9 @@ parent, or miss a message while busy.
 ## Briefs
 
 - A brief for a lane or a local session goes in `briefs/<step>-<slug>.md` on the record branch,
-  from `brief.md`. Its full text also goes in the step's `ask` field.
+  built by `scripts/brief_from_step.py <step>` from the step file and the rulings that name it. The tool fills
+  `brief.md`'s fixed sections and leaves the Grant, Base, Topic, Fences, files and done-check markers for the coordinator.
+  Its full text also goes in the step's `ask` field.
 - When a ruling changes a step, update the brief file and the `ask` copy in the same turn.
 
 ## Portability
