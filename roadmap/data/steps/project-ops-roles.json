@@ -1,0 +1,15 @@
+{
+ "id": "project-ops-roles",
+ "title": "Lane project-ops-roles: #3521 handed in to runner 10",
+ "priority": "now",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "triage",
+ "lane": "project-ops-roles",
+ "blockedBy": [],
+ "updatedAt": "2026-11-15T13:10:00-06:00",
+ "why": "[13:09 CST Nov 15, triage] Lane project-ops-roles handed in #3521 (head 3fce9a5a0, lane lint PASS). Goes to runner 10. (source: coordinator/lane message, relayed by triage; not owner-typed, undoable) New step; none existed.",
+ "source": "coordinator/lane message, relayed by triage; not owner-typed",
+ "note": "Lane project-ops-roles handed in #3521 (head 3fce9a5a0, lane lint PASS). Goes to runner 10. Guard or check: unverified (not relayed; triage read no PR)."
+}

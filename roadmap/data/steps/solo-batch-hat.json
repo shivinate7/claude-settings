@@ -1,0 +1,16 @@
+{
+ "id": "solo-batch-hat",
+ "title": "Lane solo-batch-hat: #2701 lane lint cannot read the PR body",
+ "priority": "now",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "triage",
+ "lane": "solo-batch-hat",
+ "blockedBy": [],
+ "updatedAt": "2026-11-15T13:10:00-06:00",
+ "why": "[13:09 CST Nov 15, triage] Lane solo-batch-hat, PR #2701: lane lint failed at head cfa1ec8a1699 on 'a record and the rules that cite it change together' (session-tiers cited by CLAUDE.md:13, :45 and shiv-stylisms.md:91). The remedy body line `Rules checked: session-tiers — no change` is added, but `merge --lane-lint` cannot read the PR body. Triage 13:01 CST told the lane to ask runner 10 to lint at the live head and not to edit the cited sentences. Same gap as debt draft lanes-cannot-run-lane-lint. (source: coordinator/lane message, relayed by triage; not owner-typed, undoable) New step; none existed.",
+ "source": "coordinator/lane message, relayed by triage; not owner-typed",
+ "note": "Lane solo-batch-hat, PR #2701: lane lint failed at head cfa1ec8a1699 on 'a record and the rules that cite it change together' (session-tiers cited by CLAUDE.md:13, :45 and shiv-stylisms.md:91). The remedy body line `Rules checked: session-tiers — no change` is added, but `merge --lane-lint` cannot read the PR body. Triage 13:01 CST told the lane to ask runner 10 to lint at the live head and not to edit the cited sentences. Same gap as debt draft lanes-cannot-run-lane-lint. Guard or check: unverified (not relayed; triage read no PR).",
+ "pr": 2701
+}

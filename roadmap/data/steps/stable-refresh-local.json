@@ -1,0 +1,15 @@
+{
+ "id": "stable-refresh-local",
+ "title": "Lane stable-refresh-local: #3524 retargets to main",
+ "priority": "now",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "triage",
+ "lane": "stable-refresh-local",
+ "blockedBy": [],
+ "updatedAt": "2026-11-15T13:10:00-06:00",
+ "why": "[13:09 CST Nov 15, triage] Lane stable-refresh-local: its #3524 retargets to main (base #3487 merged 12:35 CST). Goes to runner 10. (source: coordinator/lane message, relayed by triage; not owner-typed, undoable) New step; none existed.",
+ "source": "coordinator/lane message, relayed by triage; not owner-typed",
+ "note": "Lane stable-refresh-local: its #3524 retargets to main (base #3487 merged 12:35 CST). Goes to runner 10. Guard or check: unverified (not relayed; triage read no PR)."
+}
