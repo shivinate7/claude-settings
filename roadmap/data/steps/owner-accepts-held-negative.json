@@ -1,0 +1,14 @@
+{
+ "id": "owner-accepts-held-negative",
+ "title": "The merge tool reads a recorded owner ruling and lifts one negative-net-value hold",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL12kgUeBo4mh4sjvci",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 01:54 CST Nov 15 (relayed; merge.py unread by triage): PR 3381 cannot merge on the owner's \"a\" (ruling own-3381-a, item 865, owner 01:43 CST, relayed by the consultant). merge/merge.py review_state returns \"held, net value is negative\" for any negative record, before the fix check, and --grant is for round 4 only, so the tool has no form that reads an owner's acceptance. The coordinator started lane owner-accepts-held-negative (session_013NEJL12kgUeBo4mh4sjvci; triage get_session read: running, connected, parent the coordinator, tag cs-step:owner-accepts-held-negative): it makes the tool read a recorded owner ruling (own-3381-a) and lift that one hold. The coordinator refused the alternative, a false net value in the record. Coordinator's pick, undoable, not the owner's. The ruling's only home is origin/roadmap at roadmap/rulings/own-3381-a.json (triage confirmed by git show origin/roadmap at 01:54 CST), not main: the tool would read a file off main, the same gap as ruling own-archive-off-page (decision waiting-data-in-repo cites it; step status-page-size-cap). The lane reads the ruling there. PR 3381 waits on this lane (step start-session-not-pretooluse); lane start-checks-after-call waits on the 3381 merge. The grant covers only the act the ruling names (merging 3381 as is); the lane must not make the tool lift any other hold.",
+ "source": "Coordinator 01:54 CST Nov 15 (relayed); ruling own-3381-a.",
+ "note": "Lane started 01:53 CST Nov 15 (coordinator). Triage did not read merge.py or the lane's code.",
+ "updatedAt": "2026-11-15T01:54:00-06:00"
+}
