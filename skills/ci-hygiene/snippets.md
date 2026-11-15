@@ -26,7 +26,6 @@ personal token. Set the budget alarm in the billing settings (Budgets and alerts
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-  schedule: [{cron: "0 3 * * *"}]   # nightly full run
   workflow_dispatch:
 permissions:
   contents: read
