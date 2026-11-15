@@ -1723,6 +1723,41 @@ class CompactionCarryTests(unittest.TestCase):
             with self.subTest(reply=reply):
                 self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), *([name] if name else []))
 
+    def test_cc_green_label_first_recovered_items_pass(self):
+        # Catches: a label-first item, "(git) ruling X", is refused as naming no source.
+        rows = [
+            report_lines("Recovered: (git) ruling X", "Handoff gave: none"),
+            # Catches: a label-first item with a page source is refused as naming no source.
+            report_lines("Recovered: (page) fact Y", "Handoff gave: none"),
+            # Catches: a label-first item with a digest source is refused as naming no source.
+            report_lines("Recovered: (digest) fact Z", "Handoff gave: none"),
+            # Catches: a ";" split of label-first items leaves a later item with no source.
+            report_lines("Recovered: (git) ruling X; (page) fact Y; (digest) fact Z", "Handoff gave: none"),
+            # Catches: the item-first form, "ruling X (git)", stops passing once the label-first form is accepted.
+            report_lines("Recovered: ruling X (git); fact Y (page)", "Handoff gave: none"),
+        ]
+        for reply in rows:
+            with self.subTest(reply=reply):
+                self.assertIsNone(self.stop(self.compacted_turn(reply)), reply)
+
+    def test_cc_red_refusal_names_both_recovered_forms(self):
+        # Catches: the missing-line refusal names only the item-first form, so the label-first form is never named.
+        out = self.stop(self.compacted_turn(REPORT_NO_LINE))
+        self.assertBlocksForRecovered(out)
+        self.assertIn("Recovered: <item> (git|page|digest)", out["reason"],
+                      "the remedy does not name the item-first form")
+        self.assertIn("Recovered: (git|page|digest) <item>", out["reason"],
+                      "the remedy does not name the label-first form")
+
+    def test_cc_red_item_with_neither_form_and_a_line_with_no_label_still_block(self):
+        # Catches: a Recovered item with neither source form, "ruling X", passes.
+        out = self.stop(self.compacted_turn(report_lines("Recovered: ruling X", "Handoff gave: none")))
+        self.assertBlocksNaming(out, "ruling X")
+        self.assertIn("names no source", out["reason"], "the refusal does not say the item names no source")
+        # Catches: a label-first source, "(git) ruling X", with no "Recovered:" label passes as a carry line.
+        out = self.stop(self.compacted_turn(report_lines("(git) ruling X", "Handoff gave: none")))
+        self.assertOnlyMissing(out, "Recovered")
+
     def test_cc_red_source_word_must_match_a_whole_word(self):
         # Catches: "git" inside "gitlab", or "page" inside "pages", counts as a source.
         for item in ("fact Z (gitlab)", "fact Z (pages)"):
