@@ -5,8 +5,9 @@ Every case builds a throwaway git repo in its own folder under this run's temp r
 commits a base and a head, and asks the check for its findings. A fixture test script appends its own name and its
 working folder to the file named by RETIRE_MARKS, so a case shows that a Retire check ran, or did not, from that file.
 No case waits on a clock. The Retire-run cases pass a fake run_state, so no case reads the network.
+The CI entry cases (CiEntry, CiWorkflow) run the CLI on a PATH with no gh, and read checks.yml by its steps.
 """
-import atexit, json, os, shutil, subprocess, sys, tempfile, unittest, unittest.mock
+import atexit, json, os, re, shutil, subprocess, sys, tempfile, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -14,6 +15,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
 import check_debt_retire as D  # noqa: E402  the module under test
 import layout  # noqa: E402  the one layout: where the debts folder is (lint/layout.py)
+from workflow_steps import CHECKS_SUITE_JOBS, gating_text, job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one step parser
 
 RUN = os.path.realpath(_test_temp.run_folder())
 atexit.register(shutil.rmtree, RUN, True)
@@ -40,6 +42,7 @@ FAIL = "Delete the old helper. Check: `tests/test_fail.py`."
 PROSE = "Delete the old helper once nothing reads it."
 RUN_URL = "https://github.com/fixture/repo/actions/runs/42"
 ATTRIBUTION = "\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+SESSION_URL = "https://claude.ai/code/session_013NEJL2SdAA1CCG5eTFVFVr"
 NO_RETIRED = "check_debt_retire has no retired(): a Retire-run cite cannot excuse a debt close (decision debt-close-runs-retire)"
 
 
@@ -135,23 +138,122 @@ class Case(unittest.TestCase):
         patch.start()
         self.addCleanup(patch.stop)
 
-    def cli(self):
+    def cli(self, env=None):
+        """The CLI on this repo. The runner's own GITHUB_EVENT_PATH never reaches a case: `env` adds the variables a case sets."""
+        child = {k: v for k, v in os.environ.items() if k != "GITHUB_EVENT_PATH"}
+        child.update(env or {})
         return subprocess.run([sys.executable, os.path.join(HERE, "check_debt_retire.py"), "--upstream", self.base, "--head", self.head],
-                              cwd=self.dir, capture_output=True, text=True)
+                              cwd=self.dir, capture_output=True, text=True, env=child)
+
+    def tools_only(self, *tools):
+        """A folder that holds the named tools and no others, for a PATH: a case names what can run, and nothing else can."""
+        bindir = tempfile.mkdtemp(prefix="bin-", dir=self.folder)
+        for tool in tools:
+            os.symlink(shutil.which(tool), os.path.join(bindir, tool))
+        return bindir
 
     def no_node(self):
         """PATH holds git and python3 alone: node is not found, so a .mjs check cannot run, and a .py check still can."""
-        bindir = os.path.join(self.folder, "bin")
-        os.makedirs(bindir, exist_ok=True)
-        for tool in ("git", "python3"):
-            os.symlink(shutil.which(tool), os.path.join(bindir, tool))
-        patch = unittest.mock.patch.dict(os.environ, {"PATH": bindir})
+        patch = unittest.mock.patch.dict(os.environ, {"PATH": self.tools_only("git", "python3")})
         patch.start()
         self.addCleanup(patch.stop)
 
     def statuses(self):
         """The git status letter of each path from base to head, with rename detection on, as git pairs them."""
         return [line.split("\t")[0][0] for line in sh(self.dir, "git", "diff", "--name-status", "-M", self.base, self.head).splitlines()]
+
+
+class Isolated(Case):
+    """An isolated run (the merge tool and the CLI) gives the scratch worktree the checkout's installed packages (decision debt-close-runs-retire)."""
+
+    NEEDS_DEPS = ("import os, sys\n"
+                  "sys.exit(0 if os.path.isdir(os.path.join('node_modules', 'marker')) else 1)\n")
+
+    def deps_repo(self, nested=False):
+        retire = "Delete the helper. Check: `tests/test_deps.py`" + (" and `tests/test_deps_sub.py`." if nested else ".")
+        self.repo(debts={"d-deps": retire})
+        self.change(write={"tests/test_deps.py": self.NEEDS_DEPS, "package.json": "{}\n", ".gitignore": "node_modules/\n",
+                           **({"sub/package.json": "{}\n", "tests/test_deps_sub.py": self.NEEDS_DEPS.replace("'node_modules'", "'sub', 'node_modules'")}
+                              if nested else {})})
+        self.base = self.head
+        self.change(rm=["docs/debts/d-deps.md"])
+        for pre in ("", "sub") if nested else ("",):
+            put(os.path.join(self.dir, pre, "node_modules", "marker", "x"), "x")
+
+    def isolated(self, where=None):
+        return D.check(where or self.dir, self.base, head=self.head, isolate=True)
+
+    def fresh_worktree(self):
+        """A detached worktree of the head with no node_modules of its own: the shape the merge tool runs a Retire check in."""
+        wt = os.path.join(self.folder, "wt")
+        sh(self.dir, "git", "worktree", "add", "-q", "--detach", wt, self.head)
+        self.addCleanup(sh, self.dir, "git", "worktree", "remove", "--force", wt)
+        return wt
+
+    def test_i1_installed_packages_reach_the_scratch_worktree(self):
+        self.deps_repo()
+        self.assertEqual(pairs(self.isolated()), [], "a scratch run did not see the checkout's node_modules")
+
+    def test_i2_a_nested_package_folder_gets_its_packages_too(self):
+        self.deps_repo(nested=True)
+        self.assertEqual(pairs(self.isolated()), [], "a nested node_modules did not reach the scratch worktree")
+
+    def test_i2b_a_nested_package_folder_without_packages_is_red(self):
+        self.deps_repo(nested=True)
+        shutil.rmtree(os.path.join(self.dir, "sub", "node_modules"))
+        self.assertEqual(pairs(self.isolated()), [("d-deps", "red")], "the nested test passed without sub/node_modules")
+
+    def test_i3_a_checkout_with_no_packages_still_runs_the_test_and_it_is_red(self):
+        self.deps_repo()
+        shutil.rmtree(os.path.join(self.dir, "node_modules"))
+        self.assertEqual(pairs(self.isolated()), [("d-deps", "red")], "a test that fails with no packages stopped being red")
+
+    def test_i4_a_real_red_test_stays_red_with_packages_linked(self):
+        self.repo(debts={"d-fail": FAIL})
+        self.change(write={"package.json": "{}\n", ".gitignore": "node_modules/\n"}, rm=["docs/debts/d-fail.md"])
+        put(os.path.join(self.dir, "node_modules", "marker", "x"), "x")
+        self.assertEqual(pairs(self.isolated()), [("d-fail", "red")], "linking packages hid a failing test")
+
+    def test_i5_the_scratch_link_does_not_remove_the_checkouts_packages(self):
+        self.deps_repo()
+        self.isolated()
+        self.assertTrue(os.path.isfile(os.path.join(self.dir, "node_modules", "marker", "x")), "cleanup deleted the real node_modules")
+
+    def test_i6_a_fresh_worktree_of_an_installed_checkout_gets_the_checkouts_packages(self):
+        self.deps_repo()
+        wt = self.fresh_worktree()
+        self.assertFalse(os.path.lexists(os.path.join(wt, "node_modules")), "scope: the fresh worktree already has node_modules")
+        self.assertEqual(pairs(self.isolated(wt)), [], "a fresh worktree did not reach the installed checkout's node_modules")
+
+    def test_i6b_a_fresh_worktree_with_no_packages_anywhere_is_red(self):
+        self.deps_repo()
+        shutil.rmtree(os.path.join(self.dir, "node_modules"))
+        wt = self.fresh_worktree()
+        self.assertFalse(os.path.lexists(os.path.join(self.dir, "node_modules")), "scope: the checkout still has node_modules")
+        self.assertEqual(pairs(self.isolated(wt)), [("d-deps", "red")], "a test with no packages anywhere stopped being red")
+
+    def test_i6c_the_worktrees_own_packages_win_over_the_checkouts(self):
+        self.deps_repo()
+        wt = self.fresh_worktree()
+        os.makedirs(os.path.join(wt, "node_modules"))  # wt's own install, without the marker
+        self.assertFalse(os.path.exists(os.path.join(wt, "node_modules", "marker")), "scope: wt's own install has the marker")
+        self.assertEqual(pairs(self.isolated(wt)), [("d-deps", "red")], "the checkout's packages replaced the worktree's own")
+
+    def test_i6d_a_real_red_test_in_a_fresh_worktree_stays_red(self):
+        self.repo(debts={"d-fail": FAIL})
+        self.change(write={"package.json": "{}\n", ".gitignore": "node_modules/\n"}, rm=["docs/debts/d-fail.md"])
+        put(os.path.join(self.dir, "node_modules", "marker", "x"), "x")
+        wt = self.fresh_worktree()
+        self.assertFalse(os.path.lexists(os.path.join(wt, "node_modules")), "scope: the fresh worktree already has node_modules")
+        self.assertEqual(pairs(self.isolated(wt)), [("d-fail", "red")], "linking packages hid a failing test")
+
+    def test_i7_a_relative_checkout_path_links_the_packages(self):
+        self.deps_repo()
+        here = os.getcwd()
+        os.chdir(self.dir)
+        self.addCleanup(os.chdir, here)
+        self.assertTrue(os.path.isfile(os.path.join("node_modules", "marker", "x")), "scope: the checkout has no packages")
+        self.assertEqual(pairs(self.isolated(".")), [], "a relative checkout path linked node_modules to itself")
 
 
 class Closes(Case):
@@ -355,6 +457,17 @@ class RetireRun(Case):
         self.assertEqual(runs.urls, [RUN_URL], "the cited run was not read")
         self.assertEqual(pairs(found), [], "a green run on a descendant of the PR head did not clear the debt")
 
+    def test_r1c_a_session_url_line_after_the_attribution_does_not_hide_the_cite(self):
+        self.closed_prose()
+        plain = "Summary.\n\nRetire-run: d-prose -- %s\n\n%s\n" % (RUN_URL, ATTRIBUTION)
+        self.assertEqual(pairs(self.findings(pr_body=plain, run_state=Runs(("success", self.head)))), [],
+                         "scope: the body without the session URL line did not clear the prose debt")
+        runs = Runs(("success", self.head))
+        body = "Summary.\n\nRetire-run: d-prose -- %s\n\n%s\n\n%s\n" % (RUN_URL, ATTRIBUTION, SESSION_URL)
+        found = self.findings(pr_body=body, run_state=runs)
+        self.assertEqual(runs.urls, [RUN_URL], "a session URL line after the attribution hid the Retire-run cite")
+        self.assertEqual(pairs(found), [], "a session URL line after the attribution left the prose debt standing")
+
     def test_r2_a_cite_of_a_failing_run_is_red(self):
         self.closed_prose()
         runs = Runs(("failure", self.head))
@@ -444,6 +557,212 @@ class RetireRun(Case):
         body = "Retire-run: d-prose -- %s\n" % RUN_URL
         self.assertEqual(pairs(self.findings(pr_body=body)), [("d-prose", "unknown")], "scope")
         self.assertEqual(self.retired_of(body, None), {})
+
+
+class TemplateExcuses(unittest.TestCase):
+    """The PR template's own excuse lines. A PR body starts from the template, so a live excuse line in it would excuse a
+    path or a debt in every PR that keeps it (decision debt-close-runs-retire)."""
+
+    RETIRE_LINE = "Retire-run: <slug> -- <run URL>"  # the template's untouched placeholder lines
+    DROPS_LINE = "Drops-lines: <path> -- <reason>"
+
+    def live(self, text):
+        """The excuse keys `text` carries, read the way the checks read a PR body: Retire-run slugs, then Drops-lines paths.
+        A key that starts with `<` is an untouched placeholder, which names nothing real, so it drops out."""
+        keys = list(D.cites(text)) + list(D.undo.allowed(HERE, "HEAD..HEAD", text))
+        return [k for k in keys if not k.startswith("<")]
+
+    def template(self):
+        with open(os.path.join(HERE, "..", ".github", "pull_request_template.md"), encoding="utf-8") as f:
+            return f.read()
+
+    def test_real_template_carries_no_live_excuse(self):
+        self.assertEqual(self.live(self.template()), [], "the PR template carries a live excuse line, so a PR body that starts from it excuses something")
+
+    def test_live_excuse_lines_in_the_template_are_read(self):
+        text = self.template()
+        mutated = (text.replace(self.RETIRE_LINE, "Retire-run: a-debt -- https://example.test/run/1")
+                       .replace(self.DROPS_LINE, "Drops-lines: docs/a.md -- gone"))
+        self.assertNotEqual(mutated, text, "scope: the template has no placeholder line to replace, so nothing was mutated")
+        self.assertEqual(self.live(mutated), ["a-debt", "docs/a.md"], "the excuse read misses a live Retire-run or Drops-lines line")
+
+
+CHECKS = os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
+RETIRE_RUN_STEP = re.compile(r"(?:^|\s)lint/check_debt_retire\.py(?:\s|$)", re.M)  # the CLI, not test_check_debt_retire.py
+
+
+def job_permissions(block):
+    """A job's own `permissions:` map as {scope: value}: its 6-space keys under the 4-space header, read to the next 4-space key."""
+    found, inside = {}, False
+    for line in block.split("\n"):
+        if re.match(r"^    permissions:[ \t]*$", line):
+            inside = True
+        elif inside and (m := re.match(r"^      ([\w-]+):[ \t]*(\S+)[ \t]*$", line)):
+            found[m.group(1)] = m.group(2)
+        elif inside and line.strip() and not line.startswith("      "):
+            inside = False
+    return found
+
+
+class CiEntry(Case):
+    """The CI entry is the CLI on a pull request. It reads the PR body from GitHub's event payload (GITHUB_EVENT_PATH), so a
+    Retire-run cite in the body reaches the check in CI as it does at merge (decision debt-close-runs-retire)."""
+
+    def event(self, body):
+        """A pull request event file whose PR body is `body`; None is the body GitHub sends for an empty description."""
+        path = os.path.join(self.folder, "event.json")
+        put(path, json.dumps({"pull_request": {"body": body}}))
+        return path
+
+    def closed_prose(self):
+        self.repo(debts={"d-prose": PROSE})
+        self.change(rm=["docs/debts/d-prose.md"])
+
+    def test_c1_the_ci_entry_reads_the_retire_run_cite_from_the_pull_request_event(self):
+        self.closed_prose()
+        bare = {"PATH": self.tools_only("git", "python3")}  # no gh: a read of the cited run cannot reach GitHub from a case
+        plain = self.cli(env={**bare, "GITHUB_EVENT_PATH": self.event("Summary.\n")})
+        self.assertIn("names no runnable check", plain.stdout, "scope: a PR body with no cite did not leave the prose debt standing")
+        cited = self.cli(env={**bare, "GITHUB_EVENT_PATH": self.event("Summary.\n\nRetire-run: d-prose -- %s\n" % RUN_URL)})
+        self.assertNotIn("names no runnable check", cited.stdout, "the CI entry did not read the Retire-run cite from the pull request event")
+
+    def test_c2_a_null_pull_request_body_reads_as_no_cite_without_a_traceback(self):
+        self.closed_prose()
+        got = self.cli(env={"PATH": self.tools_only("git", "python3"), "GITHUB_EVENT_PATH": self.event(None)})
+        self.assertNotIn("Traceback", got.stderr, "a null PR body crashed the CI entry: " + got.stderr)
+        self.assertIn("names no runnable check", got.stdout, "a null PR body did not read as no cite")
+        self.assertEqual(got.returncode, 1, got.stdout + got.stderr)
+
+    def test_c4_off_ci_a_prose_close_with_no_event_file_exits_0_and_reads_unknown(self):
+        self.closed_prose()
+        got = self.cli(env={"CI": ""})  # the local read: no event file, and no CI
+        self.assertEqual(got.returncode, 0, "off CI, a prose close with no event file must exit 0 (the lenient local read): " + got.stdout + got.stderr)
+        self.assertIn("UNKNOWN", got.stdout, "a prose close with no event file did not read UNKNOWN: " + got.stdout)
+
+    def test_c5_on_ci_a_prose_close_with_no_event_file_exits_1(self):
+        self.closed_prose()
+        got = self.cli(env={"CI": "true"})
+        self.assertEqual(got.returncode, 1, "on CI, a prose close with no event file must exit 1, since an unknown read is red: " + got.stdout + got.stderr)
+
+
+class CiWorkflow(unittest.TestCase):
+    """checks.yml runs the Retire check on a pull request, so a debt close is judged in CI and not only when merge runs."""
+
+    def test_c3_checks_yml_has_a_pull_request_step_that_runs_the_retire_check(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            text = gating_text(f.read())  # a step that cannot fail a pull request does not count
+        blocks = [job_block(text, job) or "" for job in CHECKS_SUITE_JOBS]
+        self.assertTrue(any(blocks), "scope: checks.yml has none of the jobs %s" % ", ".join(CHECKS_SUITE_JOBS))
+        steps = [st for block in blocks for st in step_blocks(block) if RETIRE_RUN_STEP.search(run_body(st) or "")]
+        self.assertTrue(steps, "checks.yml has no step that runs lint/check_debt_retire.py, so a debt close is judged only at merge")
+        self.assertTrue(any("github.event_name == 'pull_request'" in (step_key(st, "if") or "") for st in steps),
+                        "the Retire step does not gate on a pull request, where its base ref exists")
+
+
+class CiStepRunsMainCopy(Case):
+    """The Retire step runs the classifier as main has it, with the modules it imports, never the copy the PR head holds: a PR
+    cannot rewrite the check that judges its own close (decision debt-close-runs-retire). The step's python3 is a stand-in that
+    keeps a copy of the folder of each .py script it is given, so the case reads which copy ran. It also appends the GH_REPO it
+    was run with to STAND_IN_ENV, so a case reads which repository the cited-run read names."""
+
+    MAIN = "# main's classifier\n"
+    MAIN_LAYOUT = "# main's layout module\n"
+    PR = "# the PR head's classifier: passes every close\n"
+    PR_LAYOUT = "# the PR head's layout module\n"
+    STAND_IN = ("#!/bin/sh\n"
+                "printf 'GH_REPO=%s\\n' \"${GH_REPO-<unset>}\" >> \"$STAND_IN_ENV\"\n"
+                "for arg in \"$@\"; do\n"
+                "  case \"$arg\" in\n"
+                "    *.py) mkdir -p \"$STAND_IN_KEPT\" && cp -R \"$(dirname \"$arg\")/.\" \"$STAND_IN_KEPT/\" ;;\n"
+                "  esac\n"
+                "done\n"
+                "exit 0\n")
+
+    def fixture(self):
+        """A repo whose main holds the classifier and its layout module, and whose PR head rewrites both."""
+        self.dir = tempfile.mkdtemp(prefix="repo-", dir=self.folder)
+        sh(self.dir, "git", "init", "-q", "-b", "main")
+        put(os.path.join(self.dir, "lint", "check_debt_retire.py"), self.MAIN)
+        put(os.path.join(self.dir, "lint", "layout.py"), self.MAIN_LAYOUT)
+        sh(self.dir, "git", "add", "-A")
+        sh(self.dir, "git", "commit", "-q", "-m", "base")
+        self.base = sh(self.dir, "git", "rev-parse", "HEAD")
+        sh(self.dir, "git", "update-ref", "refs/remotes/origin/main", self.base)
+        self.change(write={"lint/check_debt_retire.py": self.PR, "lint/layout.py": self.PR_LAYOUT})
+
+    def retire_step(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            text = gating_text(f.read())
+        blocks = [job_block(text, job) or "" for job in CHECKS_SUITE_JOBS]
+        steps = [st for block in blocks for st in step_blocks(block) if RETIRE_RUN_STEP.search(run_body(st) or "")]
+        self.assertTrue(steps, "scope: checks.yml has no step that runs the Retire classifier")
+        return steps[0]
+
+    def stand_in_env(self):
+        """The file the stand-in appends the GH_REPO it was run with to, one line per run."""
+        return os.path.join(self.folder, "stand-in.env")
+
+    def run_step(self, body, **env):
+        """The step's run body under bash, in the PR head's checkout, with the env the step gives it and the stand-in first on PATH.
+        The runner's own GH_REPO and GITHUB_REPOSITORY never reach a case: `env` names the ones it sets."""
+        bindir = os.path.join(self.folder, "stand-in")
+        kept = os.path.join(self.folder, "kept")
+        put(os.path.join(bindir, "python3"), self.STAND_IN)
+        os.chmod(os.path.join(bindir, "python3"), 0o755)
+        inherited = {k: v for k, v in os.environ.items() if k not in ("GH_REPO", "GITHUB_REPOSITORY")}
+        run_env = {**inherited, "PATH": bindir + os.pathsep + os.environ.get("PATH", ""), "STAND_IN_KEPT": kept,
+                   "STAND_IN_ENV": self.stand_in_env(), "BASE_REF": "main", "HEAD_SHA": self.head, "GH_TOKEN": "fixture-token", **env}
+        return subprocess.run(["bash", "-e", "-c", body], cwd=self.dir, capture_output=True, text=True, env=run_env), kept
+
+    def test_c6_the_ci_step_runs_the_main_copy_of_the_classifier_and_its_modules(self):
+        self.fixture()
+        got, kept = self.run_step(run_body(self.retire_step()))
+        self.assertTrue(os.path.isdir(kept), "scope: the Retire step ran no .py script: " + got.stdout + got.stderr)
+        self.assertTrue(os.path.isfile(os.path.join(kept, "layout.py")), "scope: the folder the step ran holds no layout module")
+        with open(os.path.join(kept, "check_debt_retire.py"), encoding="utf-8") as f:
+            self.assertEqual(f.read(), self.MAIN, "the Retire step ran the PR head's classifier, not main's")
+        with open(os.path.join(kept, "layout.py"), encoding="utf-8") as f:
+            self.assertEqual(f.read(), self.MAIN_LAYOUT, "the Retire step ran the PR head's layout module, not main's")
+
+    def test_c7_the_ci_step_exports_the_runner_repository_and_its_token_and_the_checks_job_can_read_actions(self):
+        """The cited-run read runs under GH_REPO set from GITHUB_REPOSITORY, so gh does not find the repository from the scratch folder.
+        The step's env carries GH_TOKEN, and the checks job grants `actions: read`, so the token can read the cited run."""
+        self.fixture()
+        step = self.retire_step()
+        got, _ = self.run_step(run_body(step), GITHUB_REPOSITORY="fixture/repo")
+        self.assertTrue(os.path.isfile(self.stand_in_env()), "scope: the Retire step ran no stand-in python3: " + got.stdout + got.stderr)
+        with open(self.stand_in_env(), encoding="utf-8") as f:
+            seen = f.read().splitlines()
+        self.assertEqual(seen, ["GH_REPO=fixture/repo"], "the Retire step did not export GH_REPO from GITHUB_REPOSITORY, so the cited-run read names no repository")
+        self.assertIn("GH_TOKEN", step_env(step), "the Retire step's env carries no GH_TOKEN, so the cited-run read has no token")
+        with open(CHECKS, encoding="utf-8") as f:
+            block = job_block(gating_text(f.read()), "checks") or ""
+        self.assertTrue(any(RETIRE_RUN_STEP.search(run_body(st) or "") for st in step_blocks(block)), "scope: the checks job holds no Retire step")
+        self.assertEqual(job_permissions(block).get("actions"), "read", "the checks job does not grant actions: read, so the cited-run read cannot reach the run")
+
+
+class ChildEnv(Case):
+    """A check runs the PR head's test in a child that holds no token: the CLI's GH_TOKEN and GITHUB_TOKEN stay with the CLI, so
+    the test code the PR wrote never reads them."""
+
+    SEEN = ("import os, sys\n"
+            "keys = [k for k in ('GH_TOKEN', 'GITHUB_TOKEN') if k in os.environ]\n"
+            "with open(os.environ['RETIRE_ENV_MARKS'], 'a', encoding='utf-8') as f:\n"
+            "    f.write(os.path.basename(__file__) + ' ' + ','.join(keys) + '\\n')\n"
+            "sys.exit(0)\n")
+    RETIRE = "Delete the old helper. Check: `tests/test_seen.py`."
+
+    def test_e1_the_check_child_gets_no_token_from_the_cli_environment(self):
+        self.repo(debts={"d-seen": self.RETIRE})
+        self.change(write={"tests/test_seen.py": self.SEEN}, rm=["docs/debts/d-seen.md"])
+        marks = os.path.join(self.folder, "env-marks.txt")
+        token = {"GH_TOKEN": "fixture-token", "GITHUB_TOKEN": "fixture-token", "RETIRE_ENV_MARKS": marks}
+        with unittest.mock.patch.dict(os.environ, token):
+            found = self.findings()
+        self.assertTrue(os.path.exists(marks), "scope: the check's test did not run: %r" % pairs(found))
+        with open(marks, encoding="utf-8") as f:
+            seen = f.read().strip()
+        self.assertEqual(seen, "test_seen.py", "the PR head's check test read a token from the CLI environment: %s" % seen)
 
 
 if __name__ == "__main__":

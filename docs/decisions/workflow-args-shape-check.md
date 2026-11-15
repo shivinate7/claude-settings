@@ -17,7 +17,7 @@ Known gap: a placeholder nested more than one level down, and a placeholder in a
 
 Reason: on 2026-11-10 a Workflow call ran with `FACT_CLOSE_PLACEHOLDER` as its args, and a second ran with `__FILL__`. The agents checked nothing, and the run looked complete.
 
-Cost: no new process. The check reads one field of the call in the guard run that already starts for each `Workflow` call.
+Cost: no new process. The check reads one field of the call in the guard run that already starts for each `Workflow` call (unmeasured).
 
 Tests: family `workflow-args` in `hooks/test_guard.py`.
 

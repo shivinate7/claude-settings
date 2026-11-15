@@ -27,14 +27,14 @@ Incident, 2026-10-31 to 2026-11-01: the classifier refused the coordinator's `mc
 
 Rule outcomes-mechanize-rules (turn each rule into a check, and state what the check costs) asks this record to state the cost.
 
-- One process start per auto-mode refusal (the hook).
-- One file per session that had a refusal. It is gone after the reply names every tool in it.
-- One more small file per session whose reply raised a refusal (`refusals-raised`). It is written only when a row is cleared by name, and read only when the refusals file has rows. A session that never raised a refusal has none, and a Stop with no refusals file writes nothing. The guard never removes it; its one reader is `pending_refusals`.
+- One process start per auto-mode refusal (the hook) (unmeasured).
+- One file per session that had a refusal (unmeasured). It is gone after the reply names every tool in it.
+- One more small file per session whose reply raised a refusal (`refusals-raised`) (unmeasured). It is written only when a row is cleared by name, and read only when the refusals file has rows. A session that never raised a refusal has none, and a Stop with no refusals file writes nothing. The guard never removes it; its one reader is `pending_refusals`.
 - Each Stop, inside the report guard that already runs, checks for the session's file, one stat. A session with no refusal reads no file and starts no process.
 - A Stop that finds a row with a `tool_use_id` also reads the transcript and every file in `<session>/subagents/`, once (debt `refusal-settle-reads`). The cost is unmeasured. A session with no refusal reads none of them.
 - No new process, no timer, no log and no long-lived process.
 
-Proof: `lint/test_report_guard.py` cases `PendingRefusalTests.test_l` to `test_s` prove the once-per-refusal rule. They also prove that an agent's row is never recorded, that a blank reason is never matched, and that a Stop with no refusals file writes nothing. `hooks/test_refusal_note.py` case `test_cost_one_refusal_creates_exactly_one_file` proves one file per refusal. `lint/test_report_guard.py` case `PendingRefusalTests.test_g_no_refusals_file_is_a_no_op` proves a Stop with no refusals file writes no file. No test counts the stat, so the one stat per Stop is unmeasured.
+Proof: `lint/test_report_guard.py` cases `PendingRefusalTests.test_l` to `test_s` prove the once-per-refusal rule. They also prove that an agent's row is never recorded, that a blank reason is never matched, and that a Stop with no refusals file writes nothing. `hooks/test_refusal_note.py` case `test_cost_one_refusal_creates_exactly_one_file` proves one file per refusal in `REFUSALS_DIR`. `lint/test_report_guard.py` case `PendingRefusalTests.test_g_no_refusals_file_is_a_no_op` proves a Stop with no refusals file writes no file. No test counts the stat, so the one stat per Stop is unmeasured.
 
 Kind: process
 Home: hooks/refusal_note.py

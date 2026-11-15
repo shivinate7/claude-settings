@@ -252,6 +252,14 @@ class Matcher(unittest.TestCase):
         self.assertTrue(any(re.fullmatch(m, "Artifact") for m in matchers),
                         "no guard matcher covers Artifact: %r" % matchers)
 
+    def test_guard_matcher_covers_artifact_comments(self):
+        # Rule page-thread-reply refuses a reply into a comment thread on the waiting page, made by the
+        # ArtifactComments tool, so the guard must see that call. Matchers are whole-name regexes, so
+        # Artifact and ArtifactData do not reach it.
+        matchers = guard_matchers()
+        self.assertTrue(any(re.fullmatch(m, "ArtifactComments") for m in matchers),
+                        "no guard matcher covers ArtifactComments: %r" % matchers)
+
     def test_guard_matcher_covers_trust_card_tools(self):
         # Rule trust-card-in-build refuses these two calls in a cs-build session, so the first guard.py
         # matcher must fire on both full tool names.
@@ -294,6 +302,16 @@ class Matcher(unittest.TestCase):
             with self.subTest(source=source):
                 self.assertTrue(covers(starts[0], source),
                                 "the session_start.sh SessionStart matcher %r does not cover %s" % (matcher, source))
+
+    def test_a_forked_launcher_session_keeps_its_role_file(self):
+        # Ruling: a fork keeps its role. The session_start.sh entry writes the launcher's role file, so its matcher must cover fork.
+        with open(SETTINGS, encoding="utf-8") as f:
+            entries = json.load(f)["hooks"]["SessionStart"]
+        starts = [e for e in entries if any("/hooks/session_start.sh" in h.get("command", "") for h in e.get("hooks", []))]
+        self.assertEqual(len(starts), 1, "want one SessionStart entry running session_start.sh, found %d" % len(starts))
+        matcher = starts[0].get("matcher", "")
+        self.assertTrue(covers(starts[0], "fork"),
+                        "the session_start.sh SessionStart matcher %r does not cover fork: a forked launcher session keeps no role file" % matcher)
 
     def test_cloud_pull_session_start_entry_does_not_match_compact(self):
         # A compaction mid-task must not run the cloud pull: it would move main and reinstall the pin under the session.
