@@ -25,7 +25,7 @@ guard rule, so the watcher does the waiting and the session is told once.
   and never scans the command text. A parent dies before it can start another child. A job with no child
   (builtins only) lists its own pid. The table lists the same processes. Two limits: an orphan (`(sleep N &); sleep N`) is adopted by
   init and not listed, and a TERM trap that returns respawns a loop body (SIGKILL ends it).
-- A planned pause is quiet by design, so the quiet time starts after it. The pause is the one `sleep` with a
+- A planned pause is quiet by design, so the job's quiet limit grows by its length. The grown limit covers the whole job, not only the pause: a later silent stretch in the same job waits it too. The pause is the one `sleep` with a
   command after it, anywhere in the background command: the one pause that the `waiter` guard allows
   (`guard_stream.waiter_verdict`). Its length is the sum of the operands (`sleep 5m 30s` is 330 s); an
   operand that expands (`sleep $X`) counts 600 s (consultant's pick). A `sleep` with nothing after it or piped
