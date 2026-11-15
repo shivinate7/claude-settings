@@ -17693,18 +17693,20 @@ class ReviewedList(ReviewEnv):
 
     def test_the_newest_log_at_the_fix_head_decides_what_the_fix_inherits(self):
         # a log at the fix head that already has a fix check (one fix verifier per record), or one with no round
-        # (a bare hold), gives nothing, and no older log at that head is read past it. With nothing inherited, a passing fix verifier still ends review
+        # (a bare hold) gives no round, and no older log at that head is read past it. With no round inherited, a passing fix verifier still ends review,
+        # but a bare hold's negative Net value still holds (decision hold-unsafe-after-round-3); owner item 858 a names only the round.
         round_fail = ("Round 1: reviewer, sonnet, FAIL",)
         fixed = record_text(head=REVIEW_OLD_HEAD, rounds=round_fail, fix=(fix_verifier_line(head="2e" * 20),))
         bare_hold = record_text(head=REVIEW_OLD_HEAD, rounds=(), net="negative")
-        for label, newest_earlier in (("an earlier log with its own fix check", fixed), ("a bare hold at the fix head", bare_hold)):
+        for label, newest_earlier, want in (("an earlier log with its own fix check", fixed, r"done: the fix verifier passed"),
+                                            ("a bare hold at the fix head", bare_hold, r"held: net value is negative")):
             with self.subTest(label=label):
                 older = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=round_fail, net="positive"))
                 later = review_comment(2, 7, record_text(rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD),)))
                 host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)],
                                                   [older, review_comment(3, 7, newest_earlier), later, lint_of(7, REVIEW_HEAD)])
                 self.assertEqual(rc, 0, out + err)
-                self.assertRegex(list_line(self, out, 7), r"done: the fix verifier passed")
+                self.assertRegex(list_line(self, out, 7), want)
 
     def test_a_fix_verifier_reads_no_round_from_a_log_at_another_head_or_pr(self):
         # the round is read only from the log whose Head is the fix check's reviewed head, and only on the same pull request. Nothing inherited still reads done

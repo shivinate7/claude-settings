@@ -4662,7 +4662,7 @@ def newest_review(bodies):
     """-> newest_of the parsed `bodies` (one pull request's review record texts, oldest first). The one home of
     that read, for `merge --reviewed`, the --root blocks and the lane Stop hook. A newest record with a Fix check line, no round and no Grant line
     takes the rounds of the newest earlier record on the same pull request whose Head is the fix check's reviewed head, when that record has a round
-    and no Fix check line (the newest record at that head decides: a bare or fixed one gives nothing, and no older record is read past it): a lane may
+    and no Fix check line (the newest record at that head decides: a fixed one gives nothing, a bare one gives only a negative Net value, and no older record is read past it): a lane may
     log the round and the fix check at different heads (step review-record-fix-check-reads). Its own Kind and Guard or check stay;
     the Net value is the earlier record's (decision hold-unsafe-after-round-3: a fix keeps the net value its round gave). `inherited_from` is the
     index in `bodies` of the record that gave the rounds, so release_check reads that one for an edit. Cost: one parse per record, no read."""
@@ -4677,6 +4677,8 @@ def newest_of(recs):
             if old and old["n"] == rec["n"] and old["head"] == rec["fix"][0]:
                 if old["rounds"] and not old["fix"]:
                     return {**rec, "rounds": old["rounds"], "net": old["net"], "inherited_from": i}  # the Net value goes with the rounds, so a fix record's own value never lifts a hold the round gave (a hold typed only on the fix record is ignored)
+                if not old["rounds"] and not old["fix"] and old["net"] == "negative":
+                    return {**rec, "net": old["net"], "inherited_from": i}  # a bare hold gives no round, but it still holds: a passing fix verifier never lifts it (decision hold-unsafe-after-round-3)
                 break
     return rec
 
