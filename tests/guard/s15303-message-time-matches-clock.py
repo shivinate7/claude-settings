@@ -245,10 +245,10 @@ mtc_allow("a bracketed header at the clock's own minute, [coordinator 13:22 CST]
 mtc_allow("a stamp in parens at the clock's own minute, Coordinator (13:22 CST): x, is allowed",
           "Coordinator (13:22 CST): x")
 
-# A date-led header is read by its date, never as a label word. The clock is 01:17 CST on 2026-11-15, so a quote that
-# opens with the day before's date is a stamp from yesterday, and passes.
-MTC_DATE_CLOCK = "2026-11-15T01:17:00-06:00"  # 01:17 CST on 2026-11-15, the clock of the two date-led cases below
-# Passes: a quote dated 2026-11-14 at 01:40 CST, the day before. The date is part of the stamp, not a label word.
+# A date-led header is read by its date, never as a label word. The clock is 01:17 CST, the day after the quoted date,
+# so a quote that opens with the day before's date is a stamp from yesterday, and passes.
+MTC_DATE_CLOCK = "2026-11-15T01:17:00-06:00"  # 01:17 CST, the clock of the two date-led cases below
+# Passes: a quote dated the day before, at 01:40 CST. The date is part of the stamp, not a label word.
 mtc_allow("a date-led header dated the day before, 2026-11-14 01:40 CST: go, is allowed: a quote from yesterday",
           "2026-11-14 01:40 CST: go", clock=MTC_DATE_CLOCK)
 # Passes: a date-led header of the same day, 7 minutes behind the clock. A stamp behind the clock passes.
