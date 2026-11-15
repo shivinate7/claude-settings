@@ -109,6 +109,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (rm-on-a-variable-needs-a-guard)
   rm-after-cd          deny. A recursive delete of a relative target after a cd.
                        (rm-after-cd-names-absolute-path)
+  archive-push-gates-delete  deny. A remote branch delete after an archive push of the same branch, with
+                       anything but `&&` between them. (shared-trees-archive-then-delete)
   ln-over-directory    deny. See the comment at rule 3b in judge_shell.
   destructive-delete   deny. A recursive delete, forced or not, at a root, a home, a glob, `.`,
                        the working folder (`$(pwd)` too) or a folder above it, in either shell.
@@ -247,6 +249,18 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        could not judge, when that commit covers a triplet already in the tree or the chain
                        runs merge, pull, rebase, cherry-pick, stash pop or apply, or am.
                        (commit-refuses-conflict-markers)
+  red-run              deny. A `git commit` with no push after it, or a `git push` whose range (the one
+                       conflict-markers reads, less the commits the default base holds) has a non-merge commit that adds lines to a test path and has no
+                       valid `Red-run:` trailer, judged by `judge` in lint/check_red_run.py, the one home. A
+                       commit in the same call before the push counts, read from its `-m` text (an `--amend`
+                       with none keeps the commit's own); a message the guard cannot read, a failed read and a
+                       default base it cannot read are no hit. A lone `git commit` (no push after it in the
+                       call) that stages added lines on a test path is judged too, by its own `-m` text; a
+                       merge or other replay in progress is no hit. The refusal for a flagged tip names only
+                       commit and push; for a flagged commit below the tip (under a merge at the tip too) it
+                       names commit, rebase and push; for a branch rewritten since its push it names no
+                       command. Cost: one `git log` per push, more only when a commit is a gap.
+                       (red-run-trailer-on-test-commits)
   octopus-push         deny. A `git push` whose range (the pushed ref, else HEAD, less every ref of the pushed
                        remote, else origin) adds a merge commit of more than two parents; a merge that a
                        ref of the pushed remote already holds passes. A dry run and a destination named main or master are
@@ -326,7 +340,9 @@ Other tools, in `judge` order:
                        cannot read is skipped, and an unread brief is judged as an empty brief.
                        (agent-model-cap)
   agent-model-floor, roles-third-round-steps-up
-                       deny. A spawn below the model floor, or a third round on the wrong model.
+                       deny. A spawn below the model floor, or a third round on the wrong model. A
+                       start_session call never reaches this hook: settings.json lists it in no PreToolUse
+                       matcher, so hooks/start_session_audit.py checks its floor and handoff after the call.
                        The Workflow scan is static. It reads string-literal `model` and
                        `agentType` keys, and a literal prompt, in each `agent()` call. A template
                        prompt reads its static text only. A step-up call whose prompt or model is
@@ -395,6 +411,16 @@ Other tools, in `judge` order:
                        (`FACT_CLOSE_PLACEHOLDER`, `PR_NUMBER`) or a `__X__` word. A sentence that holds one, a
                        short all-caps word, no args and empty args pass. A bare env var name as the whole value
                        is refused too; an override lifts it for a real one. (workflow-args-shape-check)
+  ci-wait-cap
+                       deny. A claude-code-remote send_later whose message says it waits on CI (the whole word CI,
+                       checks, pipeline, check run, PR run(s), workflow run(s) or GitHub Actions, in any case,
+                       anywhere in the message) and whose wait is more than cap_minutes() in hooks/ci_wait_cap.py:
+                       delay_minutes (a number or a string of digits) over it, or an `at` (ISO-8601; with no offset it
+                       reads in the clock's offset) more than that many minutes after the clock (local_time.clock).
+                       The limit is inclusive. A call with no CI word, or with no delay or `at`, passes. An agent's
+                       call is refused first (agent-no-remote-tools). The reason names send_later, delay_minutes and
+                       the cap. A missing cap file crashes the rule, which fails open and logs. An override lifts it.
+                       (ci-wait-cap-guard)
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
   simulator-boot-bypass
@@ -555,7 +581,7 @@ while True:
         _loading = "guard_core"
         import guard_core
         from guard_core import (
-            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
+            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, REPLAY_MARKS, heredoc_heads, own_heredoc_bodies, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
@@ -589,6 +615,7 @@ while True:
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
             PUSH_AGENT_REASON, PUSH_ALL_AGENT_REASON, PUSH_ALL_REASON, PUSH_REASON, PUSH_STRAY_REASON,
+            ARCHIVE_GUARD_REASON, archive_guard_hits,
             cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_ask_hit, push_verdict,
             rm_delete_hit, SUBST_OPEN, _in_group,
         )
@@ -596,9 +623,9 @@ while True:
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
-            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
+            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit, self_role_child_hit, self_role_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
         _loading = "guard_frozen"
@@ -1805,27 +1832,6 @@ def heredoc_offsets(segments, ends, bodies_kept=True):
     return offsets
 
 
-def own_heredoc_bodies(segment: str, raw: str, before: int):
-    """Return the bodies of the heredocs whose headers sit inside this segment, in order. A heredoc
-    of another command (`cat <<A && git commit -F - <<B`) is not the message.
-
-    `before` is the count of headers in the segments ahead of this one. Raw is walked as the
-    shell reads it (_split_heredocs): each header outside quotes and comments takes the next body
-    in turn, and a body line is never read for headers. This segment takes the bodies `before`
-    onward, one per header it holds, so two commits with the same text each take their own body.
-    Raw is walked twice, bash's reading and the contraction reading, as split_segments does, and
-    the bodies of both are judged: a lone `'` can hide a header from one reading, never both.
-    """
-    count = len(heredoc_heads(segment)[0])
-    if not count:
-        return []
-    texts = []
-    for contractions_are_text in (False, True):   # bash's reading, then the contraction reading
-        found = [body for _, body, _ in _split_heredocs(raw, contractions_are_text)[1]]
-        texts.extend(found[before:before + count])
-    return list(dict.fromkeys(texts))   # the readings often agree: judge each body once
-
-
 def message_texts(segment: str, raw: str, where: str, before: int, titles: bool = False):
     """Return (is_commit, texts, unread) for a `git commit` or `gh pr create|edit` segment, or None
     when the segment is neither. `titles` also takes `gh pr merge`, whose squash subject and body
@@ -2543,9 +2549,6 @@ ENTRY_OWN = re.compile(r"^commit(?: \((?:initial|amend|merge)\))?:")
 ENTRY_REBASE = re.compile(r"^(?:pull --)?rebase\b[^:(]*\(([^)]*)\)")
 ENTRY_RESOLVED = re.compile(r"^(?:commit \(cherry-pick\)|revert)\b")
 REBASE_PLAIN_STEPS = ("start", "finish", "abort", "pick", "reword", "edit")
-# A git-dir entry that shows a replay in progress: its staged change is git's copy plus what the agent
-# resolved. A MERGE_MSG without MERGE_HEAD is a `cherry-pick -n` or `revert -n`.
-REPLAY_MARKS = ("CHERRY_PICK_HEAD", "REVERT_HEAD", "SQUASH_MSG", "MERGE_MSG", "rebase-merge", "rebase-apply")
 # How a builder's test path in one change counts: refused, logged, or logged as the upstream side a
 # rebase kept.
 OWN, NOTED, KEPT = "own", "noted", "kept"
@@ -2920,6 +2923,11 @@ def judge_stop(payload) -> None:
 
 
 SPAWN_TOOLS = ("Agent", "Task")
+# The desktop start. No PreToolUse matcher in settings.json lists it: any hook on it makes the desktop app show the
+# "Allow Claude to start the session?" card on every start, even in Bypass (anthropics/claude-code#103832; decision
+# start-session-not-pretooluse). hooks/start_session_audit.py judges it after the call with floor_hit and
+# unread_handoff. The judge() branches below that name it run only if a matcher is added again, and the guard's cases
+# call them directly.
 SESSION_TOOL = "mcp__ccd_session__start_session"
 from shared_names import (  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER from here
     CREATE_SESSION_TOOL, REMOTE_OUTWARD_TOOLS, REMOTE_SERVER, is_lane_create_session, lane_tags,  # noqa: F401  REMOTE_SERVER re-exported: lint/check_agent_models.py reads guard.REMOTE_SERVER
@@ -3638,7 +3646,7 @@ def step_up_hit(tool: str, tool_input) -> str:
 def step_up_reason(prompt: str, role, model, rounds=None) -> str:
     """The step-up refusal for a brief whose marker and model disagree, or "". The model each marker needs is its round row
     (role_round_model; `rounds` is role_round_table's read, read here when not given). The second round must name its row's model exactly.
-    A later round or a fix verifier must not name a model below its row; above it passes here, and the Opus ceiling judges Opus."""
+    A later round, a fix verifier or a guard-marked reviewer brief must not name a model below its row; above it passes here, and the Opus ceiling judges Opus."""
     model = str(model or "").strip().lower()
     role = role_key(role)
     if rounds is None:
@@ -3654,6 +3662,10 @@ def step_up_reason(prompt: str, role, model, rounds=None) -> str:
         want = role_round_model(rounds, role, ROLE_ROUND_FIX)
         if want and (not model or (named is not None and named < ROLE_MODEL_RANK.index(want))):
             return "Reviewer fix verifier runs on %s. Spawn it with model %s." % (want.capitalize(), want)
+    if role == "reviewer" and review_guard_marked(prompt):
+        want = role_round_model(rounds, role, "1", "guard")
+        if want and (not model or (named is not None and named < ROLE_MODEL_RANK.index(want))):
+            return "Reviewer round 1 on a guard or check change runs on %s. Spawn it with model %s." % (want.capitalize(), want)
     if role == "builder" and builder_third_round(prompt):
         want = role_round_model(rounds, role, "3")
         if want and (named is None or named < ROLE_MODEL_RANK.index(want)):
@@ -3821,6 +3833,98 @@ def role_round_model(rounds, role, n, kind="other"):
     return ROLE_ROUND_FALLBACK.get((role, n, kind))
 
 
+# THE REVIEW ROWS (decision agent-model-cap, "The round rows", second table). A table under the header `Kind | Guard or check |
+# Rounds owed after a pass | Last round | Net value owed after a failed last round` gives each change's review policy: the key is
+# (kind, guard), the value (owed, last, net): the round a pass must reach to end the review, the final round, and whether a failed
+# final round still owes its net value. review_policy_table is the one reader; the merge tool and lint read it through the guard.
+# A row the record lacks or cannot read falls back to REVIEW_POLICY_FALLBACK, which equals the shipped rows.
+REVIEW_POLICY_HEADER = ["kind", "guard or check", "rounds owed after a pass", "last round", "net value owed after a failed last round"]
+REVIEW_POLICY_KINDS = ("normal", "delete-only", "docs-only")
+REVIEW_POLICY_CAP = 3  # rule roles-review-cap-three: no row names a last round above this
+REVIEW_POLICY_FALLBACK = {("normal", "no"): (1, 3, False), ("normal", "yes"): (1, 3, True),
+                          ("delete-only", "no"): (1, 1, False), ("delete-only", "yes"): (1, 3, True),
+                          ("docs-only", "no"): (0, 3, False)}  # docs-only has no yes row: it touches no guard or check
+
+
+def review_policy_rows(pointer_root):
+    """[(cells, row text)] for each row of the record's review rows table, the cells as written (lowercase, backticks dropped), or
+    None when the record cannot be read. Only the table under the review header is read; its separator line is left out."""
+    text = _role_record_text(pointer_root)
+    if text is None:
+        return None
+    rows, inside = [], False
+    for line in text.splitlines():
+        if not line.lstrip().startswith("|"):
+            inside = False
+            continue
+        cells = [cell.strip().replace("`", "").lower() for cell in line.strip().strip("|").split("|")]
+        if cells == REVIEW_POLICY_HEADER:
+            inside = True
+        elif inside and not all(re.fullmatch(r":?-+:?", cell) for cell in cells):
+            rows.append((cells, line.strip()))
+    return rows
+
+
+def review_policy_row(cells):
+    """((kind, guard), (owed, last, net)) of one review row's cells, or None when the row is malformed: not five cells, a kind outside
+    REVIEW_POLICY_KINDS, a guard word other than yes or no, a round cell that is not a number, a last round outside 1..REVIEW_POLICY_CAP,
+    owed above last, or a net word other than yes or no, or a docs-only row with Guard or check yes (a docs-only change has none)."""
+    if len(cells) != len(REVIEW_POLICY_HEADER):
+        return None
+    kind, guard, owed, last, net = cells
+    if kind not in REVIEW_POLICY_KINDS or guard not in ("yes", "no") or net not in ("yes", "no"):
+        return None
+    if kind == "docs-only" and guard == "yes":
+        return None
+    if not (re.fullmatch(r"\d+", owed, re.ASCII) and re.fullmatch(r"\d+", last, re.ASCII)):
+        return None
+    if not 1 <= int(last) <= REVIEW_POLICY_CAP or int(owed) > int(last):
+        return None
+    return (kind, guard), (int(owed), int(last), net == "yes")
+
+
+def review_policy_table(pointer_root):
+    """{(kind, guard): (owed, last, net)} of the record's well-formed review rows, the first row for a key winning, or None when the
+    record cannot be read or holds no well-formed row. The one reader of the review rows."""
+    table = {}
+    for cells, _ in review_policy_rows(pointer_root) or ():
+        row = review_policy_row(cells)
+        if row:
+            table.setdefault(*row)
+    return table or None
+
+
+def review_policy(rows, kind, guard):
+    """(owed, last, net) for a change of this kind and Guard or check: its row in `rows` (review_policy_table's read, or None), else
+    REVIEW_POLICY_FALLBACK."""
+    return (rows or {}).get((kind, guard)) or REVIEW_POLICY_FALLBACK[(kind, guard)]
+
+
+def review_policy_drift(pointer_root):
+    """One line per problem in the review rows, [] when none or when the record cannot be read (the lint check reports that as unknown):
+    a malformed row, a (kind, guard) key that two well-formed rows hold (the first wins, so the second is dead), and a record that holds no
+    review row at all (a missing table, a renamed header or a header with no row), where the guard runs on REVIEW_POLICY_FALLBACK.
+    Lint-time only, like role_round_drift."""
+    rows = review_policy_rows(pointer_root)
+    if rows is None:
+        return []
+    if not rows:
+        return ["the record holds no review row (a missing table, a header other than `%s`, or a header with no row), so the guard runs on "
+                "its built-in fallback" % " | ".join(REVIEW_POLICY_HEADER)]
+    lines, seen = [], set()
+    for cells, text in rows:
+        row = review_policy_row(cells)
+        if row is None:
+            lines.append("review row is malformed (a kind of %s, a Guard or check of yes or no, docs-only with Guard or check no, whole-number "
+                         "round cells with a last round of 1 to %d and no more owed than last, and a net value of yes or no): %s"
+                         % (", ".join(REVIEW_POLICY_KINDS), REVIEW_POLICY_CAP, text))
+        elif row[0] in seen:
+            lines.append("review row repeats the key %s, Guard or check %s, which an earlier row holds: %s" % (row[0] + (text,)))
+        else:
+            seen.add(row[0])
+    return lines
+
+
 def role_round_drift(pointer_root):
     """One line per round row whose model the guard cannot rank, [] when none or when the record cannot be read (the lint check
     reports that as unknown). Lint-time only, like role_list_drift."""
@@ -3828,10 +3932,23 @@ def role_round_drift(pointer_root):
             for _, _, _, word, text in role_round_rows(pointer_root) or () if word not in ROLE_MODEL_RANK]
 
 
+def frontmatter_scalar(raw):
+    """A frontmatter value without its quotes or a trailing ` # comment`, "" when nothing is left. A value that is only
+    a comment (`# sonnet`) or an unquoted YAML null (`~`, `null`) holds no value. The one reader of a scalar's text."""
+    raw = str(raw).strip()
+    if raw[:1] in ("'", '"'):
+        close = raw.find(raw[0], 1)
+        return raw[1:close] if close > 0 else raw[1:]
+    value = re.split(r"(?:^|\s)#", raw, maxsplit=1)[0].strip()
+    return "" if value.lower() in ("~", "null") else value
+
+
 def role_model_rank(model):
     """The index in ROLE_MODEL_RANK of the family a model name holds (`claude-opus-5-5`, `Haiku`), the highest family
-    when a name holds more than one, or None when it holds none. The one normaliser of a model name to its family."""
-    return next((rank for rank, word in reversed(list(enumerate(ROLE_MODEL_RANK))) if word in str(model).lower()), None)
+    when a name holds more than one, or None when it holds none. The value is read without a trailing comment
+    (frontmatter_scalar), so a family word in a comment never counts. The one normaliser of a model name to its family."""
+    value = frontmatter_scalar(model).lower()
+    return next((rank for rank, word in reversed(list(enumerate(ROLE_MODEL_RANK))) if word in value), None)
 
 
 def frontmatter_keys(lines):
@@ -3871,7 +3988,7 @@ def role_has_model_pin(pointer_root, role):
     frontmatter, False when none does, None when the folder cannot be read."""
     try:
         for keys in role_agent_keys(pointer_root):
-            if keys.get("name", "").lower() == role.lower() and keys.get("model"):
+            if keys.get("name", "").lower() == role.lower() and frontmatter_scalar(keys.get("model", "")):
                 return True
     except OSError:
         return None
@@ -4081,6 +4198,8 @@ def role_model_one(tool_input):
 # under the smaller of 5% of the disk and 5 GB) refuses every start call. A reading that cannot be read counts as normal. Only an
 # agent's shell or file write also reads load (RUNNING_AGENT_TOOLS, below). A cloud session (CLAUDE_CODE_REMOTE
 # "true") skips the brake and reads nothing, because the brake guards the owner's own machine.
+# SESSION_TOOL stays in the list, but no PreToolUse hook sees a start_session call (see SESSION_TOOL), so the brake does not
+# read the load for it. The audit after the call does not read load either.
 START_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
 LOAD_BUSY_MEMORY = 85.0
 LOAD_FULL_MEMORY = 95.0
@@ -4269,7 +4388,7 @@ OPUS_SPAWN_REASON = (
 ) % EXPLORE_AUDIT_MARKER
 OPUS_BUILDER_REASON = (
     OPUS_SPAWN_REASON + " No `Round 3 of 3` marker was found in the brief's first line or at the start of "
-    "any line. The marker applies only to a builder's third try, after review round 2 failed."
+    "any line. The marker applies only to a builder's third try: after review round 2 failed, or after round 1 failed and every fix verifier failed."
 )
 OPUS_STANDING_ROLES = ("Plan", "designer", "design-reviewer", REFUTER_ROLE)
 
@@ -4731,6 +4850,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         matched = folder and linked_nm_hit(segment, folder)
         if matched:
             refuse(tool, "deny", "linked-node-modules", LINKED_NM_REASON, matched)
+    # 3b2. Before the push asks below, so a pending ask never pre-empts this denial. POSIX only: `&&` is shell syntax.
+    if not POWERSHELL_CALL[0]:
+        hits = archive_guard_hits(nm_segments, ends)
+        if hits:
+            refuse(tool, "deny", "archive-push-gates-delete", ARCHIVE_GUARD_REASON, "; ".join(hits))  # glossary-ok: the pinned rule id, the step slug
 
     # 4. A wide delete refuses, and a force push asks.
     # Split before backslashes turn to slashes, so `it\'s` opens no quote that hides a delete.
@@ -4856,8 +4980,15 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 6c2. A commit or push that would carry all three conflict markers in one file (rule conflict-markers).
     # Cost: per judged commit, one `git rev-parse --show-toplevel --verify -q HEAD` (one more for an add in
     # another folder) and one `git diff --check`; none for an add alone, or a command with no commit or push.
-    kind, matched = conflict_markers_hit(stripped, cwd)
-    if matched:
+    # A push of a test commit with no Red-run trailer is refused here too (rule red-run): it shares the push's
+    # range, and adds one `git log` per push. A commit in the same call, before the push, is read from its
+    # `-m` text; so is a lone commit with no push after it, which adds one `git diff --numstat` only when its
+    # message holds no trailer. guard_merge states the cost.
+    kind, matched = conflict_markers_hit(stripped, cwd, is_test_rel, raw)
+    if kind in ("red-run", "red-run-commit"):
+        red_reason, red_shown = red_run_reason(matched, kind == "red-run-commit")
+        refuse(tool, "deny", "red-run", red_reason, red_shown)
+    elif matched:
         markers_reason = (CONFLICT_MARKERS_CHAIN_REASON if kind == "chain" else
                           CONFLICT_MARKERS_PUSH_REASON if kind == "push" else CONFLICT_MARKERS_REASON)
         refuse(tool, "deny", "conflict-markers", markers_reason.format(file=matched), matched)
@@ -6792,6 +6923,63 @@ def workflow_args_hit(tool: str, tool_input: dict) -> str:
     return next((v.strip() for v in values if workflow_args_placeholder(v)), "")
 
 
+# A send_later check-in that waits on CI for longer than the cap (rule ci-wait-cap; decision ci-wait-cap-guard).
+# Mistake: a session sets a CI check-in that wakes after the 1-hour prompt cache ends. Harm: the wake pays a full
+# context rewrite. The cap is cap_minutes() in hooks/ci_wait_cap.py, read on each call and never copied here. The message
+# is plain text, so comment openers and lone quotes in it carry no meaning to the scan. A missing cap file raises, and
+# main() logs the crash and lets the call through: a lost source is never turned into a made-up limit.
+CI_WAIT_TOOL = REMOTE_SERVER + "__send_later"
+CI_WAIT_WORDS = re.compile(
+    r"(?<!\w)(?:ci|checks|pr\s+runs?|workflow\s+runs?|check\s+runs?|pipelines?|github\s+actions)(?!\w)", re.IGNORECASE)
+CI_WAIT_DIGITS = re.compile(r"\d+(?:\.\d+)?")
+CI_WAIT_REASON = ("A check-in that waits on CI may wait at most %d minutes, because under the 1-hour prompt cache a later "
+                  "wake pays a full context rewrite. Set send_later with delay_minutes of %d or less, or an `at` no more "
+                  "than %d minutes ahead, then set the next check-in when this one wakes. "
+                  "(decision ci-wait-cap-guard, a CI check-in stays inside the prompt cache)")
+
+
+def ci_wait_minutes(tool_input: dict):
+    """The wait a send_later call asks for, in minutes: the larger of delay_minutes and the `at` time's distance from
+    the clock. delay_minutes is a number or a string of digits. An `at` with no offset reads in the clock's own offset.
+    None when neither reads: no field, or a value that is not a number or an ISO-8601 time."""
+    waits = []
+    delay = tool_input.get("delay_minutes")
+    if isinstance(delay, str) and CI_WAIT_DIGITS.fullmatch(delay.strip()):
+        waits.append(float(delay))
+    elif isinstance(delay, (int, float)) and not isinstance(delay, bool):
+        waits.append(delay)
+    at = tool_input.get("at")
+    if isinstance(at, str):
+        import local_time  # the one home of the clock, which LOCAL_TIME_NOW replaces in tests
+        from datetime import datetime
+        text = at.strip()
+        try:
+            when = datetime.fromisoformat(text[:-1] + "+00:00" if text[-1:] in ("Z", "z") else text)
+        except ValueError:
+            when = None
+        if when is not None:
+            now = local_time.clock()
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=now.tzinfo)
+            waits.append((when - now).total_seconds() / 60)
+    return max(waits) if waits else None
+
+
+def ci_wait_hit(tool: str, tool_input: dict) -> str:
+    """The refusal reason when this send_later waits on CI past the cap, else "". Reads the whole message."""
+    if tool != CI_WAIT_TOOL:
+        return ""
+    message = tool_input.get("message")
+    if not isinstance(message, str) or not CI_WAIT_WORDS.search(message):
+        return ""
+    wait = ci_wait_minutes(tool_input)
+    if wait is None:
+        return ""
+    import ci_wait_cap  # the one home of the cap
+    cap = ci_wait_cap.cap_minutes()
+    return CI_WAIT_REASON % (cap, cap, cap) if wait > cap else ""
+
+
 def judge(payload) -> None:
     if payload.get("hook_event_name") == "SubagentStop":
         judge_stop(payload)
@@ -6871,6 +7059,11 @@ def judge(payload) -> None:
     briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
     if briefed:
         refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
+
+    # A lane brief that names a bare session id (rule brief-ids-in-roster).
+    named_id = brief_roster_hit(tool, tool_input, cwd)
+    if named_id:
+        refuse(tool, "deny", "brief-ids-in-roster", named_id[1], named_id[0])
 
     # 8b. agent-no-remote-tools. An agent never starts, messages, tags or archives sessions, nor sets scheduled tasks;
     # the session that spawned it does. Keyed on a truthy agent_id of any shape, so a drifted id stays refused. After the
@@ -6988,6 +7181,11 @@ def judge(payload) -> None:
     stamped = stamp_hit(tool, tool_input)
     if stamped:
         refuse(tool, "deny", "message-time-matches-clock", stamped[1], stamped[0])
+
+    # A check-in that waits on CI past the cap (rule ci-wait-cap). An agent's call was refused at 8b before this point.
+    ci_wait = ci_wait_hit(tool, tool_input)
+    if ci_wait:
+        refuse(tool, "deny", "ci-wait-cap", ci_wait, str(tool_input.get("message"))[:120])
 
     # A written time off the clock: `added` in items, a step's `updatedAt`, a literal `updatedAt` in a command.
     written = written_time_hit(tool, tool_input, cwd)

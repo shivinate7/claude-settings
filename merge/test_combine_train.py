@@ -48,7 +48,7 @@ import merge  # noqa: E402  merge.CI_JOB is the one home of a ci-job run; these 
 TOOL = os.path.join(HERE, "combine_train.py")
 MERGE_PY = os.path.join(HERE, "merge.py")
 READY = ["STE lint", "split guard", "cost pins", "scaffold", "debt retire", "open-PR clash"]
-GIT_WRAPPERS = {"merge_tree", "conflicting_files", "ci_job_run"}  # the merge.py names the tool may reach
+GIT_WRAPPERS = {"merge_tree", "conflicting_files", "ci_job_run", "ready_job_groups"}  # the merge.py names the tool may reach; ready_job_groups splits the ready checks by job, no run
 NO_HOME = "unknown (fast-checks-before-ready not landed)"
 SIX = ["members in", "members left out", "clash rate", "dry-round minutes", "lint minutes", "CI minutes"]
 PASS_WORD = re.compile(r"(?<!not a )(?<!not )(?<!no )\b(?:pass(?:es|ed)?|ok)\b", re.I)  # a claim of pass ("pass", "passed", "ok"), not "not a pass" or "not ok"
@@ -79,6 +79,14 @@ if log:
     with open(log, "a", encoding="utf-8") as f:
         f.write(json.dumps(args) + "\\n")
 steps = [args[i + 1] for i in range(len(args) - 1) if args[i] == "--step"]
+job = args[0] if args else ""
+known = os.environ.get("FAKE_CI_JOB_STEPS")  # JSON {job: [steps]}: a step that job does not hold is unknown, as bin/ci-job reads it
+if known:
+    held = json.loads(known).get(job, [])
+    for s in steps:
+        if s not in held:
+            print("unknown " + s + ": no step of job " + repr(job))
+            sys.exit(2)
 mode = os.environ.get("FAKE_CI_MODE", "pass")
 if mode == "unknown":
     print("unknown " + (steps[0] if steps else "checks") + ": cannot run here")
@@ -86,6 +94,8 @@ if mode == "unknown":
 if mode == "fail" and steps:
     print("FAIL " + steps[0] + ": fake failure")
     sys.exit(1)
+for s in steps:
+    print("PASS " + s)
 sys.exit(0)
 '''
 
@@ -137,6 +147,11 @@ def calls(log):
             return [json.loads(line) for line in f if line.strip()]
     except FileNotFoundError:
         return []
+
+
+def step_names(argv):
+    """The --step names of one ci-job argv (a list), in order."""
+    return [argv[i + 1] for i in range(len(argv) - 1) if argv[i] == "--step"]
 
 
 def git(cwd, *args):
@@ -218,12 +233,15 @@ def ticking_clock(step=60.0):
     return clock
 
 
-def run_tool(queue, root, mode="pass", lint=False, clock=None, ci_job=None, shims=None):
+def run_tool(queue, root, mode="pass", lint=False, clock=None, ci_job=None, shims=None, job_steps=None):
     """Run the tool in-process: main() with merge.CI_JOB at the fake ci-job (or `ci_job`), FAKE_CI_MODE set, and the folder
-    `shims` first on PATH. -> (exit code, stdout, stderr, ci_calls), where each ci-job argv is a list."""
+    `shims` first on PATH. `job_steps` ({job: [steps]}) is the steps each job holds: the fake reads a step another job holds as unknown.
+    None lets every step through. -> (exit code, stdout, stderr, ci_calls), where each ci-job argv is a list."""
     import combine_train  # the tool; imported here so a missing tool fails the case that runs it, not the whole suite
     log = os.path.join(scratch("ci-"), "ci-calls.jsonl")
     env = {"FAKE_CI_MODE": mode, "FAKE_CI_LOG": log}
+    if job_steps is not None:
+        env["FAKE_CI_JOB_STEPS"] = json.dumps(job_steps)
     if shims:
         env["PATH"] = shims + os.pathsep + os.environ.get("PATH", "")
     argv = ["--queue", queue, "--root", root] + (["--lint"] if lint else [])
@@ -502,6 +520,41 @@ class FastChecks(unittest.TestCase):
         self.assertIn("FAIL", out, "a failed fast check must print FAIL")
         self.assertIn(READY[0], out, "a failed fast check must name its step: %s" % READY[0])
         self.assertEqual(rc, 1, "a failed fast check must exit 1")
+
+
+class FastChecksByJob(unittest.TestCase):
+    """A qualified ready check (`<job>:<step>`) runs in its own job's ci-job run, and the bare ones in job checks. Each run names only its own steps."""
+    QUALIFIED = "checks-rest:project-ops skill scaffold suite"
+    JOB_STEPS = {"checks": ["STE lint", "split guard"], "checks-rest": ["project-ops skill scaffold suite"]}
+
+    def _run_one_member(self, checks, job_steps):
+        root = make_repo({"README.md": "x\n"}, checks=checks)
+        heads = [(3, add_pr(root, 3, {"f3.txt": "3\n"}))]
+        queue = queue_file(heads, [("Q", "queued", [3])])
+        return run_tool(queue, root, clock=ticking_clock(), job_steps=job_steps)
+
+    def test_qualified_check_runs_in_its_own_job_and_the_fold_passes(self):
+        rc, out, err, ci = self._run_one_member(["STE lint", self.QUALIFIED], self.JOB_STEPS)
+        self.assertTrue(ci, "the tool never reached ci-job, so this proves nothing")
+        self.assertEqual(sorted(c[0] for c in ci), ["checks", "checks-rest"],
+                         "ci-job ran for jobs %r; a qualified ready check needs its own ci-job run for its job, one run per job of readyChecks"
+                         % [c[0] for c in ci])
+        by_job = {c[0]: step_names(c) for c in ci}
+        self.assertEqual(by_job["checks"], ["STE lint"], "the checks job's ci-job run must name only its own bare step, not the qualified one")
+        self.assertEqual(by_job["checks-rest"], ["project-ops skill scaffold suite"],
+                         "the checks-rest job's ci-job run must name only its own step, as bare name")
+        self.assertEqual(rc, 0, "a fold whose both job runs pass must exit 0, got %r" % rc)
+        self.assertTrue(any("fast checks ok" in line for line in out.splitlines()),
+                        "a fold whose both job runs pass must print fast checks ok: %s" % out)
+
+    def test_bare_only_ready_checks_run_one_checks_job_run_and_pass(self):
+        rc, out, err, ci = self._run_one_member(READY[:2], {"checks": READY[:2]})
+        self.assertTrue(ci, "the tool never reached ci-job, so this proves nothing")
+        self.assertEqual([(c[0], step_names(c)) for c in ci], [("checks", READY[:2])],
+                         "bare-only ready checks must run one ci-job run for job checks with all of them")
+        self.assertEqual(rc, 0, "bare-only ready checks that pass must exit 0, got %r" % rc)
+        self.assertTrue(any("fast checks ok" in line for line in out.splitlines()),
+                        "bare-only ready checks that pass must print fast checks ok: %s" % out)
 
 
 class LintMinutes(unittest.TestCase):

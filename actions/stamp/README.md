@@ -346,17 +346,17 @@ meets each item below. What the tool does when it runs is written in `confirm` i
 7. `merge.standingGrant` is an optional boolean, read from the base branch. It is the owner's
    standing merge grant for the repo: `standing-merge-grant`, the coordinator's standing merge grant.
    Absent means true. When it is false, a cloud session's `merge <pr> --confirm` stops.
-8. `merge.readyChecks` is an optional list of step names of the repo's `checks` job. On a draft, `merge <pr> --confirm` runs
-   them through `bin/ci-job checks --step NAME ...` before any push and before the ready mark. A FAIL or unknown stops the
+8. `merge.readyChecks` is an optional list of step names. A bare name is a step of the repo's `checks` job. `<job>:<step>`, such as
+   `checks-rest:project-ops skill scaffold suite`, is a step of another job. On a draft, `merge <pr> --confirm` runs
+   them through one `bin/ci-job <job> --step NAME ...` per job, jobs in the order the list first names them, before any push and before the ready mark. A FAIL or unknown stops the
    draft: `lanes-run-no-full-ci-job`, a lane runs no full CI job. Absent: no ready check runs, and one line says so.
    With the list present, the same run also reads two more checks: the debt-close lint and the open-PR clash. That run is the pre-ready run:
    `merge <pr> --ready`, or `--confirm` on a draft.
    The clash compares the PR's head with every other open PR on its base. It counts a clash only with a PR that is not a draft.
    A draft is read by its changed files alone, with no merge-tree. A file it shares with the head is a report line: `#N shares files: a, b`.
    One switch sets that: `PRE_READY_CLASH_SCOPE` in `merge/merge.py`.
-   The pre-ready run covers five of the six checks a lane needs before ready: the declared steps, the debt-close lint and the open-PR clash. It does not cover
-   the project-ops scaffold suite: it moved to the `checks-rest` job, which `readyChecks` cannot name (`ci-job --step` reads one job). Every run prints
-   `unknown scaffold: not run (lives in checks-rest, ci-job --step reads one job)` as a coverage note. The note is no check and moves no exit code.
+   The pre-ready run covers the declared steps, the debt-close lint and the open-PR clash. The project-ops scaffold suite lives in the `checks-rest` job and is a
+   declared step: `checks-rest:project-ops skill scaffold suite`. A job's steps are read from that job's own ci-job lines. The state of the run is fail over unknown over pass.
    It reads the list through the merge tool's own host,
    GitHub REST `GET pulls`, which a lane or a runner can call. A PR whose changed paths meet none of this head's is skipped before any merge-tree.
    A draft whose changed files cannot be read (its head is not in the clone) reads `unknown open-PR clash`, never a pass.

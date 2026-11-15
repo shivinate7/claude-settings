@@ -58,7 +58,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    Other pins keep full-SHA pinning. Which bot, if any, bumps them is set per repo.
 8. **Batch lanes.** Degen and home switch to the per-lane flow on stable now (ruling `own-degen-home-switch-now`, degen and home switch now). Every other child repo waits for the drain, and the batch rules below stay live there until the cutover (decision `all-repos-switch-together`).
 
-   Per-lane flow (in use in degen and home; target, not live elsewhere): each lane PR merges alone through the merge tool, on its own green run and the review its risk needs (rule `git-integration-branch-merge`). Each lane PR goes ready once, after its last review and lane lint (decision `draft-until-reviewed`). After a merge, main's run skips when a passing PR run proved the tree (rule `roles-each-layer-proves-once`). A breaking merge is one after which main's newest finished run is red. Its revert PR is an ordinary lane PR, merged with `--base-red-ok` (decision `no-merge-onto-red-main`). After a red main, merges resume when the revert merges, with the revert's own run still going (owner pick 745 b, 2026-11-13 13:20 CST). While main is red, a lane that touches none of the blamed paths may merge (owner pick 746 b; the blame step is not built). Both are target, not live: the built brake still waits for the revert's run on main to be green.
+   Per-lane flow (in use in degen and home; target, not live elsewhere): each lane PR merges alone through the merge tool, on its own green run and the review its risk needs (rule `git-integration-branch-merge`). Each lane PR goes ready once, after its last review and lane lint (decision `draft-until-reviewed`). After a merge, main's run skips when a passing PR run proved the tree (rule `roles-each-layer-proves-once`). A breaking merge is one after which main's newest finished run is red. Its revert PR is an ordinary lane PR, merged with `--base-red-ok` (decision `no-merge-onto-red-main`). After a red main, merges resume when the revert merges with its tree proven, with the revert's own run still going (owner ruling `own-823-b-revert-merge-lifts-red`, 2026-11-14 15:04 CST, which made pick 745 b live). While main is red, a lane that touches none of the blamed paths may merge (owner pick 746 b; target, not live: the blame step is not built).
 
    Until the cutover, every repo except degen and home batches lanes into one integration branch and one integration PR. A batch runs one
    CI run (rule `git-integration-branch-merge`, one CI run per batch). Only the integration PR goes
@@ -70,7 +70,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    A lane run of `merge --lane-lint` goes through `verdict` in the background with a Bash `timeout` above the merge tool's bound
    (`LINT_SECONDS` plus `PUSHED_HEAD_WAIT_MINUTES` times 60, in ms); a shorter limit ends it with no verdict (guard rule `check-timeout`).
    A lane's `merge --lane-lint <pr> --touched-tests` runs each test file the diff touches, once, in the lint worktree, after the lint passes. That catches a test that fails only on that head before the CI run. A ref target posts no comment, so it cannot
-   satisfy the join. A FAIL keeps it a draft. The lint counts a clash between two heads only when both
+   satisfy the join. The integration PR's lint runs the mutation test when the batch touches a mutation test file. A FAIL keeps it a draft. The lint counts a clash between two heads only when both
    merge clean with their base (decision `lanes-run-no-full-ci-job`). A hand list of checks never stands in for that run: `bin/ci-job`
    reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).
@@ -88,8 +88,11 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    Each lane merges alone: `merge <pr> --confirm` takes one PR, with no batch to build, freeze, blame or stack.
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
    Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run, and
-   the new run is the re-run. A lone lane is its own integration PR. When the integration PR merges,
-   each lane PR closes as replaced.
+   the new run is the re-run. A lone lane is its own integration PR. When
+   the integration PR that replaces a lane PR opens, the lane PR closes as replaced, and its branch stays. The merge tool closes it, at
+   `--ready` and at the integration PR's hand-in, from a `Replaces #N` or `Carries #N` line in the
+   body or the batch-freeze member list. The tool reopens each lane it closed that is marked Dropped
+   at the next lint pass.
    When the integration run is red, read the failing job. Find the lane whose files it touches.
    Search one lane merge commit at a time: for each lane merge commit `M` on the integration branch,
    run `git diff --name-only M^1 M` or `git log -1 -m -S<text> M` as its own command, and print the
@@ -118,6 +121,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    `no-merge-during-batch-ci` (no merge while a batch runs) holds the rule. A merge needs a green
    run on the current base (decision `merge-needs-current-base`). A head that lacks the base tip is
    refused, except a small move.
+   Ready express lanes share one express batch, ahead of every other lane (decision `express-batch`).
    "No conflicts" does not prove the lanes work together. A green integration run does not prove that
    no line was lost either. Run `lint/check_silent_undo.py` before the merge. First run `git fetch origin <base>`. Then pass `--upstream origin/<base>`, the PR's base branch, `--head <head SHA>`, the PR's head commit, and `--strict`, as CI does. Without `--strict`, a local run exits 0 on UNKNOWN, so a skipped check reads as clean.
    GitHub's merge queue needs an organization-owned repo. A personal repo batches by hand or through
@@ -156,8 +160,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    new lane at round 1.
    Until the cutover, every repo except degen and home batches across sessions too (`git-integration-branch-merge`).
 9. **Wait without loops.** Wait for the CI-wake notice that follows `gh pr ready`. A push starts no
-   notice. In cloud, mark ready by MCP `update_pull_request` `draft: false` (route
-   pr-ready-mcp-cloud); the same CI-wake notice is meant to follow (decision `ci-wait-reads-run-status`; unmeasured in cloud), so
+   notice. Run `merge <pr> --ready` first. When it exits 0 with the line "stays a draft (", in cloud mark ready by MCP `update_pull_request` `draft: false` (route
+   pr-ready-mcp-cloud). Never mark before `--ready` has run. After the draft run of the pushed head shows, mark ready, then run `merge <pr> --confirm`. The tool's printed hint gives those last two steps (decision `records-index-at-merge`). The same CI-wake notice is meant to follow (decision `ci-wait-reads-run-status`; unmeasured in cloud), so
    also wait on the PR subscription and a check-in. Never run `gh run watch`. One watch made 131 API calls in one minute (decision
    `ci-wait-reads-run-status`, CI waits read the run status). Never poll with a sleep loop. Repeated
    `gh run view` or `gh pr checks` calls are a poll. To wait for any other condition, use the
@@ -178,7 +182,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     A workflow that also has `on: push` for all branches still runs on a draft branch.
     `gh pr create --draft` then `gh pr ready` fires two runs. Keep the draft state in the concurrency
     group (step 4). Otherwise the skipped draft run cancels an in-progress ready run.
-    Mark ready (`gh pr ready`, or in cloud MCP `update_pull_request`) only after the draft run shows in `gh run list`. A ready sent seconds after the
+    Run `merge <pr> --ready` first. When it exits 0 with the line "stays a draft (", mark ready by hand (`gh pr ready`, or in cloud MCP `update_pull_request`) and only after the draft run shows in `gh run list`. A ready sent seconds after the
     PR opens can give both runs `draft=false`. One then cancels the other. Its cancelled check runs
     can stop the merge, even for an admin (PR 381, Sonnet prompt judges).
     After `gh pr ready`, a run of only skipped jobs proves nothing. Wait for a run on the head that
@@ -288,8 +292,11 @@ The seven opt-in templates of that decision:
   from a weekly schedule, never per PR. `open-issue: true` opens or updates one issue.
 - `ruling-kind`: fails a PR that adds or edits a record with no valid Kind line. The caller needs
   checkout at `fetch-depth: 0`. It fails closed when the base cannot be read.
-- `claude-md-cites`: fails a run when a unit of the caller's `CLAUDE.md` files or `.claude/**/*.md` copies
-  claude-settings record text instead of naming the record. The caller needs checkout first.
+- `claude-md-cites`: fails a run when a unit of the caller's rule files (`CLAUDE.md`, `.claude/**/*.md`,
+  `docs/rules/**/*.md`) copies claude-settings record text instead of naming the record. On a pull request it also
+  fails when a record and a rule unit that cites it change without each other (probe group `aligned`), unless
+  the PR body has `Rules checked: <record> — no change`. It reads the PR body from the event through env. The
+  caller needs checkout first, at `fetch-depth: 0`, and must not skip it on a docs-only change: records are `.md`.
 - `githooks/main-ref`: refuses a local move of main to a commit that origin lacks. Run
   `sh githooks/main-ref/install.sh` in each clone. `sh githooks/main-ref/install.sh --check` writes
   nothing and compares each armed copy to main; the shared pre-commit runs it and refuses a commit
