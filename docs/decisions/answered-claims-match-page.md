@@ -22,15 +22,25 @@ owner never gave. Risk kind: incident.
   - `mcp__claude-code-remote__create_session`, field `prompt`.
 - Other tools are not judged. A brief sent by any other tool passes.
 - A claim is one sentence that holds all three of these:
-  - An item reference: `item <n>`, `item #<n>` or `page:<n>`, in any case. A letter after the number, such as
-    `806 d`, does not matter.
+  - An item reference: `item <n>`, `items <n> and <m>`, `item #<n>` or `page:<n>`, in any case. A letter after
+    the number, such as `874d` or `806 d`, does not matter. A number alone in a code span counts. Each number in a
+    list is judged.
   - The whole word `answered`, `approved` or `ruled`, in any case. `unanswered`, `overruled` and a word joined
     by a hyphen, such as `answered-needs-source`, are not the word.
   - No negator in the same clause before the word. A clause ends at `. ; : ! ? ,`, a dash, or a spaced hyphen.
     The negator list is `ANSWERED_NEGATOR_RE` in `lint/report_guard.py`. The check imports it and keeps no copy.
+- A sentence is the prose of one paragraph: its lines are joined, so a break inside a claim does not hide it. A
+  blank line, a list item or a heading ends the paragraph.
 - Not judged:
   - A sentence that ends in `?`. Closing `*`, `_`, `)`, quotes or spaces after the mark do not change this.
-  - Text in a fenced block or in an inline code span.
+  - Text in a fenced block, and text in an inline code span, except a span that holds only an item number.
+  - The word as a list name: after `the`, `a`, `all`, `each`, `every` or `any` ("from the answered list"), or
+    before `list`, `tab`, `section`, `column`, `queue` and like names.
+  - The word as a condition: after `until`, `unless`, `if`, `once`, `when`, `before`, `pending`, `awaiting` and
+    like words in the same clause ("wait until item 874 is answered").
+  - A correction that ends by taking the claim back ("... was answered, and it is not").
+  - A claim that cites the owner and a time in parentheses, such as "(owner, 2026-11-15 13:30 CST)". Only
+    `owner` counts. "(coordinator, ...)" does not.
   - A claim that names an item by its id slug alone, with no number.
 
 ## What the page data is
@@ -49,7 +59,8 @@ owner never gave. Risk kind: incident.
 
 - A claimed number that the page data holds, with no answer, refuses the call. The first such number refuses.
   - The refusal names the number and the sentence.
-  - It gives the remedy: cite the owner's answer and its time, or say "recommended, not answered".
+  - It gives the remedy: cite the owner's answer and its time in parentheses, such as
+    "(owner, 2026-11-15 13:30 CST)", or say "recommended, not answered".
   - It says that the page writer exports first, when the owner answered after the last export (skill
     `waiting-page`).
   - An owner override lifts it. `refuse()` in `hooks/guard.py` takes the override (decision `owner-override`).
@@ -75,6 +86,13 @@ owner never gave. Risk kind: incident.
 - An item named only by its id slug is not judged. Only numbers count.
 - Store lag: an owner answer given after the last export is not in git yet. A claim of that answer is refused.
   The remedy is the export (skill `waiting-page`), or an owner override.
+- The owner citation is read as words. The check does not look the cited answer up on the page.
+- The refs are read without a fetch. A record branch that origin has moved since the last fetch is stale until
+  the next fetch.
+- The check is inert in a repo with no page export: no record branch holds the page data, so every claim passes
+  with one stderr line. `claude-settings` is such a repo today.
+- A condition word or a list name near the claim word exempts it, so "when item 874 was answered, we moved on"
+  passes.
 - A claim split over two sentences passes. The item in one sentence and the claim word in the next do not match.
 - The check reads words, not meaning. A claim worded another way, such as "owner said yes", "accepted" or
   "signed off", is not judged.

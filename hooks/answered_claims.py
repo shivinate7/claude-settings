@@ -8,10 +8,13 @@ answered_claim_hit(tool, tool_input, cwd) before a send_message, a SendMessage o
 
 Judged text: `message` of the claude-code-remote send_message and of SendMessage, `prompt` of create_session.
 
-A claim is one sentence that holds an item reference (`item <n>`, `item #<n>`, `page:<n>`), the whole word
-answered, approved or ruled, and no negator before that word in its clause (lint/report_guard.py
-ANSWERED_NEGATOR_RE). A sentence that ends in `?` claims nothing. Fenced blocks and inline code spans are skipped.
-A claim by an item id slug alone is not judged.
+A claim is one sentence that holds an item reference (`item <n>`, `items <n> and <m>`, `item #<n>`, `page:<n>`),
+the whole word answered, approved or ruled, and no negator before that word in its clause (lint/report_guard.py
+ANSWERED_NEGATOR_RE). A sentence is the prose of one paragraph: its lines are joined. These are not claims: a
+sentence that ends in `?`, the word used as a list name ("the answered list") or as a condition ("until item 5 is
+answered"), a sentence that takes the claim back at its end ("..., and it is not"), and a claim that cites the
+owner and a time in parentheses ("(owner, 2026-11-15 13:30 CST)"). Fenced blocks are skipped. An inline code span
+is skipped, except one that holds only an item number. A claim by an item id slug alone is not judged.
 
 The page's data is read from git, never from the live page. The folder and the record branch come from
 feedback_guard.waiting_copy. The refs read are the local record branch and origin's, both when both exist. An
@@ -39,13 +42,25 @@ TEXT_FIELDS = {"SendMessage": "message", REMOTE_SERVER + "__send_message": "mess
                REMOTE_SERVER + "__create_session": "prompt"}
 GIT_DEADLINE = 5  # seconds for the whole page read: the ref list, then the one grep
 CLAIM_WORD = re.compile(r"(?<![\w-])(?:answered|approved|ruled)(?![\w-])", re.I)
-ITEM_REF = re.compile(r"(?<!\w)item\s+#?(\d+)(?!\w)|(?<!\w)page:#?(\d+)(?!\w)", re.I)
+ITEM_NUM = r"#?\d+[a-z]?"  # a letter after the number is the item's own suffix ("874d")
+ITEM_LIST = r"(?:\s*,\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+|\s*[&/]\s*)"
+ITEM_REF = re.compile(r"(?<!\w)items?\s+%s(?:%s%s)*(?!\w)|(?<!\w)page:%s(?!\w)" % (ITEM_NUM, ITEM_LIST, ITEM_NUM, ITEM_NUM), re.I)
+# The owner's citation that the remedy asks for: "(owner, 2026-11-15 13:30 CST)". Only "owner" counts, and a time.
+OWNER_CITE = re.compile(r"\(\s*owner\s*,[^()]*?\b\d{1,2}:\d{2}\b[^()]*\)", re.I)
+# "answered" as a name or a condition, not as a claim.
+LIST_NAME_BEFORE = re.compile(r"\b(?:the|an?|all|each|every|any|these|those|its|their)\s+$", re.I)
+LIST_NAME_AFTER = re.compile(r"^\s+(?:list|lists|tab|tabs|section|column|queue|bucket|group|folder|set|pile|view|state|status|count)\b", re.I)
+CONDITION_BEFORE = re.compile(r"\b(?:until|till|unless|if|whether|once|when|whenever|before|pending|awaiting|waiting\s+(?:for|on)|as\s+soon\s+as)\b", re.I)
+# A correction: the sentence ends by saying the answer is not there ("... was answered, and it is not.").
+TAKEN_BACK = re.compile(r"\b(?:it|this|that)(?:['\u2019]s\s+not|\s+(?:(?:is|was|has|had|does|did)\s+)?(?:not|never)"
+                        r"|\s+(?:is|was|has|had|does|did)n['\u2019]t)(?:\s+(?:yet|been|actually|really))*[\s.!*_)\"']*$", re.I)
 SENTENCE_END = re.compile(r"(?<=[.!?;])\s+")
 QUESTION_END = re.compile(r"\?[*_)\"'\s]*$")
 GREP_LINE = re.compile(r"^[^:]+:[^:]*/(items|answers)/[^:/]+\.json:\s{2}\"(n|lastAnswer)\":\s*(\d*)")
 GREP_PATH = re.compile(r"^([^:]+:[^:]*/(?:items|answers)/[^:/]+\.json):")
 REASON = ("The page data in git shows no owner answer for item %s, so this sentence claims an answer the owner has not "
-          "given: \"%s\". Cite the owner's answer and its time, or say \"recommended, not answered\". If the owner "
+          "given: \"%s\". Cite the owner's answer and its time in parentheses, such as (owner, 2026-11-15 13:30 CST), or "
+          "say \"recommended, not answered\". If the owner "
           "answered after the last export, the page writer exports first (skill waiting-page). An owner override "
           "lifts this refusal. (decision answered-claims-match-page, a claim of an answer matches the page)")
 
@@ -60,30 +75,60 @@ def judged_text(tool, tool_input):
 def claims(text):
     """[(sentence, [item numbers])] for each claim sentence of `text`, in order. Prefilters on the two cheap tests
     first, so a message with no claim imports nothing and starts nothing."""
-    if not CLAIM_WORD.search(text) or not ITEM_REF.search(text):
+    if not CLAIM_WORD.search(text) or not ITEM_REF.search(text.replace("`", "")):  # a number may sit in a code span
         return []
     lint = os.path.join(HERE, "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)  # the guard runs with hooks/ alone on the path
     import report_guard  # lint/report_guard.py: the negator, the clause break, the code span and the line reader
     found = []
-    for body in report_guard._prose_lines(text, questions=True):
-        plain = report_guard.CODE_SPAN.sub(" ", body)
+    for paragraph in _paragraphs(report_guard, text):
+        plain = " ".join(report_guard.CODE_SPAN.sub(_span, paragraph).split())
         for sentence in SENTENCE_END.split(plain):
             sentence = sentence.strip()
             if not sentence or QUESTION_END.search(sentence):
                 continue
-            numbers = [a or b for a, b in ITEM_REF.findall(sentence)]
+            numbers = [n for ref in ITEM_REF.finditer(sentence) for n in re.findall(r"\d+", ref.group(0))]
             if numbers and any(_claims_word(report_guard, sentence)):
                 found.append((sentence, numbers))
     return found
 
 
+def _span(match):
+    """A code span holding only an item number keeps the number; any other span is blanked."""
+    content = match.group(2).strip()
+    return " %s " % content if re.fullmatch(ITEM_NUM, content, re.I) else " "
+
+
+def _paragraphs(report_guard, text):
+    """The prose of `text` as one string per paragraph: the lines of a paragraph are joined, so a claim split by a
+    line break is read whole. A blank line, a list item or a heading ends a paragraph."""
+    lines = []
+    for body in report_guard._prose_lines(text, questions=True):
+        if not body or body.startswith("#") or report_guard.LIST_ITEM.match(body):
+            if lines:
+                yield " ".join(lines)
+            lines = []
+            if body and not body.startswith("#"):
+                lines.append(body)
+            continue
+        lines.append(body)
+    if lines:
+        yield " ".join(lines)
+
+
 def _claims_word(report_guard, sentence):
-    """One bool per claim word: True when no negator sits in the word's clause before it."""
+    """One bool per claim word: True when the word is a claim. It is not when a negator sits in its clause before
+    it, when it names a list or follows a condition word, when the sentence takes it back at its end, or when the
+    sentence cites the owner and a time."""
+    owner_cited = bool(OWNER_CITE.search(sentence))
+    taken_back = bool(TAKEN_BACK.search(sentence))
     for match in CLAIM_WORD.finditer(sentence):
-        clause = report_guard.ANSWERED_CLAUSE_BREAK_RE.split(sentence[:match.start()])[-1]
-        yield not report_guard.ANSWERED_NEGATOR_RE.search(clause)
+        before = sentence[:match.start()]
+        clause = report_guard.ANSWERED_CLAUSE_BREAK_RE.split(before)[-1]
+        yield not (owner_cited or taken_back or report_guard.ANSWERED_NEGATOR_RE.search(clause)
+                   or LIST_NAME_BEFORE.search(before) or LIST_NAME_AFTER.match(sentence[match.end():])
+                   or CONDITION_BEFORE.search(clause))
 
 
 def read_page(root):
