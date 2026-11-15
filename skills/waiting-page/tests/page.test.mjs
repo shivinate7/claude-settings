@@ -3991,10 +3991,10 @@ test("reply to an answer: a refused reply keeps focus in the reply form", async 
 
 test("reply to an answer: an answered reply in an ask thread has its header read 'Answer from <owner>', not an array index", async (t) => {
   const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED, [RPL_DEEP.id]: RPL_DEEP } }, storage: RPL_NEW }); if (!page) return;
-  // The answer's header follows the reply's box in the thread (askMine), so it is the next sibling. The reply's box is there first, so an absent header is the defect.
+  // The answer's header follows the reply's box in the thread (askMine), inside the answer's message block (.msg), so it is the next sibling's child. The reply's box is there first, so an absent header is the defect.
   await mustHave(page, `#${RPL_DEEP.id}`, "the answered reply in the thread of " + RPL_ROOT);
-  await mustHave(page, `#${RPL_DEEP.id} + p.lhead`, "the answer header of the reply " + RPL_DEEP.id);
-  const head = (await page.locator(`#${RPL_DEEP.id} + p.lhead`).textContent()) ?? "";
+  await mustHave(page, `#${RPL_DEEP.id} + .msg > p.lhead`, "the answer header of the reply " + RPL_DEEP.id);
+  const head = (await page.locator(`#${RPL_DEEP.id} + .msg > p.lhead`).textContent()) ?? "";
   assert.ok(head.trim().startsWith("Answer from lane tier-fold"), "the answer header of " + RPL_DEEP.id + " reads " + JSON.stringify(head.trim()) + ", not Answer from lane tier-fold");
 });
 
@@ -4190,6 +4190,78 @@ test("reply to an item, case 11: once the item's reply has its answer, the fold 
   await need(fold, `No. ${IRP_ANS.n} has no fold control`);
   const show = (await fold.locator(".uf-show").textContent()).trim();
   assert.equal(show, "Show your note, the replies and your reply", "the fold words of No. " + IRP_ANS.n + " are " + JSON.stringify(show));
+});
+
+// ---------------------------------------------------------------- reply-thread layout (step item-reply-back)
+// A thread spaces its children with gap, never a vertical margin. An answer's header and text sit in one message block (.msg) on a 4 px gap.
+// A folded reply's two-line clamp follows its card's own width (a container query), not the screen's width.
+const LAYOUT_WIDTHS = [360, 390, 430];
+const RPL_WAIT = { id: "ask-rpl-wait", text: "A reply still waiting for the owner", at: "2026-10-31T10:00:00Z", re: RPL_ROOT };
+const LONG_ANS = { id: "ask-rpl-long", text: "a".repeat(400), at: "2026-10-31T08:00:00Z", re: RPL_ROOT, owner: "lane tier-fold", answered: "2026-10-31T09:00:00Z", reply: "b".repeat(400) };
+const LAY_ITEM_OWED = { id: "ask-lay-owed", text: IRP_TEXT, at: "2026-10-30T08:00:00Z", item: IRP_OWED.id };
+const LAY_ITEM_ANS = { id: "ask-lay-ans", text: IRP_TEXT, at: "2026-10-30T08:00:00Z", item: IRP_ANS.id };
+const LAYOUT_CASES = [
+  { name: "an ask thread, with an answered reply and a waiting reply", sel: `#row-${RPL_ROOT} .thread`, msgs: true,
+    setup: { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED, [RPL_DEEP.id]: RPL_DEEP, [RPL_WAIT.id]: RPL_WAIT } }, storage: RPL_NEW } },
+  { name: "an item card thread, with the session's reply and a waiting reply", sel: `#thread-${IRP_OWED.id}`, msgs: false,
+    setup: { items: [IRP_OWED], dbExtra: { asks: { [LAY_ITEM_OWED.id]: LAY_ITEM_OWED } }, storage: VISIT } },
+];
+// The thread's direct children with their vertical margins, its row gap, and the row gap of each message block.
+const threadStyle = (page, sel) => page.evaluate((s) => {
+  const th = document.querySelector(s), cs = getComputedStyle(th);
+  return {
+    gap: cs.rowGap,
+    kids: [...th.children].map((k) => [k.className || k.tagName, getComputedStyle(k).marginTop, getComputedStyle(k).marginBottom]),
+    msgs: [...th.querySelectorAll(".msg")].map((m) => getComputedStyle(m).rowGap),
+  };
+}, sel);
+for (const c of LAYOUT_CASES) for (const scheme of ["light", "dark"]) for (const width of LAYOUT_WIDTHS) test(`${c.name} takes no vertical margin on its children and spaces them with gap, ${width} wide, ${scheme} scheme`, async (t) => {
+  const page = await open(t, { ...c.setup, viewport: { width, height: 800 }, scheme }); if (!page) return;
+  await mustHave(page, c.sel, "the thread " + c.sel);
+  const s = await threadStyle(page, c.sel);
+  const margins = s.kids.filter(([, top, bottom]) => top !== "0px" || bottom !== "0px");
+  assert.deepEqual(margins, [], "a child of the thread has a vertical margin: " + JSON.stringify(margins));
+  assert.ok(parseFloat(s.gap) > 0, "the thread has no row gap: its row-gap is " + s.gap);
+  if (c.msgs) {
+    assert.ok(s.msgs.length >= 1, "the ask thread has no message block (.msg)");
+    const off = s.msgs.filter((g) => g !== "4px");
+    assert.deepEqual(off, [], "a message block's row gap is not 4px: " + JSON.stringify(off));
+  }
+});
+
+// The folded reply's text and its card's width. The card is the nearest .askc (an ask) or the article (an item card).
+const clampOf = (page, sel, card) => page.locator(sel).evaluate((e, c) => ({ card: e.closest(c).getBoundingClientRect().width, lines: getComputedStyle(e).webkitLineClamp, ws: getComputedStyle(e).whiteSpace }), card);
+for (const scheme of ["light", "dark"]) test(`the folded reply under an ask clamps by its card's own width, not the screen's: a wide card at 1280 does not clamp, a 300 px card does, ${scheme} scheme`, async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED, [RPL_WAIT.id]: RPL_WAIT } }, storage: RPL_SEEN, viewport: { width: 1280, height: 900 }, scheme }); if (!page) return;
+  await mustHave(page, `#row-${RPL_ROOT}.folded p.fwait .ftext`, "the folded reply under " + RPL_ROOT);
+  const ftext = `#row-${RPL_ROOT} p.fwait .ftext`;
+  const wide = await clampOf(page, ftext, ".askc");
+  assert.ok(wide.card > 480, "the card is " + wide.card + " px wide, not wider than 30rem, so this case cannot show a wide card");
+  assert.equal(wide.lines, "none", "the folded reply in a wide card is clamped to " + wide.lines + " lines");
+  await page.locator(`#row-${RPL_ROOT}`).evaluate((li) => { li.style.width = "300px"; });
+  const narrow = await clampOf(page, ftext, ".askc");
+  assert.equal(Math.round(narrow.card), 300, "the card is " + narrow.card + " px wide after the width is set, so this case cannot show a narrow card");
+  assert.equal(narrow.lines, "2", "the folded reply in a 300 px card is not clamped to two lines (line clamp " + narrow.lines + ") on a 1280 px screen");
+});
+for (const scheme of ["light", "dark"]) test(`the folded reply under a sunk item card clamps by its card's own width, not the screen's: a wide card at 1280 does not clamp, a 300 px card does, ${scheme} scheme`, async (t) => {
+  const page = await open(t, { items: [IRP_ANS], answers: answerOf(IRP_ANS, "a"), dbExtra: { asks: { [LAY_ITEM_ANS.id]: LAY_ITEM_ANS } }, storage: VISIT, viewport: { width: 1280, height: 900 }, scheme }); if (!page) return;
+  await mustHave(page, `#item-${IRP_ANS.id} > p.fwait .ftext`, "the folded reply under No. " + IRP_ANS.n);
+  const ftext = `#item-${IRP_ANS.id} > p.fwait .ftext`;
+  const wide = await clampOf(page, ftext, "article.card");
+  assert.ok(wide.card > 480, "the card is " + wide.card + " px wide, not wider than 30rem, so this case cannot show a wide card");
+  assert.equal(wide.lines, "none", "the folded reply in a wide card is clamped to " + wide.lines + " lines");
+  await page.locator(`#item-${IRP_ANS.id}`).evaluate((a) => { a.style.width = "300px"; });
+  const narrow = await clampOf(page, ftext, "article.card");
+  assert.equal(Math.round(narrow.card), 300, "the card is " + narrow.card + " px wide after the width is set, so this case cannot show a narrow card");
+  assert.equal(narrow.lines, "2", "the folded reply in a 300 px card is not clamped to two lines (line clamp " + narrow.lines + ") on a 1280 px screen");
+});
+
+// A long unbroken reply and its answer wrap inside the thread, so the page does not scroll sideways on a 360 px phone.
+for (const scheme of ["light", "dark"]) test(`a long unbroken reply and answer in an ask thread do not scroll the page sideways at 360 wide, ${scheme} scheme`, async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED, [LONG_ANS.id]: LONG_ANS } }, storage: RPL_NEW, viewport: { width: 360, height: 800 }, scheme }); if (!page) return;
+  await mustHave(page, `#${LONG_ANS.id} .reply`, "the unbroken reply " + LONG_ANS.id);
+  const sw = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
+  assert.ok(sw.scroll <= sw.client, "the page scrolls sideways at 360 wide: scrollWidth " + sw.scroll + " is more than clientWidth " + sw.client);
 });
 
 // ---------------------------------------------------------------- reply to an item on its line (step item-reply-back, notes section 11)
