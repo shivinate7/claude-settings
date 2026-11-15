@@ -59,11 +59,12 @@ def tgt_path(name):
     return os.path.join(TGT_DIR, name + ".jsonl")
 
 
-def tgt_list(tool_id, rows):
-    """A list_sessions result: its rows, each with an id and its tags, as another session's wrapped text."""
-    body = json.dumps({"sessions": [{"id": sid, "session_status": "SESSION_STATUS_RUNNING", "tags": tags}
-                                    for sid, tags in rows], "has_more": False})
-    return [role_use(tool_id, LIST_SESSIONS), role_result(tool_id, role_wrapped(body))]
+def tgt_list(tool_id, rows, wrapped=True):
+    """A list_sessions result in the ccr.data shape: its rows, each with an id and its tags. `wrapped` returns it as
+    another session's text comes back, inside the untrusted wrapper, and False returns the bare JSON."""
+    body = json.dumps({"ccr": {"data": [{"id": sid, "session_status": "SESSION_STATUS_RUNNING", "tags": tags}
+                                        for sid, tags in rows], "has_more": False}})
+    return [role_use(tool_id, LIST_SESSIONS), role_result(tool_id, role_wrapped(body) if wrapped else body)]
 
 
 def tgt_get(tool_id, sid, tags):
@@ -81,6 +82,7 @@ TGT_OWN = role_call("own", ["cs-build:coordinator", TGT_REPO_TAG], session=TGT_S
 TGT_LINES = {
     "own-only": TGT_OWN,
     "list-same": TGT_OWN + tgt_list("l1", [(ROSTER_LANE, ["cs-build:lane", TGT_REPO_TAG])]),
+    "list-same-bare": TGT_OWN + tgt_list("l1", [(ROSTER_LANE, ["cs-build:lane", TGT_REPO_TAG])], wrapped=False),
     "list-other": TGT_OWN + tgt_list("l1", [(ROSTER_LANE, ["cs-build:lane", TGT_OTHER_TAG])]),
     "get-same": TGT_OWN + tgt_get("g1", ROSTER_LANE, ["cs-build:lane", TGT_REPO_TAG]),
     "create-same": TGT_OWN + tgt_create("c1", ["cs-build:lane", TGT_REPO_TAG], ROSTER_LANE),
@@ -131,6 +133,8 @@ tgt_send("target-id-in-roster: a target that is a record row is allowed", "allow
 tgt_send("target-id-in-roster: the full roster's fifth row is allowed", "allow", ROSTER_ARBITER, cwd=ROSTER_FULL)
 tgt_send("target-id-in-roster: a lane seen on a list row tagged with the sender's repo is allowed", "allow", ROSTER_LANE,
          transcript=tgt_path("list-same"), env=TGT_SELF_ENV)
+tgt_send("target-id-in-roster: a lane seen on a bare list row tagged with the sender's repo is allowed", "allow", ROSTER_LANE,
+         transcript=tgt_path("list-same-bare"), env=TGT_SELF_ENV)
 tgt_send("target-id-in-roster: a lane seen on a get_session record tagged with the sender's repo is allowed", "allow",
          ROSTER_LANE, transcript=tgt_path("get-same"), env=TGT_SELF_ENV)
 tgt_send("target-id-in-roster: a lane seen on a create_session result tagged with the sender's repo is allowed", "allow",
