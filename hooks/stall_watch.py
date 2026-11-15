@@ -669,6 +669,19 @@ def agent_export(call):
     return ""
 
 
+LEADING_PAUSE = re.compile(r"\s*sleep\s+(\d+)([smhd]?)(?![\d.])\s*(?:;|&&|\n)\s*[^\s;&|#]")
+PAUSE_UNIT = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+def leading_pause(command):
+    """Seconds of a planned wait: the command starts with `sleep N`, then `;`, `&&` or a newline, then a
+    command. The pause is silent by design, so the quiet time starts after it. A bare `sleep N` (nothing
+    after it) and a pause later in the command return 0. N is a whole number: a planned wait is one, and a
+    fractional `sleep 0.5; cmd` is a short pause that the default quiet time already covers."""
+    m = LEADING_PAUSE.match(command)
+    return float(m.group(1)) * PAUSE_UNIT[m.group(2)] if m else 0
+
+
 def hook():
     # ponytail: posix only. The rewrite needs `&`, `$!` and `wait`, and Windows has no harness
     # shell that matches. Returning nothing leaves a Windows call unchanged, unmarked: a process
@@ -687,6 +700,9 @@ def hook():
     except Exception:
         return 0
     quiet = os.environ.get("STALL_WATCH_QUIET") or str(DEFAULT_QUIET)
+    pause = leading_pause(original)
+    if pause:
+        quiet = "%g" % (pause + float(quiet))
     logs, unresolved = read_named_logs(original)  # a relative log in an unknown directory is not watched
     base = os.path.join(os.path.realpath(tempfile.gettempdir()), "stall-watch-%s" % uuid.uuid4().hex)
     log, beat = base + ".log", base + ".beat"  # the job makes the beat file, if a tool writes to it
