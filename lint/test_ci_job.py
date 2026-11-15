@@ -19,7 +19,7 @@ Lint mode: a --lint run that picks no lint step is unknown, exit 2; a lint step 
 unknown when it is skipped; a lint step that runs only off a pull request reads skipped, and the run still exits 0.
 ParallelLint: --lint runs its lint steps at once (CI_JOB_LINT_WORKERS, else the cpu count up to 4), keeps the printed
 lines and each step's log lines in workflow order, and treats an install step as a barrier. Overlap is proven by rendezvous.
-LocalActionUnderLint: --lint runs a local uses: action only when its action.yml passes the gate; FAIL beats unknown, and each refusal
+LocalActionUnderLint: --lint runs a local uses: action only when the read of its action.yml before any step runs accepts it; FAIL beats unknown, and each refusal
 names its file, line or value and runs no step. A plain run never runs one.
 Run: python3 lint/test_ci_job.py
 """
@@ -2212,7 +2212,7 @@ def probe_step(name, rc, marker, extra=""):
 
 
 class LocalActionUnderLint(Job):
-    """--lint runs a local uses: action (`$/actions/<name>`) when its action.yml passes the gate: composite, and every step a
+    """--lint runs a local uses: action (`$/actions/<name>`) when its action.yml, read before any step runs, is composite, and every step a
     bash run: whose lines are lint commands. The action prints one verdict line, FAIL beating unknown. A refusal prints
     unknown naming the file, the line or the value it refused, and runs no step. A plain run never runs a local action."""
 
@@ -2323,8 +2323,8 @@ class LocalActionUnderLint(Job):
         self.commit_lane(composite_action(probe_step("Probe", 0, "probe.marker"), action_step("Install", "npm ci")))
         rc, lines, out = self.run_job(*self.BOTH, args=self.LINT, env=self.stub_path(npm=self.NPM_OK))
         self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
-        self.assertIn("npm ci", lines[0], out)  # the reason: the line the gate refused
-        self.assertFalse(self.ran("probe.marker"), "the probe ran although a later line failed the gate\n" + out)
+        self.assertIn("npm ci", lines[0], out)  # the reason: the line the read before any step refused
+        self.assertFalse(self.ran("probe.marker"), "the probe ran although a later line was refused before any step ran\n" + out)
         self.assertEqual(self.npm_calls(), "(no npm call)", out)
 
     def test_a_local_action_with_a_curl_line_reads_unknown_and_runs_no_step(self):
@@ -2332,8 +2332,8 @@ class LocalActionUnderLint(Job):
                                           action_step("Fetch", "curl -sS -o tool.sh https://example.invalid/tool.sh")))
         rc, lines, out = self.run_job(*self.BOTH, args=self.LINT, env=self.stub_path(curl='echo "$*" >> curl-calls.txt'))
         self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
-        self.assertIn("curl", lines[0], out)  # the reason: the line the gate refused
-        self.assertFalse(self.ran("probe.marker"), "the probe ran although a later line failed the gate\n" + out)
+        self.assertIn("curl", lines[0], out)  # the reason: the line the read before any step refused
+        self.assertFalse(self.ran("probe.marker"), "the probe ran although a later line was refused before any step ran\n" + out)
         self.assertFalse(self.ran("curl-calls.txt"), "the curl line ran\n" + out)
 
     def test_a_local_action_with_no_steps_reads_unknown_naming_the_file(self):
@@ -2408,6 +2408,52 @@ class LocalActionUnderLint(Job):
         self.assertIn("Install deps", named[0], out)  # the reason: the install step that did not finish
         self.assertNotIn("FAIL", self.verdicts(lines), out)
         self.assertFalse(self.ran("probe.marker"), "the action ran after a failed install\n" + out)
+
+    def test_a_comment_above_the_first_action_step_does_not_make_the_action_unknown(self):
+        action = ("name: probe-check\ndescription: a test action\nruns:\n  using: composite\n  steps:\n"
+                  "    # a note above the first step, indented four spaces\n" + probe_step("Probe", 0, "pass.marker"))
+        self.commit_lane(action)
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS", "PASS"]), out)
+        self.assertTrue(self.ran("pass.marker"), "the first step did not run\n" + out)
+
+    def test_a_comment_above_the_first_action_step_still_reads_fail_for_a_failing_probe(self):
+        action = ("name: probe-check\ndescription: a test action\nruns:\n  using: composite\n  steps:\n"
+                  "    # a note above the first step, indented four spaces\n" + probe_step("Probe", 1, "fail.marker"))
+        self.commit_lane(action)
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL", "PASS"]), out)
+        self.assertTrue(self.ran("fail.marker"), "the first step did not run\n" + out)
+
+    def test_an_install_before_a_missing_local_action_is_not_run_under_plan(self):
+        self.commit_lane(None)  # the uses: names no action, so no lint step after the install would run
+        rc, lines, out = self.run_job(step("Install deps", "npm ci"), step("Missing", uses="$/actions/no-such-action"),
+                                      args=("--lint", "--plan", "--base", "origin/main"))
+        install = [ln for ln in lines if "Install deps" in ln]
+        self.assertEqual(len(install), 1, "the install step did not print one line\n" + out)
+        self.assertTrue(install[0].startswith("not run"), "the install was not marked not run\n" + out)
+        self.assertIn("no lint step after it will run", install[0], out)
+        self.assertNotIn("would run", install[0], "the install was planned to run\n" + out)
+
+    def test_an_install_before_a_local_action_with_a_false_outer_if_is_not_run(self):
+        self.commit_lane(composite_action(probe_step("Probe", 0, "probe.marker")))
+        outer = step("Probe check", uses="$/actions/probe-check", **{"if": "github.event_name != 'pull_request'"})
+        rc, lines, out = self.run_job(step("Install deps", "npm ci"), outer, args=self.LINT,
+                                      env=self.stub_path(npm="touch npm-ran.marker"))
+        install = [ln for ln in lines if "Install deps" in ln]
+        self.assertEqual(len(install), 1, "the install step did not print one line\n" + out)
+        self.assertTrue(install[0].startswith("not run"), "the install was not marked not run\n" + out)
+        self.assertIn("no lint step after it will run", install[0], out)
+        self.assertFalse(self.ran("npm-ran.marker"), "the install ran before a skipped action\n" + out)
+        self.assertFalse(self.ran("probe.marker"), "the skipped action ran\n" + out)
+
+    def test_a_local_uses_step_with_its_own_env_reads_unknown_naming_the_env_and_does_not_run(self):
+        self.commit_lane(composite_action(probe_step("Probe", 0, "probe.marker")))
+        strict = step("Probe check", uses="$/actions/probe-check", env={"STRICT": "1"})
+        rc, lines, out = self.run_job(strict, self.PLAIN, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
+        self.assertIn("STRICT", lines[0], out)  # the reason: the env the uses: step carries, which the action does not read
+        self.assertFalse(self.ran("probe.marker"), "the action ran although its uses: step has an env\n" + out)
 
     # Controls: each reads the same today and after the change. The probe as a plain run: step proves the fixture works.
 
