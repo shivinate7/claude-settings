@@ -15832,8 +15832,8 @@ class ReviewNoRestart(ReviewEnv):
     needs a new lane (owner, page item 741, 14:01 CST). A record may open at the last round after a failed second round, or after a failed fix
     check with no second round written, and then holds that last round alone. A comment that does not parse, or that names another pull request, is skipped. A refusal exits 2 and prints
     nothing on stdout. A record with no round line is refused after an earlier record whose last design reviewer line is FAIL or PARTIAL, or after
-    records with no design reviewer line that follow it, since it holds no design reviewer line to clear that hold. Each accepted case is a control:
-    it prints a record on main and after the change."""
+    records with no design reviewer line that follow it, since it holds no design reviewer line to clear that hold. A FAIL fix check clears no hold,
+    so it is accepted beside one. Each accepted case is a control: it prints a record on main and after the change."""
 
     EARLIER_FIX_FROM = "1e" * 20  # the head a fix check's fix diff started from: a fix check line never names its own record's Head
     GRANT = REVIEW_GRANT_TEXT  # the owner's grant of a fourth review pass, bound to this pull request
@@ -16171,6 +16171,17 @@ class ReviewNoRestart(ReviewEnv):
                 self.assertEqual(state, "open", f"scope: an earlier record whose design reviewer line is {verdict} must read open: {why!r}")
                 rc, out, err = self.run_args(*self.design_only_argv(), host=self.chain_host(earlier))
                 self.assert_refused_naming_design(rc, out, err)
+
+    def test_a_fix_check_fail_after_an_earlier_design_line_fail_is_accepted(self):
+        # A FAIL fix check clears no hold, so the design hold refuses only a PASS. It is the record that opens round 3 after failed fix verifiers.
+        # Control: the same record with a PASS fix check is refused by the hold, so the acceptance below comes from the FAIL alone.
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, FAIL"))
+        self.assertEqual(record_verdict(self, earlier, head=REVIEW_OLD_HEAD)[0], "open", "scope: the earlier record must read open on its own")
+        fix = f"{REVIEW_OLD_HEAD}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}"
+        rc, out, err = self.run_args(*self.review_argv(fix=f"{fix}:PASS"), host=self.chain_host(earlier))
+        self.assert_refused_naming_design(rc, out, err)
+        rc, out, err = self.run_args(*self.review_argv(fix=f"{fix}:FAIL"), host=self.chain_host(earlier))
+        self.assert_accepted(rc, out, err)
 
     def test_a_fix_verifier_only_record_after_an_earlier_design_line_pass_is_accepted(self):
         # Control for the refusal above: the earlier record's last design reviewer line is PASS, or the record holds no design reviewer line, so the
