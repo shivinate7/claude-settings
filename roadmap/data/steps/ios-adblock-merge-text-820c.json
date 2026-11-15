@@ -1,0 +1,12 @@
+{
+ "id": "ios-adblock-merge-text-820c",
+ "title": "Rewrite ios-adblock's merge-mode text to per-lane merge, as ruling own-820-c-five-repos says",
+ "phase": "now",
+ "status": "doing",
+ "repo": "shivinate7/ios-adblock",
+ "why": "Coordinator's pick (relayed 09:09 CST Nov 15; NOT owner-typed; undoable docs-only lane): the consultant's 820 c order stands. Ruling own-820-c-five-repos (owner 00:19 CST Nov 14, item 820 c) says all five repos, mailaudit included, merge per lane now. Lane ios-adblock-merge-text-820c (session session_013NEJL2S79NnCZzNMFADBU7, sonnet, docs-only, draft PR to come; triage read no ios-adblock file) rewrites ci-push-skips-macos.md line 9 in ios-adblock and greps for the same text. Source: runner 12's where-else grep of 09:06 CST (a grep of local clones, unknown for newer main; q_max and joyous had no hit; q_max CLAUDE.md:55 'q_max batch runner' is fine under own-821-a; relayed by the coordinator, not seen by triage). Checked 09:10 CST: no earlier step carries this work. Sister steps: merge-text-matches-820c, mailaudit-merge-text-820c, banchi-merge-text-820c. The child-repo step child-repos-decision-claude-md-gap holds a pointer.",
+ "source": "coordinator 09:09 CST Nov 15, relayed by triage",
+ "note": "Doing. Lane session_013NEJL2S79NnCZzNMFADBU7 (sonnet, docs-only, draft PR to come), started 09:09 CST on the coordinator's pick under the consultant's 820 c order (not owner-typed). Rewrites ci-push-skips-macos.md line 9 in ios-adblock and greps for the same text. Runner 12 reviews and merges (relayed).",
+ "lane": "session_013NEJL2S79NnCZzNMFADBU7",
+ "updatedAt": "2026-11-15T09:10:00-06:00"
+}
