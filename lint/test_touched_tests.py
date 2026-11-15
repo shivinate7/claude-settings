@@ -441,6 +441,80 @@ class Selector(unittest.TestCase):
         self.assertNotIn(a, macos, "a Windows-only test is in files_macos, though no macOS job runs it")
         self.assertTrue(skipped_on(stdout, a, MACOS_KEY), f"the log does not name {a} as skipped on macOS")
 
+    # R61 part 4: the macOS leg of a draft lane runs only for a file whose subject is macOS. This fixture's macOS job runs a
+    # shared suite (hooks/test_ci_wake.py) and the launchd installer's suite, so the lists are the filter's, not checks.yml's.
+    MAC_BOTH_CI = dedent("""\
+        name: fixture checks
+        on: pull_request
+        jobs:
+          macos:
+            runs-on: macos-latest
+            steps:
+              - run: python3 hooks/test_ci_wake.py
+              - run: python3 janitor/test_install_launchd.py
+        """)
+
+    def test_a_shared_test_the_macos_job_runs_is_left_out_of_files_macos_with_a_reason(self):
+        """hooks/test_ci_wake.py is a suite for every OS. The macOS job runs it, but a lane that touches only it touches no
+        macOS subject, so it is absent from files_macos and the log names it as skipped on macOS."""
+        shared = "hooks/test_ci_wake.py"
+        _, macos, stdout = self.per_os(with_checks({shared: "old\n", "janitor/test_install_launchd.py": "old\n"}, self.MAC_BOTH_CI),
+                                       {shared: "new\n"})
+        self.assertNotIn(shared, macos, f"{shared} is in files_macos, though it is not a macOS subject")
+        self.assertTrue(skipped_on(stdout, shared, MACOS_KEY), f"the log does not name {shared} as skipped on macOS")
+
+    def test_a_product_file_outside_macos_lists_no_macos_test(self):
+        """A change to hooks/ci_wake.py selects its test hooks/test_ci_wake.py. That is no macOS subject, so files_macos
+        does not list it."""
+        shared = "hooks/test_ci_wake.py"
+        base = {shared: "old\n", "hooks/ci_wake.py": "old\n", "janitor/test_install_launchd.py": "old\n"}
+        _, macos, stdout = self.per_os(with_checks(base, self.MAC_BOTH_CI), {"hooks/ci_wake.py": "new\n"})
+        self.assertNotIn(shared, macos, f"a change to hooks/ci_wake.py lists {shared} in files_macos")
+        self.assertTrue(skipped_on(stdout, shared, MACOS_KEY), f"the log does not name {shared} as skipped on macOS")
+
+    def test_a_macos_subject_test_stays_in_files_macos(self):
+        """janitor/test_install_launchd.py tests the launchd installer, a macOS subject: it stays in files_macos."""
+        mac = "janitor/test_install_launchd.py"
+        _, macos, _ = self.per_os(with_checks({mac: "old\n", "hooks/test_ci_wake.py": "old\n"}, self.MAC_BOTH_CI), {mac: "new\n"})
+        self.assertIn(mac, macos, f"{mac} tests the launchd installer, a macOS subject, and is not in files_macos")
+
+    def test_a_product_file_with_macos_code_lists_its_macos_test(self):
+        """A change to janitor/install_launchd.py, the macOS installer, selects janitor/test_install_launchd.py, which runs
+        on macOS. The shared suite is not selected, so files_macos holds the installer's test alone."""
+        mac = "janitor/test_install_launchd.py"
+        base = {mac: "old\n", "janitor/install_launchd.py": "old\n", "hooks/test_ci_wake.py": "old\n"}
+        _, macos, _ = self.per_os(with_checks(base, self.MAC_BOTH_CI), {"janitor/install_launchd.py": "new\n"})
+        self.assertEqual(macos, [mac], "a change to the macOS installer does not list its macOS test alone")
+
+    # A hooks test is a macOS subject, whatever its name, when its own text names a macOS thing (darwin, macos,
+    # launchd, uname -s, Darwin or xcrun). The selector reads the file to tell.
+    MAC_HOOK_CI = dedent("""\
+        name: fixture checks
+        on: pull_request
+        jobs:
+          macos:
+            runs-on: macos-latest
+            steps:
+              - run: python3 hooks/test_wrappers.py
+              - run: python3 hooks/test_pure_helpers.py
+        """)
+
+    def test_a_hooks_test_that_fakes_a_darwin_uname_stays_in_files_macos(self):
+        """hooks/test_wrappers.py fakes a Darwin uname for install.sh. Its own text names uname -s and Darwin, so it is a
+        macOS subject whatever its name, and it stays in files_macos."""
+        wrappers = "hooks/test_wrappers.py"
+        base = {wrappers: "old\n", "hooks/test_pure_helpers.py": "old\n"}
+        _, macos, _ = self.per_os(with_checks(base, self.MAC_HOOK_CI),
+                                  {wrappers: 'uname_stub=$(uname -s)  # fakes Darwin for install.sh\n'})
+        self.assertIn(wrappers, macos, f"{wrappers} fakes a Darwin uname, so it is a macOS subject, and is not in files_macos")
+
+    def test_a_plain_pure_python_hooks_test_is_left_off_the_macos_leg(self):
+        """hooks/test_pure_helpers.py has no macOS word in its text, so it is a shared suite: files_macos does not list it."""
+        plain = "hooks/test_pure_helpers.py"
+        base = {plain: "old\n", "hooks/test_wrappers.py": "old\n"}
+        _, macos, _ = self.per_os(with_checks(base, self.MAC_HOOK_CI), {plain: "def test_add():\n    assert 1 + 1 == 2\n"})
+        self.assertNotIn(plain, macos, f"{plain} has no macOS word, yet files_macos lists it")
+
     # Row 2: a .ps1 source maps to its own .test.ps1 and install-*.test.ps1 beside it.
     def test_a_ps1_source_lists_its_test_and_its_dash_tests(self):
         base = {"install.ps1": "old\n", "install.test.ps1": "old\n", "install-no-gap.test.ps1": "old\n"}

@@ -6,9 +6,8 @@ tool refusal with the rule or decision text it claims to hold.
 
 Owner, 2026-11-01 20:57 CST: "a lot of what this repo is is just self improvement best practices so
 that my next project comes in faster, better than the last". The incident: the merge tool refused a
-merge while another ready PR ran CI, stricter than rule git-no-merge-during-batch-ci (no merge to main
-while a batch's integration PR runs CI). Step overlapping-batches (a batch can run CI on top of the
-batch ahead of it) holds that fix. This sweep cites it and does not redo it.
+merge while another ready PR ran CI, stricter than the batch-CI rule that was then `git-no-merge-during-batch-ci`. The per-lane cutover
+(R42 part 2) removed that refusal, so its rows are gone from this sweep. This sweep cites the incident and does not redo it.
 
 ## Method
 
@@ -31,7 +30,7 @@ batch ahead of it) holds that fix. This sweep cites it and does not redo it.
 - **uncited:** no rule or decision holds the refusal. Most are fail-closed stops on a failed read.
 - **unverified:** no rule sentence could be quoted.
 
-143 rows: exact 88, looser 11, stricter 11, uncited 32, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
+130 rows: exact 78, looser 11, stricter 9, uncited 31, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
 exact has a gap.
 
 
@@ -152,11 +151,6 @@ Notes: owner-judge also fires on prose "Problem statement:" (wrong id only). gh-
 | `merge:required-none-named` | no-merge-during-batch-ci | "The tool refuses a base with no protection and no pinned list." | exact | exact | no protection (776) or an empty list (782) | - |
 | `merge:ignore-clash` | git-never-merge-failing-ci | "Never merge failing CI." | exact | exact | merge.ignoreChecks names a required check (780) | - |
 | `merge:pinned-mismatch` | main-branch-protection (nearest) | "so the merge tool reads the name from the protection." | uncited | exact | a pinned check list differs from a non-empty protection list (800) | rule rewrite: add "the pin equals the protection" to main-branch-protection |
-| `merge:wait-deadline` | standing-merge-grant | "The required checks must pass on the head that merges" | exact | exact | the head is still pending at the deadline (907), or GitHub shows the old head (871) | - |
-| `merge:wait-head-moved` | standing-merge-grant | "The required checks must pass on the head that merges" | exact | exact | the head differs from the waited commit (877) | - |
-| `merge:wait-base-changed` | merge-needs-current-base (nearest) | "The head and the base tip merge cleanly." | uncited | exact | the PR base changed (875) or the PR went conflicting (879) during the wait | rule rewrite: add both cases to merge-needs-current-base |
-| `merge:wait-red` | git-never-merge-failing-ci | "Never merge failing CI." | exact | exact | any red check or run (884) | - |
-| `merge:wait-required-unreported` | ci-unknown-is-red | "a green exit on an unread input hides a defect." | exact | exact | a required check no run reports (891) | - |
 | `merge:base-red-or-unknown` | no-merge-onto-red-main | "Unknown refuses, as the silent-undo check does." | exact | exact | the newest base run is red, or cancelled with no red job (947-980) | - |
 | `merge:head-read-verdict` | git-never-merge-failing-ci | "Never merge failing CI." | exact | exact | red, pending, no check yet, or unknown is not green (1025-1057) | - |
 | `merge:ready-never-sent` | records-index-at-merge | "so the batch runner marks the PR ready" | exact | exact | the tool never marks a PR ready (1073) | - |
@@ -169,20 +163,17 @@ Notes: owner-judge also fires on prose "Problem statement:" (wrong id only). gh-
 | `merge:records-commit-failed` | records-index-at-merge | "Only the merge tool rebuilds the page." | unverified | exact | the generator or its commit fails (1189, 1202, 1226) | - |
 | `merge:records-conflict-beyond-page` | merge-needs-current-base | "The head and the base tip merge cleanly." | exact | exact | the base conflicts on a file other than the records page (1215) | - |
 | `merge:records-no-page-to-heal` | records-index-at-merge | "The heal stops when the generator writes no page for a conflicted page." | exact | exact | (1221) | - |
-| `merge:small-move-unproved` | merge-needs-current-base | "A small move is the one exception: ... any read that fails refuses." | exact | exact | a suite or lint read fails, so the base move is not proved small (1422-1556); after the claim push it is `merge:outcome-unproven`: the claim stays | - |
-| `merge:holds-base-behind` | merge-needs-current-base | "The merge tool refuses a head that does not hold the base tip." | exact | exact | the head lacks the base tip with no small-move proof (1577-1579) | - |
 | `merge:push-refused` | none | - | uncited | exact | the plain push of the PR branch is refused (1584) | - |
 | `merge:ff-main-skipped` | shared-trees-no-destructive-git | "No destructive git." | exact | exact | the local main is not moved when a fetch, ancestry or ff-only fails (1617-1631) | - |
 | `merge:cleanup-keeps` | merge-deletes-batch-lanes | "Its worktree goes when the sweep's `--fast` judgment says reap." | exact | exact | a held tree or an unmerged tip is kept (1650-1699); never blocks the merge | - |
 
-Notes: batch_running (726-753) computes the blockers; area F rows its refusal. The merge lock has no decision record: 5 lock rows uncited. BEHIND needs strict protection, off here, so BLOCKED is the live case.
+Notes: the merge lock has no decision record: 5 lock rows uncited. BEHIND needs strict protection, off here, so BLOCKED is the live case.
 
 ## F. Merge tool, second half, and the guard's merge rules
 
 | Refusal | Rule it cites | Rule sentence | Verdict | Gold | Showing case | Proposed fix |
 |---|---|---|---|---|---|---|
 | `merge-checks` | git-never-merge-failing-ci | "Never merge failing CI." | exact | exact | `gh pr merge 5` on a red or pending head is denied | rule rewrite: add the decision slug no-merge-during-batch-ci to the guard index line |
-| `merge-checks:batch` | git-no-merge-during-batch-ci | "While a batch's integration PR has a CI run in progress, nothing merges to main" | stricter | exact | `gh pr merge 63` is denied while ready PR #65, which holds #63, runs CI | tool fix: step overlapping-batches; the guard reads the same Host.head_read, so the fix reaches it; add a guard test |
 | `merge-role-proof` | session-tiers | "allows `merge --role T` only when the session's own newest `get_session` result ... lists the tag `cs-build:T`" | exact | exact | a lane runs `merge --role coordinator`: denied | - |
 | `trust-card-in-build` | session-tiers | "allows the calls only when the session's own newest `get_session` record shows no `cs-build:` tag" | exact | exact | a cs-build session opens the trust card: denied | - |
 | `merge:dropped-lane-unread` | silent-undo-check-design | "`merge.py` refuses on unknown, because its merge cannot be taken back." | exact | exact | git log fails; --undo-check-unknown-ok lifts it (1761) | - |
@@ -195,22 +186,16 @@ Notes: batch_running (726-753) computes the blockers; area F rows its refusal. T
 | `merge:pr-closed-or-conflicting` | none | - | uncited | exact | the PR is closed or conflicting (2051, 2053) | - |
 | `merge:worktree-open-failed` | none | - | uncited | exact | origin's head differs from the one gh named, or the tree cannot be added (2060-2069) | - |
 | `merge:red-base` | no-merge-onto-red-main | "the merge tool refuses `merge <pr> --confirm` while the base branch's latest completed run has a red job." | exact | exact | a red or unread main run (2105); --base-red-ok lifts it | - |
-| `merge:batch-refusal` | git-no-merge-during-batch-ci | "nothing merges to main, by any session or by me." | stricter (known) | exact | PR #63 is refused while ready PR #65, which holds #63, runs CI (batch_running 726-753, batch_refusal 2107, confirm 2224 and 2359-2363, preview 2149-2151) | tool fix: step overlapping-batches |
 | `merge:preview-base-stale` | merge-needs-current-base | "The preview prints a `base:` line that says whether the head ... is BEHIND." | exact | exact | a BEHIND head gets "--confirm refuses it" (2129, 2132) | - |
 | `merge:preview-base-run` | no-merge-onto-red-main | "The preview prints the same verdict on its `<base> run:` line." | stricter (wording) | exact | a red main says "--confirm refuses it", though --base-red-ok lifts it (2156) | tool fix: add "unless --base-red-ok" to the line |
 | `merge:draft-holds-claim` | records-index-at-merge | "refuses ... a head that carries a claim" | exact | exact | a draft head with a claim line (2177) | - |
 | `merge:draft-base-stale` | records-index-at-merge | "refuses a head that does not hold the base tip" | exact | exact | a BEHIND or unknown draft head (2182) | - |
 | `merge:base-changed-under-lock` | none | - | uncited | exact | the PR is retargeted during the lock wait (2217) | - |
-| `merge:confirm-stale-base` | merge-needs-current-base | "The merge tool refuses a head that does not hold the base tip." | exact | exact | the head is behind main and the move is not small (2231) | - |
 | `merge:claim-off-default-base` | one-shared-record-stamp (nearest) | "The claim runs before the merge, on the pull request branch" | uncited | exact | a claimed head on a base that is not the default (2239) | rule rewrite: one line in one-shared-record-stamp |
 | `merge:confirm-head-not-green` | git-never-merge-failing-ci | "Never merge failing CI." | exact | exact | the head checks are red before the claim (2258) | - |
 | `merge:confirm-required-names` | no-merge-during-batch-ci | "The tool refuses a base with no protection and no pinned list." | exact | exact | no protection and no pin (2210, 2220) | - |
-| `merge:confirm-wait-not-green` | git-never-merge-failing-ci | "Never merge failing CI." | exact | exact | a check goes red; the claim reverts (2287). The deadline with a check pending is `merge:outcome-unproven`: the claim stays | - |
-| `merge:claim-proof-stale` | merge-needs-current-base | "A base that moved during the wait, and is not a small move, reverts the claim." | exact | exact | the claimed number is now taken (2295-2310). A base fetch that fails, or an UNKNOWN stamp or undo read, is `merge:outcome-unproven`: the claim stays | - |
 | `merge:records-stale` | records-index-at-merge | "A stale page ... gets the rebuild commit" | exact | exact | the base gained a record outside the tool (2317, 2321) | - |
-| `merge:base-moved-in-wait` | merge-needs-current-base | "a batch merges only after a green run that holds for the current main." | exact | exact | main moved during the wait, not small (2324) | - |
 | `merge:heal-push-failed` | records-index-at-merge | "When only the page conflicts with the base, the tool rebuilds it on the merged tree." | exact | exact | the heal commit push fails; the claim reverts (2334) | - |
-| `merge:heal-not-green` | merge-needs-current-base | "A heal merge commit ... Its own checks wait before the merge." | exact | exact | the heal commit is red, or the base moved again (2343-2349) | - |
 | `merge:host-refused` | none | - | uncited | exact | the merge call is refused, for example the head moved; the claim reverts (2366) | - |
 | `merge:confirm-unexpected-error` | none | - | uncited | exact | an error after the claim push that is no read (not a timeout, OS or value error); the claim reverts (2266-2277, 2370) | - |
 | `merge:role-write-failed` | session-tiers | "Local sessions: unchanged." | uncited | exact | `--role` outside the cloud, with no session id, or on an unwritable file (2422, 2424, 2436) | - |
@@ -235,8 +220,7 @@ Notes: every Stop ends "No override lifts this refusal" (2488), false for red-ba
 
 Each stricter or looser row becomes one step. Triage owns the steps. This record changes no guard.
 
-- **Stricter, tool fix:** `merge-checks:batch` and `merge:batch-refusal` (step overlapping-batches),
-  `pointer-head`, `command-in-item`, `gh-login-switch`, `machine-wide-kill`, `detached-launch`,
+- **Stricter, tool fix:** `pointer-head`, `command-in-item`, `gh-login-switch`, `machine-wide-kill`, `detached-launch`,
   `impeccable-review-only`, `builder-test-edit`, `merge:preview-base-run`, the "no override" text.
 - **Looser, tool fix:** `shared-tree`, `destructive-delete` (`$(pwd)`, heredoc forms), `session-home`,
   `agent-model-floor`, `port-question`, `question-form`, `page-stale`.
@@ -253,4 +237,4 @@ Each stricter or looser row becomes one step. Triage owns the steps. This record
     load-brake-skips-create-session.
 - **Uncited, rule rewrite:** the merge-lock decision, `env-file`, `config-edit`,
   `ln-over-directory`, `role-diff-main-checkout`, `role-diff-unresolved`, `merge:pinned-mismatch`,
-  `merge:wait-base-changed`, `merge:blocked-or-behind`, `merge:claim-off-default-base`.
+  `merge:blocked-or-behind`, `merge:claim-off-default-base`.

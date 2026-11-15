@@ -175,7 +175,7 @@ case1() {
   # Simulate `curl ... | bash -s -- --cloud`: bash reads the script off its own stdin
   # (BASH_SOURCE[0] is then "-", never a real file), exactly like the piped install.
   out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
-        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+        CLAUDE_SETTINGS_REF=main bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 
   pointer=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$cfg/CLAUDE.md" 2>/dev/null | head -n1)
@@ -208,7 +208,7 @@ case2() {
   # of exercising the fallback this case is about.
   out=$(cd "$scratch" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
         GIT_CEILING_DIRECTORIES="$scratch" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
-        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+        CLAUDE_SETTINGS_REF=main bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 
   pointer=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$cfg/CLAUDE.md" 2>/dev/null | head -n1)
@@ -270,7 +270,7 @@ origin_case() {
   # rejection cases, so a wrongly-permissive origin match can't be masked by the search.
   out=$(cd "$co" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
         CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
-        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+        CLAUDE_SETTINGS_REF=main bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 
   pointer=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$cfg/CLAUDE.md" 2>/dev/null | head -n1)
@@ -322,7 +322,7 @@ case7() {
   # /home/user and /root (which would pass anyway, but would not prove this case's point).
   out=$(cd "$notacheckout" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
         GIT_CEILING_DIRECTORIES="$notacheckout" CLAUDE_SETTINGS_SEARCH_ROOTS="$h" \
-        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+        CLAUDE_SETTINGS_REF=main bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 
   pointer=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$cfg/CLAUDE.md" 2>/dev/null | head -n1)
@@ -357,7 +357,7 @@ case8() {
 
   out=$(cd "$scratch" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
         GIT_CEILING_DIRECTORIES="$scratch" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
-        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+        CLAUDE_SETTINGS_REF=main bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 
   missing=""
@@ -402,7 +402,7 @@ pointer_case1() {
   # is not itself a git toplevel, so the bounded scan cannot find $co on its own here.
   out=$(cd "$elsewhere" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
         GIT_CEILING_DIRECTORIES="$elsewhere" CLAUDE_SETTINGS_SEARCH_ROOTS="$h" \
-        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+        CLAUDE_SETTINGS_REF=main bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 
   pointer=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$cfg/CLAUDE.md" 2>/dev/null | head -n1)
@@ -429,7 +429,7 @@ pointer_case2() {
 
   out=$(cd "$elsewhere" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
         GIT_CEILING_DIRECTORIES="$elsewhere" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
-        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+        CLAUDE_SETTINGS_REF=main bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 
   pointer=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$cfg/CLAUDE.md" 2>/dev/null | head -n1)
@@ -456,7 +456,7 @@ pointer_case3() {
 
   out=$(cd "$elsewhere" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
         GIT_CEILING_DIRECTORIES="$elsewhere" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
-        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+        CLAUDE_SETTINGS_REF=main bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 
   pointer=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$cfg/CLAUDE.md" 2>/dev/null | head -n1)
@@ -484,7 +484,7 @@ pointer_case4() {
 
   out=$(cd "$elsewhere" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
         GIT_CEILING_DIRECTORIES="$elsewhere" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
-        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+        CLAUDE_SETTINGS_REF=main bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 
   pointer=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$cfg/CLAUDE.md" 2>/dev/null | head -n1)
@@ -511,7 +511,7 @@ pointer_case5() {
   # No seed_pointer call: $cfg does not exist yet, same as a first-ever install.
 
   out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
-        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+        CLAUDE_SETTINGS_REF=main bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 
   pointer=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$cfg/CLAUDE.md" 2>/dev/null | head -n1)
@@ -540,7 +540,7 @@ pointer_case6() {
 
   out=$(cd "$elsewhere" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
         GIT_CEILING_DIRECTORIES="$elsewhere" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
-        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+        CLAUDE_SETTINGS_REF=main bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 
   pointer=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$cfg/CLAUDE.md" 2>/dev/null | head -n1)
@@ -1847,7 +1847,7 @@ in_order() { case "$1" in *"$2"*"$3"*) return 0 ;; esac; return 1; }
 hk_envrun() {
   hk_co=$1; shift
   hk_so=$(mktemp "$work/hk-out.XXXXXX"); hk_se=$(mktemp "$work/hk-err.XXXXXX")
-  ( cd "$hk_co" && env -i "$@" bash -s -- --cloud < "$INSTALL_SH" > "$hk_so" 2> "$hk_se" ); rc=$?
+  ( cd "$hk_co" && env -i "$@" CLAUDE_SETTINGS_REF=main bash -s -- --cloud < "$INSTALL_SH" > "$hk_so" 2> "$hk_se" ); rc=$?
   out=$(cat "$hk_so"); err=$(cat "$hk_se")
 }
 # hookfix_checkout DIR [SETTINGS]: a checkout whose settings.json is the file SETTINGS, or else four entries:
@@ -3138,7 +3138,7 @@ caseG6() {
   git -C "$g_co" config remote.origin.url "$work/caseG6-no-such-remote"
   ref_before=$(cd "$g_co" && git rev-parse main)
   grun
-  want="checkout $g_top: cannot check main against origin, the fetch did not run; freshness unknown"
+  want="checkout $g_top: the origin fetch did not run, so origin refs may be stale; freshness unknown"
   n=$(printf '%s\n' "$g_out" | grep -c 'freshness unknown')
   if [ "$g_rc" -ne 0 ]; then bad "$name" "exit $g_rc"
   elif [ "$n" != "1" ] || ! printf '%s\n' "$g_out" | grep -qxF "$want"; then bad "$name" "expected exactly: $want; got: $g_out"
@@ -3157,7 +3157,7 @@ caseG7() {
   git config -f "$g_co/.git/config" protocol.ext.allow always
   g_out=$(cd "$g_co" && CLAUDE_CONFIG_DIR="$g_cfg" CLAUDE_SETTINGS_FETCH_TIMEOUT=0 sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/dev/null)
   g_rc=$?
-  want="checkout $g_top: cannot check main against origin, the fetch did not run; freshness unknown"
+  want="checkout $g_top: the origin fetch did not run, so origin refs may be stale; freshness unknown"
   if [ "$g_rc" -ne 0 ]; then bad "$name" "exit $g_rc"
   elif ! printf '%s\n' "$g_out" | grep -qxF "$want"; then bad "$name" "expected: $want; got: $g_out"
   else ok "$name"; fi
@@ -3908,7 +3908,7 @@ pinmove_run() {
   stub_bin="$work/$1-bin"; make_curl_stub "$stub_bin"
   pm_out=$(cd "$elsewhere" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
         GIT_CEILING_DIRECTORIES="$elsewhere" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
-        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+        CLAUDE_SETTINGS_REF=main bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   pm_rc=$?
   pm_head_after=$(git -C "$pm_pin" rev-parse HEAD 2>/dev/null)
   pm_ptr=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$cfg/CLAUDE.md" 2>/dev/null | head -n1)
@@ -4181,7 +4181,7 @@ mergepin5() {
   stub_bin="$work/mergepin5-bin"; make_curl_stub "$stub_bin"
   out=$(cd "$cwd_co" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
         GIT_CEILING_DIRECTORIES="$work" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
-        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+        CLAUDE_SETTINGS_REF=main bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
   src=$(pinmove_source "$out")
   rm -rf "$h"
@@ -4411,10 +4411,12 @@ new_home() { d=$(mktemp -d "$work/home.XXXXXX"); d=$(realpwd "$d"); default_home
 # The entries a run left under a fake HOME, not counting its default .gitconfig.
 home_entries() { find "$1" -mindepth 1 ! -path "$1/.gitconfig" 2>/dev/null; }
 # One cloud install, piped as the setup script runs it: HOME $1, a cwd $2 that is no checkout, the curl
-# stub folder $3, and the ref $4 (empty means main). Sets rc and out.
+# stub folder $3, and the ref $4. Not given or empty means main, the recovery ref, so each case that
+# checks clone mechanics names the ref it tests. The default ref (no CLAUDE_SETTINGS_REF) is stable: caseK12.
+# Sets rc and out.
 cloud_install() {
   out=$(cd "$2" && env -i PATH="$3:$PATH" HOME="$1" CLAUDE_CONFIG_DIR="$1/.claude-cfg" \
-        CLAUDE_SETTINGS_REF="${4:-}" GIT_CEILING_DIRECTORIES="$2" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        CLAUDE_SETTINGS_REF="${4:-main}" GIT_CEILING_DIRECTORIES="$2" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
         bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 }
@@ -4758,6 +4760,295 @@ caseK11() {
   fi
 }
 
+# stable_fixture DIR TAG: a GitHub fixture whose stable branch sits at the first commit, while main moves one commit on.
+stable_fixture() {
+  make_github_fixture "$1"
+  git -C "$1/src" push -q "$1/bare.git" HEAD:refs/heads/stable
+  advance_github_fixture "$1" "$2"
+}
+
+# default_cloud_install HOME SCRATCH BIN: one cloud install with no CLAUDE_SETTINGS_REF in its environment (env -i
+# clears it), so install.sh takes its default ref. Sets rc and out.
+default_cloud_install() {
+  out=$(cd "$2" && env -i PATH="$3:$PATH" HOME="$1" CLAUDE_CONFIG_DIR="$1/.claude-cfg" \
+        GIT_CEILING_DIRECTORIES="$2" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+  rc=$?
+}
+
+# advance_stable_fixture DIR TAG: moves the fixture's stable one commit on, from its own tip. main does not move.
+advance_stable_fixture() {
+  s_tip=$(git -C "$1/bare.git" rev-parse refs/heads/stable)
+  git -C "$1/src" checkout -q -b "st-$2" "$s_tip"
+  printf 'stable %s\n' "$2" > "$1/src/STABLE-$2.txt"
+  git -C "$1/src" add -A
+  git -C "$1/src" -c user.email=t@example.com -c user.name=t commit -q -m "stable $2"
+  git -C "$1/src" push -q "$1/bare.git" HEAD:refs/heads/stable
+  git -C "$1/src" checkout -q main
+}
+
+# local_stable_clone CLONE FX: a plain clone of the stable_fixture origin FX, its origin set to GitHub's URL, so
+# git reaches FX through the redirect in HOME's .gitconfig. Local main is origin's main; origin/stable is stable.
+# It also writes $work/npm-stub/npm, an npm that does nothing: a local install in a case must not reach the registry.
+local_stable_clone() {
+  git clone -q "$2/bare.git" "$1"
+  git -C "$1" remote set-url origin https://github.com/shivinate7/claude-settings.git
+  mkdir -p "$work/npm-stub"; printf '#!/bin/sh\nexit 0\n' > "$work/npm-stub/npm"; chmod +x "$work/npm-stub/npm"
+}
+
+# ---- caseK12: with no CLAUDE_SETTINGS_REF, a fresh cloud install clones the stable branch, not main ----
+caseK12() {
+  name="caseK12: with no CLAUDE_SETTINGS_REF, a fresh cloud install clones the stable branch, not main"
+  fx="$work/k12-fx"; h="$work/k12-home"; scratch="$work/k12-scratch"; bin="$work/k12-bin"
+  mkdir -p "$h" "$scratch"
+  stable_fixture "$fx" k12
+  want=$(git -C "$fx/bare.git" rev-parse refs/heads/stable); main_sha=$(fixture_sha "$fx")
+  if [ "$want" = "$main_sha" ]; then
+    bad "$name" "FIXTURE stable and main are both $want; the case cannot tell them apart"
+    return
+  fi
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  default_cloud_install "$h" "$scratch" "$bin"
+  co="$h/claude-settings"
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $(install_problems)"
+  elif [ ! -d "$co/.git" ]; then
+    bad "$name" "no clone at $co/.git: $(install_problems)"
+  elif [ "$(git -C "$co" rev-parse HEAD)" != "$want" ]; then
+    bad "$name" "clone HEAD is $(git -C "$co" rev-parse HEAD), want the fixture stable $want (main is $main_sha)"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK13: CLAUDE_SETTINGS_REF=main still clones main when stable exists: the recovery path (green control) ----
+caseK13() {
+  name="caseK13: CLAUDE_SETTINGS_REF=main still clones main when stable exists, the recovery path"
+  fx="$work/k13-fx"; h="$work/k13-home"; scratch="$work/k13-scratch"; bin="$work/k13-bin"
+  mkdir -p "$h" "$scratch"
+  stable_fixture "$fx" k13
+  want=$(fixture_sha "$fx"); stable_sha=$(git -C "$fx/bare.git" rev-parse refs/heads/stable)
+  if [ "$want" = "$stable_sha" ]; then
+    bad "$name" "FIXTURE stable and main are both $want; the case cannot tell them apart"
+    return
+  fi
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin" main
+  co="$h/claude-settings"
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $(install_problems)"
+  elif [ ! -d "$co/.git" ]; then
+    bad "$name" "no clone at $co/.git: $(install_problems)"
+  elif [ "$(git -C "$co" rev-parse HEAD)" != "$want" ]; then
+    bad "$name" "clone HEAD is $(git -C "$co" rev-parse HEAD), want the fixture main $want, not stable $stable_sha"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK14: a default cloud start moves a clone at an older stable to the new stable, and logs "refreshed ... to stable" ----
+caseK14() {
+  name="caseK14: a default cloud start moves a clone at an older stable to the new stable, and logs 'refreshed ... to stable'"
+  fx="$work/k14-fx"; h="$work/k14-home"; scratch="$work/k14-scratch"; bin="$work/k14-bin"; co="$h/claude-settings"
+  mkdir -p "$h" "$scratch"
+  stable_fixture "$fx" k14
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin" stable
+  old=$(git -C "$fx/bare.git" rev-parse refs/heads/stable)
+  if [ $rc -ne 0 ] || [ "$(git -C "$co" rev-parse HEAD 2>/dev/null)" != "$old" ]; then
+    bad "$name" "setup: the install at stable did not clone the old stable $old: $(install_problems)"
+    return
+  fi
+  advance_stable_fixture "$fx" k14s2
+  want=$(git -C "$fx/bare.git" rev-parse refs/heads/stable); main_sha=$(fixture_sha "$fx")
+  if [ "$want" = "$old" ]; then
+    bad "$name" "FIXTURE stable did not move from $old"
+    return
+  fi
+  default_cloud_install "$h" "$scratch" "$bin"
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc on the default start: $(install_problems)"
+  elif [ "$(git -C "$co" rev-parse HEAD)" != "$want" ]; then
+    bad "$name" "clone HEAD is $(git -C "$co" rev-parse HEAD), want the new stable $want (old stable $old, main $main_sha)"
+  elif ! printf '%s\n' "$out" | grep -q 'refreshed the clone .* to stable$'; then
+    bad "$name" "no 'refreshed the clone ... to stable' line in the install output: $(install_problems)"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseP1: a local install with no pin makes the pin at origin's stable commit, not at local main ----
+caseP1() {
+  name="caseP1: a local install with no pin makes the pin at origin's stable commit, not at local main"
+  fx="$work/p1-fx"; h="$work/p1-home"; co="$work/p1-co"; cfg="$work/p1-cfg"
+  mkdir -p "$h"
+  stable_fixture "$fx" p1
+  stable_sha=$(git -C "$fx/bare.git" rev-parse refs/heads/stable); main_sha=$(fixture_sha "$fx")
+  if [ "$stable_sha" = "$main_sha" ]; then
+    bad "$name" "FIXTURE stable and main are both $stable_sha; the case cannot tell them apart"
+    return
+  fi
+  write_redirect "$h" "$fx/bare.git"
+  local_stable_clone "$co" "$fx"
+  out=$(cd "$co" && env -i PATH="$work/npm-stub:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" bash ./install.sh 2>&1)
+  rc=$?
+  pin_head=$(git -C "$co-live" rev-parse HEAD 2>/dev/null)
+  if [ "$pin_head" != "$stable_sha" ]; then
+    bad "$name" "the pinned checkout is at ${pin_head:-nothing}, want origin's stable $stable_sha, not local main $main_sha (install exit $rc: $(install_problems))"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseP2: CLAUDE_SETTINGS_REF=main still makes the local pin at local main: the recovery path (green control) ----
+caseP2() {
+  name="caseP2: CLAUDE_SETTINGS_REF=main still makes the local pin at local main, the recovery path"
+  fx="$work/p2-fx"; h="$work/p2-home"; co="$work/p2-co"; cfg="$work/p2-cfg"
+  mkdir -p "$h"
+  stable_fixture "$fx" p2
+  stable_sha=$(git -C "$fx/bare.git" rev-parse refs/heads/stable); main_sha=$(fixture_sha "$fx")
+  if [ "$stable_sha" = "$main_sha" ]; then
+    bad "$name" "FIXTURE stable and main are both $stable_sha; the case cannot tell them apart"
+    return
+  fi
+  write_redirect "$h" "$fx/bare.git"
+  local_stable_clone "$co" "$fx"
+  out=$(cd "$co" && env -i PATH="$work/npm-stub:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_SETTINGS_REF=main bash ./install.sh 2>&1)
+  rc=$?
+  pin_head=$(git -C "$co-live" rev-parse HEAD 2>/dev/null)
+  if [ "$pin_head" != "$main_sha" ]; then
+    bad "$name" "the pinned checkout is at ${pin_head:-nothing}, want local main $main_sha with CLAUDE_SETTINGS_REF=main (install exit $rc: $(install_problems))"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseP3: a local install refuses a pinned checkout detached at local main, not at origin's stable, and names stable ----
+caseP3() {
+  name="caseP3: a local install refuses a pinned checkout detached at local main, not at origin's stable, and names stable"
+  fx="$work/p3-fx"; h="$work/p3-home"; co="$work/p3-co"; cfg="$work/p3-cfg"
+  mkdir -p "$h"
+  stable_fixture "$fx" p3
+  stable_sha=$(git -C "$fx/bare.git" rev-parse refs/heads/stable); main_sha=$(fixture_sha "$fx")
+  if [ "$stable_sha" = "$main_sha" ]; then
+    bad "$name" "FIXTURE stable and main are both $stable_sha; the case cannot tell them apart"
+    return
+  fi
+  write_redirect "$h" "$fx/bare.git"
+  local_stable_clone "$co" "$fx"
+  if ! git -C "$co" worktree add -q --detach --lock --reason "claude-settings live pin" "$co-live" "$main_sha" 2>/dev/null; then
+    bad "$name" "FIXTURE git worktree add of the pin at local main failed"
+    return
+  fi
+  out=$(cd "$co" && env -i PATH="$work/npm-stub:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" bash ./install.sh 2>&1)
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    bad "$name" "install exited 0 with the pin at local main $main_sha, not at origin's stable $stable_sha"
+  elif ! printf '%s\n' "$out" | grep -q stable; then
+    bad "$name" "the refusal does not name stable (install exit $rc): $(install_problems)"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseP4: with no origin/stable, a local install pins the clone's local main and says so in one WARN line naming stable ----
+# install.sh's pin_commit falls back to the clone's local main when origin holds no stable branch. Local main is made one
+# commit ahead of origin's main, so a pin at origin/main would differ from the pin at local main. The fallback must not be
+# silent: the case checks for one WARN line that names stable.
+caseP4() {
+  name="caseP4: with no origin/stable, a local install pins the clone's local main and says so in one WARN line naming stable"
+  fx="$work/p4-fx"; h="$work/p4-home"; co="$work/p4-co"; cfg="$work/p4-cfg"
+  mkdir -p "$h"
+  make_github_fixture "$fx"
+  main_sha=$(fixture_sha "$fx")
+  write_redirect "$h" "$fx/bare.git"
+  local_stable_clone "$co" "$fx"
+  if git -C "$co" rev-parse -q --verify refs/remotes/origin/stable >/dev/null; then
+    bad "$name" "FIXTURE origin has a stable branch, so the no-stable fallback is not what runs"
+    return
+  fi
+  git -C "$co" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m "local only"
+  local_main=$(git -C "$co" rev-parse refs/heads/main)
+  if [ "$local_main" = "$main_sha" ]; then
+    bad "$name" "FIXTURE local main and origin's main are both $main_sha; the case cannot tell them apart"
+    return
+  fi
+  out=$(cd "$co" && env -i PATH="$work/npm-stub:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" bash ./install.sh 2>&1)
+  rc=$?
+  pin_head=$(git -C "$co-live" rev-parse HEAD 2>/dev/null)
+  warns=$(printf '%s\n' "$out" | grep -c 'WARN.*stable')
+  if [ "$pin_head" != "$local_main" ]; then
+    bad "$name" "the pinned checkout is at ${pin_head:-nothing}, want local main $local_main, not origin/main $main_sha (install exit $rc: $(install_problems))"
+  elif [ "$warns" -ne 1 ]; then
+    bad "$name" "the fallback to local main is silent or repeated: want one WARN line naming stable, got $warns (install exit $rc: $(install_problems))"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseP5: a local install whose origin/stable was pruned pins local main and says so in one WARN line naming stable ----
+caseP5() {
+  name="caseP5: a local install whose origin/stable was pruned pins the clone's local main and says so in one WARN line naming stable"
+  fx="$work/p5-fx"; h="$work/p5-home"; co="$work/p5-co"; cfg="$work/p5-cfg"
+  mkdir -p "$h"
+  stable_fixture "$fx" p5
+  main_sha=$(fixture_sha "$fx")
+  write_redirect "$h" "$fx/bare.git"
+  local_stable_clone "$co" "$fx"
+  if ! git -C "$co" rev-parse -q --verify refs/remotes/origin/stable >/dev/null; then
+    bad "$name" "FIXTURE the clone holds no origin/stable before the prune"
+    return
+  fi
+  git -C "$fx/bare.git" update-ref -d refs/heads/stable
+  HOME="$h" git -C "$co" fetch -q --prune origin
+  if git -C "$co" rev-parse -q --verify refs/remotes/origin/stable >/dev/null; then
+    bad "$name" "FIXTURE the prune left origin/stable in the clone"
+    return
+  fi
+  out=$(cd "$co" && env -i PATH="$work/npm-stub:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" bash ./install.sh 2>&1)
+  rc=$?
+  pin_head=$(git -C "$co-live" rev-parse HEAD 2>/dev/null)
+  warns=$(printf '%s\n' "$out" | grep -c 'WARN.*stable')
+  if [ "$pin_head" != "$main_sha" ]; then
+    bad "$name" "the pinned checkout is at ${pin_head:-nothing}, want local main $main_sha after the prune (install exit $rc: $(install_problems))"
+  elif [ "$warns" -ne 1 ]; then
+    bad "$name" "the fallback after the prune is silent or repeated: want one WARN line naming stable, got $warns (install exit $rc: $(install_problems))"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK15: a cloud install with no stable branch on origin clones main and says so in one WARN line naming stable ----
+caseK15() {
+  name="caseK15: a cloud install with no stable branch on origin clones main and says so in one WARN line naming stable"
+  fx="$work/k15-fx"; h="$work/k15-home"; scratch="$work/k15-scratch"; bin="$work/k15-bin"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"; main_sha=$(fixture_sha "$fx")
+  if git -C "$fx/bare.git" rev-parse -q --verify refs/heads/stable >/dev/null; then
+    bad "$name" "FIXTURE origin has a stable branch, so the no-stable fallback is not what runs"
+    return
+  fi
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  default_cloud_install "$h" "$scratch" "$bin"
+  co="$h/claude-settings"
+  warns=$(printf '%s\n' "$out" | grep -c 'WARN.*stable')
+  if [ ! -d "$co/.git" ]; then
+    bad "$name" "no clone at $co/.git (install exit $rc: $(install_problems))"
+  elif [ "$(git -C "$co" rev-parse HEAD)" != "$main_sha" ]; then
+    bad "$name" "clone HEAD is $(git -C "$co" rev-parse HEAD), want origin's main $main_sha: no fallback to main"
+  elif [ "$warns" -ne 1 ]; then
+    bad "$name" "the fallback to main is silent or repeated: want one WARN line naming stable, got $warns (install exit $rc: $(install_problems))"
+  else
+    ok "$name"
+  fi
+}
+
 # ---- caseL: the merge allow rules come from the source checkout, and the log says what was written ----
 # The log names `merge allow rules`, not `merge --confirm allow rules`: the file holds the role rules as well as the confirm rules.
 # allow_case NAME HAS [SETTINGS]: a session's own checkout at $work/NAME-co with settings.json `{}`. HAS=1 adds this repo's
@@ -4777,7 +5068,7 @@ allow_case() {
 # One piped cloud install from inside $co, with HOME $h. Sets rc and out.
 allow_install() {
   out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" \
-        CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+        CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" CLAUDE_SETTINGS_REF=main bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 }
 # Every allow rule in the written settings.json, sorted. In caseL1 and caseL2 the source settings.json is `{}`, so all of them were added.
@@ -4901,12 +5192,12 @@ move_fixture() {
 move_install() {
   if [ "${1:-}" = file ]; then
     out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" \
-          CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" GIT_CEILING_DIRECTORIES="$work" \
+          CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" GIT_CEILING_DIRECTORIES="$work" CLAUDE_SETTINGS_REF=main \
           bash "$co/install.sh" --cloud 2>&1)
   else
     out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" \
           CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" GIT_CEILING_DIRECTORIES="$work" \
-          bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+          CLAUDE_SETTINGS_REF=main bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   fi
   rc=$?
 }
@@ -5760,6 +6051,15 @@ run caseK8
 run caseK9
 run caseK10
 run caseK11
+run caseK12
+run caseK13
+run caseK14
+run caseK15
+run caseP1
+run caseP2
+run caseP3
+run caseP4
+run caseP5
 run caseL1
 run caseL2
 run caseL3
