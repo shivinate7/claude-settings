@@ -14912,7 +14912,8 @@ class ReviewEnv(Env):
             fx.parents[sha], fx.trees[sha] = parents, tree
 
     def git_merged(self, a, b):
-        """-> (rc, tree) of git's own merge of a and b in the checkout, as merge-tree --write-tree answers it: the first word is the tree."""
+        """-> (rc, tree) of git's own merge of a and b in the checkout, as merge-tree --write-tree answers it: the first word is the tree. `b` is
+        passed as the product code passes it: a conflicted merge's tree names the labels given, so a case passes the ref name the product reads main by."""
         r = subprocess.run(["git", "merge-tree", "--write-tree", a, b], cwd=self.co, capture_output=True, text=True)
         words = r.stdout.split()
         return r.returncode, (words[0] if words else None)
@@ -14925,7 +14926,7 @@ class ReviewEnv(Env):
         """Real commits in the checkout, at small size, for the merge-tree carry. `H` is the record's head: it adds a.txt to the seed. `M` is main's
         tip: it adds b.txt to the seed, and is pushed to origin main and fetched, so refs/remotes/origin/main reads M (the ref the merge reads main's
         tip from). `L` is the live head, a re-cut off M whose tree is git's clean merge of H and M (the shape of #3429 and #3435, at small size). `L2`
-        is L plus one file. `Hc` changes b.txt, so git's merge of Hc and M conflicts, and `Lc` holds that conflicted tree. `H_eq` is off the seed and
+        is L plus one file. `Hc` changes b.txt, so git's merge of Hc and M conflicts, and `Lc` holds that conflicted tree, merged by the ref name the carry reads main by (git writes the names into its conflict markers). `H_eq` is off the seed and
         holds H's tree. Each premise is read from git's own answers and asserted here, so a red case never rests on a wrong fixture."""
         def tree(c):
             return sh(self.co, "git", "rev-parse", f"{c}^{{tree}}")
@@ -14944,7 +14945,7 @@ class ReviewEnv(Env):
         self.assertNotEqual(tree(L), tree(H), "fixture: L holds H's own tree, so the carry is an equal-tree one")
         L2 = self.git_commit(M, {"a.txt": "record head\n", "x.txt": "extra\n"})
         self.assertEqual(sh(self.co, "git", "diff-tree", "-r", "--name-only", merged, tree(L2)), "x.txt", "fixture: L2 is not git's merge plus x.txt")
-        rc, conflicted = self.git_merged(Hc, M)
+        rc, conflicted = self.git_merged(Hc, "refs/remotes/origin/main")
         self.assertEqual(rc, 1, "fixture: git's merge of Hc and main does not conflict")
         Lc = self.git_commit(M, {}, tree=conflicted)
         H_eq = self.git_commit(seed, {"a.txt": "record head\n"})
@@ -14952,6 +14953,19 @@ class ReviewEnv(Env):
         fx = types.SimpleNamespace(parents={}, trees={}, H=H, M=M, Hc=Hc, L=L, L2=L2, Lc=Lc, H_eq=H_eq, merged=merged)
         self.facts(fx, [seed, H, M, Hc, L, L2, Lc, H_eq])
         return fx
+
+    def stale_tip_fixture(self, fx):
+        """The remote's main moves to M2 by a push to the bare origin's path, which leaves the checkout's own refs/remotes/origin/main at M, as a host
+        checkout reads it before its next fetch. -> (M2, L): L is a live head, a commit off M2 whose tree is git's clean merge of H and M2."""
+        M2 = self.git_commit(fx.M, {"c.txt": "main moved again\n"})
+        sh(self.co, "git", "push", "-q", self.bare, f"{M2}:refs/heads/main")
+        self.assertEqual(sh(self.co, "git", "ls-remote", self.bare, "refs/heads/main").split("\t")[0], M2, "fixture: the remote's main is not M2")
+        self.assertEqual(self.main_tip(), fx.M, "fixture: the checkout's origin/main moved, so it is not the stale tip the case needs")
+        rc, merged = self.git_merged(fx.H, M2)
+        self.assertEqual(rc, 0, "fixture: git's merge of the record's Head and M2 is not clean")
+        L = self.git_commit(M2, {}, tree=merged)
+        self.facts(fx, [M2, L])
+        return M2, L
 
     def fork_merge(self, fx):
         """-> the sha of a merge of main into a commit off the reviewed head, which only this checkout holds: it is never pushed, so origin lacks it
@@ -16944,16 +16958,18 @@ class ReleaseCheck(ReviewEnv):
                                          per_issue={REPLACES_SOURCE: [source]})
         return rc, lines, err
 
-    def replacement_release_real(self, fx, source=None):
-        """`--release-check 7` where #7 is a replacement of #6 (its body names `Replaces #6`), at the feature head, and #6's record and lint sit at
-        `source` (fx.H unless named). The parents and trees of the feature head come from git (facts); the rest of `fx` goes to the host, so the carry
-        reads real trees and merge-tree reads real objects. -> (rc, lines, err) of the run."""
-        sh(self.co, "git", "fetch", "-q", "origin")
-        feat, source = self.head("feat"), fx.H if source is None else source
+    def replacement_release_real(self, fx, source=None, live=None, lint_head=None):
+        """`--release-check 7` where #7 is a replacement of #6 (its body names `Replaces #6`), at `live` (the feature head unless named), and #6's record
+        sits at `source` (fx.H unless named), with the lint PASS bound to `lint_head` (the source unless named). The parents and trees of the live head
+        come from git (facts); the rest of `fx` goes to the host, so the carry reads real trees and merge-tree reads real objects. No fetch here: a case
+        that needs the remote's newer main leaves the checkout stale, and the read under test must fetch it. -> (rc, lines, err) of the run."""
+        feat = self.head("feat") if live is None else live
+        source = fx.H if source is None else source
+        lint_head = source if lint_head is None else lint_head
         self.facts(fx, [feat])
         record = review_comment(1, REPLACES_SOURCE, record_text(n=REPLACES_SOURCE, head=source, rounds=REVIEW_PASS))
-        rc, lines, err, _ = self.release([7], lint=["--lint", f"7@{source}:PASS"], comments=[], bodies={7: REPLACES_BODY},
-                                         commits=fx.parents, trees=fx.trees, per_issue={REPLACES_SOURCE: [record]})
+        rc, lines, err, _ = self.release([7], lint=["--lint", f"7@{lint_head}:PASS"], comments=[], bodies={7: REPLACES_BODY},
+                                         pulls=[self.live(7, head=feat)], commits=fx.parents, trees=fx.trees, per_issue={REPLACES_SOURCE: [record]})
         return rc, lines, err
 
     def test_replacement_release_a_same_tree_source_record_and_lint_carry_to_the_release_check(self):
@@ -16989,6 +17005,17 @@ class ReleaseCheck(ReviewEnv):
         self.assertTrue(line.startswith("#7 FAIL: "), "the release check did not refuse #7 on a source head it cannot read: " + line)
         self.assertIn("carries by tree is unknown", line, "a source head the checkout lacks did not read unknown: " + line)
         self.assertNotIn("no review record", line, "a source head the checkout lacks read none, which is a refusal that claims no record: " + line)
+
+    def test_replacement_release_d_a_clean_merge_through_the_carry_passes_the_release_check(self):
+        fx = self.merge_carry_fixture()
+        rc, lines, err = self.replacement_release_real(fx, live=fx.L, lint_head=fx.L)
+        self.assertEqual((rc, self.line_of(lines, 7)), (0, "#7 PASS"), err)
+
+    def test_replacement_release_e_a_clean_merge_with_the_remotes_newer_main_passes_the_release_check(self):
+        fx = self.merge_carry_fixture()
+        _M2, L = self.stale_tip_fixture(fx)
+        rc, lines, err = self.replacement_release_real(fx, live=L, lint_head=L)
+        self.assertEqual((rc, self.line_of(lines, 7)), (0, "#7 PASS"), err)
 
     def test_round3_2_a_carried_record_that_is_held_failed_or_open_refuses_the_release_check(self):
         # A carry changes the head test only, so the source's verdict is the release check's reason: held, a failed fix check, or open.
@@ -18343,6 +18370,60 @@ class ReplacementCarry(ReviewEnv):
         self.assertNotEqual(moved, fx.merged, "fixture: git's merge with the moved main has L's tree, so the case cannot tell the tips apart")
         state, why = self.merge_carried(self.merge_carry_host(fx, L, self.source_record(fx.H)), L)
         self.assertEqual(state, "none", f"a live tree that is git's merge of the record's Head and the old main tip carried against the moved main tip M2: {state}: {why}")
+
+    def no_default_branch(self):
+        """The checkout reads no default branch: origin/HEAD is removed, and the gh read of the repo's default branch stops. The patch lasts the test."""
+        sh(self.co, "git", "remote", "set-head", "origin", "--delete")
+        patch = unittest.mock.patch.object(merge, "host_default_branch", side_effect=merge.Stop("no gh remote answers the default branch"))
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_merge_carry_12_a_live_tree_merged_with_the_remotes_newer_main_reads_done(self):
+        fx = self.merge_carry_fixture()
+        _M2, L = self.stale_tip_fixture(fx)
+        state, why = self.merge_carried(self.merge_carry_host(fx, L, self.source_record(fx.H)), L)
+        self.assertEqual(state, "done", f"a live tree that is git's merge of the record's Head and the remote's main M2 read {state} while the checkout's main was M: {why}")
+
+    def test_merge_carry_13_a_live_tree_merged_with_the_older_main_reads_none_once_the_remote_moved(self):
+        fx = self.merge_carry_fixture()
+        self.stale_tip_fixture(fx)
+        state, why = self.merge_carried(self.merge_carry_host(fx, fx.L, self.source_record(fx.H)), fx.L)
+        self.assertEqual(state, "none", f"a live tree merged with the old main tip M carried after the remote's main moved to M2: {state}: {why}")
+
+    def test_merge_carry_14_the_fix_verifier_gate_takes_a_live_tree_merged_with_the_remotes_newer_main(self):
+        fx = self.merge_carry_fixture()
+        _M2, L = self.stale_tip_fixture(fx)
+        fix = f"{fx.H}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS"
+        rc, out, err = self.run_args(*self.merge_carry_review_args(L, fix), host=self.merge_carry_host(fx, L, self.source_record(fx.H)))
+        self.assertEqual(rc, 0, "the fix verifier's source gate refused a live tree merged with the remote's newer main, while the checkout's main was stale:\n" + out + err)
+        self.assertIn(fix_verifier_line(head=fx.H), out.splitlines(), "the printed record does not carry the fix line:\n" + out)
+
+    def test_merge_carry_15_a_source_head_the_checkout_lacks_is_fetched_once_and_carries(self):  # pin: green on the code before the change, which fetches branch heads
+        fx = self.merge_carry_fixture()
+        sh(self.co, "git", "push", "-q", self.bare, f"{fx.H}:refs/heads/fixture-h")
+        clone = self.main_only_clone()
+        self.assertFalse(self.has_commit(clone, fx.H), "fixture: the main-only clone already holds the source head")
+        host = self.merge_carry_host(fx, fx.L, self.source_record(fx.H))
+        host.cwd = clone
+        state, why = self.merge_carried(host, fx.L)
+        self.assertEqual(state, "done", f"a source head the checkout lacked, on a remote branch head, read {state} after its one fetch: {why}")
+        self.assertTrue(self.has_commit(clone, fx.H), "the source head was not fetched into the checkout")
+
+    def test_merge_carry_16_the_fix_verifier_gate_carries_an_equal_tree_without_reading_the_default_branch(self):
+        fx = self.merge_carry_fixture()
+        self.no_default_branch()
+        fix = f"{fx.H}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS"
+        rc, out, err = self.run_args(*self.merge_carry_review_args(fx.H_eq, fix), host=self.merge_carry_host(fx, fx.H_eq, self.source_record(fx.H)))
+        self.assertEqual(rc, 0, "the fix verifier's gate refused an equal-tree replacement because no default branch was read, which an equal tree does not need:\n" + out + err)
+        self.assertIn(fix_verifier_line(head=fx.H), out.splitlines(), "the printed record does not carry the fix line:\n" + out)
+
+    def test_merge_carry_17_unequal_trees_without_a_default_branch_refuse_the_fix_verifier_as_unknown(self):  # pin: green on the code before the change
+        fx = self.merge_carry_fixture()
+        self.no_default_branch()
+        fix = f"{fx.H}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS"
+        rc, out, err = self.run_args(*self.merge_carry_review_args(fx.L, fix), host=self.merge_carry_host(fx, fx.L, self.source_record(fx.H)))
+        self.assertEqual(rc, 2, "a fix verifier on a tree that needs the default branch was not refused:\n" + out + err)
+        self.assertIn("unknown", err, "the refusal does not name the unknown read of the default branch:\n" + err)
 
 class ReviewedRoots(ReviewEnv):
     """`merge --reviewed --root DIR [--root DIR ...]`. Output: one block per root, in the order given. A block is the header `repo <owner/name>:`,
