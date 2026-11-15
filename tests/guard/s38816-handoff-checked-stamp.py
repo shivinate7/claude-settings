@@ -36,20 +36,23 @@ def hcs_row(pid, checked, rows=HCS_ROWS):
     return hcs_line([r for r in rows if r[0] == pid][0], checked)
 
 
-def hcs_lines(rows=HCS_ROWS, new=(), value=HCS_NEW, reword=None, extra=()):
+def hcs_lines(rows=HCS_ROWS, new=(), value=HCS_NEW, reword=None, extra=(), drop=()):
     """The premise lines of a handoff: each row at the old stamp, and each id in `new` at `value`. `reword` is a pair
-    (id, statement) that changes one statement and keeps its stamp. `extra` adds lines after the rows."""
+    (id, statement) that changes one statement and keeps its stamp. `extra` adds lines after the rows. `drop` names
+    ids whose lines a rewrite leaves out."""
     lines = []
     for pid, kind, statement, source in rows:
+        if pid in drop:
+            continue
         if reword and reword[0] == pid:
             statement = reword[1]
         lines.append(hcs_line((pid, kind, statement, source), value if pid in new else HCS_OLD))
     return lines + list(extra)
 
 
-def hcs_text(rows=HCS_ROWS, new=(), value=HCS_NEW, reword=None, extra=()):
+def hcs_text(rows=HCS_ROWS, new=(), value=HCS_NEW, reword=None, extra=(), drop=()):
     """A whole handoff whose Working premises body is hcs_lines(...). Every other section is hs_text's."""
-    return hs_text(premises=hcs_lines(rows, new, value, reword, extra))
+    return hs_text(premises=hcs_lines(rows, new, value, reword, extra, drop))
 
 
 HCS_OLD_TEXT = hcs_text()                                  # the handoff on disk: every stamp old
@@ -68,6 +71,15 @@ HCS_T_FULL_P12 = hcs_text(rows=HCS_FULL_ROWS, new=("P12",))
 HCS_P8 = ("P8", "read", "A new fact the rewrite added", "hooks/reread_check.py:40")
 HCS_T_NEW_LINE = hcs_text(extra=(hcs_line(HCS_P8, HCS_NEW),))
 HCS_T_NEW_NEVER = hcs_text(extra=(hcs_line(HCS_P8, "never"),))
+# A new line whose statement quotes the stamp: its last `Checked` word is the real stamp, so it is dated, and judged.
+HCS_QUOTE = ("P8", "read", "The stamp `Checked never` is refused", "hooks/reread_check.py:40")
+HCS_T_QUOTE = hcs_text(extra=(hcs_line(HCS_QUOTE, HCS_NEW),))
+# The handoff on disk with P1 at Checked never and P6, a ruling, at Checked never. A rewrite that keeps both is
+# refused for P1 alone; a rewrite that drops P1 is the remedy, and passes.
+HCS_SID_NEVER = "4b8e1d62-0000-4000-8000-00000000c0a3"   # a handoff whose disk text already holds `Checked never`
+HCS_NEVER = hs_handoff(HCS_CFG, HCS_SID_NEVER)
+HCS_NEVER_TEXT = hcs_text(new=("P1", "P6"), value="never")
+HCS_NEVER_DROP_P1 = hcs_text(new=("P6",), value="never", drop=("P1",))
 
 HCS_HANDOFF = hs_handoff(HCS_CFG, HCS_SID)
 HCS_HANDOFF_FULL = hs_handoff(HCS_CFG, HCS_SID_FULL)
@@ -188,8 +200,13 @@ def _build_hcs_dir():
     write(hs_handoff(HCS_CFG_DIR, HCS_SID), HCS_OLD_TEXT)
 
 
+def _build_hcs_never():
+    write(HCS_NEVER, HCS_NEVER_TEXT)
+
+
 lazy_fixture([HCS_CFG], _build_hcs_intact)
 lazy_fixture([HCS_CFG_DIR], _build_hcs_dir)
+lazy_fixture([HCS_NEVER], _build_hcs_never)
 lazy_fixture([hcs_tx(name) for name in HCS_TX_LINES] + [hcs_tx("unreadable")], write_hcs_transcripts)
 
 
@@ -292,6 +309,29 @@ add("handoff-checked-stamp: a full-size handoff with one unbacked restamp is ref
     "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID_FULL, config=HCS_CFG, transcript=hcs_tx("none"),
     carries=("P12", "any read"), lacks=("P10", "P11", "P13", "P14", "P15", "P16", "P9", "P7"),
     file_path=HCS_HANDOFF_FULL, content=HCS_T_FULL_P12)
+# Checked never is refused on a premise that is not a ruling, whatever the transcript holds: restamped, new, or kept
+# unchanged in a rewrite. Its remedy is to check the premise or delete its line, and it never offers the stamp.
+add("handoff-checked-stamp: a restamp to Checked never is refused with no evidence, naming P1, and its remedy names no never stamp",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("none"),
+    carries=("P1", "check the premise", "delete its line"), lacks=("P2", "P3", "P4", "P5", "P7", "P9", "Checked never"),
+    file_path=HCS_HANDOFF, content=HCS_T_NEVER_P1)
+add("handoff-checked-stamp: a new P8 line with Checked never is refused even when the transcript reads its token, naming P8",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("other_read"),
+    carries=("P8", "hooks/reread_check.py", "delete its line"), lacks=("P1", "P2", "P3", "P4", "P5", "P7", "P9", "Checked never"),
+    file_path=HCS_HANDOFF, content=HCS_T_NEW_NEVER)
+add("handoff-checked-stamp: a handoff already holding Checked never on P1, rewritten unchanged, is refused, naming P1 and not P6",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID_NEVER, config=HCS_CFG, transcript=hcs_tx("none"),
+    carries=("P1", "check the premise", "delete its line"), lacks=("P2", "P3", "P4", "P5", "P6", "P7", "P9", "Checked never"),
+    file_path=HCS_NEVER, content=HCS_NEVER_TEXT)
+add("handoff-checked-stamp: a full-size handoff with Checked never on one premise is refused, naming that premise only",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID_FULL, config=HCS_CFG, transcript=hcs_tx("none"),
+    carries=("P12", "delete its line"), lacks=("P10", "P11", "P13", "P14", "P15", "P16", "P9", "P7", "Checked never"),
+    file_path=HCS_HANDOFF_FULL, content=hcs_text(rows=HCS_FULL_ROWS, new=("P12",), value="never"))
+# The remedy of a dated refusal: check the premise, or delete its line. It offers no Checked never.
+add("handoff-checked-stamp: a dated restamp with no evidence has a remedy that says check the premise or delete its line, and no Checked never",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("none"),
+    carries=("P1", "check the premise", "delete its line"), lacks=("Checked never",),
+    file_path=HCS_HANDOFF, content=HCS_T_P1)
 
 
 # --- Allow cases: each one is a twin. A deny control comes first; the allowed call must then pass silently.
@@ -386,11 +426,18 @@ LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a full-size handoff with every 
                          hcs_twin("a full-size handoff, unchanged",
                                   refused=hcs_write(HCS_T_FULL_P12, transcript=hcs_tx("none"), session=HCS_SID_FULL),
                                   allowed=hcs_write(HCS_FULL_TEXT, transcript=hcs_tx("none"), session=HCS_SID_FULL))))
-# Case 4: Checked never passes without evidence.
-LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a restamp to Checked never passes silently with no evidence",
-                         hcs_twin("Checked never",
+# Case 4: Checked never is refused even when the transcript backs its token. The same evidence passes a dated restamp,
+# so the refused half is the never stamp and the allowed half is the dated one.
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a restamp to Checked never is refused with evidence, and the same evidence "
+                         "passes a dated restamp silently",
+                         hcs_twin("Checked never with evidence",
+                                  refused=hcs_write(HCS_T_NEVER_P1, transcript=hcs_tx("ev_p1")),
+                                  allowed=hcs_write(HCS_T_P1, transcript=hcs_tx("ev_p1")))))
+# A ruling premise restamped to Checked never stays exempt, as a ruling premise's stamp always is.
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a ruling premise restamped to Checked never passes silently with no evidence",
+                         hcs_twin("a ruling premise, Checked never",
                                   refused=NO_EVIDENCE,
-                                  allowed=hcs_write(HCS_T_NEVER_P1, transcript=hcs_tx("none")))))
+                                  allowed=hcs_write(hcs_text(new=("P6",), value="never"), transcript=hcs_tx("none")))))
 # Case 5: a ruling premise is restamped without evidence.
 LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a restamp of a ruling premise passes silently with no evidence",
                          hcs_twin("a ruling premise",
@@ -434,11 +481,23 @@ LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: fail open when the transcript i
 LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: fail open when the installed prompt cannot be read",
                          hcs_twin("an unreadable prompt", refused=NO_EVIDENCE,
                                   allowed=hcs_write(HCS_T_P1, transcript=hcs_tx("none"), config=HCS_CFG_DIR))))
-# Case 12: a new line dated with no evidence is refused (add() above); with Checked never, it passes.
-LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a new P8 line with Checked never passes silently",
-                         hcs_twin("a new line, Checked never",
-                                  refused=hcs_write(HCS_T_NEW_LINE, transcript=hcs_tx("none")),
-                                  allowed=hcs_write(HCS_T_NEW_NEVER, transcript=hcs_tx("none")))))
+# Case 12: a statement that quotes Checked never does not make a line one. Its last Checked word is the stamp, a date,
+# so the line is judged: refused with no evidence, and passed by a read of its token.
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a new P8 line whose statement quotes Checked never is judged by its date: "
+                         "refused with no evidence, passed by a read of its token",
+                         hcs_twin("a statement that quotes Checked never",
+                                  refused=hcs_write(HCS_T_QUOTE, transcript=hcs_tx("none")),
+                                  allowed=hcs_write(HCS_T_QUOTE, transcript=hcs_tx("other_read")))))
+# Deleting a dated premise line passes with no evidence, as it did before.
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: deleting a dated premise line passes silently with no evidence",
+                         hcs_twin("deleting a dated line",
+                                  refused=NO_EVIDENCE,
+                                  allowed=hcs_write(hcs_text(drop=("P1",)), transcript=hcs_tx("none")))))
+# A handoff with no premise lines passes with no evidence.
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a handoff with no premise lines passes silently with no evidence",
+                         hcs_twin("a handoff with no premise lines",
+                                  refused=NO_EVIDENCE,
+                                  allowed=hcs_write(hs_text(premises=[]), transcript=hcs_tx("none")))))
 # Case 13: Edit and MultiEdit with evidence pass; the same edits with no evidence are refused (add() cases above).
 LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: an Edit backed by a Read passes silently",
                          hcs_twin("an Edit with evidence",
@@ -567,6 +626,15 @@ add("handoff-checked-stamp: a stamp present before with no value after is refuse
     "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("none"),
     carries=("P1",), lacks=("P2", "P3", "P4", "P5", "P7", "P9"),
     file_path=HCS_HANDOFF, content=HCS_T_EMPTY)
+# A never stamp spelled with a colon, or as Re-checked, is the same value: the rule reads the value, not the spelling.
+add("handoff-checked-stamp: a stamp spelled Checked: never is refused with no evidence, naming P1 and not the other premises",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("none"),
+    carries=("P1", "check the premise", "delete its line"), lacks=("P2", "P3", "P4", "P5", "P7", "P9", "Checked never"),
+    file_path=HCS_HANDOFF, content=hcs_p1_text("Checked: never."))
+add("handoff-checked-stamp: a stamp spelled Re-checked never is refused with no evidence, naming P1 and not the other premises",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("none"),
+    carries=("P1", "check the premise", "delete its line"), lacks=("P2", "P3", "P4", "P5", "P7", "P9", "Checked never"),
+    file_path=HCS_HANDOFF, content=hcs_p1_text("Re-checked never."))
 LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a stamp spelled Checked: with its value unchanged passes silently; with a new "
                          "value it is refused with no evidence",
                          hcs_scoped(hcs_colon_scope,
@@ -575,6 +643,30 @@ LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a stamp spelled Checked: with i
                                                                session=HCS_SID_COLON),
                                              allowed=hcs_write(HCS_COLON_OLD, transcript=hcs_tx("none"),
                                                                session=HCS_SID_COLON)))))
+
+
+# The remedy: deleting a line passes, a never line included. The rewrite that keeps the never line is refused
+# (the same disk text as Case 3's unchanged write); the scope check asserts that disk text first (P7).
+def hcs_never_scope():
+    """The never handoff on disk holds P1 and P6 at Checked never, the text the twin's refused and allowed writes start from."""
+    materialize(HCS_NEVER)
+    with open(HCS_NEVER, "r", encoding="utf-8") as handle:
+        disk = handle.read()
+    if disk != HCS_NEVER_TEXT:
+        return False, "the never handoff on disk is not the handoff with P1 and P6 at Checked never"
+    return True, "the never handoff on disk holds P1 and P6 at Checked never"
+
+
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: scope: the never handoff on disk holds P1 and P6 at Checked never",
+                         hcs_never_scope))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: deleting a Checked never premise line passes silently; a rewrite that keeps it "
+                         "is refused",
+                         hcs_scoped(hcs_never_scope,
+                                    hcs_twin("deleting a never line",
+                                             refused=hcs_write(HCS_NEVER_TEXT, transcript=hcs_tx("none"),
+                                                               session=HCS_SID_NEVER),
+                                             allowed=hcs_write(HCS_NEVER_DROP_P1, transcript=hcs_tx("none"),
+                                                               session=HCS_SID_NEVER)))))
 
 # Case 2: a Source's token backed only by a Write or Edit of another file, or by a non-read Bash call, backs nothing. The
 # controls: a Read, a Grep, a Glob and a Bash read of the token each back it.
