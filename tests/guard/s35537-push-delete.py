@@ -17,3 +17,6 @@ def echo_ssh_case():
 
 
 LOG_CHECKS_EXTRA.append(("push: 2000 ssh words before a nested forced push stay linear in CPU", echo_ssh_case))
+# The archive gate's empty-name log check, defined in section 8728 beside its cases.
+LOG_CHECKS_EXTRA.append(("archive-push-gates-delete: an empty archive name writes no guard crash line",
+                         archive_empty_name_log_case))

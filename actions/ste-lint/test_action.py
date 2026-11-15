@@ -1346,8 +1346,11 @@ check("shallow pin: the line never says does not hold or off main",
 # The installed copy. install.sh lands bin/ste-changed in ~/.claude: a copy in cloud mode, a symlink into the
 # <clone>-live checkout in local mode. In the copy, the command's own folder holds no actions/ and is no git clone.
 # The checkout is the one the global CLAUDE.md names on its `@<dir>/CLAUDE.md` line. The cases run the clone's own
-# install.sh into a temp HOME, so each one reads what an install lands. Only PATH and HOME reach the installer:
-# CLAUDE_CODE_REMOTE in the caller's environment would force cloud mode, and CLAUDE_CONFIG_DIR would move ~/.claude.
+# install.sh into a temp HOME, so each one reads what an install lands. Only PATH, HOME and CLAUDE_SETTINGS_TEMP_ROOTS
+# reach the installer: CLAUDE_CODE_REMOTE in the caller's environment would force cloud mode, and CLAUDE_CONFIG_DIR
+# would move ~/.claude. The temp roots name a folder that holds no clone, so the scratch clone under the run folder
+# in the system temp dir is the source. Without that, install.sh skips the clone as a session's scratch copy and
+# reads the real checkout under /home/user instead.
 # A pipx stub stands in for the cloud-only `pip install --user pipx`, which needs the network.
 def install_case(mode, pointer=None, mkdirs=()):
     """The scratch clone's install.sh in `mode` ("cloud": --cloud; "local": symlinks) into a temp HOME, then
@@ -1359,7 +1362,8 @@ def install_case(mode, pointer=None, mkdirs=()):
         shas = scratch_clone(clone)
         write(os.path.join(d, "stub-bin"), "pipx", "#!/bin/sh\nexit 0\n")
         os.chmod(os.path.join(d, "stub-bin", "pipx"), 0o755)
-        env = {"PATH": os.path.join(d, "stub-bin") + os.pathsep + os.environ["PATH"], "HOME": home}
+        env = {"PATH": os.path.join(d, "stub-bin") + os.pathsep + os.environ["PATH"], "HOME": home,
+               "CLAUDE_SETTINGS_TEMP_ROOTS": os.path.join(d, "no-such-temp-root")}
         p = subprocess.run([BASH, os.path.join(clone, "install.sh"), *(["--cloud"] if mode == "cloud" else [])],
                            cwd=d, env=env, capture_output=True, text=True)
         cfg, installed = os.path.join(home, ".claude"), os.path.join(home, ".claude", "bin", "ste-changed")
