@@ -848,8 +848,8 @@ class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
 
 
 # The waiting page behind main (rule page-stale). A repo whose extras name a waiting page prints one line
-# when the stamp an allowed publish wrote, <git common dir>/waiting-page-built, holds a blob sha other than
-# main's page.html. Main is origin/main of the claude-settings clone that the config's CLAUDE.md names, the
+# when its stamp, the record file on origin/roadmap or else <git common dir>/waiting-page-built, holds a blob
+# sha other than main's page.html, or when neither holds a stamp. Main is origin/main of the claude-settings clone that the config's CLAUDE.md names, the
 # checkout the guard's stale_pages reads, not the session's own repo. The page text here is a stand-in: the
 # hook compares blob shas and never reads the text.
 WAITING_URL = "https://claude.ai/artifact/sspage"
@@ -911,8 +911,11 @@ class SessionStartWaitingPageTests(SessionStartAgentWorktreeNoticeTests):
         self.stamp(self.main_sha)
         self.assertEqual(self.waiting_lines(self.run_checked()), [])
 
-    def test_no_stamp_prints_no_line(self):
-        self.assertEqual(self.waiting_lines(self.run_checked()), [])
+    def test_no_stamp_prints_the_no_stamp_line(self):  # coordinator ruling, 00:29 CST Nov 15: no stamp is no longer silence
+        hits = self.waiting_lines(self.run_checked())
+        self.assertEqual(len(hits), 1, "expected one waiting page line for a page with no stamp, got %r" % hits)
+        self.assertTrue(hits[0].startswith("waiting page may be behind: no stamp"),
+                        "the line does not start with the no-stamp text: %r" % hits[0])
 
     def test_main_unreadable_prints_no_line_even_with_a_stale_stamp(self):
         self.stamp(self.older_sha)
