@@ -1252,10 +1252,12 @@ def owner_waits_gap(payload):
 # --- Handoff lag --------------------------------------------------------------------------
 # The Stop blocks once per newest event this session landed after the handoff's last write (its mtime):
 # a merge, a ruling relay or a role change. Each is a moment the handoff should have recorded.
-#   merge: a successful call of a merge tool (guard_merge.MERGE_TOOLS), or of a shell tool (guard_core.SHELL_TOOLS)
-#     that runs the merge tool with --confirm (guard_merge.merge_tool_args reads which segment runs it) and whose
-#     result holds the tool's success line "merge: #N merged as <sha>". The draft step, the claim push and a
-#     preview each run it with --confirm and merge nothing, so only that line counts.
+#   merge: a call of a merge tool (guard_merge.MERGE_TOOLS) whose result is not an error, or a call of a shell tool
+#     (guard_core.SHELL_TOOLS) that runs the merge tool with --confirm (guard_merge.merge_tool_args reads which
+#     segment runs it) and whose result holds the tool's success line "merge: #N merged as <sha>", even when the
+#     result is flagged as an error: the tool prints that line before a failed ff_main or afterMerge can exit
+#     non-zero. The draft step, the claim push and a preview each run it with --confirm and merge nothing, so
+#     only that line counts.
 #   ruling relay: a successful send tool call (_transcript.SEND_TOOLS) whose message holds the word ruling and no
 #     question mark, and does not ask for one (`Need a ruling ...`): a request for a ruling is no relay of one.
 #   role change: an assistant text line `Role: <name>`, outside a code fence, whose name differs from the session's
