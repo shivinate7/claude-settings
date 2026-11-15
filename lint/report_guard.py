@@ -43,7 +43,7 @@ incoming message, a peer's included; the ack of a send this turn made to the wri
 starts no turn. Owner-facing session: a send to
 the page writer (the `writer` in the newest meta/page read, else the repo's extras key `page-writer`), or an ArtifactData set, update or batch under
 collection items to this repo's page; the question box (main session) counts only in a repo with no page. Lane (own get_session record tagged cs-build:lane, or with a
-parent): a send to @parent, the parent id or the writer; @parent counts only in a lane. A promise or a page link passes nothing. A
+parent, and not tagged cs-build:triage, the page writer): a send to @parent, the parent id or the writer; @parent counts only in a lane. A promise or a page link passes nothing. A
 repo with no waiting page gets a systemMessage and no block, unless the session is a lane. This check
 does not wait for a git write: the reply's labels are what it reads. Cost: no file written. Reads: the
 transcript this hook already holds. Only on a turn that asks with no send to the writer: the
@@ -76,8 +76,9 @@ kind and incident: decision answered-needs-source. Cost: regex over the reply, n
 
 After a compaction, each report also holds a `Recovered:` line and a `Handoff gave:` line (each
 may say `none`) in the report blockquote, until one lands (`compaction-carry`, decision
-precompact-handoff, item 'Recovered line after compaction'). A label counts only where it starts an item: at line start, after a
-report label, or after "; " or ". ". A compaction is the newest `compact_boundary` system record.
+precompact-handoff, item 'Recovered line after compaction'). A label counts only where it starts an item: at line start (after
+a bullet, and after a Done-item tag BUILT, RECORDED or OTHER that follows the bullet), after a report label, or after "; " or
+". ". A compaction is the newest `compact_boundary` system record.
 Each line is tracked alone: any main-session reply after it that holds the line satisfies that
 demand; the current reply counts by its blockquote. A bare `Recovered:` takes the lines below it as
 its items; with nothing below, it is missing. While the Recovered demand is pending, each item of
@@ -94,7 +95,7 @@ stop_hook_active rewrite too, which never blocks on a refusal (decision refusals
 Cost: one stat per Stop when the session had no refusal.
 
 The triage hold (a roadmap build's `stalled step:` lines): a session whose own newest get_session record carries
-cs-build:triage (hooks/guard_merge.py _own_tier_proved) cannot end a turn while the newest roadmap build output in its
+cs-build:triage (hooks/guard_merge.py _own_role_proved) cannot end a turn while the newest roadmap build output in its
 transcript (the result of a Bash run of build.py) has an entry line, `stalled step: <id> (...)` or
 `stalled step: item <n> (...)`. An unknown line is no entry. The hold also covers a Stop after a refusal
 (stop_hook_active), which it releases only when the report's Input Needed section names every entry's id and item
@@ -154,7 +155,8 @@ checkout the global rules file names (the copied cloud layout); a tool it cannot
 (the PR, then its issue comments, every page); a Stop with no claim, or in an owner-facing session, reads nothing. A failed read, or an error in the check, never
 blocks: it adds a systemMessage that says UNKNOWN. Cost: 2 gh reads per claimed PR in a lane Stop, plus the guard_merge and merge module imports; no file,
 process kept or timer. A stale record adds the clean-merge read (merge/merge.py clean_merges_after): one commit read and one compare per merge
-commit, local git starts, and at most one `git fetch origin`, all inside the review check's REVIEW_CHECK_BUDGET. A stop_hook_active rewrite is not checked.
+commit, local git starts, and at most one `git fetch origin`, all inside the review check's REVIEW_CHECK_BUDGET. A records-page commit in the walk adds one
+temporary worktree, one `git show` and one run of the records generator, once per such commit. A stop_hook_active rewrite is not checked.
 """
 import bisect
 import datetime
@@ -232,7 +234,7 @@ def _hooks_on_path():
 
 
 _hooks_on_path()
-from shared_names import LANE_TAG  # noqa: E402  the one home of the lane tag, shared with hooks/guard.py
+from shared_names import CONSULTANT_TAG, LANE_TAG  # noqa: E402  the one home of the lane and consultant tags, shared with hooks/guard.py
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
@@ -744,7 +746,9 @@ ROLE_MODEL_RE = re.compile(
     r"\b(" + _ROLE + r"(?:\s*(?:,|/|&|\band\b)\s*" + _ROLE + r")*)\s*[:(]?\s*(haiku|sonnet|opus|fable)\b",
     re.I)
 ROLE_RE = re.compile(_ROLE, re.I)
-AGENTS_DIR = os.path.join(HERE, "..", "agents")
+# A test hook: REPORT_GUARD_AGENTS_DIR points agent_pin at a fixture folder. Read once at import; unset or empty keeps the
+# repo's agents folder. Cost: one environment read per process start, no process, no file.
+AGENTS_DIR = os.environ.get("REPORT_GUARD_AGENTS_DIR") or os.path.join(HERE, "..", "agents")
 
 
 def model_family(text):
@@ -952,11 +956,15 @@ def asks_a_question(text):
 # compaction-carry: after a compaction the session reports two lines, `Recovered:` (what it got back
 # from git, the page or a digest) and `Handoff gave:` (what the handoff supplied that the summary
 # did not), each until one lands. A label counts only where it starts an item: at line start (after
-# `>`, a bullet, and bold, backtick or quote marks), right after a report label, or after "; " or
-# ". ". So a mid-sentence "recovered:" or a backticked name of the guard is never a carry line.
+# `>`, a bullet, a Done-item tag (BUILT, RECORDED or OTHER) after that bullet, and bold, backtick or
+# quote marks), right after a report label, or after "; " or ". ". So a mid-sentence "recovered:" or a
+# backticked name of the guard is never a carry line, and neither is a bullet tagged with a non-Done word.
 CARRY_MARKS = "*_`\"'“”‘’"
-CARRY_START = (r"(?:^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]+)?(?:\*\*(?:%s):?\*\*:?[ \t]*)?|[.;][ \t]+)"
-               r"[%s]*" % ("|".join(re.escape(label) for label in LABEL_ORDER), re.escape(CARRY_MARKS)))
+DONE_TAG = r"(?-i:BUILT|RECORDED|OTHER)"
+CARRY_START = (r"(?:^[ \t]*(?:>[ \t]*)*"
+               r"(?:(?:[-*+]|\d+[.)])[ \t]+(?:\*{0,2}" + DONE_TAG + r"\*{0,2}:?\*{0,2}[ \t]*)?)?"
+               + r"(?:\*\*(?:%s):?\*\*:?[ \t]*)?|[.;][ \t]+)[%s]*"
+               % ("|".join(re.escape(label) for label in LABEL_ORDER), re.escape(CARRY_MARKS)))
 CARRY_LINES = (
     ("Recovered", re.compile(CARRY_START + r"recovered(?:\*\*)?:", re.I | re.M)),
     ("Handoff gave", re.compile(CARRY_START + r"handoff gave(?:\*\*)?:", re.I | re.M)),
@@ -1074,8 +1082,10 @@ def recovered_problem(records, text):
     missing = [name for name in pending if not carry_present(name, block)]
     reasons = []
     if missing:
-        reasons.append("a compaction came before this report and no %s line has landed since" %
-                       " or ".join(missing))
+        reasons.append("a compaction came before this report and no %s line has landed since; the line forms are "
+                       "`Recovered: <item> (git|page|digest)` or `Recovered: none`, and `Handoff gave: <items>` "
+                       "or `Handoff gave: none`; a label counts where it starts an item in the report blockquote, "
+                       "also after a bullet and a Done-item tag" % " line and no ".join(missing))
     bad = unsourced_recovered_item(block) if "Recovered" in pending else ""
     if bad:
         reasons.append("the Recovered item %r names no source (git, page or digest)" % bad)
@@ -1177,10 +1187,24 @@ def mistake_problem(text):
 
 def _own_lane_read(path, own_id):
     """(is_lane, parent id): this session's own get_session record in the transcript. A lane carries the
-    tag cs-build:lane or a parent_session_id. No record reads as owner-facing."""
+    tag cs-build:lane or a parent_session_id. No record reads as owner-facing, and so does the consultant tag
+    even with a parent id, unless the lane tag is there too."""
     import own_session
     tags, _tagged_after, parent = own_session.own_session_read(path, own_id)
-    return tags is not None and (LANE_TAG in tags or bool(parent)), parent
+    if tags is None or (CONSULTANT_TAG in tags and LANE_TAG not in tags):
+        return False, None
+    return LANE_TAG in tags or bool(parent), parent
+
+
+PAGE_WRITER_ROLE = "triage"  # the session role that always writes the waiting page
+
+
+def _is_page_writer(path):
+    """True when this session's own newest get_session record carries cs-build:triage: the triage session is the
+    repo's page writer, whatever parent id its record names (guard_merge's one triage reader)."""
+    _hooks_on_path()
+    from guard_merge import _own_role_proved as session_role_proved
+    return session_role_proved(path, PAGE_WRITER_ROLE)
 
 
 def _turn_acts(records, turn, acks):
@@ -1204,7 +1228,9 @@ def question_problem(records, turn, text, hook):
     with no result, a failed result or a non-delivered one does not. A transcript writer counts on the send alone.
     A read whose result names no writer keeps the refusal's old text. The question box counts
     only in a repo with no waiting page. A send to @parent reaches no one there.
-    Lane: a send to the parent or the page writer; a send to @parent counts only in a lane.
+    Lane: a send to the parent or the page writer; a send to @parent counts only in a lane. A session whose own
+    newest get_session record carries cs-build:triage is the page writer, not a lane, though its record names a
+    parent: it is owner-facing, so its items write to this repo's page passes.
     Cost: nothing past the text check when the turn has no question or sends to the writer. Else the own-record
     import and a transcript read, only in a session with a remote id. A lane reads no layout; an owner-facing
     turn with no counted send reads the extras file for the writer key (`layout.page_writer_key`) first, when the transcript
@@ -1225,7 +1251,11 @@ def question_problem(records, turn, text, hook):
             acks[parent] = {parent} | PARENT_TARGETS
             uses, sends = _turn_acts(records, turn, acks)
         wanted = ({parent} if parent else set()) | ({writer} if writer else set()) | PARENT_TARGETS
-        return ("" if any(t & wanted for t in sends) else LANE_REFUSAL), ""
+        if any(t & wanted for t in sends):
+            return "", ""
+        if not _is_page_writer(hook.get("transcript_path")):
+            return LANE_REFUSAL, ""
+        # The triage session names a parent id in its record but is the page writer: its items write counts too.
     root = repo_root(hook.get("cwd"))
     if not writer and root and not page_read_ran(records):
         writer = layout.page_writer_key(root)
@@ -3078,8 +3108,8 @@ def triage_hold(hook, records, active):
         if not entries:
             return ""
         _hooks_on_path()
-        from guard_merge import _own_tier_proved
-        if not _own_tier_proved(hook.get("transcript_path"), HOLD_TIER):
+        from guard_merge import _own_role_proved
+        if not _own_role_proved(hook.get("transcript_path"), HOLD_TIER):  # glossary-ok: HOLD_TIER is the existing name
             return ""
         if active and _names_every(input_needed_section(last_reply(hook)), entries):
             return ""
