@@ -1338,7 +1338,7 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
         if call[0] == "commit" and number < last_push and is_test_rel is not None and _red_run_present():
             bodies = own_heredoc_bodies(segment, raw, before) if raw and "<<" in segment else ()
             _note_commit(virtual, call[1], _commit_test_adds(where, top, all_flag, specs, wholes, adds, is_test_rel), bodies)
-        elif call[0] == "commit" and readable and is_test_rel is not None and _red_run_present():
+        elif call[0] == "commit" and is_test_rel is not None and _red_run_present():
             bodies = own_heredoc_bodies(segment, raw, before) if raw and "<<" in segment else ()
             red_hit = _commit_red_run(call[1], bodies, _red_run_module(), top,
                                       lambda: _commit_test_adds(where, top, all_flag, specs, wholes, adds, is_test_rel))
@@ -1360,12 +1360,11 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
                     found.update(_marker_findings(add_where, top, ["HEAD", "--", *add_paths], None))
                 found.update(_untracked_findings(add_where, top, add_paths))
         name = _triplet_file(found)
-        if readable:
-            if name:
-                return "commit", name
-            if red_hit:
-                return "red-run-commit", red_hit
-        else:
+        if readable and name:
+            return "commit", name
+        if red_hit:   # read from the index at hook time, whatever step runs before the commit: a miss costs a later push refusal
+            return "red-run-commit", red_hit
+        if not readable:
             blind_commit = True
             blind_triplet = blind_triplet or bool(name)
     return "", ""
