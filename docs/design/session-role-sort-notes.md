@@ -1,6 +1,6 @@
 # Waiting page, steps tier-items-sorted and answered-sections-by-repo: design notes
 
-Mockup: `docs/design/tier-sort.html`. Screen: `skills/waiting-page/page.html` (main 87daa5b50).
+Mockup: `docs/design/session-role-sort.html`. Screen: `skills/waiting-page/page.html` (main 87daa5b50).
 Deep links: `#s=page|single-repo|groups|no-repo|last-sent|empty|key-stops|key-rank|key-oldest|order-pin|order-free|order-az|seen-once|rail-plain`,
 `&w=all|390|800|1280`, `&t=light|dark`, `&lab=off`, `&hide=<state>,...`.
 Sizes: phone 390, mid 800 and wide 1280, light and dark. `layout.py devices` prints `unknown` for this repo,
@@ -10,7 +10,7 @@ Every order on the mockup comes from one sort function in its script (the pick b
 Options are named by name, never by a letter: the waiting page stamps its own letters.
 
 Owner's outcome (2026-11-12 11:19 CST): the tiers are long and unsorted. He must find the item that matters
-most first: what stops the most work, then the oldest.
+most first: what stops the most work, then the newest.
 
 Settled, not options here:
 - New before seen inside a tier, and an arrival after load first (stale-asks-sink notes, "settled behaviour",
@@ -45,7 +45,7 @@ Options. Each draws the same five Blocking items of one repo. Picture ids: `#ord
   stops, each a lane slug, a PR number or a step id (`["lane fix-proxy", "PR #1201"]`). The session that
   asks names them with `holds` (SKILL.md "Add an item": fill `holds` whenever a lane, a merge or a PR waits),
   and the writer writes them. The count is the list's length; a group counts each entry once across members.
-  Sort in Blocking: arrival, then new before seen, then most `stops`, then `rank`, then oldest. An item with
+  Sort in Blocking: arrival, then new before seen, then most `stops`, then `rank`, then newest. An item with
   `holds` and no `stops` counts 0 and sits after the counted ones (No. 57).
   Gain: the order follows the owner's own rule, the count shows on the card, and each entry is checkable
   (the writer can see that a lane or PR is live). Loss: one more field on every Blocking item; `holds` and
@@ -58,7 +58,7 @@ Options. Each draws the same five Blocking items of one repo. Picture ids: `#ord
 - Departs from: SKILL.md "Item fields", `rank` ("orders items inside a tier") and page.html `sorted()`
   `by.holds` (`byRank` first). In Blocking, `stops` goes ahead of `rank`; `rank` breaks ties. Not blocking.
 - Upcoming, Whenever and Pick stands keep today's keys (`sorted()`): triage's rank, then deadline (Upcoming)
-  or decisions first (Whenever), then oldest. The long Whenever list is fixed by the repo sub-groups (point 2),
+  or decisions first (Whenever), then newest. The long Whenever list is fixed by the repo sub-groups (point 2),
   not by a new key.
 - Builder note: the order is worked out once at load, with `freezeSeen`, and kept. A writer update while the
   page is open moves no card until reload (ux-order-holds-still). An arrival still goes first.
@@ -99,10 +99,10 @@ Picture ids: `#repos-pin`, `#repos-free`, `#repos-az`. Each draws one Blocking t
   Wide, it sits beside the head; on a phone it wraps under it. When the tier holds this repo and another, it
   starts "This repo first." A tier that holds only another repo has no such words, since they would be false.
   The keys differ, so no sentence repeats (ux-label-once).
-  - Blocking: "Most stopped work first, then triage's order, then oldest."
-  - Upcoming: "Triage's order first, then nearest deadline, then oldest."
-  - Whenever: "Triage's order first, then decisions, then oldest."
-  - Pick stands: "Triage's order first, then oldest." It splits into repo sub-groups like the other tiers, and its line
+  - Blocking: "Most stopped work first, then triage's order, then newest."
+  - Upcoming: "Triage's order first, then nearest deadline, then newest."
+  - Whenever: "Triage's order first, then decisions, then newest."
+  - Pick stands: "Triage's order first, then newest." It splits into repo sub-groups like the other tiers, and its line
     starts "This repo first." under the same condition.
 - A group member that is about another repo than its group's shows "about <repo>" in its top row, in plain sight
   (the design reviewer picked keep). A screen reader hears it in the card's words too.

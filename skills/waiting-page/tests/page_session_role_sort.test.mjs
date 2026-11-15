@@ -1,8 +1,8 @@
-// Browser cases for the waiting page's sort and tier labels (docs/design/tier-sort-notes.md: ruling Q1, points 1, 3 and 4).
+// Browser cases for the waiting page's sort and tier labels (docs/design/session-role-sort-notes.md: ruling Q1, points 1, 3 and 4).
 // Blocking sorts by arrival, new before seen, the most `stops` (a group takes its best member's), rank, then age. Each order
 // is worked out at load and kept. A Blocking card's top row shows "stops N", a group head shows its count once, and each tier
 // head has one line that names its key.
-//   NODE_PATH=<dir with playwright> node --test skills/waiting-page/tests/page_tier_sort.test.mjs
+//   NODE_PATH=<dir with playwright> node --test skills/waiting-page/tests/page_session_role_sort.test.mjs
 // The stub database and open() below are a copy of page.test.mjs's, trimmed to what these cases use. That file runs its
 // cases when it is imported, so its helpers cannot be imported, and moving them into a shared module would edit the file
 // the repo sub-group cases also change.
@@ -101,11 +101,11 @@ async function open(t, { items, answers = {}, groups = {}, meta, holdMeta = fals
 }
 
 // The card ids of tier `k`, in the order the page draws them.
-async function tierIds(page, k) {
-  const tiers = await page.evaluate(() => [...document.querySelectorAll("section.tier")].map((s) => [s.id, [...s.querySelectorAll("article.card")].map((c) => c.id.slice(5))]));
-  const tier = tiers.find((x) => x[0] === "tier-" + k);
-  assert.ok(tier, `no tier-${k} section on the page`);
-  return tier[1];
+async function sectionIds(page, k) {
+  const sections = await page.evaluate(() => [...document.querySelectorAll("section.tier")].map((s) => [s.id, [...s.querySelectorAll("article.card")].map((c) => c.id.slice(5))]));
+  const section = sections.find((x) => x[0] === "tier-" + k);
+  assert.ok(section, `no tier-${k} section on the page`);
+  return section[1];
 }
 
 // The top row of `it`'s card in tier `k`. The card's place in the tier is asserted first, so a missing card fails by name.
@@ -123,35 +123,35 @@ test("Blocking: the item that stops more work sits above an older one that stops
   const older = blk("stops-one", 1, { added: at(1), stops: ["lane a"] });
   const newer = blk("stops-three", 2, { added: at(5), stops: ["lane a", "PR #1201", "lane b"] });
   const page = await open(t, { items: [older, newer] }); if (!page) return;
-  assert.deepEqual(await tierIds(page, "holds"), [newer.id, older.id]);
+  assert.deepEqual(await sectionIds(page, "holds"), [newer.id, older.id]);
 });
 
 test("Blocking: the most stops comes before the writer's rank", async (t) => {
   const ranked = blk("rank-first", 1, { added: at(1), rank: 0, stops: ["lane a"] });
   const stopping = blk("rank-last", 2, { added: at(2), rank: 5, stops: ["lane a", "lane b"] });
   const page = await open(t, { items: [ranked, stopping] }); if (!page) return;
-  assert.deepEqual(await tierIds(page, "holds"), [stopping.id, ranked.id]);
+  assert.deepEqual(await sectionIds(page, "holds"), [stopping.id, ranked.id]);
 });
 
 test("Blocking: rank breaks a tie in stops", async (t) => {
   const older = blk("tie-old", 1, { added: at(1), rank: 3, stops: ["lane a", "lane b"] });
   const newer = blk("tie-new", 2, { added: at(5), rank: 1, stops: ["lane c", "lane d"] });
   const page = await open(t, { items: [older, newer] }); if (!page) return;
-  assert.deepEqual(await tierIds(page, "holds"), [newer.id, older.id]);
+  assert.deepEqual(await sectionIds(page, "holds"), [newer.id, older.id]);
 });
 
 test("Blocking: age breaks a tie in stops and rank", async (t) => {
   const older = blk("age-old", 1, { added: at(1), stops: ["lane a"] });
   const newer = blk("age-new", 2, { added: at(5), stops: ["lane b"] });
   const page = await open(t, { items: [older, newer] }); if (!page) return;
-  assert.deepEqual(await tierIds(page, "holds"), [older.id, newer.id]);
+  assert.deepEqual(await sectionIds(page, "holds"), [newer.id, older.id]);
 });
 
 test("Blocking: an item with holds and no stops counts zero, so it sits after the counted ones", async (t) => {
   const bare = blk("bare-old", 1, { added: at(1) });
   const counted = blk("counted-new", 2, { added: at(9), stops: ["lane a"] });
   const page = await open(t, { items: [bare, counted] }); if (!page) return;
-  assert.deepEqual(await tierIds(page, "holds"), [counted.id, bare.id]);
+  assert.deepEqual(await sectionIds(page, "holds"), [counted.id, bare.id]);
 });
 
 test("Blocking: a group takes its best member's stops, not its oldest member's", async (t) => {
@@ -159,7 +159,7 @@ test("Blocking: a group takes its best member's stops, not its oldest member's",
   const grpBare = blk("grp-bare", 2, { added: at(4), group: "pair" });
   const grpMore = blk("grp-three", 3, { added: at(5), group: "pair", stops: ["lane c", "lane d", "lane e"] });
   const page = await open(t, { items: [solo, grpBare, grpMore] }); if (!page) return;
-  const ids = await tierIds(page, "holds");
+  const ids = await sectionIds(page, "holds");
   assert.deepEqual(ids.slice(2), [solo.id], "the solo item with two stops is not last: " + ids.join(", "));
   assert.deepEqual(ids.slice(0, 2).sort(), [grpBare.id, grpMore.id].sort(), "the group is split: " + ids.join(", "));
 });
@@ -170,7 +170,7 @@ test("Blocking: an item that arrives after load sorts first, whatever its stops"
   const late = blk("arr-late", 9, { added: at(28) });
   await page.evaluate((it) => window.__putItem(it), late);
   await page.locator(`#tier-holds #item-${late.id}`).waitFor();
-  assert.deepEqual(await tierIds(page, "holds"), [late.id, old.id]);
+  assert.deepEqual(await sectionIds(page, "holds"), [late.id, old.id]);
 });
 
 test("Blocking: a new item sits above a seen one, whatever the seen one stops", async (t) => {
@@ -178,7 +178,7 @@ test("Blocking: a new item sits above a seen one, whatever the seen one stops", 
   const fresh = blk("fresh-none", 2, { added: ASKED_AFTER_SEND });
   const page = await open(t, { items: [seen, fresh, sentItem()] }); if (!page) return;
   assert.equal(await page.locator(`#item-${seen.id}`).getAttribute("data-seen"), "true", "the older item is not seen");
-  assert.deepEqual(await tierIds(page, "holds"), [fresh.id, seen.id]);
+  assert.deepEqual(await sectionIds(page, "holds"), [fresh.id, seen.id]);
 });
 
 test("Upcoming and Whenever keep their own keys, and ignore stops", async (t) => {
@@ -187,8 +187,8 @@ test("Upcoming and Whenever keep their own keys, and ignore stops", async (t) =>
   const calmOld = mk("calm-old", 3, { added: at(1) });
   const calmNew = mk("calm-new-stops", 4, { added: at(5), stops: ["lane a", "lane b", "lane c"] });
   const page = await open(t, { items: [soon, soonerStops, calmOld, calmNew] }); if (!page) return;
-  assert.deepEqual(await tierIds(page, "due"), [soon.id, soonerStops.id], "Upcoming is not nearest deadline first");
-  assert.deepEqual(await tierIds(page, "calm"), [calmOld.id, calmNew.id], "Whenever is not oldest first");
+  assert.deepEqual(await sectionIds(page, "due"), [soon.id, soonerStops.id], "Upcoming is not nearest deadline first");
+  assert.deepEqual(await sectionIds(page, "calm"), [calmNew.id, calmOld.id], "Whenever is not newest first");
 });
 
 // ---------------------------------------------------------------- the order is worked out at load and kept
@@ -198,14 +198,14 @@ test("a writer's update and a Send on the open page move no Blocking card", asyn
   const second = blk("held-second", 2, { added: at(2), rank: 2 });
   const pick = mk("whenever-pick", 3, { added: at(3) });
   const page = await open(t, { items: [first, second, pick] }); if (!page) return;
-  assert.deepEqual(await tierIds(page, "holds"), [first.id, second.id], "the load order is not rank order");
+  assert.deepEqual(await sectionIds(page, "holds"), [first.id, second.id], "the load order is not rank order");
   // The writer moves the second item to the top while the page is open: rank 0 and three stops.
   await page.evaluate((it) => window.__putItem(it), { ...second, rank: 0, stops: ["lane a", "lane b", "lane c"] });
   await page.waitForFunction((id) => (state.items.find((i) => i.id === id) || {}).rank === 0, second.id);
   await choose(page, pick, "a");
   await page.click("#send");
   await page.waitForFunction((id) => !document.querySelector(`#tier-calm #item-${id}`), pick.id);
-  assert.deepEqual(await tierIds(page, "holds"), [first.id, second.id], "Blocking was worked out again while the page was open");
+  assert.deepEqual(await sectionIds(page, "holds"), [first.id, second.id], "Blocking was worked out again while the page was open");
 });
 
 // ---------------------------------------------------------------- the count on the card, the group head, and the tier key lines
@@ -254,9 +254,9 @@ test("each tier head has one line that names its key, and the line shows once on
   const calm = mk("key-calm", 3, { added: at(3) });
   const page = await open(t, { items: [held, due, calm] }); if (!page) return;
   const keys = [
-    ["holds", /Most stopped work first, then triage['’]s order, then oldest\./i],
-    ["due", /Triage['’]s order first, then nearest deadline, then oldest\./i],
-    ["calm", /Triage['’]s order first, then decisions, then oldest\./i],
+    ["holds", /Most stopped work first, then triage['’]s order, then newest\./i],
+    ["due", /Triage['’]s order first, then nearest deadline, then newest\./i],
+    ["calm", /Triage['’]s order first, then decisions, then newest\./i],
   ];
   for (const [k] of keys) assert.equal(await page.locator(`#tier-${k}`).count(), 1, `no tier-${k} section on the page`);
   const body = await page.evaluate(() => document.body.innerText);
@@ -276,7 +276,7 @@ test("a group's stops are the union of its members' lists, so it sorts above an 
   const grpA = blk("union-a", 2, { added: at(3), group: "pair", stops: ["lane a", "lane b"] });
   const grpB = blk("union-b", 3, { added: at(4), group: "pair", stops: ["lane b", "lane c"] });
   const page = await open(t, { items: [solo, grpA, grpB] }); if (!page) return;
-  const ids = await tierIds(page, "holds");
+  const ids = await sectionIds(page, "holds");
   assert.deepEqual(ids.slice(0, 2).sort(), [grpA.id, grpB.id].sort(), "the group with three stops in union is not first: " + ids.join(", "));
   assert.deepEqual(ids.slice(2), [solo.id], "the older solo with two stops is not last: " + ids.join(", "));
 });
@@ -285,11 +285,11 @@ test("a card that gains stops after load shows no count the order does not use",
   const counted = blk("frozen-counted", 1, { added: at(1), stops: ["lane a", "lane b"] });
   const grows = mk("frozen-grows", 2, { added: at(2) });
   const page = await open(t, { items: [counted, grows] }); if (!page) return;
-  assert.deepEqual(await tierIds(page, "calm"), [grows.id], "the item with no holds is not in Whenever at load");
+  assert.deepEqual(await sectionIds(page, "calm"), [grows.id], "the item with no holds is not in Whenever at load");
   // The writer adds holds and three stops while the page is open. The order keeps the count of zero it took at load.
   await page.evaluate((it) => window.__putItem(it), { ...grows, holds: "Lane fix-proxy, PR #1201 and lane c wait on your word.", stops: ["lane fix-proxy", "PR #1201", "lane c"] });
   await page.locator(`#tier-holds #item-${grows.id}`).waitFor();
-  assert.deepEqual(await tierIds(page, "holds"), [counted.id, grows.id], "the order moved the card that gained stops while the page was open");
+  assert.deepEqual(await sectionIds(page, "holds"), [counted.id, grows.id], "the order moved the card that gained stops while the page was open");
   assert.match(await topIn(page, "holds", counted), /\bstops 2\b/, `No. ${counted.n} lost its count of two`);
   const top = await topIn(page, "holds", grows);
   assert.doesNotMatch(top, /\bstops \d/, `No. ${grows.n} shows a count the order does not use: "${top.trim()}"`);
@@ -301,13 +301,13 @@ test("a group whose member gains stops after load keeps the head count the order
   const rival = blk("grp-rival", 3, { added: at(3), stops: ["lane b", "lane c"] });
   const page = await open(t, { items: [first, gains, rival] }); if (!page) return;
   // At load the group counts 1 (its union, {lane a}); the rival counts 2, so the rival is first.
-  assert.equal((await tierIds(page, "holds"))[0], rival.id, "the rival with two stops is not first at load");
+  assert.equal((await sectionIds(page, "holds"))[0], rival.id, "the rival with two stops is not first at load");
   // The writer adds three stops to the second member while the page is open: the union goes from 1 to 4.
   await page.evaluate((it) => window.__putItem(it), { ...gains, stops: ["lane d", "lane e", "lane f"] });
   await page.waitForFunction((id) => ((state.items.find((i) => i.id === id) || {}).stops || []).length === 3, gains.id);
   const frame = page.locator("#tier-holds section.bundle#group-pair");
   assert.equal(await frame.count(), 1, "the two members are not one frame in Blocking");
-  assert.equal((await tierIds(page, "holds"))[0], rival.id, "the order moved while the page was open");
+  assert.equal((await sectionIds(page, "holds"))[0], rival.id, "the order moved while the page was open");
   // The head's text as the eye reads it: its screen-reader words (.sr) are left out.
   const head = await frame.locator("header").first().evaluate((h) => { const c = h.cloneNode(true); c.querySelectorAll(".sr").forEach((n) => n.remove()); return c.textContent; });
   assert.match(head, /\bstops 1\b/, "the group head does not show the count the order sorts by (its union at load, 1): " + head);
@@ -337,9 +337,9 @@ test("when the repo meta arrives the page redraws, in the order a load with the 
   await held.evaluate(() => window.__releaseMeta());
   await held.waitForFunction("feed.meta === true");
   assert.doesNotMatch(await held.locator("#list").innerText(), /Loading the items waiting on you/, "the loading line still shows after the repo meta arrives");
-  const after = await tierIds(held, "holds");
+  const after = await sectionIds(held, "holds");
   const full = await open(t, { items, meta: META, metaFirst: true });
-  assert.deepEqual(after, await tierIds(full, "holds"), "after the meta arrives the order is not the order a load with the meta gives: " + after.join(", "));
+  assert.deepEqual(after, await sectionIds(full, "holds"), "after the meta arrives the order is not the order a load with the meta gives: " + after.join(", "));
 });
 
 test("when the repo meta read fails the page settles, and repo-less items alone draw no repo head", async (t) => {
@@ -349,7 +349,7 @@ test("when the repo meta read fails the page settles, and repo-less items alone 
   const page = await open(t, { items: [first, second], failMeta: true }); if (!page) return;
   await page.waitForFunction("window.__metaFailed === true");
   assert.doesNotMatch(await page.locator("#list").innerText(), /Loading the items waiting on you/, "the loading line still shows after the repo meta read failed");
-  assert.deepEqual(await tierIds(page, "holds"), [first.id, second.id], "the repo-less items are not drawn in tier order after the failed meta read");
+  assert.deepEqual(await sectionIds(page, "holds"), [second.id, first.id], "the repo-less items are not drawn in tier order after the failed meta read");
   assert.equal(await page.locator(".subgrp, .subhead").count(), 0, "a repo head is drawn for repo-less items alone after the failed meta read");
   assert.doesNotMatch(await page.locator("#tier-holds .tsub").innerText(), /This repo first\./, "the key line says 'This repo first.' with repo-less items alone");
 });
@@ -372,10 +372,10 @@ test("at 1280 the first run in the rail's chips has no top gap: its label's marg
 // db.d.ts: a store that goes quiet is time-limited at about 10 s, and the page's own wait is the one these cases run out on the fake clock.
 const META_WAIT_MS = 10_000;
 
-// The list a settled meta gives repo-less items: one tier in age order, no repo head, and the rail drawn with a chip per item.
+// The list a settled meta gives repo-less items: one tier, newest first, no repo head, and the rail drawn with a chip per item.
 async function assertDrawnRepoless(page, ids, when) {
   assert.doesNotMatch(await page.locator("#list").innerText(), /Loading the items waiting on you/, `${when}: the loading line still shows`);
-  assert.deepEqual(await tierIds(page, "holds"), ids, `${when}: the cards are not in age order`);
+  assert.deepEqual(await sectionIds(page, "holds"), ids, `${when}: the cards are not newest first`);
   assert.equal(await page.locator(".subgrp, .subhead").count(), 0, `${when}: a repo head is drawn for repo-less items alone`);
   assert.equal(await page.locator("#rail").evaluate((el) => el.hidden), false, `${when}: the rail is hidden`);
   assert.equal(await page.locator("#rail .nchip").count(), ids.length, `${when}: the rail does not draw one chip per item`);
@@ -386,7 +386,7 @@ test("a meta that never answers: after the page's 10 s wait it treats the meta a
   const second = blk("silent-b", 2, { added: at(2) });
   const page = await open(t, { items: [first, second], meta: META, holdMeta: true, clock: true }); if (!page) return;
   await page.clock.runFor(META_WAIT_MS);
-  await assertDrawnRepoless(page, [first.id, second.id], "after 10 s of fake time (db.d.ts: about 10 s)");
+  await assertDrawnRepoless(page, [second.id, first.id], "after 10 s of fake time (db.d.ts: about 10 s)");
 });
 
 test("control: with the fake clock on and the meta answered, the same items draw the same list", async (t) => {
@@ -394,7 +394,7 @@ test("control: with the fake clock on and the meta answered, the same items draw
   const second = blk("answered-b", 2, { added: at(2) });
   const page = await open(t, { items: [first, second], meta: META, clock: true }); if (!page) return;
   await page.clock.runFor(META_WAIT_MS);
-  await assertDrawnRepoless(page, [first.id, second.id], "with the meta answered, after 10 s of fake time");
+  await assertDrawnRepoless(page, [second.id, first.id], "with the meta answered, after 10 s of fake time");
 });
 
 test("a late meta after the 10 s wait moves no drawn card and adds or removes no repo head", async (t) => {
@@ -404,12 +404,12 @@ test("a late meta after the 10 s wait moves no drawn card and adds or removes no
   const page = await open(t, { items: [repoless, slug], meta: META, holdMeta: true, clock: true }); if (!page) return;
   await page.clock.runFor(META_WAIT_MS);
   assert.doesNotMatch(await page.locator("#list").innerText(), /Loading the items waiting on you/, "after 10 s of fake time (db.d.ts: about 10 s): the loading line still shows");
-  const before = await tierIds(page, "holds"), headsBefore = await page.locator(".subhead").allInnerTexts();
+  const before = await sectionIds(page, "holds"), headsBefore = await page.locator(".subhead").allInnerTexts();
   assert.deepEqual(before, [repoless.id, slug.id], "after 10 s of fake time the order is not this repo's item first, then the other repo's");
   const delivered = await page.evaluate(() => window.__releaseMeta());
   assert.ok(delivered >= 1, "the held meta had no listener to deliver it, so the late meta was never sent");
   await page.waitForFunction("feed.meta === true");
-  assert.deepEqual(await tierIds(page, "holds"), before, "the late meta moved a drawn card");
+  assert.deepEqual(await sectionIds(page, "holds"), before, "the late meta moved a drawn card");
   assert.deepEqual(await page.locator(".subhead").allInnerTexts(), headsBefore, "the late meta changed the repo heads");
 });
 
@@ -419,7 +419,7 @@ test("control: a failed meta read draws the late-meta case's order, with the oth
   const slug = blk("late-slug-ctl", 1, { added: at(1), repo: "owner/this-repo" });
   const page = await open(t, { items: [repoless, slug], failMeta: true }); if (!page) return;
   await page.waitForFunction("window.__metaFailed === true");
-  assert.deepEqual(await tierIds(page, "holds"), [repoless.id, slug.id], "a failed read does not draw this repo's item first");
+  assert.deepEqual(await sectionIds(page, "holds"), [repoless.id, slug.id], "a failed read does not draw this repo's item first");
   const heads = await page.locator(".subhead").allInnerTexts();
   assert.ok(heads.some((h) => /this-repo/.test(h)), "no repo head names the other repo: " + JSON.stringify(heads));
 });

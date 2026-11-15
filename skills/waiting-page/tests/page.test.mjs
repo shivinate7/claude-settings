@@ -2242,7 +2242,7 @@ test("a group with one new member is new as a whole, so a seen item in its tier 
   assert.deepEqual(await idsInSection(page, "calm"), ["g-new", "g-old", "g-solo"], "the seen solo sits above the group in Whenever");
 });
 
-// ---------------------------------------------------------------- repo sub-groups inside each tier (tier-sort-notes, sections 1 to 5)
+// ---------------------------------------------------------------- repo sub-groups inside each tier (session-role-sort-notes, sections 1 to 5)
 // Inside each tier, one sub-group per repo: a section role="group" labelled by its head (a letter tile, the repo name, the count).
 // This repo is meta/page `repo` (owner/name) when set, else the item repo whose name part matches identity.name, ignoring case.
 // Only the repo sub-groups are tested here. The `stops` key and its sort wait on an owner answer, so no case sorts by stops.
@@ -2252,9 +2252,9 @@ const inRepo = (id, n, repo, over = {}) => mk(id, n, { repo, ...over });
 // The sub-groups of one tier, in page order: each head's text with its whitespace removed (the tile, the name, the count) and the cards in it.
 // null when the tier is not on the page; [] when it draws no sub-group.
 const repoGroups = (page, k) => page.evaluate((key) => {
-  const tier = document.getElementById("tier-" + key);
-  if (!tier) return null;
-  return [...tier.querySelectorAll('[role="group"][aria-labelledby]')].map((g) => {
+  const section = document.getElementById("tier-" + key);
+  if (!section) return null;
+  return [...section.querySelectorAll('[role="group"][aria-labelledby]')].map((g) => {
     const head = document.getElementById(g.getAttribute("aria-labelledby"));
     return { head: head ? head.textContent.replace(/\s+/g, "") : "", cards: [...g.querySelectorAll("article.card")].map((c) => c.id.slice(5)) };
   });
@@ -2275,9 +2275,9 @@ const railRuns = (page, k) => page.evaluate((key) => {
 }, k);
 // The seen dividers of each sub-group, in page order: "w" when a divider shows its words, "sr" when only a screen reader hears them.
 const dividersIn = (page, k) => page.evaluate((key) => {
-  const tier = document.getElementById("tier-" + key);
-  if (!tier) return null;
-  return [...tier.querySelectorAll('[role="group"][aria-labelledby]')].map((g) => [...g.querySelectorAll(".seenhead")].map((d) => (d.querySelector(".sr") ? "sr" : "w")));
+  const section = document.getElementById("tier-" + key);
+  if (!section) return null;
+  return [...section.querySelectorAll('[role="group"][aria-labelledby]')].map((g) => [...g.querySelectorAll(".seenhead")].map((d) => (d.querySelector(".sr") ? "sr" : "w")));
 }, k);
 
 // Case 1: this repo first, then each other repo at the place of its first item. Beta's first item outranks alpha's, so place and A to Z differ.

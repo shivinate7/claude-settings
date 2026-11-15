@@ -1327,7 +1327,7 @@ function headsOn(k, plan) {
   return on || !!headed[k];
 }
 // The line under a tier head that names its key. It says "This repo first" only when the tier holds this repo and another.
-const TIER_KEY = { holds: "Most stopped work first, then triage's order, then oldest.", due: "Triage's order first, then nearest deadline, then oldest.", calm: "Triage's order first, then decisions, then oldest.", stands: "Triage's order first, then oldest." };
+const TIER_KEY = { holds: "Most stopped work first, then triage's order, then newest.", due: "Triage's order first, then nearest deadline, then newest.", calm: "Triage's order first, then decisions, then newest.", stands: "Triage's order first, then newest." };
 const tierKey = (k, plan) => (plan.length > 1 && plan.some((g) => g.key === "") ? "This repo first. " : "") + TIER_KEY[k];
 function sorted() {
   freezeKeys();
