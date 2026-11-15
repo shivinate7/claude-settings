@@ -142,6 +142,7 @@ LINUX_SUITES = {
     "python3 lint/test_all_jobs_passed.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_ci_scope.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_checks_step_scope.py": (None, None),
+    "python3 lint/test_guard_inputs.py": (None, None),
     "python3 lint/test_rm_shim.py": (LINUX_CODE, None),
     "python3 hooks/test_mutate_shared.py": (None, None),
     "python3 hooks/test_mutate_report.py": (NO_MD_SCOPE_CONDITION, None),
@@ -433,8 +434,9 @@ IF_PIN = {"python janitor/mutate_sweep.py":
           "${{ !cancelled() && needs.scope.outputs.sweep == 'true' }}",
           # The full merge suite runs on a ready pull_request whatever the flags say, and on push when code changed (R62).
           "python merge/test_merge.py": "${{ !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}",
-          # The full guard suite: the same rule as the merge suite (R62). Neither suite has a slice step.
-          GUARD_CMD: "${{ !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}"}
+          # The full guard suite: the same rule as the merge suite (R62), and the guard-inputs gate: a diff that touches no guard input
+          # (windows_guard, .github/guard-inputs.txt) runs no guard shard, a ready pull_request included. No slice step.
+          GUARD_CMD: "${{ !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && needs.scope.outputs.windows_guard == 'true' }}"}
 
 
 FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows",
@@ -696,8 +698,10 @@ def full_suite_problems(name, job):
         flags = set(re.findall(r"needs\.scope\.outputs\.(\w+)", rest))
         if name in (GUARD_JOB, "checks-windows-merge") and "code" not in flags:
             problems.append(f"{name}: step {label} does not read code, so a push runs the suite with no code change: {expr}")
-        if flags - {"code"}:
-            problems.append(f"{name}: step {label} reads scope flags {sorted(flags - {'code'})}, want only code: {expr}")
+        # The guard family (the base and its shards) also reads windows_guard, the guard-inputs gate. No other suite reads it.
+        want = {"code", "windows_guard"} if (shard_base(name) or name) == GUARD_JOB else {"code"}
+        if flags - want:
+            problems.append(f"{name}: step {label} reads scope flags {sorted(flags - want)}, want only {sorted(want)}: {expr}")
     return problems
 
 
@@ -1381,6 +1385,19 @@ class WindowsSplit(unittest.TestCase):
         self.assertEqual(guard_problems(self.text), [])
         guard_jobs = [n for n in CONDITIONED_JOBS if n.startswith(GUARD_JOB)]
         self.assertEqual(condition_problems(self.text, guard_jobs), [], "a guard job's run step does not end in the records-only condition")
+
+    # The guard-inputs gate: each of the three guard shard steps reads windows_guard in its own condition, so a shard runs only for a
+    # diff that touches a guard input. Named failure: a shard step runs on every pull request, and the gate saves nothing.
+    def test_each_guard_shard_step_reads_windows_guard(self):
+        jobs = windows_jobs(self.text)
+        for name in (GUARD_JOB, GUARD_JOB + "-2", GUARD_JOB + "-3"):
+            with self.subTest(job=name):
+                job = jobs.get(name)
+                self.assertIsNotNone(job, f"no windows-latest job named {name}")
+                steps = [st for st in job["steps"] if key(st) == GUARD_CMD]
+                self.assertEqual(len(steps), 1, f"{name} has {len(steps)} full guard steps, want 1")
+                self.assertEqual(step_rest(steps[0], read_scope_condition(job)), unwrap(IF_PIN[GUARD_CMD]),
+                                 f"{name}: the full guard step's condition is not the pinned text (it lacks windows_guard)")
 
     def test_checks_sets_no_guard_family(self):
         self.assertEqual([p for p in guard_problems(self.text) if "GUARD_FAMILY" in p], [])
