@@ -27,7 +27,7 @@ Incident: mailaudit item `ma144-tab-bar` (mailaudit #144, the Duo tab bar place)
 
 Second incident: item 397, 2026-11-07 22:58 CST. Triage writes the page from a worktree on the record branch. That worktree holds no extras file, so the page read as unknown, no page check ran, and every rule above was skipped.
 
-Cost of the field check: no process, no file written, except the default-branch read above. One read of git's config file per waiting-page write (`lint/layout.py`, `repo_name`).
+Cost of the field check: no process, no file written, except the default-branch read above. One read of git's config file per waiting-page write (`lint/layout.py`, `repo_name`) (unmeasured).
 
 Known limit: the guard sees that `checked_with` is session-shaped, not that the session checked. A made-up id passes. Review and the owner catch it.
 

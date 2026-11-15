@@ -44,7 +44,7 @@ Not measured:
 
 Risk: a session may state an inference as an answer. Audit row F188 is that case. Each claim above carries its mark.
 
-Cost: one Markdown file. No process, no check at run time, no log.
+Cost: one Markdown file (unmeasured). No process, no check at run time, no log.
 
 Known limit: the docs read stops at 2026-11-02. The tool text is coordinator-reported from 2026-11-01. The cause of the 2026-10-30 block is unmeasured.
 

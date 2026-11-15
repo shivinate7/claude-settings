@@ -37,8 +37,11 @@ Interface the generator must meet.
     empty text, is a problem.
   - Skills: skills/<name>/SKILL.md, frontmatter `description` (plain, quoted, or `>` folded).
     Missing or empty is a problem.
-  - Model and effort: the model-table row whose first cell names the script in backticks. None:
-    "no model" and "n/a". A prompt hook takes its own `model` field, effort "n/a". A skill takes
+  - Model and effort: the model-table row whose first cell names the script in backticks. If that
+    first cell also names an event (a bare settings.json event word after the path, as in
+    "UserPromptSubmit only"), the row goes to that event's registration alone, and the script's other
+    registrations take "no model". A row that names no event goes to every registration of the script.
+    None: "no model" and "n/a". A prompt hook takes its own `model` field, effort "n/a". A skill takes
     "no model". A script that calls or defines invoke_model (ast) needs its own table row.
     An inline command takes "no model" and "n/a".
 - Page: docs/catalog.md. Header row, exactly:
@@ -224,7 +227,10 @@ def page_rows(text):
 
 
 def table_rows():
-    """{script path: (model token, effort token)} for each model-table row that names a script."""
+    """{(script path, event): (model token, effort token)} for each model-table row that names a script.
+    The event is each settings.json event word in the first cell, else "" for a row that names none.
+    Written here from the spec, not imported from the generator."""
+    events = sorted(json.loads(read(SETTINGS))["hooks"])
     found = {}
     for line in read(TABLE).replace("\r\n", "\n").split("\n"):
         if not line.lstrip().startswith("|"):
@@ -234,7 +240,9 @@ def table_rows():
         if not path or len(cells) < 3:
             continue
         model = re.match(r"[\w.-]+", cells[1])
-        found[path.group(1)] = (model.group(0) if model else "", cells[2].strip("` "))
+        value = (model.group(0) if model else "", cells[2].strip("` "))
+        for event in [e for e in events if re.search(r"\b%s\b" % e, cells[0])] or [""]:
+            found[(path.group(1), event)] = value
     return found
 
 
@@ -422,7 +430,7 @@ class RealRepo(unittest.TestCase):
             if hook.get("type") == "command":
                 path = command_script(hook)
                 key = (path or "inline: " + inline_label(event, matcher, cond), event, matcher, cond)
-                want_model, want_effort = table.get(path, ("no model", "n/a"))
+                want_model, want_effort = table.get((path, event), table.get((path, ""), ("no model", "n/a")))
             elif hook.get("type") == "prompt":
                 key = (first_sentence(hook.get("prompt", "")), event, matcher, cond)
                 want_model, want_effort = hook.get("model", ""), "n/a"
@@ -435,7 +443,7 @@ class RealRepo(unittest.TestCase):
                 problems.append("%r: Model %r, want %r" % (key, row["Model"], want_model))
             if row["Effort"] != want_effort:
                 problems.append("%r: Effort %r, want %r" % (key, row["Effort"], want_effort))
-        for path in sorted(invoke_model_callers() - set(table)):
+        for path in sorted(invoke_model_callers() - {p for p, _event in table}):
             problems.append("%s calls invoke_model but has no model-table row" % path)
         self.assertFalse(problems, "\n".join(problems))
 
@@ -445,6 +453,12 @@ class RealRepo(unittest.TestCase):
         committed = self.page().replace("\r\n", "\n")
         self.assertEqual(committed, out.replace("\r\n", "\n"),
                          "docs/catalog.md is stale: run python3 lint/hook_catalog.py")
+
+    def test_r8_header_says_a_row_that_names_an_event_gives_its_model_to_that_event_only(self):
+        # A text lint on the page header. The page is all a reader sees of the rule, so it must say it.
+        head = [p for p in self.page().split("\n\n") if p.startswith("Model and effort come from the model table")]
+        self.assertTrue(head, "the page header has no 'Model and effort come from the model table' paragraph")
+        self.assertIn("event", head[0], "the header does not say that a model-table row naming an event gives its model to that event only")
 
     def test_r9_session_start_refresh_has_its_text_markers(self):
         # A text lint, not a behaviour test. The refresh stays inline: a move into a script checks
@@ -521,6 +535,23 @@ def row_for(rows, key):
         if r["Key"].strip("`") == key:
             return r
     raise AssertionError("no row keyed %s in the page" % key)
+
+
+# One script registered under three events, as local_time is. Its docstring has a Modes line per event.
+CLOCK_DOC = ('"""Tells the session the time, and gives an agent the time.\n\nModes:\n'
+             '- UserPromptSubmit: Tells the session the time.\n'
+             '- SubagentStart: Gives the agent the time.\n'
+             '- PostToolUse: Notes the time after one read.\n"""\nprint("ok")\n')
+CLOCK_HOOKS = {
+    "UserPromptSubmit": [{"hooks": [command("hooks/clock.py")]}],
+    "SubagentStart": [{"hooks": [command("hooks/clock.py")]}],
+    "PostToolUse": [{"matcher": "ArtifactData", "hooks": [command("hooks/clock.py")]}],
+}
+# The model-table row for the script: one names an event in its first cell, one names none.
+CLOCK_NAMES_EVENT = "| clock (`hooks/clock.py`, UserPromptSubmit only) | haiku, through `decision_watch.invoke_model` | low |\n"
+CLOCK_NAMES_NO_EVENT = "| clock (`hooks/clock.py`) | haiku, through `decision_watch.invoke_model` | low |\n"
+# A row that names an event clock.py is never registered under: Stop, where only other.py is.
+CLOCK_NAMES_STOP = "| clock (`hooks/clock.py`, Stop only) | haiku, through `decision_watch.invoke_model` | low |\n"
 
 
 # ---- the records page: readers and fixture texts ------------------------------------------------
@@ -891,6 +922,39 @@ class Fixtures(Tree):
         spec["lint/hook_catalog_inline.json"] = json.dumps(
             {sidecar_key("Notification", "echo one"): "Says one plain thing.", "PreToolUse matcher=Gone #00000000": "Orphan."})
         self.assert_problem(spec, "PreToolUse matcher=Gone")
+
+    # Cases F30 and F31. A model-table row that names an event gives its model to that event's row
+    # alone. A row that names no event gives it to every row of the script. F31 passes today: a guard.
+
+    def test_f30_a_table_row_that_names_an_event_gives_its_model_to_that_event_only(self):
+        rows = self.rows_of(files(hooks=CLOCK_HOOKS, extra={
+            "hooks/clock.py": CLOCK_DOC, "decisions/agent-model-cap.md": TABLE_TEXT + CLOCK_NAMES_EVENT}))
+        got = {r["Event"]: (r["Model"], r["Effort"]) for r in rows if r["Key"].strip("`") == "hooks/clock.py"}
+        self.assertEqual(sorted(got), ["PostToolUse", "SubagentStart", "UserPromptSubmit"],
+                         "the script needs one row per registration")
+        self.assertEqual(got, {"PostToolUse": ("no model", "n/a"),
+                               "SubagentStart": ("no model", "n/a"),
+                               "UserPromptSubmit": ("haiku", "low")},
+                         "the row names UserPromptSubmit: only that row takes its model, the other events call no model")
+
+    def test_f31_a_table_row_that_names_no_event_gives_its_model_to_every_row_of_the_script(self):
+        rows = self.rows_of(files(hooks=CLOCK_HOOKS, extra={
+            "hooks/clock.py": CLOCK_DOC, "decisions/agent-model-cap.md": TABLE_TEXT + CLOCK_NAMES_NO_EVENT}))
+        got = sorted((r["Event"], r["Model"], r["Effort"]) for r in rows if r["Key"].strip("`") == "hooks/clock.py")
+        self.assertEqual([e for e, _m, _f in got], ["PostToolUse", "SubagentStart", "UserPromptSubmit"],
+                         "the script needs one row per registration")
+        self.assertEqual(got, [("PostToolUse", "haiku", "low"), ("SubagentStart", "haiku", "low"),
+                               ("UserPromptSubmit", "haiku", "low")],
+                         "a row that names no event must give its model to every row of the script")
+
+    # Case F32. A row that names an event its script never registers is a problem line. The check
+    # reads the registrations, so a row for Stop on a script registered under other events fails.
+
+    def test_f32_a_table_row_that_names_an_event_its_script_never_registers_is_a_problem(self):
+        self.assert_problem(files(hooks={**CLOCK_HOOKS, "Stop": [{"hooks": [command("hooks/other.py")]}]}, extra={
+            "hooks/clock.py": CLOCK_DOC, "hooks/other.py": '"""Does one other thing."""\nprint("ok")\n',
+            "decisions/agent-model-cap.md": TABLE_TEXT + CLOCK_NAMES_STOP}),
+            "hooks/clock.py", "Stop")
 
 
 # ---- the records page: the generator on temp trees ---------------------------------------------
