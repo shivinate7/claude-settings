@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -57,8 +58,14 @@ def init_repo(path):
     return path
 
 
-def point_ref(repo, ref, files, scratch):
-    """Points `ref` at a new commit whose whole tree is `files` ({path: text}). Returns the commit's sha."""
+def git_time(iso):
+    """Git's own form of an ISO time with a zone: unix seconds and +0000. Git reads it as the same instant."""
+    return "%d +0000" % int(datetime.fromisoformat(iso).timestamp())
+
+
+def point_ref(repo, ref, files, scratch, parent=None, when=None):
+    """Points `ref` at a new commit whose whole tree is `files` ({path: text}). `parent` (a sha) makes the commit a
+    child of that one, and `when` (an ISO time with a zone) sets its committer date. Returns the commit's sha."""
     index = os.path.join(scratch, "index-" + ref.replace("/", "_"))
     if os.path.exists(index):
         os.remove(index)
@@ -67,7 +74,9 @@ def point_ref(repo, ref, files, scratch):
         blob = git(repo, "hash-object", "-w", "--stdin", text=text, env=env)
         git(repo, "update-index", "--add", "--cacheinfo", "100644,%s,%s" % (blob, path), env=env)
     tree = git(repo, "write-tree", env=env)
-    commit = git(repo, "commit-tree", tree, "-m", "fixture for " + ref, env=env)
+    args = ["commit-tree", tree, "-m", "fixture for " + ref] + (["-p", parent] if parent else [])
+    commit_env = dict(env, GIT_COMMITTER_DATE=git_time(when)) if when else env
+    commit = git(repo, *args, env=commit_env)
     git(repo, "update-ref", ref, commit, env=env)
     return commit
 
@@ -104,12 +113,13 @@ HEADER = "rulings not on main: %d open (%d with no supersedes read yet), newest 
 DST_CDT = "2026-11-01T01:30:00-05:00"  # 06:30 UTC, the first 01:30 before the clocks go back
 DST_CST = "2026-11-01T01:10:00-06:00"  # 07:10 UTC, after the change: later, though its text sorts first
 RULING_LAND = "Rule one: keep the apps."
-# The ruling-ref rule's cutoff, as the owner's grant gives it (11:33 CST). The cases spell the instant out,
-# so they do not need the module to define a constant of that name.
+# The ruling-ref rule's cutoff, as the owner's grant gives it (11:33 CST): a store file committed at or after it is
+# checked. The cases spell the instant out, so they do not need the module to define a constant of that name.
 RULING_CUTOFF = "2026-11-15T11:33:00-06:00"
 BEFORE_CUTOFF = "2026-11-15T11:32:59-06:00"
 AFTER_CUTOFF = "2026-11-15T12:00:00-06:00"
 TARGET_LATER = "2026-11-15T13:00:00-06:00"
+EARLIER = "2026-11-10T09:00:00-06:00"  # a commit well before the cutoff
 CAUSE_NO_RULING = "names no ruling in the store"
 CAUSE_NOT_EARLIER = "names a ruling not earlier than it"
 CAUSE_BAD_REF = "ruling ref is empty or not a string"
@@ -144,14 +154,24 @@ class RepoCase(unittest.TestCase):
         self.root = tempfile.mkdtemp(prefix="ruled_store_", dir=run_folder())
         self.addCleanup(shutil.rmtree, self.root, True)
 
-    def make_repo(self, name, store=None, main=None):
+    def make_repo(self, name, store=None, main=None, when=None):
         """A repo under this case's folder. `store` and `main` are {path: text} trees, pointed at origin/roadmap
-        and origin/main. A tree left as None gives a repo with no such ref."""
+        and origin/main. A tree left as None gives a repo with no such ref. `when` dates the store commit."""
         repo = fixture.init_repo(os.path.join(self.root, name))
         if store is not None:
-            fixture.point_ref(repo, fixture.STORE_REF, store, self.root)
+            fixture.point_ref(repo, fixture.STORE_REF, store, self.root, when=when)
         if main is not None:
             fixture.point_ref(repo, fixture.MAIN_REF, main, self.root)
+        return repo
+
+    def store_history(self, name, steps):
+        """A store on origin/roadmap with one commit per (when, entries) step, oldest first. Each commit's tree holds
+        every entry written so far, so a step changes a file only when it writes that entry with new text."""
+        repo = self.make_repo(name)
+        files, parent = {}, None
+        for when, entries in steps:
+            files.update(fixture.ruling_files(entries))
+            parent = fixture.point_ref(repo, fixture.STORE_REF, dict(files), self.root, parent=parent, when=when)
         return repo
 
 
@@ -540,10 +560,10 @@ def checking_entry(rid, ref, at=AFTER_CUTOFF):
 
 
 class CheckStoreTests(RepoCase):
-    def store_with(self, name, entries, steps=None):
+    def store_with(self, name, entries, steps=None, when=EARLIER):
         files = fixture.ruling_files(entries)
         files.update(steps or {})
-        return self.make_repo(name, store=files)
+        return self.make_repo(name, store=files, when=when)
 
     def test_a_clean_store_has_no_problem(self):
         repo = self.store_with("clean", {"ok": fixture.entry("ok")})
@@ -664,10 +684,10 @@ class CheckStoreTests(RepoCase):
                       "check did not name the open entry on a done step")
 
     def check_ref(self, name, targets, ref, rid="chk", at=AFTER_CUTOFF):
-        """check_store of `targets` plus one checking entry `rid`, dated `at`, whose only supersedes is the ref `ref`."""
+        """check_store of `targets` plus one checking entry `rid`, dated `at`, whose only supersedes is `ref`."""
         entries = dict(targets)
         entries[rid] = checking_entry(rid, ref, at)
-        return ruled_store.check_store(self.store_with(name, entries))
+        return ruled_store.check_store(self.store_with(name, entries, when=AFTER_CUTOFF))
 
     def assertOneRulingProblem(self, got, rid, cause):
         """Exactly one problem line names `rid` and the word ruling, and that line names `cause`."""
@@ -740,19 +760,28 @@ class CheckStoreTests(RepoCase):
                 got = self.check_ref("not-a-string-%d" % index, targets, ref)
                 self.assertOneRulingProblem(got, "chk", CAUSE_BAD_REF)
 
-    def test_a_ruling_ref_on_an_entry_before_the_cutoff_is_not_checked(self):
-        repo = self.store_with("before", {"chk": checking_entry("chk", "Rule-one keeps the apps.", at=AT)})
+    def test_a_file_last_committed_before_the_cutoff_is_not_checked(self):
+        repo = self.store_with("before", {"chk": checking_entry("chk", "Rule-one keeps the apps.", at=AT)},
+                               when=EARLIER)
         self.assertEqual(ids(ruled_store.ruled_entries(repo)), ["chk"], "control: the entry did not read")
         self.assertEqual(ruled_store.check_store(repo), [],
-                         "an entry dated before the cutoff was checked for its ruling ref")
+                         "a file last committed before the cutoff was checked for its ruling ref")
 
-    def test_the_cutoff_is_compared_as_an_instant_not_as_text(self):
+    def test_an_entry_dated_after_the_cutoff_but_committed_before_it_is_not_checked(self):
+        repo = self.store_with("late-at", {
+            "chk": checking_entry("chk", "Rule-one keeps the apps.", at=AFTER_CUTOFF)}, when=EARLIER)
+        self.assertEqual(ids(ruled_store.ruled_entries(repo)), ["chk"], "control: the entry did not read")
+        self.assertEqual(ruled_store.check_store(repo), [],
+                         "an entry committed before the cutoff was checked because its at is after it")
+
+    def test_the_commit_cutoff_is_compared_as_an_instant_not_as_text(self):
         # 12:00 UTC is 06:00 CST, before the cutoff, though its text sorts after the cutoff's 11:33.
         repo = self.store_with("utc-before", {
-            "chk": checking_entry("chk", "Rule-one keeps the apps.", at="2026-11-15T12:00:00+00:00")})
+            "chk": checking_entry("chk", "Rule-one keeps the apps.", at=AFTER_CUTOFF)},
+            when="2026-11-15T12:00:00+00:00")
         self.assertEqual(ids(ruled_store.ruled_entries(repo)), ["chk"], "control: the entry did not read")
         self.assertEqual(ruled_store.check_store(repo), [],
-                         "an entry dated before the cutoff by instant was checked: text order was used")
+                         "a file committed before the cutoff by instant was checked: text order was used")
 
     def test_a_target_is_compared_as_an_instant_not_as_text(self):
         # 12:00 -05:00 is 11:00 CST, earlier than the checking entry's 11:50 CST, though its text sorts after it.
@@ -762,19 +791,22 @@ class CheckStoreTests(RepoCase):
                              at="2026-11-15T11:50:00-06:00")
         self.assertEqual(got, [], "an earlier ruling by instant was flagged as not earlier: %r" % got)
 
-    def test_a_ruling_ref_is_checked_from_the_cutoff_instant_on(self):
-        repo = self.store_with("cutoff", {
-            "chk-before": checking_entry("chk-before", "Rule-one keeps the apps.", at=BEFORE_CUTOFF),
-            "chk-at": checking_entry("chk-at", "Rule-two keeps the store.", at=RULING_CUTOFF),
-        })
+    def test_a_commit_at_the_cutoff_is_checked_and_one_second_before_is_not(self):
+        repo = self.store_history("cutoff", [
+            (BEFORE_CUTOFF, {"chk-before": checking_entry("chk-before", "Rule-one keeps the apps.")}),
+            (RULING_CUTOFF, {"chk-at": checking_entry("chk-at", "Rule-two keeps the store.")}),
+        ])
+        self.assertEqual(sorted(ids(ruled_store.ruled_entries(repo))), ["chk-at", "chk-before"],
+                         "control: the two entries did not read")
         got = ruled_store.check_store(repo)
         self.assertEqual([line for line in got if names(line, "chk-before") and names(line, "ruling")], [],
-                         "an entry one second before the cutoff was checked for its ruling ref: %r" % got)
+                         "a file last committed one second before the cutoff was checked: %r" % got)
         self.assertOneRulingProblem(got, "chk-at", CAUSE_NO_RULING)
 
     def test_a_supersedes_none_entry_after_the_cutoff_passes(self):
         repo = self.store_with("none-after", {"chk": fixture.entry(
-            "chk", at=AFTER_CUTOFF, supersedes=None, supersedes_none="new question, supersedes nothing")})
+            "chk", at=AFTER_CUTOFF, supersedes=None, supersedes_none="new question, supersedes nothing")},
+            when=AFTER_CUTOFF)
         self.assertEqual(ids(ruled_store.ruled_entries(repo)), ["chk"], "control: the entry did not read")
         self.assertEqual(ruled_store.check_store(repo), [], "a supersedes_none entry after the cutoff was flagged")
 
@@ -787,12 +819,44 @@ class CheckStoreTests(RepoCase):
                 at="2026-11-15T12:%02d:00-06:00" % number)
         entries["chk-bad"] = checking_entry("chk-bad", "own-999-z keeps the store to one place",
                                             at="2026-11-15T12:30:00-06:00")
-        repo = self.store_with("many", entries)
+        repo = self.store_with("many", entries, when=AFTER_CUTOFF)
         self.assertEqual(len(ruled_store.ruled_entries(repo)), 51, "control: the store did not read whole")
         got = ruled_store.check_store(repo)
         self.assertEqual(len([line for line in got if names(line, "ruling")]), 1,
                          "want one ruling problem in 51 entries: %r" % got)
         self.assertOneRulingProblem(got, "chk-bad", CAUSE_NO_RULING)
+
+    def test_a_file_re_committed_after_the_cutoff_is_checked(self):
+        # The entry's at is before the cutoff, so only its commit date puts its file in scope.
+        def entries(text, ref):
+            return {"own-820-c": target_entry("own-820-c", at=EARLIER),
+                    "chk": fixture.entry("chk", at=AT, ruling=text, supersedes=[{"kind": "ruling", "ref": ref}])}
+
+        good = self.store_history("re-commit-ok", [
+            (EARLIER, entries("first text", "Rule-one keeps the apps.")),
+            (AFTER_CUTOFF, entries("revised text", "own-820-c keeps the store to one place")),
+        ])
+        self.assertEqual(ruled_store.check_store(good), [],
+                         "control: a valid ref in the re-committed file did not pass")
+        repo = self.store_history("re-commit", [
+            (EARLIER, entries("first text", "Rule-one keeps the apps.")),
+            (AFTER_CUTOFF, entries("revised text", "Rule-one keeps the apps.")),
+        ])
+        self.assertOneRulingProblem(ruled_store.check_store(repo), "chk", CAUSE_NO_RULING)
+
+    def test_a_file_added_after_the_cutoff_is_checked(self):
+        # The entry's at is before the cutoff, so only the commit that adds its file puts it in scope.
+        target = {"own-820-c": target_entry("own-820-c", at=EARLIER)}
+        good = self.store_history("added-ok", [
+            (EARLIER, target),
+            (AFTER_CUTOFF, dict(target, chk=checking_entry("chk", "own-820-c keeps the store to one place", at=AT))),
+        ])
+        self.assertEqual(ruled_store.check_store(good), [], "control: a valid ref in the added file did not pass")
+        repo = self.store_history("added", [
+            (EARLIER, target),
+            (AFTER_CUTOFF, dict(target, chk=checking_entry("chk", "Rule-one keeps the apps.", at=AT))),
+        ])
+        self.assertOneRulingProblem(ruled_store.check_store(repo), "chk", CAUSE_NO_RULING)
 
 
 class CostAndCliTests(RepoCase):
@@ -878,6 +942,21 @@ class CostAndCliTests(RepoCase):
         self.assertEqual(ruled_store.read_store(repo)[1], "unreadable", "a lost ruling blob did not read as unreadable")
         self.assertUnknown(subprocess.run([sys.executable, MODULE, "check", repo], capture_output=True, text=True,
                                           timeout=60))
+
+    def test_check_exits_three_and_says_unknown_when_the_store_log_cannot_be_read(self):
+        repo = self.store_history("lost-history", [
+            (EARLIER, {"own-820-c": target_entry("own-820-c", at=AT)}),
+            (AFTER_CUTOFF, {"own-820-c": target_entry("own-820-c", at=AT),
+                            "chk": checking_entry("chk", "own-820-c keeps the store to one place")}),
+        ])
+        self.assertEqual(ruled_store.check_store(repo), [], "control: the intact history did not check clean")
+        parent = fixture.git(repo, "rev-parse", "%s~1" % fixture.STORE_REF)
+        loose = os.path.join(repo, ".git", "objects", parent[:2], parent[2:])
+        self.assertTrue(os.path.isfile(loose), "scope: the parent commit is not a loose object that can be removed")
+        os.remove(loose)
+        self.assertEqual(ruled_store.read_store(repo)[1], "ok", "scope: the store listing no longer reads")
+        proc = subprocess.run([sys.executable, MODULE, "check", repo], capture_output=True, text=True, timeout=60)
+        self.assertUnknown(proc)
 
     def test_check_on_an_absent_store_exits_zero_and_is_not_unknown(self):
         repo = self.make_repo("absent", main={"README.md": "main\n"})
