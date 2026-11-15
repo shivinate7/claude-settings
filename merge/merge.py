@@ -3898,14 +3898,15 @@ def merge_base_in(wt, base, branch):
     Local only: nothing is pushed. The caller has read the merge as clean (holds_base), so a merge that fails here is a Stop, and the tree is left as it was."""
     c, out = git(wt, *identity(wt), "merge", "--no-ff", "-q", "-m", f"Merge origin/{base} into {branch}", f"origin/{base}")
     if c:
-        git(wt, "merge", "--abort")
-        raise Stop(f"the merge of origin/{base} into {branch} failed, so nothing was pushed {BASE_CITE}: {' '.join(out.split())[:200]}")
+        _, aborted = git(wt, "merge", "--abort")
+        raise Stop(f"the merge of origin/{base} into {branch} failed, so nothing was pushed {BASE_CITE}: {' '.join(out.split())[:200]}"
+                   + (f" The abort said: {' '.join(aborted.split())[:200]}" if aborted.strip() else ""))
     return git(wt, "rev-parse", "HEAD")[1]
 
-def draft_step(root, cfg, n, host, info):
+def draft_step(root, cfg, n, host, info, merge_main=False):
     """`merge <pr> --confirm` on a draft: rebuild the records page on the head, push it, mark the pull request ready, and
     stop. So the branch is final at ready, and the ready confirm pushes nothing (decision records-index-at-merge).
-    On the default base, a head that lacks the tip but merges cleanly with it first gets a merge commit of origin/<base>: the page is rebuilt on the merged tree, a stale page is one more commit, the ready checks run once on that final tree, and one plain push sends both.
+    merge_main (only `merge <pr> --ready` passes it): on the default base, a head that lacks the tip but merges cleanly with it first gets a merge commit of origin/<base>: the page is rebuilt on the merged tree, a stale page is one more commit, the ready checks run once on that final tree, and one plain push sends both. Without it, as on `--confirm`, a head that lacks the tip pushes no merge.
     A conflict, a Record-claim head and a base other than the default push no merge. A failed merge, check or push leaves the pull request a draft.
     Takes no lock, claims no number and never merges: a claim stays at the ready confirm.
     A repo that declares merge.readyChecks also runs them first, on the tree the step would push, before any push and before the
@@ -3938,16 +3939,18 @@ def draft_step(root, cfg, n, host, info):
                     raise Stop(("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " Nothing was pushed.")
                 merged = None
                 if stands:
-                    say(f"merge: {stands}. The green run stands. {base} is merged into {info['branch']} before the push.")
-                    merged = merge_base_in(wt, base, info["branch"])  # the clean merge holds_base read; the page and the checks below read its tree
+                    say(f"merge: {stands}. The green run stands.")
+                    if merge_main:
+                        merged = merge_base_in(wt, base, info["branch"])  # the clean merge holds_base read; the page and the checks below read its tree
+                        say(f"merge: {base} is merged into {info['branch']} at {merged[:9]}, here only. Nothing is pushed yet.")
                 rebuilt = rebuild_records(wt)
                 sha = commit_claim(wt, None) if rebuilt else None
                 if checks:
-                    run_ready_checks(wt, n, base, checks, pre=pre)  # on the final tree, so what is checked is what is pushed
+                    run_ready_checks(wt, n, base, checks, pre=pre)  # the ci-job steps and the debt lint read the final tree in wt; the open-PR clash reads the pre-merge head in info
                 if rebuilt or merged:
                     push_branch(wt, info["branch"])
                     if merged:
-                        say(f"merge: {base} merged into {info['branch']} at {merged[:9]} and pushed.")
+                        say(f"merge: the merge of {base} pushed to {info['branch']}.")
                     if rebuilt:
                         say(f"merge: the records page pushed to {info['branch']} at {sha[:9]}.")
                 else:
@@ -5597,7 +5600,7 @@ def main(argv, host=None, lock=None, hosts=None):
             if not info["draft"]:
                 say(f"merge: #{a.pr} is ready already. Nothing was changed.")
                 return 0
-            return draft_step(root, cfg, a.pr, h, info)
+            return draft_step(root, cfg, a.pr, h, info, merge_main=True)
         checked = None  # the head the lane-lint PASS names; confirm refuses any other
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and isinstance(h, Host) and not info["draft"]:  # a scripted host that is no Host brings its own reads; a draft is the records step, never a join
             lint_check(h, a.pr, info, root, a.config)
