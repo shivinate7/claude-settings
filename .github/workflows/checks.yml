@@ -1973,7 +1973,7 @@ jobs:
         run: python merge/test_cmd.py
 
       - name: Reviewed-cursor fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python merge/test_reviewed_cursor.py
 
   checks-windows-merge-2:
