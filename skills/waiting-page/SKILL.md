@@ -486,7 +486,7 @@ While an item has `waits`, steps 2 to 4 and the busy-lane path never delete `ans
    because the page keeps the reply on the closed line. While the close waits, the session writes `lastAnswer` at once and keeps `answers/<id>`, so the
    page still shows the item as answered. Only `status: "closed"`, `closed` and the delete of `answers/<id>` wait. A later turn start skips the kept answer (see "Already routed"), so nothing is filed twice.
    The same session reads the `at` of each such record at each of its turn starts: no timer and no new process. It closes the item once no record has a missing `reply`, or 7 days after the oldest `at`.
-   A chat answer's close is not held, because it has no `answers/<id>` to keep. The session closes the item at once, and the waiting reply stays on the closed line.
+   A chat answer's close is not held, because it has no `answers/<id>` to keep. The busy-lane path's close is not held either: it closes in the turn it routes. In both, the session closes the item at once, and the waiting reply stays on the closed line.
    Before a late close, read `answers/<id>` again. If it is gone or has a new `at`, the owner withdrew or changed it: do not close (see "Withdrawn" and "Changed").
 3. If the answer is `none` with no clear direction, and you can write new `options`, `recommended` and `why` from the
    note in this same turn, act in this order. A `multi` item's new `recommended` is a list. First ask the chat
