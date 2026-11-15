@@ -4457,7 +4457,7 @@ def round_three_refusal(a, earlier):
     if not one or done(dict(one[-1], fix=None)):
         return "a record that opens at round 3 needs a failed round 1 on this pull request before it."
     if not fixes or any(f[3] != "FAIL" for f in fixes):
-        return "a record that opens at round 3 needs a failed round 2, or a failed fix check, before it."
+        return "a record that opens at round 3 needs a failed round 2, or a failed fix verifier, before it."
     return ""
 
 def pr_had_head(h, head, live, base):
@@ -5427,7 +5427,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 if want and got is not None and got < hook_guard.role_model_rank(want):  # no row for the first round leaves nothing to flag against
                     print(f"merge: round 1 ran {model}, below its row's {want} (decision agent-model-cap, the round rows)", file=sys.stderr)
         if parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant)) is None:
-            p.error("--round: the rounds must start at 1, rise by one at a time and stop at 3; a record may open at round 3 after a failed round 2 or a failed fix check; give round 1 with its real model, or unknown if not known" if not a.grant
+            p.error("--round: the rounds must start at 1, rise by one at a time and stop at 3; a record may open at round 3 after a failed round 2 or a failed fix verifier; give round 1 with its real model, or unknown if not known" if not a.grant
                     else "--round: with --grant the rounds must start at 1, rise by one at a time and end at 4; a record may open at round 3; give round 1 with its real model, or unknown if not known")
     elif (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
         p.error("give a pull request number, --unlock, --reviewed, or --role TIER")
