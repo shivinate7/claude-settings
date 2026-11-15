@@ -399,6 +399,19 @@ Other tools, in `judge` order:
                        form LANE_TITLE_FORM the deny reason prints: `Lane <branch slug>:`. A missing, empty or
                        non-text title is refused. A call with no lane tag passes. Runs after lane-start-settings.
                        An override lifts it. (agent-model-cap)
+  lane start, one pass
+                       A `create_session` call with a lane tag from a session is judged by all seven lane-start
+                       rules at once, in this order: lane-one-topic, brief-ids-in-roster, agent-model-floor,
+                       lane-effort-pin, lane-repo-tag, lane-start-settings, lane-title-slug (`lane_start_hits`).
+                       It is refused once, under the first broken rule's name. With two or more broken, the reason
+                       opens with `N lane-start rules broken:` and lists each as `<rule>: <remedy>`, each remedy
+                       unchanged; with one, the reason is that rule's own. An override names one rule: it lifts
+                       the first, and the call goes on to the rules still broken, refused the same way; it never
+                       lifts another rule. A send_message brief is still judged by one rule at a time. An
+                       agent's lane start is refused by agent-no-remote-tools after the two brief rules. Each rule
+                       reads its own call, so a read that fails open there fails open here. `bin/lane-start` prints
+                       a start from the same constants (hooks/shared_names.py) and runs `lane_start_hits` on it
+                       before printing. (agent-model-cap, The lane start in one pass)
   load-brake           deny. On a local session, a lane-start call, an agent's shell or file write, or a lane
                        session's own shell or file write, when the machine is busy (lane starts only) or full. A
                        lane session is one whose own newest get_session record carries `cs-build:lane` and no other
@@ -2929,11 +2942,9 @@ SPAWN_TOOLS = ("Agent", "Task")
 # unread_handoff. The judge() branches below that name it run only if a matcher is added again, and the guard's cases
 # call them directly.
 SESSION_TOOL = "mcp__ccd_session__start_session"
-from shared_names import (  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER from here
-    CREATE_SESSION_TOOL, REMOTE_OUTWARD_TOOLS, REMOTE_SERVER, is_lane_create_session, lane_tags,  # noqa: F401  REMOTE_SERVER re-exported: lint/check_agent_models.py reads guard.REMOTE_SERVER
+from shared_names import (  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER and LANE_EFFORT from here
+    CREATE_SESSION_TOOL, LANE_EFFORT, REMOTE_OUTWARD_TOOLS, REMOTE_SERVER, is_lane_create_session, lane_tags,  # noqa: F401  REMOTE_SERVER and LANE_EFFORT re-exported: lint/check_agent_models.py reads guard.REMOTE_SERVER and guard.LANE_EFFORT
 )
-# The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
-LANE_EFFORT = "medium"
 AGENT_NO_REMOTE_REASON = (
     "An agent never starts, messages, tags, interrupts or archives sessions, and never sets scheduled tasks, "
     "watches, pull request subscriptions, repos, computer folders or the owner's trust card. The session that spawned this agent does "
@@ -3157,6 +3168,63 @@ def lane_title_hit(tool: str, tool_input) -> str:
     if LANE_TITLE_OPENING.match(text):
         return ""
     return text[:80] or "(none)"
+
+
+# The lane-start rules, judged together for one create_session that tags a lane. The order is the order the rules refused
+# in one at a time, so the first broken rule is the one a refusal is filed under. Each rule keeps its own override.
+LANE_START_COUNT = "%d lane-start rules broken:"
+
+
+def lane_start_hits(tool: str, tool_input, cwd: str, transcript: str = "") -> list:
+    """[(rule, reason, matched)] for each lane-start rule a create_session call that tags a lane breaks, in judge order,
+    or [] for a call that is no lane start or breaks none. The one collection, read by judge() and by bin/lane-start, so the
+    helper checks its own start with the rules the guard applies. Each rule is judged by its own function, so a read that
+    fails open there fails open here."""
+    if not is_lane_create_session(tool, tool_input):
+        return []
+    hits = []
+    briefed = brief_hit(tool, tool_input, transcript)
+    if briefed:
+        hits.append(("lane-one-topic", briefed[1], briefed[0]))
+    named_id = brief_roster_hit(tool, tool_input, cwd)
+    if named_id:
+        hits.append(("brief-ids-in-roster", named_id[1], named_id[0]))
+    floor_model = floor_hit(tool, tool_input)
+    if floor_model:
+        hits.append(("agent-model-floor", LANE_MODEL_FLOOR_REASON, floor_model))
+    lane_prompt = lane_effort_hit(tool, tool_input)
+    if lane_prompt:
+        hits.append(("lane-effort-pin", LANE_EFFORT_REASON, lane_prompt))
+    repo_tag_hit_tags, lane_repo = lane_repo_tag_hit(tool, tool_input, cwd)
+    if repo_tag_hit_tags:
+        hits.append(("lane-repo-tag", LANE_REPO_TAG_REASON % (REPO_TAG + (lane_repo or "<owner>/<name>")), repo_tag_hit_tags))
+    lane_missing = lane_start_settings_hit(tool, tool_input)
+    if lane_missing:
+        hits.append(("lane-start-settings", LANE_START_SETTINGS_REASON, lane_missing))
+    lane_title = lane_title_hit(tool, tool_input)
+    if lane_title:
+        hits.append(("lane-title-slug", LANE_TITLE_REASON, lane_title))
+    return hits
+
+
+def lane_start_text(hits: list) -> str:
+    """The refusal text for the broken rules `hits`: their own remedy for one, else a count line and a line per rule."""
+    if len(hits) == 1:
+        return hits[0][1]
+    return "\n".join([LANE_START_COUNT % len(hits)] + [rule + ": " + reason for rule, reason, _ in hits])
+
+
+def refuse_lane_start(tool: str, hits: list) -> None:
+    """Refuse once for the broken lane-start rules `hits`, under the first one's name, listing every one still broken. An
+    override names one rule: when it lifts the first, the call goes on to the rules still broken, refused the same way
+    under the next one's name. When it lifts the last, refuse() ends the call as for any lifted rule. Never lifts another
+    rule's refusal."""
+    for at in range(len(hits)):
+        rest = hits[at:]
+        rule, _, matched = rest[0]
+        last = len(rest) == 1
+        refuse(tool, "deny", rule, lane_start_text(rest), matched if last else "; ".join(m for _, _, m in rest),
+               continue_on_lift=not last)
 
 
 # A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
@@ -7055,61 +7123,41 @@ def judge(payload) -> None:
     if archived:
         refuse(tool, "deny", "lane-closes-after-records", archived[1], archived[0])
 
-    # A lane brief for a topic the target lane does not hold (rule lane-one-topic).
-    briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
-    if briefed:
-        refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
+    # A lane start (create_session tagged as a lane, made by a session) is judged by every lane-start rule at once and
+    # refused once, with each broken rule listed (lane_start_hits, refuse_lane_start). An agent's lane start is refused
+    # by agent-no-remote-tools (8b) after the two brief rules, as every agent's create_session is.
+    lane_start = is_lane_create_session(tool, tool_input) and not (payload.get("agent_id") and tool in REMOTE_OUTWARD_TOOLS)
+    if lane_start:
+        refuse_lane_start(tool, lane_start_hits(tool, tool_input, cwd, trust_transcript if isinstance(trust_transcript, str) else ""))
+    else:
+        # A lane brief for a topic the target lane does not hold (rule lane-one-topic).
+        briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+        if briefed:
+            refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
 
-    # A lane brief that names a bare session id (rule brief-ids-in-roster).
-    named_id = brief_roster_hit(tool, tool_input, cwd)
-    if named_id:
-        refuse(tool, "deny", "brief-ids-in-roster", named_id[1], named_id[0])
+        # A lane brief that names a bare session id (rule brief-ids-in-roster).
+        named_id = brief_roster_hit(tool, tool_input, cwd)
+        if named_id:
+            refuse(tool, "deny", "brief-ids-in-roster", named_id[1], named_id[0])
 
     # 8b. agent-no-remote-tools. An agent never starts, messages, tags or archives sessions, nor sets scheduled tasks;
     # the session that spawned it does. Keyed on a truthy agent_id of any shape, so a drifted id stays refused. After the
-    # rules of 8a, which refuse first with their own remedy; before the spawn rules (agent-model-floor, lane-effort-pin), so an
+    # rules of 8a, which refuse first with their own remedy; before the spawn rules (agent-model-floor, step-up), so an
     # agent's create_session is refused here. An override lifts it.
     if payload.get("agent_id") and tool in REMOTE_OUTWARD_TOOLS:
         refuse(tool, "deny", "agent-no-remote-tools", AGENT_NO_REMOTE_REASON, tool)
 
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
-    # model; the log holds what the call asked for.
+    # model; the log holds what the call asked for. A lane start's floor is judged with the lane-start rules (8a).
     floor_model = floor_hit(tool, tool_input)
     if floor_model:
-        refuse(tool, "deny", "agent-model-floor",
-               LANE_MODEL_FLOOR_REASON if is_lane_create_session(tool, tool_input) else MODEL_FLOOR_REASON,
-               floor_model)
+        refuse(tool, "deny", "agent-model-floor", MODEL_FLOOR_REASON, floor_model)
 
     # 9b. Step-up: a reviewer's second round on Sonnet, a builder's third on Opus. A reviewer's third round passes here on
     # Sonnet or Opus; the Opus ceiling (9d, opus_spawn_hit) then refuses Opus unless an override lifts it.
     step_up = step_up_hit(tool, tool_input)
     if step_up:
         refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model")))
-
-    # 9b2. The lane effort pin: a lane starts with the effort field at medium and the whole brief as its
-    # prompt, the owner's Grant line first. An override lifts it: it is not in never_lifted, because the owner
-    # may mean another start.
-    lane_prompt = lane_effort_hit(tool, tool_input)
-    if lane_prompt:
-        refuse(tool, "deny", "lane-effort-pin", LANE_EFFORT_REASON, lane_prompt)
-
-    # 9b2b. The lane repo tag: a lane session carries the full `cs-repo` tag of the checkout that starts it.
-    # After the effort pin, so a call that breaks both reads the pin first. An override lifts it.
-    repo_tag_hit_tags, lane_repo = lane_repo_tag_hit(tool, tool_input, cwd)
-    if repo_tag_hit_tags:
-        refuse(tool, "deny", "lane-repo-tag", LANE_REPO_TAG_REASON % (REPO_TAG + (lane_repo or "<owner>/<name>")), repo_tag_hit_tags)
-
-    # 9b2c. The lane start settings: a lane session names its model and its source_url. After the repo tag. An
-    # override lifts it.
-    lane_missing = lane_start_settings_hit(tool, tool_input)
-    if lane_missing:
-        refuse(tool, "deny", "lane-start-settings", LANE_START_SETTINGS_REASON, lane_missing)
-
-    # 9b2d. The lane title: a lane's title opens with `Lane <branch slug>:`. After the start settings, so a call
-    # that breaks both reads the settings first. An override lifts it.
-    lane_title = lane_title_hit(tool, tool_input)
-    if lane_title:
-        refuse(tool, "deny", "lane-title-slug", LANE_TITLE_REASON, lane_title)
 
     # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is refused.
     # The override lifts the above-row refusal and never the no-model one (never_lifted).

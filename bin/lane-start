@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+# lane-start <slug> <topic> <grant-line> <brief-file> [--repo owner/name]: print the create_session fields of one lane start
+# as one JSON object. The values come from hooks/shared_names.py, and the start is checked with the guard's own lane-start
+# rules (guard.lane_start_hits) before it prints, so a printed start is one the guard lets through.
+# Exit 2: a wrong argument count, a brief file that cannot be read, no repo, or a broken rule (the refusal is on stderr, and
+# nothing is on stdout). The repo is --repo, else the checkout's own (git_reads.github_repo). Writes no file.
+import json, os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
+import git_reads  # noqa: E402
+import guard  # noqa: E402  the lane-start rules, so the helper checks with what the guard applies
+from shared_names import (  # noqa: E402  the one home of the lane start's values
+    CREATE_SESSION_TOOL, LANE_BRIEF_MARKER, LANE_EFFORT, LANE_GRANT_MARKER, LANE_MODEL, LANE_SOURCE_HOST,
+    lane_brief_line, lane_start_tags, lane_title,
+)
+USAGE = "usage: lane-start <slug> <topic> <grant-line> <brief-file> [--repo owner/name]"
+
+
+def parse(argv):
+    """(slug, topic, grant, brief file, repo or None), or None for a wrong argument count."""
+    repo, rest = None, list(argv)
+    if "--repo" in rest:
+        at = rest.index("--repo")
+        if at + 1 >= len(rest):
+            return None
+        repo = rest[at + 1]
+        del rest[at:at + 2]
+    return (*rest, repo) if len(rest) == 4 else None
+
+
+def brief_body(text):
+    """The brief without a leading Grant or Lane brief line, which the start prints itself."""
+    lines = text.strip("\n").splitlines()
+    for marker in (LANE_GRANT_MARKER, LANE_BRIEF_MARKER):
+        if lines and lines[0].lstrip().startswith(marker):
+            lines.pop(0)
+    return "\n".join(lines).strip("\n")
+
+
+def main(argv):
+    parsed = parse(argv)
+    if not parsed:
+        print(USAGE, file=sys.stderr)
+        return 2
+    slug, topic, grant, brief_file, repo = parsed
+    try:
+        with open(brief_file, encoding="utf-8") as handle:
+            body = brief_body(handle.read())
+    except OSError as err:
+        print("lane-start: cannot read the brief file: %s\n%s" % (err, USAGE), file=sys.stderr)
+        return 2
+    explicit = repo is not None
+    repo = repo or git_reads.github_repo(os.getcwd())
+    if not repo:
+        print("lane-start: no repo: pass --repo owner/name, or run it in a checkout with a GitHub origin\n" + USAGE, file=sys.stderr)
+        return 2
+    fields = {
+        "title": lane_title(slug, topic),
+        "tags": lane_start_tags(slug, topic, repo),
+        "model": LANE_MODEL,
+        "effort": LANE_EFFORT,
+        "source_url": LANE_SOURCE_HOST + repo,
+        "prompt": "\n".join([grant, lane_brief_line(slug, topic)] + ([body] if body else [])),
+    }
+    # An explicit --repo may name a repo other than the checkout's, which the repo-tag rule compares to; the guard judges
+    # that on the real call. The checkout is passed only when the repo came from it, where the tag matches by build.
+    hits = guard.lane_start_hits(CREATE_SESSION_TOOL, fields, "" if explicit else os.getcwd())
+    if hits:
+        print(hits[0][0] + ": " + guard.lane_start_text(hits), file=sys.stderr)
+        return 2
+    print(json.dumps(fields))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
