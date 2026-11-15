@@ -45,9 +45,9 @@ ZERO_LINE = re.compile(r"^merge: 0 lanes to archive\.", re.M)
 HOLD = "HOLD: handoff %s is not on the record branch"
 HANDOFF = "roadmap/outbox/%s-handoff.md"
 # N counts the clear lanes only; a held lane is printed with its HOLD marker and counted in M.
-HANDOFF_HELD_ONE = "merge: 1 lanes to archive, 1 held. Run get_session on each alone, then archive it."
-HANDOFF_HELD_ALL = "merge: 0 lanes to archive, 2 held. Run get_session on each alone, then archive it."
-HANDOFF_MIXED = "merge: 3 lanes to archive, 1 held. Run get_session on each alone, then archive it."
+HANDOFF_HELD_ONE = "merge: 1 lanes to archive, 1 held. Run get_session on each lane line alone, then archive it; never archive a hold line."
+HANDOFF_HELD_ALL = "merge: 0 lanes to archive, 2 held. Run get_session on each lane line alone, then archive it; never archive a hold line."
+HANDOFF_MIXED = "merge: 3 lanes to archive, 1 held. Run get_session on each lane line alone, then archive it; never archive a hold line."
 # Each bad slug with the path a naive join would read on the record branch, so a builder that skips the check reads
 # the lane clean. The `..` path is written at the file it resolves to, since git refuses a `..` in a path.
 BAD_SLUGS = (("", "roadmap/outbox/-handoff.md"), ("a/b", "roadmap/outbox/a/b-handoff.md"),
@@ -84,10 +84,10 @@ def archived(sid, step, slug):
     return lane(sid, step, tags=("cs-archive-ready:" + slug,))
 
 
-def stale_lane(sid, step):
+def stale_lane(sid, step, tags=()):
     """A lane on `step` idle 13 h at the live read, with no unarchived commit: the kind of lane a stale draft can hold.
-    readAt is five minutes old by default, so the idle time is counted from that read."""
-    row = lane(sid, step)
+    readAt is five minutes old by default, so the idle time is counted from that read. `tags` go on the row as lane tags."""
+    row = lane(sid, step, tags=tags)
     row["idle_since"] = roadmap.iso_ago(5 + 13 * 60)
     row["unarchived_epoch"] = 0
     return row
@@ -463,6 +463,21 @@ class IdleLanesCli(unittest.TestCase):
                          "a lane with an unarchived commit printed a joint line: %r" % out)
         self.assertEqual(lines, [JOINT % (101, "lane/c1", "session_a"), SUMMARY_ONE],
                          "the output has lines beyond the control's joint line and summary: %r" % out)
+
+    def test_joint_lane_tagged_archive_ready_with_no_handoff_is_held_and_the_summary_takes_the_long_tail(self):
+        # The joint line of an archive-ready lane takes the handoff check like a plain entry. Its handoff is not on the
+        # record branch, so the line ends with the HOLD flag, no hold line prints, and the summary counts one held lane
+        # with the long tail. record_from_origin reads the record branch; without it the lane reads unknown.
+        self.publish([stale_lane("session_a", "c1", tags=("cs-archive-ready:alpha",))],
+                     pulls=[self.stale_draft(101, "lane/c1")])
+        self.record_from_origin()
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 0, err)
+        lines = out.splitlines()
+        self.assertEqual(lines[:-1], [JOINT % (101, "lane/c1", "session_a") + " " + HOLD % "alpha"],
+                         "the held archive-ready joint lane did not print its joint line with the HOLD flag: %r" % out)
+        self.assertEqual(lines[-1:], [HELD_ONE],
+                         "a held joint line got the short tail, which names it archivable: %r" % out)
 
 
 if __name__ == "__main__":
