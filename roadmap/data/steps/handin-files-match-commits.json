@@ -1,0 +1,14 @@
+{
+ "id": "handin-files-match-commits",
+ "title": "At hand-in, check that the PR's files match the lane's own commits",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Debt (real incident): PR 3457 (step page-n-meaning-doc) listed 11 files, not its two, because the lane branched from a shared checkout holding another lane's unpushed commit 63e22ed6 and shipped it (coordinator, relayed 01:24 CST Nov 15). Nothing was lost. Guard that would have stopped it: a check at lane hand-in that the PR's changed files match the files of the lane's own commits. Not built. Cost unmeasured: a hand-in read of one PR file list; no new process. Test of worth: the owner's goal (20:17 CST Nov 14: max efficiency, no waste): build only if a read of recent hand-ins shows the clash recurs. Triage read no code. Rule: building-mistake-names-its-guard.",
+ "source": "coordinator message 01:24 CST Nov 15",
+ "note": "Filed 01:25 CST Nov 15 by triage as a debt-step. Tracker: the coordinator.",
+ "updatedAt": "2026-11-15T01:25:00-06:00"
+}

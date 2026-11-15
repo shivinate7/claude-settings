@@ -1,10 +1,10 @@
 {
  "id": "own-2917-merge-main-pick",
  "at": "2026-11-15T01:19:00-06:00",
- "title": "PR 2917: the lane merges main into the draft, resolves hooks/guard_merge.py, runs a fix verifier, pushes once more.",
- "ruling": "Coordinator's pick, not the owner's, undoable, relayed 01:17 CST Nov 15. Lane archive-flow-trio (PR 2917, step handoff-lands-tracked-first) takes option (a): it merges main (e46ab08f) into the draft, resolves the one conflicted file hooks/guard_merge.py, runs a fix verifier, and makes a second plain push to the same draft branch, because main moved. Triage read none of the code. PR 2917 by GitHub 01:19 CST: open draft, head eb7b0b6f0c5d, 14 commits, mergeable_state dirty, base main dc35317d3b40. Reopens if the owner says otherwise.",
+ "title": "PR 2917: runner 10's ready step merges main; the lane makes no second main merge.",
+ "ruling": "REPLACED by the consultant's option (b), 01:24 CST Nov 15 (consultant's word, not owner-typed): lane archive-flow-trio does not make a second merge of main into #2917; it pushes only its test-helper fix (9b237ff1) if that push is not a main merge, else holds; runner 10 takes #2917 and its ready step merges main (since #3440, merged per REST). The coordinator's 01:17 CST pick (second merge-of-main push) was refused by the cloud safety check and is not taken. Reopens if the owner says otherwise.",
  "quote": "the lane merges main (e46ab08f) into #2917, resolves the one conflicted file hooks/guard_merge.py, runs a fix verifier and pushes a second plain push",
- "source": "Coordinator message 01:17 CST Nov 15 to triage.",
+ "source": "Consultant 01:24 CST Nov 15 via triage; replaces the coordinator's 01:17 CST pick.",
  "status": "open",
  "step": "handoff-lands-tracked-first"
 }
