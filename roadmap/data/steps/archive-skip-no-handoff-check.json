@@ -1,0 +1,13 @@
+{
+ "id": "archive-skip-no-handoff-check",
+ "title": "A lane that skips its archive-ready tag gets no handoff check",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Debt (likely hit), from the round-1 review of PR 2817 at 5c410df0, same on the PR head fb02fb5e: merge --idle-lanes checks a handoff only on a lane tagged cs-archive-ready:<slug>, so a lane that skips the tag gets no handoff check and its handoff can be lost on archive. The reviewer said keep it opt-in for now. Relayed by the coordinator 01:05 CST Nov 15; triage read no code. Home: step handoff-lands-tracked-first. If the debt store on main has no record, the lane that owns PR 2817 files one.",
+ "source": "coordinator 01:05 CST Nov 15, from the round-1 review of PR 2817",
+ "note": "Filed 01:06 CST Nov 15 by triage as a step because debts on this branch are filed as steps; the debt record belongs in the repo's debt store on main.",
+ "updatedAt": "2026-11-15T01:06:00-06:00"
+}

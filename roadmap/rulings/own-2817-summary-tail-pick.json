@@ -1,0 +1,10 @@
+{
+ "id": "own-2817-summary-tail-pick",
+ "at": "2026-11-15T01:06:00-06:00",
+ "title": "PR 2817: the summary tail stops saying \"then archive it\" when only handoff-held lines exist.",
+ "ruling": "Coordinator's pick, not the owner's, undoable, relayed 01:05 CST Nov 15. Lane archive-flow-trio (PR 2817, step handoff-lands-tracked-first) fixes the PR's own summary-tail text in a review-round fix: merge/merge.py:5490 says \"then archive it\" when only handoff-held lines exist. It re-points three pinned strings (merge/test_idle_lanes.py:48-50), adds the skip to session-tiers.md:81, and pushes once with a plain push. Triage read none of the code. PR 2817 by GitHub 01:06 CST: open draft, head fb02fb5e9fa5. Reopens if the owner says otherwise.",
+ "quote": "fixes the PR's own summary-tail text",
+ "source": "Coordinator message 01:05 CST Nov 15 to triage.",
+ "status": "open",
+ "step": "handoff-lands-tracked-first"
+}
