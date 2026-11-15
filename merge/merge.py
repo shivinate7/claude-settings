@@ -1929,7 +1929,7 @@ def claim_only(root, cfgrel, base, linted, live):
     page-only commit counts when page_is_generated proves it, and is False when the page differs (a hand edit is a change a review must see, never a
     carry). A generator that cannot run raises Stop (unknown), never True: the callers keep it at stale or unknown, never done. Any other commit is
     False. Any other read that fails is False. Commits come from the clone, so the caller fetches the branch first.
-    Cost: per page-only commit one temporary worktree, one `git show` and one generator run (page_is_generated; measured median 0.56 s, n=5, on commit 81eaca3)."""
+    Cost: per page-only commit one temporary worktree, one `git show` and one generator run (page_is_generated; measured median 0.56 s, n=5, on a real tool page commit)."""
     try:
         _, kinds = base_stamp(root, cfgrel, f"origin/{base}")
     except Stop:
@@ -4496,17 +4496,17 @@ def edits_outside_conflict(root, parents, tree):
 def clean_merges_after(h, head, live, base=None, claims=None):
     """True when every commit after `head`, up to the live head `live`, is a clean merge of main. A clean merge of main has two
     parents, a second parent main holds (Host.holds_head, main being `base`, else the host's base), and git's clean merge of its parents as its tree
-    (merge_state). `claims`, the stamp config path: a one-parent claim commit also counts (claim_only, read in the host's checkout), since the merge tool's own
-    claim moves the reviewed head by exactly that. A one-parent records-page commit (page_only) counts on the walk, with or without `claims`, but only when the
-    committed page is what the generator writes for its tree (page_is_generated): the tool's own rebuild, never a hand edit. The walk reads the page commit
-    itself, ahead of the claims route, because it must Stop on a read it cannot make and must run with no stamp config; claim_only proves a page the same way
-    for its other callers. The walk follows first parents from `live` and must reach `head` within
+    (merge_state). `claims`, the stamp config path: a one-parent claim commit also counts (claim_only, read in the host's checkout). A one-parent records-page
+    commit (page_only) counts on the walk, with or without `claims`, but only when the committed page is what the generator writes for its tree
+    (page_is_generated): the tool's own rebuild, never a hand edit. The walk reads the page commit itself, ahead of the claims route, because it must Stop on a
+    read it cannot make and must run with no stamp config; claim_only proves a page the same way for its other callers. Both count since the
+    merge tool's own claim and its page rebuild move the reviewed head by exactly that. The walk follows first parents from `live` and must reach `head` within
     REVIEW_MERGE_WALK commits. A commit with one parent (an empty commit too), a merge of three, a merge of a branch main lacks, an edited or conflicted merge, a
     longer walk and a head that is never reached are all False. A failed read, a commit read that names no tree, and a merge git cannot read
     (merge_state "unknown") raise Stop: so do a page commit whose reads fail and a generator run that fails: unknown, never False and never True.
     Cost: one commit read per commit walked (each sha read once); one holds_head compare and one merge_state per merge commit; per one-parent
     commit, page_only's git reads (one per commit, two only for a commit with the subject PAGE_SUBJECT), and for a page commit
-    one temporary worktree, one `git show` and one generator run (at most one per commit, never repeated for a sha; measured median 0.56 s, n=5, on commit 81eaca3);
+    one temporary worktree, one `git show` and one generator run (at most one per commit, never repeated for a sha; measured median 0.56 s, n=5, on a real tool page commit);
     and at most one fetch_branch_heads a run."""
     sha, read = live, {}
 
