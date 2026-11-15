@@ -1,0 +1,14 @@
+{
+ "id": "recovered-guard-label-first",
+ "title": "The Recovered guard accepts the label-first carry form (lint/report_guard.py only)",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "11:39 CST Nov 15 (coordinator, relayed, not read by triage): the coordinator started a lane for item 860 b (ruling own-recovered-label-first-b; owner answered 11:34:32 CST). Covers lint/report_guard.py only. Guard or check: yes. Sonnet, round 1. Item-owner lane recovered-guard-remedy was told to check its answer and write a receipt. Lane id not relayed.",
+ "source": "Coordinator 11:39 CST Nov 15 (relayed, not read by triage)",
+ "note": "Doing. Guard or check: yes. Lane id not relayed. Filed 11:40 CST Nov 15.",
+ "updatedAt": "2026-11-15T11:40:00-06:00"
+}

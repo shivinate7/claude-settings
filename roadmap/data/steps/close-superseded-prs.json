@@ -6,8 +6,8 @@
  "phase": "now",
  "owner": "coordinator",
  "blockedBy": [],
- "why": "11:31 CST Nov 15 (consultant ordered the coordinator to start; relayed, not read by triage): close the superseded PRs. The audit's list names 15; the consultant said 16 (count unreconciled). Lane ids not relayed; the coordinator starts it. Triage checked the slug was not already a step.",
+ "why": "11:31 CST Nov 15 (consultant ordered the coordinator to start; relayed, not read by triage): close the superseded PRs. The audit's list names 15; the consultant said 16 (count unreconciled). Lane ids not relayed; the coordinator starts it. Triage checked the slug was not already a step.\n\n11:40 CST Nov 15 (coordinator 11:39, relayed, not read by triage; coordinator's pick, undoable; the consultant has it): an Explore (Sonnet, Audit) reads the 169 conflicting PRs before a lane is spent on each; the stale 245 went to the stale-list Explore as the set. Reason: runner 10 merges at 2.0 per hour (n=17); 78 plus 169 PRs at that rate are about 123 hours, so reading which are live comes before rebasing.",
  "source": "Consultant order 11:31 CST Nov 15, via the coordinator 11:34 (relayed; not read by triage)",
  "note": "Open. Guard or check: unknown. The coordinator starts the lane. The audit's list names 15 PRs, the consultant said 16 (unreconciled). Filed 11:39 CST Nov 15.",
- "updatedAt": "2026-11-15T11:39:00-06:00"
+ "updatedAt": "2026-11-15T11:40:00-06:00"
 }

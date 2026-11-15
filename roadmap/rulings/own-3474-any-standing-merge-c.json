@@ -1,0 +1,11 @@
+{
+ "id": "own-3474-any-standing-merge-c",
+ "at": "2026-11-15T11:37:01-06:00",
+ "title": "Any standing session may merge under a size bound, consultant and arbiter included; the limit is not yet named.",
+ "ruling": "Owner, page item 867 (pick-3474-size-and-sessions), choice c, \"Add the size bound and let any standing session merge, consultant and arbiter included\", saved on the page at 11:37 CST Nov 15 (2026-11-15T17:37:01Z), read by triage in the answers record. No note. Options a, b and c all carried the widening label; the owner chose c knowingly. ACT COVERED: as option b, a lane follow-up adds a limit on lines and files for a standing merge, and the merge-role-proof guard also passes the consultant and the arbiter, as his 00:50 CST Nov 15 words 'any standing session' (ruling own-tiny-fixes-b) read. OPEN: the size limit is NOT named in his answer; the owner names it or confirms the lane's proposal. Covers PR 3474 and that follow-up only. Item owner: lane merge-role-proof-follows-b (session_013NEJL2NPAD2v6x5CWD4mUb) via the coordinator. Homes: step merge-role-proof-follows-b; decisions standing-merge-grant and session-tiers.",
+ "quote": "Add the size bound and let any standing session merge, consultant and arbiter included",
+ "source": "waiting/answers pick-3474-size-and-sessions (choice c, 2026-11-15T17:37:01Z), read by triage's answers record; owner typed on the page.",
+ "status": "open",
+ "supersedes_none": "extends own-tiny-fixes-b (00:50 CST Nov 15, any standing session merges its own docs-only or rule-text PR) and does not replace it: c adds a size bound and names the consultant and arbiter; own-tiny-fixes-b stays in force for the docs-only and rule-text class",
+ "step": "merge-role-proof-follows-b"
+}

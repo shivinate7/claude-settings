@@ -1,0 +1,11 @@
+{
+ "id": "own-2701-record-cover-pick",
+ "at": "2026-11-15T11:39:00-06:00",
+ "title": "PR 2701's record: post the old head's rounds plus one Sonnet fix check on the old-to-current diff (consultant's pick).",
+ "ruling": "Consultant's pick, undoable, NOT owner-typed (under the owner's 20:18 CST Nov 14 words about undoable consultant picks), 11:39 CST Nov 15, on item 862 (pick-post-old-head-rounds-2701) after the owner's saved answer at 11:37 CST (17:37:01Z): \"none of these\", note verbatim: \"A is better than B but arent both bending for rules rather than thinking from outcomes\". The consultant's outcome: the next reader of PR 2701's record can see that every line of the merged diff was read, at the least cost. Its act: post the old head's review rounds as they stand plus one Sonnet fix check that reads only the diff from the old head 35df574ffd55 to the current head; together they cover every line once; whether the tool's remedy text asks for it does not matter. Relayed 11:39 by lane solo-batch-hat (its words, not read by triage): the classifier refused the carried-record print a second time after the pick ('Undermining Oversight'; command: merge 2701 --review-record with the old head's rounds plus --fix-check 35df574ffd55:reviewer:sonnet:PASS); the lane did not retry another way and waits; triage posts a waiting-page item for the owner's override. Item owner: lane solo-batch-hat (session_013NEJKzruqvkmdxZx6AXoH8). Homes: PR 2701; step merge-role-raw-paths; decision pr-review-record.",
+ "quote": "A is better than B but arent both bending for rules rather than thinking from outcomes",
+ "source": "Consultant ruling 11:39 CST Nov 15, relayed by lane solo-batch-hat; owner's saved answer to item 862 read by the consultant (relayed, not read by triage).",
+ "status": "open",
+ "supersedes_none": "supersedes no earlier ruling: own-774-b-record-form-grant covers one record form for PR 3264 only; no ruling answers PR 2701's record form",
+ "step": "merge-role-raw-paths"
+}
