@@ -755,7 +755,7 @@ class ShardProof(Case):
     """The guard suite's proof from its two shard jobs (owner item 852, the debt step's repeat run of the guard suite). When
     DEBT_RETIRE_SHARD_PROVEN names a Retire span's path, the check skips that span and judges the close on the rest. Any other
     value, or none, runs every span as before. checks.yml sets the var only when both shards and the scope flag hold
-    (ChecksShardGate in lint/test_windows_split.py). The shards' result is not re-read here: that is the workflow's proof."""
+    (ChecksShardCases in lint/test_windows_split.py). The shards' result is not re-read here: that is the workflow's proof."""
 
     VAR = "DEBT_RETIRE_SHARD_PROVEN"
     GUARD = "hooks/test_guard.py"
