@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shard pins for hooks/test_install_src.sh, and the shell-macos matrix in .github/workflows/checks.yml.
+"""Shard pins for hooks/test_install_src.sh, and the job checks step that runs this file.
 
 The suite contract the builder implements:
   INSTALL_SRC_SHARD=i/k (1-based i, k >= 1) runs only the cases whose position in the file's `run` list
@@ -11,12 +11,6 @@ The suite contract the builder implements:
 Every suite call here passes --list, so no case runs. On the old code `--list` is a name filter that
 matches no case, which is why the shard cases are red there. A bad value run without --list would run
 all 174 cases on the old code.
-
-The shell-macos pins read the job with lint/workflow_steps.py. The shape they accept: a `strategy.matrix`
-of the shards i/k for 1 <= i <= k; the install step takes its shard from its own step `env`; and every
-other run step of the job keeps its name and run string, and its `if` is its original condition with the
-matrix-leg test appended: `(S) && C && matrix.<key> == 'i/k'` for `(S) && C`, and `(S) && matrix.<key> == 'i/k'`
-for a bare scope condition S. So every step's scope prefix stays `(S)`, the one condition test_windows_split reads.
 
 Run with:  python3 lint/test_install_src_shards.py -v
 """
@@ -31,46 +25,18 @@ from collections import Counter
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
-from test_windows_split import paren_prefix, unwrap  # noqa: E402  the one home of the scope prefix reader (G)
 import _test_temp  # noqa: E402  the one home of the test temp folder (test-temp-standard)
 
 REPO = os.path.abspath(os.path.join(HERE, ".."))
 SUITE = os.path.join(REPO, "hooks", "test_install_src.sh")
 CHECKS = os.path.join(REPO, ".github", "workflows", "checks.yml")
+RUN_CMD = "python3 lint/test_install_src_shards.py"  # the run line of the job checks step that runs this file
 SHARD_ENV = "INSTALL_SRC_SHARD"
 # Env the suite reads from its caller. Stripped from every call, so the caller's shell cannot change what a call selects.
 STRIPPED_ENV = (SHARD_ENV, "INSTALL_SH_UNDER_TEST", "SESSION_START_SH_UNDER_TEST")
 # A run line may repeat only as a named exception: name -> reason. Empty on ae13fcab, where no run line repeats.
 KNOWN_DUPLICATE_RUNS = {}
 NAME = re.compile(r"[A-Za-z_]\w*")
-# The leg test a run step's `if` ends with: `${{ <scope prefix and original condition> && matrix.<key> == '<i/k>' }}`.
-GATE = re.compile(r"\$\{\{ (.*) && matrix\.(\w+) == '([^']*)' \}\}")
-
-
-def leg_gate(orig, key, leg):
-    """The `if` of a run step on matrix leg `key` == `leg`, for its original condition `orig`. A bare scope condition
-    takes its parentheses first, so its scope prefix is `(S)`; `(S) && C` keeps its prefix and gets the leg test appended."""
-    base = f"({orig})" if orig == SCOPE_ORIG else orig
-    return f"${{{{ {base} && matrix.{key} == '{leg}' }}}}"
-
-SCOPE_ORIG = "needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request'"
-SCOPE_CODE_ORIG = f"({SCOPE_ORIG}) && needs.scope.outputs.code == 'true'"
-INSTALL_RUN = "sh hooks/test_install_src.sh"
-INSTALL_NAME = "install.sh checkout-detection suite"
-INSTALL_IF = f"${{{{ {SCOPE_CODE_ORIG} }}}}"
-# Every run step of shell-macos but the install step, as ae13fcab has it: (name, run string or None for a block
-# scalar, original condition). Each keeps its name and run string, and gets one matrix-leg gate.
-OTHER_STEPS = [
-    ("Report the shell this job actually runs", None, SCOPE_ORIG),
-    ("Shell syntax check, install.sh", "bash -n install.sh", SCOPE_ORIG),
-    ("install_from_main suite", "sh merge/test_install_from_main.sh", SCOPE_CODE_ORIG),
-    ("ios-ship fixture suite (/bin/bash 3.2)", "/bin/bash lint/test_ios_ship.sh", SCOPE_CODE_ORIG),
-    ("ios-ship fixture suite (bash on PATH)", "bash lint/test_ios_ship.sh", SCOPE_CODE_ORIG),
-    ("sim-test fixture suite (/bin/bash 3.2)", "/bin/bash lint/test_sim_test.sh", SCOPE_CODE_ORIG),
-    ("sim-test fixture suite (bash on PATH)", "bash lint/test_sim_test.sh", SCOPE_CODE_ORIG),
-    ("duo-fold fixture suite (/bin/bash 3.2)", "/bin/bash lint/test_duo_fold.sh", SCOPE_CODE_ORIG),
-    ("duo-fold fixture suite (bash on PATH)", "bash lint/test_duo_fold.sh", SCOPE_CODE_ORIG),
-]
 
 
 def run_names():
@@ -98,30 +64,6 @@ def list_cases(shard=None, suite=SUITE):
                        capture_output=True, text=True)
     names = [ln.strip() for ln in p.stdout.splitlines() if NAME.fullmatch(ln.strip())]
     return p.returncode, names, p.stdout, p.stderr
-
-
-def under(text, key, indent=4):
-    """The lines under the `key:` line at `indent` spaces, up to the next key at that indent or less. '' when absent."""
-    lines = text.splitlines()
-    for n, line in enumerate(lines):
-        if line.rstrip() == " " * indent + key + ":":
-            body = []
-            for nxt in lines[n + 1:]:
-                if nxt.strip() and not nxt.lstrip().startswith("#") and len(nxt) - len(nxt.lstrip(" ")) <= indent:
-                    break
-                body.append(nxt)
-            return "\n".join(body)
-    return ""
-
-
-def shard_values(matrix):
-    """The i/k values under a matrix, as (i, k) pairs in file order."""
-    return [(int(i), int(k)) for i, k in re.findall(r"(\d+)/(\d+)", matrix)]
-
-
-def matrix_keys(matrix):
-    """The key names a matrix holds, at any depth under `matrix:`."""
-    return set(re.findall(r"^\s*(?:-\s+)?(\w+):", matrix, re.M))
 
 
 class ShardListsEveryCaseOnce(unittest.TestCase):
@@ -199,83 +141,6 @@ class BadShardValueRunsNothing(unittest.TestCase):
                 self.assertEqual(names, [], f"{SHARD_ENV}={value} still selected {len(names)} cases")
 
 
-class ShellMacosRunsTheShardsByMatrix(unittest.TestCase):
-    def setUp(self):
-        with open(CHECKS, encoding="utf-8") as f:
-            self.block = job_block(f.read(), "shell-macos") or ""
-        self.assertTrue(self.block, "checks.yml has no shell-macos job")
-        self.steps = step_blocks(self.block)
-        self.install = [s for s in self.steps if step_key(s, "run") == INSTALL_RUN]
-        self.matrix = under(under(self.block, "strategy"), "matrix", 6)
-
-    def test_the_steps_keep_their_names_run_strings_and_install_condition(self):
-        # Control, green on the old code: the shape adds a gate and a step env, and renames and rewrites nothing else.
-        self.assertEqual(len(self.install), 1, "shell-macos does not run the install suite in exactly one step")
-        self.assertEqual(step_key(self.install[0], "name"), INSTALL_NAME, "the install step was renamed")
-        self.assertEqual(step_key(self.install[0], "if"), INSTALL_IF, "the install step's condition changed")
-        by_name = {step_key(s, "name"): s for s in self.steps}
-        for name, run, _orig in OTHER_STEPS:
-            with self.subTest(step=name):
-                self.assertIn(name, by_name, "the step is gone or renamed")
-                if run is not None:
-                    self.assertEqual(step_key(by_name[name], "run"), run, "the run string changed")
-
-    def test_the_job_sets_no_job_level_env(self):
-        # Control, green on the old code: the shard comes from one step's env, since a job-level env reaches every step.
-        self.assertNotRegex(self.block, r"(?m)^    env:", "shell-macos sets a job-level env: every step takes it")
-
-    def test_shell_macos_runs_the_suite_once_per_shard_by_matrix(self):
-        strategy = under(self.block, "strategy")
-        self.assertTrue(strategy.strip(), "shell-macos has no strategy: the suite runs once, not once per shard")
-        self.assertTrue(self.matrix.strip(), "shell-macos strategy has no matrix")
-        pairs = shard_values(self.matrix)
-        self.assertTrue(pairs, "the matrix holds no i/k shard value")
-        totals = {k for _, k in pairs}
-        self.assertEqual(len(totals), 1, f"the matrix shards name more than one total: {sorted(totals)}")
-        k = totals.pop()
-        self.assertGreaterEqual(k, 2, "the matrix holds one shard, so nothing is split")
-        self.assertEqual(sorted(i for i, _ in pairs), list(range(1, k + 1)),
-                         f"the matrix does not hold shards 1..{k} of {k}, once each")
-
-    def test_the_install_step_takes_its_shard_from_step_env(self):
-        self.assertEqual(len(self.install), 1, "shell-macos does not run the install suite in exactly one step")
-        env = under(self.install[0], "env", 8)
-        m = re.search(r"^\s+INSTALL_SRC_SHARD:\s*\$\{\{\s*matrix\.(\w+)\s*\}\}\s*$", env, re.M)
-        self.assertIsNotNone(m, "the install step does not set INSTALL_SRC_SHARD from a matrix value in its own step env")
-        self.assertIn(m.group(1), matrix_keys(self.matrix),
-                      f"INSTALL_SRC_SHARD reads matrix.{m.group(1)}, which the matrix does not hold")
-
-    def test_the_other_run_steps_run_on_exactly_one_leg(self):
-        legs = {f"{i}/{k}" for i, k in shard_values(self.matrix)}
-        keys = matrix_keys(self.matrix)
-        others = [s for s in self.steps if step_key(s, "run") not in (None, INSTALL_RUN)]
-        # Scope first: the pin lists every run step of the job, so a step added later must be listed and gated too.
-        self.assertEqual(sorted(step_key(s, "name") for s in others), sorted(n for n, _, _ in OTHER_STEPS),
-                         "the run steps of shell-macos other than the install step changed: list and gate each one")
-        by_name = {step_key(s, "name"): s for s in others}
-        for name, _run, orig in OTHER_STEPS:
-            with self.subTest(step=name):
-                cond = step_key(by_name[name], "if") or ""
-                m = GATE.fullmatch(cond)
-                self.assertIsNotNone(m, f"{name!r} has no matrix-leg test, so it runs on every leg")
-                key, leg = m.group(2), m.group(3)
-                self.assertIn(key, keys, f"{name!r}: the gate reads matrix.{key}, which the matrix does not hold")
-                self.assertIn(leg, legs, f"{name!r}: the gate names {leg!r}, which is no matrix value")
-                self.assertEqual(cond, leg_gate(orig, key, leg),
-                                 f"{name!r}: the gate is not the one shape (the leg test appended to the original condition)")
-
-    def test_every_shell_macos_step_has_one_scope_prefix(self):
-        # Control shape read by test_windows_split (read_scope_condition): the scope prefix of every step's `if` is one
-        # condition. A gate that wraps the original condition gives the scoped steps the prefix `(S) && C`, so they disagree.
-        self.assertTrue(self.steps, "shell-macos has no steps")
-        conds = {(step_key(s, "name") or step_key(s, "uses")): step_key(s, "if") for s in self.steps}
-        self.assertEqual(sorted(n for n, c in conds.items() if c is None), [],
-                         "a shell-macos step has no `if`, so it carries no scope condition")
-        prefixes = {paren_prefix(unwrap(c)) or unwrap(c) for c in conds.values()}
-        self.assertEqual(sorted(prefixes), [SCOPE_ORIG],
-                         "the shell-macos steps' scope prefixes are not the one scope condition")
-
-
 class ListCountsOnlyExecutedCalls(unittest.TestCase):
     # Two `run` words that are no call: one in a heredoc, one in a `: '...'` block (a quoted no-op).
     GHOSTS = "\n: <<'GHOST_HEREDOC'\nrun ghost_heredoc\nGHOST_HEREDOC\n: '\nrun ghost_quoted\n'\n"
@@ -298,6 +163,16 @@ class ListCountsOnlyExecutedCalls(unittest.TestCase):
         self.assertEqual([n for n in copied if "ghost" in n], [],
                          "--list names a `run` word that is no call the suite makes")
         self.assertEqual(copied, real, "the copy's --list differs from the real suite's, with no ghost name in it")
+
+
+class ShardPinsRunInChecksJob(unittest.TestCase):
+    def test_checks_job_runs_this_file_in_one_step(self):
+        # Scope first: the job exists, so a missing step is not read as a missing job.
+        with open(CHECKS, encoding="utf-8") as f:
+            block = job_block(f.read(), "checks")
+        self.assertIsNotNone(block, "checks.yml has no checks job")
+        runs = [s for s in step_blocks(block) if step_key(s, "run") == RUN_CMD]
+        self.assertEqual(len(runs), 1, f"job checks runs {RUN_CMD!r} in {len(runs)} steps, want one")
 
 
 if __name__ == "__main__":
