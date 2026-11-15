@@ -1,0 +1,12 @@
+{
+ "id": "claude-md-check-child-rollout",
+ "title": "Roll #3492's CLAUDE.md check out to the child repos through the shared CI",
+ "phase": "now",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "why": "Coordinator 11:10 CST Nov 15 (relayed; not read by triage): lane session_013NEJKyk1LM2FRmVruNdc58 rolls the check #3492 added (decision records and rule sentences aligned) out to the child repos through the shared CI. Step 1 is a read of how child repos receive shared checks. Started by the coordinator under its application of ruling own-mechanical-before-cleanup; the child-repo CLAUDE.md cleanup (step child-repos-decision-claude-md-gap) is held until the check lands. Guard or check: yes.",
+ "source": "coordinator 11:10 CST Nov 15, relayed by triage (not read by triage)",
+ "note": "Doing. Lane session_013NEJKyk1LM2FRmVruNdc58 started by the coordinator under its application of own-mechanical-before-cleanup (11:07 CST ruling; the coordinator's pick, undoable, not owner-typed). Its cleanup is held until the check lands. Guard or check: yes. Relayed 11:10 CST Nov 15; not read by triage.",
+ "lane": "session_013NEJKyk1LM2FRmVruNdc58",
+ "updatedAt": "2026-11-15T11:12:00-06:00"
+}

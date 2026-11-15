@@ -1,0 +1,12 @@
+{
+ "id": "record-vs-later-ruling-check",
+ "title": "A decision record must not contradict a later owner ruling on the same question (a guard or check)",
+ "phase": "now",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "why": "Coordinator 11:10 CST Nov 15 (relayed; not read by triage): lane session_013NEJKzCLNUNqCwEF8se48h builds a check that a decision record does not contradict a later owner ruling on the same question. It extends the existing lint home. Held PR #3476 is named as what to avoid (what it did is not read by triage). Started by the coordinator under its application of ruling own-mechanical-before-cleanup; its cleanup is held until the check lands. Guard or check: yes.",
+ "source": "coordinator 11:10 CST Nov 15, relayed by triage (not read by triage)",
+ "note": "Doing. Lane session_013NEJKzCLNUNqCwEF8se48h started by the coordinator under its application of own-mechanical-before-cleanup (11:07 CST ruling; the coordinator's pick, undoable, not owner-typed). Its cleanup is held until the check lands. Guard or check: yes. Relayed 11:10 CST Nov 15; not read by triage.",
+ "lane": "session_013NEJKzCLNUNqCwEF8se48h",
+ "updatedAt": "2026-11-15T11:12:00-06:00"
+}
