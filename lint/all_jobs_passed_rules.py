@@ -17,7 +17,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from test_windows_split import (ALL_JOBS_PASSED_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB, all_jobs, draft_guard_only, eval_if, macos_scope_skips, macos_scope_skip_ok,  # noqa: E402,F401  the one home of the scope condition and scalar parsers
+from test_windows_split import (ALL_JOBS_PASSED_JOB, CHECKS_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB, all_jobs, checks_if_problems, draft_guard_only, eval_if, eval_value, job_needs_of, macos_scope_skips, macos_scope_skip_ok,  # noqa: E402,F401  the one home of the scope condition and scalar parsers
                                 push_guard_only, shard_base, yaml_scalar)  # NIGHTLY_SKIP_JOB and PUSH_SKIP_JOB are read from here by actions/push-skip/push-skip.py
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
 
@@ -79,6 +79,13 @@ def needs_of(block):
     return names
 
 
+class AllSucceeded(dict):
+    """Every needed job's result, success: a job-level if may read needs.<job>.result (checks reads scope's)."""
+
+    def __missing__(self, job):
+        return "success"
+
+
 def split_jobs(text):
     """(needed, off, problems) over the jobs of checks.yml. A job is off all-jobs-passed when its job-level if is false on a
     non-draft pull_request with every scope flag true. all-jobs-passed and ci-done are neither needed nor off."""
@@ -90,7 +97,7 @@ def split_jobs(text):
             needed.append(name)
             continue
         try:
-            on = eval_if(yaml_scalar(job["if"]), "pull_request", "true")
+            on = bool(eval_value(yaml_scalar(job["if"]), "pull_request", "true", results=AllSucceeded()))
         except Exception as ex:  # an if this reader cannot evaluate counts as needed, and is named
             problems.append(f"{name}: job-level if is unreadable ({ex!r}): {job['if']}")
             on = True
@@ -168,7 +175,8 @@ def steps_problems(text):
 
 def off_problems(text):
     """Only a shard job may stay off all-jobs-passed. A needed job has no job-level if, except scope (its draft rule),
-    a macOS job (its scope skip, which scope-skips names) and a Windows full shard (the draft guard)."""
+    a macOS job (its scope skip, which scope-skips names), a Windows full shard (the draft guard) and checks (it runs
+    on any shard result and skips only when scope did not succeed, which all-jobs-passed already reads red: checks_if_problems)."""
     jobs = all_jobs(text)
     needed, off, problems = split_jobs(text)
     for name in off:
@@ -182,6 +190,8 @@ def off_problems(text):
                                 f"{jobs[name]['if']}")
         elif name in MACOS_JOBS and macos_scope_skip_ok(name, jobs[name]["if"] or ""):
             continue  # its scope skip is off on a PR whose flags are on, so the macOS job stays needed; scope_skips_problems reads its skip
+        elif name == CHECKS_JOB and jobs[name]["if"] is not None and not checks_if_problems(job_needs_of(text, name), jobs[name]["if"]):
+            continue
         elif name != "scope" and jobs[name]["if"] is not None:
             problems.append(f"{name} is needed and keeps a job-level if: all-jobs-passed reads its skip as red, "
                             "so its scope condition belongs in its steps")

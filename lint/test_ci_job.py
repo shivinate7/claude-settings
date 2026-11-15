@@ -799,6 +799,70 @@ class DebtRetireInLint(unittest.TestCase):
                          "a plain plan of checks no longer plans the debt Retire step")
 
 
+class OtherJobEnv(unittest.TestCase):
+    """A local run runs one job alone, so a step env over other jobs' results (needs.*) or earlier steps' outputs (steps.*) reads
+    as '' and the step plans as a run. A secrets.* term still reads unknown, and so does a mixed expression holding one. No such
+    env reads as the guard suite's proof: the proof path is set only by a read that holds in CI."""
+
+    PROOF = "hooks/test_guard.py"
+
+    def setUp(self):
+        self.ci = load_ci_job()
+        self.values = {"base": "", "github.base_ref": "", "github.event.pull_request.head.sha": "0" * 40, "github.token": ""}
+
+    def plan_env(self, raw):
+        """(state, env) that plan gives a step whose one env is `raw`, planned as a pull-request run."""
+        step = "      - name: probe\n        run: true\n        env:\n          X: %s\n\n" % raw
+        state, _detail, _argv, env, _cwd = self.ci.plan(step, True, self.values, os.path.join(HERE, ".."))
+        return state, env
+
+    def test_a_an_env_over_a_needs_or_steps_result_plans_as_a_run_and_reads_empty(self):
+        for raw in (
+            "${{ needs.checks-guard.result == 'success' && needs.checks-guard-2.result == 'success' && 'hooks/test_guard.py' || '' }}",
+            "${{ steps.debt_proof_tree.outputs.equal == 'true' && 'hooks/test_guard.py' || '' }}",
+        ):
+            with self.subTest(env=raw):
+                state, env = self.plan_env(raw)
+                self.assertEqual(state, "run", "a local run plans an env over other jobs' results as unknown, not as a run")
+                self.assertEqual(env, {"X": ""}, "a local run reads an env over other jobs' results as a value, not as ''")
+
+    def test_b_an_env_over_a_secrets_term_stays_unknown(self):
+        self.assertEqual(self.plan_env("${{ secrets.X }}"), ("unknown", None),
+                         "an env over a secrets term plans as something other than unknown")
+
+    def test_c_a_mixed_expression_holding_a_secrets_term_stays_unknown(self):
+        for raw in (
+            "${{ needs.checks-guard.result == 'success' && secrets.X }}",
+            "${{ steps.debt_proof_tree.outputs.equal == 'true' && secrets.X }}",
+        ):
+            with self.subTest(env=raw):
+                self.assertEqual(self.plan_env(raw), ("unknown", None),
+                                 "a mixed expression holding a secrets term plans as something other than unknown")
+
+    def test_d_the_debt_retire_step_proof_env_in_checks_yml_reads_empty(self):
+        from workflow_steps import job_block
+        with open(CHECKS, encoding="utf-8") as f:
+            block = job_block(f.read(), "checks") or ""
+        steps = [st for st in step_blocks(block) if "lint/check_debt_retire.py" in (run_body(st) or "")]
+        self.assertEqual(len(steps), 1, "scope: checks has no one Debt retire step")
+        raw = step_env(steps[0]).get("DEBT_RETIRE_SHARD_PROVEN")
+        self.assertIsNotNone(raw, "scope: the Debt retire step sets no DEBT_RETIRE_SHARD_PROVEN")
+        got = self.ci.expand(raw.strip("'\""), self.values)
+        self.assertEqual(got, "", "the Debt retire step's proof reads %r in a local run, not ''" % got)
+
+    def test_e_a_negated_or_empty_test_of_a_needs_or_steps_result_never_reads_the_proof(self):
+        for raw in (
+            "${{ needs.checks-guard.result != 'success' && 'hooks/test_guard.py' || '' }}",
+            "${{ steps.debt_proof_tree.outputs.equal != 'true' && 'hooks/test_guard.py' || '' }}",
+            "${{ needs.checks-guard.result == '' && 'hooks/test_guard.py' || '' }}",
+        ):
+            with self.subTest(env=raw):
+                _state, env = self.plan_env(raw)
+                self.assertNotEqual((env or {}).get("X"), self.PROOF,
+                                    "a local run reads the guard proof from a test of another job's result, which holds no value here, "
+                                    "so the step skips the guard suite")
+
+
 class TokenValue(unittest.TestCase):
     """A step env that maps ${{ github.token }} reads as a value: a plan has no runner token, so the value is empty. An unknown
     there would refuse every lint run of a job whose step maps the token (bin/ci-job's values map, its one home)."""

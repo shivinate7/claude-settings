@@ -41,6 +41,7 @@ INTERPRETERS = {".py": ["python3"], ".mjs": ["node", "--test"], ".sh": ["bash"]}
 TEST_NAME = re.compile(r"^(?:test_[^/]+\.(?:py|mjs|sh)|[^/]+_test\.py|[^/]+\.test\.mjs)$")
 SPAN = re.compile(r"`([^`\s]+)`")  # no space inside: a lone backtick in prose never swallows the real span after it
 CITE_LINE = re.compile(r"\s*(\S+)\s+--\s+(\S+)\s*$")
+PROVEN_ENV = "DEBT_RETIRE_SHARD_PROVEN"  # checks.yml sets it to a Retire span's path when the guard shards already ran that suite on this tree
 CHILD_SECRETS = ("GH_TOKEN", "GITHUB_TOKEN")  # the CLI reads a cited run with them; a check child gets neither
 RUN_URL_ID = re.compile(r"/actions/runs/(\d+)")
 
@@ -238,8 +239,9 @@ def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_stat
         return SKIP
     todo = spans(text, tracked)
     if todo:
+        proven = os.environ.get(PROVEN_ENV) or None  # None never equals a span; only a path the workflow named is skipped
         got = None
-        for span in todo:
+        for span in (s for s in todo if s != proven):
             with scratch(wt, head) if isolate else contextlib.nullcontext(wt) as tree:
                 one = run_span(tree, span, timeout) if tree else ("unknown", "no scratch worktree for %s" % span)
             if one and one[0] == "red":
