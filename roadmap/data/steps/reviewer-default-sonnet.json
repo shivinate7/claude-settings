@@ -1,0 +1,14 @@
+{
+ "id": "reviewer-default-sonnet",
+ "title": "Reviewers run Sonnet unless a spawn names haiku for a round 1 with no guard or check change",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL1G4P531HnQjqjY7fz",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Owner question 00:39 CST Nov 15 about haiku reviewers (relayed by the consultant to the coordinator; the owner's exact words are not in triage's record: unread verbatim). Coordinator 00:40 CST Nov 15 (data): flip agents/reviewer.md default to sonnet, with haiku named per spawn only for a round 1 with no guard or check change; or make the spawn guard refuse the missing sonnet. The lane reads step spawn-model-below-role first and extends that home.\n\nCause read (consultant, unchecked by triage): #3425 only flags a round 1 model below its row. Read by triage 00:41 CST: agents/reviewer.md line 4 on the stable clone says `model: haiku`. REST: #3425 is merged, merged_at 2026-11-15T00:42:46Z (18:42:46 CST Nov 14); its body says a round 1 model below its row prints a stderr line and the record still prints (flag, not refusal). The merge commit sha was not in the REST answer; the coordinator says de7cbd4231 (relayed).\n\nGoverning text read: decision agent-model-cap, table row for reviewer per round: haiku on a round 1 of a change with no guard or check, sonnet from round 2, on a guard or check change, and on a fix verifier; set per spawn, which overrides the frontmatter `haiku`. CLAUDE.md roles-third-round-steps-up: reviewers run Sonnet from round 2 on; round 1 uses the role's model. So frontmatter haiku is the table's default for round 1 only; a spawn for a guard or check change, a round 2 or a fix verifier that does not name sonnet gets haiku.\n\nSibling: spawn-model-below-role (lane session_013NEJL4D6cmZ2s4aAHwkDve) keeps its own scope, the spawn guard refusing a model below a role's row. This step is the default in the file and, if the lane picks it, the refusal of a missing sonnet; build it in that home, not as a second guard.\n\n00:41 CST Nov 15 (coordinator, data; lane read live by get_session at 00:41 CST: running, connected, created 00:41 CST, tag cs-step:reviewer-default-sonnet, parent the coordinator): lane started on this step: session_013NEJL1G4P531HnQjqjY7fz.",
+ "source": "owner 00:39 CST Nov 15 via consultant and coordinator 00:40 CST (relayed)",
+ "note": "Filed 00:41 CST Nov 15 by triage. Doing; lane session_013NEJL1G4P531HnQjqjY7fz (sonnet, medium). Ask: flip the agents/reviewer.md default model from haiku to sonnet with haiku named per spawn only for a round 1 with no guard or check change, or make the spawn guard refuse the missing sonnet; extend step spawn-model-below-role, build no second guard. Not read: guard code, the owner's exact words.",
+ "updatedAt": "2026-11-15T00:41:00-06:00"
+}
