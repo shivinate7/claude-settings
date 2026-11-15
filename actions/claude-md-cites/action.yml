@@ -1,14 +1,27 @@
 name: CLAUDE.md cites records
 description: >
-  Fails a run when a unit of the caller's CLAUDE.md files or .claude/**/*.md copies the text of a
-  claude-settings record, instead of naming the record. Runs `compliance_probes.py restates` from
-  this action's own checkout, which holds the records, against the caller's checkout. Exit 1 is a
-  copy, with the file, the line and the record named; exit 2 is unknown (the records or a caller
-  file cannot be read) and is red too. The caller needs actions/checkout before this step, so
-  GITHUB_WORKSPACE holds its repo. Decision: child-cites-not-copies.
+  Fails a run when the caller's rule files copy the text of a claude-settings record instead of naming
+  it, or when a record and the rule units that cite it change in a pull request without each other.
+  Step 1 runs `compliance_probes.py restates` from this action's own checkout, which holds the records,
+  against the caller's checkout. Step 2 runs `compliance_probes.py aligned` on a pull_request run, with
+  BASE_SHA and PR_BODY from the event and HEAD_SHA the commit the caller checked out, so the diff's line
+  numbers match the files on disk. Exit 1 is a gap, with the file, the line and the record named; exit 2
+  is unknown (a record, a rule file or the diff cannot be read) and is red too. The caller needs
+  actions/checkout before this step, so GITHUB_WORKSPACE holds its repo, with `fetch-depth: 0` so the PR
+  base is there to diff. Decision: child-cites-not-copies.
 runs:
   using: composite
   steps:
-    - name: Check that CLAUDE.md names records and does not copy them
+    - name: Check that rule files name records and do not copy them
       shell: bash
       run: python3 "${{ github.action_path }}/../../lint/compliance_probes.py" restates "$GITHUB_WORKSPACE"
+    - name: Check that a record and the rules that cite it change together
+      if: github.event_name == 'pull_request'
+      shell: bash
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        PR_BODY: ${{ github.event.pull_request.body }}
+      run: |
+        HEAD_SHA="$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)"
+        export HEAD_SHA
+        python3 "${{ github.action_path }}/../../lint/compliance_probes.py" aligned "$GITHUB_WORKSPACE"
