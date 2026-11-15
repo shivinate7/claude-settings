@@ -406,6 +406,36 @@ class CheckCase(Fixture):
         self.assertEqual(rc, 1, out)
         self.assertGap(out, sha, "add widget tests", normal)
 
+    def pending_judge(self, message, rel):
+        """judge() on one commit the call has not made yet, with test path `rel` staged. The range is empty, so only
+        the pending row can name a gap. The module is loaded by path (MODULE), so CHECK_RED_RUN_UNDER_TEST still applies.
+        Returns one list of fields per row."""
+        probe = ("import importlib.util, sys\n"
+                 "spec = importlib.util.spec_from_file_location('check_red_run', sys.argv[1])\n"
+                 "module = importlib.util.module_from_spec(spec)\n"
+                 "spec.loader.exec_module(module)\n"
+                 "found, _last = module.judge(sys.argv[2], 'HEAD', 'HEAD', pending=[(sys.argv[3], [sys.argv[4]])])\n"
+                 "for row in found:\n"
+                 "    print('\\t'.join(row))\n")
+        done = subprocess.run([sys.executable, "-c", probe, MODULE, self.tree, message, rel],
+                              capture_output=True, text=True, encoding="utf-8", errors="replace", env=GIT_ENV)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return [line.split("\t") for line in done.stdout.splitlines()]
+
+    def test_pending_revert_of_a_test_commit_is_not_judged(self):
+        """A commit made earlier in the same call whose message carries git's This reverts commit line is no gap,
+        as a landed revert is not (decision red-run-trailer-on-test-commits, item 7). The next case is the control."""
+        self.base()
+        found = self.pending_judge("Revert \"add widget tests\"\n\nThis reverts commit abc1234.\n", self.new_test_path())
+        self.assertEqual(found, [], "a pending revert of a test commit is judged, want no row")
+
+    def test_pending_plain_test_commit_is_judged(self):
+        """Control: the same test path under a plain message is one pending gap, shown as sha new."""
+        self.base()
+        rel = self.new_test_path()
+        found = self.pending_judge("add widget tests\n", rel)
+        self.assertEqual(found, [["new", "add widget tests", rel]], "a pending plain test commit is not one gap row")
+
 
 if __name__ == "__main__":
     unittest.main()
