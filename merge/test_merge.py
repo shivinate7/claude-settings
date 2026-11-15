@@ -11843,6 +11843,28 @@ class RedMainBrake(Env):
                              {930: [main_job("readme-links", "failure", 20)], 931: [main_job("readme-links", "success", 20)]})
         self.merged(rc, out)
 
+    # Owner page item 880 (11:53 CST Nov 15): the daily runs the Windows and mutation jobs that a push no longer runs (their job-level if is
+    # `github.event_name != 'push'`, read from the real checks.yml). A red daily leaves main red under a Linux-only green push run, which
+    # skips them, and a green dispatch run, which runs every job, lifts it. These pin the rule as it stands; no product change is needed.
+    def test_a_linux_only_green_push_run_after_a_red_daily_leaves_main_red(self):
+        n_sha = f"{1951:040x}"
+        runs = [main_run(1951, "success", sha=n_sha, path=CHECKS_PATH), main_run(1950, "failure", event="schedule", path=CHECKS_PATH)]
+        jobs = {1950: [main_job("checks", "success", 20), main_job("checks-windows-merge-3", "failure", 19), main_job("all-jobs-passed", "skipped")],
+                1951: [main_job("checks", "success", 20), main_job("checks-windows-merge-3", "skipped"), main_job("all-jobs-passed", "skipped")]}
+        rc, out, before = self.go(runs, jobs, texts={n_sha: real_checks()})
+        self.refused(rc, out, before)
+        self.assertIn("run 1950", out, "the red daily is not named, so the refusal does not say what stays red")
+        self.assertIn("checks-windows-merge-3: fail", out)
+
+    def test_a_green_dispatch_run_with_every_job_of_the_red_daily_lifts_main(self):
+        n_sha = f"{1961:040x}"
+        runs = [main_run(1961, "success", event="workflow_dispatch", sha=n_sha, path=CHECKS_PATH),
+                main_run(1960, "failure", event="schedule", path=CHECKS_PATH)]
+        jobs = {1960: [main_job("checks", "success", 20), main_job("checks-windows-merge-3", "failure", 19), main_job("all-jobs-passed", "skipped")],
+                1961: [main_job("checks", "success", 20), main_job("checks-windows-merge-3", "success", 19), main_job("all-jobs-passed", "skipped")]}
+        rc, out, _ = self.go(runs, jobs, texts={n_sha: real_checks()})
+        self.merged(rc, out)
+
     # The failed-run clear, job by job: a job the red run did not fail, whose job-level if: names another event, is not needed by a green run of
     # that event. A red job always is. The workflow file is read at the green run's head (GET contents, ref = its head sha).
     def test_a_newer_push_run_clears_a_red_nightly_whose_pull_request_jobs_it_skipped(self):
