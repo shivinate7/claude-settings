@@ -2425,7 +2425,7 @@ class SessionStartRolePickTests(unittest.TestCase):
     one lane collapsed into lane, so that sentence names neither, and the Session roles bullet of that record names each role
     word the sentence names. It reads the hook's text and the record's text, so no repo fixture is built."""
 
-    SESSION_TIERS = os.path.join(HERE, "..", "docs", "decisions", "session-tiers.md")
+    SESSION_ROLES_RECORD = os.path.join(HERE, "..", "docs", "decisions", "session-tiers.md")
     ROLE_BULLET = "- **Session roles**"  # the bullet that opens the session roles in that record
     ROLE_WORDS = ("coordinator", "lane")  # the role words the No parent sentence is checked for
     SOLO_SHAPES = (("solo", r"\bsolo\b"), ("one lane", r"\bone[ -]lane\b"))  # the shapes that collapsed into lane
@@ -2453,7 +2453,7 @@ class SessionStartRolePickTests(unittest.TestCase):
 
     def session_roles_bullet(self):
         """The one Session roles bullet of the session roles record. Asserts that scope before any content."""
-        with open(self.SESSION_TIERS, encoding="utf-8") as handle:
+        with open(self.SESSION_ROLES_RECORD, encoding="utf-8") as handle:
             found = self.session_roles_bullets(handle.read())
         self.assertEqual(len(found), 1, "expected one Session roles bullet in the session roles record, found %d: %r" % (len(found), found))
         return found[0]
@@ -2483,7 +2483,7 @@ class SessionStartRolePickTests(unittest.TestCase):
                 self.assertTrue(self.names(bullet, r"\b%s\b" % word), "the Session roles bullet does not name %r" % word)
 
     # green control for the scope the cases above share: exactly one sentence of the real tier line starts No parent
-    def test_one_sentence_of_the_tier_line_starts_no_parent(self):
+    def test_one_sentence_of_the_role_pick_line_starts_no_parent(self):
         found = self.no_parent_sentences(hook_role_line())
         self.assertEqual(len(found), 1, "expected one sentence starting No parent, found %d: %r" % (len(found), found))
 
