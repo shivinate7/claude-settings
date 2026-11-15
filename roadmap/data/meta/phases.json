@@ -1,6 +1,6 @@
 {
   "design": {
-    "asOf": "Measured Nov 14: claude-settings 60db33f, banchi a3bbaf3, q_max 4cbfef3, home-app 29ca02b (home merged in)",
+    "asOf": "Measured Nov 15: claude-settings 426dbc5, banchi a3bbaf3, q_max 4cbfef3, home-app 29ca02b (home merged in)",
     "foot": "banchi's 88 design checks are from the Oct 17 audit.",
     "metrics": [
       {
@@ -29,7 +29,7 @@
     ]
   },
   "later": {
-    "asOf": "Measured Nov 14 at claude-settings 60db33f",
+    "asOf": "Measured Nov 15 at claude-settings 426dbc5",
     "foot": "Later steps start once the core is steady.",
     "metrics": [
       {
@@ -55,7 +55,7 @@
     ]
   },
   "organize": {
-    "asOf": "Measured Nov 14: claude-settings 60db33f, banchi a3bbaf3, q_max 4cbfef3, home-app 29ca02b (home merged in)",
+    "asOf": "Measured Nov 15: claude-settings 426dbc5, banchi a3bbaf3, q_max 4cbfef3, home-app 29ca02b (home merged in)",
     "foot": "All four repos measured (home merged into home-app).",
     "metrics": [
       {
@@ -96,9 +96,10 @@
           2325,
           2534,
           3317,
-          3621
+          3621,
+          3682
         ],
-        "value": 3621
+        "value": 3682
       },
       {
         "label": "Repos with a living roadmap page",
@@ -109,7 +110,7 @@
     ]
   },
   "rollout": {
-    "asOf": "Measured Nov 14: q_max 4cbfef3, home-app 29ca02b",
+    "asOf": "Measured Nov 15: q_max 4cbfef3, home-app 29ca02b",
     "foot": "Counting method is in each tile, so later counts compare like with like.",
     "metrics": [
       {
