@@ -1,0 +1,13 @@
+{
+ "id": "amend-guard-merge-head",
+ "title": "Refuse a git commit --amend when HEAD is a merge commit or nothing is staged (candidate guard)",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Guard or check: yes. Queued per rule building-mistake-names-its-guard (queued as step:amend-guard-merge-head), proposed by the coordinator 02:45 CST Nov 15 (relayed).\n\nMistake: at 02:43 CST Nov 15 lane stood-pick-needs-review (PR #3472) ran `git commit --amend` with nothing staged. That rewrote the message of a merge commit. The lane soft-reset back to the pushed head: the tree was identical and nothing was pushed (lane report, relayed; triage read no reflog).\n\nHarm: a merge commit's message was rewritten, unpushed and harmless this time. The rule it protects is shared-trees-no-destructive-git: an amend rewrites history in a tree other agents share.\n\nGuard idea: refuse `git commit --amend` when HEAD is a merge commit or when nothing is staged.\n\nCull test (rule building-guard-needs-incident): the incident is real, one, and the harm was low. Keep the guard only if its false alarms cost less than the harm it stops. Cost is unmeasured: one read of HEAD's parent count and the index per amend. A normal amend (staged change, non-merge HEAD) must pass, and a test must show the guard red on the merge-head case first.\n\nTriage read no code and no guard.",
+ "source": "Coordinator 02:45 CST Nov 15 (relayed): 'Proposed guard, queued as step amend-guard-merge-head: refuse amend when HEAD is a merge or nothing is staged. Incident: one, harmless, 02:43 CST (lane's report).'",
+ "note": "Candidate guard; not built; owner coordinator; incident one, harmless.",
+ "updatedAt": "2026-11-15T02:45:00-06:00"
+}
