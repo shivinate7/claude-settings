@@ -1903,8 +1903,8 @@ need "exit code" rc_is 0
 end_case "134 no SIM_TEST_DEVICES_DIR: the store under the default root goes too"
 
 # Case 135: the re-scan under the lock finds a Duo that a dead holder left booted. The run reuses it: no boot, the store
-# stays, and the run holds the reuse lease of that Duo through xcodebuild (owner pick 336 a, ruling sim-reuse-lease-336a:
-# a reuse takes the lease; main's earlier assertion that the lease goes back is re-pointed).
+# stays, and the run holds the reuse lease of that Duo through xcodebuild (decision sim-lease-tool, ruling 4: a reuse
+# takes the lease).
 pro_dies_during_duo_wait duo store
 need "destination is the booted Duo" dest_is "$DUO2"
 need "the Duo's store is kept" store_kept "$DUO2"
