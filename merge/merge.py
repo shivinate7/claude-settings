@@ -4152,7 +4152,7 @@ def draft_step(root, cfg, n, host, info, merge_main=False):
                     if checks:
                         run_ready_checks(wt, n, base, checks, pre=pre)  # before the remedy: it has the session mark ready by hand, past the checks
                     raise Stop(f"{info['head'][:9]} on {info['branch']} holds a Record-claim ({claim}), so the draft step adds no page commit on top of it. "
-                               f"{ready_hint(n)} The draft step leaves it to be marked ready by hand. Nothing was pushed. {RECORDS_CITE}")
+                               f"{ready_hint(n)} Nothing was pushed. {RECORDS_CITE}")
                 stale, stands = holds_base(wt, f"origin/{base}", info["head"])
                 if stale:  # holds_base ends with the remedy
                     raise Stop(("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " Nothing was pushed.")
