@@ -2828,7 +2828,7 @@ def case_departs_ruling_ranks_the_topic_first():
 
 # ------------------------------------------------------------------ generic words in a Departs line, and the cite's id
 #
-# Review round 1 of the Departs-line ruling (decision question-form) found a false alarm and a bypass. The false alarm:
+# Two cases guard the Departs-line ruling check (decision question-form): a false alarm and a bypass. The false alarm:
 # a Departs from line whose only shared words with a ruling are generic (main, adds, check, form, field, line) is
 # refused. The bypass: `Based on (ruling): decisions/<stem>` clears the step ruling whose id is that stem.
 GENERIC_RULING = "ruled-generic-form-line"
@@ -2914,10 +2914,10 @@ def case_departs_cite_bold_and_bulleted_clear_a_step_ruling():
     cited_step_clears("bulleted", "- Based on (ruling): %s" % STEM_STEP)
 
 
-# A GREEN CONTROL BY DESIGN (review round 1, item 3 of decision question-form): the Departs match reads only the ruling's
+# A GREEN CONTROL BY DESIGN (decision question-form): the Departs match reads only the ruling's
 # own words, and the metadata _ruled_candidates appends (owner, open, not on main, supersedes) never counts. The ruling
 # shares two words with the Departs focus, so one metadata word would not hit. The whole candidate line, with its
-# metadata, shares seven, so the metadata would hit if it counted. The case passes on ed4b39cdb because the strip holds
+# metadata, shares seven, so the metadata would hit if it counted. The case passes because the strip holds
 # on the real output; it guards the one home of that format (RULED_META is written against _ruled_candidates).
 META_RULING = "ruled-meta-check"
 META_RULING_TEXT = "Owner: a routed answer counts toward the account."
