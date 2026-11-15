@@ -2298,7 +2298,6 @@
 - aligned-splits-on-form-feed: `paragraph_rows` in lint/compliance_probes.py cuts lines with `str.splitlines`, which splits on form feed, vertical tab and U+2028; git hunks count `\n` only. A rule file holding one of those shifts every unit below it. Fix: split on `\n` only. Decision: child-cites-not-copies.
 - aligned-rename-reads-as-changed: a pure rename of a rule file, or a sentence moved to another file, reads as changed (the added file's base side is empty), so `aligned` goes red until a `Rules checked:` line clears it. Decision: child-cites-not-copies.
 - aligned-rerun-reads-newer-main: the action diffs the event's `base.sha` to the merge commit, so a re-run after main moved reads main's newer record changes as this PR's. A new push gives a fresh base. Unprobed. Decision: child-cites-not-copies.
-- aligned-pin-bump-needs-full-depth: a child that bumps the `claude-md-cites` pin without `fetch-depth: 0` gets exit 2 with no remedy line, red on every PR. Fail-closed as intended; the message could name the fix. Decision: child-cites-not-copies.
 - aligned-same-line-same-number: sentences on one physical line all report the same `file:line`, and two cites of one record print twice. Decision: child-cites-not-copies.
 - aligned-deleted-sentence-demands-nothing: a PR that deletes a citing sentence demands nothing of its record. Decision: child-cites-not-copies.
 - aligned-equal-text-reads-unchanged: a sentence whose new text equals another base sentence counts as unchanged. Decision: child-cites-not-copies.
