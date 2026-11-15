@@ -2190,6 +2190,7 @@ def records_proof(wt, base_ref):
         git(wt, "clean", "-fdq")
 
 CI_JOB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "ci-job")  # the lint steps of a job, read from the workflow; the tool brings it
+PR_BODY_ENV = "PR_BODY"  # the aligned probe's body source (lint/compliance_probes.py); a name copied, as the line below
 CI_JOB_HEAD_SHA_ENV = "CI_JOB_HEAD_SHA"  # ci-job's head.sha when set (bin/ci-job HEAD_SHA_ENV); ci-job is a script, not a module, so the name is copied
 READY_ROUTES = ("Mark ready in cloud by MCP update_pull_request draft=false; on a computer by `gh pr ready`, "
                 "a GraphQL call a cloud session gets 403 on (route pr-ready-mcp-cloud, route pr-ready-gh-cli-cloud, route pr-ready-gh-cli-local)")
@@ -2890,7 +2891,7 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
         stop = "\n".join([f"the cross-measure of {head[:9]} is unknown, not a pass:", *unknown, "Run again. " + LANE_LINT_REMEDY])
     return fails, reports, stop
 
-def ci_job_run(wt, *args, notes=None, raw=None, head_sha=None):
+def ci_job_run(wt, *args, notes=None, raw=None, head_sha=None, pr_body=None):
     """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     -> (state, lines, log, liftable). state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
@@ -2900,10 +2901,14 @@ def ci_job_run(wt, *args, notes=None, raw=None, head_sha=None):
     notes: a list the caller passes to receive, on a pass, each ci-job line that holds the pin note marker (a stale pin); the draft step passes none and ignores them.
     raw: a list the caller passes to receive every stdout line, for the pre-ready run's one verdict line per step (step_verdicts).
     head_sha: the pushed head, given to ci-job as CI_JOB_HEAD_SHA when the HEAD of `wt` is not that head (lane_lint's merge commit). With none, ci-job
-    reads HEAD, and an inherited CI_JOB_HEAD_SHA is dropped, so it never names another tree's head."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_") and k != CI_JOB_HEAD_SHA_ENV}  # as the merge's own lint run reads it
+    reads HEAD, and an inherited CI_JOB_HEAD_SHA is dropped, so it never names another tree's head.
+    pr_body: the description of the pull request being linted, given to ci-job as PR_BODY, which the aligned probe reads (a record and its rules move together)
+    when it has no event file. "" is a body that is present and empty. With none, an inherited PR_BODY is dropped, so it never names another PR's body."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_") and k not in (CI_JOB_HEAD_SHA_ENV, PR_BODY_ENV)}  # as the merge's own lint run reads it
     if head_sha:
         env[CI_JOB_HEAD_SHA_ENV] = head_sha
+    if pr_body is not None:
+        env[PR_BODY_ENV] = pr_body
     try:
         c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
     except subprocess.TimeoutExpired:
@@ -3204,7 +3209,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         if c2:
             raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the merge of the head with {base} could not be made the lint worktree's HEAD: {out} {LANE_LINT_CITE}")
         refuse_incomplete_tree(wt, head, base, merge_commit)
-        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes, head_sha=head)
+        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes, head_sha=head,
+                                                 pr_body=(info.get("body") or "") if target.isdigit() else None)  # a ref or commit has no PR body
         if state == "pass" and touched_tests:
             touched = run_touched_tests(wt, base, head)
         mutate, mutate_fails, skipped = "", [], False
