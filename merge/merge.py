@@ -504,8 +504,8 @@ def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_h
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
     import check_silent_undo as undo
     # The scan is slow on a merge-heavy branch and merge runs it twice. Its answer depends only on the head, the base tip, the PR body,
-    # the default refs it reads, and the cited runs (through the PR head). The key holds no run answer. Reuse is still safe: debt_check
-    # judges each close again after every scan, and reads again any run that a Retire-run excuse rests on. So the second call reuses the first when the key is unchanged.
+    # the default refs it reads, and the cited runs (through the PR head). The key holds no run answer, so the second call reuses
+    # the first when the key is unchanged, also for a run that a Retire-run excuse rests on (a run is tied to the PR head, and the checks wait reads CI's verdict on the pushed head).
     try:
         key = (wt, *(git(wt, "rev-parse", "--verify", "-q", r + "^{commit}")[1].strip() for r in ("HEAD", base_ref, "origin/HEAD", "origin/main", "main")), pr_body, retire_head)
         if not (key[1] and key[2]) or key not in UNDO_MEMO:  # a head or base that does not resolve is never reused; a hit skips the scan and its beat
@@ -555,10 +555,15 @@ def load_debt_retire():
     import check_debt_retire
     return check_debt_retire
 
-def debt_check(wt, base_ref, host, info):
+def debt_check(wt, base_ref, host, info, n=None):
     """The debt-close lint (lint/check_debt_retire.py): each debt the branch closes has its Retire check run on the head.
+    CI runs it on every pull request (checks.yml), so confirm does not run it: its checks wait reads CI's verdict. The preview passes `n` and
+    skips it when the head's CI reads green; on any other read (red, pending, unknown) it runs, so the preview names the finding. With no `n`
+    (the pre-ready run) it always runs.
     A finding, red or unknown or prose, refuses. No reason flag lifts it. A cited run is judged against the PR head, never the worktree
     HEAD: the claim commit goes on top of the PR head, and a run on the head is still the run of this PR."""
+    if n is not None and host.head_state(n) == "green":
+        return
     debt = load_debt_retire()
     try:
         found = debt.check(wt, base_ref, info["head"], pr_body=info.get("body", ""), run_state=lambda url: host.cited_run(url), isolate=True)
@@ -1235,15 +1240,16 @@ class Host:
 
     def cited_run(self, url):
         """-> (conclusion, head sha) of the workflow run at `url`, one read. A failed read is a Stop, never a green run."""
-        m = RUN_URL_ID.search(url)
-        if not m:
+        import check_debt_retire as debt  # the one home of the run read's route and reply (lint/check_debt_retire.py); the lint dir is on sys.path from the records import
+        try:
+            route = debt.run_route(url)
+        except ValueError:
             raise Stop(f"{url} is not a workflow run URL {DEBT_CITE}")
-        c, out = self.api(f"actions/runs/{m.group(1)}")
+        c, out = self.api(route)
         try:
             if c:
                 raise ValueError(out)
-            d = json.loads(out)
-            return d["conclusion"], d["head_sha"]
+            return debt.parse_run(out)
         except (ValueError, KeyError, TypeError) as e:
             raise Stop(f"reading the run {url} from GitHub failed: {e} {DEBT_CITE}")
 
@@ -3787,7 +3793,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     try:
         try:
             undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"])
-            debt_check(wt, f"origin/{base}", host, info)
+            debt_check(wt, f"origin/{base}", host, info, n)
             refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok)
             stale, stands = holds_base(wt, f"origin/{base}", info["head"])
             current = stale and ("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " --confirm refuses it."
@@ -4093,7 +4099,7 @@ def ready_page_state(root, n, host):
         with shared_deadline(READY_PAGE_CLEANUP_SECONDS):
             drop_worktree(root, tmp, wt)
 
-LOCK_TTL_SECONDS = 1200  # unmeasured. confirm waits on no CI run under the lock. extend_for lengthens it for a rate wait and before each debt check and undo check (UNDO_CHECK_LOCK_SECONDS and debt_check_lock_seconds), so a crashed run frees the lock in 20 minutes before the first check and about 65 minutes once the undo check began, at any merge.deadlineMinutes
+LOCK_TTL_SECONDS = 1200  # unmeasured. confirm waits on no CI run under the lock. extend_for lengthens it for a rate wait and before each undo check (UNDO_CHECK_LOCK_SECONDS), so a crashed run frees the lock in 20 minutes before the first check and about 65 minutes once the undo check began, at any merge.deadlineMinutes
 UNDO_CHECK_LOCK_SECONDS = 3600  # unmeasured: undo_check has no time bound of its own. The lock covers this long before each call of it
 
 def debt_check_lock_seconds():
@@ -4189,9 +4195,6 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         lane_head = head_under_claims(wt, cfgrel, base, info["head"]) if base == cfg["defaultBranch"] else info["head"]  # the head a cited run and the relayed yes name
         extend_lock(lock, UNDO_CHECK_LOCK_SECONDS)
         record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), lane_head))
-        extend_lock(lock, debt_check_lock_seconds())
-        with timed_phase("debt-check"):
-            debt_check(wt, base_ref, host, dict(info, head=lane_head))
         record_lift(lifts, UNDO_FLAG, refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok))
         stale, stands = holds_base(wt, base_ref, info["head"])  # rule M3: a clean merge-tree against the tip, read before the claim
         if stale:
@@ -4281,8 +4284,6 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                         stop(str(e))
                 extend_lock(lock, UNDO_CHECK_LOCK_SECONDS)  # outside checked: a lock that cannot be extended is a NetStop, and the claim stays
                 checked(lambda: record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), lane_head)))
-                extend_lock(lock, debt_check_lock_seconds())
-                checked(lambda: debt_check(wt, base_ref, host, dict(info, head=lane_head)))
                 try:  # the config is the base tip's, read just after the fetch
                     stamp_cfg = base_stamp_config(wt, tmp, cfgrel, base_ref)
                 except Unread as e:
