@@ -1,0 +1,13 @@
+{
+ "id": "file-clash-helper-gap",
+ "title": "Triage's file-clash test has a helper tool (gap 3 of the blind role ranking)",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "06:58 CST Nov 15 (coordinator 06:57, relayed; coordinator's pick, undoable, not the owner's): gap 3 of step role-gaps-from-ranking, which merged only gap 2 (#3255). Triage's file-clash test (do two open PRs touch the same files) has no tool today. Checked against step one-owner-per-pr: that step is a check that each PR names one session only, a different mistake, so this is not a duplicate. Low, queued behind the lanes now running, not started.",
+ "note": "Gap 3 of role-gaps-from-ranking: triage's file-clash helper. Low, not started. Coordinator's pick, not the owner's. Different from one-owner-per-pr (one session per PR).",
+ "source": "role-gaps-from-ranking, coordinator 06:57 CST Nov 15",
+ "updatedAt": "2026-11-15T06:58:00-06:00"
+}
