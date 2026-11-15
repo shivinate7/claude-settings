@@ -1114,6 +1114,87 @@ class CostAndCliTests(RepoCase):
                              for line in (bad.stdout + bad.stderr).splitlines()),
                          "the merge flagged o1, whose last change on the main line is before the cutoff")
 
+    def assertNoRulingLine(self, proc, rid, message):
+        """No problem line names `rid` with the word ruling."""
+        flagged = [line for line in (proc.stdout + proc.stderr).splitlines()
+                   if names(line, rid) and names(line, "ruling")]
+        self.assertEqual(flagged, [], message)
+
+    def o1_text(self, **over):
+        """The store file text of entry o1, which carries a free-prose ruling ref unless `over` changes it."""
+        body = fixture.entry("o1", at=AT, supersedes=[{"kind": "ruling", "ref": "Rule-one keeps the apps."}])
+        body.update(over)
+        return fixture.ruling_files({"o1": body})["%s/o1.json" % RULINGS_DIR]
+
+    def rename_history(self, name, old_text, new_text):
+        """A store that keeps r1, has o1 at o1.json before the cutoff, then has the file at o2.json after it, with
+        new_text. Returns (repo, before, after): the commit shas before and after the rename."""
+        repo = self.make_repo(name)
+        keep = fixture.ruling_files({"r1": target_entry("r1", at=EARLIER)})
+        before = fixture.point_ref(repo, fixture.STORE_REF, {**keep, "%s/o1.json" % RULINGS_DIR: old_text},
+                                   self.root, when=EARLIER)
+        after = fixture.point_ref(repo, fixture.STORE_REF, {**keep, "%s/o2.json" % RULINGS_DIR: new_text},
+                                  self.root, parents=(before,), when=AFTER_CUTOFF)
+        return repo, before, after
+
+    def rename_status(self, repo, before, after):
+        """The name-status lines of the diff between two store commits, with renames detected."""
+        done = _nowindow.run([VCS, "-C", repo, "diff-tree", "-r", "-M", "--name-status", before, after],
+                             capture_output=True, text=True, env=ENV, timeout=60)
+        self.assertEqual(done.returncode, 0, "scope: the diff of the two store commits did not run")
+        return done.stdout
+
+    def test_a_pure_rename_after_the_cutoff_leaves_an_old_entry_unchecked(self):
+        repo, before, after = self.rename_history("pure-rename", self.o1_text(), self.o1_text())
+        self.assertIn("R100", self.rename_status(repo, before, after), "scope: the rename is not a pure rename")
+        proc = self.run_check(repo)
+        self.assertEqual(proc.returncode, 0, "a pure rename after the cutoff was checked: %s"
+                         % (proc.stdout + proc.stderr))
+
+    def test_a_rename_with_an_edit_after_the_cutoff_is_checked(self):
+        edited = self.o1_text(ruling="Owner: edited after the cutoff.")
+        repo, before, after = self.rename_history("rename-edit", self.o1_text(), edited)
+        status = self.rename_status(repo, before, after)
+        self.assertTrue(status.startswith("R") and "R100" not in status,
+                        "scope: the edited rename is not a partial rename: %r" % status)
+        good, _before, _after = self.rename_history("rename-edit-ok", self.o1_text(), self.o1_text(
+            ruling="Owner: edited after the cutoff.", supersedes=[{"kind": "ruling", "ref": "r1 keeps the store"}]))
+        self.assertEqual(self.run_check(good).returncode, 0, "control: a valid ref on the edited rename did not pass")
+        self.assertFlaggedRef(self.run_check(repo), "o1")
+
+    def test_a_new_entry_under_a_renamed_away_name_is_checked(self):
+        def build(name, n1_ref):
+            repo, _before, after = self.rename_history(name, self.o1_text(), self.o1_text())
+            keep = fixture.ruling_files({"r1": target_entry("r1", at=EARLIER)})
+            new = fixture.ruling_files({"n1": fixture.entry("n1", at=AT, supersedes=[{"kind": "ruling",
+                                                                                       "ref": n1_ref}])})
+            new_text = new["%s/n1.json" % RULINGS_DIR]
+            fixture.point_ref(repo, fixture.STORE_REF, {**keep, "%s/o2.json" % RULINGS_DIR: self.o1_text(),
+                                                        "%s/o1.json" % RULINGS_DIR: new_text},
+                              self.root, parents=(after,), when=TARGET_LATER)
+            return repo
+
+        ok = self.run_check(build("new-under-old-name-ok", "r1 keeps the store to one place"))
+        self.assertNoRulingLine(ok, "o1", "the renamed entry o1 was flagged")
+        self.assertEqual(ok.returncode, 0, "control: the valid new entry did not check clean: %s"
+                         % (ok.stdout + ok.stderr))
+        bad = self.run_check(build("new-under-old-name", "Rule-two keeps the store."))
+        self.assertFlaggedRef(bad, "n1")
+        self.assertNoRulingLine(bad, "o1", "the renamed entry o1 was flagged")
+
+    def test_a_deleted_entry_file_after_the_cutoff_is_not_read(self):
+        keep = fixture.ruling_files({"r1": target_entry("r1", at=EARLIER)})
+        control = self.make_repo("deleted-before", store={**keep, "%s/o1.json" % RULINGS_DIR: self.o1_text()},
+                                 when=EARLIER)
+        self.assertEqual(self.run_check(control).returncode, 0, "control: the store before the delete did not pass")
+        repo = self.make_repo("deleted")
+        before = fixture.point_ref(repo, fixture.STORE_REF, {**keep, "%s/o1.json" % RULINGS_DIR: self.o1_text()},
+                                   self.root, when=EARLIER)
+        fixture.point_ref(repo, fixture.STORE_REF, dict(keep), self.root, parents=(before,), when=AFTER_CUTOFF)
+        proc = self.run_check(repo)
+        self.assertEqual(proc.returncode, 0, "a deleted entry file was read: %s" % (proc.stdout + proc.stderr))
+        self.assertEqual(proc.stdout + proc.stderr, "", "a deleted entry file raised output")
+
     def test_check_on_an_absent_store_exits_zero_and_is_not_unknown(self):
         repo = self.make_repo("absent", main={"README.md": "main\n"})
         self.assertEqual(ruled_store.read_store(repo)[1], "absent",
