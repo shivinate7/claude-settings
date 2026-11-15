@@ -40,7 +40,7 @@ The owner's words, 2026-10-29 16:47 CDT, in web chat:
 - "Coordinator just keep it known u will have perpetual standing merge authority that i will withdraw when i decide so no need to ask about merging"
 - "on the other repos too for now"
 
-- A batch runner merges by pull request with the merge tool of each repo, on green checks and a done review (record `pr-review-record`) where one is required. The coordinator never merges (owner ruling, 2026-11-01 21:34 CST). A batch runner never asks the owner to merge. A lane session that a coordinator started never merges.
+- A batch runner merges by pull request with the merge tool of each repo, on green checks and a done review (record `pr-review-record`) where one is required. The coordinator never merges, except its own tiny-fix PR (ruling `own-tiny-fixes-b`) (owner ruling, 2026-11-01 21:34 CST). A batch runner never asks the owner to merge. A lane session that a coordinator started never merges.
 - The batch runner still builds the batches. It runs every merge under the coordinator's grant. It holds no grant of its own.
 - Auto mode allows that merge: `settings.json` `autoMode.allow`, entry "Batch Runner Merge" (owner, 2026-11-07 13:27 CST; decision `auto-mode-owner-acts`).
 - A batch runner's merge names the head its CI ran on, with `--head <sha>`. The coordinator's merge go carries that head (coordinator, 2026-11-08 12:55 CST; same ruling as decision `auto-mode-owner-acts`).
