@@ -677,7 +677,7 @@ _NEVER_FIRST = re.compile(r"never(?![\w-])")
 
 def _is_never(stamp):
     """True when the first word of the stamp's value is `never` (`stamp` is already lowercased): `never`, `never yet`,
-    `never, unverified`. A value that holds never later (`2026-11-09 (never failed)`) or starts `never-` is not."""
+    `never, unverified`. A value that holds never later (`<date> (never failed)`) or starts `never-` is not."""
     return bool(_NEVER_FIRST.match(_stamp_value(stamp)))
 
 
