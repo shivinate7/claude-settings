@@ -1245,7 +1245,7 @@ class Host:
         return self.info(json.loads(out))
 
     def pr(self, n):
-        """-> {head, branch, base, state, mergeable, merge_state, draft, body, created, changed_files}"""
+        """-> {head, branch, base, state, mergeable, merge_state, draft, body, created, changed_files, head_repo, base_repo}"""
         info = self.read_pr(n)
         self.base = info["base"]  # the PR's own base drives required_names
         self.branch = info["branch"]
@@ -1258,7 +1258,8 @@ class Host:
                 "state": "MERGED" if d.get("merged") else d["state"].upper(),
                 "mergeable": cls.MERGEABLE[d.get("mergeable")], "merge_state": (d.get("mergeable_state") or "unknown").upper(),
                 "draft": bool(d.get("draft")), "body": d.get("body") or "", "created": d.get("created_at"),
-                "changed_files": d.get("changed_files")}  # only --review-record reads the count; pr_files stops on a missing one
+                "changed_files": d.get("changed_files"),  # only --review-record reads the count; pr_files stops on a missing one
+                "head_repo": ((d["head"].get("repo") or {}).get("full_name")), "base_repo": ((d["base"].get("repo") or {}).get("full_name"))}  # owner/name; None when the repo is gone (a deleted fork)
 
     def open_prs(self):
         """-> [(number, pr() fields)] of every open pull request, all pages. A failed read is a Stop, never an empty list."""
@@ -3128,6 +3129,15 @@ def refuse_incomplete_tree(wt, head, base, tree=None):
         raise UnknownStop("\n".join([f"the lint of {head[:9]} against {base} is unknown, not a pass: the lint worktree lacks {', '.join(missing)}, so no step ran.",
                                      "Run again. If it keeps happening, the lint worktree made for this head is incomplete. --lint-unknown-ok does not lift this. " + LANE_LINT_REMEDY]))
 
+def mergeable_into_branch(info):
+    """True when lane_lint may push a merge commit to the pull request's branch: the pull request is open and its head lives in its base's repository. A fork's
+    branch is not ours to push to, and a repository that GitHub no longer names (None) is never assumed to be ours. A pr() with no repository fields (the test fake) is not gated on them."""
+    if info["state"] != "OPEN":
+        return False
+    if "head_repo" not in info:
+        return True
+    return info["head_repo"] is not None and info["head_repo"] == info.get("base_repo")
+
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_tests=False, mutate_run=True, pre_join=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree, removed on every exit. Takes no lock. Pushes nothing, except the one merge commit below. -> 0 on a pass, else raises Stop.
@@ -3206,7 +3216,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         # A pull request on the default branch whose head lacks the tip the merge read: M, the merge commit of the head and that tip, is what the lint reads and a
         # pass pushes (never read again from origin/<base>). Any other target lints a merge commit of the tip and the head that is never pushed.
         # An unreadable ancestry (None) is no push, as is a Record-claim head: a merge commit on top would hide the claim from own_claim.
-        if (target.isdigit() and not is_integration_pr(info) and not pre_join and base == default_branch(root)
+        if (target.isdigit() and mergeable_into_branch(info) and not is_integration_pr(info) and not pre_join and base == default_branch(root)
                 and not head_claim(wt, head) and ancestor(wt, merged[1], head) is False):
             c, made = git(wt, *identity(wt), "commit-tree", merged[0], "-p", head, "-p", merged[1], "-m", base_merge_message(base, info["branch"]))
             if c:
