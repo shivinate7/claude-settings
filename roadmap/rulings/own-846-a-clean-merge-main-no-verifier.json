@@ -1,0 +1,10 @@
+{
+ "id": "own-846-a-clean-merge-main-no-verifier",
+ "at": "2026-11-14T18:30:17-06:00",
+ "title": "The grant line says a clean merge of main takes no fix verifier; pr-review-record governs.",
+ "ruling": "Owner, page item 846 (pick-clean-merge-main-fix-verifier), option a, saved on the page at 18:30 CST Nov 14 with no note: reword docs/decisions/standing-merge-grant.md line 18 (the sentence \"Each new head gets a fix verifier and a fresh review log.\") so a clean merge of main takes no fix verifier and pr-review-record governs (its lines 16, 78, 82 and 130; line 78 is the owner ruling R1 of 14:07 CST Nov 10). Option a was marked widening (\"Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo\") and was not starred; the owner chose it knowingly. Options b (reword the record, undoes R1) and c (leave both) are not chosen. The grant covers that one reword: line 18's sentence only, nothing else in the grant. It does not cover a clean merge of main where the merge conflicts, or where a human edit rides in the merge. Measured before the pick (coordinator 18:18 CST, from runner 10's read; triage read none): `merge --reviewed` at #3318's merged head asked for no fix verifier and no new record, so the tool already reads pr-review-record.",
+ "quote": "a",
+ "source": "waiting/answers/pick-clean-merge-main-fix-verifier.json (00:30:17Z Nov 15 = 18:30:17 CST Nov 14, choice a, optionId grant-line-follows-record, no note). Owner.",
+ "status": "open",
+ "step": "grant-line-clean-merge-no-verifier"
+}

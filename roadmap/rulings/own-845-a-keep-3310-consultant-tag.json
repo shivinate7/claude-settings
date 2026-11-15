@@ -1,0 +1,10 @@
+{
+ "id": "own-845-a-keep-3310-consultant-tag",
+ "at": "2026-11-14T18:31:00-06:00",
+ "title": "Keep #3310 in #3429 as built: a session tagged cs-build:consultant with a parent id and no lane tag passes the lane pick guard.",
+ "ruling": "Owner, page item 845 (pick-3310-consultant-tag-guard), option a, saved on the page at 18:31 CST Nov 14 with the note \"i asked for the consultant role\": keep member #3310 in combined PR #3429 as built, so lint/report_guard.py lets a session tagged cs-build:consultant, with a parent id and no lane tag, pass the lane pick guard that main refuses. Option a was marked widening (\"Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo\") and was not starred (the coordinator recommended b, take #3310 out for its own round 3); the owner chose a knowingly. Options b and c are not chosen. The grant covers #3310's one verdict change; it covers no other tag or role. His note says he asked for the consultant role: it is the owner word the step consultant-tag-owner-facing lacked for the tag itself; the pass of the lane pick guard is covered by his explicit pick 845 a. #3429 can go to runner 10 for marking.",
+ "quote": "i asked for the consultant role",
+ "source": "waiting/answers/pick-3310-consultant-tag-guard.json (00:31:00Z Nov 15 = 18:31:00 CST Nov 14, choice a, optionId keep-3310-in, note \"i asked for the consultant role\"). Owner.",
+ "status": "open",
+ "step": "consultant-tag-owner-facing"
+}

@@ -1,0 +1,14 @@
+{
+ "id": "grant-line-clean-merge-no-verifier",
+ "title": "The standing merge grant says a clean merge of main takes no fix verifier, so it agrees with pr-review-record",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Owner ruling own-846-a-clean-merge-main-no-verifier (page item 846 a, 18:30 CST Nov 14): reword docs/decisions/standing-merge-grant.md line 18 (\"Each new head gets a fix verifier and a fresh review log.\") so a clean merge of main takes no fix verifier; pr-review-record governs (lines 16, 78, 82, 130). The ruling covers line 18's sentence only, nothing else in the grant; not a merge that conflicts, and not a merge with a human edit in it. A record-writer lane edits the file on main by a docs-only PR. First act: read standing-merge-grant.md lines 14-22 (line 19 says runner 10 does the same: check that it reads true after the reword) and pr-review-record lines 16, 78, 82 and 130. Red then green: the two records no longer disagree, and lint passes. Triage read neither file.",
+ "source": "owner 18:30 CST Nov 14 (item 846 a)",
+ "note": "Filed 00:33 CST Nov 14 by triage. Tracker: the coordinator. Not started. Docs-only PR, merge alone.",
+ "updatedAt": "2026-11-15T00:33:10Z"
+}
