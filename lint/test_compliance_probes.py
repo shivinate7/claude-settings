@@ -3690,6 +3690,102 @@ class AlignedDeleted(AlignedSteps, unittest.TestCase):
         self.assert_refused(repo, where, ALIGNED_ROUND)
 
 
+# Round 3. CLAUDE.md:38 holds five anchored sentences on one physical line of about 3000 characters. A sentence counts as
+# changed only when its text is new: the removed lines of the same diff hold the old text. Physical lines do not decide it.
+SAME_FILLER = "This sentence keeps its wording and runs on across the synthetic line, as the live file does. " * 6
+
+
+def same_line_sentences():
+    """Five anchored sentences on one physical line. Sentence two cites the other record, sentence three cites the record
+    under test, and sentences one, four and five cite nothing."""
+    return [
+        "**Lead.** Sentence one keeps its wording. %s<!-- rule:same-one -->" % SAME_FILLER,
+        "Sentence two cites `%s` and stays as it is. %s<!-- rule:same-two -->" % (ALIGNED_OTHER, SAME_FILLER),
+        "Sentence three: decision `%s` holds the round rules. %s<!-- rule:%s -->" % (ALIGNED_ROUND, SAME_FILLER, ALIGNED_HOME),
+        "Sentence four keeps its wording. %s<!-- rule:same-four -->" % SAME_FILLER,
+        "Sentence five closes the line. %s<!-- rule:same-five -->" % SAME_FILLER,
+    ]
+
+
+def with_sentence(sentences, index, old, new):
+    """`sentences` with the text `old` in sentence `index` replaced by `new`: a one-line edit of that sentence."""
+    edited = list(sentences)
+    assert old in edited[index], "the sentence %d holds no %r" % (index, old)
+    edited[index] = edited[index].replace(old, new, 1)
+    return edited
+
+
+class AlignedSameLine(AlignedSteps, unittest.TestCase):
+    """Round 3, items (1a) to (1d): sentences are units on one physical line. The unit of change is the sentence's text, not
+    its line, and a moved sentence with unchanged text is not a change."""
+
+    def same_line_base(self):
+        """(base files, the paragraph's line): the five sentences on one line of CLAUDE.md, and both records they cite."""
+        base, first = para_base([" ".join(same_line_sentences())])
+        return base, first
+
+    def test_a_record_change_is_refused_when_only_a_same_line_sibling_is_edited(self):
+        base, where = self.same_line_base()
+        sentences = with_sentence(same_line_sentences(), 3, "Sentence four keeps its wording.",
+                                  "Sentence four keeps its wording, edited.")
+        text, _ = para_file([" ".join(sentences)])
+        repo = self.pr(dict(base), {"CLAUDE.md": text, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_refused(repo, "CLAUDE.md:%d" % 13, ALIGNED_ROUND)
+
+    def test_a_one_character_edit_to_a_sibling_citing_nothing_demands_nothing(self):
+        base, _ = self.same_line_base()
+        sentences = with_sentence(same_line_sentences(), 3, "keeps", "keepz")
+        text, _ = para_file([" ".join(sentences)])
+        repo = self.pr(base, {"CLAUDE.md": text})
+        self.assert_clear(repo)
+
+    def test_a_one_character_edit_demands_only_the_records_its_sentence_cites(self):
+        base, _ = self.same_line_base()
+        sentences = with_sentence(same_line_sentences(), 1, "stays", "stayd")
+        text, _ = para_file([" ".join(sentences)])
+        repo = self.pr(base, {"CLAUDE.md": text})
+        code, out, err = self.probe_pr(repo)
+        self.assertIsNotNone(item_for(out, "CLAUDE.md:13"), "the refusal does not name the sentence's line: %s%s" % (out, err))
+        self.assertIn(ALIGNED_OTHER, out, "the refusal does not demand the record the edited sentence cites: %s" % out)
+        self.assertNotIn(ALIGNED_ROUND, out, "the refusal demands a record the edited sentence does not cite: %s" % out)
+        self.assertEqual(code, 1, "the refusal exits with the wrong code: %s%s" % (out, err))
+
+    def test_an_edited_citing_sentence_with_its_record_changed_passes_beside_unchanged_siblings(self):
+        base, _ = self.same_line_base()
+        sentences = with_sentence(same_line_sentences(), 2, "round rules.", "round rule.")
+        text, _ = para_file([" ".join(sentences)])
+        repo = self.pr(base, {"CLAUDE.md": text, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_clear(repo)
+
+    def test_a_sentence_moved_to_another_line_unchanged_is_not_a_change(self):
+        base, _ = para_base([ALIGNED_CITE_LINE, ALIGNED_TAIL])
+        text, _ = para_file([ALIGNED_TAIL, ALIGNED_CITE_LINE])
+        repo = self.pr(base, {"CLAUDE.md": text})
+        self.assert_clear(repo)
+
+
+class AlignedVendor(AlignedSteps, unittest.TestCase):
+    """Round 3, item (2): a vendored or untracked CLAUDE.md that the probe cannot parse is not a rule file of this repo, so it
+    does not make the group unknown."""
+
+    def test_an_untracked_vendor_claude_md_with_an_unclosed_fence_does_not_fail_the_group(self):
+        base, where = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        for folder in (".venv/lib/pkg", "node_modules/pkg"):
+            with self.subTest(folder=folder):
+                path = os.path.join(repo.root, *folder.split("/"), "CLAUDE.md")
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write("```\n- an unclosed fence in a vendored file\n")
+                try:
+                    code, out, err = self.probe_pr(repo)
+                    self.assertNotEqual(code, 2, "a vendored CLAUDE.md made the group unknown: %s%s" % (out, err))
+                    self.assertIsNotNone(item_for(out, where), "the citing unit at %s is not named: %s%s" % (where, out, err))
+                    self.assertEqual(code, 1, "the refusal exits with the wrong code: %s%s" % (out, err))
+                finally:
+                    os.remove(path)
+
+
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
