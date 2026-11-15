@@ -3664,7 +3664,7 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assertEqual([run["argv"][0] for run in runs], ["checks-rest", "checks"], "the ready checks did not run ci-job once per job in first-appearance order: " + out)
         self.assertEqual([step_names(run["argv"]) for run in runs], [[SCAFFOLD_STEP], ["STE lint"]], "a job's run did not get only its own --step names: " + out)
         for run in runs:
-            self.assertIn("--pinned", run["argv"], "a job's run did not pass --pinned: " + out)
+            self.assertNotIn("--pinned", run["argv"], "a job's run still passes --pinned, which ci-job no longer takes: " + out)
             self.assertEqual(run["argv"][run["argv"].index("--base") + 1], "origin/main", "a job's run did not read the base: " + out)
         self.assertTrue(verdict_line(out, "pass", "STE lint"), "the checks job's PASS line did not read pass: " + out)
         self.assertTrue(verdict_line(out, "pass", SCAFFOLD_READY), "the checks-rest job's PASS line did not read pass: " + out)

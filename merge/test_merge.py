@@ -6555,8 +6555,9 @@ class ConfigFile(Env):
         self.assertIn("main is not the default branch (trunk)", out)
 
 class ReadyChecksRun(unittest.TestCase):
-    """The draft step's ready checks run through ci-job with --pinned: a child's pin names a claude-settings commit, so the
-    check runs that commit's harness, never the local copy's. The argv keeps its step names and base as before."""
+    """The draft step's ready checks run through ci-job with no pin flag: ci-job runs each --step at the pin of its own uses:
+    line (decision action-pins-follow-sessions), so a child's pin names a claude-settings commit and the check runs that
+    commit's harness, never the local copy's. The argv keeps its step names and base as before (ruling own-727-a-pin-tree-drop-pinned)."""
 
     @classmethod
     def setUpClass(cls):
@@ -6580,10 +6581,10 @@ class ReadyChecksRun(unittest.TestCase):
             merge.run_ready_checks(wt, 7, "main", checks)
         return calls
 
-    def test_the_ready_checks_run_ci_job_with_pinned(self):
+    def test_the_ready_checks_run_ci_job_without_a_pinned_flag(self):
         calls = self.ci_job_calls(["check invariants"])
         self.assertEqual(len(calls), 1, calls)  # precondition: one ci-job run for the one ready check
-        self.assertIn("--pinned", calls[0], "the ready checks did not pass --pinned to ci-job: %s" % calls[0])
+        self.assertNotIn("--pinned", calls[0], "the ready checks still pass --pinned, which ci-job no longer takes: %s" % calls[0])
 
     def test_the_ready_checks_keep_their_step_names_and_base(self):  # the control: the argv --pinned joins is unchanged
         calls = self.ci_job_calls(["check invariants", "records page"])
