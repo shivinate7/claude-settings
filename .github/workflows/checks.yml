@@ -592,6 +592,12 @@ jobs:
       - name: Skill model rows fixture suite
         run: python3 lint/test_check_skill_model_rows.py
 
+      - name: Project-ops roles check
+        run: python3 lint/check_project_ops_roles.py
+
+      - name: Project-ops roles fixture suite
+        run: python3 lint/test_check_project_ops_roles.py
+
       - name: Python 3.9 floor check
         if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/check_python_floor.py
