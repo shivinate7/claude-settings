@@ -9,7 +9,7 @@ State: live until the cutover (decision `all-repos-switch-together`). After the 
 - A release or a drop that arrives after the build starts goes to the next batch. It never causes a rebuild. The one change after the freeze is the drop of a red run's blamed lane.
 - The next batch builds and runs on top of the batch in CI. While its head holds the running batch's head, the merge brake lets the running batch merge (decision `no-merge-during-batch-ci`, the contains rule). A drop changes the running batch's head, so the next batch is built on the new head before that merge.
 - A red run drops the one lane that blame names (one search per lane merge commit, pull request 2358), and any lane that depends on it, as step 8 already said. A lane red on form is dropped the same way, with no fix-and-re-merge. CI restarts at once. No lane that stays is linted again. Each lane was linted at hand-off and once at the join, before the build, and the batch head once, before ready.
-- Carve-out (owner, 2026-11-13 21:52 CST, ruling `own-rolling-combine-train`, the combine-train ruling): for batches behind the one next in line, the lines above that say "never causes a rebuild" and "no lane that stays is linted again" do not hold. Decision `session-tiers`, bullet "Rolling combine train", holds the carve-out. Not built.
+- Carve-out (owner, 2026-11-13 21:52 CST, ruling `own-rolling-combine-train`, the combine-train ruling): batches keep folding, even if they did run their lints, until CI finishes on main (the owner's example named batches 3 and 4 and said "maybe not batch 2"; "behind the one next in line" is the consultant's reading, open). So the lines above that say "never causes a rebuild" and "no lane that stays is linted again" do not hold for those batches. Decision `session-tiers` (the session roles decision), bullet "Rolling combine train", holds the carve-out. Not built.
 - The batch is built as a draft. The batch-head lane lint runs, then the integration PR goes ready, with no rebuild between (decision `draft-until-reviewed`). A draft run skips every job, so a draft batch is never rebuilt only to close it.
 
 Where it lives: step 8 (Batch lanes) of skill `ci-hygiene`, under its until-the-cutover part, the batch runner's one home for this. No second copy.
@@ -18,7 +18,7 @@ Why: batch 66 merged nothing in 5.5 hours (Nov 8, 14:50-20:20 CST). Runner 8 reb
 
 Sources: owner, 2026-11-08 20:24 CST: "get the fix asap so we can lift asap". Owner, 2026-11-08 20:31 CST: "this fix needs to be mechanized". Both are quoted in the coordinator's brief for this lane. The four rules above are the coordinator's wording of the fix, from that brief.
 
-Tool check: the merge tool no longer has `--batch-build` or `--batch-drop` (its usage names no batch to open or build; `merge/test_merge.py` pins both as unknown flags), so it enforces none of this freeze. The owner's 20:31 CST ruling above put the check in the merge tool; that check left with the batch route.
+Tool check: the merge tool no longer has `--batch-build` or `--batch-drop` (its usage names no batch to open or build; `merge/test_merge.py` pins both as unknown flags), so it enforces no lane-set freeze; it still refuses a malformed frozen block (`parse_freeze`). The owner's 20:31 CST ruling above put the check in the merge tool; that check left with the batch route.
 
 ## One-time exceptions
 
