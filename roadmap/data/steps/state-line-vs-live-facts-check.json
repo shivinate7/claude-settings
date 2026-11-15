@@ -7,8 +7,8 @@
  "phase": "next",
  "owner": "triage",
  "blockedBy": [],
- "updatedAt": "2026-11-15T11:20:00-06:00",
+ "updatedAt": "2026-11-15T11:26:00-06:00",
  "why": "Third candidate check from the #3471 lane (head 8d672383, record 6892637662; relayed by the coordinator 11:13 CST Nov 15, not read by triage): no merged check catches its stale-claim kinds; a decision's `State:` line could be checked against live facts. Unmeasured. Triage looked for a like step at 11:20 CST: none found (nearest, record-vs-later-ruling-check, checks a decision against a later ruling, a different check). No lane; it would ship inside the shared action actions/claude-md-cites (owner scope change 11:10 CST).",
  "source": "#3471 lane via the coordinator, 11:13 CST Nov 15 (relayed)",
- "note": "Open, low, a note. No lane started. Filed 11:20 CST Nov 15."
+ "note": "Open, low, a note. No lane started. Filed 11:20 CST Nov 15. Coordinator started a lane under the alias state-line-live-facts-check (relayed 11:24 CST, not read by triage): design reply first; lane id not relayed. One name kept: this slug."
 }
