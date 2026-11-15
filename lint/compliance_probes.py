@@ -83,15 +83,17 @@ restates: a unit of the child's rule Markdown that copies the text of a claude-s
   shared words passes, a record citation included. An item names the file, the line and the record, and the
   remedy; it never prints record text. An unreadable records folder or no record makes the group unknown. A
   claude-settings checkout is n/a.
-aligned: a record and the rule units that cite it change together in a pull request (decision
+aligned: a record and the rule sentences that cite it change together in a pull request (decision
   child-cites-not-copies). Env: BASE_SHA and HEAD_SHA, the PR's commits, and PR_BODY, its description. It
-  reads one `git diff --unified=0 BASE_SHA...HEAD_SHA` and the files on disk: the rule units of restates'
-  files, and the records of the child's own decisions folder (layout.candidates). A unit cites a record by its
-  slug alone in a code span, or by the `<!-- rule:X -->` anchor its Home line names. When a record file
-  changes, each citing unit needs a changed line; when a citing unit changes, its record needs to be in the
-  diff. A PR body line `Rules checked: <record> — no change` clears one record. An item names the record,
-  the file and the line. A missing BASE_SHA or HEAD_SHA, or a diff or file that cannot be read, makes the
-  group unknown. A missing PR_BODY is an empty body. It makes no other git call and writes no file.
+  reads one `git diff --unified=0 BASE_SHA...HEAD_SHA` and the files on disk: the files of restates, and the
+  records of the child's own decisions folder (layout.candidates). A unit is one sentence: from the end of the
+  previous `<!-- rule:X -->` anchor, or the paragraph's start, to its own anchor. A sentence cites a record by its
+  slug alone in a code span, or by the anchor its Home line names, at base or at head (a deleted record is still
+  cited). When a record file changes, each citing sentence needs a changed line of its own; when a citing
+  sentence changes, its record needs to be in the diff. A PR body line `Rules checked: <record> — no change`
+  clears one record. An item names the record, the file and the sentence's first line. A missing BASE_SHA or
+  HEAD_SHA, or a diff, folder or file that cannot be read, makes the group unknown. A missing PR_BODY is an
+  empty body. It makes no other git call and writes no file.
 hooks: the clone's settings.json `.hooks` against the live settings.json `.hooks`, with `SessionStart`
   dropped on both sides, since a cloud install rewrites it. The live file is the one install.sh writes:
   `$CLAUDE_CONFIG_DIR/settings.json` when that variable is set and not empty, else `~/.claude/settings.json`.
@@ -107,6 +109,7 @@ scorecard: not a probe. It reads the group lines from stdin and rewrites the lay
   the child, in place: one table, columns Group, Score, Gold standard, Gap, Source. It adds the row
   for the STE lint's gap on UI files, a known gap.
 """
+import bisect
 import difflib
 import json
 import os
@@ -461,9 +464,9 @@ def span_open(text):
     return bool(opener)
 
 
-def paragraph_spans(text, rel, span_continues=False):
-    """(first line number, last line number, joined text) of each paragraph or list item outside a code fence. A blank
-    line, a fence, a list item, a table row or a heading ends one; a table row and a heading are each one of their own.
+def paragraph_rows(text, rel, span_continues=False):
+    """(first line number, last line number, [(line number, stripped line)]) of each paragraph or list item outside a
+    code fence. A blank line, a fence, a list item, a table row or a heading ends one; a table row and a heading are each one of their own.
     With `span_continues`, a line that starts inside an open code span joins the unit instead, so a `#` or `-` at the
     start of a line inside a span is code, never a heading. A fence still open at the end of the file makes the group
     unknown: the rest of the file would go unread."""
@@ -471,7 +474,7 @@ def paragraph_spans(text, rel, span_continues=False):
 
     def flush():
         if lines:
-            found.append((start, last, " ".join(lines)))
+            found.append((start, last, list(lines)))
             del lines[:]
 
     for number, line in enumerate(text.splitlines(), 1):
@@ -484,25 +487,30 @@ def paragraph_spans(text, rel, span_continues=False):
         elif mark and not (mark.group(1)[0] == "`" and "`" in mark.group(2)):
             flush()
             fence = (mark.group(1), number)
-        elif span_continues and lines and line.strip() and span_open(" ".join(lines)):
+        elif span_continues and lines and line.strip() and span_open(" ".join(t for _, t in lines)):
             last = number
-            lines.append(line.strip())
+            lines.append((number, line.strip()))
         elif not line.strip():
             flush()
         elif ONE_LINE_UNIT.match(line):
             flush()
-            found.append((number, number, line.strip()))
+            found.append((number, number, [(number, line.strip())]))
         else:
             if LIST_ITEM.match(line):
                 flush()
             if not lines:
                 start = number
             last = number
-            lines.append(line.strip())
+            lines.append((number, line.strip()))
     if fence:
         raise CannotRun("%s:%d: a code fence never closes" % (rel, fence[1]))
     flush()
     return found
+
+
+def paragraph_spans(text, rel, span_continues=False):
+    """(first line number, last line number, joined text) of each unit `paragraph_rows` finds."""
+    return [(first, last, " ".join(t for _, t in rows)) for first, last, rows in paragraph_rows(text, rel, span_continues)]
 
 
 def paragraphs(text, rel):
@@ -538,8 +546,32 @@ def child_units(root, in_scope=None, listing=None, span_continues=False):
     return [(rel, first, unit) for rel, first, _, unit in units], files
 
 
-def child_unit_spans(root, in_scope=None, listing=None, span_continues=False):
-    """Like `child_units`, with each unit's last line: (file, first line, last line, text)."""
+def split_sentences(rows):
+    """(first line, last line, text) of each sentence of a paragraph given as `paragraph_rows` rows. A sentence runs from
+    the end of the previous `<!-- rule:X -->` anchor comment, or the paragraph's start, to its own anchor; text after the
+    last anchor is a sentence of its own. An anchor inside a code span is code and ends nothing (STRIPPED). A unit with
+    no anchor is one sentence."""
+    joined = " ".join(t for _, t in rows)
+    starts, at = [], 0
+    for _, text in rows:
+        starts.append(at)
+        at += len(text) + 1
+    ends = [m.end() for m in STRIPPED.finditer(joined) if not m.group("tick") and rule_audit.claude_md_anchors(m.group(0))]
+    if not ends or ends[-1] < len(joined):
+        ends.append(len(joined))
+    found, begin = [], 0
+    for end in ends:
+        text = joined[begin:end].strip()
+        if text:
+            lead = begin + len(joined[begin:end]) - len(joined[begin:end].lstrip())
+            found.append((rows[bisect.bisect_right(starts, lead) - 1][0], rows[bisect.bisect_right(starts, end - 1) - 1][0], text))
+        begin = end
+    return found
+
+
+def child_unit_spans(root, in_scope=None, listing=None, span_continues=False, sentences=False):
+    """Like `child_units`, with each unit's last line: (file, first line, last line, text). `sentences`: a unit is one
+    sentence of a paragraph (`split_sentences`), not the whole paragraph."""
     in_scope = in_scope or SUPERSEDE_SCOPE.search
     units, seen = [], set()
     # A symlink is read after the files, so a file reached by both names is reported under its real one.
@@ -552,7 +584,11 @@ def child_unit_spans(root, in_scope=None, listing=None, span_continues=False):
         text = read(root, rel)
         if text is None:
             raise CannotRun("cannot read %s" % rel)
-        units.extend((rel, first, last, unit) for first, last, unit in paragraph_spans(text, rel, span_continues))
+        for first, last, rows in paragraph_rows(text, rel, span_continues):
+            if sentences:
+                units.extend((rel, a, b, unit) for a, b, unit in split_sentences(rows))
+            else:
+                units.append((rel, first, last, " ".join(t for _, t in rows)))
     return units, len(seen)
 
 
@@ -1393,15 +1429,20 @@ def probe_words(root):
 # The aligned group: a record and each rule unit that cites it change together in a pull request, or the PR body says why
 # not (decision child-cites-not-copies). It reads one `git diff` and the files on disk, so it starts no other process.
 RULES_CHECKED = re.compile("^Rules checked: (\\S+) \u2014 no change$")  # one line per record, in the PR body
-HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+HUNK = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 HOME_LINE = re.compile(r"^\s*Home:(.*)$", re.M)
 WALK_SKIP = {".git", "node_modules"}  # folders no rule file lives in; .claude/worktrees is skipped beside them
 
 
+def walk_failed(err):
+    raise CannotRun("a folder cannot be read: %s" % err.filename)
+
+
 def walked(root):
-    """Every file path under `root`, `/` separated. A walk, not `git ls-files`, so the group makes no second git call."""
+    """Every file path under `root`, `/` separated. A walk, not `git ls-files`, so the group makes no second git call.
+    A folder the walk cannot list makes the group unknown: a rule file in it would go unread."""
     found = []
-    for base, dirs, files in os.walk(root):
+    for base, dirs, files in os.walk(root, onerror=walk_failed):
         where = os.path.relpath(base, root).replace(os.sep, "/")
         dirs[:] = sorted(d for d in dirs if d not in WALK_SKIP and not (where == ".claude" and d == "worktrees"))
         found.extend(name if where == "." else where + "/" + name for name in files)
@@ -1409,34 +1450,64 @@ def walked(root):
 
 
 def diff_changes(root, base, head):
-    """{path: the new-side line numbers the pull request changes}, from one `git diff` of base...head. A path with no
-    line (a binary file, a mode change) maps to an empty set. A deletion marks the lines either side of it."""
+    """({path: the head-side line numbers the pull request changes}, {path: the text of each line it removes}), from one
+    `git diff` of base...head. A path with no line (a binary file, a mode change) is left out. A deletion marks the lines
+    either side of it. A hunk is read by its counts, so a changed line that starts `+++ ` or `@@ ` is no header. A
+    deleted file takes its old path. Departs from the parser of lint/stale_cites.py (`added_markdown_lines`): that one
+    keeps added .md lines only, from its own git start, and imports the hooks; this group also needs the removed
+    lines and the deletion marks, from the one read."""
     if base.startswith("-") or head.startswith("-"):
         raise CannotRun("BASE_SHA or HEAD_SHA is not a commit name")
     done = git_ok(root, "-c", "core.quotePath=false", "diff", "--unified=0", "--no-renames", "--no-color",
-                  "--no-ext-diff", "--no-textconv", "%s...%s" % (base, head), "--")
+                  "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", "%s...%s" % (base, head), "--")
     if done is None or done.returncode != 0:
         raise CannotRun("the diff %s...%s cannot be read" % (base[:12], head[:12]))
-    changes, current = {}, None
-    for line in done.stdout.decode("utf-8", "replace").splitlines():
-        if line.startswith("diff --git "):
-            both = line[len("diff --git "):]
-            # With --no-renames both sides name one path: `a/P b/P`.
-            current = both[2:2 + (len(both) - 5) // 2] if both.startswith("a/") else None
-            if current is not None:
-                changes.setdefault(current, set())
-            continue
-        hunk = HUNK.match(line)
-        if hunk and current is not None:
-            first, count = int(hunk.group(1)), 1 if hunk.group(2) is None else int(hunk.group(2))
-            changes[current].update(range(first, first + count) if count else (n for n in (first, first + 1) if n > 0))
-    return changes
+    changed, removed, path, old = {}, {}, None, None
+    rows, i = done.stdout.decode("utf-8", "replace").split("\n"), 0
+    while i < len(rows):
+        row = rows[i]
+        i += 1
+        if row.startswith("diff --git "):
+            path = old = None
+        elif row.startswith("--- "):
+            name = row[4:].split("\t")[0]
+            old = name[2:] if name.startswith("a/") else None
+        elif row.startswith("+++ "):
+            name = row[4:].split("\t")[0]
+            path = name[2:] if name.startswith("b/") else old
+            if path:
+                changed.setdefault(path, set())
+        else:
+            hunk = HUNK.match(row)
+            if not hunk or path is None:
+                continue
+            gone = 1 if hunk.group(1) is None else int(hunk.group(1))
+            number = int(hunk.group(2))
+            new = 1 if hunk.group(3) is None else int(hunk.group(3))
+            if not new:
+                changed[path].update(n for n in (number, number + 1) if n > 0)
+            while (gone or new) and i < len(rows):
+                body = rows[i]
+                i += 1
+                if body.startswith("-"):
+                    gone -= 1
+                    removed.setdefault(path, []).append(body[1:].rstrip("\r"))
+                elif body.startswith("+"):
+                    new -= 1
+                    changed[path].add(number)
+                    number += 1
+    return changed, removed
+
+
+def home_anchors(text):
+    """The rule anchors that the `Home:` lines of `text` name."""
+    return [a for m in HOME_LINE.finditer(text) for a in RULE_REF.findall(m.group(1))]
 
 
 def decision_records(root):
     """(the decisions folders, {slug: the rule anchors of its Home lines}) of the checkout at `root`. The folders are
     layout.candidates: where the repo keeps its records now, and where the layout puts them. A checkout with none of
-    them holds no record."""
+    them holds no record. A folder that cannot be listed makes the group unknown."""
     try:
         wheres = layout.candidates(root, "decisions")
     except (layout.LayoutError, KeyError, OSError) as err:
@@ -1446,11 +1517,15 @@ def decision_records(root):
         folder = os.path.join(root, *where.split("/"))
         if not os.path.isdir(folder):
             continue
-        for name in sorted(n for n in os.listdir(folder) if n.endswith(".md")):
+        try:
+            names = sorted(n for n in os.listdir(folder) if n.endswith(".md"))
+        except OSError as err:
+            raise CannotRun("the decisions folder %s cannot be listed: %s" % (where, type(err).__name__))
+        for name in names:
             text = read(folder, name)
             if text is None:
                 raise CannotRun("cannot read record %s" % name[:-len(".md")])
-            records[name[:-len(".md")]] = [a for m in HOME_LINE.finditer(text) for a in RULE_REF.findall(m.group(1))]
+            records[name[:-len(".md")]] = home_anchors(text)
     return wheres, records
 
 
@@ -1478,25 +1553,29 @@ def probe_aligned(root):
     if not base or not head:
         raise CannotRun("BASE_SHA and HEAD_SHA, the two commits of the pull request, are not both set")
     checked = {m.group(1) for m in map(RULES_CHECKED.match, (l.strip() for l in os.environ.get("PR_BODY", "").splitlines())) if m}
-    changes = diff_changes(root, base, head)
+    changes, removed = diff_changes(root, base, head)
     wheres, records = decision_records(root)
     if not changes:
         return finish("aligned", [], "in shape - the pull request changes no file", 0)
     changed = {os.path.basename(path)[:-len(".md")] for path in changes if path.endswith(".md") and os.path.dirname(path) in wheres}
-    records.update({slug: [] for slug in changed if slug not in records})  # a deleted record is still cited
-    units, files = child_unit_spans(root, rule_scope(root), walked(root), span_continues=True)
+    for slug in changed:
+        # A record the PR deleted, or whose Home line it changed, is still cited by the anchor it held at base.
+        gone = [line for where in wheres for line in removed.get(where + "/" + slug + ".md", [])]
+        old = records.setdefault(slug, [])
+        old.extend(a for a in home_anchors("\n".join(gone)) if a not in old)
+    units, files = child_unit_spans(root, rule_scope(root), walked(root), span_continues=True, sentences=True)
     hits = []
     for rel, first, last, unit in units:
-        moved = bool(changes.get(rel, set()) & set(range(first, last + 1)))
+        moved = not changes.get(rel, set()).isdisjoint(range(first, last + 1))
         for slug in sorted(cited_records(unit, records)):
             if slug in checked:
                 continue
             if slug in changed and not moved:
-                hits.append("  %s: %s:%d cites the record, the record changed and this unit did not" % (slug, rel, first))
+                hits.append("  %s: %s:%d cites the record, the record changed and this sentence did not" % (slug, rel, first))
             elif moved and slug not in changed:
                 hits.append("  %s: %s:%d changed and cites the record, the record did not change" % (slug, rel, first))
     if hits:
-        hits.append("  fix: change the unit or the record, or add one PR body line per record: "
+        hits.append("  fix: change the sentence or the record, or add one PR body line per record: "
                     "`Rules checked: <record> \u2014 no change`")
         return finish("aligned", hits, "out - %d line(s) to read in %d file(s)" % (len(hits) - 1, files), 1)
     return finish("aligned", hits, "in shape - %d rule file(s) read, %d record(s) changed" % (files, len(changed)), 0)
