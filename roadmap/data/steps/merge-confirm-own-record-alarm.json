@@ -1,0 +1,14 @@
+{
+ "id": "merge-confirm-own-record-alarm",
+ "title": "The merge-confirm-repo guard refuses a lane posting its own review record, though the lane's tags name the repo",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Sighting (lane export-holds-every-record on PR #3468; coordinator 01:49 CST Nov 15, relayed; guard record and code unread by triage): guard merge-confirm-repo refused `merge.py 3468 --review-record --confirm ...` three times, although the lane had run get_session alone first and its tags named cs-repo:shivinate7/claude-settings. Refusal text, verbatim from the lane: \"this session's own record does not prove it may merge in the checkout this command acts in\". The lane's last try used `-C /home/user/claude-settings`. Mistake: the guard may have cried wolf on a normal act (a lane posting its own review record is a normal act; Claude is likely to hit it again). Rule: a guard that goes red when nothing is wrong is spent. Harm: three refused calls, then the lane hand-posted a record through the GitHub tool, which the coordinator ruled void (see status-page-size-cap): lost lane time and a re-post by runner 10. Unmeasured: whether `-C` (a command that acts in another checkout than the session's own) is the cause, so the refusal may be right; whether other lanes hit it; the guard's own record. First act of a lane: read the guard record and reproduce with and without `-C`; say whether it is a false alarm. A change to what the guard lets through is a guard-verdict change: round 3 applies, and a form only an attacker would write does not count. Kin: merge-confirm-head-short-sha, lane-lint-background-refused.",
+ "source": "coordinator 01:49 CST Nov 15, from lane export-holds-every-record",
+ "note": "Filed 01:50 CST Nov 15 by triage. Tracker: the coordinator. No lane yet. A debt: likely hit in normal work.",
+ "updatedAt": "2026-11-15T01:50:00-06:00"
+}
