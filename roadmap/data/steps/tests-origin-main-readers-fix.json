@@ -1,15 +1,15 @@
 {
-  "id": "tests-origin-main-readers-fix",
-  "title": "Two tests left by #3494 stop reading state outside their fixture: a shallow-clone object store read and the caller's GH_REPO",
-  "status": "doing",
-  "repo": "shivinate7/claude-settings",
-  "phase": "now",
-  "lane": "session_013NEJKz8koxZAs5WZ5ak6yi",
-  "owner": "coordinator",
-  "blockedBy": [],
-  "ask": "Re-point two tests that #3494 left unfixed: lint/test_prove_route_judge.py:231 (reads the real checkout's object store; red on a shallow clone, proven red) and hooks/test_ci_wake.py:211 (call_repo reads the caller's GH_REPO; latent, unproven). Only test files change, so the brief says guard or check: no. hooks/test_guard.py and hooks/test_install_src.sh stay UNKNOWN and untouched. Red then green for each re-pointed test (outcomes-tests-are-statements).",
-  "why": "05:27 CST Nov 15 (coordinator 05:27, relayed to triage; coordinator's pick, undoable, not the owner's): follow-up from the finished #3494 lane's report. Lane tests-origin-main-readers-fix started, session_013NEJKz8koxZAs5WZ5ak6yi, builder sonnet, grant own-never-idle-order-ranks 05:26 CST. Relayed facts, not read by triage: the two test lines and their classes, the brief's 'guard or check: no', the lane's session. Parent step: tests-never-read-live-origin-main (merged #3494).\n\n05:27 CST Nov 15 LOW NOTES from the #3494 lane's round 3 (coordinator, relayed; not started; notes, not debts: no real incident yet, a note becomes a debt after one): (1) the GH_REPO clause is unbounded; (2) the test-author.md:29 sentence has no subject; (3) main_tip() is a fixture helper name.",
-  "source": "coordinator 05:27 CST Nov 15 (to triage, relayed)",
-  "note": "Lane started 05:26 CST Nov 15 (relayed). Re-points lint/test_prove_route_judge.py:231 and hooks/test_ci_wake.py:211 only; test_guard.py and test_install_src.sh stay unknown. Not a guard or check change.",
-  "updatedAt": "2026-11-15T05:27:00-06:00"
+ "id": "tests-origin-main-readers-fix",
+ "title": "Two tests left by #3494 stop reading state outside their fixture: a shallow-clone object store read and the caller's GH_REPO",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "session_013NEJKz8koxZAs5WZ5ak6yi",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "ask": "Re-point two tests that #3494 left unfixed: lint/test_prove_route_judge.py:231 (reads the real checkout's object store; red on a shallow clone, proven red) and hooks/test_ci_wake.py:211 (call_repo reads the caller's GH_REPO; latent, unproven). Only test files change, so the brief says guard or check: no. hooks/test_guard.py and hooks/test_install_src.sh stay UNKNOWN and untouched. Red then green for each re-pointed test (outcomes-tests-are-statements).",
+ "why": "05:27 CST Nov 15 (coordinator 05:27, relayed to triage; coordinator's pick, undoable, not the owner's): follow-up from the finished #3494 lane's report. Lane tests-origin-main-readers-fix started, session_013NEJKz8koxZAs5WZ5ak6yi, builder sonnet, grant own-never-idle-order-ranks 05:26 CST. Relayed facts, not read by triage: the two test lines and their classes, the brief's 'guard or check: no', the lane's session. Parent step: tests-never-read-live-origin-main (merged #3494).\n\n05:27 CST Nov 15 LOW NOTES from the #3494 lane's round 3 (coordinator, relayed; not started; notes, not debts: no real incident yet, a note becomes a debt after one): (1) the GH_REPO clause is unbounded; (2) the test-author.md:29 sentence has no subject; (3) main_tip() is a fixture helper name.\n\n[13:14 CST Nov 15, triage] Lane tests-origin-main-readers-fix (#3499) dropped the old check that every labelled rev exists in a clone, so a mistyped rev now ships green. The lane recommends a separate history-reading check lane. Filed as debt draft lane-drops-rev-exists-check in roadmap/outbox/triage.md; not started (no free lint slot). (source: coordinator 13:14 CST, relayed by triage; not owner-typed, undoable)",
+ "source": "coordinator 05:27 CST Nov 15 (to triage, relayed)",
+ "note": "Lane started 05:26 CST Nov 15 (relayed). Re-points lint/test_prove_route_judge.py:231 and hooks/test_ci_wake.py:211 only; test_guard.py and test_install_src.sh stay unknown. Not a guard or check change.",
+ "updatedAt": "2026-11-15T13:18:00-06:00"
 }
