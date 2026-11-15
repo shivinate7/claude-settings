@@ -568,6 +568,11 @@ class Env(unittest.TestCase):
     def head(self, ref="feat"):
         return sh(self.co, "git", "ls-remote", "origin", f"refs/heads/{ref}").split("\t")[0]
 
+    def push_branch(self, name):
+        """origin gets `name` at the feat head, so a head ref of that name exists there (an integration PR's batch branch)."""
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "push", "-q", "origin", f"{self.head('feat')}:refs/heads/{name}")
+
     def show(self, ref, path):
         sh(self.co, "git", "fetch", "-q", "origin")
         return sh(self.co, "git", "show", f"origin/{ref}:{path}")
@@ -2605,16 +2610,16 @@ class ClaimSurvivesUnknown(Env):
         assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
         self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
 
-    def test_a_debt_check_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        import check_debt_retire  # the lint the merge tool's debt check runs; its read fails below, only after the claim push
+    def test_an_undo_history_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        """Confirm runs no Retire check: CI's verdict is the gate. The history read that runs again after the claim push is the silent-undo check's."""
         claimed = []
         self.host.on_claim = lambda: claimed.append(self.head())
-        real_check = check_debt_retire.check
-        def check_unknown(*a, **k):
-            if claimed:  # prove() runs the debt check after the claim push
-                raise check_debt_retire.Unknown("the debt history could not be read")
-            return real_check(*a, **k)
-        with unittest.mock.patch.object(check_debt_retire, "check", check_unknown):
+        real_undo = merge.undo_check
+        def history_unreadable(*a, **k):
+            if claimed:  # prove() reads the history again after the claim push
+                raise merge.Unread("the history could not be read")
+            return real_undo(*a, **k)
+        with unittest.mock.patch.object(merge, "undo_check", history_unreadable):
             rc, out = self.run_merge("7", "--confirm")
         assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
         self.assertIn("could not read the history", out, "the stop does not name the failed history read")
@@ -3353,8 +3358,13 @@ try:
             link = '%s; rel="next", %s; rel="last"' % (url(n + 1), url(last))
         finish(text, 0, include, link)
     num = S.get("pr_number", 7)
+    def refused(knob, n):  # a failure knob: a string refuses every call; a {"<PR number>": text} dict refuses the calls on those pull requests only
+        return knob.get(str(n)) if isinstance(knob, dict) else knob
     rows = S.get("open_prs", [])
     numbered = {(r[3] if len(r) > 3 else 101 + i): r for i, r in enumerate(rows)}
+    def named_pr(n):  # a named pull request's state, merged flag and body: pr_extra, open and empty unless a case sets them
+        ex = (S.get("pr_extra") or {}).get(str(n), {})
+        return {"state": ex.get("state", "open"), "merged": ex.get("merged", False), "body": ex.get("body", "")}
     canon = rel or "(repo)"
     line = "%s %s%s%s" % (method, canon, "".join(" %s=%s" % kv for kv in sorted(params.items())), "".join(" --" + f for f in ("paginate", "slurp") if f in flags))
     m_pr, m_put = re.fullmatch(r"pulls/(\d+)", rel), re.fullmatch(r"pulls/(\d+)/merge", rel)
@@ -3379,14 +3389,14 @@ try:
             raise Refused(S["open_pulls_fail"])
         if params.get("state", "open") != "open" or set(params) - {"state", "per_page", "page"}:
             raise Refused(api_error(422, "fake gh: the open pull requests are read with state=open and per_page only, then matched on head.ref"))
-        items = [list_item(n, r[1], r[0], r[2]) for n, r in numbered.items()]
+        items = [list_item(n, r[1], r[0], r[2], body=named_pr(n)["body"]) for n, r in numbered.items() if named_pr(n)["state"] == "open"]
         answer_list(items, None)
 
     elif method == "GET" and m_pr:
         n = int(m_pr.group(1))
         if n in numbered and n != num:
-            r = numbered[n]
-            finish(one(pull(n, r[1], r[0], r[2]), jq), 0, include)
+            r, ex = numbered[n], named_pr(n)
+            finish(one(pull(n, r[1], r[0], r[2], state=ex["state"], merged=ex["merged"], body=ex["body"]), jq), 0, include)
         if n != num:
             raise Refused(api_error(404, "Not Found"))
         head = feat_head()
@@ -3395,7 +3405,7 @@ try:
                 raise Refused(S["state_read_fail"])
             head = S.get("state_head") or head
             merged = bool(S.get("oid"))
-            pr = pull(n, head, "feat", S.get("base", "main"), "closed" if merged else "open", merged, False, None if merged else True,
+            pr = pull(n, head, S.get("head_ref", "feat"), S.get("base", "main"), "closed" if merged else "open", merged, False, None if merged else True,
                       "unknown" if merged else "clean", S.get("body", ""), S["oid"] if merged else TEST_MERGE_SHA)
         else:  # the head read
             lag = S.get("lag")
@@ -3412,12 +3422,21 @@ try:
                 val = not (S.get("dirty_after_checks") is not None and S.get("checks_calls", 0) >= S["dirty_after_checks"])
             locked = bool(ref("refs/heads/merge-lock/main"))
             draft = bool(S.get("draft")) or (bool(S.get("draft_when_locked")) and locked)  # draft_when_locked: the PR turns draft once the merge lock is taken
-            pr = pull(n, head, "feat", S.get("base", "main"), "open", False, draft, val, {True: "clean", False: "dirty", None: "unknown"}[val], S.get("body", ""))
+            pr = pull(n, head, S.get("head_ref", "feat"), S.get("base", "main"), "open", False, draft, val, {True: "clean", False: "dirty", None: "unknown"}[val], S.get("body", ""))
             if locked and S.get("merge_state_when_locked"):  # mergeable_state once the merge lock is taken: clean for the preview read, this for every read after it
                 pr["mergeable_state"] = S["merge_state_when_locked"]
             S["shown"] = S.get("shown", []) + [head]; save()
         pr.update(S.get("pr_raw") or {})  # a test's own raw fields, for the mapping table
         finish(one(pr, jq), 0, include)
+
+    elif method == "PATCH" and m_pr:  # a close of a named pull request (the REST close): the call is in calls.log, and the row turns closed
+        n = int(m_pr.group(1))
+        if n == num or n not in numbered:
+            raise Refused(api_error(404, "Not Found"))
+        if refused(S.get("close_fail"), n):  # the text gh prints when GitHub refuses the close
+            raise Refused(refused(S["close_fail"], n))
+        ex = S.setdefault("pr_extra", {}).setdefault(str(n), {}); ex["state"] = params.get("state", "closed"); save()  # a reopen sends state=open
+        finish(one(pull(n, numbered[n][1], numbered[n][0], numbered[n][2], state=ex["state"], body=ex.get("body", "")), jq), 0, include)
 
     elif method == "PUT" and m_put and int(m_put.group(1)) == num:
         S["put_done"] = True; S.setdefault("merge_fields", []).append(dict(params)); save()  # each merge call's fields, as sent: a case reads what the merge carried
@@ -3481,8 +3500,8 @@ try:
             answer_list(cur["check_runs"], "check_runs", {"total_count": len(cur["check_runs"])})
         answer_list(cur["statuses"], "statuses", {"state": combined_state(cur["statuses"]), "sha": sha, "total_count": len(cur["statuses"])})
 
-    elif method == "POST" and re.fullmatch(r"issues/\d+/comments", rel) and S.get("post_fail"):  # a case's failed post: the text gh prints, and no comment kept
-        raise Refused(S["post_fail"])
+    elif method == "POST" and re.fullmatch(r"issues/\d+/comments", rel) and refused(S.get("post_fail"), rel.split("/")[1]):  # a case's failed post: the text gh prints, and no comment kept
+        raise Refused(refused(S["post_fail"], rel.split("/")[1]))
     elif method == "POST" and re.fullmatch(r"issues/\d+/comments", rel):  # a comment a lane posts (Host.post_comment): kept in the state, as GitHub files it
         S.setdefault("posted", []).append({"n": int(rel.split("/")[1]), "body": params.get("body")}); save()
         finish(one({"id": 555, "body": params.get("body")}, jq), 0, include)
@@ -4451,13 +4470,12 @@ class GhHalf(Env):
         self.merge_reply_is_retried_then_stops(RATE_API_SECONDARY_403, rate=True)
 
     def spare_is_the_take(self):
-        """The lock's spare is its take expiry, LOCK_TTL_SECONDS, as the rate-wait cases are sized. confirm's two check extensions (UNDO_CHECK_LOCK_SECONDS
-        and debt_check_lock_seconds()) would lift the expiry to about 3900 s from the take, past the end of the 900 s rung, so no rung would need an
-        extension. They are 0 here; their real values are pinned by the event-order cases (confirm_extends_the_lock_for_*_before_each_*_check)."""
-        for name, value in (("UNDO_CHECK_LOCK_SECONDS", 0), ("debt_check_lock_seconds", lambda: 0)):
-            patch = unittest.mock.patch.object(merge, name, value)
-            patch.start()
-            self.addCleanup(patch.stop)
+        """The lock's spare is its take expiry, LOCK_TTL_SECONDS, as the rate-wait cases are sized. confirm's undo-check extension (UNDO_CHECK_LOCK_SECONDS)
+        would lift the expiry to about 3900 s from the take, past the end of the 900 s rung, so no rung would need an extension. It is 0 here; its real
+        value is pinned by test_confirm_extends_the_lock_for_3600_s_before_each_undo_check. confirm runs no debt-check extension (ruling R2)."""
+        patch = unittest.mock.patch.object(merge, "UNDO_CHECK_LOCK_SECONDS", 0)
+        patch.start()
+        self.addCleanup(patch.stop)
 
     def test_a_rate_wait_past_the_lock_spare_extends_the_lock_and_the_merge_goes_on(self):
         # the take holds the lock LOCK_TTL_SECONDS (1200 s) at any deadline: the 60 s and 300 s waits fit its spare, and the 900 s wait, which starts
@@ -6065,6 +6083,290 @@ class RestRoutes(Env):
         self.assertNotIsInstance(raised.exception, merge.NetStop)
         self.assertEqual((self.paused, self.gh_state("route_failed")), ([], {"pr": 1}))
 
+class CloseReplaced(Env):
+    """The draft step (`merge <pr> --ready`) closes each open pull request that the lane's body names as replaced or carried, `Replaces #N` or
+    `Carries #N`, with a pointer comment to the kept pull request (step close-replaced-at-open; decision session-tiers, the replaced drafts).
+    A name counts only as the body's own text: not inside a code span or fence, not on a quote line, not the pull request itself, not in another
+    repo, and not as `see #N` or `related #N`. A number list counts only when the line or sentence ends right after it, so `Replaces #1 in the docs`
+    names nothing. Each case reads the fake gh's calls: at most one read of each named pull request, one
+    `PATCH pulls/<N> state=closed` and one pointer comment for each open one, and no call at all to a pull request the body does not close.
+    The close does not wait on the ready mark: the real Host's ready returns False, and the step still closes. Not a GhHalf subclass: the GhHalf tests must not run twice."""
+    set, calls, gh_host, go, gh_state = GhHalf.set, GhHalf.calls, GhHalf.gh_host, GhHalf.go, GhHalf.gh_state
+
+    def setUp(self):
+        super().setUp()
+        gh_case_setup(self)
+
+    def ready(self, number, body, named=(), **state):
+        """`merge <number> --ready` on a draft lane whose body is `body`. `named` is [(pull request number, "open" | "closed" | "merged")]: each one
+        a pull request of this repo. -> (rc, stdout and stderr together)."""
+        rows = [[f"named-{n}", f"{n:040x}", "main", n] for n, _s in named]
+        extra = {str(n): {"state": "open" if s == "open" else "closed", "merged": s == "merged"} for n, s in named}
+        self.set(pr_number=number, draft=True, body=body, open_prs=rows, pr_extra=extra, **state)
+        return self.run_merge(str(number), "--ready", host=self.gh_host())
+
+    def lines_naming(self, n):
+        """The fake gh's calls that name pull request n: its reads, its close and the comments on it."""
+        return [line for line in self.calls().splitlines() if re.search(rf"(?:pulls|issues)/{n}(?:\s|/|$)", line)]
+
+    def reads_of(self, n):
+        """How many times the step read pull request n, one `GET pulls/<n>` each (a query string on the line does not change the count)."""
+        return sum(1 for line in self.calls().splitlines() if re.fullmatch(rf"GET pulls/{n}(?: .*)?", line))
+
+    def posts_on(self, n):
+        """The comment bodies posted on pull request n."""
+        return [p["body"] for p in self.gh_state("posted") or [] if p["n"] == n]
+
+    def assert_closed_with_pointer(self, n, by, out):
+        """Pull request n was closed, and exactly one comment on it names the kept pull request `by`."""
+        self.assertIn(f"PATCH pulls/{n} state=closed", self.calls().splitlines(), f"#{n} stayed open, though the body names it as replaced by #{by}:\n{out}")
+        posted = self.posts_on(n)
+        self.assertEqual(len(posted), 1, f"#{n} got {len(posted)} comments, want one pointer to #{by}:\n{out}")
+        self.assertIn(f"#{by}", posted[0], f"the pointer on #{n} does not name #{by}:\n{posted[0]}")
+
+    def assert_untouched(self, n, out):
+        """Nothing read, closed or commented on pull request n: the body does not name it as replaced."""
+        self.assertEqual(self.lines_naming(n), [], f"#{n} was read or changed, though the body does not name it as replaced:\n{out}")
+        self.assertEqual(self.posts_on(n), [], f"#{n} got a comment, though the body does not name it as replaced:\n{out}")
+
+    def test_a_replaces_line_closes_the_named_open_pull_request_at_ready(self):
+        rc, out = self.ready(3210, "Replaces #1636", named=[(1636, "open")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_carries_line_closes_the_named_open_pull_request_at_ready(self):  # the #3277 behind #3278 incident
+        rc, out = self.ready(3278, "Carries #3277", named=[(3277, "open")])
+        self.assert_closed_with_pointer(3277, 3278, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_name_inside_a_fenced_code_block_closes_nothing(self):
+        rc, out = self.ready(3210, "Replaces #1636\n\n```\nReplaces #1700\n```\n", named=[(1636, "open"), (1700, "open")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        self.assert_untouched(1700, out)
+
+    def test_a_name_inside_an_inline_code_span_closes_nothing(self):
+        rc, out = self.ready(3210, "Replaces #1636\n\nThe old form was `Replaces #1700`.", named=[(1636, "open"), (1700, "open")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        self.assert_untouched(1700, out)
+
+    def test_a_name_on_a_quote_line_closes_nothing(self):
+        rc, out = self.ready(3210, "Replaces #1636\n\n> Replaces #1700", named=[(1636, "open"), (1700, "open")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        self.assert_untouched(1700, out)
+
+    def test_a_pull_request_that_names_itself_is_not_closed_and_the_other_name_is(self):
+        rc, out = self.ready(3210, "Replaces #3210\nReplaces #1636", named=[(1636, "open")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        self.assertNotIn("PATCH pulls/3210 state=closed", self.calls().splitlines(), "the step closed its own pull request:\n" + out)
+        self.assertEqual(self.posts_on(3210), [], "the step commented on its own pull request:\n" + out)
+
+    def test_a_named_pull_request_already_closed_or_merged_gets_no_close_and_no_comment(self):
+        rc, out = self.ready(3210, "Replaces #1636\nReplaces #1700\nReplaces #1701", named=[(1636, "open"), (1700, "closed"), (1701, "merged")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        for n in (1700, 1701):
+            with self.subTest(n=n):
+                self.assertNotIn(f"PATCH pulls/{n} state=closed", self.calls().splitlines(), f"#{n} was closed again:\n{out}")
+                self.assertEqual(self.posts_on(n), [], f"#{n} got a pointer comment though it is not open:\n{out}")
+
+    def test_a_name_in_another_repo_is_never_closed_here(self):
+        body = "Replaces other/repo#1800\nReplaces https://github.com/other/repo/pull/1801\nReplaces #1636"
+        rc, out = self.ready(3210, body, named=[(1636, "open"), (1800, "open"), (1801, "open")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        self.assert_untouched(1800, out)
+        self.assert_untouched(1801, out)
+        p = pathlib.Path(self.state, "repos.log")
+        self.assertNotIn("other/repo", set(p.read_text().split()) if p.exists() else set(), "the step called another repo's pull requests:\n" + out)
+
+    def test_see_and_related_names_close_nothing(self):
+        rc, out = self.ready(3210, "Replaces #1636\n\nSee #1700 and related #1701.", named=[(1636, "open"), (1700, "open"), (1701, "open")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        self.assert_untouched(1700, out)
+        self.assert_untouched(1701, out)
+
+    def test_a_refused_close_stops_the_step_and_names_the_pull_request(self):
+        rc, out = self.ready(3210, "Replaces #1636", named=[(1636, "open")], close_fail=rest_err(422, "Unprocessable Entity"))
+        self.assertIn("PATCH pulls/1636 state=closed", self.calls().splitlines(), "the close of #1636 was never sent:\n" + out)
+        self.assertNotEqual(rc, 0, "a refused close left the step at exit 0, so the lane read as done:\n" + out)
+        self.assertIn("1636", out, "the stop does not name #1636:\n" + out)
+
+    def test_each_named_open_pull_request_costs_at_most_one_read_one_close_and_one_comment(self):
+        named = [(1636, "open"), (1637, "open"), (1638, "open")]
+        rc, out = self.ready(3210, "Replaces #1636\nReplaces #1637\nReplaces #1638", named=named)
+        for n, _s in named:
+            with self.subTest(n=n):
+                self.assertEqual(self.calls().splitlines().count(f"PATCH pulls/{n} state=closed"), 1, f"the close of #{n} was not one call:\n{out}")
+                self.assertLessEqual(self.reads_of(n), 1, f"#{n} was read more than once:\n{out}")
+                self.assertEqual(len(self.posts_on(n)), 1, f"#{n} did not get one pointer comment:\n{out}")
+
+    def test_a_body_that_names_no_pull_request_closes_nothing(self):  # control: green on the old code
+        rc, out = self.ready(3210, "Lane work. See the record.", named=[(1636, "open")])
+        self.assertEqual(rc, 0, out)
+        self.assert_untouched(1636, out)
+
+    def test_a_preview_of_the_lane_closes_nothing(self):  # control: green on the old code; the close belongs to the ready act only
+        self.set(pr_number=3210, draft=True, body="Replaces #1636", open_prs=[["named-1636", f"{1636:040x}", "main", 1636]])
+        rc, out = self.run_merge("3210", host=self.gh_host())
+        self.assertEqual(rc, 0, out)
+        self.assert_untouched(1636, out)
+
+    def test_a_replaces_list_joined_by_and_closes_every_number_in_it(self):
+        rc, out = self.ready(3210, "Replaces #12, #13, and #14", named=[(12, "open"), (13, "open"), (14, "open")])
+        for n in (12, 13, 14):
+            with self.subTest(n=n):
+                self.assert_closed_with_pointer(n, 3210, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_replaces_line_with_pr_before_the_number_closes_it(self):
+        rc, out = self.ready(3210, "Replaces PR #1636", named=[(1636, "open")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_replaces_line_with_a_colon_closes_the_number(self):
+        rc, out = self.ready(3210, "Replaces: #1636", named=[(1636, "open")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_bold_replaces_word_closes_the_number(self):
+        rc, out = self.ready(3210, "**Replaces** #1636", named=[(1636, "open")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_bullet_replaces_line_closes_the_number(self):  # control: green on the old code
+        rc, out = self.ready(3210, "- Replaces #1636", named=[(1636, "open")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_prose_this_replaces_closes_nothing(self):  # control: green on the old code
+        rc, out = self.ready(3210, "This replaces #1636 in the old lane.", named=[(1636, "open")])
+        self.assertEqual(rc, 0, out)
+        self.assert_untouched(1636, out)
+
+    def test_an_integration_pr_at_ready_closes_its_open_lanes_and_not_a_dropped_one(self):  # control: green on the old code
+        lanes = {3301: "a" * 40, 3302: "b" * 40, 3303: "c" * 40}
+        self.push_branch(merge.integration_branch("x"))
+        body = "\n".join(merge.freeze_lines("x", lanes, dropped=[3303]))
+        rc, out = self.ready(7, body, named=[(3301, "open"), (3302, "open"), (3303, "open")], head_ref=merge.integration_branch("x"))
+        self.assertEqual(rc, 0, out)
+        for n in (3301, 3302):
+            self.assert_closed_with_pointer(n, 7, out)
+        self.assert_untouched(3303, out)
+
+    def test_a_name_with_words_after_its_number_closes_nothing(self):  # step 4: a number list counts only at the end of its line or sentence
+        rc, out = self.ready(3210, "Replaces #1636 in the docs", named=[(1636, "open")])
+        self.assert_untouched(1636, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_possessive_after_a_replaces_number_closes_nothing(self):
+        rc, out = self.ready(3210, "Replaces #1637's polling with webhooks", named=[(1637, "open")])
+        self.assert_untouched(1637, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_carries_line_with_a_word_after_its_number_closes_nothing(self):
+        rc, out = self.ready(3210, "Carries #1638 forward", named=[(1638, "open")])
+        self.assert_untouched(1638, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_replaces_list_followed_by_a_clause_names_none_of_its_numbers(self):
+        rc, out = self.ready(3210, "Replaces #1639, #1640, and see #1641", named=[(1639, "open"), (1640, "open"), (1641, "open")])
+        for n in (1639, 1640, 1641):
+            with self.subTest(n=n):
+                self.assert_untouched(n, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_replaces_list_ending_in_a_period_still_closes_every_number(self):  # control: green on the old code
+        rc, out = self.ready(3210, "Replaces #1642, #1643, and #1644.", named=[(1642, "open"), (1643, "open"), (1644, "open")])
+        for n in (1642, 1643, 1644):
+            with self.subTest(n=n):
+                self.assert_closed_with_pointer(n, 3210, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_replaces_line_ending_in_a_period_still_closes_its_number(self):  # control: green on the old code
+        rc, out = self.ready(3210, "Replaces #1645.", named=[(1645, "open")])
+        self.assert_closed_with_pointer(1645, 3210, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_carries_line_naming_a_dropped_lane_of_an_integration_pr_closes_nothing_at_ready(self):
+        lanes = {3301: "a" * 40, 3302: "b" * 40}
+        self.push_branch(merge.integration_branch("x"))
+        body = "\n".join(["Carries #3302", *merge.freeze_lines("x", lanes, dropped=[3302])])
+        rc, out = self.ready(7, body, named=[(3301, "open"), (3302, "open")], head_ref=merge.integration_branch("x"))
+        self.assert_closed_with_pointer(3301, 7, out)  # control: the kept lane still closes
+        self.assert_untouched(3302, out)
+        self.assertEqual(rc, 0, out)
+
+    @staticmethod
+    def replaces_list(sep, ending):
+        """One Replaces line that names 40 distinct pull requests (#1000, #1007, ...) joined by `sep`, then `ending`."""
+        return "Replaces " + sep.join(f"#{1000 + 7 * i}" for i in range(40)) + ending
+
+    def replaced_names_timed(self, body):
+        """`merge.replaced_names` on pull request 3210 whose body is `body`. The cases here call that function directly, not the ready act.
+        It runs in a child process: a backtracking regex holds the GIL, so a thread could not stop it. The child is killed at 10 s, and that fails the case.
+        The clock runs in the child, around the call only, so the import of merge is not counted. -> (the names, the seconds the call took)."""
+        code = ("import json, sys, time\n"
+                "sys.path.insert(0, sys.argv[1])\n"
+                "import merge\n"
+                "t0 = time.monotonic()\n"
+                "names = merge.replaced_names({'branch': 'lane', 'body': sys.argv[2]}, 3210)\n"
+                "print(json.dumps({'elapsed': time.monotonic() - t0, 'names': names}))\n")
+        try:
+            r = subprocess.run([sys.executable, "-B", "-c", code, HERE, body], capture_output=True, text=True, timeout=10)
+        except subprocess.TimeoutExpired:
+            self.fail("replaced_names did not return within 10 s on a 40-number Replaces list: the number-list regex backtracks")
+        self.assertEqual(r.returncode, 0, "the child that calls replaced_names exited %d:\n%s" % (r.returncode, r.stderr))
+        got = json.loads(r.stdout)
+        return got["names"], got["elapsed"]
+
+    def test_backtrack_comma_space_list_then_a_clause_returns_fast_and_names_none(self):
+        """The line does not end at its number list, so it names none. Head takes past the 10 s kill on this body."""
+        names, elapsed = self.replaced_names_timed(self.replaces_list(", ", " from the backlog"))
+        self.assertLess(elapsed, 2, "replaced_names took %.2f s on a 40-number list joined by ', ' then a clause; the bound is 2 s" % elapsed)
+        self.assertEqual(names, [], "a line whose number list does not end the line names none, and replaced_names named %s" % names)
+
+    def test_backtrack_comma_space_list_ending_in_a_period_names_all_forty(self):  # control: green on the old code
+        names, elapsed = self.replaced_names_timed(self.replaces_list(", ", "."))
+        self.assertLess(elapsed, 2, "replaced_names took %.2f s on a 40-number list ending in '.'; the bound is 2 s" % elapsed)
+        self.assertEqual(names, [1000 + 7 * i for i in range(40)], "the period-ended list should name all 40 numbers in order, and it named %s" % names)
+
+    def test_backtrack_and_amp_and_comma_lists_then_a_clause_return_fast_and_name_none(self):  # control: green on the old code
+        for sep in (" and ", " & ", ","):
+            with self.subTest(sep=sep):
+                names, elapsed = self.replaced_names_timed(self.replaces_list(sep, " from the backlog"))
+                self.assertLess(elapsed, 2, "replaced_names took %.2f s on a 40-number list joined by %r then a clause; the bound is 2 s" % (elapsed, sep))
+                self.assertEqual(names, [], "a line whose number list does not end the line names none, and replaced_names named %s" % names)
+
+
+class ReadyUsage(unittest.TestCase):
+    """The usage text of `merge <pr> --ready` says the draft step also closes the pull requests the body names as replaced (step close-replaced-at-open).
+    Two sources hold that text: the --ready help string the parser prints, and the module docstring's entry for the act. Each case finds its entry first
+    (the scope), then asserts that the entry names the close (the subject). Whitespace is joined, so a wrapped line reads as one line."""
+
+    def assert_names_the_close(self, entry, source):
+        text = " ".join(entry.split())
+        self.assertRegex(text, r"\bclos\w*\b[^.]*\breplaced\b", f"the --ready entry in {source} does not say it closes the replaced pull requests:\n{text}")
+
+    def test_the_ready_help_string_says_it_closes_the_replaced_pull_requests(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):
+            merge.main(["--help"])
+        lines = out.getvalue().splitlines()
+        start = next((i for i, line in enumerate(lines) if line.lstrip().startswith("--ready")), None)
+        self.assertIsNotNone(start, "merge --help has no --ready entry:\n" + out.getvalue())
+        entry = [lines[start]]
+        for line in lines[start + 1:]:
+            if not line.startswith(" " * 10):  # argparse indents a help line's wrapped part to the help column; the next option starts at two
+                break
+            entry.append(line)
+        self.assert_names_the_close("\n".join(entry), "merge --help")
+
+    def test_the_module_docstring_entry_for_ready_says_it_closes_the_replaced_pull_requests(self):
+        lines = merge.__doc__.splitlines()
+        start = next((i for i, line in enumerate(lines) if line.lstrip().startswith("merge <pr> --ready")), None)
+        self.assertIsNotNone(start, "the module docstring has no `merge <pr> --ready` entry")
+        end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("  merge ")), len(lines))
+        self.assert_names_the_close("\n".join(lines[start:end]), "the module docstring")
+
+
 def put_base_config(env, text):
     """Commit `text` as .github/stamp.json on origin's main from the other clone. env.co keeps its local checkout."""
     o = env.other
@@ -6428,7 +6730,6 @@ class SilentUndo(Env):
 
 DEBT_FIXTURE = "# Retire target\n\n- **What.** A fixture debt for the merge tests.\n- **Where.** None.\n- **Decision.** none\n- **Retire.** %s\n"
 RETIRE_TEST = "Delete the fixture. Check: `tests/test_retire_target.py`."
-PROSE_RETIRE = "Confirm it on a phone."  # names no runnable check: the close needs a cited run
 
 
 def names_kind(test, out, slug, kind):
@@ -6487,16 +6788,22 @@ class DebtRetire(Env):
 
     def test_preview_refuses_a_closed_debt_whose_retire_check_is_red(self):
         self.pr_on_debt(1)
+        self.host.state = "red: checks: fail"  # the head's CI is not green, so preview runs the Retire check itself
         rc, out = self.run_merge("7")
         self.assertEqual(rc, 1, out)
         names_kind(self, out, "retire-target", "red")
 
-    def test_confirm_refuses_a_closed_debt_whose_retire_check_is_red_before_any_claim_or_push(self):
+    def test_confirm_with_red_ci_refuses_at_the_head_wait_before_any_claim_or_push(self):
+        """CI's verdict on the head is the gate at confirm. A red head read refuses before the claim, and confirm runs no Retire check."""
         self.pr_on_debt(1)
+        calls = self.stub_retire_check()
+        self.host.state = "red: checks: fail"  # the head reads red: refused before any claim
         before = self.refs()
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
-        names_kind(self, out, "retire-target", "red")
+        self.assertIn("nothing was claimed or pushed", out)
+        self.assertIn("checks: fail", out, "the stop does not print the red check")
+        self.assertEqual(calls, [], "confirm called the Retire check")
         self.assertEqual(self.refs(), before, "a refused confirm pushed")
         self.assertEqual(self.claims(), 0, "a refused confirm claimed a record number")
         self.assertFalse(getattr(self.host, "merged", False), "a refused confirm merged")
@@ -6522,67 +6829,69 @@ class DebtRetire(Env):
         self.assertIn("PREVIEW", out)
         self.assertNotIn("BLOCKED", out)
 
-    def test_confirm_with_a_claim_keeps_a_cited_run_on_the_pr_head(self):
-        """The claim commit goes on top of the PR head. The cited run is on that head, so the re-check after the claim must accept it."""
-        self.pr_on_debt(0, retire=PROSE_RETIRE)
-        run_head = self.head()  # the run was on this head; the claim pushes the branch past it
-        self.host.body = "Retire-run: retire-target -- https://github.com/fixture/repo/actions/runs/42\n"
-        self.host.cited_run = lambda url: ("success", run_head)
+    def stub_retire_check(self):
+        """Stand in for check_debt_retire.check: each call is recorded, and it finds nothing. -> the list of recorded calls."""
+        import check_debt_retire
+        calls = []
+
+        def check(*args, **kwargs):
+            calls.append((args, kwargs))
+            return []
+
+        patch = unittest.mock.patch.object(check_debt_retire, "check", check)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return calls
+
+    def ci_closes_a_debt(self, state):
+        """Scope: feat deletes the debt file, and the host reports `state` on the head."""
+        self.assertIn("D\tdocs/debts/retire-target.md", sh(self.co, "git", "diff", "--name-status", "origin/main", "origin/feat"),
+                      "scope: feat does not close the debt, so there is no close to judge")
+        self.host.state = state
+        self.assertEqual(self.host.head_state(7), state, "scope: the host does not report %s CI" % state)
+
+    def green_ci_closes_a_debt(self):
+        """Scope: feat deletes the debt file, and the host reports green CI on the head."""
+        self.ci_closes_a_debt("green")
+
+    def test_confirm_with_green_ci_never_calls_the_retire_check(self):
+        """The Retire run moved into CI, so a host that reports green CI is not asked for the check at confirm, before the claim or after its wait."""
+        self.pr_on_debt(1)  # the close's own Retire test is red: merge would refuse it if it still ran the check
+        self.green_ci_closes_a_debt()
+        calls = self.stub_retire_check()
         rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 0, out)
-        self.assertEqual(self.claims(), 1, out)
-        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(rc, 0, "scope: confirm did not reach its merge: " + out)
+        self.assertTrue(getattr(self.host, "merged", False), "scope: confirm did not merge")
+        self.assertEqual(calls, [], "confirm called the Retire check with green CI")
 
-    def test_confirm_claim_does_not_carry_a_file_the_retire_test_wrote(self):
-        """The Retire test runs in the merge worktree, before the claim's `git add -A`. A file the test leaves there is no part of the claim."""
-        self.pr_on_debt(0, test_text="import sys\nopen('junk-from-test.txt', 'w').write('x')\nsys.exit(0)\n")
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 0, out)
-        self.assertEqual(self.claims(), 1, out)
-        names = sh(self.co, "git", "log", "origin/main", "--format=", "--name-only")  # the claim is a parent of the merge: its files are in the log
-        self.assertNotIn("junk-from-test.txt", names, "the claim commit holds a file the Retire test wrote into the merge folder")
+    def test_preview_with_green_ci_never_calls_the_retire_check(self):
+        self.pr_on_debt(1)
+        self.green_ci_closes_a_debt()
+        calls = self.stub_retire_check()
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, "scope: preview did not reach its verdict: " + out)
+        self.assertEqual(calls, [], "preview called the Retire check with green CI")
 
+    def test_preview_runs_the_retire_check_when_head_ci_is_pending(self):
+        """Pending CI is not green, so preview runs the Retire check on the head. The close's own Retire test is red, so a real run would refuse it."""
+        self.pr_on_debt(1)
+        self.ci_closes_a_debt("pending: checks")
+        calls = self.stub_retire_check()
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, "scope: preview did not reach its verdict: " + out)
+        self.assertEqual(len(calls), 1, "preview did not call the Retire check once with pending CI")
 
-    def cited_run_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self, error):
-        """The PR closes a debt by a prose check and cites a run on its head. The run reads green before the claim push; after it, the read raises."""
-        self.pr_on_debt(0, retire=PROSE_RETIRE)
-        run_head = self.head()
-        self.host.body = "Retire-run: retire-target -- https://github.com/fixture/repo/actions/runs/42\n"
-        claimed = []
-        def read(url):
-            if claimed:
-                raise error
-            return "success", run_head
-        self.host.cited_run = read
-        self.host.on_claim = lambda: claimed.append(self.head())
-        rc, out = self.run_merge("7", "--confirm")
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
-        self.assertIn("could not be read", out, "the stop does not name the cited run that could not be read")
-        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+    def test_preview_runs_the_retire_check_when_head_ci_is_unknown(self):
+        """An unknown read of the head's CI is not green, so preview runs the Retire check on the head. The close's own Retire test is red."""
+        self.pr_on_debt(1)
+        self.ci_closes_a_debt("unknown (a read of the head's checks failed)")
+        calls = self.stub_retire_check()
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, "scope: preview did not reach its verdict: " + out)
+        self.assertEqual(len(calls), 1, "preview did not call the Retire check once with unknown CI")
 
-    def test_a_cited_run_read_that_fails_with_a_network_error_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        self.cited_run_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(merge.NetStop("the run's reply was cut short"))
-
-    def test_a_cited_run_read_that_fails_with_an_error_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        self.cited_run_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(RuntimeError("boom"))
-
-    def test_a_cited_run_that_is_red_after_the_claim_push_still_reverts(self):
-        """A real finding: the cited run reads green before the claim push and red after it. A red finding refuses, so the claim reverts."""
-        self.pr_on_debt(0, retire=PROSE_RETIRE)
-        run_head = self.head()
-        self.host.body = "Retire-run: retire-target -- https://github.com/fixture/repo/actions/runs/42\n"
-        claimed = []
-        self.host.on_claim = lambda: claimed.append(self.head())
-        self.host.cited_run = lambda url: ("failure", run_head) if claimed else ("success", run_head)
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 1, out)
-        self.assertIn("reverted on feat", out)
-        self.assertIn("closes a debt without proof", out)
-        self.assertEqual(self.show("feat", "docs/decisions/second.md"), record("pending", "second").strip())
-        self.assertFalse(self.lock_ref(), "the merge lock was left on origin")
-
-    # The lock outlasts the long checks (debt_check runs each Retire test up to 1800 s; undo_check has no bound). Each check call is preceded by
-    # its own extend_for, so the lock is never left to the take's fixed expiry under a check.
+    # The lock outlasts the long check that confirm runs, undo_check, which has no bound. Each check call is preceded by its own extend_for, so the
+    # lock is never left to the take's fixed expiry under a check. confirm runs no debt check (ruling R2, owner 14:07 CST Nov 10).
 
     LOCK_REFUSAL = "the fake lock refuses the extension"
 
@@ -6630,27 +6939,33 @@ class DebtRetire(Env):
         self.spy_checks(events)
         return self.run_merge("7", "--confirm", lock=self.recording_lock(events))
 
-    def assert_claimed_and_checked_twice(self, events, out):
-        """Scope before subject (P7): the claim was pushed and merged, and each check ran twice, before the claim and inside prove."""
+    def assert_claimed_and_undo_checked_twice(self, events, out):
+        """Scope before subject (P7): the claim was pushed and merged, and the undo check ran twice, before the claim and inside prove. confirm of a
+        ready PR runs no debt check (ruling R2, owner 14:07 CST Nov 10), so the debt check count is 0."""
         self.assertEqual(self.claims(), 1, out)
         self.assertTrue(getattr(self.host, "merged", False), out)
-        self.assertGreaterEqual(events.count(("check", "debt")), 2, "the debt check ran fewer than twice, so the case misses the call inside prove")
+        self.assertEqual(events.count(("check", "debt")), 0, f"confirm ran a debt check, which ruling R2 removed from confirm (run order: {events})")
         self.assertGreaterEqual(events.count(("check", "undo")), 2, "the undo check ran fewer than twice, so the case misses the call inside prove")
 
-    def test_confirm_extends_the_lock_for_1800_s_before_each_debt_check(self):
+    def test_confirm_of_a_ready_pr_runs_no_debt_check_and_extends_no_lock_for_one(self):
+        """Ruling R2 (owner, 14:07 CST Nov 10): the Retire run moved into CI, so confirm runs no debt check and extends the lock for none. The
+        debt-check length is patched to a value no undo extension uses, so an extension that carries it is a debt check's."""
+        sentinel = 7777
+        patch = unittest.mock.patch.object(merge, "debt_check_lock_seconds", lambda: sentinel, create=True)  # create: the name may go once no caller remains
+        patch.start()
+        self.addCleanup(patch.stop)
         events = []
         rc, out = self.confirm_closed_debt_under_spies(events)
         self.assertEqual(rc, 0, out)
-        self.assert_claimed_and_checked_twice(events, out)
-        lacking = unextended_checks(events, "debt", 1800)
-        self.assertEqual(lacking, [], f"a debt check at event {lacking} ran with no lock extension of 1800 s or more before it, since the check before it "
-                                      f"(run order: {events}). debt_check runs a Retire test for up to 1800 s, and the lock can expire under it")
+        self.assert_claimed_and_undo_checked_twice(events, out)
+        self.assertNotIn(sentinel, [wait for what, wait in events if what == "extend"],
+                         f"confirm extended the lock by {sentinel} s, the debt-check length, before a check (run order: {events})")
 
     def test_confirm_extends_the_lock_for_3600_s_before_each_undo_check(self):
         events = []
         rc, out = self.confirm_closed_debt_under_spies(events)
         self.assertEqual(rc, 0, out)
-        self.assert_claimed_and_checked_twice(events, out)
+        self.assert_claimed_and_undo_checked_twice(events, out)
         lacking = unextended_checks(events, "undo", 3600)
         self.assertEqual(lacking, [], f"an undo check at event {lacking} ran with no lock extension of 3600 s or more before it, since the check before it "
                                       f"(run order: {events}). undo_check has no time bound, and the lock can expire under it")
@@ -6663,7 +6978,7 @@ class DebtRetire(Env):
         self.assertNotIn("AttributeError", out, "a lock with no extend_for crashed confirm")
         self.assertTrue(getattr(self.host, "merged", False), out)
 
-    def test_confirm_stops_before_the_undo_and_debt_checks_when_the_lock_cannot_be_extended(self):
+    def test_confirm_stops_before_the_undo_check_when_the_lock_cannot_be_extended(self):
         """confirm extends the lock before the undo check, its first call under the lock. The extension is refused: no check runs, no claim is pushed, nothing merges."""
         self.pr_on_debt(0)
         events = []
@@ -21013,6 +21328,38 @@ class DraftReady(CloudSession):
         self.assertEqual(self.host.readies, [101], "passing ready checks did not let the draft confirm mark #101 ready once: %s" % out)
         self.assertFalse(self.host.batch_pulls[101]["draft"], "#101 is still a draft after its checks passed: %s" % out)
         self.assertEqual(rc, 0, "a draft confirm with its checks passing exited %s: %s" % (rc, out))
+
+    def debt_close_on_green_head(self, test_exit):
+        """DebtRetire's close fixture, run on PR 7 of this class: feat deletes a debt whose Retire test exits with `test_exit`, and the host reads green CI."""
+        DebtRetire.pr_on_debt(self, test_exit)
+        DebtRetire.ci_closes_a_debt(self, "green")
+
+    def test_fast_checks_refuses_a_red_debt_close_even_with_green_head_ci(self):
+        """The pre-ready route (--fast-checks: pre_ready_rows, debt_verdict, debt_check) runs the debt-close lint with no CI gate: a host that reads
+        green CI on the head does not lift a close whose Retire check is red. Ruling R2 (owner, 14:07 CST Nov 10) keeps the CI gate for the preview only."""
+        self.ready_checks_on_main()
+        self.debt_close_on_green_head(1)  # the close's own Retire test is red
+        with self.ready_check_answers("pass") as ran:
+            rc, out, err = self.run_args("7", "--fast-checks")
+        text = out + err
+        self.assertTrue(ran, "scope: the pre-ready run made no ready-check call: " + text)
+        self.assertIn("pass check invariants", text, "scope: the ready check is not a pass: " + text)
+        self.assertIn("pass open-PR clash", text, "scope: the open-PR clash is not a pass: " + text)
+        self.assertIn("fail debt retire", text, "the pre-ready run did not fail the debt-close lint for a red Retire check with green head CI: " + text)
+        self.assertEqual(rc, 1, "the pre-ready run exited %s, not 1, with a red debt close: %s" % (rc, text))
+        names_kind(self, text, "retire-target", "red")
+
+    def test_fast_checks_passes_a_debt_close_whose_retire_check_holds_with_green_head_ci(self):
+        """The control of the case above: the same pre-ready route, green head CI, and a close whose Retire check holds. The debt line passes."""
+        self.ready_checks_on_main()
+        self.debt_close_on_green_head(0)
+        with self.ready_check_answers("pass") as ran:
+            rc, out, err = self.run_args("7", "--fast-checks")
+        text = out + err
+        self.assertTrue(ran, "scope: the pre-ready run made no ready-check call: " + text)
+        self.assertIn("pass open-PR clash", text, "scope: the open-PR clash is not a pass: " + text)
+        self.assertIn("pass debt retire", text, "the debt-close lint did not pass a close whose Retire check holds: " + text)
+        self.assertEqual(rc, 0, "the pre-ready run exited %s, not 0, with a passing debt close: %s" % (rc, text))
 
     def test_ready_alone_marks_a_lane_draft_ready_once_and_merges_nothing(self):  # per-lane, from the Q2 pick: --ready is not batch-only
         self.lane(101)
