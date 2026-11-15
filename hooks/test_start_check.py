@@ -217,7 +217,7 @@ class StartupLoadBrake(unittest.TestCase):
         reason = stop_of(self, run, "startup with memory 97% and the disk unread")
         want = guard.load_full(reading)
         self.assertTrue(want, "scope: guard.load_full calls memory 97% with the disk unread full, so there is no text to expect")
-        self.assertIn(want[0], reason, "startup with memory 97% and the disk unread: the stop does not name %r" % want[0])
+        self.assertIn(want[0], reason, "startup with memory 97%% and the disk unread: the stop does not name %r" % want[0])
 
     def test_a_reading_that_is_not_a_dict_prints_nothing(self):
         case = new_case()
@@ -259,6 +259,19 @@ class CloudSession(unittest.TestCase):
         stop_of(self, scope, "scope: startup on a full reading, not cloud")
         subject = run_hook(case, payload_text(case), {"reading": FULL}, cloud=True)
         assert_silent(self, subject, "startup on a full reading in a cloud session")
+
+    def test_cloud_session_keeps_the_model_floor_and_skips_the_brake(self):
+        case = new_case()
+        run = run_hook(case, payload_text(case, model=HAIKU), {"reading": NORMAL}, cloud=True)
+        reason = stop_of(self, run, "cloud startup on model %s" % HAIKU)
+        want = guard.floor_hit(guard.SESSION_TOOL, {"model": HAIKU})
+        self.assertTrue(want, "scope: guard.floor_hit does not name %s below the floor" % HAIKU)
+        self.assertIn(want, reason, "cloud startup on %s: the stop does not name the model" % HAIKU)
+        self.assertIn("agent-model-cap", reason, "cloud startup on %s: the stop does not name the decision" % HAIKU)
+        scope = run_hook(case, payload_text(case, model=SONNET), {"reading": FULL})
+        stop_of(self, scope, "scope: non-cloud startup on a full reading with a good model")
+        subject = run_hook(case, payload_text(case, model=SONNET), {"reading": FULL}, cloud=True)
+        assert_silent(self, subject, "cloud startup on a full reading with a good model")
 
 
 class ModelFloor(unittest.TestCase):
