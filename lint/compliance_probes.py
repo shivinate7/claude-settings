@@ -89,11 +89,14 @@ aligned: a record and the rule sentences that cite it change together in a pull 
   records of the child's own decisions folder (layout.candidates). A unit is one sentence: from the end of the
   previous `<!-- rule:X -->` anchor, or the paragraph's start, to its own anchor. A sentence cites a record by its
   slug alone in a code span, or by the anchor its Home line names, at base or at head (a deleted record is still
-  cited). When a record file changes, each citing sentence needs a changed line of its own; when a citing
-  sentence changes, its record needs to be in the diff. A PR body line `Rules checked: <record> — no change`
-  clears one record. An item names the record, the file and the sentence's first line. A missing BASE_SHA or
-  HEAD_SHA, or a diff, folder or file that cannot be read, makes the group unknown. A missing PR_BODY is an
-  empty body. It makes no other git call and writes no file.
+  cited). A sentence changed when a diff line touches it and its text, whitespace aside, is not among the
+  sentences of the lines the diff removes from that file: an edit to a sibling on the same line, or a move with
+  the text kept, is no change. When a record file changes, each citing sentence needs a change of its own; when
+  a citing sentence changes, its record needs to be in the diff. A PR body line `Rules checked: <record> — no
+  change` clears one record. An item names the record, the file and the sentence's first line. A missing
+  BASE_SHA or HEAD_SHA, or a diff, folder or file that cannot be read, makes the group unknown. The walk skips
+  vendor and tool folders (ALIGNED_SKIP). A missing PR_BODY is an empty body. It makes no other git call and
+  writes no file.
 hooks: the clone's settings.json `.hooks` against the live settings.json `.hooks`, with `SessionStart`
   dropped on both sides, since a cloud install rewrites it. The live file is the one install.sh writes:
   `$CLAUDE_CONFIG_DIR/settings.json` when that variable is set and not empty, else `~/.claude/settings.json`.
@@ -1431,7 +1434,10 @@ def probe_words(root):
 RULES_CHECKED = re.compile("^Rules checked: (\\S+) \u2014 no change$")  # one line per record, in the PR body
 HUNK = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 HOME_LINE = re.compile(r"^\s*Home:(.*)$", re.M)
-WALK_SKIP = {".git", "node_modules"}  # folders no rule file lives in; .claude/worktrees is skipped beside them
+# Folders at any depth that hold vendored or tool files, never this repo's rule files: a CLAUDE.md a package ships
+# there is not a rule of this repo, and an unclosed fence in it must not make the group unknown. .claude/worktrees
+# (other checkouts of this repo) is skipped beside them.
+ALIGNED_SKIP = {".git", "node_modules", ".venv", "venv", "site-packages"}
 
 
 def walk_failed(err):
@@ -1439,12 +1445,12 @@ def walk_failed(err):
 
 
 def walked(root):
-    """Every file path under `root`, `/` separated. A walk, not `git ls-files`, so the group makes no second git call.
-    A folder the walk cannot list makes the group unknown: a rule file in it would go unread."""
+    """Every file path under `root`, `/` separated, outside ALIGNED_SKIP. A walk, not `git ls-files`, so the group makes
+    no second git call. A folder the walk cannot list makes the group unknown: a rule file in it would go unread."""
     found = []
     for base, dirs, files in os.walk(root, onerror=walk_failed):
         where = os.path.relpath(base, root).replace(os.sep, "/")
-        dirs[:] = sorted(d for d in dirs if d not in WALK_SKIP and not (where == ".claude" and d == "worktrees"))
+        dirs[:] = sorted(d for d in dirs if d not in ALIGNED_SKIP and not (where == ".claude" and d == "worktrees"))
         found.extend(name if where == "." else where + "/" + name for name in files)
     return found
 
@@ -1452,7 +1458,8 @@ def walked(root):
 def diff_changes(root, base, head):
     """({path: the head-side line numbers the pull request changes}, {path: the text of each line it removes}), from one
     `git diff` of base...head. A path with no line (a binary file, a mode change) is left out. A deletion marks the lines
-    either side of it. A hunk is read by its counts, so a changed line that starts `+++ ` or `@@ ` is no header. A
+    either side of it. The removed lines of two hunks are split by an empty line, so text from separate places never
+    joins into one sentence. A hunk is read by its counts, so a changed line that starts `+++ ` or `@@ ` is no header. A
     deleted file takes its old path. Departs from the parser of lint/stale_cites.py (`added_markdown_lines`): that one
     keeps added .md lines only, from its own git start, and imports the hooks; this group also needs the removed
     lines and the deletion marks, from the one read."""
@@ -1486,6 +1493,8 @@ def diff_changes(root, base, head):
             new = 1 if hunk.group(3) is None else int(hunk.group(3))
             if not new:
                 changed[path].update(n for n in (number, number + 1) if n > 0)
+            if gone and removed.get(path):
+                removed[path].append("")
             while (gone or new) and i < len(rows):
                 body = rows[i]
                 i += 1
@@ -1497,6 +1506,19 @@ def diff_changes(root, base, head):
                     changed[path].add(number)
                     number += 1
     return changed, removed
+
+
+def flat(text):
+    """`text` with each run of whitespace made one space: a sentence rewrapped over other lines is the same sentence."""
+    return " ".join(text.split())
+
+
+def old_sentences(lines, rel):
+    """The `flat` text of each sentence in `lines`, the lines the diff removes from `rel`, cut as head sentences are
+    (`paragraph_rows`, `split_sentences`). A fence line is read as a blank line: a hunk may hold one fence line of a pair,
+    and a fence is no sentence."""
+    text = "\n".join("" if FENCE.match(line) else line for line in lines)
+    return {flat(s) for _, _, rows in paragraph_rows(text, rel, span_continues=True) for _, _, s in split_sentences(rows)}
 
 
 def home_anchors(text):
@@ -1564,9 +1586,15 @@ def probe_aligned(root):
         old = records.setdefault(slug, [])
         old.extend(a for a in home_anchors("\n".join(gone)) if a not in old)
     units, files = child_unit_spans(root, rule_scope(root), walked(root), span_continues=True, sentences=True)
-    hits = []
+    hits, was = [], {}
     for rel, first, last, unit in units:
+        # A diff line touches the sentence, and its text is new: a sibling edited on its line, or the sentence moved
+        # with its text kept, leaves the text among the removed sentences.
         moved = not changes.get(rel, set()).isdisjoint(range(first, last + 1))
+        if moved:
+            if rel not in was:
+                was[rel] = old_sentences(removed.get(rel, []), rel)
+            moved = flat(unit) not in was[rel]
         for slug in sorted(cited_records(unit, records)):
             if slug in checked:
                 continue
