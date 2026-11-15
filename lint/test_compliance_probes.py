@@ -3259,6 +3259,285 @@ class XcodebuildRuns(unittest.TestCase):
         self.assertIn("test", runs[0], runs)  # then its action: an unclosed quote is text, and `test` stays in the run
 
 
+# The aligned group (brief rules-decisions-aligned): a decision record and each rule unit that cites it move together in a
+# pull request, or the PR body says why not. Each case builds a child on origin/main, then one PR branch, and runs the
+# probe with that PR's env (BASE_SHA, HEAD_SHA, PR_BODY). The record and the citing units are fixture text written here.
+ALIGNED_ROUND = "hold-unsafe-after-round-3"  # the record slug a citing unit names in a code span
+ALIGNED_HOME = "roles-review-cap-three"  # the anchor that record's Home line names
+ALIGNED_RECORD = "docs/decisions/%s.md" % ALIGNED_ROUND
+ALIGNED_DASH = "—"  # the em dash of the `Rules checked:` form
+ALIGNED_LINE38 = "- Owner ruling: a passing round ends review."
+ALIGNED_LINE38_NEW = "- Owner ruling: a passing round ends review, and so does a passing fix check after it."
+ALIGNED_CITE = "- Review rounds: a change gets at most three review rounds. Decision `%s` holds the round rules." % ALIGNED_ROUND
+ALIGNED_ANCHOR = "- Review rounds: a change gets at most three review rounds. <!-- rule:%s -->" % ALIGNED_HOME
+ALIGNED_FILLER = ["- Repo note %d: this repo keeps its own lane labels." % n for n in range(1, 301)]
+ALIGNED_RULES_CHECKED = "Rules checked: %s %s no change" % (ALIGNED_ROUND, ALIGNED_DASH)
+
+
+def aligned_record(line38):
+    """A record of 43 lines: line 38 is `line38`, and the Home line names the anchor that citing units use."""
+    lines = ["Fixture record line %d: text that no citing unit holds." % n for n in range(1, 38)]
+    lines.append(line38)
+    lines += ["Fixture record line %d: more text." % n for n in range(39, 42)]
+    lines += ["Kind: process", "Home: rule:%s" % ALIGNED_HOME]
+    return "\n".join(lines) + "\n"
+
+
+def unit_file(unit, before=ALIGNED_FILLER[:37], after=ALIGNED_FILLER[37:40]):
+    """A rule file of `before` units, then `unit`, then `after`, a blank line between each. Returns (text, the unit's
+    first line number)."""
+    units = list(before) + [unit] + list(after)
+    line = sum(part.count("\n") + 1 for part in before) + len(before) + 1
+    return "\n\n".join(units) + "\n", line
+
+
+def commit_sha(root, rev):
+    return subprocess.run(["git", "-C", root, "rev-parse", rev], capture_output=True, text=True, check=True).stdout.strip()
+
+
+def pr_env(base, head_sha, body=None, drop=()):
+    """The environment of one PR's probe run: the base and head shas, and PR_BODY when `body` is not None."""
+    env = dict(os.environ)
+    env.update(BASE_SHA=base, HEAD_SHA=head_sha)
+    if body is None:
+        env.pop("PR_BODY", None)
+    else:
+        env["PR_BODY"] = body
+    for key in drop:
+        env.pop(key, None)
+    return env
+
+
+def run_aligned(root, env):
+    """(exit code, stdout, stderr) of `compliance_probes.py aligned <root>` run with `env`."""
+    done = subprocess.run([sys.executable, PROBES, "aligned", root], env=env, capture_output=True, text=True)
+    return done.returncode, done.stdout, done.stderr
+
+
+class AlignedSteps:
+    """The steps the aligned cases share: a child on origin/main that holds a record and its citing units, one PR branch
+    that changes some of them, and the probe run with that PR's env. Not `run`: that name is unittest's own."""
+
+    def pr(self, base, change):
+        """A child on origin/main holding `base` ({path: text}), and a PR branch on it that writes `change`."""
+        repo = Repo(self, origin=True)
+        for rel, text in base.items():
+            repo.write(rel, text)
+        repo.publish()
+        repo.base_sha = commit_sha(repo.root, "HEAD")
+        repo.branch("pr")
+        for rel, text in change.items():
+            repo.write(rel, text)
+        return repo.commit("change")
+
+    def cited(self, unit=ALIGNED_CITE, rel="CLAUDE.md", line38=ALIGNED_LINE38):
+        """(base files, where): a base holding the record and one citing unit in `rel`, and the unit's `file:line`."""
+        text, line = unit_file(unit)
+        return {rel: text, ALIGNED_RECORD: aligned_record(line38)}, "%s:%d" % (rel, line)
+
+    def probe_pr(self, repo, body=None, drop=(), base=None):
+        """(exit code, stdout, stderr) of the probe on the PR `repo` holds: its base, its head and its body."""
+        return run_aligned(repo.root, pr_env(base or repo.base_sha, commit_sha(repo.root, "HEAD"), body, drop))
+
+    def assert_refused(self, repo, where, *names, **kw):
+        """The probe refuses the PR. It names the citing unit at `where` first, then exits 1, then names each of `names`."""
+        code, out, err = self.probe_pr(repo, **kw)
+        self.assertIsNotNone(item_for(out, where), "the citing unit at %s is not named: %s%s" % (where, out, err))
+        self.assertEqual(code, 1, "the refusal exits with the wrong code: %s%s" % (out, err))
+        for name in names:
+            self.assertIn(name, out, "the refusal does not name %s: %s" % (name, out))
+
+    def assert_clear(self, repo, **kw):
+        """The probe reads the PR and clears it: in shape, exit 0."""
+        code, out, err = self.probe_pr(repo, **kw)
+        self.assertTrue(head(out).startswith("aligned: in shape"), "the PR is refused or not read: %s%s" % (out, err))
+        self.assertEqual(code, 0, "the verdict is in shape but the exit is not 0: %s%s" % (out, err))
+
+
+class AlignedRecord(AlignedSteps, unittest.TestCase):
+    """Items 1, 2, 4 and 7: a record and the units that cite it move together, or the PR body says why not. The round-three
+    fixture is the record of item 4: line 38 changes, and the citing unit sits in CLAUDE.md."""
+
+    def test_round_three_record_change_without_its_citing_line_is_refused(self):
+        base, where = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_refused(repo, where, ALIGNED_ROUND, "Rules checked:")
+
+    def test_round_three_record_change_with_its_citing_line_changed_passes(self):  # green control
+        base, _ = self.cited()
+        changed, _ = unit_file(ALIGNED_CITE + " The rule covers a fix check too.")
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW), "CLAUDE.md": changed})
+        self.assert_clear(repo)
+
+    def test_round_three_record_change_with_a_rules_checked_line_passes(self):  # green control: the line sits among others
+        base, _ = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_clear(repo, body="Summary of the change.\n%s\nTests: run." % ALIGNED_RULES_CHECKED)
+
+    def test_a_rules_checked_line_for_another_record_does_not_clear(self):
+        base, where = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_refused(repo, where, ALIGNED_ROUND, body="Rules checked: other-record-slug %s no change" % ALIGNED_DASH)
+
+    def test_a_missing_pr_body_refuses_and_names_the_fix(self):
+        base, where = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        for body in (None, ""):
+            with self.subTest(body=body):
+                self.assert_refused(repo, where, ALIGNED_ROUND, "Rules checked:", body=body)
+
+    def test_a_citing_unit_change_without_its_record_is_refused(self):  # item 2, the reverse direction
+        base, where = self.cited()
+        changed, _ = unit_file(ALIGNED_CITE + " A second sentence.")
+        repo = self.pr(base, {"CLAUDE.md": changed})
+        self.assert_refused(repo, where, ALIGNED_ROUND, "Rules checked:")
+
+    def test_a_citing_unit_change_with_its_record_changed_passes(self):  # green control
+        base, _ = self.cited()
+        changed, _ = unit_file(ALIGNED_CITE + " A second sentence.")
+        repo = self.pr(base, {"CLAUDE.md": changed, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_clear(repo)
+
+    def test_a_citing_unit_change_with_a_rules_checked_line_passes(self):  # green control
+        base, _ = self.cited()
+        changed, _ = unit_file(ALIGNED_CITE + " A second sentence.")
+        repo = self.pr(base, {"CLAUDE.md": changed})
+        self.assert_clear(repo, body=ALIGNED_RULES_CHECKED)
+
+    def test_a_citing_anchor_alone_counts_as_a_citation(self):  # the second form: `<!-- rule:X -->` against a Home line
+        base, where = self.cited(unit=ALIGNED_ANCHOR)
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_refused(repo, where, ALIGNED_ROUND)
+
+    def test_a_citing_unit_at_the_end_of_a_long_file_is_refused_at_its_line(self):  # full size: 300 units before it
+        text, line = unit_file(ALIGNED_CITE, before=ALIGNED_FILLER, after=[])
+        base = {"CLAUDE.md": text, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38)}
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_refused(repo, "CLAUDE.md:%d" % line, ALIGNED_ROUND)
+
+
+class AlignedLocations(AlignedSteps, unittest.TestCase):
+    """Item 1: a citing unit counts in CLAUDE.md, in .claude/rules, in docs/rules and in each shared rule file."""
+
+    def test_a_record_change_is_refused_for_a_citing_unit_in_each_rule_location(self):
+        locations = ["CLAUDE.md", kind_path("rules") + "/review.md", "docs/rules/review.md"]
+        locations += [rel.replace(os.sep, "/") for rel in rule_audit.RULE_FILES if rel != "CLAUDE.md"]
+        for rel in dict.fromkeys(locations):
+            with self.subTest(rel=rel):
+                base, where = self.cited(rel=rel)
+                repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+                self.assert_refused(repo, where, ALIGNED_ROUND)
+
+
+class AlignedScanner(AlignedSteps, unittest.TestCase):
+    """Item 5: the citing scan respects code spans, comment openers, a span over several lines and a lone quote (rule
+    building-scanner-respects-strings). Each case cites the record in a unit that holds one trap."""
+
+    def scan_case(self, unit):
+        """(the PR, where): a base whose citing unit is `unit`, and a PR that changes the record only."""
+        text, line = unit_file(unit)
+        base = {"CLAUDE.md": text, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38)}
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        return repo, "CLAUDE.md:%d" % line
+
+    def test_comment_openers_inside_a_code_span_do_not_hide_the_citation(self):
+        for trap in ("git log # main", "curl //host", "/* open"):
+            with self.subTest(trap=trap):
+                repo, where = self.scan_case("- Run `%s` before the merge. Decision `%s` holds the round rules."
+                                             % (trap, ALIGNED_ROUND))
+                self.assert_refused(repo, where, ALIGNED_ROUND)
+
+    def test_a_comment_opener_at_a_line_start_does_not_split_a_citation(self):
+        # The second line starts with `#`, which reads as a heading. The unit still starts at its list item.
+        repo, where = self.scan_case("- Read `git log\n# main` and decision `%s` holds the round rules." % ALIGNED_ROUND)
+        self.assert_refused(repo, where, ALIGNED_ROUND)
+
+    def test_a_multi_line_code_span_with_a_comment_opener_keeps_its_citation(self):
+        for second in ("// b` and decision `%s` holds the round rules.", "/* b` and decision `%s` holds the round rules."):
+            with self.subTest(second=second):
+                repo, where = self.scan_case("- Sample `const s = 'a\n" + second % ALIGNED_ROUND)
+                self.assert_refused(repo, where, ALIGNED_ROUND)
+
+    def test_a_lone_quote_in_text_does_not_hide_the_citation(self):
+        for unit in ("- Don't merge a red pull request: decision `%s` holds the round rules." % ALIGNED_ROUND,
+                     "- JSX `<p>Don't</p>` is text, and decision `%s` holds the round rules." % ALIGNED_ROUND):
+            with self.subTest(unit=unit):
+                repo, where = self.scan_case(unit)
+                self.assert_refused(repo, where, ALIGNED_ROUND)
+
+    def test_comment_openers_with_no_citation_pass(self):  # green control: the traps alone cite nothing
+        repo, _ = self.scan_case("- Run `git log # main` and `curl //host` before the merge.")
+        self.assert_clear(repo)
+
+
+class AlignedCost(AlignedSteps, unittest.TestCase):
+    """Item 6: the aligned check reads one git diff, writes no file, and makes no other git call. Its one python start is
+    the CLI run that the other cases make."""
+
+    def test_one_git_diff_and_no_file_written(self):
+        probes = load_probes()
+        base, _ = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        env = pr_env(repo.base_sha, commit_sha(repo.root, "HEAD"))
+        git_calls = []
+        real_run = probes._nowindow.run
+
+        def counting(argv, *args, **kwargs):
+            git_calls.append(list(argv))
+            return real_run(argv, *args, **kwargs)
+
+        before = listing(repo.root)
+        with mock.patch.dict(os.environ, clear=True):
+            os.environ.update(env)
+            with mock.patch.object(probes._nowindow, "run", side_effect=counting):
+                in_process(repo.root, group="aligned", probes=probes)
+        self.assertTrue(any("diff" in argv for argv in git_calls), "the probe made no git diff read: %r" % git_calls)
+        self.assertEqual(len(git_calls), 1, "the probe made %d git calls, not one: %r" % (len(git_calls), git_calls))
+        self.assertIn(repo.base_sha, " ".join(git_calls[0]), "the one git read does not name the PR base")
+        self.assertEqual(listing(repo.root), before, "the probe wrote a file or a folder")
+
+
+class AlignedEdges(AlignedSteps, unittest.TestCase):
+    """Item 7 and the contract: an unreadable diff or a missing sha is unknown, exit 2. An empty PR and this checkout are
+    clear."""
+
+    def test_a_missing_base_sha_is_unknown(self):
+        base, _ = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        code, out, err = run_aligned(repo.root, pr_env(repo.base_sha, commit_sha(repo.root, "HEAD"), drop=("BASE_SHA",)))
+        self.assertTrue(head(out).startswith("aligned: "), "the probe did not run: %s%s" % (out, err))
+        self.assertEqual(code, 2, "a missing BASE_SHA did not make the group unknown: %s%s" % (out, err))
+        self.assertTrue(head(out).startswith("aligned: unknown"), out)
+
+    def test_a_missing_head_sha_is_unknown(self):
+        base, _ = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        code, out, err = run_aligned(repo.root, pr_env(repo.base_sha, commit_sha(repo.root, "HEAD"), drop=("HEAD_SHA",)))
+        self.assertTrue(head(out).startswith("aligned: "), "the probe did not run: %s%s" % (out, err))
+        self.assertEqual(code, 2, "a missing HEAD_SHA did not make the group unknown: %s%s" % (out, err))
+        self.assertTrue(head(out).startswith("aligned: unknown"), out)
+
+    def test_an_unreadable_base_sha_is_unknown(self):
+        base, _ = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        code, out, err = self.probe_pr(repo, base="1" * 40)
+        self.assertTrue(head(out).startswith("aligned: "), "the probe did not run: %s%s" % (out, err))
+        self.assertEqual(code, 2, "an unreadable base did not make the group unknown: %s%s" % (out, err))
+        self.assertTrue(head(out).startswith("aligned: unknown"), out)
+
+    def test_an_empty_pr_is_clear(self):  # green control: base is the head commit, so the diff is empty
+        base, _ = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_clear(repo, base=commit_sha(repo.root, "HEAD"))
+
+    def test_this_checkout_runs_the_group_and_is_clear_with_no_change(self):  # green control: the live full-size files
+        head_sha = commit_sha(CHECKOUT, "HEAD")
+        code, out, err = run_aligned(CHECKOUT, pr_env(head_sha, head_sha))
+        self.assertTrue(out.startswith("aligned: "), "the probe did not run on this checkout: %s%s" % (out, err))
+        self.assertNotIn("n/a", head(out), "a claude-settings checkout must run the group, not print n/a")
+        self.assertEqual(code, 0, "this checkout with no change is refused: %s%s" % (out, err))
+
+
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
