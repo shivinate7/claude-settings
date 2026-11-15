@@ -3435,6 +3435,92 @@ class AlignedLocations(AlignedSteps, unittest.TestCase):
                 self.assert_refused(repo, where, ALIGNED_ROUND)
 
 
+# The aligned group also reads Markdown under the top-level agents/ and skills/ folders, at any depth (rule_scope). A
+# citing sentence there is held to its record as a CLAUDE.md sentence is. Nested folders that end in the same name, and
+# files that are not Markdown, are outside that scope.
+ALIGNED_SKILL = "skills/x/SKILL.md"
+ALIGNED_SCOPE_PATHS = (ALIGNED_SKILL, "skills/x/refs/more.md", "agents/y.md")
+ALIGNED_NESTED = ("docs/skills/x.md", "myagents/x.md")
+ALIGNED_RUN_PY = "skills/x/run.py"
+ALIGNED_RUN_PY_TEXT = "# Decision `%s` holds the round rules.\n" % ALIGNED_ROUND
+ALIGNED_RUN_PY_EDITED = "# Decision `%s` holds the round rules and a fix check.\n" % ALIGNED_ROUND
+
+
+class AlignedScopeSkillsAgents(AlignedSteps, unittest.TestCase):
+    """The scope of the aligned group: Markdown under top-level agents/ and skills/, at any depth. A case that clears a PR
+    first reads the scope (`0 rule file(s) read`), so a clear is never a file the probe did not read."""
+
+    def assert_clear_reading_nothing(self, repo, **kw):
+        """The probe reads no rule file in the PR, then clears it: the scope is checked before the verdict."""
+        code, out, err = self.probe_pr(repo, **kw)
+        self.assertIn("0 rule file(s) read", head(out), "the probe read a file outside its scope: %s%s" % (out, err))
+        self.assertTrue(head(out).startswith("aligned: in shape"), "the PR is refused or not read: %s%s" % (out, err))
+        self.assertEqual(code, 0, "the verdict is in shape but the exit is not 0: %s%s" % (out, err))
+
+    def test_a_citing_sentence_changed_without_its_record_is_refused_under_skills_or_agents(self):
+        changed, _ = unit_file(ALIGNED_CITE + " A second sentence.")
+        for rel in ALIGNED_SCOPE_PATHS:
+            with self.subTest(rel=rel):
+                base, where = self.cited(rel=rel)
+                repo = self.pr(base, {rel: changed})
+                self.assert_refused(repo, where, ALIGNED_ROUND, "Rules checked:")
+
+    def test_a_citing_sentence_at_the_end_of_a_long_skill_file_is_refused_at_its_line(self):  # full size: 300 units before
+        text, line = unit_file(ALIGNED_CITE, before=ALIGNED_FILLER, after=[])
+        base = {ALIGNED_SKILL: text, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38)}
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_refused(repo, "%s:%d" % (ALIGNED_SKILL, line), ALIGNED_ROUND)
+
+    def test_a_record_change_without_its_citing_sentence_under_skills_or_agents_is_refused(self):
+        for rel in ALIGNED_SCOPE_PATHS:
+            with self.subTest(rel=rel):
+                base, where = self.cited(rel=rel)
+                repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+                self.assert_refused(repo, where, ALIGNED_ROUND, "Rules checked:")
+
+    def test_a_record_and_its_citing_sentence_under_skills_or_agents_changed_together_pass(self):  # green control
+        changed, _ = unit_file(ALIGNED_CITE + " A second sentence.")
+        for rel in ALIGNED_SCOPE_PATHS:
+            with self.subTest(rel=rel):
+                base, _ = self.cited(rel=rel)
+                repo = self.pr(base, {rel: changed, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+                self.assert_clear(repo)
+
+    def test_a_rules_checked_line_clears_a_record_change_beside_a_citation_under_skills_or_agents(self):  # green control
+        for rel in ALIGNED_SCOPE_PATHS:
+            with self.subTest(rel=rel):
+                base, _ = self.cited(rel=rel)
+                repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+                self.assert_clear(repo, body=ALIGNED_RULES_CHECKED)
+
+    def test_a_non_citing_sentence_edited_under_skills_or_agents_is_in_shape(self):  # green control
+        edited, _ = unit_file(ALIGNED_CITE, before=["- Repo note 1: this repo keeps its own lane labels, edited."]
+                              + ALIGNED_FILLER[1:37])
+        for rel in ALIGNED_SCOPE_PATHS:
+            with self.subTest(rel=rel):
+                base, _ = self.cited(rel=rel)
+                repo = self.pr(base, {rel: edited})
+                self.assert_clear(repo)
+
+    def test_a_file_under_skills_that_is_not_markdown_is_not_read(self):  # green control: the slug sits in a Python comment
+        base = {ALIGNED_RUN_PY: ALIGNED_RUN_PY_TEXT, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38)}
+        changes = (("the citing line", {ALIGNED_RUN_PY: ALIGNED_RUN_PY_EDITED}),
+                   ("the record", {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)}))
+        for label, change in changes:
+            with self.subTest(changed=label):
+                self.assert_clear_reading_nothing(self.pr(base, change))
+
+    def test_a_folder_that_only_ends_in_skills_or_agents_is_out_of_scope(self):  # green control
+        changed, _ = unit_file(ALIGNED_CITE + " A second sentence.")
+        for rel in ALIGNED_NESTED:
+            base, _ = self.cited(rel=rel)
+            changes = (("the citing sentence", {rel: changed}),
+                       ("the record", {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)}))
+            for label, change in changes:
+                with self.subTest(rel=rel, changed=label):
+                    self.assert_clear_reading_nothing(self.pr(base, change))
+
+
 class AlignedScanner(AlignedSteps, unittest.TestCase):
     """Item 5: the citing scan respects code spans, comment openers, a span over several lines and a lone quote (rule
     building-scanner-respects-strings). Each case cites the record in a unit that holds one trap."""
