@@ -72,16 +72,53 @@ def spans(text, tracked):
 
 @contextlib.contextmanager
 def scratch(wt, head):
-    """A detached worktree of `head` under the temp dir, removed after: what a Retire test writes stays there and never reaches `wt`.
+    """A detached worktree of `head` under the temp dir, removed after: what a Retire test writes stays there and never reaches `wt`, except through a linked `node_modules`, which is the install itself (see link_packages).
     A tree that cannot be made yields None, and the test is unknown."""
     tmp = tempfile.mkdtemp(prefix="debt-retire-")
     tree = os.path.join(tmp, "tree")
     try:
         made = _nowindow.run(["git", "-C", wt, "worktree", "add", "-q", "--detach", tree, head], capture_output=True).returncode == 0
+        if made:
+            link_packages(wt, tree)
         yield tree if made else None
     finally:
         _nowindow.run(["git", "-C", wt, "worktree", "remove", "--force", tree], capture_output=True)
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def link_packages(wt, tree):
+    """Link the installed `node_modules` into the scratch tree, at the root and beside each package.json the tree holds.
+    A fresh worktree has none, so a test that imports a package would exit "module not found" and read red (decision debt-close-runs-retire).
+    Each folder comes from `wt` when `wt` has it, else from the main checkout of `wt`'s repository: the merge tool's `wt` is itself a
+    fresh worktree, and the install lives in the checkout it was made from. No other place is read.
+    The link is that install's own folder, so a Retire test that writes or deletes inside `node_modules` changes it (repaired by an install;
+    decision debt-close-runs-retire). It reads the installed packages, never head's lockfile.
+    A folder neither place has is not linked, so a test that needs it still fails. Best effort: a link that cannot be made leaves the test to run without it."""
+    homes = [os.path.abspath(wt)]  # absolute: a relative link target would resolve inside the scratch tree, to itself
+    main = installed_checkout(wt)
+    if main and main not in homes:
+        homes.append(main)
+    listed = _nowindow.run(["git", "-C", tree, "ls-files", "-z", "--", "package.json", "*/package.json"], capture_output=True, encoding="utf-8", errors="replace")
+    for pkg in listed.stdout.split("\0"):
+        rel = os.path.join(os.path.dirname(pkg), "node_modules")
+        dst = os.path.join(tree, rel)
+        src = next((s for s in (os.path.join(h, rel) for h in homes) if os.path.isdir(s)), None)
+        if pkg and src and not os.path.lexists(dst):
+            try:
+                os.symlink(src, dst, target_is_directory=True)
+            except OSError:
+                pass
+
+
+def installed_checkout(wt):
+    """The absolute path of the main checkout of `wt`'s repository: the folder that holds its `.git`, from git's common dir.
+    None when git cannot say, or when the repository is bare (its common dir is not a `.git` folder), so no path is guessed."""
+    got = _nowindow.run(["git", "-C", wt, "rev-parse", "--git-common-dir"], capture_output=True, encoding="utf-8", errors="replace")
+    common = got.stdout.strip()
+    if got.returncode or not common:
+        return None
+    common = os.path.abspath(os.path.join(wt, common))  # a relative answer is relative to `wt`
+    return os.path.dirname(common) if os.path.basename(common) == ".git" else None
 
 
 def run_span(wt, span, timeout):
@@ -193,7 +230,7 @@ def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_stat
 def check(wt, base_ref, head="HEAD", timeout=TIMEOUT, pr_body="", run_state=None, isolate=False):
     """[Finding] for each debt that `head` closes against `base_ref` and whose Retire step does not hold. Raises Unknown.
     run_state(url) -> (conclusion, head sha) of a workflow run, or raises.
-    isolate: run each test in its own scratch worktree of `head` (the merge tool and the CLI do), so nothing it writes reaches `wt`;
+    isolate: run each test in its own scratch worktree of `head` (the merge tool and the CLI do), so nothing it writes reaches `wt` or its main checkout but through a linked `node_modules` (link_packages);
     off, a test runs in `wt` itself."""
     got = closes(wt, base_ref, head)
     if not got:

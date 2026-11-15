@@ -382,7 +382,8 @@ ENV_MAX_DEPTH = 64
 ENV_DEPTH_REASON = "substitutions are nested too deep for the guard to read"
 
 
-def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: bool = False):
+def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: bool = False,
+                   arithmetic: bool = True):
     """Return ([(text, in a message)], too_deep). The last text is the command itself.
 
     One pass, no recursion. Each command substitution `$(...)`, backtick pair or process
@@ -399,19 +400,25 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: 
 
     An unquoted `#` at a word start is a comment to the end of the line: its text stays in the
     text around it, and opens no quote and no substitution. A heredoc body has no comments.
+
+    With `arithmetic` False, the text of a `$(( ))` arithmetic expansion is left out: it runs no
+    command. Bash reads `$((` as arithmetic only when the paren after `$(` closes right before the
+    last `)`; `$((a) )` and `$((a); (b))` are command substitutions and stay in. A substitution
+    inside the arithmetic is a text of its own and stays in.
     """
     escape = "`" if powershell else "\\"
     if depth > ENV_MAX_DEPTH:
         return [], True
     done = []
     # a frame: [pieces of its text, open quote, paren depth, it is a message value, its open
-    # quote holds a message value]
-    stack = [[[], "", 0, False, False]]
+    # quote holds a message value, it is still a `$(( ))` arithmetic expansion]
+    stack = [[[], "", 0, False, False, False]]
     i, n = 0, len(cmd)
 
     def close():
-        pieces, _, _, message, _ = stack.pop()
-        done.append(("".join(pieces), message))
+        pieces, _, _, message, _, arith = stack.pop()
+        if arithmetic or not arith:
+            done.append(("".join(pieces), message))
 
     def opens_message(pieces):
         """True when a `"` opened now is the value of a message flag of a commit or a PR."""
@@ -452,7 +459,7 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: 
             j = i + 1
             while j < n and cmd[j] != "`":
                 j += 2 if cmd[j] == "\\" else 1
-            inner, deep = _substitutions(cmd[i + 1:j].replace("\\`", "`"), depth + 1)
+            inner, deep = _substitutions(cmd[i + 1:j].replace("\\`", "`"), depth + 1, arithmetic=arithmetic)
             if deep:
                 return [], True
             done.extend(inner)
@@ -464,7 +471,7 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: 
                 return [], True
             message = quote == '"' and frame[4]
             pieces.append("x")
-            stack.append([[], "", 0, message, False])
+            stack.append([[], "", 0, message, False, cmd[i:i + 3] == "$(("])
             i += 2
             continue
         elif quote == "" and len(stack) > 1 and char == "(":
@@ -475,6 +482,8 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: 
                 i += 1
                 continue
             frame[2] -= 1
+            if frame[2] == 0 and cmd[i + 1:i + 2] != ")":
+                frame[5] = False   # the paren after `$(` closed before the end: a subshell, not arithmetic
         pieces.append(char)
         i += 1
     while stack:
@@ -672,19 +681,20 @@ def _elide_substitutions(text: str) -> str:
     return "".join(out)
 
 
-def substitution_commands(raw: str, stripped: str, outer: bool = False):
+def substitution_commands(raw: str, stripped: str, outer: bool = False, arithmetic: bool = True):
     """The texts a shell runs INSIDE the command, each a command of its own: every `$(...)`, backtick
     and process substitution in `stripped`, plus those in an unquoted heredoc body of `raw`. A quoted
     shell heredoc body runs nothing and is gone from `stripped`; an interpreter heredoc body stays in
     `stripped` and is read as shell text, so a `$( )` in it can be a false alarm. With `outer`, the command itself is last, its substitutions read as `x`
     (`stripped` as it stands when the nest is too deep). A nest too deep to read gives no inner text:
-    the env-file rule refuses it. The one home of this cut: judge_shell and git_env_command_hit call it.
+    the env-file rule refuses it. With `arithmetic` False, a `$(( ))` arithmetic text is left out
+    (`_substitutions`). The one home of this cut: judge_shell and git_env_command_hit call it.
     """
-    found, too_deep = _substitutions(stripped, powershell=POWERSHELL_CALL[0])
+    found, too_deep = _substitutions(stripped, powershell=POWERSHELL_CALL[0], arithmetic=arithmetic)
     inner = [text for text, _in_message in found[:-1]]
     for quote, body, _ in _split_heredocs(raw)[1]:
         if not quote:
-            body_found, body_deep = _substitutions(body, heredoc=True)
+            body_found, body_deep = _substitutions(body, heredoc=True, arithmetic=arithmetic)
             too_deep = too_deep or body_deep
             inner = [text for text, _in_message in body_found[:-1]] + inner
     if too_deep:

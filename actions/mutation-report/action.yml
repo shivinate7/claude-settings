@@ -29,7 +29,7 @@ inputs:
   budget:
     description: Wall seconds per profile part. When they pass, running suites are killed and each mutant left counts as not run.
     required: false
-    default: "300"
+    default: "1800"
   suite-timeout:
     description: Seconds before one suite run is killed.
     required: false
