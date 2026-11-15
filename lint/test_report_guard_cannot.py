@@ -26,6 +26,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import test_report_guard as trg  # noqa: E402  the Stop runner, the transcript records and the run folder (one home)
 import test_refusal_note as hook_base  # noqa: E402  the route-row seam and the surface pin (one home)
+import _clause as clause_parser  # noqa: E402  the clause parser the reason is read by (one home, lint/_clause.py)
+import report_guard  # noqa: E402  _gives_reason, the reason verdict this check reads (one home, lint/report_guard.py)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies the tracked lint and hooks folders, so an installed copy needs no file list
 
@@ -2564,6 +2566,50 @@ class CannotClaimTests(unittest.TestCase):
         line = "Because I tried it, I cannot push."
         out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p"), landed_reply(line)])
         self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_red_a_dotted_pascal_name_in_a_because_reason_is_one_reason(self):
+        # Catches: the period in Console.WriteLine ends the reason, so the reason reads as "Console" and no verb reaches it.
+        head, tail = "I can't push", " because Console.WriteLine returned 403."
+        self.assertEqual(clause_parser.reasons(tail), ["Console.WriteLine returned 403"],
+                         "scope: the dotted name cut the reason")
+        self.assertTrue(report_guard._gives_reason(head, tail, ""), "_gives_reason: a dotted name ended the reason")
+
+    def test_cc_red_a_dotted_name_with_a_verb_in_a_because_reason_is_one_reason(self):
+        # Catches: the period in Foo.Bar ends the reason, so "Foo" alone is read and the verb "is" is lost.
+        head, tail = "I could not push", " because Foo.Bar is red."
+        self.assertEqual(clause_parser.reasons(tail), ["Foo.Bar is red"], "scope: the dotted name cut the reason")
+        self.assertTrue(report_guard._gives_reason(head, tail, ""), "_gives_reason: a dotted name ended the reason")
+
+    def test_cc_red_a_dotted_name_with_a_status_in_a_because_reason_is_one_reason(self):
+        # Catches: the period in Github.Api ends the reason, so "Github" alone is read and the status 403 is lost.
+        head, tail = "I can't push", " because Github.Api returned 403."
+        self.assertEqual(clause_parser.reasons(tail), ["Github.Api returned 403"], "scope: the dotted name cut the reason")
+        self.assertTrue(report_guard._gives_reason(head, tail, ""), "_gives_reason: a dotted name ended the reason")
+
+    def test_cc_green_a_plain_name_in_a_because_reason_is_one_reason(self):
+        # Control: the same reason with no dot reads whole on the current code, and stays whole.
+        head, tail = "I can't push", " because Console returned 403."
+        self.assertEqual(clause_parser.reasons(tail), ["Console returned 403"], "scope: a plain name cut the reason")
+        self.assertTrue(report_guard._gives_reason(head, tail, ""), "_gives_reason: a plain name is no reason")
+
+    def test_cc_green_a_dotted_name_in_the_following_sentence_is_a_reason(self):
+        # Control: a following sentence with a dotted name and a status reads as a reason on the current code, and stays one.
+        self.assertTrue(report_guard._gives_reason("I can't push", "", "Github.Api returned 403."),
+                        "_gives_reason: the following sentence with a dotted name is no reason")
+
+    def test_cc_red_a_dotted_name_reason_after_a_failed_push_names_the_check(self):
+        # Catches: the period in Foo.Bar ends the reason, so a failed push that "Foo.Bar is red" explains blocks as naming no check.
+        line = "I could not push because Foo.Bar is red."
+        out = self.stop([trg.human("push the branch"),
+                         *failed_bash("git push origin HEAD:cannot-claim-follow-up-3", "tu_p"), landed_reply(line)])
+        self.assert_passes(out, "a failed push, with a dotted name in its reason")
+
+    def test_cc_green_a_plain_name_reason_after_a_failed_push_passes(self):
+        # Control: the same failed push, with the reason's name holding no dot, passes on the current code.
+        line = "I could not push because Foo is red."
+        out = self.stop([trg.human("push the branch"),
+                         *failed_bash("git push origin HEAD:cannot-claim-follow-up-3", "tu_p"), landed_reply(line)])
+        self.assert_passes(out, "a failed push, with a plain name in its reason")
 
 
 if __name__ == "__main__":
