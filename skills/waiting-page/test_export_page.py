@@ -1135,9 +1135,9 @@ class Mirror(Base):
         self.assertVerdict(r, "unknown")
         self.assertEqual(snapshot(out), before, "--allow-empty for another collection deleted docs")
         r = self.export(fetched, out, allow_empty=("items",))
-        self.assertChanged(r, 3)
+        self.assertVerdict(r, "same")
         self.assertEqual(r.returncode, 0, shown(r))
-        self.assertEqual(glob.glob(os.path.join(out, "items", "*.json")), [], "the allowed empty collection kept docs")
+        self.assertEqual(snapshot(out), before, "the allowed empty collection deleted docs: the export is append-only")
 
     def test_a_collection_without_its_completeness_marker_is_unknown_and_writes_nothing(self):
         fetched = self.fetch(items={"a": {"id": "a"}}, meta={"page": META})
@@ -1297,9 +1297,9 @@ class Receipts(Base):
                         "the receipt item-003 that the fetch lists was not exported")
         self.assertEqual(read_text(os.path.join(out, "receipts", "item-002.json")), archived,
                          "the archived receipt item-002 was changed or deleted")
-        self.assertFalse(os.path.exists(os.path.join(out, "items", "item-002.json")),
-                         "control: the item the fetch no longer lists was kept, so the mirror delete did not run")
-        self.assertChanged(r, 2)  # one receipt written and one item deleted; the archived receipt counts for nothing
+        self.assertTrue(os.path.isfile(os.path.join(out, "items", "item-002.json")),
+                        "the item the fetch no longer lists was deleted: every collection is append-only")
+        self.assertChanged(r, 1)  # one receipt written; archived docs count for nothing
 
     def export_in_process(self, fetched, out):
         """export() with receipts among its collections and no design block, run in this process. A Stop is a failure."""
@@ -1321,8 +1321,8 @@ class Receipts(Base):
         self.export_in_process(self.fetch(folders={"items": {"item-001": item(1)}, "receipts": {"item-001": receipt(1)}}), out)
         self.assertTrue(os.path.isfile(os.path.join(out, "receipts", "item-002.json")),
                         "export(design=False) deleted an archived receipt the fetch no longer lists")
-        self.assertFalse(os.path.exists(os.path.join(out, "items", "item-gone.json")),
-                         "control: the item the fetch no longer lists was kept, so the mirror delete did not run")
+        self.assertTrue(os.path.isfile(os.path.join(out, "items", "item-gone.json")),
+                        "export(design=False) deleted an item the fetch no longer lists: every collection is append-only")
 
     def test_an_emptied_receipts_fetch_is_unknown_unless_named_and_the_archive_stays(self):
         out = self.out()
