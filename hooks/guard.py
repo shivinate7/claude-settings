@@ -4376,7 +4376,7 @@ OPUS_SPAWN_REASON = (
 ) % EXPLORE_AUDIT_MARKER
 OPUS_BUILDER_REASON = (
     OPUS_SPAWN_REASON + " No `Round 3 of 3` marker was found in the brief's first line or at the start of "
-    "any line. The marker applies only to a builder's third try, after review round 2 failed."
+    "any line. The marker applies only to a builder's third try: after review round 2 failed, or after round 1 failed and every fix verifier failed."
 )
 OPUS_STANDING_ROLES = ("Plan", "designer", "design-reviewer", REFUTER_ROLE)
 
