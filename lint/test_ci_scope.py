@@ -1171,7 +1171,7 @@ class WindowsGuardShards(unittest.TestCase):
 
     # Named failure: a diff with no guard input runs the guard shards anyway, so every code change pays for the guard suite.
     def test_a_diff_with_no_guard_input_keeps_the_guard_shards_off(self):
-        for paths in (["actions/stamp/stamp.mjs"], ["bin/verdict"], ["install.ps1"], ["unlisted/new-file.txt"]):
+        for paths in (["actions/stamp/stamp.mjs"], ["githooks/main-ref/hook.sh"], ["install.ps1"], ["unlisted/new-file.txt"]):
             with self.subTest(paths=paths):
                 shards = guard_shards_run(run(paths))
                 self.assertEqual(set(shards.values()), {False}, f"a guard shard runs for {paths}, which names no guard input: {shards}")
