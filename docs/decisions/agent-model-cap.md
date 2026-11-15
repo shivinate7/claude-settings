@@ -113,7 +113,7 @@ Reason the ceiling is a refusal and no ask (owner, 2026-11-01 17:25 CST, item 12
 
 **The floor.** Every role but the five Haiku roles has Sonnet as the floor. `HAIKU_ROLES` in
 `hooks/guard.py` is the one list. Guard rule `agent-model-floor` refuses an `Agent`, `Task`, `Workflow`
-`agent()` or `create_session` call whose `model` holds "haiku", unless the role is a Haiku role. A `start_session` call is not refused: no PreToolUse hook sees it (decision `start-session-not-pretooluse`). Its PostToolUse audit flags a start whose `model` holds "haiku" and tells the session to stop the new one.
+`agent()` or `create_session` call whose `model` holds "haiku", unless the role is a Haiku role. A `start_session` call is not refused: no PreToolUse hook sees it (decision `start-session-not-pretooluse`). Its PostToolUse audit flags a start whose `model` holds "haiku" and tells the session to stop the new one. The started session's own SessionStart hook also flags that start, and nothing stops it (decision `start-checks-after-call`, the start checks run in the started session).
 `lint/check_agent_models.py` fails a Haiku `model:` in `agents/*.md` or `skills/*/SKILL.md` frontmatter,
 unless the file is a Haiku role. It also fails an `agents/*.md` body that states the agent's own model in fixed text, or whose report header has a `<model>` slot and no `powered by the model named` line. The spawn's model reaches the agent through its system prompt, so a body names that line as the source. `agents/plan.md` pins Plan.
 
