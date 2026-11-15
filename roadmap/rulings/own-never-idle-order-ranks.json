@@ -1,0 +1,10 @@
+{
+ "id": "own-never-idle-order-ranks",
+ "at": "2026-11-15T02:38:00-06:00",
+ "title": "Runner 10 never idles while any PR reads done; an order only ranks, it never holds",
+ "ruling": "Consultant 02:38 CST Nov 15 (standing rule, relayed by the coordinator at 02:40 CST; the consultant's pick under the owner's 20:18 CST Nov 14 words, NOT owner-typed; undoable; the owner can reopen it): runner 10 never idles while any PR reads done. An order only ranks, it never holds. A combine is built only from PRs already reading done. A failing combine drops the failing PR and the rest merge one at a time. A combine never holds PRs that could merge alone. It corrects the consultant's 01:55 order (owner-accepts-held-negative first, then #3381, then g1's combines), which only ranked three items; the coordinator's hold on runner 10 (02:00 to 02:39 CST by the coordinator's read) read it as a hold and was retracted at 02:39 CST. It agrees with own-826-a-now-build-b (owner 02:14 CST Nov 14: runner 10 merges per lane by priority while the combine train is built). Triage did not read the chat.",
+ "quote": "runner 10 never idles while any PR reads done; an order only ranks, it never holds",
+ "source": "Consultant 02:38 CST Nov 15, relayed by the coordinator 02:40 CST; consultant's pick under the owner's 20:18 CST Nov 14 words, not owner-typed",
+ "status": "open",
+ "step": "owner-accepts-held-negative"
+}

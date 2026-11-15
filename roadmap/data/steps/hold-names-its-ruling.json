@@ -1,0 +1,13 @@
+{
+ "id": "hold-names-its-ruling",
+ "title": "A hold on a runner or a lane names the ruling it relies on (candidate; build only if holds recur)",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Guard queued per rule building-mistake-names-its-guard (queued as step:hold-names-its-ruling). Mistake: at 02:00 CST Nov 15 the coordinator read the consultant's 01:55 order (which only ranked three items) as a hold on runner 10, and runner 10 had no merge from 01:52:11 CST (#3448) until the coordinator retracted the hold at 02:39 CST: about 39 minutes idle by the coordinator's read of the consultant's note, unmeasured by triage (main's commits show none after #3448 in that window). Ruling own-826-a-now-build-b (owner 02:14 CST Nov 14) said runner 10 merges per lane by priority; ruling own-never-idle-order-ranks (consultant 02:38 CST) says an order only ranks. Guard idea: a hold message to a runner or a lane must cite the ruling that backs it, and a hold that cites none, or cites an order that only ranks, is refused or flagged. The rule 'a guard needs a mistake Claude has made' is met by this incident. Cost is unmeasured (a read of the hold text per hold message); the owner's goal (max efficiency, no waste, 20:17 CST Nov 14) is the test: build only if holds without a ruling recur; this is a candidate, not a commitment. Siblings, not duplicates: hold-names-its-end (an Ends: line per hold), hold-cites-live-item (a page item a hold cites must exist and be open). Triage read no code.",
+ "source": "Coordinator 02:39 CST Nov 15 (relayed): 'Guard that would have stopped my over-read: none built; a check that a hold names which ruling it relies on is not queued.'",
+ "note": "Candidate guard; not built; owner coordinator; build only if holds without a ruling recur.",
+ "updatedAt": "2026-11-15T02:38:00-06:00"
+}
