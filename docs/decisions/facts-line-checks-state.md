@@ -15,5 +15,5 @@ State: live in the check, step 3 of `actions/claude-md-cites`. No record carries
 
 Why: a `State:` line goes stale when a pull request merges or a branch appears, and no reader catches it. A named PR number or branch is a fact a REST read settles.
 
-Kind: build
+Kind: process
 Home: lint/compliance_probes.py
