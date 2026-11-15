@@ -672,11 +672,25 @@ def _stamp_value(stamp):
     return _STAMP_LEAD.sub("", stamp, count=1) if stamp else ""
 
 
+def _judged_kind(old, pid, kind):
+    """The kind that judges premise `pid`: its kind in `before` (`old`), else its own kind in `after`."""
+    return old[pid][0] if pid in old else kind
+
+
+def never_stamped(before, after, name=None):
+    """The ids of the premises of `after` that are not a ruling (by `_judged_kind`) and whose stamp value is `never`,
+    unchanged or not. No read backs such a stamp. `name` is the marker's premises name, when the caller has it."""
+    old = premise_stamps(before, name)
+    return {pid for pid, (kind, _source, stamp) in premise_stamps(after, name).items()
+            if _judged_kind(old, pid, kind) != PREMISE_KINDS[0] and _stamp_value(stamp) == "never"}
+
+
 def stamp_changes(before, after, name=None):
-    """[(id, tokens)] of the premises of `after` whose stamp, spelling included, is new or differs from `before`'s, and
-    that need evidence. A stamp with no value counts as absent. A stamp present before and absent after is a change.
-    A premise whose kind in `before` is a `ruling` needs none, whatever the write relabels it to; a line new in `after`
-    is judged by its own kind. `Checked never` needs none. `name` is the marker's premises name, when the caller has it."""
+    """[(id, tokens)] of the premises of `after` that need evidence: a stamp, spelling included, that is new or differs
+    from `before`'s, and every `never` stamp (`never_stamped`), unchanged or not. A stamp with no value counts as
+    absent. A stamp present before and absent after is a change. A premise whose kind in `before` is a `ruling` needs
+    none, whatever the write relabels it to; a line new in `after` is judged by its own kind. `name` is the marker's
+    premises name, when the caller has it."""
     old = premise_stamps(before, name)
     need = []
     for pid, (kind, source, stamp) in premise_stamps(after, name).items():
@@ -685,7 +699,7 @@ def stamp_changes(before, after, name=None):
             stamp = None
         if not _stamp_value(was):
             was = None
-        if (old[pid][0] if pid in old else kind) == PREMISE_KINDS[0] or stamp == was or _stamp_value(stamp) == "never":
+        if _judged_kind(old, pid, kind) == PREMISE_KINDS[0] or (stamp == was and _stamp_value(stamp) != "never"):
             continue
         need.append((pid, source_tokens(source)))
     return need

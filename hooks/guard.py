@@ -472,11 +472,13 @@ Other tools, in `judge` order:
                        premise's `Source:` (a path, a 7+ hex hash, a backticked command, a record slug); with
                        no token, any one read-type call. No evidence: a Write or Edit of any file, an Agent
                        call, a send or PR-write tool, a call that failed, any agent record (isSidechain or
-                       agent_id), and the handoff itself. An unchanged stamp, `Checked never`, a `ruling`
-                       premise and a handoff with no premise lines pass. The reason gives one remedy line per
+                       agent_id), and the handoff itself. A `never` stamp (`Checked never`, `Checked: never`, `Re-checked
+                       never`) on a premise that is not a `ruling` is refused whether new, restamped or
+                       unchanged, and no read backs it. An unchanged dated stamp, a `ruling`
+                       premise, a deleted line and a handoff with no premise lines pass. The reason gives one remedy line per
                        unbacked premise, naming its token or "any read". No transcript_path, an unreadable
                        transcript, handoff or prompt, and a failed import allow. An override lifts it. Cost:
-                       reads on demand inside this call, the transcript once and only when a stamp changed,
+                       reads on demand inside this call, the transcript once and only when a stamp changed or a `never` stamp stands,
                        one more small read of the prompt, and for a Write the handoff on disk; no new log,
                        hook, file or process start. (precompact-handoff, item 15)
   env-file, frozen-path, config-edit, agent-model-cap
@@ -1329,9 +1331,10 @@ def handoff_sections_hit(tool, tool_input, target, cwd, result=False):
 
 
 HANDOFF_STAMP_REASON = (
-    "Rule (handoff-checked-stamp): this write restamps the Checked value of a premise in the session handoff, and "
-    "this session's own transcript holds no check of it since its last compact boundary. A stamp says you checked "
-    "the premise. Remedy: check each premise below, then repeat the call, or write `Checked never` on it.\n%s\n"
+    "Rule (handoff-checked-stamp): this write sets or keeps the Checked value of a premise in the session handoff, "
+    "and this session's own transcript holds no check of it since its last compact boundary, or the value is `never`. "
+    "A stamp says you checked the premise. Remedy: check the premise, then repeat the call with a date, or delete its "
+    "line. A read does not lift a `never` stamp: restamp it with a date.\n%s\n"
     "(decision precompact-handoff, item 15)"
 )
 
@@ -1341,7 +1344,7 @@ def handoff_stamp_hit(tool, tool_input, target, cwd, transcript, result):
     session's transcript, else None. A premise's before kind judges it, a stamp spelled other than `Checked <value>`
     counts, and only a read-type call that did not fail backs a token (precompact_handoff.backed_premises).
     `result` is handoff_sections_result's (before, after), None for no handoff. A Write has no before, so the handoff on disk is its before (a missing file holds none). Premise parsing and the
-    transcript scan are precompact_handoff's. The transcript is read once, and only when a stamp changed. Fails open:
+    transcript scan are precompact_handoff's. The transcript is read once, and only when a stamp changed or a `never` stamp stands. A `never` stamp on a non-ruling premise is never backed. Fails open:
     no transcript_path, an unreadable transcript, handoff or prompt, a prompt with no premises name, a failed import."""
     if result is None or not isinstance(transcript, str) or not transcript:
         return None
@@ -1361,6 +1364,8 @@ def handoff_stamp_hit(tool, tool_input, target, cwd, transcript, result):
                 before = ""
         need = precompact_handoff.stamp_changes(before, after, name)
         backed = precompact_handoff.backed_premises(transcript, need, path) if need else None
+        if backed is not None:
+            backed = backed - precompact_handoff.never_stamped(before, after, name)
     except Exception:
         return None
     if backed is None:

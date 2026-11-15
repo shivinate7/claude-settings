@@ -61,9 +61,9 @@ The handoff holds these sections, in this order:
   message and its date).
 - Working premises: the facts the next steps lean on, at most about 15, under the heading
   `## Working premises`. One line each, in this form:
-  `- P1 [ruling|measured|read|notes|assumed] <statement>. Source: <where>. Checked <date or never>.`
+  `- P1 [ruling|measured|read|notes|assumed] <statement>. Source: <where>. Checked <date>.`
   The kinds and what each means: docs/decisions/premise-format.md. A fact with no source is
-  `assumed`.
+  `assumed`. Stamp a premise only after you check it. A premise you cannot check now: delete its line.
 - Where things stand: the branch, the head commit, and the GitHub query for its open PRs and their CI state.
 - Work in flight: agents, workflow runs, and servers. Give each server its pid
   and its port.
