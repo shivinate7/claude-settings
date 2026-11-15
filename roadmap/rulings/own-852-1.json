@@ -1,0 +1,10 @@
+{
+ "id": "own-852-1",
+ "at": "2026-11-15T00:16:00-06:00",
+ "title": "CI skips the debt step's repeat run of hooks/test_guard.py only when the checks-guard shards ran on this tree; otherwise it runs the suite as now.",
+ "ruling": "Consultant's pick under the owner's 20:18 CST Nov 14 words (own-consultant-speaks-for-owner), not owner-typed. Page item 852 (pick-debt-step-skip-guard-rerun), option 1: the debt step reads the shard result AND the scope flag (checks_guard) and skips its own run only when the shards ran on the same tree; when the flag is false or the tree differs, the suite runs as now. Why the consultant took option 1: the owner's 00:09 CST Nov 15 save said B or A are good since both avoid the repeat run, ask consultant; option 2 (the Retire line names the shard) widens a shared tool against his ruling 'a repo changes to fit a shared tool, never the tool to fit a repo'; option 1 meets his aim with no new accepted form. The grant covers the act it names: the debt step's skip rule in the CI workflow. It does not cover option 2, a change to decision debt-close-runs-retire, or a bare `needs` read of the shard jobs. Check change: review rounds, red first. Reopens if the owner says otherwise. The lane's read of the workflow (the three measured points on the item) is the lane's; triage read no workflow code.",
+ "quote": "2 (B or A are good since botj avoid repeat run, ask consultant)",
+ "source": "Owner page save 00:09 CST Nov 15 on item 852 (quote); consultant message 00:17 CST Nov 15 to triage (the pick). Item closed 00:16 CST Nov 15 by triage on the consultant's pick, not the owner's.",
+ "status": "open",
+ "step": "ci-debt-step-duplicates-guard-suite"
+}
