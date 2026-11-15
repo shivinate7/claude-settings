@@ -1,0 +1,14 @@
+{
+  "id": "waiting-page-doc-nits-3479",
+  "title": "Two wording nits left off PR 3479: the waiting-page skill's \"is open\" line and the stale_pages.py docstring",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "",
+  "owner": "coordinator",
+  "blockedBy": [],
+  "why": "Coordinator 02:34 CST Nov 15 (relayed; triage read no file): two nits were kept off the head of PR #3479 (step stood-pick-needs-review part 2). (1) skills/waiting-page/SKILL.md line 448 says an \"is open\" line means delete it, but the check's own line says re-read, route if new, then delete. (2) The stale_pages.py docstring near line 58 says \"in item order\" and then says stale open lines come first. Coordinator pick (undoable, not the owner's): one one-line docs follow-up after #3479 merges, because the lines may move with that PR. Blocked by: #3479 merging (open draft, head 066cc6d35929, GitHub 02:34 CST). Docs-only edit: ruling own-tiny-fixes-b lets a standing session send one agent for it. Line numbers are the coordinator's and are unread by triage.",
+  "source": "Coordinator message 02:34 CST Nov 15.",
+  "note": "Filed 02:34 CST Nov 15 by triage. Todo until #3479 merges. Not built.",
+  "updatedAt": "2026-11-15T02:34:00-06:00"
+}

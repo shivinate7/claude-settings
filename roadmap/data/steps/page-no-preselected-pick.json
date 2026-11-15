@@ -5,10 +5,11 @@
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL2c98rNLBG6EyLYefM",
+ "pr": 3472,
  "owner": "triage",
  "blockedBy": [],
- "why": "Owner 13:04 CST Nov 13 (typed in this session, on the Cockpit page): stood picks must not be preselected answers.\n\nLane note 00:26 CST Nov 15 (coordinator 00:25 CST, relayed): set to doing on the shared RESUMED lane session_013NEJL2c98rNLBG6EyLYefM, which also carries stood-pick-needs-review (overlap: no pick or stands written or read leaves nothing for the stood-pick guard). The lane read running and connected by get_session.",
+ "why": "Owner 13:04 CST Nov 13 (typed in this session, on the Cockpit page): stood picks must not be preselected answers.\n\nLane note 00:26 CST Nov 15 (coordinator 00:25 CST, relayed): set to doing on the shared RESUMED lane session_013NEJL2c98rNLBG6EyLYefM, which also carries stood-pick-needs-review (overlap: no pick or stands written or read leaves nothing for the stood-pick guard). The lane read running and connected by get_session.\n\n02:34 CST Nov 15: part 1 is PR #3472 (also carries the stood-pick part of stood-pick-needs-review). GitHub 02:34 CST: open draft, head e11836046c18, mergeable clean, base main e46ab08fcd94 (main has moved since), 12 files, 9 commits. The coordinator (02:34 CST, relayed) reads its new record 6891706872 as parsing; I did not read the record. Not merged.",
  "source": "owner, 13:04 CST Nov 13, typed to triage",
  "note": "Todo. Owner: \"in general on this artifact can pick stand's not be preselected answers please\". Done by triage now: the `pick` and `stands` fields were removed from the 18 open items that carried them (54 closed ones left alone). Triage no longer writes them. The pick stays in the item text and the lane message, with its undo. Open: the waiting-page skill and its page code may still write or read `pick`/`stands`; a builder removes that, and any check that requires it.",
- "updatedAt": "2026-11-15T00:26:01-06:00"
+ "updatedAt": "2026-11-15T02:34:00-06:00"
 }
