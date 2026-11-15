@@ -1461,10 +1461,11 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
 REPORT_NO_LINE = "> **Done** BUILT abc123\n> **Deviations** none\n> **Next** ship it"
 
 
-def report_lines(*deviations):
-    """A report whose Deviations bullets are the given lines, for the compaction-carry cases."""
+def report_lines(*deviations, done="BUILT abc123"):
+    """A report whose Deviations bullets are the given lines, for the compaction-carry cases. `done` is the
+    text after the Done label."""
     bullets = "".join("\n> - %s" % line for line in deviations)
-    return "> **Done** BUILT abc123\n> **Deviations**%s\n> **Next** ship it" % bullets
+    return "> **Done** %s\n> **Deviations**%s\n> **Next** ship it" % (done, bullets)
 
 
 REPORT_BOTH_NONE = report_lines("Recovered: none", "Handoff gave: none")
@@ -1516,6 +1517,13 @@ class CompactionCarryTests(unittest.TestCase):
         for other in ("Recovered", "Handoff gave"):
             if other != name:
                 self.assertNotIn("%s line" % other, out["reason"], "the refusal names %r, which is not missing" % other)
+
+    def assertMissingLineAmongReasons(self, out, name):
+        """A block whose Recovered guard reason says the line `name` has not landed. Other reasons may sit beside it."""
+        self.assertIsNotNone(out, "no block: the %s line is not missing" % name)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("Recovered guard: a compaction came before this report and no %s line has landed since" % name,
+                      out["reason"], "the refusal does not say %r is missing" % name)
 
     def test_cc_red_landed_turn_after_compaction_without_line_blocks(self):
         # Catches: a landed turn after a compaction passes with no Recovered line.
@@ -1937,6 +1945,69 @@ class CompactionCarryTests(unittest.TestCase):
         # Catches: an OTHER tag at line start, with no bullet, is read as a Done item's Handoff gave line.
         reply = "> **Done** BUILT abc123\n> **Deviations**\n> Recovered: x (git)\n> OTHER: Handoff gave: x\n> **Next** ship it"
         self.assertOnlyMissing(self.stop(self.compacted_turn(reply)), "Handoff gave")
+
+    def test_cc_green_done_line_tagged_carry_lines_pass(self):
+        # Catches: a carry line after a report label and a Done tag is refused or not read as its line.
+        rows = [
+            ("OTHER: Recovered: x (git)", "Handoff gave: none"),
+            # Catches: the bold Done tag, "**Done** **OTHER:**", is not read as its carry line.
+            ("**OTHER:** Recovered: x (git)", "Handoff gave: none"),
+            # Catches: a BUILT tag after a report label is not read as its carry line.
+            ("BUILT: Recovered: x from PR #978 (git)", "Handoff gave: none"),
+            # Catches: a RECORDED tag after a report label is not read as its carry line.
+            ("RECORDED: Recovered: x from PR #978 (git)", "Handoff gave: none"),
+            # Catches: a Handoff gave label after a report label and a Done tag is not read as its line.
+            ("OTHER: Handoff gave: x", "Recovered: none"),
+            # Catches: the bold Done tag before a Handoff gave label is not read as its line.
+            ("**OTHER:** Handoff gave: x", "Recovered: none"),
+            # Catches: a BUILT tag before a Handoff gave label is not read as its line.
+            ("BUILT: Handoff gave: x from PR #978", "Recovered: none"),
+            # Catches: a RECORDED tag before a Handoff gave label is not read as its line.
+            ("RECORDED: Handoff gave: x from PR #978", "Recovered: none"),
+        ]
+        for done, other in rows:
+            with self.subTest(done=done):
+                out = self.stop(self.compacted_turn(report_lines(other, done=done)))
+                self.assertIsNone(out, "a carry line after a report label and a Done tag does not count: %r"
+                                  % (((out or {}).get("reason") or "")[:300],))
+
+    def test_cc_red_refusal_names_done_line_carry_form(self):
+        # Catches: the missing-line refusal does not name the report label, Done tag, carry label form.
+        out = self.stop(self.compacted_turn(REPORT_NO_LINE))
+        self.assertBlocksForRecovered(out)
+        self.assertIn("**Done** OTHER: Recovered:", out["reason"],
+                      "the remedy does not name the form with a Done tag after the report label")
+
+    def test_cc_red_done_line_tag_outside_the_done_kinds_does_not_count(self):
+        # Catches: a non-Done tag after a report label, "**Done** NOTE: Recovered:", is read as the carry line.
+        reply = report_lines("Handoff gave: none", done="NOTE: Recovered: x (git)")
+        self.assertMissingLineAmongReasons(self.stop(self.compacted_turn(reply)), "Recovered")
+
+    def test_cc_red_done_line_carry_outside_the_block_does_not_count(self):
+        # Catches: a Done-tagged Recovered line above the blockquote, or in a code fence, counts for this reply.
+        line = "**Done** OTHER: Recovered: x (git)"
+        for above in (line + "\n\n", "```\n" + line + "\n```\n\n"):
+            with self.subTest(above=above):
+                self.assertBlocksForRecovered(self.stop(self.compacted_turn(above + REPORT_NO_LINE)))
+
+    def test_cc_red_done_line_mid_item_recovered_text_does_not_count(self):
+        # Catches: a mid-sentence or backticked "recovered:" after a Done-tagged label is read as the carry line.
+        for done in ("OTHER: the janitor recovered: 3 files from git", "OTHER: built the `Recovered:` check"):
+            with self.subTest(done=done):
+                reply = report_lines("Handoff gave: none", done=done)
+                self.assertOnlyMissing(self.stop(self.compacted_turn(reply)), "Recovered")
+
+    def test_cc_red_done_line_without_a_carry_label_does_not_count(self):
+        # Catches: a label-first item, "(git) ruling X", after a "**Done** OTHER:" label is read as the Recovered line.
+        reply = report_lines("Handoff gave: none", done="OTHER: (git) ruling X")
+        self.assertOnlyMissing(self.stop(self.compacted_turn(reply)), "Recovered")
+
+    def test_cc_red_done_line_carry_item_without_a_source_blocks_naming_it(self):
+        # Catches: a Recovered item on a "**Done** OTHER:" line passes with no git, page or digest source.
+        reply = report_lines("Handoff gave: none", done="OTHER: Recovered: ruling X")
+        out = self.stop(self.compacted_turn(reply))
+        self.assertBlocksNaming(out, "ruling X")
+        self.assertIn("names no source", out["reason"], "the refusal does not say the item names no source")
 
 
 class CompactionCarryCostTests(unittest.TestCase):
