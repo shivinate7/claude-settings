@@ -536,7 +536,9 @@ def own_agent_lock_verdict(reason: str):
     holder = int(found.group(1))
     current, child, starts = os.getpid(), None, {}
     for _ in range(MAX_CLIMB):
-        if current <= 1:
+        # Pid 1 can be the holder (a container's init hosts the session), so it passes on to the
+        # holder check; any other pid 0 or 1 ends the ancestry without a start read.
+        if current <= 1 and current != holder:
             return False
         if child is not None:
             ordered = _started_no_later(current, child, starts)
