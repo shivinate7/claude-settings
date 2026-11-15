@@ -675,8 +675,9 @@ shipped() {
   return 1
 }
 
-# A folder whose landing failed removes nothing this run.
-land_failed() { FAILED_SUBS="$FAILED_SUBS $1 "; }
+# A folder whose landing failed removes nothing this run. A cloud run also exits 1 and writes no install
+# record, so the stale-copy check retries the landing; a local run keeps its exit code.
+land_failed() { FAILED_SUBS="$FAILED_SUBS $1 "; [ "$CLOUD" = 1 ] && INSTALL_FAILED=1; return 0; }
 
 # note_landed SUB NAME SRC: record what this run landed at the destination: a link to SRC, a regular file,
 # or (skills only) a folder copy. Anything else there, such as a person's own folder at a file name, is not ours.
