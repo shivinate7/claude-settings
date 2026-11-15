@@ -1,0 +1,11 @@
+{
+ "id": "own-no-new-sessions-now",
+ "at": "2026-11-15T14:10:00-06:00",
+ "title": "For now, stop spawning sessions or lanes for the fixes being identified: do them with subagents in the current session",
+ "ruling": "Owner, 14:10 CST Nov 15, relayed: for now, in general, stop spawning sessions or lanes for the fixes being identified at this moment; do them with subagents in the current session, so the session can see each one to main. The words \"for now\" and \"probably\" make this a standing lean for the present batch, not a permanent change to decision lanes-start-as-agents (a lane is always a session); the consultant noted that gap at 14:07 CST and the 14:10 ruling goes into that record. Consultant's findings (labelled the consultant's, unverified by triage): ruling own-tiny-fixes-b (00:51 CST) never landed; its PR #3465 is a draft; the consultant finishes #3465 with its own subagents (adds the 12:09 and 14:10 rulings, fixes the consultant sentence) and merges it itself. At 14:07 the lane-vs-agent gap was noted (decision lanes-start-as-agents says a lane is always a session); the 14:10 ruling goes into that record too. RELAYED, not typed to triage. Related: ruling own-consultant-builder-hat.",
+ "quote": "for now probably in general stop spawning sessions/lanes for this stuff we are immediately currently identifying just do it via subagents here so u can ensure it sees it to main easier",
+ "source": "Owner chat 14:10 CST Nov 15 (verbatim as relayed), relayed by the consultant (session_013NEJKz5AWFJhGvmCUoi6wQ; rule own-consultant-speaks-for-owner), relayed by the coordinator; triage did not read the chat",
+ "status": "open",
+ "step": "tiny-fixes-b",
+ "supersedes_none": "Not read by triage: whether an earlier ruling covers spawning versus subagents. Decision lanes-start-as-agents (a lane is always a session) is the nearest, named by the consultant; this answer is a for-now exception, not a replacement."
+}

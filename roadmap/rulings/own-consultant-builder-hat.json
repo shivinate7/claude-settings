@@ -1,0 +1,16 @@
+{
+ "id": "own-consultant-builder-hat",
+ "at": "2026-11-15T14:10:00-06:00",
+ "title": "The consultant may wear a builder hat when the owner says so: it lands the GitHub plan fix with subagents and merges it itself",
+ "ruling": "Owner, 14:10 CST Nov 15, relayed. Answer to the consultant's question whether the consultant, written as \"builds, merges and decides nothing\", may land the GitHub plan itself with subagents at the owner's 12:09 instruction: yes. The owner says the plan was agreed and exists (in the consultant's transcript), the fix is \"critical\", and, given the decay from spawning sessions, the consultant lands it as subagents that it merges in itself. Consultant's findings (labelled the consultant's, unverified by triage): ruling own-tiny-fixes-b (00:51 CST) never landed; its PR #3465 is a draft; the consultant finishes #3465 with its own subagents (adds the 12:09 and 14:10 rulings, fixes the consultant sentence) and merges it itself. At 14:07 the lane-vs-agent gap was noted (decision lanes-start-as-agents says a lane is always a session); the 14:10 ruling goes into that record too. RELAYED, not typed to triage.",
+ "quote": "“The consultant role is written as “builds, merges and decides nothing”. Yet your 12:09 instruction has me land the GitHub plan myself with subagents. The records don’t show that the consultant can wear a builder hat when you say so.” we talked abt this and had agreed on a plan it exists and if u cant find it its in ur transcript, this is “critical” stuff and with the amount of decay we’ve had bt spawning sessions i want u to ensure u land this fix as subagents that u merge in urself",
+ "source": "Owner chat 14:10 CST Nov 15 (verbatim as relayed), relayed by the consultant (session_013NEJKz5AWFJhGvmCUoi6wQ; rule own-consultant-speaks-for-owner), relayed by the coordinator; triage did not read the chat",
+ "status": "open",
+ "step": "tiny-fixes-b",
+ "supersedes": [
+  {
+   "kind": "ruling",
+   "ref": "the consultant role sentence \"builds, merges and decides nothing\" (session-tiers record; consultant's finding, not read by triage): widened, when the owner says so, to a builder hat for the named fix"
+  }
+ ]
+}
