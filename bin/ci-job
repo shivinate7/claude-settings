@@ -198,17 +198,14 @@ OTHER_JOB_REF = re.compile(r"\b(?:needs|steps)\.[\w-]+(?:\.[\w-]+)*")
 
 
 def other_job_value(expr):
-    """The value of an expression that reads only other jobs' results and outputs, and earlier steps' outputs, with each read as ''
-    (this runner runs one job alone, so none of them exists, as GitHub reads a missing context): a proof that depends on them
-    reads as no proof. The terms it understands are string literals, those reads, ==, !=, &&, ||, ! and parentheses. None for anything else."""
-    parts = LITERAL.split(expr)
-    code = "".join(p if i % 2 else OTHER_JOB_REF.sub("''", p).replace("&&", " and ").replace("||", " or ")
-                   for i, p in enumerate(parts))
-    code = re.sub(r"!(?!=)", " not ", code)
-    if re.sub(r"'[^']*'|==|!=|\band\b|\bor\b|\bnot\b|[\s()]", "", code) or not OTHER_JOB_REF.search(expr):
+    """'' for an expression whose only reads are other jobs' results and outputs and earlier steps' outputs, or None for any other
+    term. This runner runs one job alone, so none of those reads has a value and the whole expression reads as no value: the
+    expression is never evaluated, because a test of a missing read (`!= 'success'`, `== ''`) would come out true and read as a proof.
+    The terms it accepts around the reads are string literals, ==, !=, &&, ||, ! and parentheses."""
+    bare = LITERAL.sub("", expr)
+    if not OTHER_JOB_REF.search(bare):
         return None
-    got = eval(code, {"__builtins__": {}})  # only literals, ==, !=, and, or, not and parentheses pass the check above
-    return str(got).lower() if isinstance(got, bool) else got
+    return "" if not re.sub(r"==|!=|&&|\|\||!|[\s()]", "", OTHER_JOB_REF.sub("", bare)) else None
 
 
 def expand(value, values):
