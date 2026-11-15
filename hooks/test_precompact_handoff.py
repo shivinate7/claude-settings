@@ -836,6 +836,151 @@ def case_nudge_small_room_margin():
         c.cleanup()
 
 
+# --------------------------------------------------------------------------- compaction re-bases
+# The nudge's overhead is the first usable assistant entry. After a compaction the context restarts, so
+# the overhead becomes the first usable entry after the newest compact_boundary, or the transcript's first
+# entry when that is smaller. Default window 500k: threshold 384k, so the room is 384k - overhead, and the
+# top checkpoint sits at total 334k whatever the overhead. The 200k floor sits at total 200k + overhead; it
+# is dropped when it lies under 75k below the top. The sizes below are the last entry's total.
+
+def compaction_lines():
+    """The two records Claude Code writes at a compaction, in order: the boundary, then the summary."""
+    ts = "2026-10-07T10:00:00Z"
+    boundary = {"type": "system", "subtype": "compact_boundary", "timestamp": ts}
+    summary = {"type": "user", "isCompactSummary": True, "timestamp": ts,
+               "message": {"content": [{"type": "text", "text": "summary of the earlier session"}]}}
+    return [json.dumps(boundary), json.dumps(summary)]
+
+
+def quiet_exit(proc):
+    """Exit 0 and no output: the Stop did not block."""
+    return proc.returncode == 0 and not (proc.stdout or "").strip()
+
+
+def case_nudge_compaction_rebases_overhead():
+    """A 300k first entry: the overhead is 300k, so before the compaction 380k blocks (messages 80k) and
+    after it nothing reaches a checkpoint. Today the overhead stays 300k at every size after the
+    compaction, so 276k and 340k stay quiet at bucket -1. The fix re-bases on the first post-compaction
+    entry, 30k: the 200k floor sits at total 230k, so 276k blocks; a repeat is quiet; the top sits at
+    total 334k, so 340k blocks."""
+    c = Case("ncmp1")
+    try:
+        pre = [usage_line(300000)]
+        p = nudge(c, 0, overhead=None, lines=pre + [usage_line(380000)])
+        check("compaction rebase: 380k before the compaction blocks (messages 80k, bucket 0)",
+              is_block(c, p) and stored_bucket(c) == 0, "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+        lines = pre + [usage_line(380000)] + compaction_lines() + [usage_line(30000)]
+        p = nudge(c, 0, overhead=None, lines=lines)
+        check("compaction rebase: the first post-compaction Stop (30k) is quiet and resets the bucket to -1",
+              quiet_exit(p) and stored_bucket(c) == -1, "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+        lines += [usage_line(212000)]
+        p = nudge(c, 0, overhead=None, lines=lines)
+        check("compaction rebase: 212k after the compaction is quiet (messages 182k, under the 200k floor)",
+              quiet_exit(p) and stored_bucket(c) == -1, "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+        lines += [usage_line(276000)]
+        p = nudge(c, 0, overhead=None, lines=lines)
+        check("compaction rebase: 276k after the compaction blocks at the 200k floor (messages 246k)",
+              is_block(c, p), "out=%r" % p.stdout)
+        check("compaction rebase: 276k stores bucket 0", stored_bucket(c) == 0,
+              "got %r" % stored_bucket(c))
+        p = nudge(c, 0, overhead=None, lines=lines)
+        check("compaction rebase: the same 276k transcript again is quiet (no repeat)",
+              quiet_exit(p), "out=%r" % p.stdout)
+        lines += [usage_line(340000)]
+        p = nudge(c, 0, overhead=None, lines=lines)
+        check("compaction rebase: 340k after the compaction blocks at the top (total 334k, messages 310k)",
+              is_block(c, p), "out=%r" % p.stdout)
+        check("compaction rebase: 340k stores bucket 1", stored_bucket(c) == 1,
+              "got %r" % stored_bucket(c))
+        p = nudge(c, 0, overhead=None, lines=lines)
+        check("compaction rebase: the same 340k transcript again is quiet (no repeat)",
+              quiet_exit(p), "out=%r" % p.stdout)
+    finally:
+        c.cleanup()
+
+
+def case_nudge_compaction_small_first_keeps_ladder():
+    """A 20k first entry, then a compaction and a 30k post-compaction entry. The overhead is the smaller
+    of the two, 20k, which is today's value, so the ladder is today's: 212k is quiet, 225k blocks at the
+    200k floor (messages 205k), 276k is quiet (no repeat), 340k blocks at the top. The 225k step pins
+    the minimum: a fix that used only the post-compaction 30k would see messages 195k and stay quiet."""
+    c = Case("ncmp2")
+    try:
+        lines = [usage_line(20000)] + compaction_lines() + [usage_line(30000)]
+        p = nudge(c, 0, overhead=None, lines=lines + [usage_line(212000)])
+        check("compaction small first: 212k is quiet (messages 192k)", quiet_exit(p),
+              "out=%r" % p.stdout)
+        lines += [usage_line(212000)]
+        p = nudge(c, 0, overhead=None, lines=lines + [usage_line(225000)])
+        check("compaction small first: 225k blocks at the 200k floor (messages 205k, bucket 0)",
+              is_block(c, p) and stored_bucket(c) == 0, "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+        lines += [usage_line(225000)]
+        p = nudge(c, 0, overhead=None, lines=lines + [usage_line(276000)])
+        check("compaction small first: 276k is quiet (bucket 0 already reached)", quiet_exit(p),
+              "out=%r" % p.stdout)
+        lines += [usage_line(276000)]
+        p = nudge(c, 0, overhead=None, lines=lines + [usage_line(340000)])
+        check("compaction small first: 340k blocks at the top (messages 320k, bucket 1)",
+              is_block(c, p) and stored_bucket(c) == 1, "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+    finally:
+        c.cleanup()
+
+
+def case_nudge_no_boundary_keeps_first_overhead():
+    """No compaction: the 300k first entry stays the overhead at every size, as today. 212k, 276k and 340k
+    stay quiet at bucket -1 (the one checkpoint is messages 42k, total 342k); 400k blocks (messages 100k)."""
+    c = Case("ncmp3")
+    try:
+        lines = [usage_line(300000)]
+        for size in (212000, 276000, 340000):
+            lines.append(usage_line(size))
+            p = nudge(c, 0, overhead=None, lines=lines)
+            check("no boundary: %dk stays quiet at bucket -1 (the first entry's overhead is kept)" % (size // 1000),
+                  quiet_exit(p) and stored_bucket(c) == -1, "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+        lines.append(usage_line(400000))
+        p = nudge(c, 0, overhead=None, lines=lines)
+        check("no boundary: 400k blocks at the one checkpoint (messages 100k, bucket 0)",
+              is_block(c, p) and stored_bucket(c) == 0, "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+    finally:
+        c.cleanup()
+
+
+def case_nudge_compaction_with_no_later_entry():
+    """The empty state: a boundary with no assistant usage after it. The Stop exits 0 and stays quiet, and
+    the overhead is the first entry, 300k, so the bucket is -1 and nothing is lost."""
+    c = Case("ncmp4")
+    try:
+        p = nudge(c, 0, overhead=None, lines=[usage_line(300000)] + compaction_lines())
+        check("compaction no later entry: the Stop exits 0 and stays quiet, bucket -1",
+              quiet_exit(p) and stored_bucket(c) == -1, "rc=%r out=%r bucket=%r"
+              % (p.returncode, p.stdout, stored_bucket(c)))
+    finally:
+        c.cleanup()
+
+
+def case_nudge_second_compaction_rebases_at_newest_boundary():
+    """Two compactions. The stored bucket is 1, as the first compaction left it (seeded). After the second,
+    the overhead is the first entry after the newest boundary, 30k: 225k is quiet (messages 195k, under the
+    200k floor), and 255k blocks (messages 225k). An overhead taken from the first boundary, 20k, would
+    block at 225k (messages 205k)."""
+    c = Case("ncmp5")
+    try:
+        lines = ([usage_line(300000)] + compaction_lines() + [usage_line(20000), usage_line(340000)]
+                 + compaction_lines() + [usage_line(30000)])
+        p = nudge(c, 0, seed=1, overhead=None, lines=lines)
+        check("second compaction: the Stop after the newest boundary (30k) is quiet and resets the bucket to -1",
+              quiet_exit(p) and stored_bucket(c) == -1, "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+        p = nudge(c, 0, overhead=None, lines=lines + [usage_line(225000)])
+        check("second compaction: 225k after the newest boundary is quiet (messages 195k)",
+              quiet_exit(p), "out=%r" % p.stdout)
+        lines += [usage_line(225000)]
+        p = nudge(c, 0, overhead=None, lines=lines + [usage_line(255000)])
+        check("second compaction: 255k after the newest boundary blocks (messages 225k, bucket 0)",
+              is_block(c, p) and stored_bucket(c) == 0, "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+    finally:
+        c.cleanup()
+
+
 # --------------------------------------------------------------------------- window tiers
 # The nudge's window, highest first: env CLAUDE_CODE_AUTO_COMPACT_WINDOW, then
 # modelSettings.<model>.autoCompactWindow, then top-level autoCompactWindow, then 500k. A bad
@@ -2385,12 +2530,17 @@ def tagged_by_call(c, add, sid=None):
                             timestamp=OWNER_TS)]
 
 
-def bash_call(tu, command, description=None):
+def tool_call(tu, name, inp, ts):
+    """One assistant entry holding one tool_use block."""
+    call = {"type": "tool_use", "id": tu, "name": name, "input": inp}
+    return transcript_line("assistant", [call], timestamp=ts)
+
+
+def bash_call(tu, command, description=None, ts=OWNER_TS):
     inp = {"command": command}
     if description is not None:
         inp["description"] = description
-    call = {"type": "tool_use", "id": tu, "name": "Bash", "input": inp}
-    return transcript_line("assistant", [call], timestamp=OWNER_TS)
+    return tool_call(tu, "Bash", inp, ts)
 
 
 def refused_act(tu, command, description=None):
@@ -3072,6 +3222,314 @@ def case_owner_waits_prose_line_names_no_act():
         c.cleanup()
 
 
+# --- handoff lag: a Stop after a merge, a ruling relay or a role change the handoff missed ------------
+# The Stop refuses when this session landed one of three events after the handoff file's last write (its
+# mtime), and the handoff exists. Each event, narrowly:
+#   merge: a successful tool_use of mcp__github__merge_pull_request, or a successful Bash call of the
+#     merge tool (`merge <pr> --confirm`).
+#   ruling relay: a SendMessage or send_message tool_use whose message holds the word "ruling".
+#   role change: an assistant text line `Role: <coordinator|lane|consultant|batch runner|triage>`.
+# Evidence is one read of the transcript and one stat of the handoff. Each case's handoff is complete, so
+# only this check can block. The handoff's mtime is 10:00; events sit at 09:00 (before it) or after it.
+LAG_MTIME = SINCE_ISO
+LAG_BEFORE = BEFORE_ISO
+LAG_AFTER = AFTER_ISO
+LAG_AFTER_MS = "2026-10-03T11:00:00.123Z"  # the millisecond form transcript lines carry
+LAG_LATER = "2026-10-03T11:30:00Z"
+LAG_HANDOFF_LATER = "2026-10-03T12:00:00Z"
+LAG_NEWEST = "2026-10-03T13:00:00Z"
+LAG_MERGE_MCP = "mcp__github__merge_pull_request"
+LAG_MERGE_ARGS = {"owner": "example-org", "repo": "example-repo", "pullNumber": 2046}
+LAG_MERGE_CMD = "merge 2046 --confirm"
+LAG_RULING = "The owner's ruling is on the page; the page writer may act on it."
+
+
+def lag_handoff(c, mtime=LAG_MTIME):
+    """A complete handoff, written with its mtime at `mtime` (ISO, UTC)."""
+    put(c.handoff_path(), handoff_text())
+    os.utime(c.handoff_path(), (epoch(mtime), epoch(mtime)))
+
+
+def lag_stop(c, lines, active=False, extra=None, via=None):
+    """One Stop over these transcript lines, with whatever handoff is on disk."""
+    return nudge(c, 0, active=active, lines=lines, extra=extra, via=via)
+
+
+def merge_call(ts, ok=True, bash=False):
+    """A merge through the MCP tool, or through the Bash merge tool, with its result. ok False is a
+    refused merge, which is not a merge."""
+    tu = "tu-merge-bash" if bash else "tu-merge-mcp"
+    if bash:
+        call = bash_call(tu, LAG_MERGE_CMD, ts=ts)
+    else:
+        call = tool_call(tu, LAG_MERGE_MCP, LAG_MERGE_ARGS, ts)
+    content = "merged #2046" if ok else "merge refused: the checks are not green"
+    return [call, tool_result(content, ts, is_error=not ok, tool_use_id=tu)]
+
+
+def ruling_relay(ts, name="SendMessage", message=LAG_RULING):
+    """A message to a peer, with the word ruling in its message field."""
+    tu = "tu-relay-%s" % name.replace("__", "-")
+    return [tool_call(tu, name, {"to": "page-writer", "message": message}, ts),
+            tool_result("sent", ts, is_error=False, tool_use_id=tu)]
+
+
+def role_line(ts, text="Role: lane"):
+    """An assistant text entry: the role-pick line of a session."""
+    return [transcript_line("assistant", [{"type": "text", "text": text}], timestamp=ts)]
+
+
+def lag_blocks(c, label, event_lines):
+    """Scope first: with this handoff, a plain transcript is quiet, so only the event can block. Then the
+    event, after the handoff's mtime, blocks, and the reason ends with the decision cite."""
+    lag_handoff(c)
+    scope = lag_stop(c, plain_lines(2))
+    check("handoff lag (%s): scope: a plain transcript with this handoff is quiet" % label,
+          quiet_exit(scope), "out=%r" % (scope.stdout or "")[:200])
+    proc = lag_stop(c, plain_lines(2) + event_lines)
+    reason = stop_reason(proc)
+    check("handoff lag (%s): exits 0" % label, proc.returncode == 0, "rc=%r" % proc.returncode)
+    check("handoff lag (%s): the Stop blocks when the event is after the handoff's mtime" % label,
+          reason is not None, "stdout: %r" % (proc.stdout or "")[:200])
+    check("handoff lag (%s): the block ends with the decision cite" % label,
+          reason is not None and reason.endswith("(decision precompact-handoff)"), "reason: %r" % reason)
+
+
+def case_lag_merge_mcp_blocks():
+    """Merge, MCP tool: a successful mcp__github__merge_pull_request after the mtime blocks. Its time has
+    milliseconds."""
+    c = Case("lag_mcp")
+    try:
+        lag_blocks(c, "merge, MCP tool", merge_call(LAG_AFTER_MS))
+    finally:
+        c.cleanup()
+
+
+def case_lag_merge_bash_blocks():
+    """Merge, Bash: a successful `merge <pr> --confirm` after the mtime blocks."""
+    c = Case("lag_bash")
+    try:
+        lag_blocks(c, "merge, Bash merge tool", merge_call(LAG_AFTER, bash=True))
+    finally:
+        c.cleanup()
+
+
+def case_lag_ruling_relay_blocks():
+    """Ruling relay: a SendMessage after the mtime whose message holds ruling blocks. A send_message
+    tool name (the cloud MCP name ends in send_message) counts the same way."""
+    c = Case("lag_relay")
+    try:
+        lag_blocks(c, "ruling relay, SendMessage", ruling_relay(LAG_AFTER, name="SendMessage"))
+    finally:
+        c.cleanup()
+    c = Case("lag_relay_mcp")
+    try:
+        lag_blocks(c, "ruling relay, send_message",
+                   ruling_relay(LAG_AFTER, name="mcp__claude-code-remote__send_message"))
+    finally:
+        c.cleanup()
+
+
+def case_lag_role_change_blocks():
+    """Role change: an assistant text line `Role: lane` after the mtime blocks. A two-word role counts too."""
+    c = Case("lag_role")
+    try:
+        lag_blocks(c, "role change, lane", role_line(LAG_AFTER, "Starting the lane now.\nRole: lane"))
+    finally:
+        c.cleanup()
+    c = Case("lag_role_batch")
+    try:
+        lag_blocks(c, "role change, batch runner", role_line(LAG_AFTER, "Role: batch runner"))
+    finally:
+        c.cleanup()
+
+
+def case_lag_no_event_stays_quiet():
+    """The empty state: an empty transcript and a plain one, with a complete handoff, are quiet."""
+    c = Case("lag_none")
+    try:
+        lag_handoff(c)
+        p = lag_stop(c, [])
+        check("handoff lag (no event, empty transcript): quiet", quiet_exit(p), "out=%r" % (p.stdout or "")[:200])
+        p = lag_stop(c, plain_lines(2))
+        check("handoff lag (no event, plain transcript): quiet", quiet_exit(p), "out=%r" % (p.stdout or "")[:200])
+    finally:
+        c.cleanup()
+
+
+def case_lag_events_before_handoff_stay_quiet():
+    """Silent when the handoff was written after the event: a merge, a ruling relay and a role change at 09:00,
+    under a handoff written at 10:00."""
+    c = Case("lag_before")
+    try:
+        lag_handoff(c)
+        lines = (plain_lines(2) + merge_call(LAG_BEFORE) + merge_call(LAG_BEFORE, bash=True)
+                 + ruling_relay(LAG_BEFORE) + role_line(LAG_BEFORE))
+        p = lag_stop(c, lines)
+        check("handoff lag (events before the handoff's mtime): quiet", quiet_exit(p),
+              "out=%r" % (p.stdout or "")[:200])
+    finally:
+        c.cleanup()
+
+
+def case_lag_refused_merge_stays_quiet():
+    """A refused merge is no merge: an MCP call and a Bash call, each with an error result, after the mtime
+    stay quiet."""
+    c = Case("lag_refused")
+    try:
+        lag_handoff(c)
+        p = lag_stop(c, plain_lines(2) + merge_call(LAG_AFTER, ok=False))
+        check("handoff lag (refused MCP merge): quiet", quiet_exit(p), "out=%r" % (p.stdout or "")[:200])
+        p = lag_stop(c, plain_lines(2) + merge_call(LAG_AFTER, ok=False, bash=True))
+        check("handoff lag (refused Bash merge): quiet", quiet_exit(p), "out=%r" % (p.stdout or "")[:200])
+    finally:
+        c.cleanup()
+
+
+def case_lag_near_misses_stay_quiet():
+    """Each near miss, after the mtime, stays quiet: a Bash call that is not the merge tool, a relay with no
+    ruling in it, a role line that is not in the list, and a user entry that reads like a role line."""
+    c = Case("lag_near")
+    try:
+        lag_handoff(c)
+        near = (
+            ("Bash `gh pr view 2046`", [bash_call("tu-view", "gh pr view 2046", ts=LAG_AFTER)]),
+            ("Bash `echo` that quotes a merge", [bash_call("tu-echo", 'echo "merge 2046 --confirm"', ts=LAG_AFTER)]),
+            ("Bash `git merge-base`", [bash_call("tu-base", "git merge-base main HEAD", ts=LAG_AFTER)]),
+            ("a relay with no ruling in it",
+             ruling_relay(LAG_AFTER, message="The owner decided: the merge waits for the handoff.")),
+            ("an assistant line `Role: builder`", role_line(LAG_AFTER, "Role: builder")),
+            ("a user entry `Role: coordinator`", [text_entry("Role: coordinator\nBrief follows.", LAG_AFTER)]),
+        )
+        for label, event_lines in near:
+            p = lag_stop(c, plain_lines(2) + event_lines)
+            check("handoff lag (near miss, %s): quiet" % label, quiet_exit(p),
+                  "out=%r" % (p.stdout or "")[:200])
+    finally:
+        c.cleanup()
+
+
+def case_lag_no_handoff_stays_quiet():
+    """No handoff file: the events after a would-be mtime are quiet."""
+    c = Case("lag_nohand")
+    try:
+        lines = plain_lines(2) + merge_call(LAG_AFTER) + ruling_relay(LAG_AFTER) + role_line(LAG_AFTER)
+        p = lag_stop(c, lines)
+        check("handoff lag (no handoff): quiet", quiet_exit(p), "out=%r" % (p.stdout or "")[:200])
+    finally:
+        c.cleanup()
+
+
+def case_lag_stop_hook_active_stays_quiet():
+    """stop_hook_active: a Stop that follows a block stays quiet, whatever the transcript holds."""
+    c = Case("lag_active")
+    try:
+        lag_handoff(c)
+        p = lag_stop(c, plain_lines(2) + merge_call(LAG_AFTER), active=True)
+        check("handoff lag (stop_hook_active): quiet", quiet_exit(p), "out=%r" % (p.stdout or "")[:200])
+    finally:
+        c.cleanup()
+
+
+def case_lag_read_failure_stays_quiet():
+    """A read failure is silent and exits 0: a transcript path that does not exist, and a transcript with
+    bytes that are not UTF-8 beside a merge line."""
+    c = Case("lag_readfail")
+    try:
+        lag_handoff(c)
+        missing = os.path.join(c.root, "no-such-transcript.jsonl")
+        p = c.run(["--nudge"], {"session_id": c.session_id, "transcript_path": missing,
+                                "hook_event_name": "Stop", "stop_hook_active": False})
+        check("handoff lag (missing transcript): quiet, exit 0", quiet_exit(p),
+              "rc=%r out=%r" % (p.returncode, (p.stdout or "")[:200]))
+        tp = os.path.join(c.root, "undecodable.jsonl")
+        text = "\n".join(merge_call(LAG_AFTER)) + "\n"
+        put_bytes(tp, text.encode("utf-8") + b"\xff\xfe broken line\n")
+        p = c.run(["--nudge"], {"session_id": c.session_id, "transcript_path": tp,
+                                "hook_event_name": "Stop", "stop_hook_active": False})
+        check("handoff lag (undecodable transcript): quiet, exit 0", quiet_exit(p),
+              "rc=%r out=%r" % (p.returncode, (p.stdout or "")[:200]))
+    finally:
+        c.cleanup()
+
+
+def case_lag_blocks_once_per_event():
+    """One block per newest event: the same Stop again is quiet, and a newer event blocks once more."""
+    c = Case("lag_once")
+    try:
+        lag_handoff(c)
+        first = merge_call(LAG_AFTER)
+        p = lag_stop(c, plain_lines(2) + first)
+        check("handoff lag once: the first Stop after the merge blocks", stop_reason(p) is not None,
+              "stdout: %r" % (p.stdout or "")[:200])
+        p = lag_stop(c, plain_lines(2) + first)
+        check("handoff lag once: the same Stop again, with no new event, is quiet", quiet_exit(p),
+              "out=%r" % (p.stdout or "")[:200])
+        p = lag_stop(c, plain_lines(2) + first + ruling_relay(LAG_LATER))
+        check("handoff lag once: a newer event (a ruling relay) blocks once more", stop_reason(p) is not None,
+              "stdout: %r" % (p.stdout or "")[:200])
+        p = lag_stop(c, plain_lines(2) + first + ruling_relay(LAG_LATER))
+        check("handoff lag once: the same Stop after the newer event is quiet", quiet_exit(p),
+              "out=%r" % (p.stdout or "")[:200])
+    finally:
+        c.cleanup()
+
+
+def case_lag_handoff_rewrite_clears_then_new_event_blocks():
+    """A handoff written after the events clears them: a merge at 11:00 blocks, a rewrite at 12:00 clears it,
+    and a role change at 13:00 blocks again."""
+    c = Case("lag_rewrite")
+    try:
+        lag_handoff(c)
+        p = lag_stop(c, plain_lines(2) + merge_call(LAG_AFTER))
+        check("handoff lag rewrite: the merge at 11:00 blocks before the rewrite", stop_reason(p) is not None,
+              "stdout: %r" % (p.stdout or "")[:200])
+        lag_handoff(c, mtime=LAG_HANDOFF_LATER)
+        p = lag_stop(c, plain_lines(2) + merge_call(LAG_AFTER))
+        check("handoff lag rewrite: the handoff written at 12:00 clears the merge at 11:00", quiet_exit(p),
+              "out=%r" % (p.stdout or "")[:200])
+        p = lag_stop(c, plain_lines(2) + merge_call(LAG_AFTER) + role_line(LAG_NEWEST))
+        check("handoff lag rewrite: a role change at 13:00 blocks again", stop_reason(p) is not None,
+              "stdout: %r" % (p.stdout or "")[:200])
+    finally:
+        c.cleanup()
+
+
+def case_lag_full_size_transcript_still_blocks():
+    """Full size: a plain transcript of 2000 lines, then the merge last. The scan reaches the merge at the end."""
+    c = Case("lag_big")
+    try:
+        lag_handoff(c)
+        p = lag_stop(c, plain_lines(COST_PAIRS) + merge_call(LAG_AFTER))
+        check("handoff lag full size: a merge after 2000 plain lines blocks", stop_reason(p) is not None,
+              "stdout: %r" % (p.stdout or "")[:200])
+    finally:
+        c.cleanup()
+
+
+def case_lag_writes_no_file_and_starts_no_process():
+    """Cost: the blocking Stop changes no file in the config dir but the nudge file, and starts no process."""
+    c = Case("lag_cost")
+    try:
+        lag_handoff(c)
+        put(c.nudge_path(), json.dumps({"bucket": -1}))
+        before = config_state(c.cfg)
+        proc = lag_stop(c, plain_lines(2) + merge_call(LAG_AFTER),
+                        via=lambda args, payload: run_audited(c, args, payload))
+        check("handoff lag cost: the audited Stop blocks", stop_reason(proc) is not None,
+              "stdout: %r" % (proc.stdout or "")[:200])
+        after = config_state(c.cfg)
+        nudge_rel = os.path.relpath(c.nudge_path(), c.cfg)
+        changed = sorted(k for k in set(before) | set(after)
+                         if before.get(k) != after.get(k) and k != nudge_rel)
+        check("handoff lag cost: the run changes no file in the config dir but the nudge file", not changed,
+              "changed: %r" % changed)
+        started = audit_events(c)
+        check("handoff lag cost: the run starts no process", not started, "started: %r" % started)
+    finally:
+        c.cleanup()
+
+
 def main() -> int:
     case_prompt_names_audit_agent()
     case_precompact_writes_digest_and_state()
@@ -3094,6 +3552,11 @@ def main() -> int:
     case_nudge_top_checkpoint_at_threshold()
     case_checkpoint_ladder()
     case_nudge_small_room_margin()
+    case_nudge_compaction_rebases_overhead()
+    case_nudge_compaction_small_first_keeps_ladder()
+    case_nudge_no_boundary_keeps_first_overhead()
+    case_nudge_compaction_with_no_later_entry()
+    case_nudge_second_compaction_rebases_at_newest_boundary()
     case_window_tiers_table()
     case_window_tier_follows_transcript_model()
     case_window_limit_suffix_forms()
@@ -3165,6 +3628,21 @@ def main() -> int:
     case_owner_waits_substring_act_blocks()
     case_owner_waits_alone_on_line_names_act()
     case_owner_waits_prose_line_names_no_act()
+    case_lag_merge_mcp_blocks()
+    case_lag_merge_bash_blocks()
+    case_lag_ruling_relay_blocks()
+    case_lag_role_change_blocks()
+    case_lag_no_event_stays_quiet()
+    case_lag_events_before_handoff_stay_quiet()
+    case_lag_refused_merge_stays_quiet()
+    case_lag_near_misses_stay_quiet()
+    case_lag_no_handoff_stays_quiet()
+    case_lag_stop_hook_active_stays_quiet()
+    case_lag_read_failure_stays_quiet()
+    case_lag_blocks_once_per_event()
+    case_lag_handoff_rewrite_clears_then_new_event_blocks()
+    case_lag_full_size_transcript_still_blocks()
+    case_lag_writes_no_file_and_starts_no_process()
 
     if FAILED:
         print()
