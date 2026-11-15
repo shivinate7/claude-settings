@@ -2150,6 +2150,9 @@
 - stale011-body-cite-fires: a cite into a symbol's body, or at the first of four stacked decorators, is more than 3 lines from the def line and fires.
 - stale011-dotted-nested-silent: a dotted name (`Widget.method`), a call with nested parens, and a nested def are no symbol to STALE011, so a drifted cite for them passes.
 - stale011-swapped-row-silent: any cite in the sentence that holds the symbol silences it, so a table row with two swapped cites passes. A sentence wrapped over two lines, or a symbol and its cite in two sentences of one line, is not joined.
+- lane-step-dup-untagged: A `create_session` with no `cs-step` tag, a carrier row with no `cs-repo` tag, and `list_sessions` filters other than `before_id`, `tags` and `mine` are not judged by rule lane-step-dup. Decision: session-tiers.
+- lane-step-dup-archived-after-read: A carrier archived after the whole `list_sessions` read still reads live until the session reads the list again, so the guard may refuse a step it could pass. Decision: session-tiers.
+- lane-step-dup-one-rule-id: Part two (open pull request) refuses under rule id `lane-step-dup`, the same as part one, so one override lifts both parts. Decision: session-tiers.
 - idle-lanes-reads-closed-lane-item: `idle_lanes` in `skills/roadmap/build.py` may read a lane whose only item is closed (routed) as idle; unpinned.
 - routed-waits-skipped: a routed closed item with `waits` is skipped by `kept_answer_lines` before its waits branch.
 - routed-kept-answer-at-unchecked: `kept_answer_lines` skips a routed closed item without comparing the kept answer's `at` to `lastAnswer.at`, so a changed answer on it is silent.
