@@ -10038,6 +10038,28 @@ class OwnAgentLockTests(unittest.TestCase):
         require(found[0].get("locked_reason") is not None, "worktree %s is not locked" % path)
         return found[0]
 
+    def spawn_child_after_this_process(self):
+        """A live sleeper whose start time, as `ps` shows it, is later than this process's. `ps` shows
+        whole seconds, lagged up to one second by the boot time's truncation, so the wait is 2.5 s."""
+        mine = guard._process_start_ms(os.getpid())
+        require(isinstance(mine, int), "could not read the start time of this process")
+        time.sleep(max(0.0, (mine + 2500) / 1000.0 - time.time()))
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+
+        def reap_child():
+            child.kill()
+            child.wait(timeout=10)
+
+        self.addCleanup(reap_child)
+        require(child.poll() is None, "the child exited before the lock")
+        require(child.pid not in (os.getpid(), os.getppid()), "the child is an ancestor")
+        theirs = guard._process_start_ms(child.pid)
+        require(isinstance(theirs, int), "could not read the start time of the child")
+        require(theirs > mine, "the child did not start after this process")
+        return child
+
     def test_own_lock_on_a_live_ancestor_on_a_clean_merged_idle_tree_is_freed(self):
         # The test process's parent is a live ancestor of the sweep (this process). Red today:
         # every locked tree is kept as "locked: ...".
@@ -10129,20 +10151,7 @@ class OwnAgentLockTests(unittest.TestCase):
     def test_a_live_lock_holder_reused_as_our_parent_pid_keeps(self):
         # The child starts after this process, so it cannot be an ancestor. A pid that a later
         # process reuses as this process's parent must not read as the calling session's own.
-        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"],
-                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL)
-
-        def reap_child():
-            child.kill()
-            child.wait(timeout=10)
-
-        self.addCleanup(reap_child)
-        require(child.poll() is None, "the child exited before the lock")
-        require(child.pid not in (os.getpid(), os.getppid()), "the child is an ancestor")
-        mine, theirs = guard._process_start_ms(os.getpid()), guard._process_start_ms(child.pid)
-        require(isinstance(mine, int) and isinstance(theirs, int), "could not read a start time")
-        require(theirs >= mine, "the child started before this process, so it could be an ancestor")
+        child = self.spawn_child_after_this_process()
         root, path = self.own_lock_tree("recycled", child.pid)
         entry = self.entry_for(root, path)
         real = sweep._parent_pid
@@ -10150,8 +10159,25 @@ class OwnAgentLockTests(unittest.TestCase):
         with mock.patch.object(sweep, "_parent_pid",
                                side_effect=lambda pid: parents[pid] if pid in parents else real(pid)) as read:
             decision = sweep.decide_worktree(root, entry)
-        self.assertIn(mock.call(os.getpid()), read.call_args_list, "the parent read never reached this process")
+        self.assertEqual(read.call_args_list[:1], [mock.call(os.getpid())], "the parent read did not start here")
         self.assertEqual(decision["action"], "keep", "reaped a live non-ancestor: %s" % decision["reason"])
+        self.assertTrue(decision["reason"].startswith("locked:"), "kept for another reason: %s" % decision["reason"])
+
+    def test_a_stale_parent_link_mid_chain_keeps(self):
+        # The holder is a live child. The link between this process and the holder is a child that
+        # started after this process, so it cannot be this process's parent. The climb must not pass
+        # that link to reach the holder.
+        holder = self.spawn_child_after_this_process()
+        stale = self.spawn_child_after_this_process()
+        root, path = self.own_lock_tree("stale-link", holder.pid)
+        entry = self.entry_for(root, path)
+        real = sweep._parent_pid
+        parents = {os.getpid(): stale.pid, stale.pid: holder.pid, holder.pid: 1}
+        with mock.patch.object(sweep, "_parent_pid",
+                               side_effect=lambda pid: parents[pid] if pid in parents else real(pid)) as read:
+            decision = sweep.decide_worktree(root, entry)
+        self.assertEqual(read.call_args_list[:1], [mock.call(os.getpid())], "the parent read did not start here")
+        self.assertEqual(decision["action"], "keep", "reaped through a stale parent link: %s" % decision["reason"])
         self.assertTrue(decision["reason"].startswith("locked:"), "kept for another reason: %s" % decision["reason"])
 
     def test_an_unreadable_ancestor_read_keeps_the_own_lock(self):
