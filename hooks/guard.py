@@ -3200,6 +3200,11 @@ def lane_start_hits(tool: str, tool_input, cwd: str, transcript: str = "", judge
     briefed = brief_hit(tool, tool_input, transcript)
     if briefed:
         hits.append(("lane-one-topic", briefed[1], briefed[0]))
+    # lane-step-dup part two sits where main judged it, right after lane-one-topic and ahead of the rest, so a start that
+    # breaks another rule and holds a step an open pull request holds is still filed under it and names the pull request.
+    held = step_pr_hit(tool, tool_input, transcript) if judge_step else None
+    if held:
+        hits.append(("lane-step-dup", held[1], held[0]))
     named_id = brief_roster_hit(tool, tool_input, cwd)
     if named_id:
         hits.append(("brief-ids-in-roster", named_id[1], named_id[0]))
@@ -7152,17 +7157,15 @@ def judge(payload) -> None:
         if briefed:
             refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
 
-    # A brief naming a step another live session of the repo carries (rule lane-step-dup). A lane start is judged for it
-    # in the one pass above (lane_start_hits), after the seven.
+    # A brief naming a step another live session of the repo carries, or an open lane pull request holds (rule
+    # lane-step-dup, both parts). A lane start is judged for both in the one pass above (lane_start_hits).
     if not lane_start:
         doubled = step_dup_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
         if doubled:
             refuse(tool, "deny", "lane-step-dup", doubled[1], doubled[0])
-    # The same call, for an open lane pull request that holds the step (rule lane-step-dup, part two).
-    held = step_pr_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
-    if held:
-        refuse(tool, "deny", "lane-step-dup", held[1], held[0])
-    if not lane_start:
+        held = step_pr_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+        if held:
+            refuse(tool, "deny", "lane-step-dup", held[1], held[0])
         # A lane brief that names a bare session id (rule brief-ids-in-roster).
         named_id = brief_roster_hit(tool, tool_input, cwd)
         if named_id:
