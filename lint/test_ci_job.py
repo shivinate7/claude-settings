@@ -2265,6 +2265,14 @@ class LocalActionUnderLint(Job):
         rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
         self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL", "PASS"]), out)
 
+    def test_a_quoted_action_path_runs_the_probe_and_reads_fail(self):
+        # The real action writes its path in double quotes, as CI's shell reads it; the quotes drop before the run.
+        quoted = action_step("Probe", 'python3 "${{ github.action_path }}/../../lint/probe.py" 1 fail.marker')
+        self.commit_lane(composite_action(quoted))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL", "PASS"]), out)
+        self.assertTrue(self.ran("fail.marker"), "the quoted probe did not run\n" + out)
+
     def test_a_passing_local_action_reads_pass(self):
         self.commit_lane(composite_action(probe_step("Probe", 0, "pass.marker")))
         rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
