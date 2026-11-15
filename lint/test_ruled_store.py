@@ -63,9 +63,9 @@ def git_time(iso):
     return "%d +0000" % int(datetime.fromisoformat(iso).timestamp())
 
 
-def point_ref(repo, ref, files, scratch, parent=None, when=None):
-    """Points `ref` at a new commit whose whole tree is `files` ({path: text}). `parent` (a sha) makes the commit a
-    child of that one, and `when` (an ISO time with a zone) sets its committer date. Returns the commit's sha."""
+def point_ref(repo, ref, files, scratch, parents=(), when=None):
+    """Points `ref` at a new commit whose whole tree is `files` ({path: text}). `parents` (shas) make the commit a child
+    of those, the first one its first parent; `when` (an ISO time with a zone) sets its committer date. Returns it."""
     index = os.path.join(scratch, "index-" + ref.replace("/", "_"))
     if os.path.exists(index):
         os.remove(index)
@@ -74,7 +74,9 @@ def point_ref(repo, ref, files, scratch, parent=None, when=None):
         blob = git(repo, "hash-object", "-w", "--stdin", text=text, env=env)
         git(repo, "update-index", "--add", "--cacheinfo", "100644,%s,%s" % (blob, path), env=env)
     tree = git(repo, "write-tree", env=env)
-    args = ["commit-tree", tree, "-m", "fixture for " + ref] + (["-p", parent] if parent else [])
+    args = ["commit-tree", tree, "-m", "fixture for " + ref]
+    for parent in parents:
+        args += ["-p", parent]
     commit_env = dict(env, GIT_COMMITTER_DATE=git_time(when)) if when else env
     commit = git(repo, *args, env=commit_env)
     git(repo, "update-ref", ref, commit, env=env)
@@ -120,6 +122,9 @@ BEFORE_CUTOFF = "2026-11-15T11:32:59-06:00"
 AFTER_CUTOFF = "2026-11-15T12:00:00-06:00"
 TARGET_LATER = "2026-11-15T13:00:00-06:00"
 EARLIER = "2026-11-10T09:00:00-06:00"  # a commit well before the cutoff
+BRANCH_COMMIT = "2026-11-15T10:30:00-06:00"  # a branch commit, dated before the cutoff, merged after it
+BACK_DATED_TIP = "2026-11-15T11:00:00-06:00"  # a commit on top of a later-dated one, dated before the cutoff
+MERGED_AT = "2026-11-15T12:05:00-06:00"  # the merge that brings the branch commit onto the store ref
 CAUSE_NO_RULING = "names no ruling in the store"
 CAUSE_NOT_EARLIER = "names a ruling not earlier than it"
 CAUSE_BAD_REF = "ruling ref is empty or not a string"
@@ -171,7 +176,8 @@ class RepoCase(unittest.TestCase):
         files, parent = {}, None
         for when, entries in steps:
             files.update(fixture.ruling_files(entries))
-            parent = fixture.point_ref(repo, fixture.STORE_REF, dict(files), self.root, parent=parent, when=when)
+            parent = fixture.point_ref(repo, fixture.STORE_REF, dict(files), self.root,
+                                       parents=(parent,) if parent else (), when=when)
         return repo
 
 
@@ -957,6 +963,100 @@ class CostAndCliTests(RepoCase):
         self.assertEqual(ruled_store.read_store(repo)[1], "ok", "scope: the store listing no longer reads")
         proc = subprocess.run([sys.executable, MODULE, "check", repo], capture_output=True, text=True, timeout=60)
         self.assertUnknown(proc)
+
+    def run_check(self, repo):
+        return subprocess.run([sys.executable, MODULE, "check", repo], capture_output=True, text=True, timeout=60)
+
+    def assertFlaggedRef(self, proc, rid):
+        """check exited 1 and printed one problem line that names `rid`, the word ruling, and the no-ruling cause."""
+        text = proc.stdout + proc.stderr
+        self.assertEqual(proc.returncode, 1, "check exited %d, want 1: %s" % (proc.returncode, text))
+        lines = [line for line in text.splitlines() if names(line, rid) and names(line, "ruling")]
+        self.assertEqual(len(lines), 1, "want one ruling problem for %s, got %r" % (rid, text))
+        self.assertIn(CAUSE_NO_RULING, lines[0], "the ruling problem for %s names the wrong cause: %r"
+                      % (rid, lines[0]))
+
+    def test_check_exits_three_and_says_unknown_when_a_rulings_tree_cannot_be_read(self):
+        repo = self.make_repo("lost-tree", store=fixture.ruling_files({"ok": fixture.entry("ok")}))
+        self.assertEqual(self.run_check(repo).returncode, 0, "control: the intact store did not check clean")
+        tree = fixture.git(repo, "rev-parse", "%s:%s" % (fixture.STORE_REF, RULINGS_DIR))
+        loose = os.path.join(repo, ".git", "objects", tree[:2], tree[2:])
+        self.assertTrue(os.path.isfile(loose), "scope: the rulings tree is not a loose object that can be removed")
+        os.remove(loose)
+        listing = _nowindow.run([VCS, "-C", repo, "ls-tree", "-z", "--name-only", fixture.STORE_REF, RULINGS_DIR + "/"],
+                                capture_output=True, env=ENV, timeout=60)
+        self.assertNotEqual(listing.returncode, 0, "scope: the listing still reads with the rulings tree gone")
+        self.assertUnknown(self.run_check(repo))
+
+    def test_check_exits_zero_when_the_store_has_no_rulings_folder(self):
+        repo = self.make_repo("no-folder", store={"roadmap/README.md": "No rulings yet.\n"})
+        self.assertEqual(ruled_store.read_store(repo)[1], "absent",
+                         "scope: a store with no rulings folder did not read as absent")
+        proc = self.run_check(repo)
+        self.assertEqual(proc.returncode, 0, "check on a store with no rulings folder exited %d: %s"
+                         % (proc.returncode, proc.stderr))
+        self.assertFalse(any(line.startswith("unknown") for line in (proc.stdout + proc.stderr).splitlines()),
+                         "check on a store with no rulings folder printed an unknown line")
+
+    def test_a_file_added_then_a_back_dated_commit_on_top_is_still_checked(self):
+        def store(name, ref):
+            return self.store_history(name, [
+                (AFTER_CUTOFF, {"chk": checking_entry("chk", ref, at=AT)}),
+                (BACK_DATED_TIP, {"own-820-c": target_entry("own-820-c", at=EARLIER)}),
+            ])
+
+        self.assertEqual(self.run_check(store("back-dated-ok", "own-820-c keeps the store to one place")).returncode, 0,
+                         "control: a valid ref on the back-dated history did not check clean")
+        self.assertFlaggedRef(self.run_check(store("back-dated", "Rule-one keeps the apps.")), "chk")
+
+    def test_a_branch_commit_dated_before_the_cutoff_is_checked_when_merged_after_it(self):
+        def store(name, ref):
+            repo = self.make_repo(name)
+            own = {"own-820-c": target_entry("own-820-c", at=EARLIER)}
+            other = {"other": target_entry("other", at=EARLIER)}
+            chk = {"chk": checking_entry("chk", ref, at=AT)}
+            base = fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files(own), self.root, when=EARLIER)
+            tip = fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files({**own, **other}), self.root,
+                                    parents=(base,), when=BACK_DATED_TIP)
+            side = fixture.point_ref(repo, "refs/heads/side", fixture.ruling_files({**own, **chk}), self.root,
+                                     parents=(base,), when=BRANCH_COMMIT)
+            fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files({**own, **other, **chk}), self.root,
+                              parents=(tip, side), when=MERGED_AT)
+            return repo
+
+        self.assertEqual(self.run_check(store("merged-ok", "own-820-c keeps the store to one place")).returncode, 0,
+                         "control: a valid ref on the merged history did not check clean")
+        self.assertFlaggedRef(self.run_check(store("merged", "Rule-one keeps the apps.")), "chk")
+
+    def test_a_file_last_committed_before_the_cutoff_in_a_full_history_is_skipped(self):
+        repo = self.store_history("old-full", [
+            (EARLIER, {"own-820-c": target_entry("own-820-c", at=EARLIER),
+                       "chk": checking_entry("chk", "Rule-one keeps the apps.", at=AT)}),
+            (AFTER_CUTOFF, {"own-820-c": target_entry("own-820-c", at=EARLIER),
+                            "other": target_entry("other", at=EARLIER)}),
+        ])
+        self.assertEqual(fixture.git(repo, "rev-parse", "--is-shallow-repository"), "false",
+                         "scope: the history is shallow")
+        proc = self.run_check(repo)
+        self.assertEqual(proc.returncode, 0, "an old file in a full history was not skipped: %s"
+                         % (proc.stdout + proc.stderr))
+
+    def test_check_exits_three_and_says_unknown_on_a_shallow_store(self):
+        repo = self.store_history("shallow", [
+            (EARLIER, {"own-820-c": target_entry("own-820-c", at=EARLIER),
+                       "chk": checking_entry("chk", "Rule-one keeps the apps.", at=AT)}),
+            (AFTER_CUTOFF, {"own-820-c": target_entry("own-820-c", at=EARLIER),
+                            "other": target_entry("other", at=EARLIER)}),
+        ])
+        self.assertEqual(self.run_check(repo).returncode, 0, "control: the full history did not check clean")
+        self.assertEqual(fixture.git(repo, "rev-parse", "--is-shallow-repository"), "false",
+                         "control: the history reads as shallow before the marker")
+        tip = fixture.git(repo, "rev-parse", fixture.STORE_REF)
+        with open(os.path.join(repo, ".git", "shallow"), "w", encoding="utf-8") as handle:
+            handle.write(tip + "\n")
+        self.assertEqual(fixture.git(repo, "rev-parse", "--is-shallow-repository"), "true",
+                         "scope: the repo did not read as shallow")
+        self.assertUnknown(self.run_check(repo))
 
     def test_check_on_an_absent_store_exits_zero_and_is_not_unknown(self):
         repo = self.make_repo("absent", main={"README.md": "main\n"})
