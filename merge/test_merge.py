@@ -16021,8 +16021,9 @@ class ReviewCleanMainMerge(ReviewEnv):
 
 class LintCleanMainMergeCarry(ReviewEnv, RecordsEnv):
     """A lane-lint PASS carries across a clean merge of main (owner ruling, 2026-11-14 23:04 CST, item 850 a). The merge tool proves the merge: two
-    parents, the second on the base's main, git's own merge tree of its parents, and nothing else changed since the PASS. Any other form is not
-    carried, and a read that fails is not carried, never passed. The carry does not depend on the stamp config. Cases call lint_carried with its
+    parents, the second on the base's main, git's own merge tree of its parents, and nothing else changed since the PASS. The lint carries across clean
+    merges of main only: a claim or records-page commit after a clean merge is not carried here. The old direct form, a claim or page straight on the
+    PASS, stays. Any other form is not carried, and a read that fails is not carried, never passed. The carry does not depend on the stamp config. Cases call lint_carried with its
     current signature, through the scripted host of --reviewed (reviewed_host); lint_check and --reviewed each get one case."""
 
     def setUp(self):
@@ -16045,19 +16046,31 @@ class LintCleanMainMergeCarry(ReviewEnv, RecordsEnv):
         self.assertTrue(self.carry(fx, fx.clean), "a lane-lint PASS on the reviewed head does not carry across one clean merge of main")
         self.assertTrue(self.carry(fx, fx.clean2), "a lane-lint PASS on the reviewed head does not carry across two clean merges of main")
 
-    def test_b_a_claim_after_a_clean_merge_carries_the_lint(self):
+    def test_b_a_claim_after_a_clean_merge_is_not_carried(self):
         fx = self.real_commits()
         self.assertEqual(fx.parents[fx.clean], [fx.fixed, fx.main], "fixture: the clean merge's parents are not the reviewed head and main")
         claim = self.claim_over(fx.clean, {"docs/decisions/second.md": record("D-002", "second")})
         self.facts(fx, [claim])
-        self.assertTrue(self.carry(fx, claim), "a claim commit after a clean merge of main does not carry the PASS of the reviewed head")
+        self.assertFalse(self.carry(fx, claim), "a claim commit after a clean merge of main carried the PASS: the lint carries across clean merges of main only")
 
-    def test_b_a_records_page_after_a_clean_merge_carries_the_lint(self):
+    def test_b_a_records_page_after_a_clean_merge_is_not_carried(self):
         fx = self.real_commits()
         page = self.tool_page(fx.clean)
         self.facts(fx, [page])
         self.assert_page_scope(page, fx.clean)
-        self.assertTrue(self.carry(fx, page), "a records page the tool wrote after a clean merge of main does not carry the PASS of the reviewed head")
+        self.assertFalse(self.carry(fx, page), "a generated records page after a clean merge of main carried the PASS: the lint carries across clean merges of main only")
+
+    def test_b_a_hand_edited_records_page_after_a_clean_merge_is_not_carried(self):
+        fx = self.real_commits()
+        generated = self.tool_page(fx.fixed)
+        self.facts(fx, [generated])
+        self.assert_page_scope(generated, fx.fixed)
+        self.assertTrue(self.carry(fx, generated), "control: a generated records page straight on the reviewed head does not carry, the old direct form")
+        hand = self.tool_page(fx.clean, hand="hand line\n")
+        self.facts(fx, [hand])
+        self.assert_page_scope(hand, fx.clean)
+        self.assertIn("hand line", sh(self.co, "git", "show", f"{hand}:{merge.RECORDS_PAGE}"), "fixture: the page commit does not hold the hand edit")
+        self.assertFalse(self.carry(fx, hand), "a hand-edited records page after a clean merge of main carried the PASS: the page is the generator's output or no carry")
 
     def test_c_a_plain_commit_after_a_clean_merge_is_not_carried(self):
         fx = self.real_commits()
@@ -16149,6 +16162,34 @@ class LintCleanMainMergeCarry(ReviewEnv, RecordsEnv):
         self.assertRegex(line_with_lint(live), rf"^#7 feat7 {live[:9]} done: ", "control: the record at the live head does not read done with its own lint")
         self.assertRegex(line_with_lint(fx.fixed), rf"^#7 feat7 {live[:9]} no lint: ",
                          "a lane-lint PASS on the reviewed head carried to a merge the checkout cannot read, so the line does not read no lint")
+
+    def test_m_a_plain_commit_before_a_clean_merge_is_not_carried(self):
+        fx = self.real_commits()
+        self.assertEqual(fx.parents[fx.after_plain], [fx.plain, fx.main], "fixture: the clean merge's first parent is not the plain commit")
+        self.assertFalse(self.carry(fx, fx.after_plain), "a clean merge of main on a plain commit carried the PASS of the reviewed head")
+
+    def test_p_a_default_branch_failure_is_not_carried_and_never_falls_back_to_the_pull_request_base(self):
+        fx = self.real_commits()
+        stacked = self.reviewed_host(fx, fx.stacked, base="feat-base", compares={**fx.on_main, **fx.on_stack})
+        clean = self.reviewed_host(fx, fx.clean, base="feat-base", compares={**fx.on_main, **fx.on_stack})
+        with unittest.mock.patch.object(merge, "default_branch", return_value="main"):
+            self.assertTrue(self.carry(fx, fx.clean, base="feat-base", host=clean), "control: a clean merge of main does not carry on a stacked pull request while the default branch reads main")
+        with unittest.mock.patch.object(merge, "default_branch", side_effect=merge.Stop("fixture: the default branch cannot be read")):
+            self.assertFalse(self.carry(fx, fx.stacked, base="feat-base", host=stacked),
+                             "a merge of the pull request's base carried the PASS when the default branch cannot be read: the carry must not fall back to the base")
+
+    def test_q_an_unknown_merge_state_in_the_walk_is_not_carried(self):
+        fx = self.real_commits()
+        fork = self.git_commit(fx.main, {"n.txt": "n\n"})  # a commit of main that only this checkout holds
+        fx.on_main[(fork, "main")] = "ahead"
+        tree = sh(self.co, "git", "merge-tree", "--write-tree", fx.fixed, fork).split()[0]  # git's own merge of the reviewed head and fork
+        live = sh(self.co, "git", "commit-tree", tree, "-p", fx.fixed, "-p", fork, "-m", "fixture")
+        self.facts(fx, [fork, live])
+        self.assertEqual(fx.parents[live], [fx.fixed, fork], "fixture: the merge's parents are not the reviewed head and the unpushed commit")
+        self.assertTrue(self.carry(fx, live), "control: git reads this merge in the checkout, and a clean merge of main on the reviewed head carries")
+        clone = self.main_only_clone()
+        self.assertFalse(self.has_commit(clone, fork), "fixture: the main-only clone holds the unpushed commit, so git can read the merge")
+        self.assertFalse(self.carry(fx, live, root=clone), "a merge whose merge state is unknown carried the PASS: an unknown read is no carry")
 
 
 class ReviewUnknownReads(ReviewEnv):
