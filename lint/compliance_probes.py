@@ -1670,7 +1670,7 @@ FACTS_TIMEOUT = 20  # seconds per request: a hung API read must end as unknown, 
 # A line that reads like a Facts line in any dress: a list, quote or heading mark, a numbered-list prefix, emphasis, the
 # singular word, a full-width colon. `[^\S\n]` keeps the multi-line search below from running across a line end.
 # Each mark is one character or one numbered-list prefix, so the match stays linear on a long run of marks.
-FACTS_LABEL = re.compile(r"[^\S\n]*(?:(?:[-*_>#`]|[0-9]+[.)])[^\S\n]*)*facts?(?:[*_`]|[^\S\n])*[:：]", re.I)
+FACTS_LABEL = re.compile(r"[^\S\n]*(?:(?:[-*_>#]|[0-9]+[.)])[^\S\n]*)*facts?(?:[*_`]|[^\S\n])*[:：]", re.I)
 FACTS_LABEL_LINE = re.compile(r"^" + FACTS_LABEL.pattern, re.I | re.M)
 FACTS_FORMS = "a claim reads `pr <N> open|merged` or `ref <name> present|absent`"
 FACTS_VALUES = {"pr": ("open", "merged", "closed"), "ref": ("present", "absent")}
@@ -1765,7 +1765,7 @@ def facts_claims(text, rel):
                 if claim.strip():
                     out.append((number, claim.strip(), None))
                 else:
-                    out.append((number, "empty claim", "a `;` has no claim after it, or two `;` stand together"))
+                    out.append((number, "empty claim", "a `;` at the start or end, or two `;` together, leave a claim empty"))
     return out, seen
 
 
