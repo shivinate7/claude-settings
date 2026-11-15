@@ -3,7 +3,8 @@
 
     python3 lint/ruled_store.py --session-line REPO   the lines the session-start hook prints, or nothing
     python3 lint/ruled_store.py list REPO             every open entry in full
-    python3 lint/ruled_store.py check REPO            exit 1 on a store problem (check_store)
+    python3 lint/ruled_store.py check REPO            exit 1 on a store problem (check_store), exit 3 and a line that
+                                                      starts "unknown" when the store cannot be read
 
 The store is the folder roadmap/rulings on origin/roadmap of REPO, one JSON file per ruling. An entry holds `id`,
 `at` (ISO 8601 with a zone), `ruling`, `source`, `status` ("open" or "closed"), `supersedes` (a list of
@@ -22,6 +23,9 @@ unchecked. guard_ruling_line(entry) words the note a guard prints when it lets t
 every entry text only. A guard rule id is the first token of the ref, with a trailing ":" cut, in kebab-case
 (guard_rule_id); a ref with no such token names no rule.
 
+An entry dated at or after CUTOFF_AT must name what it supersedes when the kind is "ruling": the first token of the
+ref is the exact `id` of an entry in the store dated strictly earlier (check_store). An older entry is not checked.
+
 Cost: this module keeps no process and no timer and writes no file. ruled_entries starts two read-only git processes
 (one ls-tree, one cat-file --batch). open_entries starts one more cat-file --batch, and only when an open entry
 names `lands_in`. check_store adds one more cat-file --batch, only when an open entry names a `step`. A missing ref, a
@@ -37,7 +41,7 @@ import re
 import shlex
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # A caller that already put hooks/ on the path (report_guard puts a stamped guard.d copy first) keeps its order: this
@@ -64,6 +68,10 @@ GIT_TIMEOUT = 30
 # A git start must read REPO, never an outer repo that a hook or CI step points at through these.
 STRIPPED = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_NAMESPACE")
 _FAR_PAST = datetime.min.replace(tzinfo=timezone.utc)
+# Entries before this instant keep the refs they were written with; the ruling-ref rule starts here (owner grant,
+# waiting-page item 877 option a).
+CUTOFF_AT = datetime(2026, 11, 15, 11, 33, tzinfo=timezone(timedelta(hours=-6)))
+EXIT_UNKNOWN = 3  # the store could not be read: neither clean nor flawed
 
 
 def _git(repo_dir, args, text=None):
@@ -337,18 +345,43 @@ def _steps_of(entry):
     return [s for s in raw if isinstance(s, str) and STEP_SLUG.match(s)]
 
 
-def check_store(repo_dir):
-    """One problem line per defect in the store: a file that is not a JSON object; each check_entry problem (prefixed by
-    the entry's id); a guard-rule ref that names no rule id; two or more open entries that supersede one ref of one
-    kind; an open entry whose `step` (or, with a `steps` list, every listed step) is done on origin/roadmap. A step file
-    that is missing or unreadable is not done. [] when the store is clean or absent."""
-    entries, _state, bad = _load(repo_dir, STORE_REF)
+def _ruling_ref_problems(entries):
+    """Problem lines for each "ruling" ref, on entries dated at or after CUTOFF_AT, whose first token is not the exact
+    id of a store entry dated strictly earlier. A ref is judged on its id alone, so prose after the id never matters."""
+    instants = {}
+    for entry in entries:
+        if isinstance(entry.get("id"), str):
+            instants.setdefault(entry["id"], []).append(entry_instant(entry))
+    problems = []
+    for entry in entries:
+        at = entry_instant(entry)
+        if at < CUTOFF_AT:
+            continue
+        rid = entry.get("id", "?")
+        for item in _supersedes(entry):
+            if item.get("kind") != "ruling":
+                continue
+            ref = item.get("ref")
+            parts = ref.split() if isinstance(ref, str) else []
+            if not parts:
+                problems.append("%s: ruling ref is empty or not a string" % rid)
+            elif parts[0] not in instants:
+                problems.append("%s: ruling ref %s names no ruling in the store" % (rid, parts[0]))
+            elif not any(moment < at for moment in instants[parts[0]]):
+                problems.append("%s: ruling ref %s names a ruling not earlier than it" % (rid, parts[0]))
+    return problems
+
+
+def _check_state(repo_dir):
+    """(problems, state) of the store: the problem lines of check_store and the read state of read_store."""
+    entries, state, bad = _load(repo_dir, STORE_REF)
     problems = list(bad)
     for entry in entries:
         rid = entry.get("id", "?")
         problems += ["%s: %s" % (rid, p) for p in check_entry(entry)]
         if any(not rule for rule in _guard_ids(entry)):
             problems.append("entry %s: guard-rule ref names no rule id" % rid)
+    problems += _ruling_ref_problems(entries)
     opened = open_entries(entries, repo_dir)
     shared = {}
     for entry in opened:
@@ -376,13 +409,28 @@ def check_store(repo_dir):
         if slugs and all(is_done(slug) for slug in slugs):
             noun = "step %s is" % slugs[0] if len(slugs) == 1 else "steps %s are" % _joined(slugs)
             problems.append("%s done but entry %s is still open" % (noun, entry.get("id", "?")))
-    return problems
+    return problems, state
+
+
+def check_store(repo_dir):
+    """One problem line per defect in the store: a file that is not a JSON object; each check_entry problem (prefixed by
+    the entry's id); a guard-rule ref that names no rule id; on an entry dated at or after CUTOFF_AT, a "ruling" ref
+    whose first token is empty, is not a string, names no entry in the store, or names an entry not dated strictly
+    earlier; two or more open entries that supersede one ref of one kind; an open entry whose `step` (or, with a
+    `steps` list, every listed step) is done on origin/roadmap. A step file that is missing or unreadable is not done.
+    [] when the store is clean or absent, and also when it is unreadable: a caller that must tell the two apart reads
+    read_store's state, as _check does."""
+    return _check_state(repo_dir)[0]
 
 
 def _check(repo_dir):
-    problems = check_store(repo_dir)
+    problems, state = _check_state(repo_dir)
     for problem in problems:
         print(problem)
+    if state == "unreadable":
+        print("unknown: the ruled store could not be read (git cannot start, or a ruling file is lost), so it is "
+              "neither clean nor flawed")
+        return EXIT_UNKNOWN
     return 1 if problems else 0
 
 
