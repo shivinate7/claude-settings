@@ -1,4 +1,4 @@
-# Seven repos merge per lane now; any other repo switches together at the cutover
+# Six repos are ordered to merge per lane now, q_max waits; any other repo switches together at the cutover
 
 ## The ruling
 
@@ -10,12 +10,12 @@ Owner ruling `own-820-c-five-repos` (per-lane merge for five more repos), page s
 
 Both exceptions override ruling `own-act6-draft-prs-when-green` (child-repo draft PRs open once claude-settings main is green; the switch waits for the drain), for the seven named repos only.
 
-State: per-lane merge on the stable branch is ordered now in degen, home, banchi, mailaudit, ios-adblock and joyous. What each repo's settings change is for the lane that builds it, so "live" holds only where a per-lane merge is recorded. In q_max the order stands, but the act as named is blocked until item 821 is answered. Target, not live, for every other repo; it waits for the drain and switches at the cutover. The cutover lands with the removal act, act 4 of R42 part 2, which is a branch in progress.
+State: per-lane merge on the stable branch is ordered now in degen, home, banchi, mailaudit, ios-adblock and joyous. What each repo's settings change is for the lane that builds it, so "live" holds only where a per-lane merge is recorded. In q_max the order stands, but the act as named is blocked until item 821 is answered. Target, not live, for every other repo, and q_max keeps its batch path until item 821 is answered; it waits for the drain and switches at the cutover. The cutover lands with the removal act, act 4 of R42 part 2, which is a branch in progress.
 
 - The merge tool is one shared script that every repo runs (`merge/merge.py`). A cutover in one repo gives that tool two rule sets. The exceptions accept that for the seven named repos.
 - Decision `uniform-over-variants` forbids one rule set per repo. Q1 a applies it to the cutover. The two exceptions above are the only departures.
 - Child repos read the stable branch (decision `stable-branch`) and fall back as decision `stable-fallback-warn` says. Both land before the cutover.
-- Until the cutover, every repo the two rulings do not name keeps its batch path, and a red main keeps the brake of decision `no-merge-onto-red-main`.
+- Until the cutover, every repo the two rulings do not name keeps its batch path, and so does q_max until item 821 is answered. A red main keeps the brake of decision `no-merge-onto-red-main`.
 
 Why: act 4 changes the shared merge tool. Child repos would lose batching and get no stable branch or revert route if the cutover came first in one repo. Refuter, 2026-11-11 22:58 CST, gap 3.
 
