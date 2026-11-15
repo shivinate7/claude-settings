@@ -7,8 +7,8 @@
  "lane": "",
  "owner": "triage",
  "blockedBy": [],
- "why": "Lane R42 part 2 15:52 CST Nov 12 (record-writer for act 5, PR #2993): a PR moved to ready runs nothing in the lane-touched-tests job; unknown whether checks.yml covers those tests on the merging head.",
+ "why": "Lane R42 part 2 15:52 CST Nov 12 (record-writer for act 5, PR #2993): a PR moved to ready runs nothing in the lane-touched-tests job; unknown whether checks.yml covers those tests on the merging head. Sighting 04:22 CST CST Nov 15 (coordinator relaying runner 10, 04:21 CST; not read by triage): #3472 head 4dcb7423e5d7 (a merge of main into the ready PR) linted UNKNOWN because lane-touched-tests was skipped on the ready PR; runner 10 set it back to draft to get a draft run (43703661910).",
  "source": "lane merge-flow-after-anthropic 15:52 CST Nov 12",
  "note": "Read one ready PR run and the batch run that merges it; report which lane-touched tests ran where. If none ran on the merging head, file the fix. Decision draft-until-reviewed.",
- "updatedAt": "2026-11-12T15:56:59-06:00"
+ "updatedAt": "2026-11-15T04:22:27-06:00"
 }
