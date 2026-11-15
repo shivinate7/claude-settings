@@ -248,10 +248,13 @@ After each build the roadmap build script prints the upkeep list for the triage 
   sessions, `held` and `reviewLog` still come from a fresh live file: a pull has a live lane when a live
   session step equals its branch exactly (the in-progress row also counts a `lane/<id>` branch). An ended
   session holds no draft. A draft whose live pull row (matched by number) has `held` or `reviewLog` true is skipped.
-  Each entry is `#N (<branch or title>)`. When the sessions cannot be read, the row is one
-  `unknown (sessions not read: <why>; REST read: N stale-looking drafts: #a, #b)`, never a clear row. When the REST read
-  cannot finish whole (no token or GitHub name, an HTTP error, a rate limit, a reply that is not a JSON list, a row of
-  the wrong shape, over 20 pages) the row is one `unknown (<why>)` entry;
+  A stale draft with no live pull row has unread `held` and `reviewLog`, so it reads
+  `unknown (#N has no live pulls row, so held and reviewLog are unread)`, never listed. Each other entry is
+  `#N (<branch or title>)`. When the sessions cannot be read, the row is one
+  `unknown (sessions not read: <why>; REST read: N stale-looking drafts)`, a count with no number or branch, never a
+  clear row. When the REST read cannot finish whole (no token or GitHub name, an HTTP error, a transport error cut
+  short, a rate limit, a reply that is not a JSON list, a row of the wrong shape, over 20 pages) the row is one
+  `unknown (<why>)` entry;
 - page rulings not on their step: each closed waiting-page item whose `home` is a step that is not
   done, where none of that step's `note`, `why` or `ask` cites the item. The `home` is trimmed, an
   optional leading `step ` (in any case) is dropped, and the rest must equal the step id exactly. A cite

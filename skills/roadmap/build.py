@@ -58,12 +58,13 @@ N // 100 + 1 REST calls per build run for N open pulls (floor, not ceil: a full 
 the read), at most 20; it writes no file, starts no timer and keeps no log. Sessions, `held` and `reviewLog` still come
 from a fresh live file (a pull's marks are matched by number): a draft is skipped when a live session step equals its
 branch or its `lane/<id>` form, or its live row has `held` or `reviewLog` true. When the sessions cannot be read the row is one
-`unknown (sessions not read: <why>; REST read: N stale-looking drafts: #a, #b)`. The row reads one `unknown (<why>)`
-entry when the REST read cannot finish whole: no token or GitHub name, an HTTP error (403 and 429 name the rate
-limit), a rate-limit count of 0 before the last page, a reply that is not a JSON list, a row of the wrong shape, or
+`unknown (sessions not read: <why>; REST read: N stale-looking drafts)`, a count with no number or branch. A stale
+draft with no live pulls row reads `unknown (#N has no live pulls row, ...)`, never listed. The row reads one
+`unknown (<why>)` entry when the REST read cannot finish whole: no token or GitHub name, an HTTP error (403 and 429
+name the rate limit), a transport error cut short, a rate-limit count of 0 before the last page, a reply that is not a JSON list, a row of the wrong shape, or
 more than 20 pages. A pull names a step when its branch equals the step id or
 its title holds the id as a whole token (names_step), used by the pair line below. The stale-draft row's lane check is
-unlaned's: the branch, bare or as lane/<id>, equals a live session step. Triage sets `held` from the batch runner's hand-in or hold list and `reviewLog`
+unlaned's: the branch, bare or as lane/<id>, equals a live session step. On each live pulls row, triage sets `held` from the batch runner's hand-in or hold list and `reviewLog`
 from the pull's posted review log. A present key must be a JSON bool (`null` and text are not); absent means false. A
 pull row with a non-bool value is skipped, so the stale-draft, pair, unlaned and lanes-to-archive rows read unknown.
 
@@ -147,6 +148,7 @@ joint line (stale_draft_pull) reads it now.
 """
 import argparse
 import datetime
+import http.client
 import json
 import os
 import pathlib
@@ -1286,8 +1288,8 @@ def open_pulls_rest(slug):
             return None, "unknown (the open pulls read failed: HTTP %d)" % err.code
         except ValueError:
             return None, "unknown (the open pulls reply was not JSON)"
-        except OSError as err:
-            return None, "unknown (the open pulls read failed: %s)" % (err,)
+        except (OSError, http.client.HTTPException) as err:
+            return None, "unknown (the open pulls read failed: %s)" % (err or type(err).__name__,)
         if not isinstance(body, list):
             return None, "unknown (the open pulls reply was not a list)"
         for row in body:
@@ -1307,9 +1309,10 @@ def open_pulls_rest(slug):
 
 def stale_drafts(work, rest=None, now=None):
     """Entries for each draft pull whose updated_at is over STALE_DRAFT_HOURS before `now` with no live lane (an ended
-    lane holds none), or one unknown entry. `rest` is open_pulls_rest's (rows, why); the live file gives only the
-    sessions and the held and reviewLog marks, so a live file that cannot be read makes the row one unknown entry that
-    still names the stale-looking drafts, never a clear row or a close list."""
+    lane holds none), or unknown entries. `rest` is open_pulls_rest's (rows, why); the live file gives only the
+    sessions and the held and reviewLog marks. A live file that cannot be read makes the row one unknown entry that
+    counts the stale-looking drafts and names none; a stale draft with no live pulls row reads unknown, naming its
+    number, never listed."""
     rows, rest_why = rest if rest else (None, "unknown (the open pulls were not read)")
     if rest_why:
         return [rest_why]
@@ -1317,16 +1320,19 @@ def stale_drafts(work, rest=None, now=None):
     old = [p for p in rows if p["draft"] and (now - p["updated_at"]).total_seconds() > STALE_DRAFT_HOURS * 3600]
     why = live_why(work)
     if why:
-        names = ", ".join("#%d" % p["number"] for p in old)
         inner = why[len("unknown ("):-1] if why.startswith("unknown (") and why.endswith(")") else why
-        return ["unknown (sessions not read: %s; REST read: %d stale-looking drafts%s)" % (inner, len(old), ": " + names if old else "")]
+        return ["unknown (sessions not read: %s; REST read: %d stale-looking drafts)" % (inner, len(old))]
     marks = {p["number"]: p for p in work["pulls"]}
     out = []
     for p in old:
         if live_lane_holds(work, p["branch"]):
             continue
+        # A draft with no live pulls row has unread held and reviewLog marks, so it reads unknown, never listed.
+        if p["number"] not in marks:
+            out.append("unknown (#%d has no live pulls row, so held and reviewLog are unread)" % p["number"])
+            continue
         # A pull the batch runner holds or whose review log is posted waits on a named owner, not forgotten.
-        mark = marks.get(p["number"], {})
+        mark = marks[p["number"]]
         if mark.get("held") is True or mark.get("reviewLog") is True:
             continue
         out.append("#%d (%s)" % (p["number"], p["branch"] or p["title"]))
