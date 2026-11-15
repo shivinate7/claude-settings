@@ -23299,6 +23299,26 @@ class GhApiBudget(Env):
         h.api("pulls/7")
         self.assertEqual(self.call_count(), 3, "a GET after a write was served without a call")
 
+    def test_a_get_with_memo_off_is_sent_each_time(self):  # pins the head: memo=False always reads
+        h = self.gh_host()
+        h.api("pulls/7", memo=False)
+        self.assertEqual(self.call_count(), 1, "the first GET with memo=False made no call")  # scope: the first call, before the repeat
+        h.api("pulls/7", memo=False)
+        self.assertEqual(self.call_count(), 2, "the second GET with memo=False was served from the memo, so it made no call")
+
+    def test_read_pr_reads_the_pull_request_each_time(self):  # pins the head: read_pr never reads the memo, so a poll sees the head move
+        h = self.gh_host()
+        h.read_pr(7)
+        self.assertEqual(self.call_count(), 1, "the first read_pr(7) made no call")  # scope: the first read, before the repeat
+        h.read_pr(7)
+        self.assertEqual(self.call_count(), 2, "the second read_pr(7) was served from the memo, so a poll would see the head it read before a push")
+
+    def test_a_bulk_read_after_an_identical_ordinary_read_is_sent(self):  # pins the head: a bulk page reads fresh, never the memo
+        h = self.primed_host()
+        self.assertEqual(self.call_count(), 1, "the ordinary read made no call")  # scope: the priming read, before the bulk read
+        h.pages("pulls", fields={"state": "open"}, **bulk_kw())
+        self.assertEqual(self.call_count(), 2, "the bulk read after an identical ordinary read was served from the memo, so it made no call")
+
 
 class AuditPrs(Env):
     """`merge --audit-prs`: one line per open pull request from the bulk open-PR list and one repo-wide comment read, then the calls of each route
