@@ -1,0 +1,10 @@
+{
+  "title": "Triage names who did an act, from REST or the actor's own word, before it files a step or record about it",
+  "phase": "next",
+  "status": "ready",
+  "order": 2302,
+  "owner": "claude-settings",
+  "why": "Incident, 13:28 CST Nov 16: triage filed step classifier-denies-merged-merge saying the merger of #3583 was unknown, from a relayed account; the coordinator corrected it at 13:23 CST (runner 10 merged it alone at 13:20:33 CST) and triage deleted the step at 13:31 CST. Harm: a wrong record on the roadmap branch for about three minutes and a wasted coordinator message. Mistake Claude is likely to repeat: filing a record about a merge or a refusal from a relay without reading who acted. Guard that would have stopped it: before a triage commit adds a step or ruling that says an actor is unknown, a check that the record names the REST read (merged_by) or the actor's own word. Not built.",
+  "note": "Ready. Not a guard on every tool call: it reads only the staged roadmap diff at commit (the roadmap pre-commit hook already reads staged files). Cost: one file read per commit, no process or log. Reader: triage. Unmeasured: how often a relayed account is wrong; one sighting today, so this may stay a note until a second.",
+  "updatedAt": "2026-11-16T13:38:00-06:00"
+}
