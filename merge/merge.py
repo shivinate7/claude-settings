@@ -6038,12 +6038,12 @@ def main(argv, host=None, lock=None, hosts=None):
                 return 0
             return draft_step(root, cfg, a.pr, h, info, merge_main=True)
         checked = None  # the head the lane-lint PASS names; confirm refuses any other
-        if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and isinstance(h, Host) and not info["draft"]:  # a scripted host that is no Host brings its own reads; a draft is the records step, never a join
+        if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and hasattr(h, "issue_comments") and not info["draft"]:  # a scripted host with no comment read brings its own reads; a draft is the records step, never a join
             lint_check(h, a.pr, info, root, a.config)
             checked = info["head"]
         if a.confirm:
             with release_on_signals():
-                proof = (lambda live: lint_proves_head(h, a.pr, live, root, a.config)) if isinstance(h, Host) else None  # read in the cloud and on a computer; a scripted host reads no comments
+                proof = (lambda live: lint_proves_head(h, a.pr, live, root, a.config)) if hasattr(h, "issue_comments") else None  # read in the cloud and on a computer; a scripted host with no comment read reads no comments
                 return confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok, a.head, checked, a.express, proof) or 0
         return (preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
     except Stop as e:
