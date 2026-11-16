@@ -47,7 +47,7 @@ An option also keeps its letter once shown (owner ruling R60, roadmap ruling r60
   - an option at a shown position has a label that is not a non-empty string; or
   - an option at a shown position carries the label shown at another position (trimmed, case-folded): a swap that kept the ids.
 
-  - The label may be reworded (owner, 2026-11-15 23:2x CST: "options made don't flip flop: a is apple, b is banana; the page must not show a is banana, b is apple"). R60 stands: the letter keeps its meaning, which is its key and id. `shown` keeps the labels as first shown, so a reword is an option label that differs from `shown`'s.
+  - The label may be reworded (owner, 2026-11-15, evening CST; no exact time is in the repo: "options made don't flip flop: a is apple, b is banana; the page must not show a is banana, b is apple"). R60 stands: the letter keeps its meaning, which is its key and id. `shown` keeps the labels as first shown, so a reword is an option label that differs from `shown`'s.
   - A note on an option (`note`), with key and id unchanged, passes. So does an option appended after the shown ones. A rule-driven change adds a `note` and reorders nothing; the page shows the note on the option's card.
   - On every write that carries `options`, `shown` is as long as `options`. An update that appends options extends `shown` by them on the same write. A first `set` carries a `shown` equal to its own options. The reason names `shown`.
   - A task, a note, a closed item and a write with no `options` pass. `shown` is in the page's `itemFields` block (rule `item-field-rendered`).
@@ -57,6 +57,8 @@ An option also keeps its letter once shown (owner ruling R60, roadmap ruling r60
   - Known limit: a write that carries its own `shown` is trusted. A set or update that rewrites `shown` to match reordered options passes, since the guard cannot see the stored item. A held answer (`page_grant.py`) is the backstop: an answer whose option id or label moved is held. An `options` that is not a list is refused.
   - Known limit: a write that rewrites `shown` itself is not detectable. The guard trusts `shown`, since the stored item is unseen.
   - Known limit: a write that carries no `options` is not judged, so an update that drops `shown` alone passes.
+  - Known limit: the label comparison trims and case-folds only. A swap through a punctuation or unicode variant ("Banana." for "Banana") passes. So does a two-step swap through a temporary label, since each write is judged against its own `shown` alone.
+  - Known limit: when two shown positions hold the same label ("Same" and "Same"), an unchanged write is refused, because each label equals another position's. The page writer gives such an option a new label with a `note`, or appends it.
 
 The page keeps the id and the label of an option as they read when the owner picked it, in the draft. A move of the letters between the pick and Send then saves the option picked.
 

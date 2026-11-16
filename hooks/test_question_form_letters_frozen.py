@@ -15,7 +15,7 @@ Rule option-letters-frozen refuses a set or update of an open decision on this r
   - there are fewer options than shown; or
   - the options and shown differ in length, so an option appended on an update is shown on the same write (ruling R60).
 A reworded label passes when the option's key and id still equal shown[i]'s: the letter keeps its meaning (owner,
-Nov 15 2026 23:30 CST: the freeze is for options that flip-flop between the chat and the page, not for their wording).
+Nov 15 2026, evening CST: the freeze is for options that flip-flop between the chat and the page, not for their wording).
 `shown` keeps the labels as first shown, so a reword is the options' label differing from shown's.
 A first set with options must carry shown equal to its own options (key, id and label). An update that appends options
 carries shown extended by them.
@@ -160,6 +160,16 @@ def case_fn_two_labels_swapped_is_refused():
     labels_swapped = [dict(RED, label="Blue"), dict(BLUE, label="Red")]
     refuses("fn: two labels swapped, keys and ids kept, is refused",
             frozen("update", decision(labels_swapped, shown=shown_of(OPTIONS))), "option a")
+
+
+def case_fn_swap_in_another_case_or_padding_is_refused():
+    """The label comparison trims and case-folds, so a swap that only changes case or padding is still a swap."""
+    cased = [dict(RED, label="BLUE"), dict(BLUE, label="red")]
+    refuses("fn: two labels swapped in another case, keys and ids kept, is refused",
+            frozen("update", decision(cased, shown=shown_of(OPTIONS))), "option a")
+    padded = [dict(RED, label=" Blue "), dict(BLUE, label="Red")]
+    refuses("fn: a label padded with spaces that equals another shown label is refused",
+            frozen("update", decision(padded, shown=shown_of(OPTIONS))), "option a")
 
 
 def case_fn_reword_passes():
@@ -345,7 +355,8 @@ def case_fn_options_that_is_not_a_list_is_refused():
 
 CASES = (case_fn_options_that_is_not_a_list_is_refused, case_fn_no_shown_is_refused, case_fn_item_646_swap_is_refused,
          case_fn_control_letter_rule_reads_the_swap_as_valid, case_fn_two_labels_swapped_is_refused,
-         case_fn_reword_passes, case_fn_reword_with_a_reorder_is_refused, case_fn_reword_with_a_changed_id_is_refused,
+         case_fn_swap_in_another_case_or_padding_is_refused, case_fn_reword_passes,
+         case_fn_reword_with_a_reorder_is_refused, case_fn_reword_with_a_changed_id_is_refused,
          case_fn_reworded_label_must_be_a_non_empty_string, case_fn_reword_with_an_append,
          case_fn_changed_id_is_refused, case_fn_fewer_options_is_refused, case_fn_append_must_extend_shown,
          case_fn_first_set_must_equal_its_shown, case_fn_option_id_rules, case_fn_lone_letter_id_is_refused,
