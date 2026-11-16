@@ -1,0 +1,10 @@
+{
+  "id": "own-476-c-refuse-cd-missing-folder",
+  "at": "2026-11-16T13:36:41-06:00",
+  "title": "PR #2099 refuses a git write after a cd only when the cd target is missing at check time (owner pick c, item 476).",
+  "ruling": "Owner, page item 476, option c \"Refuse only a cd into a missing folder (Recommended)\", saved 13:36:41 CST Nov 16, no note. The guard in PR #2099 refuses a git write after a cd only when the cd target is missing at check time; a `;` after a cd into a folder that exists still passes. Main's one test case (commit 94f68f2fa, tests/guard/s17500-conflict-markers.py:311, a cd into a missing folder then `git add -A` and commit expects allow) is re-pointed to expect the refusal, red then green. Cost the item names: a folder removed between the check and the run still slips. Related: page item 912 (git-after-cd-main-test-conflict) asks about the same case, option a keeping the refusal and re-pointing the test; the owner has not answered 912, so triage does not close it on this pick.",
+  "quote": "C: Refuse only a cd into a missing folder (Recommended)",
+  "source": "waiting/answers/failed-cd-git-write-test.json (2026-11-16T19:36:41Z = 13:36:41 CST, choice c, no note). Owner; filed by triage. Triage read no diff of #2099.",
+  "status": "open",
+  "step": "git-write-after-failed-cd"
+}
