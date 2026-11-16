@@ -1,15 +1,15 @@
 {
  "id": "test-sections-no-branch-numbers",
  "title": "Test sections never take a number on a branch: order by file slug or claim at merge, so two branches cannot collide",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
  "owner": "triage",
  "blockedBy": [],
- "why": "Owner 23:24 CST Nov 13 (relayed by the consultant, 23:25; triage did not see it): \"“same test section number” dont we have so many rules that fix this? amateur hour mistake no?\" Two lanes (#3223, #3102) each took section 21305 in hooks/test_guard.py on their own branch; a duplicate stops the whole run at fixture setup (consultant's read, line ~587, unchecked by triage).\n\n[20:18 CST Nov 15, triage] PR #3561 attached, status doing (coordinator ask). Round 1 Sonnet PASS, record posted (consultant 20:17 CST Nov 15); #3561 lints after #3567 lands. Both claims are the consultant's word, unread by triage.",
+ "why": "Owner 23:24 CST Nov 13 (relayed by the consultant, 23:25; triage did not see it): \"“same test section number” dont we have so many rules that fix this? amateur hour mistake no?\" Two lanes (#3223, #3102) each took section 21305 in hooks/test_guard.py on their own branch; a duplicate stops the whole run at fixture setup (consultant's read, line ~587, unchecked by triage).\n\n[20:18 CST Nov 15, triage] PR #3561 attached, status doing (coordinator ask). Round 1 Sonnet PASS, record posted (consultant 20:17 CST Nov 15); #3561 lints after #3567 lands. Both claims are the consultant's word, unread by triage.\n\n[07:50 CST Nov 16, triage] MERGED: #3561 (\"Refuse duplicate test section numbers\", branch test-sections-no-branch-numbers) merged 07:48:26 CST Nov 16 (REST read by triage 07:50 CST: merged true, merged_at 2026-11-16T13:48:26Z, merge commit b783053a0e6e; coordinator 07:49 CST relayed it; triage read no diff). Status set to done because the PR is this step's own and its title names the fix; it moves back to doing if two branches can still take one section number, which nobody has re-run.",
  "source": "Consultant message 23:25 CST Nov 13 (relayed). Rule git-slug-then-claim-number already forbids a number on a branch for records; it was never applied to test sections.",
  "note": "Doing. PR #3561 (test sections). Round 1 Sonnet PASS, record posted (consultant 20:17 CST Nov 15); #3561 lints after #3567 lands. Both claims are the consultant's word, unread by triage. Triage 23:26 CST Nov 13: the guard that would have stopped this mistake (rule building-mistake-names-its-guard). Fix: sections order by file slug, or claim the number at merge as records do, so two branches cannot collide. Red case first: two branches each add a section, the merged tree runs and fails on main. Check first whether the done step test-guard-split-per-rule (one file per guard rule) already removed the number; if so, the hole is only in whatever still carries \"# section <n>\". Fast-check fold rounds catch it meanwhile. A lane builds it, not triage. Not started. Pass 1 of shared-savings-gap-read 23:30 CST Nov 13 (relayed): hooks/test_guard.py load_sections stops at run time only; .github/stamp.json kinds is []. Cheap check: lint/check_record_slugs.py refuses an added tests/guard/sNNNNN file whose n a base file holds. Matches the #3223 vs #3102 collision.",
- "updatedAt": "2026-11-15T20:18:00-06:00",
+ "updatedAt": "2026-11-16T07:50:09-06:00",
  "pr": 3561
 }
