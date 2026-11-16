@@ -9504,6 +9504,20 @@ class RecordsRebuild(RecordsEnv):
         self.on("main", {"debts/gap-one.md": DEBT_TEXT}, "untooled push")  # a record the head lacks
         return self.head("main"), self.head()
 
+    def merge_and_page_pushed_on(self):
+        """Push onto the head what `merge --ready` pushes on a head that lacks the base tip: the base merged in, then the page rebuilt on
+        that merge. The merge goes up from the other clone; the page is built in the tool's own checkout (tool_page). -> the page commit."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "merge", "-q", "--no-ff", "--no-edit", "origin/main")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        merged = sh(o, "git", "rev-parse", "HEAD")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        page_sha = self.tool_page(merged)
+        sh(self.co, "git", "push", "-q", "origin", f"{page_sha}:refs/heads/feat")
+        return page_sha
+
     def assert_healed_merge(self, out, main_tip, head):
         """The one confirm merged the head: the merge's second parent holds the base tip and the head the run started from, main's page is
         current, and the run claimed no number and waited on no check."""
@@ -9536,10 +9550,33 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(rc, 0, "under none a base that gained a record did not merge in one confirm:\n" + out)
         self.assert_healed_merge(out, main_tip, before)
 
+    def test_under_none_a_stale_own_page_and_a_base_that_gained_a_record_heal_in_one_confirm(self):
+        # Both heals at once: the head's own page is stale, and main gained a record. The refusal for the own page must not stand in the way.
+        self.set_required("none")
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page("ghost")})  # a page that names a debt nobody has
+        before = self.head()
+        self.on("main", {"debts/gap-one.md": DEBT_TEXT}, "untooled push")
+        main_tip = self.head("main")
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "under none a stale own page and a base that gained a record did not heal in one confirm:\n" + out)
+        self.assert_healed_merge(out, main_tip, before)
+
     def test_under_none_a_relayed_head_merges_across_the_merge_and_page_commits(self):
-        main_tip, before = self.main_gains_a_record_under_none()
-        rc, out = self.run_merge_once("7", "--confirm", "--head", before)  # the relayed yes names the head before the heal's commits
-        self.assertEqual(rc, 0, "under none a relayed head did not merge across the heal's commits:\n" + out)
+        # The heal's commits are already on the head, as `merge --ready` pushes them. The relayed yes names the head before them, so the
+        # check must read a merge commit of the base as part of the relayed head (a head that moved in one run would pass it trivially).
+        self.set_required("none")
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})
+        before = self.head()  # the head the relayed yes names
+        self.on("main", {"debts/gap-one.md": DEBT_TEXT}, "untooled push")
+        main_tip = self.head("main")
+        pushed = self.merge_and_page_pushed_on()
+        self.assertNotEqual(self.head(), before, "scope: the live head did not move off the relayed head")
+        self.assertEqual(self.show("feat", merge.RECORDS_PAGE), page("gap-one").strip(), "scope: the pushed page is not current")
+        rc, out = self.run_merge_once("7", "--confirm", "--head", before)
+        self.assertEqual(rc, 0, "under none a relayed head did not merge across the merge and page commits:\n" + out)
+        self.assertEqual(self.rev("origin/main^2"), pushed, "the merge did not take the head that was pushed")
         self.assert_healed_merge(out, main_tip, before)
 
     def test_under_none_a_red_head_refuses_before_any_push(self):
@@ -9575,6 +9612,17 @@ class RecordsRebuild(RecordsEnv):
         refs_before = self.refs()
         rc, out = self.run_merge_once("7", "--confirm")
         self.assert_refused_on_ready(rc, out, refs_before)
+
+    def test_a_named_required_list_still_refuses_a_base_that_gained_a_record(self):
+        # A control: under a named list a base that gained a record is refused before any push, as today. Nothing heals it.
+        self.set_required(["checks"])
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})
+        self.on("main", {"debts/gap-one.md": DEBT_TEXT}, "untooled push")
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assert_refused_untouched(rc, out, refs_before)
+        self.assertIn("stale", out.lower())
 
     def test_a_pr_that_adds_a_debt_gets_the_page_in_the_claim_commit(self):
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
