@@ -11,6 +11,10 @@
 #     lint_ruling_kind (Ruling kind check: a path under docs/decisions/, and the rule files CLAUDE.md and output-styles/shiv-stylisms.md),
 #     lint_comment_narration (Comment narration check: any non-.md path; the checker reads no .md file).
 #   lint/layout.py, lint/layout.json and .claude/layout-extras.json set all four: each lint finds its record folders through them.
+#   per doc group (DOCS; the steps that read a .md file take the scope condition of the groups they read, and no doc flag turns a job on):
+#     doc_decisions (docs/decisions/), doc_rules (CLAUDE.md, .claude/CLAUDE.md, output-styles/), doc_skills (skills/), doc_agents (agents/*.md),
+#     doc_glossary (GLOSSARY.md, README.md), doc_map (docs/map/), doc_other (the rest of docs/, and mods/<mod>/README.md),
+#     doc_any (every .md path, so a path in no group sets this flag only). A deleted or moved .md path counts through its old name (--no-renames).
 #   checks_windows_rest_2 repeats checks_windows_rest's value (R62). No job reads it: checks-windows-rest-2 runs every step on a ready pull_request, so the output is kept only for the tests that derive it.
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event; false on a records-only skip.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
@@ -22,7 +26,8 @@
 set -u
 JOBS="checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos pointer_windows"
 LINTS="lint_red_run lint_plan_refuter lint_ruling_kind lint_comment_narration"
-ALL="$JOBS checks_guard code mods guard sweep shoot $LINTS"
+DOCS="doc_decisions doc_rules doc_skills doc_agents doc_glossary doc_map doc_other doc_any"
+ALL="$JOBS checks_guard code mods guard sweep shoot $LINTS $DOCS"
 range=""
 [ "${EVENT:-}" = pull_request ] && [ -n "${BASE_SHA:-}" ] && range="$BASE_SHA...HEAD"
 on=" "
@@ -86,7 +91,8 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       actions/stamp/*.md) ;;
       actions/stamp/*) on="$on $R $Z $X $M code " ;;
       # Mod tests: the mod-tests.sh step in checks, checks-windows and checks-macos reads mods/.
-      mods/*) on="$on $W $X mods " ;;
+      # A non-.md path also sets `code`: the whole-tree readers (retired names, retired repo, glossary, hook catalog) run on `code` or a doc flag.
+      mods/*) on="$on $W $X mods "; case "$f" in *.md) ;; *) on="$on code " ;; esac ;;
       install.ps1|install.test.ps1|install-no-gap.test.ps1|install-bin-eol.test.ps1|install-set.test.ps1) on="$on $P code " ;;
       # decision-watch.test.mjs imports lint/test_scanner_traps.mjs, so the mod-tests.sh step runs it too.
       lint/test_scanner_traps.mjs) on="$on $W $X mods code " ;;
@@ -140,6 +146,26 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       lint/check_ruling_kind.py) on="$on lint_red_run lint_comment_narration lint_ruling_kind " ;;
       # Every other path that is not .md: the red-run check and the narration check read it.
       *) on="$on lint_red_run lint_comment_narration " ;;
+    esac
+    # The doc groups: one doc_<group> flag per group of .md paths, read by the steps that read a .md file (lint/test_checks_step_scope.py
+    # DOC_STEPS). This is a fourth case, so the flags each path sets above stay as they are. No doc flag turns a job on. Every .md sets
+    # doc_any; a path no group arm names sets doc_any only. An empty arm keeps a nested path out of its parent's group (bash's `*` matches `/`).
+    # A name in upper-case .MD takes the catch-all arm above, which sets every flag. A path that is not .md sets no doc flag.
+    case "$f" in
+      *.md)
+        on="$on doc_any "
+        case "$f" in
+          docs/decisions/*) on="$on doc_decisions " ;;
+          CLAUDE.md|.claude/CLAUDE.md|output-styles/*) on="$on doc_rules " ;;
+          skills/*) on="$on doc_skills " ;;
+          agents/*/*.md) ;;
+          agents/*.md) on="$on doc_agents " ;;
+          GLOSSARY.md|README.md) on="$on doc_glossary " ;;
+          docs/map/*) on="$on doc_map " ;;
+          docs/*) on="$on doc_other " ;;
+          mods/*/*/*.md) ;;
+          mods/*/README.md) on="$on doc_other " ;;
+        esac ;;
     esac
   done <<< "$files"
   # A new file under a landed dir (landed-dirs.txt, the one list) changes what test_install_src and
