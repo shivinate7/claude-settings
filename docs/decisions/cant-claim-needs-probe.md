@@ -29,16 +29,16 @@ Status: built in `cannot_problem` (`lint/report_guard.py`). Its cases are in `li
 
 "have no access", "no access to", "don't have access", "lack access", "no permission to" and bare "unable" join `CANNOT_FORMS` (`lint/_clause.py`). `cannot_problem` reads that list, so the old check needs a case for each form.
 
-The hand-off guard does not read `CANNOT_FORMS`. Its `CAPABILITY_RE` reads `CANT_FORMS`, `COULD_NOT_FORMS` and its own word list (`_CAPABILITY_CORE`, `lint/report_guard.py`). A new form reaches the hand-off guard only through those lists.
+The hand-off guard does not read `CANNOT_FORMS`. Its `CAPABILITY_RE` reads `CANT_FORMS`, `COULD_NOT_FORMS`, the access and permission forms (`ACCESS_FORMS`, `lint/_clause.py`, which `CANNOT_FORMS` holds too) and its own word list (`_CAPABILITY_CORE`, `lint/report_guard.py`). A new form reaches the hand-off guard only through those lists. A Why yours line with an access form, such as "I lack access to the mailbox, so the import is yours.", needs a cite as any capability line does.
 
 ## What passes
 
-- The whole word `unchecked` in the sentence.
+- The whole word `unchecked` inside the sentence of the claim. A parenthetical after the full stop is the next sentence, so it does not count.
 - A `(route <id>)` cite (a route row, the glossary term) or a dated `(measured <date>, <check and result>)` cite.
 - Text in quotes or code spans. `_mask` reads it as blank.
 - A subject that is not the writer: it, the guard, the lane, a builder, the session, a draft PR. "this session" is the writer.
 - A question. A sentence that ends in `?`.
-- A past claim (could not, couldn't) that hands no step to the owner. A past claim with a hand-off ("so you'll need to run it") is read.
+- A past claim (could not, couldn't) that hands no step to the owner. A past claim with a hand-off ("so you'll need to run it", or "You'll need to run it yourself." as the next sentence on the same line) is read.
 - A judgement, not an access claim: a claim whose object is a fact, a choice or a size, not a system or an act on one (`judged_object`, `lint/_clause.py`).
   - A fact: a clause that why, how, whether or if opens ("can't see why the test fails", "can't predict how long it will take"). What and where may name a thing ("can't see what is in the bucket"), so they open no fact.
   - A fact or a remark: a verb whose object is only ever one (`FACT_VERBS`: determine, confirm, predict, explain, decide, agree, comment ...). A pronoun object ("can't confirm that", "can't import that") carries no kind, so this one short list is the rule's only verb list. Verify, check, test, see and find act on a system and are not in it.
@@ -82,6 +82,7 @@ Rule `outcomes-mechanize-rules` (each check states its cost and a test proves it
 - A probe in an earlier turn does not count. The check reads this turn only.
 - A claim whose subject is another party: "the builder cannot import it."
 - A claim outside the phrase list, such as "only the owner can" or "it is impossible."
+- A hand-off two sentences after a past claim, or on another line from it. It passes as a past claim with no hand-off.
 - A hand-off with no cannot-phrase, such as "import it yourself" or "you need to import it." Nothing blocks these. The Stop reply judge (`hooks/reply_judge.py`, a model that never blocks) judges reports with an Input Needed label for their checks.
 
 ## Measure

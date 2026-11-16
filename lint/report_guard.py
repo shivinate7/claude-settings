@@ -117,7 +117,8 @@ short keys, so it stays as the refusals and reply-judge counter files do.
 
 Hand-off cite (rule output-never-hand-off-doable-step): a "Why yours:" line, in prose above the report or in the Input
 Needed or Next item (plain, behind a list marker, or in bold), that gives a capability reason (can't, cannot, refuse,
-refused, unable to, denied, forbidden, no access, not allowed, not permitted, unavailable, 403, blocked, not available)
+refused, unable to, denied, forbidden, no access, lack access, don't have access, no permission to, not allowed,
+not permitted, unavailable, 403, blocked, not available)
 must cite `(route <id>)` for a route row whose outcome on this surface is refused or asks, a
 tool in backticks that hooks/refusal_note.py recorded for this session, or `(measured <date>, <check and result>)`. A
 line with a choice, login or safety-kept phrase needs no cite, and "blocked until" or "not available until" is a
@@ -144,7 +145,7 @@ on a claim with a slug in parentheses, one read of the rule files per run; no fi
 Probe check (decision cant-claim-needs-probe, rule output-never-hand-off-doable-step): a prose sentence that says this session
 cannot do an act outside the table (the cannot-claim check's phrases, which also hold "have no access", "no access to" and
 "unable") passes only when the turn after the last incoming message holds a main-session tool call (a peer's ack of a send of
-the turn starts no turn; only the parent, by the id in the lane record, acks a send to @parent), or the sentence is in the past tense (could not) with no hand-off to the owner, names its check (an
+the turn starts no turn; only the parent, by the id in the lane record, acks a send to @parent), or the sentence is in the past tense (could not) with no hand-off to the owner in it or in the next sentence, names its check (an
 exit code, a status form such as HTTP 500 or 500 error, or a backtick span or tool name beside a result word; a span alone
 names the object, and a bare word such as failed names none), says `unchecked` as a whole word or carries a route or measured
 cite. A claim whose object is a fact, a choice or a size (_clause.judged_object: "can't see why", "can't fix this in one
@@ -1704,10 +1705,11 @@ def _forms_re(forms):
     return r"\b(?:%s)\b" % "|".join(_clause.form_pattern(form) for form in forms)
 
 
-# The capability words both readers share: the three _clause.CANT_FORMS (the start of _clause.CANNOT_FORMS), refused,
-# denied, forbidden, no access, not allowed or permitted, unavailable, the 403 token, and blocked or not available.
+# The capability words both readers share: the three _clause.CANT_FORMS (the start of _clause.CANNOT_FORMS), the access and
+# permission forms (_clause.ACCESS_FORMS), refused, denied, forbidden, no access, not allowed or permitted, unavailable,
+# the 403 token, and blocked or not available.
 # "blocked until" and "not available until" wait on another act, so they are a dependency, not a capability.
-_CAPABILITY_CORE = _forms_re(_clause.CANT_FORMS) + (
+_CAPABILITY_CORE = _forms_re(_clause.CANT_FORMS + _clause.ACCESS_FORMS) + (
     r"|\brefuse[sd]?\b|\bdenied\b|\bforbidden\b|\bno access\b|\b(?:isn['’]t|not)\s+(?:allowed|permitted)\b"
     r"|\bunavailable\b|\b403\b|\bblocked\b(?!\s+until\b)|\bnot available\b(?!\s+until\b)")
 # The words only the hand-off cite reads: the two _clause.COULD_NOT_FORMS, the reject forms, and the 401 token.
@@ -2054,8 +2056,8 @@ PROBE_ACT = ""  # the act of a claim whose verb names no table act: the probe fo
 CANNOT_NO_PROBE = (
     "Probe guard (cant-claim-needs-probe, rule output-never-hand-off-doable-step): a line says an act cannot be done and "
     "this turn holds no tool call. Remedy: run one probe of the act, then say what it returned; or end the line with "
-    "`(route <id>)` for a route row that says refused or asks, or with `(measured <date>, <check and result>)`; or say "
-    "`unchecked` on the line. Lines:")
+    "`(route <id>)` for a route row that says refused or asks, or with `(measured <date>, <check and result>)`; or put "
+    "`unchecked` inside the sentence. Lines:")
 # A probe claim names its check by an exit code, a status form (_clause.STATUS_FORM_PATTERN: "HTTP 500", "500 error", not
 # ", 500 rows") or a backtick span or tool name beside a result word. A span alone names the object ("import `inbox.mbox`").
 PROBE_EXIT_RE = re.compile(r"\bexit(?:ed|s)?(?:\s+with)?(?:\s+(?:code|status))?\s+[1-9]\d*\b", re.I)
@@ -2064,7 +2066,8 @@ PROBE_NAMED_RE = re.compile(r"`[^`\n]+`|\bmcp__\w+")
 PROBE_RESULT_RE = re.compile(r"\b(?:%s|exited)\b" % "|".join(_clause.CHECK_WORDS), re.I)
 PROBE_BESIDE_WORDS = 3  # words that may sit between a span and its result word, in one clause
 PROBE_GAP_STOP_RE = re.compile(r"[;:.!?—–]")
-# A past claim ("could not") that hands the act to the owner is a hand-off, not a report of a failed try.
+# A past claim ("could not") that hands the act to the owner, in its own sentence or the next, is a hand-off, not a report
+# of a failed try.
 PROBE_HAND_OFF_RE = re.compile(
     r"\byou(?:['’]ll|['’]d| will| would| need| must| should| have to| can| could| may)\b|\bfor you to\b|\bover to you\b"
     r"|\bhand(?:ing)?\s+(?:it\s+)?(?:off|over)\b|\bplease\s+(?:run|do|import|check|try)\b", re.I)
@@ -2643,7 +2646,8 @@ def cannot_problem(records, text, refused=()):
     on_table = {claim[0] for claim in table}  # a sentence that holds a table claim is listed under that reason alone
     probes = [] if _main_tool_calls(records) else list(dict.fromkeys(
         claim[0] for claim in claims if not claim[1] and claim[0] not in on_table
-        and (not claim[3] or PROBE_HAND_OFF_RE.search(claim[0])) and not UNCHECKED_RE.search(claim[0])
+        and (not claim[3] or PROBE_HAND_OFF_RE.search(claim[0]) or PROBE_HAND_OFF_RE.search(claim[5]))
+        and not UNCHECKED_RE.search(claim[0])
         and not _names_probe_check(claim[0]) and not _cited(claim[0], refused, PROBE_ACT)))
     no_try, no_check = [], []
     if table and guard is None:

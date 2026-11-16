@@ -1,7 +1,7 @@
 """The clause parser the cannot-claim check reads: sentences, clauses and the lexicons of their grammar.
 
 `lint/report_guard.py` imports this module, so the check has one copy of its sentence and clause boundaries and one home
-for each word list (NEGATORS, ADVERBS, CONDITIONALS, REASON_LINKS, DETERMINERS, CANT_FORMS, COULD_NOT_FORMS, CANNOT_FORMS, CHECK_WORDS,
+for each word list (NEGATORS, ADVERBS, CONDITIONALS, REASON_LINKS, DETERMINERS, CANT_FORMS, COULD_NOT_FORMS, ACCESS_FORMS, CANNOT_FORMS, CHECK_WORDS,
 STATE_VERBS, OUTAGE_NOUNS, OUTAGE_VERBS, BACK_PATTERN, STATUS_PATTERN, STATUS_FORM_PATTERN, SPEECH_VERBS, CALL_SUBJECTS,
 FACT_VERBS, FACT_OPENERS, FIND_VERBS, ACCESS_NOUNS) and for the words that
 name the writer (WRITER_BEFORE_RE, FROM_HERE_RE and the lead-ins and subject words that own_subject reads). The module reads text and
@@ -47,20 +47,22 @@ CANT_FORMS = ("can't", "cannot", "unable to")
 # The two past forms the hand-off cite also reads as a capability. They sit in CANNOT_FORMS after "can not", and a form
 # added to CANT_FORMS would widen CANNOT_FORMS, so the cite takes them from this list.
 COULD_NOT_FORMS = ("could not", "couldn't")
+# The access and permission forms. The hand-off cite reads them as a capability too (report_guard.CAPABILITY_RE), so a Why
+# yours line that says "I lack access to the mailbox" needs a cite. They sit in CANNOT_FORMS, so a form added here reaches both.
+ACCESS_FORMS = ("don't have access to", "do not have access to", "doesn't have access to", "does not have access to",
+                "lack permission to", "lacks permission to",
+                "have no access to", "has no access to", "have no access", "has no access", "no access to",
+                "don't have access", "do not have access", "doesn't have access", "does not have access",
+                "lack access", "lacks access", "have no permission to", "has no permission to", "no permission to") + tuple(
+    "%s have %s%s to" % (verb, the, noun)
+    for verb in ("don't", "do not", "doesn't", "does not") for the in ("", "the ") for noun in _PERMISSION_NOUNS)
 CANNOT_FORMS = CANT_FORMS + ("can not",) + COULD_NOT_FORMS + ("no way to", "no way I can",
                 "no way we can", "not able to", "won't be able to", "will not be able to",
                 "haven't been able to", "hasn't been able to", "have not been able to", "has not been able to",
                 "not allowed to", "not permitted to", "not going to be able to", "not authorized to", "not authorised to",
-                "don't have access to", "do not have access to", "doesn't have access to", "does not have access to",
-                "lack permission to", "lacks permission to", "blocked from", "forbidden from",
-                "have no access to", "has no access to", "have no access", "has no access", "no access to",
-                "don't have access", "do not have access", "doesn't have access", "does not have access",
-                "lack access", "lacks access", "have no permission to", "has no permission to", "no permission to",
-                "unable") + tuple(
+                "blocked from", "forbidden from", "unable") + ACCESS_FORMS + tuple(
     "%s %s" % (be, able)
-    for be in _BE_NT_FORMS for able in ("able to", "allowed to", "permitted to", "going to be able to")) + tuple(
-    "%s have %s%s to" % (verb, the, noun)
-    for verb in ("don't", "do not", "doesn't", "does not") for the in ("", "the ") for noun in _PERMISSION_NOUNS)
+    for be in _BE_NT_FORMS for able in ("able to", "allowed to", "permitted to", "going to be able to"))
 # The nouns that make a checks noun an outage, not a CI check ("the network checks are failing"), and the verbs that make
 # "failing to <verb>" an outage, not a red check. They live here, a shared lexicon, so each caller reads an outage alike.
 OUTAGE_NOUNS = ("connection", "network", "connectivity", "api", "auth", "authentication", "proxy", "health")
