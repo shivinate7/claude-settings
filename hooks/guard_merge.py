@@ -19,7 +19,7 @@ from guard_core import (
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import BUILD_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_BRIEF_MARKER, LANE_GRANT_MARKER, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags, repo_tag_names  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import opens_fence, BUILD_TAG, CONSULTANT_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_BRIEF_MARKER, LANE_GRANT_MARKER, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags, repo_tag_names  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -1401,8 +1401,8 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
 ROLE_TIERS = ("batch-runner", "lane", "standing")  # glossary-ok: ROLE_TIERS is the existing name; merge.py MERGE_ROLES names the same roles
 LOCAL_ROLE_TIERS = ("batch-runner",)  # glossary-ok: the name a test reads; the roles a local role file may name (merge.py LOCAL_MERGE_ROLES), the lane role is a cloud role only
 ROLE_WITH_STEP = "lane"  # the role whose call also names a step (--step), proved by a cs-step tag of the own record
-STANDING_ROLE = "standing"  # ruling own-tiny-fixes-b: a standing session, not a batch runner, merges its own small edit
-STANDING_HOLDERS = ("coordinator", "triage")  # the cs-build tags that prove the standing session role (decision session-tiers)  # glossary-ok: session-tiers is the decision
+STANDING_ROLE = "standing"  # ruling own-tiny-fixes-b: a standing session, not a batch runner, merges its own pull request
+STANDING_HOLDERS = ("coordinator", "triage", CONSULTANT_TAG.split(":", 1)[1])  # the cs-build tags that prove the standing session role (decision session-tiers)  # glossary-ok: session-tiers is the decision
 LANE_MERGE_REPO = "shivinate7/claude-settings"  # the one repo whose lanes hold the lane merge role; agrees with merge.py LANE_MERGE_REPO, which this module cannot import
 ROLE_TAG_PREFIX = BUILD_TAG
 ROLE_REASON = (
@@ -2624,6 +2624,63 @@ def step_pr_hit(tool: str, tool_input, transcript: str):
     except (Exception, SystemExit):
         return "lane step with an unreadable pull request list", STEP_PR_READ_REASON % steps[0]
     return None
+
+
+# ---- a build spawn names the prior work it searched (rule spawn-searches-existing-builds)
+# The line is `Prior work: #N (state) | <branch> | none found`, on a line of its own, with some text after the colon. The
+# text is not checked against GitHub: the guard reads the brief only. A line inside a ``` fence is a quoted example and
+# does not count. The marker matches without case, after optional markdown lead characters.
+PRIOR_WORK_LINE = "Prior work:"
+PRIOR_WORK_REASON = (
+    "this build spawn has no `Prior work:` line with text after it. Search the open and closed pull requests, the "
+    "branches and main for an existing build first, then add one line to the brief: `Prior work: #N (state) | <branch> "
+    "| none found`. A bare `Prior work:` line does not count. "
+    "(decision spawn-searches-existing-builds, a build spawn names the prior work it searched)"
+)
+# The colon may sit outside bold (`**Prior work**: x`), and a numbered-list lead (`1. `) may come before the marker.
+_PRIOR_WORK_LINE = re.compile(
+    r"[-#*_>\s]*(?:\d+[.)]\s+)?[-#*_>\s]*" + re.escape(PRIOR_WORK_LINE[:-1]) + r"[*_]*:[ \t*_]*(?P<text>\S.*)?$",
+    re.IGNORECASE)
+# An unfilled template placeholder (`<what you searched>`) names nothing.
+_PLACEHOLDER = re.compile(r"<[^<>]*>")
+
+
+def prior_work_named(text) -> bool:
+    """True when `text` has a Prior work line with text after the marker, outside a fence. Text that is only angle-bracket
+    placeholders does not count."""
+    if not isinstance(text, str):
+        return False
+    fenced = False
+    for line in text.split("\n"):
+        if opens_fence(line.strip()):
+            fenced = not fenced
+            continue
+        found = None if fenced else _PRIOR_WORK_LINE.match(line.rstrip())
+        if found and found.group("text") and _PLACEHOLDER.sub("", found.group("text")).strip(" \t|,;"):
+            return True
+    return False
+
+
+def prior_work_lane_hit(tool: str, tool_input):
+    """Return (matched, reason) when a lane start or a lane brief names no prior work, else None. A lane start is a
+    create_session that tags a lane (its prompt). A lane brief is a send_message whose first non-blank line after any
+    Grant line starts the Lane brief marker (its message), read as _step_call reads it. Pure text work: no read, no file.
+    The Agent side of the rule is guard.prior_work_agent_hit."""
+    if not isinstance(tool_input, dict):
+        return None
+    if tool == BRIEF_TOOL:
+        message = tool_input.get("message")
+        lines = [line.strip() for line in message.splitlines() if line.strip()] if isinstance(message, str) else []
+        if lines and lines[0].startswith(LANE_GRANT_MARKER):
+            lines = lines[1:]
+        if not (lines and _BRIEF_MARKER_LINE.match(lines[0])):
+            return None
+        text, matched = message, "lane brief with no Prior work line"
+    elif is_lane_create_session(tool, tool_input):
+        text, matched = tool_input.get("prompt"), "lane start with no Prior work line"
+    else:
+        return None
+    return None if prior_work_named(text) else (matched, PRIOR_WORK_REASON)
 
 
 # ---- A lane brief names a slug or a role, never a session id (rule brief-ids-in-roster)

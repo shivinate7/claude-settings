@@ -70,6 +70,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  git's tracked files under a folder, suites left out (testing/tracked_tree.py)
 GUARD = os.path.join(HERE, "guard.py")
 SUITE = os.path.join(HERE, "test_guard.py")
+WAVE2_SUITE = os.path.join(HERE, "test_handoff_wave2.py")   # the compaction-audit cases (its part 4)
 WATCH = os.path.join(HERE, "config_watch.py")
 WATCH_SUITE = os.path.join(HERE, "test_config_watch.py")
 DECISION = os.path.join(HERE, "decision_watch.py")
@@ -92,6 +93,9 @@ TARGETS = {
     "calljudge": (CALL_JUDGE, CALL_JUDGE_SUITE, "CALL_JUDGE_UNDER_TEST", "call_judge"),
     # bin/sim-lease, which the guard loads by path (hooks/guard.py sim_lease_holds). The suite is the guard's.
     "simlease": (SIM_LEASE, SUITE, "GUARD_UNDER_TEST", "sim_lease"),
+    # The guard family's compaction-audit rule, judged by test_handoff_wave2.py part 4 (test_guard.py has no
+    # section for it). It lays out the guard family like "guard" and reads its guard from GUARD_UNDER_TEST.
+    "audit": (GUARD, WAVE2_SUITE, "GUARD_UNDER_TEST", "guard"),
 }
 
 # (label, anchor text found once in the source, its mutated replacement, target, required case
@@ -2405,6 +2409,66 @@ MUTATIONS = [
     ("role-diff: a test-author's conflicted path is judged like any other",
      '        if role == AUTHOR_ROLE and all(norm(n) in merge_route_paths(conflicts) for n in names):', '        if False:', "guard",
      "builder-refuse: a test-author's merge commit that resolves a conflicted test file and a conflicted product file"),
+    # The builder's merge route for a test file (decision builders-cannot-edit-tests): the write allow, the
+    # per-case reading of a merge result, the call and statement checks, the manifests and the subfolder path.
+    # Each row is killed by the existing case named in its last field.
+    ("merge-write: a builder's write of a test path that merged clean is allowed mid-merge",
+     '    return bool(where) and norm(rel).lstrip("/") in {norm(c).lstrip("/") for c in merge_conflicts(where) or ()}',
+     '    return bool(where)', "guard",
+     "a builder's Write to a test path that merged clean mid-merge is denied"),
+    ("merge-write: a builder's write of a mutation test is allowed mid-merge",
+     '    if is_mutation_test_rel(rel):\n        return False\n    where = norm(os.path.normpath(_expanded(target, cwd)))',
+     '    where = norm(os.path.normpath(_expanded(target, cwd)))', "guard",
+     "a builder's Write to a conflicted mutation test is denied"),
+    ("merge-write: a builder's write of a conflicted test path is refused mid-merge",
+     '    return bool(where) and norm(rel).lstrip("/") in {norm(c).lstrip("/") for c in merge_conflicts(where) or ()}',
+     '    return False', "guard",
+     "a builder's Write of a test path its merge conflicts is allowed mid-merge"),
+    ("merge-call: a top-level call a parent does not hold is not read as new",
+     '            issues.add("skip" if _skip_marks(node) else "new")', '            pass', "guard",
+     "adds a top-level call neither parent had is refused as new"),
+    ("merge-call: a top-level pytest.skip call is refused as new, not as a skip",
+     '            issues.add("skip" if _skip_marks(node) else "new")', '            issues.add("new")', "guard",
+     "adds a top-level pytest.skip call is refused as a skip"),
+    ("merge-call: a top-level call a parent holds that the merge drops is not read as lost",
+     '        if sum(1 for d, _ in result["calls"] if d == dump) < needed:', '        if False:', "guard",
+     "drops main's top-level call is refused as lost"),
+    ("merge-statement: a top-level statement a parent holds that the merge drops is not read as lost",
+     '            if have.get(key, 0) < count:', '            if False:', "guard",
+     "a merge that drops a module-level assert is refused"),
+    ("merge-base: a case both sides changed differently is not read as lost when the result keeps one side",
+     '        if mine != theirs and (origin not in (mine, theirs) or result.get(key) == origin):',
+     '        if mine != theirs and (False or result.get(key) == origin):', "guard",
+     "keeps one side's changed body of a case both sides changed"),
+    ("merge-base: a case only one side changed is not read as lost when the result reverts it to the base",
+     '        if mine != theirs and (origin not in (mine, theirs) or result.get(key) == origin):',
+     '        if mine != theirs and (origin not in (mine, theirs) or False):', "guard",
+     "keeps the unchanged parent's body of a case only the lane changed"),
+    ("merge-keys: a module-level statement a parent edited is not read against the merge base",
+     '*(_key_versions(p) for p in read)', '*({} for p in read)', "guard",
+     "drops one parent's edit to a module-level table"),
+    ("merge-rename: a conflicted path that one parent and the merge base both lack is not read as unread",
+     '    if None in texts and not base["held"]:', '    if None in texts and False:', "guard",
+     "keeps the renamed file whole, dropping the other side's edit and case"),
+    ("text-at: a revision that lacks a file reads as an empty file, not as missing",
+     '    return answer.stdout if answer is not None and answer.returncode == 0 else missing',
+     '    return answer.stdout if answer is not None and answer.returncode == 0 else ""', "guard",
+     "keeps the renamed file whole, dropping the other side's edit and case"),
+    ("merge-config: setup.cfg is read as a test config, not a merge manifest",
+     'MERGE_MANIFESTS = {"package.json", "pyproject.toml", "setup.cfg", "tox.ini"}',
+     'MERGE_MANIFESTS = {"package.json", "pyproject.toml", "tox.ini"}', "guard",
+     "keeps both sides' install_requires lines in setup.cfg is allowed"),
+    ("merge-config: tox.ini is read as a test config, not a merge manifest",
+     'MERGE_MANIFESTS = {"package.json", "pyproject.toml", "setup.cfg", "tox.ini"}',
+     'MERGE_MANIFESTS = {"package.json", "pyproject.toml", "setup.cfg"}', "guard",
+     "keeps both sides' deps lines in tox.ini is allowed"),
+    ("merge-prefix: a conflicted path from a subfolder is not put back to the checkout's top",
+     '        if prefix.stdout.strip():', '        if False:', "guard",
+     "keeps both sides' test cases, run from a subfolder, is allowed"),
+    ("merge-prefix: a conflicted path from a subfolder is joined without normalising the ../ parts",
+     '            conflicts = {os.path.normpath(os.path.join(prefix.stdout.strip(), path)).replace(os.sep, "/")',
+     '            conflicts = {os.path.join(prefix.stdout.strip(), path).replace(os.sep, "/")', "guard",
+     "keeps both sides' test cases, run from a subfolder, is allowed"),
     ("test-author: the write tool refuses a product path its merge left conflicted",
      '            if where and norm(rel).lstrip("/") in merge_route_paths(merge_conflicts(where) or ()):', '            if False:', "guard",
      "test-author: Edit of a product file its merge conflicts is allowed"),
@@ -3246,9 +3310,47 @@ MUTATIONS = [
      '    except Exception:\n        raise\n',
      "guard", "handoff-unread: a guard copy without reread_check.py fails open"),
     ("handoff-unread: an agent's call is judged like the main session's",
-     '        if ph is None or not isinstance(payload, dict) or payload.get("agent_id"):',
-     '        if ph is None or not isinstance(payload, dict):',
+     '        if ph is None or not isinstance(payload, dict) or payload.get("agent_id"):\n'
+     '            return ""\n'
+     '        sid = payload.get("session_id")\n'
+     '        if not sid or not isinstance(sid, str) or not os.path.isfile(ph.reread_flag_path(sid)):',
+     '        if ph is None or not isinstance(payload, dict):\n'
+     '            return ""\n'
+     '        sid = payload.get("session_id")\n'
+     '        if not sid or not isinstance(sid, str) or not os.path.isfile(ph.reread_flag_path(sid)):',
      "guard", "handoff-unread: a payload that carries agent_id is allowed"),
+    # ---- compaction-audit (decision precompact-handoff, item 16): one mutant per arm the rule needs. Each is
+    # judged by test_handoff_wave2.py part 4 (target "audit"), so its required name is one of that suite's checks.
+    ("compaction-audit: the refusal is never printed",
+     '            refuse(tool, "deny", "compaction-audit", COMPACTION_AUDIT_REASON % pending, pending)',
+     '            pass',
+     "audit", "after the read, a Bash call is refused by compaction-audit"),
+    ("compaction-audit: the Audit: spawn does not clear the audit flag",
+     "        judge(payload)\n        audit_flag_clear_after_allow(payload)",
+     "        judge(payload)\n        pass",
+     "audit", "the Audit: spawn clears the audit flag"),
+    ("compaction-audit: a quoted Audit: line clears the flag, so the first-line rule is dropped",
+     "        return AUDIT_ROW is not None and AUDIT_ROW.search(first) is not None",
+     "        return AUDIT_ROW is not None and AUDIT_ROW.search(prompt) is not None",
+     "audit", "an Agent whose Audit: line is quoted on a later line is refused by compaction-audit"),
+    ("compaction-audit: judge() clears the flag at the mark, so a later rule's refusal leaves it cleared",
+     "            AUDIT_SPAWN_PASSED.append(True)",
+     "            AUDIT_SPAWN_PASSED.append(True)\n            from reread_check import audit_clear\n            audit_clear(payload)",
+     "audit", "the refused Audit: spawn leaves the audit flag set"),
+    ("compaction-audit: audit_spawn hard-codes a case-blind marker, not the home row's case-sensitive one",
+     "        return AUDIT_ROW is not None and AUDIT_ROW.search(first) is not None",
+     '        return re.search(r"(?i)\\bAudit:", first) is not None',
+     "audit", "a lowercase `audit:` first line is not the marker"),
+    ("compaction-audit: an agent's call is judged like the main session's",
+     '        if ph is None or not isinstance(payload, dict) or payload.get("agent_id"):\n'
+     '            return ""\n'
+     '        sid = payload.get("session_id")\n'
+     '        if not sid or not isinstance(sid, str) or not os.path.isfile(ph.audit_flag_path(sid)):',
+     '        if ph is None or not isinstance(payload, dict):\n'
+     '            return ""\n'
+     '        sid = payload.get("session_id")\n'
+     '        if not sid or not isinstance(sid, str) or not os.path.isfile(ph.audit_flag_path(sid)):',
+     "audit", "a Bash call whose payload carries agent_id is allowed"),
     ("handoff-unread: the flag is not read, so a set handoff alone refuses",
      '        if not sid or not isinstance(sid, str) or not os.path.isfile(ph.reread_flag_path(sid)):',
      '        if not sid or not isinstance(sid, str):',
@@ -4599,7 +4701,7 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
     A mutant and its clean-layout control both go through here, so they differ only in the text:
     `old == new` is the control, the same layout with nothing mutated (see `run_controls`)."""
     stem = TARGETS[target][3]
-    if target in ("guard", "simlease"):
+    if target in ("guard", "simlease", "audit"):
         # The whole guard family goes in the mutant's own hooks folder, and the anchor lands in the one
         # module that holds it. The suite loads the copied guard.py, which finds its siblings.
         root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(name)))
@@ -4649,7 +4751,7 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
         copy_path = os.path.join(tree, "call_judge.py")
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
-    elif target not in ("guard", "simlease"):
+    elif target not in ("guard", "simlease", "audit"):
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
     return copy_path
@@ -4765,7 +4867,7 @@ def main() -> int:
         if target not in TARGETS:
             print("ERROR unknown mutation target %r: %s" % (target, label))
             return 1
-        if target == "guard":
+        if target in ("guard", "audit"):
             # Across every guard module: exactly one match, or the mutant breaks the wrong spot.
             try:
                 mutate_shared.find_anchor(HERE, old)

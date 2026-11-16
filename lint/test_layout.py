@@ -278,6 +278,14 @@ class WaitingPage(Tree):
         super().setUp()
         self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
 
+    def test_receipts_is_a_waiting_collection_and_the_export_never_deletes_one(self):
+        """The export's append-only list is the registry's six, receipts included: a collection the registry adds and the
+        export does not keep would lose its archived docs at the next run."""
+        export_page = load("export_page_under_test", os.path.join(REPO, "skills", "waiting-page", "export_page.py"))
+        self.assertIn("receipts", self.layout.WAITING_COLLECTIONS)
+        self.assertEqual(tuple(export_page.APPEND_ONLY), tuple(self.layout.WAITING_COLLECTIONS),
+                         "export_page.APPEND_ONLY is not WAITING_COLLECTIONS: an emptied collection could delete files")
+
     def test_key_set_returns_the_url(self):
         self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page": self.URL}))
         self.assertEqual(self.layout.waiting_page(self.tree), self.URL)
@@ -1089,7 +1097,7 @@ class Registry(Tree):
         self.assertEqual(found[0]["collections"], [], "the page-only entry was not read with no collections")
 
     def test_a_waiting_page_entry_with_empty_collections_is_still_refused_and_named(self):
-        """Control: the waiting page exports its five collections, so an empty list on its role is refused, not read."""
+        """Control: the waiting page exports its six collections, so an empty list on its role is refused, not read."""
         self.registry([self.page_entry(collections=[])])
         self.assertReported("page01", "a waiting-page entry with collections []")
 
