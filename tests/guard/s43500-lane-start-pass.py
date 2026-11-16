@@ -216,7 +216,7 @@ add(LSP_TOKEN + ": a lane start that breaks lane-title-slug and holds a step a l
     **_lsp_fields(tags=LSP_STEP_TAGS, title=LSP_BAD_TITLE))
 _lsp_log(LSP_TOKEN + ": a lane start that breaks one rule and holds a step a live lane carries names both in judge order",
          _lsp_order_check(CASES[-1], (LSP_ORDER[-1], "lane-step-dup")))
-# Controls, green on head. The held step with every other rule met is lane-step-dup's alone, with no count line. The same
+# Controls, which the code already passes. The held step with every other rule met is lane-step-dup's alone, with no count line. The same
 # broken rule with no live lane on its step is that rule's alone, so lane-step-dup adds no line when it passes.
 add(LSP_TOKEN + ": a lane start that holds a step a live lane carries and breaks no other rule is refused under lane-step-dup alone",
     "deny", "lane-step-dup", tool=LANE_TOOL, cwd=LANE_REPO, transcript=role_path("lsp-step-carrier"),
