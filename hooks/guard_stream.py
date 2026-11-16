@@ -9,8 +9,8 @@ import re
 import shlex
 
 from guard_core import (
-    DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, basename,
-    bare_words, command_indexes, inline_script, inner_commands, is_powershell,
+    DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords,
+    backgrounding_amp, basename, bare_words, command_indexes, inline_script, inner_commands, is_powershell,
     resolve_command, git_calls, segment_dirs, segment_tokens, split_segments,
 )
 from guard_env import _substitutions
@@ -220,8 +220,10 @@ def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
 def narrated_tail_hit(stripped: str) -> str:
     """Return the matched text when a narrating stage reaches `tail`/`head`, directly or through a
     `tee` or other filters. Same pipeline walk as `check_tail_hit`, one stage reader apart."""
-    for stages in _pipelines(stripped):
-        hit = _pipeline_hit(stages, False, lambda segment, _background: narrating_stage(segment))
+    flags = []
+    pipelines = _pipelines(stripped, flags)
+    for stages, list_amp in zip(pipelines, flags):
+        hit = _pipeline_hit(stages, False, lambda segment, _background: narrating_stage(segment), list_amp=list_amp)
         if hit:
             return hit
     return ""
@@ -410,31 +412,42 @@ def _inherited_in_lint(pipelines, cwd: str = ""):
 
 
 def _ends_in_ampersand(stages, first: int) -> bool:
-    """Whether the pipeline is backgrounded by a lone `&` word in the stage at `first` or a later one.
-    split_segments leaves the `&` of `|&` at the head of the next stage; that one is a pipe, not a job
-    (the same reading as background_commands in guard.py), so it is skipped."""
+    """Whether the pipeline is backgrounded by a `&` in the stage at `first` or a later one, spaced
+    or glued to the last word (`backgrounding_amp`, the one reader detached-launch shares)."""
     for segment in stages[first:]:
         tokens = segment_tokens(segment)
-        if tokens and tokens[0] == "&":
-            tokens = tokens[1:]
-        if tokens and "&" in tokens:
+        if tokens and backgrounding_amp(segment, tokens):
             return True
     return False
 
 
+def _list_ends_in_ampersand(segments, ends, after: int) -> bool:
+    """Whether the `&&` or `||` list that a pipeline closes, which goes on from segment `after`, is
+    ended by a job `&`: `ci-job x | tail && echo done & echo $!` backgrounds the whole list. The
+    list runs on through `|`, `&&` and `||` and stops at `;` or a newline, or at the first `&`."""
+    for segment, end in zip(segments[after:], ends[after:]):
+        tokens = segment_tokens(segment)
+        if tokens and backgrounding_amp(segment, tokens):
+            return True
+        if end not in ("|", "&&", "||"):
+            return False
+    return False
+
+
 def _pipeline_hit(stages, background: bool, stage_of=check_stage, any_filter: bool = False,
-                  any_later: bool = False) -> str:
+                  any_later: bool = False, list_amp: bool = False) -> str:
     """The matched text when a stage that `stage_of(segment, backgrounded)` names, in one pipeline's
     stages, reaches `tail`/`head`. A `tee` between them does not end the reach, since the filter after it
     still cuts what the agent reads. A `tee` with no `tail` or `head` after it is not a hit. The one walk
-    for the narrated rule and the check rule. `backgrounded` is the call's `background` or a lone `&` word
-    in this stage or a later one. `any_filter` (the check rule, decision `background-check-through-verdict`)
+    for the narrated rule and the check rule. `backgrounded` is the call's `background`, or a lone `&` word
+    in this stage or a later one, or a job `&` that ends the `&&` or `||` list this pipeline closes
+    (`list_amp`). `any_filter` (the check rule, decision `background-check-through-verdict`)
     widens the reach to every later stage but a file writer (`tee`, `tee.exe`, `Tee-Object`, `Out-File`),
     since `sed -n`, `grep -m1` and `awk` cut what the agent reads as `tail` does. With `any_later`, any
     later command counts: a pipeline's exit is its last stage's, so `grep`, `tee` and `wc` mask the
     exit of the stage before them as `tail` does (the lint-then-commit gate reads the exit, not the cut)."""
     for first, segment in enumerate(stages):
-        stage = stage_of(segment, background or _ends_in_ampersand(stages, first))
+        stage = stage_of(segment, background or list_amp or _ends_in_ampersand(stages, first))
         if not stage:
             continue
         for later in stages[first + 1:]:
@@ -457,19 +470,24 @@ def _commits_or_pushes(segment: str) -> bool:
     return any(verb in ("commit", "push") for verb, _args in git_calls(segment))
 
 
-def _pipelines(text: str):
+def _pipelines(text: str, list_amps=None):
     """One command text as its pipelines, each a list of stage segments. A pipeline ends at any
-    separator other than `|`."""
+    separator other than `|`. With `list_amps` (a list), it gets one flag per pipeline: whether the `&&`
+    or `||` list that pipeline closes is ended by a job `&` (`_list_ends_in_ampersand`)."""
     ends = []
     segments = split_segments(text, ends)
     pipelines = []
     stages = []
-    for segment, end in zip(segments, ends):
+    for number, (segment, end) in enumerate(zip(segments, ends)):
         stages.append(segment)
         if end != "|":
             pipelines.append(stages)
+            if list_amps is not None:
+                list_amps.append(end in ("&&", "||") and _list_ends_in_ampersand(segments, ends, number + 1))
             stages = []
     pipelines.append(stages)
+    if list_amps is not None:
+        list_amps.append(False)
     return pipelines
 
 
@@ -488,10 +506,11 @@ def check_tail_hit(stripped: str, background: bool, cwd: str = "") -> str:
     texts, too_deep = _substitutions(stripped, powershell=is_powershell(stripped))
     if too_deep:   # the env layer refuses a nest this deep; read the command as it stands
         texts = [(stripped, False)]
-    texts = [_pipelines(text) for text, _in_message in texts]
-    for pipelines in texts:
-        for stages in pipelines:
-            hit = _pipeline_hit(stages, background, any_filter=True)
+    amps = [[] for _ in texts]
+    texts = [_pipelines(text, flags) for (text, _in_message), flags in zip(texts, amps)]
+    for pipelines, flags in zip(texts, amps):
+        for stages, list_amp in zip(pipelines, flags):
+            hit = _pipeline_hit(stages, background, any_filter=True, list_amp=list_amp)
             if hit:
                 return hit
     inherited, slot_folder = _inherited_in_lint(texts[-1], cwd) if len(texts) > 1 else (False, None)

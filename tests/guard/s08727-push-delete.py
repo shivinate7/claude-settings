@@ -1729,10 +1729,12 @@ for _name, _command in (
 RM_PARENT_HINT = {"Bash": "rm -rf build", "PowerShell": "Remove-Item -Recurse build"}
 
 
-def rm_parent(name, command, expected="deny", **kw):
-    """One case of the block: a deny names destructive-delete, an allow names nothing."""
-    sh("rm-parent: " + name.replace("\n", " ; "), command, expected,
-       "destructive-delete" if expected == "deny" else None, cwd=NOGIT, **kw)
+def rm_parent(name, command, expected="deny", rule=None, **kw):
+    """One case of the block: a deny names destructive-delete unless `rule` names the rule that reads it
+    first, and an allow names nothing."""
+    if rule is None:
+        rule = "destructive-delete" if expected == "deny" else None
+    sh("rm-parent: " + name.replace("\n", " ; "), command, expected, rule, cwd=NOGIT, **kw)
 
 
 # The flag spellings, on `.` and `..`: one cluster, split flags, a capital R, a verbose letter, the
@@ -1962,10 +1964,23 @@ for _command in (VCS + " rm -r --cached .", VCS + " rm -r .", VCS + " rm -r --ca
     rm_parent("allows " + _command, _command, "allow")
 rm_parent("a real rm -rf . after a git command", VCS + " status && rm -rf .")
 
-# KNOWN OPEN. A shell operator glued to the target (`..&`, `..>x`, `.>/dev/null`) leaves the target
-# unread by both the token read and the raw read. These cases record today's verdict and are not a
-# ruling that it is right: when a fix makes one deny, re-point it here.
-for _command in ("rm -rf ..&", "rm -rf ..>x", "rm -rf .>/dev/null"):
+# A `&` glued to the target backgrounds the delete as a spaced one does, so detached-launch refuses `rm -rf ..&`
+# before any delete rule reads it. destructive-delete still reads no target glued to a shell operator, so this row
+# shows only the detached-launch refusal.
+rm_parent("rm -rf ..& is refused by detached-launch", "rm -rf ..&", rule="detached-launch")
+# With a pid captured on the same line, detached-launch does not refuse the job (bare_background_hit returns on
+# `$!`), as it does not refuse the spaced `rm -rf .. & echo $!`. That spaced form is refused by destructive-delete,
+# so this glued form is too. destructive-delete reads no target glued to a shell operator (above), so this row
+# is red on the code before this change, and a fix to the job reader alone leaves it red.
+rm_parent("rm -rf ..& echo $!, a glued & with the pid captured, is refused by destructive-delete",
+          "rm -rf ..& echo $!", rule="destructive-delete")
+# `&>` redirects both streams, so `..` is the target and the delete is refused by destructive-delete. Only
+# the `>` after the `&` is read, so no job is formed. `rm -rf ..>x` stays a known open case below.
+rm_parent("rm -rf ..&>/dev/null, a glued &> redirect, is refused by destructive-delete", "rm -rf ..&>/dev/null")
+# KNOWN OPEN. A shell operator glued to the target (`..>x`, `.>/dev/null`) leaves the target unread by
+# both the token read and the raw read. These cases record today's verdict and are not a ruling that
+# it is right: when a fix makes one deny, re-point it here.
+for _command in ("rm -rf ..>x", "rm -rf .>/dev/null"):
     rm_parent("known open: " + _command, _command, "allow")
 
 

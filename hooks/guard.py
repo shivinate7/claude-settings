@@ -657,7 +657,7 @@ while True:
             path_is_inside, primary_checkout, record, refuse, resolve_command,
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
-            _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes,
+            _git_subcommand_index, amp_pieces, dir_before_segment, shell_abs, walk_quotes,
             _REDIRECT_OPERATOR, ssh_remote_script, strip_redirections,
         )
         _loading = "guard_branch_worktree"
@@ -5328,7 +5328,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 4. A wide delete refuses, and a force push asks.
     # Split before backslashes turn to slashes, so `it\'s` opens no quote that hides a delete.
-    delete_texts = [[delete_text(segment) for segment in split_segments(text)] for text in texts]
+    delete_texts = [[delete_text(piece) for segment in split_segments(text)
+                     for piece, _ in amp_pieces(segment)] for text in texts]
     for delete_segments in delete_texts:
         for number in range(len(delete_segments)):
             matched, reason = parent_delete_hit(delete_segments, number, cwd)

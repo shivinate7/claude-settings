@@ -713,6 +713,121 @@ sh("check-tail: ci-job checks --lint |& tail -3 in the foreground, the & of |& i
 sh("check-tail: ci-job checks --lint 2>&1 |& cat in the foreground, the & of |& is a pipe, is allowed",
    "~/.claude/bin/ci-job checks --lint 2>&1 |& cat", "allow", cwd=NOGIT)
 
+# A `&` glued to the last word backgrounds the pipeline as a spaced one does: `tail -3&` is `tail -3 &`.
+# detached-launch reads that job through `backgrounding_amp` and refuses it first, since no pid is
+# captured, so these name detached-launch. The two quoted cases keep a `#` or an apostrophe inside
+# quotes from ending the text the `&` follows.
+add("check-tail: ci-job checks piped to tail -3&, the & glued to the word, is refused; "
+    "detached-launch refuses it first", "deny",
+    "detached-launch", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | tail -3&")
+add("check-tail: ci-job checks|tail&, with no space around the pipe or the &, is refused; "
+    "detached-launch refuses it first", "deny",
+    "detached-launch", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks|tail&")
+add("check-tail: a glued & after a quoted #, piped to grep, is refused; "
+    "detached-launch refuses it first", "deny",
+    "detached-launch", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | grep '#x'&")
+add("check-tail: a glued & after a quoted lone apostrophe, piped to grep, is refused; "
+    "detached-launch refuses it first", "deny",
+    "detached-launch", cwd=NOGIT, description=TAIL_BG_UNTIL, command='ci-job checks | grep "don\'t"&')
+# The pid is captured on the next line, so detached-launch does not refuse it. check-tail reads the `&` at
+# the line's end as a background job and refuses the pipeline.
+add("check-tail: ci-job checks piped to tail -3&, a newline, then echo $! capturing the pid, is refused", "deny",
+    "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | tail -3&\necho $!")
+# A `&` glued to a word mid-line ends that word's job, and the next command runs on the same line. The reader
+# takes only the last token, so these were missed. `tail -3& echo $!` captures a pid on its line, so
+# detached-launch does not refuse it (bare_background_hit returns on `$!`), and check-tail refuses it, as it
+# refuses the spaced `tail -3 & echo $!`. `tail&echo done` captures no pid, so detached-launch refuses it, as
+# it refuses the spaced `tail & echo done`.
+sh("check-tail: ci-job checks | tail -3& echo $!, a glued & mid-line with the pid captured, is refused",
+   "ci-job checks | tail -3& echo $!", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: ci-job checks|tail&echo done, a glued & mid-line with no pid, is refused; "
+   "detached-launch refuses it first", "ci-job checks|tail&echo done", "deny", "detached-launch", cwd=NOGIT)
+# Controls for that reading, each held in the foreground and each allowed on the code before this change. A `&` that is no job
+# is a `&&`, a quoted `&`, a redirect's `&`, or the `&` of `|&`. None of these may turn into a background job.
+sh("check-tail: a&&b, an && glued to both words, is allowed", "a&&b", "allow", cwd=NOGIT)
+sh("check-tail: x |& tail, the & of |& is a pipe, is allowed", "x |& tail", "allow", cwd=NOGIT)
+sh("check-tail: echo 'a& b', a & inside quotes, is allowed", "echo 'a& b'", "allow", cwd=NOGIT)
+sh("check-tail: cmd 2>&1 | tail, the & of a redirect is no job, is allowed", "cmd 2>&1 | tail", "allow",
+   cwd=NOGIT)
+sh("check-tail: cmd >&2; echo x, the & of a redirect is no job, is allowed", "cmd >&2; echo x", "allow",
+   cwd=NOGIT)
+# The quote and comment cases for the mid-line reading (building-scanner-respects-strings): a `#` or a lone
+# apostrophe inside quotes starts no comment and ends no quote, so the `&` after it is a job. A `&` after a
+# comment's `#`, or inside a multi-line quote, is no job. Each deny names the rule its spaced form is refused by.
+sh("check-tail: ci-job checks | grep '#x'& echo $!, a glued & after a quoted #, with the pid captured, is refused",
+   "ci-job checks | grep '#x'& echo $!", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: ci-job checks | grep \"don't\"&echo done, a glued & after a quoted lone apostrophe, is refused; "
+   "detached-launch refuses it first", 'ci-job checks | grep "don\'t"&echo done', "deny", "detached-launch",
+   cwd=NOGIT)
+sh("check-tail: ci-job checks | tail -3 # a& b, a glued & after a comment's #, is allowed",
+   "ci-job checks | tail -3 # a& b", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks | grep \"x& y\" over a newline \"z\", a glued & inside a multi-line quote, is allowed",
+   'ci-job checks | grep "x& y\nz"', "allow", cwd=NOGIT)
+
+# A `&` glued to a word that starts no job. PowerShell's call operator takes an `&` before a command
+# (`& $tool x`, `&$tool $_`). In Bash, a `&` inside `$(( ))` or `(( ))` is bitwise and, and a `&` in a
+# `${s//&/and}` pattern is a character. detached-launch reads each glued `&` as a backgrounded job and refuses
+# it, so each of these is allowed. The deny controls after them keep the three real background jobs refused.
+sh("detached-launch: (& $tool x).Count, a call operator in a grouped expression, is allowed",
+   "(& $tool x).Count", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached-launch: $a = @(& $tool x), a call operator inside @(), is allowed",
+   "$a = @(& $tool x)", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached-launch: 1..3 | ForEach-Object {&$tool $_}, a glued call operator in a scriptblock, is allowed",
+   "1..3 | ForEach-Object {&$tool $_}", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached-launch: $r = (& ci-job checks), a call operator on a roster command, is allowed",
+   "$r = (& ci-job checks)", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached-launch: $x = (& git rev-parse HEAD), a call operator on git, is allowed",
+   "$x = (& git rev-parse HEAD)", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached-launch: echo $((5&3)), a bitwise & in arithmetic expansion, is allowed",
+   "echo $((5&3))", "allow", cwd=NOGIT)
+sh("detached-launch: if (( n&1 )); then echo odd; fi, a bitwise & in an arithmetic test, is allowed",
+   "if (( n&1 )); then echo odd; fi", "allow", cwd=NOGIT)
+sh("detached-launch: echo ${s//&/and}, a & in a parameter pattern, is allowed",
+   "echo ${s//&/and}", "allow", cwd=NOGIT)
+sh("detached-launch: ci-job x | tail -3&, the & glued to the word, is refused",
+   "ci-job x | tail -3&", "deny", "detached-launch", cwd=NOGIT)
+sh("detached-launch: (ci-job x | tail)&, a subshell backgrounded by a glued &, is refused",
+   "(ci-job x | tail)&", "deny", "detached-launch", cwd=NOGIT)
+sh("detached-launch: cmd 2>&1&, a redirect's & then a glued background &, is refused",
+   "cmd 2>&1&", "deny", "detached-launch", cwd=NOGIT)
+
+# A quoted lone `&` ends no job (decision detached-launch-refused), so each of these is allowed. The quotes keep
+# the `&` from reading as a spaced background `&`, and a `&` that is a word of a grep or a cut is no job.
+sh("check-tail: grep '&' file, a quoted lone &, is allowed", "grep '&' file", "allow", cwd=NOGIT)
+sh("check-tail: cut -d '&' -f1 q | head -3, a quoted lone &, is allowed", "cut -d '&' -f1 q | head -3", "allow",
+   cwd=NOGIT)
+sh("check-tail: ci-job checks | grep -c '&', a quoted lone &, is allowed", "ci-job checks | grep -c '&'", "allow",
+   cwd=NOGIT)
+sh("check-tail: grep \"&\" file | tail -3, a double-quoted lone &, is allowed", 'grep "&" file | tail -3', "allow",
+   cwd=NOGIT)
+# A `&` after an `&&` list backgrounds the whole list, so the ci-job pipeline before the `&&` runs as a job and
+# its cut verdict is lost. check-tail refuses each; the pid capture on the line keeps detached-launch out.
+add("check-tail: ci-job checks | tail -3 && echo done & echo $!, a spaced & backgrounds the && list, is refused",
+    "deny", "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | tail -3 && echo done & echo $!")
+add("check-tail: ci-job checks | tail -3 && echo done& echo $!, a glued & backgrounds the && list, is refused",
+    "deny", "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | tail -3 && echo done& echo $!")
+
+# Controls, each held in the foreground and each allowed. A reading that takes any `&` in a word for a
+# background job would refuse every one: the `&` of `|&` (also glued to the next word), `&&`, a quoted
+# `&`, a `>&` or `2>&` redirect, a `&` after a comment's `#`, and a `&` at a line's end in a multi-line quote.
+sh("check-tail: ci-job checks |& tail -3 in the foreground, the & of |& is a pipe, is allowed",
+   "ci-job checks |& tail -3", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks|&tail -3 in the foreground, the & of |& glued to the next word, is allowed",
+   "ci-job checks|&tail -3", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks && tail x in the foreground is allowed",
+   "ci-job checks && tail x", "allow", cwd=NOGIT)
+sh("check-tail: echo a&&b is allowed", "echo a&&b", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks piped to grep, a & inside quotes, is allowed",
+   "ci-job checks | grep 'a&'", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks piped to tail -3 >&2 in the foreground is allowed",
+   "ci-job checks | tail -3 >&2", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks piped to tail -3 2>&1 in the foreground is allowed",
+   "ci-job checks | tail -3 2>&1", "allow", cwd=NOGIT)
+sh("check-tail: a & after a comment's # is no job, piped to tail, is allowed",
+   "ci-job checks | tail -3 # bg&", "allow", cwd=NOGIT)
+sh("check-tail: a & at a line's end inside a multi-line quote is no job, is allowed",
+   'ci-job checks | grep "first line&\nsecond line"', "allow", cwd=NOGIT)
+
 # A merge script run by its path, with no interpreter word, is the same verdict call as
 # `python merge/merge.py`, so check-tail refuses it too.
 sh("check-tail: ./merge/merge.py --lane-lint piped to tail is refused",

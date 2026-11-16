@@ -1163,9 +1163,11 @@ LANE_TRANSCRIPT = role_path("lane")
 TRIAGE_TRANSCRIPT = role_path("triage")
 
 
-def record_refuse(name, command, transcript, cwd=PUSHFEAT, env=ROLE_ENV, **kw):
-    """A git push the guard refuses under roadmap-one-writer. The reason names the rule, never the push."""
-    sh("roadmap-one-writer: " + name, command, "deny", rule=RECORD_RULE, carries=RECORD_CARRIES, lacks=RECORD_LACKS,
+def record_refuse(name, command, transcript, cwd=PUSHFEAT, env=ROLE_ENV, rule=RECORD_RULE, **kw):
+    """A git push the guard refuses under roadmap-one-writer, or under `rule` when another rule reads it
+    first. The reason names the rule, never the push. Only the record rule's reason carries its words."""
+    carries = RECORD_CARRIES if rule == RECORD_RULE else ()
+    sh("roadmap-one-writer: " + name, command, "deny", rule=rule, carries=carries, lacks=RECORD_LACKS,
        transcript=transcript, env=env, cwd=cwd, **kw)
 
 
@@ -1240,7 +1242,12 @@ record_refuse("a lane's HEAD:roadmap push in a subshell after a cd, piped to tai
 record_refuse("a lane's push to roadmap in a subshell under bash -c after a cd is refused",
               'bash -c "(cd ' + slash(RECROADMAP) + " && " + VCS + ' push origin roadmap)"', LANE_TRANSCRIPT)
 record_refuse("a lane's push to roadmap with a trailing background & is refused",
-              VCS + " push origin roadmap&", LANE_TRANSCRIPT)
+              VCS + " push origin roadmap&", LANE_TRANSCRIPT, rule="detached-launch")
+# The pid is captured on the same line, so detached-launch lets this push through. roadmap-one-writer refuses it:
+# the glued & ends the word, so the push reads the record branch. The glued-& mutant in the mutation table names
+# this row by the words it starts with, so keep those words.
+record_refuse("a lane's push to roadmap with a trailing background & is refused, the pid captured by echo $!",
+              VCS + " push origin roadmap& echo $!", LANE_TRANSCRIPT)
 record_allow("a lane's push to lane/foo in a subshell after a cd into the roadmap checkout is allowed",
              "(cd " + slash(RECROADMAP) + " && " + VCS + " push origin lane/foo)", LANE_TRANSCRIPT)
 # Quoted, heredoc and comment text never hides a push, and a push after such text is still a push.
