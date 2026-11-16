@@ -346,6 +346,12 @@ Other tools, in `judge` order:
                        write deletes the file's record) and a read pass. A refused write leaves the record with the first
                        writer; an override that lifts it moves the record. The reason names no path. A call that names no scratchpad touches no file. An override lifts it.
                        (scratchpad-owner)
+  spawn-searches-existing-builds
+                       deny. A builder or test-author Agent or Task spawn, a `create_session` tagged cs-build:lane and a
+                       lane brief (a `send_message` whose first line after any Grant line starts `Lane brief:`) whose text
+                       has no `Prior work:` line with text after the colon, outside a fence. A bare line counts as none. A
+                       reviewer, an Explore and any other role pass. The text alone decides: nothing is read from GitHub.
+                       An override lifts it. (spawn-searches-existing-builds)
   agent-role-model     deny. A spawn whose model ranks above its role's row in the decision record
                        (haiku < sonnet < opus), or that names no model where the role has no `model:`
                        pin and no default model is set. An Explore whose brief's first line
@@ -659,7 +665,7 @@ while True:
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, OCTOPUS_PUSH_STALE, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, LANE_READY_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit, lane_ready_hit, lane_mcp_ready_hit, self_role_child_hit, self_role_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, stamp_hit, step_dup_hit, step_pr_hit, target_roster_hit, trust_card_hit, written_time_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, PRIOR_WORK_REASON, prior_work_lane_hit, prior_work_named, stamp_hit, step_dup_hit, step_pr_hit, target_roster_hit, trust_card_hit, written_time_hit,
             BRIEF_ID_REASON, BRIEF_TOPIC_REASON, STEP_DUP_REASON,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
@@ -2973,7 +2979,7 @@ AGENT_NO_REMOTE_REASON = (
     "that. Finish your own work and put the request in your report so that session can act on it. "
     "(decision lanes-start-as-agents, an agent is not a lane)"
 )
-from shared_names import LANE_TAG, LANE_TITLE_EXAMPLE_OPENING, LANE_TITLE_FORM, LANE_TITLE_OPENING, grant_line_holds_words  # noqa: E402  the one home of the lane tag, the lane title form and the Grant reader, shared with guard_merge
+from shared_names import opens_fence, LANE_TAG, LANE_TITLE_EXAMPLE_OPENING, LANE_TITLE_FORM, LANE_TITLE_OPENING, grant_line_holds_words  # noqa: E402  the one home of the lane tag, the lane title form and the Grant reader, shared with guard_merge
 LANE_EFFORT_REASON = (
     "A lane starts with the effort field set to `%s` and the whole brief as its prompt. The prompt's "
     "first non-blank line is `Grant: <the grant>, <time>`, the owner's grant that starts this lane. Set the "
@@ -3587,6 +3593,13 @@ def brief_claim_hit(tool: str, tool_input) -> list:
     return brief_claim_gaps(tool_input.get("prompt"))
 
 
+def prior_work_agent_hit(tool: str, tool_input) -> bool:
+    """True when an Agent or Task brief to a builder or a test-author names no prior work (rule
+    spawn-searches-existing-builds; the reader and the lane forms are in guard_merge). Another role passes."""
+    return (tool in SPAWN_TOOLS and role_key(tool_input.get("subagent_type")) in BRIEF_CLAIM_ROLES
+            and not prior_work_named(tool_input.get("prompt")))
+
+
 # A BRIEF MUST NOT ORDER A DISCARD (rule brief-destructive-git, rule shared-trees-no-destructive-git). A brief that tells a
 # builder to run a command the shell guard refuses starts a lane that hits the refusal, or one that works around it. The
 # scan reads only the command-shaped parts of a brief: a backtick span, a line inside a fence, and a line led by `$ `.
@@ -3609,7 +3622,6 @@ try:
 except Exception:  # fail closed (decision guard-hooks-fail-closed): with no read-only list, every role is judged
     READ_ONLY = frozenset()
 BRIEF_DESTRUCTIVE_SPAN = re.compile(r"(`+)(.+?)\1(?!`)")
-BRIEF_DESTRUCTIVE_INLINE = re.compile(r"(`{3,})[^`].*?\1")
 BRIEF_DESTRUCTIVE_CASE_DATA = re.compile(r"must deny:|add a case:", re.IGNORECASE)  # glossary-ok: the marker text briefs carry
 BRIEF_DESTRUCTIVE_NEGATORS = ("never", "no", "don't", "do-not", "shouldn't", "mustn't", "can't", "cannot")
 BRIEF_DESTRUCTIVE_NEXT_TO = ("avoid", "without")   # a negator only as the word directly before the part
@@ -3650,7 +3662,7 @@ def _brief_commands(prompt: str):
     fenced, covered, cover_indent = False, False, -1
     for line in prompt.replace("\x00", " ").splitlines():
         stripped = line.strip()
-        if stripped.startswith("```") and not BRIEF_DESTRUCTIVE_INLINE.match(stripped):
+        if opens_fence(stripped):
             fenced = not fenced
             continue
         if fenced:
@@ -7261,6 +7273,13 @@ def judge(payload) -> None:
     if claimed:
         named = ", ".join("`" + item[:120].replace("`", "'") + "`" for item in claimed)
         refuse(tool, "deny", "brief-claim-has-probe", BRIEF_CLAIM_REASON % named, named[:120])
+
+    # 9e1. A build spawn names the prior work it searched (rule spawn-searches-existing-builds): a builder or test-author
+    # spawn, a lane start, a lane brief. An override lifts it: the owner may mean the spawn as it stands.
+    unsearched = ("build spawn with no Prior work line", PRIOR_WORK_REASON) if prior_work_agent_hit(tool, tool_input) \
+        else prior_work_lane_hit(tool, tool_input)
+    if unsearched:
+        refuse(tool, "deny", "spawn-searches-existing-builds", unsearched[1], unsearched[0])
 
     # 9e2. A brief that orders a discard of a working tree (rule brief-destructive-git). Any role; an override lifts it,
     # because the owner may mean the brief as it stands.
