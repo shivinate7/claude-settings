@@ -62,10 +62,12 @@ def _proof_scope(tree, status, reflog_min=0):
     return None
 
 
-def _proof_read(tree, trip):
+def _proof_read(tree, trip, budget=None, module_at=None):
     """(answer, candidate reads) of the proof on TREE, with `git_reads._now` installed at 0. With TRIP, the first
     `ls-tree` the proof makes moves the clock past every deadline, so from the next candidate on the proof must answer
-    as it does past its budget. Each git read is counted. Nothing sleeps and no real clock is read."""
+    as it does past its budget. BUDGET, when given, stands in for `_proof_budget`. MODULE_AT, when given, is the path
+    the module is taken to live at, so the real `_proof_budget` reads the settings.json beside it. Each git read is
+    counted. Nothing sleeps and no real clock is read."""
     git_reads = _load_git_reads()
     lines = _porcelain(tree)
     now, ls_trees = [0.0], []
@@ -81,7 +83,10 @@ def _proof_read(tree, trip):
 
     git_reads._git = counting_git
     try:
-        with mock.patch.object(git_reads, "_now", lambda: now[0], create=True):
+        with mock.patch.object(git_reads, "_now", lambda: now[0], create=True), \
+                mock.patch.object(git_reads, "_proof_budget",
+                                  git_reads._proof_budget if budget is None else budget), \
+                mock.patch.object(git_reads, "__file__", git_reads.__file__ if module_at is None else module_at):
             got = git_reads.dirty_paths_are_pushed_copies(tree, lines)
     finally:
         git_reads._git = real_git
@@ -164,6 +169,118 @@ def base_copies_many_pushed_control_case():
     return True, "201 changed paths that are all pushed copies answer True with the clock on time"
 
 
+# THE BUDGET IS UNREADABLE. _proof_budget reads the guard hook's timeout from the settings.json beside the hooks folder
+# of the module it runs in, and answers None when that read fails. The proof then answers None before any candidate
+# read. The guard refuses None and False alike (guard_core.py, worktree remove), so these cases pin the proof's own
+# answer: None says the read failed. False would say the tree holds work it cannot prove pushed.
+
+GUARD_HOOK_COMMAND = "python3 ${HOME}/.claude/hooks/guard.py"  # names /hooks/guard.py, the row _proof_budget reads
+
+
+def _settings_text(hook_row):
+    """settings.json text with one PreToolUse row holding HOOK_ROW, or with no row at all when HOOK_ROW is None."""
+    rows = [] if hook_row is None else [{"matcher": "Bash", "hooks": [hook_row]}]
+    return json.dumps({"hooks": {"PreToolUse": rows}})
+
+
+def _module_beside(name, settings):
+    """A module path under this run's folder, with SETTINGS written as the settings.json beside its hooks folder, or
+    with no settings.json there when SETTINGS is None. The hooks folder is made real: the reader opens
+    `hooks/../settings.json`, and a missing hooks folder would fail that open for the wrong reason. Nothing is copied."""
+    folder = os.path.join(ROOT, name)
+    os.makedirs(os.path.join(folder, "hooks"), exist_ok=True)
+    if settings is not None:
+        write(os.path.join(folder, "settings.json"), settings)
+    return os.path.join(folder, "hooks", "git_reads.py")
+
+
+def _budget_beside(module_at):
+    """What the real `_proof_budget` reads for a module at MODULE_AT: a number, or None when it cannot read one."""
+    git_reads = _load_git_reads()
+    with mock.patch.object(git_reads, "__file__", module_at):
+        return git_reads._proof_budget()
+
+
+def _incident_scope():
+    """None when the incident tree holds its state, else the one thing that differs."""
+    materialize(BCINC)
+    scope = _proof_scope(BCINC, BC_INCIDENT)
+    return ("scope: " + scope) if scope else None
+
+
+def _allowed_incident_scope():
+    """None when the incident tree is in its state and the proof allows it on a readable budget, else the one thing
+    that differs. The unreadable-budget cases read this first, so a None answer is not a tree never allowed."""
+    scope = _incident_scope()
+    if scope:
+        return scope
+    got, _ = _proof_read(BCINC, trip=False)
+    if got is not True:
+        return ("scope: the incident tree answered %r with a readable budget, want True: it is not an allowed tree"
+                % (got,))
+    return None
+
+
+def base_copies_unreadable_budget_case():
+    """The incident tree, allowed with a readable budget, answers None once `_proof_budget` answers None."""
+    scope = _allowed_incident_scope()
+    if scope:
+        return False, scope
+    got, _ = _proof_read(BCINC, trip=False, budget=lambda: None)
+    if got is not None:
+        return False, "answered %r with _proof_budget None, want None: a failed budget read is None" % (got,)
+    return True, "the incident tree answers None, not False or True, when _proof_budget is None"
+
+
+def _unreadable_budget_case(name, settings, why):
+    """The incident tree, allowed with a readable budget, answers None once the real budget read beside its module
+    fails for WHY."""
+    scope = _allowed_incident_scope()
+    if scope:
+        return False, scope
+    module_at = _module_beside(name, settings)
+    if _budget_beside(module_at) is not None:
+        return False, "scope: the budget beside %s reads a number, want None: %s" % (name, why)
+    got, _ = _proof_read(BCINC, trip=False, module_at=module_at)
+    if got is not None:
+        return False, ("answered %r with the budget unreadable (%s), want None: a failed budget read is None"
+                       % (got, why))
+    return True, "the incident tree answers None, not False or True, when the budget is unreadable: %s" % why
+
+
+def base_copies_no_settings_budget_case():
+    """The incident tree with no settings.json beside its hooks folder: the budget reads None, so the answer is None."""
+    return _unreadable_budget_case("budget-no-settings", None, "no settings.json beside the hooks folder")
+
+
+def base_copies_no_timeout_budget_case():
+    """The incident tree with a guard hook row that has no timeout: the budget reads None, the proof answers None."""
+    settings = _settings_text({"type": "command", "command": GUARD_HOOK_COMMAND})
+    return _unreadable_budget_case("budget-no-timeout", settings, "the guard hook row has no timeout")
+
+
+def base_copies_no_guard_row_budget_case():
+    """The incident tree with no PreToolUse row: nothing names the guard, the budget reads None, so the answer is None."""
+    return _unreadable_budget_case("budget-no-row", _settings_text(None), "no PreToolUse row names the guard")
+
+
+def base_copies_readable_budget_control_case():
+    """Green control: a settings.json whose guard row has a timeout gives a readable budget, and the incident tree is
+    allowed under it. The fixture value only feeds the parse; no case asserts it."""
+    settings = _settings_text({"type": "command", "command": GUARD_HOOK_COMMAND, "timeout": 60})
+    module_at = _module_beside("budget-readable", settings)
+    if _budget_beside(module_at) is None:
+        return False, "scope: the budget beside a settings.json with a guard timeout reads None, want a number"
+    scope = _incident_scope()
+    if scope:
+        return False, scope
+    got, _ = _proof_read(BCINC, trip=False, module_at=module_at)
+    if got is not True:
+        return False, ("answered %r with a readable budget beside its settings.json, want True: a readable budget "
+                       "lets the incident tree through" % (got,))
+    return True, "a readable budget beside its settings.json lets the incident tree through"
+
+
 for _label, _check in (
     ("base copies: 250 paths with an edit in no commit answer False and read no candidate tree",
      base_copies_edits_no_candidate_case),
@@ -174,6 +291,16 @@ for _label, _check in (
     ("base copies: the incident tree, whose paths all match one candidate, answers True with the clock on time",
      base_copies_one_candidate_control_case),
     ("base copies: 201 pushed copies answer True with the clock on time", base_copies_many_pushed_control_case),
+    ("base copies: the incident tree answers None, not False or True, when _proof_budget is None",
+     base_copies_unreadable_budget_case),
+    ("base copies: the incident tree answers None with no settings.json beside its hooks folder",
+     base_copies_no_settings_budget_case),
+    ("base copies: the incident tree answers None when its guard hook row has no timeout",
+     base_copies_no_timeout_budget_case),
+    ("base copies: the incident tree answers None when no PreToolUse row names the guard",
+     base_copies_no_guard_row_budget_case),
+    ("base copies: a readable budget beside its settings.json lets the incident tree through",
+     base_copies_readable_budget_control_case),
 ):
     LOG_CHECKS_EXTRA.append((_label, _check))
     LOG_FAMILY[_label] = "branch-worktree"
