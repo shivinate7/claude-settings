@@ -572,7 +572,7 @@ Session: session_013NEJL1gw6EdrSyvHkTUEx6 (cs-build:coordinator cs-repo:shivinat
 |---|---|---|---|---|
 | #3569 | Freeze the old notes file; one file per new note | draft | resume by name when its stack head merges | none |
 | #3536 | Saved comment: a cut owner ends in an ellipsis | draft | its own live session | none |
-| #3228 | Question form: refuse bash-only forms in PowerShell blocks;… | draft | resume by name when its stack head merges | none |
+| #3228 | Question form: refuse bash-only forms in PowerShell blocks;… | closed | closed as replaced by #3583 (REST 03:17 CST Nov 16: #3228 closed, merged false, closed 09:05:33Z; #3583 open draft at a6d5945140, body "Replaces #3228"; #3583 carried to merge, handed to runner 10) | none |
 | #2862 | Stall watch: never end a waiter or a lone pause (stacked on… | draft | PARKED (coordinator relay, stale-drafts lane): open; base #2680 is open and dirty; no replacing PR; last update Nov 13 17:54 CST | close: Closed in Third p… |
 | #2771 | Resume guard: a finished agent whose worktree is gone is re… | draft | PARKED (coordinator relay, stale-drafts lane): open; replacement #3248 is open and based on guard-tables-per-section, contents not compared, so superseded is not proven | close: Closed in Triage … |
 
