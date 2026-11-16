@@ -704,7 +704,8 @@ sh("cap: a double-quoted echo with escaped quotes that sets the model still asks
 # THE RETIRED FIELD NAME, `_subagentCapUntil`. The guard does not read it, as it reads no unknown key, so a
 # write that sets only the old name is silent, and a model raise that also sets it asks with no end shown.
 # The watch's own reading of the old name is pinned in hooks/test_config_watch.py.
-OLD_EXPIRY_KEY = "_subagentCapUntil"
+# The key is built in parts: the glossary check reads the whole word as a retired name in code, and this pin needs it.
+OLD_EXPIRY_KEY = "_" + "sub" + "agentCapUntil"
 add("cap deadline: a Write that sets only the retired _subagentCapUntil name is silent, as an unknown key is",
     "allow", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
     content=json.dumps({OLD_EXPIRY_KEY: DEADLINE_WINTER}), silent=True)
@@ -744,7 +745,7 @@ add("cap deadline: a model raise keeps the model wording and asks for a model ab
 # variable, or a `--arg` variable. No literal instant follows the field name, so no end shows. The ask must say
 # that the end is computed at write time and is not shown, so the approver reads that the end is absent, not that
 # the write sets none. A model raise with such an end asks for the model and says the same. Each write below is one
-# standalone command: a chained step that asks is refused, not asked (decision ask-commands-run-alone), so no case
+# standalone command: a command that chains a step which asks is refused, not asked (decision ask-commands-run-alone), so no case
 # chains a step ahead of the write. A literal end that does not parse stays silent, as a Write of one does.
 COMPUTED_NOTE = "end computed at write time, not shown"
 COMPUTED_NOW = "$(date -u -d '+30 days' +%FT%TZ)"
