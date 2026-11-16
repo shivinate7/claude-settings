@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # The shared push-skip action's fixture suite. Static: action.yml is a composite with one decide step, which runs push-skip.py
 # from the action path, is not continue-on-error, and reads WORKFLOW from inputs.workflow. Pinned: the script runs from a copy
-# that holds only actions/push-skip, lint/, .github/scripts/nightly-skip.py and this repo's checks.yml. That checks.yml is a
-# decoy: a pinned child must never read it. The calling workspace holds the child's checks.yml, CHILD_GOOD from
-# lint/test_all_jobs_passed.py. api_get answers canned reads, so nothing reaches the network. Each case prints ok or FAIL,
-# and the exit is 0 only when every case is ok.
+# that holds only actions/push-skip, lint/, hooks/required_check.py (lint/ imports the required check's name from it),
+# .github/scripts/nightly-skip.py and this repo's checks.yml. That checks.yml is a decoy: a pinned child must never read it.
+# The calling workspace holds the child's checks.yml, CHILD_GOOD from lint/test_all_jobs_passed.py. api_get answers canned
+# reads, so nothing reaches the network. Each case prints ok or FAIL, and the exit is 0 only when every case is ok.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
@@ -32,23 +32,42 @@ grep -qF 'WORKFLOW: ${{ inputs.workflow }}' "$action" && ok "static: WORKFLOW is
 pin="$work/pin"; caller="$work/caller"
 mkdir -p "$pin/actions" "$pin/.github/scripts" "$pin/.github/workflows" "$caller/.github/workflows"
 cp -r "$here" "$pin/actions/push-skip" && cp -r "$root/lint" "$pin/lint" \
+  && mkdir -p "$pin/hooks" && cp "$root/hooks/required_check.py" "$pin/hooks/" \
   && cp "$root/.github/scripts/nightly-skip.py" "$pin/.github/scripts/" && cp "$root/.github/workflows/checks.yml" "$pin/.github/workflows/checks.yml" \
   || { echo "FAIL - pin: the copy of the action and its readers failed"; exit 1; }
 python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import test_all_jobs_passed as t; sys.stdout.write(t.CHILD_GOOD)' "$root/lint" \
   > "$caller/.github/workflows/checks.yml" || { echo "FAIL - fixture: lint/test_all_jobs_passed.py did not give CHILD_GOOD"; exit 1; }
 
-# The scope-skip callers: this repo's checks.yml, which sets the macOS scope-skips map, and the same file with that input removed. The scope-skip
-# jobs come from testing/scope_skips.py here, since the pinned copy holds no testing/ folder.
-scope_skipped_caller="$work/scope_skipped_caller"; nomap_caller="$work/nomap_caller"
-mkdir -p "$scope_skipped_caller/.github/workflows" "$nomap_caller/.github/workflows"
-[ "$(grep -c '^          scope-skips: ' "$root/.github/workflows/checks.yml")" -eq 1 ] \
-  || { echo "FAIL - fixture: checks.yml does not set its scope-skips input exactly once"; exit 1; }
-cp "$root/.github/workflows/checks.yml" "$scope_skipped_caller/.github/workflows/checks.yml" \
-  && sed '/^          scope-skips: /d' "$root/.github/workflows/checks.yml" > "$nomap_caller/.github/workflows/checks.yml" \
-  || { echo "FAIL - fixture: the scope-skip callers could not be written"; exit 1; }
-SCOPE_SKIPPED=$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import scope_skips; print(" ".join(sorted(scope_skips.MACOS_SCOPE_SKIPS)))' "$root/testing") \
-  || { echo "FAIL - fixture: testing/scope_skips.py did not give MACOS_SCOPE_SKIPS"; exit 1; }
-export SCOPE_SKIPPED
+# The macOS caller: this repo's checks.yml. Its macOS jobs run on a schedule and a dispatch only (owner, 01:33 CST Nov 16), so its
+# scope-skips map is empty: it names no job and only opts in to the records-only read.
+[ "$(grep -c "^          scope-skips: '{}'$" "$root/.github/workflows/checks.yml")" -eq 1 ] && ok "static: checks.yml's scope-skips map is empty" \
+  || no "static: checks.yml's scope-skips map is not the one empty map"
+macos_caller="$work/macos_caller"
+mkdir -p "$macos_caller/.github/workflows"
+cp "$root/.github/workflows/checks.yml" "$macos_caller/.github/workflows/checks.yml" \
+  || { echo "FAIL - fixture: the macOS caller could not be written"; exit 1; }
+
+# The scope-skips proof, on a literal map: the mapped caller is CHILD_GOOD with a scope-skips input that names lint, one of its own suite
+# jobs. No macOS job is named, so these cases do not depend on the macOS jobs. The step is spelled $/actions/all-jobs-passed, the spelling
+# the rules reader matches (ALL_JOBS_PASSED_USES in lint/all_jobs_passed_rules.py); a child's pinned spelling reads as no map.
+mapped="$work/mapped_caller"
+mkdir -p "$mapped/.github/workflows"
+cat > "$work/mapped.py" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import test_all_jobs_passed as t
+anchor = "          needs: ${{ toJSON(needs) }} # every job above\n"
+pinned_uses = "shivinate7/claude-settings/actions/all-jobs-passed@" + t.CHILD_PIN
+assert t.CHILD_GOOD.count(anchor) == 1 and t.CHILD_GOOD.count(pinned_uses) == 1, "the all-jobs-passed step changed: the map must follow it"
+text = t.CHILD_GOOD.replace(pinned_uses, "$/actions/all-jobs-passed").replace(anchor, anchor + "          scope-skips: '{\"lint\": [\"code\"]}'\n", 1)
+sys.stdout.write(text)
+PY
+python3 -I "$work/mapped.py" "$root/lint" > "$mapped/.github/workflows/checks.yml" \
+  || { echo "FAIL - fixture: the mapped caller could not be written"; exit 1; }
+# P7: the map reads back from the mapped caller before any verdict is read from it.
+readback=$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import all_jobs_passed_rules as r; print(sorted(r.scope_skips_map(open(sys.argv[2], encoding="utf-8").read())))' "$root/lint" "$mapped/.github/workflows/checks.yml") || readback=""
+[ "$readback" = "['lint']" ] && ok "fixture: the mapped caller's scope-skips map reads back as lint" \
+  || no "fixture: the mapped caller's scope-skips map reads back as $readback, wanted ['lint']"
 
 # The driver: loads the pinned script, answers its reads from the case's canned routes, and prints the skip value it wrote.
 cat > "$work/drive.py" <<'PY'
@@ -88,28 +107,26 @@ def lane_reads(jobs=None):
             "actions/runs/7/jobs": {"jobs": jobs}}
 
 
-SCOPE_SKIPPED = os.environ.get("SCOPE_SKIPPED", "").split()  # the macOS scope skip's jobs, from testing/scope_skips.py (test_action.sh reads it: the pinned copy holds no testing/)
-
-
-def caller_needed():
-    """The jobs the caller's workflow needs, read by the pinned copy's own reader (lint/all_jobs_passed_rules.py), rollup included."""
+def caller_jobs():
+    """Every job of the calling workflow, and which of them are macOS jobs, read by the pinned copy's own reader (lint/test_windows_split.py)."""
     sys.path.insert(0, os.path.join(pin, "lint"))
-    import all_jobs_passed_rules
+    import test_windows_split
     with open(os.path.join(caller, ".github", "workflows", "checks.yml"), encoding="utf-8") as handle:
-        return all_jobs_passed_rules.split_jobs(handle.read())[0] + [ROLLUP]
+        return sorted(test_windows_split.all_jobs(handle.read())), set(test_windows_split.MACOS_JOBS)
 
 
-def scope_skipped_runs(needed):
-    """The check runs of a ready batch head: each scope-skipped job skipped by its flags, every other job passed."""
-    return [run(name, "skipped" if name in SCOPE_SKIPPED else "success") for name in needed]
+def skipped_runs(jobs, skipped):
+    """The check runs of a ready batch head: each job in `skipped` skipped, every other job passed."""
+    return [run(name, "skipped" if name in skipped else "success") for name in jobs]
 
 
-def scope_skipped_jobs(needed):
-    """The jobs of a ready lone-lane run: each scope-skipped job skipped with no steps, every other job passed."""
-    return [job(name, "skipped", steps=[]) if name in SCOPE_SKIPPED else job(name) for name in needed]
+def skipped_jobs(jobs, skipped):
+    """The jobs of a ready lone-lane run: each job in `skipped` skipped with no steps, every other job passed."""
+    return [job(name, "skipped", steps=[]) if name in skipped else job(name) for name in jobs]
 
 
-NEEDED = caller_needed()
+ALL_JOBS, MACOS = caller_jobs()
+SUITE = "checks-windows-rest"  # a suite job of checks.yml that no macOS rule names
 CASES = {
     "green_batch": (batch_reads(), {}),
     "green_lane": (lane_reads(), {}),
@@ -118,9 +135,22 @@ CASES = {
     "schedule": (lane_reads(), {"EVENT": "schedule"}),
     "dispatch": (lane_reads(), {"EVENT": "workflow_dispatch"}),
 }
-CASES["scope_skipped_batch"] = (batch_reads(scope_skipped_runs(NEEDED)), {})
-CASES["scope_skipped_lane"] = (lane_reads(scope_skipped_jobs(NEEDED)), {})
-CASES["scope_skipped_nomap"] = CASES["scope_skipped_batch"]  # the same ready run, judged against a caller whose scope-skips input is removed
+if case.startswith("macos"):  # the macOS cases read the caller's own jobs, so the suite job they refuse must be one of them
+    assert SUITE in ALL_JOBS, "checks-windows-rest is not a job of checks.yml, so the refusal case would probe the wrong job"
+CASES["macos_skipped_batch"] = (batch_reads(skipped_runs(ALL_JOBS, MACOS)), {})
+CASES["macos_skipped_lane"] = (lane_reads(skipped_jobs(ALL_JOBS, MACOS)), {})
+CASES["macos_and_suite_skipped_batch"] = (batch_reads(skipped_runs(ALL_JOBS, MACOS | {SUITE})), {})
+# The scope-skips proof: the mapped caller names lint, so a skipped lint is proven only by the same run's scope job. Each case without a
+# passing scope job, and each skipped job the map does not name, must stay a gap.
+CASES["map_batch_proven"] = (batch_reads([run(ROLLUP), run("scope"), run("lint", "skipped"), run("test-mac")]), {})
+CASES["map_batch_scope_failed"] = (batch_reads([run(ROLLUP), run("scope", "failure"), run("lint", "skipped"), run("test-mac")]), {})
+CASES["map_batch_scope_absent"] = (batch_reads([run(ROLLUP), run("lint", "skipped"), run("test-mac")]), {})
+CASES["map_batch_unnamed"] = (batch_reads([run(ROLLUP), run("scope"), run("lint"), run("test-mac", "skipped")]), {})
+CASES["map_lane_proven"] = (lane_reads([job(ROLLUP), job("scope"), job("lint", "skipped", steps=[]), job("test-mac")]), {})
+CASES["map_lane_scope_failed"] = (lane_reads([job(ROLLUP), job("scope", "failure"), job("lint", "skipped", steps=[]), job("test-mac")]), {})
+CASES["map_lane_scope_absent"] = (lane_reads([job(ROLLUP), job("lint", "skipped", steps=[]), job("test-mac")]), {})
+# No map at all (the empty state): the same run as map_batch_proven gives skip=false on the caller with no scope-skips input.
+CASES["unmapped_batch_proven"] = (batch_reads([run(ROLLUP), run("scope"), run("lint", "skipped"), run("test-mac")]), {})
 routes, extra = CASES[case]
 
 
@@ -159,8 +189,16 @@ pinned skipped_suite false
 pinned skipped_step true
 pinned schedule false
 pinned dispatch false
-pinned scope_skipped_batch true "$scope_skipped_caller"
-pinned scope_skipped_lane true "$scope_skipped_caller"
-pinned scope_skipped_nomap false "$nomap_caller"
+pinned macos_skipped_batch true "$macos_caller"
+pinned macos_skipped_lane true "$macos_caller"
+pinned macos_and_suite_skipped_batch false "$macos_caller"
+pinned map_batch_proven true "$mapped"
+pinned map_batch_scope_failed false "$mapped"
+pinned map_batch_scope_absent false "$mapped"
+pinned map_batch_unnamed false "$mapped"
+pinned map_lane_proven true "$mapped"
+pinned map_lane_scope_failed false "$mapped"
+pinned map_lane_scope_absent false "$mapped"
+pinned unmapped_batch_proven false "$caller"
 
 exit "$bad"

@@ -65,7 +65,10 @@ that no open pull (on lane_head_refs) or open page item holds; `merge --idle-lan
 not to archive now reads `hold (<reason>; lane <session id>)` and is left out of the row's count. The reason is no
 cs-step tag, a step unproven on main, or a step whose `lane` is the session and that is still doing or active and not
 landed; the last clears when the step's status is set to todo or done.
-A lane that waits (step not done, open pull, open item) prints no line.
+A lane that waits (step not done, open pull, open item) prints no line. A lane tagged `cs-archive-ready:<slug>` whose
+`roadmap/outbox/<slug>-handoff.md` is not on the record branch carries a `HOLD: handoff <slug> is not on the record
+branch` flag (a bad slug, or a handoff read that fails, reads the lane unknown); the merge summary then reads
+`N lanes to archive, M held`, N counting only the clear lanes. Cost: one batched `git cat-file --batch-check`, none with no tagged lane.
 
 This script goes red (step roadmap-pr-without-step) when a todo step is named by an open pull: it prints
 "todo step with an open PR: <id> (#N)" per pair, writes the page, then exits 1. Without a usable readAt and pulls read (sessions are not
@@ -196,6 +199,11 @@ ITEM_DONE_STATUSES = ("closed",)
 ITEMS_MISSING_WHY = "unknown (the live file has no items list)"
 THREADS_MISSING_WHY = "unknown (the live file has no threads list)"
 IDLE_LANES_LINE = "lanes to archive"
+# A lane tagged ARCHIVE_READY_TAG:<slug> is listed with IDLE_HOLD when its handoff is not on the record branch. merge
+# --idle-lanes counts the held lanes by IDLE_HOLD_MARK, the text every such entry holds.
+IDLE_HANDOFF = "roadmap/outbox/%s-handoff.md"
+IDLE_HOLD = "HOLD: handoff %s is not on the record branch"
+IDLE_HOLD_MARK = " HOLD: handoff "
 # A readAt this far past the build time is clock skew; further than that is a bad stamp.
 FUTURE_MINUTES = 5
 # `ready` reads as todo.
@@ -243,7 +251,7 @@ sys.path.insert(0, str(HERE.parent.parent / "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import git_reads  # noqa: E402  the one home of a checkout's GitHub repo, shared with the guard (hooks/git_reads.py)
 from shared_names import (  # noqa: E402,F401  REPO_TAG: test_build pins build.REPO_TAG to the shared object  the one home of the tag names and lane head refs, shared with the guard (hooks/shared_names.py)
-    BUILD_TAG, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, lane_head_refs, repo_tag_names,
+    ARCHIVE_READY_TAG, BUILD_TAG, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, lane_head_refs, repo_tag_names,
 )
 sys.path.insert(0, str(LINT))
 try:
@@ -992,7 +1000,7 @@ def main(argv=None):
     for sid, mid, why in unread_files:
         print("%s: %s %s (%s)" % (MOCKUP_UNREAD_LINE, sid, mid, why))
     upkeep(data["steps"], added_at(source), marks, strays if not unread else ["unknown (%s)" % unread], info["live"],
-           slug, repo, args.main_branch, unread, ref)
+           slug, repo, args.main_branch, unread, ref, source.ref if source is not None else None)
     lines = stalled_lines(info["stalled"])
     if lines:
         print("\n".join(lines))
@@ -1633,7 +1641,7 @@ def on_lane_form(ref, slugs):
                                         for slug in slugs for form in lane_head_refs(slug))
 
 
-def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=None, trailer_ids=None):
+def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=None, record_ref=None, trailer_ids=None):
     """Entries for each idle lane of this repo, sorted: `<session id> (<steps>; topic <topic or ->)` to archive, or
     `hold (<reason>; lane <session id>)` for a lane not to archive now: no cs-step tag, a step that is neither on the
     record branch nor named by a Step trailer on main (that reason ends `; also tagged <tags>` when the lane carries
@@ -1651,13 +1659,21 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
     when main could not be read, no step can be shown landed, so the list reads unknown. `trailer_ids` is the set of
     step ids named by a Step trailer on main; left out, it is read from main when a lane's step is off the record branch.
 
+    A listed lane tagged cs-archive-ready:<slug> is held, `HOLD: handoff <slug> is not on the record branch` after its
+    entry, when roadmap/outbox/<slug>-handoff.md is no file on `record_ref` (the record branch as a git ref). A slug that
+    is empty, holds `/`, `..` or a line break, or whose file cannot be read (or with no `record_ref`) reads the lane
+    unknown, never clear. The page row lists a held lane's flagged entry like any other and keeps no count of its own.
+    Cost: one batched `git cat-file --batch-check` for all tagged lanes, none with no tagged lane.
+
     A lane that passes every test above except an open pull, and whose only holders are stale drafts (stale_draft_pull),
     reads `joint (close #<n> ...; archive archive/<branch> ...; archive lane <session id>)` instead of nothing: the
     batch runner pushes each branch to archive/<branch>, closes each draft, then archives the lane. It needs the lane's
     `idle_since` over STALE_DRAFT_HOURS before the live read, its `unarchived_epoch` the int 0 (joint_pulls), and no open
     pull whose title or branch holds the word records. A stale draft with no head sha gives no joint line: the lane
     keeps waiting. The merge summary counts a joint line among the lanes to archive.
-    Cost: it reads the live file's rows already loaded, and runs no process and opens no file of its own.
+    Cost: it reads the live file's rows already loaded, and runs no process and opens no file of its own. A joint
+    lane tagged cs-archive-ready:<slug> takes the handoff check above like a plain entry: it adds the one batched
+    `git cat-file`, and its joint line ends with the HOLD flag when the handoff is not on the record branch.
     """
     why = live_why(work)
     if why:
@@ -1690,7 +1706,7 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
     live = [row for row in ours if row["session_status"] != ARCHIVED_SESSION]
     if live and not any(row.get("status_bucket") in SESSION_BUCKETS for row in live):
         return ["unknown (no live lane session row carries a status_bucket enum name)"]
-    out = []
+    out, listed = [], []
     for row in ours:
         tags = [t.strip() for t in row["tags"] if isinstance(t, str)]
         if row["session_status"] == ARCHIVED_SESSION or row.get("status_bucket") not in IDLE_BUCKETS:
@@ -1735,12 +1751,32 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
                        % (" ".join(doing), sid))
             continue
         if joint:
-            out.append("joint (close %s; archive %s; archive lane %s)" % (
+            entry = "joint (close %s; archive %s; archive lane %s)" % (
                 " ".join("#%d" % p["number"] for p in joint),
-                " ".join(sorted({"archive/" + p["branch"] for p in joint})), sid))
-            continue
-        topic = next((t[len(TOPIC_TAG):].strip() for t in tags if t.startswith(TOPIC_TAG) and t[len(TOPIC_TAG):].strip()), "-")
-        out.append("%s (%s; topic %s)" % (sid, " ".join(mine), topic))
+                " ".join(sorted({"archive/" + p["branch"] for p in joint})), sid)
+        else:
+            topic = next((t[len(TOPIC_TAG):].strip() for t in tags if t.startswith(TOPIC_TAG) and t[len(TOPIC_TAG):].strip()), "-")
+            entry = "%s (%s; topic %s)" % (row["id"], " ".join(mine), topic)
+        # A joint line archives the lane too, so it takes the same handoff check as a plain entry.
+        slugs = [t[len(ARCHIVE_READY_TAG):].strip() for t in tags if t.startswith(ARCHIVE_READY_TAG)]
+        bad = [s for s in slugs if not s or "/" in s or ".." in s or "\n" in s or "\r" in s]
+        if bad:
+            out.append("unknown (archive slug %r is not a plain name; lane %s)" % (bad[0], row["id"]))
+        elif slugs:
+            listed.append((row["id"], entry, slugs))
+        else:
+            out.append(entry)
+    asks = [(sid, s, "%s:%s" % (record_ref, IDLE_HANDOFF % s)) for sid, _, slugs in listed for s in slugs]
+    found = cat_check(repo, [ask for _, _, ask in asks]) if asks and record_ref else None if asks else []
+    held = {}
+    for (sid, s, _), row in zip(asks, found or []):
+        if not (row and row[1] == "blob"):
+            held.setdefault(sid, []).append(IDLE_HOLD % s)
+    for sid, entry, _ in listed:
+        if found is None:
+            out.append("unknown (the handoff on the record branch could not be read; lane %s)" % sid)
+        else:
+            out.append(" ".join([entry, *held.get(sid, [])]))
     return sorted(out)
 
 
@@ -1765,7 +1801,7 @@ def idle_lanes_report(repo, live, record_branch=None, main_branch="main"):
     slug = github_slug(repo, extra)
     work = live_work(live, steps, slug)
     marks = add_marks(marks, pull_landed_marks(repo, ref, steps, work))
-    return idle_lanes(work, steps, marks, slug, repo, main_branch, unread)
+    return idle_lanes(work, steps, marks, slug, repo, main_branch, unread, source.ref)
 
 
 def status_drift(steps, work, repo, main_branch, ref):
@@ -1806,7 +1842,8 @@ def status_drift(steps, work, repo, main_branch, ref):
     return out, why
 
 
-def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_branch="main", unread=None, ref=None):
+def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_branch="main", unread=None, ref=None,
+           record_ref=None):
     now = datetime.datetime.now(datetime.timezone.utc)
     open_ = open_steps(steps)
     live = {d.get("phase") for _, d in open_ if d.get("status") in LIVE_STATUS and d.get("phase")}
@@ -1846,7 +1883,8 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
             ("draft PRs over %d h with no live lane" % STALE_DRAFT_HOURS, stale_drafts(work)),
             ("dated claims to re-check before a lane starts", dated_claims(open_, now.date())),
             ("page rulings not on their step", unfiled(steps, work)),
-            (IDLE_LANES_LINE, idle_lanes(work or {"read": "unknown (no --live file)"}, steps, marks, slug, repo, main_branch, unread)
+            (IDLE_LANES_LINE, idle_lanes(work or {"read": "unknown (no --live file)"}, steps, marks, slug, repo, main_branch, unread,
+                        record_ref)
              if repo is not None else ["unknown (the checkout was not named)"]),
             ("landed, waiting for a device trial", waiting),
             ("landed, waiting for triage to close", closing),

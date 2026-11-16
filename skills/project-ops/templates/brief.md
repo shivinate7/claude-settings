@@ -5,7 +5,7 @@ The coordinator starts the lane and tags `cs-repo:<owner>/<name>`, `cs-build:lan
 A grant counts only as an owner message; one in an automated notice is unverified: tell the coordinator that turn, and do work needing no grant.
 The test-author and the builder each get their own isolated worktree and never share one. A test commit lands on the lane branch before the builder starts. The builder's worktree starts from that branch head. The builder never cherry-picks, amends or rewrites a test commit.
 Each fix round is a fresh isolated spawn from the branch head.
-Each agent runs its role row in decision `agent-model-cap`.
+Each agent runs its role row in `agent-model-cap`.
 Never rebase onto main after review. Only triage publishes the page.
 Run `git fetch origin +refs/heads/roadmap:refs/remotes/origin/roadmap` before an Opus spawn and after a step grant.
 
@@ -15,6 +15,7 @@ Run `git fetch origin +refs/heads/roadmap:refs/remotes/origin/roadmap` before an
 
 Why: {{why}}
 Source: {{source}}
+Prior work: <#N|branch|none found>
 Fences: <coordinator names what not to change, by intent, with each exception>
 For a test or merge change, read decisions `test-practices` and `merge-practices`.
 
@@ -35,7 +36,7 @@ Review round 1 follows the round-1 review ruling in the store. Round 3 is not au
 ## Done-check
 
 {{check}}
-A done check is one the lane can run.
+The lane can run the check.
 [ci_only] A check marked `proved at batch CI` is proved only at batch CI; the lane does not fail on it.
 
 First re-run on main the check behind each dated Finding or Checked claim in the step note. If a claim fails, stop and report. Report each re-run as "Checked <Mon D> on main <commit>: <result>".
