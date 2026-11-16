@@ -1,5 +1,6 @@
 {
   "added": "2026-11-15T23:20:33-06:00",
+  "closed": "2026-11-16T19:58:30Z",
   "context": "Goal: Home's open pull requests match what you still want.\nProblem (goal): Home #684 is a draft that records your 2026-11-11 wish to take home builds local; the session that opened it is gone, and only you know whether the wish is done, dropped or still wanted.\nBased on (notes): the consultant relayed this at 23:19 CST Nov 15; I did not read the pull request.\nDeparts from: main \u2014 Home keeps #684 open as a draft; done or dropped closes it as replaced, and still wanted keeps it.",
   "home": "runner 11 closing Home #684 as replaced",
   "kind": "decision",
@@ -32,8 +33,8 @@
   ],
   "owner": "runner 11 (session_013NEJKzRugXqBZrZ8xwXmW7), via consultant (session_013NEJKz5AWFJhGvmCUoi6wQ); posted by triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
   "ref": "Home #684 (docs recording the 2026-11-11 wish to take home builds local)",
-  "replied": "2026-11-16T13:40:30-06:00",
-  "reply": "Runner 11 read Home #684 at 13:36 CST by GitHub (draft, head 55bf79ee2506, docs only, 3 files, +55 lines). Title: \"Handoffs for the move from cloud to a local session\"; body: \"so a local session can resume the home build (owner, 2026-11-11 19:27 CST)\". Its files are three handoff notes under handoffs/local-move/. The coordinator note says \"The owner moves it from cloud to a local session\" and lists a ruling \"pause when possible, then take the build local. Process only.\" That reads as a one-way move; it does not say \"for now\" or \"both\". It changes no rule, code or setting. If it merges, main holds handoff notes that say the build moved to local. So its text is stronger than your words. Nothing is closed or touched. Options: fix the wording to \"moving local for now; always both\", or drop the draft. Tell me which, in a line, and runner 11 does it.",
+  "replied": "2026-11-16T13:58:30-06:00",
+  "reply": "Closed 13:58 CST Nov 16. Runner 11 reports (13:58 CST, relayed; triage read no run) that Home #684 is closed as replaced, on your typed word in its chat at 13:57 CST (\"Closed as replaced\"), and that it read the pull request by GitHub: state closed, closed 19:58:05 UTC, with a comment naming the source. The branch is kept because the cloud cannot delete refs; it stays on the Delete merged branches list. Nothing is open for you here.",
   "repo": "shivinate7/claude-settings",
   "short": "Home #684: local builds",
   "shown": [
@@ -53,7 +54,7 @@
       "label": "Still wanted: keep #684 open"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "Home #684 records your Nov 11 wish to take home builds local: is the local move done, dropped, or still wanted?",
   "why": "Only you know whether the wish still stands."
 }
