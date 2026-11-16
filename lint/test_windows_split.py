@@ -744,15 +744,15 @@ def job_check_problems(name, job, flag=None):
     return problems + scope_condition_property_problems(name, scope_condition, flag) + scope_condition_step_problems(name, job, scope_condition)
 
 
-def scope_needs_of(text):
-    """The job names scope needs: its block list under `needs:`, else its inline value. Empty when it needs none or has no scope."""
-    m_block = re.search(r"^  scope:\s*$(.*?)(?=^  [\w-]+:\s*$|\Z)", text, re.M | re.S)
+def job_needs(text, job):
+    """The job names a job needs: its block list under `needs:`, else its inline value. Empty when it needs none or is absent."""
+    m_block = re.search(r"^  %s:\s*$(.*?)(?=^  [\w-]+:\s*$|\Z)" % re.escape(job), text, re.M | re.S)
     if not m_block:
         return set()
     m = re.search(r"^    needs:[ \t]*\n((?:      - [\w-]+[ \t]*\n)+)", m_block.group(1), re.M)
     if m:
         return set(re.findall(r"^\s+-\s+([\w-]+)\s*$", m.group(1), re.M))
-    return set(re.findall(r"[\w-]+", (all_jobs(text).get("scope") or {}).get("needs") or ""))
+    return set(re.findall(r"[\w-]+", (all_jobs(text).get(job) or {}).get("needs") or ""))
 
 
 def scope_problems(text):
@@ -765,7 +765,7 @@ def scope_problems(text):
         return ["no scope job"]
     if not (sc["os"] or "").startswith("ubuntu"):
         problems.append(f"scope runs on {sc['os']}, want ubuntu")
-    got_needs = scope_needs_of(text)
+    got_needs = job_needs(text, "scope")
     if got_needs != SCOPE_NEEDS:
         problems.append(f"scope has needs {sorted(got_needs)}, want {sorted(SCOPE_NEEDS)}")
     block = re.search(r"^  scope:\s*$(.*?)(?=^  [\w-]+:\s*$|\Z)", text, re.M | re.S).group(1)
@@ -1853,8 +1853,8 @@ def scope_waits_on_skip_jobs_problems(text):
     scope skips every job through needs; an unset or failed skip job reads '' and runs everything (unknown is not skip)."""
     sc = all_jobs(text).get("scope") or {}
     problems = []
-    if scope_needs_of(text) != SCOPE_NEEDS:
-        problems.append(f"scope needs {sorted(scope_needs_of(text))}, want {sorted(SCOPE_NEEDS)}: scope must wait on both skip jobs")
+    if job_needs(text, "scope") != SCOPE_NEEDS:
+        problems.append(f"scope needs {sorted(job_needs(text, 'scope'))}, want {sorted(SCOPE_NEEDS)}: scope must wait on both skip jobs")
     expr = sc.get("if")
     if expr is None:
         return problems + ["scope has no if"]
@@ -2466,6 +2466,12 @@ class ModTestStep(unittest.TestCase):
             required = json.load(f)["merge"]["requiredChecks"]
         if required == "protection":  # the list lives in branch protection, which no offline test reads: check only that the workflow gains no mod job
             self.assertEqual([n for n in all_jobs(self.text) if "mod" in n.lower()], [])
+            return
+        if required == [ALL_JOBS_PASSED_JOB]:  # the shared ruleset (ruling r, 2026-11-11 16:43 CST): the one required check is the aggregate job
+            needs = job_needs(self.text, ALL_JOBS_PASSED_JOB)
+            for job in MOD_JOBS:
+                self.assertIn(job, needs, "%s gates no merge: %s does not need it" % (job, ALL_JOBS_PASSED_JOB))
+            self.assertEqual([n for n in required if "mod" in n.lower()], [])
             return
         for job in MOD_JOBS:
             self.assertIn(job, required)
