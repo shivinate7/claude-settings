@@ -1,0 +1,10 @@
+{
+ "id": "coordinator-drop-pin-by-sha-followups",
+ "at": "2026-11-16T00:13:00-06:00",
+ "title": "Drop the two pin-by-SHA follow-ups for child repos; @stable is the ruled form (coordinator pick; not owner-typed)",
+ "ruling": "Coordinator pick a, 00:13 CST Nov 16, answering triage 8's flag: drop the mailaudit and q_max pin-by-SHA follow-ups. Step child-ci-actions-follow-stable cites the owner's R44 A (14:05 CST Nov 11, \"yea agreed A build all 3\"): @stable is the ruled form for child repos, and the line in decision push-skip-on-proven-tree that says child repos pin by SHA is the stale text that step push-skip-text-says-stable fixes. mailaudit's @stable pins and its tests 3a and 3c match the ruling. Not owner-typed; undoable.",
+ "quote": "",
+ "source": "Coordinator message to triage 8, 00:13 CST Nov 16; filed by triage 8",
+ "status": "done",
+ "step": "push-skip-text-says-stable"
+}
