@@ -56,10 +56,7 @@ that triage or the batch runner writes for its successor.
    `roadmap-one-writer`, the record branch's one writer). The coordinator starts triage before any other
    session (decision `session-tiers`). Send triage the repo and the branch name. Triage does steps 2 and 3
    in its own worktree, then commits and pushes the branch. The push needs no PR and runs no CI.
-6. **Protect the default branch.** Name the one check the repo's CI reports (the `all-jobs-passed` rollup). Preview, then set, once the
-   owner confirms the act (it changes the live repo):
-   `python3 ~/.claude/skills/project-ops/scripts/protect.py --repo <owner>/<name> --check all-jobs-passed [--branch main]`,
-   then the same with `--confirm`. It sets a ruleset on the branch: the one check, deletion and force-push blocked, and the Admin role able to bypass on pull requests only. It refuses any `--check` other than `all-jobs-passed`, and more than one, so no repo starts with none (decision `same-check-kinds`). It never touches classic protection. merge reads the required checks from the ruleset first, then from classic protection, so keep `merge.requiredChecks` at `"protection"`.
+6. **Protect the default branch.** The shared form requires no status check (ruling `own-all-jobs-passed-removed`, 2026-11-15 19:08 CST). It is a ruleset that blocks deletion and force-push, and the Admin role can bypass on pull requests only. protect.py still writes the removed one-check form, and merge refuses a base with no check, until the code change lands. So do not set it. Ask the owner. The current command previews with `python3 ~/.claude/skills/project-ops/scripts/protect.py --repo <owner>/<name> --check all-jobs-passed [--branch main]`. The script still refuses any other `--check` name, and more than one. Its `--confirm` form sets the removed form, so it waits for the owner's act (it changes the live repo). It never touches classic protection. merge reads the required checks from the ruleset first, then from classic protection, so keep `merge.requiredChecks` at `"protection"`.
 7. **Add the PR template.** If the adopting repo has no `.github/pull_request_template.md`, copy
    `templates/pull_request_template.md` to that path. Put it in by a pull request on the repo's default
    branch, never on the record branch. The template holds the two PR-body lines the merge tool reads:

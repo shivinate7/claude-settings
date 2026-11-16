@@ -248,9 +248,9 @@ Fork PRs run code you did not write. Apply these to a public repo. See `snippets
 
 ## Before you skip a required job
 
-Branch protection decides what counts as passing. Decision `same-check-kinds` (every repo runs the
-same check kinds) sets the rule. Branch protection requires one check: the `all-jobs-passed` rollup.
-That job lists every other job in `needs:`, and its `if:` holds `always()`. The rollup fails a
+Branch protection requires no status check (ruling `own-all-jobs-passed-removed`, 2026-11-15 19:08 CST).
+Decision `same-check-kinds` (every repo runs the same check kinds) sets the rule for the rollup. The
+`all-jobs-passed` rollup still runs. It lists every other job in `needs:`, and its `if:` holds `always()`. The rollup fails a
 needed job that failed, was cancelled or was skipped, unless `scope-skips` names the skip. Without
 the rollup, a skipped job reads as passing. So a scoped-out suite skips at its CI step, and its job
 still runs and passes (step 19).
@@ -327,8 +327,8 @@ n/a where an item says so. A no is a finding. A read that cannot run is unknown,
    job-level `if:` skips it on every `pull_request` event, such as a nightly-only or push-only job. A
    PR can then never turn it red. Read that job's `if:`. A job off `needs:` that can run on a PR is a no.
    A job with a scope flag in its job-level `if:` stays in `needs:`, and `scope-skips` names it with that flag.
-3. Does branch protection require exactly one check, `all-jobs-passed`? Read
-   `gh api repos/<owner>/<repo>/branches/main/protection`, and count `required_status_checks.checks`.
+3. Does branch protection require no status check (ruling `own-all-jobs-passed-removed`, 2026-11-15 19:08 CST)? Read
+   `gh api repos/<owner>/<repo>/branches/main/protection`, and count `required_status_checks.checks`. It must be zero.
    A 403 is unknown.
 4. Do the PR triggers include `opened`, `synchronize`, `reopened` and `ready_for_review`? Read each
    `on: pull_request: types:` line.
