@@ -1,0 +1,11 @@
+{
+ "id": "own-notes-new-only",
+ "at": "2026-11-15T19:13:00-06:00",
+ "title": "Freeze the old docs/debts/notes.md; new notes only get their own files (item 904 a)",
+ "ruling": "Owner saved 904 a on the waiting page (item debt-notes-new-only, option a \"Freeze the old file; new notes only get their own files\"). Narrows his earlier 903 a (one file per note) to: the old docs/debts/notes.md freezes (deletes only); new notes go to docs/notes/<slug>.md. Source: the page's save comment (page data, not typed chat); triage did not re-read the answers record. It rewrites decision notes-merge-union lines 5-8 and 27-28; that is the lane's job and triage edits neither. Order (coordinator 18:58 CST, relayed): the notes lane first, then #1619 (step notes-sightings-expiry) on the new layout. Step: notes-new-only-layout.",
+ "quote": "Freeze the old file; new notes only get their own files",
+ "source": "Owner's save on the waiting page, item debt-notes-new-only (904 a), time per the page's save comment \"Saved on the waiting page. Owners: lane notes-one-file-each. Items: 904 a.\" sent 2026-11-16T01:13:07Z (19:13 CST Nov 15); page data, not typed chat; relayed by the coordinator; answers record not re-read by triage",
+ "status": "open",
+ "step": "notes-new-only-layout",
+ "supersedes_none": "Triage found no ruling file for 903 a in the roadmap rulings folder (grep for 903 and notes found none); 903 a is named in the page's save comment only. So nothing is listed as superseded; this answer narrows 903 a."
+}

@@ -1,0 +1,15 @@
+{
+ "id": "notes-new-only-layout",
+ "title": "Freeze docs/debts/notes.md; new notes go to docs/notes/<slug>.md",
+ "priority": "now",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "triage",
+ "lane": "session_013NEJL4Rvnnm8Mk8f7NnBGs",
+ "blockedBy": [],
+ "updatedAt": "2026-11-15T19:13:00-06:00",
+ "why": "[19:13 CST Nov 15, triage] Owner saved 904 a (item debt-notes-new-only, \"Freeze the old file; new notes only get their own files\"); ruling own-notes-new-only. Narrows 903 a. The old docs/debts/notes.md freezes (deletes only); new notes go to docs/notes/<slug>.md; decision notes-merge-union lines 5-8 and 27-28 are rewritten by the lane. Order: this lane first, then #1619 (notes-sightings-expiry). No step named notes-one-file-each or carrying 903 a existed, so this one is new. (source: coordinator, relayed by triage; page save at 19:13 CST read from the page comment; undoable)",
+ "source": "coordinator, relayed by triage; page save at 19:13 CST read from the page comment; undoable",
+ "note": "Todo. Owner 904 a (page save 19:13 CST): freeze the old docs/debts/notes.md (deletes only); new notes go to docs/notes/<slug>.md. Narrows 903 a (one file per note). Rewrites decision notes-merge-union lines 5-8 and 27-28 (the lane's job). Order (coordinator 18:58 CST): this lane first, then #1619 (step notes-sightings-expiry) on the new layout. Ruling own-notes-new-only. Lane: session_013NEJL4Rvnnm8Mk8f7NnBGs (lane rebase-wave-1b's session, which made the notes plan). Guard or check: yes."
+}
