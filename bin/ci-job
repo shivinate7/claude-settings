@@ -203,7 +203,8 @@ def condition(text, pr):
     expr = re.sub(r"needs\.scope\.outputs\.[\w-]+\s*(?:==\s*'true'|!=\s*'false')", " T ", expr)  # a flag reads as true
     expr = re.sub(r"github\.event_name\s*==\s*'pull_request'", " T " if pr else " F ", expr)
     expr = re.sub(r"github\.event_name\s*!=\s*'pull_request'", " F " if pr else " T ", expr)
-    expr = re.sub(r"\b(?:cancelled|always|success|failure)\(\)", lambda x: " F " if x.group(0) in ("cancelled()", "failure()") else " T ", expr)
+    expr = re.sub(r"github\.event\.pull_request\.draft", " F ", expr)  # a lint run reads a ready pull request
+    expr = re.sub(r"\b(?:cancelled|always|success|failure)\(\)", lambda x:" F " if x.group(0) in ("cancelled()", "failure()") else " T ", expr)
     expr = expr.replace("&&", " and ").replace("||", " or ").replace("!", " not ")
     if not re.fullmatch(r"[\sTF()]*(?:(?:and|or|not)[\sTF()]*)*", expr):
         return None

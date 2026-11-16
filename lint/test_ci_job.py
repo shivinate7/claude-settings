@@ -1049,7 +1049,7 @@ class NotRunLines(Job):
         # The red-job wake step (`if: failure()`, a local action) runs only after a red job. A green local lint run
         # never reaches it, so it reads `not run`, not `unknown` (decision ci-wait-reads-run-status).
         wake = step("Wake the batch runner (red job)", uses="$/actions/ci-done-comment",
-                    **{"if": "${{ failure() && github.event_name == 'pull_request' }}"})
+                    **{"if": "${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}"})
         rc, lines, out = self.run_job(self.DEGEN[2], wake, args=("--lint",))
         self.assertEqual(by_step(lines)["Wake the batch runner (red job)"], "not run", out)
         self.assertEqual(rc, 0, out)
