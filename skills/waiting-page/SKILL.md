@@ -38,7 +38,7 @@ The rest of the page's rules live in sibling files under `reference/`. Read a fi
 ## Find the page
 
 Run `python3 ~/.claude/lint/layout.py waiting-page <repo root>`. It prints the URL, or `unknown`.
-The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-extras.json`.
+The URL is the link of the `waiting-page` role entry in the `artifacts` key of the repo's extras file, `.claude/layout-extras.json`, else its old `waiting-page` key.
 
 - `unknown` is not an error. Ask in the reply while anything runs, else in the terminal question
   box, and say in one line that the repo has no waiting page.

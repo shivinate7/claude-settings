@@ -59,7 +59,7 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session roles and how 
 - **First triage makes the page** (owner, 2026-10-31 15:02 CDT, in chat to triage, roadmap step `triage-makes-page`).
   - When a repo has no waiting page, its first triage makes one. The coordinator-and-triage setup is the grant. No separate grant is needed.
   - Triage follows skill `waiting-page`, "Make a repo's page": the same `page.html`, the repo's colour and icon, and triage writes `meta/page`.
-  - Triage sets the URL once with `python3 ~/.claude/lint/layout.py set-waiting-page <repo root> <url>`.
+  - Triage sets the URL once with `python3 ~/.claude/lint/layout.py set-waiting-page <repo root> <url> <label>`, with a plain account label such as `current`.
   - It never marks the repo rolled out (`one-layout-every-repo`, the layout record).
 - **Lane.** A lane runs its own line of work. It spawns its own builder and reviewer agents under `agent-model-cap` (the model per role). It reports up to the coordinator that started it, if any. Owner, about 14:52, in short: sessions that spawn under a coordinator run their own agents, reporting up to it.
   - One topic (owner, 2026-11-03 16:36 and 16:40 CST). A lane holds one topic: the slug in its topic tag, `cs-topic` (How it works, role tags). A lane may take several steps on that topic. Each roadmap step the lane takes gets its own `cs-step` tag.

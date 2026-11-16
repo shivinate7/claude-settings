@@ -4,8 +4,8 @@
     python3 ~/.claude/skills/waiting-page/stale_pages.py <fetched-dir> [<repo root> ...]
 
 A script cannot call the Artifact tool, so the session fetches first. For each page in the list
-(lint/layout.py `live_pages`, from the `waiting-page` key of each repo's extras file; with no root
-given, the claude-settings checkout and every sibling folder of it that has one), the session reads
+(lint/layout.py `live_pages`: the first link of the waiting-page entry in each repo's extras file, else its old
+`waiting-page` key; with no root given, the claude-settings checkout and every sibling folder of it that has one), the session reads
 the page with Artifact `read` and saves the text to <fetched-dir>/<artifact id>.html. A page it
 could not read gets an empty file <artifact id>.unreadable instead. A page that Artifact read
 reports as not found, and that this account's Artifact list (scope all) holds no id for, gets an empty
