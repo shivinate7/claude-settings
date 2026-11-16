@@ -607,10 +607,13 @@ class UpkeepFixture(Fixture):
 
     SLUG = "owner/fixture"
     REPO = "cs-repo:" + SLUG
+    # git's empty tree: every repo holds it, so a commit or ref on it needs no file of its own.
+    EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
     def setUp(self):
         super().setUp()
         self.use_origin(self.SLUG)
+        self.origin_set = set()  # branches whose refs/remotes/origin/ ref a case set, dropped or broke
 
     def commit_step(self, sid, **fields):
         """Write a step on the record branch and commit it, where a build from main reads it. A field set to _ABSENT is left out."""
@@ -727,13 +730,64 @@ class UpkeepFixture(Fixture):
         """The live pulls row the publisher writes for an open pull, with no marks: held and reviewLog read as unset."""
         return {"number": number, "title": title or "lane " + branch, "branch": branch}
 
+    def origin_commit(self, branch, when):
+        """Point refs/remotes/origin/<branch> at a new commit dated `when` (ISO, with its zone): the branch's newest commit."""
+        sha = git(self.repo, "commit-tree", self.EMPTY_TREE, "-m", "lane " + branch,
+                  env={"GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}).strip()
+        self.set_origin(branch, sha)
+
+    def set_origin(self, branch, target):
+        """Point refs/remotes/origin/<branch> at the object `target`."""
+        git(self.repo, "update-ref", "refs/remotes/origin/" + branch, target)
+        self.origin_set.add(branch)
+
+    def drop_origin(self, branch):
+        """Leave refs/remotes/origin/<branch> out, so the branch has no ref."""
+        git(self.repo, "update-ref", "-d", "refs/remotes/origin/" + branch)
+        self.origin_set.add(branch)
+
+    def break_origin(self, branch):
+        """Write refs/remotes/origin/<branch> to name an object git does not hold, so reading it fails."""
+        ref = self.repo / ".git" / "refs" / "remotes" / "origin" / branch
+        ref.parent.mkdir(parents=True, exist_ok=True)
+        ref.write_text("1" * 40 + "\n", encoding="utf-8")
+        self.origin_set.add(branch)
+
+    def stale_draft_branches(self, item):
+        """The head branches of the rows in one served page that the build reads as stale drafts: a draft whose
+        updated_at is over 12 h before now. A page that is not a list of rows gives none."""
+        body = item[0] if isinstance(item, tuple) else item
+        if not isinstance(body, list):
+            return []
+        cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=12)
+        out = []
+        for row in body:
+            if not (isinstance(row, dict) and row.get("draft") is True and isinstance(row.get("head"), dict)):
+                continue
+            ref, at = row["head"].get("ref"), row.get("updated_at")
+            if not isinstance(ref, str) or not isinstance(at, str):
+                continue
+            try:
+                when = datetime.datetime.fromisoformat(at.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if when.tzinfo is not None and when < cutoff:
+                out.append(ref)
+        return out
+
     def serve_pulls(self, *pages, token="test-token"):
         """Serve the rest_get seam: page N is pages[N-1], and a page past the list is empty. A page is a list of
         pulls rows, a (body, headers) pair, or an exception to raise. The seam, as the build reads it, returns
         (body, headers) on a 200, raises urllib.error.HTTPError on a non-2xx and raises ValueError on a body that is
-        not JSON. token sets GH_TOKEN for the read; None leaves the environment as the case set it."""
+        not JSON. token sets GH_TOKEN for the read; None leaves the environment as the case set it. Each stale draft
+        branch served here gets a commit 13 h old, so the build's commit read finds one, unless the case has already
+        set that branch's origin ref (origin_commit, set_origin, drop_origin, break_origin)."""
         if token is not None:
             os.environ["GH_TOKEN"] = token
+        for item in pages:
+            for branch in self.stale_draft_branches(item):
+                if branch not in self.origin_set:
+                    self.origin_commit(branch, iso_ago(780))
 
         def reply(url, token):
             number = int(urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("page", ["1"])[0])
