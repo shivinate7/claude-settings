@@ -233,11 +233,31 @@ for fg_label, fg_command, fg_silent in FG_NOT_LONG:
     fg_allow("fg-bash-while-bg: a %s is allowed in the foreground while a background command runs" % fg_label,
              fg_command, fg_path("bg-running"), silent=fg_silent)
 
+# SHAPES. A test tool's verbose flag runs its tests, so `pytest -v` and `flake8 -v` are long. A dry run, a help flag and
+# a `command -v` lookup run nothing, so they stay quick. A flag that takes a value, such as `npm -w web test`, does not
+# end the command: the test or build script after it still counts. A test file named by a plain word, `test.py`, counts.
+FG_SHAPE_LONG = (
+    "pytest -v", "flake8 -v", "pytest -v tests", "python3 test.py", "python3 tests/run.py", "bash test.sh",
+    "./test.sh", "node test.js", "node --test", "bash tests/run.sh", "npm --prefix web test", "npm -w web test",
+    "pnpm --filter x build", "yarn --cwd web test",
+)
+for fg_command in FG_SHAPE_LONG:
+    fg_refuse("fg-bash-while-bg: a foreground %s is refused while a background command runs" % fg_command,
+              fg_command, fg_path("bg-running"))
+FG_SHAPE_QUICK = (
+    "command -v pytest", "command -v make", "xcodebuild -version", "xcodebuild -showsdks", "make -n", "pytest -h",
+)
+for fg_command in FG_SHAPE_QUICK:
+    fg_allow("fg-bash-while-bg: a foreground %s is allowed in the foreground while a background command runs" % fg_command,
+             fg_command, fg_path("bg-running"), silent=True)
+
 # AGENT AND TRANSCRIPT PINS. A call from an agent is not judged: its payload carries agent_id and agent_type, and the
 # transcript is its parent's. The bg-running transcript holds a background command, so only the agent fields exempt
 # this call.
 fg_allow("fg-bash-while-bg: a foreground npm test from an agent, with agent_id and agent_type, is not judged while a background command runs",
          "npm test", fg_path("bg-running"), agent_id="agentpin1", agent_type="general-purpose")
+fg_allow("fg-bash-while-bg: a foreground npm test from an agent, with agent_type and no agent_id, is not judged while a background command runs",
+         "npm test", fg_path("bg-running"), agent_type="general-purpose")
 # A missing transcript allows: the rule fails open. A payload with no transcript_path at all allows the same way.
 fg_allow("fg-bash-while-bg: a foreground npm test is allowed when its transcript file is missing",
          "npm test", fg_path("missing"))
