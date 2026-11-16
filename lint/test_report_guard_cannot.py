@@ -2971,6 +2971,25 @@ class CannotClaimTests(trg.SameTurnWriter, unittest.TestCase):
                     out = self.stop([trg.human("import the mail export"), record])
                     self.assert_passes(out, "a Why yours access line with a dated cite (%s)" % shape)
 
+    # ---- Probe claims on a past report, a named check and the bare "unable" form.
+
+    def test_cc_control_couldnt_report_with_no_hand_off_passes(self):
+        # Control: a past report of a failed import ("could not") with no hand-off to the owner passes with no call in its turn.
+        out = self.stop([trg.human("import it"), trg.assistant_text("I couldn't import it.")])
+        self.assert_passes(out, "a past report of a failed import with no hand-off")
+
+    def test_cc_control_named_exit_or_status_claim_passes_with_no_call(self):
+        # Control: a probe claim that names its check by an exit code or an HTTP status passes with no call in its turn.
+        for line in ("I can't import it; the script exited 1.", "I can't import it; the call got HTTP 500."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("import it"), trg.assistant_text(line)])
+                self.assert_passes(out, "a probe claim that names its check: %r" % line)
+
+    def test_cc_control_bare_unable_here_blocks_for_a_probe(self):
+        # Control: "unable" with no "to" is a cannot form, so a claim with it and no call in its turn blocks as a probe claim.
+        line = "I'm unable here."
+        self.assert_probe_blocked(self.stop([trg.human("import it"), trg.assistant_text(line)]), line)
+
 
 if __name__ == "__main__":
     unittest.main()
