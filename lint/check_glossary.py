@@ -57,8 +57,29 @@ import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_
 from rule_audit import ANCHOR_RE, RULE_FILES  # noqa: E402  the one home of the rule marker list
 import diff_moves  # noqa: E402  the one home of a moved line (lint/diff_moves.py)
 
-ROOT = os.path.dirname(HERE)
 GLOSSARY = "GLOSSARY.md"
+
+
+def find_root():
+    """The repo this check reads. A cloud copy sits in ~/.claude/lint and a local install links each file there, so
+    the script's own folder is a repo only when run in place. Else the repo the run starts in wins, so a link run
+    from repo B reads B, not the link's target. B's top is the root even with no glossary, so the FAIL names B's
+    GLOSSARY.md, never ~/.claude. Outside any repo, a link install reads its target repo."""
+    own = os.path.dirname(HERE)
+    if os.path.isfile(os.path.join(own, GLOSSARY)) or os.path.exists(os.path.join(own, ".git")):
+        return own  # a repo copy run in place with its glossary gone fails on its own path, not the cwd repo's
+    try:
+        r = _nowindow.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, encoding="utf-8")
+        top = os.path.normpath(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip() else ""
+    except OSError:  # no git on PATH
+        top = ""
+    if top:
+        return top
+    linked = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    return linked if os.path.isfile(os.path.join(linked, GLOSSARY)) else own
+
+
+ROOT = find_root()
 SECTION = "## Terms"
 NONE = ("", "-", "—")  # a "not" cell that lists no name
 THIS_SENSE = " (this sense)"  # `issue (this sense)`: read in paths, anchors and slugs, not in code names
@@ -756,7 +777,7 @@ def main(args):
         return 1
     text = read(GLOSSARY)
     if text is None:
-        print("check_glossary: FAIL: %s cannot be read" % GLOSSARY)
+        print("check_glossary: FAIL: %s cannot be read" % os.path.join(ROOT, GLOSSARY))
         return 1
     table = rows(text)
     if not table:  # a parser that finds nothing must not read as clean
