@@ -4,11 +4,13 @@
 render(spec) takes one list of options and returns {"chat": text, "item": dict}:
   - chat: the line `Page item: <id>`, then one line `a) <label>` per option, in order;
   - item: `options` and `shown` built from the same list. Keys are letters by position (a, b, c, ...), whatever keys the
-    spec gives. Each option has an id: the spec's `id`, else the slug of its label, made unique. `shown` holds the
-    {key, id, label} of each option (ruling R60, decision option-keys-are-letters).
-  - spec `shown` is the shown list of an earlier item. When the new options do not extend it, position by position in key,
-    id and label, render raises ValueError. When the spec carries `changes` ({key: note}), a changed option instead keeps
-    its shown key, id and label and carries the note, so option-letters-frozen passes it.
+    spec gives. Each option has an id: the spec's `id`, else the shown id at a shown position, else the slug of its
+    label, made unique. `shown` holds the {key, id, label} of each option as first shown (ruling R60, decision
+    option-keys-are-letters).
+  - spec `shown` is the shown list of an earlier item. When the new options do not extend it, position by position in key
+    and id, render raises ValueError. A label may be reworded, but not to empty text or to the wording shown at another
+    position. When the spec carries `changes` ({key: note}), a changed option instead keeps its shown key and id,
+    carries the note and takes the spec's label, so option-letters-frozen passes it.
 
 The chat and the item it writes are read by question_form.chat_page_label_hit and frozen_letters_hit: no refusal.
 
@@ -167,14 +169,26 @@ class Earlier(unittest.TestCase):
         self.assertEqual(len(options), 3, "an appended option is not rendered beside the shown two")
         self.assertEqual(item.get("shown", [])[:2], EARLIER, "the shown positions a and b changed")
 
-    def test_changes_keep_the_shown_label_and_carry_the_note(self):
+    def test_changes_keep_the_spec_label_and_carry_the_note(self):
         spec = spec_of(["Keep it as is", "Hold it for the coordinator"], shown=EARLIER, changes={"b": NOTE})
         result = RENDER(spec)
         options = options_of(self, result.get("item", {}))
-        self.assertEqual(options[1].get("label"), "Allow merge --role",
-                         "a changed option does not keep its shown label, so option-letters-frozen would refuse it")
+        self.assertEqual(options[1].get("label"), "Hold it for the coordinator",
+                         "a changed option does not keep the spec's reworded label")
+        self.assertEqual((options[1].get("key"), options[1].get("id")), ("b", "allow-merge-role"),
+                         "a changed option does not keep its shown key and id")
         self.assertEqual(options[1].get("note"), NOTE, "a changed option does not carry the change's note")
-        self.assertIn("b) Allow merge --role", chat_lines(result), "the chat does not write the kept label for b")
+        self.assertIn("b) Hold it for the coordinator", chat_lines(result), "the chat does not write the spec's label for b")
+
+    def test_changes_with_another_shown_label_raises(self):
+        spec = spec_of(["Allow merge --role", "Allow merge --role"], shown=EARLIER, changes={"a": NOTE})
+        raises_value_error(self, spec, "a changed option takes the wording shown for letter b")
+
+    def test_swap_in_another_case_or_padding_raises(self):
+        raises_value_error(self, spec_of(["ALLOW MERGE --ROLE", "keep it as is"], shown=EARLIER),
+                           "labels swapped between a and b in another case")
+        raises_value_error(self, spec_of([" Allow merge --role ", "Keep it as is"], shown=EARLIER),
+                           "label for a padded with spaces, equal to b's shown label")
 
 
 class Feed(unittest.TestCase):

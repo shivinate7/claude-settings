@@ -37,7 +37,7 @@ nothing changes (a restatement of main) refuse as `question-departs`: the rule b
 in decision port-keeps-behaviour. departs_hit is its one predicate; lint/report_guard.py calls it too.
 The page writer's last three rules run after the form: `option-letter-keys` (an option's key is its
 position's letter, and a label that opens with a letter tag names that letter), `option-letters-frozen` (an option keeps the
-key, id and label it was shown with, and each option has a unique id) and `rework-off-page` (an open item never says it is being reworked).
+key and id it was shown with, may be reworded but never takes another shown option's label, and each option has a unique id) and `rework-off-page` (an open item never says it is being reworked).
 `option-labels-match-chat` runs in hooks/guard.py after all of those, because it reads the session's transcript, which item_hit never sees:
 page_label_hit(writes, transcript_path) -> (rule, matched). A chat question cites its item ("Page item: <id>") and writes "a) <text>" per
 option; a write of that item whose label for a letter differs from the chat's text for it is refused (chat_page_label_hit).
@@ -1307,7 +1307,7 @@ def option_letter_hit(op: str, data) -> str:
 # options as first shown, in order, each as {key, id, label}. A later write keeps each shown position's key and id,
 # may add a `note` to an option, and may append options when `shown` is extended by them. Each option carries a unique
 # `id` that a stored answer records, so a later move of the letters cannot change which option the owner meant
-# (page_grant.py holds such an answer for his word). The label may be reworded (owner, Nov 15 2026 23:2x CST: a is
+# (page_grant.py holds such an answer for his word). The label may be reworded (owner, Nov 15 2026, evening CST: a is
 # apple and b is banana, never a is banana): the letter's meaning is its key and id, not its wording. A reword that
 # lands on another shown position's label is a swap that kept the ids, so it is refused.
 FROZEN_RULE = "option-letters-frozen"

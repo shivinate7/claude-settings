@@ -14,8 +14,8 @@ The spec is the item's own fields, with `options`, and optionally:
            not the label shown at another position. That is the freeze (guard rule `option-letters-frozen`) read
            before the write, not after it.
   existing true when the spec names an item already on the page: `shown` must then be that item's, never empty.
-  changes  {key: note}. A shown option listed here keeps its shown key, id and label and carries the note as its `note`
-           (the page shows it on the card). Use it when a rule changes what an option means: the letter does not move.
+  changes  {key: note}. A shown option listed here keeps its shown key and id and carries the note as its `note`
+           (the page shows it on the card). Its label is the spec's, so a reword stands; with no label it keeps the shown one. Use it when a rule changes what an option means: the letter does not move.
 
 It returns {"chat": text, "item": dict}.
   chat  the line `Page item: <id>`, then one line `a) <label>` per option, in order.
@@ -88,23 +88,25 @@ def render(spec):
     for at, given in enumerate(options):
         key = string.ascii_lowercase[at]
         if at < len(shown) and key in changes:
-            # The option keeps what was shown; only its note says what changed.
+            # The option keeps its shown key and id, and carries the note. Its label is the spec's, so a note-only
+            # re-render after a reword keeps the new wording; a spec with no label falls back to the shown one.
             kept = shown[at]
-            one = dict(given, key=kept["key"], id=kept["id"], label=kept["label"], note=changes[key])
+            one = dict(given, key=kept["key"], id=kept["id"], note=changes[key])
+            one.setdefault("label", kept["label"])
         else:
             one = dict(given, key=key)
             # A shown option's id is its stable name, so a reworded label keeps it unless the spec gives another.
             default = shown[at]["id"] if at < len(shown) else slug(given.get("label", ""))
             one["id"] = unique(str(given["id"]) if given.get("id") else default, used)
-            if at < len(shown):
-                if pair(one) != pair(shown[at]):
-                    raise ValueError("option %s differs from the option shown at its letter" % key)
-                if not isinstance(one.get("label"), str) or not one["label"].strip():
-                    raise ValueError("option %s has no label text" % key)
-                if any(label_form(one["label"]) == label_form(entry["label"])
-                       for other, entry in enumerate(shown)
-                       if other != at and isinstance(entry.get("label"), str)):
-                    raise ValueError("option %s carries the wording shown for another letter" % key)
+            if at < len(shown) and pair(one) != pair(shown[at]):
+                raise ValueError("option %s differs from the option shown at its letter" % key)
+        if at < len(shown):
+            if not isinstance(one.get("label"), str) or not one["label"].strip():
+                raise ValueError("option %s has no label text" % key)
+            if any(label_form(one["label"]) == label_form(entry["label"])
+                   for other, entry in enumerate(shown)
+                   if other != at and isinstance(entry.get("label"), str)):
+                raise ValueError("option %s carries the wording shown for another letter" % key)
         used.add(one["id"])
         built.append(one)
     item = {k: v for k, v in spec.items() if k not in NOT_ITEM_FIELDS}
