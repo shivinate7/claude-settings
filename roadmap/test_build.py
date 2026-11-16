@@ -1,7 +1,9 @@
 """build.py refuses a tree with git conflict markers (step c72); the pre-commit hook refuses an over-cap
-note (step c138) and a staged roadmap/rulings/*.json that does not parse (step rulings-store-parses).
+note (step c138), a staged roadmap/rulings/*.json that does not parse (step rulings-store-parses), and a
+staged updatedAt or ruling at more than 5 minutes after now (step updatedat-not-future).
 Run: python roadmap/test_build.py"""
 import contextlib
+import datetime
 import io
 import json
 import os
@@ -22,6 +24,10 @@ CONFLICT = "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> 1234567 (other)\n"
 VALID_RULING = '{"id": "r1", "title": "t", "ruling": "x", "status": "open"}\n'
 # A ruling quoted with unescaped inner quotes, as a hand-written store entry can be.
 BROKEN_RULING = '{"id": "r1", "why": "he said "no" here"}\n'
+# Fixed stamps: FUTURE and FUTURE_Z are far enough ahead that no clock reaches them; PAST stays behind.
+FUTURE = "2099-01-01T00:00:00-06:00"
+FUTURE_Z = "2099-01-01T00:00:00Z"
+PAST = "2020-01-01T00:00:00-06:00"
 
 
 def words(n):
@@ -155,9 +161,12 @@ class NoteCapHook(unittest.TestCase):
             self.fail(f"git {' '.join(args)}: {r.stdout}{r.stderr}")
         return r
 
-    def step(self, sid, n, status="open", where=None):
+    def step(self, sid, n, status="open", where=None, updated_at=None):
         path = (where or self.repo) / "roadmap" / "data" / "steps" / f"{sid}.json"
-        path.write_text(json.dumps(dict(STEP, status=status, note=words(n))), encoding="utf-8")
+        rec = dict(STEP, status=status, note=words(n))
+        if updated_at is not None:
+            rec["updatedAt"] = updated_at
+        path.write_text(json.dumps(rec), encoding="utf-8")
 
     def commit(self, msg="m", *extra, cwd=None):
         return self.git("commit", "-q", "-m", msg, *extra, cwd=cwd, check=False)
@@ -313,6 +322,100 @@ class NoteCapHook(unittest.TestCase):
         self.step("", 300)
         self.git("add", "-A")
         self.assert_refused(self.commit(), ".json (300 words)")
+
+    def assert_stamp_refused(self, r, *names):
+        if r.returncode == 0:
+            self.fail("a future stamp was not refused: " + r.stdout + r.stderr)
+        self.assert_refused(r, *names)
+
+    def assert_stamp_unjudged(self, r, path):
+        self.assert_passed(r)
+        self.assertIn(path, r.stderr, "an unreadable stamp was not reported")
+        self.assertIn("updatedAt", r.stderr, "the report does not name updatedAt")
+        self.assertIn("not checked", r.stderr, "the report does not say the stamp was not checked")
+
+    def ahead(self, minutes):
+        """A stamp this many minutes after the real clock. The hook reads the same clock."""
+        return (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=minutes)).isoformat(
+            timespec="seconds")
+
+    def test_future_updated_at_is_refused(self):
+        self.step("c1", 10, updated_at=FUTURE)
+        self.git("add", "-A")
+        self.assert_stamp_refused(self.commit(), "c1.json", "updatedAt " + FUTURE)
+
+    def test_future_z_updated_at_is_refused(self):
+        self.step("c1", 10, updated_at=FUTURE_Z)
+        self.git("add", "-A")
+        self.assert_stamp_refused(self.commit(), "c1.json", "updatedAt " + FUTURE_Z)
+
+    def test_future_updated_at_on_first_commit_is_refused(self):
+        self.unborn()
+        self.step("c1", 10, updated_at=FUTURE)
+        self.git("add", "-A")
+        self.assert_stamp_refused(self.commit(), "c1.json", "updatedAt " + FUTURE)
+
+    def test_past_updated_at_passes(self):
+        self.step("c1", 10, updated_at=PAST)
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
+
+    # Real clock: the 5-minute margin is tested at 3 and 7 minutes, 2 minutes either side of the edge.
+    def test_updated_at_written_now_passes(self):
+        self.step("c1", 10, updated_at=self.ahead(0))
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
+
+    def test_updated_at_inside_the_margin_passes(self):
+        self.step("c1", 10, updated_at=self.ahead(3))
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
+
+    def test_updated_at_past_the_margin_is_refused(self):
+        self.step("c1", 10, updated_at=self.ahead(7))
+        self.git("add", "-A")
+        self.assert_stamp_refused(self.commit(), "c1.json", "updatedAt")
+
+    def test_unchanged_old_future_stamp_does_not_block_an_edit(self):
+        self.step("c1", 10, updated_at=FUTURE)
+        self.git("add", "-A")
+        self.assert_passed(self.commit("seed", "--no-verify"))
+        self.assertEqual(json.loads(self.git("show", "HEAD:roadmap/data/steps/c1.json").stdout)["updatedAt"], FUTURE,
+                         "the seed did not land with the future stamp")
+        path = self.repo / "roadmap" / "data" / "steps" / "c1.json"
+        path.write_text(json.dumps(dict(json.loads(path.read_text()), title="new")), encoding="utf-8")
+        self.git("add", "-A")
+        self.assertEqual(self.git("diff", "--cached", "--name-only").stdout.split(), ["roadmap/data/steps/c1.json"],
+                         "the commit does not touch only the old record")
+        self.assert_passed(self.commit())
+
+    def test_moving_a_stamp_into_the_future_is_refused(self):
+        self.step("c1", 10, updated_at=PAST)
+        self.git("add", "-A")
+        self.assert_passed(self.commit("seed"))
+        self.step("c1", 10, updated_at=FUTURE)
+        self.git("add", "-A")
+        self.assert_stamp_refused(self.commit(), "c1.json", "updatedAt " + FUTURE)
+
+    def test_unreadable_updated_at_is_reported_not_judged(self):
+        self.step("c1", 10, updated_at="01:30 CST")
+        self.git("add", "-A")
+        self.assert_stamp_unjudged(self.commit(), "c1.json")
+
+    def test_naive_future_updated_at_is_reported_not_judged(self):
+        self.step("c1", 10, updated_at="2099-01-01T00:00:00")
+        self.git("add", "-A")
+        self.assert_stamp_unjudged(self.commit(), "c1.json")
+
+    def test_future_ruling_at_is_refused(self):
+        self.ruling("r1.json", json.dumps({"id": "r1", "at": FUTURE, "title": "t", "ruling": "x", "status": "open"}))
+        self.git("add", "-A")
+        self.assert_stamp_refused(self.commit(), "r1.json", "at " + FUTURE)
+
+    def test_past_ruling_at_passes(self):
+        self.ruling("r1.json", json.dumps({"id": "r1", "at": PAST, "title": "t", "ruling": "x", "status": "open"}))
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
 
     def ruling(self, name, text):
         """Write roadmap/rulings/<name> as raw text or bytes, so a broken ruling stays broken."""
@@ -652,6 +755,32 @@ exit 0
         self.step("c2", 300)
         self.git("add", "-A")
         self.assert_refused(self.commit(), "c2 (300 words)")
+
+
+class StampIsFuture(unittest.TestCase):
+    """stamp_is_future with the clock passed in, so the 5-minute edge is exact and reads no real clock."""
+    NOW = datetime.datetime(2026, 11, 16, 7, 30, tzinfo=datetime.timezone.utc)
+
+    def at(self, **delta):
+        return (self.NOW + datetime.timedelta(**delta)).isoformat(timespec="seconds")
+
+    def test_exactly_the_margin_is_not_future(self):
+        self.assertFalse(build.stamp_is_future(self.at(minutes=5), self.NOW))
+
+    def test_a_second_past_the_margin_is_future(self):
+        self.assertTrue(build.stamp_is_future(self.at(minutes=5, seconds=1), self.NOW))
+
+    def test_now_is_not_future(self):
+        self.assertFalse(build.stamp_is_future(self.at(), self.NOW))
+
+    def test_z_suffix_is_read_as_utc(self):
+        self.assertTrue(build.stamp_is_future("2026-11-16T07:37:00Z", self.NOW))
+        self.assertFalse(build.stamp_is_future("2026-11-16T07:30:00Z", self.NOW))
+
+    def test_unreadable_values_are_none(self):
+        for value in (None, "", "01:30 CST", "2026-11-16T09:30", 5):
+            with self.subTest(value=value):
+                self.assertIsNone(build.stamp_is_future(value, self.NOW))
 
 
 if __name__ == "__main__":
