@@ -1,0 +1,12 @@
+{
+  "id": "own-required-checks-none-fold-3590",
+  "at": "2026-11-16T14:12:00-06:00",
+  "title": "Owner at 14:02 CST: A or C is fine, whichever is faster; claude-settings requiredChecks \"none\" is folded into PR #3590 (relayed, not read by triage).",
+  "ruling": "Owner, 14:02 CST Nov 16, relayed by the consultant at 14:11 CST: \"A or C is fine which is faster\". The consultant reads this as: the claude-settings requiredChecks \"none\" change folds into PR #3590. The options A and C are the consultant's; triage does not have their text, so it records only the quoted words and the consultant's reading. The owner has not been shown the reading.",
+  "quote": "A or C is fine which is faster",
+  "source": "Consultant message to triage 14:11 CST Nov 16 (the owner's chat words as the consultant gave them). Filed by triage; triage did not see the owner's chat or the options.",
+  "status": "open",
+  "pr": 3590,
+  "prNote": "Consultant 14:11 CST Nov 16 (relay): the change is folded into #3590. Triage read no diff.",
+  "step": "merge-pin-required-checks"
+}

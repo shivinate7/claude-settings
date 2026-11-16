@@ -1,0 +1,10 @@
+{
+  "id": "own-lane-merge-allow-entry-a",
+  "at": "2026-11-16T14:12:00-06:00",
+  "title": "Owner picked a on the Lane Own Merge allow entry: the consultant builds it on branch lane-merge-allow (relayed, not read by triage).",
+  "ruling": "Owner chat answer, relayed by the consultant at 14:11 CST Nov 16, word for word: \"a (recommended): you type here 'yes, add the Lane Own Merge allow entry'. I then build it. It lifts no merge check (lint, review record and head binding stay), and never covers the flags that skip checks, admin merges or settings changes.\" The text is option a of the consultant's question as it was put to the owner; the consultant reports the owner picked a. Triage cannot tell from the relay whether the owner also typed the quoted yes sentence, so the entry's grant is read as covering only what the sentence names: add the entry, lift no merge check, cover no check-skipping flag, no admin merge, no settings change. Open: the owner has not been asked to confirm the typed sentence in triage's sight. The consultant builds it on branch lane-merge-allow; no PR number yet.",
+  "quote": "a (recommended): you type here 'yes, add the Lane Own Merge allow entry'.",
+  "source": "Consultant message to triage 14:11 CST Nov 16 (the owner's chat answer as the consultant gave it). Filed by triage; triage did not see the owner's chat.",
+  "status": "open",
+  "step": "merge-on-lint-pass"
+}
