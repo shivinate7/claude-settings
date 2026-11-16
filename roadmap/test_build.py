@@ -429,6 +429,10 @@ class NoteCapHook(unittest.TestCase):
         path = self.repo / "roadmap" / "data" / "steps" / "c1.json"
         path.write_text(json.dumps(dict(json.loads(path.read_text()), title="new")), encoding="utf-8")
         self.git("add", "-A")
+        self.assertEqual(json.loads(self.git("show", "HEAD:roadmap/data/steps/c1.json").stdout)["updatedAt"], NAIVE_PAST,
+                         "the seed did not land with the naive stamp")
+        self.assertEqual(self.git("diff", "--cached", "--name-only").stdout.split(), ["roadmap/data/steps/c1.json"],
+                         "the commit does not touch only the old record")
         r = self.commit()
         self.assert_passed(r)
         self.assertEqual(r.stderr, "", "an unchanged stamp was reported")
