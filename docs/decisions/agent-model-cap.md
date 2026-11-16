@@ -30,7 +30,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | reviewer, per round (the round rows below) | the round rows: haiku on a round 1 of a change with no guard or check, sonnet from round 2, on a guard or check change, and on a fix verifier; set per spawn, which overrides the frontmatter `haiku` | the round rows |
 | record-writer (`agents/record-writer.md`) | haiku | xhigh |
 | builder | sonnet | high |
-| builder, try 3 after a FAIL at review round 2, or a round 1 FAIL with failed fix verifiers | the round rows: opus, the owner's standing grant; set per spawn, which overrides `CLAUDE_CODE_SUBAGENT_MODEL` | the round rows |
+| builder, try 3 after a FAIL at review round 2, or a round 1 FAIL with failed fix verifiers | the round rows: sonnet, high effort (owner item 893); an Opus try 3 stays allowed by the standing grant | the round rows |
 | Plan (`agents/plan.md`) | opus | high |
 | designer (`agents/designer.md`) | opus, the owner's standing grant of 2026-10-26 | high |
 | design-reviewer (`agents/design-reviewer.md`) | opus, the owner's standing grant of 2026-10-26 | high |
@@ -86,7 +86,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | reviewer | 2 | sonnet | high |
 | reviewer | 3 | sonnet | xhigh |
 | reviewer | fix verifier | sonnet | xhigh |
-| builder | 3 | opus | high |
+| builder | 3 | sonnet | high |
 
 The review rows. A second table gives each change's review policy by its `Kind` and `Guard or check`. The merge tool's `review_state` and `--review-record` read it through `review_policy_table` in `hooks/guard.py`, beside the round reader, so a changed row changes their verdicts with no code edit. `Rounds owed after a pass` is the round a PASS must reach to end the review (0: a change with no round recorded is done). `Last round` is the final round, 1 to 3 (rule `roles-review-cap-three`). A failed final round ends the review. The exception is a `yes` in the `Net value owed after a failed last round` cell: that keeps the review open until the net value is zero or positive (negative holds the change). A row that is missing or malformed falls back to `REVIEW_POLICY_FALLBACK` in `hooks/guard.py`, which equals the rows below. `lint/check_agent_models.py` fails a malformed row, a repeated `Kind` and `Guard or check` key, and a record with no review row (a missing table or a renamed header). Owner item 741 (2026-11-13 13:29 CST): every change is done at the first round or fix verifier that passes. Round 3 follows only a failed round 2 (rule `roles-review-cap-three`). Net value is owed only after a failed final round on a guard or check change. A delete-only change with no guard or check ends at round 1, pass or fail. A docs-only change owes no round and has no guard or check. It has no `yes` row. The merge tool refuses `Kind: docs-only` with `Guard or check: yes`, and `lint/check_agent_models.py` fails a docs-only `yes` row.
 
@@ -98,7 +98,7 @@ The review rows. A second table gives each change's review policy by its `Kind` 
 | delete-only | yes | 1 | 3 | yes |
 | docs-only | no | 0 | 3 | no |
 
-Reasons and rulings. Round 1 on a guard or check diff runs Sonnet (owner R9, item 359 a, Nov 10 15:44 CST). A fix verifier runs Sonnet on every PR (owner item 444 a, 2026-11-08 15:04 CST); the merge tool refuses a record that names another model. Round 2 on opus: the step-up refuses it, and no override lifts that. Round 3 on opus: the Opus ceiling refuses it, and the owner's typed override lifts it (2026-11-01 17:25 CST, item 127, pick a). Round 2 effort is set per spawn; the other reviewer rows take the frontmatter's xhigh. The builder's third try runs Opus by the owner's standing grant.
+Reasons and rulings. Round 1 on a guard or check diff runs Sonnet (owner R9, item 359 a, Nov 10 15:44 CST). A fix verifier runs Sonnet on every PR (owner item 444 a, 2026-11-08 15:04 CST); the merge tool refuses a record that names another model. Round 2 on opus: the step-up refuses it, and no override lifts that. Round 3 on opus: the Opus ceiling refuses it, and the owner's typed override lifts it (2026-11-01 17:25 CST, item 127, pick a). Round 2 effort is set per spawn; the other reviewer rows take the frontmatter's xhigh. The builder's third try runs Sonnet at high effort (owner item 893, 2026-11-16, which replaces the Opus step-up). Its row is its role row, so the guard holds no step-up for it and no fallback row; an Opus third try still passes the Opus ceiling by the standing grant.
 
 The Agent prompt judge refuses an audit Explore (a brief that asks it to audit, review, judge, rate or
 compare meaning) unless the call sets model sonnet or opus; haiku or no model refuses. Explore stays a
@@ -209,7 +209,7 @@ the brief. A line that starts with it counts. When the brief's first non-blank l
 leftmost marker on that line also counts if it is `Round N of 3`, such as "Builder, Round 3 of 3. Lane ...". A
 leftmost `Try N of 3` there adds nothing. Owner ruling 2026-10-29 16:29 CDT: a round-3
 builder on Opus just runs, with no approval. The first-line form is case-sensitive. Later lines count only
-when they start with the marker. A builder's old `Try 3 of 3` still counts until note `try-marker-sunset`. A round 2 reviewer runs on Sonnet. A round 3 reviewer runs Sonnet; its refusal names Sonnet only, and Opus needs the owner's override (2026-11-01 17:25 CST, item 127, pick a). A try 3 builder needs Opus. A guard-marked round 1 reviewer must run its `1 guard` row's model (coordinator ruling 01:20 CST Nov 15, lane spawn-model-below-role); an unmarked brief is not refused, the merge tool's record check covers it.
+when they start with the marker. A builder's old `Try 3 of 3` still counts until note `try-marker-sunset`. A round 2 reviewer runs on Sonnet. A round 3 reviewer runs Sonnet; its refusal names Sonnet only, and Opus needs the owner's override (2026-11-01 17:25 CST, item 127, pick a). A try 3 builder runs Sonnet (owner item 893); it needs no step-up. A guard-marked round 1 reviewer must run its `1 guard` row's model (coordinator ruling 01:20 CST Nov 15, lane spawn-model-below-role); an unmarked brief is not refused, the merge tool's record check covers it.
 
 **No pin, and the ceiling is a refusal.** The variable is a true fallback: it decides only the spawns that name no
 model and whose definition names no model. Every agent file pins a model now (`agents/builder.md` pins
@@ -291,8 +291,7 @@ scan as the Haiku floor and the step-up). Item 127 pick a and the coordinator ru
 a variable brief, or a prompt key beside a spread, grants nothing. It is judged as an empty brief. The override or a literal
 brief lifts the refusal. A call whose model or `agentType` the scan cannot read is skipped. The floor reads the model, and the role only to exempt
 a Haiku role. The step-up skips an unread brief. A Workflow `agent()` call that sets its model through a variable is unseen by all four
-checks. A call that names no model is unseen by the floor and the Opus ceiling. The step-up still judges it: a builder
-brief with `Round 3 of 3` is refused. The role row refuses it on an Agent or Task call only, when the role's agent file
+checks. A call that names no model is unseen by the floor and the Opus ceiling. The step-up still judges a reviewer's later round. A builder brief with `Round 3 of 3` and no model passes (owner item 893). The role row refuses it on an Agent or Task call only, when the role's agent file
 pins no model (`floor-workflow-runtime-models`, `model-ceiling-no-after-read`). The refusal never reads a `start_session` on Opus, and no hook reads it before the call (decision `start-session-not-pretooluse`).
 
 A step grant also lifts the Opus spawn refusal (owner, 2026-10-29 13:44 CDT: grants live in the roadmap).

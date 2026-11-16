@@ -378,7 +378,7 @@ Other tools, in `judge` order:
                        cannot read is skipped, and an unread brief is judged as an empty brief.
                        (agent-model-cap)
   agent-model-floor, roles-third-round-steps-up
-                       deny. A spawn below the model floor, or a third round on the wrong model. A
+                       deny. A spawn below the model floor, or a reviewer's later round on the wrong model. A
                        start_session call never reaches this hook: settings.json lists it in no PreToolUse
                        matcher, so hooks/start_session_audit.py checks its floor and handoff after the call.
                        The Workflow scan is static. It reads string-literal `model` and
@@ -4103,10 +4103,6 @@ def step_up_reason(prompt: str, role, model, rounds=None) -> str:
         want = role_round_model(rounds, role, "1", "guard")
         if want and (not model or (named is not None and named < ROLE_MODEL_RANK.index(want))):
             return "Reviewer round 1 on a guard or check change runs on %s. Spawn it with model %s." % (want.capitalize(), want)
-    if role == "builder" and builder_third_round(prompt):
-        want = role_round_model(rounds, role, "3")
-        if want and (named is None or named < ROLE_MODEL_RANK.index(want)):
-            return "Builder round 3 runs on %s. Spawn it with model %s." % (want.capitalize(), want)
     return ""
 
 
@@ -4202,14 +4198,13 @@ def role_model_table(pointer_root):
 # model of each round: the key is (role, round, kind), the round a number or "fix verifier", the kind "guard" for a
 # first-round brief with the guard marker and "other" for every other brief. role_round_table is the one reader; the merge tool
 # reads it through the guard's helpers. A row the record lacks, or one whose model has no rank, falls back to
-# ROLE_ROUND_FALLBACK (sonnet for a reviewer's `1 guard`, later rounds and fix verifier, opus for the builder's third try; no `1 other` entry). Cost: one more read of the record per spawn.
+# ROLE_ROUND_FALLBACK (sonnet for a reviewer's `1 guard`, later rounds and fix verifier, no row for the builder's third try, which runs its role row, sonnet (owner item 893); no `1 other` entry). Cost: one more read of the record per spawn.
 ROLE_ROUND_HEADER = ["role", "round", "model", "effort"]
 ROLE_ROUND_CELL = re.compile(r"(\d+|fix verifier)(?:\s+(guard|other))?$")
 ROLE_ROUND_FIX = "fix verifier"
 ROLE_ROUND_EXACT = ("2",)  # the second round above its row is refused at the step-up, where no override lifts it; a later round above its row falls to the Opus ceiling
 ROLE_ROUND_FALLBACK = dict([(("reviewer", n, "other"), "sonnet") for n in ROLE_REVIEWER_FREE_ROUNDS]
-                           + [(("reviewer", "1", "guard"), "sonnet"), (("reviewer", ROLE_ROUND_FIX, "other"), "sonnet"),
-                              (("builder", "3", "other"), "opus")])
+                           + [(("reviewer", "1", "guard"), "sonnet"), (("reviewer", ROLE_ROUND_FIX, "other"), "sonnet")])
 
 
 def _role_record_text(pointer_root):
@@ -7574,7 +7569,7 @@ def judge(payload) -> None:
     if floor_model:
         refuse(tool, "deny", "agent-model-floor", MODEL_FLOOR_REASON, floor_model)
 
-    # 9b. Step-up: a reviewer's second round on Sonnet, a builder's third on Opus. A reviewer's third round passes here on
+    # 9b. Step-up: a reviewer's second round on Sonnet. A builder's third try has no step-up: it runs Sonnet, its role row (owner item 893). A reviewer's third round passes here on
     # Sonnet or Opus; the Opus ceiling (9d, opus_spawn_hit) then refuses Opus unless an override lifts it.
     step_up = step_up_hit(tool, tool_input)
     if step_up:
