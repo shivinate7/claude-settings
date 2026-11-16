@@ -13,7 +13,7 @@ saves them; an empty collection is an empty folder. A script cannot call that to
 The session touches `.complete` in each collection folder after the last list page, so a fetch that stopped early
 shows: a collection with no marker is unknown. A collection that is empty now while the copy holds docs of it is
 unknown too, unless the session names it with --allow-empty.
-A receipt the copy holds and the fetch no longer lists stays: `receipts` is append-safe, the others mirror-delete.
+A doc the copy holds and the fetch no longer lists stays: all six collections are append-only.
 WAITING_DIR is the `waiting-data` folder of the record branch (`layout.py path <root> waiting-data`). With --page,
 the page's bytes land in `page/page.html`, and its designData block in `page/designData.json`. A file is written
 only when its bytes differ. The script never runs git: the session commits.
@@ -48,7 +48,8 @@ not count),
 `PWD=<path>`, a no-reply address and an ssh remote of a public git host.
 A personal fact in plain words passes too. A postal address (street, PO box, "City, ST ZIP") is a shape.
 A doc is written with sorted keys, two-space indent and a final newline, so an unchanged doc is byte-identical. A doc no
-longer fetched is deleted from its collection folder; a truncated fetch deletes docs, and git history keeps them.
+longer fetched stays in a waiting collection folder: the export adds and updates, and a truncated fetch deletes nothing
+there. A collection outside the six, from another role's registry entry, still mirror-deletes.
 
 Check, before a republish, writes nothing:
 
@@ -79,7 +80,7 @@ Every artifact, the step "Before you switch Claude accounts":
 REPO_ROOT holds the extras file with the artifacts registry (lint/layout.py `artifacts()`). DIR holds one folder per
 artifact id, each laid out as in a single export, plus `page.html` and `files/<path>` (the page's supporting files).
 Each entry exports the collections it lists to its export path under RECORD_WORKTREE (the waiting page: the
-waiting-data folder; any other artifact: `artifacts/<id>/`), with the same scan and mirror as one export. Any role's
+waiting-data folder; any other artifact: `artifacts/<id>/`), with the same scan and copy as one export. Any role's
 `<id>/page.html` lands at `page/page.html` there, and `<id>/files/<path>` at `page/files/<path>`; a waiting-page entry
 also exports its designData block. A supporting file no longer fetched stays in the copy; history is the delete.
 An entry with `"export": false` prints `<id>: skipped - no export`, needs no folder in DIR, writes nothing and
@@ -127,7 +128,7 @@ import page_check  # noqa: E402  the one home that runs the page's picture check
 # The same six as lint/layout.py WAITING_COLLECTIONS. A copy, because a single export and the rebuild must run with no
 # lint/ beside them: the recovery path may not depend on the repo it recovers (verification-recovery-independent-of-state).
 COLLECTIONS = ("items", "answers", "groups", "asks", "meta", "receipts")
-APPEND_ONLY = ("receipts",)  # the waiting page's own export never deletes a doc of these: the owner keeps archived receipts
+APPEND_ONLY = COLLECTIONS  # the export adds and updates, never deletes a doc: a page cleanup drops archived rows, and the copy is their only home
 COLLECTION_SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")  # copy of lint/layout.py COLLECTION, for the same reason
 PAGE_FOLDER, DESIGN_FILE, PAGE_FILE, FILES_FOLDER = "page", "designData.json", "page.html", "files"
 MARKER = ".complete"  # the session touches it in a collection folder after the last list page
@@ -512,7 +513,7 @@ def load_json(path, label):
 
 def docs_in(folder, label):
     """{doc_id: parsed JSON} of the `<doc_id>.json` files in `folder`. Anything but the marker is unknown: a doc that
-    is skipped would be deleted from the copy as if it were gone."""
+    is skipped would go missing from the copy's update, and in a non-waiting collection it would be deleted."""
     found = {}
     for name in sorted(os.listdir(folder)):
         path = os.path.join(folder, name)
@@ -916,10 +917,10 @@ def merge(copy, live, batches, collections=COLLECTIONS, live_page=None):
 def main(argv):
     ap = argparse.ArgumentParser(description="Copy the waiting page's database into the repo, or build batches back from it.")
     ap.add_argument("--fetched", help="the folder `ArtifactData list` saved, one folder per collection")
-    ap.add_argument("--out", help="the waiting-data folder to mirror into")
+    ap.add_argument("--out", help="the waiting-data folder to copy into")
     ap.add_argument("--page", help="the fetched page.html, for its designData block")
     ap.add_argument("--allow-empty", action="append", default=[], metavar="COLLECTION",
-                    help="a collection that really emptied, so its docs leave the copy")
+                    help="a collection that really emptied: lifts the unknown stop, deletes no doc of the six")
     ap.add_argument("--all", help="the repo root whose artifacts registry lists each artifact to export")
     ap.add_argument("--worktree", help="with --all: the record branch worktree each artifact's export path is under")
     ap.add_argument("--check", action="store_true", help="with --fetched and --page: run the picture checks only, write nothing")
