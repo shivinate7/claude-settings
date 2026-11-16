@@ -103,7 +103,7 @@ Cost: no new long-lived process or file. The reads run per push, in the guard's 
   - `--all` to a local-path remote: config 2, symbolic-ref 1, rev-parse 1.
   - A glob refspec: config 1, for-each-ref 2, rev-parse 2, symbolic-ref 1, diff 3, rev-list 1. The second
     `for-each-ref` runs under the same condition.
-  - Nothing contacts the remote. No `ls-remote`, `fetch` or `push` runs.
+  - Nothing contacts the remote, except one `fetch` on an octopus hit only (rule `octopus-push`). No `ls-remote` or `push` runs.
 - Added by the other pushes' reads: a literal destination of main or master reads the remote's URL with
   one `config`. A HEAD push or a bare push adds one `symbolic-ref` and one `config`. A refspec push such
   as `origin lane/foo` adds one `symbolic-ref`. One whose destination differs from its upstream adds one
