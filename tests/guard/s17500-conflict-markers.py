@@ -318,6 +318,23 @@ cmk_refuse("a cd into a missing folder, then ; add -A and commit, in a cwd repo 
 # one is allowed.
 cmk_allow("a cd into an existing folder, then ; add -A and commit, in a cwd repo whose edit is clean",
           "cd " + slash(CMK_SUB) + " ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CL)
+# The ruling covers every git write after a cd, not only a commit: a push, a merge, and a commit after a newline.
+# Each deny runs in the clean CMK_CL, so the missing cd target is the only reason to refuse. Each control is the
+# same call after a cd to an existing folder. `&&` stops the chain after a missing cd, so that one is allowed.
+cmk_refuse("a cd into a missing folder, then ; push, in a cwd repo whose edit is clean",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " push", CMK_CL)
+cmk_allow("a cd into an existing folder, then ; push, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_SUB) + " ; " + VCS + " push", CMK_CL)
+cmk_refuse("a cd into a missing folder, then ; merge main, in a cwd repo whose edit is clean",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " merge main", CMK_CL)
+cmk_allow("a cd into an existing folder, then ; merge main, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_SUB) + " ; " + VCS + " merge main", CMK_CL)
+cmk_refuse("a cd into a missing folder, then a newline, then commit, in a cwd repo whose edit is clean",
+           "cd " + slash(CMK_GONE) + "\n" + VCS + " commit -m x", CMK_CL)
+cmk_allow("a cd into an existing folder, then a newline, then commit, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_SUB) + "\n" + VCS + " commit -m x", CMK_CL)
+cmk_allow("a cd into a missing folder, then && push, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_GONE) + " && " + VCS + " push", CMK_CL)
 
 # A failed cd leaves the shell where it was, so the next command after `;`, a newline or `||` runs there. After
 # `&&` the chain stops. `--work-tree` names the folder an add reads: a missing one fails the add (exit 128), so
