@@ -1359,7 +1359,7 @@ class Readers(Tree):
 
 GITHUB_TEMPLATE = ".github/pull_request_template.md"  # this repo's pull request template
 ADOPTER_TEMPLATE = "skills/project-ops/templates/pull_request_template.md"  # the copy an adopting repo gets
-DIFFERING_LINE = b"Read by lint/check_silent_undo.py (last_paragraph) and decision `debt-close-runs-retire`.\n"  # the line the .github copy holds today
+DIFFERING_LINE = b"Read by lint/check_silent_undo.py (last_paragraph) and decision `debt-close-runs-retire`.\n"  # a line neither copy holds; the test appends it to the .github copy so the copies differ
 
 
 def write_bytes(root, rel, data):
