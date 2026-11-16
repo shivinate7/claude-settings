@@ -3800,6 +3800,52 @@ class StaleDraftRestRead(UpkeepFixture):
         self.assertEqual((count, self.entries(detail)), (2, ["#1001 (cost-a)", "#1002 (cost-b)"]))
         self.assertEqual(len(self.rest_get.call_args_list), 1, "the branch commit read made a REST call")
 
+    def test_a_stale_draft_whose_branch_commit_is_after_the_build_reads_one_unknown_entry(self):
+        # A commit an hour after the build is no proof of recency, so it reads the draft unknown, never fresh and silent.
+        self.origin_commit("future-branch", iso_ago(-60))
+        self.serve_pulls([self.rest_draft(1001, "future-branch", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "future-branch")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual(count, 1, "a commit after the build read the stale draft as no entry at all: %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown (#1001"), "the entry is not an unknown for #1001: %r" % (detail,))
+        self.assertIn("future-branch", detail, "the unknown entry does not name the branch")
+        self.assertNotIn("#1001 (future-branch)", detail, "a commit after the build listed the draft as stale")
+
+    def test_a_fork_pull_whose_head_branch_shares_an_origin_name_reads_unknown_not_the_origin_commit(self):
+        # PR #1001 is a fork's pull whose head ref is `main`, and origin's own main has a commit an hour old. The fork
+        # reads unknown, so the origin commit cannot suppress it. #1002 is this repo's own stale branch, still listed.
+        self.origin_commit("main", iso_ago(60))
+        self.origin_commit("feature", iso_ago(780))
+        self.serve_pulls([self.rest_draft(1001, "main", 780, head_repo="someone/fixture"),
+                          self.rest_draft(1002, "feature", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "main"), self.live_pull(1002, "feature")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        entries = self.entries(detail)
+        self.assertEqual(count, 2, "the fork pull was silent: the origin commit suppressed it (%r)" % (detail,))
+        self.assertIn("#1002 (feature)", entries, "this repo's own stale draft was not listed")
+        unknown = [entry for entry in entries if entry.startswith("unknown (#1001")]
+        self.assertEqual(len(unknown), 1, "the fork pull did not read as one unknown entry: %r" % (entries,))
+        self.assertNotIn("#1001 (main)", entries, "the fork pull was listed on the origin commit's name")
+
+    def test_a_fork_pull_reads_unknown_even_when_its_branch_commit_is_old(self):
+        self.origin_commit("topic", iso_ago(780))
+        self.serve_pulls([self.rest_draft(1001, "topic", 780, head_repo="someone/fixture")])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "topic")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual(count, 1, "the fork pull did not read as one entry: %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown (#1001"), "a fork pull with an old commit was not read unknown: %r" % (detail,))
+        self.assertNotIn("#1001 (topic)", detail, "a fork pull was listed on its branch commit")
+
+    def test_a_pull_whose_head_repo_is_gone_reads_unknown(self):
+        # head.repo is null when the fork was deleted: the head is not this repo, so the commit read does not apply.
+        self.origin_commit("gone", iso_ago(780))
+        self.serve_pulls([self.rest_draft(1001, "gone", 780, head_repo=None)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "gone")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual(count, 1, "a pull with a null head repo did not read as one entry: %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown (#1001"), "a pull with a null head repo was not read unknown: %r" % (detail,))
+        self.assertNotIn("#1001 (gone)", detail, "a pull with a null head repo was listed on its branch commit")
+
 
 class StaleDraftTable(UpkeepFixture):
     """The two helpers the stale-draft row reads, pinned on their own: build.branch_commit_times (the commit read, one
@@ -3921,6 +3967,14 @@ class StaleDraftTable(UpkeepFixture):
     @staticmethod
     def lanes_by_number(table):
         return {row["number"]: row["lane"] for row in table}
+
+    def test_a_commit_dated_after_the_build_reads_the_draft_unknown_never_fresh(self):
+        # ago(-1) is one hour after NOW: a commit from the future proves nothing about the draft's age.
+        table = build.draft_table([self.pull(1, "future-commit")], self.NOW, {"liveRows": {}}, {1: {"number": 1}}, None,
+                                  {"future-commit": self.ago(-1)})
+        self.assertEqual(len(table), 1, "the draft has no table row")
+        self.assertEqual(table[0]["verdict"], "unknown",
+                         "a commit an hour after the build read the stale draft fresh, so it was silent")
 
     def test_the_stale_draft_entries_are_the_table_rows_formatted(self):
         # Four drafts, all stale by updated_at: a stale commit (listed), a recent commit (fresh), no commit (unknown),
