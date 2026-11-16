@@ -56,7 +56,7 @@ def _mt4_case(name, lane_ops, main_ops, conflicted, resolve, files=None):
     def build(w):
         main = w + "-main"
         _must(main, "checkout", "-q", "-b", "lane")
-        _mt4_ops(main, lane_ops, "test-author lane")
+        _mt4_ops(main, lane_ops, "test-author lane\n\nRed-run: none: fixture; the case pins the builder's merge, not a red run of this lane's test")
         _must(main, "checkout", "-q", "main")
         _must(w, "reset", "-q", "--hard", "lane")
         _mt4_ops(main, main_ops, "main moves")
