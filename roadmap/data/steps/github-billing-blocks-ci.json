@@ -1,0 +1,14 @@
+{
+ "id": "github-billing-blocks-ci",
+ "title": "GitHub Actions jobs fail at once with a payment or spending-limit message",
+ "priority": "now",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "updatedAt": "2026-11-16T00:13:36-06:00",
+ "why": "[00:13 CST Nov 16, triage] Coordinator relay 00:14 CST, from runner 12's read: ios-adblock #175 `checks` job 133125009327 (run 43815026279) failed in 31 s with no runner: \"recent account payments have failed or your spending limit needs to be increased\". Confirmed in ios-adblock only; claude-settings not confirmed by the coordinator's REST read (no billing annotation; some runs queued). Only the account owner reaches GitHub Billing & plans (github.com/settings/billing). Page task item 916 asks for the check. (source: runner 12 via the coordinator; not owner-typed)",
+ "source": "runner 12 via the coordinator, 00:14 CST Nov 16; filed by triage 8",
+ "note": "Blocked on the owner: the billing page check (page item 916). Every merge that needs a fresh CI run in an affected repo waits. Confirmed in ios-adblock only; claude-settings unconfirmed. No PR."
+}
