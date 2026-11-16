@@ -30,7 +30,7 @@ Every tool the guard judges, first of the refusals (`judge`, after the Read and 
 set_override_veto and session_home_keep):
   handoff-unread       deny. After compaction, a call from the main session while its handoff is
                        unread. The reason names the handoff and says to Read it. A payload with
-                       `agent_id` passes. An override lifts it. A failed import of reread_check, or of its sibling precompact_handoff, refuses as guard-crash at load.
+                       `agent_id` passes. An override lifts it. A failed import of reread_check allows; a failed import of its sibling precompact_handoff refuses as guard-crash at load.
                        (precompact-handoff, item 9)
 
 Shell tools (Bash, PowerShell), in judge_shell order:
@@ -681,17 +681,17 @@ while True:
         )
         _loading = "guard_wsl"
         from guard_wsl import WSL_REASON, wsl_hit
-        # Flat modules the guard reads on every call. A failed import takes this same wait-then-refuse
-        # path (decision install-hooks-whole), never a fallback that judges with the read missing.
-        # guard_kill imports proc_env above, so its failure surfaces under guard_kill's name.
+        # reread_check is the one flat module whose failed import allows (decision precompact-handoff, item 9): the
+        # call site below falls back to no check. Its sibling precompact_handoff is not: reread_check never raises on
+        # it, so the guard reads the gap here. ph is None when the sibling is missing, will not import, or lacks a
+        # name in PH_NAMES, and that takes the wait-then-refuse path (decision install-hooks-whole).
         _loading = "reread_check"
-        import reread_check
-        # reread_check never raises on its sibling, so the guard reads the gap: ph is None when the sibling is
-        # missing, will not import, or lacks a name in PH_NAMES. A reread_check with no unread_handoff is as bad.
-        if reread_check.ph is None:
+        try:
+            import reread_check
+        except Exception:
+            reread_check = None
+        if reread_check is not None and reread_check.ph is None:
             raise ImportError("reread_check could not use precompact_handoff")
-        if not callable(getattr(reread_check, "unread_handoff", None)):
-            raise ImportError("reread_check has no unread_handoff")
 
         _loading = "install-id"
         if _install_ids_differ():
@@ -7033,8 +7033,12 @@ def judge(payload) -> None:
     guard_core.set_override_veto(lambda: never_lifted(payload, tool, tool_input, cwd))
     session_home_keep(payload, tool, cwd)  # rule session-home's record, kept before any refusal can end the call
     # 0, handoff-unread. After compaction, no call the guard judges runs from the main session until it reads its handoff.
-    # Not in never_lifted: the owner may mean the call. A failed import of reread_check refuses as guard-crash at load.
-    unread = reread_check.unread_handoff(payload)
+    # Not in never_lifted: the owner may mean the call. A failed import of reread_check allows.
+    try:
+        from reread_check import unread_handoff
+    except Exception:
+        unread_handoff = None
+    unread = unread_handoff(payload) if unread_handoff else ""
     if unread:
         refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % unread, unread)
     # 0. Each agent stays inside its own worktree.
