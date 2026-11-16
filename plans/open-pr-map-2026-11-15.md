@@ -495,7 +495,7 @@ Session: session_013NEJL2f1YCYsvLdpFqtWP3 (cs-build:batch-runner cs-repo:shivina
 | #3368 | Combine clear set 3: six lane PRs merged onto main bedbce7b… | draft | runner 10 section | merge: sent to runner 10… |
 | #3359 | Keep the batch runner's state in one file on the record bra… | draft | runner 10 section | merge: Runner 10 files n… |
 | #3358 | docs: back or cut the unbacked claims the prose judge named… | draft | runner 10 section | merge: - Older queue nam… |
-| #3357 | Rolling combine train: pre-flight step while a batch's CI r… | draft | runner 10 section | merge: - Older queue nam… |
+| #3357 | Rolling combine train: pre-flight step while a batch's CI r… | draft | runner 10 section | merge: - Older queue nam… (replacement #3576 merged 06:04:25 CST Nov 16, alone, commit 115cbad47, REST read by triage 06:05 CST; #3357 close as replaced is runner 10's, REST proof owed) |
 | #3354 | Apply six signed reply-style changes (29 rules to 25) | draft | runner 10 section | merge: - Older queue nam… |
 | #3350 | Print the PR's own-run suite count when main is red or --ba… | draft | runner 10 section | merge: - Older queue nam… |
 | #3346 | Warn on a ready mark with no PR subscription | draft | runner 10 section | merge: - Older queue nam… |
