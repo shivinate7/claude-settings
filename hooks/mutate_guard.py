@@ -1664,6 +1664,21 @@ MUTATIONS = [
      "    return True", "guard",
      "a jq --arg bound to an unparseable literal, set on the cap-lift field, stays silent"),
 
+    # ---- the end a shell printf takes from an argument, and the wording of an ask that holds a computed end.
+    # Each required name is a case in tests/guard/s19328-model-cap.py.
+    ("guard: a printf ignores a literal ISO end argument, so a literal cap-lift end reads as no end",
+     '            literal = [arg for arg in args if re.fullmatch(CAP_ISO_END, arg)]',
+     '            literal = []', "guard",
+     "a printf that names the cap-lift field in its format and takes a literal ISO end as its argument asks"),
+    ("guard: the shell end does not call the printf reader, so a printf's argument end reads as no end",
+     '    printed = cap_printf_end(raw)',
+     '    printed = ""', "guard",
+     "a printf that names the cap-lift field in its format and takes a literal ISO end as its argument asks"),
+    ("guard: the computed-end flag is ignored, so a computed end's ask is worded as if the end were shown",
+     '    if computed:',
+     '    if False:', "guard",
+     "a computed end with no model says the end is not shown"),
+
     # ---- the one deadline parser, hooks/shared_names.py parse_deadline, which the guard and the config
     # watch both call. These break its space form and its no-offset form.
     ("parse-deadline: the space form is read as its date alone, so the end is midnight",

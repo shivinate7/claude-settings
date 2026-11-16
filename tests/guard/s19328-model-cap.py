@@ -812,6 +812,29 @@ sh("cap deadline: a printf %s argument split from the field's text, with a $(dat
    "printf '%s' '{\"" + EXPIRY_KEY + "\": \"' \"" + COMPUTED_NOW + "\" '\"}' > " + PROJ_LOCAL,
    "ask", "agent-model-cap", cwd=NOGIT, carries=(COMPUTED_NOTE,), lacks=WRONG_FOR_END_ONLY + (" CST", " CDT"),
    env=DISK_CLOCK)
+# THE LITERAL END IN A PRINTF ARGUMENT. The field sits in the format and the end is a literal instant in the
+# argument, so no end follows the field in the text. The end is read from the argument and named in Central.
+# The model variant puts the model raise in the same format, so the ask names the model and the end together.
+PRINTF_MODEL_FORMAT = json.dumps({"env": {CAP_KEY: OPUS, CAP_FORCE: "1"}, EXPIRY_KEY: "%s"})
+sh("cap deadline: a printf that names the cap-lift field in its format and takes a literal ISO end as its argument "
+   "asks under agent-model-cap and names the end in CST",
+   "printf '" + PRINTF_END_FORMAT + "' '" + DEADLINE_WINTER + "' > " + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(WANT_WINTER,), lacks=WRONG_FOR_END_ONLY + (COMPUTED_NOTE,),
+   env=DISK_CLOCK)
+sh("cap deadline: a printf that sets the model and names the cap-lift field in its format, with a literal ISO end "
+   "argument, asks for the model and names the end in CST",
+   "printf '" + PRINTF_MODEL_FORMAT + "' '" + DEADLINE_WINTER + "' > " + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY + " = " + OPUS, WANT_WINTER), lacks=(COMPUTED_NOTE,),
+   env=DISK_CLOCK)
+# A SINGLE-QUOTED $D IS LITERAL TEXT. The shell does not expand '$D', so the file would hold "$D", not a date. The
+# guard cannot tell that from a computed end, so it asks and says the end is computed at write time. This is
+# ACCEPTED CONSERVATIVE BEHAVIOUR: a `$` in a printf argument reads as computed, so one harmless write is asked
+# rather than a computed end passing silently.
+sh("cap deadline: a printf whose cap-lift end is a single-quoted $D argument asks under agent-model-cap and says "
+   "the end is computed at write time (accepted conservative behaviour)",
+   "printf '" + PRINTF_END_FORMAT + "' '$D' > " + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(COMPUTED_NOTE,), lacks=WRONG_FOR_END_ONLY + (" CST", " CDT"),
+   env=DISK_CLOCK)
 sh("control: a printf whose cap-lift end argument is a literal that is not a date stays silent",
    "printf '" + PRINTF_END_FORMAT + "' 'next Tuesday' > " + PROJ_LOCAL,
    "allow", cwd=NOGIT, silent=True, env=DISK_CLOCK)
