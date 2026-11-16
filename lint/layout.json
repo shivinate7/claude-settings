@@ -32,7 +32,7 @@
     },
     "notes": {
       "path": "docs/notes",
-      "set": "core"
+      "set": "optional"
     },
     "plans": {
       "path": "docs/plans",
