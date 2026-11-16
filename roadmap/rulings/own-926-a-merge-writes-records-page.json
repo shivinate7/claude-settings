@@ -1,0 +1,10 @@
+{
+  "id": "own-926-a-merge-writes-records-page",
+  "at": "2026-11-16T14:34:28-06:00",
+  "title": "Owner at 14:30 CST delegated item 926 to the consultant; the consultant picked a at 14:32 CST: the merge tool writes the records page on a ready head and merges.",
+  "ruling": "Owner, 14:30 CST Nov 16, saved on the waiting page: none of these, \"whatever is faster -- ask consultant to decide off that outcome\". The consultant, 14:32 CST (relayed by message; triage read no chat), picked option a and judged it faster: b costs a full draft-ready round trip and a new PR CI run per ready PR after every main merge (one sample: the #3553 run took about an hour, 13:23 to 14:23 CST), while a costs one page-only commit inside the merge call. The ready-run length is one sample, not a measure. The consultant builds it on branch merge-heals-records, after #3590. Ruling own-consultant-speaks-for-owner (20:24 CST Nov 14) lets the consultant's pick stand for the owner's when the owner delegates it.",
+  "quote": "whatever is faster -- ask consultant to decide off that outcome",
+  "source": "Owner answer saved on the page 14:30 CST (answers/ready-merge-writes-records-page); consultant message to triage 14:32 CST. Filed by triage.",
+  "status": "open",
+  "step": "records-page-before-ready"
+}

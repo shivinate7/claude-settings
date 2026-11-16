@@ -1,8 +1,9 @@
 {
   "added": "2026-11-16T14:21:00-06:00",
+  "closed": "2026-11-16T20:35:00Z",
   "context": "Goal: merge ready PRs without a second full CI run.\nProblem (rule): every merge to main makes each ready PR's records page stale, so each one must go back to draft, get a page-only push, a new draft run, ready again and a new ready run, while main moves again; it needs your word because it changes how the merge tool treats a reviewed head.\nBased on (ruling): your pick on the earlier records-page question (15:02 CST Nov 14, option c: skip CI on a records-only push after a green head), built in PR #3349 (merged 2026-11-14), and decision records-index-at-merge: a ready PR with a stale records page goes back to draft.\nBased on (read): runner 10's report via the coordinator, 14:19 CST Nov 16 (relayed; triage read no run); the same refusal hit #3583 at 12:36 CST. Runner 10 expects it on #2817 and #3553 too.\nDeparts from: main \u2014 decision records-index-at-merge sends a ready PR with a stale records page back to draft; option a has the merge tool write the page itself on a ready head.\nMeanwhile: no merge, flag or override is requested; the three PRs wait, and triage keeps its other work.",
   "holds": "Ready pull requests #3577, #2817 and #3553, and every ready PR after each merge, cannot merge until the records page is fresh.",
-  "home": "records-page-before-ready",
+  "home": "own-926-a-merge-writes-records-page",
   "kind": "decision",
   "n": 926,
   "options": [
@@ -26,8 +27,8 @@
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
   "recommended": "a",
   "ref": "runner 10's finding at 14:19 CST Nov 16, relayed by the coordinator: #3577's merge was refused at 14:18 CST on a green, clean, ready head (records page stale); same as #3583 at 12:36 CST",
-  "replied": "2026-11-16T14:30:29-06:00",
-  "reply": "Your 14:30 CST answer: none of these; whichever is faster, and the consultant decides from that outcome. Sent to the consultant at 14:31 CST. The item stays open until the consultant's pick comes back and you can see it. Nobody has measured the ready-run length yet, so \"faster\" is unmeasured.",
+  "replied": "2026-11-16T14:35:00-06:00",
+  "reply": "Closed on the consultant's pick, as you delegated at 14:30 CST. The consultant picked a at 14:32 CST: the merge tool writes the records page itself on a ready head and merges. Its reason: b costs a draft-ready round trip plus a new PR CI run per ready PR after each main merge (one sample: #3553's run took about an hour), while a costs one page-only commit. The consultant is building it (branch merge-heals-records, after #3590). The speed figure is one sample, not a measure.",
   "repo": "shivinate7/claude-settings",
   "short": "Merge writes records page",
   "shown": [
@@ -42,7 +43,7 @@
       "label": "Keep the round trip: back to draft, page-only push, ready again"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "When main moves, should the merge tool refresh a ready PR's records page itself, or should the PR go back to draft each time?",
   "why": "The coordinator recommends a and has not measured the ready-run length; triage read no diff and agrees only on the cost shown: a stops the trip that repeats after every merge. It is a recommendation, not owner-typed."
 }
