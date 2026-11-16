@@ -496,6 +496,20 @@ def pull_landed_marks(repo, ref, steps, work, with_done=False):
     return {k: v for k, v in marks.items() if v}
 
 
+def superseded_marks(steps, work):
+    """{step: ["#N", ...]} from the landedPulls rows closed unmerged with a `replacedBy` pull number, matched by the row's branch (the step id or
+    lane/<id>) whatever the step's status: the replacing pull carries the step on, so the lane may be archived. Only idle_lanes reads these. The
+    landed upkeep rows never do, because the work is not on main yet: a step set to done from one would read landed too soon."""
+    marks = {}
+    for row in sorted((work or {}).get("landedPulls") or [], key=lambda r: r["number"]):
+        if row.get("merged") is True or type(row.get("replacedBy")) is not int:
+            continue
+        for sid in steps or {}:
+            if row["branch"] in lane_head_refs(sid) and "#%d" % row["number"] not in marks.setdefault(sid, []):
+                marks[sid].append("#%d" % row["number"])
+    return {k: v for k, v in marks.items() if v}
+
+
 def add_marks(marks, more):
     """A new dict: `marks` with `more` ({step: [mark]}) merged in, each mark listed once per step."""
     out = {k: list(v) for k, v in marks.items()}
@@ -704,11 +718,12 @@ def live_work(path, steps, slug=None):
     Two more optional keys on a sessions row feed the joint line (idle_lanes): `idle_since` (ISO time with a zone, when
     the lane last did anything) and `unarchived_epoch` (JSON int, the lane's commits not yet archived). `laneSessions`
     keeps each as the file has it, and idle_lanes reads their type; a missing or wrong-typed one never makes the lane joint.
-    One more optional key, `landedPulls`: [{"number": int, "branch": str, "head"?: sha, "merged"?: bool}], the closed
-    pull requests of the last 14 days (head ref, head sha, GitHub's merged flag). The publisher (triage) fills it from
+    One more optional key, `landedPulls`: [{"number": int, "branch": str, "head"?: sha, "merged"?: bool, "replacedBy"?: int}], the closed
+    pull requests of the last 14 days (head ref, head sha, GitHub's merged flag, and for a pull closed as replaced the
+    number of the pull that replaced it, which superseded_marks reads). The publisher (triage) fills it from
     GitHub: a merged lane branch is gone from the open pulls and may leave no Step trailer on main. `landedPulls` holds
     the kept rows, which pull_landed_marks reads. A row that is not an object, whose number is not an int, whose
-    branch is not text or whose `merged` is present and not a JSON bool is counted in `skipped`; a value that is not a
+    branch is not text, whose `merged` is present and not a JSON bool or whose `replacedBy` is present and not an int is counted in `skipped`; a value that is not a
     list adds one skipped entry; an absent key adds nothing. Each skipped row makes staleWhy and pullWhy read unknown.
     A pulls row's optional `held` (the batch runner's hand-in or hold list names the pull) and `reviewLog` (the
     pull carries a posted review log) are JSON bools that triage fills; a present non-bool value skips the row.
@@ -760,7 +775,8 @@ def live_work(path, steps, slug=None):
     # `merged` is the JSON true or false the publisher read from GitHub; text such as "true" is a wrong shape, not a guess.
     landed_pulls = keep("landedPull", raw["landedPulls"], lambda r: type(r.get("number")) is int
                         and isinstance(r.get("branch"), str)
-                        and ("merged" not in r or isinstance(r["merged"], bool))) if "landedPulls" in raw else None
+                        and ("merged" not in r or isinstance(r["merged"], bool))
+                        and ("replacedBy" not in r or type(r["replacedBy"]) is int)) if "landedPulls" in raw else None
     landed_skipped = len(skipped) - before_landed
     for row in threads:
         sid = row.get("step") or None
@@ -1795,6 +1811,7 @@ def idle_lanes_report(repo, live, record_branch=None, main_branch="main"):
     slug = github_slug(repo, extra)
     work = live_work(live, steps, slug)
     marks = add_marks(marks, pull_landed_marks(repo, ref, steps, work))
+    marks = add_marks(marks, superseded_marks(steps, work))
     return idle_lanes(work, steps, marks, slug, repo, main_branch, unread, source.ref)
 
 

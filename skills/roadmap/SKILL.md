@@ -89,9 +89,9 @@ GitHub, so the publisher reads them just before the build and passes one file:
   the pull, `reviewLog` when the pull has a posted review log. The stale-draft row skips a draft with either
   true. A present key must be a JSON bool (`null` counts as non-bool); a pull row with a non-bool value is skipped, so the
   stale-draft, pair, unlaned and lanes-to-archive rows read unknown. `branches`: lane branches with no open pull request.
-- `landedPulls` (optional, beside the keys above): `[{"number", "branch", "head"?, "merged"?}]`, the repo's pull
+- `landedPulls` (optional, beside the keys above): `[{"number", "branch", "head"?, "merged"?, "replacedBy"?}]`, the repo's pull
   requests closed in the last 14 days whose base is the default branch, each with its head ref (`branch`), head sha
-  (`head`) and GitHub's `merged` flag. Triage's live-file brief must fill it; see "A merge marks a step".
+  (`head`), GitHub's `merged` flag and, for a pull closed as replaced, `replacedBy` (the replacing pull's number). Triage's live-file brief must fill it; see "A merge marks a step".
 - `sessions`: `list_sessions`, every page, each row copied as it comes with only these fields.
   `status_bucket` is the bucket list_sessions returns (`SESSION_STATUS_BUCKET_WORKING`, `_BLOCKED`, `_REVIEW_READY`, `_COMPLETED`, `_FAILED`);
   it is optional, and a row without it reads as not completed. The upkeep list reads the rows for steps
@@ -130,6 +130,14 @@ pull readings `unknown (<n> landedPulls rows skipped)`. The publisher (triage) m
 GitHub. It lists the closed pull requests of the last 14 days whose base is the default branch, each with its head
 ref, head sha and merged flag. That filter makes `merged: true` mean merged into main. A merge
 that drops the `Step:` trailer, or a lane that closes its pull unmerged, then still reads right.
+
+A row may also carry `replacedBy`, the number of the pull that replaced it. Triage writes it on a closed row whose `merged`
+is false and whose newest tool pointer comment on that pull (first line `<!-- replaced-pointer -->`) reads `Replaced by #N`, as
+`merge` posts when it closes a lane as replaced (decision `pr-ledger`). A pull closed by hand, or whose newest pointer reads
+`Dropped from the batch`, gets no `replacedBy`. A row whose `replacedBy` is present and not an int is skipped, like a bad
+`merged`. `merge --idle-lanes` (`superseded_marks` in `build.py`) lists a lane whose closed unmerged row has `replacedBy`, whatever
+the step's status, because the replacing pull carries the step on (decision `session-tiers`, Archiving scope). The landed
+upkeep rows ignore it: the work is not on main.
 
 ## Refusals
 
