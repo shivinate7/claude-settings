@@ -412,7 +412,10 @@ def branch_is_empty(where: str, base: str, branch: str):
 #     A blob found only in a local-only commit never counts.
 # No `--find-object` and no history walk: the candidate set is bounded. The count of dirty paths is
 # not a limit (owner R37, page item 595, 2026-11-12 12:54 CST): a large tree is judged by the same
-# proof. A read that cannot run, such as a timeout or a command line too long, answers None.
+# proof. A read that cannot run (a timeout, or a command line too long) answers None, except a
+# candidate's `ls-tree` and the reads that list the candidates (merge-base, reflog): those only
+# drop the candidate, so the paths stay unmatched and the proof answers False. An unreadable
+# budget also answers None. The guard refuses both answers.
 # A timed-out guard lets the call through, so the proof owns a clock: a path whose worktree entry
 # differs from its index entry can match no commit and answers False before any candidate read, and
 # once the proof has run past its budget it answers False before the next candidate read.
