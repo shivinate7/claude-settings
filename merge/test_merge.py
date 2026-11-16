@@ -13855,7 +13855,7 @@ class ExpressPath(ScopedRepo, Env):
         rc_scope, flags = self.scope_run(base=True)
         self.assertEqual(rc_scope, 0, "the stub scope script does not exit 0: %d" % rc_scope)
         self.assertEqual(flags.get("doc_decisions"), "true", "the stub does not turn doc_decisions on, so the case proves nothing: %r" % flags)
-        self.on("feat", {"docs/decisions/x.md": "# Decision\n"})
+        self.on("feat", {"docs/decisions/x.md": record("pending", "x")})
         calls = self.record_express()
         rc, out = self.run_express()
         self.assertEqual(rc, 0, out)
