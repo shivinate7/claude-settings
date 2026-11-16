@@ -6228,7 +6228,7 @@ for (const scheme of ["light", "dark"]) for (const width of SIZES) {
 }
 
 test("a rail jump after Send lands on its card", async (t) => {
-  const items = Array.from({ length: 14 }, (_, i) => mk("q" + i, i + 1, { context: LONG }));
+  const items = Array.from({ length: 14 }, (_, i) => noRec(mk("q" + i, i + 1, { context: LONG })));
   const page = await open(t, { items: inArrayOrder(items), viewport: { width: 1280, height: 800 } }); if (!page) return;
   await noAnchor(page);
   await choose(page, items[0], "a"); await choose(page, items[1], "a");
@@ -8197,6 +8197,7 @@ for (const width of [390, 1280]) test(`a press on the empty part of a ranked opt
   await needBoxes(page, r, 3);
   const row = card(page, r).locator(`#k-${r.id}-a`), link = row.locator("a");
   await need(row, `${r.id}: no links row on option a`);
+  await row.scrollIntoViewIfNeeded(); // at 390 wide the row sits below the 900 px viewport; the press uses viewport coordinates
   const rb = await row.boundingBox(), lb = await link.boundingBox();
   // 20px in from the row's right edge, past the link: the press must land on the row's empty part, not on the link.
   const x = rb.x + rb.width - 20, y = rb.y + rb.height / 2;
