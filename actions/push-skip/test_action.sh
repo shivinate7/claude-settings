@@ -38,18 +38,14 @@ cp -r "$here" "$pin/actions/push-skip" && cp -r "$root/lint" "$pin/lint" \
 python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import test_all_jobs_passed as t; sys.stdout.write(t.CHILD_GOOD)' "$root/lint" \
   > "$caller/.github/workflows/checks.yml" || { echo "FAIL - fixture: lint/test_all_jobs_passed.py did not give CHILD_GOOD"; exit 1; }
 
-# The scope-skip callers: this repo's checks.yml, which sets the macOS scope-skips map, and the same file with that input removed. The scope-skip
-# jobs come from testing/scope_skips.py here, since the pinned copy holds no testing/ folder.
-scope_skipped_caller="$work/scope_skipped_caller"; nomap_caller="$work/nomap_caller"
-mkdir -p "$scope_skipped_caller/.github/workflows" "$nomap_caller/.github/workflows"
-[ "$(grep -c '^          scope-skips: ' "$root/.github/workflows/checks.yml")" -eq 1 ] \
-  || { echo "FAIL - fixture: checks.yml does not set its scope-skips input exactly once"; exit 1; }
-cp "$root/.github/workflows/checks.yml" "$scope_skipped_caller/.github/workflows/checks.yml" \
-  && sed '/^          scope-skips: /d' "$root/.github/workflows/checks.yml" > "$nomap_caller/.github/workflows/checks.yml" \
-  || { echo "FAIL - fixture: the scope-skip callers could not be written"; exit 1; }
-SCOPE_SKIPPED=$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import scope_skips; print(" ".join(sorted(scope_skips.MACOS_SCOPE_SKIPS)))' "$root/testing") \
-  || { echo "FAIL - fixture: testing/scope_skips.py did not give MACOS_SCOPE_SKIPS"; exit 1; }
-export SCOPE_SKIPPED
+# The macOS caller: this repo's checks.yml. Its macOS jobs run on a schedule and a dispatch only (owner, 01:33 CST Nov 16), so it names no
+# scope-skips map. The driver reads its macOS jobs from the file itself (the pinned copy's lint/test_windows_split.py), so none is named here.
+[ "$(grep -c '^          scope-skips: ' "$root/.github/workflows/checks.yml")" -eq 0 ] && ok "static: checks.yml names no scope-skips map" \
+  || no "static: checks.yml names a scope-skips map, but no macOS job has a scope skip now"
+macos_caller="$work/macos_caller"
+mkdir -p "$macos_caller/.github/workflows"
+cp "$root/.github/workflows/checks.yml" "$macos_caller/.github/workflows/checks.yml" \
+  || { echo "FAIL - fixture: the macOS caller could not be written"; exit 1; }
 
 # The driver: loads the pinned script, answers its reads from the case's canned routes, and prints the skip value it wrote.
 cat > "$work/drive.py" <<'PY'
@@ -89,28 +85,26 @@ def lane_reads(jobs=None):
             "actions/runs/7/jobs": {"jobs": jobs}}
 
 
-SCOPE_SKIPPED = os.environ.get("SCOPE_SKIPPED", "").split()  # the macOS scope skip's jobs, from testing/scope_skips.py (test_action.sh reads it: the pinned copy holds no testing/)
-
-
-def caller_needed():
-    """The jobs the caller's workflow needs, read by the pinned copy's own reader (lint/all_jobs_passed_rules.py), rollup included."""
+def caller_jobs():
+    """Every job of the calling workflow, and which of them are macOS jobs, read by the pinned copy's own reader (lint/test_windows_split.py)."""
     sys.path.insert(0, os.path.join(pin, "lint"))
-    import all_jobs_passed_rules
+    import test_windows_split
     with open(os.path.join(caller, ".github", "workflows", "checks.yml"), encoding="utf-8") as handle:
-        return all_jobs_passed_rules.split_jobs(handle.read())[0] + [ROLLUP]
+        return sorted(test_windows_split.all_jobs(handle.read())), set(test_windows_split.MACOS_JOBS)
 
 
-def scope_skipped_runs(needed):
-    """The check runs of a ready batch head: each scope-skipped job skipped by its flags, every other job passed."""
-    return [run(name, "skipped" if name in SCOPE_SKIPPED else "success") for name in needed]
+def skipped_runs(jobs, skipped):
+    """The check runs of a ready batch head: each job in `skipped` skipped, every other job passed."""
+    return [run(name, "skipped" if name in skipped else "success") for name in jobs]
 
 
-def scope_skipped_jobs(needed):
-    """The jobs of a ready lone-lane run: each scope-skipped job skipped with no steps, every other job passed."""
-    return [job(name, "skipped", steps=[]) if name in SCOPE_SKIPPED else job(name) for name in needed]
+def skipped_jobs(jobs, skipped):
+    """The jobs of a ready lone-lane run: each job in `skipped` skipped with no steps, every other job passed."""
+    return [job(name, "skipped", steps=[]) if name in skipped else job(name) for name in jobs]
 
 
-NEEDED = caller_needed()
+ALL_JOBS, MACOS = caller_jobs()
+SUITE = "checks-windows-rest"  # a suite job of checks.yml that no macOS rule names
 CASES = {
     "green_batch": (batch_reads(), {}),
     "green_lane": (lane_reads(), {}),
@@ -119,9 +113,11 @@ CASES = {
     "schedule": (lane_reads(), {"EVENT": "schedule"}),
     "dispatch": (lane_reads(), {"EVENT": "workflow_dispatch"}),
 }
-CASES["scope_skipped_batch"] = (batch_reads(scope_skipped_runs(NEEDED)), {})
-CASES["scope_skipped_lane"] = (lane_reads(scope_skipped_jobs(NEEDED)), {})
-CASES["scope_skipped_nomap"] = CASES["scope_skipped_batch"]  # the same ready run, judged against a caller whose scope-skips input is removed
+if case.startswith("macos"):  # the macOS cases read the caller's own jobs, so the suite job they refuse must be one of them
+    assert SUITE in ALL_JOBS, "checks-windows-rest is not a job of checks.yml, so the refusal case would probe the wrong job"
+CASES["macos_skipped_batch"] = (batch_reads(skipped_runs(ALL_JOBS, MACOS)), {})
+CASES["macos_skipped_lane"] = (lane_reads(skipped_jobs(ALL_JOBS, MACOS)), {})
+CASES["macos_and_suite_skipped_batch"] = (batch_reads(skipped_runs(ALL_JOBS, MACOS | {SUITE})), {})
 routes, extra = CASES[case]
 
 
@@ -160,8 +156,8 @@ pinned skipped_suite false
 pinned skipped_step true
 pinned schedule false
 pinned dispatch false
-pinned scope_skipped_batch true "$scope_skipped_caller"
-pinned scope_skipped_lane true "$scope_skipped_caller"
-pinned scope_skipped_nomap false "$nomap_caller"
+pinned macos_skipped_batch true "$macos_caller"
+pinned macos_skipped_lane true "$macos_caller"
+pinned macos_and_suite_skipped_batch false "$macos_caller"
 
 exit "$bad"

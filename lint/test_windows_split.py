@@ -6,7 +6,7 @@ dropped, none run twice); (2) at least MIN_JOBS `windows-latest` jobs carry thos
 Cut F adds: the guard suite has its own Windows job (GUARD_JOB) and runs off it nowhere else; its
 slice (GUARD_TESTS=windows-slice) runs only on pull_request; the guard mutation test has its own
 Linux job (MUTATE_JOB) and runs nowhere else; both jobs skip on the `guard` scope flag. A scoped job's
-job-level if, if any, holds only the draft guard, or a macOS job's scope skip (macos_scope_skip_ok); its scope condition sits in each step
+job-level if, if any, holds only the draft guard, or a macOS job's daily-only if (macos_daily_ok); its scope condition sits in each step
 (read_scope_condition, step_rest), so a step cannot run outside the scope condition.
 
 Why not rule_audit.py: it reads step names only. This needs job boundaries and `run:` lines.
@@ -742,11 +742,12 @@ def job_check_problems(name, job, flag=None):
         return problems + ([] if expr == SHARD_JOB_IF or (name in PUSH_OFF_JOBS and push_off_job_if(name, expr)) else [f"{name}: shard job if is {expr}, want {SHARD_JOB_IF}"])
     if name in LINT_JOBS:  # they run on every PR: no scope condition, and a job-level if only when it is the draft guard
         return problems + ([] if expr is None or draft_guard_only(expr) else [f"{name}: job-level if: {expr}"])
-    # A macOS job's job-level if is its scope skip (macos_scope_skip_ok): the push guard and its own flags. A step-level skip still starts its runner.
+    # A macOS job's job-level if is daily only (macos_daily_ok): no push, no pull_request, a schedule and a dispatch. The push guard
+    # alone is no daily form, so a macOS job is not exempt as a push-off job.
     # A Windows or mutation job's job-level if is the push guard (push_off_job_if, owner page item 880), with the draft guard on a shard.
-    if expr is not None and not draft_guard_only(expr) and not (name in MACOS_JOBS and macos_scope_skip_ok(name, expr)) \
-            and not (name in PUSH_OFF_JOBS and push_off_job_if(name, expr)):
-        why = ("is not its scope skip (the push guard and its own flags)" if name in MACOS_JOBS
+    if expr is not None and not draft_guard_only(expr) and not (name in MACOS_JOBS and macos_daily_ok(name, expr)) \
+            and not (name in PUSH_OFF_JOBS and name not in MACOS_JOBS and push_off_job_if(name, expr)):
+        why = ("is not daily only (a schedule and a dispatch)" if name in MACOS_JOBS
                else "keeps a job-level if, its scope condition belongs in its steps")
         return problems + [f"{name}: job-level if {why}: {expr}"]
     if full_suite_job(name):
@@ -1810,8 +1811,8 @@ def push_off_job_if(name, expr):
 
 
 def holds_push_guard(name, expr):
-    """True when a job-level if keeps the push guard: the push-off form, or a macOS job's scope skip, which also starts on no push."""
-    return push_off_job_if(name, expr) or (name in MACOS_JOBS and macos_scope_skip_ok(name, expr))
+    """True when a job-level if keeps the push guard: the push-off form, or a macOS job's daily-only if, which also starts on no push."""
+    return push_off_job_if(name, expr) or (name in MACOS_JOBS and macos_daily_ok(name, expr))
 
 
 def push_guard_jobs(text):
@@ -1819,55 +1820,48 @@ def push_guard_jobs(text):
     return sorted(n for n, j in all_jobs(text).items() if j["if"] is not None and holds_push_guard(n, j["if"]))
 
 
-def scope_skips_module():
-    """testing/scope_skips.py, the one home of the macOS scope skip. Imported when a case asks, not at import: the product rules import
-    this module from a pinned copy of lint/ that holds no testing/ folder (actions/push-skip/test_action.sh)."""
-    testing = os.path.join(HERE, "..", "testing")
-    if testing not in sys.path:
-        sys.path.insert(0, testing)
-    import scope_skips  # noqa: E402  the one home of the macOS scope skip (testing/scope_skips.py)
-    return scope_skips
-
-
 def macos_scope_skips():
-    """Each macOS job's scope flags, scope_skips.MACOS_SCOPE_SKIPS."""
-    return scope_skips_module().MACOS_SCOPE_SKIPS
+    """Each macOS job's scope skip, by job name. Empty: a macOS job runs on a schedule and a dispatch only, so it has no scope skip
+    (owner, 01:33 CST Nov 16: "turn off all mac runs for now"). lint/all_jobs_passed_rules.py reads it, so its scope-skips rule asks for no input."""
+    return {}
 
 
 def macos_scope_skip_ok(name, expr):
-    """True when `expr` is macOS job `name`'s job-level if, its scope skip: false on a push, true on a schedule and a
-    workflow_dispatch, and on a pull_request true exactly when one of the job's own flags is "true". It reads no other flag,
-    so a flag of another job cannot start this one."""
-    flags = macos_scope_skips().get(name)
-    if not flags or not expr or set(re.findall(r"needs\.scope\.outputs\.(\w+)", expr)) != set(flags):
+    """Always False: no macOS job has a scope skip (macos_scope_skips is empty). Kept for lint/all_jobs_passed_rules.py's import."""
+    return False
+
+
+def macos_daily_ok(name, expr):
+    """True when `expr` is macOS job `name`'s job-level if: false on a push, false on a pull_request whatever its flags and draft
+    state, true on a schedule and a workflow_dispatch. A step-level skip still starts the macOS runner, so the job-level if keeps it off."""
+    if name not in MACOS_JOBS or not expr:
         return False
+    flags = sorted(set(re.findall(r"needs\.scope\.outputs\.(\w+)", expr)))
     try:
         for values in itertools.product(("true", "false"), repeat=len(flags)):
             vals = dict(zip(flags, values))
             if eval_with(expr, "push", vals) or not eval_with(expr, "schedule", vals) or not eval_with(expr, "workflow_dispatch", vals):
                 return False
-            if eval_with(expr, "pull_request", vals) != ("true" in values):
+            if any(eval_with(expr, "pull_request", vals, draft=draft) for draft in (False, True)):
                 return False
         return True
     except Exception:
         return False
 
 
-def macos_scope_skip_problems(text):
-    """Each MACOS_JOBS job's job-level if is its scope skip (macos_scope_skip_ok). A step-level skip still starts the macOS runner, so
-    its scope skip sits on the job. No job outside PUSH_OFF_JOBS holds the push guard (item 880 added the Windows and mutation jobs)."""
+def macos_daily_problems(text):
+    """Each MACOS_JOBS job's job-level if is daily only (macos_daily_ok), and each macOS job has one: a pull_request with no macOS
+    path would still start its runner. No job outside PUSH_OFF_JOBS holds the push guard (item 880 added the Windows and mutation jobs)."""
     jobs = all_jobs(text)
     problems = []
-    if sorted(macos_scope_skips()) != sorted(MACOS_JOBS):
-        problems.append(f"the macOS scope skip names {sorted(macos_scope_skips())}, want the macOS jobs {sorted(MACOS_JOBS)}")
     for name in MACOS_JOBS:
         job = jobs.get(name)
         if job is None:
             problems.append(f"no {name} job")
         elif job["if"] is None:
             problems.append(f"{name} has no job-level if: a pull_request with no macOS path still starts its macOS runner")
-        elif not macos_scope_skip_ok(name, job["if"]):
-            problems.append(f"{name} job-level if is not its scope skip: {job['if']}")
+        elif not macos_daily_ok(name, job["if"]):
+            problems.append(f"{name} job-level if is not daily only (a schedule and a dispatch): {job['if']}")
     for name in push_guard_jobs(text):
         if name not in PUSH_OFF_JOBS:
             problems.append(f"{name} has the push guard as its job-level if and is not on the R61 push-off list")
@@ -1977,36 +1971,35 @@ class MacOnceByBatch(unittest.TestCase):
         with open(CHECKS, encoding="utf-8") as f:
             self.text = f.read()
 
-    def test_each_macos_job_skips_a_push_at_job_level(self):
-        # Named failure: a macOS job has no job-level scope skip, so a push or a pull_request with no macOS path starts its runner.
-        self.assertEqual(macos_scope_skip_problems(self.text), [])
+    def test_each_macos_job_is_daily_only_at_job_level(self):
+        # Named failure: a macOS job's job-level if lets it run on a push or a pull_request, or keeps it off a schedule or a dispatch.
+        self.assertEqual(macos_daily_problems(self.text), [])
 
-    def test_the_macos_scope_skip_skips_a_push_and_a_pull_request_with_its_flags_off(self):
-        # Named failure: a pull_request with every flag of a macOS job off still starts it. Also a push starts it, or a schedule
-        # or a dispatch skips it. Each job is read over every value of its own flags.
+    def test_a_macos_job_never_runs_on_a_push_or_a_pull_request_whatever_its_flags(self):
+        # Named failure: a macOS job starts on a push, or on a pull_request with any scope flag and draft or ready (owner, 01:33 CST Nov 16).
         jobs = all_jobs(self.text)
         for name in MACOS_JOBS:
             expr = jobs.get(name, {}).get("if")
             self.assertIsNotNone(expr, f"{name} has no job-level if")
-            flags = macos_scope_skips()[name]
-            for values in itertools.product(("true", "false"), repeat=len(flags)):
-                vals = dict(zip(flags, values))
+            for values in itertools.product(("true", "false"), repeat=3):
+                vals = dict(zip(("shell_macos", "checks_macos", "sweep"), values))
                 with self.subTest(job=name, flags=vals):
                     self.assertFalse(eval_with(expr, "push", vals), f"{name} runs on a push")
-                    self.assertTrue(eval_with(expr, "schedule", vals), f"{name} does not run on a schedule")
-                    self.assertTrue(eval_with(expr, "workflow_dispatch", vals), f"{name} does not run on a workflow_dispatch")
-                    if "true" in values:
-                        self.assertTrue(eval_with(expr, "pull_request", vals), f"{name} does not run on a pull_request with flags {vals}")
-                    else:
-                        self.assertFalse(eval_with(expr, "pull_request", vals), f"{name} runs on a pull_request with every flag off: {expr}")
+                    for draft in (False, True):
+                        self.assertFalse(eval_with(expr, "pull_request", vals, draft=draft),
+                                         f"{name} runs on a pull_request (draft {draft}) with flags {vals}: {expr}")
 
-    def test_the_macos_jobs_still_run_on_a_pull_request_a_schedule_and_a_dispatch(self):
-        # Named failure: the push guard also skips the batch PR's macOS proof, or the scheduled or manual macOS run.
+    def test_the_macos_jobs_run_on_a_schedule_and_a_dispatch(self):
+        # Named failure: a macOS job is skipped on the daily schedule or on a dispatch, so the scheduled and the manual run never prove it.
+        # Scope first: the workflow's triggers name both events, read from the text before the jobs.
+        triggers = self.text.split("\njobs:", 1)[0]
+        for event in ("schedule", "workflow_dispatch"):
+            self.assertRegex(triggers, rf"(?m)^  {event}:", f"checks.yml has no {event} trigger")
         for name in MACOS_JOBS:
             with self.subTest(job=name):
                 expr = all_jobs(self.text).get(name, {}).get("if")
                 self.assertIsNotNone(expr, f"{name} has no job-level if")
-                for event in ("pull_request", "schedule", "workflow_dispatch"):
+                for event in ("schedule", "workflow_dispatch"):
                     self.assertTrue(eval_if(expr, event, "true"), f"{name} does not run on {event}")
 
     def test_checks_macos_runs_one_guard_slice_and_checks_macos_b_runs_none(self):
@@ -2026,16 +2019,17 @@ class MacOnceByBatch(unittest.TestCase):
         self.assertEqual(scope_waits_on_skip_jobs_problems(self.text), [])
 
     def test_checker_sees_the_push_guard_defects(self):
-        # The control: the macOS scope skip on a macOS job, with its scope condition in the steps, passes. Each defect is flagged.
+        # The control: a macOS job whose job-level if is daily only, with its scope condition in the steps, passes. Each defect is flagged.
         def job_text(name, if_):
             text = split_doc({name: ("macos-latest", [(MACOS_GUARD, MAC_CODE, None, {})])})
             return text.replace("    needs: scope\n", f"    needs: scope\n    if: ${{{{ {if_} }}}}\n", 1)
 
-        expr = scope_skips_module().scope_skip_expr("checks-macos")
+        expr = "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"
         self.assertEqual(job_check_problems("checks-macos", all_jobs(job_text("checks-macos", expr))["checks-macos"]), [])
         bad = {
             "a push-only guard": ("checks-macos", "github.event_name == 'push'"),
             "a pull-request-only guard": ("checks-macos", "github.event_name == 'pull_request'"),
+            "a pull_request run with no flag": ("checks-macos", "github.event_name != 'push'"),
             # Re-pointed (owner page item 880, 11:53 CST Nov 15): the push guard on a Windows job is the new shape, so it is no defect.
             # The defect is the push guard on a job outside the R61 list, or a Windows job whose push guard also reads a flag.
             "the push guard on a job outside the R61 list": ("checks-rest", "github.event_name != 'push'"),
