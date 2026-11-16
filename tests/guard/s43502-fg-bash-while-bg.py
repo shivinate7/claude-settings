@@ -2,7 +2,7 @@
 FAMILY = "fg-bash-while-bg"
 #
 # A foreground Bash call that can run long is refused while background work runs in this session. The owner's
-# ruling, 2026-11-16 13:47 CST, verbatim: "refuse only commands that can run long, such as tests, lint, merges,
+# decision fg-bash-while-bg, verbatim: "refuse only commands that can run long, such as tests, lint, merges,
 # builds and installs, or anything asking a time limit over 60 s. Quick reads stay in the foreground."
 #
 # Background work is a background command or a background agent of this session, read from the session's own
@@ -140,7 +140,7 @@ FG_LONG = (
     ("pip install", "pip install -r requirements.txt"),
     ("npm install", "npm install"),
 )
-# The roster additions of the owner's ruling, and the shapes the roster must read through: a grouped command and a
+# The roster additions of decision fg-bash-while-bg, and the shapes the roster must read through: a grouped command and a
 # wrapper (`timeout`, `nice`, `ionice`). The three loops below run each form in every state that FG_LONG forms run in.
 FG_LONG_ROSTER = (
     ("grouped npm test", "(npm test)"),
