@@ -15,6 +15,7 @@ Keep the lines together as the last paragraph. Put nothing after them but the Cl
 A line with a real path and any reason excuses that path, so fill both parts or delete the line.
 The untouched placeholders, `<path> -- <reason>` and `<slug> -- <run URL>`, name nothing real.
 Comments and code blocks are not read.
+Read as decision `debt-close-runs-retire` (the Retire-run line) and decision `silent-undo-check-design` (the Drops-lines line) say.
 -->
 
 Retire-run: <slug> -- <run URL>
