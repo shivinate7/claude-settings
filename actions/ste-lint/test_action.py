@@ -1372,6 +1372,7 @@ def install_case(mode, pointer=None, mkdirs=()):
                  "is_file": os.path.isfile(installed), "is_link": os.path.islink(installed),
                  "real": os.path.realpath(installed), "live": os.path.realpath(clone + "-live"),
                  "actions": os.path.exists(os.path.join(cfg, "actions")),
+                 "in_generation": os.path.realpath(installed).startswith(os.path.realpath(os.path.join(cfg, "installs")) + os.sep),
                  "pointer": open(md, encoding="utf-8").read().split("\n")[0] if os.path.exists(md) else ""}
         for rel in mkdirs:
             os.makedirs(os.path.join(home, rel))
@@ -1417,8 +1418,8 @@ if os.name == "nt":
     print("skip - installed copy: install.sh does not run on Windows")
 else:
     r = install_case("cloud")
-    check("installed copy, cloud: install.sh exits 0 and copies bin/ste-changed, with no actions/ beside it",
-          r["install_rc"] == 0 and r["is_file"] and not r["is_link"] and not r["actions"], shown(r))
+    check("installed copy, cloud: install.sh exits 0 and lands bin/ste-changed inside its own install generation, with no actions/ beside it",
+          r["install_rc"] == 0 and r["is_file"] and r["in_generation"] and not r["actions"], shown(r))
     check("installed copy, cloud: the global CLAUDE.md names the checkout", r["pointer"] == "@~/claude-settings/CLAUDE.md",
           r["pointer"])
     check("installed copy, cloud: a drifted pin exits 3 with the pin message read from the checkout the pointer names",
