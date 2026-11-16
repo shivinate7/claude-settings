@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-16T14:21:00-06:00",
+  "context": "Goal: merge ready PRs without a second full CI run.\nProblem (rule): every merge to main makes each ready PR's records page stale, so each one must go back to draft, get a page-only push, a new draft run, ready again and a new ready run, while main moves again; it needs your word because it changes how the merge tool treats a reviewed head.\nBased on (ruling): your pick on the earlier records-page question (15:02 CST Nov 14, option c: skip CI on a records-only push after a green head), built in PR #3349 (merged 2026-11-14), and decision records-index-at-merge: a ready PR with a stale records page goes back to draft.\nBased on (read): runner 10's report via the coordinator, 14:19 CST Nov 16 (relayed; triage read no run); the same refusal hit #3583 at 12:36 CST. Runner 10 expects it on #2817 and #3553 too.\nDeparts from: main \u2014 decision records-index-at-merge sends a ready PR with a stale records page back to draft; option a has the merge tool write the page itself on a ready head.\nMeanwhile: no merge, flag or override is requested; the three PRs wait, and triage keeps its other work.",
+  "holds": "Ready pull requests #3577, #2817 and #3553, and every ready PR after each merge, cannot merge until the records page is fresh.",
+  "home": "records-page-before-ready",
+  "kind": "decision",
+  "n": 926,
+  "options": [
+    {
+      "gain": "Ready PRs merge in one step even while main keeps moving.",
+      "how": "On a ready head, the merge tool writes the records page as a page-only commit and merges, with no second full CI run, since a page-only commit changes no code.",
+      "id": "merge-writes-page",
+      "key": "a",
+      "label": "The merge tool refreshes the records page itself on a ready head",
+      "lose": "The merge tool adds a commit to a head that was reviewed; the length of a ready run is unmeasured, so the time saved is unknown."
+    },
+    {
+      "gain": "The head that merges is exactly the head that was reviewed and run.",
+      "how": "A ready PR with a stale page goes back to draft, gets the page-only push (your earlier pick skips its CI), then is marked ready again.",
+      "id": "keep-draft-round-trip",
+      "key": "b",
+      "label": "Keep the round trip: back to draft, page-only push, ready again",
+      "lose": "Each merge to main sends every ready PR through the trip again, and a PR can lose the race while main moves."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
+  "recommended": "a",
+  "ref": "runner 10's finding at 14:19 CST Nov 16, relayed by the coordinator: #3577's merge was refused at 14:18 CST on a green, clean, ready head (records page stale); same as #3583 at 12:36 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "Merge writes records page",
+  "shown": [
+    {
+      "id": "merge-writes-page",
+      "key": "a",
+      "label": "The merge tool refreshes the records page itself on a ready head"
+    },
+    {
+      "id": "keep-draft-round-trip",
+      "key": "b",
+      "label": "Keep the round trip: back to draft, page-only push, ready again"
+    }
+  ],
+  "status": "open",
+  "title": "When main moves, should the merge tool refresh a ready PR's records page itself, or should the PR go back to draft each time?",
+  "why": "The coordinator recommends a and has not measured the ready-run length; triage read no diff and agrees only on the cost shown: a stops the trip that repeats after every merge. It is a recommendation, not owner-typed."
+}
