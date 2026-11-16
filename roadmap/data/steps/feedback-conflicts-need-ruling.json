@@ -1,0 +1,14 @@
+{
+ "id": "feedback-conflicts-need-ruling",
+ "title": "Seven conflicting instructions to the batch runner need one ruling each",
+ "priority": "next",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "consultant",
+ "blockedBy": [],
+ "updatedAt": "2026-11-16T01:19:20-06:00",
+ "why": "[01:19 CST Nov 16, triage] Runner 10's 24 h feedback audit (01:16 CST Nov 16) found seven places where the consultant, the coordinator, the owner's saved answers and the rules told the batch runner different things: mark gate, 902 b vs 'things shouldn't wait', combine and tournament, queue order, #3479 hold, who merges, lane-lint counts. Every line is runner 10's claim, relayed; triage verified none. The full table, owner words and what runner 10 did not act on sit in plans/runner10-feedback-audit-2026-11-16.md. Searched steps and rulings: own-848-a-hand-built-docs-combine, own-906-b-page-prs-class, combine-train-tool, merge-role-standing and lane-lint-unknown-on-ready-pr each touch one conflict; none settles all seven. (source: runner 10 via send_message; not owner-typed)",
+ "source": "runner 10 relay 01:16 CST Nov 16; filed by triage 8; not owner-typed",
+ "note": "Todo. The consultant rules each of the seven conflicts in plans/runner10-feedback-audit-2026-11-16.md and rewrites the record it names in place. Conflict 5 (#3479) is moot: it merged. Conflict 2 and 4 also need the owner's word if they overturn his saved page answer 902 b. No PR yet."
+}
