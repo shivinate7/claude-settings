@@ -506,17 +506,16 @@ chained_ask("cap var: a cap write to a settings path held in a shell variable, t
 
 # =========================================================================== the cap-lift deadline ask
 #
-# THE DEADLINE ASKS (owner ruling, page item 602, pick a, 2026-11-12 12:54 CST). A write that sets
-# `_agentCapUntil` alone asks under agent-model-cap, and the ask names the end in US Central: its date,
-# a 24-hour clock and the zone (rule style-time-central-24h). A deadline has no ceiling, so one years
-# ahead asks too. A deadline already passed, or one that does not parse, stays silent, as on main. A
-# model raise still asks. The expected Central text comes from hooks/local_time.py, the one home of the
+# THE DEADLINE ASKS. A write that sets `_agentCapUntil` alone asks under agent-model-cap, and the ask names
+# the end in US Central: its date, a 24-hour clock and the zone (rule style-time-central-24h). A deadline has
+# no ceiling, so one far ahead asks too. A deadline already passed, or one that does not parse, stays silent.
+# A model raise still asks. The expected Central text comes from hooks/local_time.py, the one home of the
 # Central clock, so a reason that echoes the UTC reading, hard-codes CST, or drops the date reads as wrong.
 import datetime as _dt  # noqa: E402  the instants the Central helper reads (local_time is imported by test_guard)
 
 EXPIRY_KEY = "_agentCapUntil"
-DEADLINE_WINTER = "2099-01-15T03:30:00Z"   # CST: 2099-01-14 21:30 on the 14th
-DEADLINE_SUMMER = "2099-07-15T03:30:00Z"   # CDT: 2099-07-14 22:30 on the 14th
+DEADLINE_WINTER = "2099-01-15T03:30:00Z"   # a winter instant, read in CST
+DEADLINE_SUMMER = "2099-07-15T03:30:00Z"   # a summer instant, read in CDT
 DEADLINE_PAST = "2000-01-01T00:00:00Z"
 
 
@@ -526,8 +525,8 @@ def _central_text(text):
     return local_time.central_full(instant)
 
 
-WANT_WINTER = _central_text(DEADLINE_WINTER)   # "2099-01-14 21:30 CST"
-WANT_SUMMER = _central_text(DEADLINE_SUMMER)   # "2099-07-14 22:30 CDT"
+WANT_WINTER = _central_text(DEADLINE_WINTER)   # the CST reading of DEADLINE_WINTER
+WANT_SUMMER = _central_text(DEADLINE_SUMMER)   # the CDT reading of DEADLINE_SUMMER
 
 add("cap deadline: a Write that sets only the cap-lift end asks under agent-model-cap and names the end in CST",
     "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
@@ -549,10 +548,10 @@ add("cap deadline: a model raise whose end is already passed still asks under ag
 sh("cap deadline: a shell write that sets only the cap-lift end asks under agent-model-cap and names the end in CST",
    "printf '%s' '" + json.dumps({EXPIRY_KEY: DEADLINE_WINTER}) + "' > " + PROJ_SETTINGS,
    "ask", "agent-model-cap", cwd=NOGIT, carries=(WANT_WINTER,))
-# The clock is pinned to an instant one hour before the deadline, so this end is near, not far: it asks
-# at any length, and it is the control that a far-only row cannot be.
+# The clock is pinned one hour before this deadline, so the end is near, not far. The ask must hold at
+# this distance too, which a case with only far ends would not check.
 NEAR_CLOCK = "2099-01-14T20:30:00+00:00"
-DEADLINE_NEAR = "2099-01-14T21:30:00Z"   # one hour after NEAR_CLOCK: 2099-01-14 15:30 CST
+DEADLINE_NEAR = "2099-01-14T21:30:00Z"   # one hour after NEAR_CLOCK, read in CST
 add("cap deadline: a Write that sets a cap-lift end one hour ahead asks under agent-model-cap and names the end in CST",
     "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
     content=json.dumps({EXPIRY_KEY: DEADLINE_NEAR}), carries=(_central_text(DEADLINE_NEAR),),
@@ -570,7 +569,7 @@ CLOCK_FOR_DISK_CASES = "2026-11-12T13:47:00-06:00"   # Central, the clock the gu
 DISK_CLOCK = {"LOCAL_TIME_NOW": CLOCK_FOR_DISK_CASES}
 OLD_END_2026 = "2026-11-12T10:00:00Z"
 CAP_END_2030 = "2030-01-01T00:00:00Z"
-WANT_2030 = _central_text(CAP_END_2030)   # "2029-12-31 18:00 CST", the 31st of December 2029
+WANT_2030 = _central_text(CAP_END_2030)   # the CST reading of CAP_END_2030, the evening before the new year
 MULTI_START_2099 = "2099-03-01T00:00:00Z"
 
 
@@ -656,9 +655,9 @@ add("cap deadline: an Edit whose new_string repeats the cap-lift end line, with 
     old_string='"TZ": "UTC"}, "%s": "%s"' % (EXPIRY_KEY, DEADLINE_WINTER),
     new_string='"TZ": "CET"}, "%s": "%s"' % (EXPIRY_KEY, DEADLINE_WINTER), silent=True, env=DISK_CLOCK)
 
-# THE SAME CENTRAL DAY. DISK_CLOCK is 13:47 CST on 12 November 2026, and this end is 14:00 CST that day.
-# The date is printed with the time, so a reader sees that the lift ends today, not on another day.
-SAME_DAY_END = "2026-11-12T20:00:00Z"   # 2026-11-12 14:00 CST
+# THE SAME CENTRAL DAY. This end falls later on the Central day that DISK_CLOCK reads. The date is printed
+# with the time, so a reader sees that the lift ends that day, not on another day.
+SAME_DAY_END = "2026-11-12T20:00:00Z"   # a later time on the same Central day as DISK_CLOCK
 add("cap deadline: a Write that sets a cap-lift end later the same Central day asks and names the date and time in CST",
     "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
     content=json.dumps({EXPIRY_KEY: SAME_DAY_END}), carries=(_central_text(SAME_DAY_END),), env=DISK_CLOCK)
@@ -684,7 +683,7 @@ add("cap deadline: a sed whose pattern holds a 200-backslash run and no slash af
     "ask", "agent-model-cap", cwd=_folder, command=_command, carries=(WANT_2030,),
     max_seconds=SED_LIMIT_S, env=DISK_CLOCK)
 _folder, _command = sed_run_case(4, "sed-run-4")
-# The control pins the time alone, which the guard already prints, so it is green on head: the date is the new claim.
+# The control expects only the time of the end. It shows the limit does not fail on startup, not that the date is shown.
 add("control: a sed whose pattern holds a 4-backslash run in the same shape asks in under 1 s, "
     "and names the end's time in CST",
     "ask", "agent-model-cap", cwd=_folder, command=_command, carries=("18:00 CST",),
@@ -747,7 +746,7 @@ add("cap deadline: a model raise keeps the model wording and asks for a model ab
 # so the approver reads that the end is absent, not that the write sets none. A model raise with such an end asks
 # for the model and says the same. Each write below is one standalone command: a chained step that asks is refused,
 # not asked (decision ask-commands-run-alone), so no case chains a step ahead of the write. A literal end that does
-# not parse stays silent, as the Write of one does (owner ruling, page item 602).
+# not parse stays silent, as a Write of one does.
 COMPUTED_NOTE = "end computed at write time, not shown"
 COMPUTED_NOW = "$(date -u -d '+30 days' +%FT%TZ)"
 sh("cap deadline: a shell echo whose cap-lift end is a $(date) substitution asks under agent-model-cap and says "

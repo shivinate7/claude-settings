@@ -125,8 +125,8 @@ NEAR_UNTIL = _fmt(REFERENCE_NOW + timedelta(hours=1))
 FAR_30H_UNTIL = _fmt(REFERENCE_NOW + timedelta(hours=30))
 FAR_48H_UNTIL = _fmt(REFERENCE_NOW + timedelta(hours=48))
 FAR_400D_UNTIL = _fmt(REFERENCE_NOW + timedelta(days=400))
-# The cap-lift deadline has no ceiling any more (owner ruling, page item 602, pick a, 2026-11-12
-# 12:54 CST). These instants test the edges that remain: current, and passed.
+# The cap-lift deadline has no ceiling. These instants test the two edges that matter: the current
+# instant, and one that has passed.
 BOUNDARY_24H_UNTIL = _fmt(REFERENCE_NOW + timedelta(hours=24))             # ahead == 86400s: accepted
 JUST_UNDER_24H_UNTIL = _fmt(REFERENCE_NOW + timedelta(seconds=86399))      # ahead == 86399s: accepted
 JUST_OVER_24H_UNTIL = _fmt(REFERENCE_NOW + timedelta(seconds=86401))       # ahead == 86401s: accepted
@@ -145,8 +145,8 @@ def _utc(text):
     return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
 
 
-WINTER_WANT = local_time.central_full(_utc(WINTER_UNTIL))  # 2099-01-14 21:30 CST
-SUMMER_WANT = local_time.central_full(_utc(SUMMER_UNTIL))  # 2099-07-14 22:30 CDT
+WINTER_WANT = local_time.central_full(_utc(WINTER_UNTIL))  # the CST reading of the winter instant
+SUMMER_WANT = local_time.central_full(_utc(SUMMER_UNTIL))  # the CDT reading of the summer instant
 FAR_30H_WANT = local_time.central_full(_utc(FAR_30H_UNTIL))  # the end 30 hours ahead, as the ask names it
 
 
