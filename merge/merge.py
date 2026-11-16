@@ -5733,7 +5733,7 @@ def replaced_names(info, n):
     return [x for x in dict.fromkeys(names) if x != n and x not in dropped]
 
 LANE_ROLE = "lane"  # a lane's merge role: its role record also names its step, and it merges only its own pull request (ruling own-lanes-merge-claude-settings-prs)
-STANDING_ROLE = "standing"  # ruling own-tiny-fixes-b: a coordinator, triage or the consultant merges its own pull request (owner, 2026-11-16 08:51 CST)
+STANDING_ROLE = "standing"  # ruling own-tiny-fixes-b: a coordinator, triage or the consultant merges its own pull request (decision session-tiers)
 MERGE_ROLES = {"batch-runner", LANE_ROLE, STANDING_ROLE}  # the tiers that may run `merge <pr> --confirm` in a cloud session; the standing one only past standing_refusal, the lane one only on its own pull request
 LANE_MERGE_REPO = "shivinate7/claude-settings"  # the one repo whose pull requests a lane merges itself; the lane role covers it alone
 LOCAL_MERGE_ROLES = {"batch-runner"}  # the roles a local session's role file may name; the lane role is a cloud role only
@@ -5847,7 +5847,7 @@ def is_rule_text(path):
 def standing_refusal(h, n, info, head):
     """-> why a standing session may not merge pull request `n`, or "" when it may (ruling own-tiny-fixes-b). It must be the session's own,
     and the head's own checks must be green. A pull request past docs, code and guard paths included, needs one sonnet reviewer record on the relayed head `head`.
-    No size bound (owner, 2026-11-16 08:51 CST). A docs-only one needs no record.
+    No size bound (decision session-tiers). A docs-only one needs no record.
     The text names no tier and no flag, so a lane learns nothing from it (git-remedy-never-names-target)."""
     if not own_session_link(info.get("body")):
         return "this session did not open this pull request, so it may not merge it."
@@ -5858,7 +5858,7 @@ def standing_refusal(h, n, info, head):
     not_green = head_not_green(h.head_state(n, info["head"]))
     if not_green:
         return f"the head's own checks are not green: {not_green}."
-    if kind_misfits("docs-only", files) or guard_hits(paths):  # any file past docs, code and guard paths included: one passing sonnet reviewer record on the live head (owner, 2026-11-16 08:51 CST)
+    if kind_misfits("docs-only", files) or guard_hits(paths):  # any file past docs, code and guard paths included: one passing sonnet reviewer record on the live head (decision session-tiers)
         bodies = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(n, [])
         rec = next((r for r in map(parse_review, reversed(bodies)) if r and r["n"] == n), None)
         reviewers = [m for _, role, m, _ in (rec["rounds"] if rec else []) if role == REVIEW_ROLES[0]]

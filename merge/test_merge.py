@@ -14509,7 +14509,7 @@ class StandingMergeRole(CloudSession):
                     self.scripted_records(*([] if body is None else [body]))
                     self.assert_standing_refused()
 
-    def test_an_own_guard_path_pr_with_no_review_record_is_refused_under_standing(self):
+    def test_an_own_guard_path_pr_with_no_review_log_is_refused_under_standing(self):
         # the model record is a doc under docs/, yet a guard path (decision agent-model-cap); hooks/ is a guard path too.
         # A guard path is a code change, so it needs a passing Sonnet record, and this one has none.
         for path in ("docs/decisions/agent-model-cap.md", "hooks/rules.md"):
