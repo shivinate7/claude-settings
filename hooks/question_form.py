@@ -1068,7 +1068,7 @@ def _layout():
     return layout
 
 
-def waiting_page_root(tool_input, cwd, any_form=False):
+def waiting_page_root(tool_input, cwd, any_form=False):  # glossary-ok: the name main already uses
     """The git root of cwd's repo when the call's url is that repo's waiting page (lint/layout.py, the one
     home), else None. A repo with no page reads as unknown; only the none-key check judges its calls.
     `any_form` is layout.is_waiting_page_url's: the page's id in any url form."""
@@ -1105,9 +1105,9 @@ def design_file_problems(writes, root):
     return found
 
 
-def is_waiting_page(tool_input, cwd, any_form=False) -> bool:
+def is_waiting_page(tool_input, cwd, any_form=False) -> bool:  # glossary-ok: the name main already uses
     """True when the call's url is this repo's waiting page (`any_form`: see waiting_page_root)."""
-    return waiting_page_root(tool_input, cwd, any_form) is not None
+    return waiting_page_root(tool_input, cwd, any_form) is not None  # glossary-ok: the name main already uses
 
 
 def page_item_hit(tool_input, cwd="", session_id=None):
