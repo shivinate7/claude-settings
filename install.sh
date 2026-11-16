@@ -956,7 +956,6 @@ GEN_DIR="$GEN_ROOT/$INSTALL_ID_VALUE"
 GEN_LINKS=""     # one landed path per line, relative to $CLAUDE_DIR: what the links cover
 GEN_NEW=""       # the links this run made where nothing was: removed again when the switch fails
 GEN_ABORTED=0
-GEN_SWITCHED=0
 
 # gen_abort: the old generation stays live. Removes the stage and the folder this run named, then fails the run.
 gen_abort() {
@@ -1124,7 +1123,6 @@ gen_switch() {
     mv "$gs_tmp" "$GEN_CUR" || { rm -f "$gs_tmp"; return 1; }
   fi
   [ "$(readlink "$GEN_CUR")" = "$gs_to" ] || return 1
-  GEN_SWITCHED=1
 }
 
 # gen_links_all: a link for each staged path, settings.json last. The skills move out of skills/ their old backups first.
