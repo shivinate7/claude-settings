@@ -411,6 +411,7 @@ STAMPDIR = os.path.join(ROOT, "stamp_dir")           # stamp.json is a folder: i
 STAMPLIST = os.path.join(ROOT, "stamp_list")         # stamp.json is JSON, not an object, and holds "merge"
 STAMPLINK = os.path.join(ROOT, "stamp_link", "into")  # a symlink from outside into STAMPREPO/hooks
 STAMPIGNORE = os.path.join(ROOT, "stamp_ignore")     # stamp.json whose merge block ignores the `sync` check
+STAMPNOCHECK = os.path.join(ROOT, "stamp_no_checks")  # stamp.json pins requiredChecks "none", and a workflows folder holds one workflow file
 
 
 def _build_stamp_repos():
@@ -421,6 +422,10 @@ def _build_stamp_repos():
         "method": "merge", "requiredChecks": ["checks"], "deadlineMinutes": 30, "deleteBranch": True,
         "ignoreChecks": [{"name": "sync", "reason": "the sync job is advisory"}]}}
     make_repo(STAMPIGNORE, {".github/stamp.json": json.dumps(ignoring) + "\n"})
+    nochecks = {"defaultBranch": "main", "kinds": [], "merge": {
+        "method": "merge", "requiredChecks": "none", "deadlineMinutes": 30, "deleteBranch": True}}
+    make_repo(STAMPNOCHECK, {".github/stamp.json": json.dumps(nochecks) + "\n",
+                             ".github/workflows/ci.yml": "name: ci\non: push\n"})
     make_repo(STAMPNONE, {".github/dependabot.yml": "version: 2\n", "hooks/keep": "x\n"})
     make_repo(STAMPNOBLOCK, {".github/stamp.json": json.dumps({"defaultBranch": "main", "kinds": []}) + "\n"})
     make_repo(STAMPBAD, {".github/stamp.json": '{"defaultBranch": "main", "merge": {"method": \n'})
@@ -431,7 +436,7 @@ def _build_stamp_repos():
         os.symlink(os.path.join(STAMPREPO, "hooks"), STAMPLINK, target_is_directory=True)
 
 
-lazy_fixture([STAMPREPO, STAMPNONE, STAMPNOBLOCK, STAMPBAD, STAMPDIR, STAMPLIST, STAMPLINK, STAMPIGNORE],
+lazy_fixture([STAMPREPO, STAMPNONE, STAMPNOBLOCK, STAMPBAD, STAMPDIR, STAMPLIST, STAMPLINK, STAMPIGNORE, STAMPNOCHECK],
              _build_stamp_repos)
 add("merge-batch: the merge tool of the host is allowed past an ignored running workflow on another ready pr", "allow",
     tool="mcp__github__merge_pull_request", cwd=STAMPIGNORE, pullNumber=1, repo="x", owner="y",
@@ -439,6 +444,16 @@ add("merge-batch: the merge tool of the host is allowed past an ignored running 
 # A pinned merge.requiredChecks list is the required list: STAMPREPO pins `checks`, the protection says `gate`, so only the pin counts.
 add("merge-batch: a pinned merge.requiredChecks list is the required list, so a pending `gate` check on pr 2 does not block", "allow",
     tool="mcp__github__merge_pull_request", cwd=STAMPREPO, pullNumber=1, repo="x", owner="y", env_path=GHPINNED + os.pathsep + PY_PATH)
+# A pinned requiredChecks "none" names no required check, so a head with no check and no run reads green here too
+# (decision private-repos-no-ci, merge.requiredChecks "none" for a repo that requires no check). The workflows folder
+# is what makes that head unsettled when the pin is not read, so this case fails on that defect alone.
+add("merge-checks: the merge tool of the host reads a head with no check and no run as green when requiredChecks is none", "allow",
+    silent=True, tool="mcp__github__merge_pull_request", cwd=STAMPNOCHECK, pullNumber=12, repo="x", owner="y",
+    env_path=GHEMPTY + os.pathsep + PY_PATH)
+# The control: the same repo with a failed check on the head still reads red, so the pin never hides a red check.
+add("merge-checks: the merge tool of the host still denies a failed head when requiredChecks is none", "deny", "merge-checks",
+    carries="settled: red", tool="mcp__github__merge_pull_request", cwd=STAMPNOCHECK, pullNumber=12, repo="x", owner="y",
+    env_path=GHRED + os.pathsep + PY_PATH)
 
 _BARE_GUARD = dict(env_path=GREEN_ON, config=MERGECFG)
 # ASK: the repo uses the merge tool, and the call skips it.
