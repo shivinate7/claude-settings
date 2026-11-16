@@ -201,6 +201,10 @@ def one_line_scalar(value):
     return value if value and value[0] not in "#[{|>&*!" and "${{" not in value else None
 
 
+# A runs-on that reads the scope job's mac_runner output: a macOS job whose runner the run picks (.github/scripts/mac-runner.py).
+MAC_PICK = re.compile(r"\$\{\{.*needs\.scope\.outputs\.mac_runner.*\}\}$")
+
+
 def ci_jobs(text):
     """{job: (runs-on, [(line, run text, line join)])} for each job under the top-level `jobs:` of a workflow. A hand
     parser: the runner image has no YAML module. `line join` is the step shell's line continuation. A run text is the line's
@@ -260,6 +264,8 @@ def ci_jobs(text):
             step_indent, step_col, step_no = indent, key_col, step_no + 1
         if m["key"] == "runs-on" and indent == prop_indent and not m["dash"]:
             runner = one_line_scalar(m["value"])
+            if runner is None and MAC_PICK.match(m["value"].strip()):
+                runner = "macos-latest"  # the batch run's pick (R58): the Mac or macos-latest, both macOS
             if runner is None or jobs[job][0] is not None:
                 fail(f"{CI_PATH} job {job}: cannot read runs-on {m['value']!r}; the OS lists would be unknown")
             jobs[job][0] = runner
