@@ -1846,18 +1846,21 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int, local_se
 
 
 LANE_READY_REASON = (
-    "merge-role-proof: this session's own record is a claude-settings lane's, and the batch runner marks a pull request ready, not a lane. "
-    "Leave the draft as it is. The batch runner finds it (list_sessions, tag cs-build:batch-runner, same cs-repo). "
+    "merge-role-proof: this session's own record is a claude-settings lane's. A lane marks only its own pull request ready, once, "
+    "through the merge tool: the tool's role flag with its own step, then the pull request number and the ready flag, on a pull request whose head is that step's branch. "
+    "Any other ready mark waits for the batch runner (list_sessions, tag cs-build:batch-runner, same cs-repo). "
     "(decision session-tiers, a session's role decides which merge acts it may run)"  # glossary-ok: session-tiers is the decision's file name
 )
 
 
 def lane_ready_hit(stripped: str, transcript: str) -> str:
     """Return a label when a cloud session whose own newest get_session record carries cs-build:lane and a cs-repo tag naming LANE_MERGE_REPO runs the
-    merge tool's ready mark, else ''. A batch runner, a lane of another repo or with no cs-repo tag, a session with another or no cs-build tag, and a
+    merge tool's ready mark, else ''. A call is let through only when it names the lane role and a --step that is a cs-step tag of that record, and the pull
+    request it names has a head that is one of lane_head_refs of that step (_lane_ready_own_pr). A batch runner, a lane of another repo or with no cs-repo tag, a session with another or no cs-build tag, and a
     session with no readable record are not judged here: the repo proof
     (repo_proof_hit) still judges each. A script a wrapper hands on is read as a top-level call is (_nested_segments); one nested deeper
-    than MERGE_NEST_DEPTH that holds the flag counts as a call. Cost: one parse per merge-tool segment, and one transcript read when a ready flag is found."""
+    than MERGE_NEST_DEPTH that holds the flag counts as a call. Cost: one parse per merge-tool segment, one transcript read when a ready flag is found,
+    and one pull request read when the call names the lane role."""
     if not is_cloud() or "--ready" not in stripped:   # the cheap filter: a call with no ready flag reads no transcript
         return ""
     for segment, too_deep in _nested_segments(stripped):
@@ -1871,9 +1874,35 @@ def lane_ready_hit(stripped: str, transcript: str) -> str:
                 called = True   # an unreadable merge-tool segment fails closed, as the other clauses do
         if not called:
             continue
-        if _own_record_is_lane(transcript):
+        if _own_record_is_lane(transcript) and (too_deep or not _lane_ready_own_pr(segment, transcript)):
             return "merge --ready from a lane"
     return ""
+
+
+def _lane_ready_own_pr(segment: str, transcript: str) -> bool:
+    """True when the merge-tool call in `segment` is a lane's ready mark of its own pull request: the lane role with a step that is a cs-step tag of the own
+    record, the ready flag without --confirm, a pull request number, and a head on that number in LANE_MERGE_REPO that is one of lane_head_refs of the step.
+    The read is the merge tool's own Host, so the guard and the tool read a head alike. Any failure is False: an unread pull request is refused."""
+    try:
+        bare = merge_tool_args(strip_redirections(segment))
+        if bare is None:
+            return False
+        flags = _merge_flags(_command_words(bare))
+        if flags.role != ROLE_WITH_STEP or not flags.step or not flags.ready or flags.confirm or not str(flags.pr or "").isdigit():
+            return False
+        from override import remote_session_id
+        own_id = remote_session_id()
+        tags = _own_get_session_tags(transcript, own_id) if own_id and transcript else None
+        if tags is None or STEP_TAG + flags.step not in tags:
+            return False
+        module = merge_module()
+        if module is None:
+            return False
+        with module.shared_deadline(MERGE_READ_TIMEOUT):
+            info = module.Host(repo=LANE_MERGE_REPO).pr(int(flags.pr))
+        return info["branch"] in lane_head_refs(flags.step)
+    except Exception:
+        return False
 
 
 def _own_record_is_lane(transcript: str) -> bool:
