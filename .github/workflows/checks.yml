@@ -2417,9 +2417,11 @@ jobs:
         run: bash actions/stamp/test_action.sh
 
   # The one check branch protection requires. It fails on a needed job that failed, was cancelled or was
-  # skipped, so every needed job runs on a ready PR and puts its scope condition on its steps, never on the job. The three macOS
-  # jobs are the exception: their job-level scope skip stops a runner that a step-level skip would still start, and scope-skips
-  # (actions/all-jobs-passed) names them so their skip reads as green only while scope succeeded with their flags false.
+  # skipped, so every needed job runs on a ready PR and puts its scope condition on its steps, never on the job. There are two
+  # exceptions. The three macOS jobs: their job-level scope skip stops a runner that a step-level skip would still start, and
+  # scope-skips (actions/all-jobs-passed) names them so their skip reads as green only while scope succeeded with their flags false.
+  # The second is the job-level `if: needs.scope.outputs.records_only_skip != 'true'` on the suite jobs: a records-only run
+  # skips them, and the rollup reads that all-skipped run as green only when scope's records_only_skip output is true.
   # It runs on a ready pull_request only: on a push or a schedule it would read green over a red shard job it does not need.
   all-jobs-passed:
     runs-on: ubuntu-latest
