@@ -8,8 +8,9 @@
  "owner": "triage",
  "lane": "stable-refresh-local",
  "blockedBy": [],
- "updatedAt": "2026-11-15T13:10:00-06:00",
- "why": "[13:09 CST Nov 15, triage] Lane stable-refresh-local: its #3524 retargets to main (base #3487 merged 12:35 CST). Goes to runner 10. (source: coordinator/lane message, relayed by triage; not owner-typed, undoable) New step; none existed.",
+ "updatedAt": "2026-11-15T20:19:00-06:00",
+ "why": "[13:09 CST Nov 15, triage] Lane stable-refresh-local: its #3524 retargets to main (base #3487 merged 12:35 CST). Goes to runner 10. (source: coordinator/lane message, relayed by triage; not owner-typed, undoable) New step; none existed.\n\n[20:19 CST Nov 15, triage] PR #3524: open, draft, head bc6e72b8ffae, REST read at 20:19 CST Nov 15 (pull_request_read; the PR's title or branch names this step's work). It is stacked on #3487 (the PR body).",
  "source": "coordinator/lane message, relayed by triage; not owner-typed",
- "note": "Lane stable-refresh-local: its #3524 retargets to main (base #3487 merged 12:35 CST). Goes to runner 10. Guard or check: unverified (not relayed; triage read no PR)."
+ "note": "Lane stable-refresh-local: its #3524 retargets to main (base #3487 merged 12:35 CST). Goes to runner 10. Guard or check: unverified (not relayed; triage read no PR).",
+ "pr": 3524
 }

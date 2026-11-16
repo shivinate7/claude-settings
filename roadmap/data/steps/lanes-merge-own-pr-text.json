@@ -7,8 +7,9 @@
  "phase": "now",
  "owner": "triage",
  "blockedBy": [],
- "updatedAt": "2026-11-15T12:58:00-06:00",
- "why": "[12:57 CST Nov 15, triage] Lane lanes-merge-own-pr-text closes #3512 and #3508 as \"Replaced by #3514\": the merge tool's rule (decision session-tiers) refuses #3514's lint while they are open. (source: coordinator 12:57 CST, relayed by triage; not owner-typed, undoable) New step; none existed.",
+ "updatedAt": "2026-11-15T20:19:00-06:00",
+ "why": "[12:57 CST Nov 15, triage] Lane lanes-merge-own-pr-text closes #3512 and #3508 as \"Replaced by #3514\": the merge tool's rule (decision session-tiers) refuses #3514's lint while they are open. (source: coordinator 12:57 CST, relayed by triage; not owner-typed, undoable) New step; none existed.\n\n[20:19 CST Nov 15, triage] PR #3514: open, draft, head 24cb8ea577c3, REST read at 20:19 CST Nov 15 (pull_request_read; the PR's title or branch names this step's work). It replaces #3512 and #3508.",
  "source": "coordinator 12:57 CST Nov 15, relayed by triage; not owner-typed",
- "note": "Doing. Closes #3512 and #3508 as \"Replaced by #3514\". Related steps: lane-merges-own-pr-code, rewrite-merge-decisions-for-lane-merge."
+ "note": "Doing. Closes #3512 and #3508 as \"Replaced by #3514\". Related steps: lane-merges-own-pr-code, rewrite-merge-decisions-for-lane-merge.",
+ "pr": 3514
 }
