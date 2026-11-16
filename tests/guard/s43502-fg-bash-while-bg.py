@@ -112,7 +112,7 @@ def write_fg_transcripts():
 lazy_fixture([fg_path(name) for name in FG_LINES], write_fg_transcripts)
 
 
-def fg_deny(name, command, transcript, **fields):
+def fg_refuse(name, command, transcript, **fields):
     """A foreground call the rule refuses: the reason names the rule and says to rerun it with run_in_background."""
     add(name, "deny", rule=FG_RULE, carries=FG_CARRIES, cwd=FG_CWD, transcript=transcript, command=command,
         **fields)
@@ -152,25 +152,25 @@ FG_QUICK = (
 
 # DENY: a foreground long form while a background command runs.
 for fg_label, fg_command in FG_LONG:
-    fg_deny("fg-bash-while-bg: a foreground %s is refused while a background command runs" % fg_label,
+    fg_refuse("fg-bash-while-bg: a foreground %s is refused while a background command runs" % fg_label,
             fg_command, fg_path("bg-running"))
-fg_deny("fg-bash-while-bg: a foreground pytest is refused while a command its timeout moved to the background runs",
+fg_refuse("fg-bash-while-bg: a foreground pytest is refused while a command its timeout moved to the background runs",
         "pytest hooks/test_stall_watch.py", fg_path("bg-moved"))
-fg_deny("fg-bash-while-bg: a foreground npm test with run_in_background false is refused while a background command runs",
+fg_refuse("fg-bash-while-bg: a foreground npm test with run_in_background false is refused while a background command runs",
         "npm test", fg_path("bg-running"), run_in_background=False)
 # DENY: a foreground long form while a background agent runs.
-fg_deny("fg-bash-while-bg: a foreground verdict is refused while a background agent runs",
+fg_refuse("fg-bash-while-bg: a foreground verdict is refused while a background agent runs",
         "verdict python3 hooks/test_guard.py", fg_path("agent-running"))
-fg_deny("fg-bash-while-bg: a foreground npm test is refused while a background agent runs",
+fg_refuse("fg-bash-while-bg: a foreground npm test is refused while a background agent runs",
         "npm test", fg_path("agent-running"))
-fg_deny("fg-bash-while-bg: a foreground pytest is refused while a background agent runs",
+fg_refuse("fg-bash-while-bg: a foreground pytest is refused while a background agent runs",
         "pytest hooks/test_stall_watch.py", fg_path("agent-running"))
 # DENY: any foreground call whose time limit is over 60000 ms, even a quick read, while a background command runs.
-fg_deny("fg-bash-while-bg: a foreground ls with a 60001 ms limit is refused while a background command runs",
+fg_refuse("fg-bash-while-bg: a foreground ls with a 60001 ms limit is refused while a background command runs",
         "ls -la", fg_path("bg-running"), timeout=60001)
-fg_deny("fg-bash-while-bg: a foreground git status with a 120000 ms limit is refused while a background command runs",
+fg_refuse("fg-bash-while-bg: a foreground git status with a 120000 ms limit is refused while a background command runs",
         "git status", fg_path("bg-running"), timeout=120000)
-fg_deny("fg-bash-while-bg: a foreground cat with the 600000 ms foreground maximum is refused while a background command runs",
+fg_refuse("fg-bash-while-bg: a foreground cat with the 600000 ms foreground maximum is refused while a background command runs",
         "cat notes.txt", fg_path("bg-running"), timeout=600000)
 
 # ALLOW: the same long forms with run_in_background true while a background command runs.
