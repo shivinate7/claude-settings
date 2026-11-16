@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Fixture tests for rule_audit.py.
 
-Each test builds a small CLAUDE.md fragment, a map, and (when it matters) a guard.py or
-checks.yml fragment in memory, then calls `check(...)` directly. No subprocess: the audit
-itself does not touch the transcript or the hook protocol the way report_guard does.
+Most cases build a small CLAUDE.md fragment, a map, and (when it matters) a guard.py or
+checks.yml fragment in memory, then call `check(...)` directly. The cases that read the
+audit's printed report or its exit code (AuditOutputTests, RealRepoOutputTests) run it as a
+child process on a fixture tree. No case passes a pinned count: the audit has none.
 
 Run with:
 
@@ -15,6 +16,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -23,6 +25,9 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rule_audit  # noqa: E402
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "testing"))
+import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 
 # .mjs fixtures must be listable: form 1 names node:test, form 2 names LIST_TESTS (see rule_audit).
 NODE_TEST = 'import { test } from "node:test";\n'
@@ -60,23 +65,11 @@ GOOD_MAP = {
 }
 
 
-def kind_count(rule_map, kind):
-    rules = rule_map.get("rules", {})
-    return sum(1 for r in rules.values()
-               if isinstance(r, dict) and (r.get("mechanism") or {}).get("kind") == kind)
-
-
-def run(md=GOOD_MD, rule_map=None, guard=GUARD_SRC, workflow=WORKFLOW_SRC,
-        rule_floor=1, unmechanized_expected=None, judgment_expected=None):
-    """Call check() with small pins sized to the fixture, not this repo's real numbers."""
+def run(md=GOOD_MD, rule_map=None, guard=GUARD_SRC, workflow=WORKFLOW_SRC):
+    """Call check() on the fixture with no pin argument: the audit has no fixed number to pass."""
     if rule_map is None:
         rule_map = GOOD_MAP
-    if unmechanized_expected is None:
-        unmechanized_expected = kind_count(rule_map, "unmechanized")
-    if judgment_expected is None:
-        judgment_expected = kind_count(rule_map, "judgment")
-    return rule_audit.check(md, rule_map, guard, workflow, rule_floor, unmechanized_expected,
-                            judgment_expected=judgment_expected)
+    return rule_audit.check(md, rule_map, guard, workflow)
 
 
 def check_map(mechanism):
@@ -85,6 +78,7 @@ def check_map(mechanism):
 
 
 class RuleAuditTests(unittest.TestCase):
+    """Rule rows read by check(). A passing row passes with no problem at all, so the cases compare whole lists."""
 
     def test_single_mapped_rule_is_clean(self):
         problems = run()
@@ -201,7 +195,7 @@ class RuleAuditTests(unittest.TestCase):
         problems = run(rule_map=rule_map)
         self.assertEqual(problems, [])
 
-    def test_unmechanized_with_a_thin_reason_fails(self):
+    def test_unmechanized_with_a_short_reason_passes(self):
         rule_map = {
             "rules": {
                 "shared-trees-no-destructive-git": {
@@ -209,8 +203,25 @@ class RuleAuditTests(unittest.TestCase):
                 }
             }
         }
-        problems = run(rule_map=rule_map)
-        self.assertTrue(any("rubber stamp" in p for p in problems), problems)
+        self.assertEqual(run(rule_map=rule_map), [])
+
+    def test_unmechanized_with_an_empty_or_missing_reason_fails(self):
+        for reason in ("", "   ", None):
+            with self.subTest(reason=reason):
+                mechanism = ({"kind": "unmechanized"} if reason is None
+                             else {"kind": "unmechanized", "reason": reason})
+                rule_map = {"rules": {"shared-trees-no-destructive-git": {"mechanism": mechanism}}}
+                self.assertTrue(reason_problems(run(rule_map=rule_map)), reason)
+
+    def test_a_row_without_a_mechanism_object_still_fails(self):
+        for entry in ({}, {"mechanism": "unmechanized"}):
+            with self.subTest(entry=entry):
+                rule_map = {"rules": {"shared-trees-no-destructive-git": entry}}
+                self.assertTrue(any('has no "mechanism" object' in p for p in run(rule_map=rule_map)))
+
+    def test_a_row_with_an_unknown_kind_still_fails(self):
+        rule_map = {"rules": {"shared-trees-no-destructive-git": {"mechanism": {"kind": "vibes"}}}}
+        self.assertTrue(any("unknown mechanism kind" in p for p in run(rule_map=rule_map)))
 
     def test_orphaned_row_with_no_anchor_left_fails(self):
         rule_map = {
@@ -230,11 +241,19 @@ class RuleAuditTests(unittest.TestCase):
         self.assertTrue(any("a-deleted-rule" in p and "no rule anchor" in p for p in problems),
                          problems)
 
-    def test_floor_catches_a_shrunk_reader(self):
-        problems = run(rule_floor=5)
-        self.assertTrue(any("fewer than the pinned floor" in p for p in problems), problems)
+    def test_a_shrunk_reader_fails_through_orphaned_rows(self):
+        # A reader that finds no anchors orphans every row. That fails with no floor to name.
+        problems = run(md="No rule anchors here.\n")
+        self.assertTrue(any("shared-trees-no-destructive-git" in p and "no rule anchor" in p
+                            for p in problems), problems)
 
-    def test_unmechanized_pin_catches_a_silent_drop(self):
+    def test_zero_anchors_and_zero_rows_is_still_a_problem(self):
+        # No anchor and no row: no orphan can fail the audit, so the zero-anchor check alone must.
+        self.assertEqual(rule_audit.claude_md_anchors("No rule anchors here.\n"), [])
+        problems = run(md="No rule anchors here.\n", rule_map={"rules": {}})
+        self.assertTrue(any("found no rule anchors" in p for p in problems), problems)
+
+    def test_unmechanized_count_is_never_compared_with_a_pin(self):
         rule_map = {
             "rules": {
                 "shared-trees-no-destructive-git": {
@@ -245,8 +264,7 @@ class RuleAuditTests(unittest.TestCase):
                 }
             }
         }
-        problems = run(rule_map=rule_map, unmechanized_expected=0)
-        self.assertTrue(any("more than the pinned 0" in p for p in problems), problems)
+        self.assertEqual(run(rule_map=rule_map), [])
 
     def _rule_files(self, claude_md, style_md):
         """Write both RULE_FILES under a temp root and read them back through rule_text()."""
@@ -265,8 +283,7 @@ class RuleAuditTests(unittest.TestCase):
             "kind": "unmechanized",
             "reason": "No check reads whether the first sentence of a reply gives the result.",
         }}
-        problems = run(md=self._rule_files(GOOD_MD, style), rule_map={"rules": rules},
-                       rule_floor=2)
+        problems = run(md=self._rule_files(GOOD_MD, style), rule_map={"rules": rules})
         self.assertEqual(problems, [])
 
     def test_duplicate_anchor_split_across_claude_md_and_style_fails(self):
@@ -286,74 +303,487 @@ def one_row_map(kind, reason=None):
     return {"rules": {"shared-trees-no-destructive-git": {"mechanism": mechanism}}}
 
 
+REASON_ROW = "shared-trees-no-destructive-git"
+
+
+def reason_problems(problems, slug=REASON_ROW):
+    """The problems that name a row and its reason. A count never matches, and neither does an unknown kind."""
+    return [p for p in problems if slug in p and "reason" in p]
+
+
 class JudgmentKindTests(unittest.TestCase):
-    """`judgment`: an unmechanized rule whose reason says no check can judge it. Same reason
-    floor as `unmechanized`, its own pin JUDGMENT_EXPECTED, passed as `judgment_expected`.
-    `unmechanized` never reads `ref`, so no ref case is pinned."""
+    """`judgment`: an unmechanized rule whose reason says no check can judge it. Its reason must be non-empty.
+    No count of judgment rows is compared with a number: a count moves whenever a rule changes kind. `unmechanized`
+    never reads `ref`, so no ref case is pinned."""
 
-    def reason_problems(self, problems):
-        # Only a reason check says these words. "unknown mechanism kind 'judgment'" does not.
-        return [p for p in problems
-                if "judgment" in p and ("words of reason" in p or "rubber stamp" in p)]
-
-    def test_judgment_is_a_kind_with_its_own_integer_pin(self):
+    def test_judgment_is_a_kind_of_its_own(self):
         self.assertIn("judgment", rule_audit.KINDS)
-        self.assertIsInstance(rule_audit.JUDGMENT_EXPECTED, int)
 
     def test_judgment_row_with_a_full_reason_is_clean(self):
-        problems = run(rule_map=one_row_map("judgment", JUDGMENT_REASON), judgment_expected=1)
-        self.assertEqual(problems, [])
+        self.assertEqual(run(rule_map=one_row_map("judgment", JUDGMENT_REASON)), [])
 
-    def test_judgment_reason_of_exactly_the_minimum_words_is_clean(self):
-        reason = " ".join(["word"] * rule_audit.REASON_MIN_WORDS)
-        problems = run(rule_map=one_row_map("judgment", reason), judgment_expected=1)
-        self.assertEqual(problems, [])
+    def test_judgment_reason_of_one_word_is_clean(self):
+        self.assertEqual(run(rule_map=one_row_map("judgment", "word")), [])
 
-    def test_judgment_reason_one_word_short_fails_as_a_reason_problem(self):
-        reason = " ".join(["word"] * (rule_audit.REASON_MIN_WORDS - 1))
-        problems = run(rule_map=one_row_map("judgment", reason), judgment_expected=1)
-        self.assertTrue(self.reason_problems(problems), problems)
+    def test_judgment_reason_of_seven_words_is_clean(self):
+        reason = " ".join(["word"] * 7)
+        self.assertEqual(run(rule_map=one_row_map("judgment", reason)), [])
 
-    def test_judgment_with_a_thin_empty_blank_or_missing_reason_fails(self):
-        for reason in ("no reason", "", "   ", None):
+    def test_judgment_with_a_short_reason_passes(self):
+        for reason in ("no reason", "ok"):
             with self.subTest(reason=reason):
-                problems = run(rule_map=one_row_map("judgment", reason), judgment_expected=1)
-                self.assertTrue(self.reason_problems(problems), problems)
+                self.assertEqual(run(rule_map=one_row_map("judgment", reason)), [])
 
-    def test_judgment_count_above_the_pin_fails_as_more(self):
-        problems = run(rule_map=one_row_map("judgment", JUDGMENT_REASON), judgment_expected=0)
-        self.assertTrue(any("judgment" in p and "more than the pinned 0" in p for p in problems),
-                        problems)
+    def test_judgment_with_an_empty_blank_or_missing_reason_still_fails(self):
+        for reason in ("", "   ", None):
+            with self.subTest(reason=reason):
+                problems = run(rule_map=one_row_map("judgment", reason))
+                self.assertTrue(reason_problems(problems), problems)
 
-    def test_judgment_count_below_the_pin_fails_as_fewer(self):
-        # A `>` in place of `!=` passes the case above and misses this one. GOOD_MAP has no judgment row.
-        problems = run(judgment_expected=1)
-        self.assertTrue(any("judgment" in p and "fewer than the pinned 1" in p for p in problems),
-                        problems)
+    def test_two_judgment_rows_are_clean_with_no_count_pin(self):
+        rule_map = {"rules": {
+            "shared-trees-no-destructive-git": {"mechanism": {"kind": "judgment", "reason": JUDGMENT_REASON}},
+            "second-judged-rule": {"mechanism": {"kind": "judgment", "reason": JUDGMENT_REASON}}}}
+        self.assertEqual(run(md=TWO_RULE_MD, rule_map=rule_map), [])
 
-    def test_judgment_row_is_not_counted_as_unmechanized(self):
-        # One judgment row, unmechanized pin 0: clean only if that pin counts `unmechanized` alone.
-        problems = run(rule_map=one_row_map("judgment", JUDGMENT_REASON),
-                       unmechanized_expected=0, judgment_expected=1)
-        self.assertEqual(problems, [])
+    def test_zero_judgment_rows_is_clean_with_no_count_pin(self):
+        # GOOD_MAP has no judgment row.
+        self.assertEqual(run(), [])
 
-    def test_unmechanized_pin_ignores_judgment_rows_beside_unmechanized_ones(self):
+    def test_unmechanized_and_judgment_rows_are_both_clean_with_no_count_pin(self):
         rule_map = {"rules": {
             "shared-trees-no-destructive-git": {"mechanism": {
                 "kind": "unmechanized", "reason": JUDGMENT_REASON}},
             "second-judged-rule": {"mechanism": {"kind": "judgment", "reason": JUDGMENT_REASON}}}}
-        problems = run(md=TWO_RULE_MD, rule_map=rule_map, unmechanized_expected=1,
-                       judgment_expected=1)
-        self.assertEqual(problems, [])
+        self.assertEqual(run(md=TWO_RULE_MD, rule_map=rule_map), [])
 
-    def test_relabeling_unmechanized_as_judgment_cannot_dodge_the_pins(self):
-        # The row was `unmechanized` (pin 1). Relabeled `judgment`, with neither pin moved.
-        problems = run(rule_map=one_row_map("judgment", JUDGMENT_REASON),
-                       unmechanized_expected=1, judgment_expected=0)
-        self.assertTrue(any("unmechanized" in p and "fewer than the pinned 1" in p
-                            for p in problems), problems)
-        self.assertTrue(any("judgment" in p and "more than the pinned 0" in p
-                            for p in problems), problems)
+
+# ------------------------------------------------- the printed report, on fixture trees
+# The report and the exit code are the audit's contract, so these cases run it as a child process. A fixture tree
+# holds lint/ and hooks/ copied from this repo, and the three rule files. Its git history: `base` is committed and
+# pushed to a bare origin, so origin/main is the base, and `head` is committed on top of it.
+# UNMECH, JUDG and STEPS make a full-size fixture: 98 anchors (58 unmechanized, 25 judgment, 15 ci). A case changes
+# one thing from `base`, so its red names one cause.
+UNMECH = ["unmech-%02d" % i for i in range(58)]
+JUDG = ["judge-%02d" % i for i in range(25)]
+STEPS = ["step-%02d" % i for i in range(15)]
+WHY = "Only a reviewer can see whether this rule was followed, so a person reads it."
+
+
+def fixture_rules(unmech=(), judgment=(), ci=(), orphan=()):
+    """The three rule files for a fixture. Each slug in `unmech` or `judgment` gets an anchor in CLAUDE.md and a row
+    of that kind. Each in `ci` gets an anchor and a row that names a CI step of the same name. Each in `orphan` gets
+    a row and no anchor. The counts are the lengths of the arguments, never a pin."""
+    anchors, rows, steps = [], {}, []
+    for slug in unmech:
+        anchors.append(slug)
+        rows[slug] = {"mechanism": {"kind": "unmechanized", "reason": WHY}}
+    for slug in judgment:
+        anchors.append(slug)
+        rows[slug] = {"mechanism": {"kind": "judgment", "reason": WHY}}
+    for slug in ci:
+        anchors.append(slug)
+        rows[slug] = {"mechanism": {"kind": "ci", "ref": slug}}
+        steps.append(slug)
+    for slug in orphan:
+        rows[slug] = {"mechanism": {"kind": "unmechanized", "reason": WHY}}
+    claude = "".join("**Fixture rule.** Keep %s.<!-- rule:%s -->\n" % (s, s) for s in anchors)
+    return {
+        "CLAUDE.md": claude or "No rules here.\n",
+        "output-styles/shiv-stylisms.md": "# Style\n",
+        "lint/rule_mechanisms.json": json.dumps({"rules": rows}, indent=2) + "\n",
+        ".github/workflows/checks.yml": "jobs:\n  checks:\n    steps:\n" + "".join(
+            "      - name: %s\n" % s for s in steps),
+    }
+
+
+def with_row(files, slug, mechanism):
+    """`files` with the rule map's row `slug` replaced by `mechanism`. Only the rule map changes."""
+    rules = json.loads(files["lint/rule_mechanisms.json"])["rules"]
+    rules[slug] = {"mechanism": mechanism}
+    changed = dict(files)
+    changed["lint/rule_mechanisms.json"] = json.dumps({"rules": rules}, indent=2) + "\n"
+    return changed
+
+
+def renamed_anchor(files, old, new, mechanism):
+    """`files` with the anchor `old` renamed to `new` in CLAUDE.md, and its row moved under `new` as `mechanism`."""
+    changed = dict(files)
+    changed["CLAUDE.md"] = files["CLAUDE.md"].replace("<!-- rule:%s -->" % old, "<!-- rule:%s -->" % new)
+    rules = json.loads(files["lint/rule_mechanisms.json"])["rules"]
+    del rules[old]
+    rules[new] = {"mechanism": mechanism}
+    changed["lint/rule_mechanisms.json"] = json.dumps({"rules": rules}, indent=2) + "\n"
+    return changed
+
+
+def write_files(root, files):
+    for rel, text in files.items():
+        path = os.path.join(root, *rel.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+
+
+def git_in(root, *args):
+    subprocess.run(["git", "-C", root, "-c", "user.name=test", "-c", "user.email=test@example.com", *args],
+                   check=True, capture_output=True, text=True)
+
+
+def commit_all(root, message):
+    git_in(root, "add", "-A")
+    git_in(root, "commit", "-q", "-m", message)
+
+
+def audit(root, env=None):
+    """Run the audit in `root` as a child process. Returns its exit code and its printed report. `env`, when given,
+    is the child's whole environment."""
+    done = subprocess.run([sys.executable, os.path.join(root, "lint", "rule_audit.py")], cwd=root, env=env,
+                          capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+    return done.returncode, done.stdout + done.stderr
+
+
+class ToolTreeCase(unittest.TestCase):
+
+    def tree(self, base, head=None, git=True, pushed=True):
+        """A fixture tree under a run folder, removed at teardown. It holds lint/ and hooks/ from this repo and the
+        `base` files, committed and pushed so origin/main is the base. `head`, when given, is committed on top.
+        With git=False the tree has no repository. With pushed=False the base is never pushed: no origin/main."""
+        run = _test_temp.run_folder()
+        self.addCleanup(tracked_tree.rm_tree, run)
+        root = os.path.join(run, "tree")
+        os.makedirs(root)
+        tracked_tree.copy_tracked(root, "lint", "hooks")
+        if not git:
+            write_files(root, base)
+            return root
+        git_in(root, "init", "-q", "-b", "main")
+        write_files(root, base)
+        commit_all(root, "base")
+        if pushed:
+            origin = os.path.join(run, "origin.git")
+            subprocess.run(["git", "init", "-q", "--bare", origin], check=True, capture_output=True)
+            git_in(root, "remote", "add", "origin", origin)
+            git_in(root, "push", "-q", "origin", "main")
+        if head is not None:
+            write_files(root, head)
+            commit_all(root, "head")
+        return root
+
+    def tree_behind_main(self, base, main_after, branch=None):
+        """A branch forked from `base`, and origin/main then moved on to `main_after`. The branch is checked out, so
+        the merge base of origin/main and HEAD is `base`. `branch`, when given, is committed on the branch first."""
+        root = self.tree(base=base)
+        git_in(root, "checkout", "-q", "-b", "feature")
+        if branch is not None:
+            write_files(root, branch)
+            commit_all(root, "branch")
+        git_in(root, "checkout", "-q", "main")
+        write_files(root, main_after)
+        commit_all(root, "main moves on")
+        git_in(root, "push", "-q", "origin", "main")
+        git_in(root, "checkout", "-q", "feature")
+        return root
+
+
+class AuditOutputTests(ToolTreeCase):
+    """The printed report and the exit code on a fixture tree. Each case holds one claim. Scope comes first: a case
+    reads the report line before it reads the subject (P7)."""
+
+    def test_a_count_below_an_old_floor_alone_does_not_fail(self):
+        rc, out = audit(self.tree(base=fixture_rules(unmech=UNMECH, judgment=JUDG)))
+        self.assertIn("rule_audit: OK", out, out)
+        self.assertIn("83 rule anchors", out, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_tree_with_no_git_does_not_fail_on_count_alone(self):
+        rc, out = audit(self.tree(base=fixture_rules(unmech=UNMECH, judgment=JUDG), git=False))
+        self.assertIn("rule_audit: OK", out, out)
+        self.assertNotIn("Traceback", out, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_no_git_binary_on_the_path_exits_zero_and_says_not_compared(self):
+        root = self.tree(base=fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS))
+        no_git = os.path.join(os.path.dirname(root), "no-git-bin")
+        os.makedirs(no_git)
+        rc, out = audit(root, env=dict(os.environ, PATH=no_git))
+        self.assertEqual(rc, 0, out)
+        self.assertIn("rule_audit: OK", out, out)
+        self.assertIn("not compared", out, out)
+
+    def test_an_anchor_removed_from_the_base_is_named_in_the_report(self):
+        base = fixture_rules(unmech=UNMECH + ["gone-rule"], judgment=JUDG, ci=STEPS)
+        head = fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS)
+        rc, out = audit(self.tree(base=base, head=head))
+        self.assertIn("rule_audit: OK", out, out)
+        self.assertIn("98 rule anchors", out, out)
+        self.assertIn("gone-rule", out, out)
+
+    def test_an_anchor_removed_together_with_its_row_does_not_fail(self):
+        base = fixture_rules(unmech=UNMECH + ["gone-rule"], judgment=JUDG, ci=STEPS)
+        head = fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS)
+        rc, out = audit(self.tree(base=base, head=head))
+        self.assertEqual(rc, 0, out)
+
+    def test_an_anchor_removed_while_its_row_stays_fails(self):
+        base = fixture_rules(unmech=UNMECH + ["gone-rule"], judgment=JUDG, ci=STEPS)
+        head = fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS, orphan=["gone-rule"])
+        rc, out = audit(self.tree(base=base, head=head))
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("row `gone-rule` names no rule anchor left", out, out)
+
+    def test_zero_anchors_is_never_reported_ok(self):
+        rc, out = audit(self.tree(base=fixture_rules(orphan=UNMECH + JUDG)))
+        self.assertNotIn("rule_audit: OK", out, out)
+
+    def test_the_report_names_no_pinned_number(self):
+        rc, out = audit(self.tree(base=fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS)))
+        self.assertIn("rule_audit: OK", out, out)
+        self.assertNotIn("pinned", out, out)
+
+    def test_counts_that_differ_from_the_old_pins_do_not_fail(self):
+        # One unmechanized rule is added, not relabeled: 59 unmechanized and 25 judgment.
+        base = fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS)
+        head = fixture_rules(unmech=UNMECH + ["extra-rule"], judgment=JUDG, ci=STEPS)
+        rc, out = audit(self.tree(base=base, head=head))
+        self.assertIn("rule_audit: OK", out, out)
+        self.assertIn("59 argue `unmechanized`", out, out)
+        self.assertIn("25 are `judgment`", out, out)
+        self.assertEqual(rc, 0, out)
+
+
+MECH_REASON = "The step runs on every push, so no person reads for it."
+
+
+def step_base(unmech=UNMECH):
+    """The full-size base, with `step-00` a ci row that carries MECH_REASON."""
+    return with_row(fixture_rules(unmech=unmech, judgment=JUDG, ci=STEPS), "step-00",
+                    {"kind": "ci", "ref": "step-00", "reason": MECH_REASON})
+
+
+def moved_to_check(base):
+    """`base` with `unmech-00` moved onto a check that keeps its reason: the change origin/main made after a fork."""
+    return with_row(base, "unmech-00", {
+        "kind": "check", "ref": "lint/rule_audit.py", "reason": WHY,
+        "test": "lint/test_rule_audit.py::AuditOutputTests.test_zero_anchors_is_never_reported_ok"})
+
+
+class MoveOffMechanismTests(ToolTreeCase):
+    """A row that moves off a mechanism (kind guard, check or ci) to `unmechanized` or `judgment` is printed by its
+    anchor. It fails when its reason is the reason the mechanized row carried: the move adds no explanation. The base
+    is origin/main, read the way removed_anchor_line reads it."""
+
+    def move_tree(self, base_mech, head_mech, pushed=True):
+        """Full-size fixture with the row `step-00` as `base_mech` on origin/main and as `head_mech` on head."""
+        base = with_row(fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS), "step-00", base_mech)
+        return self.tree(base=base, head=with_row(base, "step-00", head_mech), pushed=pushed)
+
+    def test_a_move_off_a_mechanism_with_the_same_reason_fails_and_names_the_anchor(self):
+        moves = (({"kind": "ci", "ref": "step-00", "reason": MECH_REASON}, "unmechanized"),
+                 ({"kind": "guard", "ref": "agent-model-cap", "reason": MECH_REASON}, "unmechanized"),
+                 ({"kind": "check", "ref": "lint/rule_audit.py", "reason": MECH_REASON}, "judgment"))
+        for base_mech, new_kind in moves:
+            with self.subTest(kind=base_mech["kind"]):
+                rc, out = audit(self.move_tree(base_mech, {"kind": new_kind, "reason": MECH_REASON}))
+                self.assertNotEqual(rc, 0, out)
+                self.assertIn("moved off a mechanism: step-00: %s -> %s" % (base_mech["kind"], new_kind), out, out)
+
+    def test_a_move_off_a_mechanism_with_a_new_reason_passes_and_prints_the_move(self):
+        for base_reason in (None, MECH_REASON):
+            with self.subTest(base_reason=base_reason):
+                base_mech = {"kind": "ci", "ref": "step-00"}
+                if base_reason is not None:
+                    base_mech["reason"] = base_reason
+                rc, out = audit(self.move_tree(base_mech, {"kind": "unmechanized", "reason": WHY}))
+                self.assertEqual(rc, 0, out)
+                self.assertIn("rule_audit: OK", out, out)
+                self.assertIn("moved off a mechanism: step-00: ci -> unmechanized", out, out)
+
+    def test_a_row_that_stays_mechanized_prints_no_move(self):
+        # Control: the same row on origin/main and on head, so nothing moved and no move line prints.
+        same = {"kind": "ci", "ref": "step-00", "reason": MECH_REASON}
+        rc, out = audit(self.tree(base=with_row(fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS), "step-00", same)))
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("moved off a mechanism", out, out)
+
+    def test_a_new_rule_with_no_base_row_is_not_a_move(self):
+        # Control: origin/main has no rules, so every head row is new. The empty base and the full-size head both reach.
+        rc, out = audit(self.tree(base=fixture_rules(), head=fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS)))
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("moved off a mechanism", out, out)
+
+    def test_a_row_moving_between_unmechanized_and_judgment_is_no_move(self):
+        # Both kinds are off a mechanism already, so a move between them is no move off one, in either direction.
+        for base_kind, new_kind in (("judgment", "unmechanized"), ("unmechanized", "judgment")):
+            with self.subTest(base_kind=base_kind, new_kind=new_kind):
+                base_mech = {"kind": base_kind, "reason": MECH_REASON}
+                rc, out = audit(self.move_tree(base_mech, {"kind": new_kind, "reason": WHY}))
+                self.assertEqual(rc, 0, out)
+                self.assertNotIn("moved off a mechanism", out, out)
+
+    def test_no_origin_main_compares_no_move_and_fails_nothing(self):
+        # Control: no origin/main to read, so the move is not compared. The report says so and nothing fails.
+        same = {"kind": "ci", "ref": "step-00", "reason": MECH_REASON}
+        rc, out = audit(self.move_tree(same, {"kind": "unmechanized", "reason": MECH_REASON}, pushed=False))
+        self.assertEqual(rc, 0, out)
+        self.assertIn("not compared", out, out)
+
+    def test_a_mechanized_anchor_renamed_off_its_mechanism_fails_and_names_it(self):
+        # A mechanized anchor renamed to an unmechanized row leaves its mechanism with no row to keep it. The move check
+        # reads only the same slug, so it does not see the loss.
+        for base_mech in ({"kind": "ci", "ref": "step-00"},
+                          {"kind": "guard", "ref": "agent-model-cap"},
+                          {"kind": "check", "ref": "lint/rule_audit.py", "reason": MECH_REASON}):
+            with self.subTest(kind=base_mech["kind"]):
+                base = with_row(fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS), "step-00", base_mech)
+                head = renamed_anchor(base, "step-00", "step-renamed", {"kind": "unmechanized", "reason": WHY})
+                rc, out = audit(self.tree(base=base, head=head))
+                self.assertIn("rule_audit: FAIL", out, out)
+                self.assertNotEqual(rc, 0, out)
+                self.assertIn("step-00", out, out)
+
+    def test_a_mechanized_anchor_renamed_and_kept_on_its_mechanism_passes(self):
+        # Control: the same rename, and the new row keeps the mechanism (the same CI step). Nothing leaves a mechanism.
+        base = fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS)
+        head = renamed_anchor(base, "step-00", "step-renamed", {"kind": "ci", "ref": "step-00"})
+        rc, out = audit(self.tree(base=base, head=head))
+        self.assertIn("rule_audit: OK", out, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_an_unmechanized_row_relabelled_judgment_with_the_same_reason_fails(self):
+        # judgment is not counted as a debt, so a relabel must say why the rule is judgment now, as a move off a
+        # mechanism must. The reason here is the one the unmechanized row already carried.
+        base = fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS)
+        head = with_row(base, "unmech-00", {"kind": "judgment", "reason": WHY})
+        rc, out = audit(self.tree(base=base, head=head))
+        self.assertIn("rule_audit: FAIL", out, out)
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("unmech-00", out, out)
+
+    def test_an_unmechanized_row_relabelled_judgment_with_a_new_reason_passes(self):
+        # Control: the same relabel with its own reason.
+        base = fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS)
+        head = with_row(base, "unmech-00", {"kind": "judgment", "reason": JUDGMENT_REASON})
+        rc, out = audit(self.tree(base=base, head=head))
+        self.assertIn("rule_audit: OK", out, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_move_to_unmechanized_with_a_whitespace_only_reason_edit_fails(self):
+        # The reason changed in its spacing only. A reason edit must change its words, or the move adds no explanation.
+        edits = (MECH_REASON.replace("so no person", "so no  person"),
+                 MECH_REASON.replace("so no person", "so no\nperson"))
+        for edited in edits:
+            with self.subTest(edited=edited):
+                base_mech = {"kind": "ci", "ref": "step-00", "reason": MECH_REASON}
+                rc, out = audit(self.move_tree(base_mech, {"kind": "unmechanized", "reason": edited}))
+                self.assertIn("moved off a mechanism: step-00: ci -> unmechanized", out, out)
+                self.assertNotEqual(rc, 0, out)
+
+    def test_a_move_to_unmechanized_with_a_reworded_reason_passes(self):
+        # Control: a real rewording of the reason passes, and the move prints with "(reason changed)".
+        base_mech = {"kind": "ci", "ref": "step-00", "reason": MECH_REASON}
+        reworded = MECH_REASON.replace("no person reads for it", "a person reads for it instead")
+        rc, out = audit(self.move_tree(base_mech, {"kind": "unmechanized", "reason": reworded}))
+        self.assertIn("moved off a mechanism: step-00: ci -> unmechanized (reason changed)", out, out)
+        self.assertEqual(rc, 0, out)
+
+
+class BehindMainTests(ToolTreeCase):
+    """The audit compares a branch with the merge base of origin/main and HEAD, not with origin/main's tip. A branch
+    behind main is judged on its own changes: a row main changed after the fork is not one the branch fails on, and an
+    anchor main added after the fork is not one the branch removed."""
+
+    def test_a_branch_behind_main_fails_on_no_row_it_never_touched(self):
+        # main moved `unmech-00` after the fork, to a check that keeps the reason. The branch never touched that row.
+        base = step_base()
+        rc, out = audit(self.tree_behind_main(base=base, main_after=moved_to_check(base)))
+        self.assertIn("rule_audit: OK", out, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_branch_behind_main_names_no_anchor_that_main_added_as_removed(self):
+        # main added `added-on-main` after the fork. The branch never had it and never removed it.
+        base = step_base()
+        main_after = step_base(unmech=UNMECH + ["added-on-main"])
+        rc, out = audit(self.tree_behind_main(base=base, main_after=main_after))
+        self.assertIn("rule_audit: OK", out, out)
+        self.assertNotIn("added-on-main", out, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_branch_behind_main_passes_its_own_reason_changed_move(self):
+        # Control: the branch moves step-00 off its mechanism with a new reason, and main added an anchor.
+        base = step_base()
+        branch = with_row(base, "step-00", {"kind": "unmechanized", "reason": WHY})
+        main_after = step_base(unmech=UNMECH + ["added-on-main"])
+        rc, out = audit(self.tree_behind_main(base=base, main_after=main_after, branch=branch))
+        self.assertIn("rule_audit: OK", out, out)
+        self.assertIn("moved off a mechanism: step-00: ci -> unmechanized (reason changed)", out, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_branch_behind_main_still_fails_its_own_same_reason_move(self):
+        # Control: the branch moves step-00 off its mechanism with the reason the mechanized row carried. It fails.
+        base = step_base()
+        branch = with_row(base, "step-00", {"kind": "unmechanized", "reason": MECH_REASON})
+        main_after = step_base(unmech=UNMECH + ["added-on-main"])
+        rc, out = audit(self.tree_behind_main(base=base, main_after=main_after, branch=branch))
+        self.assertIn("moved off a mechanism: step-00: ci -> unmechanized", out, out)
+        self.assertNotEqual(rc, 0, out)
+
+
+class RealRepoOutputTests(unittest.TestCase):
+    """The printed report on this repo as it is, with the counts it prints checked against the map."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.rc, cls.out = audit(rule_audit.ROOT)
+        # With no origin/main the audit cannot compare, so its OK does not vouch for the real tree: skip UNKNOWN.
+        if "not compared" in cls.out:
+            raise unittest.SkipTest("UNKNOWN: no origin/main to read")
+
+    def test_the_real_report_names_no_pinned_number(self):
+        self.assertIn("rule_audit: OK", self.out, self.out)
+        self.assertNotIn("pinned", self.out, self.out)
+
+    def test_the_real_report_counts_come_from_the_map(self):
+        self.assertIn("rule_audit: OK", self.out, self.out)
+        rules = json.loads(rule_audit.read(rule_audit.MAP_FILE))["rules"]
+        kinds = [rules[s]["mechanism"]["kind"] for s in rule_audit.claude_md_anchors(rule_audit.rule_text())]
+        self.assertIn("%d argue `unmechanized`" % kinds.count("unmechanized"), self.out, self.out)
+        self.assertIn("%d are `judgment`" % kinds.count("judgment"), self.out, self.out)
+
+
+class RealRepoOriginTests(ToolTreeCase):
+    """RealRepoOutputTests reads this repo through origin/main, so its verdict could move with main. With origin/main
+    missing it must skip UNKNOWN, not assert OK. A row main changed after the fork must not change its OK."""
+
+    def real_suite_out(self, root):
+        """The report RealRepoOutputTests.setUpClass reads, with rule_audit.ROOT set to `root`."""
+        with mock.patch.object(rule_audit, "ROOT", root):
+            RealRepoOutputTests.setUpClass()
+        return RealRepoOutputTests.out
+
+    def test_the_real_suite_skips_unknown_when_origin_main_is_missing(self):
+        root = self.tree(base=fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS), pushed=False)
+        with mock.patch.object(rule_audit, "ROOT", root):
+            with self.assertRaises(unittest.SkipTest) as cm:
+                RealRepoOutputTests.setUpClass()
+        self.assertIn("UNKNOWN", str(cm.exception))
+
+    def test_the_real_suite_runs_and_asserts_ok_when_origin_main_is_present(self):
+        # Control: with origin/main present the suite runs, and its report is OK.
+        out = self.real_suite_out(self.tree(base=fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS)))
+        self.assertIn("rule_audit: OK", out, out)
+
+    def test_the_real_suite_verdict_does_not_change_when_main_changes_a_row(self):
+        base = fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS)
+        out = self.real_suite_out(self.tree_behind_main(base=base, main_after=moved_to_check(base)))
+        self.assertIn("rule_audit: OK", out, out)
+
+    def test_the_real_suite_stays_ok_when_main_adds_an_unrelated_anchor(self):
+        # Control: main adds an anchor after the fork, and the suite still reports OK.
+        base = fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS)
+        main_after = fixture_rules(unmech=UNMECH + ["added-on-main"], judgment=JUDG, ci=STEPS)
+        out = self.real_suite_out(self.tree_behind_main(base=base, main_after=main_after))
+        self.assertIn("rule_audit: OK", out, out)
 
 
 class CountsFromRestMechanismTests(unittest.TestCase):
@@ -416,7 +846,7 @@ class GuardTextTests(unittest.TestCase):
     def test_rule_refused_only_in_a_sibling_module_resolves(self):
         root = self.tree(self.files())
         guard_text = rule_audit.guard_text(root)
-        problems = rule_audit.check(GOOD_MD, SIBLING_MAP, guard_text, "", 1, 0, judgment_expected=0)
+        problems = rule_audit.check(GOOD_MD, SIBLING_MAP, guard_text, "")
         self.assertEqual(problems, [])
 
     def test_guard_py_alone_leaves_that_sibling_rule_stale(self):
@@ -424,7 +854,7 @@ class GuardTextTests(unittest.TestCase):
         case above proves the reader, not the fixture."""
         root = self.tree(self.files())
         guard_text = rule_audit.read(os.path.join(root, "hooks", "guard.py"))
-        problems = rule_audit.check(GOOD_MD, SIBLING_MAP, guard_text, "", 1, 0, judgment_expected=0)
+        problems = rule_audit.check(GOOD_MD, SIBLING_MAP, guard_text, "")
         self.assertTrue(any("sibling-rule" in p and "Stale row" in p for p in problems), problems)
 
     def test_guard_text_joins_guard_modules_and_no_test_file(self):
