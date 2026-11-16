@@ -185,7 +185,9 @@ test("a rule question starts blank, my pick is starred in its card, and a tap on
   const page = await open(t); if (!page) return;
   assert.equal(await page.locator(`input[name="g-${DECISION.id}"]:checked`).count(), 0, "an option is preselected");
   const star = page.locator(`label[for="o-${DECISION.id}-a"] .pick`);
-  assert.match(await star.textContent(), /Red is bold\./);
+  await need(card(page, DECISION).locator(".recline"), `No. ${DECISION.n} draws no card-level Recommended line`);
+  assert.match(await card(page, DECISION).locator(".recline").textContent(), /Red is bold\./);
+  assert.doesNotMatch(await star.textContent(), /Red is bold\./, "the star still prints the why, which the Recommended line carries");
   assert.equal(await star.locator("svg").count(), 1, "the pick box holds no inline sparkle icon");
   assert.doesNotMatch(await star.textContent(), /[★⭐]/, "the pick box still holds a star character");
   assert.equal(await page.locator(`label[for="o-${DECISION.id}-b"] .pick`).count(), 0, "the star sits on a second option");
@@ -6249,7 +6251,7 @@ for (const scheme of ["light", "dark"]) for (const width of SIZES) {
 }
 
 test("a rail jump after Send lands on its card", async (t) => {
-  const items = Array.from({ length: 14 }, (_, i) => mk("q" + i, i + 1, { context: LONG }));
+  const items = Array.from({ length: 14 }, (_, i) => noRec(mk("q" + i, i + 1, { context: LONG })));
   const page = await open(t, { items: inArrayOrder(items), viewport: { width: 1280, height: 800 } }); if (!page) return;
   await noAnchor(page);
   await choose(page, items[0], "a"); await choose(page, items[1], "a");
@@ -8035,7 +8037,9 @@ test("a pick that is not a valid list shows no star; a valid list does", async (
   const page = await open(t, { items: [...bad, good] }); if (!page) return;
   for (const it of [...bad.slice(0, 4), good]) await needBoxes(page, it, 3);
   assert.equal(await card(page, good).locator(".opt .pick").count(), 2, "a valid list is not starred on each pick");
-  assert.match(await page.locator(`#item-${good.id} .opt:has(#o-${good.id}-a) .pick`).textContent(), /Red and Green cover it\./);
+  await need(card(page, good).locator(".recline"), `No. ${good.n} draws no card-level Recommended line`);
+  assert.match(await card(page, good).locator(".recline").textContent(), /Red and Green cover it\./);
+  assert.doesNotMatch(await page.locator(`#item-${good.id} .opt:has(#o-${good.id}-a) .pick`).textContent(), /Red and Green cover it\./, "the star on Red still prints the why, which the Recommended line carries");
   for (const it of bad) assert.equal(await card(page, it).locator(".opt .pick").count(), 0, `${it.id}: a star shows for a bad pick`);
 });
 
@@ -8216,6 +8220,7 @@ for (const width of [390, 1280]) test(`a press on the empty part of a ranked opt
   await needBoxes(page, r, 3);
   const row = card(page, r).locator(`#k-${r.id}-a`), link = row.locator("a");
   await need(row, `${r.id}: no links row on option a`);
+  await row.scrollIntoViewIfNeeded(); // at 390 wide the row sits below the 900 px viewport; the press uses viewport coordinates
   const rb = await row.boundingBox(), lb = await link.boundingBox();
   // 20px in from the row's right edge, past the link: the press must land on the row's empty part, not on the link.
   const x = rb.x + rb.width - 20, y = rb.y + rb.height / 2;
@@ -8529,8 +8534,8 @@ test("a card with none of lastAnswer, reply and lane draws as today, and so does
   const emptyD = mk("em-d", 3, { reply: "", lane: "", lastAnswer: null }), emptyT = { ...TASK, id: "em-t", n: 4, reply: "", lane: "", lastAnswer: null };
   const page = await open(t, { items: [plainD, plainT, emptyD, emptyT] }); if (!page) return;
   const shape = (it) => card(page, it).evaluate((c) => ({ kids: [...c.children].map((e) => e.tagName + "." + e.className), top: c.querySelector(".top").innerText.replace(/No\. \d+/, "").replace(/\s+/g, " ").trim() }));
-  // The children of a plain open card, read from page.html at 2b66f6a3 plus the always-open note box (step note-always-open): a build that adds a wrapper or a row to a card with nothing to show fails here.
-  const TODAY = { decision: ["DIV.top", "H3.title", "P.ctx", "P.about", "DIV.opts", "P.ready", "DIV.alts", "DIV.note", "P.dest"], task: ["DIV.top", "H3.title", "P.ctx", "P.about", "OL.steps", "P.ready", "DIV.alts", "DIV.note", "P.dest"] };
+  // The children of a plain open card, plus the always-open note box (step note-always-open). The Recommended line (step page-recommend-and-waiting-on) is the one added child of a decision, drawn only when the decision has a valid recommendation: `recommended`, or the old `pick`, which this fixture has. A build that adds a wrapper or a row to a card with nothing to show fails here.
+  const TODAY = { decision: ["DIV.top", "H3.title", "P.ctx", "P.about", "DIV.recline", "DIV.opts", "P.ready", "DIV.alts", "DIV.note", "P.dest"], task: ["DIV.top", "H3.title", "P.ctx", "P.about", "OL.steps", "P.ready", "DIV.alts", "DIV.note", "P.dest"] };
   for (const [plain, empty] of [[plainD, emptyD], [plainT, emptyT]]) {
     assert.equal(await laPanel(page, plain).count() + await laPanel(page, empty).count(), 0, `${plain.id}: a panel is drawn with nothing to show`);
     assert.doesNotMatch(await card(page, plain).innerText() + await card(page, empty).innerText(), /Your last answer|Reply:|waits on lane/i);
@@ -10013,6 +10018,189 @@ test("a multi answer carries a list of labels, one per tick, beside its list of 
   assert.match(a.label[0], /^a: Red$/i);
   assert.match(a.label[1], /^c: Green$/i);
 });
+
+// ---------------------------------------------------------------- the Recommended line and the Waiting on line
+// The Recommended line sits above the options, outside them: the recommended letter and label, then the why, printed once.
+// The Waiting on line is the context's first "Waiting on:" line, drawn as its own line above the context, which no longer prints it.
+// The classes .recline, .waitline, .key and .ord are the ones the lane's design notes name.
+
+const REC_WHY = "Blue reads on both themes.";
+const WAIT = "the colour change stays stopped until you answer; the session builds it the same day.";
+const WAIT_CTX = `Goal: pick one colour for the page.\nWaiting on: ${WAIT}\nMeanwhile: nothing else waits.`;
+const LONG_LABEL = "Keep all four tools and widen the shared list to take each one, as the ruling allows when a repo is set up for it. ".repeat(2).trim();
+const recLineOf = (page, it) => card(page, it).locator(".recline");
+const waitLineOf = (page, it) => card(page, it).locator(".waitline");
+const ctxOf = (page, it) => card(page, it).locator(`#ctx-${it.id}`);
+const lineText = (loc) => loc.innerText().then((s) => s.replace(/\s+/g, " ").trim());
+// A decision whose recommended option is B. Its old pick is still A, so a line that reads the old field names A.
+const recOne = (id, n, over = {}) => mk(id, n, { recommended: "b", why: REC_WHY, context: "Which colour?", ...over });
+// An old item: no recommendation (neither `recommended` nor `pick`) and no why.
+const noRec = (it) => { delete it.pick; delete it.why; return it; };
+
+test("Recommended line: the card draws its line above the options, with the letter, the label and the why", async (t) => {
+  const it = recOne("rec-line", 50);
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await need(recLineOf(page, it), `No. ${it.n} draws no card-level Recommended line`);
+  const line = recLineOf(page, it);
+  assert.equal(await line.evaluate((el) => !!el.closest(".opts, label")), false, "the Recommended line sits inside an option");
+  assert.deepEqual(await line.locator(".key").allInnerTexts(), ["B"], "the Recommended line does not name letter B");
+  const text = await lineText(line), at = ["Recommended:", "Blue", REC_WHY].map((s) => text.indexOf(s));
+  assert.ok(at.every((i) => i >= 0) && at[0] < at[1] && at[1] < at[2], `the Recommended line reads "${text}", not Recommended, then B, then Blue, then the why`);
+  const lb = await line.boundingBox(), ob = await card(page, it).locator("label.opt").first().boundingBox();
+  assert.ok(lb.y + lb.height <= ob.y, "the Recommended line is not above the options");
+});
+
+test("Recommended line: it names the recommended option, not the old pick", async (t) => {
+  const it = recOne("rec-not-pick", 51);
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await need(recLineOf(page, it), `No. ${it.n} draws no Recommended line`);
+  const text = await lineText(recLineOf(page, it));
+  assert.ok(text.includes("Blue"), `the Recommended line does not name Blue: "${text}"`);
+  assert.equal(text.includes("Red"), false, `the Recommended line names Red, the old pick: "${text}"`);
+});
+
+test("Recommended line: the why prints once, in the line, and no option's star repeats it", async (t) => {
+  const it = recOne("rec-why-once", 52);
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const stars = await card(page, it).locator("label.opt .pick").allTextContents();
+  assert.equal(stars.some((s) => s.includes(REC_WHY)), false, `an option's star prints the why: ${JSON.stringify(stars)}`);
+  await need(recLineOf(page, it), `No. ${it.n} draws no Recommended line`);
+  const printed = (await card(page, it).textContent()).split(REC_WHY).length - 1;
+  assert.equal(printed, 1, `the why prints ${printed} times in No. ${it.n}, not once`);
+  assert.ok((await lineText(recLineOf(page, it))).includes(REC_WHY), "the why is not in the Recommended line");
+});
+
+test("Recommended line: a multi item lists each recommended option in option order, with its letter and label", async (t) => {
+  const it = multi("rec-multi", 53, { recommended: ["c", "a"] });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await need(recLineOf(page, it), `No. ${it.n} draws no Recommended line`);
+  assert.deepEqual(await recLineOf(page, it).locator(".key").allInnerTexts(), ["A", "C"], "the Recommended line does not name A and C, in option order");
+  const text = await lineText(recLineOf(page, it));
+  assert.ok(text.includes("Red") && text.includes("Green"), `the Recommended line does not name Red and Green: "${text}"`);
+  assert.equal(text.includes("Blue"), false, `the Recommended line names Blue, which is not recommended: "${text}"`);
+});
+
+test("Recommended line: a ranked item lists its recommended options in their order, with each place", async (t) => {
+  const it = ranked("rec-rank", 54, { recommended: ["c", "a"] });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await need(recLineOf(page, it), `No. ${it.n} draws no Recommended line`);
+  assert.deepEqual(await recLineOf(page, it).locator(".key").allInnerTexts(), ["C", "A"], "the Recommended line does not list C then A, in the ranked order");
+  assert.deepEqual(await recLineOf(page, it).locator(".ord").allInnerTexts(), ["1st", "2nd"], "the Recommended line does not give the places 1st and 2nd");
+});
+
+test("Recommended line: a widening option that is not recommended never appears in it", async (t) => {
+  const WIDEN = "Keep every tool and widen the shared list to take it";
+  const it = mk("rec-widen", 55, { options: [{ key: "a", label: WIDEN, how: "h", gain: "g", lose: "l", widens: true }, opt("b", "Blue"), opt("c", "Green")], recommended: "c", why: "Green keeps your ruling." });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await need(recLineOf(page, it), `No. ${it.n} draws no Recommended line`);
+  const text = await lineText(recLineOf(page, it));
+  assert.ok(text.includes("Green"), `the Recommended line does not name the recommended option Green: "${text}"`);
+  assert.equal(text.includes(WIDEN), false, `the Recommended line names the widening option: "${text}"`);
+  assert.deepEqual(await recLineOf(page, it).locator(".key").allInnerTexts(), ["C"], "the Recommended line names a letter other than C");
+});
+
+test("Recommended line control: a tap on the starred option still picks it", async (t) => {
+  const it = recOne("rec-star-tap", 56);
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const star = page.locator(`label[for="o-${it.id}-b"] .pick`);
+  assert.equal(await star.count(), 1, `the star is not on option B of No. ${it.n}`);
+  await star.click();
+  assert.equal(await page.isChecked(`#o-${it.id}-b`), true, "a tap on the starred option did not pick it");
+});
+
+test("Recommended line: a tap on the line picks nothing, and no option is checked", async (t) => {
+  const it = recOne("rec-tap-line", 57);
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await need(recLineOf(page, it), `No. ${it.n} draws no Recommended line to tap`);
+  assert.equal(await page.locator(`#item-${it.id} input:checked`).count(), 0, "an option is checked before the tap");
+  await recLineOf(page, it).click();
+  assert.equal(await page.locator(`#item-${it.id} input:checked`).count(), 0, "a tap on the Recommended line checked an option");
+  assert.equal(await page.locator("#send").isDisabled(), true, "a tap on the Recommended line opened Send");
+});
+
+test("Waiting on line: the context's Waiting on line is drawn as its own line, and the context no longer prints it", async (t) => {
+  const it = mk("wait-own", 58, { context: WAIT_CTX });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await need(waitLineOf(page, it), `No. ${it.n} draws no Waiting on line`);
+  assert.equal(await lineText(waitLineOf(page, it)), "Waiting on: " + WAIT, "the Waiting on line does not read the context's Waiting on line");
+  const ctx = await ctxOf(page, it).textContent();
+  assert.equal(ctx.includes("Waiting on:"), false, "the context still prints the Waiting on line");
+  assert.ok(ctx.includes("Meanwhile: nothing else waits."), "the context lost its Meanwhile line with the Waiting on line");
+});
+
+test("Waiting on line: it sits above the context", async (t) => {
+  const it = mk("wait-above", 59, { context: WAIT_CTX });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await need(waitLineOf(page, it), `No. ${it.n} draws no Waiting on line`);
+  const wb = await waitLineOf(page, it).boundingBox(), cb = await ctxOf(page, it).boundingBox();
+  assert.ok(wb.y + wb.height <= cb.y, "the Waiting on line sits below the context");
+});
+
+test("Waiting on line: it stays whole when the context runs past the 220-character clamp", async (t) => {
+  const it = mk("wait-clamp", 60, { context: `${LONG}\nWaiting on: ${WAIT}` });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await need(waitLineOf(page, it), `No. ${it.n} draws no Waiting on line`);
+  assert.match(await ctxOf(page, it).getAttribute("class"), /\bclamp\b/, `the context of No. ${it.n} is not clamped, so the case proves nothing`);
+  assert.equal(await lineText(waitLineOf(page, it)), "Waiting on: " + WAIT, "the Waiting on line is cut or changed past the clamp");
+  assert.equal(await waitLineOf(page, it).evaluate((el, id) => !!el.closest("#ctx-" + id), it.id), false, "the Waiting on line sits inside the clamped context");
+});
+
+test("Waiting on line: an item with a Waiting on line and no valid recommendation draws the line and no Recommended line", async (t) => {
+  const it = noRec(mk("wait-no-rec", 61, { context: WAIT_CTX }));
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await need(waitLineOf(page, it), `No. ${it.n} draws no Waiting on line`);
+  assert.equal(await recLineOf(page, it).count(), 0, `No. ${it.n} draws a Recommended line with no recommendation`);
+});
+
+test("control: an old item with no recommendation and no Waiting on line draws neither line, and raises no error", async (t) => {
+  const it = noRec(mk("old-neither", 62, { context: "Goal: pick one colour. Waiting on you for the next step." }));
+  const errors = [];
+  const page = await open(t, { items: [it], errors }); if (!page) return;
+  await need(card(page, it), `No. ${it.n} is not drawn`);
+  assert.equal(await card(page, it).locator("label.opt").count(), 2, `No. ${it.n} does not draw its two options`);
+  assert.equal(await recLineOf(page, it).count(), 0, `No. ${it.n} draws a Recommended line with no recommendation`);
+  assert.equal(await waitLineOf(page, it).count(), 0, `No. ${it.n} draws a Waiting on line with no Waiting on line in its context`);
+  assert.deepEqual(errors, [], "the page raised an error on an old item");
+});
+
+test("Recommended line: a decision with neither recommended nor pick draws no DIV.recline among its card's children", async (t) => {
+  const it = noRec(mk("rec-none-child", 65));
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await need(card(page, it), `No. ${it.n} is not drawn`);
+  const kids = await card(page, it).evaluate((c) => [...c.children].map((e) => e.tagName + "." + e.className));
+  assert.equal(kids.includes("DIV.recline"), false, `No. ${it.n} draws a DIV.recline with no recommendation`);
+});
+
+// Full size: a long recommended label and a long Waiting on line, at each phone width and theme.
+const sizeItem = () => mk("rec-size", 63, { options: [opt("a", "Red"), opt("b", LONG_LABEL), opt("c", "Green")], recommended: "b", why: REC_WHY, context: WAIT_CTX });
+for (const scheme of ["light", "dark"]) for (const width of [430, 390, 360]) {
+  test(`the Recommended line and the Waiting on line stay inside the card and the page, with a long label, at ${width} wide, ${scheme} scheme`, async (t) => {
+    const it = sizeItem();
+    const page = await open(t, { items: [it], viewport: { width, height: 900 }, scheme }); if (!page) return;
+    await need(recLineOf(page, it), `No. ${it.n} draws no Recommended line to fit at ${width} px`);
+    await need(waitLineOf(page, it), `No. ${it.n} draws no Waiting on line to fit at ${width} px`);
+    const right = await card(page, it).evaluate((c) => Math.max(...[c, ...c.querySelectorAll(".recline, .recline *, .waitline, .waitline *")].map((e) => e.getBoundingClientRect().right)));
+    assert.ok(right <= width, `a line in No. ${it.n} runs to ${Math.round(right)} px, past the ${width} px screen`);
+    const scrollW = await page.evaluate(() => document.documentElement.scrollWidth);
+    assert.ok(scrollW <= width, `the page is ${scrollW} px wide on a ${width} px screen`);
+  });
+}
+
+for (const scheme of ["light", "dark"]) {
+  test(`the Recommended line and the Waiting on line read at 4.5:1 or more on their ground, ${scheme} scheme`, async (t) => {
+    const it = sizeItem();
+    const page = await open(t, { items: [it], scheme }); if (!page) return;
+    for (const [what, loc] of [["Recommended line", recLineOf(page, it)], ["Waiting on line", waitLineOf(page, it)]]) {
+      await need(loc, `No. ${it.n} draws no ${what}`);
+      const ink = await loc.evaluate((el) => getComputedStyle(el).color);
+      const ground = await loc.evaluate((el) => { for (let n = el; n; n = n.parentElement) { const b = getComputedStyle(n).backgroundColor; if (b !== "rgba(0, 0, 0, 0)" && b !== "transparent") return b; } return null; });
+      const fg = hexOf(ink), bg = hexOf(ground);
+      assert.ok(fg && bg, `${what} has a colour the check cannot read in the ${scheme} scheme: ink ${ink}, ground ${ground}`);
+      const r = await ratioOf(page, fg, bg);
+      assert.ok(r >= 4.5, `${what} reads ${r.toFixed(2)}:1 in the ${scheme} scheme, under 4.5:1`);
+    }
+  });
+}
 
 // The number on a card is the stable number the owner answers by, not a database id. Its hover text says so, so the owner never reads it as one. Both cases check that text: on an open card and on a ruling card.
 const N_MEANING = /item number: the stable number you answer by; not a database id/i;
