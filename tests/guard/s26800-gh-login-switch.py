@@ -37,9 +37,9 @@ gl("a gh command after a semicolon, with no switch, is denied", "deny", "cd x; g
 gl("a gh command after a pipe, with no switch, is denied", "deny",
    "printf '{}' | gh api -X PUT repos/shivinate7/claude-settings/branches/main/protection --input -",
    "'{}' | gh api -X PUT repos/shivinate7/claude-settings/branches/main/protection --input -")
-gl("a gh api piped to jq, with no switch, is denied", "deny",
+gl("a gh api piped to a parser, with no switch, is denied", "deny",
    "gh api repos/shivinate7/claude-settings/branches/main/protection | jq .",
-   "gh api repos/shivinate7/claude-settings/branches/main/protection | jq .")
+   "gh api repos/shivinate7/claude-settings/branches/main/protection | ConvertFrom-Json")
 gl("a gh api split by line continuations, with no switch, is denied", "deny",
    "gh api -X PATCH \\\n  repos/shivinate7/claude-settings/branches/main/protection/required_status_checks \\\n  -f strict=true",
    "gh api -X PATCH `\n  repos/shivinate7/claude-settings/branches/main/protection/required_status_checks `\n  -f strict=true")
