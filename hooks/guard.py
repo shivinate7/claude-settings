@@ -1500,6 +1500,15 @@ CAP_DEADLINE_ASSIGN = re.compile(
     r"['\"]?" + re.escape(CAP_DEADLINE_FIELD) + r"['\"]?\s*[:=]\s*['\"]?([0-9][0-9T:.+\-Zz]*(?: [0-9][0-9:.+\-Zz]*)?)"
 )
 
+# A cap-lift end a command takes from a variable or a substitution, not from text after the field. VALUE_REF reads
+# `$name` or `${name}` after the field, so a `jq --arg name LITERAL` can be read for its literal. COMPUTED_REF reads
+# a `$` or a backtick there: `$(date ...)`, `$D`, `$ENV.D`. Both are anchored on the field name and linear.
+_CAP_FIELD_VALUE = r"['\"]?" + re.escape(CAP_DEADLINE_FIELD) + r"['\"]?\s*[:=]\s*['\"]?"
+CAP_DEADLINE_VALUE_REF = re.compile(_CAP_FIELD_VALUE + r"\$\{?([A-Za-z_][A-Za-z0-9_]*)")
+CAP_DEADLINE_COMPUTED = re.compile(_CAP_FIELD_VALUE + r"[$`]")
+CAP_ISO_END = r"[0-9][0-9T:.+\-Zz]*(?: [0-9][0-9:.+\-Zz]*)?"
+CAP_END_COMPUTED = "computed at write time, not shown"
+
 
 def is_settings_file(path: str, cwd: str = "") -> bool:
     """True when the path, or the path it resolves to, names a settings file.
@@ -1653,9 +1662,33 @@ def cap_deadline_text(parts) -> str:
         if isinstance(part, str):
             # A double-quoted shell write spells each JSON quote as a backslash and a quote. One
             # replace, linear, un-escapes it so the pattern reads the pair the file will hold.
-            for found in CAP_DEADLINE_ASSIGN.finditer(part.replace('\\"', '"')):
+            plain = part.replace('\\"', '"')
+            for found in CAP_DEADLINE_ASSIGN.finditer(plain):
                 text = found.group(1)
+            # A `jq --arg name 'LITERAL'` end reaches the field as `$name`: read the literal it binds.
+            for ref in CAP_DEADLINE_VALUE_REF.finditer(plain):
+                bound = re.search(r"--arg\s+" + re.escape(ref.group(1)) + r"\s+['\"]?(" + CAP_ISO_END + ")", plain)
+                if bound:
+                    text = bound.group(1)
     return text
+
+
+def cap_deadline_computed(raw: str) -> bool:
+    """True when a shell command sets the cap-lift field to a value it computes at write time and names no literal end.
+
+    `$(date ...)`, a backtick, a shell variable, or a `jq --arg name "$VAR"` after the field: no readable end
+    follows, so the ask says so (owner R37, page item 602 pick a: the ask is the check on the length). A literal
+    end, readable or not, is not computed: an unparseable literal stays silent for `hooks/config_watch.py` to
+    revoke, and a `jq --arg name 'literal'` end is read by `cap_deadline_text`. Shell route only: the same text
+    in a Write is a literal string the file will hold.
+    """
+    plain = raw.replace('\\"', '"')
+    if cap_deadline_text([raw]) or not CAP_DEADLINE_COMPUTED.search(plain):
+        return False
+    for ref in CAP_DEADLINE_VALUE_REF.finditer(plain):
+        if re.search(r"--arg\s+" + re.escape(ref.group(1)) + r"\s+['\"]?[^\s'\"$`]", plain):
+            return False   # bound to some other literal: an unparseable one, which stays silent
+    return True
 
 
 def cap_deadline_end(parts) -> str:
@@ -1776,6 +1809,8 @@ def cap_with_deadline(change: str, end: str) -> str:
     """Join the cap-lift end, when the write sets one, to the reading that the ask prints."""
     if not end:
         return change
+    if end == CAP_END_COMPUTED:
+        return (change + ", " if change else "") + "cap lift end " + end
     return (change + ", " if change else "") + "cap lift ends " + end + " (US Central)"
 
 
@@ -5199,7 +5234,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = shell_write_hit(raw, cwd, is_settings_file)
     if matched:
         model = cap_change(raw)
-        end = cap_deadline_end(cap_sed_parts(raw, matched, cwd))
+        end = cap_deadline_end(cap_sed_parts(raw, matched, cwd)) or (CAP_END_COMPUTED if cap_deadline_computed(raw) else "")
         change = cap_with_deadline(model, end)
         if change:
             ask_command("agent-model-cap", cap_ask_reason(change, matched, end_only=not model),
