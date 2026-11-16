@@ -191,6 +191,11 @@ def planned_nightly_skip(text):
     return text.replace("\n  checks:\n", "\n" + SKIP_JOB + "  checks:\n", 1)
 
 
+# checks-hooks' header and its job-level if in checks.yml. A case swaps that if line for its own, so the subject is the job's one if.
+HOOKS_HEAD = "  checks-hooks:\n\n    runs-on: ubuntu-latest\n    needs: scope\n"
+HOOKS_IF = "    if: ${{ needs.scope.outputs.records_only_skip != 'true' }}\n"
+
+
 class PushOffRollup(unittest.TestCase):
     """Owner page item 880 (11:53 CST Nov 15): a Windows or mutation job keeps the push guard, `github.event_name != 'push'`, as its
     job-level if. all-jobs-passed runs only on a pull_request, and a pull_request runs every such job, so the rollup still needs it and
@@ -263,9 +268,8 @@ class MacOnceByBatchRollup(unittest.TestCase):
         # Control: a job-level if that reads a scope flag is refused on a job that scope-skips does not name. The subject is
         # checks-hooks, which is no macOS job, so no scope skip or entry of the planned file covers it.
         planned = scope_skips.planned_scope_skips(self.text)
-        anchor = "  checks-hooks:\n"
-        self.assertEqual(planned.count(anchor), 1, "checks-hooks' header changed: this case must follow it")
-        text = planned.replace(anchor, anchor + "    if: ${{ needs.scope.outputs.checks_macos == 'true' }}\n", 1)
+        self.assertEqual(planned.count(HOOKS_HEAD + HOOKS_IF), 1, "checks-hooks' header changed: this case must follow it")
+        text = planned.replace(HOOKS_HEAD + HOOKS_IF, HOOKS_HEAD + "    if: ${{ needs.scope.outputs.checks_macos == 'true' }}\n", 1)
         self.assertTrue(off_problems(text) or needs_problems(text), "a flag-reading job-level if on an unnamed job passes the rollup rules")
 
 
@@ -387,9 +391,8 @@ class ScopeSkipsWiring(unittest.TestCase):
 
     def test_a_job_outside_scope_skips_that_keeps_a_job_level_if_is_flagged(self):
         # Control: a job that scope-skips does not name, with a job-level if, is refused, since all-jobs-passed would read its skip as red.
-        anchor = "  checks-hooks:\n"
-        self.assertEqual(self.planned.count(anchor), 1, "checks-hooks' header changed: this case must follow it")
-        text = self.planned.replace(anchor, anchor + "    if: ${{ github.event_name != 'push' }}\n", 1)
+        self.assertEqual(self.planned.count(HOOKS_HEAD + HOOKS_IF), 1, "checks-hooks' header changed: this case must follow it")
+        text = self.planned.replace(HOOKS_HEAD + HOOKS_IF, HOOKS_HEAD + "    if: ${{ github.event_name != 'push' }}\n", 1)
         clean = all_problems(self.planned)
         self.assertTrue([p for p in all_problems(text) if p not in clean], "a job outside scope-skips with a job-level if passes the rules")
 

@@ -188,6 +188,24 @@ class ClearRuleScanner(unittest.TestCase):
         self.assertFalse(clear_rule.clears(self.R, self.N, PUSH, text),
                          "a real || means the job may run in a push run, so it stays needed and its skip blocks the clear")
 
+    def test_a_pull_request_test_in_a_parenthesized_and_group_leaves_the_job_out(self):
+        # `(A && github.event_name == 'pull_request')` is a conjunct of the whole if:, so the job runs only in a pull_request run.
+        # Named failure: the group reads as one opaque conjunct, so the job stays needed and the push run's skip blocks the clear.
+        want = "(!cancelled() && github.event_name == 'pull_request') && github.head_ref != 'x'"
+        text = extra_workflow(f"if: {want}")
+        self.assert_read(text, want)
+        self.assertTrue(clear_rule.clears(self.R, self.N, PUSH, text),
+                        "a pull_request test inside a parenthesized && group is a conjunct of the whole, so the job is left out and the push run clears")
+
+    def test_an_or_inside_a_parenthesized_group_keeps_the_job_needed(self):
+        # `(A || github.event_name == 'pull_request')` may be true in a push run, so the job stays needed and its skip blocks the clear.
+        # Named failure: a fix that reads each event test inside a group as a conjunct, whatever the operator, leaves the job out.
+        want = "(!cancelled() || github.event_name == 'pull_request') && github.head_ref != 'x'"
+        text = extra_workflow(f"if: {want}")
+        self.assert_read(text, want)
+        self.assertFalse(clear_rule.clears(self.R, self.N, PUSH, text),
+                         "an || inside a parenthesized group may run in a push run, so the job stays needed and its skip blocks the clear")
+
 
 class ClearRuleNightly(unittest.TestCase):
     """R61 part 3: how a skipped nightly is classified. Controls: each holds on the rule as it stands, since a job whose `!=`
