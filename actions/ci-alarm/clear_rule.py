@@ -237,7 +237,7 @@ def empty_without_evidence(jobs, event):
     """True when a completed `success` run of `event` (a push-group event) ran no check and carries no evidence (the module docstring).
     Empty: no job but `scope`, `push-skip` and `nightly-skip` concluded success. Evidence: a `push` run whose push-skip job is success and scope job is skipped.
     Callers check the run-level conditions (the event is in rule_events, the run concluded success) before they read the jobs."""
-    # One of three homes of "proven push" (push-skip success and scope skipped; also nightly-skip.py `proven` and the stable-mover proof step).
+    # One of two homes of "proven push" (push-skip success and scope skipped; also nightly-skip.py `proven`).
     # This file cannot import the others: it runs from a bare action path in other repos (module docstring), so only the standard library exists.
     if any(j.get("status") == "completed" and j.get("conclusion") == "success" and j["name"] not in BOOKKEEPING for j in jobs):
         return False
