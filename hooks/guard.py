@@ -113,8 +113,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   check-tail           deny. A named check piped into any filter after the run, or a lint piped into
                        any later command with a commit or push later in the call.
                        (background-check-through-verdict)
-  check-timeout        deny. A `merge --lane-lint` run in the foreground, or in the background under a
-                       time limit below its bound. (background-check-through-verdict)
+  check-timeout        deny. A `merge --lane-lint` run in the foreground with a time limit set, or in the
+                       background under a time limit below its bound. A run with no limit passes.
+                       (background-check-through-verdict)
   playwright-browsers-path, playwright-install
                        deny. (playwright-browsers-path, playwright-install-once)
   rm-var-unguarded     deny. A recursive delete under an unguarded variable.

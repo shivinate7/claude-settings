@@ -532,9 +532,8 @@ CHECK_TAIL_REASON = (
 # A BACKGROUND LANE LINT'S TIME LIMIT (rule check-timeout). `merge --lane-lint` waits for its pushed head. Then it
 # runs one ci-job under the merge tool's lint bound. A call whose `timeout` is shorter ends before the verdict.
 # The bound is read from the merge tool, never copied. The tool caps a foreground limit below the bound,
-# so a foreground lane lint is refused at any limit. A call with no `timeout` gets the tool's default,
-# which is under the bound too. An unloadable merge tool gives an unknown bound: nothing is refused.
-BACKGROUND_DEFAULT_TIMEOUT_MS = 1800000
+# so a foreground lane lint that sets a limit is refused at any limit. A call that sets no `timeout` is not
+# judged (owner ruling own-896-897-glued-amp-b). An unloadable merge tool gives an unknown bound: nothing is refused.
 
 
 def check_timeout_bound_ms():
@@ -551,8 +550,8 @@ def check_timeout_bound_ms():
 
 def check_timeout_hit(stripped: str, background: bool, timeout_ms=None) -> str:
     """The matched text when a call runs `merge --lane-lint` with too little time, else ''.
-    The foreground has too little at any limit. The background has too little under the bound.
-    `timeout_ms` is the `timeout` of the call. None means the default."""
+    A call that sets no limit is not judged. A foreground call that sets one has too little at any limit.
+    A background call has too little under the bound. `timeout_ms` is the `timeout` of the call, None when unset."""
     hit = ""
     for segment in split_segments(stripped):
         word = check_stage(segment, False)  # False: ci-job is no lane lint
@@ -560,15 +559,13 @@ def check_timeout_hit(stripped: str, background: bool, timeout_ms=None) -> str:
         if word and tokens and "--lane-lint" in tokens:
             hit = word + " --lane-lint"
             break
-    if not hit:
+    if not hit or isinstance(timeout_ms, bool) or not isinstance(timeout_ms, (int, float)):
         return ""
     bound = check_timeout_bound_ms()
     if bound is None:
         return ""
     if not background:
         return hit
-    if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, (int, float)):
-        timeout_ms = BACKGROUND_DEFAULT_TIMEOUT_MS
     return hit if timeout_ms < bound else ""
 
 
