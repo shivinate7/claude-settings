@@ -6,4 +6,6 @@
 
 **Decision.** `pr-review-record` (a review log names the head it reviewed, and only an open pull request takes one). Its form ends a record at the CI line, and its `--fix-check` rule reads the newest earlier record.
 
+**Fix.** Consultant's pick, 02:00 CST Nov 16 (not owner-typed): the refusal names the prose line below the CI line. The parser route is not taken, so `parse_review` keeps returning None for that log, as `test_a_note_line_after_a_blank_line_below_the_ci_line_is_not_a_record` pins. This route needs no owner grant.
+
 **Retire.** `merge/test_merge.py` does not yet hold this case. Add it: a newest review log with one prose line below the CI line, then `--review-record --fix-check` from that log's Head. It asserts that the refusal names the prose line. Today's refusal names no prose. `parse_review` still returns None for that log, as test_a_note_line_after_a_blank_line_below_the_ci_line_is_not_a_record pins. The parser route, reading record lines only, would change that pinned test and decision `pr-review-record`, so it needs the owner's grant first. The case is red on today's code and green after the fix.
