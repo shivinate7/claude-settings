@@ -1,0 +1,16 @@
+{
+ "id": "merge-on-lint-pass-child-repos",
+ "title": "Child repos: merge a PR on its lane lint pass, as in claude-settings",
+ "priority": "next",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "runner 11 and runner 12",
+ "blockedBy": [
+  "merge-on-lint-pass"
+ ],
+ "updatedAt": "2026-11-15T19:24:00-06:00",
+ "why": "[19:24 CST Nov 15, triage] Todo. Owner 19:23 CST (relayed; ruling own-web-merge-3564-child-repos): the child-repo batch runners implement merge-on-lint-pass (ruling own-merge-on-lint-pass) for their repos too. Scope: the child repos runners 11 and 12 serve per the roadmap CLAUDE.md Standing sessions lines (runner 11: degen and home, session_013NEJKzRugXqBZrZ8xwXmW7; runner 12: q_max, banchi, mailaudit, ios-adblock and joyous, session_013NEJL33U96UiyE6UtCHct3). Not yet built even in claude-settings (#3562 is the build, blocked until #3564 lands). The consultant is sending runners 11 and 12 the child-repo part. Owner's question \"this means things land faster yea?\" is open (to the consultant); no measure yet. Guard or check: unverified. (source: consultant 19:23 CST via the coordinator, relayed by triage; not owner-typed here) New step; none existed.",
+ "source": "consultant 19:23 CST via the coordinator, relayed by triage; not owner-typed here",
+ "note": "Todo. Owner 19:23 CST (relayed; ruling own-web-merge-3564-child-repos): the child-repo batch runners implement merge-on-lint-pass (ruling own-merge-on-lint-pass) for their repos too. Scope: the child repos runners 11 and 12 serve per the roadmap CLAUDE.md Standing sessions lines (runner 11: degen and home, session_013NEJKzRugXqBZrZ8xwXmW7; runner 12: q_max, banchi, mailaudit, ios-adblock and joyous, session_013NEJL33U96UiyE6UtCHct3). Not yet built even in claude-settings (#3562 is the build, blocked until #3564 lands). The consultant is sending runners 11 and 12 the child-repo part. Owner's question \"this means things land faster yea?\" is open (to the consultant); no measure yet. Guard or check: unverified."
+}

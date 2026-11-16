@@ -1,0 +1,11 @@
+{
+ "id": "own-web-merge-3564-child-repos",
+ "at": "2026-11-15T19:23:00-06:00",
+ "title": "The owner presses the web merge of #3564 himself; the child-repo runners implement merge-on-lint-pass too",
+ "ruling": "Owner words, verbatim as relayed (RELAYED, not read by triage as typed; typos kept): \"ok ill do that press. and then this means things land faster yea? have the child repos batch runner implement it for them too then too\". \"That press\" = his web-page merge of #3564 (the pin) once its run is green. Part 1: the owner will press the web merge of #3564 himself once its run is green; scope that PR only, his own act, no page task. Part 2, an order: the child-repo batch runners implement merge-on-lint-pass (ruling own-merge-on-lint-pass) for their repos too; scope: the child repos runners 11 and 12 serve (degen, home, q_max, banchi, mailaudit, ios-adblock, joyous, per the roadmap CLAUDE.md Standing sessions lines); not yet built even in claude-settings (#3562 is the build, blocked until #3564 lands); the consultant is sending runners 11 and 12 the child-repo part. OPEN QUESTION, recorded as unanswered: his \"this means things land faster yea?\" (to the consultant); no measure yet. Steps: merge-pin-required-checks, merge-on-lint-pass-child-repos.",
+ "quote": "ok ill do that press. and then this means things land faster yea? have the child repos batch runner implement it for them too then too",
+ "source": "Owner chat (verbatim as relayed; typos kept), relayed by the consultant (consultant → triage 19:23 CST) and the coordinator; not read by triage as typed",
+ "status": "open",
+ "step": "merge-on-lint-pass-child-repos",
+ "supersedes_none": "A new order and a one-PR act; it supersedes no ruling. It extends own-merge-on-lint-pass to the child repos."
+}
