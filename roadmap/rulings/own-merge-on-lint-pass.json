@@ -1,0 +1,16 @@
+{
+ "id": "own-merge-on-lint-pass",
+ "at": "2026-11-15T18:21:00-06:00",
+ "title": "A PR whose lane lint passed merges without waiting for its own CI run; main's run is the check (option b)",
+ "ruling": "Owner words, verbatim as the consultant relayed them (RELAYED, not read by triage as typed), answering the consultant's 18:20 CST question: \"B for sure\". Option b as the consultant states it: a PR whose lane lint passed merges without waiting for its own CI run; main's run after the merge is the check, and a red main reverts the blamed commit. The consultant says it departs from rule git-never-merge-failing-ci. The consultant builds it as subagent PRs (merge tool change, CLAUDE.md line, decision record). UNTIL the merge tool and CLAUDE.md change on main, the OLD rule governs every session. Addendum (coordinator 18:22 CST, relayed): the change also touches decision roles-each-layer-proves-once (\"The PR run is the merge check\"); the records to rewrite are the consultant's PR's to name; until its merge-tool PR lands the tool still requires a green run, so nothing changes for runner 10. Same direction as waiting-page item 902 (ready-gate-scope), a different gate; item 902 stays open.",
+ "quote": "B for sure",
+ "source": "Owner chat, answering the consultant's 18:20 CST question (verbatim as relayed), relayed by the consultant (consultant → triage 18:22 CST) and the coordinator; not read by triage as typed",
+ "status": "open",
+ "step": "merge-on-lint-pass",
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "git-never-merge-failing-ci (CLAUDE.md): \"Never merge a PR whose own run is red, or onto a red main, except its revert.\" (the consultant's reading, not re-read by triage; the red-main revert part stays; also touches decision roles-each-layer-proves-once, \"The PR run is the merge check\")"
+  }
+ ]
+}
