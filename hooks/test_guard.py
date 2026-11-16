@@ -23,7 +23,8 @@ every case, so CI can split the suite across jobs and drop none. A malformed val
 before a case runs.
 
 GUARD_SECTION_DIR=<folder> reads the section files from that folder instead of tests/guard/. A folder with no
-section file, or with two that share a `# section <n>` number, stops the run before any case.
+section file, or with a set that lint/_guard_sections.py faults (two files that share a `# section <n>` number,
+or a name whose number disagrees with its header), stops the run before any case.
 
 Each case drives the guard as Claude Code drives it: one JSON object on stdin, and the decision read
 back off stdout. An empty stdout is an allow. Anything else is parsed for permissionDecision.
@@ -76,6 +77,7 @@ from precompact_handoff import PREMISE_KINDS  # noqa: E402,F401  the one home of
 import precompact_handoff as ph  # noqa: E402,F401  the one home of the handoff and flag paths
 import local_time  # noqa: E402,F401  the one home of the inbox paths
 import mutate_shared  # noqa: E402,F401  module_files: every module a copied guard may import
+import _guard_sections  # noqa: E402  the one home of the section folder, header read and faults
 
 # Assembled, so this file never holds the token whole.
 ENV = "." + "env"
@@ -172,7 +174,7 @@ FAMILIES = {
     "start-session-audit": "the one PostToolUse command for start_session: a start below the floor (haiku) or with an unread handoff prints the stop line (interrupt_session or archive_session), the audit reuses guard.floor_hit, and any other start prints nothing",
     "ci-wait-cap": "the CI-wait cap: a send_later whose message says it waits on CI (the word CI or checks, PR run or PR runs, workflow run or workflow runs, check run, pipeline, or GitHub Actions) is refused past the cap in cap_minutes(), by delay_minutes (a number or a digit string) or an at time (with or without an offset); a call that is not about CI, a CI call at the cap, and a copy whose data file moves the limit are judged against that cap",
     "workflow-args": "a Workflow call whose args is, or holds as an array or object value, a placeholder (an all-caps word with an underscore, or __X__) is refused, naming it and the fix; an absent, empty or real args passes, and so does a short all-caps word or a sentence with an env var name",
-    "sections": "the section files: a set the loader refuses (no section file, two files with one number, a log check appended after the LOG_CHECKS_EXTRA join) stops a run before any case",
+    "sections": "the section files: a set the loader refuses (no section file, two files with one number, a name whose number disagrees with its header, a log check appended after the LOG_CHECKS_EXTRA join) stops a run before any case",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -569,30 +571,20 @@ def chained_ask(name, command, **kw):
 # The cases after the helpers above are section files in tests/guard/. A section file's first line is
 # `# section <n>`, where n orders them. n need not be a FAMILY line: a section with no FAMILY statement, such as s00442, keeps the module's default family, misc.
 # They run here, in this module's globals, in n order: the case and log-check order is the one-file order.
-SECTION_DIR = os.path.join(HERE, "..", "tests", "guard")
+SECTION_DIR = _guard_sections.SECTION_DIR
 
 
 def load_sections(section_dir):
-    """Run each section file of section_dir here, in n order. No file, or two files with one n, stops the run."""
-    found = []
-    for name in (sorted(os.listdir(section_dir)) if os.path.isdir(section_dir) else []):
-        if not name.endswith(".py"):
-            continue
-        path = os.path.join(section_dir, name)
-        with open(path, encoding="utf-8") as f:
-            text = f.read()
-        head = re.match(r"# section (\d+)\n", text)
-        if not head:
-            sys.exit("fixture setup failed: %s has no `# section <n>` first line" % path)
-        found.append((int(head.group(1)), path, text))
-    if not found:
+    """Run each section file of section_dir here, in n order. No file, or a set the shared loader faults, stops the run."""
+    sections = _guard_sections.read(section_dir)
+    if not sections:
         sys.exit("fixture setup failed: no section file in %s, so the run would hold no case" % section_dir)
-    numbers = [n for n, _, _ in found]
-    for n in sorted(set(numbers)):
-        if numbers.count(n) > 1:
-            sys.exit("fixture setup failed: section number %d is on %d section files" % (n, numbers.count(n)))
-    for _, path, text in sorted(found):
-        exec(compile(text, path, "exec"), globals())
+    faults = _guard_sections.faults(sections)
+    if faults:
+        sys.exit("\n".join("fixture setup failed: %s %s" % (os.path.join(section_dir, name), message)
+                           for name, message in faults))
+    for name, _, text in sorted(sections, key=lambda section: section[1]):
+        exec(compile(text, os.path.join(section_dir, name), "exec"), globals())
 
 
 load_sections(os.environ.get("GUARD_SECTION_DIR") or SECTION_DIR)
@@ -609,6 +601,7 @@ if UNJOINED:
 NO_SYMLINK = "a symlink needs a privilege this Windows run does not hold, so this check does not run here"
 EMPTY_SECTIONS_LABEL = "sections: a run with no section file stops before any case"
 DUPLICATE_SECTIONS_LABEL = "sections: two section files with one number stop the run before any case"
+NAME_NUMBER_LABEL = "sections: a section file named for another number than its header stops the run before any case"
 LATE_APPEND_LABEL = "sections: a log check appended after the join stops the run before any case"
 
 
@@ -658,14 +651,16 @@ def build_empty(folder):
     """A folder with no section file in it."""
 
 
-def build_two_with_one_number(folder):
-    """Every real section file, copied in, and one more file that claims the number of the first section."""
-    # A copy, not a link: a symlink needs a privilege the Windows run does not hold.
-    for name in os.listdir(SECTION_DIR):
-        if name.endswith(".py"):
-            shutil.copyfile(os.path.join(SECTION_DIR, name), os.path.join(folder, name))
-    with open(os.path.join(folder, "s00442-second.py"), "w", encoding="utf-8") as f:
-        f.write("# section 442\n")
+def build_with_extra(extra_name, extra_text):
+    """A builder: every real section file, copied in, and one more file, `extra_name`, holding `extra_text`."""
+    def build(folder):
+        # A copy, not a link: a symlink needs a privilege the Windows run does not hold.
+        for name in os.listdir(SECTION_DIR):
+            if name.endswith(".py"):
+                shutil.copyfile(os.path.join(SECTION_DIR, name), os.path.join(folder, name))
+        with open(os.path.join(folder, extra_name), "w", encoding="utf-8") as f:
+            f.write(extra_text)
+    return build
 
 
 def build_late_append(folder):
@@ -679,8 +674,10 @@ def build_late_append(folder):
 
 for _label, _check in (
         (EMPTY_SECTIONS_LABEL, section_refusal_check(build_empty, "no section file in")),
-        (DUPLICATE_SECTIONS_LABEL, section_refusal_check(build_two_with_one_number,
+        (DUPLICATE_SECTIONS_LABEL, section_refusal_check(build_with_extra("s00442-second.py", "# section 442\n"),
                                                          "section number 442 is on 2 section files")),
+        (NAME_NUMBER_LABEL, section_refusal_check(build_with_extra("s99997-wrong.py", "# section 99998\n"),
+                                                  "name number 99997 disagrees with its header, section 99998")),
 ):
     LOG_FAMILY[_label] = "sections"
     LOG_CHECKS = LOG_CHECKS + ((_label, _check),)
