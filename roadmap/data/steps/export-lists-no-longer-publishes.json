@@ -8,7 +8,7 @@
  "blockedBy": [],
  "why": "Coordinator relay 15:53 CST Nov 16: export-lists.yml no longer publishes since the 11:20 CST billing ruling; the app raises an alert at 5 days without a publish. Which repo holds it was not named.",
  "source": "Coordinator message to triage 9, 15:53 CST Nov 16 (relayed from runner 12's reads, not read by triage). Follows from the owner's 11:20 CST Nov 16 billing ruling: private runner jobs that cost money are dropped. Filed by triage 9.",
- "note": "Todo, low. Note only: one sighting, no lane; the owner may want a free way to publish before day 5. Searched steps at 15:54 CST Nov 16: no like step found.",
+ "note": "Todo, low. Note only: one sighting, no lane; the owner may want a free way to publish before day 5. Searched steps at 15:54 CST Nov 16: no like step found. Detail from runner 12 (15:54 CST, relayed): the repo is ios-adblock (PR 177). export-lists.yml no longer publishes on push or daily; the app alerts users at 5 days until someone dispatches it.",
  "updatedAt": "2026-11-16T15:54:00-06:00",
  "order": 201
 }

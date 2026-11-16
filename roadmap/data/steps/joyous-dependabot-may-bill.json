@@ -1,0 +1,14 @@
+{
+ "id": "joyous-dependabot-may-bill",
+ "title": "joyous: Dependabot version-update jobs run on hosted runners and may bill the private repo",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Runner 12's review of joyous PR 96, relayed 15:54 CST Nov 16: the weekly npm and github-actions Dependabot version-update jobs (.github/dependabot.yml) run on hosted runners and may bill the private repo, against the owner's 11:20 CST Nov 16 billing ruling. Unmeasured: whether they bill at all.",
+ "source": "Batch runner 12 message to triage 9, 15:54 CST Nov 16 (relayed, not read by triage). Filed by triage 9.",
+ "note": "Todo, low. Note only: one sighting, no lane. Searched steps at 15:54 CST Nov 16: no like step found. A fix would be a dependabot.yml change in joyous (its own repo), decided by the owner's billing ruling; not a claude-settings change.",
+ "updatedAt": "2026-11-16T15:54:00-06:00",
+ "order": 202
+}

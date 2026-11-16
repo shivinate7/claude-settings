@@ -8,7 +8,7 @@
  "blockedBy": [],
  "why": "Coordinator relay 15:53 CST Nov 16: in ios-adblock the pin-bump.yml approve loop ends red on dispatch. It follows from the 11:20 CST billing ruling, which made the repo's hosted jobs dispatch-only. Cause unmeasured.",
  "source": "Coordinator message to triage 9, 15:53 CST Nov 16 (relayed from runner 12's reads, not read by triage). Follows from the owner's 11:20 CST Nov 16 billing ruling: private runner jobs that cost money are dropped. Filed by triage 9.",
- "note": "Todo, low. Note only: one sighting, no lane. Searched steps at 15:54 CST Nov 16: no like step found.",
+ "note": "Todo, low. Note only: one sighting, no lane. Searched steps at 15:54 CST Nov 16: no like step found. Detail from runner 12 (15:54 CST, relayed): ios-adblock PR 177, pin-bump.yml lines 43-51: the approve loop looks for a pull_request run of checks.yml; checks.yml no longer has that trigger, so a dispatched pin bump opens a bot PR, enables auto-merge, then exits red before dispatching export-lists.yml.",
  "updatedAt": "2026-11-16T15:54:00-06:00",
  "order": 200
 }
