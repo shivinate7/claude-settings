@@ -43,11 +43,13 @@ ENV = {key: value for key, value in os.environ.items() if key not in STRIPPED}
 
 def git(repo, *args, text=None, env=None):
     """stdout of one git start in `repo`. A failure raises: a fixture that cannot be built is an error, not a case result."""
-    answer = _nowindow.run([VCS, "-C", repo, *IDENT, *args], input=text, capture_output=True, text=True,
-                           env=env or ENV, timeout=60)
+    # Bytes, not text mode: Windows text mode writes each LF as CRLF, and a blob or tree entry would keep the CR.
+    answer = _nowindow.run([VCS, "-C", repo, *IDENT, *args], input=None if text is None else text.encode("utf-8"),
+                           capture_output=True, env=env or ENV, timeout=60)
     if answer.returncode != 0:
-        raise RuntimeError("fixture: %s %s failed: %s" % (VCS, " ".join(args), answer.stderr.strip()))
-    return answer.stdout.strip()
+        raise RuntimeError("fixture: %s %s failed: %s"
+                           % (VCS, " ".join(args), answer.stderr.decode("utf-8", "replace").strip()))
+    return answer.stdout.decode("utf-8").strip()
 
 
 def init_repo(path):
