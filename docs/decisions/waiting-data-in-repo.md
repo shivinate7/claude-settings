@@ -18,7 +18,7 @@ Git is each artifact's home. The claude.ai link is one account's view of it.
 - The 14 roadmap step links become `artifact:<id>` cites under the same pick (fb-1458-2). Open: the links are still bare. Until they are fixed, the check runs with `--steps list`, which prints each step link and fails no step. Target, once the links are fixed: the guard that checks page writes refuses a bare link at each write to the record branch (coordinator's option a, event 46a1a427, 14:56 CST).
 - Owner, 2026-11-02 11:00 CST (waiting-page gripe, via the coordinator): the waiting page keeps a copy of its data in the repo, so a lost page loses no item. The owner said not to take the ask verbatim, but the gripe is real.
 - The id `waiting-data-in-repo` names this decision. The page writer's step lives in the waiting-page skill, not in a rule.
-- The waiting page's copy is folder `waiting/` on the record branch. It holds six collections: `items`, `answers`, `groups`, `asks`, `meta` and `receipts`. Each document is one file, `waiting/<collection>/<doc_id>.json` (rule `git-record-own-file-per-kind`, one file per kind). Receipts land at `waiting/receipts/<doc_id>.json`, the doc id being the answer id. The export never deletes a receipt file the fetch lacks: an archived receipt survives a page cleanup (ruling `own-archive-off-page`). The other five keep the mirror-delete.
+- The waiting page's copy is folder `waiting/` on the record branch. It holds six collections: `items`, `answers`, `groups`, `asks`, `meta` and `receipts`. Each document is one file, `waiting/<collection>/<doc_id>.json` (rule `git-record-own-file-per-kind`, one file per kind). Receipts land at `waiting/receipts/<doc_id>.json`, the doc id being the answer id. The export never deletes a file in any of the six collections: an archived doc survives a page cleanup (ruling `own-archive-off-page`, extended from receipts to all six by step `export-append-only-all-six`, a coordinator relay of 2026-11-15 01:00 CST with no owner-typed ruling).
 - The mockups live in the page's `designData` block. The export saves that block as `waiting/page/designData.json`.
 - A kept mockup lands in the repo's design folder on main, by PR (layout kind `design`, `docs/design` by default). The record branch holds the artifact page copies. Process-only: the artifact lane's reading of the owner's words "my repos' design folders" (fb-1458-1). Design-explore step 7 closes the gap.
 - Files use sorted keys, two-space indent and a final newline. An unchanged document stays byte-identical, so a commit shows only real change.
@@ -26,7 +26,7 @@ Git is each artifact's home. The claude.ai link is one account's view of it.
 - The export scans every value and key, the page text and each supporting text file before it writes. It refuses a token, a key, a cookie or auth header, a named cookie set with `=`, a bare bearer or basic credential, a password or credentials in a URL. It refuses a secret, token, key or cookie name in any case form (`apiKey`, `SECRET_KEY_BASE`) set to a random-looking value. It refuses an email address, a phone number or a postal address. The refusal prints each find's file, path and kind. It never prints the value. The page writer fixes the item on the page first.
 - Recovery needs no live page. The rebuild mode writes batch files of at most 50 writes each. The page writer sends them to a new page, then puts the design data back into the page.
 - The lint check flags a repo that has a waiting page but no `waiting/` folder on its record branch. It reads git refs. A missing ref, such as in a shallow clone, prints `unknown`. The check never passes or fails on that. Tools read the folder name through `lint/layout.py`, never as a literal.
-- The export has an `--all` mode. It exports each registered artifact with the same scan and mirror rules, and prints one verdict line per artifact. One artifact's refusal holds back no other. The skill step "Before you switch Claude accounts" runs it.
+- The export has an `--all` mode. It exports each registered artifact with the same scan and copy rules, and prints one verdict line per artifact. One artifact's refusal holds back no other. The skill step "Before you switch Claude accounts" runs it.
 - Briefs and handoffs are working files. The cite check does not read them.
 
 Cost: each run of the page writer makes one list call per page of each collection and starts one python process (unmeasured). It makes one commit when a file changed (unmeasured). No timer and no watcher.
@@ -34,7 +34,7 @@ Cost: each run of the page writer makes one list call per page of each collectio
 Known limits:
 
 - The scan reads shapes, not meaning. A personal fact in plain words, such as an employer or a city, passes. A password word whose whole value is a placeholder, a mask or a plain word also passes. So do `PWD=<path>`, a no-reply address and the ssh remote of a public git host.
-- A truncated fetch, such as a missed page of results, deletes the missed documents from the copy. Git history keeps them.
+- A truncated fetch, such as a missed page of results, deletes nothing from the six waiting collections: the missed documents stay as the copy last held them.
 
 Basis: owner rulings fb-1456-1, fb-1458-1, fb-1458-2 and fb-1512-1 ("wb"), the coordinator's note of 11:49 CST, and a named incident (see Incidents). Landed: set at merge.
 
