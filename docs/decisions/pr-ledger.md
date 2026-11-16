@@ -73,7 +73,7 @@ The first match wins, in this order. A held or unparseable record matches no rec
 
 The ledger reads no pull request's CI state. A batch line is a done record for the live head. `merge --lane-lint` checks the join, and the integration PR's CI run checks the merge. Its CI-side reads are main's runs, judged per workflow, for the main-red hold.
 
-Each next act has an age limit, in one constant, `PR_STATE_AGE_HOURS` in merge/merge.py. Every limit is unmeasured (coordinator pick A, 12:33 CST Nov 7). Fix check, fresh full review and lane round 2 and later are 72 h, unmeasured (coordinator pick, 12:01 CST Nov 12). Lane lint is 72 h, unmeasured (lane pick, 12:13 CST Nov 12). `waits on` has no limit: a hold goes red when it has no page item or debt; the coordinator measures the real ages after the label rollout. Batch is 24 h, a first guess at one batch cycle. Blocked on #N has no limit of its own and is red while #N is red. A next act over its limit is red.
+Only the two batch acts have an age limit, in one constant, `PR_STATE_AGE_HOURS` in merge/merge.py. Batch and batch run are 24 h, an unmeasured first guess at one batch cycle (coordinator pick A, 12:33 CST Nov 7). Every other act has no limit: lane round 1 to 4, fix check, fresh full review, lane lint, `waits on` and blocked on #N. The owner ruled that no fixed numeric limit stands anywhere (R37, no fixed numeric limits; owner, Nov 11, restated 18:35 CST Nov 15), which retired the 72 h limits. A hold still goes red when it has no page item or debt, and blocked on #N is red while #N is red. A batch act over its limit is red.
 
 A main-red hold shows on each batch line it holds.
 

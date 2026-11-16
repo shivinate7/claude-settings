@@ -35,7 +35,7 @@
                           the record stale and the line says unknown; the fix verifier then refuses. Any other difference keeps today's rules.
   merge --reviewed        one line per open PR, with its review state (bad when the newest record does not parse; no record when it has none),
                           its one next act, owner and age (`; next: ACT, owner OWNER, age Nh[, RED]`; ACT is batch, lane round N, fix check,
-                          fresh full review, waits on debt:SLUG|page:ID, batch run, blocked on #N, lane lint or none; RED when the act is over its limit
+                          fresh full review, waits on debt:SLUG|page:ID, batch run, blocked on #N, lane lint or none; RED when the act is batch or batch run over its limit
                           in PR_STATE_AGE_HOURS, or none; a held, parked or replaced label with no valid Waits line reads none, even on a draft;
                           lane lint, owner lane, is a done record with no lane-lint PASS at its head; blocked on #N
                           is a PR whose base branch is the head branch of open PR #N) and its live CI (not read for a ready PR with no record); then the PRs with no
@@ -4385,7 +4385,7 @@ REVIEW_BATCH_BUILD = "build next batch on the running head: "  # ... and when on
 REVIEW_BATCH_UNKNOWN = "batch line unknown "  # ... and when a read for the batch line stopped: the reason follows, in brackets
 
 # The PR ledger (decision pr-ledger, part 1): each open pull request gets one next act, read from GitHub alone.
-PR_STATE_AGE_HOURS = {"batch": 24, "lane round 1": 72, "lane round 2": 72, "lane round 3": 72, "lane round 4": 72, "fix check": 72, "fresh full review": 72, "batch run": 24, "lane lint": 72}  # hours a next act may wait before it reads RED, by act. Every limit is an unmeasured first guess; decision pr-ledger holds the picks. An act with no key has no limit: waits on, blocked on. The last `lane round` key is the granted extra round past REVIEW_LAST_ROUND (pr_next_round)
+PR_STATE_AGE_HOURS = {"batch": 24, "batch run": 24}  # hours a next act may wait before it reads RED, by act. Only the batch acts have a limit, an unmeasured first guess at one batch cycle (decision pr-ledger). An act with no key has no limit: the lane acts, waits on, blocked on
 PR_HOLD_LABELS = ("held", "parked", "replaced")  # a label that holds a pull request when a `Waits on:` line names what it waits for
 PR_BATCH_LABEL = "batch"  # an integration pull request in a batch run
 PR_RECORD_STATES = ("done", "open", "stale")  # the review states that give a record act; held and bad give none, so they fall to the label, blocked and draft rules
