@@ -1,0 +1,14 @@
+{
+ "id": "lane-next-acts-refresh-before-relay",
+ "title": "lane-next-acts.md is refreshed before each relay to a lane",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "At 15:13 CST Nov 16 the coordinator told the lane of PR 3569 that lane lint PASS was at its head, read from a stale lane-next-acts.md.",
+ "source": "Coordinator message to triage 9, 15:46 CST Nov 16: its Unstarted line of guard steps, each tied to a mistake of its own. The coordinator could not find the 14:51 CST list triage 8 meant, so these five are the coordinator's, not confirmed as triage 8's. Filed by triage 9.",
+ "note": "Todo. No lane, no PR. A check or habit that refreshes lane-next-acts.md from GitHub before each relay. Searched steps at 15:47 CST Nov 16: no like step found. Guard or check: yes (unverified).",
+ "updatedAt": "2026-11-16T15:46:00-06:00",
+ "order": 104
+}

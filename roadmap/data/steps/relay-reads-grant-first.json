@@ -1,0 +1,14 @@
+{
+ "id": "relay-reads-grant-first",
+ "title": "Before a session relays a grant to lanes, it reads the governing decision first",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "At 13:05 CST Nov 16 the coordinator relayed 'everyone merges' to 19 lanes before reading decision standing-merge-grant; corrected 13:07 CST.",
+ "source": "Coordinator message to triage 9, 15:46 CST Nov 16: its Unstarted line of guard steps, each tied to a mistake of its own. The coordinator could not find the 14:51 CST list triage 8 meant, so these five are the coordinator's, not confirmed as triage 8's. Filed by triage 9.",
+ "note": "Todo. No lane, no PR. A guard or check that refuses a relay of a grant to lanes until the session has read the decision it rests on. Searched steps at 15:47 CST Nov 16: no like step found. Guard or check: yes (unverified).",
+ "updatedAt": "2026-11-16T15:46:00-06:00",
+ "order": 100
+}

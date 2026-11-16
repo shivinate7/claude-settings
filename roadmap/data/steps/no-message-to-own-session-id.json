@@ -1,0 +1,14 @@
+{
+ "id": "no-message-to-own-session-id",
+ "title": "A guard refuses a message sent to the sender's own session id",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "At 14:03 CST Nov 16 the coordinator sent a one-word 'test' to its own session id.",
+ "source": "Coordinator message to triage 9, 15:46 CST Nov 16: its Unstarted line of guard steps, each tied to a mistake of its own. The coordinator could not find the 14:51 CST list triage 8 meant, so these five are the coordinator's, not confirmed as triage 8's. Filed by triage 9.",
+ "note": "Todo. No lane, no PR. A guard on send_message that refuses a target equal to the sender's own id. Searched steps at 15:47 CST Nov 16: no like step found. Guard or check: yes (unverified).",
+ "updatedAt": "2026-11-16T15:46:00-06:00",
+ "order": 101
+}

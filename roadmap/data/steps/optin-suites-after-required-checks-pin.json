@@ -1,0 +1,14 @@
+{
+ "id": "optin-suites-after-required-checks-pin",
+ "title": "A guard for opt-in test suites after a required-checks pin change",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "From the coordinator's handoff Unstarted line. The incident is not recalled in the coordinator's context, so this step carries no why. Needs the incident named before it can be built.",
+ "source": "Coordinator message to triage 9, 15:46 CST Nov 16: its Unstarted line of guard steps, each tied to a mistake of its own. The coordinator could not find the 14:51 CST list triage 8 meant, so these five are the coordinator's, not confirmed as triage 8's. Filed by triage 9.",
+ "note": "Todo. No lane, no PR. Unknown: the coordinator names the mistake; none is on record. Searched steps at 15:47 CST Nov 16: no like step found. Guard or check: yes (unverified).",
+ "updatedAt": "2026-11-16T15:46:00-06:00",
+ "order": 102
+}
