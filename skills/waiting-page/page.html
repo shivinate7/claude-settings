@@ -1225,8 +1225,23 @@ const isArrival = (it) => !!state.known && !mates(it).every((x) => state.known.h
 // A group sinks only when every member is in the set, so it never splits.
 const isSunk = (it) => !!state.sunk && mates(it).every((x) => state.sunk.has(x.id));
 function freezeSunk() {
-  if (state.sunk || !feed.items || !feed.answers) return;
-  state.sunk = new Set(state.items.filter((it) => !isRuling(it) && (isSaved(it) || answeredByWait(it))).map((it) => it.id));
+  if (!feed.items || !feed.answers) return;
+  if (!state.sunk) { state.sunk = new Set(state.items.filter((it) => !isRuling(it) && (isSaved(it) || answeredByWait(it))).map((it) => it.id)); return; }
+  releaseReopened();
+}
+// An item a snapshot makes open again (savedOf and answeredByWait read none; a Change keeps savedOf, so it stays) leaves the sunk set and the Undo panel at once, with no reload.
+// The owner's own Withdraw deletes the record on purpose, so a card the panel holds as withdrawn keeps its place and its Undo (Undo puts the answer back under it),
+// unless the answer it would restore is older than the item's added: that one is stale, and the card opens.
+function releaseReopened() {
+  const open = (it) => !isRuling(it) && !savedOf(it) && !answeredByWait(it);
+  const p = state.sentPanel;
+  const held = (it) => !!p && p.wrote.some((w) => w.withdrawn && w.it.id === it.id && w.prior && !staleAnswer(it, w.prior));
+  state.items.forEach((it) => { if (state.sunk.has(it.id) && open(it) && !held(it)) state.sunk.delete(it.id); });
+  if (!p || p.busy) return;
+  const left = p.wrote.filter((w) => !state.items.some((it) => it.id === w.it.id && open(it) && !held(it)));
+  if (left.length === p.wrote.length) return;
+  p.wrote = left;
+  if (!left.length) closeSent();
 }
 // A card sent on this visit joins the set under "sink", and the write records it, so Undo leaves a card that was already sunk where it is.
 function sinkSent(it) {
@@ -1262,7 +1277,9 @@ const byId = (id) => state.items.find((i) => i.id === id);
 // Every item that can hold an answer: the open ones, and the rulings an Overturn may answer.
 const answerable = () => [...state.items, ...state.rulings];
 // The owner's saved answer. A ruling was an open item once, so a record under its id that is no overturn is stale and counts as none.
-const savedOf = (it) => { const a = state.answers[it.id]; return a && (!isRuling(it) || a.choice === OVERTURN) ? a : undefined; };
+// A record older than the item's `added` is no answer: the writer reopened or reworded the item by moving `added` past it, and the card is open again.
+const staleAnswer = (it, a) => { const at = ts(a.at), added = ts(it.added); return Number.isFinite(at) && Number.isFinite(added) && at < added; };
+const savedOf = (it) => { const a = state.answers[it.id]; return a && (!isRuling(it) || a.choice === OVERTURN) && !staleAnswer(it, a) ? a : undefined; };
 const isSaved = (it) => !!savedOf(it) && !state.changing[it.id];
 // An item the owner answered that now waits on a CI run or a PR: `waits` and `lastAnswer` are both set. The page keeps no answers record for it.
 // savedOf and isSaved stay out of this on purpose (Withdraw and the receipts read them), so each place that counts it asks here too.
