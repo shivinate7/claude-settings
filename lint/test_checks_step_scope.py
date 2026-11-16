@@ -27,6 +27,7 @@ and read calls (open, run, join and the like), so a read one or two files down i
 """
 import ast
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -577,9 +578,19 @@ def tracked_md():
     return out.split()
 
 
+def folded_path(run):
+    """The path a run of constant join arguments names. `.` and `..` segments fold, and a leading `..` is dropped: the repo's
+    readers start in lint/ or hooks/, so join(HERE, "..", "docs", "x.md") names docs/x.md. "" when nothing is left."""
+    p = posixpath.normpath("/".join(run))
+    while p.startswith("../"):
+        p = p[3:]
+    return "" if p in (".", "..") else p
+
+
 def split_join_names(text):
-    """The paths that os.path.join builds from runs of constant arguments: join(ROOT, "docs", "x.md") is docs/x.md. A
-    non-constant argument ends a run. Empty when `text` does not parse as Python: its joins are then read as text."""
+    """The paths that os.path.join builds from runs of constant arguments: join(ROOT, "docs", "x.md") is docs/x.md (folded_path).
+    A non-constant argument ends a run. A join through pathlib `/` or an f-string is not read: a stated limit. Empty when
+    `text` does not parse as Python: its joins are then read as text."""
     try:
         tree = ast.parse(text)
     except SyntaxError:
@@ -592,8 +603,9 @@ def split_join_names(text):
                 if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                     run.append(arg.value)
                     continue
-                if run:
-                    out.add("/".join(run))
+                path = folded_path(run) if run else ""
+                if path:
+                    out.add(path)
                 run = []
     return out
 
