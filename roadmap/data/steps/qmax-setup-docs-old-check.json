@@ -1,0 +1,14 @@
+{
+ "id": "qmax-setup-docs-old-check",
+ "title": "q_max setup PR #1186: docs and checks.yml still describe the old required check; nothing pins stamp.yml's dispatch-only trigger",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Runner 12's reviewer notes on q_max PR 1186, relayed by the coordinator 16:36 CST Nov 16 (not read by triage): q_max docs/commands.md lines 112, 116 and 120 and checks.yml line 976 still describe the old required check, and no test pins stamp.yml's dispatch-only trigger. Non-blocking.",
+ "source": "Coordinator message to triage 9, 16:36 CST Nov 16, relaying runner 12's reviewer. Filed by triage 9.",
+ "note": "Todo, low. Notes only: one sighting, no lane, no PR here; the fix lands in q_max (its own repo) after item 929 settles how the setup PRs merge. Searched steps at 16:39 CST Nov 16: qmax-1011-carry is a different carry; no like step found.",
+ "updatedAt": "2026-11-16T16:39:00-06:00",
+ "order": 220
+}
