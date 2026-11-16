@@ -377,8 +377,9 @@ def _ampersand_split(segment: str):
 
 
 # The deepest nest of substitutions the guard reads. A command nested deeper is REFUSED: a nest this
-# deep is far more likely a runaway than a command Claude writes, and an unbounded read would hit
-# Python's recursion limit. A crash fails open, so past the bound the guard refuses instead.
+# deep is far more likely a runaway than a command Claude writes. A backtick nest is read by a recursive
+# call, so an unbounded read would hit Python's recursion limit (`$(` uses a stack). A crash fails open,
+# so past the bound the guard refuses instead.
 ENV_MAX_DEPTH = 64
 ENV_DEPTH_REASON = "substitutions are nested too deep for the guard to read"
 
