@@ -1,12 +1,14 @@
 {
   "added": "2026-11-13T17:31:00Z",
+  "closed": "2026-11-16T20:37:30Z",
   "context": "ANSWER to your question (20:29 CST Nov 14): 'glued' means an & typed with no space, like `build&echo done`; 'reader' is the part of the guard that splits a command into pieces so it can judge them. #2156 teaches the reader to see the glued &; the risk is that it also refuses valid commands, such as a web address with & in it. Nothing else changed; a drops it, b keeps it. How often it refuses wrongly is unmeasured.\nGoal: a guard's wrong refusals cost less than the harm it stops.\nIn plain words: the guard reads each shell command before it runs. The 'reader' is the part that splits a command into pieces so the guard can judge them. A 'glued &' is an & typed with no space, like `build&echo done`: the shell runs the left part in the background, so a check could hide behind it. PR #2156 teaches the reader to see that.\nProblem (rule): the risk is the reader refusing valid commands, because & also appears inside a web address like `curl x?a=1&b=2`. Wrong refusals on record: that one (with a wrong fix printed), `$[1&2]`, and `ci-job checks --lint & echo $! | cat`. How often it refuses wrongly is unmeasured, so R5's test ('only when its wrong refusals cost more than the harm it stops') cannot be run.\nBased on (ruling): R5; decision guard-that-cries-wolf-is-spent.\nDeparts from: main \u2014 main lists the gap as debt check-tail-trailing-amp; keeping adds the reader.",
-  "home": "decision guard-that-cries-wolf-is-spent; R5",
+  "home": "own-716-b-keep-2156-glued-amp",
   "id": "drain-2156-any-filter",
   "kind": "decision",
   "lastAnswer": {
-    "at": "2026-11-15T02:29:34Z",
-    "note": "Answered 20:29 CST Nov 14: what 'glued' and 'reader' mean, in the item text; no pick."
+    "at": "2026-11-15T17:57:48.288Z",
+    "choice": "b",
+    "note": ""
   },
   "n": 716,
   "options": [
@@ -29,8 +31,8 @@
   ],
   "owner": "triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
   "ref": "backlog-drain lane, #3154",
-  "replied": "2026-11-16T13:57:00-06:00",
-  "reply": "Re-pointed 13:57 CST Nov 16 on the consultant's word (relayed 13:54 CST): the question moved from PR #2156 to #3287, the fresh rebuild that replaced it. The question is unchanged: a drops the glued-& reader, b keeps it. Triage read no diff of #3287.",
+  "replied": "2026-11-16T14:37:24-06:00",
+  "reply": "Closed on your pick of b, Keep the widening, saved 11:57 CST Nov 15 (ruling own-716-b-keep-2156-glued-amp). I re-opened this item on Nov 16 as a new question when #2156 was replaced by #3287; that was my mistake, since your pick already covers the rebuild on #2015 that #3287 is (the consultant's word, relayed; I read no diff). The cost you accepted still stands: the reader may refuse valid commands such as an unquoted web address with & in it, and how often is unmeasured.",
   "repo": "shivinate7/claude-settings",
   "short": "#3287: widen the any-filter?",
   "shown": [
@@ -45,7 +47,7 @@
       "label": "Keep the widening"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "Keep the glued-& reader (now in PR #3287, which replaced #2156) on top of the any-filter, which may refuse valid commands?",
   "why": "Backlog-drain lane ledger in #3154; no past ruling settles it (triage read of rulings, steps and main's decisions 11:30 CST Nov 13)."
 }

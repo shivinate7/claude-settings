@@ -5,6 +5,8 @@
  "ruling": "Owner, page item 716 (drain-2156-any-filter), option b \"Keep the widening\", saved 11:57:48 CST Nov 15: rebuild #2156 on #2015 as the backlog-drain lane proposes, so the guard's reader sees a glued & (`build&echo done`). Cost accepted: it may refuse valid commands such as an unquoted URL with & in it; the wrong-refusal rate is unmeasured (item text), so rule R5's test cannot yet be run. Triage had picked a (drop); the owner chose b. Covers the act b names, no variant: the debt check-tail-trailing-amp on main closes when the build merges; step glued-amp-url-remedy (the wrong remedy for an unquoted URL) is not covered and stays a separate fix. Owner: nothing was starred or marked widening on the item.",
  "source": "waiting/answers/drain-2156-any-filter.json (2026-11-15T17:57:48Z = 11:57:48 CST Nov 15, choice b, optionId keep, no note). Owner; filed by triage.",
  "status": "open",
+ "pr": 3287,
+ "prNote": "PR #3287 replaced #2156 as the rebuild on #2015 (consultant 13:54 CST Nov 16, relayed; triage read no diff). Item 716 closed 14:37 CST Nov 16 on this pick.",
  "step": "check-tail-amp-tidy",
  "supersedes_none": "Read rulings narrated-tail-any-filter and any-filter-after-lane-lint (coordinator rulings, open): they refuse a tee or filter before tail or head; this ruling adds the glued & and reverses none of them. No earlier owner ruling on #2156 found in roadmap/rulings or steps (triage read, 12:05 CST Nov 15). Triage's drop pick was a pick, not a ruling."
 }
