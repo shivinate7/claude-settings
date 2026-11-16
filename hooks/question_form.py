@@ -37,7 +37,7 @@ nothing changes (a restatement of main) refuse as `question-departs`: the rule b
 in decision port-keeps-behaviour. departs_hit is its one predicate; lint/report_guard.py calls it too.
 The page writer's last three rules run after the form: `option-letter-keys` (an option's key is its
 position's letter, and a label that opens with a letter tag names that letter), `option-letters-frozen` (an option keeps the
-key, id and label it was shown with, and each option has a unique id) and `rework-off-page` (an open item never says it is being reworked).
+key and id it was shown with, may be reworded but never takes another shown option's label, and each option has a unique id) and `rework-off-page` (an open item never says it is being reworked).
 `option-labels-match-chat` runs in hooks/guard.py after all of those, because it reads the session's transcript, which item_hit never sees:
 page_label_hit(writes, transcript_path) -> (rule, matched). A chat question cites its item ("Page item: <id>") and writes "a) <text>" per
 option; a write of that item whose label for a letter differs from the chat's text for it is refused (chat_page_label_hit).
@@ -1304,14 +1304,18 @@ def option_letter_hit(op: str, data) -> str:
 # Nov 12), built against a named incident (incident in the record): triage reordered item 646 after the chat question
 # went out, so chat a became page b, and the owner's "a" could have been filed as the opposite pick. option_letter_hit
 # cannot see that: after the swap each key is still its position's letter. The item therefore carries `shown`, the
-# options as first shown, in order, each as {key, id, label}. A later write keeps each shown position's key, id and
-# label, may add a `note` to an option, and may append options when `shown` is extended by them. Each option carries a unique `id` that a stored answer
-# records, so a later move of the letters cannot change which option the owner meant (page_grant.py holds such an
-# answer for his word).
+# options as first shown, in order, each as {key, id, label}. A later write keeps each shown position's key and id,
+# may add a `note` to an option, and may append options when `shown` is extended by them. Each option carries a unique
+# `id` that a stored answer records, so a later move of the letters cannot change which option the owner meant
+# (page_grant.py holds such an answer for his word). The label may be reworded (owner, Nov 15 2026, evening CST: a is
+# apple and b is banana, never a is banana): the letter's meaning is its key and id, not its wording. A reword that
+# lands on another shown position's label is a swap that kept the ids, so it is refused.
 FROZEN_RULE = "option-letters-frozen"
 FROZEN_REASON = ("An option keeps the letter it was first shown with. Carry `shown`, the options as first shown, in "
                  "order, each as {key, id, label}. Give each option a short unique `id` that is never a lone letter. "
-                 "Keep each shown option's key, id and label and its position: never reorder, relabel or drop one. "
+                 "Keep each shown option's key, id and position: never reorder or drop one. "
+                 "A label may be reworded to say the same option in new words: keep it non-empty text, and never give it "
+                 "another shown option's wording. "
                  "A rule-driven change adds a `note` to the option and moves nothing. A new option goes at the end, and `shown` gets it on the same write. "
                  "(decision option-keys-are-letters, ruling R60: an option keeps its letter and carries an id)")
 SHOWN_FIELDS = ("key", "id", "label")
@@ -1334,15 +1338,22 @@ def _option_id_hit(options) -> str:
 
 
 def _shown_entry(entry):
-    """(key, id, label) of one shown entry or option, else None when it is no mapping."""
-    return tuple(entry.get(f) for f in SHOWN_FIELDS) if isinstance(entry, dict) else None
+    """(key, id) of one shown entry or option, else None when it is no mapping. The label is judged apart: it may be
+    reworded."""
+    return tuple(entry.get(f) for f in ("key", "id")) if isinstance(entry, dict) else None
+
+
+def _label_form(label) -> str:
+    """The label as compared between options: trimmed and case-folded, so "blue" reads as "Blue"."""
+    return label.strip().casefold()
 
 
 def frozen_letters_hit(op: str, data) -> str:
     """The matched text when this write of an open waiting-page decision that carries `options` breaks the freeze:
     an option with no unique id (or an id that is a lone letter), no `shown` list, an option at a shown position
-    that differs from the shown entry in key, id or label, fewer options than shown, or a `shown` shorter than the
-    options (an appended option is shown on the same write). A task, a note, a closed item and a write with no
+    that differs from the shown entry in key or id, an option whose label is no non-empty string or is the label
+    shown at another position, fewer options than shown, or a `shown` shorter than the options (an appended option
+    is shown on the same write). A task, a note, a closed item and a write with no
     `options` pass. The stored item is unseen: a write that carries `shown` is trusted, as the record says."""
     if not _open_decision(data) or "options" not in data:
         return ""
@@ -1360,6 +1371,13 @@ def frozen_letters_hit(op: str, data) -> str:
     for i, entry in enumerate(shown):
         if _shown_entry(options[i]) != _shown_entry(entry):
             return "option %s differs from the option shown at its letter" % _letter_of(i)
+    shown_labels = [_label_form(e["label"]) if isinstance(e.get("label"), str) else None for e in shown]
+    for i in range(len(shown)):
+        label = options[i].get("label")
+        if not isinstance(label, str) or not label.strip():
+            return "option %s has no label text" % _letter_of(i)
+        if any(_label_form(label) == other for at, other in enumerate(shown_labels) if at != i):
+            return "option %s carries the wording shown for another letter" % _letter_of(i)
     if len(shown) != len(options):
         return "shown holds fewer options than the write carries: extend shown with each appended option"
     return ""
