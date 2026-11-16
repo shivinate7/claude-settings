@@ -176,6 +176,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `feel-fix-waits-device-check` | A feel-fix is a change to how a screen feels: its motion, touch, timing or scroll. | [`docs/decisions/feel-fix-waits-device-check.md`](../docs/decisions/feel-fix-waits-device-check.md) |
 | `fewest-words-mandate` | Fewest words, most of all in front-end copy | [`docs/decisions/fewest-words-mandate.md`](../docs/decisions/fewest-words-mandate.md) |
 | `frozen-path-resolves-shell-vars` | Before rule 7 (frozen-path) matches the target of a shell write, it reads the command left to right. | [`docs/decisions/frozen-path-resolves-shell-vars.md`](../docs/decisions/frozen-path-resolves-shell-vars.md) |
+| `gh-api-budget` | Incident: at 12:05 CST on Nov 15, 2026 the REST core budget of the shared token read 15,000 of 15,000 spent. | [`docs/decisions/gh-api-budget.md`](../docs/decisions/gh-api-budget.md) |
 | `git-env-set-refused` | No agent command may set `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE`. | [`docs/decisions/git-env-set-refused.md`](../docs/decisions/git-env-set-refused.md) |
 | `github-apps-keep-access` | Owner, 2026-10-28 14:40 CDT (waiting page item 9, roadmap step c153): keep the access that Renovate, Cloudflare and Render have to claude-settings as it is. | [`docs/decisions/github-apps-keep-access.md`](../docs/decisions/github-apps-keep-access.md) |
 | `glossary-meets-owner-halfway` | Owner, 2026-11-01 18:46 CST: a session reads what the owner types by meaning, and the glossary keeps one name per thing. | [`docs/decisions/glossary-meets-owner-halfway.md`](../docs/decisions/glossary-meets-owner-halfway.md) |
@@ -540,6 +541,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `restart-plan` | Restart plan: how claude-settings lands work after the freeze | [`docs/plans/restart-plan.md`](../docs/plans/restart-plan.md) |
 | `shared-merge-tool` | Plan: the shared merge tool | [`docs/plans/shared-merge-tool.md`](../docs/plans/shared-merge-tool.md) |
 | `stalled-steps` | Plan: stalled steps (lane doing-needs-live-lane) | [`docs/plans/stalled-steps.md`](../docs/plans/stalled-steps.md) |
+| `stylisms-rules-table` | Plan: shiv-stylisms rules table | [`docs/plans/stylisms-rules-table.md`](../docs/plans/stylisms-rules-table.md) |
 | `test-ci-standard` | Plan: how good tests and CI are made, how far the repos are, and how to close the gap | [`docs/plans/test-ci-standard.md`](../docs/plans/test-ci-standard.md) |
 | `time-pinned-tests` | Time-pinned tests: per-repo list | [`docs/plans/time-pinned-tests.md`](../docs/plans/time-pinned-tests.md) |
 | `trial-results` | Trial results: Ambition Lenses, blind grade | [`docs/plans/trial-results.md`](../docs/plans/trial-results.md) |
