@@ -13491,8 +13491,8 @@ class ProtectionHost(merge.Host):
 class MergeChecksFromProtection(unittest.TestCase):
     """c189 part 1: main's own stamp.json pins no required check (merge.requiredChecks "none"), and a pinned list that disagrees with a non-empty branch protection is refused."""
     def test_main_stamp_pins_required_checks_to_none(self):
-        """Ruling own-merge-on-lint-pass (owner, 2026-11-15 18:21 CST), applied to claude-settings at 2026-11-16 14:02 CST (owner's pick a):
-        a PR whose lane lint passed merges without waiting for its own CI run, so main's stamp pins "none"."""
+        """Ruling own-merge-on-lint-pass: a PR whose lane lint passed merges without waiting for its own
+        CI run, so main's stamp pins requiredChecks "none"."""
         with open(os.path.join(HERE, "..", ".github", "stamp.json"), encoding="utf-8") as f:
             self.assertEqual(json.load(f)["merge"]["requiredChecks"], "none", 'main\'s stamp must pin requiredChecks "none" (ruling own-merge-on-lint-pass)')
 

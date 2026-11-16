@@ -2652,8 +2652,8 @@ class ModTestStep(unittest.TestCase):
         self.assertEqual(copies, [])
 
     def test_main_stamp_requires_no_check_and_mods_adds_no_name(self):
-        """Ruling own-merge-on-lint-pass (owner, 2026-11-15 18:21 CST), applied to claude-settings at 2026-11-16 14:02 CST (owner's pick a):
-        main's stamp pins merge.requiredChecks "none". The mod step adds no name to that pin, so a name added there would show as a list."""
+        """Ruling own-merge-on-lint-pass: main's stamp pins merge.requiredChecks "none". The mod step adds no name
+        to that pin, so a name added there would show as a list."""
         with open(STAMP, encoding="utf-8") as f:
             required = json.load(f)["merge"]["requiredChecks"]
         self.assertEqual(required, "none", 'main\'s stamp must pin requiredChecks "none" (ruling own-merge-on-lint-pass)')
