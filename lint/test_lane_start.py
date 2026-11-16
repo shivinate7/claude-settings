@@ -49,6 +49,30 @@ LANE_BRIEF_VALUE = "Lane brief:"
 TITLE_FORM = re.compile(r"Lane <(?:branch )?slug>:")
 LIST_TOOL = "mcp__claude-code-remote__list_sessions"
 CARRIER_ID = "session_LANECARRIER01"  # a live lane that carries the step, in the transcript's whole list read
+# A helper run reads the open pull requests of its repo through `gh` (lane-step-dup, part two). That read is live, and a
+# read that fails is a refusal, so every run puts a stand-in `gh` first on PATH. It answers the pull request list with none.
+GH_STAND_IN = os.path.join(RUN_FOLDER, "gh-stand-in")
+GH_STAND_IN_SH = """#!/bin/sh
+case "$*" in
+  */pulls*) printf 'HTTP/2.0 200 OK\\nContent-Type: application/json\\n\\n[]\\n' ;;
+  *) echo "stand-in gh: no answer for: $*" >&2; exit 1 ;;
+esac
+"""
+GH_STAND_IN_CMD = """@echo off
+echo %* | findstr /C:"/pulls" >nul
+if errorlevel 1 (
+  echo stand-in gh: no answer for: %* 1>&2
+  exit /b 1
+)
+echo HTTP/2.0 200 OK
+echo Content-Type: application/json
+echo.
+echo []
+"""
+# The caller's variables the helper's code reads (hooks/, merge/, hooks/git_reads.py) and the ones gh reads, removed so
+# each run reads the same environment whatever shell runs the suite.
+CALLER_ENV_READS = ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR",
+                    "CLAUDE_PROJECT_DIR", "GIT_DIR", "GH_REPO", "GH_HOST", "GH_TOKEN", "GITHUB_TOKEN")
 
 
 def write_list_transcript(path, rows):
@@ -67,6 +91,27 @@ def write_list_transcript(path, rows):
 
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)
+
+
+def gh_stand_in():
+    """The folder of the stand-in `gh`, written once per run. The .cmd file takes CRLF, as cmd.exe reads it."""
+    if not os.path.isfile(os.path.join(GH_STAND_IN, "gh")):
+        os.makedirs(GH_STAND_IN, exist_ok=True)
+        for name, text in (("gh", GH_STAND_IN_SH), ("gh.cmd", GH_STAND_IN_CMD)):
+            newline = "\r\n" if name.endswith(".cmd") else "\n"
+            with open(os.path.join(GH_STAND_IN, name), "w", encoding="utf-8", newline=newline) as handle:
+                handle.write(text)
+        os.chmod(os.path.join(GH_STAND_IN, "gh"), 0o755)
+    return GH_STAND_IN
+
+
+def helper_env():
+    """The environment of one helper run: this process's, minus the caller's variables the helper reads, with the stand-in
+    `gh` first on PATH. The PATH key is found in whatever case the platform gives it."""
+    env = {k: v for k, v in os.environ.items() if k not in CALLER_ENV_READS}
+    path_key = next((k for k in env if k.upper() == "PATH"), "PATH")
+    env[path_key] = gh_stand_in() + os.pathsep + env.get(path_key, "")
+    return env
 
 
 def tree_listing(folder):
@@ -184,7 +229,7 @@ class LaneStartHelper(unittest.TestCase):
     def run_helper(self, *args, cwd=None):
         self.assertTrue(os.path.isfile(HELPER), "bin/lane-start is missing, so no lane start can be printed")
         return subprocess.run([sys.executable, HELPER] + list(args), cwd=cwd or self.work,
-                              capture_output=True, text=True, timeout=60)
+                              capture_output=True, text=True, timeout=60, env=helper_env())
 
     def start(self, *extra, brief_text="Do the task.\n", grant=GRANT, slug=SLUG, topic=TOPIC):
         """A successful start, with its JSON decoded. Fails the case, with the helper's stderr, when the helper refuses."""
