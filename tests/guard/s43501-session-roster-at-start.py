@@ -1,4 +1,4 @@
-# section 43500
+# section 43501
 FAMILY = "brief-ids-in-roster"  # the role-word brief cases, and the decision record checks at the end of this section
 
 # ---- Session roster at start (decision brief-ids-in-roster, which holds the ruling and its time). Three parts:
