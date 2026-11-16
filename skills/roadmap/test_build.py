@@ -42,6 +42,7 @@ CONFLICT = "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> 1234567 (other)\n"
 GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
 _NO_LANE = object()  # item(): the default, which leaves the row's lane key out
 _ABSENT = object()  # commit_step(): a field set to this is left out of the step file
+_OWN_REPO = object()  # rest_draft(): the head repo is the base repo of the case
 # get_session's status_bucket as list_sessions returns it: the SESSION_STATUS_BUCKET_* enum names, measured on real rows.
 BUCKET_COMPLETED = "SESSION_STATUS_BUCKET_COMPLETED"
 BUCKET_REVIEW_READY = "SESSION_STATUS_BUCKET_REVIEW_READY"
@@ -709,10 +710,14 @@ class UpkeepFixture(Fixture):
             row["createdAt"] = created
         return row
 
-    def rest_draft(self, number, branch, updated_min=780, title=None, created_min=None, draft=True):
+    def rest_draft(self, number, branch, updated_min=780, title=None, created_min=None, draft=True, head_repo=_OWN_REPO):
         """A pulls row as GitHub's list call returns it, the shape the REST read takes. updated_min and created_min
-        are minutes before now. The default 780 (13 h) is stale; created_min is left out when None."""
-        row = {"number": number, "title": title or "lane " + branch, "draft": draft, "head": {"ref": branch},
+        are minutes before now. The default 780 (13 h) is stale; created_min is left out when None. head.repo is the
+        head repo as GitHub gives it: the base repo's full name by default, another full name for a fork's pull, and
+        null (head_repo=None) for a head repo GitHub no longer has, such as a deleted fork."""
+        full_name = self.SLUG if head_repo is _OWN_REPO else head_repo
+        row = {"number": number, "title": title or "lane " + branch, "draft": draft,
+               "head": {"ref": branch, "repo": None if full_name is None else {"full_name": full_name}},
                "updated_at": iso_ago(updated_min)}
         if created_min is not None:
             row["created_at"] = iso_ago(created_min)
