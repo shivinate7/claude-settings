@@ -33,7 +33,6 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: write
-      actions: read
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -47,5 +46,4 @@ jobs:
           head-sha: ${{ github.event.workflow_run.head_sha }}
           conclusion: ${{ github.event.workflow_run.conclusion }}
           event: ${{ github.event.workflow_run.event }}
-          run-id: ${{ github.event.workflow_run.id }}
           token: ${{ secrets.GITHUB_TOKEN }}
