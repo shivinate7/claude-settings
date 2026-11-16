@@ -1,0 +1,14 @@
+{
+  "title": "Child repos move their waiting-page entry to the links shape, and land the export branches",
+  "phase": "next",
+  "status": "todo",
+  "order": 267.2,
+  "owner": "coordinator",
+  "priority": "next",
+  "repo": "shivinate7/claude-settings",
+  "blockedBy": "[]",
+  "why": "#3547 (merged 04:43 CST Nov 16) changed .claude/layout-extras.json: one entry per artifact, a required export path, and links per account. The old entry-level url and account fields are refused by main's layout.py. Child repos still carry the old shape.",
+  "note": "From the lane artifact-pages-other-account's Unstarted list, relayed by the coordinator 04:55 CST Nov 16 (not read by triage; triage cannot read child repos). Banchi #1084 needs the links conversion (the waiting-page entry gets export \"waiting\"); #1084 is a parked owner wait. Degen #546 and q_max #1153 merged in the old shape, which main's layout.py now refuses. No session is named to land the export branches on the record branches. Mailaudit and joyous exports are not done. Search at 04:56 CST found no existing open step for this (nearest: artifact-pages-other-account, 210 words, a different act). Reader: the coordinator.",
+  "source": "coordinator 04:55 CST Nov 16, relayed by triage; undoable; not owner-typed",
+  "updatedAt": "2026-11-16T04:55:47-06:00"
+}
