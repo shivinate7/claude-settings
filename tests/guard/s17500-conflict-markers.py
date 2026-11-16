@@ -160,6 +160,7 @@ CMK_SEQB = os.path.join(CMKPUSH, "seqtriplet")  # as seqclean, with b.txt holdin
 CMK_REL = os.path.join(CMKPUSH, "relative")    # diff.relative set; a triplet unpushed in sub/f.txt
 CMK_PAREN = os.path.join(CMKPUSH, "fixparen")  # an unpushed triplet on branch fix(x); HEAD on clean topic
 CMK_GONE = os.path.join(CMKROOT, "gone")       # a folder no fixture makes: the cd target of the missing-folder cases
+CMK_SUB = os.path.join(CMK_CL, "sub")          # an existing folder inside the clean repo: the cd target of the control
 
 
 def _cmk_commit(where, rel, text, msg):
@@ -255,6 +256,7 @@ def _build_conflict_markers_push():
     commit(CMK_PAREN, "a.txt", CM_TRIPLET, "triplet on fix(x), unpushed")
     run(CMK_PAREN, "checkout", "-q", "topic")
     run(CMK_PAREN, "branch", "fixy", "fix(x)")             # the same commit, under a plain name
+    os.makedirs(CMK_SUB)                                   # an empty folder: git does not track it
     for gone in (CMK_GONE, os.path.join(CMK_CLT, "nope")):
         if os.path.exists(gone):
             sys.exit("fixture setup failed in the conflict-markers fixtures: %r exists, so a cd to it does not fail"
@@ -308,8 +310,14 @@ cmk_refuse("a cd into a missing relative folder, then ; add -A and commit, with 
            "cd nope ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
 cmk_allow("a cd into a missing folder, then && add -A and commit, with a triplet tracked in the cwd repo",
           "cd " + slash(CMK_GONE) + " && " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
-cmk_allow("a cd into a missing folder, then ; add -A and commit, in a cwd repo whose edit is clean",
-          "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CL)
+# A `;` after a cd to a missing folder runs the commit in the cwd repo. A git write after a missing cd target is
+# refused, even when that repo is clean (ruling own-476-c-refuse-cd-missing-folder, owner, 2026-11-16 13:36 CST).
+cmk_refuse("a cd into a missing folder, then ; add -A and commit, in a cwd repo whose edit is clean",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CL)
+# The control for it: the same call, with the cd to a folder that exists. Only the cd target differs, so this
+# one is allowed.
+cmk_allow("a cd into an existing folder, then ; add -A and commit, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_SUB) + " ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CL)
 
 # A failed cd leaves the shell where it was, so the next command after `;`, a newline or `||` runs there. After
 # `&&` the chain stops. `--work-tree` names the folder an add reads: a missing one fails the add (exit 128), so
