@@ -171,7 +171,7 @@
                           and posts a pointer after the reopen. Cost: one open-list read, one read of each dropped lane not open, and one read
                           of the repo's comments when any is closed.
   merge --idle-lanes --live FILE
-                          lane lines (a lane the roadmap's live file shows done and safe to archive) and `hold (` lines (a lane not to archive now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane; the last clears when the step's status is set to todo or done), then a summary line. A lane that waits (a step not done, an open pull, an open item) prints no line, except a lane only stale drafts hold: that prints one `joint (close #N ...; archive archive/<branch> ...; archive lane <id>)` line, counted among the lanes to archive. Reads
+                          lane lines (a lane the roadmap's live file shows done and safe to archive) and `hold (` lines (a lane not to archive now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane; the last clears when the step's status is set to todo or done; a lane whose pull an open or merged pull replaced is listed whatever its step status), then a summary line. A lane that waits (a step not done, an open pull, an open item) prints no line, except a lane only stale drafts hold: that prints one `joint (close #N ...; archive archive/<branch> ...; archive lane <id>)` line, counted among the lanes to archive. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
                           posts nothing; any session may run it. An unreadable build or a missing --live exits 1: unknown, never empty.
   merge <pr> --ready      a lane's one act on its own draft: the draft step of --confirm (on the default branch, merge origin/<base> into
@@ -5920,7 +5920,8 @@ def idle_lanes(live, repo_dir=None):
     """merge --idle-lanes: print lane lines (a lane to archive; a lane whose handoff is not on the record branch ends with
     HOLD and counts only in the summary's "M held", not in "N lanes to archive") and `hold (` lines (a lane not to archive
     now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane;
-    the last clears when the step's status is set to todo or done), then the summary line. A lane that waits (a step not
+    the last clears when the step's status is set to todo or done; a lane whose pull an open or merged pull replaced is listed whatever
+    its step status), then the summary line. A lane that waits (a step not
     done, an open pull, an open item) prints no line, except a lane only stale drafts hold: that prints one
     `joint (close #N ...; archive archive/<branch> ...; archive lane <id>)` line, counted among the lanes to archive.
     Exit 1 with no summary when the

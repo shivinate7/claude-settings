@@ -60,11 +60,11 @@ unlaned's: the branch, bare or as lane/<id>, equals a live session step. A draft
 from the pull's posted review log. A present key must be a JSON bool (`null` and text are not); absent means false. A
 pull row with a non-bool value is skipped, so the stale-draft, pair, unlaned and lanes-to-archive rows read unknown.
 
-The row "lanes to archive" (idle_lanes) lists each completed or review-ready lane session whose steps have all landed and
-that no open pull (on lane_head_refs) or open page item holds; `merge --idle-lanes` prints the same list. An idle lane
+The row "lanes to archive" (idle_lanes) lists each completed or review-ready lane session whose steps have all landed, or whose pull an open or
+merged pull replaced whatever its step status, and that no open pull (on lane_head_refs) or open page item holds; `merge --idle-lanes` prints the same list. An idle lane
 not to archive now reads `hold (<reason>; lane <session id>)` and is left out of the row's count. The reason is no
 cs-step tag, a step unproven on main, or a step whose `lane` is the session and that is still doing or active and not
-landed; the last clears when the step's status is set to todo or done.
+landed; the last clears when the step's status is set to todo or done. A lane whose pull an open or merged pull replaced reads none of these holds.
 A lane that waits (step not done, open pull, open item) prints no line. A lane tagged `cs-archive-ready:<slug>` whose
 `roadmap/outbox/<slug>-handoff.md` is not on the record branch carries a `HOLD: handoff <slug> is not on the record
 branch` flag (a bad slug, or a handoff read that fails, reads the lane unknown); the merge summary then reads
@@ -1665,12 +1665,13 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
     `hold (<reason>; lane <session id>)` for a lane not to archive now: no cs-step tag, a step that is neither on the
     record branch nor named by a Step trailer on main (that reason ends `; also tagged <tags>` when the lane carries
     another repo's cs-repo tag), or a record-branch step whose `lane` is this session and that is still doing or active
-    and not landed (this hold clears when the step's status is set to todo or done). A lane that waits (step not done, open pull, open
+    and not landed (this hold clears when the step's status is set to todo or done; a lane whose pull an open or merged pull replaced has none of these holds). A lane that waits (step not done, open pull, open
     item) has no line. `unknown (<why>)` is only for a whole read that could not run.
 
     A session is listed only when it carries cs-build:lane and this repo's cs-repo tag, is not archived, has status
     bucket completed or review ready, and names at least one cs-step with every one of them landed (a Step trailer
-    on main, or status done; a step off the record branch counts only by its trailer). It is held back by an open pull on one of its steps' head refs (lane_head_refs) unless
+    on main, or status done; a step off the record branch counts only by its trailer), or has a pull that an open or merged pull replaced (superseded_marks),
+    whatever its step status. It is held back by an open pull on one of its steps' head refs (lane_head_refs) unless
     that pull is a draft whose head sha is already in the default branch, and by an open waiting-page item whose
     `lane` is one of its steps, or whose `owner` is the session itself (the item is the lane's own question); only
     status `closed` releases an item. When no live
