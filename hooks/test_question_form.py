@@ -1677,11 +1677,12 @@ def steps_no_kind(context=TASK_WHY):
 
 
 def steps_no_kind_update(context=TASK_WHY):
-    """An update with steps and options and no kind. It carries context only when `context` is not None."""
+    """An update with steps and options and no kind. It carries context only when `context` is not None. Its options
+    carry an id and `shown`, as a session's write does (with_frozen_fields, rule option-letters-frozen)."""
     item = {"steps": ["Open Terminal"], "options": copy.deepcopy(TASK_OPTIONS)}
     if context is not None:
         item["context"] = context
-    return item
+    return tcj.with_frozen_fields(item)
 
 
 def refused_by_some_rule(name, op, entry):
