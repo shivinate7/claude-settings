@@ -5877,7 +5877,7 @@ def own_session_link(body):
 
 def standing_refusal(h, n, info, head):
     """-> why a standing session may not merge pull request `n`, or "" when it may (ruling own-tiny-fixes-b). It must be the session's own,
-    and the head's own checks must be green. A pull request past docs, code and guard paths included, needs one sonnet reviewer record on the relayed head `head`.
+    and the head's own checks must be green. A pull request past docs, code and guard paths included, needs one passing reviewer record, of any model, on the relayed head `head`.
     No size bound (decision session-tiers). A docs-only one needs no record.
     The text names no tier and no flag, so a lane learns nothing from it (git-remedy-never-names-target)."""
     if not own_session_link(info.get("body")):
@@ -5889,15 +5889,15 @@ def standing_refusal(h, n, info, head):
     not_green = head_not_green(h.head_state(n, info["head"]))
     if not_green:
         return f"the head's own checks are not green: {not_green}."
-    if kind_misfits("docs-only", files) or guard_hits(paths):  # any file past docs, code and guard paths included: one passing sonnet reviewer record on the live head (decision session-tiers)
+    if kind_misfits("docs-only", files) or guard_hits(paths):  # any file past docs, code and guard paths included: one passing reviewer record on the live head (decision session-tiers)
         bodies = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(n, [])
         recs = [r for r in map(parse_review, bodies) if r and r["n"] == n]
         rec = recs[-1] if recs else None
-        # the pass that ends review must be sonnet's: the fix verifier's when the record has one, else the last reviewer round's
+        # the pass that ends review, of any model (ruling own-review-gate-any-model): the fix verifier's when the record has one, else the last reviewer round's
         last = (rec["fix"][2], rec["fix"][3]) if rec and rec["fix"] else next(((m, v) for _, role, m, v in reversed(rec["rounds"] if rec else []) if role == REVIEW_ROLES[0]), (None, None))
         passer = last[0] if last[1] == "PASS" else None  # a final round that failed reads done when no net value is owed, but it is no pass
-        if not passer or passer.lower() != "sonnet" or review_state(rec, head, recs[:-1])[0] != "done":  # `head` is the relayed head, which relayed_head_holds ties to the live one: only this tool's claim commits may sit above it
-            return "this pull request changes code, rule text or a guard path, and its head has no passing sonnet review record."
+        if not passer or review_state(rec, head, recs[:-1])[0] != "done":  # `head` is the relayed head, which relayed_head_holds ties to the live one: only this tool's claim commits may sit above it
+            return "this pull request changes code, rule text or a guard path, and its head has no passing review record."
     return ""
 
 def guard_hits(paths):
