@@ -739,6 +739,62 @@ add("cap deadline: a model raise keeps the model wording and asks for a model ab
     "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL, content=cap_settings(),
     carries=("this write sets the agent model cap", "a model above Sonnet is wanted", OPUS))
 
+# ------------------------------------------ a cap-lift end the shell computes at write time
+#
+# THE END IS NOT A LITERAL. A shell write may take its end from a command substitution, `$(date ...)`, or from a
+# `--arg` variable. The guard reads an end only as a literal instant after the field name, so no end shows, and a
+# deadline-only write passed unasked. The ask must say that the end is computed at write time and is not shown,
+# so the approver reads that the end is absent, not that the write sets none. A model raise with such an end asks
+# for the model and says the same. Each write below is one standalone command: a chained step that asks is refused,
+# not asked (decision ask-commands-run-alone), so no case chains a step ahead of the write. A literal end that does
+# not parse stays silent, as the Write of one does (owner ruling, page item 602).
+COMPUTED_NOTE = "end computed at write time, not shown"
+COMPUTED_NOW = "$(date -u -d '+30 days' +%FT%TZ)"
+sh("cap deadline: a shell echo whose cap-lift end is a $(date) substitution asks under agent-model-cap and says "
+   "the end is computed at write time",
+   'echo "{\\"%s\\": \\"%s\\"}" > %s' % (EXPIRY_KEY, COMPUTED_NOW, PROJ_LOCAL),
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(COMPUTED_NOTE,), lacks=WRONG_FOR_END_ONLY + (" CST", " CDT"),
+   env=DISK_CLOCK)
+sh("cap deadline: a jq filter whose cap-lift end is a $(date) substitution, writing the settings file, asks under "
+   "agent-model-cap and says the end is computed at write time",
+   "jq --arg d \"%s\" '.%s=$d' %s > %s" % (COMPUTED_NOW, EXPIRY_KEY, PROJ_LOCAL, PROJ_LOCAL),
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(COMPUTED_NOTE,), lacks=WRONG_FOR_END_ONLY + (" CST", " CDT"),
+   env=DISK_CLOCK)
+sh("cap deadline: a shell echo that sets the model and a $(date) cap-lift end asks for the model and says the end "
+   "is computed at write time",
+   'echo "{\\"env\\": {\\"%s\\": \\"%s\\"}, \\"%s\\": \\"%s\\"}" > %s' % (CAP_KEY, OPUS, EXPIRY_KEY, COMPUTED_NOW,
+                                                                  PROJ_LOCAL),
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY, COMPUTED_NOTE), lacks=(" CST", " CDT"),
+   env=DISK_CLOCK)
+sh("cap deadline: a jq filter that sets the model and a $(date) cap-lift end asks for the model and says the end "
+   "is computed at write time",
+   "jq --arg d \"%s\" '.env.%s=\"%s\" | .%s=$d' %s > %s" % (COMPUTED_NOW, CAP_KEY, OPUS, EXPIRY_KEY, PROJ_LOCAL,
+                                                       PROJ_LOCAL),
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY + " = " + OPUS, COMPUTED_NOTE), lacks=(" CST", " CDT"),
+   env=DISK_CLOCK)
+# A --arg that carries a literal instant: the end is read from the command text, so either the note or the end
+# the approver can check (WANT_WINTER) is acceptable. The choice between them is the ask's design, not pinned here.
+sh("cap deadline: a jq --arg whose cap-lift end is a literal instant asks under agent-model-cap and either names "
+   "the end in CST or says the end is computed at write time",
+   "jq -n --arg d '%s' '{\"%s\": $d}' > %s" % (DEADLINE_WINTER, EXPIRY_KEY, PROJ_LOCAL),
+   "ask", "agent-model-cap", cwd=NOGIT, carries=((COMPUTED_NOTE, WANT_WINTER),), lacks=WRONG_FOR_END_ONLY,
+   env=DISK_CLOCK)
+sh("control: a shell echo whose cap-lift end is a literal instant asks, shows the end in CST, and does not say the "
+   "end is computed at write time",
+   ESCAPED_DEADLINE_ECHO, "ask", "agent-model-cap", cwd=NOGIT, carries=(WANT_WINTER,), lacks=(COMPUTED_NOTE,),
+   env=DISK_CLOCK)
+sh("control: a shell echo whose cap-lift end is an unparseable literal stays silent, as the Write of one does",
+   'echo "{\\"%s\\": \\"next Tuesday\\"}" > %s' % (EXPIRY_KEY, PROJ_LOCAL),
+   "allow", cwd=NOGIT, silent=True, env=DISK_CLOCK)
+sh("control: a read-only grep of the cap-lift field asks nothing",
+   "grep %s %s" % (EXPIRY_KEY, PROJ_LOCAL), "allow", cwd=NOGIT, silent=True, env=DISK_CLOCK)
+sh("control: a jq that prints the cap-lift field with a $(date) value and no redirect writes nothing and asks nothing",
+   "jq --arg d \"%s\" '.%s=$d' %s" % (COMPUTED_NOW, EXPIRY_KEY, PROJ_LOCAL),
+   "allow", cwd=NOGIT, silent=True, env=DISK_CLOCK)
+sh("control: a shell echo that writes a $(date) value under another key, not the cap-lift field, asks nothing",
+   'echo "{\\"TZ\\": \\"%s\\"}" > %s' % (COMPUTED_NOW, PROJ_LOCAL),
+   "allow", cwd=NOGIT, silent=True, env=DISK_CLOCK)
+
 # ----------------------------------------------------- one reading of each offset form of the end
 #
 # The same instant, 03:30 UTC on 15 January 2099 (21:30 CST on the 14th), written in each form. The
