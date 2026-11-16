@@ -762,11 +762,13 @@ class SessionStartRosterTests(SessionStartAgentWorktreeNoticeTests):
         vcs(self.primary, "remote", "add", "origin", origin)
 
     def git_in(self, args, text=None):
-        answer = subprocess.run([VCS, "-C", self.primary, *IDENT, *args], input=text, capture_output=True, text=True,
-                                timeout=60)
+        # Bytes, not text mode: Windows text mode writes each LF as CRLF, and mktree would read a CR in the name.
+        answer = subprocess.run([VCS, "-C", self.primary, *IDENT, *args],
+                                input=None if text is None else text.encode("utf-8"), capture_output=True, timeout=60)
         if answer.returncode != 0:
-            sys.exit("fixture setup failed: %s %s: %s" % (VCS, " ".join(args), answer.stderr.strip()))
-        return answer.stdout.strip()
+            sys.exit("fixture setup failed: %s %s: %s"
+                     % (VCS, " ".join(args), answer.stderr.decode("utf-8", "replace").strip()))
+        return answer.stdout.decode("utf-8").strip()
 
     def put_record(self, text):
         """Point refs/remotes/origin/roadmap at a commit whose only file is CLAUDE.md `text`. The checkout's branch and
