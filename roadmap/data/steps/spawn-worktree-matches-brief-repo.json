@@ -1,0 +1,14 @@
+{
+ "id": "spawn-worktree-matches-brief-repo",
+ "title": "Refuse an isolation:worktree spawn whose brief names a repo other than the session's cwd repo",
+ "priority": "next",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "consultant",
+ "blockedBy": [],
+ "updatedAt": "2026-11-15T19:33:00-06:00",
+ "why": "[19:33 CST Nov 15, triage] The consultant sent a `cd` to degen and an Agent spawn in one parallel batch, so the worktree was cut in degen while the brief named shivinate7/claude-settings; the agent wasted one run (consultant's own mistake, relayed). Guard: refuse an isolation:worktree spawn whose brief names a repo other than the session's cwd repo. Searched the steps first (spawn, worktree, repo, cwd): none is the same guard, so this is a new step. Related: child-lane-starts-in-child-repo (a lane for a child repo starts inside that repo; ready), cd-out-of-worktree-refuse (refuse a cd that leaves the session's worktree; todo; the cd here is what moved the cwd), spawn-home-measure-first (todo), workflow-builder-needs-repo (todo). Guard or check: yes (unverified). (source: consultant 19:31 CST via the coordinator, relayed by triage; the consultant's own mistake; not owner-typed) New step.",
+ "source": "consultant 19:31 CST via the coordinator, relayed by triage; the consultant's own mistake; not owner-typed",
+ "note": "Todo, owner consultant. The consultant sent a `cd` to degen and an Agent spawn in one parallel batch, so the worktree was cut in degen while the brief named shivinate7/claude-settings; the agent wasted one run (consultant's own mistake, relayed). Guard: refuse an isolation:worktree spawn whose brief names a repo other than the session's cwd repo. Searched the steps first (spawn, worktree, repo, cwd): none is the same guard, so this is a new step. Related: child-lane-starts-in-child-repo (a lane for a child repo starts inside that repo; ready), cd-out-of-worktree-refuse (refuse a cd that leaves the session's worktree; todo; the cd here is what moved the cwd), spawn-home-measure-first (todo), workflow-builder-needs-repo (todo). Guard or check: yes (unverified)."
+}
