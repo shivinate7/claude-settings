@@ -6,5 +6,7 @@
   "quote": "C: Refuse only a cd into a missing folder (Recommended)",
   "source": "waiting/answers/failed-cd-git-write-test.json (2026-11-16T19:36:41Z = 13:36:41 CST, choice c, no note). Owner; filed by triage. Triage read no diff of #2099.",
   "status": "open",
+  "pr": 3594,
+  "prNote": "Consultant 13:58 CST Nov 16 (relay): built as draft PR #3594, head d34e6c2f47, a fresh rebuild from main that replaces #2099; review round 1 running. Triage read no diff.",
   "step": "git-write-after-failed-cd"
 }
