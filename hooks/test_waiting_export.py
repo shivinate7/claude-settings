@@ -100,13 +100,13 @@ def git(where, *args, env=None):
 
 # --------------------------------------------------------------------------- repo fixtures
 
-def registry(page_export=None, page_id=PAGE_ID, page_url=PAGE_URL):
-    """The repo's extras file: a waiting page and a reference artifact. `page_export` names the copy folder."""
-    page = {"id": page_id, "url": page_url, "role": "waiting-page", "account": "shivam"}
-    if page_export is not None:
-        page["export"] = page_export
-    reference = {"id": REF_ID, "url": REF_URL, "role": "reference", "account": "shivam",
-                 "collections": ["notes"]}
+def registry(page_export="waiting", page_id=PAGE_ID, page_url=PAGE_URL):
+    """The repo's extras file: a waiting page and a reference artifact. `page_export` names the copy folder; every entry
+    has its export path, which the registry requires, and its one link in the account `shivam`."""
+    page = {"id": page_id, "role": "waiting-page", "export": page_export,
+            "links": [{"account": "shivam", "url": page_url}]}
+    reference = {"id": REF_ID, "role": "reference", "export": "artifacts/" + REF_ID,
+                 "links": [{"account": "shivam", "url": REF_URL}], "collections": ["notes"]}
     return json.dumps({"kinds": {}, "artifacts": [page, reference]})
 
 
