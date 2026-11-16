@@ -11,7 +11,7 @@ takes its steps, marks and repo name from the checkout, as the roadmap build doe
 no merge role in a cloud session. A missing --live file exits 1 and prints no summary, so an unread list never reads
 as an empty one. A lane that only stale drafts hold prints one `joint (` line instead of nothing; the summary counts it
 among the lanes to archive. A lane whose pull closed as replaced (a closed landedPulls row with replacedBy) is listed as
-superseded; a pull closed with no replacement is not.
+superseded whatever its step status; a pull closed with no replacement is not.
 
 A lane tagged cs-archive-ready:<slug> is printed with a HOLD marker when its handoff, roadmap/outbox/<slug>-handoff.md,
 is not on the record branch, and the summary counts the held lanes. A slug that is empty or has a `/` or `..` reads the
@@ -280,12 +280,14 @@ class IdleLanesCli(unittest.TestCase):
         self.assertEqual(len(found), 1, "lane %s is not listed once: out: %r" % (sid, out))
         return found[0]
 
-    def land_steps(self, stems, status="done"):
+    def land_steps(self, stems, status="done", lane=None):
         """Commit one step per stem on the record branch, numbered from 3 (c1 to c3 are in setUp, so a stem
-        already there changes nothing and the commit may be empty). Each step carries `status`."""
+        already there changes nothing and the commit may be empty). Each step carries `status`, and `lane` when given."""
         roadmap.git(self.repo, "checkout", "-q", "roadmap")
         for order, stem in enumerate(stems, start=3):
             step = dict(roadmap.STEP, order=order, status=status)
+            if lane:
+                step["lane"] = lane
             (self.repo / "roadmap" / "data" / "steps" / (stem + ".json")).write_text(json.dumps(step), encoding="utf-8")
         roadmap.git(self.repo, "add", "-A")
         roadmap.git(self.repo, "commit", "-q", "--allow-empty", "-m", "steps " + ", ".join(stems))
@@ -563,6 +565,21 @@ class IdleLanesCli(unittest.TestCase):
                       "scope: a lane whose pull closed as replaced by the open #8 is not listed: out: %r" % out)
         self.assertNotIn("session_b", self.listed_ids(out),
                          "a lane whose pull closed as replaced by #10, closed unmerged, is listed as superseded: out: %r" % out)
+
+    def test_a_superseded_lane_whose_step_is_doing_is_still_listed(self):
+        # The control is lane session_b, whose step c5 is todo: it is listed. The subject is session_a, whose step c4 is
+        # doing under it and whose pull closed as replaced by the open #8. The replacement carries the step on, so the
+        # doing step holds nothing: session_a is listed as an archive line, not held by a hold line.
+        self.land_steps(["c5"], status="todo")
+        self.land_steps(["c4"], status="doing", lane="session_a")
+        head = self.record_tip()
+        landed = [self.closed_row(7, "lane/c4", head, replacedBy=8), self.closed_row(9, "lane/c5", head, replacedBy=8)]
+        pulls = [{"number": 8, "title": "batch 7", "branch": "batch-7", "draft": False, "head": head}]
+        self.publish([lane("session_a", "c4"), lane("session_b", "c5")], landed=landed, pulls=pulls)
+        out = self.run_idle()
+        self.assertIn("session_b", self.listed_ids(out), "scope: a todo superseded lane is not listed: out: %r" % out)
+        self.assertIn("session_a", self.listed_ids(out),
+                      "a superseded lane whose step is doing is not listed: out: %r" % out)
 
     def test_a_replaced_by_that_is_not_an_int_skips_the_row_and_the_list_reads_unknown(self):
         # The control is lane c1, done and idle, with no landedPulls row: it is listed and the command exits 0. Then its
