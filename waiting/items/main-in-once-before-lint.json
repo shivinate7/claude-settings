@@ -1,0 +1,58 @@
+{
+  "added": "2026-11-16T13:53:00-06:00",
+  "context": "Goal: every ready PR merges fast, with its lint and review still true for the head that merges.\nProblem (rule): your two picks pull apart, and a bring-in on a ready PR costs a new head and a new run, so it needs your word on which pick wins.\nBased on (ruling): own-923-c-ready-lanes-bring-main-in (you, 13:46 CST Nov 16): ready and near-ready lanes bring main in after each merge. It clashes with merge-needs-current-base / own-merge-on-lint-pass (you, 18:21 CST Nov 15, \"B for sure\"): a head needs only a clean merge with main's tip and need not hold it.\nBased on (read): runner 10 reported at 13:46 CST that a bring-in on a ready PR makes a new head and a new ready run and may send it back to draft; it happened once today (coordinator relay, not read by triage).\nDeparts from: main \u2014 a head needs only a clean merge with main's tip, and the CI step names only conflicting PRs; the options change when a lane brings main in.\nMeanwhile: the coordinator holds the agent that would write this rule until you pick; ready PRs behind main but clean still merge as they are.",
+  "home": "rewrite-merge-decisions-for-lane-merge",
+  "kind": "decision",
+  "n": 925,
+  "options": [
+    {
+      "gain": "Few new heads, so ready PRs rarely go back to draft or wait for a new run.",
+      "how": "A lane brings main in once, just before its last lint, so lint and review sit on a head that has main. After that it brings main in only on a conflict. A ready PR that is behind but clean merges as it is.",
+      "id": "once-before-lint",
+      "key": "a",
+      "label": "A lane brings main in once, right before its lint; later only if it conflicts",
+      "lose": "A ready PR can merge several merges behind main, so main's own run after the merge may catch a clash the PR run did not."
+    },
+    {
+      "gain": "Every PR tests against the newest main before it merges.",
+      "how": "After every merge to main, each ready or lint-passed PR brings main in.",
+      "id": "after-each-merge",
+      "key": "b",
+      "label": "After each merge, ready and lint-passed PRs bring main in (as you typed)",
+      "lose": "Each bring-in makes a new head and a new run, and may send a ready PR back to draft, so the queue slows while lanes keep re-running."
+    },
+    {
+      "gain": "The fewest new heads; ready PRs stay ready.",
+      "how": "A PR brings main in only when it conflicts with main's tip; nothing else is touched.",
+      "id": "only-on-conflict",
+      "key": "c",
+      "label": "Only a PR that conflicts brings main in",
+      "lose": "Lint and review may sit on a head that is far behind main, so a clean-looking PR can still break main."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
+  "recommended": "a",
+  "ref": "your 13:46 CST Nov 16 pick that ready and near-ready lanes bring main in after each merge, against your 18:21 CST Nov 15 pick \"B for sure\" that a head needs only a clean merge with main's tip; relayed by the coordinator 13:50 CST Nov 16",
+  "repo": "shivinate7/claude-settings",
+  "short": "When lanes bring main in",
+  "shown": [
+    {
+      "id": "once-before-lint",
+      "key": "a",
+      "label": "A lane brings main in once, right before its lint; later only if it conflicts"
+    },
+    {
+      "id": "after-each-merge",
+      "key": "b",
+      "label": "After each merge, ready and lint-passed PRs bring main in (as you typed)"
+    },
+    {
+      "id": "only-on-conflict",
+      "key": "c",
+      "label": "Only a PR that conflicts brings main in"
+    }
+  ],
+  "status": "open",
+  "title": "When should a lane bring main into its branch: once before lint, after every merge, or only on a conflict?",
+  "why": "The coordinator recommends a; triage read no diff and agrees only on the cost shown: it keeps the lint true for the merged head without a new run after every merge. It is a recommendation, not owner-typed."
+}

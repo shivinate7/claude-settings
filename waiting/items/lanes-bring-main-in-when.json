@@ -40,8 +40,8 @@
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
   "recommended": "c",
   "ref": "your question in the coordinator's chat, 13:39 CST Nov 16 (\"how come lanes/checkouts are still not moving up to main when they are able to easily be fast forwarding their checkouts in their builds\"); coordinator's measure, relayed at 13:45 CST",
-  "replied": "2026-11-16T13:48:00-06:00",
-  "reply": "Option c, closed at 13:48 CST Nov 16, from your words typed in the coordinator's chat at 13:46 CST (relayed): only lanes that are ready or one step from it bring main in after each merge. \"One step from ready\" is read as: lane lint PASS and the review record posted at the live head, not yet marked ready; tell me if you meant something else. The coordinator acts on it now. Your extra idea (PRs brought to main together by priority grade) was a hedge, not a pick: it is the new question below this one, with what grades exist today. Filed as ruling own-923-c-ready-lanes-bring-main-in; the rule's written home is step rewrite-merge-decisions-for-lane-merge.",
+  "replied": "2026-11-16T13:54:00-06:00",
+  "reply": "Option c, closed at 13:48 CST Nov 16, from your words typed in the coordinator's chat at 13:46 CST (relayed): only lanes that are ready or one step from it bring main in after each merge. This may narrow: it clashes with your Nov 15 pick that a head needs only a clean merge with main's tip, and the new question on the page asks which one wins. The coordinator acts on c until you answer it. Your extra idea (PRs brought to main together by priority grade) was a hedge, not a pick; it is its own question on the page. Filed as ruling own-923-c-ready-lanes-bring-main-in; the rule's written home is step rewrite-merge-decisions-for-lane-merge.",
   "repo": "shivinate7/claude-settings",
   "short": "When lanes bring main in",
   "shown": [

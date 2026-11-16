@@ -29,9 +29,10 @@
   ],
   "owner": "triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
   "ref": "backlog-drain lane, #3154",
-  "reply": "You asked what 'glued' and 'reader' mean; the item now says it in plain words. Nothing else changed: a drops the glued-& reader, b keeps it.",
+  "replied": "2026-11-16T13:57:00-06:00",
+  "reply": "Re-pointed 13:57 CST Nov 16 on the consultant's word (relayed 13:54 CST): the question moved from PR #2156 to #3287, the fresh rebuild that replaced it. The question is unchanged: a drops the glued-& reader, b keeps it. Triage read no diff of #3287.",
   "repo": "shivinate7/claude-settings",
-  "short": "#2156: widen the any-filter?",
+  "short": "#3287: widen the any-filter?",
   "shown": [
     {
       "id": "drop",
@@ -45,6 +46,6 @@
     }
   ],
   "status": "open",
-  "title": "Keep PR #2156's glued-& reader on top of the any-filter, which may refuse valid commands?",
+  "title": "Keep the glued-& reader (now in PR #3287, which replaced #2156) on top of the any-filter, which may refuse valid commands?",
   "why": "Backlog-drain lane ledger in #3154; no past ruling settles it (triage read of rulings, steps and main's decisions 11:30 CST Nov 13)."
 }
