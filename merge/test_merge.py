@@ -5355,6 +5355,7 @@ class NoneRequiredChecks(Env):
         rc, out = self.run_merge("7", "--confirm", host=self.none_host())
         self.assertEqual(rc, 0, out)
         self.assertIn(MERGE_CALL, self.calls())
+        self.assertNotIn("branches/main/protection", self.calls(), "under requiredChecks none, the confirm read the base's branch protection")
 
     def test_a_pending_run_with_no_workflow_folder_refuses_at_once_under_none(self):
         # The base has no workflow folder, so the run's file cannot be read. A run whose file cannot be read holds the head.
