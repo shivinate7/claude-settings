@@ -161,6 +161,10 @@ CMK_REL = os.path.join(CMKPUSH, "relative")    # diff.relative set; a triplet un
 CMK_PAREN = os.path.join(CMKPUSH, "fixparen")  # an unpushed triplet on branch fix(x); HEAD on clean topic
 CMK_GONE = os.path.join(CMKROOT, "gone")       # a folder no fixture makes: the cd target of the missing-folder cases
 CMK_SUB = os.path.join(CMK_CL, "sub")          # an existing folder inside the clean repo: the cd target of the control
+CMK_MADE = os.path.join(CMK_CL, "made")        # a folder a mkdir in the same call makes: absent at check time
+CMK_MADE_T = os.path.join(CMK_CLT, "made")     # the same folder, inside the triplet repo
+CMK_WT = os.path.join(CMKPUSH, "wt")           # the worktree that `worktree add ../wt` makes, from CMK_CL
+CMK_CLONE = os.path.join(CMK_CL, "cloned")     # the folder that a clone in the same call makes
 
 
 def _cmk_commit(where, rel, text, msg):
@@ -257,7 +261,7 @@ def _build_conflict_markers_push():
     run(CMK_PAREN, "checkout", "-q", "topic")
     run(CMK_PAREN, "branch", "fixy", "fix(x)")             # the same commit, under a plain name
     os.makedirs(CMK_SUB)                                   # an empty folder: git does not track it
-    for gone in (CMK_GONE, os.path.join(CMK_CLT, "nope")):
+    for gone in (CMK_GONE, os.path.join(CMK_CLT, "nope"), CMK_MADE, CMK_MADE_T, CMK_WT, CMK_CLONE):
         if os.path.exists(gone):
             sys.exit("fixture setup failed in the conflict-markers fixtures: %r exists, so a cd to it does not fail"
                      % gone)
@@ -335,6 +339,52 @@ cmk_allow("a cd into an existing folder, then a newline, then commit, in a cwd r
           "cd " + slash(CMK_SUB) + "\n" + VCS + " commit -m x", CMK_CL)
 cmk_allow("a cd into a missing folder, then && push, in a cwd repo whose edit is clean",
           "cd " + slash(CMK_GONE) + " && " + VCS + " push", CMK_CL)
+# The same ruling covers the other git writes after a missing cd: add, pull, rebase, cherry-pick, and the --continue
+# of a rebase or a cherry-pick. Each deny runs in the clean CMK_CL, so the missing cd target is the only reason to
+# refuse. Each control is the same call after a cd to an existing folder.
+cmk_refuse("a cd into a missing folder, then ; add -A, in a cwd repo whose edit is clean",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A", CMK_CL)
+cmk_allow("a cd into an existing folder, then ; add -A, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_SUB) + " ; " + VCS + " add -A", CMK_CL)
+cmk_refuse("a cd into a missing folder, then ; pull, in a cwd repo whose edit is clean",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " pull", CMK_CL)
+cmk_allow("a cd into an existing folder, then ; pull, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_SUB) + " ; " + VCS + " pull", CMK_CL)
+cmk_refuse("a cd into a missing folder, then ; rebase main, in a cwd repo whose edit is clean",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " rebase main", CMK_CL)
+cmk_allow("a cd into an existing folder, then ; rebase main, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_SUB) + " ; " + VCS + " rebase main", CMK_CL)
+cmk_refuse("a cd into a missing folder, then ; cherry-pick a sha, in a cwd repo whose edit is clean",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " cherry-pick abc1234", CMK_CL)
+cmk_allow("a cd into an existing folder, then ; cherry-pick a sha, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_SUB) + " ; " + VCS + " cherry-pick abc1234", CMK_CL)
+cmk_refuse("a cd into a missing folder, then ; rebase --continue, in a cwd repo whose edit is clean",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " rebase --continue", CMK_CL)
+cmk_allow("a cd into an existing folder, then ; rebase --continue, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_SUB) + " ; " + VCS + " rebase --continue", CMK_CL)
+cmk_refuse("a cd into a missing folder, then ; cherry-pick --continue, in a cwd repo whose edit is clean",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " cherry-pick --continue", CMK_CL)
+cmk_allow("a cd into an existing folder, then ; cherry-pick --continue, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_SUB) + " ; " + VCS + " cherry-pick --continue", CMK_CL)
+# A folder that the same call makes first is in place when the cd runs, so the cd works and the write runs there.
+# The brief reads "missing" as "not made earlier in the same call". Each case runs in CMK_CL, so the cd rule is
+# the only thing that can refuse it. Each is refused today.
+cmk_allow("a mkdir of a folder, then ; cd into it and commit, in a cwd repo whose edit is clean",
+          "mkdir -p " + slash(CMK_MADE) + " ; cd " + slash(CMK_MADE) + " ; " + VCS + " commit -m x", CMK_CL)
+cmk_allow("a worktree add of ../wt, then ; cd into it and commit, in a cwd repo whose edit is clean",
+          VCS + " worktree add ../wt b ; cd ../wt ; " + VCS + " commit -m x", CMK_CL)
+cmk_allow("a clone into a folder, then ; cd into it and commit, in a cwd repo whose edit is clean",
+          VCS + " clone " + slash(CMK_CL) + " " + slash(CMK_CLONE) + " ; cd " + slash(CMK_CLONE) + " ; "
+          + VCS + " commit -m x", CMK_CL)
+cmk_allow("a cd into a missing folder, then || exit 1, then ; commit, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_GONE) + " || exit 1 ; " + VCS + " commit -m x", CMK_CL)
+# A read-only git after a missing cd is no write, so it stays allowed.
+cmk_allow("a cd into a missing folder, then ; status, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_GONE) + " ; " + VCS + " status", CMK_CL)
+# The folder a mkdir makes, inside the triplet repo, still refuses: the add and the commit land in that repo.
+cmk_refuse("a mkdir of a folder in the triplet repo, then ; cd into it, add -A and commit",
+           "mkdir -p " + slash(CMK_MADE_T) + " ; cd " + slash(CMK_MADE_T) + " ; " + VCS + " add -A && "
+           + VCS + " commit -m x", CMK_CLT)
 
 # A failed cd leaves the shell where it was, so the next command after `;`, a newline or `||` runs there. After
 # `&&` the chain stops. `--work-tree` names the folder an add reads: a missing one fails the add (exit 128), so
