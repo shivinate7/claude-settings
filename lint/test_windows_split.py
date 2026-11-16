@@ -37,7 +37,9 @@ from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 from workflow_steps import CHECKS_SUITE_JOBS, gating_text, job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
+from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 CHECKS = os.environ.get("CHECKS_YML") or os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
 MIN_JOBS = 3
 
@@ -91,6 +93,7 @@ LINUX_SUITES = {
     "python3 janitor/mutate_sweep.py": (LINUX_SWEEP, None),
     "python3 hooks/test_config_watch.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_config_watch_fast_exit.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 hooks/test_reinstall_stale.py": (None, None),
     "python3 hooks/test_shared_names.py": (None, None),
     "python3 hooks/test_precompact_handoff.py": (None, None),
     "python3 hooks/test_cc_version_check.py": (NO_MD_SCOPE_CONDITION, None),
@@ -2459,16 +2462,11 @@ class ModTestStep(unittest.TestCase):
         copies = [c for c in run_commands(self.text) if INLINE_COPY.search(c)]
         self.assertEqual(copies, [])
 
-    def test_checks_stays_a_required_check_and_mods_adds_no_name(self):
-        """Control, green now: the step rides jobs that are already required, so the list gains no name."""
+    def test_all_jobs_passed_stays_the_one_required_check_and_mods_adds_no_name(self):
+        """The owner removed the branch's required check, so main's stamp pins the one name. The mod step adds no name to that pin."""
         with open(STAMP, encoding="utf-8") as f:
             required = json.load(f)["merge"]["requiredChecks"]
-        if required == "protection":  # the list lives in branch protection, which no offline test reads: check only that the workflow gains no mod job
-            self.assertEqual([n for n in all_jobs(self.text) if "mod" in n.lower()], [])
-            return
-        for job in MOD_JOBS:
-            self.assertIn(job, required)
-        self.assertEqual([n for n in required if "mod" in n.lower()], [])
+        self.assertEqual(required, [REQUIRED_CHECK])
 
 
 @unittest.skipUnless(shutil.which("bash") and shutil.which("node") and shutil.which("find"), "needs bash, node and find on PATH")
