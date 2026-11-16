@@ -14,7 +14,7 @@ Every idle limit reads idle the same way: the newest mtime of the worktree's own
 |---|---|---|---|
 | 30 min or more | Agent-end reap, at each SubagentStop | A finished agent's worktree. The ending agent's own worktree waits the same limit. | A follow-up message to a finished agent resumes it in its own worktree. A hook cannot remove the tree its own shells stand in, so the ending agent's tree waits for a later hook. |
 | 1 hour | Unattended `--confirm` run: the daily job and SessionEnd | Every worktree this route removes, together with the merged-or-pushed test below. | Unrecorded. |
-| 4 hours | Session-end sweep, agent rule (`sweep.py --confirm`, no `--attended`) | A finished agent's worktree at `<repo>/.claude/worktrees/agent-*`, in every repo. | Unrecorded. |
+| 4 hours | Session-end sweep, agent rule (`sweep.py --confirm`, no `--attended`) | A finished agent's worktree at `<repo>/.claude/worktrees/agent-*`, in the repository whose session ended. | Unrecorded. |
 | 24 hours | Unattended `--confirm` run | A pushed tree that is not merged. A merged tree goes at 1 hour. | Pushed proves that a copy exists, not that the work is done. The remote keeps every commit. |
 
 Each route keeps its own limit. A clean, pushed agent worktree that is not merged is governed by the agent-end reap (30 min) and the agent rule (4 hours). The unmerged 24-hour limit applies to it only on the unattended run.
@@ -96,13 +96,13 @@ Session start warns when more than 50 agent worktrees exist. An agent leaves its
 
 ### Session-end sweep, agent rule
 
-Owner ruling, 2026-10-14: the session-end sweep (`sweep.py --confirm`, no `--attended`) removes a finished agent's worktree in every repo. It ADDS to the removals of the unattended run. It never narrows them. It removes a tree only when all of these hold:
+Owner ruling, 2026-10-14: the session-end sweep (`sweep.py --confirm`, no `--attended`) removes a finished agent's worktree. It runs in the repository whose session ended, and no other (owner ruling `watchers-sessionend-250a`, one repo at SessionEnd, machine-wide only in the daily job; confirmed by `own-828-a-sessionend-this-repo-only`, this repo only at session end, 2026-11-14 19:57:58 CST; the janitor decision `the-janitor-is-one-machine-wide-sweep`, "Two triggers", says the same). The check is `SweepsOnlyTheEndingSessionsRepository` in `janitor/test_session_end_sweep.py`. The daily job's run of the same command covers every repo. The rule ADDS to the removals of the unattended run. It never narrows them. It removes a tree only when all of these hold:
 
 - Its path is `<repo>/.claude/worktrees/agent-*`, a branch or a detached HEAD.
 - It is clean, unlocked, and idle 4 hours. No live session and no process has a cwd inside it.
 - Its tip is on GitHub, read after the run's fetch (see Safe work). Two reads must both pass: `git ls-remote --heads` read now lists a head that holds HEAD (owner ruling 2026-10-14: the read is live, never a local `origin/*` ref alone; a listed head the clone lacks is dropped), and `git branch -r --contains HEAD` is not empty.
 
-A read that fails or cannot tell keeps the tree. The report line names its path and the reason `unreadable-subject`. The rule applies in every repo, whatever its `package.json` defines.
+A read that fails or cannot tell keeps the tree. The report line names its path and the reason `unreadable-subject`. The sweep runs no script the repo supplies, whatever its `package.json` defines.
 
 Reason: a lane pushes `HEAD:<lane>` from a local branch of another name, so a branch-upstream read called many trees never pushed. The test-author makes its red-run checkout under `<repo>/.claude/worktrees/` and names it `agent-<something>`, so this rule covers it. A checkout with another name under that folder is not covered.
 

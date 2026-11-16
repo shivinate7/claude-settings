@@ -201,6 +201,17 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        that holds a `<` or no letter or digit is a refusal. A lane `create_session` whose prompt has the marker
                        line is judged the same way against its own tags, with no transcript read. A message without the marker reads no transcript. An
                        override lifts it.
+  lane-step-dup       deny. A lane brief (the lane-one-topic marker) or a `create_session` tagged `cs-step:<step>` while
+                       another live session, not the brief's target, carries that step and shares a cs-repo tag with the
+                       subject (the target's record, or the create's own tags), read from this transcript's
+                       list_sessions reads. A session whose newest row is archived is not live. The reason names the
+                       carrier. A brief to a target that carries the step passes. With no carrier found, no whole
+                       list_sessions read (a chain from no cursor, each next read's after_id the page before's last
+                       row id, the last has_more false, none filtered), a target with no current record, and a
+                       subject with no cs-repo tag are refusals. Steps and tags match without case. The same call is also
+                       refused while an open pull request of the cs-repo has the step's head (shared_names.lane_head_refs),
+                       and the reason names it, unless the brief or prompt says `continues #N` or `replaces #N`, or the
+                       target carries the step. A pull request read that fails is a refusal. An override lifts it.
   message-time-matches-clock
                        deny. A send_message whose first non-blank line opens with a header stamp: a label of 1 to 4 words,
                        then `,` or `:` or a dash spaced on both sides, an optional date, then `H:MM` or `HH:MM`, an
@@ -249,12 +260,14 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        could not judge, when that commit covers a triplet already in the tree or the chain
                        runs merge, pull, rebase, cherry-pick, stash pop or apply, or am.
                        (commit-refuses-conflict-markers)
-  red-run              deny. A `git push` whose range (the one conflict-markers reads, less the commits the
-                       default base holds) has a non-merge commit that adds lines to a test path and has no
+  red-run              deny. A `git commit` with no push after it, or a `git push` whose range (the one
+                       conflict-markers reads, less the commits the default base holds) has a non-merge commit that adds lines to a test path and has no
                        valid `Red-run:` trailer, judged by `judge` in lint/check_red_run.py, the one home. A
                        commit in the same call before the push counts, read from its `-m` text (an `--amend`
                        with none keeps the commit's own); a message the guard cannot read, a failed read and a
-                       default base it cannot read are no hit. The refusal for a flagged tip names only
+                       default base it cannot read are no hit. A lone `git commit` (no push after it in the
+                       call) that stages added lines on a test path is judged too, by its own `-m` text; a
+                       merge or other replay in progress is no hit. The refusal for a flagged tip names only
                        commit and push; for a flagged commit below the tip (under a merge at the tip too) it
                        names commit, rebase and push; for a branch rewritten since its push it names no
                        command. Cost: one `git log` per push, more only when a commit is a gap.
@@ -338,7 +351,9 @@ Other tools, in `judge` order:
                        cannot read is skipped, and an unread brief is judged as an empty brief.
                        (agent-model-cap)
   agent-model-floor, roles-third-round-steps-up
-                       deny. A spawn below the model floor, or a third round on the wrong model.
+                       deny. A spawn below the model floor, or a third round on the wrong model. A
+                       start_session call never reaches this hook: settings.json lists it in no PreToolUse
+                       matcher, so hooks/start_session_audit.py checks its floor and handoff after the call.
                        The Workflow scan is static. It reads string-literal `model` and
                        `agentType` keys, and a literal prompt, in each `agent()` call. A template
                        prompt reads its static text only. A step-up call whose prompt or model is
@@ -577,7 +592,7 @@ while True:
         _loading = "guard_core"
         import guard_core
         from guard_core import (
-            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, own_heredoc_bodies, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
+            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, REPLAY_MARKS, heredoc_heads, own_heredoc_bodies, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
@@ -621,7 +636,7 @@ while True:
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit, self_role_child_hit, self_role_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, stamp_hit, trust_card_hit, written_time_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, stamp_hit, step_dup_hit, step_pr_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
         _loading = "guard_frozen"
@@ -2545,9 +2560,6 @@ ENTRY_OWN = re.compile(r"^commit(?: \((?:initial|amend|merge)\))?:")
 ENTRY_REBASE = re.compile(r"^(?:pull --)?rebase\b[^:(]*\(([^)]*)\)")
 ENTRY_RESOLVED = re.compile(r"^(?:commit \(cherry-pick\)|revert)\b")
 REBASE_PLAIN_STEPS = ("start", "finish", "abort", "pick", "reword", "edit")
-# A git-dir entry that shows a replay in progress: its staged change is git's copy plus what the agent
-# resolved. A MERGE_MSG without MERGE_HEAD is a `cherry-pick -n` or `revert -n`.
-REPLAY_MARKS = ("CHERRY_PICK_HEAD", "REVERT_HEAD", "SQUASH_MSG", "MERGE_MSG", "rebase-merge", "rebase-apply")
 # How a builder's test path in one change counts: refused, logged, or logged as the upstream side a
 # rebase kept.
 OWN, NOTED, KEPT = "own", "noted", "kept"
@@ -2922,6 +2934,11 @@ def judge_stop(payload) -> None:
 
 
 SPAWN_TOOLS = ("Agent", "Task")
+# The desktop start. No PreToolUse matcher in settings.json lists it: any hook on it makes the desktop app show the
+# "Allow Claude to start the session?" card on every start, even in Bypass (anthropics/claude-code#103832; decision
+# start-session-not-pretooluse). hooks/start_session_audit.py judges it after the call with floor_hit and
+# unread_handoff. The judge() branches below that name it run only if a matcher is added again, and the guard's cases
+# call them directly.
 SESSION_TOOL = "mcp__ccd_session__start_session"
 from shared_names import (  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER from here
     CREATE_SESSION_TOOL, REMOTE_OUTWARD_TOOLS, REMOTE_SERVER, is_lane_create_session, lane_tags,  # noqa: F401  REMOTE_SERVER re-exported: lint/check_agent_models.py reads guard.REMOTE_SERVER
@@ -3640,7 +3657,7 @@ def step_up_hit(tool: str, tool_input) -> str:
 def step_up_reason(prompt: str, role, model, rounds=None) -> str:
     """The step-up refusal for a brief whose marker and model disagree, or "". The model each marker needs is its round row
     (role_round_model; `rounds` is role_round_table's read, read here when not given). The second round must name its row's model exactly.
-    A later round or a fix verifier must not name a model below its row; above it passes here, and the Opus ceiling judges Opus."""
+    A later round, a fix verifier or a guard-marked reviewer brief must not name a model below its row; above it passes here, and the Opus ceiling judges Opus."""
     model = str(model or "").strip().lower()
     role = role_key(role)
     if rounds is None:
@@ -3656,6 +3673,10 @@ def step_up_reason(prompt: str, role, model, rounds=None) -> str:
         want = role_round_model(rounds, role, ROLE_ROUND_FIX)
         if want and (not model or (named is not None and named < ROLE_MODEL_RANK.index(want))):
             return "Reviewer fix verifier runs on %s. Spawn it with model %s." % (want.capitalize(), want)
+    if role == "reviewer" and review_guard_marked(prompt):
+        want = role_round_model(rounds, role, "1", "guard")
+        if want and (not model or (named is not None and named < ROLE_MODEL_RANK.index(want))):
+            return "Reviewer round 1 on a guard or check change runs on %s. Spawn it with model %s." % (want.capitalize(), want)
     if role == "builder" and builder_third_round(prompt):
         want = role_round_model(rounds, role, "3")
         if want and (named is None or named < ROLE_MODEL_RANK.index(want)):
@@ -4188,6 +4209,8 @@ def role_model_one(tool_input):
 # under the smaller of 5% of the disk and 5 GB) refuses every start call. A reading that cannot be read counts as normal. Only an
 # agent's shell or file write also reads load (RUNNING_AGENT_TOOLS, below). A cloud session (CLAUDE_CODE_REMOTE
 # "true") skips the brake and reads nothing, because the brake guards the owner's own machine.
+# SESSION_TOOL stays in the list, but no PreToolUse hook sees a start_session call (see SESSION_TOOL), so the brake does not
+# read the load for it. The audit after the call does not read load either.
 START_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
 LOAD_BUSY_MEMORY = 85.0
 LOAD_FULL_MEMORY = 95.0
@@ -4376,7 +4399,7 @@ OPUS_SPAWN_REASON = (
 ) % EXPLORE_AUDIT_MARKER
 OPUS_BUILDER_REASON = (
     OPUS_SPAWN_REASON + " No `Round 3 of 3` marker was found in the brief's first line or at the start of "
-    "any line. The marker applies only to a builder's third try, after review round 2 failed."
+    "any line. The marker applies only to a builder's third try: after review round 2 failed, or after round 1 failed and every fix verifier failed."
 )
 OPUS_STANDING_ROLES = ("Plan", "designer", "design-reviewer", REFUTER_ROLE)
 
@@ -4970,10 +4993,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # another folder) and one `git diff --check`; none for an add alone, or a command with no commit or push.
     # A push of a test commit with no Red-run trailer is refused here too (rule red-run): it shares the push's
     # range, and adds one `git log` per push. A commit in the same call, before the push, is read from its
-    # `-m` text; guard_merge states the cost.
+    # `-m` text; so is a lone commit with no push after it, which adds one `git diff --numstat` only when its
+    # message holds no trailer. guard_merge states the cost.
     kind, matched = conflict_markers_hit(stripped, cwd, is_test_rel, raw)
-    if kind == "red-run":
-        red_reason, red_shown = red_run_reason(matched)
+    if kind in ("red-run", "red-run-commit"):
+        red_reason, red_shown = red_run_reason(matched, kind == "red-run-commit")
         refuse(tool, "deny", "red-run", red_reason, red_shown)
     elif matched:
         markers_reason = (CONFLICT_MARKERS_CHAIN_REASON if kind == "chain" else
@@ -7047,6 +7071,14 @@ def judge(payload) -> None:
     if briefed:
         refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
 
+    # A brief or a create naming a step another live session of the repo carries (rule lane-step-dup).
+    doubled = step_dup_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+    if doubled:
+        refuse(tool, "deny", "lane-step-dup", doubled[1], doubled[0])
+    # The same call, for an open lane pull request that holds the step (rule lane-step-dup, part two).
+    held = step_pr_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+    if held:
+        refuse(tool, "deny", "lane-step-dup", held[1], held[0])
     # A lane brief that names a bare session id (rule brief-ids-in-roster).
     named_id = brief_roster_hit(tool, tool_input, cwd)
     if named_id:

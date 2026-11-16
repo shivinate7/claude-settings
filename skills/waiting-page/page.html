@@ -5,7 +5,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@700;800&family=Newsreader:opsz,wght@6..72,600&display=swap">
 <style>
-/* Layout: one stable list in three tiers and a last section for picks that stand. A slim bar in the
+/* Layout: one stable list in three tiers. A slim bar in the
    repo's colour and a tinted ground carry the repo. Nothing on the page moves when an answer is picked or sent. */
 :root {
   /* Neutrals and state colours. The script replaces the --r-* values when meta/page names a brand. */
@@ -64,7 +64,6 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .g.holds { background: var(--holds); border-radius: 2px; }
 .g.due { width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 12px solid var(--due); }
 .g.calm { border: 2px solid var(--calm); border-radius: 50%; }
-.g.stands { border-radius: 50%; background: var(--gold-ink); }
 .g.done { background: var(--good); border-radius: 50%; position: relative; }
 .g.done::after { content: ""; position: absolute; left: 4px; top: 1.5px; width: 3px; height: 6px; border: solid var(--surface); border-width: 0 2px 2px 0; transform: rotate(45deg); }
 
@@ -1011,7 +1010,8 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 <script type="application/json" id="designData">{}</script>
 
 <!-- The one list of top-level item fields. The page warns on a field outside it, and the guard (rule item-field-rendered) refuses a write of one.
-     Add a field here when the page draws it. A key inside options or steps is not listed. -->
+     Add a field here when the page draws it. A key inside options or steps is not listed.
+     `stands` is inert: the page never reads it, but 54 closed items carry it and the guard must still pass their writes. -->
 <script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "recommended", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "replied", "lastAnswer", "lane", "waits", "repo", "checked_with", "closed", "dismissed", "shown"]</script>
 
 <!-- The roadmap build writes only this block (skills/roadmap/build.py --block). The page writer replaces it on each publish
@@ -1039,7 +1039,6 @@ const validKeys = (it, l) => Array.isArray(l) && l.length > 0 && new Set(l).size
 // The keys of my pick, or null when the pick does not fit the kind of item: a pick-one pick is one key, a multi pick is a valid list. An unranked multi pick is shown and saved in option order, as ticks are; a ranked one keeps its order.
 const recOf = (it) => (it.recommended != null ? it.recommended : it.pick); // `recommended` is the field; `pick` is its old name, read on an old item
 const pickKeys = (it) => { const r = recOf(it); return isMulti(it) ? (validKeys(it, r) ? (it.ranked === true ? r : (it.options || []).map((o) => o.key).filter((k) => r.includes(k))) : null) : typeof r === "string" && (it.options || []).some((o) => o.key === r) ? [r] : null; };
-const pickChoice = (it) => (isMulti(it) ? pickKeys(it).slice() : recOf(it));
 // "A", "A and B", "A, B and C"; a ranked list is an order, so it reads "A, B, C".
 // A ready line names an option by its title, or by its letter when the title is missing, as its chip does. The none-key block keeps pickName's "".
 const optName = (it, key) => pickName(it, key) || letterOf(it, key);
@@ -1180,15 +1179,13 @@ const validT = (iso) => !isNaN(Date.parse(iso));
 const waited = (iso) => (validT(iso) ? "waited " + span(Date.now() - Date.parse(iso)) : "");
 
 /* ---------- Tiers: what holds up work, then what has a deadline, then the rest by age ---------- */
-const TIERS = [{ k: "holds", name: "Blocking" }, { k: "due", name: "Upcoming" }, { k: "calm", name: "Whenever" }, { k: "stands", name: "Pick stands" }];
-const RANK = { holds: 0, due: 1, calm: 2, stands: 3 };
+const TIERS = [{ k: "holds", name: "Blocking" }, { k: "due", name: "Upcoming" }, { k: "calm", name: "Whenever" }];
+const RANK = { holds: 0, due: 1, calm: 2 };
 // What a Send does to the card it sends (owner, page item 311; one switch). "sink": the card moves to the Answered section, folded, and the next open card takes its place.
 // "stay": the card keeps its place in its tier until reload.
 const SENT_MOVE = "sink";
 const ts = (iso) => { const t = Date.parse(iso); return isNaN(t) ? Infinity : t; };
-// A pick stands only for a decision with a valid pick that sits in no group, so it is always in the last section where the owner sees it.
-const standsOk = (it) => it.stands === true && !it.group && it.kind === "decision" && !!pickKeys(it);
-const rawTier = (it) => (standsOk(it) ? "stands" : it.holds ? "holds" : it.by && validT(it.by) ? "due" : "calm");
+const rawTier = (it) => (it.holds ? "holds" : it.by && validT(it.by) ? "due" : "calm");
 const mates = (it) => (it.group && !isRuling(it) ? state.items.filter((x) => x.group === it.group) : [it]);
 // A group sits in the most urgent tier of any member, so its items never split across tiers.
 const tierOf = (it) => mates(it).map(rawTier).sort((a, b) => RANK[a] - RANK[b])[0];
@@ -1253,7 +1250,7 @@ function sinkSent(it) {
 }
 const unsinkSent = (w) => { if (w.sank && state.sunk) state.sunk.delete(w.it.id); };
 function sorted() {
-  const by = { holds: [], due: [], calm: [], stands: [], answered: [] };
+  const by = { holds: [], due: [], calm: [], answered: [] };
   state.items.forEach((it) => { if (isSunk(it) && itemAway(it)) return; by[isSunk(it) ? "answered" : tierOf(it)].push(it); });
   // Newest answer first; a group sits at its newest member's time.
   const sentAt = (it) => Math.max(...mates(it).map((x) => Date.parse(sentOf(x).at) || 0));
@@ -1272,7 +1269,6 @@ function sorted() {
   by.holds.sort(part((a, b) => byRank(a, b) || byAge(a, b)));
   by.due.sort(part((a, b) => byRank(a, b) || dl(a) - dl(b) || byAge(a, b)));
   by.calm.sort(part((a, b) => byRank(a, b) || (a.kind === b.kind ? byAge(a, b) : a.kind === "decision" ? -1 : 1)));
-  by.stands.sort(part((a, b) => byRank(a, b) || byAge(a, b)));
   return by;
 }
 
@@ -1307,16 +1303,13 @@ const waitUrl = (w) => "https://github.com/" + w.repo + (w.run ? "/actions/runs/
 const waitWords = (w) => (w.pr ? "PR #" + w.pr : "a CI run");
 // The link holds the whole phrase after "waits on", so the words read as one link and its arrow and screen-reader words follow.
 const waitLink = (w, pre) => h("a", { href: waitUrl(w), target: "_blank", rel: "noopener" }, (pre || "") + waitWords(w), h("span", { "aria-hidden": "true" }, "↗"), h("span", { class: "sr" }, ", opens in a new tab"));
-// The answer a card holds: the owner's draft, or my pick on a question whose pick stands.
-const stoodNow = (it) => standsOk(it) && !savedOf(it);
+// The answer a card holds: the owner's draft. The page never preselects an answer (owner, 13:04 CST Nov 13).
 const eff = (it) => {
   const d = state.draft[it.id];
   if (it.park) return d;
   // A ruling holds one draft, overturn. A pick draft left from when the item was open is ignored.
   if (isRuling(it)) return d && d.choice === OVERTURN ? d : undefined;
-  if (d && d.act === "park") return d; // Park beats a stood pick: the pick stays as text and goes with no answer
-  if (d && stoodNow(it) && !d.choice && !d.unstood) return { ...d, choice: pickChoice(it), auto: true, stood: true };
-  return d || (stoodNow(it) ? { choice: pickChoice(it), auto: true, stood: true } : undefined);
+  return d;
 };
 function draftReady(it) {
   if (it.park) return ACTS.includes((state.draft[it.id] || {}).act);
@@ -1395,7 +1388,7 @@ function parkItems() {
 function pressPark(it, act) {
   edited();
   const on = (state.draft[it.id] || {}).act === act;
-  if (!it.park) { setDraft(it, on ? { act: null } : { act, choice: null, auto: false, done: false }); render(); return; }
+  if (!it.park) { setDraft(it, on ? { act: null } : { act, choice: null, done: false }); render(); return; }
   if (on) delete state.draft[it.id]; else state.draft[it.id] = { act };
   saveDraft(); render();
 }
@@ -1419,15 +1412,14 @@ function keepRouted(was, now) {
 }
 function setDraft(it, patch) {
   const next = Object.assign({}, state.draft[it.id], patch);
-  if (!next.choice && !next.done && !next.unstood && !next.act && !(next.note || "").length) delete state.draft[it.id]; else state.draft[it.id] = next;
+  if (!next.choice && !next.done && !next.act && !(next.note || "").length) delete state.draft[it.id]; else state.draft[it.id] = next;
   saveDraft();
 }
 function choose(it, key) {
   const cur = state.draft[it.id] || {};
   // A "none" note says what the owner wants instead. It does not carry over to an option.
-  const patch = { choice: key, auto: false, act: null };
+  const patch = { choice: key, act: null };
   if (key !== null && key !== NONE) patch.picked = capturePick(it, key);
-  if (key === null && stoodNow(it)) patch.unstood = true; // else my pick would stand again
   if (cur.choice === NONE && key !== NONE) patch.note = "";
   edited(); setDraft(it, patch); repaint(it);
   if (key === NONE) { const t = $("n-" + it.id); if (t) t.focus(); }
@@ -1439,9 +1431,8 @@ function toggle(it, key) {
   const cur = tickList(it), on = !cur.includes(key);
   const next = it.ranked === true ? (on ? [...cur, key] : cur.filter((k) => k !== key))
     : (it.options || []).map((o) => o.key).filter((k) => k === key ? on : cur.includes(k));
-  const patch = { choice: next.length ? next : null, auto: false, act: null };
+  const patch = { choice: next.length ? next : null, act: null };
   if (on) patch.picked = capturePick(it, key);
-  if (!next.length && stoodNow(it)) patch.unstood = true;
   if ((eff(it) || {}).choice === NONE) patch.note = "";
   edited(); setDraft(it, patch); repaint(it);
 }
@@ -1449,13 +1440,13 @@ function move(it, key, dir) {
   const cur = tickList(it).slice(), i = cur.indexOf(key), j = dir === "up" ? i - 1 : i + 1;
   if (i < 0 || j < 0 || j >= cur.length) return;
   [cur[i], cur[j]] = [cur[j], cur[i]];
-  edited(); setDraft(it, { choice: cur, auto: false }); repaint(it);
+  edited(); setDraft(it, { choice: cur }); repaint(it);
 }
 function answerBody(it, d, at) {
   if (it.park) return { parked: true, id: it.park.id, act: d.act, ref: String(it.park.ref == null ? "" : it.park.ref), note: String(it.park.note == null ? "" : it.park.note), at };
   const typed = d.note != null ? d.note : "";
   if (d.act === "park") return { item: it.id, n: it.n, at, act: "park", note: typed };
-  const body = { item: it.id, n: it.n, at, note: typed || (d.auto ? "accepted pick" : "") };
+  const body = { item: it.id, n: it.n, at, note: typed };
   if (isRuling(it)) body.choice = OVERTURN; else if (it.kind === "decision") {
     body.choice = d.choice || NONE; body.label = choiceLabel(it, body.choice, d.picked);
     const oid = choiceOptionId(it, body.choice, d.picked);
@@ -1492,7 +1483,6 @@ function readyText(it) {
   if (d.act === "park") return "Ready to send: park.";
   if (isRuling(it)) return d.choice === OVERTURN ? "Ready to send: overturn." : "";
   if (it.kind === "task") return d.done ? "Ready to send: done." : (d.note || "").trim() ? "Ready to send: note, not done." : "";
-  if (d.stood) return "The recommended option goes with your next Send.";
   if (!d.choice) return (d.note || "").trim() ? "Ready to send: none of these, with your note." : "";
   if (d.choice === NONE) return (d.note || "").trim() ? "Ready to send: none of these." : "Say what you want instead.";
   if (isMulti(it)) return validKeys(it, d.choice) ? "Ready to send: " + namesOf(it, d.choice) + (it.ranked === true ? ", your order." : ", your choice.") : "";
@@ -1501,7 +1491,7 @@ function readyText(it) {
 // The longest lines a multi item's ready line can show: every option ticked, with each ending, and the lines with no tick.
 function readyFits(it) {
   const all = "Ready to send: " + namesOf(it, (it.options || []).map((o) => o.key));
-  return [all + (it.ranked === true ? ", your order." : ", your choice."), "Ready to send: none of these, with your note.", "The recommended option goes with your next Send."];
+  return [all + (it.ranked === true ? ", your order." : ", your choice."), "Ready to send: none of these, with your note."];
 }
 // The AI sparkle: a four-point star with two small ones. It takes the colour of its box.
 function sparkle() {
@@ -1596,6 +1586,10 @@ function ruledOf(it) {
   const ks = pickKeys(it) || [], lab = (k) => String(((it.options || []).find((o) => o.key === k) || {}).label || k);
   return { letters: ks.map((k) => letterOf(it, k)).join(", "), label: ks.length ? ks.map(lab).join(" and ") : "an option" };
 }
+// Saved answers from before the page stopped preselecting carry this as their note. It is no note of the owner's, so no receipt shows it.
+const LEGACY_NOTE = "accepted pick";
+// A saved note as the owner's own: the old placeholder reads as no note. The Copy line and Change take their saved note through it.
+const ownNote = (n) => n === LEGACY_NOTE ? "" : n;
 // noNote: the owner's note is held by the fold of a card in the Answered section, so the answer line shows without it.
 function receipt(it, noNote) {
   const sv = savedOf(it) || lastOf(it), rc = savedOf(it) ? rcOf(it) : {};
@@ -1612,9 +1606,9 @@ function receipt(it, noNote) {
   return h("div", { class: "receipt" },
     h("div", { class: "line" }, glyph("done"), h("b", {}, picks ? what : what + "."),
       rc.read && !rc.filed ? h("span", { class: "read" }, "Read by " + it.owner + " " + fmt(rc.read, false)) : null,
-      h("button", { class: "btn quiet changebtn", type: "button", onclick: () => { state.changing[it.id] = true; edited(); setDraft(it, sv.act === "park" ? { act: "park", note: sv.note || "" } : { choice: Array.isArray(sv.choice) ? sv.choice.slice() : sv.choice, note: sv.note || "", done: !!sv.done }); repaint(it); } }, "Change")),
+      h("button", { class: "btn quiet changebtn", type: "button", onclick: () => { state.changing[it.id] = true; edited(); setDraft(it, sv.act === "park" ? { act: "park", note: ownNote(sv.note) || "" } : { choice: Array.isArray(sv.choice) ? sv.choice.slice() : sv.choice, note: ownNote(sv.note) || "", done: !!sv.done }); repaint(it); } }, "Change")),
     picks,
-    !noNote && sv.note && sv.note !== "accepted pick" ? h("p", { class: "rnote" }, "Note: " + sv.note) : null);
+    !noNote && sv.note && sv.note !== LEGACY_NOTE ? h("p", { class: "rnote" }, "Note: " + sv.note) : null);
 }
 // The thread on a card: the owner's last answer, then the writer's reply. Either part may be absent, and a card with neither draws nothing.
 const lastOf = (it) => (it.lastAnswer && typeof it.lastAnswer === "object" && !Array.isArray(it.lastAnswer) ? it.lastAnswer : null);
@@ -1639,7 +1633,7 @@ function lastAnswerEl(it) {
     h("p", { class: "lhead" }, "Your last answer" + (t ? ", " + t : "")),
     what ? h("div", { class: "line" }, h("b", {}, what)) : null,
     picks,
-    typeof la.note === "string" && la.note && la.note !== "accepted pick" ? h("p", { class: "rnote" }, "Note: " + la.note) : null);
+    typeof la.note === "string" && la.note && la.note !== LEGACY_NOTE ? h("p", { class: "rnote" }, "Note: " + la.note) : null);
 }
 // noLast: the card already draws the last answer as its answer line (answered by its wait), so the thread holds the reply only.
 function threadEl(it, noLast) {
@@ -1728,7 +1722,7 @@ function buildRuling(it) {
   return card;
 }
 // The fold control. The visible words name the act and what it opens; the hidden words name the item. All three labels sit in one grid cell (see .unfold).
-// A draft, a stood pick or a pending withdraw locks the fold open. A saved item never locks.
+// A draft or a pending withdraw locks the fold open. A saved item never locks.
 const foldLocked = (it) => !isSaved(it) && (!!eff(it) || withdrawing(it));
 // words ({ show, hide }) names the fold of a sunk answered card, which holds its note, last answer and reply instead of options, steps or commands.
 function unfoldBtn(it, open, locked, ncmd, words) {
@@ -1791,7 +1785,7 @@ function buildCard(it) {
     h("details", { class: "cmd-more" }, h("summary", {}, "Which " + (odd.length === 1 ? "field" : "fields")), h("p", {}, odd.join(", ") + ". Ask the session to add " + (odd.length === 1 ? "it" : "each") + " to itemFields in the page or to remove " + (odd.length === 1 ? "it" : "each") + "."))));
   if (saved && sunk) {
     // The fold holds the parts below the answer line, named by the parts that are present. With none, there is no control.
-    const sv = savedOf(it) || lastOf(it), noteOk = typeof sv.note === "string" && sv.note && sv.note !== "accepted pick";
+    const sv = savedOf(it) || lastOf(it), noteOk = typeof sv.note === "string" && sv.note && sv.note !== LEGACY_NOTE;
     // Answered by its wait, the answer line is lastAnswer, so the fold does not show it again.
     const parts = [noteOk ? "your note" : null, !byWait && lastOf(it) ? "your last answer" : null, replyOf(it) ? "the reply" : null].filter(Boolean);
     card.append(receipt(it, true));
@@ -1936,7 +1930,7 @@ function holdView(ids, back) {
 const hourBucket = () => Math.floor(Date.now() / 36e5);
 function signature(it) {
   const d = eff(it) || {};
-  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.act, d.auto, d.stood, state.more[it.id], state.moreReply[it.id], isSeen(it), isSunk(it), state.unfold[it.id], replyFirst(it), state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
+  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.act, state.more[it.id], state.moreReply[it.id], isSeen(it), isSunk(it), state.unfold[it.id], replyFirst(it), state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
 }
 const copyAttrs = (to, from) => { [...to.attributes].forEach((a) => to.removeAttribute(a.name)); [...from.attributes].forEach((a) => to.setAttribute(a.name, a.value)); };
 // Replace old's children with nu's but leave each kept node ([old node, nu stand-in, optional sync]) in place: moving an iframe reloads it.
@@ -2270,11 +2264,11 @@ function renderRail() {
 /* ---------- Bar and Send ---------- */
 function renderBar() {
   const st = staged(), open = state.items.filter((i) => !isAnswered(i)), sa = $("send");
-  const over = st.filter(isRuling).length, pks = st.filter((i) => i.park).length, toPark = st.filter((i) => !i.park && (eff(i) || {}).act === "park").length, stood = st.filter((i) => (eff(i) || {}).stood).length, left = open.length - (st.length - over - pks);
+  const over = st.filter(isRuling).length, pks = st.filter((i) => i.park).length, toPark = st.filter((i) => !i.park && (eff(i) || {}).act === "park").length, left = open.length - (st.length - over - pks);
   const parts = [];
   if (state.barNote) parts.push(state.barNote);
   else {
-    if (st.length) { parts.push(h("b", {}, String(st.length)), " ready"); const why = [stood && stood + " where my pick stands", toPark && toPark + " to park", over && over + " overturn", pks && pks + " on " + (pks === 1 ? "a parked line" : "parked lines")].filter(Boolean); if (why.length) parts.push(" (" + why.join(", ") + ")"); parts.push(". "); }
+    if (st.length) { parts.push(h("b", {}, String(st.length)), " ready"); const why = [toPark && toPark + " to park", over && over + " overturn", pks && pks + " on " + (pks === 1 ? "a parked line" : "parked lines")].filter(Boolean); if (why.length) parts.push(" (" + why.join(", ") + ")"); parts.push(". "); }
     if (left) parts.push(h("b", {}, String(left)), left === 1 ? " stays open." : " stay open.");
     if (state.items.length && !open.length) parts.push(h("b", {}, "All answered."));
   }
@@ -2449,12 +2443,12 @@ function answerLine() {
   answerable().sort((a, b) => a.n - b.n).forEach((it) => {
     if (blocked(it)) return;
     const a = savedOf(it), d = eff(it) || {};
-    const choice = d.choice || (a && a.choice), note = d.note != null ? d.note : (a && a.note);
+    const choice = d.choice || (a && a.choice), note = d.note != null ? d.note : ownNote(a && a.note);
     if (state.draft[it.id] ? d.act === "park" : !!(a && a.act === "park")) parts.push(it.n + " park" + (note ? " (" + note + ")" : ""));
     else if ((it.kind === "decision" || isRuling(it)) && choice) parts.push(it.n + " " + choiceText(choice) + (note ? " (" + note + ")" : ""));
     else if (it.kind === "task") {
       const live = !!state.draft[it.id] && draftReady(it); // only a draft that would send replaces the saved answer
-      const done = live ? !!d.done : !!(a && a.done), tnote = live ? d.note : (a && a.note);
+      const done = live ? !!d.done : !!(a && a.done), tnote = live ? d.note : ownNote(a && a.note);
       if (done) parts.push(it.n + " done" + (tnote ? " (" + tnote + ")" : ""));
       else if ((tnote || "").trim()) parts.push(it.n + " note, not done (" + tnote + ")");
     }
