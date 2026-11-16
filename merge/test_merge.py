@@ -14816,6 +14816,65 @@ def role_tuple_in_source(text, name):
     return None
 
 
+class NoneLaneLint(CloudSession):
+    """`merge --lane-lint <pr>` under merge.requiredChecks "none" (decision private-repos-no-ci: a repo with no CI names no check). The config is
+    written to origin's main, so the lint reads "none" as a run in production does. A lane head with no check run has no touched job, so the
+    lint reads no draft run and the local lint decides. A case scripts the head's check runs (FakeHost.draft_rows, read by the real judge) and the
+    local lint's answer (merge.ci_job_run, LINT_STATES)."""
+
+    def lane_head(self, required, rows):
+        """Write the base's config with requiredChecks `required`, then script the lane head's check runs as `rows` ([] is a head with no check run).
+        -> the head's sha, read after the base's merge into the lane (head_takes_base)."""
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=required))))
+        head = self.head("feat")
+        self.host.draft_rows = {head: rows}
+        return head
+
+    @contextlib.contextmanager
+    def local_lint_answers(self, state):
+        """merge.ci_job_run answers the local lint with LINT_STATES[state]. The lint tree lives in this run's folder. Yields each call's arguments."""
+        calls = []
+
+        def answer(wt, *args, **kw):
+            calls.append(args)
+            return LINT_STATES[state]
+        with unittest.mock.patch.object(merge, "ci_job_run", side_effect=answer), \
+                unittest.mock.patch.object(tempfile, "tempdir", self.run_dir):
+            yield calls
+
+    def lane_lint_run(self):
+        """`merge --lane-lint 7` as a local run, with CLAUDE_CODE_REMOTE unset. -> (rc, stdout and stderr together)."""
+        rc, out, err = self.run_main("--lane-lint", "7", CLAUDE_CODE_REMOTE=None)
+        return rc, out + err
+
+    def test_a_lane_head_with_no_check_run_under_none_takes_the_lint_and_posts_its_pass(self):
+        head = self.lane_head("none", [])
+        self.assertFalse(merge.is_integration_pr(self.host.pr(7)), "precondition: pull request 7 is an integration PR, so the lane path does not run")
+        with self.local_lint_answers("pass") as calls:
+            rc, text = self.lane_lint_run()
+        self.assertEqual(check_run_reads(self.host.draft_reads), [], "under requiredChecks none, the lane lint read the check runs of the head for a touched job")
+        self.assertEqual(len(calls), 1, "the local lint ran %d times, want once: %s" % (len(calls), text))
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(len([line for line in text.splitlines() if line.startswith("PASS:")]), 1, text)
+        self.assertEqual(self.host.posted, [(7, lint_body(head))], "the lane lint did not post its PASS comment on #7 at the head")
+
+    def test_a_lane_head_whose_touched_job_passed_under_none_takes_the_lint_and_posts_its_pass(self):  # control: green on the old code
+        head = self.lane_head("none", [draft_row("touched")])
+        with self.local_lint_answers("pass") as calls:
+            rc, text = self.lane_lint_run()
+        self.assertEqual(len(calls), 1, "the local lint ran %d times, want once: %s" % (len(calls), text))
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(self.host.posted, [(7, lint_body(head))], "the lane lint did not post its PASS comment on #7 at the head")
+
+    def test_a_lane_head_with_no_check_run_under_a_named_check_list_still_stops_unknown_on_the_touched_job(self):  # control: green on the old code
+        self.lane_head(["checks"], [])
+        rc, text = self.lane_lint_run()
+        self.assertEqual(rc, 1, text)
+        self.assertIn("is unknown, not a pass", text, "a named check list let a head with no touched job through without the unknown refusal: " + text)
+        self.assertIn("no `touched` job", text, "the unknown refusal does not name the missing touched job: " + text)
+        self.assertEqual(self.host.posted, [], "an unknown lint posted a PASS comment")
+
+
 class GuardRoleNamesMatch(unittest.TestCase):
     """The guard cannot import merge/merge.py, so hooks/guard_merge.py names the merge tiers in its own constants, ROLE_TIERS and
     LOCAL_ROLE_TIERS. These cases read those constants from the guard's source, never by import, and compare them with the merge tool's
