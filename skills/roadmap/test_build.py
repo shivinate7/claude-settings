@@ -3551,12 +3551,13 @@ class StepCheckFields(unittest.TestCase):
 class StepCheckRow(UpkeepFixture):
     """The upkeep row "steps with an unreadable done_check or ci_only". It lists the id of every step, any status,
     sorted, whose fields step_check_fields reads "bad". With none, it prints count 0 and no detail line. The row sits
-    just before "done without check". Each case builds from main with no --live file. The steps are todo or done: a
+    just before "status drift", which sits just before "done without check". Each case builds from main with no --live file. The steps are todo or done: a
     doing or active step would also trip the in-progress row. A valid case builds beside a bad control step, so the row is shown to work
     before a valid step counts as absent (P7: scope before subject)."""
 
     ROW = "steps with an unreadable done_check or ci_only"
     BEFORE = WaitOnClosedPull.LABEL
+    DRIFT = build.DRIFT_LINE
     AFTER = DoneWithoutCheck.ROW
     CONTROL = "control-blank"
     VALID = "python3 skills/roadmap/test_build.py passes"
@@ -3612,11 +3613,12 @@ class StepCheckRow(UpkeepFixture):
         # Empty state (P8): only the default step, which has no step fields.
         self.assertEqual(self.row(self.build_steps({}), self.ROW), (0, ""))
 
-    def test_the_row_sits_just_before_done_without_check(self):
+    def test_the_row_sits_just_before_status_drift_then_done_without_check(self):
         labels = list(self.summary_counts(self.build_steps({})))
         self.assertIn(self.ROW, labels, "no upkeep row labelled %r" % self.ROW)
         at = labels.index(self.ROW)
-        self.assertEqual(labels[at + 1:at + 2], [self.AFTER], "the row is not just before done without check")
+        self.assertEqual(labels[at + 1:at + 2], [self.DRIFT], "the row is not just before status drift")
+        self.assertEqual(labels[at + 2:at + 3], [self.AFTER], "status drift is not just before done without check")
         self.assertEqual(labels[at - 1:at], [self.BEFORE],
                          "the row does not follow open step waits on a closed unmerged PR")
 
