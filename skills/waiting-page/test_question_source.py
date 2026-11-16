@@ -138,9 +138,22 @@ class Item(unittest.TestCase):
 
 
 class Earlier(unittest.TestCase):
-    def test_new_label_at_a_shown_position_raises(self):
-        spec = spec_of(["Keep it as is", "Hold it for the coordinator"], shown=EARLIER)
-        raises_value_error(self, spec, "a label at position b differs from the shown label")
+    def test_reworded_label_at_a_shown_position_renders_with_its_shown_id(self):
+        result = RENDER(spec_of(["Keep it as is", "Hold it for the coordinator"], shown=EARLIER))
+        item = result.get("item", {})
+        options = options_of(self, item)
+        self.assertEqual([(o.get("key"), o.get("id"), o.get("label")) for o in options],
+                         [("a", "keep-it-as-is", "Keep it as is"), ("b", "allow-merge-role", "Hold it for the coordinator")],
+                         "a reworded option does not keep its key and id")
+        self.assertEqual(item.get("shown"), EARLIER, "shown does not keep the labels as first shown")
+        self.assertIn("b) Hold it for the coordinator", chat_lines(result), "the chat does not carry the reworded label")
+
+    def test_label_that_is_another_shown_label_raises(self):
+        spec = spec_of(["Allow merge --role", "Keep it as is"], shown=EARLIER)
+        raises_value_error(self, spec, "labels swapped between positions a and b")
+
+    def test_empty_label_at_a_shown_position_raises(self):
+        raises_value_error(self, spec_of(["", "Allow merge --role"], shown=EARLIER), "an empty label at position a")
 
     def test_new_id_at_a_shown_position_raises(self):
         spec = spec_of(LABELS, shown=EARLIER)

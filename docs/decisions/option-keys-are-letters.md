@@ -43,12 +43,15 @@ An option also keeps its letter once shown (owner ruling R60, roadmap ruling r60
   - the write carries no `shown` list. `shown` is the options as first shown, in order, each as `{key, id, label}`;
   - there are fewer options than shown;
   - `shown` is shorter than `options`; or
-  - an option at a shown position differs from the shown entry in key, id or label (a reorder, a relabel, a changed id).
+  - an option at a shown position differs from the shown entry in key or id (a reorder, a changed id);
+  - an option at a shown position has a label that is not a non-empty string; or
+  - an option at a shown position carries the label shown at another position (trimmed, case-folded): a swap that kept the ids.
 
-  - A note on an option (`note`), with key, id and label unchanged, passes. So does an option appended after the shown ones. A rule-driven change adds a `note` and reorders nothing; the page shows the note on the option's card.
+  - The label may be reworded (owner, 2026-11-15 23:2x CST: "options made don't flip flop: a is apple, b is banana; the page must not show a is banana, b is apple"). R60 stands: the letter keeps its meaning, which is its key and id. `shown` keeps the labels as first shown, so a reword is an option label that differs from `shown`'s.
+  - A note on an option (`note`), with key and id unchanged, passes. So does an option appended after the shown ones. A rule-driven change adds a `note` and reorders nothing; the page shows the note on the option's card.
   - On every write that carries `options`, `shown` is as long as `options`. An update that appends options extends `shown` by them on the same write. A first `set` carries a `shown` equal to its own options. The reason names `shown`.
   - A task, a note, a closed item and a write with no `options` pass. `shown` is in the page's `itemFields` block (rule `item-field-rendered`).
-  - The reason says: keep each shown option's key, id and label and position, give each option a unique id, carry `shown`. It names no target.
+  - The reason says: keep each shown option's key, id and position, reword a label only as the same option and never to another shown option's wording, give each option a unique id, carry `shown`. It names no target.
   - Incident: 2026-11-12 14:39 CST, waiting item 646. Triage reordered the options after the chat question went out, so chat a became page b. The owner's "a" (15:03 CST) could have been filed as the opposite pick. `option_letter_hit` could not see it: after the swap each key was still its position's letter.
   - Cost: no new process. It runs in the guard process that every waiting-page write already starts, reads only the write, and writes no file unless it denies.
   - Known limit: a write that carries its own `shown` is trusted. A set or update that rewrites `shown` to match reordered options passes, since the guard cannot see the stored item. A held answer (`page_grant.py`) is the backstop: an answer whose option id or label moved is held. An `options` that is not a list is refused.
