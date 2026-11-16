@@ -209,8 +209,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     starts no macOS job (a job-level `github.event_name != 'push'`, since a step-level skip still starts
     the runner). Slow legs run daily (owner item 880, 11:53 CST Nov 15). A push runs the Linux fast jobs
     only. The Windows and mutation jobs run in the one daily scheduled run, a pull request and a
-    manual run. The macOS jobs run in the daily run and a manual run only, never on a pull request (owner,
-    01:33 CST Nov 16: "turn off all mac runs for now"), and `all-jobs-passed` does not need them. When the newest completed daily is green and `push-skip` proved every push run since it, the
+    manual run. The macOS jobs run on a manual run, and on a daily that runs, never on a pull request or a push (owner,
+    01:33 CST Nov 16: "turn off all mac runs for now"). The lane-touched-tests workflow has no macOS leg either. `all-jobs-passed` does not need them. When the newest completed daily is green and `push-skip` proved every push run since it, the
     newest at this head, the daily skips (the `nightly-skip` job). `scope` waits on that job,
     so nothing is cancelled.
 18. **Profile before you refactor test setup.** Compare setup time to test-body time. If the saving is

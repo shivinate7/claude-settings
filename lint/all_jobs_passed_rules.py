@@ -17,7 +17,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from test_windows_split import (ALL_JOBS_PASSED_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_OFF_JOBS, PUSH_SKIP_JOB, RECORDS_ONLY_CONDITION, all_jobs, draft_guard_only, drop_condition, eval_if, macos_scope_skips, macos_scope_skip_ok,  # noqa: E402,F401  the one home of the scope condition and scalar parsers
+from test_windows_split import (ALL_JOBS_PASSED_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_OFF_JOBS, PUSH_SKIP_JOB, RECORDS_ONLY_CONDITION, all_jobs, draft_guard_only, drop_condition, eval_if,  # noqa: E402,F401  the one home of the scope condition and scalar parsers
                                 job_if_without_records, push_guard_only, push_off_only, shard_base, shard_push_off, unwrap, yaml_scalar)  # NIGHTLY_SKIP_JOB and PUSH_SKIP_JOB are read from here by actions/push-skip/push-skip.py
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
 
@@ -198,8 +198,6 @@ def off_problems(text):
             if not draft_guard_only(jobs[name]["if"] or "") and not shard_push_off(rest or "") and not shard_records_only_if(jobs[name]["if"]) and not records_only_if(jobs[name]["if"]):
                 problems.append(f"shard {name} is in all-jobs-passed's needs but its job-level if is not the draft guard: "
                                 f"{jobs[name]['if']}")
-        elif name in MACOS_JOBS and macos_scope_skip_ok(name, jobs[name]["if"] or ""):
-            continue  # its scope skip is off on a PR whose flags are on, so the macOS job stays needed; scope_skips_problems reads its skip
         elif name in PUSH_OFF_JOBS and jobs[name]["if"] is not None and push_off_only(job_if_without_records(jobs[name]["if"])):
             continue  # a listed job (R61 push-off list) with the push guard alone, or with the records-only skip joined: a pull_request runs it, so the rollup needs it and never reads a skip
         elif name != "scope" and jobs[name]["if"] is not None and not records_only_if(jobs[name]["if"]):
@@ -234,28 +232,21 @@ def scope_skips_map(text):
 
 
 def scope_skips_problems(text):
-    """all-jobs-passed's scope-skips input is the macOS scope skip (macos_scope_skips, testing/scope_skips.py): one entry per macOS job whose
-    job-level if is its scope skip, with that skip's flags, and no other job. check.sh passes a skipped job only on such an entry.
-    A file with no scope-skipped job needs no input."""
+    """No job has a scope skip now (the macOS jobs run on a dispatch and a daily that runs, never on a pull request), so
+    all-jobs-passed's scope-skips input must be missing: check.sh would pass a skipped job on any entry."""
     block = job_block(text, ALL_JOBS_PASSED_JOB)
     if block is None:
         return [f"no {ALL_JOBS_PASSED_JOB} job in checks.yml"]
     raw = scope_skips_raw(text)
-    jobs = all_jobs(text)
-    want = {name: flags for name, flags in macos_scope_skips().items() if name in jobs and macos_scope_skip_ok(name, jobs[name]["if"] or "")}
     if raw is None:
-        return [f"{ALL_JOBS_PASSED_JOB}'s action step has no scope-skips input: a skipped macOS job reads as red"] if want else []
+        return []
     try:
         got = json.loads(raw)
     except ValueError:
         return [f"scope-skips is not JSON: {raw!r}"]
     if not isinstance(got, dict) or not all(isinstance(v, list) for v in got.values()):
         return [f"scope-skips is not one object of job: [flag, ...]: {raw!r}"]
-    problems = [f"scope-skips lacks {name}, whose job-level if is a scope skip" for name in sorted(set(want) - set(got))]
-    problems += [f"scope-skips names {name}, which has no scope skip" for name in sorted(set(got) - set(want))]
-    problems += [f"scope-skips lists {got[name]} for {name}, want its scope skip's flags {list(want[name])}"
-                 for name in sorted(set(want) & set(got)) if got[name] != list(want[name])]
-    return problems
+    return [f"scope-skips names {name}, which has no scope skip" for name in sorted(got)]
 
 
 def scope_if_problems(text):
