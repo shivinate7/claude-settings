@@ -519,7 +519,7 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertEqual(rc, 1, out)
         self.assertEqual(flagged(out), [NOTE % "no-slug-line"], out)
 
-    # Round 2: the frozen file's line test counts copies, splits on "\n" only, and reads every edited note file.
+    # The frozen file's line test counts copies, splits on "\n" only, and reads every edited note file.
     # Separators and BOMs are escapes in this source: a raw control character here would read as a line break.
 
     def test_second_copy_of_a_frozen_line_is_refused(self):
