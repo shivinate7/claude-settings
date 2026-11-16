@@ -580,6 +580,9 @@ FIXTURELESS_CHECKS.add(octopus_remedy_case)
 LOG_CHECKS_EXTRA.append((OCT_FETCH_COST_LABEL, octopus_fetch_cost_case))
 LOG_FAMILY[OCT_FETCH_COST_LABEL] = "octopus-push"
 FIXTURELESS_CHECKS.add(octopus_fetch_cost_case)
+LOG_CHECKS_EXTRA.append((OCT_BROKEN_REMEDY_LABEL, octopus_broken_remedy_case))
+LOG_FAMILY[OCT_BROKEN_REMEDY_LABEL] = "octopus-push"
+FIXTURELESS_CHECKS.add(octopus_broken_remedy_case)
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue

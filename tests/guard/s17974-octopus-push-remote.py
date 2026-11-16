@@ -95,6 +95,29 @@ sh("octopus-push: a push whose remote cannot be fetched is refused, and the reas
    "refreshed", VCS + " push origin lane", "deny", OCT_RULE, cwd=OCT_BROKEN, carries="could not be refreshed")
 
 
+# The same broken remote, read for the remedy. The stale-refs sentence is in this refusal, and it must not name the
+# forbidden target after `Remedy:`. The case above passes on the same refusal, because it reads only the sentence.
+# The scope is read first: the refusal must be the stale-refs variant, so the remedy judged is the one that sentence adds to.
+OCT_BROKEN_REMEDY_LABEL = ("octopus-push: a refusal on a failed fetch names the two-parent form in its remedy, and not "
+                           "the forbidden target")
+
+
+def octopus_broken_remedy_case():
+    materialize(OCT_BROKEN)
+    got, reason = decide({
+        "raw": None, "tool": "Bash", "cwd": OCT_BROKEN, "session": None,
+        "env_path": None, "tool_input": {"command": VCS + " push origin lane"},
+    })
+    if got != "deny":
+        return False, "expected deny, got %s" % got
+    if "could not be refreshed" not in reason:
+        return False, "the refusal does not say the refresh failed: %s" % reason[:90]
+    fault = octopus_remedy_fault(reason)
+    if fault:
+        return False, fault
+    return True, "refused on a failed fetch, and the remedy names the two-parent form and not the octopus merge"
+
+
 # A fetch on a hit, pinned in the push cost table (the helper of section 13406). A push whose range holds an octopus
 # runs one `git fetch` of its remote and reads the range again. A clean push runs no fetch. Each row's scope is read
 # before its counts are judged. The check builds only the two fixtures it names, through materialize, so it is
