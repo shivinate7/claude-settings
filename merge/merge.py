@@ -1137,6 +1137,7 @@ class Host:
         self.memo = {}  # (route, query, flags) -> the reply of this run's GET, kept until any write (api)
         self.route_counts = {}  # (method, route template) -> gh calls made, retries included (route_template)
 
+    batch_brake = None  # the guard sets it to merge.ignoreChecks ({} for none): head_read then also reads the other ready pull requests on the base (batch_running). The merge tool never sets it
     commit_message = None  # set by confirm just before the merge: one line per reason flag that lifted a check. None leaves GitHub's default message
     branch = "<branch>"  # the head branch of the last pr() read: the remedy of a "no check ran" red names it
     before_wait = None  # lock.extend_for, set by confirm once the lock is held: runs before each rate wait. No gh call has one before
@@ -1956,7 +1957,7 @@ class Host:
         home for "has this head settled", so it shares classify and runs with the wait.
         No check and no run reads as pending, not green: right after a push GitHub has not created
         them yet (the checks read settles for the same reason). `nothing_is_green` is for a repo with no workflows.
-        Another ready PR's running CI holds no merge (per-lane merge), and the branch protection feeds no verdict here, so neither is read.
+        With `batch_brake` set (the guard's read), a settled head is held while another ready PR on its base has CI running (batch_running): -> "held".
         Its `gh` calls (the pull request, the check runs, the commit statuses, the workflow runs; a branch name adds the open pull request list;
         a head whose check runs link more than one run adds one more workflow runs read) share one deadline (SH_TIMEOUT, the guard's one budget for this whole
         read) instead of each getting it afresh, so a hung gh holds the whole read for one deadline,
@@ -1970,6 +1971,7 @@ class Host:
                 runs = self.runs(info["head"])
                 red, pending = self.settle(red, pending, *self.judge_runs(runs))
                 unseen = not got and not runs and not nothing_is_green
+                held = self.batch_running(num, info["base"], info["head"]) if self.batch_brake is not None and not (red or pending or unseen) else []
         except subprocess.TimeoutExpired:  # its text names the resolved program path
             return "unknown", "a gh call timed out"
         except Exception as e:  # Stop, a missing gh, malformed JSON: all unread
@@ -1980,7 +1982,40 @@ class Host:
             return "pending", ", ".join(pending)
         if unseen:
             return "pending", "no check and no workflow run is reported on the head yet"
+        if held:
+            return "held", "; ".join(held)
         return "green", ""
+
+    def batch_running(self, n, base, head):
+        """-> one line per other open, ready pull request on `base` whose head has a workflow run not completed, or a check
+        reported and not completed, unless that head contains n's head (decision no-merge-during-batch-ci): the compare
+        `head...other head` reads `ahead` or `identical`, and so does the compare `base...head` (this head holds the base tip).
+        Both are read only for a busy pull request, the second only when the first passes. A failed read raises Stop: unknown is red.
+        `head` is n's head sha. The run counts because a required job can wait on another job (checks.yml's `checks` needs `scope`),
+        so it has no row yet. The checks that count are a pinned list, else the ruleset or the branch protection; with neither,
+        every reported check counts. The checks and runs in `batch_brake` (merge.ignoreChecks) never count. The PR `n` itself, drafts and other bases
+        never count. With no other ready pull request on the base, no protection is read."""
+        others = [d for d in self.open_pulls() if d["base"]["ref"] == base and not d.get("draft") and d["number"] != n]
+        if not others:
+            return []
+        names = self.required if isinstance(self.required, list) else self.protection_names()
+        blockers = []
+        for d in others:
+            parts = self.busy_parts(d, names, self.batch_brake or {})
+            # held only when the busy head does not hold this head, or this head is behind the base tip: that run never tested what this merge lands
+            if parts and not (self.holds_head(head, d["head"]["sha"]) and self.holds_head(base, head)):
+                blockers.append(f"#{d['number']} ({d['head']['ref']}) " + "; ".join(parts))
+        return blockers
+
+    def busy_parts(self, d, names, ignore):
+        """-> why the head of the open pull request row `d` is busy: one text per pending check and per workflow run not completed.
+        [] when it is settled. `names` is the check names that count; None counts every reported check. The one home of "this head has CI running"."""
+        got = self.checks(d["number"], warn=False, sha=d["head"]["sha"])
+        _, pending, _ = self.classify(got, names or [], ignore)
+        hits = [f"`{k}` is pending: " + next((l for b, l in got[k] if b == "pending"), "")
+                for k in pending if (names is None or k in names) and got.get(k)]
+        running = self.judge_runs([r for r in self.runs(d["head"]["sha"]) if r["name"] not in ignore])[1]
+        return (["check " + "; ".join(hits)] if hits else []) + [w + " is not completed" for w in running]
 
     def block(self, pending, got):
         """Pause for something to change. A check with an Actions run pauses 30 s, else a minute. Neither makes a gh call."""
