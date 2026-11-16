@@ -740,13 +740,12 @@ add("cap deadline: a model raise keeps the model wording and asks for a model ab
 
 # ------------------------------------------ a cap-lift end the shell computes at write time
 #
-# THE END IS NOT A LITERAL. A shell write may take its end from a command substitution, `$(date ...)`, or from a
-# `--arg` variable. The guard reads an end only as a literal instant after the field name, so no end shows, and a
-# deadline-only write passed unasked. The ask must say that the end is computed at write time and is not shown,
-# so the approver reads that the end is absent, not that the write sets none. A model raise with such an end asks
-# for the model and says the same. Each write below is one standalone command: a chained step that asks is refused,
-# not asked (decision ask-commands-run-alone), so no case chains a step ahead of the write. A literal end that does
-# not parse stays silent, as a Write of one does.
+# THE END IS NOT A LITERAL. A shell write may take its end from a command substitution, `$(date ...)`, a shell
+# variable, or a `--arg` variable. No literal instant follows the field name, so no end shows. The ask must say
+# that the end is computed at write time and is not shown, so the approver reads that the end is absent, not that
+# the write sets none. A model raise with such an end asks for the model and says the same. Each write below is one
+# standalone command: a chained step that asks is refused, not asked (decision ask-commands-run-alone), so no case
+# chains a step ahead of the write. A literal end that does not parse stays silent, as a Write of one does.
 COMPUTED_NOTE = "end computed at write time, not shown"
 COMPUTED_NOW = "$(date -u -d '+30 days' +%FT%TZ)"
 sh("cap deadline: a shell echo whose cap-lift end is a $(date) substitution asks under agent-model-cap and says "
@@ -793,6 +792,68 @@ sh("control: a jq that prints the cap-lift field with a $(date) value and no red
 sh("control: a shell echo that writes a $(date) value under another key, not the cap-lift field, asks nothing",
    'echo "{\\"TZ\\": \\"%s\\"}" > %s' % (COMPUTED_NOW, PROJ_LOCAL),
    "allow", cwd=NOGIT, silent=True, env=DISK_CLOCK)
+
+# THE PRINTF FORMAT. The end sits in a printf argument, not in the text after the field name, so the field
+# reads no end. Each ask case names the field in the format and takes the end from an argument. The controls are
+# a literal argument that is not a date, and a printf that never names the field.
+PRINTF_END_FORMAT = '{"' + EXPIRY_KEY + '": "%s"}'
+sh("cap deadline: a printf whose cap-lift end is a $(date) argument asks under agent-model-cap and says the end is "
+   "computed at write time",
+   "printf '" + PRINTF_END_FORMAT + "' \"" + COMPUTED_NOW + "\" > " + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(COMPUTED_NOTE,), lacks=WRONG_FOR_END_ONLY + (" CST", " CDT"),
+   env=DISK_CLOCK)
+sh("cap deadline: a printf whose cap-lift end is a shell variable argument asks under agent-model-cap and says the "
+   "end is computed at write time",
+   "printf '" + PRINTF_END_FORMAT + "' \"$D\" > " + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(COMPUTED_NOTE,), lacks=WRONG_FOR_END_ONLY + (" CST", " CDT"),
+   env=DISK_CLOCK)
+sh("cap deadline: a printf %s argument split from the field's text, with a $(date) end argument, asks under "
+   "agent-model-cap and says the end is computed at write time",
+   "printf '%s' '{\"" + EXPIRY_KEY + "\": \"' \"" + COMPUTED_NOW + "\" '\"}' > " + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(COMPUTED_NOTE,), lacks=WRONG_FOR_END_ONLY + (" CST", " CDT"),
+   env=DISK_CLOCK)
+sh("control: a printf whose cap-lift end argument is a literal that is not a date stays silent",
+   "printf '" + PRINTF_END_FORMAT + "' 'next Tuesday' > " + PROJ_LOCAL,
+   "allow", cwd=NOGIT, silent=True, env=DISK_CLOCK)
+sh("control: a printf that never names the cap-lift field, with a $(date) argument, asks nothing",
+   "printf '{\"TZ\": \"%s\"}' \"" + COMPUTED_NOW + "\" > " + PROJ_LOCAL,
+   "allow", cwd=NOGIT, silent=True, env=DISK_CLOCK)
+
+# THE COMPUTED END IN EACH SHELL SPELLING. A bare variable, a braced variable, a backtick substitution and a jq
+# `--arg` variable each compute the end, so each asks. A `--arg` bound to an unparseable literal stays silent.
+sh("cap deadline: an echo whose cap-lift end is a bare $D variable asks under agent-model-cap and says the end is "
+   "computed at write time",
+   'echo "{\\"' + EXPIRY_KEY + '\\": \\"$D\\"}" > ' + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(COMPUTED_NOTE,), lacks=WRONG_FOR_END_ONLY + (" CST", " CDT"),
+   env=DISK_CLOCK)
+sh("cap deadline: an echo whose cap-lift end is a braced ${D} variable asks under agent-model-cap and says the end is "
+   "computed at write time",
+   'echo "{\\"' + EXPIRY_KEY + '\\": \\"${D}\\"}" > ' + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(COMPUTED_NOTE,), lacks=WRONG_FOR_END_ONLY + (" CST", " CDT"),
+   env=DISK_CLOCK)
+sh("cap deadline: an echo whose cap-lift end is a backtick substitution asks under agent-model-cap and says the end is "
+   "computed at write time",
+   'echo "{\\"' + EXPIRY_KEY + '\\": \\"`date -u +%FT%TZ`\\"}" > ' + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(COMPUTED_NOTE,), lacks=WRONG_FOR_END_ONLY + (" CST", " CDT"),
+   env=DISK_CLOCK)
+sh("cap deadline: a jq --arg bound to a shell variable, set on the field, asks under agent-model-cap and says the end "
+   "is computed at write time",
+   "jq --arg d \"$D\" '." + EXPIRY_KEY + "=$d' f > " + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(COMPUTED_NOTE,), lacks=WRONG_FOR_END_ONLY + (" CST", " CDT"),
+   env=DISK_CLOCK)
+sh("control: a jq --arg bound to an unparseable literal, set on the cap-lift field, stays silent",
+   "jq --arg d 'unparseable' '." + EXPIRY_KEY + "=$d' f > " + PROJ_LOCAL,
+   "allow", cwd=NOGIT, silent=True, env=DISK_CLOCK)
+
+# THE WORDING OF A COMPUTED END. The end is not printed, so the ask must not say "shown here", which tells the
+# approver the end is on screen. Each ask names a computed end and states that it is not shown.
+sh("cap deadline: a computed end with no model says the end is not shown, and does not say it is shown here",
+   'echo "{\\"' + EXPIRY_KEY + '\\": \\"' + COMPUTED_NOW + '\\"}" > ' + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(COMPUTED_NOTE,), lacks=("shown here",), env=DISK_CLOCK)
+sh("cap deadline: a computed end with a model says the end is not shown, and does not say it is shown here",
+   'echo "{\\"env\\": {\\"' + CAP_KEY + '\\": \\"' + OPUS + '\\"}, \\"' + EXPIRY_KEY + '\\": \\"' + COMPUTED_NOW
+   + '\\"}" > ' + PROJ_LOCAL,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY, COMPUTED_NOTE), lacks=("shown here",), env=DISK_CLOCK)
 
 # ----------------------------------------------------- one reading of each offset form of the end
 #

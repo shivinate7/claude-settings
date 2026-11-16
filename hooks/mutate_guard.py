@@ -1652,6 +1652,17 @@ MUTATIONS = [
      '        end = cap_deadline_end(cap_sed_parts(raw, matched, cwd)) or (CAP_END_COMPUTED if cap_deadline_computed(raw) else "")',
      '        end = cap_deadline_end(cap_sed_parts(raw, matched, cwd))', "guard",
      "a jq filter whose cap-lift end is a $(date) substitution, writing the settings file"),
+    ("guard: the computed end is read only after a $( substitution, so a bare variable or a backtick end reads as no end",
+     r'CAP_DEADLINE_COMPUTED = re.compile(_CAP_FIELD_VALUE + r"[$`]")',
+     r'CAP_DEADLINE_COMPUTED = re.compile(_CAP_FIELD_VALUE + r"\$\(")', "guard",
+     "an echo whose cap-lift end is a backtick substitution asks"),
+    ("guard: a jq --arg bound to an unparseable literal is not checked, so the cap-lift end reads as computed",
+     r"""    for ref in CAP_DEADLINE_VALUE_REF.finditer(plain):
+        if re.search(r"--arg\s+" + re.escape(ref.group(1)) + r"\s+['\"]?[^\s'\"$`]", plain):
+            return False   # bound to some other literal: an unparseable one, which stays silent
+    return True""",
+     "    return True", "guard",
+     "a jq --arg bound to an unparseable literal, set on the cap-lift field, stays silent"),
 
     # ---- the one deadline parser, hooks/shared_names.py parse_deadline, which the guard and the config
     # watch both call. These break its space form and its no-offset form.
