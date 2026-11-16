@@ -528,7 +528,7 @@ SPEC_JOBS = CONDITIONED_JOBS + SPLIT_CONDITIONED_JOBS + UNCONDITIONED_JOBS
 def scope_named_steps():
     """The step names that take the condition in SPLIT_CONDITIONED_JOBS: NO_MD and NAMES_ONLY of lint/test_checks_step_scope.py, the
     one home of those lists. Imported here, not at the top, because that module imports this one. A doc step is not named:
-    owner ruling own-830-c (decision records-index-at-merge, 2026-11-14 15:02 CST) keeps the steps that read a .md file running."""
+    a records-only push still runs the steps that read a .md file (decision records-index-at-merge)."""
     from test_checks_step_scope import NAMES_ONLY, NO_MD
     return set(NO_MD) | set(NAMES_ONLY)
 

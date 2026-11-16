@@ -1028,7 +1028,7 @@ class WholeTreeReadersOnAModsChange(ChecksStepBase):
 
 
 class DocStepScopeConditions(ChecksStepBase):
-    # Owner ruling own-830-c (decision records-index-at-merge, 2026-11-14 15:02 CST): a records-only push turns off no doc step, since each reads a .md file.
+    # A records-only push still runs each doc step, since each reads a .md file (decision records-index-at-merge).
     def test_each_doc_step_carries_the_scope_condition_of_its_groups(self):
         steps = self.steps()
         for name, groups in DOC_STEPS.items():
