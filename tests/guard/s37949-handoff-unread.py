@@ -213,6 +213,28 @@ def hu_copy_check(drop="reread_check.py"):
                   "spawn; the intact copy refuses the call for the unread handoff" % drop)
 
 
+def hu_fix_check(drop="reread_check.py"):
+    """install-hooks-whole, with the fix named (owner ruling own-896-897-glued-amp-b, 897 b): with `drop` missing beside
+    guard.py, a flagged call is refused as guard-crash, and the reason names the fix: run install.sh, then retry. That
+    text is the load-failure refusal (guard.py, _print_crash_refuse), which every missing part gets. No rule runs when the
+    load fails, so the handoff-unread reason never reaches this call."""
+    cfg = os.path.join(ROOT, "hu-fix")
+    hu_files(cfg, flag=True, handoff=True)
+    dropped = _guard_copy("hu-fix-no-" + drop[:-3], drop)
+    run = _hu_copy_run(dropped, cfg)
+    decision, reason = _decision(run)
+    if run.returncode != 0 or decision != "deny" or GUARD_CRASH not in reason:
+        return False, "without %s the call is %r as %r (exit %d), want deny as guard-crash" % (
+            drop, decision, reason[:70], run.returncode)
+    if "run install.sh" not in reason:
+        return False, "without %s the deny does not name the fix, want 'run install.sh' in %r" % (drop, reason[-100:])
+    return True, "without %s the deny names the fix: run install.sh, then retry" % drop
+
+
+LOG_CHECKS_EXTRA.append(("handoff-unread: install-hooks-whole: a missing reread_check's refusal names install.sh as the fix",
+                         hu_fix_check))
+
+
 def _hu_copy_run(folder, config, tool="Bash", tool_input=None):
     """One call through a copy's guard.py, with `config` as its config folder and the session on the payload.
     The call is `echo hi` in Bash unless `tool` and `tool_input` name another call."""
