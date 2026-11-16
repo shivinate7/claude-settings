@@ -59,12 +59,15 @@ since origin/main. A removal that takes its row with it passes. A removal that l
 fails as an orphan row. With no git history, no git on PATH or no origin/main, the removed-anchor
 line says so and the count still prints.
 
-MOVE OFF A MECHANISM. A row that was `guard`, `check` or `ci` on origin/main and is now `unmechanized`
-or `judgment` is printed as "moved off a mechanism: <anchor>: <old kind> -> <new kind>". It fails
-when its reason text is the base row's reason, a move with no new explanation. It passes, still
-printed, when the reason changed. A new rule, with no base row, is never a move. This check replaced
-the pinned `unmechanized` and `judgment` counts and the reason word minimum: it names the one act
-that loses enforcement, and fails nothing else.
+MOVE OFF A MECHANISM. Every base read is the merge base of origin/main and HEAD, so a branch behind main is
+judged on its own changes. A row that was `guard`, `check` or `ci` and is now `unmechanized` or `judgment` is
+printed as "moved off a mechanism: <anchor>: <old kind> -> <new kind>". A row relabelled between `unmechanized`
+and `judgment` is printed as "relabelled". Each fails when its reason has the base row's words, spacing aside: no
+new explanation. It passes, still printed, when the reason changed. An anchor of a mechanized row renamed in
+place to an `unmechanized` or `judgment` row always fails: the mechanism went with the old slug. A rename kept
+on its mechanism passes. A new rule with no base row is never a move. This check replaced the pinned
+`unmechanized` and `judgment` counts and the reason word minimum. It does not see a pure delete of an anchor
+with its row, or a rename that also rewords the rule sentence; the removed-anchor line prints the delete.
 
 WHAT THIS CANNOT SEE, BY NAME. It reads a citation, not the coverage behind it: a row can name
 a real guard rule, or a real test, that does not actually cover what the rule sentence
@@ -571,15 +574,24 @@ def check(
     return problems
 
 
-def _base_text(root: str, path: str):
-    """The text of `path` on origin/main, or None when it cannot be read: no repository, no origin/main, or no
-    git binary on PATH (OSError, FileNotFoundError among them). One home for both base reads."""
+def _git_out(root: str, *args):
+    """The stdout of one git call in `root`, or None on a nonzero exit or no git binary on PATH (OSError)."""
     try:
-        r = _nowindow.run(["git", "-C", root, "show", "origin/main:" + path.replace(os.sep, "/")],
-                          capture_output=True, encoding="utf-8", errors="replace")
+        r = _nowindow.run(["git", "-C", root, *args], capture_output=True, encoding="utf-8", errors="replace")
     except OSError:
         return None
     return None if r.returncode else r.stdout
+
+
+def _base_text(root: str, path: str):
+    """The text of `path` at the merge base of origin/main and HEAD, or None when it cannot be read: no repository,
+    no origin/main, no common history, or no git binary on PATH. The merge base, not origin/main's tip, so a branch
+    behind main is judged on its own changes: a row main changed after the fork is not the branch's move, and an
+    anchor main added is not one the branch removed. One home for every base read."""
+    base = _git_out(root, "merge-base", "origin/main", "HEAD")
+    if base is None or not base.strip():
+        return None
+    return _git_out(root, "show", base.strip() + ":" + path.replace(os.sep, "/"))
 
 
 def removed_anchor_line(anchors: List[str], root: str = ROOT) -> str:
@@ -608,13 +620,40 @@ def _mech(rules, slug) -> dict:
     return mech if isinstance(mech, dict) else {}
 
 
-def moved_off_mechanism(rule_map: dict, root: str = ROOT):
-    """Compare each row's kind with the row on origin/main. Returns (lines, problems).
-    A row that was guard, check or ci and is now unmechanized or judgment gets a line naming it. It is also a
-    problem when its reason is the reason the base row carried: the move adds no explanation. A row with no base
-    row (a new rule) is never a move. With no repository, no git on PATH or no origin/main, nothing is compared,
-    one line says so, and nothing fails. This is the measure that replaced the fixed unmechanized and judgment
-    counts (owner ruling R37, 2026-11-11; item 595, 2026-11-12 12:54 CST)."""
+def _same_words(a, b) -> bool:
+    """Two reasons read the same when their words match, whatever the spacing between them. A missing reason reads as ""."""
+    return " ".join((a or "").split()) == " ".join((b or "").split())
+
+
+def _anchor_sentences(text: str) -> dict:
+    """Each anchor in `text`, mapped to the whitespace-normalised text between the anchor before it and itself.
+    A rename in place keeps that text, so it ties a base anchor to the head anchor that replaced it."""
+    out, prev = {}, 0
+    for m in ANCHOR_RE.finditer(text):
+        out[m.group(1)] = " ".join(text[prev:m.start()].split())
+        prev = m.end()
+    return out
+
+
+def _base_rule_text(root: str):
+    """The rule files at the merge base, joined as rule_text joins them, or None when any one cannot be read."""
+    parts = [_base_text(root, path) for path in RULE_FILES]
+    return None if any(p is None for p in parts) else "\n".join(parts)
+
+
+def moved_off_mechanism(rule_map: dict, root: str = ROOT, head_text=None):
+    """Compare each row with the row at the merge base with origin/main. Returns (lines, problems).
+    Three acts lose enforcement or its explanation, and each gets a line naming it:
+      - a row that was guard, check or ci and is now unmechanized or judgment. It is a problem when its reason is
+        the base row's reason, spacing aside: the move adds no explanation.
+      - a row relabelled between unmechanized and judgment. The same problem, for the same reason: judgment is not
+        counted as a debt, so the relabel must say why.
+      - a guard, check or ci anchor renamed in place so the base slug is gone and the new slug is unmechanized or
+        judgment. Always a problem: the mechanism went with the old slug. A new slug still on a mechanism passes.
+    A row with no base row (a new rule) is never a move. A pure delete of an anchor and its row is none of these:
+    this check does not see it. With no repository, no git on PATH, no origin/main or no common history, nothing is
+    compared, one line says so, and nothing fails. This is the measure that replaced the fixed unmechanized and
+    judgment counts (owner ruling R37, 2026-11-11; item 595, 2026-11-12 12:54 CST)."""
     not_compared = ["rule_audit: moves off a mechanism not compared, no origin/main to read."]
     text = _base_text(root, os.path.join("lint", "rule_mechanisms.json"))
     if text is None:
@@ -628,19 +667,46 @@ def moved_off_mechanism(rule_map: dict, root: str = ROOT):
         return not_compared, []
     lines: List[str] = []
     problems: List[str] = []
+    moved = False
     for slug in sorted(rules.keys() & base_rules.keys()):
         old, new = _mech(base_rules, slug), _mech(rules, slug)
-        if old.get("kind") not in MECHANIZED_KINDS or new.get("kind") not in OFF_KINDS:
+        old_kind, new_kind = old.get("kind"), new.get("kind")
+        if new_kind not in OFF_KINDS:
             continue
-        move = "moved off a mechanism: %s: %s -> %s" % (slug, old["kind"], new["kind"])
-        old_reason, new_reason = old.get("reason"), new.get("reason")
-        same = (old_reason or "").strip() == (new_reason or "").strip() if isinstance(new_reason, str) else True
+        if old_kind in MECHANIZED_KINDS:
+            move = "moved off a mechanism: %s: %s -> %s" % (slug, old_kind, new_kind)
+            carried, restore = "mechanized", ", or restore the mechanism"
+            moved = True
+        elif old_kind in OFF_KINDS and old_kind != new_kind:
+            move = "relabelled: %s: %s -> %s" % (slug, old_kind, new_kind)
+            carried, restore = old_kind, ""
+        else:
+            continue
+        new_reason = new.get("reason")
+        same = _same_words(old.get("reason"), new_reason) if isinstance(new_reason, str) else True
         if same:
-            problems.append(move + ". The reason is the one the mechanized row carried. Say why the rule left "
-                            "its mechanism, or restore the mechanism.")
+            problems.append("%s. The reason is the one the %s row carried. Say why the rule is %s now%s." % (
+                move, carried, new_kind, restore))
         else:
             lines.append("rule_audit: " + move + " (reason changed).")
-    if not lines and not problems:
+    base_rule_text = _base_rule_text(root)
+    if base_rule_text is not None:
+        base_sent = _anchor_sentences(base_rule_text)
+        head_sent = _anchor_sentences(rule_text(root) if head_text is None else head_text)
+        new_slugs = head_sent.keys() - base_sent.keys()
+        for slug in sorted(base_sent.keys() - head_sent.keys()):
+            old_kind = _mech(base_rules, slug).get("kind")
+            if old_kind not in MECHANIZED_KINDS or slug in rules:
+                continue
+            for new_slug in sorted(new_slugs):
+                new_kind = _mech(rules, new_slug).get("kind")
+                if head_sent[new_slug] == base_sent[slug] and new_kind in OFF_KINDS:
+                    moved = True
+                    problems.append(
+                        "moved off a mechanism: %s: %s -> %s, by a rename to `%s`. The mechanism went with the old "
+                        "anchor. Point `%s` at it, or keep the anchor `%s`." % (
+                            slug, old_kind, new_kind, new_slug, new_slug, slug))
+    if not moved:
         lines.append("rule_audit: no row went from a mechanism to unmechanized or judgment since origin/main.")
     return lines, problems
 

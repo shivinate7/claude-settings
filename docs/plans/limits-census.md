@@ -18,7 +18,7 @@ L2 check_record_slugs MAX 32 (rule git-slug-then-claim-number); H13 guard.py:356
 
 ## Outcome of PR 3 plan
 - To retire: H17 path cap, in branch h17-path-cap-census, not yet merged.
-- Retired: L6 RULE_FLOOR 98, L7 the 61/27 equality pins (58 and 25 before PR 2814, 62 and 26 after it), L8 REASON_MIN_WORDS 8 (PR lint-counts-census). The rule audit now prints the counts and names each anchor removed since origin/main. The move-off-mechanism check replaces the 62/26 pins: a row that goes from guard, check or ci to unmechanized or judgment is printed, and fails when its reason text is unchanged.
+- Retired: L6 RULE_FLOOR 98, L7 the 61/27 equality pins (58 and 25 before PR 2814, 62 and 26 after it), L8 REASON_MIN_WORDS 8 (PR lint-counts-census). The rule audit now prints the counts and names each anchor removed since origin/main. The move check covers three acts against the merge base with origin/main: a row off guard, check or ci, a row relabelled between unmechanized and judgment, and an anchor renamed in place off its mechanism. Each fails when its reason is unchanged (spacing aside), and a rename off a mechanism always fails. It does not see a pure delete of an anchor with its row; the removed-anchor line prints that.
 - To join the ask: H12 deadline (item 602 pick a), in branch h12-deadline-ask-census, not yet merged.
 - To state the reason beside the number: H4, H6, H7, H8, in branch hook-bounds-reasons-census, not yet merged.
 - Kept unchanged: H5 (refuter: a stricter replacement is not a measurement); H9 (the owner's own output style says one to three); H18 (a presence rule).
