@@ -548,6 +548,38 @@ class IdleLanesCli(unittest.TestCase):
         out = self.run_idle()
         self.assertIn("session_a", self.listed_ids(out), "a lane whose pull merged is not listed: out: %r" % out)
 
+    def test_a_superseded_lane_whose_replacement_closed_unmerged_is_not_listed(self):
+        # The control is lane c4, whose pull closed as replaced by #8, and #8 is open. The subject is lane c5, whose pull
+        # closed as replaced by #10, and #10 closed unmerged. No open pull and no merged one names that replacement, so
+        # the lane waits. c4 and c5 are todo with no Step trailer on main, so only the replacedBy link can list a lane.
+        self.land_steps(["c4", "c5"], status="todo")
+        head = self.record_tip()
+        landed = [self.closed_row(7, "lane/c4", head, replacedBy=8), self.closed_row(9, "lane/c5", head, replacedBy=10),
+                  self.closed_row(10, "batch-9", head)]
+        pulls = [{"number": 8, "title": "batch 7", "branch": "batch-7", "draft": False, "head": head}]
+        self.publish([lane("session_a", "c4"), lane("session_b", "c5")], landed=landed, pulls=pulls)
+        out = self.run_idle()
+        self.assertIn("session_a", self.listed_ids(out),
+                      "scope: a lane whose pull closed as replaced by the open #8 is not listed: out: %r" % out)
+        self.assertNotIn("session_b", self.listed_ids(out),
+                         "a lane whose pull closed as replaced by #10, closed unmerged, is listed as superseded: out: %r" % out)
+
+    def test_a_replaced_by_that_is_not_an_int_skips_the_row_and_the_list_reads_unknown(self):
+        # The control is lane c1, done and idle, with no landedPulls row: it is listed and the command exits 0. Then its
+        # closed row carries replacedBy as JSON null, then as JSON true. Neither is an int, so the row is skipped, and the
+        # whole list reads one unknown line with exit 1, as a skipped landedPulls row does everywhere else.
+        self.publish([lane("session_a", "c1")])
+        out = self.run_idle()
+        self.assertIn("session_a", self.listed_ids(out), "scope: a lane with no landedPulls row is not listed: out: %r" % out)
+        head = self.record_tip()
+        for bad in (None, True):
+            with self.subTest(replacedBy=bad):
+                self.publish([lane("session_a", "c1")], landed=[self.closed_row(7, "lane/c1", head, replacedBy=bad)])
+                code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+                self.assertEqual(out.splitlines(), ["unknown (1 landedPulls rows skipped)"],
+                                 "a non-int replacedBy is not skipped: out: %r, err: %r" % (out, err))
+                self.assertEqual(code, 1, "a skipped landedPulls row exits %d, so a caller reads the list as read: %s" % (code, err))
+
 
 if __name__ == "__main__":
     unittest.main()
