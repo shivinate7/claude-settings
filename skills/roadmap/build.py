@@ -498,11 +498,14 @@ def pull_landed_marks(repo, ref, steps, work, with_done=False):
 
 def superseded_marks(steps, work):
     """{step: ["#N", ...]} from the landedPulls rows closed unmerged with a `replacedBy` pull number, matched by the row's branch (the step id or
-    lane/<id>) whatever the step's status: the replacing pull carries the step on, so the lane may be archived. Only idle_lanes reads these. The
-    landed upkeep rows never do, because the work is not on main yet: a step set to done from one would read landed too soon."""
+    lane/<id>) whatever the step's status: the replacing pull carries the step on, so the lane may be archived. The replacement must be an open
+    pull (work["pulls"]) or a merged landedPulls row; one closed unmerged, or in neither list, replaces nothing, so the lane waits. Only idle_lanes
+    reads these. The landed upkeep rows never do, because the work is not on main yet: a step set to done from one would read landed too soon."""
+    rows = (work or {}).get("landedPulls") or []
+    carried = {p["number"] for p in (work or {}).get("pulls") or []} | {r["number"] for r in rows if r.get("merged") is True}
     marks = {}
-    for row in sorted((work or {}).get("landedPulls") or [], key=lambda r: r["number"]):
-        if row.get("merged") is True or type(row.get("replacedBy")) is not int:
+    for row in sorted(rows, key=lambda r: r["number"]):
+        if row.get("merged") is True or type(row.get("replacedBy")) is not int or row["replacedBy"] not in carried:
             continue
         for sid in steps or {}:
             if row["branch"] in lane_head_refs(sid) and "#%d" % row["number"] not in marks.setdefault(sid, []):
@@ -1702,6 +1705,7 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
         return ["unknown (%s)" % marks_why]
     if work.get("pageItems") is None:
         return [work.get("itemsWhy") or "unknown (the page items could not be read)"]
+    marks = add_marks(marks, superseded_marks(steps, work))  # here, so the upkeep row and merge --idle-lanes list the same lanes
     ref = main_ref(repo, main_branch)
     landed_heads = {}
 
@@ -1811,7 +1815,6 @@ def idle_lanes_report(repo, live, record_branch=None, main_branch="main"):
     slug = github_slug(repo, extra)
     work = live_work(live, steps, slug)
     marks = add_marks(marks, pull_landed_marks(repo, ref, steps, work))
-    marks = add_marks(marks, superseded_marks(steps, work))
     return idle_lanes(work, steps, marks, slug, repo, main_branch, unread, source.ref)
 
 
