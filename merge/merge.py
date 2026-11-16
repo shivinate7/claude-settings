@@ -4373,7 +4373,7 @@ def heals_stale_page(root, base, path):
     config on origin; a config that cannot be read is False, so the relayed yes keeps the narrow form."""
     with contextlib.redirect_stdout(io.StringIO()):
         try:
-            cfg = load_config(root, base, path)
+            cfg = load_config(root, base, path, " " + RECORDS_CITE)
         except Stop:
             return False
     return cfg["merge"].get("requiredChecks") == "none" and base == cfg["defaultBranch"]
@@ -4445,7 +4445,7 @@ def heal_page(wt, base, branch, base_ref, rebuilt, stands):
     return git(wt, "rev-parse", "HEAD")[1] != start
 
 HEAL_BLOCKED = ("merge.requiredChecks is \"none\", so this tool reads no branch protection, and GitHub reads the pull request BLOCKED: the base's branch protection "
-                "requires a check this head does not report. Name that check in merge.requiredChecks, or change the branch protection, and run again.")
+                "requires a check this head does not report. Name that check in merge.requiredChecks, or change the branch protection, and run again. " + RECORDS_CITE)
 
 def wait_healed_head(host, n, sha, branch):
     """Wait, bounded, for GitHub to show the head `sha` this run pushed, so the merge call names a head GitHub holds. No check is waited on."""
@@ -4547,7 +4547,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                         raise Stop(f"#{n} reads BLOCKED. Nothing was pushed. {HEAL_BLOCKED}")
                     if merged_page_stale(root, wt, base, base_ref):  # before the push: the base moved again, so a second heal is the next run's
                         raise Stop(stale_merge_text(n, base_ref, pushed=False) + f" {RECORDS_CITE}")
-                    push_branch(wt, branch)
+                    push_branch(wt, branch, cite=RECORDS_CITE)
                     say(f"merge: the records page healed and pushed to {branch} at {heal_sha[:9]}. No check is waited on.")
                     wait_healed_head(host, n, heal_sha, branch)
                 rebuilt = False  # healed, or nothing to heal: no claim commit follows
