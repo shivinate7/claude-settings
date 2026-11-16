@@ -1,6 +1,7 @@
 """build.py refuses a tree with git conflict markers (step c72); the pre-commit hook refuses an over-cap
 note (step c138), a staged roadmap/rulings/*.json that does not parse (step rulings-store-parses), and a
-staged updatedAt or ruling at more than 5 minutes after now (step updatedat-not-future).
+staged updatedAt or ruling at more than 5 minutes after now, or one that is new or changed and is not an ISO
+time with a UTC offset (step updatedat-not-future).
 Run: python roadmap/test_build.py"""
 import contextlib
 import datetime
@@ -28,6 +29,8 @@ BROKEN_RULING = '{"id": "r1", "why": "he said "no" here"}\n'
 FUTURE = "2099-01-01T00:00:00-06:00"
 FUTURE_Z = "2099-01-01T00:00:00Z"
 PAST = "2020-01-01T00:00:00-06:00"
+# No UTC offset: a new or changed stamp like this is refused as a form, whatever the clock says.
+NAIVE_PAST = "2020-01-01T00:00:00"
 
 
 def words(n):
@@ -161,11 +164,13 @@ class NoteCapHook(unittest.TestCase):
             self.fail(f"git {' '.join(args)}: {r.stdout}{r.stderr}")
         return r
 
-    def step(self, sid, n, status="open", where=None, updated_at=None):
+    def step(self, sid, n, status="open", where=None, updated_at=None, no_updated_at=False):
         path = (where or self.repo) / "roadmap" / "data" / "steps" / f"{sid}.json"
         rec = dict(STEP, status=status, note=words(n))
         if updated_at is not None:
             rec["updatedAt"] = updated_at
+        if no_updated_at:
+            del rec["updatedAt"]
         path.write_text(json.dumps(rec), encoding="utf-8")
 
     def commit(self, msg="m", *extra, cwd=None):
@@ -325,14 +330,8 @@ class NoteCapHook(unittest.TestCase):
 
     def assert_stamp_refused(self, r, *names):
         if r.returncode == 0:
-            self.fail("a future stamp was not refused: " + r.stdout + r.stderr)
+            self.fail("a bad stamp was not refused: " + r.stdout + r.stderr)
         self.assert_refused(r, *names)
-
-    def assert_stamp_unjudged(self, r, path):
-        self.assert_passed(r)
-        self.assertIn(path, r.stderr, "an unreadable stamp was not reported")
-        self.assertIn("updatedAt", r.stderr, "the report does not name updatedAt")
-        self.assertIn("not checked", r.stderr, "the report does not say the stamp was not checked")
 
     def ahead(self, minutes):
         """A stamp this many minutes after the real clock. The hook reads the same clock."""
@@ -360,7 +359,7 @@ class NoteCapHook(unittest.TestCase):
         self.git("add", "-A")
         self.assert_passed(self.commit())
 
-    # Real clock: the 5-minute margin is tested at 3 and 7 minutes, 2 minutes either side of the edge.
+    # Real clock: 3 minutes is inside the 5-minute margin and 10 is past it; the hook may read up to 5 minutes later.
     def test_updated_at_written_now_passes(self):
         self.step("c1", 10, updated_at=self.ahead(0))
         self.git("add", "-A")
@@ -372,7 +371,7 @@ class NoteCapHook(unittest.TestCase):
         self.assert_passed(self.commit())
 
     def test_updated_at_past_the_margin_is_refused(self):
-        self.step("c1", 10, updated_at=self.ahead(7))
+        self.step("c1", 10, updated_at=self.ahead(10))
         self.git("add", "-A")
         self.assert_stamp_refused(self.commit(), "c1.json", "updatedAt")
 
@@ -397,15 +396,68 @@ class NoteCapHook(unittest.TestCase):
         self.git("add", "-A")
         self.assert_stamp_refused(self.commit(), "c1.json", "updatedAt " + FUTURE)
 
-    def test_unreadable_updated_at_is_reported_not_judged(self):
+    def test_unreadable_updated_at_is_refused(self):
         self.step("c1", 10, updated_at="01:30 CST")
         self.git("add", "-A")
-        self.assert_stamp_unjudged(self.commit(), "c1.json")
+        self.assert_stamp_refused(self.commit(), "c1.json", "updatedAt", "now-central --iso")
 
-    def test_naive_future_updated_at_is_reported_not_judged(self):
+    def test_naive_future_updated_at_is_refused(self):
         self.step("c1", 10, updated_at="2099-01-01T00:00:00")
         self.git("add", "-A")
-        self.assert_stamp_unjudged(self.commit(), "c1.json")
+        self.assert_stamp_refused(self.commit(), "c1.json", "updatedAt", "now-central --iso")
+
+    def seed_step(self, **fields):
+        """Commit c1 with the hook off, as an older writer did, so its stamp is in the base."""
+        self.step("c1", 10, **fields)
+        self.git("add", "-A")
+        self.assert_passed(self.commit("seed", "--no-verify"))
+
+    def test_changed_naive_updated_at_is_refused(self):
+        self.seed_step(updated_at=PAST)
+        self.step("c1", 10, updated_at=NAIVE_PAST)
+        self.git("add", "-A")
+        self.assert_stamp_refused(self.commit(), "c1.json", "updatedAt", NAIVE_PAST, "now-central --iso")
+
+    def test_changed_bare_updated_at_is_refused(self):
+        self.seed_step(updated_at=PAST)
+        self.step("c1", 10, updated_at="03:30 CST")
+        self.git("add", "-A")
+        self.assert_stamp_refused(self.commit(), "c1.json", "updatedAt", "03:30 CST", "now-central --iso")
+
+    def test_unchanged_naive_updated_at_passes_silently(self):
+        self.seed_step(updated_at=NAIVE_PAST)
+        path = self.repo / "roadmap" / "data" / "steps" / "c1.json"
+        path.write_text(json.dumps(dict(json.loads(path.read_text()), title="new")), encoding="utf-8")
+        self.git("add", "-A")
+        r = self.commit()
+        self.assert_passed(r)
+        self.assertEqual(r.stderr, "", "an unchanged stamp was reported")
+
+    def test_missing_updated_at_passes_silently(self):
+        self.step("c1", 10, no_updated_at=True)
+        self.git("add", "-A")
+        r = self.commit()
+        self.assert_passed(r)
+        self.assertEqual(r.stderr, "", "a missing stamp was reported")
+
+    def write_ruling_at(self, at):
+        self.ruling("r1.json", json.dumps({"id": "r1", "at": at, "title": "t", "ruling": "x", "status": "open"}))
+
+    def test_changed_naive_ruling_at_is_refused(self):
+        self.write_ruling_at(PAST)
+        self.git("add", "-A")
+        self.assert_passed(self.commit("seed"))
+        self.write_ruling_at(NAIVE_PAST)
+        self.git("add", "-A")
+        self.assert_stamp_refused(self.commit(), "r1.json", NAIVE_PAST, "now-central --iso")
+
+    def test_ruling_at_moved_from_past_to_future_is_refused(self):
+        self.write_ruling_at(PAST)
+        self.git("add", "-A")
+        self.assert_passed(self.commit("seed"))
+        self.write_ruling_at(FUTURE)
+        self.git("add", "-A")
+        self.assert_stamp_refused(self.commit(), "r1.json", FUTURE, "now-central --iso")
 
     def test_future_ruling_at_is_refused(self):
         self.ruling("r1.json", json.dumps({"id": "r1", "at": FUTURE, "title": "t", "ruling": "x", "status": "open"}))
