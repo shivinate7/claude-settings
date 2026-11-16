@@ -73,3 +73,56 @@ oct_allow("a push with git -C of a clone whose origin/main tracking ref lacks th
 # The control for `git -C`: the named clone holds the octopus in its tracking ref, and the cwd's stale ref must not decide.
 oct_allow("a push with git -C of a clone whose origin/main tracking ref holds the octopus, run from a stale clone",
           VCS + " -C " + slash(OCT_NEWDEST) + " push origin lane", OCT_STALE)
+
+
+# A failed fetch. origin's main holds O, and lane adds a three-parent merge that no remote ref holds, so the push is a
+# hit. The remote's URL names no repository, so the one fetch fails: the hit survives, and the refusal says the refs
+# could not be refreshed. Why: a refusal that rests on stale refs must say that the refresh failed.
+OCT_BROKEN = os.path.join(ROOT, "oct-broken")               # as oct-newdest-ctrl, with origin's URL broken
+OCT_BROKEN_URL = os.path.join(ROOT, "oct-broken-gone.git")  # names no repository, so `git fetch origin` fails
+
+
+def _build_octopus_broken():
+    _oct_new_branch(OCT_BROKEN, control=True)
+    _cmk_run(OCT_BROKEN, "config", "remote.origin.url", OCT_BROKEN_URL)
+    _oct_must(OCT_BROKEN, "lane --not --remotes=origin", [3], "the three-parent merge on no remote ref")
+    if run_vcs(OCT_BROKEN, "fetch", "--quiet", "origin").returncode == 0:
+        sys.exit("fixture setup failed in the octopus-push fixtures: a fetch of origin succeeds with a broken URL")
+
+
+lazy_fixture([OCT_BROKEN], _build_octopus_broken)
+sh("octopus-push: a push whose remote cannot be fetched is refused, and the reason says the refs could not be "
+   "refreshed", VCS + " push origin lane", "deny", OCT_RULE, cwd=OCT_BROKEN, carries="could not be refreshed")
+
+
+# A fetch on a hit, pinned in the push cost table (the helper of section 13406). A push whose range holds an octopus
+# runs one `git fetch` of its remote and reads the range again. A clean push runs no fetch. Each row's scope is read
+# before its counts are judged. The check builds only the two fixtures it names, through materialize, so it is
+# fixtureless, as octopus_remedy_case is.
+OCT_FETCH_COST_LABEL = ("octopus-push: a hit fetches its remote once and reads its range again, and a clean push "
+                        "runs no fetch")
+
+
+def octopus_fetch_cost_case():
+    if os.name == "nt":
+        return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
+    log, path = _stand_in_git("octfetch")
+    if path is None:
+        return False, "no git on PATH"
+    materialize(OCT_NEWDEST_CTRL)
+    materialize(OCT_NEWDEST)
+    _oct_must(OCT_NEWDEST_CTRL, "lane --not --remotes=origin", [3], "the octopus sits in the push range")
+    _oct_must(OCT_NEWDEST, "lane --not --remotes=origin", [], "no octopus sits in the push range")
+    # The two rows differ by one fetch and one more rev-list, the range read again after the refresh. Every other count
+    # is the same on both rows, and the table pins each count, so a new read anywhere in the push shows here.
+    problems = _push_cost_problems((
+        ("an octopus-push hit", "push origin lane",
+         {"config": 1, "diff": 3, "fetch": 1, "log": 1, "rev-list": 2, "rev-parse": 3, "symbolic-ref": 2},
+         OCT_NEWDEST_CTRL),
+        ("a clean push", "push origin lane",
+         {"config": 1, "diff": 3, "log": 1, "rev-list": 1, "rev-parse": 3, "symbolic-ref": 2},
+         OCT_NEWDEST),
+    ), log, path)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "one fetch on a hit, and none on a clean push"

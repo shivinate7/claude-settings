@@ -575,6 +575,11 @@ OCT_REMEDY_LABEL = "octopus-push: the refusal's remedy names the two-parent form
 LOG_CHECKS_EXTRA.append((OCT_REMEDY_LABEL, octopus_remedy_case))
 LOG_FAMILY[OCT_REMEDY_LABEL] = "octopus-push"
 FIXTURELESS_CHECKS.add(octopus_remedy_case)
+# The octopus-push fetch-count check is defined in section 17974. It builds its two fixtures through materialize, so it
+# is fixtureless too. Its family is set by hand, as the remedy's is.
+LOG_CHECKS_EXTRA.append((OCT_FETCH_COST_LABEL, octopus_fetch_cost_case))
+LOG_FAMILY[OCT_FETCH_COST_LABEL] = "octopus-push"
+FIXTURELESS_CHECKS.add(octopus_fetch_cost_case)
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue

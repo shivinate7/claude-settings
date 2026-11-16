@@ -1163,8 +1163,9 @@ def _push_cost_problems(rows, log, path):
         kinds, lines = spawn_kinds(VCS + " " + tail, cwd[0] if cwd else PUSHFEAT)
         if kinds != want:
             problems.append("%s: git spawns %s, want %s" % (label, sorted(kinds.items()), sorted(want.items())))
-        # Nothing contacts the remote: the push-main and push-all-main reads are local, and a push reads no remote's refs.
-        for reach in ("ls-remote", "fetch", "push", "remote"):
+        # Nothing contacts the remote through ls-remote or push, and a push reads no remote's refs. A fetch is not
+        # banned here: a row's want counts it, and only an octopus-push hit has one (section 17974).
+        for reach in ("ls-remote", "push", "remote"):
             if reach in kinds:
                 problems.append("%s: git spawns %r, which contacts or names the remote" % (label, reach))
         if label == "a bare push" and not any("push.default" in line for line in lines):
@@ -1184,10 +1185,11 @@ def record_push_cost_case():
     branch (`symbolic-ref`, the agent test), one `git for-each-ref` of the tracking refs, and, when those refs show no
     update, one more `git for-each-ref` of the local branches (the all-agent test). A glob refspec reads the URL and
     the same two for-each-ref reads, and no branch. A local-path origin stops after the URL read. No push spawns
-    `ls-remote`, `fetch` or `push`. A stray push (rule push-stray-branch: an implied destination off the
+    `ls-remote` or `push`. A stray push (rule push-stray-branch: an implied destination off the
     upstream) adds one `git rev-parse --verify -q` of the destination's remote-tracking ref. The octopus-push
     rule (decision octopus-push-refused) adds one `git rev-list` for each pushed ref whose destination is not
-    main or master, with or without a remote-tracking ref. The conflict-markers
+    main or master, with or without a remote-tracking ref. On a hit under a configured remote's name, it adds one
+    `git fetch` of that remote and one more `git rev-list` (section 17974 pins the counts). The conflict-markers
     push check (decision commit-refuses-conflict-markers) runs one `git diff --check` for each base it reads, in
     order: the remote-tracking ref, then the upstream, then the default base (a three-dot range, so git
     finds the merge base itself). A push with a tracking ref reads one base. A push with no tracking ref
