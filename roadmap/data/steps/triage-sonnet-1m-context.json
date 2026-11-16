@@ -1,0 +1,14 @@
+{
+ "id": "triage-sonnet-1m-context",
+ "title": "Should sessions the owner keeps on Sonnet, like triage, get the full 1M context window?",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "owner": "consultant",
+ "blockedBy": [],
+ "why": "Owner fb-1815-1 (Nov 15 18:15 CST) asked for thoughts on giving Sonnet sessions like triage a full 1m context window, since tokens are cheaper on Sonnet, or whether tighter context is just good. Audit: docs/decisions/session-tiers.md line 31 only measures context use; the repo has no answer.",
+ "source": "Consultant message to triage 9, 17:50 CST Nov 16 (owner messages relayed word for word; checked by two read-only agents, sonnet, 17:56 CST; not read by triage 9). Filed by triage 9.",
+ "note": "Todo. A decision, not a build. Measure triage's context use before and after compaction, then bring the owner a question with options. Searched steps at 17:57 CST Nov 16: no like step found. No lane, no PR.",
+ "updatedAt": "2026-11-16T17:57:00-06:00",
+ "order": 233
+}

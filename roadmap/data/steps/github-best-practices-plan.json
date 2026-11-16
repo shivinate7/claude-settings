@@ -1,0 +1,14 @@
+{
+ "id": "github-best-practices-plan",
+ "title": "Mechanize GitHub best practices: one blind Opus agent drafts a plan, one agent that sees the repo and the web drafts another, then combine them",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "owner": "consultant",
+ "blockedBy": [],
+ "why": "Owner fb-1200-1 (Nov 15 12:00 CST): send one Opus subagent blind to give a best-practices plan and another that can see the repo and the web, then combine. Owner fb-1209-1 (12:09 CST): take ownership of the GitHub plan, use subagents, land the whole thing; say if a GitHub app or token is needed for more action minutes (a later step). Same message asks: do cloud sessions keep memory under the strict memory.md rules that apply locally? The repo has no answer; docs/decisions/memory-is-never-a-rulings-only-home.md says only that memory is never a ruling's sole home.",
+ "source": "Consultant message to triage 9, 17:50 CST Nov 16 (owner messages relayed word for word; checked by two read-only agents, sonnet, 17:56 CST; not read by triage 9). Filed by triage 9.",
+ "note": "Todo. Audit found no step or ruling for the plan (nearest: c95 CI milestones, c153 GitHub apps). Ruling own-consultant-builder-hat covers who builds. The cloud-memory question needs a measured answer, not a guess. Searched steps at 17:57 CST Nov 16: no like step found. No lane, no PR.",
+ "updatedAt": "2026-11-16T17:57:00-06:00",
+ "order": 230
+}

@@ -1,0 +1,14 @@
+{
+ "id": "rerun-reuses-merge-ref",
+ "title": "A rerun of failed jobs reuses the PR's cached merge ref, so a PR queued behind a red main stays red after main's fix lands",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Owner fb-2343-2 (Nov 15 23:43 CST) asked whether this degen feedback is right: a rerun of failed jobs reuses the PR's cached merge ref; fix: ci-hygiene says rerun only when the base did not move, otherwise close and reopen (or push); the merge tool can check the run's base sha against main before rerunning.",
+ "source": "Consultant message to triage 9, 17:50 CST Nov 16 (owner messages relayed word for word; checked by two read-only agents, sonnet, 17:56 CST; not read by triage 9). Filed by triage 9.",
+ "note": "Todo. Audit: skills/ci-hygiene/SKILL.md on main has no such line, and merge/merge.py around line 289 still names gh run rerun --failed as the remedy. Whether GitHub reuses the merge ref on a rerun is unmeasured in the repo. A guard or check change, so review rounds apply. Searched steps at 17:57 CST Nov 16: no like step found. No lane, no PR.",
+ "updatedAt": "2026-11-16T17:57:00-06:00",
+ "order": 231
+}

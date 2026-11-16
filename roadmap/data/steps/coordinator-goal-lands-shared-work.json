@@ -1,0 +1,14 @@
+{
+ "id": "coordinator-goal-lands-shared-work",
+ "title": "The coordinator's goal prompt has no line that asks it to land shared identified work it owns or must merge",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Owner fb-1442-1 (Nov 16 14:42 CST) asked: in the goal prompt for the coordinator, where is the part that asks it to land the shared identified work of PRs it should own or be responsible for merging? Audit: the prompt text is not in the repo; the nearest text is the coordinator bullet in skills/project-ops/templates/operating-model.md and ruling own-everyone-merges. No line says this.",
+ "source": "Consultant message to triage 9, 17:50 CST Nov 16 (owner messages relayed word for word; checked by two read-only agents, sonnet, 17:56 CST; not read by triage 9). Filed by triage 9.",
+ "note": "Todo. Add the line to the operating-model coordinator bullet, or answer the owner that none exists. A prose change to a template. Searched steps at 17:57 CST Nov 16: no like step found. No lane, no PR.",
+ "updatedAt": "2026-11-16T17:57:00-06:00",
+ "order": 235
+}

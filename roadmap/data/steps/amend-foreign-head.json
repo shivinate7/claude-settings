@@ -1,0 +1,14 @@
+{
+ "id": "amend-foreign-head",
+ "title": "A lane's push that amends a foreign head: the session queued this as step amend-foreign-head, and no step exists",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Owner fb-0934-1 (Nov 16 09:34 CST) on 'I'm queuing that as step:amend-foreign-head': you can just own the issues you run into and land them yourself as part of your subagent allowances. Rulings own-subagents-allowed-triage and own-triage-merges-page-prs cover part of the permission.",
+ "source": "Consultant message to triage 9, 17:50 CST Nov 16 (owner messages relayed word for word; checked by two read-only agents, sonnet, 17:56 CST; not read by triage 9). Filed by triage 9.",
+ "note": "Todo. Audit found no step named amend-foreign-head; the sighting itself is not in the record (the nearest step, amend-needs-own-commit, is a different issue). Needs the sighting's text from the session that queued it. Searched steps at 17:57 CST Nov 16: no like step found. No lane, no PR.",
+ "updatedAt": "2026-11-16T17:57:00-06:00",
+ "order": 232
+}

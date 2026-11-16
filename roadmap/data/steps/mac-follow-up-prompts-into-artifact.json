@@ -1,0 +1,14 @@
+{
+ "id": "mac-follow-up-prompts-into-artifact",
+ "title": "Triage gets the follow-up prompts it needs from the owner's Mac into the artifact",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "owner": "consultant",
+ "blockedBy": [],
+ "why": "Owner fb-2207-2 (Nov 13 22:07 CST): tell triage to get the follow-up prompts it needs from my mac into the artifact. Owner fb-2350-2 (23:50 CST) asked whether exporting artifact data from the Mac and personal accounts is still needed. Audit: git is ruled the single store (page-git-is-home) but step page-data-one-store is still doing; a Mac extract prompt is not in the repo.",
+ "source": "Consultant message to triage 9, 17:50 CST Nov 16 (owner messages relayed word for word; checked by two read-only agents, sonnet, 17:56 CST; not read by triage 9). Filed by triage 9.",
+ "note": "Todo. Audit found no home for the prompts part. Blocked on page-data-one-store; the owner's Mac act (if any) needs one command in the item's command field. Searched steps at 17:57 CST Nov 16: no like step found. No lane, no PR.",
+ "updatedAt": "2026-11-16T17:57:00-06:00",
+ "order": 234
+}

@@ -1,0 +1,14 @@
+{
+ "id": "unplaced-bare-owner-picks",
+ "title": "Bare owner picks whose question text is not in the inbox file: place each with its question",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "owner": "consultant",
+ "blockedBy": [],
+ "why": "The consultant could not place these bare picks: fb-2101-2, fb-2331-1, fb-1103-1, fb-1129-3, fb-1316-1, fb-1821-1, fb-2222-1, fb-0004-1, fb-0143-3, fb-1402-2. Placed by the consultant: fb-1534-2 'A' is pick a at 15:34 (the Opus builder finishes, then PR 3286 lands next); fb-1510-1 'A' is the 15:10 option A (cancel queued draft runs so PR 3590 runs). The audit agents could not read these picks' text.",
+ "source": "Consultant message to triage 9, 17:50 CST Nov 16 (owner messages relayed word for word; checked by two read-only agents, sonnet, 17:56 CST; not read by triage 9). Filed by triage 9.",
+ "note": "Todo. Each pick needs its question from the chat. Without it the pick is not a ruling with a home. Not filed as rulings. Searched steps at 17:57 CST Nov 16: no like step found. No lane, no PR.",
+ "updatedAt": "2026-11-16T17:57:00-06:00",
+ "order": 236
+}
