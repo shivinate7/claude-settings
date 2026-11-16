@@ -3673,6 +3673,16 @@ class StaleDraftRestRead(UpkeepFixture):
         self.assertTrue(detail.startswith("unknown (") and "token" in detail.lower(), detail)
         self.assertNotIn("#1001", detail)
 
+    def test_a_github_token_alone_lets_the_read_run(self):
+        # The gate takes either token variable: with only GITHUB_TOKEN set, the read runs and lists the stale draft.
+        self.serve_pulls([self.rest_draft(1001, "old-1001", 780)], token=None)
+        os.environ["GITHUB_TOKEN"] = "from-github"
+        self.assertNotIn("GH_TOKEN", os.environ, "the case set GH_TOKEN, so GITHUB_TOKEN alone is not what was tested")
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "old-1001")])
+        count, detail = self.draft_row()
+        self.assertEqual((count, self.entries(detail)), (1, ["#1001 (old-1001)"]),
+                         "the read did not run on GITHUB_TOKEN alone: %r" % (detail,))
+
     def test_with_no_token_the_merge_tool_is_never_imported(self):
         # A control on the old code too: the token gate returned before any read. On the new code it keeps the order: the
         # merge tool loads only when a read is about to run, so a case with no token imports nothing from it.
@@ -3683,6 +3693,19 @@ class StaleDraftRestRead(UpkeepFixture):
         self.assertEqual(asked, [], "the no-token case imported the merge tool")
         self.assertEqual(count, 1, "the row was %r" % (detail,))
         self.assertTrue(detail.startswith("unknown ("), detail)
+
+    def test_a_read_past_the_page_ceiling_reads_one_unknown_entry_and_asks_no_page_past_it(self):
+        # merge's page ceiling stops a read that would pass PAGE_CEILING pages, as a Stop. The row is one unknown entry: page
+        # 1's stale #1001 is not listed beside it, and no page past the ceiling is asked. Every page after page 1 is one
+        # shared full page of fresh drafts, each with a next link.
+        full = self.fresh_rows(2001, 100)
+        self.serve_pulls(self.stale_first_page(), *[full] * merge.PAGE_CEILING)
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "old-1001")])
+        count, detail = self.draft_row()
+        self.assertEqual(len(self.gh_calls), merge.PAGE_CEILING, "the read did not stop at the page ceiling")
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown ("), detail)
+        self.assertNotIn("#1001", detail, "page 1's stale draft was listed beside the page-ceiling stop")
 
     def test_one_call_per_hundred_open_pulls_and_one_for_none(self):
         # The cost the design states: one gh call per page, and a page is read on only while its Link has rel="next".
