@@ -1367,6 +1367,20 @@ add("prior-work: a builder spawn whose Prior work line has its colon outside the
     config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n**Prior work**: none found"))
 add("prior-work: a builder spawn whose Prior work line is a numbered list item is allowed", "allow",
     config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n1. Prior work: none found"))
+# An unfilled angle-bracket placeholder names no prior work: the brief template's own line, and a line of only brackets.
+# Real text beside a bracket still names it, and so does the bare words `none found`.
+PW_TEMPLATE = "Prior work: <#N|branch|none found>"
+PW_BRACKETS_ONLY = "Prior work: <...>"
+PW_REUSED = "Prior work: #3560 <reused>"
+PW_BARE_NONE = "Prior work: none found"
+add("prior-work: a builder spawn whose Prior work line is the brief template's placeholder is refused", "deny", PW_RULE,
+    carries=PW_LINE, config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_TEMPLATE))
+add("prior-work: a builder spawn whose Prior work line holds only angle brackets is refused", "deny", PW_RULE,
+    carries=PW_LINE, config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_BRACKETS_ONLY))
+add("prior-work: a builder spawn whose Prior work line is the bare words none found is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_BARE_NONE))
+add("prior-work: a builder spawn whose Prior work line names a number beside a bracket is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_REUSED))
 
 
 # --------------------------------------------------------------------------- the simulator boot rules
