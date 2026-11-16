@@ -1,0 +1,10 @@
+{
+ "id": "coordinator-mailaudit-cites-gates-a",
+ "at": "2026-11-16T00:07:00-06:00",
+ "title": "mailaudit cites check: step-level gates, not exempt push-skip gates (coordinator pick a; not owner-typed)",
+ "ruling": "Lane mailaudit-add-cites-check (session_013NEJL2gg1Dfj5LaFt2TAVh) asked a = step-level gates, or b = exempt push-skip gates, from its assertions 2 and 5. The coordinator picked a at 00:07 CST Nov 16: it keeps the guards and widens nothing. Skipping milestone-due and mutation-report on a skipped push follows ruling own-769-a-narrowed-pr-push. The macOS-on-direct-push line stays with the consultant's open gap. Not owner-typed; undoable: the lane's PR is unmerged, and a pick b would need the owner.",
+ "quote": "",
+ "source": "Coordinator message to triage 8, 00:07 CST Nov 16; filed by triage 8",
+ "status": "open",
+ "step": ""
+}
