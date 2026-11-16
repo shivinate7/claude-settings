@@ -65,7 +65,13 @@ GH_TOKEN, else GITHUB_TOKEN), not the live file's pulls. The list is read a page
 N // 100 + 1 REST calls per build run for N open pulls (floor, not ceil: a full page is followed by the page that ends
 the read), at most 20; it writes no file, starts no timer and keeps no log. Sessions, `held` and `reviewLog` still come
 from a fresh live file (a pull's marks are matched by number): a draft is skipped when a live session step equals its
-branch or its `lane/<id>` form, or its live row has `held` or `reviewLog` true. When the sessions cannot be read the row is one
+branch or its `lane/<id>` form, or its live row has `held` or `reviewLog` true. The row also reads each REST-stale
+draft's newest branch commit time (branch_commit_times, one `git log -1` of refs/remotes/origin/<branch> per
+stale-looking draft; no network, no REST call, no file): a commit under STALE_DRAFT_HOURS old drops the draft from the
+row, so the commit can only suppress, and a fresh REST draft gets no read. A draft with no readable commit time (no
+ref, a ref on no commit, a git failure, a time that does not parse, no checkout named) reads `unknown (#N branch X has
+no commit time)`, unless a live lane, `held` or `reviewLog` already skips it. Those three still need the live file.
+draft_table holds the one reading (number, branch, lane, commit, verdict per REST draft) that the entries derive from. When the sessions cannot be read the row is one
 `unknown (sessions not read: <why>; REST read: N stale-looking drafts)`, a count with no number or branch. A stale
 draft with no live pulls row reads `unknown (#N has no live pulls row, ...)`, never listed. The row reads one
 `unknown (<why>)` entry when the REST read cannot finish whole: no token or GitHub name, an HTTP error (403 and 429
@@ -1351,16 +1357,64 @@ def unknown_inner(why):
     return why[len("unknown ("):-1] if why.startswith("unknown (") and why.endswith(")") else why
 
 
-def stale_drafts(work, rest=None, now=None, source=LIVE_FILE_SOURCE):
-    """Entries for each draft pull whose updated_at is over STALE_DRAFT_HOURS before `now` with no live lane (an ended
-    lane holds none), or unknown entries. `rest` is open_pulls_rest's (rows, why). `source` names where the sessions
-    come from (SESSION_SOURCES). Under live-file they are the live file's sessions list, and a live file that cannot be
-    read makes the row one unknown entry that counts the stale-looking drafts and names none. A registered reader's rows
-    replace those sessions for the lane check, so the live file need not be fresh for them; the reader is read only
-    when a draft is stale, and one that gives a why, raises or returns a bad shape makes the same one unknown entry. A
-    name the registry does not hold reads `unknown (sessions source NAME is not wired)`. The held and reviewLog marks
-    come from the live pulls rows under every source. A stale draft with no live pulls row, or whose marks come from a
-    live file that is not usable, reads unknown naming its number, never listed."""
+def branch_commit_times(repo, branches):
+    """({branch: aware datetime}, why or None): the newest commit time of each branch's remote ref, one `git log -1` per
+    branch and no network. A branch whose time cannot be read (no ref, a ref on no commit, a git failure, text that is
+    not an ISO time with a zone) is left out of the dict, so the caller reads it unknown. `why` is set only when no read
+    could run at all (no checkout named)."""
+    if repo is None:
+        return {}, "the checkout was not named"
+    times = {}
+    for branch in dict.fromkeys(branches):
+        read = git(repo, "log", "-1", "--format=%cI", "refs/remotes/origin/" + branch)
+        at = zoned_time(read.strip()) if read else None
+        if at is not None:
+            times[branch] = at
+    return times, None
+
+
+def draft_table(rows, now, lanes, marks, marks_why, times):
+    """One row per open draft pull of `rows` (open_pulls_rest's), the one reading the stale-draft entries derive from:
+    {number, branch, lane, commit, verdict}. lane is `live` (a live lane holds the branch), `held` (held or reviewLog
+    true), `none`, or `unknown` (the marks are unread or the pull has no live row). commit is the branch's newest
+    commit time from `times`, taken only for a draft whose updated_at is over STALE_DRAFT_HOURS old, else None. verdict
+    is `fresh` (updated_at or the commit is under STALE_DRAFT_HOURS old), `unknown` (stale updated_at, no commit time)
+    or `stale`. A commit moves a stale-looking draft to fresh, never a fresh one to stale."""
+    limit = STALE_DRAFT_HOURS * 3600
+    table = []
+    for p in rows:
+        if not p["draft"]:
+            continue
+        mark = marks.get(p["number"])
+        if live_lane_holds(lanes, p["branch"]):
+            lane = "live"
+        elif marks_why or mark is None:
+            lane = "unknown"
+        else:
+            lane = "held" if mark.get("held") is True or mark.get("reviewLog") is True else "none"
+        looks_stale = (now - p["updated_at"]).total_seconds() > limit
+        commit = times.get(p["branch"]) if looks_stale else None
+        if not looks_stale or (commit is not None and (now - commit).total_seconds() < limit):
+            verdict = "fresh"
+        else:
+            verdict = "stale" if commit is not None else "unknown"
+        table.append({"number": p["number"], "branch": p["branch"], "lane": lane, "commit": commit, "verdict": verdict})
+    return table
+
+
+def stale_drafts(work, rest=None, now=None, source=LIVE_FILE_SOURCE, repo=None):
+    """Entries for each draft pull whose updated_at is over STALE_DRAFT_HOURS before `now` and whose newest branch
+    commit is not under that old, with no live lane (an ended lane holds none), or unknown entries. `rest` is
+    open_pulls_rest's (rows, why). `source` names where the sessions come from (SESSION_SOURCES). Under live-file they
+    are the live file's sessions list, and a live file that cannot be read makes the row one unknown entry that counts
+    the stale-looking drafts and names none. A registered reader's rows replace those sessions for the lane check, so
+    the live file need not be fresh for them; the reader is read only when a draft is stale, and one that gives a why,
+    raises or returns a bad shape makes the same one unknown entry. A name the registry does not hold reads `unknown
+    (sessions source NAME is not wired)`. The held and reviewLog marks come from the live pulls rows under every
+    source. A stale draft with no live pulls row, or whose marks come from a live file that is not usable, reads
+    unknown naming its number, never listed. Each stale-looking draft's commit time is read once from `repo`'s
+    checkout (branch_commit_times); one whose time is unread and that no lane, hold or review log silences reads
+    `unknown (#N branch X has no commit time)`. Every entry derives from draft_table."""
     rows, rest_why = rest if rest else (None, "unknown (the open pulls were not read)")
     if rest_why:
         return [rest_why]
@@ -1380,22 +1434,22 @@ def stale_drafts(work, rest=None, now=None, source=LIVE_FILE_SOURCE):
     if why:
         return ["unknown (sessions not read: %s; REST read: %d stale-looking drafts)" % (unknown_inner(why), len(old))]
     marks = {} if marks_why else {p["number"]: p for p in work["pulls"]}
+    times, _ = branch_commit_times(repo, [p["branch"] for p in old])
+    titles = {p["number"]: p["title"] for p in rows}
     out = []
-    for p in old:
-        if live_lane_holds(lanes, p["branch"]):
-            continue
-        if marks_why:
-            out.append("unknown (#%d held and reviewLog are unread: %s)" % (p["number"], unknown_inner(marks_why)))
-            continue
-        # A draft with no live pulls row has unread held and reviewLog marks, so it reads unknown, never listed.
-        if p["number"] not in marks:
-            out.append("unknown (#%d has no live pulls row, so held and reviewLog are unread)" % p["number"])
-            continue
+    for row in draft_table(rows, now, lanes, marks, marks_why, times):
         # A pull the batch runner holds or whose review log is posted waits on a named owner, not forgotten.
-        mark = marks[p["number"]]
-        if mark.get("held") is True or mark.get("reviewLog") is True:
+        if row["verdict"] == "fresh" or row["lane"] in ("live", "held"):
             continue
-        out.append("#%d (%s)" % (p["number"], p["branch"] or p["title"]))
+        if row["lane"] == "unknown":
+            # A draft with no live pulls row has unread held and reviewLog marks, so it reads unknown, never listed.
+            out.append("unknown (#%d held and reviewLog are unread: %s)" % (row["number"], unknown_inner(marks_why))
+                       if marks_why else
+                       "unknown (#%d has no live pulls row, so held and reviewLog are unread)" % row["number"])
+        elif row["verdict"] == "unknown":
+            out.append("unknown (#%d branch %s has no commit time)" % (row["number"], row["branch"]))
+        else:
+            out.append("#%d (%s)" % (row["number"], row["branch"] or titles[row["number"]]))
     return out
 
 
@@ -1991,7 +2045,7 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
             ("no note in a live phase", empty), ("new in top %d with no placement line" % TOP, jumped),
             ("in progress with no live lane or open PR", unlaned(open_, marks, work)),
             ("ready todo steps", ready),
-            ("draft PRs over %d h with no live lane" % STALE_DRAFT_HOURS, stale_drafts(work, open_pulls_rest(slug), now, sessions_source)),
+            ("draft PRs over %d h with no live lane" % STALE_DRAFT_HOURS, stale_drafts(work, open_pulls_rest(slug), now, sessions_source, repo)),
             ("dated claims to re-check before a lane starts", dated_claims(open_, now.date())),
             ("page rulings not on their step", unfiled(steps, work)),
             (IDLE_LANES_LINE, idle_lanes(work or {"read": "unknown (no --live file)"}, steps, marks, slug, repo, main_branch, unread)

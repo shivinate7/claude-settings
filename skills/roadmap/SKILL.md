@@ -248,6 +248,12 @@ After each build the roadmap build script prints the upkeep list for the triage 
   sessions, `held` and `reviewLog` still come from a fresh live file: a pull has a live lane when a live
   session step equals its branch exactly (the in-progress row also counts a `lane/<id>` branch). An ended
   session holds no draft. A draft whose live pull row (matched by number) has `held` or `reviewLog` true is skipped.
+  The build also reads each stale-looking draft's newest branch commit time, once, from the checkout's
+  `refs/remotes/origin/<branch>` (`git log -1`; no network, no REST call). A commit under 12 hours old drops the draft
+  from the row, so the commit only suppresses an entry and never adds one; a fresh REST draft gets no read. A draft
+  whose commit time cannot be read (no ref, a ref on no commit, a git failure, a time that does not parse) reads
+  `unknown (#N branch X has no commit time)`, unless a live lane, `held` or `reviewLog` already skips it. The live
+  file is still needed for lane, `held` and `reviewLog`. Cost: one `git log` per stale-looking draft, no file, timer or log.
   A stale draft with no live pull row has unread `held` and `reviewLog`, so it reads
   `unknown (#N has no live pulls row, so held and reviewLog are unread)`, never listed. Each other entry is
   `#N (<branch or title>)`. When the sessions cannot be read, the row is one
@@ -347,7 +353,7 @@ page) to the same publish. The roadmap build script adds no git process, file, t
 dated-claim row reads the notes already loaded and adds nothing.
 The red line, the stalled lines, the ready lines and the two stale-ready rows read the live file and steps build.py
 already reads. They add no process, file, timer or log. The publisher's `createdAt` per pull row comes from the
-GitHub list call it already makes. The stale-draft row makes its own REST calls (N // 100 + 1 per build run).
+GitHub list call it already makes. The stale-draft row makes its own REST calls (N // 100 + 1 per build run) and one local `git log` per stale-looking draft.
 The `landedPulls` rows cost the publisher one more GitHub list call (closed pulls) per publish. The closed-pull wait row runs
 one `git merge-base` per closed unmerged PR that an open step waits on, once per build. A closed row no open step
 waits on runs no git for this row. It writes no file. The landed rows add their own `git merge-base` per distinct head of an unmerged
