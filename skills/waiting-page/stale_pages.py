@@ -55,10 +55,10 @@ An item with `waits` keeps its one line. The word is
 `waiting` (the run or PR is still going), or `unknown` (gh missing, non-zero, timed out, not JSON, or a
 malformed `waits`; also an item past the WAIT_CAP-th call, which is not asked). The exit code stays the page verdict's.
 --answers, with --items, names the answers the session saved with `ArtifactData list answers`, in the same two shapes, read by the same
-loader (a list entry names its item in `item`, or is {"id", "data"}; a folder doc by its file name). After the wait and lane lines, one line per closed item,
+loader (a list entry names its item in `item`, or is {"id", "data"}; a folder doc by its file name). After the wait and lane lines, one line per open or closed item,
 in item order, whose answer is still kept: `kept-answer: item <n> (<id>) is closed and answers/<id> is kept`, then the remedy (delete
 the answer; a routed item stays closed). A closed item with `waits` prints `kept-answer: item <n> (<id>) is closed with waits and
-answers/<id> is kept`, then the remedy: when its wait has ended, drop `waits` and delete the answer; no gh call. Never named: an open item or one with no status,
+answers/<id> is kept`, then the remedy: when its wait has ended, drop `waits` and delete the answer; no gh call. An open item whose kept answer is older than its `added` (reopened or reworded, record left) prints `kept-answer: item <n> (<id>) is open and answers/<id> is older than its added`, then the remedy: re-read the answer, route it if new, then delete it. These lines come before the closed items' lines. Never named: an open item whose answer is not older than its `added` (awaiting filing), an item with no status,
 a closed item with a `lane` and a `lastAnswer` (routed: its answer stays until the done report), an item with `arbiter` true, a park answer (`park.<id>`, `parked: true` or `act: "park"`), an answer with no item. An unreadable file, a folder without the marker,
 unreadable items, an items folder without the marker, or --answers without --items print one `kept-answer: unknown (...)` line, with no other kept-answer line.
 The folder loader is export_page.docs_in, the one home of reading that folder.
@@ -549,10 +549,12 @@ def wait_lines(items, complete=True):
 
 
 def kept_answer_lines(items, answers, complete=True, answers_complete=True):
-    """One line per closed item, in item order, whose answer is still kept: the writer re-reads answers/<id>, then deletes it
+    """One line per open or closed item, in item order within each group, whose answer is still kept: the writer re-reads answers/<id>, routes it if new, then deletes it
     (SKILL.md, "Route and close"). `items` and `answers` are (doc id, data) pairs from load_docs. A closed item with `waits` and a kept answer (a chat
-    answer can close an item during a wait) gets its own line, "is closed with waits", whose remedy waits for the wait to end; no gh call. Never an open
-    item, an arbiter ruling (its overturn answer is read by its own route), a park answer, an answer with no item, or a routed closed item (a
+    answer can close an item during a wait) gets its own line, "is closed with waits", whose remedy waits for the wait to end; no gh call. An open
+    item gets a line, "is open", only when its kept answer is older than its `added` (a reopened item the writer left a stale record on); an open item
+    with a newer record is awaiting filing and is never named. The "is open" lines come first, then the closed lines; each group is in item order.
+    Never an arbiter ruling (its overturn answer is read by its own route), a park answer, an answer with no item, or a routed closed item (a
     non-empty string `lane` and a `lastAnswer` object: its answer stays until the done report).
     With `complete` or `answers_complete` False (that folder may be cut short), one unknown line naming it."""
     if not (complete and answers_complete):
@@ -566,12 +568,20 @@ def kept_answer_lines(items, answers, complete=True, answers_complete=True):
         if (isinstance(doc_id, str) and not doc_id.startswith("park.") and data.get("parked") is not True
                 and data.get("act") != "park"):
             kept[doc_id] = data
-    lines = []
+    lines, reopened = [], []
     for doc_id, item in items:
         if not isinstance(item, dict):
             continue
         item_id = doc_id if doc_id is not None else item.get("id")  # the file name is the doc id, as for the answers
-        if item.get("status") != "closed" or item.get("arbiter") is True or item_id not in kept:
+        if item.get("arbiter") is True or item_id not in kept:
+            continue
+        if item.get("status") != "closed":
+            # An open item is named only when its kept answer is older than its `added`: the writer reopened or reworded it and left the record.
+            # A newer record is the owner's answer awaiting filing. An unreadable time names nothing.
+            answered, added = parse_utc(kept[item_id].get("at")), parse_utc(item.get("added"))
+            if item.get("status") == "open" and answered is not None and added is not None and answered < added:
+                reopened.append('kept-answer: item %s (%s) is open and answers/%s is older than its added; re-read answers/%s, route it if new, then delete it '
+                             '(SKILL.md, "Route and close")' % (item.get("n", item_id), item_id, item_id, item_id))
             continue
         if isinstance(item.get("lane"), str) and item["lane"] and isinstance(item.get("lastAnswer"), dict):
             continue  # routed: closed at routing, answer kept until the receiver's done report
@@ -581,13 +591,13 @@ def kept_answer_lines(items, answers, complete=True, answers_complete=True):
         else:
             lines.append('kept-answer: item %s (%s) is closed and answers/%s is kept; re-read answers/%s, then delete it '
                          '(SKILL.md, "Route and close")' % (item.get("n", item_id), item_id, item_id, item_id))
-    return lines
+    return reopened + lines  # the stale open items lead, as they hold the page's wrong state
 
 
 def single_page(argv):
     """Exit 0 current, 1 behind, 2 unknown for one fetched page. Writes a file only with --write, never on unknown.
     With --items, prints after the verdict line one wait line per open item with a `waits` field, and one lane line per open
-    item with a `lane` and a `lastAnswer` and no `waits`. With --answers too, one kept-answer line per closed item whose answer is kept.
+    item with a `lane` and a `lastAnswer` and no `waits`. With --answers too, one kept-answer line per closed item whose answer is kept, and per open item whose answer is older than its `added`.
     The exit code stays the verdict's."""
     ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
     ap.add_argument("--page", required=True)
