@@ -1,7 +1,7 @@
 {
  "id": "rules-decisions-aligned",
  "title": "A changed decision record must update the rule lines that cite it (a guard or check)",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "owner": "coordinator",
@@ -10,6 +10,6 @@
  "pr": 3492,
  "source": "Coordinator message 01:15 CST Nov 15, relaying the consultant brief of 01:14 CST.",
  "lane": "session_013NEJKzbYsMZZPNx5LnoNMN",
- "updatedAt": "2026-11-15T11:35:00-06:00",
- "note": "Low note (lane's read, unchecked): bin/ci-job header lines 49-52 still say claude-md-cites reads unknown for the HEAD_SHA reason. No incident yet; it becomes a debt if it misleads a session. Live head 0d37b34e (GitHub 08:58 CST, open draft, clean); record 6896461193 at that head (relayed). Item 874 stays open until runner 10's lint without a flag reads. Relayed 10:01 CST Nov 15 (coordinator, not read by triage): live head is now b08ad6d58e96 (was 0d37b34e); draft; runner 10's re-lint alone is running."
+ "updatedAt": "2026-11-15T23:06:19-06:00",
+ "note": "Low note (lane's read, unchecked): bin/ci-job header lines 49-52 still say claude-md-cites reads unknown for the HEAD_SHA reason. No incident yet; it becomes a debt if it misleads a session. Live head 0d37b34e (GitHub 08:58 CST, open draft, clean); record 6896461193 at that head (relayed). Item 874 stays open until runner 10's lint without a flag reads. Relayed 10:01 CST Nov 15 (coordinator, not read by triage): live head is now b08ad6d58e96 (was 0d37b34e); draft; runner 10's re-lint alone is running. [23:06 CST Nov 15, triage] Done: PR #3492 merged 2026-11-15T17:07:44Z (REST read 22:58 CST)."
 }
