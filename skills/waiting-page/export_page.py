@@ -80,7 +80,7 @@ Every artifact, the step "Before you switch Claude accounts":
 REPO_ROOT holds the extras file with the artifacts registry (lint/layout.py `artifacts()`). DIR holds one folder per
 artifact id, each laid out as in a single export, plus `page.html` and `files/<path>` (the page's supporting files).
 Each entry exports the collections it lists to its export path under RECORD_WORKTREE (the waiting page: the
-waiting-data folder; any other artifact: `artifacts/<id>/`), with the same scan and mirror as one export. Any role's
+waiting-data folder; any other artifact: `artifacts/<id>/`), with the same scan and copy as one export. Any role's
 `<id>/page.html` lands at `page/page.html` there, and `<id>/files/<path>` at `page/files/<path>`; a waiting-page entry
 also exports its designData block. A supporting file no longer fetched stays in the copy; history is the delete.
 An entry with `"export": false` prints `<id>: skipped - no export`, needs no folder in DIR, writes nothing and
@@ -915,10 +915,10 @@ def merge(copy, live, batches, collections=COLLECTIONS, live_page=None):
 def main(argv):
     ap = argparse.ArgumentParser(description="Copy the waiting page's database into the repo, or build batches back from it.")
     ap.add_argument("--fetched", help="the folder `ArtifactData list` saved, one folder per collection")
-    ap.add_argument("--out", help="the waiting-data folder to mirror into")
+    ap.add_argument("--out", help="the waiting-data folder to copy into")
     ap.add_argument("--page", help="the fetched page.html, for its designData block")
     ap.add_argument("--allow-empty", action="append", default=[], metavar="COLLECTION",
-                    help="a collection that really emptied, so its docs leave the copy")
+                    help="a collection that really emptied: lifts the unknown stop, deletes no doc of the six")
     ap.add_argument("--all", help="the repo root whose artifacts registry lists each artifact to export")
     ap.add_argument("--worktree", help="with --all: the record branch worktree each artifact's export path is under")
     ap.add_argument("--check", action="store_true", help="with --fetched and --page: run the picture checks only, write nothing")

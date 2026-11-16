@@ -17,8 +17,8 @@ never runs it. There is one path: the record branch's own worktree. Never write 
 2. Fetch each of the six collections: `items`, `answers`, `groups`, `asks`, `meta` and `receipts`. Use
    `ArtifactData list <collection>` with `out_dir` set to one new folder, and `query.limit` 1000.
    Follow `next_cursor` until it is empty. A list call that errors, or that ends with a cursor still
-   pending, stops the run: touch no `.complete` file and run no export. A missed cursor page deletes docs
-   from the copy. After the last page of a collection, touch `.complete` in its folder. An empty collection
+   pending, stops the run: touch no `.complete` file and run no export. A missed cursor page leaves its docs
+   stale in the copy. After the last page of a collection, touch `.complete` in its folder. An empty collection
    is an empty folder with that marker. Make the folder by hand if the tool wrote none.
 3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --fetched <folder> --out <copy folder> --page <file>`.
    `<file>` is the page that "Keep the page on main's code" step 1 already read. Its HTML lands in the copy as

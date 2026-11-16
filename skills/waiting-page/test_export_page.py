@@ -1314,9 +1314,10 @@ class Receipts(Base):
         out = self.out()
         self.export_in_process_with(("steps",), self.fetch(folders={"steps": {"a": item(1), "b": item(2)}}), out)
         self.assertTrue(os.path.isfile(os.path.join(out, "steps", "b.json")), "scope: steps/b.json did not land")
-        self.export_in_process_with(("steps",), self.fetch(folders={"steps": {"a": item(1)}}), out)
+        verdict = self.export_in_process_with(("steps",), self.fetch(folders={"steps": {"a": item(1)}}), out)
         self.assertFalse(os.path.exists(os.path.join(out, "steps", "b.json")),
                          "a collection outside the six kept a doc the fetch no longer lists")
+        self.assertEqual(verdict[0], "changed 1", "a delete is not counted in the verdict")
 
     def export_in_process_with(self, collections, fetched, out):
         try:
