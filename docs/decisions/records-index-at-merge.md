@@ -33,8 +33,8 @@ second full run of the jobs. CI scope turns off the job and suite flags for that
 `green-head.sh`). Owner item 857 b (waiting-page save, 2026-11-15 19:48 CST, "Overrule: the ruling reopens")
 holds ruling own-830-c again in full: a records-only change skips every suite job and the `checks` lint job,
 and the all-jobs-passed rollup passes. The `scope`, `nightly-skip` and `push-skip` jobs still run to decide it.
-Those flags cover the macOS, Windows, pointer, guard, shoot, mutation and sweep work. CI scope also turns off every
-run step of the Windows guard, merge and rest jobs. It also turns off the mutation report. The merge
+The job and suite flags cover the macOS, Windows, pointer, guard, shoot, mutation and sweep work. CI scope also turns
+off the mutation report. The merge
 tool still refuses a ready PR with a stale page, and the records push before ready stays. A current page makes no
 commit. A claim stays at confirm under the lock, so its numbers are free on the base tip, as before. The
 claim commit carries the rebuilt page, so the claim and the page share one commit.
