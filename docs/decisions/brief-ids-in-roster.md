@@ -45,7 +45,7 @@ Two rules in `hooks/guard.py` keep a hand-typed session id out of a message. The
 - A stale record: the roadmap ref is the one the checkout last fetched, so a row triage rewrote since is not in it. A session that reads the new id from `list_sessions` passes.
 - A false alarm: a file name or prose such as `session_2026-11-14.md` or `session_1` is refused as an id, and a line that starts `Brief:` anywhere in a message makes the message a brief. Quote the id itself, with a backtick or a double quote on each side of it, to lift the refusal. A quote around the whole file name does not count, since the id ends before the dash.
 
-Protected by the `brief-ids-in-roster:` cases in `tests/guard/s43300-brief-ids-in-roster.py`, red before the rule read every bare id, by the `target-id-in-roster:` and record cases in `tests/guard/s43500-session-roster-at-start.py`, and by `SessionStartRosterTests` in `hooks/test_session_start.py`.
+Protected by the `brief-ids-in-roster:` cases in `tests/guard/s43300-brief-ids-in-roster.py`, red before the rule read every bare id, by the `target-id-in-roster:` and record cases in `tests/guard/s43501-session-roster-at-start.py`, and by `SessionStartRosterTests` in `hooks/test_session_start.py`.
 
 Kind: process
 Home: hooks/guard_merge.py
