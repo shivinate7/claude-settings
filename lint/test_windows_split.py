@@ -91,6 +91,7 @@ LINUX_SUITES = {
     "python3 janitor/mutate_sweep.py": (LINUX_SWEEP, None),
     "python3 hooks/test_config_watch.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_config_watch_fast_exit.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 hooks/test_reinstall_stale.py": (None, None),
     "python3 hooks/test_shared_names.py": (None, None),
     "python3 hooks/test_precompact_handoff.py": (None, None),
     "python3 hooks/test_cc_version_check.py": (NO_MD_SCOPE_CONDITION, None),

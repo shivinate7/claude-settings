@@ -61,7 +61,6 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     - `holds` (one plain sentence: what is stopped until the answer) puts the item in Blocking.
     - `by` (an ISO deadline) puts an item with no `holds` in Upcoming.
     - An item with neither is in Whenever.
-    - `stands: true` puts the item in the last section, Pick stands (see "Add an item").
   - `arbiter: true` marks a ruling: an item the arbiter decided (decision `session-tiers`, Arbiter, "On the page").
     The arbiter hands each ruling to the writer. The writer writes it closed, with the item's `status` `closed`,
     `home` the ruling's record id, `recommended` (old name `pick`) the ruled option's key, `why`, and `ruled` (an ISO time). It cites the ruling.
@@ -92,7 +91,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     "Your sent answers, newest first." under "sink". The section is open on load, each card folded
     to its top row, title and answer line; one control holds the owner's note, last answer and reply. A card with a
     new reply (see `replied`) opens at load and carries the mark "New reply", in place. A Change keeps
-    the card in the section, open, until reload, and a reply that arrives opens a card in place. A card that holds a draft, a stood pick or a pending withdraw stays open. With no answered item the page draws no section and no rail row.
+    the card in the section, open, until reload, and a reply that arrives opens a card in place. A card that holds a draft or a pending withdraw stays open. With no answered item the page draws no section and no rail row.
   - `group` (a slug) puts the item in one frame with the other items of that group. See `groups/<slug>`.
   - `port: true` marks a question about a port or redesign of an existing app. Set `port: false` on an item
     whose text uses the word port for another meaning. Such an item needs a line in `context` that starts
@@ -180,12 +179,11 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   Write the record in the same step that sets `group` on the second item.
 - `answers/<id>`: the page writes it when the owner presses Send. Fields: `item`, `n`, `at` (ISO
   time), `note`, and `choice` (a decision) or `done: true` (a task). A task answer may instead be
-  a note with no `done`. A pick that stands writes `choice` equal to `recommended`, with the note
-  `accepted pick`. A tap on the starred option is an ordinary pick, with no such note. On a `multi` item `choice` is a
-  list of option keys, in rank order when `ranked` and in option order otherwise. A stood pick writes the whole `recommended` list in that order. "None of these" writes
+  a note with no `done`. The page never preselects an answer and sends nothing the owner did not press: a tap on the
+  starred option is an ordinary pick. On a `multi` item `choice` is a
+  list of option keys, in rank order when `ranked` and in option order otherwise. "None of these" writes
   `choice: "none"`, and the page sends it only with a note that says what the owner wants
   instead. A note typed with no option picked is the same answer: `choice: "none"` plus the note.
-  On an item whose pick stands, a note with no new pick sends the stood pick plus the note.
   A decision answer also carries `label`, the words of the choice as the page showed them, so a reader sees what the letter meant: "A: Red" for a pick (the letter by position, then the option's `label`), a list of those for a `multi` item, "none of these" for none. `choice` stays the key, or the list of keys, and decides the answer. The answer also carries `optionId`, the id of the option picked (a list for a `multi` item), when every picked option has an id (ruling R60). If the item's option at that key no longer has that id, or, with no `optionId`, no longer has that letter and label, `page_grant.py` prints `held:` and exits 3: the owner confirms in words, and the answer is no grant. The same holds for a choice key the item no longer holds, when it equals `--pick`. The fields are new, so an older answer has neither.
   A changed answer that the owner leaves empty is withdrawn: Send reads "Withdraw answer" and
   deletes `answers/<id>`. The page re-reads the record first and leaves one that changed. A withdraw
@@ -256,7 +254,7 @@ extras key `page-writer`; the pick guard uses it when the transcript has no `met
 - Every other session sends its question to the writer, which writes the item. A lane sends its question
   to its parent in the same turn, and triage writes the item ("Add an item", step 0). Not built: the route from a lane to triage.
   `owner` stays the session that asked. It reads its own answer at its wake, so nobody relays answers.
-- The writer ranks. The fact tiers are the base: Blocking, Upcoming, Whenever and Pick stands. Never
+- The writer ranks. The fact tiers are the base: Blocking, Upcoming and Whenever. Never
   write a tier. Inside a tier the writer sets `rank` on each item, judged against every open item on
   the page, not only its own. It re-ranks when it adds, updates or closes an item. A close by
   another session needs no re-rank. The writer re-ranks at its next add or update.
@@ -319,7 +317,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
    fails, fix the item at once. The page refuses to send an answer to a broken item.
    - Set `repo`. When it is not this page's repo, ask that repo's triage, coordinator or owner's-computer session whether the owner has ruled, and write its session id as `checked_with` (rule `question-checked-with-repo`).
    - Before you write a decision, run the owner-judge test: can the owner judge it from what he already knows?
-     An undoable choice on internals he has no stake in is not asked. Take your own pick and set `stands: true`.
+     An undoable choice on internals he has no stake in is not asked. Take your own pick and say it in the reply.
      A question stays only when it touches his goals, his money, a risk he would care about, a rule, or an act that
      cannot be undone. Name which as the stake of the Problem line of `context`. The writer refuses a decision with no such line.
      Then write the Departs from line: what main does now, and what your question changes. For a new thing, write `Departs from: main — adds <X>`.
@@ -340,10 +338,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
      Set either only on a page that `stale_pages.py` reports current (see "Update a repo's pages"). An older page draws radios.
      Write `recommended` only on a page that `stale_pages.py` reports current too: an older page reads only `pick` and shows no star for `recommended`.
      The page stars no option when `recommended` is not valid.
-   - Set `stands: true` only on a decision that changes no rule and has a `recommended`. Never set it on
-     an item in a group. The page shows it in the last section, and `recommended` goes with the owner's
-     next Send unless the owner chooses another. The owner cannot hold a stood pick
-     open: choosing another option is the only way out. A `multi` item stands with its list `recommended`: the owner's ticks replace it. A question that touches a rule starts blank.
+   - The page never preselects an answer. A decision may carry a starred `recommended` option, and nothing is sent unless the owner presses. A `multi` item's `recommended` is a list; a tap on its star ticks the list.
 3. Once the item exists, name it in the reply in one line, with the page URL for an open item only
    (a closed item is one line on the page, with no card to open). Open no question box (`questions-go-to-owner`).
 4. Keep working on what does not depend on the answer.

@@ -25,6 +25,7 @@ import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shall
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
 import stale_cites  # noqa: E402  the guard's rule dirs, one home (lint/stale_cites.py)
 import layout  # noqa: E402  where each kind of record lives, one home (lint/layout.py)
+import ruled_store  # noqa: E402  the one reader of the ruling store (lint/ruled_store.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "hooks"))  # append: no hook module shadows one this suite imports
 import guard as hook_guard  # noqa: E402  is_test_rel, the one home of what a test path is (hooks/guard.py)
 CITE_HOMES = audit.cite_homes()  # read live from the repo when this run starts
@@ -3296,10 +3297,18 @@ def hold(kind):  # the first such call starts a helper that keeps this process's
         open(os.path.join(d, "held"), "w").close()
         import subprocess
         subprocess.Popen([sys.executable, "-c", "import time; time.sleep(%d)" % h["seconds"]])
+def ratelimit_lines():
+    """The budget headers of a reply. A case sets S["ratelimit"] = {remaining, limit, reset}: a value of None leaves its header out, and any other value is printed as it is
+    (a text value gives a header that is not a number). Unset, the reply carries the one header every older case reads: remaining 4999."""
+    rl = S.get("ratelimit")
+    if rl is None:
+        return "X-Ratelimit-Remaining: 4999\r\n"
+    lines = [f"X-Ratelimit-{name}: {rl[key]}\r\n" for name, key in (("Remaining", "remaining"), ("Limit", "limit"), ("Reset", "reset")) if rl.get(key) is not None]
+    return "".join(lines)
 def finish(text, code, include=False, link=None):
     if include and not (code and not re.search(r"\(HTTP \d{3}\)\s*$", text)):  # a transport error has no HTTP reply, so no header block
         got = int(re.search(r"\(HTTP (\d{3})\)\s*$", text).group(1)) if code else 200
-        sys.stdout.buffer.write(("HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nX-Ratelimit-Remaining: 4999\r\n%s\r\n" % (got, "Error" if code else "OK", "Link: %s\r\n" % link if link else "")).encode())
+        sys.stdout.buffer.write(("HTTP/1.1 %d %s\r\nContent-Type: application/json\r\n%s%s\r\n" % (got, "Error" if code else "OK", ratelimit_lines(), "Link: %s\r\n" % link if link else "")).encode())
     print(text)
     sys.exit(code)
 def graphql():
@@ -13435,6 +13444,7 @@ class PullsHost(merge.Host):
         self.files_error = files_error  # the (code, output) text of a failed files read
         self.changed_files = changed_files  # the changed_files count of `pulls/<n>`; None is the length of files
         self.workflow_runs = workflow_runs or {}  # sha -> the workflow runs `gh run list --commit <sha>` answers
+        self.run_reads = []  # the --commit sha of each `gh run list` this host answers, in order: the run list reads of a head
         self.compares, self.compare_error, self.base_compare_error = compares or {}, compare_error, base_compare_error  # the (code, output) of a failed read
         self.reads = []
         self.list_calls = []
@@ -13449,6 +13459,7 @@ class PullsHost(merge.Host):
 
     def gh(self, args, cwd=None):
         if args[:2] == ["run", "list"]:
+            self.run_reads.append(args[args.index("--commit") + 1])
             return 0, json.dumps(self.workflow_runs.get(args[args.index("--commit") + 1], []))
         if self.count_gh and args[0] == "api":
             rel = args[1].split("/", 3)[-1]  # repos/{owner}/{repo}/<rel>
@@ -14471,6 +14482,33 @@ class RepoDirFlag(RepoDirRuns, Env):
 
     def test_a_confirm_with_c_merges_in_the_named_checkout(self):
         self.assert_merged_in_named(*self.confirm_from(self.co, ["-C", self.b_co, "7", "--confirm"])[:2])
+
+    def test_audit_prs_with_c_is_accepted_and_reads_the_named_checkout(self):
+        """`--audit-prs -C <checkout>` reads that checkout, so -C is no second mode and is accepted (the stands-alone check refused it). audit_prs is
+        stood in for, as release_check is above. The Host main builds for the audit must carry the named checkout, so an accepted -C that is
+        ignored fails here."""
+        audited = []
+
+        def fake(h):
+            audited.append(h)
+            return ["no open pull requests."], []
+
+        for argv in self.spellings("--audit-prs"):
+            with self.subTest(spelling=argv[0]):
+                audited.clear()
+                with unittest.mock.patch.object(merge, "audit_prs", fake):
+                    rc, out, seen = self.run_from(self.co, argv)
+                self.assertNotIn("stands alone", out, "--audit-prs refused -C as a second mode: " + out)  # scope first
+                self.assertEqual(rc, 0, "--audit-prs with -C did not run (rc %r): %s" % (rc, out))
+                self.assertEqual(len(audited), 1, "the audit did not read a host (%d calls): %s" % (len(audited), out))
+                self.assertEqual(checkout_key(audited[0].built_with.get("cwd")), checkout_key(self.b_co),
+                                 "the audit's host was not built in the -C checkout: %r" % (audited[0].built_with,))
+
+    def test_audit_prs_with_a_pull_request_number_still_stands_alone(self):
+        """A control for the case above: --audit-prs beside a pull request number is still a usage error that names the mode."""
+        rc, out, seen = self.run_from(self.co, ["--audit-prs", "7"])
+        self.assertEqual(rc, 2, "--audit-prs beside a pull request number was not a usage error (rc %r): %s" % (rc, out))  # scope first
+        self.assertIn("--audit-prs stands alone", out, "the refusal does not name --audit-prs: " + out)
 
     def test_c_alone_with_reviewed_reads_the_named_checkout(self):
         """A control for the --root refusal: -C with --reviewed and no --root is not refused, and main takes the named checkout as the root it
@@ -15820,6 +15858,306 @@ class ReviewEnv(Env):
         parents = [arg for p in (parent, *more_parents) for arg in ("-p", p)]
         return sh(self.co, "git", "commit-tree", tree, *parents, "-m", message)
 
+# ------------------------------------------------------------------ the owner's acceptance of a held change
+# A change with Net value negative is held (decision hold-unsafe-after-round-3). The owner can accept that loss in the record: one line
+# `Owner accepted: <ruling id>, <YYYY-MM-DD HH:MM CST|CDT>`, directly before Net value. parse_review reads it into rec["accepted"]. Only
+# live_review_state reads the ruling: one git read of origin/roadmap at merge.RULED_STORE_PATH, whose own id must be the cited one.
+# review_state stays pure, so it holds a negative record whatever the line says. The cases use a guard change's shape: Guard or check yes,
+# three FAIL rounds, Net value negative.
+
+ACCEPT_PR = 3381
+ACCEPT_ID = "own-3381-a"
+ACCEPT_AT = "2026-11-15 01:50 CST"
+ACCEPT_LINE = f"Owner accepted: {ACCEPT_ID}, {ACCEPT_AT}"
+UNLINKED_HEAD = "e5" * 20  # a head no record names: a push that is not a clean merge of main
+
+def pr3381_text(accepted=(), net="negative", rounds=REVIEW_FAILED_THREE, fix=(), n=ACCEPT_PR):
+    """A guard change's record at REVIEW_HEAD on pull request `n`: Guard or check yes, `rounds`, then `fix` and `accepted` lines. record_text puts
+    both after the rounds and before Net value, which is where the owner's line goes."""
+    return record_text(rounds=rounds, kind="normal", guard="yes", net=net, n=n, fix=(*fix, *accepted))
+
+def accepted_record(test, text):
+    """-> the parsed record of `text`, which must parse. The old parser refuses a record with the owner's line, and this names that."""
+    rec = review_fn(test, "parse_review")(text)
+    test.assertIsNotNone(rec, "parse_review refused the record, so its Owner accepted line is not read:\n" + text)
+    return rec
+
+def ruling_files(rid=ACCEPT_ID, inside=None, **fields):
+    """origin/roadmap's file for ruling `rid`: an open entry that check_entry passes. Its id is `inside` when given, so a file can name another id
+    than its own name. `fields` replace the entry's own keys, for the cases that break one."""
+    entry = {"id": inside or rid, "at": "2026-11-15T01:43:00-06:00", "ruling": "fixture: the owner's ruling", "source": "fixture",
+             "status": "open", "supersedes_none": "fixture: the ruling names no guard rule", **fields}
+    return {merge.RULED_STORE_PATH.format(id=rid): json.dumps(entry) + "\n"}
+
+def process_starts(action):
+    """-> (what action returns, the argv of each process it starts). Every process a call starts goes through subprocess.Popen, so this counts
+    each git and gh start."""
+    real, starts = subprocess.Popen, []
+    def counting(*args, **kwargs):
+        starts.append(args[0] if args else kwargs.get("args"))
+        return real(*args, **kwargs)
+    with unittest.mock.patch.object(subprocess, "Popen", counting):
+        out = action()
+    return out, starts
+
+class OwnerAcceptedForm(unittest.TestCase):
+    """The Owner accepted line, as parse_review reads it: one optional line directly before Net value, with one ruling id and one CST or CDT
+    time. Each refusal sits beside the well-formed line, which must parse as an acceptance first (scope before subject). So a parser that never
+    learned the line fails on that line, by name, and not on the refusal."""
+
+    def assert_refused(self, scope, text, why):
+        self.assertTrue(accepted_record(self, scope).get("accepted"), "fixture: the well-formed line does not parse as an acceptance")
+        rec = review_fn(self, "parse_review")(text)
+        read = rec.get("accepted") if rec else None
+        self.assertFalse(read, f"{why}: the record reads the line as an acceptance: {read!r}")
+        self.assertNotEqual(review_fn(self, "review_state")(rec, REVIEW_HEAD)[0], "done", f"{why}: the record reads done")
+
+    def test_the_line_parses_into_the_ruling_id_and_its_time(self):
+        rec = accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,)))
+        read = str(rec.get("accepted"))
+        self.assertIn(ACCEPT_ID, read, "the parsed record does not carry the ruling id: %r" % (rec.get("accepted"),))
+        self.assertIn("01:50 CST", read, "the parsed record does not carry the time: %r" % (rec.get("accepted"),))
+        self.assertEqual((rec["net"], rec["guard"]), ("negative", "yes"), "the line changed another field")
+
+    def test_a_record_without_the_line_reads_no_acceptance(self):
+        # the control: the form without the line parses with no acceptance, on the old code too
+        self.assertFalse(review_fn(self, "parse_review")(pr3381_text()).get("accepted"))
+
+    def test_the_line_must_sit_directly_before_net_value(self):
+        scope = pr3381_text(accepted=(ACCEPT_LINE,))
+        after_net = pr3381_text().replace("Net value: negative\n", "Net value: negative\n" + ACCEPT_LINE + "\n")
+        before_rounds = pr3381_text().replace("Guard or check: yes\n", "Guard or check: yes\n" + ACCEPT_LINE + "\n")
+        for why, text in (("after Net value", after_net), ("before the rounds", before_rounds)):
+            with self.subTest(place=why):
+                self.assert_refused(scope, text, f"the line {why}")
+
+    def test_a_ruling_id_in_backticks_or_quotes_is_no_acceptance(self):
+        scope = pr3381_text(accepted=(ACCEPT_LINE,))
+        for line in (f"Owner accepted: `{ACCEPT_ID}`, {ACCEPT_AT}", f'Owner accepted: "{ACCEPT_ID}", {ACCEPT_AT}'):
+            with self.subTest(line=line):
+                self.assert_refused(scope, pr3381_text(accepted=(line,)), "a quoted ruling id")
+
+    def test_a_lone_quote_is_no_acceptance(self):
+        scope = pr3381_text(accepted=(ACCEPT_LINE,))
+        for line in (f'Owner accepted: "{ACCEPT_ID}, {ACCEPT_AT}', f"Owner accepted: {ACCEPT_ID}', {ACCEPT_AT}"):
+            with self.subTest(line=line):
+                self.assert_refused(scope, pr3381_text(accepted=(line,)), "a lone quote")
+
+    def test_a_line_after_the_rule_is_no_acceptance(self):
+        # The record ends at the first `---` line, and the attribution footer follows it, so a line there is no part of the record.
+        scope = pr3381_text(accepted=(ACCEPT_LINE,))
+        footer = pr3381_text() + "\n---\n" + ACCEPT_LINE + "\n"
+        self.assert_refused(scope, footer, "a line in the footer after the rule")
+
+    def test_a_second_line_is_no_acceptance(self):
+        scope = pr3381_text(accepted=(ACCEPT_LINE,))
+        for lines, why in (((ACCEPT_LINE, ACCEPT_LINE), "the same line twice"),
+                           ((ACCEPT_LINE, f"Owner accepted: own-3381-b, {ACCEPT_AT}"), "two ruling ids")):
+            with self.subTest(case=why):
+                self.assert_refused(scope, pr3381_text(accepted=lines), why)
+
+    def test_a_bad_time_is_no_acceptance(self):
+        scope = pr3381_text(accepted=(ACCEPT_LINE,))
+        for at in ("2026-13-45 99:99 CST", "2026-11-15 1:50 CST", "2026-11-15 01:50 PST", "2026-11-15 01:50"):
+            with self.subTest(time=at):
+                self.assert_refused(scope, pr3381_text(accepted=(f"Owner accepted: {ACCEPT_ID}, {at}",)), f"the time {at!r}")
+
+class OwnerAcceptedHold(ScopedRepo, ReviewEnv):
+    """What the line lifts: a held record reads as it reads at Net value zero, once live_review_state has read the ruling it names. A case that needs
+    the store unread does not fetch it, or drops its copy."""
+
+    def publish(self, files):
+        """origin/roadmap holds `files`, and this checkout fetches it, so the ruling store is readable here."""
+        self.on("roadmap", files, start="main")
+        sh(self.co, "git", "fetch", "-q", "origin")
+
+    def live(self, rec, live=REVIEW_HEAD):
+        """-> (state, why) of `rec` at the live head `live`: live_review_state on a Host of this checkout, with main as the base."""
+        return review_fn(self, "live_review_state")(merge.Host(cwd=self.co), rec, live, "main")
+
+    def test_review_state_alone_holds_the_record_and_starts_no_process(self):
+        # review_state stays pure: the ruling is read by live_review_state, so the line alone lifts nothing in review_state
+        rec = accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,)))
+        (state, why), starts = process_starts(lambda: review_fn(self, "review_state")(rec, REVIEW_HEAD))
+        self.assertEqual(starts, [], f"review_state started {len(starts)} process(es), so it is not pure: {starts!r}")
+        self.assertEqual(state, "held", why)
+
+    def test_a_valid_acceptance_of_a_negative_record_reads_done(self):
+        self.publish(ruling_files())
+        rec = accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,)))
+        state, why = self.live(rec)
+        self.assertEqual(state, "done", f"a negative record whose line names a ruling on origin/roadmap reads {state}: {why!r}")
+
+    def test_the_same_record_without_the_line_stays_held(self):
+        # the control: the same ruling on the store, and no line, so nothing lifts the hold
+        self.publish(ruling_files())
+        state, why = self.live(accepted_record(self, pr3381_text()))
+        self.assertEqual(state, "held", why)
+
+    def test_an_unknown_ruling_id_does_not_lift_the_hold(self):
+        # scope: the store holds three rulings, and the cited one lifts the hold; then a typo of its id, which the store does not hold
+        self.publish({**ruling_files(), **ruling_files("own-3381-b"), **ruling_files("own-3380-a")})
+        self.assertEqual(self.live(accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,))))[0], "done",
+                         "fixture: the cited ruling does not lift the hold")
+        typo = pr3381_text(accepted=(f"Owner accepted: own-3381-typo, {ACCEPT_AT}",))
+        state, why = self.live(accepted_record(self, typo))
+        self.assertEqual(state, "held", f"an id the store does not hold reads {state}: {why!r}")
+
+    def test_a_ruling_file_that_names_another_id_does_not_lift_the_hold(self):
+        # the file at own-3381-b's path names own-3381-x inside, so citing own-3381-b must not read it
+        self.publish({**ruling_files(), **ruling_files("own-3381-b", inside="own-3381-x")})
+        self.assertEqual(self.live(accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,))))[0], "done",
+                         "fixture: the cited ruling does not lift the hold")
+        state, why = self.live(accepted_record(self, pr3381_text(accepted=(f"Owner accepted: own-3381-b, {ACCEPT_AT}",))))
+        self.assertEqual(state, "held", f"a file that names another id lifts the hold: {state}: {why!r}")
+
+    def test_a_ruling_store_this_checkout_cannot_read_holds_the_record(self):
+        self.publish(ruling_files())
+        rec = accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,)))
+        self.assertEqual(self.live(rec)[0], "done", "fixture: the store is readable here, so the line should lift the hold")
+        sh(self.co, "git", "update-ref", "-d", "refs/remotes/origin/roadmap")  # this checkout loses its copy of the store: the one read cannot run
+        state, why = self.live(rec)
+        self.assertNotEqual(state, "done", f"the store cannot be read, yet the record reads done: {why!r}")
+        self.assertIn(state, ("held", "unknown"), why)
+
+    def test_an_acceptance_covers_the_named_head_only(self):
+        self.publish(ruling_files())
+        rec = accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,)))
+        self.assertEqual(self.live(rec)[0], "done", "fixture: the accepted record does not read done at its own head")
+        state, why = self.live(rec, live=UNLINKED_HEAD)
+        self.assertEqual(state, "stale", f"an acceptance covers the head it names, and a new head reads {state}: {why!r}")
+
+    def test_the_line_lifts_only_the_hold(self):
+        # Each shape reads with the line as it reads at Net value zero. A failed fix check, a failed round before the last, and one failed round
+        # stay open, and a passed round or fix check stays done.
+        self.publish(ruling_files())
+        shapes = (
+            ("the three rounds FAIL", REVIEW_FAILED_THREE, (), "done"),
+            ("round 1 PASS", REVIEW_PASS, (), "done"),
+            ("round 1 and round 2 FAIL, round 3 not run", REVIEW_FAILED_THREE[:2], (), "open"),
+            ("round 1 FAIL alone", REVIEW_FAILED_THREE[:1], (), "open"),
+            ("the three rounds FAIL and a fix check FAIL", REVIEW_FAILED_THREE, (fix_verifier_line("FAIL"),), "open"),
+            ("the three rounds FAIL and a fix check PASS", REVIEW_FAILED_THREE, (fix_verifier_line("PASS"),), "done"),
+        )
+        for name, rounds, fix, want in shapes:
+            with self.subTest(shape=name):
+                zero = accepted_record(self, pr3381_text(rounds=rounds, fix=fix, net="zero"))
+                self.assertEqual(self.live(zero)[0], want, "fixture: the record at Net value zero does not read %s" % want)
+                held = accepted_record(self, pr3381_text(rounds=rounds, fix=fix, accepted=(ACCEPT_LINE,)))
+                state, why = self.live(held)
+                self.assertEqual(state, want, f"the line reads {name!r} as {state}, not as at Net value zero: {why!r}")
+
+    def test_a_zero_or_positive_net_with_the_line_parses_and_reads_as_without_it(self):
+        self.publish(ruling_files())
+        for net in ("zero", "positive"):
+            with self.subTest(net=net):
+                with_line = accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,), net=net))
+                without = accepted_record(self, pr3381_text(net=net))
+                state, why = self.live(with_line)
+                self.assertEqual(state, "done", why)
+                self.assertEqual(state, self.live(without)[0], "the line changes a record whose Net value is %s" % net)
+
+    def test_a_negative_record_with_the_line_starts_two_git_processes_and_the_rest_start_none(self):
+        # The cost of live_review_state: the one reader of the ruling store (lint/ruled_store.py) starts two git processes, ls-tree of the
+        # store folder and then cat-file --batch, only for a negative record with the line. Every other record starts 0 processes.
+        self.publish(ruling_files())
+        quiet = (("no line, net negative", pr3381_text()),
+                 ("the line, net zero", pr3381_text(accepted=(ACCEPT_LINE,), net="zero")),
+                 ("the line, net positive", pr3381_text(accepted=(ACCEPT_LINE,), net="positive")))
+        for name, text in quiet:
+            with self.subTest(record=name):
+                rec = accepted_record(self, text)
+                _out, starts = process_starts(lambda: self.live(rec))
+                self.assertEqual(len(starts), 0, f"{name} started {len(starts)} process(es), want 0: {starts!r}")
+        rec = accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,)))
+        (state, why), starts = process_starts(lambda: self.live(rec))
+        self.assertEqual(state, "done", why)
+        self.assertEqual(len(starts), 2, f"a negative record with the line starts {len(starts)} git process(es), want 2 (the reader's ls-tree and cat-file --batch): {starts!r}")
+        self.assertIn("ls-tree", starts[0], "the first of the 2 processes is not the reader's ls-tree: %r" % (starts[0],))
+        self.assertIn(ruled_store.STORE_DIR, starts[0], "the ls-tree does not list the ruling store folder: %r" % (starts[0],))
+        self.assertIn("cat-file", starts[1], "the second of the 2 processes is not the reader's cat-file: %r" % (starts[1],))
+
+    def test_a_ruling_of_another_pull_request_does_not_lift_the_hold(self):
+        # scope: a record on pull request N lifts on a ruling named own-N-letters that the store holds, letters plural included
+        self.publish({**ruling_files(), **ruling_files("own-3381-ab"), **ruling_files("own-3400-a"), **ruling_files("r59")})
+        for line in (ACCEPT_LINE, f"Owner accepted: own-3381-ab, {ACCEPT_AT}"):
+            with self.subTest(line=line):
+                self.assertEqual(self.live(accepted_record(self, pr3381_text(accepted=(line,))))[0], "done",
+                                 "fixture: a ruling named for the record's own number does not lift the hold: " + line)
+        self.assertEqual(self.live(accepted_record(self, pr3381_text(accepted=(f"Owner accepted: own-3400-a, {ACCEPT_AT}",), n=3400)))[0], "done",
+                         "fixture: a ruling named for pull request 3400 does not lift the hold on it")
+        # subject: the same record on pull request 3400, citing the ruling of 3381 that the store holds
+        state, why = self.live(accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,), n=3400)))
+        self.assertEqual(state, "held", f"pull request 3400 citing own-3381-a reads {state}: a ruling of another pull request lifts the hold: {why!r}")
+
+    def test_a_bare_slug_ruling_does_not_lift_the_hold(self):
+        self.publish({**ruling_files(), **ruling_files("r59")})
+        self.assertEqual(self.live(accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,))))[0], "done", "fixture: the record's own ruling does not lift the hold")
+        state, why = self.live(accepted_record(self, pr3381_text(accepted=(f"Owner accepted: r59, {ACCEPT_AT}",))))
+        self.assertEqual(state, "held", f"a bare slug, r59, lifts the hold on pull request 3381: {state}: {why!r}")
+
+    def test_a_closed_ruling_does_not_lift_the_hold(self):
+        self.publish({**ruling_files(), **ruling_files("own-3381-c", status="closed")})
+        self.assertEqual(self.live(accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,))))[0], "done", "fixture: the open ruling does not lift the hold")
+        state, why = self.live(accepted_record(self, pr3381_text(accepted=(f"Owner accepted: own-3381-c, {ACCEPT_AT}",))))
+        self.assertEqual(state, "held", f"a closed ruling lifts the hold: {state}: {why!r}")
+
+    def test_a_ruling_that_fails_check_entry_does_not_lift_the_hold(self):
+        # each defect in turn: an `at` with no time zone, and a ruling text that is missing
+        self.publish({**ruling_files(), **ruling_files("own-3381-c", at="2026-11-15T01:43:00"), **ruling_files("own-3381-d", ruling=None)})
+        self.assertEqual(self.live(accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,))))[0], "done", "fixture: the valid ruling does not lift the hold")
+        for rid in ("own-3381-c", "own-3381-d"):
+            with self.subTest(ruling=rid):
+                state, why = self.live(accepted_record(self, pr3381_text(accepted=(f"Owner accepted: {rid}, {ACCEPT_AT}",))))
+                self.assertEqual(state, "held", f"{rid}, which fails check_entry, lifts the hold: {state}: {why!r}")
+
+    def test_an_unchecked_ruling_does_not_lift_the_hold(self):
+        # triage has not read what this ruling supersedes, so it never governs (the reader's unchecked rule)
+        self.publish({**ruling_files(), **ruling_files("own-3381-c", supersedes_none="unread: triage has not read what it supersedes")})
+        self.assertEqual(self.live(accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,))))[0], "done", "fixture: the checked ruling does not lift the hold")
+        state, why = self.live(accepted_record(self, pr3381_text(accepted=(f"Owner accepted: own-3381-c, {ACCEPT_AT}",))))
+        self.assertEqual(state, "held", f"an unchecked ruling lifts the hold: {state}: {why!r}")
+
+    def test_the_lift_takes_the_ruling_from_the_one_store_reader(self):
+        # The reader's entries decide. With the reader reporting no entry, the record stays held, though the copy in git holds the ruling.
+        self.publish(ruling_files())
+        rec = accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,)))
+        entry = json.loads(next(iter(ruling_files().values())))
+        with unittest.mock.patch.object(ruled_store, "read_store", return_value=([entry], "ok")):
+            self.assertEqual(self.live(rec)[0], "done", "fixture: the reader's entry for the ruling does not lift the hold")
+        with unittest.mock.patch.object(ruled_store, "read_store", return_value=([], "absent")):
+            state, why = self.live(rec)
+        self.assertEqual(state, "held", f"the reader reports no entry for the ruling, yet the record reads {state}: {why!r}")
+
+    def test_a_clean_merge_of_main_does_not_lift_the_hold(self):
+        # the lift applies at the live head only: a record held at its Head stays held after a clean merge of main
+        self.publish(ruling_files())
+        rec = accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,)))
+        self.assertEqual(self.live(rec)[0], "done", "fixture: the accepted record does not read done at its own head")
+        with unittest.mock.patch.object(merge, "clean_merges_after", return_value=True):
+            state, why = self.live(rec, live=UNLINKED_HEAD)
+        self.assertEqual(state, "held", f"after a clean merge of main the record reads {state}, not held as at its Head: {why!r}")
+
+class OwnerAcceptedWrite(ScopedRepo, ReviewEnv):
+    """`merge <pr> --review-record --accepted <ruling id>,<time>` prints the Owner accepted line directly before Net value, and changes nothing
+    else. The ruling is on origin/roadmap here, so a writer that reads the store finds it."""
+
+    def test_the_writer_prints_the_line_directly_before_net_value(self):
+        # pull request 7 cites its own ruling, own-7-a: the scope bind names the record's number
+        self.on("roadmap", ruling_files("own-7-a"), start="main")
+        argv = ("7", "--review-record", "--kind", "normal", "--guard", "yes", "--head", self.head(),
+                "--round", "1:reviewer:sonnet:FAIL", "--round", "2:reviewer:sonnet:FAIL", "--round", "3:reviewer:sonnet:FAIL",
+                "--net-value", "negative")
+        rc, out, err = self.run_args(*argv)  # the scope: the same record with no line prints
+        self.assertEqual(rc, 0, out + err)
+        rc, out, err = self.run_args(*argv, "--accepted", f"own-7-a,{ACCEPT_AT}")
+        self.assertEqual(rc, 0, out + err)
+        body = posted_body(self, out)
+        lines = body.splitlines()
+        self.assertEqual(lines[lines.index("Net value: negative") - 1], f"Owner accepted: own-7-a, {ACCEPT_AT}",
+                         "the accepted line is not directly before Net value:\n" + body)
+        self.assertEqual(parse_text(self, body)["net"], "negative")
+
 class ReviewArgs(ReviewEnv):
     """The flags, as argparse reads them. --reviewed and --role each stand alone. --review-record needs a PR number and a --head, and takes no
     --confirm or --unlock. Each refusal has a control: the same flag with good values exits 0, so a parser that never learned the flag fails here too."""
@@ -16551,6 +16889,13 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
     def test_a_net_negative_pass_prior_refuses_the_fix_verifier(self):
         fx = self.real_commits()
         self.assert_refused_after(fx, self.prior_text(fx, net="negative"), "held")
+
+    def test_an_owner_accepted_negative_prior_is_no_fix_base(self):
+        # pin (green on today's code): the fix-check gate reads review_state, which holds a negative record whatever its owner line says
+        fx = self.real_commits()
+        accepted = record_text(head=fx.fixed, rounds=REVIEW_PASS, net="negative",
+                               fix=(fix_verifier_line(verdict="PASS", head=fx.pre), f"Owner accepted: own-7-a, {ACCEPT_AT}"))
+        self.assert_refused_after(fx, accepted, "held")
 
     def test_a_design_reviewer_fail_on_the_prior_refuses_the_fix_verifier(self):
         fx = self.real_commits()
@@ -17376,6 +17721,40 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(rc, 1, out + err)
         self.assertEqual(out.strip(), "", out)
 
+    def run_list_reads(self, check_rows, runs):
+        """-> {head: gh run list reads} of one `merge --reviewed` over two ready pull requests, 7 at REVIEW_HEAD and 8 at REVIEW_OLD_HEAD. Each has a
+        passing record and no lane lint, and each head holds `check_rows` and the workflow runs `runs`. Both pull requests must be listed."""
+        heads = (REVIEW_HEAD, REVIEW_OLD_HEAD)
+        comments = [review_comment(1, 7, record_text(n=7, head=REVIEW_HEAD, rounds=REVIEW_PASS)),
+                    review_comment(2, 8, record_text(n=8, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))]
+        host = PullsHost([batch_pull(7, REVIEW_HEAD), batch_pull(8, REVIEW_OLD_HEAD)], {sha: list(check_rows) for sha in heads},
+                         comments=comments, workflow_runs={sha: runs for sha in heads})
+        rc, out, err = self.run_args("--reviewed", host=host)
+        self.assertEqual(rc, 0, out + err)
+        list_line(self, out, 7)
+        list_line(self, out, 8)
+        return {sha: host.run_reads.count(sha) for sha in heads}
+
+    def test_a_head_whose_check_rows_link_two_runs_reads_the_run_list_once(self):
+        """A draft run (101, its rollup job skipped) and a ready run (202, its rollup job passed) on each head: the check rows link two runs, so
+        superseded needs the run list. Each head's run list is one read. Today rollup_green, head_state's checks and run_state each reach Host.runs,
+        which keeps no memo, so each head reads it three times."""
+        rows = [{**batch_run(merge.ROLLUP_JOB, "completed", "skipped"), "details_url": job_link(101, 1)},
+                {**batch_run(merge.ROLLUP_JOB, "completed", "success"), "details_url": job_link(202, 1)}]
+        runs = [{"name": "checks", "status": "completed", "conclusion": "skipped", "databaseId": 101, "workflowDatabaseId": 1},
+                {"name": "checks", "status": "completed", "conclusion": "success", "databaseId": 202, "workflowDatabaseId": 1}]
+        reads = self.run_list_reads(rows, runs)
+        self.assertGreater(min(reads.values()), 0, "a head's run list was never read: %s" % reads)  # scope first
+        self.assertEqual(reads, {REVIEW_HEAD: 1, REVIEW_OLD_HEAD: 1}, "gh run list was read more than once for a head: %s" % reads)
+
+    def test_a_head_whose_check_rows_link_one_run_reads_the_run_list_once(self):
+        """The control for the case above: one run on each head, so superseded needs no run list, and the head's one read is the only one."""
+        rows = [{**batch_run(merge.ROLLUP_JOB, "completed", "success"), "details_url": job_link(202, 1)}]
+        runs = [{"name": "checks", "status": "completed", "conclusion": "success", "databaseId": 202, "workflowDatabaseId": 1}]
+        reads = self.run_list_reads(rows, runs)
+        self.assertGreater(min(reads.values()), 0, "a head's run list was never read: %s" % reads)  # scope first
+        self.assertEqual(reads, {REVIEW_HEAD: 1, REVIEW_OLD_HEAD: 1}, "gh run list was read more than once for a head: %s" % reads)
+
     def test_review_comments_reads_one_list_from_since_oldest_first(self):
         if getattr(merge.Host, "review_comments", None) is None:
             self.fail("merge.Host.review_comments is not defined")
@@ -17400,17 +17779,36 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(host.gh_calls[4], "rules/branches/main", "the ruleset read comes before the classic protection")
         self.assertEqual(host.gh_calls[5:], ["branches/main/protection/required_status_checks"])
 
-    def test_a_ready_pr_with_a_record_and_no_lint_comment_reads_the_rollup_first(self):
-        # The same fixture without the lint comment: the join reads the head's rollup (rollup_green: its check runs, then its statuses), head_state
-        # reads the same two again, then the ruleset and the protection. Eight calls
+    def test_a_ready_pr_with_a_record_and_no_lint_comment_reads_its_head_checks_once(self):
+        # The same fixture without the lint comment: the join reads the head's rollup (rollup_green: its check runs, then its statuses), and head_state
+        # takes those rows as read, with no second read. Then the ruleset and the protection, once each. Six calls (the brief for PR 1 of the GitHub
+        # API budget, item 4: each head's checks are read once per run).
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, {REVIEW_HEAD: [batch_run("checks", "completed", "success")]},
                                           count_gh=True)
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(host.gh_calls, ["pulls", "issues/comments", f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status",
-                                         f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status", "rules/branches/main",
-                                         "branches/main/protection/required_status_checks"],
-                         "a ready pull request with a record and no lint comment must read the head's rollup before its CI state")
+                                         "rules/branches/main", "branches/main/protection/required_status_checks"],
+                         "a ready pull request's head checks are read twice (the rollup, then head_state), or the ruleset or protection is read more than once")
+
+    def test_three_ready_prs_read_each_head_once_and_the_protection_once_per_run(self):
+        # Ruling (the brief for PR 1 of the GitHub API budget, item 4): the check runs and the statuses of each head are read once per pull request, and the
+        # branch protection and the ruleset of the base once per run, not once per pull request (decision pr-review-record, the cost).
+        shas = {7: REVIEW_HEAD, 8: REVIEW_OLD_HEAD, 9: "5" * 40}
+        pulls = [batch_pull(n, sha) for n, sha in shas.items()]
+        comments = [review_comment(n, n, record_text(n=n, head=sha, rounds=REVIEW_PASS)) for n, sha in shas.items()]
+        rows = {sha: [batch_run("checks", "completed", "success")] for sha in shas.values()}
+        host, rc, out, err = self.listing(pulls, comments, rows, count_gh=True)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(len(host.gh_calls), 2 + 2 * len(shas) + 2, f"the reads are not the one set per run: {host.gh_calls}")  # scope: the calls, before each route
+        for n, sha in shas.items():
+            for route in ("check-runs", "status"):
+                with self.subTest(pr=n, route=route):
+                    self.assertEqual(host.gh_calls.count(f"commits/{sha}/{route}"), 1,
+                                     f"#{n}: the head's {route} was read {host.gh_calls.count(f'commits/{sha}/{route}')} times, want once")
+        self.assertEqual(host.gh_calls.count("branches/main/protection/required_status_checks"), 1,
+                         "the base's branch protection was read once per pull request, not once per run")
+        self.assertEqual(host.gh_calls.count("rules/branches/main"), 1, "the base's ruleset was read once per pull request, not once per run")
 
     def test_a_draft_with_a_record_reads_no_head_checks(self):
         host, rc, out, err = self.listing([batch_pull(9, REVIEW_HEAD, draft=True)], [review_comment(1, 9, record_text(n=9, rounds=REVIEW_PASS))],
@@ -19405,6 +19803,12 @@ class ReplacementCarry(ReviewEnv):
     def test_replacement_5b_a_held_source_record_reads_held_on_the_replacement(self):
         self.reviewed_line(self.carry_host(per_issue=self.source_issue(self.source_record(net="negative"), self.source_lint())), REVIEW_HEAD, "held",
                            "the carried record does not read its own verdict, held, on the replacement")
+
+    def test_replacement_5d_an_owner_accepted_source_record_stays_held_on_the_replacement(self):
+        # pin (green on today's code): the carry path reads no ruling, so the source's owner line lifts nothing on a replacement
+        record = self.source_record(net="negative", fix=(f"Owner accepted: own-{REPLACES_SOURCE}-a, {ACCEPT_AT}",))
+        self.reviewed_line(self.carry_host(per_issue=self.source_issue(record, self.source_lint())), REVIEW_HEAD, "held",
+                           "a carried source record with the owner's line reads other than held on the replacement")
 
     def test_replacement_5c_a_failed_fix_verifier_on_the_source_reads_open_on_the_replacement(self):
         failed_fix = fix_verifier_line(verdict="FAIL", head="1e" * 20)
@@ -22774,6 +23178,356 @@ class StaleBatchCites(unittest.TestCase):
             text = getattr(merge, name, "")
             with self.subTest(constant=name):
                 self.assertIsNone(re.search(r"\bline \d+\b", text), f"{name} cites a line number, which moves: {text!r}")
+
+
+# ---- The GitHub API budget (the brief for PR 1 of the GitHub API budget work): the budget of each reply, the refusal of a bulk read below the floor, the in-run memo,
+# `-i` on every api call, and `merge --audit-prs`. The cases run the real Host through the fake gh, because the budget and the -i flag are read in
+# Host.gh, which PullsHost replaces. The floor is a tenth of the limit the replies name. The reset is the clock time in CST (UTC-6).
+RESET_EPOCH = 1800000000  # 08:00 UTC, which is 02:00 CST
+RESET_CST = time.strftime("%H:%M", time.gmtime(RESET_EPOCH - 6 * 3600)) + " CST"  # the clock time a refusal names
+
+def bulk_kw():
+    """{"bulk": True} when Host.pages takes the mark. The old code does not, so its read goes out unmarked, and the case fails on the call that
+    went out, never on a TypeError (P3)."""
+    return {"bulk": True} if "bulk" in inspect.signature(merge.Host.pages).parameters else {}
+
+def refusal_of(read):
+    """-> the text of the exception `read` raises, or None when it returns. A refusal's class is the builder's, so any exception is read as the refusal, and the case checks its text."""
+    try:
+        read()
+    except Exception as e:
+        return str(e)
+    return None
+
+def recorded_ints(obj):
+    """The whole numbers an object holds in its own attributes, one level down. Where a Host keeps a budget is the builder's choice, so a case reads the values."""
+    found = set()
+    for v in vars(obj).values():
+        for x in (v.values() if isinstance(v, dict) else v if isinstance(v, (list, tuple, set)) else (v,)):
+            if isinstance(x, int) and not isinstance(x, bool):
+                found.add(x)
+    return found
+
+def route_count_line(text, route, count):
+    """The line, among the last few output lines, that names `route` with its call count `count`. None when there is none."""
+    tail = [l for l in text.splitlines() if l.strip()][-6:]
+    return next((l for l in tail if route in l and re.search(rf"(?<!\d){count}(?!\d)", l)), None)
+
+def tree_of(root):
+    """-> {relative path: size} of every file under root, git's folder left out. A case compares the tree before and after a run."""
+    found = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d != ".git"]
+        for f in filenames:
+            p = os.path.join(dirpath, f)
+            found[os.path.relpath(p, root)] = os.path.getsize(p)
+    return found
+
+def sha_of(k):
+    """A head sha for pull request k: 40 hex digits of a digest, so they differ in their first nine (the line may print a short sha)."""
+    import hashlib  # local: the one digest per pull request number, and no module-level import for one helper
+    return hashlib.sha1(f"pr{k}".encode()).hexdigest()
+
+class GhApiBudget(Env):
+    """Each case primes the budget with one ordinary read, then makes the call under test. The priming read is never bulk, so it is never refused."""
+    set, calls, gh_host, gh_state = GhHalf.set, GhHalf.calls, GhHalf.gh_host, GhHalf.gh_state
+
+    def setUp(self):
+        super().setUp()
+        gh_case_setup(self)
+
+    def budget(self, remaining, limit=5000, reset=RESET_EPOCH):
+        self.set(ratelimit={"remaining": remaining, "limit": limit, "reset": reset})
+
+    def call_count(self):
+        return len([l for l in self.calls().splitlines() if l.strip()])
+
+    def gh_api_argv(self):
+        """Spies on merge.sh, the seam every gh call passes through. -> the argv of each `gh api` call, in order."""
+        seen, real = [], merge.sh
+
+        def spy(args, *a, **k):
+            if list(args[:2]) == ["gh", "api"]:
+                seen.append(list(args))
+            return real(args, *a, **k)
+        patch = unittest.mock.patch.object(merge, "sh", spy)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return seen
+
+    def primed_host(self):
+        """A Host whose one ordinary read has recorded the budget the replies carry."""
+        h = self.gh_host()
+        h.pages("pulls", fields={"state": "open"})
+        return h
+
+    def bulk_read_below(self, remaining, limit):
+        """-> (refusal or None, calls before, calls after) of one bulk read at `remaining` of `limit`."""
+        self.budget(remaining, limit)
+        h = self.primed_host()
+        before = self.call_count()
+        refusal = refusal_of(lambda: h.pages("pulls", fields={"state": "open"}, **bulk_kw()))
+        return refusal, before, self.call_count()
+
+    # ---- the budget of each reply, and -i on every call
+
+    def test_every_api_and_pages_call_passes_dash_i(self):
+        seen = self.gh_api_argv()
+        h = self.gh_host()
+        h.api("pulls/7")
+        h.pages("pulls", fields={"state": "open"})
+        h.api("issues/7/comments", method="POST", fields={"body": "x"})
+        self.assertEqual(len(seen), 3, f"the three calls did not each reach gh: {seen}")  # scope: the calls, before their flags
+        for argv in seen:
+            self.assertIn("-i", argv, f"a gh api call went out without -i, so its reply's budget headers are not read: {' '.join(argv)}")
+
+    def test_an_api_call_returns_its_body_with_no_header_block(self):  # control: green on the old code
+        c, out = self.gh_host().api("pulls/7")
+        self.assertEqual(c, 0, out)
+        self.assertEqual(json.loads(out)["number"], 7, "the reply kept its header block, or is not the body: " + out[:120])
+
+    def test_the_budget_of_one_reply_is_recorded_with_no_extra_call(self):
+        self.budget(499)
+        h = self.primed_host()
+        self.assertEqual(self.call_count(), 1, "recording the budget made a gh call of its own")  # scope: the one call, before its record
+        self.assertIn(499, recorded_ints(h), "the Host holds no remaining count of 499 from the reply's X-Ratelimit-Remaining")
+        self.assertIn(5000, recorded_ints(h), "the Host holds no limit of 5000 from the reply's X-Ratelimit-Limit")
+
+    # ---- the refusal: a bulk read below a tenth of the limit
+
+    def test_a_bulk_read_just_under_a_tenth_of_a_15000_limit_is_refused_before_any_call(self):
+        refusal, before, after = self.bulk_read_below(1499, 15000)
+        self.assertIsNotNone(refusal, f"a bulk read at 1499 of 15000 went out: it was not refused (calls {before} then {after})")
+        self.assertIn("1499", refusal, "the refusal does not name the remaining count 1499: " + refusal)
+        self.assertIn(RESET_CST, refusal, f"the refusal does not name the reset time {RESET_CST}: " + refusal)
+        self.assertEqual(after, before, "the refused read still made a gh call")
+
+    def test_a_bulk_read_at_exactly_a_tenth_of_a_15000_limit_goes_out(self):  # control: green on the old code
+        refusal, before, after = self.bulk_read_below(1500, 15000)
+        self.assertIsNone(refusal, "a bulk read at 1500 of 15000 is not under the floor, and was refused: " + str(refusal))
+        self.assertEqual(after, before + 1, "the read at the floor did not go out")
+
+    def test_a_bulk_read_under_a_tenth_of_a_5000_limit_is_refused(self):
+        refusal, before, after = self.bulk_read_below(499, 5000)
+        self.assertIsNotNone(refusal, f"a bulk read at 499 of 5000 went out: it was not refused (calls {before} then {after})")
+        self.assertIn("499", refusal, "the refusal does not name the remaining count 499: " + refusal)
+        self.assertEqual(after, before, "the refused read still made a gh call")
+
+    def test_a_bulk_read_of_1000_of_5000_goes_out_because_the_floor_is_a_fraction(self):  # control: an absolute floor of 1500 would refuse it
+        refusal, before, after = self.bulk_read_below(1000, 5000)
+        self.assertIsNone(refusal, "a bulk read at 1000 of 5000 is above a tenth of the limit, and was refused: " + str(refusal))
+        self.assertEqual(after, before + 1, "the read above the floor did not go out")
+
+    def test_a_bulk_read_is_never_refused_without_a_usable_budget(self):  # control: green on the old code
+        for label, rl in (("header missing", {"remaining": None, "limit": 5000}),
+                          ("remaining not a number", {"remaining": "lots", "limit": 5000}),
+                          ("limit missing", {"remaining": 1, "limit": None})):
+            with self.subTest(replies=label):
+                self.set(ratelimit=rl)
+                h = self.primed_host()
+                before = self.call_count()
+                refusal = refusal_of(lambda: h.pages("pulls", fields={"state": "open"}, **bulk_kw()))
+                self.assertIsNone(refusal, f"a bulk read was refused with no usable budget ({label}): {refusal}")
+                self.assertEqual(self.call_count(), before + 1, f"the read did not go out ({label})")
+
+    def test_an_ordinary_read_and_a_write_are_never_refused_below_the_floor(self):  # control: green on the old code
+        self.budget(1, 5000)
+        h = self.primed_host()
+        before = self.call_count()
+        c, out = h.api("pulls/7")
+        self.assertEqual(c, 0, "an ordinary read below the floor was refused or failed: " + out)
+        c2, out2 = h.api("issues/7/comments", method="POST", fields={"body": "x"})
+        self.assertEqual(c2, 0, "a write below the floor was refused or failed: " + out2)
+        self.assertEqual(self.call_count(), before + 2, "a read or a write below the floor did not go out")
+
+    # ---- the in-run memo: a repeated GET is one call, and a write clears it
+
+    def test_a_repeated_get_of_the_same_route_and_query_is_one_call(self):
+        h = self.gh_host()
+        first = h.pages("pulls", fields={"state": "open"})
+        second = h.pages("pulls", fields={"state": "open"})
+        self.assertEqual(self.call_count(), 1, "the second identical GET went to gh: the run keeps no memo of its reads")
+        self.assertEqual(second, first, "the memo returned a different body than the read it repeats")
+
+    def test_a_repeated_get_with_a_different_query_is_a_new_call(self):  # control: green on the old code
+        h = self.gh_host()
+        h.api("pulls/7", fields={"a": "1"})
+        h.api("pulls/7", fields={"a": "2"})
+        self.assertEqual(self.call_count(), 2, "two GETs with different queries were not two calls")
+
+    def test_a_write_clears_the_memo(self):  # control: green on the old code, and it must stay green when the memo lands
+        h = self.gh_host()
+        h.api("pulls/7")
+        h.api("issues/7/comments", method="POST", fields={"body": "x"})
+        h.api("pulls/7")
+        self.assertEqual(self.call_count(), 3, "a GET after a write was served without a call")
+
+    def test_a_get_with_memo_off_is_sent_each_time(self):  # pins the head: memo=False always reads
+        h = self.gh_host()
+        h.api("pulls/7", memo=False)
+        self.assertEqual(self.call_count(), 1, "the first GET with memo=False made no call")  # scope: the first call, before the repeat
+        h.api("pulls/7", memo=False)
+        self.assertEqual(self.call_count(), 2, "the second GET with memo=False was served from the memo, so it made no call")
+
+    def test_read_pr_reads_the_pull_request_each_time(self):  # pins the head: read_pr never reads the memo, so a poll sees the head move
+        h = self.gh_host()
+        h.read_pr(7)
+        self.assertEqual(self.call_count(), 1, "the first read_pr(7) made no call")  # scope: the first read, before the repeat
+        h.read_pr(7)
+        self.assertEqual(self.call_count(), 2, "the second read_pr(7) was served from the memo, so a poll would see the head it read before a push")
+
+    def test_a_bulk_read_after_an_identical_ordinary_read_is_sent(self):  # pins the head: a bulk page reads fresh, never the memo
+        h = self.primed_host()
+        self.assertEqual(self.call_count(), 1, "the ordinary read made no call")  # scope: the priming read, before the bulk read
+        h.pages("pulls", fields={"state": "open"}, **bulk_kw())
+        self.assertEqual(self.call_count(), 2, "the bulk read after an identical ordinary read was served from the memo, so it made no call")
+
+    # ---- the merge's own reads under its lock, the pushed-head poll, and a header block with no budget in it
+
+    def test_a_head_whose_checks_turn_red_after_a_green_read_before_the_lock_is_not_merged(self):  # pins the head: confirm reads the checks fresh under the lock
+        self.leave_no_pending_record()  # no claim, so the merge runs in one step and the head's checks are read under the lock
+        head = self.head()
+        self.set(checks_seq=[[(REQUIRED_CHECK, "pass", "")], [(REQUIRED_CHECK, "fail", "https://x/checks")]])
+        h = self.gh_host(required=[REQUIRED_CHECK])
+        self.assertTrue(merge.rollup_green(h, 7, head), "scope: the read before the lock did not see the head's checks green")  # the read lint_check makes before the lock
+        rc, out = self.run_merge("7", "--confirm", host=h)
+        self.assertNotEqual(rc, 0, "the merge went out on a head whose checks read red under the lock, after a green read before it: " + out)
+        self.assertIn("not green", out, "the refusal does not say the head's checks are not green: " + out)
+        self.assertEqual(self.gh_state("merge_fields") or [], [], "a merge call was sent for the head whose checks read red under the lock")
+
+    def test_a_head_whose_checks_stay_green_after_a_green_read_before_the_lock_is_merged(self):  # control: green on the old code and the new
+        self.leave_no_pending_record()
+        head = self.head()
+        self.set(checks_seq=[[(REQUIRED_CHECK, "pass", "")], [(REQUIRED_CHECK, "pass", "")]])
+        h = self.gh_host(required=[REQUIRED_CHECK])
+        self.assertTrue(merge.rollup_green(h, 7, head), "scope: the read before the lock did not see the head's checks green")
+        rc, out = self.run_merge("7", "--confirm", host=h)
+        self.assertEqual(rc, 0, "the merge of a head whose checks stay green was refused: " + out)
+        self.assertEqual(len(self.gh_state("merge_fields") or []), 1, "the merge call was not sent once")
+
+    def test_the_pushed_head_poll_sees_the_pushed_head_on_its_second_read(self):  # pins the head: the poll reads the pull request fresh, never the memo
+        h = self.gh_host()
+        prior = h.pr(7)  # the read before the push, the poll's starting point; the run's memo now holds the prior head
+        pushed = self.competitor_push()
+        self.assertNotEqual(prior["head"], pushed, "scope: the push did not move the head")
+        self.set(lag={"n": 1, "prior": prior["head"]})  # GitHub shows the prior head on the poll's first read, then the pushed one
+        got = merge.wait_pushed_head(h, 7, prior, h.now() + merge.PUSHED_HEAD_WAIT_MINUTES * 60, want=pushed)
+        self.assertIsNotNone(got, "the poll ended at its bound on the prior head: its reads were served from the memo, so it never saw the push")
+        self.assertEqual(got["head"], pushed, "the poll returned a head other than the pushed one")
+
+    def test_the_pushed_head_poll_with_no_read_before_it_returns_the_pushed_head_at_once(self):  # control: green on the old code and the new
+        prior = self.head()
+        pushed = self.competitor_push()
+        h = self.gh_host()
+        got = merge.wait_pushed_head(h, 7, {"head": prior}, h.now() + merge.PUSHED_HEAD_WAIT_MINUTES * 60, want=pushed)
+        self.assertIsNotNone(got, "the poll ended at its bound with no read before it, although GitHub shows the pushed head")
+        self.assertEqual(got["head"], pushed, "the poll returned a head other than the pushed one")
+
+    def test_a_reply_with_a_header_block_and_no_budget_header_makes_the_next_bulk_read_go_out(self):  # pins the head: an unknown budget never refuses
+        self.budget(100, 15000)
+        h = self.primed_host()  # the budget is now 100 of 15000
+        self.assertIsNotNone(refusal_of(lambda: h.pages("pulls", fields={"state": "open"}, **bulk_kw())),
+                             "control: a bulk read at 100 of 15000 was not refused, so the budget of the priming reply was not recorded")
+        self.set(ratelimit={"remaining": None, "limit": None, "reset": None})  # the next reply has a header block and no X-Ratelimit line
+        before = self.call_count()
+        h.api("pulls/7")  # an ordinary read, sent: its header block resets the budget to unknown
+        self.assertEqual(self.call_count(), before + 1, "scope: the ordinary read after the header-less reply made no call")
+        before = self.call_count()
+        refusal = refusal_of(lambda: h.pages("pulls", fields={"state": "open"}, **bulk_kw()))
+        self.assertIsNone(refusal, "a bulk read was refused after a reply with no budget header, so the old budget was kept: " + str(refusal))
+        self.assertEqual(self.call_count(), before + 1, "the bulk read after a reply with no budget header was not sent")
+
+
+class AuditPrs(Env):
+    """`merge --audit-prs`: one line per open pull request from the bulk open-PR list and one repo-wide comment read, then the calls of each route
+    printed at the end. Runs through the fake gh, not PullsHost: PullsHost answers gh itself, bypassing Host.gh where the call count is taken, and its
+    list reply has no Link header, so a 300-PR list would read as its first 100."""
+    set, calls, gh_host = GhHalf.set, GhHalf.calls, GhHalf.gh_host
+
+    def setUp(self):
+        super().setUp()
+        gh_case_setup(self)
+
+    def open_prs(self, n):
+        return [(f"feat{k}", sha_of(k), "main", k) for k in range(1, n + 1)]
+
+    def call_routes(self):
+        """The route of each gh call the run made, in order: the second word of each call's line in the fake's log."""
+        return [l.split()[1] for l in self.calls().splitlines() if l.strip()]
+
+    def audit(self):
+        """-> (exit code, output, routes, temp files made, checkout tree before, after) of one `merge --audit-prs`."""
+        before = tree_of(self.co)
+        with unittest.mock.patch.object(tempfile, "mkstemp", wraps=tempfile.mkstemp) as made:
+            rc, out, err = self.run_args("--audit-prs", host=self.gh_host())
+        return rc, out + err, self.call_routes(), made.call_count, before, tree_of(self.co)
+
+    def test_three_hundred_open_prs_print_one_line_each_for_four_calls_or_fewer(self):
+        self.set(open_prs=self.open_prs(300), issue_comments=[])
+        rc, text, routes, _made, _before, _after = self.audit()
+        lines = text.splitlines()
+        printed = [k for k in range(1, 301) if len([l for l in lines if sha_of(k)[:9] in l]) == 1]
+        self.assertEqual(len(printed), 300, f"the audit printed one line for {len(printed)} of 300 open pull requests (exit {rc}): {text[:200]}")
+        self.assertLessEqual(len(routes), 4, f"the audit made {len(routes)} gh calls for 300 open pull requests, want 4 or fewer: {routes}")
+        self.assertTrue(set(routes) <= {"pulls", "issues/comments"}, f"the audit read a route other than the open-PR list and the comments, a per-PR call: {routes}")
+        self.assertEqual(routes.count("pulls"), 3, "the open-PR list of 300 is three pages of 100, one call each")
+        self.assertEqual(routes.count("issues/comments"), 1, "the repo-wide comment read is one call")
+
+    def test_the_audit_ends_with_the_calls_of_each_route(self):
+        self.set(open_prs=self.open_prs(300), issue_comments=[])
+        rc, text, routes, _made, _before, _after = self.audit()
+        self.assertTrue(any(sha_of(k)[:9] in text for k in (1, 300)), f"the audit printed no PR line, so no count to print (exit {rc})")  # scope first
+        self.assertIsNotNone(route_count_line(text, "pulls", routes.count("pulls")),
+                             f"the last lines name no call count of {routes.count('pulls')} for the open-PR list: {text[-200:]}")
+        self.assertIsNotNone(route_count_line(text, "issues/comments", routes.count("issues/comments")),
+                             f"the last lines name no call count of {routes.count('issues/comments')} for the comment read: {text[-200:]}")
+
+    def test_the_audit_writes_no_file_and_takes_no_temp_file(self):
+        self.set(open_prs=self.open_prs(300), issue_comments=[])
+        rc, text, _routes, made, before, after = self.audit()
+        self.assertTrue(any(sha_of(k)[:9] in text for k in (1, 300)), f"the audit printed no PR line, so it did not run (exit {rc})")  # scope first
+        self.assertEqual(made, 0, "the audit took a temp file (mkstemp), a write the cost case forbids")
+        self.assertEqual(after, before, "the audit wrote into the checkout: " + str(sorted(set(after.items()) ^ set(before.items()))[:5]))
+
+    def test_a_bulk_read_below_the_floor_stops_the_audit_and_names_the_count_and_reset(self):
+        self.set(open_prs=self.open_prs(300), issue_comments=[], ratelimit={"remaining": 499, "limit": 5000, "reset": RESET_EPOCH})
+        rc, text, routes, _made, _before, _after = self.audit()
+        self.assertIn("499", text, f"the audit's refusal does not name the remaining count 499 (exit {rc}): {text[-200:]}")
+        self.assertIn(RESET_CST, text, f"the audit's refusal does not name the reset time {RESET_CST}: {text[-200:]}")
+        self.assertEqual(len(routes), 1, f"the audit read a page after the replies said the budget was under the floor: {routes}")
+
+    def test_zero_open_prs_read_the_list_and_the_comments_only_and_print_their_counts(self):
+        self.set(open_prs=[], issue_comments=[])
+        rc, text, routes, _made, _before, _after = self.audit()
+        self.assertIsNotNone(route_count_line(text, "pulls", 1), f"the empty audit names no call count of 1 for the open-PR list (exit {rc}): {text[-200:]}")
+        self.assertIsNotNone(route_count_line(text, "issues/comments", 1), f"the empty audit names no call count of 1 for the comment read: {text[-200:]}")
+        self.assertEqual(rc, 0, f"the empty audit did not run: {text[-200:]}")
+        self.assertEqual(sorted(routes), ["issues/comments", "pulls"], f"the empty audit made other calls: {routes}")
+
+    def test_a_newest_record_with_a_fix_verifier_and_no_round_lines_is_listed_and_does_not_crash(self):
+        """A record whose only line before Net value is a Fix check parses with no rounds. The audit's round summary then read the last round of
+        that empty list (merge.py audit_prs), and IndexError ended the run before it printed its line."""
+        head = sha_of(1)
+        body = record_text(n=1, head=head, rounds=(), fix=(fix_verifier_line("PASS", head=sha_of(9)),))
+        parsed = merge.parse_review(body)
+        self.assertIsNotNone(parsed, "fixture: parse_review refuses the record, so the audit never reaches its round summary")  # scope first
+        self.assertEqual(parsed["rounds"], [], "fixture: the record holds round lines")
+        self.set(open_prs=self.open_prs(1), issue_comments=[review_comment(1, 1, body)])
+        try:
+            rc, text, _routes, _made, _before, _after = self.audit()
+        except Exception as err:
+            self.fail(f"the audit raised {type(err).__name__} on a record with a Fix check and no round lines: {err}")
+        self.assertEqual(rc, 0, f"the audit exited {rc} on a record with a Fix check and no round lines: {text[-200:]}")
+        self.assertEqual(len([l for l in text.splitlines() if l.startswith("#1 ")]), 1, f"the audit printed no line for #1: {text[-200:]}")
+
+    def test_a_newest_record_with_a_round_is_listed_with_its_round_and_verdict(self):
+        """The control for the case above: a normal record with one passing round, on the head, is listed with that round and verdict."""
+        head = sha_of(1)
+        self.set(open_prs=self.open_prs(1), issue_comments=[review_comment(1, 1, record_text(n=1, head=head, rounds=REVIEW_PASS))])
+        rc, text, _routes, _made, _before, _after = self.audit()
+        line = printed(text, f"#1 feat1 {head[:9]}")
+        self.assertTrue(line, f"the audit printed no line for #1 at its head (exit {rc}): {text[-200:]}")  # scope first
+        self.assertIn("review: round 1 PASS (reviewer)", line, "the line does not name the newest record's round and verdict: " + line)
 
 
 if __name__ == "__main__":
