@@ -790,6 +790,17 @@ sh("detached-launch: (ci-job x | tail)&, a subshell backgrounded by a glued &, i
    "(ci-job x | tail)&", "deny", "detached-launch", cwd=NOGIT)
 sh("detached-launch: cmd 2>&1&, a redirect's & then a glued background &, is refused",
    "cmd 2>&1&", "deny", "detached-launch", cwd=NOGIT)
+# An unquoted URL with `&` in it reads as a glued `&`: bash backgrounds `curl x?a=1` and runs `b=2`. The
+# refusal is the cost owner ruling own-716-b-keep-2156-glued-amp accepted; its wrong-refusal rate is unmeasured.
+# The quoted URLs keep their `&` in quotes, so they are allowed.
+sh("detached-launch: curl x?a=1&b=2, an unquoted URL with a glued &, is refused",
+   "curl x?a=1&b=2", "deny", "detached-launch", cwd=NOGIT)
+sh("detached-launch: curl -o out.json x?a=1&b=2, an unquoted URL after a flag, is refused",
+   "curl -o out.json x?a=1&b=2", "deny", "detached-launch", cwd=NOGIT)
+sh("detached-launch: curl \"x?a=1&b=2\", a double-quoted URL, is allowed",
+   'curl "x?a=1&b=2"', "allow", cwd=NOGIT)
+sh("detached-launch: curl 'x?a=1&b=2', a single-quoted URL, is allowed",
+   "curl 'x?a=1&b=2'", "allow", cwd=NOGIT)
 
 # A quoted lone `&` ends no job (decision detached-launch-refused), so each of these is allowed. The quotes keep
 # the `&` from reading as a spaced background `&`, and a `&` that is a word of a grep or a cut is no job.
