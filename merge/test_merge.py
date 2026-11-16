@@ -13645,12 +13645,18 @@ class ExpressPath(ScopedRepo, Env):
         """origin/roadmap holds rulings/<id>.json for each id. The branch is made after co's clone, so a read that does not fetch it sees no entry."""
         self.on("roadmap", {f"roadmap/rulings/{i}.json": json.dumps({"id": i}) + "\n" for i in ids}, start="main")
 
-    def stub_scope(self, prelude, branch="feat"):
-        """ci-scope.sh is main's, with `prelude` put in after its shebang line, committed to `branch`. Only an insertion: the silent-undo
-        check reads no removed line. On main, feat then merges it: the classifier runs origin/main's copy, and a head that touches the
+    def stub_scope(self, prelude, branch="feat", drop=None):
+        """ci-scope.sh is main's, with `prelude` put in after its shebang line, committed to `branch`. Without `drop` it only inserts: the
+        silent-undo check reads no removed line. `drop` names one `NAME="..."` line of the script to remove as well (asserted: exactly one).
+        On main, feat then merges it: the classifier runs origin/main's copy, and a head that touches the
         script turns every flag on through main's own arm, so the head must not diff the script against main."""
         with open(SCOPE_SCRIPT, encoding="utf-8") as f:
             first, rest = f.read().split("\n", 1)
+        if drop:
+            lines = rest.split("\n")
+            kept = [ln for ln in lines if not ln.startswith(f'{drop}="')]
+            self.assertEqual(len(lines) - len(kept), 1, f"ci-scope.sh has no single {drop}= line to drop")
+            rest = "\n".join(kept)
         self.on(branch, {".github/scripts/ci-scope.sh": first + "\n" + prelude + rest})
         if branch == "main":
             o = self.other
@@ -13948,6 +13954,36 @@ class ExpressPath(ScopedRepo, Env):
         before = self.refs()
         rc, out = self.run_express()
         self.assert_refused(rc, out, before, "unknown", *scope_line("LINTS").split())
+
+    def assert_main_script_lacks(self, name):
+        """The scope assert, before a case relies on it (P7): origin/main's ci-scope.sh has no `NAME="` line, and its ALL line still names
+        $NAME, so the reader meets the name with no line behind it."""
+        script = sh(self.other, "git", "show", "origin/main:.github/scripts/ci-scope.sh")
+        self.assertIsNone(re.search(r'^%s="' % name, script, re.M), f"origin/main's ci-scope.sh still has a {name}= line")
+        every = re.search(r'^ALL="([^"]*)"', script, re.M)
+        self.assertIsNotNone(every, "origin/main's ci-scope.sh has no ALL line")
+        self.assertIn("$" + name, every.group(1).split(), f"origin/main's ALL line does not name ${name}")
+
+    # The real DOCS= line is removed on main, not a prelude added: ALL still names $DOCS, so the reader cannot tell which doc flags the
+    # script names, and it refuses as unknown. Named failure: a script with a missing DOCS= line is read as naming no doc flag, and passes.
+    def test_a_scope_script_with_no_docs_line_is_refused_naming_docs(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope("", branch="main", drop="DOCS")
+        self.assert_main_script_lacks("DOCS")
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "unknown", "$DOCS", "the script has no DOCS= line")
+
+    # The same for the LINTS= line: ALL names $LINTS and the script has no LINTS= line, so the refusal names LINTS.
+    def test_a_scope_script_with_no_lints_line_is_refused_naming_lints(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope("", branch="main", drop="LINTS")
+        self.assert_main_script_lacks("LINTS")
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "unknown", "$LINTS", "the script has no LINTS= line")
 
     def test_a_missing_store_entry_is_refused(self):
         self.store(self.RULINGS)
