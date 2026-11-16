@@ -255,11 +255,14 @@ def uses_merge_tool(where: str) -> bool:
 
 
 def pinned_required(where: str):
-    """The repo's pinned `merge.requiredChecks` list, when it is a non-empty list of names; else None,
-    and the batch read takes the names from the branch protection."""
+    """The repo's pinned `merge.requiredChecks`: the string "none", or a non-empty list of names; else None,
+    and the batch read takes the names from the branch protection. "none" is the merge tool's value for a repo
+    that requires no check (decision private-repos-no-ci), so a head with no check and no run reads green here too."""
     for config in _merge_configs(where) if where else ():
         merge = config["merge"]
         names = merge.get("requiredChecks") if isinstance(merge, dict) else None
+        if names == "none":
+            return names
         if isinstance(names, list) and names and all(isinstance(k, str) and k for k in names):
             return names
     return None
