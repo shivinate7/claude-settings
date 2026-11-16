@@ -522,7 +522,7 @@ def chain_case(name):
 
 
 approved_case("an approved lift with a missing _agentCapUntil is revoked",
-              cap_json(model="opus", force="1"), "bad")
+              cap_json(model="opus", force="1"), "missing")
 approved_case("an approved lift with an unparseable _agentCapUntil is revoked",
               cap_json(model="opus", force="1", until="not-a-time"), "bad")
 approved_case("an approved lift with _agentCapUntil more than 24h ahead is NOT reverted, "
@@ -740,6 +740,13 @@ def expectation(entry, result):
                 return (False, "reverted, but not as a missing _agentCapUntil: the old name must count as "
                         "no deadline -- got: %r" % message)
             return (True, "reverted as a missing _agentCapUntil: the retired name is no deadline")
+        if kind == "missing":
+            if lifted:
+                return (False, "cap STILL LIFTED with no _agentCapUntil: the watch missed it")
+            if "_agentCapUntil is missing" not in message:
+                return (False, "reverted, but not as a missing _agentCapUntil: an absent deadline must read "
+                        "as missing, not as unparseable -- got: %r" % message)
+            return (True, "reverted as a missing _agentCapUntil")
         if kind == "bad":
             if lifted:
                 return (False, "cap STILL LIFTED past a bad deadline: the expiry rule missed it")
