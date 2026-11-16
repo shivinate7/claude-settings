@@ -588,8 +588,10 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         sentence = merge_role_sentence(hook_role_line())
         self.assertIn("resume", sentence.lower(), sentence)
 
-    def test_the_tier_line_does_not_say_once(self):
-        self.assertNotRegex(hook_role_line(), r"(?i)\bonce\b")
+    # ruling Q2 (decision draft-until-reviewed, owner, 12:58 CST Nov 16, 2026): a lane marks its own draft PR ready once. The role record is
+    # still taken again after a resume, so every other "once" in the line stays out.
+    def test_the_tier_line_does_not_say_once_except_in_ready_once(self):
+        self.assertNotRegex(re.sub(r"(?i)\bready once\b", "", hook_role_line()), r"(?i)\bonce\b")
 
     def test_the_merge_role_sentence_is_found_by_its_edges(self):
         # The helper cuts at ". ": from the one before `merge --role` to the one after it, or to the line's ends.
