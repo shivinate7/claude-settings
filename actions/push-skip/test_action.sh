@@ -38,10 +38,10 @@ cp -r "$here" "$pin/actions/push-skip" && cp -r "$root/lint" "$pin/lint" \
 python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import test_all_jobs_passed as t; sys.stdout.write(t.CHILD_GOOD)' "$root/lint" \
   > "$caller/.github/workflows/checks.yml" || { echo "FAIL - fixture: lint/test_all_jobs_passed.py did not give CHILD_GOOD"; exit 1; }
 
-# The macOS caller: this repo's checks.yml. Its macOS jobs run on a schedule and a dispatch only (owner, 01:33 CST Nov 16), so it names no
-# scope-skips map. The driver reads its macOS jobs from the file itself (the pinned copy's lint/test_windows_split.py), so none is named here.
-[ "$(grep -c '^          scope-skips: ' "$root/.github/workflows/checks.yml")" -eq 0 ] && ok "static: checks.yml names no scope-skips map" \
-  || no "static: checks.yml names a scope-skips map, but no macOS job has a scope skip now"
+# The macOS caller: this repo's checks.yml. Its macOS jobs run on a schedule and a dispatch only (owner, 01:33 CST Nov 16), so its
+# scope-skips map is empty: it names no job and only opts in to the records-only read.
+[ "$(grep -c "^          scope-skips: '{}'$" "$root/.github/workflows/checks.yml")" -eq 1 ] && ok "static: checks.yml's scope-skips map is empty" \
+  || no "static: checks.yml's scope-skips map is not the one empty map"
 macos_caller="$work/macos_caller"
 mkdir -p "$macos_caller/.github/workflows"
 cp "$root/.github/workflows/checks.yml" "$macos_caller/.github/workflows/checks.yml" \

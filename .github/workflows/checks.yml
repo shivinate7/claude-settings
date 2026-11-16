@@ -1926,8 +1926,8 @@ jobs:
   # there, which skips on a draft). The records-only skip (records_only_skip, from .github/scripts/ci-scope.sh) is a change to
   # docs/records.md alone after a fully green head, on a pull request or a push. Every job but scope, nightly-skip, push-skip and
   # all-jobs-passed starts nothing then: each job-level `if` reads it (lint/all_jobs_passed_rules.py allows that condition and no wider
-  # one on a needed job), and all-jobs-passed passes the skips (actions/all-jobs-passed/check.sh). The macOS jobs are already off through
-  # their scope flags. A step-level `if` still starts a runner, so the skip sits on the job. R62 ("each suite runs once per batch, on
+  # one on a needed job), and all-jobs-passed passes the skips (actions/all-jobs-passed/check.sh). The macOS jobs never start on a pull
+  # request or a push. A step-level `if` still starts a runner, so the skip sits on the job. R62 ("each suite runs once per batch, on
   # the batch PR"; "Part 3 keeps the full shards once per batch") puts the full suites on every ready pull_request; own-830-c, widened by
   # owner item 857 pick b (19:48 CST Nov 15), narrows that: the green head's run already proved what a records-only change moves.
   # A schedule and a dispatch run them whole.
@@ -2483,6 +2483,8 @@ jobs:
       - uses: $/actions/all-jobs-passed
         with:
           needs: ${{ toJSON(needs) }}
+          # An empty map names no job: it only opts in to check.sh's records-only read, so a records-only run reads green.
+          scope-skips: '{}'
 
   # Wakes a session that waits on this PR (decision ci-wait-reads-run-status, "The cloud wake").
   # A run with a red job sends no "all checks done" wake, so this job comments once when the run

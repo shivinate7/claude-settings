@@ -1862,17 +1862,6 @@ def push_guard_jobs(text):
     return sorted(n for n, j in all_jobs(text).items() if j["if"] is not None and holds_push_guard(n, j["if"]))
 
 
-def macos_scope_skips():
-    """Each macOS job's scope skip, by job name. Empty: a macOS job runs on a schedule and a dispatch only, so it has no scope skip
-    (owner, 01:33 CST Nov 16: "turn off all mac runs for now"). lint/all_jobs_passed_rules.py reads it, so its scope-skips rule asks for no input."""
-    return {}
-
-
-def macos_scope_skip_ok(name, expr):
-    """Always False: no macOS job has a scope skip (macos_scope_skips is empty). Kept for lint/all_jobs_passed_rules.py's import."""
-    return False
-
-
 def macos_daily_ok(name, expr):
     """True when `expr` is macOS job `name`'s job-level if: false on a push, false on a pull_request whatever its flags and draft
     state, true on a schedule and a workflow_dispatch. A step-level skip still starts the macOS runner, so the job-level if keeps it off."""

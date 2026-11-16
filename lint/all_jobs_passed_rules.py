@@ -233,13 +233,14 @@ def scope_skips_map(text):
 
 def scope_skips_problems(text):
     """No job has a scope skip now (the macOS jobs run on a dispatch and a daily that runs, never on a pull request), so
-    all-jobs-passed's scope-skips input must be missing: check.sh would pass a skipped job on any entry."""
+    all-jobs-passed's scope-skips input must be the empty map: check.sh would pass a skipped job on any entry, and reads a
+    records-only run as green only when the input is set."""
     block = job_block(text, ALL_JOBS_PASSED_JOB)
     if block is None:
         return [f"no {ALL_JOBS_PASSED_JOB} job in checks.yml"]
     raw = scope_skips_raw(text)
     if raw is None:
-        return []
+        return ["all-jobs-passed has no scope-skips input, so a records-only run reads red; set it to '{}'"]
     try:
         got = json.loads(raw)
     except ValueError:

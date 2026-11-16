@@ -24,7 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from test_windows_split import CHECKS, MACOS_JOBS, all_jobs, eval_with, yaml_scalar  # noqa: E402  the one home of the checks.yml path
 from all_jobs_passed_rules import (ALL_JOBS_PASSED_USES, all_problems, child_problems, ci_done_problems, needs_of,  # noqa: E402  the one home of the rules
-                                   needs_problems, off_problems, scope_if_problems, shape_problems, split_jobs, step_with,
+                                   needs_problems, off_problems, scope_if_problems, scope_skips_problems, shape_problems, split_jobs, step_with,
                                    steps_problems, steps_part)
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the job parser
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
@@ -80,6 +80,7 @@ GOOD = """jobs:
       - uses: $/actions/all-jobs-passed
         with:
           needs: ${{ toJSON(needs) }} # every job above
+          scope-skips: '{}'
   ci-done:
     runs-on: ubuntu-latest
     needs:
@@ -149,11 +150,17 @@ class AllJobsPassedJob(unittest.TestCase):
         # Named failure: a job that runs on a pull_request is off all-jobs-passed, so its red cannot block the merge.
         self.assertEqual(off_problems(self.text), [])
 
-    def test_no_macos_job_is_needed_and_all_jobs_passed_has_no_scope_skips_input(self):
-        # Named failure: a macOS job is back in all-jobs-passed's needs, or the rollup names a scope-skips map, so a macOS job runs on a pull_request.
+    def test_no_macos_job_is_needed_and_all_jobs_passed_scope_skips_is_the_empty_map(self):
+        # Named failure: a macOS job is back in all-jobs-passed's needs, or the rollup's scope-skips map names a job, so a macOS job runs on a pull_request.
         needed, _, _ = split_jobs(self.text)
         self.assertEqual([j for j in MAC_JOBS if j in needed], [], "a macOS job runs on a pull_request, so it is needed by all-jobs-passed")
-        self.assertIsNone(scope_skips_input(self.text), "all-jobs-passed still names a scope-skips map, which no macOS job has now")
+        self.assertEqual(scope_skips_input(self.text), "{}", "all-jobs-passed's scope-skips map names a job, which no macOS job has now")
+
+    def test_a_rollup_with_no_scope_skips_input_is_flagged(self):
+        # Named failure: without the input, check.sh reads a records-only run as red (actions/all-jobs-passed/check.sh, "Only a set SCOPE_SKIPS opts in").
+        line = "          scope-skips: '{}'\n"
+        self.assertEqual(self.text.count(line), 1, "the rollup's scope-skips line changed: this case must follow it")
+        self.assertTrue(scope_skips_problems(self.text.replace(line, "", 1)), "a rollup with no scope-skips input passes the rules")
 
     def test_scope_skips_only_a_draft_pr(self):
         self.assertEqual(scope_if_problems(self.text), [])
@@ -335,7 +342,7 @@ class MacOsNeverOnPullRequest(unittest.TestCase):
         # The same pull request as all-jobs-passed sees it: every needed job passed, and no macOS job among them.
         needs = {name: {"result": "success"} for name in needs_of(job_block(self.text, "all-jobs-passed"))}
         needs["scope"] = {"result": "success", "outputs": flags}
-        self.assertIsNone(scope_skips_input(self.text), "all-jobs-passed names a scope-skips map: no macOS job has a scope skip now")
+        self.assertEqual(scope_skips_input(self.text), "{}", "all-jobs-passed's scope-skips map names a job: no macOS job has a scope skip now")
         code, out = check_sh(needs)
         self.assertEqual(code, 0, f"all-jobs-passed refuses a pull request with no macOS path: exit {code}: {out}")
 
