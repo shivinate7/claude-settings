@@ -878,6 +878,17 @@ sh("cap deadline: a computed end with a model says the end is not shown, and doe
    + '\\"}" > ' + PROJ_LOCAL,
    "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY, COMPUTED_NOTE), lacks=("shown here",), env=DISK_CLOCK)
 
+# THE WORDING OF A MODEL-ONLY ASK. A write that sets no end shows none, so its ask must not say that an end is
+# "shown here". A write that sets a readable end shows it, so that ask may name the end.
+add("cap: a Write that sets only the model, with no end, asks and does not say the end is shown here",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL, content=cap_settings(),
+    carries=(OPUS,), lacks=("shown here",))
+sh("cap: a shell write that sets only the model, with no end, asks and does not say the end is shown here",
+   HIDDEN_CAP_WRITE, "ask", "agent-model-cap", cwd=NOGIT, carries=(OPUS,), lacks=("shown here",))
+add("cap deadline: a model raise that also sets a readable cap-lift end asks and names the end in CST",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL, content=OPUS_LIFT_WINTER,
+    carries=(OPUS, WANT_WINTER), env=DISK_CLOCK)
+
 # ----------------------------------------------------- one reading of each offset form of the end
 #
 # The same instant, 03:30 UTC on 15 January 2099 (21:30 CST on the 14th), written in each form. The
