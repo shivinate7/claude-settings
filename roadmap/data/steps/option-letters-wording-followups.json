@@ -1,0 +1,14 @@
+{
+ "id": "option-letters-wording-followups",
+ "title": "Three loose ends from the option-label reword guard (#3574 round 2)",
+ "priority": "next",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "consultant",
+ "blockedBy": [],
+ "updatedAt": "2026-11-16T00:27:53-06:00",
+ "why": "[00:27 CST Nov 16, triage] Consultant 00:27 CST, from #3574 round 2 (sonnet PASS): (1) lint/rule_mechanisms.json line 626 says option-letters-frozen \"relabels\"; after #3574 a reword passes, so it should say \"swaps labels between letters\". (2) The guard and the render disagree on an appended duplicate label (the wrong-letter message). (3) Decision option-keys-are-letters does not say that option-labels-match-chat still refuses a reword when the chat cites the old text. Searched steps: only option-keys-match-chat names these rules; none carries these three.",
+ "source": "consultant relay 00:27 CST Nov 16; filed by triage 8; not owner-typed",
+ "note": "Todo, after #3574 merges. (1) Change the word \"relabels\" in lint/rule_mechanisms.json (line 626) to \"swaps labels between letters\". (2) Make the guard and the render agree on an appended duplicate label. (3) Add one line to decision option-keys-are-letters: option-labels-match-chat still refuses a reword when the chat cites the old text. A lane through the consultant. No PR yet."
+}
