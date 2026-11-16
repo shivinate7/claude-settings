@@ -2637,11 +2637,17 @@ PRIOR_WORK_REASON = (
     "| none found`. A bare `Prior work:` line does not count. "
     "(decision spawn-searches-existing-builds, a build spawn names the prior work it searched)"
 )
-_PRIOR_WORK_LINE = re.compile(r"[-#*_>\s]*" + re.escape(PRIOR_WORK_LINE) + r"[ \t*_]*(?P<text>\S.*)?$", re.IGNORECASE)
+# The colon may sit outside bold (`**Prior work**: x`), and a numbered-list lead (`1. `) may come before the marker.
+_PRIOR_WORK_LINE = re.compile(
+    r"[-#*_>\s]*(?:\d+[.)]\s+)?[-#*_>\s]*" + re.escape(PRIOR_WORK_LINE[:-1]) + r"[*_]*:[ \t*_]*(?P<text>\S.*)?$",
+    re.IGNORECASE)
+# An unfilled template placeholder (`<what you searched>`) names nothing.
+_PLACEHOLDER = re.compile(r"<[^<>]*>")
 
 
 def prior_work_named(text) -> bool:
-    """True when `text` has a Prior work line with text after the marker, outside a fence."""
+    """True when `text` has a Prior work line with text after the marker, outside a fence. Text that is only angle-bracket
+    placeholders does not count."""
     if not isinstance(text, str):
         return False
     fenced = False
@@ -2650,7 +2656,7 @@ def prior_work_named(text) -> bool:
             fenced = not fenced
             continue
         found = None if fenced else _PRIOR_WORK_LINE.match(line.rstrip())
-        if found and found.group("text"):
+        if found and found.group("text") and _PLACEHOLDER.sub("", found.group("text")).strip(" \t|,;"):
             return True
     return False
 
