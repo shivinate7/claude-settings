@@ -64,12 +64,13 @@ def _proof_scope(tree, status, reflog_min=0):
     return None
 
 
-def _proof_read(tree, trip, budget=None, module_at=None):
+def _proof_read(tree, trip, budget=None, module_at=None, config_dir=None):
     """(answer, candidate reads) of the proof on TREE, with `git_reads._now` installed at 0. With TRIP, the first
     `ls-tree` the proof makes moves the clock past every deadline, so from the next candidate on the proof must answer
     as it does past its budget. BUDGET, when given, stands in for `_proof_budget`. MODULE_AT, when given, is the path
-    the module is taken to live at, so the real `_proof_budget` reads the settings.json beside it. Each git read is
-    counted. Nothing sleeps and no real clock is read."""
+    the module is taken to live at, so the real `_proof_budget` reads from there. CONFIG_DIR is the CLAUDE_CONFIG_DIR
+    the budget may read; left None it is the repo, whose settings.json the real module reads from its own folder. Each
+    git read is counted. Nothing sleeps and no real clock is read."""
     git_reads = _load_git_reads()
     lines = _porcelain(tree)
     now, ls_trees = [0.0], []
@@ -85,7 +86,8 @@ def _proof_read(tree, trip, budget=None, module_at=None):
 
     git_reads._git = counting_git
     try:
-        with mock.patch.object(git_reads, "_now", lambda: now[0], create=True), \
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": REPO if config_dir is None else config_dir}), \
+                mock.patch.object(git_reads, "_now", lambda: now[0], create=True), \
                 mock.patch.object(git_reads, "_proof_budget",
                                   git_reads._proof_budget if budget is None else budget), \
                 mock.patch.object(git_reads, "__file__", git_reads.__file__ if module_at is None else module_at):
@@ -171,10 +173,13 @@ def base_copies_many_pushed_control_case():
     return True, "201 changed paths that are all pushed copies answer True with the clock on time"
 
 
-# THE BUDGET IS UNREADABLE. _proof_budget reads the guard hook's timeout from the settings.json beside the hooks folder
-# of the module it runs in, and answers None when that read fails. The proof then answers None before any candidate
-# read. The guard refuses None and False alike (guard_core.py, worktree remove), so these cases pin the proof's own
-# answer: None says the read failed. False would say the tree holds work it cannot prove pushed.
+# THE BUDGET IS READ FROM THE INSTALL. _proof_budget reads the guard hook's timeout from the settings.json of the install
+# its module runs in, and answers None when that read fails. The proof then answers None before any candidate read. The
+# guard refuses None and False alike (guard_core.py, worktree remove), so these cases pin the proof's own answer: None
+# says the read failed. False would say the tree holds work it cannot prove pushed. The cases do not pin the route to
+# that file. A module at hooks/ reads the settings.json beside hooks/. A module at hooks/guard.d/<id>/, the installed
+# layout, reads the one at the install root. The install root is also the config directory each case names, so either
+# route reads the same file.
 
 GUARD_HOOK_COMMAND = "python3 ${HOME}/.claude/hooks/guard.py"  # names /hooks/guard.py, the row _proof_budget reads
 
@@ -185,21 +190,29 @@ def _settings_text(hook_row):
     return json.dumps({"hooks": {"PreToolUse": rows}})
 
 
-def _module_beside(name, settings):
-    """A module path under this run's folder, with SETTINGS written as the settings.json beside its hooks folder, or
-    with no settings.json there when SETTINGS is None. The hooks folder is made real: the reader opens
-    `hooks/../settings.json`, and a missing hooks folder would fail that open for the wrong reason. Nothing is copied."""
+GUARD_D_ID = "cases-install-id"  # the folder name guard.py gives an installed copy's guard.d/<id>/ (INSTALL_ID)
+
+
+def _install_layout(name, settings, guard_d):
+    """(install folder, module path) under this run's folder. The install folder holds SETTINGS as its settings.json
+    beside `hooks/`, or no settings.json when SETTINGS is None. The module sits at `hooks/git_reads.py` when GUARD_D is
+    false, and at `hooks/guard.d/<id>/git_reads.py` when true: the installed layout, where guard.py loads its modules from
+    the folder of its own id (hooks/guard.py, _SET_DIR). Both folders are made real, so a read fails for the content it
+    reads, never for a missing folder. Nothing is copied: the budget reads paths, not the module's bytes."""
     folder = os.path.join(ROOT, name)
-    os.makedirs(os.path.join(folder, "hooks"), exist_ok=True)
+    module_dir = os.path.join(folder, "hooks", "guard.d", GUARD_D_ID) if guard_d else os.path.join(folder, "hooks")
+    os.makedirs(module_dir, exist_ok=True)
     if settings is not None:
         write(os.path.join(folder, "settings.json"), settings)
-    return os.path.join(folder, "hooks", "git_reads.py")
+    return folder, os.path.join(module_dir, "git_reads.py")
 
 
-def _budget_beside(module_at):
-    """What the real `_proof_budget` reads for a module at MODULE_AT: a number, or None when it cannot read one."""
+def _budget_beside(module_at, config_dir):
+    """What the real `_proof_budget` reads for a module at MODULE_AT, with CONFIG_DIR as its config directory: a number,
+    or None when it cannot read one."""
     git_reads = _load_git_reads()
-    with mock.patch.object(git_reads, "__file__", module_at):
+    with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config_dir}), \
+            mock.patch.object(git_reads, "__file__", module_at):
         return git_reads._proof_budget()
 
 
@@ -234,16 +247,17 @@ def base_copies_unreadable_budget_case():
     return True, "the incident tree answers None, not False or True, when _proof_budget is None"
 
 
-def _unreadable_budget_case(name, settings, why):
+def _unreadable_budget_case(name, settings, why, guard_d=False):
     """The incident tree, allowed with a readable budget, answers None once the real budget read beside its module
-    fails for WHY."""
+    fails for WHY. The install root is also the config directory, so a route to settings.json through either reads the
+    same file."""
     scope = _allowed_incident_scope()
     if scope:
         return False, scope
-    module_at = _module_beside(name, settings)
-    if _budget_beside(module_at) is not None:
+    install, module_at = _install_layout(name, settings, guard_d)
+    if _budget_beside(module_at, install) is not None:
         return False, "scope: the budget beside %s reads a number, want None: %s" % (name, why)
-    got, _ = _proof_read(BCINC, trip=False, module_at=module_at)
+    got, _ = _proof_read(BCINC, trip=False, module_at=module_at, config_dir=install)
     if got is not None:
         return False, ("answered %r with the budget unreadable (%s), want None: a failed budget read is None"
                        % (got, why))
@@ -266,21 +280,58 @@ def base_copies_no_guard_row_budget_case():
     return _unreadable_budget_case("budget-no-row", _settings_text(None), "no PreToolUse row names the guard")
 
 
-def base_copies_readable_budget_control_case():
-    """Green control: a settings.json whose guard row has a timeout gives a readable budget, and the incident tree is
-    allowed under it. The fixture value only feeds the parse; no case asserts it."""
-    settings = _settings_text({"type": "command", "command": GUARD_HOOK_COMMAND, "timeout": 60})
-    module_at = _module_beside("budget-readable", settings)
-    if _budget_beside(module_at) is None:
-        return False, "scope: the budget beside a settings.json with a guard timeout reads None, want a number"
+def base_copies_no_settings_guard_d_case():
+    """The installed layout with no settings.json anywhere: the install root holds none, and it is the config directory,
+    so the budget reads None and the incident tree answers None."""
+    return _unreadable_budget_case("budget-guard-d-none", None,
+                                   "no settings.json at the install root, beside hooks/, or in the config directory",
+                                   guard_d=True)
+
+
+FIXTURE_GUARD_TIMEOUT = 60  # the guard row's timeout in the settings.json the readable cases write
+
+
+def _readable_budget_case(guard_d, layout, cause):
+    """The incident tree, under a readable budget, answers True on time. The budget beside the module is above zero and
+    below the guard row's timeout, read back from the settings.json the case wrote at the install root. LAYOUT names the
+    module's place in the messages, and CAUSE says why a None budget is wrong there."""
+    settings = _settings_text({"type": "command", "command": GUARD_HOOK_COMMAND, "timeout": FIXTURE_GUARD_TIMEOUT})
+    install, module_at = _install_layout("budget-guard-d" if guard_d else "budget-flat", settings, guard_d)
     scope = _incident_scope()
     if scope:
         return False, scope
-    got, _ = _proof_read(BCINC, trip=False, module_at=module_at)
+    settings_at = os.path.join(install, "settings.json")
+    if not os.path.isfile(settings_at) or not os.path.isdir(os.path.dirname(module_at)):
+        return False, "scope: the %s layout is not on disk, so the budget read has no file to find" % layout
+    timeout = _guard_row_timeout(settings_at)
+    if timeout is None:
+        return False, "scope: %s has no PreToolUse row that names /hooks/guard.py with a numeric timeout" % settings_at
+    budget = _budget_beside(module_at, install)
+    if budget is None:
+        return False, "_proof_budget answered None for the module %s, want a number: %s" % (layout, cause)
+    if not 0 < budget < timeout:
+        return False, ("_proof_budget answered %g s, want above zero and below the guard hook's %g s timeout"
+                       % (budget, timeout))
+    got, _ = _proof_read(BCINC, trip=False, module_at=module_at, config_dir=install)
     if got is not True:
-        return False, ("answered %r with a readable budget beside its settings.json, want True: a readable budget "
-                       "lets the incident tree through" % (got,))
-    return True, "a readable budget beside its settings.json lets the incident tree through"
+        return False, ("answered %r with the clock on time, want True: a readable budget of %g s lets the incident "
+                       "tree through" % (got, budget))
+    return True, ("a budget of %g s, above zero and below the guard hook's %g s timeout, lets the incident tree "
+                  "through (%s)" % (budget, timeout, layout))
+
+
+def base_copies_readable_budget_control_case():
+    """Green control, the flat layout: the module at hooks/, its settings.json beside hooks/. The budget is readable and
+    the incident tree is allowed under it."""
+    return _readable_budget_case(False, "at hooks/, with settings.json beside hooks/",
+                                 "the settings.json beside hooks/ is not read from a module at hooks/")
+
+
+def base_copies_guard_d_budget_case():
+    """The installed layout: the module at hooks/guard.d/<id>/, settings.json at the install root beside hooks/, which
+    is also the config directory. The budget is readable and the incident tree is allowed under it."""
+    return _readable_budget_case(True, "at hooks/guard.d/<id>/, with settings.json at the install root",
+                                 "the install root's settings.json is not read from a module under hooks/guard.d/<id>/")
 
 
 def _guard_row_timeout(settings):
@@ -300,16 +351,18 @@ def _guard_row_timeout(settings):
 
 
 def base_copies_budget_below_guard_timeout_case():
-    """The proof's budget is above zero and below the guard hook's own timeout, both read from the settings.json the
-    proof reads. A budget at or past that timeout is the hole this section guards: a timed-out guard lets the call
-    through. So `* 2` in place of `/ 2` (twice the timeout) fails this case. It asserts an inequality, not a number."""
+    """The proof's budget is above zero and below the guard hook's own timeout, both read from the repo's settings.json:
+    the file the real module reads from its folder, and the one the config directory names here. A budget at or past
+    that timeout is the hole this section guards: a timed-out guard lets the call through. So `* 2` in place of `/ 2`
+    (twice the timeout) fails this case. It asserts an inequality, not a number."""
     git_reads = _load_git_reads()
-    settings = os.path.join(os.path.dirname(os.path.realpath(git_reads.__file__)), os.pardir, "settings.json")
+    settings = os.path.join(REPO, "settings.json")
     timeout = _guard_row_timeout(settings)
     if timeout is None:
         return False, ("scope: %s has no PreToolUse row that names /hooks/guard.py with a numeric timeout, so there is "
                        "no timeout to bound the budget against" % settings)
-    budget = git_reads._proof_budget()
+    with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": REPO}):
+        budget = git_reads._proof_budget()
     if budget is None:
         return False, ("_proof_budget answered None with the guard hook's timeout %g s read, want a number" % timeout)
     if budget <= 0:
@@ -340,6 +393,10 @@ for _label, _check in (
      base_copies_no_guard_row_budget_case),
     ("base copies: a readable budget beside its settings.json lets the incident tree through",
      base_copies_readable_budget_control_case),
+    ("base copies: a readable budget under hooks/guard.d/<id>/, with settings.json at the install root, lets the "
+     "incident tree through", base_copies_guard_d_budget_case),
+    ("base copies: the incident tree answers None with no settings.json anywhere, under hooks/guard.d/<id>/",
+     base_copies_no_settings_guard_d_case),
     ("base copies: the proof's budget is above zero and below the guard hook's timeout in settings.json",
      base_copies_budget_below_guard_timeout_case),
 ):
