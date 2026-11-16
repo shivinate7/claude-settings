@@ -165,7 +165,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
                        record (read from the transcript) does not show in its cs-build tags. The standing tier
-                       needs the own newest record to show a coordinator or triage tag, with no set_session_tags after it.
+                       needs the own newest record to show a coordinator, triage or consultant tag, with no set_session_tags after it.
                        For the lane tier, also a `--step` that is no cs-step tag of that record, or a record with no cs-repo
                        tag for shivinate7/claude-settings. Read inside wrappers
                        (`bash -c`, `$(...)`) too. Also a cloud `merge <pr> --ready` from a session whose own

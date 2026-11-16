@@ -72,8 +72,8 @@ Contract the page cases assume (the builder builds to it):
   The picture checks of one run share one time budget. Items not checked when it runs out print
     `checks unknown: time budget spent, <k> item(s) not checked`; --check exits 3; export keeps its copy and its exit code.
   Receipts, the sixth waiting collection: `receipts/<doc_id>.json` (a doc id may hold a dot, `park.colour-pick`) exports,
-    is scanned, rebuilds and merges as the other five do, and the live page wins a merge. An export is append-safe for
-    receipts: a receipt the copy holds and the fetch no longer lists stays. An emptied receipts fetch is unknown unless
+    is scanned, rebuilds and merges as the other five do, and the live page wins a merge. An export is append-only, as
+    for every waiting collection: a receipt the copy holds and the fetch no longer lists stays. An emptied receipts fetch is unknown unless
     `--allow-empty receipts` names it. A fetch with no receipts folder, or no marker in it, is unknown.
 """
 import collections
@@ -1058,7 +1058,7 @@ class Scan(Base):
 
 
 class Mirror(Base):
-    def test_counts_each_write_and_delete_and_keeps_the_rest(self):
+    def test_counts_each_write_and_keeps_every_doc_no_longer_fetched(self):
         fetched = self.fetch(items={"a": {"id": "a"}, "b": {"id": "b"}, "c": {"id": "c"}},
                              answers={"x": {"id": "x"}}, meta={"page": META})
         out = self.out()
@@ -1069,10 +1069,10 @@ class Mirror(Base):
         write_text(os.path.join(fetched, "items", "d.json"), canonical({"id": "d"}))
         os.remove(os.path.join(fetched, "items", "b.json"))
         r = self.export(fetched, out)
-        self.assertChanged(r, 3)
+        self.assertChanged(r, 2)
         self.assertEqual(r.returncode, 0, shown(r))
         self.assertEqual(os.stat(c_path).st_mtime, SENTINEL, "an unchanged doc was rewritten")
-        self.assertFalse(os.path.exists(os.path.join(out, "items", "b.json")), "a doc no longer fetched was kept")
+        self.assertTrue(os.path.exists(os.path.join(out, "items", "b.json")), "a doc no longer fetched was deleted")
         self.assertEqual(read_text(os.path.join(out, "items", "a.json")), canonical({"id": "a", "title": "new"}))
         self.assertEqual(read_text(os.path.join(out, "items", "d.json")), canonical({"id": "d"}))
 
@@ -1106,6 +1106,25 @@ class Mirror(Base):
         self.assertEqual(r.returncode, 0, shown(r))
         self.assertEqual(read_text(os.path.join(out, "items", "a.json")), canonical({"id": "a", "n": 2}))
 
+    def test_an_emptied_collection_removes_no_file_in_any_of_the_six(self):
+        """Append-only for every waiting collection: a page cleanup empties the page's rows, and the next export must not
+        erase the archived docs from the copy. --allow-empty only lifts the unknown stop; it deletes nothing."""
+        docs = {"items": {"a": {"id": "a"}}, "answers": {"x": {"id": "x"}}, "groups": {"g": {"id": "g"}},
+                "asks": {"k": {"id": "k"}}, "meta": {"page": META}, "receipts": {"a": receipt(1)}}
+        out = self.out()
+        self.assertEqual(self.export(self.fetch(**docs), out).returncode, 0, "scope: the first export did not run")
+        before = snapshot(out)
+        for name in layout.WAITING_COLLECTIONS:
+            with self.subTest(collection=name):
+                emptied = dict(docs, **{name: {}})
+                r = self.export(self.fetch(**emptied), out, allow_empty=(name,))
+                self.assertEqual(r.returncode, 0, shown(r))
+                self.assertEqual(snapshot(out), before, "an emptied %s removed or changed a file in the copy" % name)
+
+    def test_append_only_is_every_waiting_collection(self):
+        self.assertEqual(tuple(export_page.APPEND_ONLY), tuple(layout.WAITING_COLLECTIONS),
+                         "export_page.APPEND_ONLY is not lint/layout.py WAITING_COLLECTIONS")
+
     def test_an_emptied_collection_is_unknown_unless_the_session_allows_it(self):
         fetched = self.fetch(items={"a": {"id": "a"}, "b": {"id": "b"}, "c": {"id": "c"}})
         out = self.out()
@@ -1121,9 +1140,9 @@ class Mirror(Base):
         self.assertVerdict(r, "unknown")
         self.assertEqual(snapshot(out), before, "--allow-empty for another collection deleted docs")
         r = self.export(fetched, out, allow_empty=("items",))
-        self.assertChanged(r, 3)
+        self.assertVerdict(r, "same")
         self.assertEqual(r.returncode, 0, shown(r))
-        self.assertEqual(glob.glob(os.path.join(out, "items", "*.json")), [], "the allowed empty collection kept docs")
+        self.assertEqual(snapshot(out), before, "the allowed empty collection deleted docs: the export is append-only")
 
     def test_a_collection_without_its_completeness_marker_is_unknown_and_writes_nothing(self):
         fetched = self.fetch(items={"a": {"id": "a"}}, meta={"page": META})
@@ -1198,7 +1217,7 @@ class Mirror(Base):
 
 class Receipts(Base):
     """The sixth waiting collection. `receipts/<doc_id>.json` is written by the owning session, never by the page. An export
-    writes, scans and mirrors it like the other five, except that it is append-safe: a receipt the copy holds and the fetch
+    writes, scans and copies it like the other five, and like them never deletes: a receipt the copy holds and the fetch
     no longer lists stays, since the owner keeps archived receipts through a later page cleanup. The pins at the end hold
     the export's list equal to the registry's."""
 
@@ -1283,9 +1302,9 @@ class Receipts(Base):
                         "the receipt item-003 that the fetch lists was not exported")
         self.assertEqual(read_text(os.path.join(out, "receipts", "item-002.json")), archived,
                          "the archived receipt item-002 was changed or deleted")
-        self.assertFalse(os.path.exists(os.path.join(out, "items", "item-002.json")),
-                         "control: the item the fetch no longer lists was kept, so the mirror delete did not run")
-        self.assertChanged(r, 2)  # one receipt written and one item deleted; the archived receipt counts for nothing
+        self.assertTrue(os.path.isfile(os.path.join(out, "items", "item-002.json")),
+                        "the item the fetch no longer lists was deleted: every collection is append-only")
+        self.assertChanged(r, 1)  # one receipt written; archived docs count for nothing
 
     def export_in_process(self, fetched, out):
         """export() with receipts among its collections and no design block, run in this process. A Stop is a failure."""
@@ -1294,9 +1313,26 @@ class Receipts(Base):
         except export_page.Stop as stop:
             self.fail("export(design=False) stopped: %s" % stop)
 
+    def test_a_collection_outside_the_six_still_mirror_deletes(self):
+        """Control for append-only: only the six waiting collections keep their docs. Another role's own collection
+        mirrors the fetch, so the delete branch is still proved to run."""
+        out = self.out()
+        self.export_in_process_with(("steps",), self.fetch(folders={"steps": {"a": item(1), "b": item(2)}}), out)
+        self.assertTrue(os.path.isfile(os.path.join(out, "steps", "b.json")), "scope: steps/b.json did not land")
+        verdict = self.export_in_process_with(("steps",), self.fetch(folders={"steps": {"a": item(1)}}), out)
+        self.assertFalse(os.path.exists(os.path.join(out, "steps", "b.json")),
+                         "a collection outside the six kept a doc the fetch no longer lists")
+        self.assertEqual(verdict[0], "changed 1", "a delete is not counted in the verdict")
+
+    def export_in_process_with(self, collections, fetched, out):
+        try:
+            return export_page.export(fetched, out, None, (), collections=collections, design=False)
+        except export_page.Stop as stop:
+            self.fail("export stopped: %s" % stop)
+
     def test_a_receipt_the_fetch_lacks_stays_when_the_export_runs_without_its_design_block(self):
         """Append-only follows the collection name, not the design flag: export(design=False) with receipts among its
-        collections keeps an archived receipt. Items still mirror-delete, the control."""
+        collections keeps an archived receipt. Items stay too."""
         out = self.out()
         self.export_in_process(self.fetch(folders={"items": {"item-001": item(1), "item-gone": item(9)},
                                                    "receipts": {"item-001": receipt(1), "item-002": receipt(2)}}), out)
@@ -1307,8 +1343,8 @@ class Receipts(Base):
         self.export_in_process(self.fetch(folders={"items": {"item-001": item(1)}, "receipts": {"item-001": receipt(1)}}), out)
         self.assertTrue(os.path.isfile(os.path.join(out, "receipts", "item-002.json")),
                         "export(design=False) deleted an archived receipt the fetch no longer lists")
-        self.assertFalse(os.path.exists(os.path.join(out, "items", "item-gone.json")),
-                         "control: the item the fetch no longer lists was kept, so the mirror delete did not run")
+        self.assertTrue(os.path.isfile(os.path.join(out, "items", "item-gone.json")),
+                        "export(design=False) deleted an item the fetch no longer lists: every collection is append-only")
 
     def test_an_emptied_receipts_fetch_is_unknown_unless_named_and_the_archive_stays(self):
         out = self.out()
@@ -2249,7 +2285,7 @@ class Rebuild(Base):
 class All(Base):
     """--all: each artifact in the repo's registry (the "artifacts" key of its extras file) exports its collections to
     its export path under --worktree: the waiting page to waiting/, any other artifact to artifacts/<id>/. Each artifact
-    gets the same scan and mirror as a single export, and one verdict line of its own, named by its id."""
+    gets the same scan and copy as a single export, and one verdict line of its own, named by its id."""
     WAIT, QUEUE = "page01", "queue02"
     VERDICT = r"\b(changed\s+\d+|same|refused|unknown)\b"
 
