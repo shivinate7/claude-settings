@@ -1,0 +1,10 @@
+{
+  "id": "own-913-a-merge-any-repo-grant-line",
+  "at": "2026-11-16T13:34:21-06:00",
+  "title": "The consultant adds the standing merge grant line as worded (owner pick a, item 913).",
+  "ruling": "Owner, page item 913, option a \"Yes: the consultant adds the line as worded under Standing grants\", saved 13:34:21 CST Nov 16, no note. The line as worded on the item: \"Merge in any repo (owner, 2026-11-15 23:43 CST): any session may merge a PR in any of the owner's repos with the merge tool, under every merge check.\" It covers adding that line to .claude/CLAUDE.md Standing grants, by a pull request that merges by the merge tool. It covers no other wording and no other grant. Every merge check stays. The private repos still hold until PR #3590 and a setup PR per repo (record own-everyone-merges). Item 913 had no `home`; triage sets it to this record's step.",
+  "quote": "A: Yes: the consultant adds the line as worded under Standing grants",
+  "source": "waiting/answers/merge-any-repo-grant-line.json (2026-11-16T19:34:21Z = 13:34:21 CST, choice a, optionId add-as-worded, no note). Owner; filed by triage.",
+  "status": "open",
+  "step": "rewrite-merge-decisions-for-lane-merge"
+}

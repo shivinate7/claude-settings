@@ -1,0 +1,10 @@
+{
+  "id": "own-918-a-grant-lint-unknown-2860",
+  "at": "2026-11-16T13:33:52-06:00",
+  "title": "Grant the lint-unknown flag once, for PR #2860 only (owner pick a, item 918).",
+  "ruling": "Owner, page item 918, option a \"Grant the lint-unknown flag once for PR 2860\", saved 13:33:52 CST Nov 16, no note. The act it names: the batch runner merges PR #2860 with `merge --lane-lint 2860 --lint-unknown-ok \"this PR adds the draft-field reader to bin/ci-job; main's copy cannot read it yet\"`. It covers that PR and that flag once. It covers no other PR, no other flag, and no later head with a changed diff: the PR read head ce9db4590 at 13:29 CST, and a different head needs the runner to say so first. Every other merge check stays (green run of the PR's own head, review rounds, record at the live head).",
+  "quote": "A: Grant the lint-unknown flag once for PR 2860",
+  "source": "waiting/answers/pr-2860-lint-unknown-flag.json (2026-11-16T19:33:52Z = 13:33:52 CST, choice a, optionId grant-flag-once-2860, no note). Owner; filed by triage. Triage read no diff of #2860.",
+  "status": "open",
+  "step": "lane-lint-unknown-on-ready-pr"
+}
