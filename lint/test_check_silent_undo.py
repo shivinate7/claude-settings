@@ -736,28 +736,55 @@ class Value(unittest.TestCase):
 class Flips(unittest.TestCase):
     """Lines that look alike but state something else must not pass as a rewrite."""
     T0, T1, T2 = "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
+    S0 = "The batch runner merges a pull request after the owner yes, and records the merge in the pending record."
+    S1 = S0[:-1] + ", for an unproven push, not for a proven one."  # every original word, then a clause with a negation
 
-    def resolve(self, base_line, a_line, result_line):
-        """main changes base_line to a_line (A). The branch merges main by hand and writes result_line."""
+    @staticmethod
+    def cfg_text(v):
+        """cfg.txt: five lines, then the line v (no line when v is empty), then a tail."""
+        return "".join("l%d\n" % i for i in range(1, 6)) + (v + "\n" if v else "") + "tail\n"
+
+    def resolve(self, base_line, a_line, result_line, path="cfg.txt"):
+        """main changes base_line to a_line (A) in `path`. The branch merges main by hand and writes result_line."""
         r = self.r = Repo()
-        text = lambda v: "".join("l%d\n" % i for i in range(1, 6)) + (v + "\n" if v else "") + "tail\n"
-        r.commit("base", date="2025-12-01T10:00:00", cfg_txt=text(base_line))
+        r.put(path, self.cfg_text(base_line))
+        r.commit("base", date="2025-12-01T10:00:00")
         r.push()
         r.sh("checkout", "-q", "-b", "feat")
         r.commit("feat", date=self.T0, other_txt="x\n")
         r.sh("checkout", "-q", "main")
-        r.commit("A", date=self.T1, cfg_txt=text(a_line))
+        r.put(path, self.cfg_text(a_line))
+        r.commit("A", date=self.T1)
         r.push()
         r.sh("checkout", "-q", "feat")
         r.sh("merge", "--no-commit", "--no-ff", "main")
-        r.put("cfg.txt", text(result_line))
+        r.put(path, self.cfg_text(result_line))
         r.sh("add", "-A")
         r.sh("commit", "-q", "-m", "Merge main", date=self.T2)
+        self.assertIn(path, r.sh("diff", "--name-only", "main", "HEAD").split(), "premise: the merge changes %s" % path)
         return r.verdict()
 
-    def red(self, *case):
-        got = self.resolve(*case)
-        self.assertTrue(any("cfg.txt" in p for p in got), (case, got))
+    def red(self, *case, path="cfg.txt"):
+        got = self.resolve(*case, path=path)
+        self.assertTrue(any(path in p for p in got), "the merge that changed %s was not flagged: case %r, verdict %r" % (path, case, got))
+
+    def in_place(self, main_line, branch_line, path="cfg.txt"):
+        """PR 1 merges main with `path` holding main_line. PR 2, cut after it, rewrites that line in place to branch_line. -> the verdict."""
+        r = self.r = Repo()
+        r.put(path, self.cfg_text(""))
+        r.commit("base", date="2025-12-01T10:00:00")
+        r.push()
+        r.sh("checkout", "-q", "-b", "pr1")
+        r.put(path, self.cfg_text(main_line))
+        r.commit("main adds the line", date=self.T1)
+        r.sh("checkout", "-q", "main")
+        r.sh("merge", "-q", "--no-ff", "-m", "Merge pull request #1", "pr1", date=self.T1)
+        r.push()
+        r.sh("checkout", "-q", "-b", "pr2")
+        r.put(path, self.cfg_text(branch_line))
+        r.commit("rewrite the line", date=self.T2)
+        self.assertIn(path, r.sh("diff", "--name-only", "main", "HEAD").split(), "premise: the rewrite changes %s" % path)
+        return r.verdict()
 
     def test_a_stale_value_with_trailing_tokens_is_the_base_line(self):
         for tail in (" #s", ",", ";"):
@@ -780,6 +807,96 @@ class Flips(unittest.TestCase):
 
     def test_a_third_value_still_passes(self):
         self.assertEqual(self.resolve("RULE_FLOOR = 80", "RULE_FLOOR = 91", "RULE_FLOOR = 94"), [])
+
+    def test_an_appended_negation_clause_is_not_a_merge_drop(self):
+        """main adds the sentence; the merge keeps every original word and appends a clause that holds a negation."""
+        self.assertEqual(self.resolve("", self.S0, self.S1), [], "a negation clause appended after every original word read as a drop")
+
+    def test_an_appended_negation_clause_is_not_an_in_place_reversal(self):
+        """PR 1 merges the sentence; PR 2, cut after it, rewrites the sentence in place by appending the clause."""
+        self.assertEqual(self.in_place(self.S0, self.S1), [], "a negation clause appended in place read as an undo")
+
+    def test_an_appended_negation_clause_on_a_short_line_passes(self):  # control: green on the old code, a guard for the fix
+        self.assertEqual(self.resolve("deploy now", "deploy now fast", "deploy now fast, never past 55 minutes"), [])
+
+    def test_a_real_dropped_line_is_still_flagged(self):  # control
+        self.red("", self.S0, "")
+        self.red("deploy now", "deploy now fast", "")
+        self.assertTrue(any("cfg.txt" in p for p in self.in_place(self.S0, "")), "an in-place delete of the line was not flagged")
+
+    def test_a_negation_inside_the_original_words_is_still_flagged(self):  # control
+        inside = self.S0.replace("merges a pull", "does not merge a pull")
+        self.red("", "deploy now", "deploy not now")
+        self.red("", self.S0, inside)
+        self.assertTrue(any("cfg.txt" in p for p in self.in_place(self.S0, inside)), "an in-place negation inside the words was not flagged")
+
+    def test_a_hash_comment_paste_is_flagged(self):
+        """`x = run(cfg)` becomes `x = True`, and the original words sit after a # with a negation: a comment, not an edit."""
+        self.red("", "x = run(cfg)", "x = True  # run(cfg) is not needed")
+
+    def test_a_hash_comment_paste_is_flagged_in_place(self):
+        self.assertTrue(any("cfg.txt" in p for p in self.in_place("x = run(cfg)", "x = True  # run(cfg) is not needed")),
+                        "an in-place paste of the words into a # comment was not flagged")
+
+    def test_a_slash_comment_paste_with_its_semicolon_is_flagged(self):  # control: flagged on the old code too, a guard for the fix
+        self.red("", "x = run(cfg);", "x = true;  // run(cfg) is not needed")
+
+    def test_a_slash_comment_paste_with_its_semicolon_is_flagged_in_place(self):  # control
+        self.assertTrue(any("cfg.txt" in p for p in self.in_place("x = run(cfg);", "x = true;  // run(cfg) is not needed")),
+                        "an in-place paste of the words into a // comment, with the semicolon, was not flagged")
+
+    def test_a_slash_comment_paste_without_a_semicolon_is_flagged(self):
+        self.red("", "x = run(cfg)", "x = true  // run(cfg) is not needed")
+
+    def test_a_slash_comment_paste_without_a_semicolon_is_flagged_in_place(self):
+        self.assertTrue(any("cfg.txt" in p for p in self.in_place("x = run(cfg)", "x = true  // run(cfg) is not needed")),
+                        "an in-place paste of the words into a // comment, without a semicolon, was not flagged")
+
+    def test_a_line_with_no_words_keeps_the_old_rule(self):
+        """`}` becomes `} not reachable`. A line with no words has no original words to keep in order, so extends() must
+        not read the added negation as a clause. Unit claim on extends(), the one home of that rule, with a control: a line
+        with words still passes when a clause follows its words."""
+        self.assertFalse(C.extends("}", "} not reachable"), "a line with no words passed extends(): the negated clause was read as an addition")
+        self.assertTrue(C.extends("run(a)", "run(a), never past 55 minutes"), "control: a clause after the words no longer passes extends()")
+
+    def test_a_line_with_no_words_keeps_the_old_rule_in_place(self):
+        """The in-place path reaches the same decision: rewritten() takes extends() for a hunk, so a wordless line changed
+        to a negated line is no rewrite."""
+        self.assertFalse(C.extends("}", "} not reachable"), "a line with no words passed extends(): the negated clause was read as an addition")
+        self.assertFalse(C.rewritten("}", [(("}",), ("} not reachable",))]), "rewritten() took a wordless line's negated change as a rewrite")
+        self.assertTrue(C.extends("run(a)", "run(a), never past 55 minutes"), "control: a clause after the words no longer passes extends()")
+
+    # Code keeps the rule that a negation anywhere in the new line is a change. Only prose (.md, .txt, .rst) may take
+    # an appended negation clause as an addition, so these pin the code side of that split.
+
+    def test_a_code_conditional_added_to_a_merged_python_line_is_flagged(self):
+        self.red("", "retry = 3", "retry = 3 if not CI else 0", path="app.py")
+
+    def test_a_code_conditional_added_to_a_merged_shell_line_is_flagged(self):
+        self.red("", "if ready:", "if ready and not blocked:", path="run.sh")
+
+    def test_a_code_conditional_added_in_place_in_python_is_flagged(self):
+        got = self.in_place("retry = 3", "retry = 3 if not CI else 0", path="app.py")
+        self.assertTrue(any("app.py" in p for p in got), "an in-place conditional on a python line was not flagged: %r" % got)
+
+    def test_a_code_conditional_added_in_place_in_shell_is_flagged(self):
+        got = self.in_place("if ready:", "if ready and not blocked:", path="run.sh")
+        self.assertTrue(any("run.sh" in p for p in got), "an in-place conditional on a shell line was not flagged: %r" % got)
+
+    def test_a_negated_tail_after_a_python_string_with_a_hash_is_flagged(self):
+        self.red("", 's = "a#b"', 's = "a#b" if not CI', path="s.py")
+
+    def test_an_appended_negation_clause_is_not_a_merge_drop_in_markdown(self):  # control: green on the old code, a guard for the fix
+        self.assertEqual(self.resolve("", self.S0, self.S1, path="guide.md"), [],
+                         "a negation clause appended after every original word read as a drop in a .md file")
+
+    def test_a_lone_quote_in_prose_keeps_its_appended_clause(self):  # control: green on the old code, a guard for the fix
+        self.assertEqual(self.resolve("", "Don't do it", "Don't do it, never past 55 minutes", path="guide.md"), [],
+                         "a lone quote in a .md line made its appended clause read as a drop")
+
+    def test_a_url_in_prose_keeps_its_appended_clause(self):  # control: green on the old code, a guard for the fix
+        self.assertEqual(self.resolve("", "see http://x.io", "see http://x.io, not for CI", path="guide.md"), [],
+                         "the // inside a URL made the appended clause of a .md line read as a drop")
 
 
 class MainLineDrop:
@@ -2120,6 +2237,34 @@ class RestoredLine(MainLineDrop, unittest.TestCase):
         self.assertTrue(any("added by main" in g for g in got), "no finding names the dropped line: %r" % got)
 
 
+REMEDY_BEGIN, REMEDY_END = "--- begin commit message ---", "--- end commit message ---"  # the marker lines a refusal prints around its message
+PROOF = "git log -1 --format='%(trailers:key=Drops-lines)'"  # the command a refusal prints to read the trailer back
+
+
+def printed_message(text):
+    """The commit message a refusal prints: the unprefixed lines between the two marker lines, each with its newline.
+    None when the text holds no such block, or a marker more than once."""
+    lines = text.splitlines()
+    if lines.count(REMEDY_BEGIN) != 1 or lines.count(REMEDY_END) != 1:
+        return None
+    i, j = lines.index(REMEDY_BEGIN), lines.index(REMEDY_END)
+    return "\n".join(lines[i + 1:j]) + "\n" if i < j else None
+
+
+def read_back(message):
+    """Commits `message` in a scratch repo, with a real path and reason in place of the placeholders, and reads the
+    Drops-lines trailer back with git. -> what git reads: empty when the line is not in the last paragraph."""
+    text = message.replace("<path>", "app.txt").replace("<reason>", "the owner wants Card back")
+    scratch = Repo()
+    path = os.path.join(scratch.tmp.name, "COMMIT_MSG")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    scratch.put("note.txt", "a file\n")
+    scratch.sh("add", "-A")
+    scratch.sh("commit", "-q", "-F", path)
+    return scratch.sh("log", "-1", "--format=%(trailers:key=Drops-lines)")
+
+
 class DropsLinesHint(unittest.TestCase):
     """A `Drops-lines:` line that git does not parse as a trailer (it is not in the last paragraph) excuses nothing.
     A refusal names the commit and says where the trailer goes. The hint never excuses a finding, and it shows
@@ -2259,6 +2404,115 @@ class DropsLinesHint(unittest.TestCase):
         text = out.getvalue() + "\n" + str(cm.exception)
         self.assertIn("app.txt", str(cm.exception))  # the refusal holds
         self.assertTrue(any(sha[:7] in l and self.HINT in l for l in text.splitlines()), text)
+
+    # ------------------------------------------------ the remedy a refusal prints
+
+    def remedy_run(self):
+        """PR 1 lands and `oops` reverts it, so main() refuses the branch. -> (rc, the text main() prints)."""
+        self.land_pr()
+        self.revert_with("Bring Card back")
+        return self.run_main(["--upstream", "origin/main", "--head", "HEAD", "--repo", self.r.dir], "utf-8")
+
+    def test_a_refusal_prints_a_complete_commit_message(self):
+        """The remedy is a commit message: a subject line, a blank line, then one last paragraph that holds the Drops-lines
+        line with Co-Authored-By and Claude-Session under it and no blank line between them."""
+        rc, text = self.remedy_run()
+        self.assertEqual(rc, 1, "premise: the refused check exits 1: %r" % text)
+        block = printed_message(text)
+        self.assertIsNotNone(block, "the refusal prints no commit message between the marker lines: %r" % text)
+        lines = block.splitlines()
+        self.assertTrue(lines, "the commit message block is empty: %r" % block)
+        self.assertTrue(lines[0].strip(), "the commit message has no subject line: %r" % block)
+        self.assertEqual(lines[1:2], [""], "the subject is not followed by a blank line: %r" % block)
+        last = lines[2:]
+        self.assertNotIn("", last, "the trailers are split by a blank line, so git reads only the part after it: %r" % block)
+        self.assertIn("Drops-lines: <path> -- <reason>", last, "the last paragraph has no Drops-lines line with placeholders: %r" % block)
+        self.assertTrue(any(l.startswith("Co-Authored-By:") for l in last), "the last paragraph has no Co-Authored-By line: %r" % block)
+        self.assertTrue(any(l.startswith("Claude-Session:") for l in last), "the last paragraph has no Claude-Session line: %r" % block)
+
+    def test_the_printed_message_reads_its_trailer_once_committed(self):
+        """The proof: committed with git, with a real path and reason in place of the placeholders, the printed message reads
+        back as a Drops-lines trailer."""
+        rc, text = self.remedy_run()
+        block = printed_message(text)
+        self.assertIsNotNone(block, "the refusal prints no commit message, so there is nothing to commit: %r" % text)
+        read = read_back(block)
+        self.assertIn("app.txt -- the owner wants Card back", read, "git reads no Drops-lines trailer from the printed message: %r" % read)
+
+    def test_the_refusal_prints_the_proof_command(self):
+        """After the commit, the refusal says how to read the trailer back."""
+        rc, text = self.remedy_run()
+        self.assertIn(PROOF, text, "the refusal does not print the proof command: %r" % text)
+
+    def test_a_green_check_prints_no_remedy(self):  # control: green on the old code, and must stay so
+        """No finding: no marker block and no proof command. The green output stays as it is."""
+        r = self.r
+        r.sh("checkout", "-q", "-b", "clean")
+        r.commit("other work", other_txt="other v2\n")
+        rc, text = self.run_main(["--upstream", "origin/main", "--head", "HEAD", "--repo", r.dir], "utf-8")
+        self.assertEqual(rc, 0, "premise: a branch with no finding exits 0: %r" % text)
+        self.assertIsNone(printed_message(text), "a green check printed a commit message: %r" % text)
+        self.assertNotIn(PROOF, text, "a green check printed the proof command")
+
+    def test_a_drops_lines_line_in_its_own_paragraph_reads_as_nothing_and_is_hinted(self):  # control
+        """The pitfall the remedy's layout avoids: a Drops-lines line in its own paragraph above Co-Authored-By reads as no
+        trailer, and misplaced() names the commit."""
+        self.land_pr()
+        sha = self.revert_with(self.ABOVE)
+        self.assertEqual(self.parsed(sha), "", "fixture: git must not parse the line as a trailer")
+        hints = C.misplaced(self.r.dir, "origin/main..HEAD")
+        self.assertTrue(any(sha[:9] in h and self.HINT in h for h in hints), "misplaced() does not name the commit: %r" % hints)
+
+    def test_the_merge_refusal_prints_the_complete_remedy(self):
+        """merge.undo_check refuses with the same remedy: the commit message between the markers, which git reads back as a
+        trailer, and the proof command."""
+        import merge
+        self.land_pr()
+        self.revert_with("Bring Card back")
+        with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(merge.Stop) as cm:
+            merge.undo_check(self.r.dir, "origin/main")
+        text = str(cm.exception)
+        self.assertIn("app.txt", text, "premise: the refusal names the file")
+        block = printed_message(text)
+        self.assertIsNotNone(block, "the merge refusal prints no commit message between the marker lines: %r" % text)
+        self.assertIn("app.txt -- the owner wants Card back", read_back(block), "git reads no Drops-lines trailer from the merge refusal's message")
+        self.assertIn(PROOF, text, "the merge refusal does not print the proof command: %r" % text)
+
+    # ------------------------------------------------ which reason is kept
+
+    def two_reasons(self, first, second):
+        """PR 1 lands; `oops` reverts it, so app.txt has a finding. The revert commit carries the first reason, and a later
+        commit on the branch carries the second. The branch's tip is the later commit."""
+        self.land_pr()
+        self.revert_with("Bring Card back\n\nDrops-lines: app.txt -- %s" % first)
+        self.r.commit("tidy again\n\nDrops-lines: app.txt -- %s" % second, other_txt="other v3\n")
+
+    def test_the_oldest_commit_reason_is_kept(self):  # characterization: green on this head
+        """Two commits carry a reason for the same path. allowed() keeps the oldest: git lists the newest first and each
+        line overwrites the one before it. check() prints that reason, and the later one does not replace it."""
+        self.two_reasons("FIRST wrong reason", "SECOND right reason")
+        self.assertEqual(C.allowed(self.r.dir, "origin/main..HEAD"), {"app.txt": "FIRST wrong reason"},
+                         "allowed() did not keep the oldest commit's reason")
+        got = self.r.verdict()
+        self.assertEqual(got, [], "premise: the revert is excused by the trailers")
+        self.assertEqual(self.r.notes, ["ALLOWED app.txt: FIRST wrong reason"], "check() does not print the oldest commit's reason")
+
+    def test_a_pr_body_reason_beats_both_commits(self):  # characterization: green on this head
+        """The PR body's Drops-lines line is read after the commits, so it overwrites both of their reasons."""
+        self.two_reasons("FIRST wrong reason", "SECOND right reason")
+        body = "Why this lands.\n\nDrops-lines: app.txt -- BODY reason"
+        self.assertEqual(C.allowed(self.r.dir, "origin/main..HEAD", body), {"app.txt": "BODY reason"},
+                         "the PR body's reason did not beat the commits")
+        got, notes = C.check(self.r.dir, "origin/main", "HEAD", pr_body=body)
+        self.assertEqual(got, [], "premise: the revert is excused by the PR body")
+        self.assertEqual(notes, ["ALLOWED app.txt: BODY reason"], "check() does not print the PR body's reason")
+
+    def test_the_remedy_says_a_pr_body_line_replaces_the_reason_only_where_the_merge_tool_reads_it(self):
+        """The remedy tells the reader that the oldest commit's reason is kept, and that a PR-body line replaces it only
+        where the merge tool reads the body. One line of the text must hold both halves, so a word in another line cannot pass."""
+        self.assertTrue(any("oldest" in line and "PR-body line replaces it only where the merge tool reads the body" in line
+                            for line in C.remedy_text().splitlines()),
+                        "the remedy does not say the oldest reason is kept, and that a PR-body line replaces it only where the merge tool reads the body")
 
     # ------------------------------------------------ reads of the message
 
@@ -3061,6 +3315,21 @@ class RevivedNote(unittest.TestCase):
         self.assertIsNotNone(e, "premise: check() reads the octopus merge as UNKNOWN")
         self.assertIsInstance(getattr(e, "notes", None), list,
                               "the UNKNOWN for the octopus merge carries no .notes list: %r" % (getattr(e, "notes", None),))
+
+    def test_the_merge_refusal_for_an_octopus_finding_carries_the_complete_remedy(self):
+        """The other refusal of merge.undo_check: an Unknown that carries findings. It prints the same remedy and proof command."""
+        import merge
+        self.start(union=True)
+        self.merge_main()
+        self.octopus()
+        with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(merge.Stop) as cm:
+            merge.undo_check(self.r.dir, "origin/main")
+        text = str(cm.exception)
+        self.assertIn("could not read the whole history", text, "premise: the refusal is the octopus Unknown that carries findings")
+        block = printed_message(text)
+        self.assertIsNotNone(block, "the octopus refusal prints no commit message between the marker lines: %r" % text)
+        self.assertIn("app.txt -- the owner wants Card back", read_back(block), "git reads no Drops-lines trailer from the octopus refusal's message")
+        self.assertIn(PROOF, text, "the octopus refusal does not print the proof command: %r" % text)
 
     def test_main_prints_the_finding_then_unknown_and_exits_1_without_strict(self):
         self.start(union=True)

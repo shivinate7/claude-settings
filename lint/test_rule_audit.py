@@ -612,6 +612,16 @@ class RealRepoOutputTests(unittest.TestCase):
         self.assertIn("%d are `judgment`" % kinds.count("judgment"), self.out, self.out)
 
 
+class CountsFromRestMechanismTests(unittest.TestCase):
+    """verification-counts-from-rest is a judgment: a model reads the reply, and no test proves its verdict.
+    Its map row must read `judgment`, not `check`."""
+
+    def test_counts_from_rest_row_is_a_judgment(self):
+        with open(rule_audit.MAP_FILE, encoding="utf-8") as f:
+            rules = json.load(f)["rules"]
+        self.assertEqual(rules["verification-counts-from-rest"]["mechanism"]["kind"], "judgment")
+
+
 SIBLING_MAP = {
     "rules": {
         "shared-trees-no-destructive-git": {"mechanism": {"kind": "guard", "ref": "sibling-rule"}}
@@ -1095,17 +1105,14 @@ REFUSAL_UNCITED_EXEMPT = {
     "merge:Host.base_state: out": ("refusal-matches-rule", "the base state read failed, and the stop prints gh's output unchanged"),
     "merge:Host.gh: network error from `gh": ("refusal-matches-rule", "gh failed on a network error after its retries, and the stop prints gh's output"),
     "merge:Host.pages: reading from GitHub failed": ("refusal-matches-rule", "a repo file could not be read from GitHub, and the stop names the file and the error"),
-    "merge:Host.pr: reading the pull request failed": ("refusal-matches-rule", "the pull request could not be read, and the stop prints gh's output"),
     "merge:Host.pr_number: no pull request is named": ("refusal-matches-rule", "no pull request is named and the branch cannot be read, so the stop prints git's output"),
     "merge:Host.pr_number: open pull requests have the head": ("refusal-matches-rule", "more than one open pull request has the same head, so the stop names the branch"),
     "merge:Host.required_names: merge.ignoreChecks names a required check": ("refusal-matches-rule", "the config names a required check to ignore, and the stop states that rule with no decision cite"),
     "merge:base_job_caps: cannot read to look for .github/workflows": ("refusal-matches-rule", "the workflow folder on the base could not be listed, and the stop prints git's output"),
     "merge:base_verdict: cannot read origin/ to look for .github/workflows": ("refusal-matches-rule", "the workflow folder on the base could not be listed, and the stop prints git's output"),
     "merge:confirm: the pull request is": ("refusal-matches-rule", "the pull request is closed or conflicting, and the stop names GitHub's state"),
-    "merge:confirm: the push of was refused": ("refusal-matches-rule", "a plain push was refused, so nothing reaches origin, and the stop prints only that", 2),
-    "merge:confirm: why": ("refusal-matches-rule", "the check wait's reason is a Host method's return, which the reader cannot follow"),
-    "merge:confirm: merge: the worktree is gone": ("refusal-matches-rule", "the worktree is gone, so the claim cannot be reverted, and the stop names the claim and the branch"),
-    "merge:confirm: unexpected after the claim was pushed": ("refusal-matches-rule", "an error that is not a Stop hit the run after the claim, and the stop prints its name and text"),
+    "merge:confirm: the push of was refused": ("refusal-matches-rule", "a plain push was refused, so nothing reaches origin, and the stop prints only that", 1),
+    "merge:confirm: unexpected after the claim was pushed":("refusal-matches-rule", "an error that is not a Stop hit the run after the claim, and the stop prints its name and text"),
     "merge:confirm: unexpected after the claim was pushed: merge: the worktree is gone": ("refusal-matches-rule", "the same unexpected error with the worktree gone, so the claim stays on the branch"),
     "merge:confirm: the local main did not move in": ("refusal-matches-rule", "the local main cannot fast-forward in that tree, so the stop names the fix by hand"),
     "merge:confirm: is not on . Nothing was moved": ("refusal-matches-rule", "the commit is not on origin, so no local move was made, and the stop names only that"),
@@ -3659,6 +3666,20 @@ class RefusalCiteRatchetTests(unittest.TestCase):
         src = body_src('    raise Stop("not in a git checkout")\n')
         exempt = {"merge:go: not in a git checkout": "refusal-matches-rule"}
         self.assertTrue(any("needs a reason" in p for p in module_problems(src, exempt)))
+
+
+class SectionDirTests(unittest.TestCase):
+    """section_dir(): the folder the guard runner's SECTION_DIR names. This repo names tests/guard; a root with no runner names none."""
+
+    def test_this_repo_names_the_guard_section_folder(self):
+        self.assertTrue(os.path.isdir(os.path.join(rule_audit.ROOT, "tests", "guard")), "scope: tests/guard is not a folder of this repo")
+        self.assertEqual(rule_audit.section_dir(), "tests/guard")
+
+    def test_a_root_with_no_runner_names_no_folder(self):
+        root = tempfile.mkdtemp(dir=_test_temp.run_folder())
+        self.addCleanup(shutil.rmtree, root, True)
+        self.assertFalse(os.path.exists(os.path.join(root, "hooks", "test_guard.py")), "scope: the root has a runner")
+        self.assertIsNone(rule_audit.section_dir(root), "section_dir named a folder for a root with no runner")
 
 
 if __name__ == "__main__":
