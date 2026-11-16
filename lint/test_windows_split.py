@@ -177,7 +177,7 @@ LINUX_SUITES = {
     "python3 hooks/test_mutate_report.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_mutate_js.py": (None, None),
     "python3 hooks/test_mutate_replay.py": (None, None),
-    "python3 lint/test_check_landed_dirs.py": (SCOPE_DOC_SKILLS, None),
+    "python3 lint/test_check_landed_dirs.py": (SCOPE_DOC_SKILLS_DECISIONS, None),  # its helper-home case opens a decision record
     "python3 lint/test_settings_matcher.py": (SCOPE_DOC_DECISIONS, None),
     "python3 lint/test_hook_platform_exit.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_check_hook_stubs.py": (None, None),

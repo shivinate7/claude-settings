@@ -19,8 +19,9 @@ Pinned here:
   8. a docs-only change runs exactly the doc steps that list its group, or `any`, with no other step's change.
 
 Steps are read by lint/workflow_steps.py. The `if:` evaluator is eval_if in lint/test_windows_split.py.
-Item 5 reads the entry file only, and a name split across arguments is not seen. Item 6 follows imports and read
-calls (open, run, join and the like), so a read one or two files down is seen. A comment names nothing in Python.
+Item 5 reads the entry file only. Item 7 reads each name as md_names_reached reads it: a whole path, or the constant
+arguments of an os.path.join, so join(ROOT, "docs", "decisions", "x.md") reads docs/decisions/x.md. Item 6 follows imports
+and read calls (open, run, join and the like), so a read one or two files down is seen. A comment names nothing in Python.
 """
 import ast
 import os
@@ -188,7 +189,6 @@ DOC_STEPS = {
     'Stop-hook cannot-claim suite': ("rules",),
     'Stop-hook review-record fixture suite': ("rules",),
     'CLAUDE.md size (warns, never fails)': ("rules",),
-    'Landed-directory check fixture suite': ("skills",),
     'Landed-directory manifest agreement': ("skills",),
     'project-ops skill scaffold suite': ("skills",),
     'ios-apps skill starter suite': ("skills",),
@@ -199,9 +199,10 @@ DOC_STEPS = {
     'Rule audit fixture suite': ("decisions", "rules"),
     'Rule mechanization audit': ("decisions", "rules"),
     'Route judge measure fixture suite': ("decisions", "rules", "other"),
+    'Landed-directory check fixture suite': ("skills", "decisions"),  # HelperHomeRecordTests reads the helper-home decision record
     'Artifact cite check': ("decisions", "other"),
     'Waiting page park relay prose suite': ("skills", "other"),
-    'Map check': ("decisions", "map", "other"),  # the check reads every decision and debt record
+    'Map check': ("decisions", "map", "other"),  # reads the map pages and debt records; map.config.json sets no decisionsDir, so no decision record is read
     # Any .md: the read is wider than the groups above, or not verified.
     # lint/report_guard.py reaches hooks/question_form.py past_rulings, which opens docs/decisions and docs/debts; whether its verdict
     # depends on their content is unmeasured, so the step fails safe on every doc group.
@@ -475,7 +476,7 @@ MAIN_STEPS = [
 ALLOWED = {
     "hooks/test_call_judge.py": (["README.md", "docs/design/last-answer-notes.md"], "README.md is written into a temp repo; the other name is in comments"),
     "hooks/test_decision_watch.py": (["CLAUDE.md", "decisions/reply-judge-samples-never-refuses.md"], "CLAUDE.md is written into temp repos; the record name is in a comment"),
-    "hooks/test_feedback_inbox.py": ([".claude/CLAUDE.md", "CLAUDE.md", "README.md", "docs/todo.md"], "fixture repos track or write these names in temp dirs"),
+    "hooks/test_feedback_inbox.py": ([".claude/CLAUDE.md", "CLAUDE.md", "README.md", "docs/debts/notes.md", "docs/todo.md"], "fixture repos track or write these names in temp dirs"),
     "hooks/test_prose_judge.py": (["README.md", "decisions/test-strategy-reset.md"], "a hook payload's file path and edit text"),
     "hooks/test_question_form_letters_frozen.py": (["docs/decisions/option-keys-are-letters.md"], "named in the module docstring"),
     "hooks/test_session_start.py": ([".claude/CLAUDE.md", "CLAUDE.md"], "written into temp config and checkout dirs"),
@@ -574,11 +575,32 @@ def tracked_md():
     return out.split()
 
 
+def split_join_names(text):
+    """The paths that os.path.join builds from runs of constant arguments: join(ROOT, "docs", "x.md") is docs/x.md. A
+    non-constant argument ends a run. Empty when `text` does not parse as Python: its joins are then read as text."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return set()
+    out = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and callee(node) == "join":
+            run = []
+            for arg in node.args + [None]:  # None closes the last run
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    run.append(arg.value)
+                    continue
+                if run:
+                    out.add("/".join(run))
+                run = []
+    return out
+
+
 def md_names_reached(text, tracked):
     """The tokens of `text` that name a tracked .md file: the same path, or a path that ends in one. A name written
-    whole is seen; a name split across arguments, such as os.path.join(root, "docs", "x.md"), is not."""
+    whole is seen, and so is a path split across the constant arguments of os.path.join (split_join_names)."""
     reached = set()
-    for tok in MD_TOKEN.findall(text):
+    for tok in MD_TOKEN.findall(text) + sorted(split_join_names(text)):
         for name in tracked:
             if tok == name or ("/" in tok and name.endswith("/" + tok)):
                 reached.add(tok)
@@ -832,6 +854,15 @@ class MdNamesInText(unittest.TestCase):
     def test_a_dotted_claude_path_is_its_own_name(self):
         self.assertEqual(md_names_reached('"(.claude/CLAUDE.md)"', self.TRACKED), {".claude/CLAUDE.md"})
 
+    def test_a_path_split_across_join_arguments_is_reached(self):
+        text = 'path = os.path.join(ROOT, "docs", "decisions", "x.md")\n'
+        self.assertEqual(md_names_reached(text, self.TRACKED), {"docs/decisions/x.md"})
+
+    # Control: a name between two constants ends the run, so the two pieces are not joined into a tracked path.
+    def test_a_join_with_a_name_between_its_constants_joins_nothing(self):
+        text = 'path = os.path.join("docs", SUB, "x.md")\n'
+        self.assertEqual(md_names_reached(text, self.TRACKED), set())
+
     def test_an_untracked_name_is_not_reached(self):
         self.assertEqual(md_names_reached('open("missing.md")', self.TRACKED), set())
 
@@ -1014,6 +1045,22 @@ class DocStepEntriesReadOnlyTheirFlags(ChecksStepBase):
         got = doc_name_problems(entry, {"agents"}, read_repo(entry), tracked_md())
         self.assertTrue(any(p.startswith("skills/design-explore/SKILL.md") for p in got), got)
 
+    # Named failure: a decision record read through os.path.join arguments is not reported when the step's if does not read the
+    # decisions group, so a docs-only edit to that record skips a step that reads it. The entry is in no ALLOWED list.
+    def test_a_split_join_read_of_a_decision_record_is_reported_without_its_flag(self):
+        entry = "fixture/split_read.py"
+        text = 'import os\nROOT = "."\nRECORD = os.path.join(ROOT, "docs", "decisions", "x.md")\n'
+        tracked = ["docs/decisions/x.md", "skills/a/SKILL.md"]
+        self.assertEqual(doc_name_problems(entry, {"skills"}, text, tracked), ["docs/decisions/x.md (decisions)"],
+                         "the split read of a decision record is not reported when the if reads only skills")
+
+    # Control beside it: the same read is no problem once the if reads the decisions group.
+    def test_a_split_join_read_of_a_decision_record_with_its_flag_is_no_problem(self):
+        entry = "fixture/split_read.py"
+        text = 'import os\nROOT = "."\nRECORD = os.path.join(ROOT, "docs", "decisions", "x.md")\n'
+        tracked = ["docs/decisions/x.md", "skills/a/SKILL.md"]
+        self.assertEqual(doc_name_problems(entry, {"decisions"}, text, tracked), [])
+
 
 class DocStepsAgreeWithLinuxSplit(ChecksStepBase):
     def test_each_doc_step_run_in_the_linux_split_has_its_groups_condition(self):
@@ -1045,6 +1092,26 @@ class DocsOnlyPullRequestSteps(ChecksStepBase):
         for path, _ in DOC_CASES:
             with self.subTest(path=path):
                 self.assert_steps_run_by_groups(path)
+
+    # Named failure: a docs-only edit to the helper-home decision record skips the landed-dirs suite, which opens that record. The
+    # flags are read first (P7): the record's decisions flag is on and code is off, then the step's `if:` decides.
+    def test_a_docs_only_edit_to_the_helper_home_record_runs_the_landed_dirs_suite(self):
+        path = "docs/decisions/builders-cannot-edit-tests.md"
+        got = scope_run([path], existing=[path])
+        self.assertEqual(got.get("doc_decisions"), "true", f"doc_decisions is not on for {path}: {got}")
+        self.assertEqual(got.get("code"), "false", f"{path} set code: {got}")
+        step = self.named(self.steps(), "Landed-directory check fixture suite")
+        self.assertTrue(runs_on(if_of(step), got),
+                        f"the landed-dirs suite skips a docs-only edit to {path}: its if is {if_of(step)!r}")
+
+    # Control beside it: a docs-only edit to a doc that no skill or decision group holds skips the landed-dirs suite, as before.
+    def test_a_docs_only_edit_outside_the_skill_and_decision_groups_skips_the_landed_dirs_suite(self):
+        path = "docs/notes.md"
+        got = scope_run([path], existing=[path])
+        self.assertEqual(got.get("doc_other"), "true", f"doc_other is not on for {path}: {got}")
+        self.assertEqual(got.get("code"), "false", f"{path} set code: {got}")
+        step = self.named(self.steps(), "Landed-directory check fixture suite")
+        self.assertFalse(runs_on(if_of(step), got), f"the landed-dirs suite runs for a docs-only edit to {path}: its if is {if_of(step)!r}")
 
 
 if __name__ == "__main__":
