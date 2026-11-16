@@ -7,8 +7,9 @@
  "lane": "session_013NEJL1bHGk79VLSp3tcLEi",
  "owner": "triage",
  "blockedBy": [],
- "why": "The brief-from-step tool reads optional done_check and ci_only, but no step has them, so briefs built from steps lack the proof check.",
+ "why": "The brief-from-step tool reads optional done_check and ci_only, but no step has them, so briefs built from steps lack the proof check.\n\n[22:41 CST Nov 15, triage] PR #3319 (\"Steps may carry done_check and ci_only; upkeep lists unreadable ones (step step-done-check-field)\"; branch worktree-step-done-check-field): open, draft, head 886c2616c9b1, REST read at 22:41 CST Nov 15 (pull_request_read; mergeable_state clean; 9 commits, 3 files; the PR body names this step). Lane rebase-wave-1c (session_013NEJKyzkbY7Ayvxza5a6o9), 22:41 CST Nov 15, via the coordinator (the lane's report, unread by triage; the head sha matches its 886c2616c): item 888 a applied (keep both rows, the PR's first); builder Sonnet merged main; test-author re-pointed the pinned row-order test; fix checks PASS twice (reviewer Sonnet) on 62993b336 and on the second main merge 886c2616c; `merge --lane-lint 3319` PASS (406 s) at 886c2616c; handed to runner 10 as a draft (not ready, not merged). Guard or check change: yes (a new upkeep check). The PR body (older): round 1 PASS (sonnet), fix check PASS at 00238e4a5. Not set done; status doing.",
  "source": "Coordinator 17:04 CST Nov 13, from lane brief-from-step (session_013NEJL3zemFrPdTzdnwhpVi; PRs #3261, #3262); the lane's measures, unchecked by the coordinator and by triage.",
  "note": "Filed 17:05 CST Nov 13. Add optional `done_check` and `ci_only` to the step record, taken from the lane's template, and to build.py's checks. A record-form change on the roadmap branch; triage can do it, or a lane builds the reader side (step brief-from-step). Past rulings not checked. Not started. Coordinator 19:54 CST Nov 13 (19:53, owner asked it to start the lanes): lane started, session_013NEJL1bHGk79VLSp3tcLEi (Sonnet, medium; searches for duplicates first).",
- "updatedAt": "2026-11-13T19:54:01-06:00"
+ "updatedAt": "2026-11-15T22:41:00-06:00",
+ "pr": 3319
 }

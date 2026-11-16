@@ -2,9 +2,11 @@
  "id": "pr-3319-upkeep-row-order",
  "at": "2026-11-15T19:48:00-06:00",
  "title": "Item 888 a: keep both rows, PR first (PR #3319, lane rebase-wave-1c)",
- "ruling": "Owner page save 19:48 CST Nov 15, item 888 (key pr-3319-upkeep-row-order), pick a, as relayed by the coordinator: keep both rows, PR first. PR #3319, lane rebase-wave-1c. The item's option text was not read by triage, so what \"both rows\" and \"PR first\" name is the coordinator's relay, unverified.",
+ "ruling": "Owner page save 19:48 CST Nov 15, item 888 (key pr-3319-upkeep-row-order), pick a, as relayed by the coordinator: keep both rows, PR first. PR #3319, lane rebase-wave-1c. The item's option text was not read by triage, so what \"both rows\" and \"PR first\" name is the coordinator's relay, unverified. APPLIED 22:41 CST Nov 15 (lane rebase-wave-1c's report via the coordinator, 22:41 CST; unread by triage): item 888 a is applied on PR #3319 (step step-done-check-field; keep both rows, the PR's first). The owner's 888 a covers the row order only, not the merge of #3319: no owner yes names that merge, and #3319 is a guard or check change (a new upkeep check), so it merges under the usual review and merge checks.",
  "quote": "a",
  "source": "Owner page save 19:48 CST Nov 15, relayed by the coordinator; triage did not read the save or the item's option text",
  "status": "open",
- "supersedes_none": "A pick on a new question; it supersedes no ruling."
+ "supersedes_none": "A pick on a new question; it supersedes no ruling.",
+ "step": "step-done-check-field",
+ "updatedAt": "2026-11-15T22:41:00-06:00"
 }
