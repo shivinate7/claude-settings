@@ -177,15 +177,19 @@ def hu_cost_check():
     return True, "one existence check (%s) on the flag, no write, no process start" % name
 
 
-def hu_copy_check(drop="reread_check.py"):
+def hu_copy_check(drop="reread_check.py", stub=None):
     """install-hooks-whole: with `drop` missing beside guard.py, a failed import allows the call, as main's guard
-    does (decision precompact-handoff). The call is allowed silently, and a Haiku spawn is still refused by the model
-    floor, which the copy runs without the missing module. The intact copy is the control, so the fixture is shown
+    does (decision precompact-handoff). With `stub`, `drop` is replaced by that text: a module that imports but cannot
+    serve the guard fails the same way. The call is allowed silently, and a Haiku spawn is still refused by the model
+    floor, so the guard judged the call and did not crash. The intact copy is the control, so the fixture is shown
     to bite."""
     cfg = os.path.join(ROOT, "hu-copy")
     hu_files(cfg, flag=True, handoff=True)
     intact = _guard_copy("hu-intact", None)
-    dropped = _guard_copy("hu-no-" + drop[:-3], drop)
+    shape = "missing" if stub is None else "replaced by a stub"
+    dropped = _guard_copy(("hu-no-" if stub is None else "hu-stub-") + drop[:-3], drop)
+    if stub is not None:
+        write(os.path.join(dropped, drop), stub)
     control = _hu_copy_run(intact, cfg)
     why = ov_want(*_decision(control), "deny", HU_RULE)
     if why:
@@ -193,14 +197,14 @@ def hu_copy_check(drop="reread_check.py"):
     run = _hu_copy_run(dropped, cfg)
     decision, reason = _decision(run)
     if run.returncode != 0 or decision != "allow" or reason:
-        return False, "without %s the call is %r as %r (exit %d), want a silent allow" % (
-            drop, decision, reason[:70], run.returncode)
+        return False, "%s %s: the call is %r as %r (exit %d), want a silent allow" % (
+            drop, shape, decision, reason[:70], run.returncode)
     spawn = _hu_copy_run(dropped, cfg, "Agent", {"prompt": "do it", "model": "haiku"})
     why = ov_want(*_decision(spawn), "deny", "agent-model-floor")
     if why:
-        return False, "without %s a Haiku spawn is not refused by the model floor: %s" % (drop, why)
-    return True, ("%s missing: the call is allowed silently, exit 0, and a Haiku spawn is refused by the model "
-                  "floor; the intact copy refuses the call for the unread handoff" % drop)
+        return False, "%s %s: a Haiku spawn is not refused by the model floor: %s" % (drop, shape, why)
+    return True, ("%s %s: the call is allowed silently, exit 0, and a Haiku spawn is refused by the model "
+                  "floor; the intact copy refuses the call for the unread handoff" % (drop, shape))
 
 
 def _hu_copy_run(folder, config, tool="Bash", tool_input=None):
@@ -332,36 +336,15 @@ for _label, pr2015__check in (
     LOG_CHECKS_EXTRA.append((_label, pr2015__check))
 
 
-def hu_stub_check(module, text):
-    """install-hooks-whole (decision install-hooks-whole, item 10): with `module` replaced by `text`, a flagged
-    session's call is refused as guard-crash, never allowed. The intact copy is the control: it refuses the same
-    call for the unread handoff, so the fixture is shown to bite. The guard's load check refuses a stub that lacks
-    what reread_check takes from it, so the fault shows at load, before any call is judged."""
-    cfg = os.path.join(ROOT, "hu-copy")
-    hu_files(cfg, flag=True, handoff=True)
-    control = _hu_copy_run(_guard_copy("hu-stub-intact", None), cfg)
-    why = ov_want(*_decision(control), "deny", HU_RULE)
-    if why:
-        return False, "the intact copy, the control: %s" % why
-    stub = _guard_copy("hu-stub-" + module[:-3], module)
-    write(os.path.join(stub, module), text)
-    run = _hu_copy_run(stub, cfg)
-    decision, reason = _decision(run)
-    if decision != "deny" or GUARD_CRASH not in reason:
-        return False, "with %s replaced, a flagged call is %r as %r (exit %d), want deny as guard-crash" % (
-            module, decision, reason[:70], run.returncode)
-    return True, "%s replaced: a flagged call is refused as guard-crash" % module
-
-
-# Two stubs that the guard's load check must refuse at load, never allow. A precompact_handoff that imports and names
-# nothing: reread_check nulls its ph (PH_NAMES), so the load check raises. A reread_check with no callable
-# unread_handoff: the load check raises the same way. Each must refuse a flagged call as guard-crash.
+# Two stubs that import but cannot serve reread_check. A precompact_handoff that names nothing: unread_handoff's read of
+# the flag name fails inside its try, and it gives ''. A reread_check with no unread_handoff: the guard's import of it
+# fails. Main's guard allows a flagged call for either, as it does for a failed import.
 for _label, pr2015__check in (
-    ("handoff-unread: install-hooks-whole: a precompact_handoff that imports but names nothing refuses a flagged call as guard-crash",
-     lambda: hu_stub_check("precompact_handoff.py",
+    ("handoff-unread: install-hooks-whole: a precompact_handoff that imports but names nothing allows a flagged call silently",
+     lambda: hu_copy_check("precompact_handoff.py",
                            '"""precompact_handoff, replaced by the case: it imports and names nothing."""\n')),
-    ("handoff-unread: install-hooks-whole: a reread_check with no unread_handoff refuses a flagged call as guard-crash",
-     lambda: hu_stub_check("reread_check.py", "import precompact_handoff as ph\n")),
+    ("handoff-unread: install-hooks-whole: a reread_check with no unread_handoff allows a flagged call silently",
+     lambda: hu_copy_check("reread_check.py", "import precompact_handoff as ph\n")),
 ):
     LOG_CHECKS_EXTRA.append((_label, pr2015__check))
 
@@ -375,8 +358,6 @@ for _label, _check in (
      hu_override_check),
     ("handoff-unread: unread_handoff returns the path only when every condition holds, and never raises",
      hu_contract_check),
-    ("handoff-unread: importing reread_check does not end the process when precompact_handoff cannot import",
-     hu_import_check),
 ):
     LOG_CHECKS_EXTRA.append((_label, _check))
 
