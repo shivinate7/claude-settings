@@ -1,0 +1,15 @@
+{
+ "id": "pr-3579-pr-template-copies-equal",
+ "title": "check_layout: keep the two PR template copies byte-equal (revives #2708)",
+ "priority": "next",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "triage",
+ "blockedBy": [],
+ "pr": 3579,
+ "updatedAt": "2026-11-16T02:53:53-06:00",
+ "why": "[02:53 CST Nov 16, triage] Step for open PR #3579 (branch pr-tmpl-copies-equal-2), filed so the step carries its pr field (goal item 3). Triage searched step files by PR number and branch first and found none. Status and review state live on the PR, not here.",
+ "source": "triage 8, goal item 3",
+ "note": "Open draft PR #3579. Merge and review are the batch runner's and the lane's; this step records the PR only."
+}

@@ -1,0 +1,15 @@
+{
+ "id": "pr-3575-deadline-ask-census",
+ "title": "The cap-lift end joins the model-cap ask; the 24 h limit is gone (census row H12)",
+ "priority": "next",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "pr": 3575,
+ "updatedAt": "2026-11-16T02:53:53-06:00",
+ "why": "[02:53 CST Nov 16, triage] Step for open PR #3575 (branch h12-deadline-ask-census-3), filed so the step carries its pr field (goal item 3). Triage searched step files by PR number and branch first and found none. Status and review state live on the PR, not here.",
+ "source": "triage 8, goal item 3",
+ "note": "Open draft PR #3575. Merge and review are the batch runner's and the lane's; this step records the PR only."
+}
