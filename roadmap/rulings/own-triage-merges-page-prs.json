@@ -1,0 +1,11 @@
+{
+ "id": "own-triage-merges-page-prs",
+ "at": "2026-11-16T14:57:50-06:00",
+ "title": "Owner at 14:57 CST: triage merges the page PRs itself and sees them through to main; this overrides the order that triage merges no lane PRs, for these PRs.",
+ "ruling": "Owner, typed in this triage session's chat at 14:57 CST Nov 16, answering triage's question whether the goal wording 'merged by me with the merge tool' overrides the order that triage merges no lane PRs: \"yes this overrides that order. you'd be merging them yourself since it was your work that coordinator spawned for you, now ofc if coordinator merges it or someone else does that's fine, but you are also being held responsible to seeing it through to main (And should attempt the merge yourslef)\". Covers the act it names: triage attempts the merge of the page PRs that were its work (#3543, #3449, #3469, and the other page PRs the coordinator spawned for it) with the merge tool, under every merge check. It does not cover other lanes' PRs, the flags that skip checks, admin merges or settings changes. If the coordinator or another session merges one first, that is fine; triage still owns seeing each to main and files each merge with its time.",
+ "quote": "yes this overrides that order. you'd be merging them yourself since it was your work that coordinator spawned for you, now ofc if coordinator merges it or someone else does that's fine, but you are also being held responsible to seeing it through to main (And should attempt the merge yourslef)",
+ "source": "Owner message in the triage 8 session chat, 14:57 CST Nov 16 (typed, not relayed).",
+ "status": "open",
+ "step": "page-recommend-and-waiting-on",
+ "stepsAlso": "writer-lists-awaiting-threads (#3449), surface-page-link-in-chat (#3469)"
+}
