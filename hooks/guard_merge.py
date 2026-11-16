@@ -2480,6 +2480,57 @@ def step_pr_hit(tool: str, tool_input, transcript: str):
     return None
 
 
+# ---- a build spawn names the prior work it searched (rule spawn-searches-existing-builds)
+# The line is `Prior work: #N (state) | <branch> | none found`, on a line of its own, with some text after the colon. The
+# text is not checked against GitHub: the guard reads the brief only. A line inside a ``` fence is a quoted example and
+# does not count. The marker matches without case, after optional markdown lead characters.
+PRIOR_WORK_LINE = "Prior work:"
+PRIOR_WORK_REASON = (
+    "this build spawn has no `Prior work:` line with text after it. Search the open and closed pull requests, the "
+    "branches and main for an existing build first, then add one line to the brief: `Prior work: #N (state) | <branch> "
+    "| none found`. A bare `Prior work:` line does not count. "
+    "(decision spawn-searches-existing-builds, a build spawn names the prior work it searched)"
+)
+_PRIOR_WORK_LINE = re.compile(r"[-#*_>\s]*" + re.escape(PRIOR_WORK_LINE) + r"[ \t*_]*(?P<text>\S.*)?$", re.IGNORECASE)
+
+
+def prior_work_named(text) -> bool:
+    """True when `text` has a Prior work line with text after the marker, outside a fence."""
+    if not isinstance(text, str):
+        return False
+    fenced = False
+    for line in text.split("\n"):
+        if line.strip().startswith("```"):
+            fenced = not fenced
+            continue
+        found = None if fenced else _PRIOR_WORK_LINE.match(line.rstrip())
+        if found and found.group("text"):
+            return True
+    return False
+
+
+def prior_work_lane_hit(tool: str, tool_input):
+    """Return (matched, reason) when a lane start or a lane brief names no prior work, else None. A lane start is a
+    create_session that tags a lane (its prompt). A lane brief is a send_message whose first non-blank line after any
+    Grant line starts the Lane brief marker (its message), read as _step_call reads it. Pure text work: no read, no file.
+    The Agent side of the rule is guard.prior_work_agent_hit."""
+    if not isinstance(tool_input, dict):
+        return None
+    if tool == BRIEF_TOOL:
+        message = tool_input.get("message")
+        lines = [line.strip() for line in message.splitlines() if line.strip()] if isinstance(message, str) else []
+        if lines and lines[0].startswith(LANE_GRANT_MARKER):
+            lines = lines[1:]
+        if not (lines and _BRIEF_MARKER_LINE.match(lines[0])):
+            return None
+        text, matched = message, "lane brief with no Prior work line"
+    elif is_lane_create_session(tool, tool_input):
+        text, matched = tool_input.get("prompt"), "lane start with no Prior work line"
+    else:
+        return None
+    return None if prior_work_named(text) else (matched, PRIOR_WORK_REASON)
+
+
 # ---- A lane brief names a slug or a role, never a session id (rule brief-ids-in-roster)
 # A session id as a brief types it, in any case. SESSION_ID_RE (guard_shared_tree) is a full match, so this scans: the id
 # is `session_`, a digit, then letters and digits, so a parameter name such as `session_id` is no id, and a `.md`, a dot or

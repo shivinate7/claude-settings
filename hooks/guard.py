@@ -337,6 +337,12 @@ Other tools, in `judge` order:
                        write deletes the file's record) and a read pass. A refused write leaves the record with the first
                        writer; an override that lifts it moves the record. The reason names no path. A call that names no scratchpad touches no file. An override lifts it.
                        (scratchpad-owner)
+  spawn-searches-existing-builds
+                       deny. A builder or test-author Agent or Task spawn, a `create_session` tagged cs-build:lane and a
+                       lane brief (a `send_message` whose first line after any Grant line starts `Lane brief:`) whose text
+                       has no `Prior work:` line with text after the colon, outside a fence. A bare line counts as none. A
+                       reviewer, an Explore and any other role pass. The text alone decides: nothing is read from GitHub.
+                       An override lifts it. (spawn-searches-existing-builds)
   agent-role-model     deny. A spawn whose model ranks above its role's row in the decision record
                        (haiku < sonnet < opus), or that names no model where the role has no `model:`
                        pin and no default model is set. An Explore whose brief's first line
@@ -636,7 +642,7 @@ while True:
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit, self_role_child_hit, self_role_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, stamp_hit, step_dup_hit, step_pr_hit, trust_card_hit, written_time_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, PRIOR_WORK_REASON, prior_work_lane_hit, prior_work_named, stamp_hit, step_dup_hit, step_pr_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
         _loading = "guard_frozen"
@@ -3483,6 +3489,13 @@ def brief_claim_hit(tool: str, tool_input) -> list:
     if tool not in SPAWN_TOOLS or role_key(tool_input.get("subagent_type")) not in BRIEF_CLAIM_ROLES:
         return []
     return brief_claim_gaps(tool_input.get("prompt"))
+
+
+def prior_work_agent_hit(tool: str, tool_input) -> bool:
+    """True when an Agent or Task brief to a builder or a test-author names no prior work (rule
+    spawn-searches-existing-builds; the reader and the lane forms are in guard_merge). Another role passes."""
+    return (tool in SPAWN_TOOLS and role_key(tool_input.get("subagent_type")) in BRIEF_CLAIM_ROLES
+            and not prior_work_named(tool_input.get("prompt")))
 
 
 # A BRIEF MUST NOT ORDER A DISCARD (rule brief-destructive-git, rule shared-trees-no-destructive-git). A brief that tells a
@@ -7166,6 +7179,13 @@ def judge(payload) -> None:
     if claimed:
         named = ", ".join("`" + item[:120].replace("`", "'") + "`" for item in claimed)
         refuse(tool, "deny", "brief-claim-has-probe", BRIEF_CLAIM_REASON % named, named[:120])
+
+    # 9e1. A build spawn names the prior work it searched (rule spawn-searches-existing-builds): a builder or test-author
+    # spawn, a lane start, a lane brief. An override lifts it: the owner may mean the spawn as it stands.
+    unsearched = ("build spawn with no Prior work line", PRIOR_WORK_REASON) if prior_work_agent_hit(tool, tool_input) \
+        else prior_work_lane_hit(tool, tool_input)
+    if unsearched:
+        refuse(tool, "deny", "spawn-searches-existing-builds", unsearched[1], unsearched[0])
 
     # 9e2. A brief that orders a discard of a working tree (rule brief-destructive-git). Any role; an override lifts it,
     # because the owner may mean the brief as it stands.
