@@ -3796,6 +3796,155 @@ class StaleDraftRestRead(UpkeepFixture):
         self.assertEqual(len(self.rest_get.call_args_list), 1, "the branch commit read made a REST call")
 
 
+class StaleDraftTable(UpkeepFixture):
+    """The two helpers the stale-draft row reads, pinned on their own: build.branch_commit_times (the commit read, one
+    `git log -1` per branch) and build.draft_table (one row per draft pull: number, branch, lane, commit, verdict). A case
+    passes an explicit `now` and reads no clock, and the origin refs come from the UpkeepFixture helpers."""
+
+    NOW = datetime.datetime(2026, 11, 16, 12, 0, tzinfo=datetime.timezone.utc)
+
+    def ago(self, hours):
+        return self.NOW - datetime.timedelta(hours=hours)
+
+    def iso(self, hours):
+        """The ago() time as the Z-suffixed ISO text a commit is dated with."""
+        return self.ago(hours).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    @staticmethod
+    def utc(text):
+        return datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+    def pull(self, number, branch, updated_h=13, draft=True):
+        """A draft pull row as open_pulls_rest returns it: updated_at is an aware datetime `updated_h` hours before NOW."""
+        return {"number": number, "title": "lane " + branch, "branch": branch, "draft": draft, "updated_at": self.ago(updated_h)}
+
+    def test_branch_commit_times_gives_each_branch_its_commit_as_an_aware_time(self):
+        self.origin_commit("utc-branch", "2026-11-01T10:00:00Z")
+        self.origin_commit("central-branch", "2026-11-02T10:00:00-06:00")
+        times, why = build.branch_commit_times(self.repo, ["utc-branch", "central-branch"])
+        self.assertIsNone(why, "a read with a checkout named gave a why: %r" % (why,))
+        self.assertEqual(set(times), {"utc-branch", "central-branch"}, "the times do not hold both branches")
+        self.assertEqual(times["utc-branch"], self.utc("2026-11-01T10:00:00Z"), "the UTC commit time is wrong")
+        self.assertEqual(times["central-branch"], self.utc("2026-11-02T16:00:00Z"), "the -06:00 commit time is wrong")
+        for name, at in times.items():
+            self.assertIsNotNone(at.tzinfo, "the time of %s is naive" % name)
+
+    def test_a_branch_whose_time_cannot_be_read_is_left_out_and_the_others_stay(self):
+        self.origin_commit("good", "2026-11-01T10:00:00Z")
+        self.drop_origin("no-ref")
+        self.set_origin("tree-ref", self.EMPTY_TREE)
+        self.break_origin("broken-ref")
+        times, why = build.branch_commit_times(self.repo, ["good", "no-ref", "tree-ref", "broken-ref"])
+        self.assertIsNone(why, "a read with a checkout named gave a why: %r" % (why,))
+        self.assertEqual(times, {"good": self.utc("2026-11-01T10:00:00Z")},
+                         "a branch with no readable commit time was kept, or the good branch was dropped")
+
+    def test_a_time_that_is_not_iso_with_a_zone_is_left_out(self):
+        self.origin_commit("good", "2026-11-01T10:00:00Z")
+        replies = {"refs/remotes/origin/garbled": "not a time\n", "refs/remotes/origin/naive": "2026-11-01T10:00:00\n"}
+        real_git = build.git
+
+        def fake(repo, *args, stdin=None):
+            if args[:1] == ("log",) and args[-1] in replies:
+                return replies[args[-1]]
+            return real_git(repo, *args, stdin=stdin)
+
+        with mock.patch.object(build, "git", fake):
+            times, why = build.branch_commit_times(self.repo, ["good", "garbled", "naive"])
+        self.assertEqual(times, {"good": self.utc("2026-11-01T10:00:00Z")},
+                         "a time that is not ISO with a zone was kept, or the good branch was dropped")
+
+    def test_one_git_log_per_distinct_branch_and_no_network(self):
+        self.origin_commit("first", "2026-11-01T10:00:00Z")
+        self.origin_commit("second", "2026-11-01T11:00:00Z")
+        trace = pathlib.Path(self.tmp.name) / "git-trace.txt"
+        with mock.patch.dict(os.environ, {"GIT_TRACE": str(trace)}):
+            build.branch_commit_times(self.repo, ["first", "second", "first"])
+        reads = {}
+        for line in (trace.read_text(encoding="utf-8") if trace.exists() else "").splitlines():
+            found = re.search(r" log .*refs/remotes/origin/(\S+)", line)
+            if found:
+                reads[found.group(1)] = reads.get(found.group(1), 0) + 1
+        self.assertEqual(reads, {"first": 1, "second": 1}, "the read was not one git log per distinct branch")
+        self.assertEqual(len(self.rest_get.call_args_list), 0, "the commit read made a REST call")
+
+    def test_no_checkout_named_reads_no_time_and_says_why(self):
+        times, why = build.branch_commit_times(None, ["any-branch"])
+        self.assertEqual(times, {}, "a read with no checkout gave times")
+        self.assertTrue(why, "a read with no checkout gave no why")
+
+    def test_an_empty_branch_list_reads_nothing_and_gives_no_why(self):
+        self.assertEqual(build.branch_commit_times(self.repo, []), ({}, None))
+
+    def test_the_table_has_one_row_per_draft_pull_with_exactly_the_five_fields(self):
+        rows = [self.pull(1, "draft-one"), self.pull(2, "not-a-draft", draft=False), self.pull(3, "draft-three", updated_h=1)]
+        table = build.draft_table(rows, self.NOW, {"liveRows": {}}, {}, None, {})
+        self.assertEqual([row["number"] for row in table], [1, 3], "the table is not one row per draft pull")
+        for row in table:
+            self.assertEqual(set(row), {"number", "branch", "lane", "commit", "verdict"},
+                             "a table row does not have exactly the five fields")
+        self.assertEqual([row["branch"] for row in table], ["draft-one", "draft-three"])
+
+    def test_verdict_is_stale_only_when_the_draft_and_its_commit_are_both_over_twelve_hours(self):
+        # (draft updated_at h ago, commit h ago or None, verdict, commit the row carries)
+        cases = {"stale draft, commit 13 h old": (13, 13, "stale", self.ago(13)),
+                 "stale draft, commit 1 h old": (13, 1, "fresh", self.ago(1)),
+                 "stale draft, no commit time": (13, None, "unknown", None),
+                 "fresh draft, commit 13 h old": (1, 13, "fresh", None)}
+        for name, (updated_h, commit_h, verdict, commit) in cases.items():
+            with self.subTest(name):
+                times = {} if commit_h is None else {"b": self.ago(commit_h)}
+                table = build.draft_table([self.pull(1, "b", updated_h=updated_h)], self.NOW, {"liveRows": {}},
+                                          {1: {"number": 1}}, None, times)
+                self.assertEqual(len(table), 1, "the draft has no table row")
+                self.assertEqual(table[0]["verdict"], verdict, "the verdict for %s is wrong" % name)
+                self.assertEqual(table[0]["commit"], commit, "the commit for %s is not the one the rule names" % name)
+
+    def test_lane_is_live_then_held_then_none_and_unknown_when_no_mark_is_read(self):
+        rows = [self.pull(n, branch) for n, branch in ((1, "live-br"), (2, "held-br"), (3, "review-br"),
+                                                       (4, "plain-br"), (5, "no-row-br"))]
+        lanes = {"liveRows": {"s-live": ["live-br"]}}
+        marks = {1: {"number": 1, "held": True}, 2: {"number": 2, "held": True}, 3: {"number": 3, "reviewLog": True},
+                 4: {"number": 4}}
+        table = build.draft_table(rows, self.NOW, lanes, marks, None, {})
+        self.assertEqual(self.lanes_by_number(table), {1: "live", 2: "held", 3: "held", 4: "none", 5: "unknown"},
+                         "a live lane, a held or review-logged pull, a clean pull and an unmarked pull got the wrong lanes")
+        table = build.draft_table(rows, self.NOW, lanes, marks, "the live file was read 90 minutes ago", {})
+        self.assertEqual(self.lanes_by_number(table), {1: "live", 2: "unknown", 3: "unknown", 4: "unknown", 5: "unknown"},
+                         "unread marks did not make every non-live lane unknown")
+
+    @staticmethod
+    def lanes_by_number(table):
+        return {row["number"]: row["lane"] for row in table}
+
+    def test_the_stale_draft_entries_are_the_table_rows_formatted(self):
+        # Four drafts, all stale by updated_at: a stale commit (listed), a recent commit (fresh), no commit (unknown),
+        # and a held one (silent). stale_drafts must print exactly the rows the table marks as shown.
+        self.origin_commit("old-commit", self.iso(13))
+        self.origin_commit("recent-commit", self.iso(1))
+        self.drop_origin("no-commit")
+        self.origin_commit("held-one", self.iso(13))
+        rows = [self.pull(1, "old-commit"), self.pull(2, "recent-commit"), self.pull(3, "no-commit"),
+                self.pull(4, "held-one")]
+        # The live pulls rows carry the marks: #1 to #3 have a row with no marks, #4 is held.
+        work = {"liveRows": {}, "pulls": [{"number": 1}, {"number": 2}, {"number": 3}, {"number": 4, "held": True}],
+                "staleWhy": None, "pullWhy": None}
+        entries = build.stale_drafts(work, (rows, None), self.NOW, repo=self.repo)
+        times, _ = build.branch_commit_times(self.repo, [row["branch"] for row in rows])
+        marks = {p["number"]: p for p in work["pulls"]}
+        expected = []
+        for row in build.draft_table(rows, self.NOW, work, marks, None, times):
+            if row["verdict"] == "fresh" or row["lane"] in ("live", "held"):
+                continue
+            if row["verdict"] == "unknown":
+                expected.append("unknown (#%d branch %s has no commit time)" % (row["number"], row["branch"]))
+            else:
+                expected.append("#%d (%s)" % (row["number"], row["branch"]))
+        self.assertEqual(expected, ["#1 (old-commit)", "unknown (#3 branch no-commit has no commit time)"],
+                         "the table rows the case expects are not the two it names")
+        self.assertEqual(entries, expected, "the stale-draft entries are not the table's rows formatted")
+
+
 class SessionsSource(UpkeepFixture):
     """The stale-draft row takes its sessions from a named source: `--sessions-source NAME`, default `live-file`. The
     registry build.SESSION_SOURCES maps a name to a reader that returns (liveRows-style rows, None) or (None, why). A name
