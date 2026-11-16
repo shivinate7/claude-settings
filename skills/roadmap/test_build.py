@@ -3812,7 +3812,7 @@ class StaleDraftRestRead(UpkeepFixture):
         self.assertNotIn("#1001 (future-branch)", detail, "a commit after the build listed the draft as stale")
 
     def test_a_fork_pull_whose_head_branch_shares_an_origin_name_reads_unknown_not_the_origin_commit(self):
-        # PR #1001 is a fork's pull whose head ref is `main`, and origin's own main has a commit an hour old. The fork
+        # Pull 1001 is a fork's pull whose head ref is `main`, and origin's own main has a commit an hour old. The fork
         # reads unknown, so the origin commit cannot suppress it. #1002 is this repo's own stale branch, still listed.
         self.origin_commit("main", iso_ago(60))
         self.origin_commit("feature", iso_ago(780))
