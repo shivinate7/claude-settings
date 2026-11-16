@@ -1,0 +1,10 @@
+{
+  "title": "The auto-mode classifier denied a merge call for a PR that had already merged",
+  "phase": "next",
+  "status": "ready",
+  "order": 2301,
+  "owner": "coordinator",
+  "why": "Coordinator report 13:22 CST Nov 16 (relay; triage read no transcript): the rebase-wave-1c lane's `merge 3583 --confirm` was denied by the auto-mode classifier at 13:21 CST (\"Reason: [Destructive or Unwanted Actions].\"). REST (coordinator's report; triage's own read is a merge time of 13:20:33 CST, head 975cac075, merge commit 4680473b0) shows #3583 had merged at 13:20:33 CST. Triage does not know who merged it. Effect: a lane saw a denial for a PR already merged and could not tell whether its act took. Not measured: how often the classifier denies a merge call; one sighting.",
+  "note": "Ready, note-level until a second sighting (rule roles-findings-are-debts-or-notes). Open question for the coordinator: who merged #3583 at 13:20:33 CST, and did the lane's call run before the denial? Guard that would help: the merge tool reports 'already merged' before the classifier sees the call. Not built.",
+  "updatedAt": "2026-11-16T13:28:00-06:00"
+}
