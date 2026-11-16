@@ -13218,10 +13218,10 @@ class ProtectionHost(merge.Host):
         return github_read(args, [], self.contexts)
 
 class MergeChecksFromProtection(unittest.TestCase):
-    """c189 part 1: main's own stamp.json reads the required checks from branch protection, and a pinned list that disagrees with it is refused."""
-    def test_main_stamp_reads_required_checks_from_protection(self):
+    """c189 part 1: main's own stamp.json pins the one required check, and a pinned list that disagrees with a non-empty branch protection is refused."""
+    def test_main_stamp_pins_required_checks_to_all_jobs_passed(self):
         with open(os.path.join(HERE, "..", ".github", "stamp.json"), encoding="utf-8") as f:
-            self.assertEqual(json.load(f)["merge"]["requiredChecks"], "protection")
+            self.assertEqual(json.load(f)["merge"]["requiredChecks"], [REQUIRED_CHECK])
 
     def test_a_pinned_list_that_disagrees_with_protection_is_refused_naming_both_sets(self):  # #746: pinned gates*, protection held checks*
         host = ProtectionHost(["gates", "gates-guard"], ["checks", "checks-guard"])
