@@ -1,0 +1,14 @@
+{
+ "id": "push-skip-main-run",
+ "title": "mailaudit push-skip: matrix job `suite (N)` is never found by the shared skip (parked)",
+ "priority": "later",
+ "status": "parked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "updatedAt": "2026-11-16T00:55:39-06:00",
+ "why": "[00:55 CST Nov 16, triage] Coordinator relay 00:5x CST: lane mailaudit-add-cites-check (slug push-skip-main-run) failed round 3 of 3 at 00:54 CST. The shared push-skip.py matches the job name `suite` exactly; mailaudit's `suite` is a 3-shard matrix whose rows read `suite (1..3)` (REST on run 43810021861). The reviewer ran the real reader: suite_jobs() lists every PR job except scope, rollup, ci-done and push-skip, so a matrix job is never found and skip is never true (fail-closed); the fan-in job named `suite` fixed one name only. The work is archived at origin archive/push-skip-main-run (a2158c21); no PR. The coordinator withdrew its 00:37 CST fan-in pick (ruling coordinator-mailaudit-suite-fan-in-a, now withdrawn). Lane parked it with option 3: mailaudit keeps its hand-rolled push-skips-Mac scope step. Round 4 needs the owner's grant. Page item filed for the owner with three options. Searched steps and page items for push-skip-main-run first: no step existed.",
+ "source": "coordinator relay 00:5x CST Nov 16; filed by triage 8; not owner-typed",
+ "note": "Parked. mailaudit keeps its hand-rolled push-skips-Mac scope step. The shared push-skip.py never finds a matrix job such as `suite (N)`. The lane failed round 3 of 3; its work is on origin archive/push-skip-main-run (a2158c21), no PR. Round 4 needs the owner's grant. Options for the owner are on the page: de-matrix mailaudit, teach the shared action matrix rows, or leave parked."
+}
