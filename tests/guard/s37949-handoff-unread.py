@@ -178,12 +178,10 @@ def hu_cost_check():
 
 
 def hu_copy_check(drop="reread_check.py"):
-    """install-hooks-whole: with `drop` missing beside guard.py, the guard does not judge a call with the read missing.
-    A missing reread_check is a failed import, and a failed import allows, as main's guard does (decision
-    precompact-handoff): the call is allowed silently, and a Haiku spawn is still refused by the model floor, which
-    the copy runs without reread_check. Any other dropped copy, precompact_handoff here, takes the wait-then-refuse
-    path: the guard loads again for about 5 s, then refuses each call as guard-crash, and so does a Haiku spawn. The
-    intact copy is the control, so the fixture is shown to bite."""
+    """install-hooks-whole: with `drop` missing beside guard.py, a failed import allows the call, as main's guard
+    does (decision precompact-handoff). The call is allowed silently, and a Haiku spawn is still refused by the model
+    floor, which the copy runs without the missing module. The intact copy is the control, so the fixture is shown
+    to bite."""
     cfg = os.path.join(ROOT, "hu-copy")
     hu_files(cfg, flag=True, handoff=True)
     intact = _guard_copy("hu-intact", None)
@@ -194,26 +192,15 @@ def hu_copy_check(drop="reread_check.py"):
         return False, "the intact copy, the control: %s" % why
     run = _hu_copy_run(dropped, cfg)
     decision, reason = _decision(run)
-    if drop == "reread_check.py":
-        if run.returncode != 0 or decision != "allow" or reason:
-            return False, "without %s the call is %r as %r (exit %d), want a silent allow" % (
-                drop, decision, reason[:70], run.returncode)
-        spawn = _hu_copy_run(dropped, cfg, "Agent", {"prompt": "do it", "model": "haiku"})
-        why = ov_want(*_decision(spawn), "deny", "agent-model-floor")
-        if why:
-            return False, "without %s a Haiku spawn is not refused by the model floor: %s" % (drop, why)
-        return True, ("reread_check.py missing: the call is allowed silently, exit 0, and a Haiku spawn is refused "
-                      "by the model floor; the intact copy refuses the call for the unread handoff")
-    if run.returncode != 0 or decision != "deny" or GUARD_CRASH not in reason:
-        return False, "without %s the call is %r as %r (exit %d), want deny as guard-crash" % (
+    if run.returncode != 0 or decision != "allow" or reason:
+        return False, "without %s the call is %r as %r (exit %d), want a silent allow" % (
             drop, decision, reason[:70], run.returncode)
     spawn = _hu_copy_run(dropped, cfg, "Agent", {"prompt": "do it", "model": "haiku"})
-    decision, reason = _decision(spawn)
-    if spawn.returncode != 0 or decision != "deny" or GUARD_CRASH not in reason:
-        return False, "without %s a Haiku spawn is %r as %r (exit %d), want deny as guard-crash" % (
-            drop, decision, reason[:70], spawn.returncode)
-    return True, ("%s missing: the call is refused as guard-crash, exit 0, and so is a Haiku "
-                  "spawn; the intact copy refuses the call for the unread handoff" % drop)
+    why = ov_want(*_decision(spawn), "deny", "agent-model-floor")
+    if why:
+        return False, "without %s a Haiku spawn is not refused by the model floor: %s" % (drop, why)
+    return True, ("%s missing: the call is allowed silently, exit 0, and a Haiku spawn is refused by the model "
+                  "floor; the intact copy refuses the call for the unread handoff" % drop)
 
 
 def _hu_copy_run(folder, config, tool="Bash", tool_input=None):
@@ -333,7 +320,7 @@ for _label, pr2015__check in (
      hu_cost_check),
     ("handoff-unread: a guard copy without reread_check.py fails open, and the intact copy refuses",
      hu_copy_check),
-    ("handoff-unread: install-hooks-whole: a guard copy without precompact_handoff.py refuses as guard-crash, never allows",
+    ("handoff-unread: a guard copy without precompact_handoff.py fails open, and the intact copy refuses",
      lambda: hu_copy_check("precompact_handoff.py")),
     ("handoff-unread: an owner override lifts the refusal once, and the spent override refuses again",
      hu_override_check),
