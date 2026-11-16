@@ -20,7 +20,7 @@ Mistake: a session ran a long command in the foreground while its agents and bac
 - The rule judges the PowerShell tool the same as Bash.
 - Order: it runs before `check-timeout` (`background-check-through-verdict`). A foreground `merge --lane-lint` under background work gets this refusal. Its rerun in the background then meets `check-timeout`'s limit. With no background work, `check-timeout` is unchanged.
 
-Cost: no new process and no file written. A call that cannot run long reads nothing. A call that can run long reads the transcript once, by `scan_jobs`, in the guard hook already running.
+Cost: no new process and no file written. A call that cannot run long reads nothing. A call that can run long reads the transcript once (unmeasured), by `scan_jobs`, in the guard hook already running.
 
 Why: a long foreground wait hides the agents and background commands that are still working. A quick read hides nothing, so it stays.
 

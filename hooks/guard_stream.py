@@ -1030,7 +1030,7 @@ def background_work_running(transcript) -> bool:
 FG_BACKGROUND_REASON = (
     "refused in the foreground while background work runs: this call can run long, and this session has a "
     "background command or agent that is still running. A long foreground call holds the session still, so no "
-    "notice from that work can be read until it ends (rule fg-bash-while-bg, owner, 2026-11-16 13:47 CST). "
+    "notice from that work can be read until it ends (decision fg-bash-while-bg, owner, 2026-11-16 13:47 CST). "
     "Remedy: rerun it with run_in_background and it is allowed. Read its result when its notice arrives. "
     "A quick read stays in the foreground."
 )
