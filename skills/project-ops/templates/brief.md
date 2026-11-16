@@ -47,6 +47,10 @@ Hand in a draft PR to the batch runner. Never merge.
 
 Time: `~/.claude/bin/now-central`. Cap {{cap}} lines: Done, Deviations, Input Needed, Next, "Port to other repos: yes or no, and why". Send questions to triage, and the green head and branch to the coordinator.
 
+The lane ends archive-ready, as the operating model's Lane bullet sets.
+If another PR replaces the lane's PR, the report names that PR's number.
+The lane then tags itself archive-ready too (session tiers decision `session-tiers`, Archiving scope).
+
 Agent spawn brief head
 
 A spawn brief's first line holds one marker alone.
