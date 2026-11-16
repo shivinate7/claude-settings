@@ -1131,6 +1131,49 @@ record_allow("a commit message that names a push to roadmap is text",
              VCS + ' commit -m "' + VCS + ' push origin roadmap"', LANE_TRANSCRIPT)
 
 
+def _push_case(command, cwd, transcript, path):
+    """The guard's payload for one Bash push call, judged with the stand-in git first on PATH (`path`)."""
+    return {"raw": None, "tool": "Bash", "cwd": cwd, "session": None, "env_path": path, "config": None,
+            "agent_id": None, "tool_input": {"command": command}, "transcript": transcript, "env": ROLE_ENV}
+
+
+def _push_cost_problems(rows, log, path):
+    """The problems the push cost table `rows` shows, as a list that is empty when every row holds. A row is
+    (label, tail, want) or (label, tail, want, cwd): the git spawns of `tail`, by subcommand, must equal `want`, and
+    a row with no cwd runs in PUSHFEAT. The stand-in git on `path` logs each spawn to `log`. The fixtures a row
+    names are built by its caller, before this runs."""
+    problems = []
+
+    def spawn_kinds(command, cwd):
+        if os.path.exists(log):
+            os.remove(log)
+        decide(_push_case(command, cwd, LANE_TRANSCRIPT, path))
+        lines = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
+        kinds = {}
+        for line in lines:
+            words = line.split()
+            # The guard runs git as `git -C <dir> <subcommand>`, so the subcommand follows the -C pair.
+            while len(words) >= 2 and words[0] in ("-C", "-c"):
+                words = words[2:]
+            word = words[0] if words else ""
+            kinds[word] = kinds.get(word, 0) + 1
+        return kinds, lines
+
+    for label, tail, want, *cwd in rows:
+        kinds, lines = spawn_kinds(VCS + " " + tail, cwd[0] if cwd else PUSHFEAT)
+        if kinds != want:
+            problems.append("%s: git spawns %s, want %s" % (label, sorted(kinds.items()), sorted(want.items())))
+        # Nothing contacts the remote: the push-main and push-all-main reads are local, and a push reads no remote's refs.
+        for reach in ("ls-remote", "fetch", "push", "remote"):
+            if reach in kinds:
+                problems.append("%s: git spawns %r, which contacts or names the remote" % (label, reach))
+        if label == "a bare push" and not any("push.default" in line for line in lines):
+            problems.append("a bare push: no read of push.default")
+        if label == "a HEAD push" and any("push.default" in line for line in lines):
+            problems.append("a HEAD push: reads push.default, which it must not")
+    return problems
+
+
 def record_push_cost_case():
     """roadmap-one-writer's stated cost (session-tiers, the Cost line): per `git push` call, one
     `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
@@ -1163,28 +1206,7 @@ def record_push_cost_case():
     log, path = _stand_in_git("rwcost")
     if path is None:
         return False, "no git on PATH"
-    problems = []
-
-    def case_of(command, cwd, transcript):
-        return {"raw": None, "tool": "Bash", "cwd": cwd, "session": None, "env_path": path, "config": None,
-                "agent_id": None, "tool_input": {"command": command}, "transcript": transcript, "env": ROLE_ENV}
-
-    def spawn_kinds(command, cwd):
-        if os.path.exists(log):
-            os.remove(log)
-        decide(case_of(command, cwd, LANE_TRANSCRIPT))
-        lines = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
-        kinds = {}
-        for line in lines:
-            words = line.split()
-            # The guard runs git as `git -C <dir> <subcommand>`, so the subcommand follows the -C pair.
-            while len(words) >= 2 and words[0] in ("-C", "-c"):
-                words = words[2:]
-            word = words[0] if words else ""
-            kinds[word] = kinds.get(word, 0) + 1
-        return kinds, lines
-
-    for label, tail, want, *cwd in (
+    problems = _push_cost_problems((
         ("a refspec push to lane/foo", "push origin lane/foo",
          {"rev-parse": 1, "symbolic-ref": 1, "diff": 1, "rev-list": 1, "log": 1}),
         ("a HEAD push", "push origin HEAD",
@@ -1219,24 +1241,13 @@ def record_push_cost_case():
         # RR_DOCS is built in section 43400, which loads after this one.
         ("a push of a docs-only commit, no test path", "push origin topic",
          {"config": 1, "diff": 1, "rev-list": 1, "rev-parse": 1, "symbolic-ref": 1, "log": 1}, RR_DOCS),
-    ):
-        kinds, lines = spawn_kinds(VCS + " " + tail, cwd[0] if cwd else PUSHFEAT)
-        if kinds != want:
-            problems.append("%s: git spawns %s, want %s" % (label, sorted(kinds.items()), sorted(want.items())))
-        # Nothing contacts the remote: the push-main and push-all-main reads are local, and a push reads no remote's refs.
-        for reach in ("ls-remote", "fetch", "push", "remote"):
-            if reach in kinds:
-                problems.append("%s: git spawns %r, which contacts or names the remote" % (label, reach))
-        if label == "a bare push" and not any("push.default" in line for line in lines):
-            problems.append("a bare push: no read of push.default")
-        if label == "a HEAD push" and any("push.default" in line for line in lines):
-            problems.append("a HEAD push: reads push.default, which it must not")
+    ), log, path)
     unreadable = role_path("unreadable")
     for tail in ("push origin lane/foo", "push origin HEAD", "push"):
-        got, _reason = decide(case_of(VCS + " " + tail, PUSHFEAT, unreadable))
+        got, _reason = decide(_push_case(VCS + " " + tail, PUSHFEAT, unreadable, path))
         if got != "allow":
             problems.append("%s with an unreadable transcript: %s, want allow" % (tail, got))
-    got, _reason = decide(case_of(VCS + " push origin roadmap", PUSHFEAT, unreadable))
+    got, _reason = decide(_push_case(VCS + " push origin roadmap", PUSHFEAT, unreadable, path))
     if got != "deny":
         problems.append("a push to roadmap with an unreadable transcript: %s, want deny" % got)
     if problems:
