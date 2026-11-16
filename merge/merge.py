@@ -285,7 +285,7 @@ RERUN_IN_FLIGHT = "is a re-run still going"  # base_state words an unknown re-ru
 BREAKING_MERGE = "breaking merge:"  # base_state words the first red run with a green parent, once its re-run is red again, with it; red_base reads it back to name the revert route
 FIRST_RED_RERUN = re.compile(rf"`{RERUN_REMEDY} (\d+) --failed`")  # base_state names a first red run's re-run with it; red_base reads the run id back to name the re-run before the reason flag
 DROP_CITE = "(decision silent-undo-check-design, a branch that silently undoes earlier work does not merge)"
-BATCH_CITE = "(decision main-branch-protection, the merge tool reads the required checks from the ruleset or the protection and never merges with none)"
+BATCH_CITE = "(decision main-branch-protection, the merge tool reads the required checks from the ruleset or the protection; decision private-repos-no-ci, merge.requiredChecks \"none\" merges a repo with no required check)"
 EXPRESS_CITE = "(decision owner-override, ruling R59 part 5 of 15:05 CST Nov 12, a ruled prose change skips the batch queue and runs only the checks that read its files)"
 FREEZE_CITE = "(decision batch-freeze-lane-set, a batch's lane set freezes when its build starts)"  # the frozen-block refusals and the duplicate-head stop keep their own cite: BATCH_CITE names the required-checks home, which does not govern them
 DRAFT_CITE = "(decision draft-until-reviewed, every pull request opens as a draft and only the one integration PR goes ready)"
@@ -1506,7 +1506,10 @@ class Host:
         return names
 
     def required_names(self):
-        """The required check names. Never empty: an empty list would pass the wait without a read."""
+        """The required check names. Never empty, except for merge.requiredChecks "none", which names no check and reads neither the ruleset nor the protection:
+        GitHub's own merge call refuses a check that is still required."""
+        if self.required == "none":
+            return []
         if isinstance(self.required, list):
             names = self.required
         else:
@@ -1525,7 +1528,7 @@ class Host:
     def refuse_pinned_mismatch(self):
         """A pinned merge.requiredChecks list must equal a non-empty ruleset or branch protection list: a copy that drifted waits on checks no run reports (#746).
         An empty or unreadable protection leaves the pinned list in force; an unreadable one says so."""
-        if not isinstance(self.required, list):
+        if not isinstance(self.required, list):  # "protection" has no copy to compare, and "none" reads no protection
             return
         try:
             held = self.protection_names()
@@ -1951,7 +1954,7 @@ class Host:
         -> (verdict, detail): green, pending, red, or unknown when any read could not run. The guard's
         home for "has this head settled", so it shares classify and runs with the wait.
         No check and no run reads as pending, not green: right after a push GitHub has not created
-        them yet (the checks read settles for the same reason). `nothing_is_green` is for a repo with no workflows.
+        them yet (the checks read settles for the same reason). `nothing_is_green` is for a repo with no workflows; merge.requiredChecks "none" is that repo too.
         Another ready PR's running CI holds no merge (per-lane merge), and the branch protection feeds no verdict here, so neither is read.
         Its `gh` calls (the pull request, the check runs, the commit statuses, the workflow runs; a branch name adds the open pull request list;
         a head whose check runs link more than one run adds one more workflow runs read) share one deadline (SH_TIMEOUT, the guard's one budget for this whole
@@ -1965,7 +1968,7 @@ class Host:
                 red, pending, _ = self.classify(got, [], self.ignore, info["branch"])
                 runs = self.runs(info["head"])
                 red, pending = self.settle(red, pending, *self.judge_runs(runs))
-                unseen = not got and not runs and not nothing_is_green
+                unseen = not got and not runs and not nothing_is_green and self.required != "none"
         except subprocess.TimeoutExpired:  # its text names the resolved program path
             return "unknown", "a gh call timed out"
         except Exception as e:  # Stop, a missing gh, malformed JSON: all unread
@@ -2686,7 +2689,7 @@ def load_config(root, base, path, cite=""):
                   (isinstance(am, list) and all(map(ne, am)), "afterMerge"),
                   ("readyChecks" not in m or isinstance(m["readyChecks"], list) and m["readyChecks"] and all(map(ne, m["readyChecks"])), "readyChecks"),
                   (isinstance(m.get("keepBranches", []), list) and all(map(plain_name, m.get("keepBranches", []))), "keepBranches"),
-                  (rc == "protection" or isinstance(rc, list) and rc and all(map(ne, rc)), "requiredChecks")):
+                  (rc in ("protection", "none") or isinstance(rc, list) and rc and all(map(ne, rc)), "requiredChecks")):
         if not ok:
             raise Stop(f"{path} on {ref}: merge.{k} is not valid: {m[k]!r}.{cite}")
     if "defaultBranch" in cfg and not ne(cfg["defaultBranch"]):
