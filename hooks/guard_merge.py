@@ -769,7 +769,7 @@ OCTOPUS_PUSH_REASON = (
     "Remedy: redo that merge as a chain of two-parent merges, then retry the push."
 )
 OCTOPUS_PUSH_STALE = (" The remote's tracking refs could not be refreshed, so a merge the remote already holds may show as new."
-                      " Run `git fetch <remote>` and push again. If the octopus is still listed, redo it as two-parent merges.")
+                      " Run `git fetch <remote>` and push again. If that merge is still listed, redo it as two-parent merges.")
 _READ_VERBS = ("status", "diff", "log", "show")
 _CONTINUE_VERBS = ("merge", "rebase", "cherry-pick")
 _CONFLICT_VERBS = ("merge", "pull", "rebase", "cherry-pick", "am")
