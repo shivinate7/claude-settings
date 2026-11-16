@@ -26,7 +26,7 @@ It moved here from shivinate7/advisor on Oct 26 (owner, step c51), with that rep
 A lane brief names a standing session by role or lane slug, never by session id (owner 00:19 CST Nov 14, item 819 b; ruling R22 point 3). The lane looks the id up here. Triage rewrites a line when a role changes hands.
 
 - Coordinator: "Claude settings coordinator onboarding", session_013NEJL1gw6EdrSyvHkTUEx6, since 2026-11-11 22:38 CST.
-- Triage: "cs triage: claude-settings (7)", session_013NEJKzCzoWhfP8FMCPtQU6, since 2026-11-11 22:38 CST.
+- Triage: "cs triage: claude-settings (8)", session_013NEJL2kLm8c5qDhosD6Nqb, since 2026-11-15 22:50 CST.
 - Consultant: session_013NEJKz5AWFJhGvmCUoi6wQ, the owner's voice (ruling own-consultant-speaks-for-owner, 20:24 CST Nov 14).
 - Batch runner: "claude-settings batch runner 10", session_013NEJL2f1YCYsvLdpFqtWP3, since 2026-11-11 22:38 CST.
 - Batch runner, child repos: "batch runner 11 (child repos)", session_013NEJKzRugXqBZrZ8xwXmW7, since 2026-11-11 22:46 CST; scope every child repo under shivinate7 and ssemwal-cdc, degen included (owner 11:13 CST Nov 13, item 704 b: "they're all children of claude-settings"; degen added 11:19 CST: "it can take degen too"); it fast-forwards each repo before every batch. Narrowed 00:26 CST Nov 14 (coordinator, relayed; consultant's ask 00:25): runner 11 keeps degen and home; batch runner 12 takes the other five. Degen scope narrowed 16:30 CST Nov 14 (owner, ruling own-841-degen-coordinator-spawned-only): only the degen PRs this account's coordinator spawned lanes for; degen drafts made by other sessions are out of scope.
