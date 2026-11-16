@@ -1,0 +1,10 @@
+{
+ "id": "billing-drop-private-jobs",
+ "at": "2026-11-16T11:20:00-06:00",
+ "title": "Drop every private-repo job that could cost money, and merge without it.",
+ "ruling": "Owner ruling, 11:20 CST Nov 16, relayed by the consultant (not read by triage): drop any and all private runner jobs that could cost money and merge without it. The consultant builds it and sees it through to landing. Consultant's scope (relayed by the coordinator, 11:23 CST): all GitHub-hosted jobs in private repos; self-hosted jobs stay; degen PR 741 (red main) is outside it.",
+ "quote": "was billing working for a bit and then it stopped? im convinced billing is just bugged ongithub. literally just drop any and all private runner jobs that could cost money and merge without it - see that change through to the end and land it. mandatory.",
+ "source": "Consultant message to triage, about 11:21 CST Nov 16 (the quote as the consultant gave it); coordinator 11:23 CST confirms the consultant as its source. Runner 11 relayed a shorter form at 11:21 CST. Not owner-typed to triage.",
+ "status": "open",
+ "step": "github-billing-blocks-ci"
+}
