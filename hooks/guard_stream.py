@@ -10,7 +10,7 @@ import re
 import shlex
 
 from guard_core import (
-    DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, basename,
+    DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, _wrapper_flags, basename,
     bare_words, command_indexes, inline_script, inner_commands, is_powershell, resolve_command,
     segment_tokens, split_segments,
 )
@@ -792,10 +792,10 @@ FG_LIMIT_MS = 60000
 FG_PROGRAMS = frozenset((
     "pytest", "py.test", "tox", "nox", "jest", "vitest", "mocha", "playwright", "eslint", "pylint", "flake8", "mypy",
     "pyright", "shellcheck", "markdownlint", "make", "gmake", "cmake", "ninja", "xcodebuild", "gradle", "gradlew",
-    "mvn", "bazel", "ci-job", "sim-test",
+    "mvn", "bazel", "ci-job", "sim-test", "ruff", "black", "rspec", "invoke-pester",
 ))
 FG_PYTHON_MODULES = frozenset((
-    "pytest", "unittest", "tox", "nox", "mypy", "pylint", "flake8", "ruff", "build", "pip", "playwright",
+    "pytest", "unittest", "tox", "nox", "mypy", "pylint", "flake8", "ruff", "black", "build", "pip", "playwright",
 ))
 FG_INSTALLERS = {  # the install verbs of each installer
     "pip": ("install",), "pip3": ("install",), "pipx": ("install", "upgrade"), "poetry": ("install", "add", "update"),
@@ -805,11 +805,67 @@ FG_INSTALLERS = {  # the install verbs of each installer
     "swift": ("build", "test"), "cargo": ("build", "test", "check", "clippy", "install"),
     "go": ("build", "test", "install", "vet"),
 }
+FG_VERBS = {  # a program that runs long only for some verbs: the verbs, read after the program's own flags
+    "pre-commit": ("run", "run-hooks", "autoupdate", "install-hooks"),
+    "deno": ("test", "lint", "check", "bench", "compile", "install"),
+    "docker": ("build", "buildx", "compose"),
+    "git": ("clone",),
+}
+FG_VERB_FLAGS = {  # the flags of a FG_VERBS program that take a value
+    "git": ("-C", "-c", "--git-dir", "--work-tree", "--namespace"),
+    "docker": ("-H", "--host", "-c", "--context"),
+}
 FG_PACKAGE_MANAGERS = ("npm", "pnpm", "yarn", "bun")
 FG_PACKAGE_VERBS = frozenset(("test", "t", "tst", "install", "i", "ci", "add", "build", "lint"))
 FG_SCRIPT_NAME = re.compile(r"test|lint|build|check|install|verify|compile|e2e|ci$")
 FG_INTERPRETERS = frozenset(("node", "bash", "sh", "zsh", "ruby", "deno", "pwsh", "powershell"))
 FG_TEST_FILE = re.compile(r"(?:^test[_-]|[_-]tests?\.\w+$|\.(?:test|spec)\.\w+$|^run[_-]?tests?\.\w+$)")
+
+
+def _fg_verb_hit(word: str, args) -> str:
+    """The matched text when `word` (a FG_VERBS program) runs one of its long verbs, else ''. `docker buildx` and
+    `docker compose` count for their `build` verb only. A flag that takes a value is skipped with it."""
+    at = 0
+    while at < len(args) and args[at].startswith("-"):
+        at += 2 if args[at] in FG_VERB_FLAGS.get(word, ()) else 1
+    verb = args[at] if at < len(args) else ""
+    if verb not in FG_VERBS[word]:
+        return ""
+    if verb in ("buildx", "compose") and args[at + 1:at + 2] != ["build"]:
+        return ""
+    return word + " " + verb
+
+
+def _fg_info_read(args) -> bool:
+    """True for a version or help read. `--version` and `--help` print and exit, so they count anywhere. `-v` is
+    verbose for most programs (`pytest -v tests`), so it counts only as the one argument."""
+    return "--version" in args or "--help" in args or list(args) == ["-v"]
+
+
+class _FgTokens(list):
+    quoted = frozenset()
+
+
+def _fg_clean(tokens):
+    """The tokens with the `)` that closes a group cut off each unquoted word, so `(npm test)` reads as
+    `npm test`. A word that is only `)` stays. `quoted` is kept for command_indexes."""
+    quoted = getattr(tokens, "quoted", frozenset())
+    cleaned = _FgTokens(token.rstrip(")") if i not in quoted and token.rstrip(")") else token
+                        for i, token in enumerate(tokens))
+    cleaned.quoted = quoted
+    return cleaned
+
+
+def _fg_skip_ionice(tokens, index: int) -> int:
+    """The index of the command `ionice [flags] ...` runs, read through `resolve_command` again, else `index`.
+    `ionice` is no entry of COMMAND_WRAPPERS, which would move every rule that reads the command word."""
+    while index < len(tokens) and basename(tokens[index]) == "ionice":
+        start = _wrapper_flags("ionice", tokens, index + 1)[0]
+        at = resolve_command(tokens[start:])
+        if at is None:
+            break
+        index = start + at
+    return index
 
 
 def _fg_positional(args):
@@ -847,10 +903,14 @@ def _fg_word_hit(tokens, at: int) -> str:
     """The matched text when the command at `tokens[at]` can run long, else ''."""
     word, args = program_name(tokens[at]), tokens[at + 1:]
     positional = _fg_positional(args)
+    if _fg_info_read(args):
+        return ""
     if any(basename(token) in VERDICT_WORDS for token in tokens[:at]):
         return "verdict " + word
     if word in FG_PROGRAMS:
         return word
+    if word in FG_VERBS:
+        return _fg_verb_hit(word, args)
     if _roster_word(tokens, at, interpreter_only=True):
         return "merge"
     if word in FG_PACKAGE_MANAGERS:
@@ -876,8 +936,9 @@ def _fg_word_hit(tokens, at: int) -> str:
 def _fg_tokens_hit(tokens, depth: int) -> str:
     """The matched text when the one segment `tokens` runs a command that can run long, else ''. A shell's
     `-c` text, `cmd /c` and `pwsh -Command` are read as segments of their own."""
+    tokens = _fg_clean(tokens)
     for start in command_indexes(tokens):
-        at = _skip_uv_run(tokens, start)
+        at = _fg_skip_ionice(tokens, _skip_uv_run(tokens, start))
         hit = _fg_word_hit(tokens, at)
         if hit:
             return hit
