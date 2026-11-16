@@ -4011,15 +4011,26 @@ SECOND_DEBT_TEXT = "# Spin rate floor\n\nThe spin rate may not drop below six de
 BACKLOG_TODO = "# Todo\n\n- Wheel speed cap: raise the spin limit\n"
 BACKLOG_NOTES = "# Notes\n\n- keep the wheel speed setting in the reader\n"
 TODO_REF, NOTE_REF, DEBT_REF = "todo:3", "note:3", "debt:" + DEBT_SLUG
+OLD_NOTE_PHRASE = "keep the wheel speed setting in the reader"  # the words of the old notes file's line 3
+# One file per note: each file in the notes folder is one note, a candidate under `note:<slug>`.
+NOTE_FILE_SLUG, OTHER_NOTE_SLUG = "wheel-speed-setting", "wheel-speed-floor"
+NOTE_FILE_TEXT = "- wheel-speed-setting: the spin rate is held in the reader (lint/check_reader.py)\n"
+OTHER_NOTE_TEXT = "- wheel-speed-floor: the spin floor is set in the reader (lint/check_reader.py)\n"
+NOTE_FILE_PHRASE = "the spin rate is held in the reader"
+NOTE_FILE_REF = "note:" + NOTE_FILE_SLUG
+NOTES_README_TEXT = "# Notes\n\nOne note per file.\n"
 
 
-def backlog_repo(name):
+def backlog_repo(name, notes=()):
     """A rolled-out repo whose backlog holds each candidate kind, untracked: the todo file, the notes file and
-    two debts. A case names one of them as its item's home."""
+    two debts. `notes` (slug, text) pairs add one note file each to the notes folder. A case names one of
+    them as its item's home."""
     root = repeat_repo(name, debt=True)
     write_file(os.path.join(root, "docs", "todo.md"), BACKLOG_TODO)
     write_file(os.path.join(root, "docs", "debts", "notes.md"), BACKLOG_NOTES)
     write_file(os.path.join(root, "docs", "debts", SECOND_DEBT_SLUG + ".md"), SECOND_DEBT_TEXT)
+    for slug, text in notes:
+        write_file(os.path.join(root, "docs", "notes", slug + ".md"), text)
     return root
 
 
@@ -4121,6 +4132,62 @@ def case_repeat_debt_home_is_never_a_candidate_for_its_item():
     check("debt home control: the item homed to another debt still marks against this debt",
           inbox_line(cfg, NEW_SID, "fb-1104-2") == other_line + " repeats " + DEBT_REF,
           inbox_line(cfg, NEW_SID, "fb-1104-2"))
+
+
+def case_repeat_note_file_is_a_backlog_candidate_under_its_own_ref():
+    """A file in the layout's notes folder is one note: a backlog candidate under `note:<slug>`. Controls: the old
+    notes file's line keeps its `note:<line>` ref, and the folder's README is no note."""
+    root = backlog_repo("repeat-notes-folder", notes=[(NOTE_FILE_SLUG, NOTE_FILE_TEXT)])
+    write_file(os.path.join(root, "docs", "notes", "README.md"), NOTES_README_TEXT)
+    cfg, sid = new_cfg(), "repeat-notes-folder"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    add_item(cfg, sid)
+    p, calls = stop(cfg, sid, root, answer=ANSWER_NONE)
+    prompt = calls[0]["prompt"] if len(calls) == 1 else ""
+    check("notes folder: one model call on the Stop", len(calls) == 1, p.desc())
+    check("notes folder: the note file is a backlog candidate under note:<slug>",
+          candidate_ref_of(prompt, NOTE_FILE_PHRASE) == NOTE_FILE_REF, prompt[-300:])
+    check("notes folder control: the old notes file's line still reads as note:<line>",
+          candidate_ref_of(prompt, OLD_NOTE_PHRASE) == NOTE_REF, prompt[-300:])
+    check("notes folder: the folder's README is no note", "note:README" not in candidate_refs(prompt), prompt[-300:])
+
+
+def case_repeat_note_file_is_never_a_candidate_for_its_own_item():
+    """A note file is its own home: an item homed to it is never marked against that note. Scope first: the note is
+    a candidate at all, so the own-home drop is what this judges. Control: an item homed to another note file still
+    marks against this one."""
+    root = backlog_repo("repeat-notes-home-file",
+                        notes=[(NOTE_FILE_SLUG, NOTE_FILE_TEXT), (OTHER_NOTE_SLUG, OTHER_NOTE_TEXT)])
+    cfg = new_cfg()
+    own_line = "- fb-1106-1 [task] -> docs/notes/%s.md" % NOTE_FILE_SLUG
+    other_line = "- fb-1106-2 [task] -> docs/notes/%s.md" % OTHER_NOTE_SLUG
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [own_line, other_line])])
+    answer = json.dumps({"repeats": [{"id": "fb-1106-1", "ref": NOTE_FILE_REF},
+                                     {"id": "fb-1106-2", "ref": NOTE_FILE_REF}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    prompt = calls[0]["prompt"] if len(calls) == 1 else ""
+    check("notes home: one model call for both items", len(calls) == 1, p.desc())
+    check("notes home: the note file is a candidate before its own-home drop",
+          NOTE_FILE_REF in candidate_refs(prompt), prompt[-300:])
+    check("notes home: the item homed to the note file is not marked against its own note",
+          inbox_line(cfg, NEW_SID, "fb-1106-1") == own_line, inbox_line(cfg, NEW_SID, "fb-1106-1"))
+    check("notes home control: the item homed to another note still marks against this note",
+          inbox_line(cfg, NEW_SID, "fb-1106-2") == other_line + " repeats " + NOTE_FILE_REF,
+          inbox_line(cfg, NEW_SID, "fb-1106-2"))
+
+
+def case_notes_folder_absent_still_reads_the_old_notes_file():
+    """The empty state: a repo with no notes folder reads its old notes file's lines as `note:<line>`, as today."""
+    root = backlog_repo("repeat-no-notes-folder")
+    cfg, sid = new_cfg(), "repeat-no-notes-folder"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    add_item(cfg, sid)
+    p, calls = stop(cfg, sid, root, answer=ANSWER_NONE)
+    prompt = calls[0]["prompt"] if len(calls) == 1 else ""
+    check("no notes folder: the repo has no notes folder", not os.path.isdir(os.path.join(root, "docs", "notes")), root)
+    check("no notes folder: one model call on the Stop", len(calls) == 1, p.desc())
+    check("no notes folder: the old notes file's line still reads as note:<line>",
+          candidate_ref_of(prompt, OLD_NOTE_PHRASE) == NOTE_REF, prompt[-300:])
 
 
 def case_one_shot_grant_passes_with_its_home_and_blocks_without_one():
@@ -4852,6 +4919,9 @@ CASES = (
     case_repeat_notes_home_is_never_a_candidate_for_its_item,
     case_repeat_dot_slash_debt_home_is_never_a_candidate_for_its_item,
     case_repeat_debt_home_is_never_a_candidate_for_its_item,
+    case_repeat_note_file_is_a_backlog_candidate_under_its_own_ref,
+    case_repeat_note_file_is_never_a_candidate_for_its_own_item,
+    case_notes_folder_absent_still_reads_the_old_notes_file,
     case_one_shot_grant_passes_with_its_home_and_blocks_without_one,
     case_guard_ruling_home_is_judged_in_the_repo_the_session_worked_in,
     case_step_path_is_derived_from_override_step_dir,
