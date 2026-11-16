@@ -9518,6 +9518,36 @@ class RecordsRebuild(RecordsEnv):
         sh(self.co, "git", "push", "-q", "origin", f"{page_sha}:refs/heads/feat")
         return page_sha
 
+    def base_merge_pushed_on(self, source, edit=None):
+        """Push onto the head a merge of `source` (a ref of the second clone), as a person makes one. `edit` ({path: text}) is written into the merge
+        before it is committed, so the merge's tree may differ from git's clean merge. -> the merge sha."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "merge", "-q", "--no-ff", "--no-commit", source)
+        for path, text in (edit or {}).items():
+            put_lf(os.path.join(o, path), text)
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "Merge " + source); sh(o, "git", "push", "-q", "origin", "feat")
+        return sh(o, "git", "rev-parse", "HEAD")
+
+    def clean_merge_tree(self, first, second):
+        """-> the tree id of git's clean merge of two commits, or None when they conflict."""
+        r = subprocess.run(["git", "merge-tree", "--write-tree", "--no-messages", first, second], cwd=self.co, capture_output=True, text=True)
+        return r.stdout.split()[0] if r.returncode == 0 else None
+
+    def assert_merge_shape(self, live, first, second, clean):
+        """Scope before subject (P7): `live` is a merge of `first` then `second`. Its tree is git's clean merge of the two when `clean`, and is not when not."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "rev-list", "--parents", "-n", "1", live).split()[1:], [first, second],
+                         "fixture: the head is not a merge of the relayed head and the second parent")
+        merged = self.clean_merge_tree(first, second)
+        self.assertIsNotNone(merged, "fixture: git cannot merge the two parents cleanly")
+        tree = sh(self.co, "git", "rev-parse", f"{live}^{{tree}}")
+        if clean:
+            self.assertEqual(tree, merged, "fixture: the merge's tree is not git's clean merge")
+        else:
+            self.assertNotEqual(tree, merged, "fixture: the merge's tree is git's clean merge, so the edit did not change it")
+
     def assert_healed_merge(self, out, main_tip, head):
         """The one confirm merged the head: the merge's second parent holds the base tip and the head the run started from, main's page is
         current, and the run claimed no number and waited on no check."""
@@ -9623,6 +9653,78 @@ class RecordsRebuild(RecordsEnv):
         rc, out = self.run_merge_once("7", "--confirm")
         self.assert_refused_untouched(rc, out, refs_before)
         self.assertIn("stale", out.lower())
+
+    def test_a_named_list_refuses_a_relayed_yes_with_a_base_merge_on_top(self):
+        # Under a named list no heal runs, so a merge of main on the relayed head is not the tool's own commit: the yes does not cover it.
+        self.set_required(["checks"])
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})  # current for the head's own debts, so only the relayed yes can refuse the merge
+        relayed = self.head()
+        self.main_moves()
+        main_tip = self.head("main")
+        live = self.base_merge_pushed_on("origin/main")
+        self.assert_merge_shape(live, relayed, main_tip, clean=True)
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
+        self.assertFalse(getattr(self.host, "merged", False), "a named list merged a relayed yes with a base merge on top:\n" + out)
+        self.assertIn("so that yes does not cover it", out, "a named list let a relayed yes cover a base merge on top:\n" + out)
+        self.assertEqual(self.refs(), refs_before, "a named list pushed on a relayed yes with a base merge on top")
+        self.assertEqual(rc, 1, out)
+
+    def test_under_none_a_merge_of_a_commit_main_never_got_refuses_the_relayed_yes(self):
+        # The tree is git's clean merge, so only the second parent tells this merge apart: a base merge's second parent is on main.
+        self.set_required("none")
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})  # current for the head's own debts, so only the relayed yes can refuse the merge
+        relayed = self.head()
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "side", "origin/main")
+        put_lf(os.path.join(o, "side.txt"), "a commit off main that main never got\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "side work")
+        side = sh(o, "git", "rev-parse", "HEAD")
+        live = self.base_merge_pushed_on("side")
+        self.assert_merge_shape(live, relayed, side, clean=True)
+        self.assertNotIn(side, sh(self.co, "git", "rev-list", "origin/main").split(), "fixture: the second parent is on main")
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
+        self.assertFalse(getattr(self.host, "merged", False), "under none a merge of a commit main never got carried a relayed yes:\n" + out)
+        self.assertIn("so that yes does not cover it", out, "under none a relayed yes covered a merge whose second parent is not on main:\n" + out)
+        self.assertEqual(self.refs(), refs_before, "under none a merge of a commit main never got was pushed over on a relayed yes")
+        self.assertEqual(rc, 1, out)
+
+    def test_under_none_an_edited_base_merge_refuses_the_relayed_yes(self):
+        # The second parent is on main, so only the tree tells this merge apart: an edit the relayed yes did not see is not git's clean merge.
+        self.set_required("none")
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})  # current for the head's own debts, so only the relayed yes can refuse the merge
+        relayed = self.head()
+        self.main_moves()
+        main_tip = self.head("main")
+        live = self.base_merge_pushed_on("origin/main", edit={"edited.txt": "a line the relayed yes never saw\n"})
+        self.assert_merge_shape(live, relayed, main_tip, clean=False)
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
+        self.assertFalse(getattr(self.host, "merged", False), "under none an edited base merge carried a relayed yes to a merge:\n" + out)
+        self.assertIn("so that yes does not cover it", out, "under none a relayed yes covered an edited base merge:\n" + out)
+        self.assertEqual(self.refs(), refs_before, "under none an edited base merge was pushed over on a relayed yes")
+        self.assertEqual(rc, 1, out)
+
+    def test_under_none_a_stale_page_on_a_blocked_head_refuses_before_the_heal_pushes(self):
+        self.set_required("none")
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page("ghost")})  # a page that names a debt nobody has
+        self.assertEqual(self.show("feat", merge.RECORDS_PAGE), page("ghost").strip(), "scope: the head's page is not the stale page")
+        read = self.host.pr
+        self.host.pr = lambda n: dict(read(n), merge_state="BLOCKED")  # GitHub reads the head BLOCKED, so the heal's commit would not merge
+        self.assertEqual(self.host.pr(7)["merge_state"], "BLOCKED", "scope: the pull request does not read BLOCKED")
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(self.refs(), refs_before, "the heal pushed onto a BLOCKED head:\n" + out)
+        self.assertEqual(rc, 1, "a BLOCKED head with a stale page did not refuse:\n" + out)
+        self.assertIn("reads BLOCKED", out, "the refusal does not say the head reads BLOCKED:\n" + out)
+        self.assertIn(merge.HEAL_BLOCKED, out, "the refusal does not carry the heal's BLOCKED text:\n" + out)
+        self.assertEqual(self.host.waits, [], "the BLOCKED refusal waited on a check")
+        self.assertFalse(getattr(self.host, "merged", False), out)
 
     def test_a_pr_that_adds_a_debt_gets_the_page_in_the_claim_commit(self):
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
