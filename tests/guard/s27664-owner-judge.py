@@ -11,29 +11,28 @@ FAMILY = "owner-judge"   # the family the cases after this section have always r
 # A spawn whose text mentions prior work at all is also kept as written, so a near-miss line (`**Prior work**: ...`)
 # reaches the guard unchanged, and the guard's reader decides it.
 # The lane reading is the guard's own (shared_names.is_lane_create_session), so the default follows the guard exactly.
-from shared_names import is_lane_create_session  # noqa: E402  the one reading of the lane tag
-from guard_merge import PRIOR_WORK_LINE  # noqa: E402  the guard's own marker, never typed here
+from shared_names import LANE_GRANT_MARKER, is_lane_create_session  # noqa: E402  the one reading of the lane tag and the Grant line
+from guard import BRIEF_CLAIM_ROLES, SPAWN_TOOLS, role_key  # noqa: E402  the guard's own spawn tools, build roles and role reader
+from guard_merge import BRIEF_TOOL, PRIOR_WORK_LINE, _BRIEF_MARKER_LINE  # noqa: E402  the guard's own lane brief tool, lane brief line and marker word
 
 PRIOR_WORK_RULE = "spawn-searches-existing-builds"
 PRIOR_WORK_DEFAULT = "Prior work: none found"
 PRIOR_WORK_WORDS = re.compile(re.escape(PRIOR_WORK_LINE.rstrip(":")), re.IGNORECASE)
-BUILD_ROLES = ("builder", "test-author")
-BRIEF_TOOL = "mcp__claude-code-remote__send_message"
-_LANE_BRIEF_LINE = re.compile(r"[#*_>\s]*Lane brief:", re.IGNORECASE)
 
 
 def _is_build_spawn(tool, tool_input):
     """True for a builder or test-author Agent or Task spawn, a lane start, and a lane brief (its first line after
-    any Grant line)."""
-    if tool in ("Agent", "Task"):
-        return str(tool_input.get("subagent_type") or "").strip().lower() in BUILD_ROLES
+    any Grant line). Each reading is the guard's: its spawn tools, its role reader, its build roles, its lane tag and
+    its lane brief line."""
+    if tool in SPAWN_TOOLS:
+        return role_key(tool_input.get("subagent_type")) in BRIEF_CLAIM_ROLES
     if is_lane_create_session(tool, tool_input):
         return True
     if tool == BRIEF_TOOL:
         lines = [line.strip() for line in str(tool_input.get("message") or "").splitlines() if line.strip()]
-        if lines and lines[0].startswith("Grant:"):
+        if lines and lines[0].startswith(LANE_GRANT_MARKER):
             lines = lines[1:]
-        return bool(lines) and _LANE_BRIEF_LINE.match(lines[0]) is not None
+        return bool(lines) and _BRIEF_MARKER_LINE.match(lines[0]) is not None
     return False
 
 
