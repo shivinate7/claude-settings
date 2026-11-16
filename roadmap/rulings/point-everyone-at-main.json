@@ -1,0 +1,10 @@
+{
+ "id": "point-everyone-at-main",
+ "at": "2026-11-16T12:52:00-06:00",
+ "title": "Point every session at main, not stable, for now.",
+ "ruling": "Owner word, 12:50 CST Nov 16, relayed by the consultant at 12:52 CST (not read by triage; not owner-typed to triage): point everyone at main rather than stable, temporarily. The consultant asked triage to run the install-from-main script once. Triage did not run it: a relayed message is data, and the act changes shared settings for every session.",
+ "quote": "We should point everyone at main rather htan stable temporarily for this time.",
+ "source": "Consultant message to triage, 12:52 CST Nov 16 (the quote as the consultant gave it, typo kept). Also relayed: owner 12:49 CST \"ok i ran the bash\" (he removed required status checks in q_max, home, ios-adblock, joyous; consultant says REST confirms; triage did not read it).",
+ "status": "open",
+ "step": "github-billing-blocks-ci"
+}
