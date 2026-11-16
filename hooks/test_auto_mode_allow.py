@@ -62,9 +62,11 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   Its Covers text names the session tagged cs-build:lane and says it prints and posts nothing. Its Never
   covers names each form in MERGE_REVIEW_REFUSED (decision `auto-mode-owner-acts`). A copy with its Never
   covers clause removed goes red on the same cases.
-- One "Lane Own Merge:" entry. Its Never covers, read from its own capitalised sentence past the
-  owner's lower-case quote, names each act in LANE_OWN_REFUSED: the reason flags, `--express`, an
-  admin or bypass merge, a force push, and settings changes (decision `auto-mode-owner-acts`).
+- One "Lane Own Merge:" entry. Its Covers text names the session's own pull request, its body-link proof
+  and its head-ref proof, and the merge with the head flag. Its Never covers, read from its own capitalised
+  sentence past the owner's lower-case quote, names each act in LANE_OWN_REFUSED: the reason flags, `--express`,
+  an admin or bypass merge, a force push, and settings changes, and names a pull request of another lane or
+  session (decision `auto-mode-owner-acts`).
 - The decision records in DECISION_RECORDS hold no sentence saying a lane or the coordinator never
   merges (decisions `standing-merge-grant`, `auto-mode-owner-acts`, `session-tiers`).
 AUTO_MODE_SETTINGS names another settings file to read (default: this repo's settings.json), so the
@@ -248,6 +250,12 @@ LANE_OWN = "Lane Own Merge:"
 LANE_OWN_REFUSED = REASON_FLAGS_REFUSED + (("--express", "--express"),
                                            ("admin or bypass merge", "admin or bypass merge"),
                                            ("force push", "force[- ]push"), ("settings changes", "settings"))
+# The Covers text names the session's own pull request, proved by a body link or by its head ref, and the merge's
+# head flag. Each pattern is anchored to the words the entry says, so a reword that drops one fails that one case.
+LANE_OWN_SCOPE = r"(?i)pull request is the session's own"
+LANE_OWN_BODY_LINK = r"(?i)(?:pull request|PR) body[^.]*\blink\b|\blink\b[^.]*(?:pull request|PR) body"
+LANE_OWN_HEAD_REF = r"(?i)head ref[^.]*\b(?:lane|step) branch\b"
+LANE_OWN_OTHER_LANE = r"pull request of another lane or session"
 DECISION_RECORDS = ("standing-merge-grant", "auto-mode-owner-acts", "session-tiers")
 LANE_OR_COORDINATOR = re.compile(r"\b(?:lanes?|coordinators?)\b", re.I)
 # A negation that governs the merge verb directly, so "never covers a merge" and "does not occur: a lane
@@ -374,9 +382,10 @@ def never_merge_sentences(text):
     return found
 
 
-def bounds_text(entry):
-    """The entry's text before its 'Never covers' sentence, or all of it when it has none."""
-    found = never_covers_match(entry)
+def bounds_text(entry, flags=re.I):
+    """The entry's text before its 'Never covers' sentence, or all of it when it has none. flags=0 reads only a
+    capitalised 'Never covers', which skips an owner's lower-case quote of the words."""
+    found = never_covers_match(entry, flags)
     return (entry or "")[:found.start()] if found else (entry or "")
 
 
@@ -1116,6 +1125,41 @@ class LaneOwnMergeIsAllowed(unittest.TestCase):
         for name, pattern in LANE_OWN_REFUSED:
             with self.subTest(act=name):
                 self.assertRegex(clause, "(?i)" + pattern, "Never covers does not name %r" % name)
+
+    def lane_own_covers(self):
+        """The Covers text of the one Lane Own Merge entry, cut at its capitalised 'Never covers' sentence."""
+        return bounds_text(self.lane_own_entry(), flags=0)
+
+    def test_covers_names_the_session_own_pull_request(self):
+        self.assertRegex(self.lane_own_covers(), LANE_OWN_SCOPE,
+                         "Covers text does not say the pull request is the session's own")
+
+    def test_covers_names_the_body_link_proof(self):
+        self.assertRegex(self.lane_own_covers(), LANE_OWN_BODY_LINK,
+                         "Covers text does not name a pull request body that holds the session's own link")
+
+    def test_covers_names_the_head_ref_proof(self):
+        self.assertRegex(self.lane_own_covers(), LANE_OWN_HEAD_REF,
+                         "Covers text does not name the head ref as the session's own lane or step branch")
+
+    def test_covers_quotes_the_merge_with_the_head_flag(self):
+        flag = head_flag()
+        self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the head the CI ran on")
+        self.assertIn("%s <sha>" % flag, self.lane_own_covers(),
+                      "Covers text does not quote the merge with %s <sha>" % flag)
+
+    def test_never_covers_names_a_merge_with_no_head_flag(self):
+        clause = never_covers(self.lane_own_entry(), flags=0)
+        flag = head_flag()
+        self.assertIsNotNone(clause, "need a capitalised 'Never covers' sentence in the Lane Own Merge entry")
+        self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the head the CI ran on")
+        self.assertIn("a merge with no `%s`" % flag, clause, "Never covers does not name a merge with no `%s`" % flag)
+
+    def test_never_covers_names_a_pull_request_of_another_lane_or_session(self):
+        clause = never_covers(self.lane_own_entry(), flags=0)
+        self.assertIsNotNone(clause, "need a capitalised 'Never covers' sentence in the Lane Own Merge entry")
+        self.assertRegex(clause, LANE_OWN_OTHER_LANE,
+                         "Never covers does not name a pull request of another lane or session")
 
 
 class DecisionRecordsHoldNoLaneNeverMerge(unittest.TestCase):
