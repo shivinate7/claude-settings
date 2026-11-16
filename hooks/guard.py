@@ -1486,10 +1486,24 @@ CAP_ASK_REASON = (
     "time shown here is the one you want. "
     "(decision agent-model-cap, the owner's cap on the agent model lifts only with his word)"
 )
+CAP_ASK_REASON_COMPUTED = (
+    "Rule (configuration): this write sets the agent model cap, which the owner's user settings "
+    "hold. A project settings file overrides user settings, so the write lifts the cap for every "
+    "agent started there. Requested: {change}. File: {where}. "
+    "Approve it only when a model above Sonnet is wanted for this project, and compute the cap "
+    "lift's end first and check it: this ask does not show it. "
+    "(decision agent-model-cap, the owner's cap on the agent model lifts only with his word)"
+)
 CAP_END_ASK_REASON = (
     "Rule (configuration): this write sets the cap-lift end, the time until which a project's "
     "settings lift the owner's cap on the agent model. Requested: {change}. File: {where}. "
     "Approve it only when the cap lift's end time shown here is the one you want. "
+    "(decision opus-grant-expires, the cap lift ends at a set time; decision agent-model-cap, the owner's cap on the agent model lifts only with his word)"
+)
+CAP_END_ASK_REASON_COMPUTED = (
+    "Rule (configuration): this write sets the cap-lift end, the time until which a project's "
+    "settings lift the owner's cap on the agent model. Requested: {change}. File: {where}. "
+    "This ask does not show the end: compute it first, check it, and approve only when it is the one you want. "
     "(decision opus-grant-expires, the cap lift ends at a set time; decision agent-model-cap, the owner's cap on the agent model lifts only with his word)"
 )
 from shared_names import CAP_DEADLINE_FIELD, parse_deadline  # noqa: E402  the one home of the cap-lift deadline's field name, shared with hooks/config_watch.py
@@ -1691,6 +1705,55 @@ def cap_deadline_computed(raw: str) -> bool:
     return True
 
 
+# One shell word: quoted runs and plain characters, or one operator. Each alternative starts on a different
+# character, so a long backslash or quote run fails in linear time.
+CAP_SHELL_WORD = re.compile(r"""(?:'[^']*'|"(?:[^"\\]|\\.)*"|\\.|[^\s'"\\;|&<>])+|[;|&<>]""")
+CAP_PRINTF = re.compile(r"\bprintf\b")
+
+
+def cap_printf_end(raw: str) -> str:
+    """The cap-lift end a shell `printf` takes from an argument: CAP_END_COMPUTED, a literal ISO end, else ''.
+
+    The field sits in the format, or in a literal argument, and the end is a LATER argument, so
+    `cap_deadline_text` reads no end after the field. Each `printf` runs to the first operator. The words after
+    the last one that names the field are the arguments: one with `$` or a backtick computes the end, else one
+    that is an ISO instant is the literal end. A literal that is no date reads as ''. The last `printf` wins.
+    """
+    found = ""
+    pos = 0
+    while True:
+        start = CAP_PRINTF.search(raw, pos)
+        if not start:
+            return found
+        words = []
+        pos = start.end()
+        for word in CAP_SHELL_WORD.finditer(raw, start.end()):
+            pos = word.end()
+            if word.group(0)[0] in ";|&<>":
+                break
+            words.append(word.group(0).replace('\\"', '"').strip("'\""))
+        named = [i for i, word in enumerate(words) if CAP_DEADLINE_FIELD in word]
+        if not named:
+            continue
+        args = words[named[-1] + 1:]
+        if any("$" in arg or "`" in arg for arg in args):
+            found = CAP_END_COMPUTED
+        else:
+            literal = [arg for arg in args if re.fullmatch(CAP_ISO_END, arg)]
+            found = literal[-1] if literal else ""
+
+
+def cap_shell_end(raw: str, path: str, cwd: str = "") -> str:
+    """The cap-lift end a shell write sets, as `cap_deadline_end` prints it, CAP_END_COMPUTED, or ''."""
+    printed = cap_printf_end(raw)
+    if printed == CAP_END_COMPUTED:
+        return printed
+    parts = cap_sed_parts(raw, path, cwd)
+    if printed:
+        parts = parts + ['"' + CAP_DEADLINE_FIELD + '": "' + printed + '"']
+    return cap_deadline_end(parts) or (CAP_END_COMPUTED if cap_deadline_computed(raw) else "")
+
+
 def cap_deadline_end(parts) -> str:
     """Return the end of the cap lift a write sets, as `YYYY-MM-DD HH:MM CST` or `CDT` in US Central, else ''.
 
@@ -1814,7 +1877,7 @@ def cap_with_deadline(change: str, end: str) -> str:
     return (change + ", " if change else "") + "cap lift ends " + end + " (US Central)"
 
 
-def cap_ask_reason(change: str, where: str, end_only: bool = False) -> str:
+def cap_ask_reason(change: str, where: str, end_only: bool = False, computed: bool = False) -> str:
     """Build the printed ask, BOUNDED BY CONSTRUCTION.
 
     The template is fixed, the change holds at most the cap's two keys with a value of at most
@@ -1823,8 +1886,11 @@ def cap_ask_reason(change: str, where: str, end_only: bool = False) -> str:
     the cleaning and marks each cut. `end_only` is a write that sets the cap-lift end and no model:
     it says so, and never says it sets the model cap.
     """
-    return (CAP_END_ASK_REASON if end_only else CAP_ASK_REASON).format(change=cap_safe(change, CAP_MAX_CHANGE),
-                                 where=cap_safe(where, CAP_MAX_PATH))
+    if computed:
+        template = CAP_END_ASK_REASON_COMPUTED if end_only else CAP_ASK_REASON_COMPUTED
+    else:
+        template = CAP_END_ASK_REASON if end_only else CAP_ASK_REASON
+    return template.format(change=cap_safe(change, CAP_MAX_CHANGE), where=cap_safe(where, CAP_MAX_PATH))
 
 
 # ---- a message that cites a record by path
@@ -5234,10 +5300,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = shell_write_hit(raw, cwd, is_settings_file)
     if matched:
         model = cap_change(raw)
-        end = cap_deadline_end(cap_sed_parts(raw, matched, cwd)) or (CAP_END_COMPUTED if cap_deadline_computed(raw) else "")
+        end = cap_shell_end(raw, matched, cwd)
         change = cap_with_deadline(model, end)
         if change:
-            ask_command("agent-model-cap", cap_ask_reason(change, matched, end_only=not model),
+            ask_command("agent-model-cap", cap_ask_reason(change, matched, end_only=not model, computed=end == CAP_END_COMPUTED),
                      log_path_and_text(matched, change), "settings write")
     settle_ask(tool, raw)
 
