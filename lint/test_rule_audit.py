@@ -407,6 +407,17 @@ def with_row(files, slug, mechanism):
     return changed
 
 
+def renamed_anchor(files, old, new, mechanism):
+    """`files` with the anchor `old` renamed to `new` in CLAUDE.md, and its row moved under `new` as `mechanism`."""
+    changed = dict(files)
+    changed["CLAUDE.md"] = files["CLAUDE.md"].replace("<!-- rule:%s -->" % old, "<!-- rule:%s -->" % new)
+    rules = json.loads(files["lint/rule_mechanisms.json"])["rules"]
+    del rules[old]
+    rules[new] = {"mechanism": mechanism}
+    changed["lint/rule_mechanisms.json"] = json.dumps({"rules": rules}, indent=2) + "\n"
+    return changed
+
+
 def write_files(root, files):
     for rel, text in files.items():
         path = os.path.join(root, *rel.split("/"))
@@ -458,6 +469,21 @@ class ToolTreeCase(unittest.TestCase):
         if head is not None:
             write_files(root, head)
             commit_all(root, "head")
+        return root
+
+    def tree_behind_main(self, base, main_after, branch=None):
+        """A branch forked from `base`, and origin/main then moved on to `main_after`. The branch is checked out, so
+        the merge base of origin/main and HEAD is `base`. `branch`, when given, is committed on the branch first."""
+        root = self.tree(base=base)
+        git_in(root, "checkout", "-q", "-b", "feature")
+        if branch is not None:
+            write_files(root, branch)
+            commit_all(root, "branch")
+        git_in(root, "checkout", "-q", "main")
+        write_files(root, main_after)
+        commit_all(root, "main moves on")
+        git_in(root, "push", "-q", "origin", "main")
+        git_in(root, "checkout", "-q", "feature")
         return root
 
 
@@ -531,6 +557,19 @@ class AuditOutputTests(ToolTreeCase):
 MECH_REASON = "The step runs on every push, so no person reads for it."
 
 
+def step_base(unmech=UNMECH):
+    """The full-size base, with `step-00` a ci row that carries MECH_REASON."""
+    return with_row(fixture_rules(unmech=unmech, judgment=JUDG, ci=STEPS), "step-00",
+                    {"kind": "ci", "ref": "step-00", "reason": MECH_REASON})
+
+
+def moved_to_check(base):
+    """`base` with `unmech-00` moved onto a check that keeps its reason: the change origin/main made after a fork."""
+    return with_row(base, "unmech-00", {
+        "kind": "check", "ref": "lint/rule_audit.py", "reason": WHY,
+        "test": "lint/test_rule_audit.py::AuditOutputTests.test_zero_anchors_is_never_reported_ok"})
+
+
 class MoveOffMechanismTests(ToolTreeCase):
     """A row that moves off a mechanism (kind guard, check or ci) to `unmechanized` or `judgment` is printed by its
     anchor. It fails when its reason is the reason the mechanized row carried: the move adds no explanation. The base
@@ -592,6 +631,106 @@ class MoveOffMechanismTests(ToolTreeCase):
         self.assertEqual(rc, 0, out)
         self.assertIn("not compared", out, out)
 
+    def test_a_mechanized_anchor_renamed_off_its_mechanism_fails_and_names_it(self):
+        # A mechanized anchor renamed to an unmechanized row leaves its mechanism with no row to keep it. The move check
+        # reads only the same slug, so it does not see the loss.
+        for base_mech in ({"kind": "ci", "ref": "step-00"},
+                          {"kind": "guard", "ref": "agent-model-cap"},
+                          {"kind": "check", "ref": "lint/rule_audit.py", "reason": MECH_REASON}):
+            with self.subTest(kind=base_mech["kind"]):
+                base = with_row(fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS), "step-00", base_mech)
+                head = renamed_anchor(base, "step-00", "step-renamed", {"kind": "unmechanized", "reason": WHY})
+                rc, out = audit(self.tree(base=base, head=head))
+                self.assertIn("rule_audit: FAIL", out, out)
+                self.assertNotEqual(rc, 0, out)
+                self.assertIn("step-00", out, out)
+
+    def test_a_mechanized_anchor_renamed_and_kept_on_its_mechanism_passes(self):
+        # Control: the same rename, and the new row keeps the mechanism (the same CI step). Nothing leaves a mechanism.
+        base = fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS)
+        head = renamed_anchor(base, "step-00", "step-renamed", {"kind": "ci", "ref": "step-00"})
+        rc, out = audit(self.tree(base=base, head=head))
+        self.assertIn("rule_audit: OK", out, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_an_unmechanized_row_relabelled_judgment_with_the_same_reason_fails(self):
+        # judgment is not counted as a debt, so a relabel must say why the rule is judgment now, as a move off a
+        # mechanism must. The reason here is the one the unmechanized row already carried.
+        base = fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS)
+        head = with_row(base, "unmech-00", {"kind": "judgment", "reason": WHY})
+        rc, out = audit(self.tree(base=base, head=head))
+        self.assertIn("rule_audit: FAIL", out, out)
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("unmech-00", out, out)
+
+    def test_an_unmechanized_row_relabelled_judgment_with_a_new_reason_passes(self):
+        # Control: the same relabel with its own reason.
+        base = fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS)
+        head = with_row(base, "unmech-00", {"kind": "judgment", "reason": JUDGMENT_REASON})
+        rc, out = audit(self.tree(base=base, head=head))
+        self.assertIn("rule_audit: OK", out, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_move_to_unmechanized_with_a_whitespace_only_reason_edit_fails(self):
+        # The reason changed in its spacing only. A reason edit must change its words, or the move adds no explanation.
+        edits = (MECH_REASON.replace("so no person", "so no  person"),
+                 MECH_REASON.replace("so no person", "so no\nperson"))
+        for edited in edits:
+            with self.subTest(edited=edited):
+                base_mech = {"kind": "ci", "ref": "step-00", "reason": MECH_REASON}
+                rc, out = audit(self.move_tree(base_mech, {"kind": "unmechanized", "reason": edited}))
+                self.assertIn("moved off a mechanism: step-00: ci -> unmechanized", out, out)
+                self.assertNotEqual(rc, 0, out)
+
+    def test_a_move_to_unmechanized_with_a_reworded_reason_passes(self):
+        # Control: a real rewording of the reason passes, and the move prints with "(reason changed)".
+        base_mech = {"kind": "ci", "ref": "step-00", "reason": MECH_REASON}
+        reworded = MECH_REASON.replace("no person reads for it", "a person reads for it instead")
+        rc, out = audit(self.move_tree(base_mech, {"kind": "unmechanized", "reason": reworded}))
+        self.assertIn("moved off a mechanism: step-00: ci -> unmechanized (reason changed)", out, out)
+        self.assertEqual(rc, 0, out)
+
+
+class BehindMainTests(ToolTreeCase):
+    """The audit compares a branch with the merge base of origin/main and HEAD, not with origin/main's tip. A branch
+    behind main is judged on its own changes: a row main changed after the fork is not one the branch fails on, and an
+    anchor main added after the fork is not one the branch removed."""
+
+    def test_a_branch_behind_main_fails_on_no_row_it_never_touched(self):
+        # main moved `unmech-00` after the fork, to a check that keeps the reason. The branch never touched that row.
+        base = step_base()
+        rc, out = audit(self.tree_behind_main(base=base, main_after=moved_to_check(base)))
+        self.assertIn("rule_audit: OK", out, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_branch_behind_main_names_no_anchor_that_main_added_as_removed(self):
+        # main added `added-on-main` after the fork. The branch never had it and never removed it.
+        base = step_base()
+        main_after = step_base(unmech=UNMECH + ["added-on-main"])
+        rc, out = audit(self.tree_behind_main(base=base, main_after=main_after))
+        self.assertIn("rule_audit: OK", out, out)
+        self.assertNotIn("added-on-main", out, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_branch_behind_main_passes_its_own_reason_changed_move(self):
+        # Control: the branch moves step-00 off its mechanism with a new reason, and main added an anchor.
+        base = step_base()
+        branch = with_row(base, "step-00", {"kind": "unmechanized", "reason": WHY})
+        main_after = step_base(unmech=UNMECH + ["added-on-main"])
+        rc, out = audit(self.tree_behind_main(base=base, main_after=main_after, branch=branch))
+        self.assertIn("rule_audit: OK", out, out)
+        self.assertIn("moved off a mechanism: step-00: ci -> unmechanized (reason changed)", out, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_branch_behind_main_still_fails_its_own_same_reason_move(self):
+        # Control: the branch moves step-00 off its mechanism with the reason the mechanized row carried. It fails.
+        base = step_base()
+        branch = with_row(base, "step-00", {"kind": "unmechanized", "reason": MECH_REASON})
+        main_after = step_base(unmech=UNMECH + ["added-on-main"])
+        rc, out = audit(self.tree_behind_main(base=base, main_after=main_after, branch=branch))
+        self.assertIn("moved off a mechanism: step-00: ci -> unmechanized", out, out)
+        self.assertNotEqual(rc, 0, out)
+
 
 class RealRepoOutputTests(unittest.TestCase):
     """The printed report on this repo as it is, with the counts it prints checked against the map."""
@@ -610,6 +749,41 @@ class RealRepoOutputTests(unittest.TestCase):
         kinds = [rules[s]["mechanism"]["kind"] for s in rule_audit.claude_md_anchors(rule_audit.rule_text())]
         self.assertIn("%d argue `unmechanized`" % kinds.count("unmechanized"), self.out, self.out)
         self.assertIn("%d are `judgment`" % kinds.count("judgment"), self.out, self.out)
+
+
+class RealRepoOriginTests(ToolTreeCase):
+    """RealRepoOutputTests reads this repo through origin/main, so its verdict could move with main. With origin/main
+    missing it must skip UNKNOWN, not assert OK. A row main changed after the fork must not change its OK."""
+
+    def real_suite_out(self, root):
+        """The report RealRepoOutputTests.setUpClass reads, with rule_audit.ROOT set to `root`."""
+        with mock.patch.object(rule_audit, "ROOT", root):
+            RealRepoOutputTests.setUpClass()
+        return RealRepoOutputTests.out
+
+    def test_the_real_suite_skips_unknown_when_origin_main_is_missing(self):
+        root = self.tree(base=fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS), pushed=False)
+        with mock.patch.object(rule_audit, "ROOT", root):
+            with self.assertRaises(unittest.SkipTest) as cm:
+                RealRepoOutputTests.setUpClass()
+        self.assertIn("UNKNOWN", str(cm.exception))
+
+    def test_the_real_suite_runs_and_asserts_ok_when_origin_main_is_present(self):
+        # Control: with origin/main present the suite runs, and its report is OK.
+        out = self.real_suite_out(self.tree(base=fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS)))
+        self.assertIn("rule_audit: OK", out, out)
+
+    def test_the_real_suite_verdict_does_not_change_when_main_changes_a_row(self):
+        base = fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS)
+        out = self.real_suite_out(self.tree_behind_main(base=base, main_after=moved_to_check(base)))
+        self.assertIn("rule_audit: OK", out, out)
+
+    def test_the_real_suite_stays_ok_when_main_adds_an_unrelated_anchor(self):
+        # Control: main adds an anchor after the fork, and the suite still reports OK.
+        base = fixture_rules(unmech=UNMECH, judgment=JUDG, ci=STEPS)
+        main_after = fixture_rules(unmech=UNMECH + ["added-on-main"], judgment=JUDG, ci=STEPS)
+        out = self.real_suite_out(self.tree_behind_main(base=base, main_after=main_after))
+        self.assertIn("rule_audit: OK", out, out)
 
 
 class CountsFromRestMechanismTests(unittest.TestCase):
