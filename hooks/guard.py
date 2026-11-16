@@ -276,8 +276,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        remote, else origin) adds a merge commit of more than two parents; a merge that a
                        ref of the pushed remote already holds passes. A dry run and a destination named main or master are
                        left out; push-main asks about the latter. A remote named by a URL or a path
-                       counts every remote's refs. Cost: one `git rev-list` per pushed ref, and one `git
-                       config` more per pushed ref for such a remote. (octopus-push-refused)
+                       counts every remote's refs. A range that shows an octopus is read again after one `git
+                       fetch` of the remote, so a lagging tracking ref cannot hide a merge the remote holds; a
+                       failed fetch keeps the refusal and says so. Cost: one `git rev-list` per pushed ref, one
+                       `git config` more per pushed ref for a URL or path remote, and on a hit one `git fetch`
+                       (10 s at most). (octopus-push-refused)
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
   config-edit          noted. A write to a project's own settings or hooks. See below.
@@ -633,7 +636,7 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
+            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, OCTOPUS_PUSH_STALE, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit, self_role_child_hit, self_role_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, stamp_hit, step_dup_hit, step_pr_hit, trust_card_hit, written_time_hit,
@@ -5005,11 +5008,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "conflict-markers", markers_reason.format(file=matched), matched)
 
     # 6c3. A push whose range adds a merge of more than two parents (rule octopus-push).
-    # Cost: one `git rev-list` per pushed ref, plus one `git config` for a remote named by a URL or a path;
-    # none for a dry run, a main or master destination, or a command with no push.
-    matched = octopus_push_hit(stripped, cwd, read_verb)
+    # Cost: one `git rev-list` per pushed ref, plus one `git config` for a remote named by a URL or a path, plus one
+    # `git fetch` (10 s at most) only when a range first shows an octopus; none for a dry run, a main or master
+    # destination, or a command with no push.
+    matched, stale = octopus_push_hit(stripped, cwd, read_verb)
     if matched:
-        refuse(tool, "deny", "octopus-push", OCTOPUS_PUSH_REASON.format(sha=matched), matched)
+        refuse(tool, "deny", "octopus-push", OCTOPUS_PUSH_REASON.format(sha=matched) + (OCTOPUS_PUSH_STALE if stale else ""), matched)
 
     # 7. A frozen path. The command is read as a shell reads it: a script's own strings are text, and its
     # shell spots are lines of their own (`shell_write_hit`).

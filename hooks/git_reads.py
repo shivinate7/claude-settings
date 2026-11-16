@@ -31,6 +31,20 @@ def _git(where: str, *args):
         return None
 
 
+def fetch_remote(where: str, remote: str, timeout: int = 10) -> bool:
+    """True when `git fetch --quiet <remote>` ran in `where` and succeeded: the remote's tracking refs now match the
+    remote. A prompt is switched off, so a remote that wants a login fails at once, not at the timeout. A refused,
+    failed or timed-out fetch is False."""
+    try:
+        done = _nowindow.run(
+            ["git", "-C", where, "fetch", "--quiet", remote], capture_output=True, encoding="utf-8", errors="replace",
+            timeout=timeout, env=dict(os.environ, GIT_TERMINAL_PROMPT="0"),
+        )
+    except Exception:
+        return False
+    return done.returncode == 0
+
+
 def is_worktree(where: str):
     """True in a linked worktree, False in an ordinary checkout, None when unknown.
 
