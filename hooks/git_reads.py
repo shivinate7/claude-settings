@@ -31,6 +31,30 @@ def _git(where: str, *args):
         return None
 
 
+# Flags that keep the fetch to tracking refs only: no tags, no FETCH_HEAD, no background gc. All three need git 2.29.
+_FETCH_QUIET_FLAGS = ("--no-tags", "--no-write-fetch-head", "--no-auto-maintenance")
+_GIT_USAGE_EXIT = 129
+
+
+def fetch_remote(where: str, remote: str, timeout: int = 10) -> bool:
+    """True when `git fetch --quiet <remote>` ran in `where` and succeeded: the remote's tracking refs now match the
+    remote. The fetch writes tracking refs only (no tags, no FETCH_HEAD, no gc). A git older than 2.29 refuses those
+    flags with a usage error, and the fetch then runs once more without them. A prompt is switched off, so a remote that
+    wants a login fails at once, not at the timeout. A refused, failed or timed-out fetch is False."""
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    for flags in (_FETCH_QUIET_FLAGS, ()):
+        try:
+            done = _nowindow.run(
+                ["git", "-C", where, "fetch", "--quiet", *flags, remote], capture_output=True, encoding="utf-8",
+                errors="replace", timeout=timeout, env=env,
+            )
+        except Exception:
+            return False
+        if done.returncode != _GIT_USAGE_EXIT:
+            return done.returncode == 0
+    return False
+
+
 def is_worktree(where: str):
     """True in a linked worktree, False in an ordinary checkout, None when unknown.
 
@@ -279,9 +303,11 @@ def origin_slug(url):
     follows the colon; a POSIX path with no scheme is the path itself."""
     if not isinstance(url, str):
         return None
-    url = url.strip()
+    url = url.strip().replace("\\", "/")  # a Windows path (`D:\\a\\owner\\name.git`) is a path, not an scp `host:path`
     if "://" in url:
         path = url.split("://", 1)[1].partition("/")[2]
+    elif len(url) > 2 and url[0].isalpha() and url[1] == ":" and url[2] == "/":  # a drive letter, not an scp host
+        path = url[2:]
     elif ":" in url.partition("/")[0]:
         path = url.partition(":")[2]
     else:

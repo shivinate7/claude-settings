@@ -37,7 +37,7 @@ nothing changes (a restatement of main) refuse as `question-departs`: the rule b
 in decision port-keeps-behaviour. departs_hit is its one predicate; lint/report_guard.py calls it too.
 The page writer's last three rules run after the form: `option-letter-keys` (an option's key is its
 position's letter, and a label that opens with a letter tag names that letter), `option-letters-frozen` (an option keeps the
-key, id and label it was shown with, and each option has a unique id) and `rework-off-page` (an open item never says it is being reworked).
+key and id it was shown with, may be reworded but never takes another shown option's label, and each option has a unique id) and `rework-off-page` (an open item never says it is being reworked).
 `option-labels-match-chat` runs in hooks/guard.py after all of those, because it reads the session's transcript, which item_hit never sees:
 page_label_hit(writes, transcript_path) -> (rule, matched). A chat question cites its item ("Page item: <id>") and writes "a) <text>" per
 option; a write of that item whose label for a letter differs from the chat's text for it is refused (chat_page_label_hit).
@@ -395,7 +395,9 @@ CHAT_PRESS_LINK_REASON = ("An option that asks the owner to press in a web app c
                           "description; for a pull request or an issue, the url of that number.")
 COMMAND_REASON = ("A step never sends the owner to a file for a command, and never holds one. Put the "
                   "command in the item's `command` field as {powershell, mac}: a PowerShell 5.1-safe "
-                  "string (no &&, ||, <<, <<<, /dev/null or export) and a bash or zsh string for the Mac, both non-empty. "
+                  "string (no &&, ||, <<, <<<, /dev/null or export; no pipe to a Unix tool such as head, tail or grep; "
+                  "no NAME=value prefix; no `[ ]` test; no backslash at a line end) and a bash or zsh string "
+                  "for the Mac, both non-empty. "
                   "Say \"paste the command below\" in the step.")
 # A press: press, click, tap in any form; an imperative approve, merge, hit, turn on at the start of
 # a clause, `you` allowed before it (a command to the owner, so "the PR merged" and "to merge"
@@ -434,14 +436,30 @@ COMMAND_VERB = re.compile(_RUN_VERB + r"[^.\n]{0,40}\bcommands?\b(?!\s+below)"
 # A task's `command` is {powershell, mac}, each a non-empty string, so the owner's own shell gets a
 # block that runs in it. PowerShell 5.1 has none of the bash syntax below: the operators, the
 # /dev/null path and an export statement, at a line start or after `;`. A line holding one fails there.
+# Four more bash forms are read on the text with strings, comments and here-strings blanked out
+# (_ps_bash_form), so PowerShell text that only looks like one passes: a pipe to a Unix-only program
+# (PowerShell has `Sort-Object`, `Tee-Object` and `more`, so those are left out; `jq` and `less` are in), a leading `NAME=value`
+# before a command (a value that opens `{` + space + letter is a scriptblock, so a hashtable's `E={ Get-Date }` is none; a `}` ends the value, so `b=2}` is none, unless it closes a `${...}` expansion, nested
+# one deep as in `${A:-${B}}`; each expansion holds no other `{` or `;`, so a failed read backtracks in linear time), a `[ ... ]` or `[[ ... ]]` test after a statement start or `if`, and a backslash that ends a line
+# after a space with a line after it (a `C:\repo\` path ends in no space before its backslash, and a
+# lone backslash argument ends the text: `cd \`, and a `cd \` line before a line with no flag is a path).
 COMMAND_SHELLS = ("powershell", "mac")
 PS_BASH_OPERATOR = re.compile(r"&&|\|\||<<|/dev/null|(?:^|;)\s*export\s", re.M)
+PS_BASH_FORMS = re.compile(
+    r"\|[ \t]*(?:head|tail|grep|xargs|sed|awk|cut|wc|uniq|tr|tac|jq|less)(?![\w-])"
+    r"|(?:^|;)[ \t]*[A-Za-z_][A-Za-z0-9_]*=(?!\{[ \t]+[A-Za-z])(?:\$\{(?:\$\{[^{}\s;]*\}|[^{}\s;])*\}|[^\s;}])*[ \t]+[A-Za-z./]"
+    r"|(?:^|[;(]|\b(?:if|elif|while|until)\b)[ \t]*(?:\[[ \t]+[^\]\n]*[ \t]\]|\[\[[ \t]+[^\]\n]*[ \t]\]\])",
+    re.M | re.I)
+# A backslash that ends a line after a space, with a line after it. When the backslash is the line's only
+# argument (`cd \`, the drive root) and the next line does not start with a flag, it is a path, not a continuation.
+PS_BASH_CONTINUATION = re.compile(r"^([^\n]*[ \t])\\[ \t]*\r?\n[ \t]*(\S)", re.M)
 # A shell line in a step's backtick span or fence, read by guard_core's quote-aware reader. A span
 # with a chain (an operator, or two lines) is a shell line when one segment plainly runs a command:
 # its command word, after any `VAR=value`, `env`, `time`, `sudo` or `$(` prefix, is in SHELL_PROGRAMS,
 # is a hyphenated cmdlet (`get-process`), or is a lowercase word with an argument after it (`grep -n
 # x`, `cmd /c git log`). A span with no chain is a shell line when its command is a Verb-Noun cmdlet,
-# or a SHELL_PROGRAMS program with an argument. Plain text is no command: `foo|bar` (no space), `title;
+# or a SHELL_PROGRAMS program with an argument, or a lowercase word whose second word is a flag
+# (`chmod +x f`). Plain text is no command: `foo|bar` (no space), `title;
 # subtitle`, `// a | b` and a markdown table row. A program alone (`git`) names the tool in prose, and
 # any other backticked word (`main`) or a file name is not a shell line. A path that starts ./ or ../ is
 # a shell line when an argument follows it, when its name has no extension (`./build`), or when it ends
@@ -450,7 +468,12 @@ PS_BASH_OPERATOR = re.compile(r"&&|\|\||<<|/dev/null|(?:^|;)\s*export\s", re.M)
 SHELL_PROGRAMS = frozenset(("git", "gh", "cd", "npm", "npx", "node", "python", "python3", "pip", "curl",
                             "brew", "bash", "sh", "zsh", "pwsh", "powershell", "claude", "rm", "mv", "cp",
                             "ls", "cat", "echo", "export", "sudo", "make", "pytest", "docker", "mkdir",
-                            "gcloud", "bq", "winget"))
+                            "gcloud", "bq", "winget", "gsutil", "kubectl", "terraform", "yarn", "pnpm", "aws",
+                            "az", "helm"))
+# A span whose command word is any lowercase word and whose second word is a flag (`grep -r x`, `chmod +x
+# f`) is a shell line too, as is one whose program is listed. A command word with a path is read by its
+# basename, so `/usr/bin/chmod +x f` and `scripts/run.py --x` are shell lines.
+SPAN_FLAG = re.compile(r"(?:--?|\+)[A-Za-z]")
 SHELL_CMDLET = re.compile(r"[A-Z][a-z]+-[A-Z][A-Za-z]+")
 # In a chain a cmdlet may be any case (`get-process`), and a command may be any lowercase word.
 CHAIN_CMDLET = re.compile(r"[A-Za-z]+-[A-Za-z]+")
@@ -459,6 +482,14 @@ ENV_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 SHELL_SCRIPT_EXT = (".sh", ".ps1", ".py", ".bat", ".cmd")
 # A run verb in the step text before a span, back to the last sentence break.
 SPAN_RUN_VERB = re.compile(_RUN_VERB + r"(?:(?![.;!?](?:\s|$)).)*$", re.I | re.S)
+# An edit verb in the step text before a span, back to the last sentence break: the span is a line the owner
+# finds or replaces, so it is quoted text, not a command to run. A run verb in the same sentence wins (see
+# command_in_item_hit), and a fence is never quoted. Delete and remove are left out: "Delete the lane with
+# `merge --drop 5`" runs the span.
+SPAN_EDIT_VERB = re.compile(r"\b(?:find|locate|replace|swap|search\s+for|look\s+for|edit)\b"
+                            r"(?:(?![.;!?](?:\s|$)).)*$", re.I | re.S)
+# A run verb in the step text after a span, up to the next sentence break: "Find `x --y` and run it" runs it.
+SPAN_RUN_AFTER = re.compile(r"(?:(?![.;!?](?:\s|$)).)*?" + _RUN_VERB, re.I | re.S)
 EFFECT_TEXT = re.compile(r"\b(?:Gain|Lose):.*?(?=\b(?:Gain|Lose):|$)", re.I | re.S)
 CHAT_URL = re.compile(r"https://[^\s)>\]\"']+", re.I)
 
@@ -551,7 +582,11 @@ def _press_field_ok(text, links, context="", press_text=None) -> bool:
     page = text if WEB_MARKER.search(text) else context
     if not WEB_MARKER.search(page):
         return True
-    urls = [l["url"] for l in (links if isinstance(links, list) else []) if isinstance(l, dict) and isinstance(l.get("url"), str)]
+    # A link counts as the page draws it: a string url and a string label (skills/waiting-page/page.html
+    # isLink). A link the page does not draw shows the owner nothing to press. `links` that is not a
+    # list holds no link.
+    urls = [l["url"] for l in (links if isinstance(links, list) else [])
+            if isinstance(l, dict) and isinstance(l.get("url"), str) and isinstance(l.get("label"), str)]
     if not urls:
         return False
     return all(any(re.search(r"/(?:pull|issues)/%s(?!\d)" % n, u) for u in urls)
@@ -638,11 +673,14 @@ def _chain_command(word, args) -> bool:
             or (args >= 1 and bool(CHAIN_COMMAND.fullmatch(word))))
 
 
-def _shell_line(span, run) -> bool:
+def _shell_line(span, run, quoted=False) -> bool:
     """True when a segment of this code span runs a shell line (see SHELL_PROGRAMS). `run` is as for
     _relative_run. The segments, their prefixes and their command words come from guard_core, the one
     quote-aware shell reader, so a quote or a comment opener in text hides no command. A line that
-    starts with `|` (a table row) or `//` is text and is left out."""
+    starts with `|` (a table row) or `//` is text and is left out. `quoted` is True when the step finds or
+    replaces the span as a line of a file: the span-flag clause (a path or word with a flag) then reads it
+    as text, so `scripts/guard-shell.py --hook` quoted for an edit is no command. A listed program, a
+    cmdlet and a chain stay shell lines."""
     import guard_core   # loads only for a step that holds a code span
     kept = [line for line in span.splitlines() if not line.strip().startswith(("|", "//"))]
     segments = guard_core.split_segments(guard_core.PosixScript("\n".join(kept)))
@@ -667,7 +705,30 @@ def _shell_line(span, run) -> bool:
             return True
         elif chained and _chain_command(word, len(words) - 1):
             return True
-        elif word in SHELL_PROGRAMS and len(words) >= 2:
+        elif len(words) >= 2 and (word in SHELL_PROGRAMS
+                                  or (CHAIN_COMMAND.fullmatch(word) and not quoted
+                                      and SPAN_FLAG.match(words[1]))):
+            return True
+    return False
+
+
+def _ps_bash_form(text) -> bool:
+    """True when PowerShell text holds a bash-only form. PS_BASH_OPERATOR reads the text as it stands;
+    PS_BASH_FORMS reads it with each quoted string, here-string and comment blanked to `_` (newlines kept),
+    found by guard_core's PowerShell quote walk, the one home of that reading."""
+    if PS_BASH_OPERATOR.search(text):
+        return True
+    import guard_core   # loads only for a task that has a command
+    script = guard_core.PowerShellScript(text)
+    out = []
+    for index, char, quote in guard_core.walk_quotes(script, line_comments=True):
+        out.append("_" if quote and char != "\n" else char)
+    blanked = "".join(out)
+    if PS_BASH_FORMS.search(blanked):
+        return True
+    for match in PS_BASH_CONTINUATION.finditer(blanked):
+        lone = len(match.group(1).split()) == 1
+        if not (lone and match.group(2) != "-"):
             return True
     return False
 
@@ -683,7 +744,7 @@ def command_in_item_hit(data) -> str:
     has_command = _command_ok(data.get("command"))
     if "command" in data and not has_command:
         return "command is not {powershell, mac}"
-    if has_command and PS_BASH_OPERATOR.search(data["command"]["powershell"]):
+    if has_command and _ps_bash_form(data["command"]["powershell"]):
         return "powershell command holds a bash operator"
     steps = data.get("steps")
     if not isinstance(steps, list):
@@ -694,9 +755,14 @@ def command_in_item_hit(data) -> str:
     if COMMAND_IN_FILE.search(joined) or (has_file and COMMAND_ITS.search(joined)) \
             or (has_file and not has_command and COMMAND_VERB.search(joined)):
         return "steps send the owner to a file for a command"
-    if any(_shell_line(body, fenced or bool(SPAN_RUN_VERB.search(text[:start])))
-           for text in texts for start, body, fenced in _code_spans(text)):
-        return "step holds a shell line"
+    for text in texts:
+        for start, body, fenced in _code_spans(text):
+            run = fenced or bool(SPAN_RUN_VERB.search(text[:start]))
+            after = text[text.index(body, start) + len(body):]
+            quoted = (not run and bool(SPAN_EDIT_VERB.search(text[:start]))
+                      and not SPAN_RUN_AFTER.match(after))
+            if _shell_line(body, run, quoted=quoted):
+                return "step holds a shell line"
     return ""
 
 
@@ -1085,12 +1151,13 @@ def _layout():
     return layout
 
 
-def waiting_page_root(tool_input, cwd):
+def waiting_page_root(tool_input, cwd, any_form=False):  # glossary-ok: the name main already uses
     """The git root of cwd's repo when the call's url is that repo's waiting page (lint/layout.py, the one
-    home), else None. A repo with no page reads as unknown; only the none-key check judges its calls."""
+    home), else None. A repo with no page reads as unknown; only the none-key check judges its calls.
+    `any_form` is layout.is_waiting_page_url's: the page's id in any url form."""
     layout = _layout()
     root = _git_root_of(cwd)
-    return root if root and layout.is_waiting_page_url(root, tool_input.get("url")) else None
+    return root if root and layout.is_waiting_page_url(root, tool_input.get("url"), any_form) else None
 
 
 def names_no_artifact(url):
@@ -1121,9 +1188,9 @@ def design_file_problems(writes, root):
     return found
 
 
-def is_waiting_page(tool_input, cwd) -> bool:
-    """True when the call's url is this repo's waiting page."""
-    return waiting_page_root(tool_input, cwd) is not None
+def is_waiting_page(tool_input, cwd, any_form=False) -> bool:  # glossary-ok: the name main already uses
+    """True when the call's url is this repo's waiting page (`any_form`: see waiting_page_root)."""
+    return waiting_page_root(tool_input, cwd, any_form) is not None  # glossary-ok: the name main already uses
 
 
 def page_item_hit(tool_input, cwd="", session_id=None):
@@ -1321,14 +1388,18 @@ def option_letter_hit(op: str, data) -> str:
 # Nov 12), built against a named incident (incident in the record): triage reordered item 646 after the chat question
 # went out, so chat a became page b, and the owner's "a" could have been filed as the opposite pick. option_letter_hit
 # cannot see that: after the swap each key is still its position's letter. The item therefore carries `shown`, the
-# options as first shown, in order, each as {key, id, label}. A later write keeps each shown position's key, id and
-# label, may add a `note` to an option, and may append options when `shown` is extended by them. Each option carries a unique `id` that a stored answer
-# records, so a later move of the letters cannot change which option the owner meant (page_grant.py holds such an
-# answer for his word).
+# options as first shown, in order, each as {key, id, label}. A later write keeps each shown position's key and id,
+# may add a `note` to an option, and may append options when `shown` is extended by them. Each option carries a unique
+# `id` that a stored answer records, so a later move of the letters cannot change which option the owner meant
+# (page_grant.py holds such an answer for his word). The label may be reworded (owner, Nov 15 2026, evening CST: a is
+# apple and b is banana, never a is banana): the letter's meaning is its key and id, not its wording. A reword that
+# lands on another shown position's label is a swap that kept the ids, so it is refused.
 FROZEN_RULE = "option-letters-frozen"
 FROZEN_REASON = ("An option keeps the letter it was first shown with. Carry `shown`, the options as first shown, in "
                  "order, each as {key, id, label}. Give each option a short unique `id` that is never a lone letter. "
-                 "Keep each shown option's key, id and label and its position: never reorder, relabel or drop one. "
+                 "Keep each shown option's key, id and position: never reorder or drop one. "
+                 "A label may be reworded to say the same option in new words: keep it non-empty text, and never give it "
+                 "another shown option's wording. "
                  "A rule-driven change adds a `note` to the option and moves nothing. A new option goes at the end, and `shown` gets it on the same write. "
                  "(decision option-keys-are-letters, ruling R60: an option keeps its letter and carries an id)")
 SHOWN_FIELDS = ("key", "id", "label")
@@ -1351,15 +1422,22 @@ def _option_id_hit(options) -> str:
 
 
 def _shown_entry(entry):
-    """(key, id, label) of one shown entry or option, else None when it is no mapping."""
-    return tuple(entry.get(f) for f in SHOWN_FIELDS) if isinstance(entry, dict) else None
+    """(key, id) of one shown entry or option, else None when it is no mapping. The label is judged apart: it may be
+    reworded."""
+    return tuple(entry.get(f) for f in ("key", "id")) if isinstance(entry, dict) else None
+
+
+def _label_form(label) -> str:
+    """The label as compared between options: trimmed and case-folded, so "blue" reads as "Blue"."""
+    return label.strip().casefold()
 
 
 def frozen_letters_hit(op: str, data) -> str:
     """The matched text when this write of an open waiting-page decision that carries `options` breaks the freeze:
     an option with no unique id (or an id that is a lone letter), no `shown` list, an option at a shown position
-    that differs from the shown entry in key, id or label, fewer options than shown, or a `shown` shorter than the
-    options (an appended option is shown on the same write). A task, a note, a closed item and a write with no
+    that differs from the shown entry in key or id, an option whose label is no non-empty string or is the label
+    shown at another position, fewer options than shown, or a `shown` shorter than the options (an appended option
+    is shown on the same write). A task, a note, a closed item and a write with no
     `options` pass. The stored item is unseen: a write that carries `shown` is trusted, as the record says."""
     if not _open_decision(data) or "options" not in data:
         return ""
@@ -1377,6 +1455,13 @@ def frozen_letters_hit(op: str, data) -> str:
     for i, entry in enumerate(shown):
         if _shown_entry(options[i]) != _shown_entry(entry):
             return "option %s differs from the option shown at its letter" % _letter_of(i)
+    shown_labels = [_label_form(e["label"]) if isinstance(e.get("label"), str) else None for e in shown]
+    for i in range(len(shown)):
+        label = options[i].get("label")
+        if not isinstance(label, str) or not label.strip():
+            return "option %s has no label text" % _letter_of(i)
+        if any(_label_form(label) == other for at, other in enumerate(shown_labels) if at != i):
+            return "option %s carries the wording shown for another letter" % _letter_of(i)
     if len(shown) != len(options):
         return "shown holds fewer options than the write carries: extend shown with each appended option"
     return ""
@@ -1737,7 +1822,8 @@ def _chat_question_hit(question, options):
             return "uniform-pick", "recommended option goes against the uniform ruling"
     for o in options:
         label, desc = _option_text(o, "label"), _option_text(o, "description")
-        links = [{"url": u} for u in CHAT_URL.findall(desc)]
+        # a url in the description shows as its own text, so it is its own label
+        links = [{"label": u, "url": u} for u in CHAT_URL.findall(desc)]
         # the page scans label and how; Gain and Lose text says what the pick does to the owner, not what he presses
         text, press_text = _owner_press_text(label, EFFECT_TEXT.sub("", desc))
         if not _press_field_ok(text, links, press_text=press_text):

@@ -1225,8 +1225,23 @@ const isArrival = (it) => !!state.known && !mates(it).every((x) => state.known.h
 // A group sinks only when every member is in the set, so it never splits.
 const isSunk = (it) => !!state.sunk && mates(it).every((x) => state.sunk.has(x.id));
 function freezeSunk() {
-  if (state.sunk || !feed.items || !feed.answers) return;
-  state.sunk = new Set(state.items.filter((it) => !isRuling(it) && (isSaved(it) || answeredByWait(it))).map((it) => it.id));
+  if (!feed.items || !feed.answers) return;
+  if (!state.sunk) { state.sunk = new Set(state.items.filter((it) => !isRuling(it) && (isSaved(it) || answeredByWait(it))).map((it) => it.id)); return; }
+  releaseReopened();
+}
+// An item a snapshot makes open again (savedOf and answeredByWait read none; a Change keeps savedOf, so it stays) leaves the sunk set and the Undo panel at once, with no reload.
+// The owner's own Withdraw deletes the record on purpose, so a card the panel holds as withdrawn keeps its place and its Undo (Undo puts the answer back under it),
+// unless the answer it would restore is older than the item's added: that one is stale, and the card opens.
+function releaseReopened() {
+  const open = (it) => !isRuling(it) && !savedOf(it) && !answeredByWait(it);
+  const p = state.sentPanel;
+  const held = (it) => !!p && p.wrote.some((w) => w.withdrawn && w.it.id === it.id && w.prior && !staleAnswer(it, w.prior));
+  state.items.forEach((it) => { if (state.sunk.has(it.id) && open(it) && !held(it)) state.sunk.delete(it.id); });
+  if (!p || p.busy) return;
+  const left = p.wrote.filter((w) => !state.items.some((it) => it.id === w.it.id && open(it) && !held(it)));
+  if (left.length === p.wrote.length) return;
+  p.wrote = left;
+  if (!left.length) closeSent();
 }
 // A card sent on this visit joins the set under "sink", and the write records it, so Undo leaves a card that was already sunk where it is.
 function sinkSent(it) {
@@ -1262,7 +1277,9 @@ const byId = (id) => state.items.find((i) => i.id === id);
 // Every item that can hold an answer: the open ones, and the rulings an Overturn may answer.
 const answerable = () => [...state.items, ...state.rulings];
 // The owner's saved answer. A ruling was an open item once, so a record under its id that is no overturn is stale and counts as none.
-const savedOf = (it) => { const a = state.answers[it.id]; return a && (!isRuling(it) || a.choice === OVERTURN) ? a : undefined; };
+// A record older than the item's `added` is no answer: the writer reopened or reworded the item by moving `added` past it, and the card is open again.
+const staleAnswer = (it, a) => { const at = ts(a.at), added = ts(it.added); return Number.isFinite(at) && Number.isFinite(added) && at < added; };
+const savedOf = (it) => { const a = state.answers[it.id]; return a && (!isRuling(it) || a.choice === OVERTURN) && !staleAnswer(it, a) ? a : undefined; };
 const isSaved = (it) => !!savedOf(it) && !state.changing[it.id];
 // An item the owner answered that now waits on a CI run or a PR: `waits` and `lastAnswer` are both set. The page keeps no answers record for it.
 // savedOf and isSaved stay out of this on purpose (Withdraw and the receipts read them), so each place that counts it asks here too.
@@ -1690,7 +1707,7 @@ function cmdBlocks(it) {
 function buildRuling(it) {
   const saved = isSaved(it), d = eff(it) || {}, rc = rcOf(it), armed = !saved && d.choice === OVERTURN, r = ruledOf(it);
   const card = h("article", { class: "card rcard" + (saved ? " answered" : "") + (armed ? " armed" : ""), id: "item-" + it.id, "aria-labelledby": "t-" + it.id });
-  const num = h("span", { class: "num", "aria-label": "No. " + it.n + ", ruling, from the arbiter", title: "Ruled by the arbiter for " + it.owner }, "No. " + it.n);
+  const num = h("span", { class: "num", "aria-label": "No. " + it.n + ", ruling, from the arbiter", title: "Item number: the stable number you answer by; not a database id. Ruled by the arbiter for " + it.owner }, "No. " + it.n);
   card.append(h("div", { class: "top" }, num, saved
     ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? "Answered, filed in " + it.home + " " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(savedOf(it).at)))
     : h("span", {}, "ruled ", validT(it.ruled) ? h("time", { datetime: it.ruled }, fmt(it.ruled)) : "")), h("h3", { class: "title", id: "t-" + it.id }, it.title));
@@ -1747,7 +1764,7 @@ function buildCard(it) {
   const T = tierOf(it), byWait = isByWait(it), saved = isSaved(it) || byWait, d = eff(it) || {}, rc = rcOf(it), sunk = isSunk(it);
   // A sunk card holds nothing up, so it drops its tier class.
   const card = h("article", { class: "card" + (sunk ? "" : " " + T) + (saved ? " answered" : ""), id: "item-" + it.id, "aria-labelledby": "t-" + it.id, "data-seen": isSeen(it) ? "true" : null });
-  const top = h("div", { class: "top" }, h("span", { class: "num", "aria-label": "No. " + it.n + ", " + (it.kind === "decision" ? "decision" : "task") + ", from " + it.owner, title: "From " + it.owner }, "No. " + it.n),
+  const top = h("div", { class: "top" }, h("span", { class: "num", "aria-label": "No. " + it.n + ", " + (it.kind === "decision" ? "decision" : "task") + ", from " + it.owner, title: "Item number: the stable number you answer by; not a database id. From " + it.owner }, "No. " + it.n),
     // The section head says "Answered", so its pill drops the word: the ring or tick carries it.
     byWait ? h("span", { class: "ans" }, (sunk ? "" : "Answered, "), h("span", { class: "t" }, "Sent" + (fmt(lastOf(it).at) ? " " + fmt(lastOf(it).at) : "")))
     : saved ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? (sunk ? "Filed in " : "Answered, filed in ") + it.home + " " : sunk ? "Filing pending, sent " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(savedOf(it).at))) : h("span", {}, waited(it.added)));
@@ -2282,8 +2299,10 @@ function fitBytes(text) {
   while (enc.encode(text).length > MAX_BYTES) text = text.slice(0, Math.floor(text.length * 0.9)) + "…";
   return text;
 }
+// An owner over MAX_OWNER is cut with an ellipsis inside the cap, so a cut name never reads as a whole one.
+const ownerCut = (o) => { const cp = [...plain(o)]; return cp.length > MAX_OWNER ? cp.slice(0, MAX_OWNER - 1).join("") + "…" : cp.join("") || "?"; };
 function noticeText(entries, head, tail) {
-  const owners = [...new Set(entries.map((e) => plain(e.owner).slice(0, MAX_OWNER) || "?"))].join(", ");
+  const owners = [...new Set(entries.map((e) => ownerCut(e.owner)))].join(", ");
   const line = entries.map((e) => { const note = plain(e.note).slice(0, MAX_NOTE); return e.n + (tail ? "" : " " + (e.act === "park" ? "park" : e.choice ? choiceText(e.choice) : e.done ? "done" : "note, not done") + (note ? " (" + note + ")" : "")); }).join(", ");
   return fitBytes(head + " Owners: " + owners + ". Items: " + line + (tail || "."));
 }
