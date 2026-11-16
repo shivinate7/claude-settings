@@ -6289,7 +6289,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 return 0
             return draft_step(root, cfg, a.pr, h, info, merge_main=True)
         checked = None  # the head the lane-lint PASS names; confirm refuses any other
-        if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and hasattr(h, "issue_comments") and not info["draft"]:  # a scripted host with no comment read brings its own reads; a draft is the records step, never a join
+        if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and isinstance(h, Host) and not info["draft"]:  # a scripted host that is no Host brings its own reads; a draft is the records step, never a join
             lint_check(h, a.pr, info, root, a.config)
             checked = info["head"]
         if a.confirm:
