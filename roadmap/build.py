@@ -22,8 +22,8 @@ working tree, and refuses the commit when it adds or grows an open step's note p
 stages a symlink as a step file. A long note the commit leaves alone or trims passes, so one writer's
 note never blocks another's commit. It also refuses a staged roadmap/rulings/*.json that is empty, not
 UTF-8, not valid JSON, or not a JSON object. It also refuses a staged step whose `updatedAt`, or ruling whose
-`at`, is more than SKEW_MINUTES later than the clock (step updatedat-not-future); a time that is not an ISO
-time with a UTC offset is reported, not judged. It writes no page.
+`at`, is more than SKEW_MINUTES later than the clock, or is new or changed and is not an ISO time with a
+UTC offset (step updatedat-not-future); an unchanged or missing value passes. It writes no page.
 """
 import datetime
 import json
@@ -170,10 +170,12 @@ def json_at(repo, rev, path):
 
 
 def future_stamp_refusals(repo, path, d, field, now):
-    """Refusal lines when the staged object d holds a future time in field (updatedAt on a step, at on a ruling).
+    """Refusal lines when the staged object d writes a bad time in field (updatedAt on a step, at on a ruling).
 
-    A base holding the same value excuses it, so a commit that only touches another field of a record
-    with an old bad stamp is not blocked: only the commit that writes the stamp answers for it.
+    A bad time is a future one, or one that is not an ISO time with a UTC offset (a zone-less stamp cannot be
+    placed against now). A missing field is silent. A base holding the same value excuses it, so a commit
+    that only touches another field of a record with an old bad stamp is not blocked: only the commit that
+    writes the stamp answers for it.
     """
     value = d.get(field)
     late = stamp_is_future(value, now) if value is not None else False
@@ -181,10 +183,9 @@ def future_stamp_refusals(repo, path, d, field, now):
     if late is False or any(o and o.get(field) == value for o in (json_at(repo, b, path) for b in bases(repo))):
         return []
     if late is None:
-        print(f"pre-commit: {shown(path)} {field} {value!r} is not an ISO time with a UTC offset; not checked",
-              file=sys.stderr)
-        return []
-    return [f"{shown(path)}: {field} {value} is later than now. Stamp it from ~/.claude/bin/now-central, never from memory."]
+        return [f"{shown(path)}: {field} {value!r} is not an ISO time with a UTC offset. "
+                "Stamp it with ~/.claude/bin/now-central --iso, never from memory."]
+    return [f"{shown(path)}: {field} {value} is later than now. Stamp it with ~/.claude/bin/now-central --iso, never from memory."]
 
 
 def staged_entries(repo, folder):
