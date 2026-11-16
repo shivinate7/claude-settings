@@ -8,14 +8,17 @@ FAMILY = "owner-judge"   # the family the cases after this section have always r
 # ---- The Prior work line a build spawn carries (rule spawn-searches-existing-builds). A build spawn that names no
 # prior work is refused, and most cases here probe another rule, so decide() adds the default line to each build spawn
 # that names none. A case that names this rule keeps its spawn as written: its absent or empty line is what it tests.
+# A spawn whose text mentions prior work at all is also kept as written, so a near-miss line (`**Prior work**: ...`)
+# reaches the guard unchanged, and the guard's reader decides it.
 # The lane reading is the guard's own (shared_names.is_lane_create_session), so the default follows the guard exactly.
 from shared_names import is_lane_create_session  # noqa: E402  the one reading of the lane tag
+from guard_merge import PRIOR_WORK_LINE  # noqa: E402  the guard's own marker, never typed here
 
 PRIOR_WORK_RULE = "spawn-searches-existing-builds"
 PRIOR_WORK_DEFAULT = "Prior work: none found"
+PRIOR_WORK_WORDS = re.compile(re.escape(PRIOR_WORK_LINE.rstrip(":")), re.IGNORECASE)
 BUILD_ROLES = ("builder", "test-author")
 BRIEF_TOOL = "mcp__claude-code-remote__send_message"
-_NAMED_PRIOR_WORK = re.compile(r"^[ \t>*_#-]*Prior work:[ \t*_]*\S", re.IGNORECASE | re.MULTILINE)
 _LANE_BRIEF_LINE = re.compile(r"[#*_>\s]*Lane brief:", re.IGNORECASE)
 
 
@@ -47,14 +50,14 @@ def _with_default_line(text):
 
 
 def with_prior_work(tool, tool_input, rule=None):
-    """The tool input a case judges. A build spawn that names no Prior work line gets the default line (see
-    _with_default_line). A case that names this rule, a spawn that already names prior work, and every other call keep
+    """The tool input a case judges. A build spawn that never mentions prior work gets the default line (see
+    _with_default_line). A case that names this rule, a spawn that mentions prior work, and every other call keep
     their input as written. Returns a copy when it changes one."""
     if (rule or "").startswith(PRIOR_WORK_RULE) or not _is_build_spawn(tool, tool_input):
         return tool_input
     key = "message" if tool == BRIEF_TOOL else "prompt"
     text = tool_input.get(key)
-    if isinstance(text, str) and _NAMED_PRIOR_WORK.search(text):
+    if isinstance(text, str) and PRIOR_WORK_WORDS.search(text):
         return tool_input
     named = dict(tool_input)
     named[key] = _with_default_line(text if isinstance(text, str) else "")

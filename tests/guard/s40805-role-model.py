@@ -1355,6 +1355,18 @@ add("prior-work: a reviewer spawn with no Prior work line is allowed", "allow",
     config=ROLE_REAL_CFG, tool="Agent", **role_input("reviewer", "sonnet", "Round 2 of 3. Review the diff."))
 add("prior-work: an Explore spawn with no Prior work line is allowed", "allow",
     config=ROLE_REAL_CFG, tool="Agent", **role_input("Explore", "haiku", "Find where X is defined."))
+# A line inside a ``` fence is a quoted example and names no prior work. A fenced example beside a real line outside the
+# fence is allowed, since the real line counts.
+PW_FENCED = "```\n" + PW_PR + "\n```"
+add("prior-work: a builder spawn whose only Prior work line sits inside a fence is refused", "deny", PW_RULE, carries=PW_LINE,
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_FENCED))
+add("prior-work: a builder spawn with a fenced example and a real Prior work line outside the fence is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_FENCED + "\n" + PW_NONE))
+# The marker with its colon outside the bold, and the marker as a numbered list item: each names the prior work it searched.
+add("prior-work: a builder spawn whose Prior work line has its colon outside the bold is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n**Prior work**: none found"))
+add("prior-work: a builder spawn whose Prior work line is a numbered list item is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n1. Prior work: none found"))
 
 
 # --------------------------------------------------------------------------- the simulator boot rules
