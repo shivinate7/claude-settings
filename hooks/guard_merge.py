@@ -1334,17 +1334,19 @@ def _operands(args, value_flags):
 
 def _made_folders(segments, number, cwd, ends):
     """The normalized folders that a segment ahead of `segments[number]` makes: a `mkdir`'s operands, a `git clone`'s
-    target (git's default name when none is given) and a `git worktree add`'s path, each with its parents. Each is
-    resolved against the folder its own segment runs in. Parsing only: no process is spawned."""
+    target (git's default name when none is given) and a `git worktree add`'s path, each with its parents (a `mkdir`'s
+    only with `-p`). Each is resolved against the folder its own segment runs in. Parsing only: no process is
+    spawned."""
     made = set()
     for at in range(number):
         tokens = segment_tokens(segments[at]) if segments[at].strip() else None
         index = resolve_command(tokens) if tokens else None
         if index is None:
             continue
-        paths, call = [], git_call_of(segments[at])
+        paths, call, parents = [], git_call_of(segments[at]), True
         if basename(tokens[index]) == "mkdir":
             paths = _operands(tokens[index + 1:], _MKDIR_VALUE_FLAGS)
+            parents = any(arg == "--parents" or re.match(r"-[a-zA-Z]*p", arg) for arg in tokens[index + 1:])
         elif call is not None and call[0] == "clone":
             operands = _operands(call[1], _CLONE_VALUE_FLAGS)
             if len(operands) > 1:
@@ -1367,7 +1369,7 @@ def _made_folders(segments, number, cwd, ends):
                 if target in made or os.path.dirname(target) == target:
                     break
                 made.add(target)
-                target = os.path.dirname(target)
+                target = os.path.dirname(target) if parents else None
     return frozenset(made)
 
 
