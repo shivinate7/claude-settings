@@ -7,8 +7,9 @@
  "phase": "now",
  "owner": "triage",
  "blockedBy": [],
- "updatedAt": "2026-11-15T13:24:00-06:00",
+ "updatedAt": "2026-11-15T22:52:46-06:00",
  "why": "[13:18 CST Nov 15, triage] Owner chat 13:16 CST, relayed by the consultant (verbatim): \"any feedback for claude-settings to tell you how to create lanes mroe easily so you dont see so many failures first?\" (owner: \"ignore the stale handoff part tho\"). The step: one refusal lists every broken lane-start rule; one helper prints the create_session fields; the handoff template points at the helper; the archive check names the add_repo fix. The lane was started by the consultant 13:18 CST. Guard or check: yes (unverified). (source: consultant 13:18 CST via the coordinator, relayed by triage; not owner-typed)",
  "source": "consultant 13:18 CST via the coordinator, relayed by triage; not owner-typed",
- "note": "Doing. One refusal lists every broken lane-start rule; one helper prints the create_session fields; the handoff template points at the helper; the archive check names the add_repo fix. Source: the owner's second question, 13:16 CST (relayed). Guard or check: yes (unverified)."
+ "note": "Doing. One refusal lists every broken lane-start rule; one helper prints the create_session fields; the handoff template points at the helper; the archive check names the add_repo fix. Source: the owner's second question, 13:16 CST (relayed). Guard or check: yes (unverified).",
+ "pr": 3549
 }

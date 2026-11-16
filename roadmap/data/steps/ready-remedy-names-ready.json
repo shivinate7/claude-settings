@@ -8,5 +8,6 @@
  "source": "coordinator 08:41 CST Nov 15, relayed by triage",
  "note": "Doing. Lane session_013NEJL2QiYphMq4LqrXFjCQ (sonnet), started 08:41 CST by the coordinator's pick (not the owner's). Fix: the stale-page remedy text names `merge <pr> --ready` first (pins in merge/test_merge.py re-pointed red then green) and ci-hygiene line 81 and snippets.md 170/231 show the same order. Guard or check: yes. No owner item unless a reviewer finds a verdict change. Draft PR to come. 11:21 CST Nov 15 (coordinator 11:19, relayed): the lane did nothing for 2.5 hours; it refused its brief as an automated notice with no human input. The coordinator pointed it at the standing rulings to verify. A sighting of a lane refusing its brief (no step lane-refuses-brief exists; cause and guard unmeasured).",
  "lane": "session_013NEJL2QiYphMq4LqrXFjCQ",
- "updatedAt": "2026-11-15T12:59:00-06:00"
+ "updatedAt": "2026-11-15T22:52:46-06:00",
+ "pr": 3523
 }

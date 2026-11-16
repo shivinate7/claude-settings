@@ -7,9 +7,10 @@
  "phase": "now",
  "owner": "triage",
  "blockedBy": [],
- "updatedAt": "2026-11-15T13:24:00-06:00",
+ "updatedAt": "2026-11-15T22:52:46-06:00",
  "why": "[13:16 CST Nov 15, triage] Owner chat answer \"i think A\" (13:16 CST, relayed by the consultant; ruling own-layout-extras-links-per-acct): each artifact has one entry, its git path is required, its links are listed one per account; a session opens its own account's link, or rebuilds the page from git with the `--all` export and adds its link. The lane rewrites decision waiting-data-in-repo in place. (source: coordinator 13:16 CST, relayed by triage; not owner-typed)",
  "source": "coordinator 13:16 CST, relayed by triage; not owner-typed",
  "note": "Doing. Lane artifact-links-per-account rewrites decision waiting-data-in-repo to ruling own-layout-extras-links-per-acct (A). Guard or check: unverified (not relayed).",
- "lane": "artifact-links-per-account"
+ "lane": "artifact-links-per-account",
+ "pr": 3547
 }
