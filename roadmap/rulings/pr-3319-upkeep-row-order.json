@@ -1,0 +1,10 @@
+{
+ "id": "pr-3319-upkeep-row-order",
+ "at": "2026-11-15T19:48:00-06:00",
+ "title": "Item 888 a: keep both rows, PR first (PR #3319, lane rebase-wave-1c)",
+ "ruling": "Owner page save 19:48 CST Nov 15, item 888 (key pr-3319-upkeep-row-order), pick a, as relayed by the coordinator: keep both rows, PR first. PR #3319, lane rebase-wave-1c. The item's option text was not read by triage, so what \"both rows\" and \"PR first\" name is the coordinator's relay, unverified.",
+ "quote": "a",
+ "source": "Owner page save 19:48 CST Nov 15, relayed by the coordinator; triage did not read the save or the item's option text",
+ "status": "open",
+ "supersedes_none": "A pick on a new question; it supersedes no ruling."
+}

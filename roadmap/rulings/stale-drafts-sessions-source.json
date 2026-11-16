@@ -1,0 +1,10 @@
+{
+ "id": "stale-drafts-sessions-source",
+ "at": "2026-11-15T19:48:00-06:00",
+ "title": "Item 894: none of the options; read the live file plus git commits, one table",
+ "ruling": "Owner page save 19:48 CST Nov 15, item 894 (key stale-drafts-sessions-source), \"none\" of the options, with this note, verbatim as relayed: \"why cant it just use the live file with git commits too? just needs a table right\". The owner's idea, in the coordinator's words (its reading, unverified): read the live file plus git commits, one table, no token. Lane named by the coordinator: stale-drafts-read-rest; its 19:50 roster line names stale-row-reads-rest (PR #3531, head d1a3b998c, waits on item 894): triage does not know whether these are one lane.",
+ "quote": "why cant it just use the live file with git commits too? just needs a table right",
+ "source": "Owner page save 19:48 CST Nov 15, relayed by the coordinator; triage did not read the save or the item's option text",
+ "status": "open",
+ "supersedes_none": "A pick on a new question; it supersedes no ruling."
+}
