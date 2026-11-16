@@ -157,9 +157,19 @@ def suites_not_success(runs, env):
     """The checks whose newest check run that ran is missing or did not complete with success, sorted. A check the run skipped is no
     gap when the caller's scope-skips map names it and the same head's scope check run succeeded. The caller has read the head's
     all-jobs-passed as success, which is the third condition."""
-    skippable = scope_skips(env) if newest_result(runs, "scope") == ("completed", "success") else frozenset()
+    scope_ok = newest_result(runs, "scope") == ("completed", "success")
+    if scope_ok and records_only_run(suite_jobs(env), lambda name: skipped_only(runs, name)):
+        return []  # a records-only run: the rollup the caller read as success is the proof (see records_only_run)
+    skippable = scope_skips(env) if scope_ok else frozenset()
     return sorted(name for name in suite_jobs(env) if newest_result(runs, name) != ("completed", "success")
                   and not (name in skippable and skipped_only(runs, name)))
+
+
+def records_only_run(suites, skipped):
+    """True when every suite job was skipped, so the run is a records-only run once its scope and all-jobs-passed jobs have
+    succeeded, which the caller has read. all-jobs-passed passes an all-skipped run only when scope's records_only_skip output is
+    "true" (actions/all-jobs-passed/check.sh). The REST jobs read has no job outputs, so that rollup success is the readable proof."""
+    return bool(suites) and all(skipped(name) for name in suites)
 
 
 def skipped_only(runs, name):
@@ -171,7 +181,8 @@ def skipped_only(runs, name):
 def pull_request_run_gap(env, sha):
     """None when the newest checks run of the pull request head `sha` is a green pull request run. Else the reason it proves
     nothing. Raises Unknown on a read that cannot be judged. Green: the run, all-jobs-passed and every suite job succeeded. A step
-    that scope skipped inside a succeeded job is no gap (a narrowed run)."""
+    that scope skipped inside a succeeded job is no gap (a narrowed run). So is a records-only run: scope and all-jobs-passed
+    succeeded and every suite job was skipped."""
     body = get("actions/runs", {"head_sha": sha, "event": "pull_request", "per_page": str(PAGE)}, env)
     page = body.get("workflow_runs") if isinstance(body, dict) else None
     if not isinstance(page, list):
@@ -197,12 +208,16 @@ def pull_request_run_gap(env, sha):
     def succeeded(name):
         return bool(conclusions(name)) and all(c == ("completed", "success") for c in conclusions(name))
 
+    def skipped(name):
+        return bool(conclusions(name)) and all(c == ("completed", "skipped") for c in conclusions(name))
+
+    if succeeded("scope") and succeeded(ROLLUP) and records_only_run(suite_jobs(env), skipped):
+        return None  # a records-only run: every suite job skipped, and the rollup's success is the proof
     skippable = scope_skips(env) if succeeded("scope") else frozenset()
     gaps = []
     for name in (ROLLUP,) + suite_jobs(env):
         # A suite job the run skipped is proven by the map and this run's scope job. The rollup is never skippable: it must succeed.
-        proven_skip = (name in skippable and name != ROLLUP and bool(conclusions(name))
-                       and all(c == ("completed", "skipped") for c in conclusions(name)))
+        proven_skip = name in skippable and name != ROLLUP and skipped(name)
         if not succeeded(name) and not proven_skip:
             gaps.append("%s did not succeed" % name)
     return "; ".join(gaps) if gaps else None

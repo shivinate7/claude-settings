@@ -9,9 +9,8 @@ A spawner is a session that starts its own agents. Each session role is a set of
 
 - **Coordinator.** One per repo. It is the one session that starts other sessions. It starts
   triage and the batch runner together, as a trio, before any lane. It holds lane state
-  and writes each lane brief. It starts each lane in roadmap order, with `model` (the lane row's),
-  `source_url` (the repo), effort `medium` and `title` `Lane <branch slug>: <task>`. It sets the tags `cs-repo`, `cs-build:lane`, `cs-step`
-  and `cs-topic`. Its whole brief is the first prompt, and it opens with the Grant line. It talks with the owner. Before a fix lane for a red CI case, it runs
+  and writes each lane brief. It starts each lane in roadmap order, with `~/.claude/bin/lane-start`, which prints
+  the start's fields (the helper holds the model, effort, title and tags). Its whole brief is the first prompt, and it opens with the Grant line. It talks with the owner. Before a fix lane for a red CI case, it runs
   `~/.claude/bin/merge --touches --run <run id>` and reads each open PR named (decision `session-tiers`, "Who starts which session"). On a local session, the load
   brake, not a number, decides how many lanes run at once. It does not rotate (see below).
   It archives each other finished session it started at its next wake, once it has read the report (ruling R46). It sends each lane that triage flags one line: reply if you are stuck and nobody picked it up (ruling R56 point 3).
@@ -19,7 +18,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
   A lane also gets `cs-topic:<topic slug>`, its one topic, and a `cs-step:<step id>` for each step it takes, so triage can see each step is live.
-  It plans, briefs, verifies and reports, and builds only as rule `roles-orchestrator-never-builds` allows. A change that touches a rule's behaviour, a check's verdict or product code goes to a lane. Long reads go to read-only agents: the red-run reads, each `merge --touches` read of an open PR, and audits. It keeps lane state, the briefs and the talk with the owner.
+  It plans, briefs, verifies and reports, and builds only as rule `roles-orchestrator-never-builds` allows. It builds what the owner asks of it and lands it on main. Long reads go to read-only agents: the red-run reads, each `merge --touches` read of an open PR, and audits. It keeps lane state, the briefs and the talk with the owner.
 - **Triage.** A standing session. It writes the roadmap. Only triage writes a new step,
   merges two steps, changes the work order, or closes a step. Triage always writes the waiting page; in a run with one lane the lane wears triage's hat and writes it.
   At triage start, when the repo has no waiting page, triage makes it, with no separate grant (skill
@@ -31,6 +30,10 @@ A spawner is a session that starts its own agents. Each session role is a set of
   the batch runner's hand-in or hold list names the pull) and `reviewLog` (true when the pull has a posted review log),
   JSON bools, omitted when false or unknown. Each item row carries
   `lane` when the page item has one, so it can list an item whose lane is gone.
+  Triage is also the reader of the runner's `RUNNER-STATE` message: it saves the message to a file, runs
+  `python3 skills/project-ops/scripts/check_runner_state.py message <file> <file of git show origin/roadmap:plans/runner-state.json>`,
+  commits the JSON body whole, without a code fence, as `plans/runner-state.json` and pushes it, and answers the runner with the commit. On a problem it commits nothing and sends the runner the printed lines (decision `runner-state-on-record`).
+  It runs `check_runner_state.py message <file> --first` only when that `git show` fails because the file is absent. On any other read error the state is unknown, and triage commits nothing and tells the runner. A `--first` send passes only as version 1.
   The file also carries `landedPulls`: each pull request closed in the last 14 days whose base is the default
   branch, with `number`, `branch`, `head` and `merged`. The build marks a step landed from it when no `Step:` trailer is on main.
   At each publish, triage also disposes each `stalled step:` line the build prints (the build exits 1 on one): a
@@ -77,6 +80,16 @@ A spawner is a session that starts its own agents. Each session role is a set of
   never `cd X && merge`, and only when its own record names that checkout's repo (claude-settings record
   `merge-confirm-repo`). It runs the confirm in the foreground (Bash timeout up to 600000), never with
   `run_in_background`: a background call misses the allow rule and the auto-mode classifier refuses it. It dispatches no deferred step. Each CI or merge alarm wakes it, and it fixes the alarm or brings it to the coordinator (ruling R53). A red job wakes it at once (ruling R50). It runs Sonnet 5.5 at medium effort (ruling R52).
+  Its working state (merge queue order, folds and their members, gos, holds with their end events, archive pass) lives in one file on the record branch,
+  `plans/runner-state.json` (decision `runner-state-on-record`). The runner cannot push to that branch: triage is its one writer. After each merge the runner sends triage one message with
+  `mcp__claude-code-remote__send_message`: `RUNNER-STATE <owner/repo> v<N> after merge #<PR>`, then the whole file as JSON, with `version` one higher than the last. It reads triage's answer (the commit)
+  before it starts the next merge; with no answer it sends again and tells the coordinator. At start and after each compaction it runs `git fetch origin roadmap`, then saves
+  `git show origin/roadmap:plans/runner-state.json` to a file before any other act, and runs
+  `python3 skills/project-ops/scripts/check_runner_state.py recover <handoff> <file of git show origin/roadmap:plans/runner-state.json>`.
+  When that `git show` fails because the file is absent, there is no state yet: the runner builds v1 from `skills/project-ops/templates/runner-state.json`
+  (it fills `repo`, `runner`, `writtenAt`, `afterMerge` and the lists) and sends it as `v1`; triage checks it with `--first`. Any other read error is unknown, never empty: the runner merges nothing and tells the coordinator.
+  A committed version below its last sent one means that a merge is missing: it rebuilds that merge from main's log since the file's `afterMerge.commit`
+  and sends the next version. Its handoff holds one pointer line and never the list, and before it ends a handoff it runs `python3 skills/project-ops/scripts/check_runner_state.py handoff <file>`.
   Of the merge work, the runner keeps only the merge itself and the CI wait for it. The merge lock serializes the merge. It hands the rest of that work to agents (Sonnet, the ceiling in decision `agent-model-cap`), and it builds only as rule `roles-orchestrator-never-builds` allows:
   - Each PR close comes from the PR ledger's replaced lines (decision `pr-ledger`, read by `merge --reviewed`; the act is in decision `session-tiers`, archiving lanes), with its comment: one agent per close. A step close stays with triage.
   - It runs `merge --lane-lint <pr>` once per lane, all lanes in parallel, one agent per lane.
@@ -94,7 +107,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   names the machine. It may drive a Remote Control session on the owner's machine.
 - **Batch runner's standing duty: a rolling combine train.** In a repo that still batches, the batch runner keeps it all the time (ruled, not in force or built; both routes stay, picked by speed per situation; the scope reading is the lane's, unchecked; a repo on per-lane merging, where each lane PR merges alone, does not)
   (claude-settings decision `session-tiers`, the session roles decision, bullet "Rolling combine train": the levels L1 to L4, what is
-  frozen, what keeps folding, what a fold owes, and the per-batch report numbers).
+  frozen, what keeps folding, what a fold owes, the pre-merge reads and the fold checks (both relayed, not checked), and the per-batch report numbers).
 
 When the owner names the wrong session, or brings work that belongs to another session, the session
 says in one line whose job it is, then routes it.
@@ -156,7 +169,7 @@ parent, or miss a message while busy.
 - A lane posts its review log on its PR after each round (claude-settings record
   `pr-review-record`). The batch runner finds it. The lane first runs `merge --lane-lint <pr>`. The batch
   runner runs it again on each lane head before the join, and refuses a red lane (claude-settings record
-  `lanes-run-no-full-ci-job`). A lane never rebases onto main. A lane merges only in claude-settings, its own PR (claude-settings ruling `own-lanes-merge-claude-settings-prs`; not built, the merge tool still refuses a lane's cloud confirm); in any other repo it never merges. After a batch merges, a handed-in PR that conflicts with the new main gets one main merge by its lane (step `post-batch-conflict-merge`; whether a review of only the resolved hunks suffices is the owner's open item 651).
+  `lanes-run-no-full-ci-job`). A lane never rebases onto main. A lane marks its own draft PR ready once, after its review and lane lint pass, with `merge --role lane --step <slug> <pr> --ready` (claude-settings decision `draft-until-reviewed`, ruling Q2, owner, 12:58 CST Nov 16). A lane merges only in claude-settings, its own PR (claude-settings ruling `own-lanes-merge-claude-settings-prs`; not built, the merge tool still refuses a lane's cloud confirm); in any other repo it never merges. After a batch merges, a handed-in PR that conflicts with the new main gets one main merge by its lane (step `post-batch-conflict-merge`; whether a review of only the resolved hunks suffices is the owner's open item 651).
 - A record that files an owner ruling gets a round 1 review before it merges. Round 1 checks two things only (claude-settings decision `docs-only-prs-skip-review`).
 - Nobody pushes to a PR's head once a done review log is posted for that head, until the merge
   result is back. The exception is the fix that a FAIL round calls for, such as the round-1 fix on a

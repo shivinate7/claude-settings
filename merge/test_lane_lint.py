@@ -212,7 +212,7 @@ class CiJobStub:
         return [c for c in calls if "--plan" not in c["argv"]]
 
 
-WAIT_LINE ="GitHub to show the pushed head"  # the progress text of the wait for a pushed head (merge.py wait_checks)
+WAIT_LINE ="GitHub to show the pushed head"  # the progress text of the wait for a pushed head (merge.py PUSHED_HEAD_WAIT, printed by wait_pushed_head)
 WAIT_CEILING = 600  # fake seconds a wait may run. The bound is the builder's choice; this ceiling only proves the wait is finite
 WAIT_POLLS_CEILING = 30  # pull request reads one wait may make
 RUNAWAY_PAUSES = 500  # pauses after which a wait that never ends is stopped, so a broken wait cannot hang the run

@@ -23,7 +23,8 @@ every case, so CI can split the suite across jobs and drop none. A malformed val
 before a case runs.
 
 GUARD_SECTION_DIR=<folder> reads the section files from that folder instead of tests/guard/. A folder with no
-section file, or with two that share a `# section <n>` number, stops the run before any case.
+section file, or with a set that lint/_guard_sections.py faults (two files that share a `# section <n>` number,
+or a name whose number disagrees with its header), stops the run before any case.
 
 Each case drives the guard as Claude Code drives it: one JSON object on stdin, and the decision read
 back off stdout. An empty stdout is an allow. Anything else is parsed for permissionDecision.
@@ -76,6 +77,7 @@ from precompact_handoff import PREMISE_KINDS  # noqa: E402,F401  the one home of
 import precompact_handoff as ph  # noqa: E402,F401  the one home of the handoff and flag paths
 import local_time  # noqa: E402,F401  the one home of the inbox paths
 import mutate_shared  # noqa: E402,F401  module_files: every module a copied guard may import
+import _guard_sections  # noqa: E402  the one home of the section folder, header read and faults
 
 # Assembled, so this file never holds the token whole.
 ENV = "." + "env"
@@ -120,11 +122,13 @@ FAMILIES = {
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "hook-bypass": "a git commit, merge or push that skips the git hooks: core.hooksPath on the command or in the environment, --no-verify, and -n on commit; the mutation tool's own exemption",
     "merge": "merge into main, draft pull requests and the merge guard",
+    "lane-may-mark-ready": "a lane marks its own lane PR ready with --role lane --step <its step> <pr> --ready: allowed when the head is the step's branch, refused for another branch or an unreadable pull request; the --confirm rules pass or refuse as before",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, while a branch of the lane is ahead of its repo's default branch with no pull request, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
     "lane-step-dup":"one live session per step (part one): a create_session tagged cs-step:<slug>, or a send_message brief naming that step, is refused when another live session in the cs-repo carries the step, and names that session; a session an earlier create_session of the transcript started counts as live until an archive_session names it; an archived carrier, a near-miss step, a carrier in another repo, a target that carries the step, and a whole list read that finds none pass; a list read that is not whole, or cannot be read, is refused",
-    "lane-step-dup-pr": "one open lane pull request per step (part two): a create_session tagged cs-step:<slug>, or a brief naming it, is refused while an open pull request in the cs-repo has the slug as its head (lane/<slug> counts), and names that pull request; `continues #N` or `replaces #N` in the brief passes when #N is that open pull request; a closed or merged pull request, or one on another slug, passes; a pull request read that cannot run is refused",
-    "brief-ids-in-roster": "a lane start (a create_session that tags a lane, whatever its prompt opens with) or a send_message with a Grant or Lane brief line anywhere in it (after a markdown lead) is refused when it names a bare session id, roster id or not, since a brief names a slug or a role and the lane looks the id up; an id with a backtick or a double quote on both sides passes. The check reads no roster, so a repo with none is judged the same",
+    "lane-step-dup-pr": "one open lane pull request per step (part two): a create_session tagged cs-step:<slug>, or a brief naming it, is refused while an open pull request in the cs-repo has the slug as its head (lane/<slug> counts), and names that pull request; `continues #N` or `replaces #N` in the brief passes when #N is that open pull request; a closed or merged pull request, or one on another slug, passes; a pull request read that cannot run is refused; a lane start or lane brief with no `Prior work:` line is refused (rule spawn-searches-existing-builds)",
+    "brief-ids-in-roster": "a lane start (a create_session that tags a lane, whatever its prompt opens with) or a send_message with a Grant or Lane brief line anywhere in it (after a markdown lead), or with a Brief, Triage brief or Batch runner brief line (the standing sessions), is refused when it names a bare session id, roster id or not, since a brief names a slug or a role and the lane looks the id up; an id with a backtick or a double quote on both sides passes. The check reads no roster, so a repo with none is judged the same",
+    "target-id-in-roster": "a send_message whose target session_id is not in the sender's roster is refused: the roster is the Standing sessions rows of the repo's roadmap record, plus the ids the sender's own transcript shows from list_sessions, get_session and create_session results tagged with its cs-repo; the refusal prints the record's rows. A target that is a record row, or a listed id tagged with the sender's repo, passes. An override lifts it. With neither source readable it allows and prints one stderr line that says the roster is unknown",
     "message-time-matches-clock": "a send_message whose first non-blank line opens with a header stamp (a label of 1 to 4 words, then a comma, a colon or a spaced dash, then H:MM or HH:MM with optional seconds, then CST or CDT in any case) is refused when the stamp is wrong for the clock: a CST or CDT label that is not the clock's zone, a dated stamp more than 1 minute ahead, or an undated stamp 2 to 60 minutes ahead; an undated stamp more than 60 minutes ahead, or behind the clock, passes; a stamp later in the message, mid-line, on a status line, or on another tool passes. A dated ISO instant with an offset more than 1 minute ahead is refused too in `added` of an ArtifactData write to collection items (a whole instant, or a time fragment such as T20:24:00Z), `updatedAt` of a Write to a roadmap step file, each instant an Edit or MultiEdit writes to a roadmap step file (with or without a key), and the last literal `updatedAt` key in a Bash command (bare, quoted, or followed by `]`; then `:`, `=` or jq's `|=`; then a single- or double-quoted value); a time in prose, another field or collection, or a value with no offset passes",
     "sendmessage-session-id": "SendMessage whose to starts session_: refused, since a session_ id is not an agent name and delivery to one is unmeasured; mcp__claude-code-remote__send_message takes the session_id. Any other to, and that tool, pass this rule",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
@@ -155,7 +159,7 @@ FAMILIES = {
     "item-field-rendered": "the page writer: a write names only item fields the page renders (the itemFields block of page.html)",
     "page-item-design": "the page writer: a design picture that misses its focus, its state or its height is refused at write, and an allowed publish of the waiting page records the published file",
     "rule9": "rule 9, the agent model floor",
-    "role-model": "agent-role-model: a spawn's model against its role's row in the decision table, the missing-model default, and the fail-open read",
+    "role-model": "agent-role-model: a spawn's model against its role's row in the decision table, the missing-model default, and the fail-open read; a builder or test-author spawn with no `Prior work:` line is refused (rule spawn-searches-existing-builds), and a reviewer or Explore spawn passes",
     "mask-script": "mask_script lexemes",
     "simulator": "the simulator boot and hold rules",
     "rm-var": "every case named rm-var, wherever it sits",
@@ -172,7 +176,7 @@ FAMILIES = {
     "start-session-audit": "the one PostToolUse command for start_session: a start below the floor (haiku) or with an unread handoff prints the stop line (interrupt_session or archive_session), the audit reuses guard.floor_hit, and any other start prints nothing",
     "ci-wait-cap": "the CI-wait cap: a send_later whose message says it waits on CI (the word CI or checks, PR run or PR runs, workflow run or workflow runs, check run, pipeline, or GitHub Actions) is refused past the cap in cap_minutes(), by delay_minutes (a number or a digit string) or an at time (with or without an offset); a call that is not about CI, a CI call at the cap, and a copy whose data file moves the limit are judged against that cap",
     "workflow-args": "a Workflow call whose args is, or holds as an array or object value, a placeholder (an all-caps word with an underscore, or __X__) is refused, naming it and the fix; an absent, empty or real args passes, and so does a short all-caps word or a sentence with an env var name",
-    "sections": "the section files: a set the loader refuses (no section file, two files with one number, a log check appended after the LOG_CHECKS_EXTRA join) stops a run before any case",
+    "sections": "the section files: a set the loader refuses (no section file, two files with one number, a name whose number disagrees with its header, a log check appended after the LOG_CHECKS_EXTRA join) stops a run before any case",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -573,26 +577,16 @@ SECTION_DIR = os.path.join(HERE, "..", "tests", "guard")
 
 
 def load_sections(section_dir):
-    """Run each section file of section_dir here, in n order. No file, or two files with one n, stops the run."""
-    found = []
-    for name in (sorted(os.listdir(section_dir)) if os.path.isdir(section_dir) else []):
-        if not name.endswith(".py"):
-            continue
-        path = os.path.join(section_dir, name)
-        with open(path, encoding="utf-8") as f:
-            text = f.read()
-        head = re.match(r"# section (\d+)\n", text)
-        if not head:
-            sys.exit("fixture setup failed: %s has no `# section <n>` first line" % path)
-        found.append((int(head.group(1)), path, text))
-    if not found:
+    """Run each section file of section_dir here, in n order. No file, or a set the shared loader faults, stops the run."""
+    sections = _guard_sections.read(section_dir)
+    if not sections:
         sys.exit("fixture setup failed: no section file in %s, so the run would hold no case" % section_dir)
-    numbers = [n for n, _, _ in found]
-    for n in sorted(set(numbers)):
-        if numbers.count(n) > 1:
-            sys.exit("fixture setup failed: section number %d is on %d section files" % (n, numbers.count(n)))
-    for _, path, text in sorted(found):
-        exec(compile(text, path, "exec"), globals())
+    faults = _guard_sections.faults(sections)
+    if faults:
+        sys.exit("\n".join("fixture setup failed: %s %s" % (os.path.join(section_dir, name), message)
+                           for name, message in faults))
+    for name, _, text in sorted(sections, key=lambda section: section[1]):
+        exec(compile(text, os.path.join(section_dir, name), "exec"), globals())
 
 
 load_sections(os.environ.get("GUARD_SECTION_DIR") or SECTION_DIR)
@@ -609,6 +603,7 @@ if UNJOINED:
 NO_SYMLINK = "a symlink needs a privilege this Windows run does not hold, so this check does not run here"
 EMPTY_SECTIONS_LABEL = "sections: a run with no section file stops before any case"
 DUPLICATE_SECTIONS_LABEL = "sections: two section files with one number stop the run before any case"
+NAME_NUMBER_LABEL = "sections: a section file named for another number than its header stops the run before any case"
 LATE_APPEND_LABEL = "sections: a log check appended after the join stops the run before any case"
 
 
@@ -658,14 +653,16 @@ def build_empty(folder):
     """A folder with no section file in it."""
 
 
-def build_two_with_one_number(folder):
-    """Every real section file, copied in, and one more file that claims the number of the first section."""
-    # A copy, not a link: a symlink needs a privilege the Windows run does not hold.
-    for name in os.listdir(SECTION_DIR):
-        if name.endswith(".py"):
-            shutil.copyfile(os.path.join(SECTION_DIR, name), os.path.join(folder, name))
-    with open(os.path.join(folder, "s00442-second.py"), "w", encoding="utf-8") as f:
-        f.write("# section 442\n")
+def build_with_extra(extra_name, extra_text):
+    """A builder: every real section file, copied in, and one more file, `extra_name`, holding `extra_text`."""
+    def build(folder):
+        # A copy, not a link: a symlink needs a privilege the Windows run does not hold.
+        for name in os.listdir(SECTION_DIR):
+            if name.endswith(".py"):
+                shutil.copyfile(os.path.join(SECTION_DIR, name), os.path.join(folder, name))
+        with open(os.path.join(folder, extra_name), "w", encoding="utf-8") as f:
+            f.write(extra_text)
+    return build
 
 
 def build_late_append(folder):
@@ -679,8 +676,10 @@ def build_late_append(folder):
 
 for _label, _check in (
         (EMPTY_SECTIONS_LABEL, section_refusal_check(build_empty, "no section file in")),
-        (DUPLICATE_SECTIONS_LABEL, section_refusal_check(build_two_with_one_number,
+        (DUPLICATE_SECTIONS_LABEL, section_refusal_check(build_with_extra("s00442-second.py", "# section 442\n"),
                                                          "section number 442 is on 2 section files")),
+        (NAME_NUMBER_LABEL, section_refusal_check(build_with_extra("s99997-wrong.py", "# section 99998\n"),
+                                                  "name number 99997 disagrees with its header, section 99998")),
 ):
     LOG_FAMILY[_label] = "sections"
     LOG_CHECKS = LOG_CHECKS + ((_label, _check),)
