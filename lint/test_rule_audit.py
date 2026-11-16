@@ -78,8 +78,7 @@ def check_map(mechanism):
 
 
 class RuleAuditTests(unittest.TestCase):
-    """Rule rows read by check(). The equality pins are retired: owner ruling R37, 2026-11-11; item 595, 2026-11-12 12:54 CST
-    (a waiting-page item). A passing row passes with no problem at all, so the cases compare whole lists."""
+    """Rule rows read by check(). A passing row passes with no problem at all, so the cases compare whole lists."""
 
     def test_single_mapped_rule_is_clean(self):
         problems = run()
@@ -314,8 +313,8 @@ def reason_problems(problems, slug=REASON_ROW):
 
 class JudgmentKindTests(unittest.TestCase):
     """`judgment`: an unmechanized rule whose reason says no check can judge it. Its reason must be non-empty.
-    No count of judgment rows is compared with a number. `unmechanized` never reads `ref`, so no ref case is pinned.
-    The equality pins are retired: owner ruling R37, 2026-11-11; item 595, 2026-11-12 12:54 CST (a waiting-page item)."""
+    No count of judgment rows is compared with a number: a count moves whenever a rule changes kind. `unmechanized`
+    never reads `ref`, so no ref case is pinned."""
 
     def test_judgment_is_a_kind_of_its_own(self):
         self.assertIn("judgment", rule_audit.KINDS)
@@ -489,8 +488,7 @@ class ToolTreeCase(unittest.TestCase):
 
 class AuditOutputTests(ToolTreeCase):
     """The printed report and the exit code on a fixture tree. Each case holds one claim. Scope comes first: a case
-    reads the report line before it reads the subject (P7). The equality pins are retired: owner ruling R37,
-    2026-11-11; item 595, 2026-11-12 12:54 CST (a waiting-page item)."""
+    reads the report line before it reads the subject (P7)."""
 
     def test_a_count_below_an_old_floor_alone_does_not_fail(self):
         rc, out = audit(self.tree(base=fixture_rules(unmech=UNMECH, judgment=JUDG)))
@@ -573,8 +571,7 @@ def moved_to_check(base):
 class MoveOffMechanismTests(ToolTreeCase):
     """A row that moves off a mechanism (kind guard, check or ci) to `unmechanized` or `judgment` is printed by its
     anchor. It fails when its reason is the reason the mechanized row carried: the move adds no explanation. The base
-    is origin/main, read the way removed_anchor_line reads it. Owner ruling R37, 2026-11-11; item 595, 2026-11-12
-    12:54 CST (a waiting-page item)."""
+    is origin/main, read the way removed_anchor_line reads it."""
 
     def move_tree(self, base_mech, head_mech, pushed=True):
         """Full-size fixture with the row `step-00` as `base_mech` on origin/main and as `head_mech` on head."""
