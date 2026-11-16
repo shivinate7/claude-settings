@@ -759,7 +759,8 @@ def case_n16_writer_write_by_path_to_receipts_blocks():
 def case_n18_writer_receipts_write_then_a_same_export_passes():
     """The writer writes receipts/x, which blocks the Stop, and a later export run prints `same`: the export has landed
     since the write, so the Stop passes."""
-    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="receipts/x") + export_run(at(19, 5), verdict="same")
+    records = ([owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="receipts/x")
+               + export_run(at(19, 5), verdict="same") + [say(at(19, 7), "Page: " + PAGE_URL)])
     expect_pass("N18", run_stop("n18", base_repo("n18"), records))
 
 

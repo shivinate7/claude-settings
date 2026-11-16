@@ -197,8 +197,8 @@ def case_g07_write_to_another_artifact_passes():
 
 
 def case_g08_write_to_an_unexported_collection_passes():
-    """P01 with one change: the write sets receipts, which the waiting page does not export."""
-    records = [twe.owner(twe.at(18, 50))] + twe.page_write(twe.at(19), collection=None, doc_id="receipts/x") + [
+    """P01 with one change: the write sets scratch/x, a collection no export list names, so the waiting page does not export it."""
+    records = [twe.owner(twe.at(18, 50))] + twe.page_write(twe.at(19), collection=None, doc_id="scratch/x") + [
         twe.say(twe.at(19, 2), "Done.")]
     twe.expect_pass("G08", twe.run_stop("g08", page_repo("g08"), records))
 
