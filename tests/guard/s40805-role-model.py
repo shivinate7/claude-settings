@@ -1331,4 +1331,30 @@ WINDOWS_CHECKERS.update(LB_CHECKS)
 WINDOWS_CHECKERS.update({ov_parallel_check, ov_take_race_check, ov_late_reader_check})
 
 
+# --------------------------------------------------------------------------- prior work (rule spawn-searches-existing-builds)
+# A build spawn names the prior work it searched, on a line of its own: `Prior work: #N (state) | branch <name> | none
+# found`. A builder or test-author Agent spawn carries it here, and a lane start or a lane brief carries it in section 42910.
+# A reviewer and an Explore spawn are exempt, since they build nothing new. Each spawn below runs its role's model from the
+# role table, so only the Prior work line can refuse it. The constants below are read by section 42910 too.
+PW_RULE = "spawn-searches-existing-builds"
+PW_LINE = "Prior work:"
+PW_NONE = "Prior work: none found (searched origin/main hooks and lint, origin/roadmap steps, PR titles and branches)"
+PW_PR = "Prior work: #3285 (open) | branch lane-step-dup"
+PW_BUILD = "Round 1 of 3. Start the fix."
+add("prior-work: a builder spawn with no Prior work line is refused", "deny", PW_RULE, carries=PW_LINE,
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD))
+add("prior-work: a test-author spawn with no Prior work line is refused", "deny", PW_RULE, carries=PW_LINE,
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("test-author", "haiku", "Write the failing cases."))
+add("prior-work: a builder spawn whose Prior work line is empty is refused", "deny", PW_RULE, carries=PW_LINE,
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_LINE))
+add("prior-work: a builder spawn whose Prior work line names a pull request is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_PR))
+add("prior-work: a builder spawn whose Prior work line says none found is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_NONE))
+add("prior-work: a reviewer spawn with no Prior work line is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("reviewer", "sonnet", "Round 2 of 3. Review the diff."))
+add("prior-work: an Explore spawn with no Prior work line is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("Explore", "haiku", "Find where X is defined."))
+
+
 # --------------------------------------------------------------------------- the simulator boot rules
