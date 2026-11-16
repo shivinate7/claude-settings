@@ -396,7 +396,7 @@ jobs:
         run: python3 lint/test_rm_shim.py
 
       - name: Landed-directory check fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true' || github.event_name != 'pull_request' }}
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_skills == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_check_landed_dirs.py
 
       - name: Settings matcher fixture suite
