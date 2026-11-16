@@ -1246,15 +1246,15 @@ MUTATIONS = [
      '    if matched:\n'
      '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)', "guard", 'cap: a heredoc onto the config settings stays denied'),
     ("cap: the shell route reads the stripped command, so a heredoc body's cap change walks past",
-     '        change = cap_with_deadline(cap_change(raw), cap_deadline_end(cap_sed_parts(raw, matched, cwd)))',
-     '        change = cap_with_deadline(cap_change(stripped), cap_deadline_end(cap_sed_parts(raw, matched, cwd)))',
+     '        model = cap_change(raw)',
+     '        model = cap_change(stripped)',
      "guard", 'cap: a heredoc writing a project settings file asks'),
     ("cap: an earlier part wins, so an Edit names the value it leaves, not the one it arrives at",
      '            values[key] = value',
      '            values.setdefault(key, value)', "guard", 'cap: Edit turning the force flag off asks'),
     ("cap: a Write of a settings file never asks, so an opus lift lands unasked",
-     '        if is_settings_file(target, cwd):\n            change = cap_with_deadline(cap_change_parts(write_content_parts(tool_input)),',
-     '        if False:\n            change = cap_with_deadline(cap_change_parts(write_content_parts(tool_input)),', "guard",
+     '        if is_settings_file(target, cwd):\n            model = cap_change_parts(write_content_parts(tool_input))',
+     '        if False:\n            model = cap_change_parts(write_content_parts(tool_input))', "guard",
      'cap: Write of a project local settings file setting an opus model asks'),
     ("floor: the model test is case-sensitive, so a mixed-case haiku id walks past",
      '    return "haiku" in str(model).lower()',
@@ -1572,29 +1572,29 @@ MUTATIONS = [
 
     # ---- the cap-lift deadline ask. Each mutant below breaks one link of the end a write's ask shows:
     # the passed-deadline test, the zone, the Central text, the ask a Write or a shell write makes on
-    # the end, the text an Edit or MultiEdit arrives at, the sed reading, and the space form of the
-    # assignment. Each required name is a case in tests/guard/s19328-model-cap.py.
+    # the end, the text an Edit or MultiEdit arrives at, the sed reading, the space form of the
+    # assignment, the un-escape of a double-quoted shell write, the wording of an end-only ask, and the
+    # fallback when the clock module cannot be imported. Each required name is a case in
+    # tests/guard/s19328-model-cap.py.
     ("guard: the deadline ask runs backwards, so a current end is silent and a passed one is asked",
      '        if deadline < local_time.clock():\n            return ""',
      '        if deadline > local_time.clock():\n            return ""', "guard",
      "a Write that sets only the cap-lift end asks"),
     ("guard: the end drops its zone, so it reads as a date and time with no CST or CDT",
-     '        return local_time.central_full(deadline)\n    except (ValueError, OverflowError, TypeError):',
-     '        return local_time.central_full(deadline).rsplit(" ", 1)[0]\n'
-     '    except (ValueError, OverflowError, TypeError):', "guard",
+     '        return local_time.central_full(deadline)\n    except ImportError:',
+     '        return local_time.central_full(deadline).rsplit(" ", 1)[0]\n    except ImportError:', "guard",
      "names the end in CST"),
     ("guard: the end prints in UTC, not US Central, so the approver reads the wrong hour",
-     '        return local_time.central_full(deadline)\n    except (ValueError, OverflowError, TypeError):',
-     '        return deadline.strftime("%Y-%m-%d %H:%M UTC")\n    except (ValueError, OverflowError, TypeError):',
+     '        return local_time.central_full(deadline)\n    except ImportError:',
+     '        return deadline.strftime("%Y-%m-%d %H:%M UTC")\n    except ImportError:',
      "guard", "names the end in CST"),
     ("guard: a Write that sets the cap-lift end is not asked about, so its end is never shown",
-     '            change = cap_with_deadline(cap_change_parts(write_content_parts(tool_input)),\n'
-     '                                       cap_deadline_end(cap_arriving_parts(tool_input, target, cwd)))',
-     '            change = cap_change_parts(write_content_parts(tool_input))', "guard",
+     '            change = cap_with_deadline(model, cap_deadline_end(cap_arriving_parts(tool_input, target, cwd)))',
+     '            change = model', "guard",
      "a Write that sets only the cap-lift end asks"),
     ("guard: a shell write that sets the cap-lift end is not asked about, so its end is never shown",
-     '        change = cap_with_deadline(cap_change(raw), cap_deadline_end(cap_sed_parts(raw, matched, cwd)))',
-     '        change = cap_change(raw)', "guard",
+     '        change = cap_with_deadline(model, end)',
+     '        change = model', "guard",
      "a shell write that sets only the cap-lift end asks"),
     ("guard: the edits of an Edit or MultiEdit apply last-first, so the end the file arrives at is the first edit's",
      '    for edit in edits:\n        if not isinstance(edit, dict):\n            continue\n        old, new = edit.get("old_string"), edit.get("new_string")',
@@ -1616,6 +1616,18 @@ MUTATIONS = [
      '(?: [0-9][0-9:.+\\-Zz]*)?)"',
      ')"', "guard",
      "a Write that sets the cap-lift end in the space form asks"),
+    ("guard: a double-quoted shell write keeps its escaped quotes, so an escaped cap-lift end reads as no end",
+     r"""            for found in CAP_DEADLINE_ASSIGN.finditer(part.replace('\\"', '"')):""",
+     '            for found in CAP_DEADLINE_ASSIGN.finditer(part):', "guard",
+     "a double-quoted echo with escaped quotes that sets only the cap-lift end"),
+    ("guard: a deadline-only write is asked with the model wording, so it says it sets the model cap",
+     '(CAP_END_ASK_REASON if end_only else CAP_ASK_REASON)',
+     '(CAP_ASK_REASON if end_only else CAP_ASK_REASON)', "guard",
+     "a Write that sets only the cap-lift end does not say it sets the model cap"),
+    ("guard: a missing clock module makes a deadline write silent, so the fail-closed ask is swallowed",
+     'return text + " (clock unreadable, so the Central time is not shown)"',
+     'return ""', "guard",
+     "still asks when the clock module cannot be imported"),
 
     # ---- the one deadline parser, hooks/shared_names.py parse_deadline, which the guard and the config
     # watch both call. These break its space form and its no-offset form.

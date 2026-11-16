@@ -761,4 +761,26 @@ add("cap deadline: a Write that sets the cap-lift end in the naive form reads it
     content=json.dumps({EXPIRY_KEY: OFFSET_FORMS["naive"]}), carries=(WANT_WINTER,),
     env=dict(DISK_CLOCK, TZ="JST-9"))
 
+# THE CLOCK MODULE CANNOT BE IMPORTED. The end then reads as the raw text the file holds, and the write still
+# asks, with "clock unreadable" where the Central time would be. A missing clock must never turn a deadline
+# write silent (decision guard-hooks-fail-closed). The copy is the guard family, with a local_time.py that
+# raises ImportError, built once under this run's folder.
+CLOCKLESS_DIR = os.path.join(ROOT, "clockless")
+CLOCKLESS_GUARD = os.path.join(CLOCKLESS_DIR, "guard.py")
+
+
+def build_clockless():
+    os.makedirs(CLOCKLESS_DIR, exist_ok=True)
+    copy_guard_family(CLOCKLESS_DIR)
+    with open(os.path.join(CLOCKLESS_DIR, "local_time.py"), "w", encoding="utf-8") as handle:
+        handle.write('raise ImportError("local_time is unavailable in this copy")\n')
+
+
+lazy_fixture([CLOCKLESS_GUARD], build_clockless)
+add("cap deadline: a Write that sets only the cap-lift end still asks when the clock module cannot be imported, "
+    "and shows the raw end as clock unreadable",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
+    content=json.dumps({EXPIRY_KEY: DEADLINE_WINTER}), guard=CLOCKLESS_GUARD,
+    carries=(DEADLINE_WINTER, "clock unreadable"), lacks=(WANT_WINTER,))
+
 # =========================================================================== 6c. ask alone
