@@ -62,8 +62,8 @@ live page.
    the JSON of `page/designData.json`. Write each `<` as `\u003c`, so no string can close the script. Publish
    it to the new URL, as "Keep the page on main's code" step 4 says.
 6. Read the new page's items back. Their count must equal the count of files in the copy's `items` folder.
-7. Write the new URL into the repo's extras file, in a pull request. Set the `url` of the `waiting-page` role entry
-   in `artifacts`. If the repo has no such entry, set the `waiting-page` key.
+7. Write the new URL into the repo's extras file, in a pull request. Write the account's link in the `links`
+   of the `waiting-page` role entry in `artifacts`, never a `url` field. If the repo has no such entry, set the `waiting-page` key.
 
 ## Merge a copy into a live page
 

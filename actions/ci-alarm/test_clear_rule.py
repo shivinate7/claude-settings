@@ -231,6 +231,53 @@ class ClearRuleNightly(unittest.TestCase):
                          "a push run with only push-skip running cleared a red macOS nightly: the skipped red job read as passed")
 
 
+class DailyRedClear(unittest.TestCase):
+    """Owner page item 880 (11:53 CST Nov 15): a push starts no Windows or mutation job, since their job-level if is
+    `github.event_name != 'push'`, and the daily scheduled run runs them. A red daily is cleared only by a run that passed every such
+    job. A green dispatch run does. A Linux-only push run does not, and neither does a push run whose suite jobs were all skipped.
+    The rule is unchanged (clear_rule.py is the one home), so these cases hold on the rule as it stands and pin the new job shape."""
+    DAILY_IF = "if: ${{ github.event_name != 'push' }}"  # the job-level if of a Windows or mutation job from item 880
+    TEXT = workflow(("checks", [RUNS_ON, *STEPS]),
+                    ("checks-windows-merge-3", ["runs-on: windows-latest", DAILY_IF, *STEPS]),
+                    ("checks-mutate-guard", ["runs-on: ubuntu-latest", DAILY_IF, *STEPS]))
+    R = [job("checks", "success"), job("checks-windows-merge-3", "failure"), job("checks-mutate-guard", "success")]
+
+    def test_a_linux_only_green_push_run_does_not_clear_a_red_daily(self):
+        # Named failure: the != push Windows job is left out of the push run's need, so its skip there reads as passed.
+        n = [job("checks", "success"), job("checks-windows-merge-3", "skipped"), job("checks-mutate-guard", "skipped")]
+        self.assertFalse(clear_rule.clears(self.R, n, PUSH, self.TEXT),
+                         "a Linux-only green push run cleared a red daily: its skipped Windows job read as passed")
+
+    def test_a_linux_only_green_push_run_does_not_clear_a_red_mutation_job(self):
+        # Named failure: the != push mutation job is left out of the push run's need, so its skip there reads as passed.
+        r = [job("checks", "success"), job("checks-windows-merge-3", "success"), job("checks-mutate-guard", "failure")]
+        n = [job("checks", "success"), job("checks-windows-merge-3", "skipped"), job("checks-mutate-guard", "skipped")]
+        self.assertFalse(clear_rule.clears(r, n, PUSH, self.TEXT),
+                         "a Linux-only green push run cleared a red mutation job: its skipped mutation job read as passed")
+
+    def test_a_proven_push_run_with_every_suite_job_skipped_does_not_clear_a_red_daily(self):
+        # Named failure: push-skip and scope read as the verdict, and the skipped suite jobs read as passed.
+        n = [job("push-skip", "success"), job("scope", "skipped"), job("checks", "skipped"),
+             job("checks-windows-merge-3", "skipped"), job("checks-mutate-guard", "skipped")]
+        self.assertFalse(clear_rule.clears(self.R, n, PUSH, self.TEXT),
+                         "a proven push run with its suite jobs skipped cleared a red daily: skipped is no pass")
+
+    def test_a_green_push_run_that_skips_the_windows_and_mutation_jobs_does_not_clear_a_linux_red_daily(self):
+        # The red job is a Linux job, so step one (red_stays) finds nothing: the rule reads the workflow and decides. The Windows and
+        # mutation jobs are not red in the daily, and their != push guard keeps them needed, so the push run's skip of them blocks the clear.
+        # Named failure: a rule that leaves a != push job out of the need reads the skip as passed, and the Linux-only push run clears the daily.
+        r = [job("checks", "failure"), job("checks-windows-merge-3", "success"), job("checks-mutate-guard", "success")]
+        n = [job("checks", "success"), job("checks-windows-merge-3", "skipped"), job("checks-mutate-guard", "skipped")]
+        self.assertFalse(clear_rule.clears(r, n, PUSH, self.TEXT),
+                         "a Linux-only green push run cleared a red Linux job of the daily: its skipped != push jobs were left out of the need")
+
+    def test_a_green_dispatch_run_with_every_job_of_the_daily_clears_it(self):
+        # Control: a dispatch runs every job, so every job the daily needed passed in it, and the red daily is lifted.
+        n = [job("checks", "success"), job("checks-windows-merge-3", "success"), job("checks-mutate-guard", "success")]
+        self.assertTrue(clear_rule.clears(self.R, n, "workflow_dispatch", self.TEXT),
+                        "a green dispatch run with every job of the red daily passed did not clear it")
+
+
 class EmptyRun(unittest.TestCase):
     """clear_rule.empty_without_evidence: a green run of the push group that ran no suite job and carries no evidence is no verdict."""
     EMPTY = [job("push-skip", "success"), job("scope", "success"), job("checks", "skipped"), job("checks-macos", "skipped")]
