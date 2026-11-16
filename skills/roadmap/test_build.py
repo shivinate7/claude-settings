@@ -3366,7 +3366,11 @@ class StaleDraftRestRead(UpkeepFixture):
     partial list and never a clear row: no token, an HTTP or rate-limit error, a body that is not a list or not JSON, a
     row of the wrong shape, a read past the 20-page cap, a page that fails midway, or a rate-limit count of 0 before the
     last page. The live file still gives the sessions and the held and reviewLog marks. Those are read only when the
-    live file is fresh; otherwise the row is one `unknown (sessions not read: ...; REST read: ...)` entry."""
+    live file is fresh; otherwise the row is one `unknown (sessions not read: ...; REST read: ...)` entry.
+
+    Each stale draft's newest branch commit is read too, one git log per stale draft. A commit under 12 h old lists
+    nothing, so the commit can only suppress a listing. A branch whose commit cannot be read (no ref, a ref on no
+    commit, a git failure, a time that does not parse) reads `unknown (#N branch X has no commit time)`, never a listing."""
 
     DRAFT = ReadyAndDraftRows.DRAFT
 
@@ -3669,6 +3673,127 @@ class StaleDraftRestRead(UpkeepFixture):
                 self.assertRegex(detail, r"REST read: 2 stale-looking drafts?\b", detail)
                 for named in ("#1001", "#1002", "old-1001", "old-1002"):
                     self.assertNotIn(named, detail, "the unusable read named a draft: %s" % named)
+
+    def commit_time(self, branch):
+        """The newest commit time of the fixture's refs/remotes/origin/<branch>, as an aware datetime (git's own read)."""
+        return datetime.datetime.fromisoformat(git(self.repo, "log", "-1", "--format=%cI", "refs/remotes/origin/" + branch).strip())
+
+    @staticmethod
+    def iso_time(text):
+        """An ISO time with its zone, as an aware datetime: the form iso_ago and zoned_ago write."""
+        return datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+    def zoned_ago(self, minutes):
+        """An ISO time `minutes` before now, written in the -06:00 zone rather than UTC."""
+        zone = datetime.timezone(datetime.timedelta(hours=-6))
+        return (datetime.datetime.now(zone) - datetime.timedelta(minutes=minutes)).isoformat(timespec="seconds")
+
+    def unknown_no_commit(self, number, branch):
+        return "unknown (#%d branch %s has no commit time)" % (number, branch)
+
+    def test_a_stale_draft_whose_branch_has_a_commit_under_twelve_hours_old_is_not_listed(self):
+        when = iso_ago(60)
+        self.origin_commit("pushed-today", when)
+        self.serve_pulls([self.rest_draft(1001, "pushed-today", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "pushed-today")])
+        self.assertEqual(self.commit_time("pushed-today"), self.iso_time(when),
+                         "the fixture's branch commit is not the 1 h old commit the case set")
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, detail), (0, ""), "a commit 1 h old did not suppress the stale draft: %r" % (detail,))
+
+    def test_the_twelve_hour_line_for_the_branch_commit_holds_in_any_zone(self):
+        cases = {"11 h 30 m old, in the -06:00 zone": (self.zoned_ago(690), []),
+                 "12 h 30 m old, in UTC": (iso_ago(750), ["#1001 (aged-commit)"])}
+        for name, (when, listed) in cases.items():
+            with self.subTest(name):
+                self.origin_commit("aged-commit", when)
+                self.serve_pulls([self.rest_draft(1001, "aged-commit", 780)])
+                self.publish(sessions=[], pulls=[self.live_pull(1001, "aged-commit")])
+                self.assertEqual(self.commit_time("aged-commit"), self.iso_time(when),
+                                 "the fixture's branch commit is not the one the case set")
+                count, detail = self.row(self.out_with_live(), self.DRAFT)
+                self.assertEqual((count, self.entries(detail)), (len(listed), listed),
+                                 "a branch commit %s was not read against 12 h" % name)
+
+    def test_a_recent_commit_suppresses_an_old_one_lists_and_a_fresh_draft_is_never_added(self):
+        self.origin_commit("fresh-draft-old-commit", iso_ago(780))
+        self.origin_commit("stale-old-commit", iso_ago(780))
+        self.origin_commit("stale-recent-commit", iso_ago(60))
+        self.serve_pulls([self.rest_draft(1001, "fresh-draft-old-commit", 60),
+                          self.rest_draft(1002, "stale-old-commit", 780),
+                          self.rest_draft(1003, "stale-recent-commit", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1002, "stale-old-commit"),
+                                         self.live_pull(1003, "stale-recent-commit")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (1, ["#1002 (stale-old-commit)"]),
+                         "a recent branch commit did not suppress #1003, or a fresh draft was listed")
+
+    def test_a_stale_draft_whose_branch_has_no_ref_reads_one_unknown_entry(self):
+        self.drop_origin("no-ref")
+        self.serve_pulls([self.rest_draft(1001, "no-ref", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "no-ref")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, detail), (1, self.unknown_no_commit(1001, "no-ref")),
+                         "a draft whose branch has no ref was not read as one unknown entry")
+
+    def test_a_branch_ref_on_a_tree_holds_no_commit_and_reads_the_same_unknown_entry(self):
+        self.set_origin("tree-ref", self.EMPTY_TREE)
+        self.serve_pulls([self.rest_draft(1001, "tree-ref", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "tree-ref")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, detail), (1, self.unknown_no_commit(1001, "tree-ref")),
+                         "a branch ref that holds no commit was not read as one unknown entry")
+
+    def test_a_branch_ref_git_cannot_read_reads_the_same_unknown_entry(self):
+        self.break_origin("broken-ref")
+        self.serve_pulls([self.rest_draft(1001, "broken-ref", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "broken-ref")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, detail), (1, self.unknown_no_commit(1001, "broken-ref")),
+                         "a branch ref git cannot read was not read as one unknown entry")
+
+    def test_a_commit_time_that_does_not_parse_reads_the_same_unknown_entry(self):
+        # Git's %cI is always ISO, so a real repo cannot show this. The one git read's reply is swapped for text that is
+        # not a time. The read goes through build.git, the one home of git reads.
+        self.serve_pulls([self.rest_draft(1001, "garbled-time", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "garbled-time")])
+        real_git = build.git
+
+        def garbled(repo, *args, stdin=None):
+            if args[:1] == ("log",) and "refs/remotes/origin/garbled-time" in args:
+                return "not a time\n"
+            return real_git(repo, *args, stdin=stdin)
+
+        with mock.patch.object(build, "git", garbled):
+            count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, detail), (1, self.unknown_no_commit(1001, "garbled-time")),
+                         "a commit time that does not parse was not read as one unknown entry")
+
+    def test_an_unknown_draft_and_a_listed_one_both_show_in_the_row(self):
+        self.drop_origin("no-ref-beside")
+        self.serve_pulls([self.rest_draft(1001, "no-ref-beside", 780), self.rest_draft(1002, "old-beside", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "no-ref-beside"), self.live_pull(1002, "old-beside")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        expected = sorted(["#1002 (old-beside)", self.unknown_no_commit(1001, "no-ref-beside")])
+        self.assertEqual((count, self.entries(detail)), (2, expected),
+                         "the unknown entry and the listed draft were not both in the row")
+
+    def test_each_stale_draft_gets_one_branch_commit_read_and_a_fresh_draft_gets_none(self):
+        trace = pathlib.Path(self.tmp.name) / "git-trace.txt"
+        self.serve_pulls([self.rest_draft(1001, "cost-a", 780), self.rest_draft(1002, "cost-b", 780),
+                          self.rest_draft(1003, "cost-fresh", 60)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "cost-a"), self.live_pull(1002, "cost-b")])
+        with mock.patch.dict(os.environ, {"GIT_TRACE": str(trace)}):
+            count, detail = self.row(self.out_with_live(), self.DRAFT)
+        reads = {}
+        for line in (trace.read_text(encoding="utf-8") if trace.exists() else "").splitlines():
+            found = re.search(r" log .*refs/remotes/origin/(\S+)", line)
+            if found:
+                reads[found.group(1)] = reads.get(found.group(1), 0) + 1
+        self.assertEqual(reads, {"cost-a": 1, "cost-b": 1},
+                         "the build did not read one branch commit per stale draft, or read a fresh draft's commit")
+        self.assertEqual((count, self.entries(detail)), (2, ["#1001 (cost-a)", "#1002 (cost-b)"]))
+        self.assertEqual(len(self.rest_get.call_args_list), 1, "the branch commit read made a REST call")
 
 
 class SessionsSource(UpkeepFixture):
