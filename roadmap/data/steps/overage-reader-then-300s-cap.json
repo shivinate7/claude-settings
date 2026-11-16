@@ -1,0 +1,14 @@
+{
+ "id": "overage-reader-then-300s-cap",
+ "title": "Find a reader for overage, then add a second 300 s CI wait cap used while overage shows",
+ "priority": "next",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "triage",
+ "blockedBy": [],
+ "updatedAt": "2026-11-15T23:16:00-06:00",
+ "why": "Owner page item 584 b, 23:10 CST Nov 15, overruled the pick: use a second 300 s cap while overage shows. No hook can read overage today, and the cost of the gap is unmeasured, so the first act is to find out whether any reader exists. Step ci-wait-cap-55 stays done.",
+ "source": "ruling own-584-b-second-300s-cap; coordinator 23:15 CST Nov 15",
+ "note": "[23:16 CST Nov 15, triage] Todo. Act 1: find out whether any reader of overage exists (a hook, a tool or a session field). Act 2: if one does, add a second 300 s CI wait cap used while overage shows, beside the 55 minute cap. If none does, say so on this step. The consultant builds it. The 55 minute cap in ci-wait-cap-55 stands."
+}

@@ -1,0 +1,10 @@
+{
+ "id": "own-584-b-second-300s-cap",
+ "at": "2026-11-15T23:10:39-06:00",
+ "title": "Overage shows: a second 300 s CI wait cap applies, and a reader for overage comes first",
+ "ruling": "Owner, page item 584 (pick-overage-cache-gap), answer b (overrule the pick), saved 23:10 CST Nov 15: a second 300 s CI wait cap is used while overage shows, and a reader for overage comes first. Step ci-wait-cap-55 stays done; the 55 minute cap stands. The cost of the gap is unmeasured and no hook reads overage today, so the first act is to find out whether any reader exists. Built by step overage-reader-then-300s-cap. Filed by triage from the coordinator's read.",
+ "quote": "B: Overrule it",
+ "source": "Owner page save 23:10 CST Nov 15 (item 584 b); applied and relayed by the coordinator 23:15 CST Nov 15; filed by triage 8",
+ "status": "open",
+ "step": "overage-reader-then-300s-cap"
+}

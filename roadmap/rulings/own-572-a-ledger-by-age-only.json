@@ -1,0 +1,10 @@
+{
+ "id": "own-572-a-ledger-by-age-only",
+ "at": "2026-11-15T23:10:39-06:00",
+ "title": "The PR ledger flags a stalled review only by a measured age; an unproven done record belongs to its lane",
+ "ruling": "Owner, page item 572 (pick-pr-ledger-72h), answer a, saved 23:10 CST Nov 15 (answers/pick-pr-ledger-72h, optionId keep-no-number): drop the 72 h number and keep the ownership part. The ledger flags a stalled review only by an age measured in step pr-ledger-round-ages. A record marked done whose lane check never passed belongs to its lane, not the batch runner. No 72 h number is on main (coordinator grep 23:15 CST), so nothing is removed. Filed by triage from the coordinator's read.",
+ "quote": "A: Drop the 72 h number; keep the ownership part (triage's proposal)",
+ "source": "Owner page save 23:10 CST Nov 15 (item 572 a); applied and relayed by the coordinator 23:15 CST Nov 15; filed by triage 8",
+ "status": "open",
+ "step": "pr-ledger-round-ages"
+}
