@@ -19,7 +19,7 @@ from guard_core import (
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import BUILD_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import opens_fence, BUILD_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -2500,7 +2500,7 @@ def prior_work_named(text) -> bool:
         return False
     fenced = False
     for line in text.split("\n"):
-        if line.strip().startswith("```"):
+        if opens_fence(line.strip()):
             fenced = not fenced
             continue
         found = None if fenced else _PRIOR_WORK_LINE.match(line.rstrip())

@@ -2957,7 +2957,7 @@ AGENT_NO_REMOTE_REASON = (
     "that. Finish your own work and put the request in your report so that session can act on it. "
     "(decision lanes-start-as-agents, an agent is not a lane)"
 )
-from shared_names import LANE_TAG, LANE_TITLE_EXAMPLE_OPENING, LANE_TITLE_FORM, LANE_TITLE_OPENING, grant_line_holds_words  # noqa: E402  the one home of the lane tag, the lane title form and the Grant reader, shared with guard_merge
+from shared_names import opens_fence, LANE_TAG, LANE_TITLE_EXAMPLE_OPENING, LANE_TITLE_FORM, LANE_TITLE_OPENING, grant_line_holds_words  # noqa: E402  the one home of the lane tag, the lane title form and the Grant reader, shared with guard_merge
 LANE_EFFORT_REASON = (
     "A lane starts with the effort field set to `%s` and the whole brief as its prompt. The prompt's "
     "first non-blank line is `Grant: <the grant>, <time>`, the owner's grant that starts this lane. Set the "
@@ -3520,7 +3520,6 @@ try:
 except Exception:  # fail closed (decision guard-hooks-fail-closed): with no read-only list, every role is judged
     READ_ONLY = frozenset()
 BRIEF_DESTRUCTIVE_SPAN = re.compile(r"(`+)(.+?)\1(?!`)")
-BRIEF_DESTRUCTIVE_INLINE = re.compile(r"(`{3,})[^`].*?\1")
 BRIEF_DESTRUCTIVE_CASE_DATA = re.compile(r"must deny:|add a case:", re.IGNORECASE)  # glossary-ok: the marker text briefs carry
 BRIEF_DESTRUCTIVE_NEGATORS = ("never", "no", "don't", "do-not", "shouldn't", "mustn't", "can't", "cannot")
 BRIEF_DESTRUCTIVE_NEXT_TO = ("avoid", "without")   # a negator only as the word directly before the part
@@ -3561,7 +3560,7 @@ def _brief_commands(prompt: str):
     fenced, covered, cover_indent = False, False, -1
     for line in prompt.replace("\x00", " ").splitlines():
         stripped = line.strip()
-        if stripped.startswith("```") and not BRIEF_DESTRUCTIVE_INLINE.match(stripped):
+        if opens_fence(stripped):
             fenced = not fenced
             continue
         if fenced:
