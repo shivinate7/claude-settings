@@ -6,7 +6,7 @@ characters or fewer, not counting `.md`. Existing files are not checked or renam
 
 Also fails, over the whole tree and not the diff, when two guard test section files (tests/guard/) share a header number,
 or a file's name number disagrees with its `# section <n>` header: git merges two branches' new section files clean, and
-hooks/test_guard.py then stops on the pair. The folder and header read come from lint/_guard_sections.py.
+hooks/test_guard.py then stops on the pair. The header read comes from lint/_guard_sections.py, the folder from lint/rule_audit.py section_dir().
 
 Also fails when a debt file deleted, renamed out of the debt folder, or edited to drop its Feel line against
 origin/main was a feel-fix (a line starting `**Feel.**`) with no valid device-trial line (`**Device check.**`, then
@@ -25,7 +25,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
-import _guard_sections  # noqa: E402  the one home of the guard test's section folder, header and faults
+import _guard_sections  # noqa: E402  the one home of the guard test's section header and faults
+import rule_audit  # noqa: E402  section_dir(): the folder hooks/test_guard.py's SECTION_DIR names
 
 MAX = 32
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -142,7 +143,13 @@ def too_long(files, dirs):
 def section_faults(root):
     """[(path, message)] for each guard test section file of `root` that has a bad header, a name that disagrees with its
     header, or a header number another file holds. Paths are relative to `root`, with forward slashes."""
-    folder = os.path.join(root, os.path.relpath(_guard_sections.SECTION_DIR, ROOT))
+    rel = rule_audit.section_dir(root)
+    if not rel:
+        runner = "hooks/test_guard.py"
+        if os.path.isfile(os.path.join(root, *runner.split("/"))):  # a runner whose folder cannot be read is red, never green
+            return [(runner, "names no SECTION_DIR folder this check can read")]
+        return []  # a root with no runner holds no section set
+    folder = os.path.join(root, *rel.split("/"))
     return [(os.path.relpath(os.path.join(folder, name), root).replace(os.sep, "/"), message)
             for name, message in _guard_sections.faults(_guard_sections.read(folder))]
 
