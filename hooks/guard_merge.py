@@ -768,6 +768,8 @@ OCTOPUS_PUSH_REASON = (
     "Rule (Git, octopus-push; decision octopus-push-refused): this push would send {sha}, a merge commit of more than two parents. "
     "Remedy: redo that merge as a chain of two-parent merges, then retry the push."
 )
+OCTOPUS_PUSH_STALE = (" The remote's tracking refs could not be refreshed, so a merge the remote already holds may show as new."
+                      " Run `git fetch <remote>` and push again. If that merge is still listed, redo it as two-parent merges.")
 _READ_VERBS = ("status", "diff", "log", "show")
 _CONTINUE_VERBS = ("merge", "rebase", "cherry-pick")
 _CONFLICT_VERBS = ("merge", "pull", "rebase", "cherry-pick", "am")
@@ -1018,37 +1020,61 @@ def _remote_refs(where, remote):
     return "--remotes=" + remote
 
 
-def _octopus_hit(segment, stripped, cwd, args):
-    """Return the short sha of the first merge of more than two parents that a `git push` would send,
-    else ''. The range is what the push adds to the remote: the source ref, less every ref of the pushed
-    remote, so an octopus that a remote ref already holds (a merge of origin/main brings one in) is not
-    sent. A destination named like the default branch is skipped before any read: push-main asks about
-    that push, and a deny from here would win over the ask. One `git rev-list` for each ref, and one
-    `git config` more for a remote named by a URL or a path (`_remote_refs`)."""
-    for where, source, _dest, _tracking, remote, _memo in _push_refs(
-            segment, stripped, cwd, args, DEFAULT_BRANCH_FALLBACK):
-        done = _git(where, "rev-list", "--merges", "--parents", source, "--not", _remote_refs(where, remote), "--")
-        if done is None or done.returncode != 0:
-            continue
-        for line in done.stdout.splitlines():
-            fields = line.split()
-            if len(fields) > 3:
-                return fields[0][:12]
+def _octopus_in_range(where, source, refs):
+    """The short sha of the first merge of more than two parents in `source` less `refs`, else ''. A failed read is ''."""
+    done = _git(where, "rev-list", "--merges", "--parents", source, "--not", refs, "--")
+    if done is None or done.returncode != 0:
+        return ""
+    for line in done.stdout.splitlines():
+        fields = line.split()
+        if len(fields) > 3:
+            return fields[0][:12]
     return ""
 
 
-def octopus_push_hit(stripped: str, cwd: str, read_verb) -> str:
-    """Return the short sha of the first merge of more than two parents that a `git push` in the command
-    would send, else ''. Each segment is judged from its own command word. A push whose destination is
-    unnamed reads its source's range all the same. `read_verb("push", args)` is true for a dry run, which
-    sends nothing."""
+def _octopus_hit(segment, stripped, cwd, args):
+    """Return `(sha, stale)`: the short sha of the first merge of more than two parents that a `git push` would send,
+    else `("", False)`. The range is what the push adds to the remote: the source ref, less every ref of the pushed
+    remote, so an octopus that a remote ref already holds (a merge of origin/main brings one in) is not
+    sent. A clone's tracking refs can lag the remote, and a lagging ref hides an octopus the remote holds. So on a
+    hit, and only then, the tracking refs of a configured remote are refreshed once (`git_reads.fetch_remote`, once per
+    directory and remote in the call) and the range is read again; the refusal stands only when the hit survives. A
+    refresh that fails or times out keeps the refusal, with `stale` True so the reason says so. A destination named
+    like the default branch is skipped before any read: push-main asks about that push, and a deny from here would
+    win over the ask. One `git rev-list` for each ref, one `git config` more for a remote named by a URL or a path
+    (`_remote_refs`), and on a hit one `git fetch` of a plain remote name (a URL or a path has no tracking refs)."""
+    refreshed = {}
+    for where, source, _dest, _tracking, remote, _memo in _push_refs(
+            segment, stripped, cwd, args, DEFAULT_BRANCH_FALLBACK):
+        refs = _remote_refs(where, remote)
+        sha = _octopus_in_range(where, source, refs)
+        if not sha:
+            continue
+        if refs == "--remotes":
+            return sha, False
+        key = (where, remote)
+        if key not in refreshed:
+            import git_reads  # the one home of a git call and its timeout
+            refreshed[key] = git_reads.fetch_remote(where, remote)
+            sha = _octopus_in_range(where, source, refs)
+            if not sha:
+                continue
+        return sha, not refreshed[key]
+    return "", False
+
+
+def octopus_push_hit(stripped: str, cwd: str, read_verb):
+    """Return `(sha, stale)` as `_octopus_hit` does for the first merge of more than two parents that a `git push` in
+    the command would send, else `("", False)`. Each segment is judged from its own command word. A push whose
+    destination is unnamed reads its source's range all the same. `read_verb("push", args)` is true for a dry run,
+    which sends nothing."""
     for segment in split_segments(stripped):
         call = git_call_of(segment) if segment.strip() else None
         if call is not None and call[0] == "push" and not read_verb("push", call[1]):
-            sha = _octopus_hit(segment, stripped, cwd, call[1])
+            sha, stale = _octopus_hit(segment, stripped, cwd, call[1])
             if sha:
-                return sha
-    return ""
+                return sha, stale
+    return "", False
 
 
 def _untracked_names(where, specs):

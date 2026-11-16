@@ -1707,7 +1707,7 @@ function cmdBlocks(it) {
 function buildRuling(it) {
   const saved = isSaved(it), d = eff(it) || {}, rc = rcOf(it), armed = !saved && d.choice === OVERTURN, r = ruledOf(it);
   const card = h("article", { class: "card rcard" + (saved ? " answered" : "") + (armed ? " armed" : ""), id: "item-" + it.id, "aria-labelledby": "t-" + it.id });
-  const num = h("span", { class: "num", "aria-label": "No. " + it.n + ", ruling, from the arbiter", title: "Ruled by the arbiter for " + it.owner }, "No. " + it.n);
+  const num = h("span", { class: "num", "aria-label": "No. " + it.n + ", ruling, from the arbiter", title: "Item number: the stable number you answer by; not a database id. Ruled by the arbiter for " + it.owner }, "No. " + it.n);
   card.append(h("div", { class: "top" }, num, saved
     ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? "Answered, filed in " + it.home + " " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(savedOf(it).at)))
     : h("span", {}, "ruled ", validT(it.ruled) ? h("time", { datetime: it.ruled }, fmt(it.ruled)) : "")), h("h3", { class: "title", id: "t-" + it.id }, it.title));
@@ -1764,7 +1764,7 @@ function buildCard(it) {
   const T = tierOf(it), byWait = isByWait(it), saved = isSaved(it) || byWait, d = eff(it) || {}, rc = rcOf(it), sunk = isSunk(it);
   // A sunk card holds nothing up, so it drops its tier class.
   const card = h("article", { class: "card" + (sunk ? "" : " " + T) + (saved ? " answered" : ""), id: "item-" + it.id, "aria-labelledby": "t-" + it.id, "data-seen": isSeen(it) ? "true" : null });
-  const top = h("div", { class: "top" }, h("span", { class: "num", "aria-label": "No. " + it.n + ", " + (it.kind === "decision" ? "decision" : "task") + ", from " + it.owner, title: "From " + it.owner }, "No. " + it.n),
+  const top = h("div", { class: "top" }, h("span", { class: "num", "aria-label": "No. " + it.n + ", " + (it.kind === "decision" ? "decision" : "task") + ", from " + it.owner, title: "Item number: the stable number you answer by; not a database id. From " + it.owner }, "No. " + it.n),
     // The section head says "Answered", so its pill drops the word: the ring or tick carries it.
     byWait ? h("span", { class: "ans" }, (sunk ? "" : "Answered, "), h("span", { class: "t" }, "Sent" + (fmt(lastOf(it).at) ? " " + fmt(lastOf(it).at) : "")))
     : saved ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? (sunk ? "Filed in " : "Answered, filed in ") + it.home + " " : sunk ? "Filing pending, sent " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(savedOf(it).at))) : h("span", {}, waited(it.added)));

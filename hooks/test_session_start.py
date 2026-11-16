@@ -906,9 +906,11 @@ class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
         self.assert_no_live_pin_line(session_cwd=link)
 
 
-# The waiting page behind main (rule page-stale). A repo whose extras name a waiting page prints one line
-# when the stamp an allowed publish wrote, <git common dir>/waiting-page-built, holds a blob sha other than
-# main's page.html. Main is origin/main of the claude-settings clone that the config's CLAUDE.md names, the
+# The waiting page behind main (rule page-stale). A repo whose extras name a waiting page prints one line when a stamp
+# exists and none equals main's page.html blob sha. The stamps are the record file on origin/roadmap and the local stamp
+# <git common dir>/waiting-page-built, which alone counts while the record file is missing or unreadable. A stamp equal
+# to main's blob, or no stamp at all, prints nothing.
+# Main is origin/main of the claude-settings clone that the config's CLAUDE.md names, the
 # checkout the guard's stale_pages reads, not the session's own repo. The page text here is a stand-in: the
 # hook compares blob shas and never reads the text.
 WAITING_URL = "https://claude.ai/artifact/sspage"

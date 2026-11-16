@@ -31,6 +31,30 @@ def _git(where: str, *args):
         return None
 
 
+# Flags that keep the fetch to tracking refs only: no tags, no FETCH_HEAD, no background gc. All three need git 2.29.
+_FETCH_QUIET_FLAGS = ("--no-tags", "--no-write-fetch-head", "--no-auto-maintenance")
+_GIT_USAGE_EXIT = 129
+
+
+def fetch_remote(where: str, remote: str, timeout: int = 10) -> bool:
+    """True when `git fetch --quiet <remote>` ran in `where` and succeeded: the remote's tracking refs now match the
+    remote. The fetch writes tracking refs only (no tags, no FETCH_HEAD, no gc). A git older than 2.29 refuses those
+    flags with a usage error, and the fetch then runs once more without them. A prompt is switched off, so a remote that
+    wants a login fails at once, not at the timeout. A refused, failed or timed-out fetch is False."""
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    for flags in (_FETCH_QUIET_FLAGS, ()):
+        try:
+            done = _nowindow.run(
+                ["git", "-C", where, "fetch", "--quiet", *flags, remote], capture_output=True, encoding="utf-8",
+                errors="replace", timeout=timeout, env=env,
+            )
+        except Exception:
+            return False
+        if done.returncode != _GIT_USAGE_EXIT:
+            return done.returncode == 0
+    return False
+
+
 def is_worktree(where: str):
     """True in a linked worktree, False in an ordinary checkout, None when unknown.
 

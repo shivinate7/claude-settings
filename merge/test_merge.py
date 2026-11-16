@@ -1113,7 +1113,9 @@ class ClaudeMdFlag(Env):
     - A rename is a change to both paths: the old path is flagged too, and git's default rename detection hides it.
     - The timeout seam: `merge.sh` is patched for the one `git diff` call whose args hold a `...` range (the PR-paths
       read). Any other call goes to the real `sh`. A case that never reaches that call fails, so a changed read cannot pass blind.
-    - The match is case-insensitive on the whole rule-file path; the line prints the path as git names it."""
+    - The match is case-insensitive on the whole rule-file path; the line prints the path as git names it.
+    - The waiting-page line (exact path skills/waiting-page/page.html) reads the same PR paths and uses the same seams. Its cases
+      come after the rule-file cases, at the end of the class. A read that fails prints an UNKNOWN line that names page.html, never silence."""
 
     def line(self, path):
         return f"merge: #7 changes {path}, a rule file every session loads."
@@ -1191,15 +1193,23 @@ class ClaudeMdFlag(Env):
         self.assert_flagged(rc, out, "CLAUDE.md", ".claude/CLAUDE.md", "output-styles/a.md")
 
     def pr_renames(self, moves):
-        """Main holds each old path first. The PR merges main, then renames each (old, new). Same text, so git sees a rename."""
+        """Main holds each old path first. The PR merges main, then renames each (old, new), or deletes old when new is None. Same text, so git sees a rename."""
         for old, _ in moves:
             self.on_main(old, "".join(f"rule line {i}\n" for i in range(8)))
         o = self.other
         sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
         sh(o, "git", "merge", "-q", "-m", "sync main", "origin/main")
         for old, new in moves:
-            sh(o, "git", "mv", old, new)
-        sh(o, "git", "commit", "-qm", "pr: move"); sh(o, "git", "push", "-q", "origin", "feat")
+            if new is None:
+                sh(o, "git", "rm", "-q", old)
+            else:
+                sh(o, "git", "mv", old, new)
+        drops = [f"Drops-lines: {old} -- the test removes it" for old, new in moves if new is None]
+        if drops:  # a removal of work main holds names its reason in the last paragraph (decision silent-undo-check-design)
+            sh(o, "git", "commit", "-qm", "pr: delete", "-m", "\n".join(drops))
+        else:
+            sh(o, "git", "commit", "-qm", "pr: move")
+        sh(o, "git", "push", "-q", "origin", "feat")
 
     def test_a_rename_out_of_output_styles_flags_the_old_path(self):  # F1: --name-only names the new path only
         self.pr_renames([("output-styles/x.md", "docs/x.md")])
@@ -1291,6 +1301,67 @@ class ClaudeMdFlag(Env):
         self.pr_writes({".Claude/claude.md": "rules\n", "Output-Styles/A.md": "a\n", "notes/Output-Styles/b.md": "b\n"})
         rc, out = self.run_merge("7", "--confirm")
         self.assert_flagged(rc, out, ".Claude/claude.md", "Output-Styles/A.md")
+
+    PAGE_PATH = "skills/waiting-page/page.html"
+    PAGE_LINE = ('merge: #7 changes skills/waiting-page/page.html: republish each live waiting page now (skill waiting-page, '
+                 '"Update a repo\'s pages"), and put "republished: <pages>" or a reason in the report.')
+
+    def page_flags(self, out):
+        """The republish lines of the waiting page. A page line is the only line with this text."""
+        return [l for l in out.splitlines() if "republish each live waiting page now" in l]
+
+    def page_unknowns(self, out):
+        """The UNKNOWN lines of the waiting page: a read that could not run, named by its file."""
+        return [l for l in out.splitlines() if l.startswith("merge: #7 ") and "UNKNOWN:" in l and "page.html" in l]
+
+    def test_a_merged_pr_that_changes_the_page_prints_one_republish_line_after_the_merged_as_line(self):
+        self.pr_writes({self.PAGE_PATH: "<!doctype html>\n"})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out)  # the merge landed; page.html is no rule file, so no rule-file line
+        self.assertEqual(self.page_flags(out), [self.PAGE_LINE], "the republish line is missing, doubled or worded otherwise\n" + out)
+        self.assertEqual(self.page_unknowns(out), [], "the diff was readable, so no UNKNOWN line\n" + out)
+        lines = out.splitlines()
+        merged_at = [i for i, l in enumerate(lines) if l.startswith("merge: #7 merged as ")]
+        self.assertGreater(lines.index(self.PAGE_LINE), merged_at[0], "the republish line came before the merged-as line\n" + out)
+
+    def test_a_pr_that_changes_only_other_files_of_the_page_skill_prints_no_line_for_the_page(self):
+        self.pr_writes({"skills/waiting-page/SKILL.md": "# waiting page\n", "docs/notes.md": "x\n"})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out)  # the merge landed first, so the absence below is a read that ran and found no page.html
+        self.assertEqual(self.page_flags(out), [], "a diff without page.html printed a republish line\n" + out)
+        self.assertEqual(self.page_unknowns(out), [], "a diff that was read printed an UNKNOWN line for page.html\n" + out)
+
+    def test_an_unreadable_changed_paths_list_prints_an_unknown_line_for_the_page(self):
+        self.pr_writes({self.PAGE_PATH: "<!doctype html>\n"})
+        seen = self.unreadable(lambda args: (128, "fatal: bad revision"))
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_check_could_not_run(rc, out, seen)  # the merge landed; the rule-file line for the unread diff is the existing one
+        self.assertEqual(self.page_flags(out), [], "an unread diff printed a republish line for a file it never read\n" + out)
+        unknown = self.page_unknowns(out)
+        self.assertEqual(len(unknown), 1, "an unread diff must print one UNKNOWN line that names page.html\n" + out)
+        lines = out.splitlines()
+        merged_at = [i for i, l in enumerate(lines) if l.startswith("merge: #7 merged as ")]
+        self.assertGreater(lines.index(unknown[0]), merged_at[0], "the UNKNOWN line came before the merged-as line\n" + out)
+
+    def test_a_near_miss_of_the_page_path_prints_no_line_for_the_page(self):
+        self.pr_writes({"other/page.html": "x\n", "skills/waiting-page/page.html.bak": "x\n",
+                        "skills/waiting-page/page.htm": "x\n", "CLAUDE.md": "rules\n"})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out, "CLAUDE.md")  # the control: the same diff was read, and its rule file is flagged
+        self.assertEqual(self.page_flags(out), [], "a near-miss path printed a republish line\n" + out)
+        self.assertEqual(self.page_unknowns(out), [], "a near-miss path printed an UNKNOWN line for page.html\n" + out)
+
+    def test_a_pr_that_renames_the_page_away_still_prints_the_republish_line(self):
+        self.pr_renames([(self.PAGE_PATH, "docs/old-page.md")])  # --no-renames lists the old path as a removal, so the line still prints
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out)  # the merge landed; neither path is a rule file
+        self.assertEqual(self.page_flags(out), [self.PAGE_LINE], "a rename away from page.html printed no republish line\n" + out)
+
+    def test_a_pr_that_deletes_the_page_still_prints_the_republish_line(self):
+        self.pr_renames([(self.PAGE_PATH, None)])
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out)  # the merge landed; no rule file moved
+        self.assertEqual(self.page_flags(out), [self.PAGE_LINE], "a deletion of page.html printed no republish line\n" + out)
 
 class Race(Env):
     def test_two_runs_one_lock(self):
