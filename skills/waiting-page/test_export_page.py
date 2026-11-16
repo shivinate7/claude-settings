@@ -2285,7 +2285,7 @@ class Rebuild(Base):
 class All(Base):
     """--all: each artifact in the repo's registry (the "artifacts" key of its extras file) exports its collections to
     its export path under --worktree: the waiting page to waiting/, any other artifact to artifacts/<id>/. Each artifact
-    gets the same scan and mirror as a single export, and one verdict line of its own, named by its id."""
+    gets the same scan and copy as a single export, and one verdict line of its own, named by its id."""
     WAIT, QUEUE = "page01", "queue02"
     VERDICT = r"\b(changed\s+\d+|same|refused|unknown)\b"
 
