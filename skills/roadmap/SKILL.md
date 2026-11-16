@@ -361,7 +361,7 @@ page) to the same publish. The roadmap build script adds no git process, file, t
 dated-claim row reads the notes already loaded and adds nothing.
 The red line, the stalled lines and the ready lines read the live file and steps build.py
 already reads. They add no process, file, timer or log. The publisher's `createdAt` per pull row comes from the
-GitHub list call it already makes. The stale-draft row makes its own REST calls (N // 100 + 1 per build run) and one local
+GitHub list call it already makes. The stale-draft row makes its own REST calls (max(1, ceil(N / 100)) gh calls per build run, N being the open pulls) and one local
 `git log` per stale-looking draft. It writes no file, starts no timer and keeps no log.
 The `landedPulls` rows cost the publisher one more GitHub list call (closed pulls) per publish. The closed-pull wait row runs
 one `git merge-base` per closed unmerged PR that an open step waits on, once per build. A closed row no open step

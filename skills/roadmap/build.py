@@ -8,7 +8,7 @@ live file's own sessions list. A name in SESSION_SOURCES replaces it for the lan
 takes no arguments and returns (rows, None) or (None, why), rows being {session id: [step id, ...]}. held and reviewLog
 still come from the live file's pulls rows. A name the registry does not hold, or a reader that raises or returns a bad
 shape, reads the row unknown. The registry holds only live-file until the owner names a source (owner page item 894); no
-token or network source is wired, and no new REST read is made.
+token or network source is wired, so a sessions source makes no REST read.
 
 The steps, topics and numbers come from the repo's record branch, under roadmap/data/. In a
 checkout that stands on the record branch, this script reads the working tree and writes
@@ -1262,18 +1262,34 @@ REST_DEADLINE_SECONDS = 120
 MERGE_DIR = HERE.parent.parent / "merge"
 
 
+def merge_folder():
+    """The folder that holds merge.py, or None. Beside this checkout first. A cloud install copies skills/ to the config
+    dir with no merge/, so then the clone the global rules file points at (guard_pointer.pointer_checkout, the one home
+    of that read)."""
+    if (MERGE_DIR / "merge.py").is_file():
+        return MERGE_DIR
+    from guard_pointer import pointer_checkout  # hooks/ is on sys.path; a run with no token never needs it
+    clone = pointer_checkout()
+    found = pathlib.Path(clone) / "merge" if clone else None
+    return found if found and (found / "merge.py").is_file() else None
+
+
 def load_merge():
     """The merge tool module (merge/merge.py), the one home of the GitHub reads. Loaded when a read is about to run, so a
-    run with no token never imports it. Its folder is on sys.path only for the import."""
-    added = str(MERGE_DIR) not in sys.path
+    run with no token never imports it. Its folder is on sys.path only for the import. No merge tool to reach raises
+    ModuleNotFoundError, which the caller reads as one unknown."""
+    folder = merge_folder()
+    if folder is None:
+        raise ModuleNotFoundError("merge")
+    added = str(folder) not in sys.path
     if added:
-        sys.path.insert(1, str(MERGE_DIR))
+        sys.path.insert(1, str(folder))
     try:
         import merge
         return merge
     finally:
-        if added and str(MERGE_DIR) in sys.path:
-            sys.path.remove(str(MERGE_DIR))
+        if added and str(folder) in sys.path:
+            sys.path.remove(str(folder))
 
 
 def pull_shape_why(row):
@@ -1310,7 +1326,7 @@ def open_pulls_rest(slug):
         with merge.shared_deadline(REST_DEADLINE_SECONDS), merge.bulk_reads(host):
             body = host.open_pulls()
     except OSError as err:
-        return None, "unknown (gh could not run: %s)" % (err or type(err).__name__,)
+        return None, "unknown (gh could not run: %s)" % (str(err) or type(err).__name__,)
     except subprocess.SubprocessError:
         return None, "unknown (the open pulls read timed out)"
     except (Exception, SystemExit) as err:
@@ -1350,7 +1366,7 @@ def read_sessions_source(name):
     try:
         got = SESSION_SOURCES[name]()
     except Exception as err:  # a reader is outside code: whatever it raises reads unknown and never stops the build
-        return None, "the sessions source %s failed: %s" % (name, err or type(err).__name__)
+        return None, "the sessions source %s failed: %s" % (name, str(err) or type(err).__name__)
     bad = "the sessions source %s returned a bad shape" % name
     if not isinstance(got, tuple) or len(got) != 2:
         return None, bad
