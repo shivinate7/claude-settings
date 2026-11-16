@@ -118,6 +118,76 @@ def octopus_broken_remedy_case():
     return True, "refused on a failed fetch, and the remedy names the two-parent form and not the octopus merge"
 
 
+# The fetch of a hit, pinned at its call. fetch_remote runs one fetch with three flags that keep it to tracking refs.
+# A git that refuses those flags (exit 129, a usage error) gets one more fetch without them. The runner is stubbed, so
+# no git runs. The flags are written out here, not read from the product: a product constant would not exist on an older head.
+FETCH_TRACKING_FLAGS = ("--no-tags", "--no-write-fetch-head", "--no-auto-maintenance")
+FETCH_USAGE_EXIT = 129
+FETCH_FLAGS_LABEL = ("octopus-push: a fetch of a hit runs once, with --no-tags, --no-write-fetch-head and "
+                     "--no-auto-maintenance")
+FETCH_RETRY_LABEL = ("octopus-push: a fetch that git refuses with exit 129 runs once more, without those three flags")
+FETCH_NO_RETRY_LABEL = "octopus-push: a fetch that fails with any other exit runs once, with no retry"
+
+
+def _fetch_with_codes(codes):
+    """Run git_reads.fetch_remote for origin with its runner stubbed. Call n returns codes[n]; a call past the list
+    returns 0. Returns (the fetch's result, the argv of each call). The real runner is put back before it returns."""
+    import git_reads
+    calls = []
+    left = list(codes)
+
+    class _Runner(object):
+        @staticmethod
+        def run(argv, **kwargs):
+            calls.append(list(argv))
+            return subprocess.CompletedProcess(argv, left.pop(0) if left else 0, "", "")
+
+    real = git_reads._nowindow
+    git_reads._nowindow = _Runner
+    try:
+        result = git_reads.fetch_remote(ROOT, "origin")
+    finally:
+        git_reads._nowindow = real
+    return result, calls
+
+
+def octopus_fetch_flags_case():
+    result, calls = _fetch_with_codes([0])
+    if len(calls) != 1:
+        return False, "a fetch that exits 0 ran %d times, want one" % len(calls)
+    if calls[0][3:4] != ["fetch"]:
+        return False, "the call is not a fetch: %r" % calls[0]
+    if result is not True:
+        return False, "a fetch that exits 0 is reported as failed"
+    for flag in FETCH_TRACKING_FLAGS:
+        if flag not in calls[0]:
+            return False, "the fetch runs without %s: %r" % (flag, calls[0])
+    return True, "one fetch, with --no-tags, --no-write-fetch-head and --no-auto-maintenance"
+
+
+def octopus_fetch_retry_case():
+    result, calls = _fetch_with_codes([FETCH_USAGE_EXIT, 0])
+    if len(calls) != 2:
+        return False, "a fetch refused with exit 129 ran %d time(s), want two" % len(calls)
+    if [call[3:4] for call in calls] != [["fetch"], ["fetch"]]:
+        return False, "a call is not a fetch: %r" % calls
+    for flag in FETCH_TRACKING_FLAGS:
+        if flag in calls[1]:
+            return False, "the retry still passes %s: %r" % (flag, calls[1])
+    if result is not True:
+        return False, "a retry that exits 0 is reported as failed"
+    return True, "exit 129 runs one more fetch, without the three flags, and reports its result"
+
+
+def octopus_fetch_no_retry_case():
+    result, calls = _fetch_with_codes([128])
+    if len(calls) != 1:
+        return False, "a fetch that exits 128 ran %d times, want one" % len(calls)
+    if result is not False:
+        return False, "a fetch that exits 128 is reported as ok"
+    return True, "exit 128 runs one fetch and reports it failed"
+
+
 # A fetch on a hit, pinned in the push cost table (the helper of section 13406). A push whose range holds an octopus
 # runs one `git fetch` of its remote and reads the range again. A clean push runs no fetch. Each row's scope is read
 # before its counts are judged. The check builds only the two fixtures it names, through materialize, so it is
