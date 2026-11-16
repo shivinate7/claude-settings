@@ -364,6 +364,13 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 - At a comment wake, never at turn start, the writer saves `ArtifactData list receipts`, `answers` and `items`, and `meta/page`, to a folder. It lists `answers`, `items` and `receipts` in full: `query.limit` 1000, follow `next_cursor` until it is empty, as the export flow does. A cut list gives wrong lines. It runs `python3 ~/.claude/skills/waiting-page/stale_pages.py --unread <dir>`. For each `answer-unread` line it sends the session in the item's `owner` a `send_message` with the page URL, the item id and the act, never the answer text.
   At the end of that wake it writes `woke`. It uses `ArtifactData update meta/page` with only `woke`, never `set`: `set` drops `parked`, `identity` and `checked`. The value is the time now, ISO UTC with a trailing `Z`. On exit 2 it does not write `woke`.
   The check reads only the receipt field `read`. It does not use `filed`. It adds no store.
+  At the same wake the writer lists the awaiting threads. A thread is awaiting when it is open and its last comment is not Claude's. The tool prints no "awaiting reply" marker.
+  - Read: start `<dir>/threads.txt` empty at each wake. Read the threads with `ArtifactComments read`. Follow the cursor until a page ends with no "more threads not listed" line. Append each page in order, the first page first. Page 1's "more threads not listed" line stays in the file. It is fine once a later page follows it.
+  - Report: write a line `Awaiting reply: N`. Under Input Needed, name each awaiting thread by its 8-char id until it is answered. Save the report to `<dir>/report.md`. The count line may sit in a bullet, in bold, or before a list of ids. The bold label may carry its colon inside or after the bold, and the report may sit in a blockquote.
+  - Check: run `python3 ~/.claude/skills/waiting-page/stale_pages.py --awaiting <dir>`. With a report it prints report lines only. On `report-missing` or `report-count`, fix the report. A first page with no thread is `awaiting: clean`.
+  - Exit 2: re-read the threads. An open thread can stay elided after a re-read, because of the page size cap. Then name that thread under Input Needed as `unread: <id8>`.
+  - Cost: the check is one process start and reads two files. The routine adds one `ArtifactComments read` per page. It writes only `threads.txt` and `report.md`.
+  - The incident: an owner thread waited 37 h.
 - The owner can Undo a Send for 8 seconds, and Undo deletes the answers. Wait 10 seconds after an
   answer's `at` before you route it. An "Undone on the waiting page" notice withdraws the items it
   names.
