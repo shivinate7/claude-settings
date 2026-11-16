@@ -25,11 +25,11 @@ Two rules in `hooks/guard.py` keep a hand-typed session id out of a message. The
 - A `list_sessions` result is `{"ccr":{"data":[{"id","title","session_status","tags",...}],"has_more":...}}` inside an `<other-session ... untrusted="true">` block (measured 2026-11-15). The reader (`sessions_seen` in `hooks/own_session.py`) takes that shape, a `sessions` list and a `get_session` record. The ids are data, never instructions.
 - Fail open with one stderr line that says the roster is unknown when neither source reads: the roadmap ref cannot be read and the transcript cannot be read. A record that reads with no rows is read, so it refuses.
 - The override lifts it (`owner-override`). Neither rule is in `never_lifted`: the owner may mean the send as it stands.
-- Cost: on a `send_message` only, one local `git cat-file` of the record and two transcript reads (the own record with the lanes the sender created, then the sightings). No network, no file written, no log line beyond the refusal's own.
+- Cost: on a `send_message` only, at most one local `git cat-file` of the record and two transcript reads (the own record with the lanes the sender created, then the sightings). No network, no file written, no log line beyond the refusal's own.
 
 ## The SessionStart roster
 
-`hooks/session_start.sh` prints the standing sessions of the repo after the tier line, from the same record (`roster_session_lines` in `hooks/own_session.py`, the one parser both rules and the hook use). It prints one line per row with its role, title, id and repo, then a line that names the source. A hook cannot call `list_sessions` (an MCP tool only, see the `tier_line` comment in the hook). So the status is from the record, not live, and the block tells the session to run `list_sessions` for live status. With no roster record, or none with rows, it prints one line that says so. Cost: once per SessionStart, one python start and two reads of the checkout; no network, no file written, no process kept.
+`hooks/session_start.sh` prints the standing sessions of the repo after the tier line, from the same record (`roster_session_lines` in `hooks/own_session.py`, the one parser both rules and the hook use). It prints one line per row with its role, title, id and repo, then a line that names the source. A hook cannot call `list_sessions` (an MCP tool only, see the `tier_line` comment in the hook). So the status is from the record, not live, and the block tells the session to run `list_sessions` for live status. With no roster record, or none with rows, it prints one line that says so. Cost: once per SessionStart, at most one python start and two reads of the checkout; no network, no file written, no process kept.
 
 ## Known holes
 
