@@ -14,9 +14,9 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 from guard_core import (
-    SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
+    SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, GIT_WRITES, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
     REPLAY_MARKS, command_indexes, dir_before_segment, heredoc_heads, inline_script, inner_commands, own_heredoc_bodies, resolve_command, resolve_default_base, segment_tokens, split_segments,
-    is_cloud, strip_heredoc_bodies, strip_redirections,
+    is_cloud, shell_abs, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import opens_fence, BUILD_TAG, CONSULTANT_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_BRIEF_MARKER, LANE_GRANT_MARKER, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags, repo_tag_names  # the one home of the lane tags and head refs, shared with the roadmap build
@@ -1256,7 +1256,8 @@ def _commit_red_run(args, bodies, check_red_run, top, read_adds):
 
 def _chain_safe(segment):
     """True when the segment cannot change the tree a later commit reads: a git add, a git read,
-    `true`, `false`, `cd` (the root already resolves through a cd) or a plain `VAR=value`. A commit is judged on its own, so
+    `true`, `false`, `cd` (the root already resolves through a cd), `mkdir` (git tracks no empty folder) or a plain
+    `VAR=value`. A commit is judged on its own, so
     the caller never asks about one."""
     call = git_call_of(segment)
     if call is not None:
@@ -1265,6 +1266,8 @@ def _chain_safe(segment):
     if tokens and all(ASSIGNMENT.match(token) for token in tokens) and not set(segment) & set("`("):
         return True   # a plain `VAR=value` runs nothing; a substitution could, so it stays unsafe
     index = resolve_command(tokens) if tokens else None
+    if index is not None and basename(tokens[index]) == "mkdir":
+        return not set(segment) & set("`(")   # a substitution in its operands could run anything
     return index is not None and basename(tokens[index]) in ("true", "false", "cd")
 
 
@@ -1297,23 +1300,83 @@ def _repo_of(repos, where):
     return repos[where]
 
 
-def _after_missing_cd(segments, number, cwd, ends):
+def _after_missing_cd(segments, number, cwd, ends, made=frozenset()):
     """True when a `cd` ahead of `segments[number]` named a folder that is missing now and the segment still runs: the
     shell stayed where it was. The walk that reads a failed cd as staying (`failed_cd_stays`) and the one that does
-    not trust it (None) differ only there, so a folder in the first and None in the second marks that cd."""
-    return (dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True) is not None
-            and dir_before_segment(segments, number, cwd, ends) is None)
+    not trust it (None) differ only there, so a folder in the first and None in the second marks that cd. A folder in
+    `made` (`_made_folders`) is read as present."""
+    return (dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True, made=made) is not None
+            and dir_before_segment(segments, number, cwd, ends, made=made) is None)
 
 
-# The git writes a failed `cd` redirects: each lands in the shell's old folder, which the guard did not judge.
-_CD_WRITE_VERBS = ("commit", "push", "merge")
+_MKDIR_VALUE_FLAGS = ("-m", "--mode", "--context")
+_CLONE_VALUE_FLAGS = ("-b", "--branch", "-o", "--origin", "-c", "--config", "-u", "--upload-pack", "-j", "--jobs",
+                      "--depth", "--reference", "--reference-if-able", "--separate-git-dir", "--template", "--filter",
+                      "--shallow-since", "--shallow-exclude", "--server-option", "--bundle-uri", "--ref-format")
+_WORKTREE_ADD_VALUE_FLAGS = ("-b", "-B", "--reason")
+
+
+def _operands(args, value_flags):
+    """The operands of a command's args: a flag is skipped, and so is the value of one in `value_flags`. After `--`
+    every arg is an operand."""
+    found, skip, ended = [], False, False
+    for arg in args:
+        if skip:
+            skip = False
+        elif ended or not arg.startswith("-") or arg == "-":
+            found.append(arg)
+        elif arg == "--":
+            ended = True
+        else:
+            skip = arg in value_flags
+    return found
+
+
+def _made_folders(segments, number, cwd, ends):
+    """The normalized folders that a segment ahead of `segments[number]` makes: a `mkdir`'s operands, a `git clone`'s
+    target (git's default name when none is given) and a `git worktree add`'s path, each with its parents. Each is
+    resolved against the folder its own segment runs in. Parsing only: no process is spawned."""
+    made = set()
+    for at in range(number):
+        tokens = segment_tokens(segments[at]) if segments[at].strip() else None
+        index = resolve_command(tokens) if tokens else None
+        if index is None:
+            continue
+        paths, call = [], git_call_of(segments[at])
+        if basename(tokens[index]) == "mkdir":
+            paths = _operands(tokens[index + 1:], _MKDIR_VALUE_FLAGS)
+        elif call is not None and call[0] == "clone":
+            operands = _operands(call[1], _CLONE_VALUE_FLAGS)
+            if len(operands) > 1:
+                paths = [operands[1]]
+            elif operands:
+                default = operands[0].rstrip("/").rsplit("/", 1)[-1].rsplit(":", 1)[-1]
+                paths = [default[:-4] if default.endswith(".git") else default]
+        elif call is not None and call[0] == "worktree" and call[1][:1] == ["add"]:
+            paths = _operands(call[1][1:], _WORKTREE_ADD_VALUE_FLAGS)[:1]
+        if not paths:
+            continue
+        base = dir_before_segment(segments, at, cwd, ends, failed_cd_stays=True, made=frozenset(made))
+        c_target = _segment_git_c_target(tokens) if call is not None else None
+        if c_target is not None:
+            base = _absolute(c_target, base or "")
+        for path in paths:
+            target = shell_abs(path, base)
+            while target and os.path.isabs(target):
+                target = os.path.normpath(target)
+                if target in made or os.path.dirname(target) == target:
+                    break
+                made.add(target)
+                target = os.path.dirname(target)
+    return frozenset(made)
 
 
 def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
     """Return `(kind, file)` for the first commit or push that would carry all three conflict markers
     in one file, else `('', '')`. The kind is `commit`, `push`, `chain` (a push after a commit the
-    guard could not judge; the file is then `git push`), or `cd` (a commit, push, merge or `--continue` after a `cd` into a
-    missing folder, which the shell survives: the file is then `git <verb>`; the reason prints no folder, ruling own-476-c-refuse-cd-missing-folder). A push that carries no marker but sends a test
+    guard could not judge; the file is then `git push`), or `cd` (a git write, any verb in `GIT_WRITES`, after a `cd`
+    into a folder that is missing now and that no earlier segment makes (`_made_folders`), which the shell survives:
+    the file is then `git <verb>`; the reason prints no folder, ruling own-476-c-refuse-cd-missing-folder). A push that carries no marker but sends a test
     commit with no valid Red-run trailer returns `('red-run', (found, last, rewritten))` (`_red_run_found`); a caller that
     passes no `is_test_rel` reads no red-run hit. A lone commit (no push after it in the call) that adds test lines with no
     valid trailer in its `-m` returns `('red-run-commit', (found, 'new', False))` (`_commit_red_run`). Each segment is judged from its own command word. `raw` is the
@@ -1334,8 +1397,10 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
             continue
         call = calls[number]
         before, heads_before = heads_before, heads_before + len(heredoc_heads(segment)[0])
-        if call is not None and (call[0] in _CD_WRITE_VERBS or _continues(call)) and _segment_git_c_target(segment_tokens(segment) or []) is None:
-            if _after_missing_cd(segments, number, cwd, ends) and _repo_of(repos, dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True)) is not None:
+        if call is not None and call[0] in GIT_WRITES and _segment_git_c_target(segment_tokens(segment) or []) is None:
+            if (_after_missing_cd(segments, number, cwd, ends)
+                    and _after_missing_cd(segments, number, cwd, ends, _made_folders(segments, number, cwd, ends))
+                    and _repo_of(repos, dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True)) is not None):
                 return "cd", "git " + call[0]
         if call is not None and call[0] == "push":
             if blind_commit and (blind_triplet or conflict_step):

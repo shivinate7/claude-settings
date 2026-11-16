@@ -270,14 +270,18 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        line in one file's added lines, read with `git diff --check`: the index, or the working
                        tree (untracked files too) when `-a`, a pathspec or an earlier add reaches the file; a
                        `merge`, `rebase` or `cherry-pick --continue` counts as a commit. It judges a commit only
-                       when each earlier segment is a git add, commit or read, `true`, `false` or `cd`. Also a
+                       when each earlier segment is a git add, commit or read, `true`, `false`, `cd` or a
+                       `mkdir` with no substitution. Also a
                        `git push` whose net range (remote-tracking tip, else upstream, else default base, up
                        to the pushed ref, else HEAD) adds such a file; and a push after a commit the guard
                        could not judge, when that commit covers a triplet already in the tree or the chain
-                       runs merge, pull, rebase, cherry-pick, stash pop or apply, or am. Also a
-                       `git commit` after a `cd` into a folder that is missing now, ended by `;`, a newline
-                       or `||`: the shell stays put and the commit runs in the repo the guard did not
-                       judge. After `&&` the chain stops, so that passes.
+                       runs merge, pull, rebase, cherry-pick, stash pop or apply, or am. Also any git
+                       write (`GIT_WRITES`: add, commit, push, merge, pull, rebase, cherry-pick, reset and
+                       the rest) after a `cd` into a folder that is missing now, ended by `;`, a newline or
+                       `||`: the shell stays put and the write lands in a repo the call did not name. A
+                       folder an earlier segment makes (mkdir, git clone, git worktree add) counts as
+                       present. After `&&`, or `|| exit` or `|| return`, nothing more runs, so that passes.
+                       A git read passes.
                        (commit-refuses-conflict-markers; ruling own-476-c-refuse-cd-missing-folder)
   red-run              deny. A `git commit` with no push after it, or a `git push` whose range (the one
                        conflict-markers reads, less the commits the default base holds) has a non-merge commit that adds lines to a test path and has no
@@ -5427,7 +5431,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # A push of a test commit with no Red-run trailer is refused here too (rule red-run): it shares the push's
     # range, and adds one `git log` per push. A commit in the same call, before the push, is read from its
     # `-m` text; so is a lone commit with no push after it, which adds one `git diff --numstat` only when its
-    # message holds no trailer. guard_merge states the cost.
+    # message holds no trailer. A git write after a cd into a missing folder adds one `git rev-parse` of the
+    # folder the shell stays in; the scan for folders the call makes is parsing only. guard_merge states the cost.
     kind, matched = conflict_markers_hit(stripped, cwd, is_test_rel, raw)
     if kind in ("red-run", "red-run-commit"):
         red_reason, red_shown = red_run_reason(matched, kind == "red-run-commit")
