@@ -16,6 +16,8 @@ The contract these cases pin. A change to any of it changes these cases first.
   that scope skipped does not stop the skip: after a passing PR run, narrowed or full, main runs none of its suites for that merge.
   A macOS scope skip job skipped by its scope flags is no gap when the caller's scope-skips input names it, the run's scope job succeeded
   and its all-jobs-passed succeeded. A skipped job that map does not name is still a gap.
+  A records-only run (every suite job skipped, scope and all-jobs-passed succeeded) is a passing run: its skips are proven. The
+  REST jobs read carries no job outputs, so all-jobs-passed's success stands for its records_only_skip flag.
 - Any read error, unknown state or unreadable record writes skip=false and says "unknown".
 
 The stand-in PRS_JSON, a JSON list of batch heads, is read by the older cases. The live cases answer the reads through FakeGitHub,
@@ -435,9 +437,11 @@ class SuiteRunsOfTheHead(LiveHead):
         self.assertEqual(value, "true", "every suite job succeeded on the ready run and the jobs off a pull request are skipped: skip=true (%s)"
                          % text.strip()[-200:])
 
-    def test_a_head_whose_suite_jobs_were_all_skipped_does_not_skip_the_push_though_all_jobs_passed_is_green(self):
-        value, _ = self.skip_on(ready_head_runs({name: {"conclusion": "skipped"} for name in SUITE_JOBS}))
-        self.assertEqual(value, "false", "every suite job skipped on the ready run, so no suite ran on this tree: skip=false")
+    def test_a_head_whose_suite_jobs_were_all_skipped_does_not_skip_the_push_when_all_jobs_passed_failed(self):
+        changes = {name: {"conclusion": "skipped"} for name in SUITE_JOBS}
+        changes[ALL_JOBS_PASSED_JOB] = {"conclusion": "failure"}
+        value, _ = self.skip_on(ready_head_runs(changes))
+        self.assertEqual(value, "false", "every suite job skipped and all-jobs-passed failed, so the rollup refused the skips: skip=false")
 
     def test_one_suite_job_skipped_among_successes_does_not_skip_the_push(self):
         name = "checks-windows-rest"
@@ -574,10 +578,16 @@ class MergedPullRequest(LiveHead):
         self.assertEqual(value, "true", "a green run with a suite step skipped by scope is a passing PR run, so main skips (%s)" % text.strip()[-200:])
 
     def test_a_draft_run_whose_suite_jobs_were_all_skipped_runs(self):
-        jobs = full_run_jobs({name: {"conclusion": "skipped", "steps": []} for name in SUITE_JOBS})
-        self.assertTrue(all(job["conclusion"] == "skipped" for job in jobs if job["name"] in SUITE_JOBS), "the fixture must skip every suite job")
+        # A real draft skips its scope job, so all-jobs-passed fails on the skipped scope.
+        changes = {name: {"conclusion": "skipped", "steps": []} for name in SUITE_JOBS}
+        changes[SCOPE_JOB] = {"conclusion": "skipped", "steps": []}
+        changes[ROLLUP_NAME] = {"conclusion": "failure"}
+        jobs = full_run_jobs(changes)
+        got = {job["name"]: job["conclusion"] for job in jobs}
+        self.assertEqual((got.get(SCOPE_JOB), got.get(ROLLUP_NAME)), ("skipped", "failure"), "the fixture must be a draft: scope skipped, all-jobs-passed failed")
+        self.assertTrue(all(got.get(name) == "skipped" for name in SUITE_JOBS), "the fixture must skip every suite job")
         value, _ = self.skip_on(fake=self.lane_fake([pull_request_run(1)], {1: jobs}))
-        self.assertEqual(value, "false", "the draft run skipped every suite job, and a skipped job proves nothing: skip=false")
+        self.assertEqual(value, "false", "the draft run skipped its scope job, so no suite ran and a skipped job proves nothing: skip=false")
 
     def test_a_red_pull_request_run_runs(self):
         jobs = full_run_jobs({"checks-windows-rest": {"conclusion": "failure"}})
@@ -870,6 +880,77 @@ class ScopeSkippedMacosMergedPullRequest(LiveHead):
                                         extra=[job_row(name, "skipped", steps=[])])
                 value, _ = self.skip_on(fake=fake)
                 self.assertEqual(value, "false", "%s failed beside a skipped job of its name, so the skipped job proves nothing: skip=false" % name)
+
+
+def records_only_changes(scope="success", rollup="success"):
+    """full_run_jobs changes for a records-only pull request run: every suite job skipped with no steps. `scope` and `rollup` are the
+    conclusions of the scope and all-jobs-passed jobs. None leaves that job out."""
+    changes = {name: {"conclusion": "skipped", "steps": []} for name in SUITE_JOBS}
+    changes[SCOPE_JOB] = None if scope is None else {"conclusion": scope}
+    changes[ROLLUP_NAME] = None if rollup is None else {"conclusion": rollup}
+    return changes
+
+
+def records_only_check_runs(scope="success", rollup="success"):
+    """The same records-only run as the check runs of a batch head. None leaves that run out."""
+    changes = {name: {"conclusion": "skipped"} for name in SUITE_JOBS}
+    changes[SCOPE_JOB] = None if scope is None else {"conclusion": scope}
+    changes[ROLLUP_NAME] = None if rollup is None else {"conclusion": rollup}
+    return ready_head_runs(changes)
+
+
+def records_only_lone_fake(jobs):
+    """A merged lone-lane head whose newest checks.yml pull request run has these jobs."""
+    return FakeGitHub(pulls=[lane_pull()], trees={LANE_HEAD: TREE}, workflow_runs=[pull_request_run(1)], jobs={1: jobs})
+
+
+class RecordsOnlyRun(LiveHead):
+    """A records-only run: a pull request run whose change is records only. Its scope job succeeded, every suite job was skipped with no
+    steps, and all-jobs-passed succeeded. The rollup passes those skips only when its records_only_skip output is "true"
+    (actions/all-jobs-passed/check.sh). push-skip cannot read that output, since the REST jobs read carries no job outputs. So the
+    rollup's success is the visible form of the flag, and the unset control is the same skips with all-jobs-passed failed.
+    The two red cases are the two paths push-skip reads a pull request run on. Each control is a gap on the old code too."""
+
+    def shape(self, rows, scope, rollup):
+        """The fixture's scope and all-jobs-passed conclusions, and every suite job skipped. Asserted before the verdict."""
+        got = {row["name"]: row["conclusion"] for row in rows}
+        self.assertEqual((got.get(SCOPE_JOB), got.get(ROLLUP_NAME)), (scope, rollup),
+                         "the fixture's scope and all-jobs-passed must be %s and %s" % (scope, rollup))
+        self.assertEqual({name: got.get(name) for name in SUITE_JOBS}, {name: "skipped" for name in SUITE_JOBS},
+                         "the fixture must skip every suite job")
+
+    def assert_gap(self, scope, rollup, cause):
+        """On both paths the same records-only shape, with this scope and rollup conclusion, stays a gap: skip=false."""
+        jobs = full_run_jobs(records_only_changes(scope, rollup))
+        runs = records_only_check_runs(scope, rollup)
+        for path, rows, source in (("merged pull request", jobs, {"fake": records_only_lone_fake(jobs)}), ("batch head", runs, {"runs": runs})):
+            with self.subTest(path=path):
+                self.shape(rows, scope, rollup)
+                value, text = self.skip_on(**source)
+                self.assertEqual(value, "false", "%s: %s, so its skipped suite jobs are gaps: skip=false (%s)" % (path, cause, text.strip()[-200:]))
+
+    def test_a_records_only_merged_pull_request_run_skips_the_push(self):
+        jobs = full_run_jobs(records_only_changes())
+        self.shape(jobs, "success", "success")
+        value, text = self.skip_on(fake=records_only_lone_fake(jobs))
+        self.assertEqual(value, "true", "a records-only merged pull request run passed, so its skipped suite jobs are proven and the push skips: skip=true (%s)"
+                         % text.strip()[-200:])
+
+    def test_a_records_only_batch_head_run_skips_the_push(self):
+        runs = records_only_check_runs()
+        self.shape(runs, "success", "success")
+        value, text = self.skip_on(runs)
+        self.assertEqual(value, "true", "a records-only batch head run passed, so its skipped suite jobs are proven and the push skips: skip=true (%s)"
+                         % text.strip()[-200:])
+
+    def test_the_records_only_shape_with_a_failed_rollup_stays_a_gap(self):
+        self.assert_gap("success", "failure", "all-jobs-passed failed, which is what an unset records_only_skip gives")
+
+    def test_the_records_only_shape_with_a_failed_scope_run_stays_a_gap(self):
+        self.assert_gap("failure", "success", "the scope run failed, so the flags the skips rest on are not known")
+
+    def test_the_records_only_shape_with_no_scope_run_stays_a_gap(self):
+        self.assert_gap(None, "success", "there is no scope run, so the flags the skips rest on are not known")
 
 
 class EventRefusal(LiveHead):
