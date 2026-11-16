@@ -738,7 +738,8 @@ CONFLICT_MARKERS_CHAIN_REASON = (
     "Remedy: run the push in a call of its own, after the commit has landed."
 )
 CONFLICT_MARKERS_CD_REASON = (
-    "Rule (Git, conflict-markers; decision refuse-git-after-missing-cd; ruling own-476-c-refuse-cd-missing-folder): "
+    "Rule (Git, conflict-markers; decision commit-refuses-conflict-markers, decision refuse-git-after-missing-cd; "
+    "ruling own-476-c-refuse-cd-missing-folder): "
     "the cd before this git write names a folder that does not exist, so the cd failed and the shell stays in the "
     "current folder. The write would land in the current folder's repository, which is not the one you named. "
     "Remedy: check the folder path, or join the cd to the git command with `&&`, then retry."
