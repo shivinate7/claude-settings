@@ -1,0 +1,14 @@
+{
+ "id": "updatedat-not-future",
+ "title": "build.py --check-staged refuses an updatedAt or at later than now-central",
+ "priority": "next",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "triage",
+ "blockedBy": [],
+ "updatedAt": "2026-11-15T19:00:00-06:00",
+ "why": "[19:00 CST Nov 15, triage] A check that refuses a step or ruling `updatedAt` or `at` later than now-central at commit time, so a timestamp read from memory cannot land. Triage and its filing worker stamped times 1.5 to 2 hours ahead on 2026-11-15 (coordinator flagged 18:58 CST; five steps corrected at a64c92eaef). Home: build.py `--check-staged`, the existing pre-commit check (roadmap branch CLAUDE.md); extend it, do not add a new hook. Red case first: a step with updatedAt after now. Guard or check: yes. (source: coordinator 19:00 CST, relayed by triage; undoable; not owner-typed) New step.",
+ "source": "coordinator 19:00 CST, relayed by triage; undoable; not owner-typed",
+ "note": "Todo. A check that refuses a step or ruling `updatedAt` or `at` later than now-central at commit time, so a timestamp read from memory cannot land. Triage and its filing worker stamped times 1.5 to 2 hours ahead on 2026-11-15 (coordinator flagged 18:58 CST; five steps corrected at a64c92eaef). Home: build.py `--check-staged`, the existing pre-commit check (roadmap branch CLAUDE.md); extend it, do not add a new hook. Red case first: a step with updatedAt after now. Guard or check: yes."
+}
