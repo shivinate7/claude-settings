@@ -6,8 +6,9 @@
 A record file that a change adds must have a slug of 32 characters or fewer. The check reads
 decisions/ and debts/ from the diff, or the files it is given.
 
-A section file under tests/guard/ has a `# section <n>` header on its first line. Its number must be
-its name's number, and no other section file may hold it. The tree is read, not only the diff.
+A section file under tests/guard/ has a `# section <n>` header on its first line. Its name is `s<n>-<slug>.py`,
+and a name that does not read so is refused. Its number must be its name's number, and no other section file may
+hold it. The tree is read, not only the diff, and file arguments do not skip that read.
 
 Each case builds a temp tree: a copy of the module, and the records it checks. It runs the real
 script from that tree. The diff cases also make a temp git repo and set refs/remotes/origin/main,
@@ -437,6 +438,79 @@ class RecordSlugsTests(unittest.TestCase):
         self.commit_change()
         self.assert_tracked(SECTIONS + "/s43500-a.py", SECTIONS + "/s43502-trap.py")
         self.assert_passes()
+
+    def add_section_in_change(self, rel, header):
+        """A base with no section file, then a change that adds `rel` with `# section <header>`. Scope is checked."""
+        self.commit_base()
+        self.put(rel, section_text(header))
+        self.commit_change()
+        self.assert_tracked(rel)
+
+    def test_file_args_pass_distinct_section_numbers(self):
+        # The green control beside the red below: the same file-argument shape, with no duplicate on the tree.
+        self.put(SECTIONS + "/s43500-a.py", section_text(43500))
+        self.commit_base()
+        self.put(SECTIONS + "/s43501-b.py", section_text(43501))
+        self.commit_change()
+        self.assert_tracked(SECTIONS + "/s43500-a.py", SECTIONS + "/s43501-b.py")
+        self.assert_passes(SECTIONS + "/s43501-b.py")
+
+    def test_file_args_still_refuse_two_section_files_on_one_number(self):
+        # The check skipped the section read when it was given files, so a duplicate passed as one exited 0.
+        self.put(SECTIONS + "/s43500-a.py", section_text(43500))
+        self.put(SECTIONS + "/s43500-b.py", section_text(43500))
+        self.commit_base()
+        self.assert_tracked(SECTIONS + "/s43500-a.py", SECTIONS + "/s43500-b.py")
+        rc, out = self.lint(SECTIONS + "/s43500-b.py")
+        self.assertEqual(rc, 1, "a duplicate section number passed as a file argument must be refused:\n" + out)
+        self.assertEqual(sorted(flagged(out)), [SECTIONS + "/s43500-a.py", SECTIONS + "/s43500-b.py"], out)
+
+    def test_unknown_diff_still_refuses_a_section_duplicate(self):
+        # With git UNKNOWN the run returned 0 locally, even after a section fault was printed. CI is unset here.
+        self.put(FEEL_DEBT, FEEL_TEXT)
+        self.put(SECTIONS + "/s43500-a.py", section_text(43500))
+        self.put(SECTIONS + "/s43500-b.py", section_text(43500))
+        self.commit_base()
+        loose = self.loose_blob(FEEL_DEBT)
+        # A packed blob would survive the removal, and git show would not fail, so the case would prove nothing.
+        self.assertTrue(os.path.isfile(loose), loose)
+        os.remove(loose)
+        self.delete(FEEL_DEBT)
+        self.commit_change()
+        self.assert_tracked(SECTIONS + "/s43500-a.py", SECTIONS + "/s43500-b.py")
+        rc, out = self.lint()
+        self.assertIn("check_record_slugs: UNKNOWN", out, out)  # scope: the unknown branch is the one under test
+        self.assertEqual(rc, 1, "a section duplicate must stay red when the diff is unknown:\n" + out)
+        self.assertEqual(sorted(flagged(out)), [SECTIONS + "/s43500-a.py", SECTIONS + "/s43500-b.py"], out)
+
+    def test_section_name_that_reads_and_agrees_with_its_header_passes(self):
+        # The green control beside the four name reds below: `s<n>-<slug>.py` whose number is the header's.
+        self.add_section_in_change(SECTIONS + "/s43500-x.py", 43500)
+        self.assert_passes()
+
+    def test_section_name_with_an_underscore_after_its_number_is_refused(self):
+        self.add_section_in_change(SECTIONS + "/s43501_x.py", 43500)
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, "a section name the check cannot read must be refused, not passed:\n" + out)
+        self.assertEqual(flagged(out), [SECTIONS + "/s43501_x.py"], out)
+
+    def test_section_name_with_no_dash_after_its_number_is_refused(self):
+        self.add_section_in_change(SECTIONS + "/s43501x.py", 43500)
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, "a section name the check cannot read must be refused, not passed:\n" + out)
+        self.assertEqual(flagged(out), [SECTIONS + "/s43501x.py"], out)
+
+    def test_section_name_without_the_s_prefix_is_refused(self):
+        self.add_section_in_change(SECTIONS + "/43501-x.py", 43500)
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, "a section name the check cannot read must be refused, not passed:\n" + out)
+        self.assertEqual(flagged(out), [SECTIONS + "/43501-x.py"], out)
+
+    def test_section_name_with_an_upper_case_s_is_refused(self):
+        self.add_section_in_change(SECTIONS + "/S43501-x.py", 43500)
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, "a section name the check cannot read must be refused, not passed:\n" + out)
+        self.assertEqual(flagged(out), [SECTIONS + "/S43501-x.py"], out)
 
 
 class ImportTests(unittest.TestCase):
