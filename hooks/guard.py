@@ -350,7 +350,7 @@ Other tools, in `judge` order:
                        `.git`, a target outside the clone, reads and non-writing shell pass. A git
                        `clean` counts only with a force flag. An
                        override lifts it. It adds no git spawn beyond what the call already spends.
-  scratchpad-owner     ask (deny for an `rm` or `mv` of a folder holding such a file). A call with a valid `agent_id` that runs a file in this session's scratchpad, or
+  scratchpad-owner     deny. A call with a valid `agent_id` that runs a file in this session's scratchpad, or
                        writes over one, that another agent wrote. Each such write records its agent in a
                        sidecar `<scratchpad>/.writers/<hash>`. A run is an interpreter or the path as the
                        command word; a write is a Write-family target or a shell write target. A first
@@ -6707,7 +6707,7 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # Rule scratchpad-owner (decision scratchpad-owner). Every agent of a session shares the session's
 # scratchpad, so one agent can run a script another agent left there. A call from an agent that writes a
 # file in the scratchpad records the agent as its writer (`scratchpad_record_writer`); a shell call from an
-# agent that runs a scratchpad file another agent recorded asks, and so does a write over such a file; a folder removal is refused. A call
+# agent that runs a scratchpad file another agent recorded is refused, and so is a write over such a file. A call
 # with no `agent_id`, a file with no record, an agent's own file and a read pass. The text gate (`SCRATCHPAD_WORD`) keeps a call that names no scratchpad from
 # touching the disk: a path that reaches the scratchpad by a symlink is the ceiling, and passes.
 SCRATCHPAD_WORD = "scratchpad"
@@ -6906,8 +6906,7 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
 
     if taken:
         # A refused write lands nothing, so the record stays with the first writer; an override that lifts it moves it.
-        refuse(tool, "deny" if reason is SCRATCHPAD_FOLDER_REASON else "ask", "scratchpad-owner", reason, taken,
-               on_lift=record_writers)
+        refuse(tool, "deny", "scratchpad-owner", reason, taken, on_lift=record_writers)
     record_writers()
 
 
@@ -7795,7 +7794,7 @@ def judge(payload) -> None:
             # After the denies above: the shell call runs another agent's scratchpad script.
             owned = scratchpad_owner_hit(payload, tool, tool_input, cwd)
             if owned:
-                refuse(tool, "ask", "scratchpad-owner", SCRATCHPAD_OWNER_REASON, owned)
+                refuse(tool, "deny", "scratchpad-owner", SCRATCHPAD_OWNER_REASON, owned)
             scratchpad_owner_write(payload, tool, tool_input, cwd)   # the call passed: refuse an overwrite, else record the writer
         return
     if tool == SIM_MCP:
