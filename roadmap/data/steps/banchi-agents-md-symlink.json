@@ -7,8 +7,8 @@
  "phase": "next",
  "owner": "consultant",
  "blockedBy": [],
- "updatedAt": "2026-11-16T00:01:00-06:00",
- "why": "[00:01 CST Nov 16, triage] Runner 12's banchi audit (D135), relayed by the consultant at 23:59 CST Nov 15: banchi has no AGENTS.md pointer to CLAUDE.md. Decision one-layout-every-repo (docs/decisions, line 19 on main) already puts `AGENTS.md`, a symlink to `CLAUDE.md`, in every repo, and decision uniform-over-variants (2026-10-27) says a repo changes to fit the shared format. A page item was drafted and refused by the question reviewer for this reason (past-ruling); no owner question is asked. Related step banchi-claude-md-cut (ready, no lane).",
+ "updatedAt": "2026-11-16T00:03:00-06:00",
+ "why": "[00:01 CST Nov 16, triage] Runner 12's banchi audit (D135), relayed by the consultant at 23:59 CST Nov 15: banchi has no AGENTS.md pointer to CLAUDE.md. Decision one-layout-every-repo (docs/decisions, line 19 on main) already puts `AGENTS.md`, a symlink to `CLAUDE.md`, in every repo, and decision uniform-over-variants (2026-10-27) says a repo changes to fit the shared format. A page item was drafted and refused by the question reviewer for this reason (past-ruling); no owner question is asked. Related step banchi-claude-md-cut (ready, no lane).\n\n[00:03 CST Nov 16, triage] Owner, typed in the consultant's chat 23:59 CST Nov 15, relayed: \"Add a pointer for banchi what is my ruling ? claude settings always overrules unless a named exception this shudnt have even been a quesiton\". Ruled already by uniform-over-variants (owner, 2026-10-27 12:51 CDT).",
  "source": "runner 12 audit D135, relayed by the consultant 23:59 CST Nov 15; triage 8 searched decisions; not owner-typed",
  "note": "Todo. Add `AGENTS.md` as a symlink to `CLAUDE.md` in banchi, as decision one-layout-every-repo says. A banchi lane, run by the consultant or the banchi coordinator. No PR yet. No owner question: the ruling already answers it."
 }

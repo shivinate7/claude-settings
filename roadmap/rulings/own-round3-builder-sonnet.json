@@ -1,0 +1,10 @@
+{
+ "id": "own-round3-builder-sonnet",
+ "at": "2026-11-16T00:00:00-06:00",
+ "title": "A builder's third try runs Sonnet, not Opus (extends the Nov 13 reviewer ruling)",
+ "ruling": "Owner, in the census lane tonight (time to follow from that lane), relayed by the consultant at 00:00 CST Nov 16, not typed in a session triage read: \"the round 3 builder should have run Sonnet too\". It extends the owner's 2026-11-13 14:05 CST ruling \"no opus round 3 here just sonnet high\" (reviewer, round 3) to the builder's third try. Rule roles-third-round-steps-up (\"Third try: Opus\"), the round rows in agent-model-cap, the guard's Round 3 of 3 Opus lift and the root CLAUDE.md line 23 are to be rewritten so round 3 builders run Sonnet high. The consultant owns the rewrite, after goal item 1. Page item 915 closed as not a question.",
+ "quote": "the round 3 builder should have run Sonnet too",
+ "source": "Census lane, relayed by the consultant 00:00 CST Nov 16; the owner's time is not yet given; filed by triage 8",
+ "status": "open",
+ "step": "roles-third-round-builder-sonnet"
+}
