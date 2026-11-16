@@ -1,0 +1,11 @@
+{
+ "id": "own-merge-3545-now",
+ "at": "2026-11-15T18:10:00-06:00",
+ "title": "Merge #3545 now: a yes to that one merge",
+ "ruling": "Owner words, typed 18:10 CST Nov 15 per the consultant (RELAYED, verbatim): \"yes merge 3545 now. in general things shouldnt have had to wait for other stuff behind to merge imagine sand shifting through multiple strainers in a sense man cmon we’ve talked abt this\". Part 1 (this record): a yes to merge #3545 (head dd94fa084c4ec5a3a294920e33e19ebaebbc247a). The coordinator relayed it to runner 10 under the standing Relayed Merge Yes grant (.claude/CLAUDE.md), that merge only. #3545's ready run is red on the stale pre-revert merge ref (see debt draft stale-merge-ref-ready-red); the merge tool decides, and no flag is given. Covers that merge only, no variant. The \"in general\" part is the separate ruling own-ready-pr-no-queue-wait.",
+ "quote": "yes merge 3545 now. in general things shouldnt have had to wait for other stuff behind to merge imagine sand shifting through multiple strainers in a sense man cmon we’ve talked abt this",
+ "source": "Owner, typed 18:10 CST Nov 15 per the consultant (verbatim as relayed), relayed by the consultant (consultant → triage 18:11 CST) and by the coordinator (18:11 CST); triage did not read the chat",
+ "status": "open",
+ "step": "ready-no-queue-wait",
+ "supersedes_none": "A one-merge grant; it supersedes no ruling. Standing grant Relayed Merge Yes (.claude/CLAUDE.md) is what carries it to runner 10."
+}

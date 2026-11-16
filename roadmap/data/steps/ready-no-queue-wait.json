@@ -1,0 +1,14 @@
+{
+ "id": "ready-no-queue-wait",
+ "title": "A ready PR does not wait behind unrelated PRs in the queue",
+ "priority": "now",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "triage",
+ "blockedBy": [],
+ "updatedAt": "2026-11-15T18:15:00-06:00",
+ "why": "[18:10 CST Nov 15, triage] Owner words, typed 18:10 CST per the consultant (relayed, verbatim): \"yes merge 3545 now. in general things shouldnt have had to wait for other stuff behind to merge imagine sand shifting through multiple strainers in a sense man cmon we’ve talked abt this\". Rulings own-ready-pr-no-queue-wait (standing, \"in general\") and own-merge-3545-now (the one merge). The gate it touches: session-tiers.md Batch runner, \"It still marks ready only while no job is queued\". Neighbours: ruling own-ready-by-priority, debt draft stale-merge-ref-ready-red. (source: coordinator and consultant 18:11 CST, relayed by triage; not read by triage as typed)",
+ "source": "coordinator and consultant 18:11 CST, relayed by triage; not read by triage as typed",
+ "note": "Todo. Owner 18:10 CST Nov 15 (relayed, \"in general\"): a ready PR does not wait behind unrelated PRs in the queue. Touches runner 10's gate (marks ready only while no job is queued; docs/decisions/session-tiers.md, Batch runner). Ruling own-ready-pr-no-queue-wait. Not built or decided: the coordinator reads it as this gate only. Merge of #3545 itself: ruling own-merge-3545-now. Guard or check: unverified."
+}

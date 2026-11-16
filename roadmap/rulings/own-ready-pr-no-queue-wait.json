@@ -1,0 +1,16 @@
+{
+ "id": "own-ready-pr-no-queue-wait",
+ "at": "2026-11-15T18:10:00-06:00",
+ "title": "A ready PR does not wait behind unrelated PRs in the queue (standing, \"in general\")",
+ "ruling": "Same owner words as own-merge-3545-now (typed 18:10 CST Nov 15 per the consultant; RELAYED, verbatim): \"yes merge 3545 now. in general things shouldnt have had to wait for other stuff behind to merge imagine sand shifting through multiple strainers in a sense man cmon we’ve talked abt this\". Part 2, one record per question: standing, per the consultant: a ready PR does not wait behind unrelated PRs in the queue. The owner's word is \"in general\", noted: a lean for how the queue should work, not a worded rule. The coordinator's read only: runner 10's gate, which holds the next ready mark until its ready run shows 0 queued, is what this touches. Triage read the gate's home on origin/main (3237e391e): docs/decisions/session-tiers.md, Delegation duties, Batch runner bullet (line 114): \"It still marks ready only while no job is queued, and merges one PR at a time (no merge during a batch run).\" The other queue rule, ruling own-ready-by-priority (owner 01:52 CST Nov 14), is a neighbour, not named as superseded. Step: ready-no-queue-wait. The change itself is not built or decided here.",
+ "quote": "yes merge 3545 now. in general things shouldnt have had to wait for other stuff behind to merge imagine sand shifting through multiple strainers in a sense man cmon we’ve talked abt this",
+ "source": "Owner, typed 18:10 CST Nov 15 per the consultant (verbatim as relayed), relayed by the consultant (consultant → triage 18:11 CST) and by the coordinator (18:11 CST); triage did not read the chat",
+ "status": "open",
+ "step": "ready-no-queue-wait",
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/session-tiers.md Delegation duties, Batch runner: \"It still marks ready only while no job is queued\" (read by triage on origin/main 3237e391e; whether the owner's \"in general\" overturns it fully, or only for unrelated PRs, is not settled)"
+  }
+ ]
+}
