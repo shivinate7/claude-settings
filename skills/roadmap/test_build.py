@@ -3806,6 +3806,16 @@ class StaleDraftRestRead(UpkeepFixture):
         self.assertIn("gh could not run", detail, "a gh launch that failed did not read as gh could not run: %r" % (detail,))
         self.assertNotIn("#1001", detail)
 
+    def test_an_os_error_with_no_message_names_its_class_in_the_unknown_entry(self):
+        # str() of an OSError with no message is empty, so the reason names the exception's class instead of an empty line.
+        self.serve_pulls(self.stale_first_page(), OSError())
+        self.publish(sessions=[])
+        count, detail = self.claim_row()
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown (gh could not run"), "an OSError with no message did not read as gh could not run: %r" % (detail,))
+        self.assertIn("OSError", detail, "the reason for an OSError with no message names no exception: %r" % (detail,))
+        self.assertNotIn("#1001", detail)
+
     def test_a_hung_gh_reads_one_unknown_entry_naming_the_timeout(self):
         # gh hangs past the read's shared deadline: the timeout reads one unknown entry that says it timed out.
         self.serve_pulls(self.stale_first_page(), subprocess.TimeoutExpired(["gh", "api"], 120))
@@ -4172,6 +4182,116 @@ class StaleDraftTable(UpkeepFixture):
         self.assertEqual(expected, ["#1 (old-commit)", "unknown (#3 branch no-commit has no commit time)"],
                          "the table rows the case expects are not the two it names")
         self.assertEqual(entries, expected, "the stale-draft entries are not the table's rows formatted")
+
+
+def copy_tree_without_tests(source, target):
+    """Copy a folder of the repo into a layout a case builds, without its test files or bytecode."""
+    shutil.copytree(source, target, ignore=shutil.ignore_patterns("test_*", "__pycache__", "*.pyc"))
+
+
+class MergeFromTheRulesPointer(UpkeepFixture):
+    """The open-pulls read loads the merge tool from the clone that the global rules file points at, when no merge/ sits
+    beside build.py. A cloud install copies skills/ to the config dir alone. The pointer is read as the guard reads it
+    (guard_pointer.pointer_checkout): CLAUDE_CONFIG_DIR, else ~/.claude, and one line `@<dir>/CLAUDE.md`. Each case takes
+    the repo's merge/ off sys.path and out of sys.modules, so the only merge tool the copy can reach is the one the pointer
+    names. The gh calls go through hooks/_nowindow.run, the runner merge's sh calls, so one fake serves any copy of merge."""
+
+    REPO_MERGE = str(HERE.parent.parent / "merge")
+
+    def setUp(self):
+        super().setUp()
+        self.cfg = pathlib.Path(self.tmp.name) / "config"
+        self.clone = pathlib.Path(self.tmp.name) / "clone"
+        self.pull_pages = [[self.rest_draft(1001, "old-1001", 780)]]
+        self.calls = []  # the argv of each gh api call the copied build's read makes
+
+    def layout_without_merge(self):
+        """The config dir of a cloud install: skills/roadmap/build.py with the hooks and lint it imports, and no merge/."""
+        copy_tree_without_tests(HERE.parent.parent / "hooks", self.cfg / "hooks")
+        copy_tree_without_tests(HERE.parent.parent / "lint", self.cfg / "lint")
+        (self.cfg / "skills" / "roadmap").mkdir(parents=True)
+        shutil.copy2(HERE / "build.py", self.cfg / "skills" / "roadmap" / "build.py")
+        self.assertFalse((self.cfg / "merge").exists(), "the copied layout has a merge/ beside build.py")
+
+    def make_clone(self):
+        """A clone of the repo's merge tool: merge/ with the hooks, lint and actions it reads beside it (Host reads
+        actions/ci-alarm/events.json), and its CLAUDE.md."""
+        for folder in ("actions", "merge", "hooks", "lint"):
+            copy_tree_without_tests(HERE.parent.parent / folder, self.clone / folder)
+        (self.clone / "CLAUDE.md").write_text("# clone\n", encoding="utf-8")
+
+    def point_rules_file_at(self, folder):
+        """The global rules file of the config dir, with its one pointer line to `folder`'s CLAUDE.md."""
+        (self.cfg / "CLAUDE.md").write_text("@%s/CLAUDE.md\n" % folder, encoding="utf-8")
+
+    def read_through_copy(self):
+        """(rows, why) of the copied build's open-pulls read, run as a cloud run would: GH_TOKEN set, the config dir named,
+        and the repo's merge/ out of reach. A failure that escapes the read fails the case by its name."""
+        import _nowindow  # hooks/_nowindow.py: the runner merge's sh calls, so the fake reaches any copy of the tool
+        real_run = _nowindow.run
+
+        def run(args, *rest, **kwargs):
+            if list(args[1:2]) != ["api"]:
+                return real_run(args, *rest, **kwargs)
+            self.calls.append(list(args))
+            code, text = pulls_reply(self.pull_pages, list(args))
+            return subprocess.CompletedProcess(args, code, text, "")
+
+        env = {"CLAUDE_CONFIG_DIR": str(self.cfg), "GH_TOKEN": "test-token"}
+        with mock.patch.dict(os.environ, env), \
+                mock.patch.object(sys, "path", [p for p in sys.path if p != self.REPO_MERGE]), \
+                mock.patch.dict(sys.modules), mock.patch.object(_nowindow, "run", run):
+            sys.modules.pop("merge", None)
+            spec = importlib.util.spec_from_file_location("roadmap_build_copy", self.cfg / "skills" / "roadmap" / "build.py")
+            copied = importlib.util.module_from_spec(spec)
+            try:
+                spec.loader.exec_module(copied)
+                return copied.open_pulls_rest(self.SLUG)
+            except Exception as err:
+                self.fail("%s: the copied build raised %s" % (self._testMethodName, type(err).__name__))
+
+    def assert_one_unknown_entry(self, rows, why):
+        """The read of a copy that cannot reach a merge tool is one unknown entry: never a list, never clear."""
+        self.assertIsNone(rows, "%s: a copy with no merge tool to reach listed pulls: %r" % (self._testMethodName, rows))
+        self.assertTrue(why and why.startswith("unknown ("), "%s: the read was not one unknown entry: %r" % (self._testMethodName, why))
+        self.assertEqual(self.calls, [], "%s: the read made a merge gh call with no merge tool to reach" % self._testMethodName)
+
+    def test_a_copied_build_with_no_merge_beside_it_reads_through_the_clone_the_rules_file_points_at(self):
+        self.layout_without_merge()
+        self.make_clone()
+        self.point_rules_file_at(self.clone)
+        rows, why = self.read_through_copy()
+        self.assertIsNone(why, "%s: the copied build did not read the pulls through the clone its rules file points at: %r"
+                          % (self._testMethodName, why))
+        self.assertEqual([row["number"] for row in rows or []], [1001], "%s: the read did not list the pulls it was served"
+                         % self._testMethodName)
+        self.assertTrue(self.calls, "%s: the copied build read the pulls without a merge gh call" % self._testMethodName)
+
+    def test_a_copied_build_with_no_pointer_reads_one_unknown_entry(self):
+        # The clone exists, but no rules file points at it: the copy has no merge tool to reach.
+        self.layout_without_merge()
+        self.make_clone()
+        rows, why = self.read_through_copy()
+        self.assert_one_unknown_entry(rows, why)
+
+    def test_a_copied_build_whose_pointer_names_a_folder_with_no_merge_reads_one_unknown_entry(self):
+        self.layout_without_merge()
+        empty = pathlib.Path(self.tmp.name) / "no-merge"
+        empty.mkdir()
+        (empty / "CLAUDE.md").write_text("# no merge here\n", encoding="utf-8")
+        self.point_rules_file_at(empty)
+        rows, why = self.read_through_copy()
+        self.assert_one_unknown_entry(rows, why)
+
+
+class StaleDraftDocs(unittest.TestCase):
+    """SKILL.md states the stale-draft read's cost as the design does: one gh call per page, at least one, so
+    max(1, ceil(N / 100)). The old `N // 100 + 1` count is gone from the file."""
+
+    def test_skill_states_the_cost_as_max_one_ceil_of_n_over_a_hundred(self):
+        text = " ".join((HERE / "SKILL.md").read_text(encoding="utf-8").split())
+        self.assertIn("max(1, ceil(N / 100))", text, "SKILL.md does not state the open-pulls read's cost as max(1, ceil(N / 100))")
+        self.assertNotIn("N // 100 + 1", text, "SKILL.md still states the old cost, N // 100 + 1")
 
 
 class SessionsSource(UpkeepFixture):
