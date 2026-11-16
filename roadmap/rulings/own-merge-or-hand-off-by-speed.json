@@ -1,0 +1,16 @@
+{
+ "id": "own-merge-or-hand-off-by-speed",
+ "at": "2026-11-15T18:24:00-06:00",
+ "title": "A session merges its own PR or hands it to the batch runner, whichever lands faster now",
+ "ruling": "Owner words, verbatim as relayed (RELAYED, not read by triage as typed), on the consultant's option a (\"Any session merges its own PR through the merge tool\"): \"this is correct. kind of. remember its either or depending on whats faster which is the isntruction u messaged batch runber a while ago, it applies conceptually here too\". The consultant's reading, NOT the owner's words: a session merges its own PR or hands it to the batch runner, whichever lands faster now. Builds on own-lanes-merge-claude-settings-prs (11:12 CST, lanes merge their own claude-settings PRs) and own-merge-or-combine-by-speed (14:12 CST, either route by speed), which the owner says the same instruction applies to \"conceptually\". Per the consultant, its PRs #3535, #3514 and #3474 are reviewed and linted but still draft (the consultant's word, unverified by triage). Step: lane-merges-own-pr-code (carries #3535).",
+ "quote": "this is correct. kind of. remember its either or depending on whats faster which is the isntruction u messaged batch runber a while ago, it applies conceptually here too",
+ "source": "Owner chat (verbatim as relayed), answering the consultant's option a, relayed by the consultant (consultant → triage 18:25 CST) and the coordinator; not read by triage as typed",
+ "status": "open",
+ "step": "lane-merges-own-pr-code",
+ "supersedes": [
+  {
+   "kind": "ruling",
+   "ref": "own-lanes-merge-claude-settings-prs (owner 11:12 CST Nov 15, \"lanes can merge claude settings prs yes\"): WIDENED (a clarification): not only lanes, and not always the session itself; the session either merges its own PR or hands it to the batch runner, by speed. Read by triage as a widening, not an undoing."
+  }
+ ]
+}
