@@ -1,0 +1,11 @@
+{
+ "id": "own-905-a-banchi-1106-pin",
+ "at": "2026-11-15T19:40:00-06:00",
+ "title": "The owner says yes on item 905: merge banchi #1106, the one-line pin of requiredChecks",
+ "ruling": "Owner words, verbatim as relayed (RELAYED by the consultant, not read by triage as typed): \"yes on 905\". Act named: merge banchi (shivinate7/banchi) PR #1106, head 0ec884639e5fa3e913d367cbea60a2532e5db015, a one-line change pinning .github/stamp.json merge.requiredChecks from \"protection\" to [\"all-jobs-passed\"]. Covers that PR only. Order point: it merges before the owner removes the check from banchi's protection. Source item: waiting page item 905 (v2; runner 12's Sonnet round 2 PASS, comment 6904882124; these facts are as the coordinator relayed them, unverified by triage). Step: banchi-1106-pin-checks.",
+ "quote": "yes on 905",
+ "source": "Owner chat 19:40 CST Nov 15 (verbatim as relayed), relayed by the consultant and the coordinator; not read by triage as typed; waiting page item 905",
+ "status": "open",
+ "step": "banchi-1106-pin-checks",
+ "supersedes_none": "A one-PR merge grant; it supersedes no ruling. It is banchi's counterpart of the claude-settings pin (ruling own-web-merge-3564-child-repos, #3564)."
+}
