@@ -1,4 +1,4 @@
-# The fix-check refusal does not name prose below a review log's CI line
+# The `--fix-check` refusal does not name prose below a review log's CI line
 
 **What.** `merge --review-record --fix-check` refuses to chain from the newest review log on a pull request when that log has a prose line below the line `CI: read live by merge --reviewed`. The refusal says the reviewed head must be the Head of the newest earlier review log. It never names the prose. Source: the consultant's relay, not verified by triage. Pull request #3474's comment 6910116455, with prose, was refused. The same lines without prose, in comment 6910690439, chained. Pull request #3574 hit it too.
 
