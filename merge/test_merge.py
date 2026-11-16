@@ -14748,16 +14748,12 @@ class StandingMergeRole(CloudSession):
         self.own_pr(changed)
         self.assert_standing_merges(changed, record_text(head=self.head(), rounds=("Round 1: reviewer, opus, PASS",)))
 
-    def test_an_own_code_pr_whose_sonnet_round_failed_and_a_haiku_fix_verifier_passed_merges_under_standing(self):
-        # case 2 (owner, 2026-11-16 15:18 CST, pick A): a fix check PASS ends review, whatever its model. Its precondition is the parse only:
-        # review_state's fix-model rule (owner item 444 a) is the open question, so a precondition on review_state would hide the gate's own cause.
+    def test_an_own_code_pr_whose_sonnet_round_failed_and_a_haiku_fix_verifier_passed_is_refused_under_standing(self):
+        # control (owner item 444 a, 2026-11-08 15:04 CST; the 15:18 CST ruling keeps fix checks on sonnet): a haiku fix check PASS does not end review
         self.commit_feat({"tools/note.py": "X = 1\n"})
-        changed = [("tools/note.py", "added", 1)]
-        self.own_pr(changed)
-        body = record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, FAIL",), fix=(fix_verifier_line(model="haiku"),))
-        self.assertIsNotNone(merge.parse_review(body), "the case's review record does not parse")  # the scope, before the gate reads it
-        self.assertTrue(any(not merge.is_doc(p) for p, _, _ in changed), "the case holds no code path")
-        self.assert_standing_merge_served(body)
+        self.own_pr([("tools/note.py", "added", 1)])
+        self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, FAIL",), fix=(fix_verifier_line(model="haiku"),)))
+        self.assert_standing_refused()
 
     def test_an_own_code_pr_whose_three_rounds_all_failed_is_refused_under_standing(self):
         # three failed rounds read done when no net value is owed, but no reviewer passed it
