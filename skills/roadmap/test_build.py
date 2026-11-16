@@ -107,6 +107,11 @@ def run_build(*argv):
     return code, out + err
 
 
+def fixture_env():
+    """The environment a fixture's build child runs with: the caller's, minus the GitHub token variables."""
+    return {k: v for k, v in os.environ.items() if k not in TOKEN_VARS}
+
+
 def build_info(page):
     found = re.search(r"window\.ROADMAP_BUILD = (.*?);\n</script>", page, re.S)
     return json.loads(found.group(1).replace("<\\/", "</"))

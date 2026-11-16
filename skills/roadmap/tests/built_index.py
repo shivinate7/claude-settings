@@ -8,6 +8,8 @@ Builds page/index.html (skills/roadmap/build.py --out) from the fixture roadmap 
 doc}}, in place of the built-in ones. With --live JSON the live-work file's text is written and handed to the build
 with --live, as the publisher does. The fixture repo is the one in skills/roadmap/test_build.py (make_repo). Its
 folder is this run's folder from lint/_test_temp.py, removed before the script ends (decision test-temp-standard).
+The build runs with the caller's environment minus the GitHub token variables (test_build.fixture_env), so no page build
+reads GitHub's open pulls.
 A build that fails prints its stderr and exits 1, so a missing builder reads as that, not as a blank page.
 """
 import argparse
@@ -49,7 +51,7 @@ def main():
                 f.write(args.live)
             build += ["--live", live]
         # Exit 1 is a red line (an unread or stalled part): the build still wrote the page.
-        done = _nowindow.run(build, capture_output=True, text=True, encoding="utf-8")
+        done = _nowindow.run(build, env=test_build.fixture_env(), capture_output=True, text=True, encoding="utf-8")
         if done.returncode not in ((0, 1) if args.live else (0,)):
             sys.stderr.write("the roadmap build failed (exit %d): %s\n%s%s" % (done.returncode, " ".join(build), done.stdout, done.stderr))
             raise SystemExit(1)
