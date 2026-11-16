@@ -2,6 +2,7 @@
  "title": "Refuse a lane push on a PR whose FAIL round has no posted record",
  "phase": "now",
  "status": "folded",
+ "pr": 3490,
  "order": 1.31,
  "owner": "coordinator",
  "why": "Coordinator, 14:32 CST Nov 7. | Folded 03:36 CST Nov 15 into step handed-in-push-needs-record (#3490): never built; the new check is its one home (coordinator, from the lane's hand-in).",

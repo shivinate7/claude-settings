@@ -2,6 +2,7 @@
  "id": "progress-claims-cite-live-read",
  "title": "A report line that states a step's or lane's progress cites a live read made that turn",
  "status": "doing",
+ "pr": 3227,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJKzXpdXD5b3J8wYd4eT",

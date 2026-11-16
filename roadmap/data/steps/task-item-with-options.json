@@ -2,6 +2,7 @@
  "id": "task-item-with-options",
  "title": "The question-form check refuses a waiting-page task item that carries choice options",
  "status": "doing",
+ "pr": 3325,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJKypyEJNqQVEV57jv8M",

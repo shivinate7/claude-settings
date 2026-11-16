@@ -2,6 +2,7 @@
  "title": "Resuming a finished reviewer is refused, and the refusal says to send a fresh reviewer the prior report",
  "phase": "now",
  "status": "doing",
+ "pr": 2771,
  "order": 268.61,
  "owner": "coordinator",
  "lane": "session_013NEJL1yBtihFeuHoX5et11",

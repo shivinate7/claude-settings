@@ -2,6 +2,7 @@
   "title": "Fix the 14 small rows and 13 prose-Fix notes from the kept-notes re-check",
   "phase": "now",
   "status": "doing",
+  "pr": 3039,
   "order": 1.2,
   "owner": "coordinator",
   "why": "Coordinator, 14:23 CST Nov 7: notes-keep-reverify re-checked 146 rows. 18 to fix, 18 to delete, 110 to keep (86 rare and harmless, 18 for the owner to decide, 6 that need the Mac).",

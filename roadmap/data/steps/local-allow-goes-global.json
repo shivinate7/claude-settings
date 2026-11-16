@@ -2,6 +2,7 @@
  "id": "local-allow-goes-global",
  "title": "A session that writes an allow rule to settings.local.json is asked whether it belongs in the shared settings.json",
  "status": "doing",
+ "pr": 3343,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL2mJoAeFDsLisvHPEE",

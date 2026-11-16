@@ -2,6 +2,7 @@
  "id": "gh-write-heredoc-text-false-alarm",
  "title": "The guard that refuses cloud `gh` writes does not refuse a command whose heredoc only holds the words of a gh ready call",
  "status": "doing",
+ "pr": 3475,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL1tcKPHXbDyDsoxvPR",

@@ -2,6 +2,7 @@
   "id": "usage-brake",
   "title": "On a rate-limited account, usage at 90% winds work down and 94% stops new work",
   "status": "doing",
+  "pr": 2663,
   "repo": "shivinate7/claude-settings",
   "phase": "next",
   "lane": "session_013NEJL3FP12ztogsV6d7q6J",

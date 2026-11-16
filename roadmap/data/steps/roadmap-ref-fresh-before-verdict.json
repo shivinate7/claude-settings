@@ -2,6 +2,7 @@
  "id": "roadmap-ref-fresh-before-verdict",
  "title": "A reader of origin/roadmap fetches it before its verdict",
  "status": "doing",
+ "pr": 3253,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL1rEh1FMnSFEW6jYge",

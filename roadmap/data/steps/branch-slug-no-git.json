@@ -2,6 +2,7 @@
   "title": "A new lane's branch name never contains \"git\", and a check refuses one that does",
   "phase": "now",
   "status": "doing",
+  "pr": 2791,
   "order": 263.4,
   "owner": "coordinator",
   "why": "Claude Code's own worktree check (CLI 2.1.319) refuses agent git commands that name a branch containing \"git\": a switch to, a fetch of, or a PR opened from branch git-push-after-failed-commit. Seen three or more times in that lane on 2026-11-07.",

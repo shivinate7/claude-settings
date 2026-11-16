@@ -2,6 +2,7 @@
  "id": "agent-output-terse-line",
  "title": "Each agent role file and the lane start text carry one short-output line, proven by a check",
  "status": "doing",
+ "pr": 2714,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL1SnHytvPFQsRypupi",

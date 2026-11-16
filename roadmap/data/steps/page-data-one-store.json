@@ -2,6 +2,7 @@
  "id": "page-data-one-store",
  "title": "Design pass: page data has one store, git is the first write, no copy step",
  "status": "doing",
+ "pr": 3212,
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "lane": "session_013NEJL2piwNcUiUiggPot8n",

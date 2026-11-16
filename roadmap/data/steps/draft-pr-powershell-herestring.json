@@ -2,6 +2,7 @@
   "title": "The draft-PR guard reads a PowerShell here-string piped to pwsh or iex",
   "phase": "now",
   "status": "doing",
+  "pr": 2750,
   "order": 55,
   "owner": "coordinator",
   "lane": "session_013NEJL1yBtihFeuHoX5et11",

@@ -2,6 +2,7 @@
   "title": "banchi uses the shared typecheck hook and drops its own",
   "phase": "next",
   "status": "todo",
+  "pr": 2895,
   "order": 267.1,
   "owner": "coordinator",
   "why": "banchi runs tsc twice today: once through its own scripts/typecheck-hook.py, and once through the shared hook that claude-settings #1612 (step repo-typecheck-hook) adds (coordinator, 16:23 CST Nov 7).",

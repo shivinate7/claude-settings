@@ -2,6 +2,7 @@
  "id": "waiting-page-skill-text-fixes",
  "title": "Five wording fixes in skills/waiting-page/SKILL.md",
  "status": "queued",
+ "pr": 2802,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",

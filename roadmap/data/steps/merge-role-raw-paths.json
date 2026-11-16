@@ -2,6 +2,7 @@
  "title": "A solo session with no parent and no cs-build tag may take the batch-runner hat for its own merge",
  "phase": "now",
  "status": "doing",
+ "pr": 2701,
  "order": 267.4,
  "owner": "coordinator",
  "lane": "session_013NEJKzruqvkmdxZx6AXoH8",

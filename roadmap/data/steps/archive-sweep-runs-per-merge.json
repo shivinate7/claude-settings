@@ -2,6 +2,7 @@
  "id": "archive-sweep-runs-per-merge",
  "title": "Find out why no archive ran after 10:44 CST although steps idle-lane-archive and idle-lane-archive-at-merge are done",
  "status": "doing",
+ "pr": 3383,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL1co4LC5YoQSfpziti",

@@ -4,6 +4,7 @@
   "note": "Fix: when the repo is outside this session's scope, the refusal names that cause and routes the act to the runner that holds the repo, with no retry. Red case first: a fixture where the read is out of scope, and today's remedy says retry. Control: a transient read failure in scope still says retry. Meanwhile runner 9 archives that lane (coordinator). Renamed from qmax-ready-checks, which misread the refusal as a ready-check one. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 02:22 CST, renamed 02:25 CST Nov 8. Lane [ended:lane:-child-repo-archive-scope] started it; it may stack on #1744, which touches the same archive guard (coordinator, 02:01 CST Nov 8). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-child-repo-archive-scope]). Lane code-guard-2 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
   "phase": "now",
   "status": "doing",
+  "pr": 2768,
   "order": 570,
   "owner": "triage",
   "lane": "session_013NEJL3e9j8esdUiNqEEpGG",

@@ -2,6 +2,7 @@
  "id": "builder-xctestplan-config",
  "title": "The xctestplan config change held out of #2725",
  "status": "ready",
+ "pr": 2798,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",

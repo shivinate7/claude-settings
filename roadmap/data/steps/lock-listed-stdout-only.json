@@ -2,6 +2,7 @@
   "title": "Merge lock: read the ls-remote listing from stdout alone; accept only a 40-hex sha",
   "phase": "now",
   "status": "doing",
+  "pr": 2991,
   "order": 0.23,
   "owner": "coordinator",
   "lane": "session_013NEJL2UayGumX3LbxC3R4h",

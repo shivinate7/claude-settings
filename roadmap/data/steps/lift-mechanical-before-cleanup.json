@@ -3,6 +3,7 @@
  "title": "Lift ruling own-mechanical-before-cleanup into a decision on main (low)",
  "priority": "low",
  "status": "doing",
+ "pr": 3509,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "owner": "coordinator",

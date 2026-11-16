@@ -2,6 +2,7 @@
  "id": "push-skip-text-says-stable",
  "title": "The push-skip decision and script text say child repos follow @stable, not \"pin by SHA\"",
  "status": "doing",
+ "pr": 3419,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL3jQE8gXtgde6cb35v",

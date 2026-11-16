@@ -2,6 +2,7 @@
  "id": "ready-step-hang-no-timeout",
  "title": "The debt-close lint prints a start line and a line every 60 s while a Retire span runs, so a long close does not read as a hang",
  "status": "doing",
+ "pr": 3415,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL2HtXsQVvQJNn6Ygq9",

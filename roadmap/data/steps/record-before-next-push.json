@@ -2,6 +2,7 @@
  "id": "record-before-next-push",
  "title": "A hook refuses a lane push to a PR whose live head has review rounds read but no posted review record",
  "status": "doing",
+ "pr": 3109,
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "lane": "session_013NEJL1JMo5JoUeT8C3QedR",

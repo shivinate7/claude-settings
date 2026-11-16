@@ -2,6 +2,7 @@
   "title": "CI's silent-undo step reads the PR body and the cited run, so a Retire-run cite clears a debt delete in CI too",
   "phase": "now",
   "status": "doing",
+  "pr": 3230,
   "order": 50,
   "owner": "coordinator",
   "lane": "session_013NEJL1rreXGu8xv7m6nN3h",

@@ -2,6 +2,7 @@
  "id": "stale-cites-read-symbol",
  "title": "The stale-cite judge sees the symbol a 'read path::name' cite names",
  "status": "ready",
+ "pr": 3146,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",

@@ -2,6 +2,7 @@
  "id": "coordinator-session-board",
  "title": "The coordinator's session board flags silent lanes that others wait on, and sends each one targeted nudge",
  "status": "doing",
+ "pr": 2943,
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "lane": "session_013NEJL3bD7WV2R2WrMqh5Xz",

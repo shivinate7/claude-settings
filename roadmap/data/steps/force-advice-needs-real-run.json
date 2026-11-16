@@ -2,6 +2,7 @@
  "id": "force-advice-needs-real-run",
  "title": "Never advise the owner to force-merge a PR whose own run never ran its suites",
  "status": "doing",
+ "pr": 3350,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJKzpmMN5jTqpjYqSBQo",

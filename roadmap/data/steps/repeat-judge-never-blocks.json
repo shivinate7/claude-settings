@@ -2,6 +2,7 @@
   "id": "repeat-judge-never-blocks",
   "title": "The repeat judge skips the item's own home and the same owner message, and never blocks",
   "status": "doing",
+  "pr": 2957,
   "repo": "shivinate7/claude-settings",
   "phase": "next",
   "lane": "session_013NEJKzqM5fLnC5CwpRt8p3",

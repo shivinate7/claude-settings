@@ -2,6 +2,7 @@
  "id": "config-entry-waits-for-its-tool",
  "title": "A config entry that only a new merge tool can read lands one stable cycle after that tool, or the old tool reads an unknown qualified entry as a named skip, not as unknown on every step",
  "status": "doing",
+ "pr": 3420,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJKzLAAC7Hs1Fc8JB8rM",

@@ -2,6 +2,7 @@
   "title": "The merge lock's expired-lock delete does not race a new holder",
   "phase": "now",
   "status": "doing",
+  "pr": 2689,
   "order": 0.22,
   "owner": "coordinator",
   "why": "Coordinator, 14:31 CST Nov 7.",

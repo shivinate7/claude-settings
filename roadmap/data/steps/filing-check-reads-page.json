@@ -2,6 +2,7 @@
   "id": "filing-check-reads-page",
   "title": "The filing check reads the page database, not the git copy",
   "status": "doing",
+  "pr": 2907,
   "repo": "shivinate7/claude-settings",
   "phase": "now",
   "lane": "session_013NEJKzzSH1qHLmMz7RZ81z",

@@ -2,6 +2,7 @@
  "id": "main-job-cap-alarm",
  "title": "A main CI job that ends at its time cap raises an alarm the same day",
  "status": "doing",
+ "pr": 2920,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL11UY3p6jnSXrTspmu",

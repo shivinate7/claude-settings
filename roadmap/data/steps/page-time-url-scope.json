@@ -2,6 +2,7 @@
  "id": "page-time-url-scope",
  "title": "The time check of rule message-time-matches-clock judges only the waiting page's artifact",
  "status": "doing",
+ "pr": 2732,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL3preQpR1zdQ3z1WR8",

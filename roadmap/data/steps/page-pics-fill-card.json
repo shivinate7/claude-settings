@@ -2,6 +2,7 @@
   "title": "A waiting-page option picture fills its card width",
   "phase": "now",
   "status": "doing",
+  "pr": 2742,
   "order": 950,
   "owner": "coordinator",
   "why": "Owner, 2026-11-09 20:47 CST: \"the images are so small in the artifact cockpit.\" Owner ask ask-mwa3hdpa1j (20:52 CST, from the Degen coordinator). Checked by triage 20:53 CST against skills/waiting-page/page.html on main ddaa393c0: optPic (line 1442) passes maxScale 1 and maxH 480 to fitFrame, and fitFrame (line 2861) takes sc = min(maxScale, card width / design width, 480 / design height). So a 390x844 phone mockup draws at about 0.57, near 220 px wide, and a two-page Duo mockup shrinks further.\n\nLane started 00:22 CST Nov 15 under own-draft-rebase-lanes (draft PR #2742); lane session_013NEJL2KAgB22ZA3BRbSpqU read running and connected by get_session. Replaced lane field session_013NEJL1s4J4rQVVz1kBBJfh.\n\nRead 00:45 CST Nov 15 by GitHub: #2742 is an open draft, head 7657beb29a0d, 33 commits, 12 files (the earlier head 0f393efad in the note is stale); handed to runner 10 (coordinator's relay). Follow-up findings (the 2px loss on whole-drawn pictures, the decision's missing 120-floor line) are step page-pic-bottom-2px, blocked by this step; not fixed in #2742 so its head stays.",

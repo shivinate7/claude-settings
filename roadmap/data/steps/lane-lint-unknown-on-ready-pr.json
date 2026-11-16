@@ -2,6 +2,7 @@
  "id": "lane-lint-unknown-on-ready-pr",
  "title": "The lane lint reads UNKNOWN on a ready PR, so no combined PR can be lint-checked while it is ready",
  "status": "doing",
+ "pr": 3321,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL2GMX3ra6ckazHEoT2",

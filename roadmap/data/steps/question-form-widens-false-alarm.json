@@ -2,6 +2,7 @@
  "id": "question-form-widens-false-alarm",
  "title": "hooks/question_form.py flags a shared form as widening; judge whether it is a false alarm",
  "status": "doing",
+ "pr": 3422,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL1c1Rddp4KKdXvkHh4",

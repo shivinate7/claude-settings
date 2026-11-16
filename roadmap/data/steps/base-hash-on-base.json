@@ -2,6 +2,7 @@
  "id": "base-hash-on-base",
  "title": "A base hash must be on the base branch, not older than the merge base",
  "status": "doing",
+ "pr": 3244,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJKyrMqGGt4eRzJmrKwn",

@@ -2,6 +2,7 @@
  "id": "batch-build-names-left-out",
  "title": "merge --batch-build lists each reviewed-done PR that no batch holds, with its reason",
  "status": "doing",
+ "pr": 3148,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJKzLWyyEafsGfsXUwzG",

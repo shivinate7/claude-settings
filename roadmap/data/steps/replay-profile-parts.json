@@ -6,6 +6,7 @@
   "owner": "coordinator",
   "phase": "now",
   "status": "doing",
+  "pr": 2786,
   "lane": "session_013NEJL2HQGCzNZ1CFKb15Lr",
   "updatedAt": "2026-11-12T10:13:00-06:00"
 }

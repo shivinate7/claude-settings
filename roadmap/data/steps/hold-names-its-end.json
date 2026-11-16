@@ -2,6 +2,7 @@
  "id": "hold-names-its-end",
  "title": "The handoff template and the lane brief carry an \"Ends:\" line for each hold; the check waits for 20 real handoffs that show the form holds",
  "status": "doing",
+ "pr": 3335,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJKysBwTRLntgJpLmHaw",

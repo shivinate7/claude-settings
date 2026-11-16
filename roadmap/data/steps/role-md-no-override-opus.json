@@ -2,6 +2,7 @@
  "id": "role-md-no-override-opus",
  "title": "No role file, skill or decision text tells a role it may run above its row; each role file states only its own model and effort",
  "status": "doing",
+ "pr": 3286,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL2Cjj9QtsasmPimG8J",

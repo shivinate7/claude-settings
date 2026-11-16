@@ -2,6 +2,7 @@
  "id": "fix-branch-merge-main-deny",
  "title": "Pushing a clean merge of main onto a fix-checked branch is refused",
  "status": "doing",
+ "pr": 3102,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL3Fq3KUGQfJvmJWwRq",

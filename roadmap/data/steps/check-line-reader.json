@@ -2,6 +2,7 @@
   "title": "A blind reader flags a done-check that can pass with the ask unmet",
   "phase": "now",
   "status": "doing",
+  "pr": 2676,
   "order": 103.369,
   "why": "Work can't be marked done by a check that misses the point.",
   "note": "Owner picked c on item 284, 13:08 CST, and noted: some challengers should run Opus, not all Sonnet. Glossary word is \"refuter\" (item 282 b).\nAudit build 5, coordinator 12:57 CST. 1 Sonnet call per brief, 1 per step close. Waits on owner item 284 c. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1344. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was open PR #1344). Lane code-lint-1 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",

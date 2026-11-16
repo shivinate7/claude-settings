@@ -2,6 +2,7 @@
   "id": "answer-reply-wake-close-batch",
   "title": "The answer-needs-reply wake skips a routed none answer, and --close-batch never closes an open lane item on a plain pick",
   "status": "todo",
+  "pr": 3264,
   "repo": "shivinate7/claude-settings",
   "phase": "next",
   "owner": "coordinator",

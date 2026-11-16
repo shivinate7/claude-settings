@@ -3,6 +3,7 @@
   "title": "Check a decision's State: line against live facts (low, note only)",
   "priority": "low",
   "status": "open",
+  "pr": 3525,
   "repo": "shivinate7/claude-settings",
   "phase": "next",
   "owner": "triage",

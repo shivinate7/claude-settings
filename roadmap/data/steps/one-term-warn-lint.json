@@ -2,6 +2,7 @@
  "id": "one-term-warn-lint",
  "title": "A warn-only lint for one term per meaning",
  "status": "doing",
+ "pr": 2858,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL32XbRdWaA6Nf7jubJ",

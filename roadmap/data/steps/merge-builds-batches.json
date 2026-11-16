@@ -2,6 +2,7 @@
   "title": "The merge tool builds each batch from PR state",
   "phase": "now",
   "status": "ready",
+  "pr": 1771,
   "order": 103.5,
   "owner": "coordinator",
   "lane": "archived, handoff at handoffs/session_013NEJL39DAqcWWfdNFXmxnC.md on archive/session-handoffs-2026-11-10",

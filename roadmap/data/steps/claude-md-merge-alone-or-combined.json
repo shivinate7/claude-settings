@@ -2,6 +2,7 @@
  "id": "claude-md-merge-alone-or-combined",
  "title": "CLAUDE.md rule git-integration-branch-merge says a PR merges alone and may combine several reviewed lanes",
  "status": "doing",
+ "pr": 3274,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJKyscjfLmR48TQ6cqza",

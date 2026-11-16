@@ -2,6 +2,7 @@
   "title": "At status time, list each outbox ruling and whether its home on main holds its words",
   "phase": "now",
   "status": "doing",
+  "pr": 2767,
   "order": -297,
   "owner": "triage",
   "why": "Owner 15:22 CST Nov 10 (R6, relayed by the retrospective session): \"yes but it's tbd if an outbox is the right spot right? but for rn it only make senses that it is read\".",

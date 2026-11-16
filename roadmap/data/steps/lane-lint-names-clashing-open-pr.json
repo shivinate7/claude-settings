@@ -2,6 +2,7 @@
  "id": "lane-lint-names-clashing-open-pr",
  "title": "merge --lane-lint names which same-session PR a head clashes with, and the fold build tests it before the lint",
  "status": "ready",
+ "pr": 3379,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",

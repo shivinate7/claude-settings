@@ -4,6 +4,7 @@
   "note": "Fix: (1) resolve a relative --also path against the command's cwd, or refuse with a remedy that names the absolute form; (2) first check whether #1823 (step stall-watch-quiet-lint) covers a suite run; if not, count the child process's life, not only its output. Red tests first. Queued after draft-pr-unquoted-body-sq-subst in the same lane (item 386 b). Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 05:08 CST Nov 8. Doing 05:58 CST Nov 10: open PR #1952 on branch stall-watch-live-run (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJL232Ko7dmr4v3fmrvF.md on archive/session-handoffs-2026-11-10). Lane prose-guard-2 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
   "phase": "now",
   "status": "doing",
+  "pr": 2862,
   "order": 613,
   "owner": "triage",
   "lane": "session_013NEJL2oJcHtLuXDdhHA7E8",

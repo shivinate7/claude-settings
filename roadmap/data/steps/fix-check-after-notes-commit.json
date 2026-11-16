@@ -1,6 +1,7 @@
 {
   "title": "`merge --fix-check` records a fix check after a notes-only commit",
   "status": "doing",
+  "pr": 3189,
   "order": 264.8,
   "lane": "session_013NEJL3i19kz6ssVPSoPSuK",
   "why": "Incident #1515 (coordinator, 15:03 CST): a fix check could not be recorded after a notes-only commit on the PR.",

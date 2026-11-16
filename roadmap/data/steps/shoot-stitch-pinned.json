@@ -2,6 +2,7 @@
   "title": "bin/shoot's touch stitch keeps sticky and fixed elements where the page puts them",
   "phase": "guards",
   "status": "ready",
+  "pr": 2716,
   "order": 696,
   "owner": "coordinator",
   "lane": "",

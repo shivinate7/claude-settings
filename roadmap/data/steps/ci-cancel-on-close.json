@@ -2,6 +2,7 @@
  "id": "ci-cancel-on-close",
  "title": "Closing a PR cancels its running CI",
  "status": "doing",
+ "pr": 3216,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL3WnhxtGWz1TAEcDVq",

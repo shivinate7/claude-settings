@@ -2,6 +2,7 @@
  "id": "ci-mac-once-per-batch",
  "title": "macOS CI runs once per batch, on the batch PR, and only on OS-tagged tests",
  "status": "doing",
+ "pr": 3005,
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "lane": "session_013NEJKzYPcwdLyfXoaZiZ7t",

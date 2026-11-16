@@ -2,6 +2,7 @@
   "title": "The merge tool judges a merge command whose args hold a $( ) substitution",
   "phase": "guards",
   "status": "doing",
+  "pr": 2873,
   "order": 678,
   "owner": "coordinator",
   "lane": "session_013NEJL3GTFJLwXVvpL2kzcN",

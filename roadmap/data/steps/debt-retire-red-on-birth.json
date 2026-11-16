@@ -2,6 +2,7 @@
   "title": "A debt's Retire test must fail on the commit that added the debt",
   "phase": "now",
   "status": "doing",
+  "pr": 2883,
   "order": 265.0,
   "owner": "coordinator",
   "lane": "session_013NEJL2aszZyqEG4K9Ue77v",

@@ -2,6 +2,7 @@
   "id": "brief-write-needs-writer",
   "title": "A brief that asks a read-only agent to write a file is refused",
   "status": "doing",
+  "pr": 2693,
   "repo": "shivinate7/claude-settings",
   "lane": "session_013NEJL1SnHytvPFQsRypupi",
   "blockedBy": [],

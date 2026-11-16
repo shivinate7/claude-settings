@@ -2,6 +2,7 @@
   "title": "A reviewer's brief holds only the task, the diff and the rulings",
   "phase": "now",
   "status": "doing",
+  "pr": 2780,
   "order": 103.365,
   "why": "The reviewer judges the code, not the builder's story.",
   "note": "Nov 6 12:53 CST (coordinator): lane [ended:lane:-reviewer-brief-blind]. Agents write \"challenger\" in one constant until item 282 picks the word.\nOwner picked a on item 279, 12:43 CST. Debate audit 12:40 CST. A check holds it. Cost: 0 calls. Waits on owner item 279. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1366. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was open PR #1366). Lane prose-agents started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",

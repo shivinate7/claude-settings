@@ -2,6 +2,7 @@
  "id": "archive-refusal-names-add-repo",
  "title": "The lane-archive refusal names the add_repo act when it cannot read a lane's repo",
  "status": "doing",
+ "pr": 3136,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL12RbFvv4332eciB9j",

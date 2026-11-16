@@ -2,6 +2,7 @@
  "id": "stall-watch-ends-quiet-jobs",
  "title": "The stall watch never ends a quiet job whose process tree is alive, nor a lone sleep followed by a command; when it ends one, it kills the whole tree",
  "status": "doing",
+ "pr": 2862,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL1GpGypoxH9ZdHDtEw",

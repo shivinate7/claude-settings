@@ -2,6 +2,7 @@
   "title": "A commit-time guard refuses a commit whose staged diff holds conflict markers",
   "phase": "next",
   "status": "doing",
+  "pr": 3223,
   "order": 260.7,
   "owner": "coordinator",
   "why": "Incident, lane merge-waits-required-only, 2026-11-07 02:36 CST, relayed by the coordinator 02:38 CST: a conflict-fix script failed, and the next chained command still committed the conflict markers (locally only). A fix commit removed them before any push.",

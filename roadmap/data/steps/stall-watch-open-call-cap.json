@@ -2,6 +2,7 @@
   "title": "The stall watch lists an agent whose foreground tool call has been open more than 900 s",
   "phase": "now",
   "status": "doing",
+  "pr": 2697,
   "order": 52,
   "owner": "coordinator",
   "lane": "session_013NEJL4Rt4fYfwvrGdu1mx7",

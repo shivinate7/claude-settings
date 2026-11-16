@@ -2,6 +2,7 @@
  "id": "round-one-model-prose-matches-table",
  "title": "agents/reviewer.md, the merge help text and the brief template say the round-1 model the table gives",
  "status": "doing",
+ "pr": 3316,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL1waup9BzyWDv3eDJs",

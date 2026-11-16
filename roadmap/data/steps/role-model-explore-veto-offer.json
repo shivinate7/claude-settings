@@ -2,6 +2,7 @@
  "id": "role-model-explore-veto-offer",
  "title": "An owner override lifts the Explore model veto for a spawn he names",
  "status": "doing",
+ "pr": 3074,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL3zR7xTtnHVF9EGr1j",

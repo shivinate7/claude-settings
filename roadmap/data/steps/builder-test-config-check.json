@@ -2,6 +2,7 @@
   "title": "A builder cannot edit test config",
   "phase": "guards",
   "status": "doing",
+  "pr": 2725,
   "order": 664,
   "owner": "coordinator",
   "lane": "session_013NEJL3VvsFr2K1WX9t5ch3",

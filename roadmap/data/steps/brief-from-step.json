@@ -2,6 +2,7 @@
  "id": "brief-from-step",
  "title": "Lane briefs are built by a tool from the step file and the governing rulings' own words, then checked against the rulings store before the lane starts (EXPRESS)",
  "status": "doing",
+ "pr": 3319,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL3zemFrPdTzdnwhpVi",

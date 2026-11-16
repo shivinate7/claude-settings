@@ -2,6 +2,7 @@
  "id": "ci-alarm-reads-reverts",
  "title": "The CI alarm (actions/ci-alarm) also reads reverts: it does not open an alarm for a run the merge tool now lifts",
  "status": "doing",
+ "pr": 3294,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJKzGKUSdCcES3LYPJZv",

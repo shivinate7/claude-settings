@@ -2,6 +2,7 @@
  "id": "child-ci-actions-follow-stable",
  "title": "Child repos run claude-settings actions from @stable, not a commit pin (R44 part 1, design step 6)",
  "status": "ready",
+ "pr": 3419,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",

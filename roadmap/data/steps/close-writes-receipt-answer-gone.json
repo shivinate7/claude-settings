@@ -2,6 +2,7 @@
  "id": "close-writes-receipt-answer-gone",
  "title": "Closing a page item also writes its receipt, so no answer shows \"filing pending\" after the item is filed",
  "status": "doing",
+ "pr": 3264,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL475DM2SFvuoMakXhQ",

@@ -2,6 +2,7 @@
   "title": "bin/shoot sets hasTouch for each size, and a full-page shot keeps it",
   "phase": "guards",
   "status": "doing",
+  "pr": 2717,
   "order": 662,
   "owner": "coordinator",
   "lane": "session_013NEJL3y5kzHLeSuCU1GriT",

@@ -2,6 +2,7 @@
  "id": "debt-close-reads-ci",
  "title": "A debt close reads the PR's own CI result for the suite its Retire line names, so `merge --ready` does not run hooks/test_guard.py a second time",
  "status": "doing",
+ "pr": 3452,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJKyvDFUWUG59sK2f6Dx",

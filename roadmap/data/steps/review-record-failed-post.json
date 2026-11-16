@@ -2,6 +2,7 @@
   "title": "A failed or refused review-record post does not count as posted",
   "phase": "now",
   "status": "doing",
+  "pr": 3235,
   "order": 958,
   "owner": "lane",
   "why": "A record post that failed or was refused by a hook still counts as posted, so a builder spawn is allowed with no record on the PR.",

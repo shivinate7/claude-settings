@@ -2,6 +2,7 @@
   "title": "A typed override takes even when the app puts a status block before it",
   "phase": "now",
   "status": "doing",
+  "pr": 2666,
   "order": 6,
   "owner": "lane (hooks/override.py)",
   "why": "Owner page note ask-mw5m8up8g8, 17:38 CST Nov 6: 'override 12h' did not take in a local session, because the app put a 'Linked sessions now' status block in front of the words. Owner asked: does this work.",

@@ -2,6 +2,7 @@
  "id": "fix-verifier-stands-for-round-2",
  "title": "A fix verifier at the reviewed head stands in for round 2",
  "status": "doing",
+ "pr": 3131,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",

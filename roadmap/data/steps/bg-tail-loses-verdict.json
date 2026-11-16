@@ -2,6 +2,7 @@
  "title": "A guard refuses a background check piped through tail with no verdict",
  "phase": "now",
  "status": "doing",
+ "pr": 3287,
  "order": 266.2,
  "owner": "coordinator",
  "lane": "session_013NEJL2bHJPuGxxRSmQpAyi",

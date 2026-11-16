@@ -2,6 +2,7 @@
  "id": "tier-boundaries-carry",
  "title": "Carry #919's remaining tier code from branch tier-boundaries-enforced",
  "status": "doing",
+ "pr": 2831,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL1M7jLwhx9fjzDrJdL",

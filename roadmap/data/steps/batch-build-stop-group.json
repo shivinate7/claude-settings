@@ -2,6 +2,7 @@
  "id": "batch-build-stop-group",
  "title": "The merge tool's batch build stop reaches its whole process group, so a stopped build pushes nothing",
  "status": "doing",
+ "pr": 2837,
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "lane": "",

@@ -2,6 +2,7 @@
  "id": "spawn-guard-marker-any-line",
  "title": "The agent-spawn guard counts a marker on any line of a brief, so a pasted template block falsely refuses a haiku reviewer",
  "status": "doing",
+ "pr": 3339,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL2PQvDorgDZsKeSyfn",

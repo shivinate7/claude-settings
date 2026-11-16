@@ -2,6 +2,7 @@
  "id": "queue-score-plus-agent",
  "title": "The roadmap build scores each step, and a triage agent checks the top at each batch merge",
  "status": "blocked",
+ "pr": 2828,
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "lane": "",

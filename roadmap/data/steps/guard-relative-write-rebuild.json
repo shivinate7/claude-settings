@@ -2,6 +2,7 @@
  "id": "guard-relative-write-rebuild",
  "title": "Rebuild of #2234: false-alarm cut for the relative-write guard, with #1906",
  "status": "ready",
+ "pr": 2691,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",

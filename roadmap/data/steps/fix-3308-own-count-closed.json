@@ -2,6 +2,7 @@
  "id": "fix-3308-own-count-closed",
  "title": "PR #3308 is fixed in its own lane so the owning session's own count of a kept routed answer before the receiver is done is refused",
  "status": "doing",
+ "pr": 3308,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJKyqQmpj2FNxeZzDV7s",

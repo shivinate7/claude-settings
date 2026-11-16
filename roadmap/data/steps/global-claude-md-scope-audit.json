@@ -2,6 +2,7 @@
  "id": "global-claude-md-scope-audit",
  "title": "Audit where each global CLAUDE.md section matters, before any section moves",
  "status": "doing",
+ "pr": 2852,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJKzRnzW9oYuFZAxseXz",

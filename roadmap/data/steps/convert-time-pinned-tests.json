@@ -2,6 +2,7 @@
   "title": "The 59 fixed sleeps and 1 elapsed assert in claude-settings become outcome checks",
   "phase": "now",
   "status": "doing",
+  "pr": 2975,
   "order": 685,
   "owner": "coordinator",
   "lane": "session_013NEJL4PjaEKZtDccHU8fNp",

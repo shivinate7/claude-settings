@@ -2,6 +2,7 @@
  "id": "brief-matches-rulings",
  "title": "Before a lane starts, a model-judged check reads the coordinator's brief against the governing rulings and flags one that drops or narrows a ruling",
  "status": "folded",
+ "pr": 3262,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",

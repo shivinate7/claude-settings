@@ -2,6 +2,7 @@
  "id": "stale-draft-reads-runner-holds",
  "title": "The stale-draft list holds every PR the batch runner holds or that has a review record",
  "status": "doing",
+ "pr": 3147,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL27HK5xN9tS2Mce13F",

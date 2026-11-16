@@ -2,6 +2,7 @@
  "id": "spend-log-per-batch",
  "title": "The batch runner logs each session's spend at each batch merge",
  "status": "doing",
+ "pr": 2662,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL3FP12ztogsV6d7q6J",
