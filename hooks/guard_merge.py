@@ -19,7 +19,7 @@ from guard_core import (
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import BUILD_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import BUILD_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, STEP_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags, repo_tag_names  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -1371,8 +1371,13 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
     return "", ""
 
 
-# ---- merge --role: the tier is read from this session's own get_session record
-ROLE_TIERS = ("batch-runner",)
+# ---- merge --role: the role is read from this session's own get_session record
+ROLE_TIERS = ("batch-runner", "lane", "standing")  # glossary-ok: ROLE_TIERS is the existing name; merge.py MERGE_ROLES names the same roles
+LOCAL_ROLE_TIERS = ("batch-runner",)  # glossary-ok: the name a test reads; the roles a local role file may name (merge.py LOCAL_MERGE_ROLES), the lane role is a cloud role only
+ROLE_WITH_STEP = "lane"  # the role whose call also names a step (--step), proved by a cs-step tag of the own record
+STANDING_ROLE = "standing"  # ruling own-tiny-fixes-b: a standing session, not a batch runner, merges its own small edit
+STANDING_HOLDERS = ("coordinator", "triage")  # the cs-build tags that prove the standing session role (decision session-tiers)  # glossary-ok: session-tiers is the decision
+LANE_MERGE_REPO = "shivinate7/claude-settings"  # the one repo whose lanes hold the lane merge role; agrees with merge.py LANE_MERGE_REPO, which this module cannot import
 ROLE_TAG_PREFIX = BUILD_TAG
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
@@ -1406,7 +1411,7 @@ def merge_tool_args(segment: str):
 
 
 def role_call_of(segment: str):
-    """Return the tier word after the role flag when the segment runs the merge tool with it, else None.
+    """Return the role word after the role flag when the segment runs the merge tool with it, else None.
 
     A role flag with no value gives ''.
     """
@@ -1421,6 +1426,18 @@ def role_call_of(segment: str):
     return None
 
 
+def role_step_of(segment: str) -> str:
+    """The value after the step flag when the segment runs the merge tool with it (`--step X` or `--step=X`), else ''. The last flag wins, as argparse reads it."""
+    rest = merge_tool_args(segment) or []
+    step = ""
+    for at, arg in enumerate(rest):
+        if arg == "--step":
+            step = rest[at + 1] if at + 1 < len(rest) else ""
+        elif arg.startswith("--step="):
+            step = arg[len("--step="):]
+    return step
+
+
 def _own_session_read(transcript: str, own_id: str, created: bool = False):
     """(tags, tagged_after): the own-record read of hooks/own_session.py, without the parent id."""
     # `created` counts a create_session call as a record too: rule lane-one-topic reads a lane by its start.
@@ -1433,24 +1450,70 @@ def _own_get_session_tags(transcript: str, session_id: str):
     return _own_session_read(transcript, session_id)[0]
 
 
+def _nested_segments(text: str, depth: int = 0):
+    """Yield (segment, too_deep) for each non-blank segment of `text`, then for each script a segment hands on (inner_commands, the one reader of
+    `bash -c`, `$(...)` and the other wrappers), down to MERGE_NEST_DEPTH, and for each command substitution of `text`. A script nested deeper, or text whose
+    substitutions nest too deep to cut, is yielded whole, with too_deep True."""
+    try:
+        from guard_env import _substitutions  # the one cut of `$(...)`, backtick and process substitutions outside single quotes
+        found, deep = _substitutions(text)
+        texts = [part for part, _in_message in found]
+    except Exception:
+        texts, deep = [text], True   # an unreadable cut is read whole and judged as a refusal where it holds the flag
+    if deep:
+        yield text, True
+    for part in texts:
+        for segment in split_segments(part):
+            if not segment.strip():
+                continue
+            yield segment, False
+            tokens = segment_tokens(segment)
+            for script in (inner_commands(tokens) if tokens else []):
+                if depth >= MERGE_NEST_DEPTH:
+                    yield script, True
+                else:
+                    yield from _nested_segments(script, depth + 1)
+
+
+def _tags_name_lane_merge_repo(tags) -> bool:
+    """True when a cs-repo tag of the own record names LANE_MERGE_REPO: the only repo whose lanes hold the lane merge role. Own tags only, no REST read."""
+    return any(repo_tag_names(tag, LANE_MERGE_REPO) for tag in tags)
+
+
 def role_proof_hit(stripped: str, transcript: str) -> str:
     """Return the matched call when a segment runs the merge tool with a role the own record does not
     prove, else ''. Fails closed inside the clause: any error in the reads is a refusal, because the
-    allow rule has no classifier behind it and the guard-wide crash path fails open."""
-    for segment in split_segments(stripped):
-        tier = role_call_of(segment) if segment.strip() else None
-        if tier is None:
+    allow rule has no classifier behind it and the guard-wide crash path fails open.
+    A script a wrapper hands on (`bash -c`, `$(...)`: _nested_segments) is judged as a top-level call is; one nested deeper than
+    MERGE_NEST_DEPTH that holds a role flag is refused."""
+    if "--role" not in stripped:   # the cheap filter: every spelling of the flag holds this text, so no other call is cut or read
+        return ""
+    for segment, too_deep in _nested_segments(stripped):
+        if too_deep:
+            if "--role" in segment:
+                return "merge role in a deep wrapper"
+            continue
+        role = role_call_of(segment)
+        if role is None:
             continue
         try:  # cost: one transcript read, only on a role-flag call
             from override import remote_session_id
             own_id = remote_session_id()
             if own_id and transcript:
+                if role == STANDING_ROLE:  # a tag set after the record may have changed the role, so that record proves nothing
+                    tags, tagged_after = _own_session_read(transcript, own_id)
+                    if tags is not None and not tagged_after and any(ROLE_TAG_PREFIX + r in tags for r in STANDING_HOLDERS):
+                        continue
+                    return "merge role " + role
                 tags = _own_get_session_tags(transcript, own_id)
-                if tier in ROLE_TIERS and tags is not None and ROLE_TAG_PREFIX + tier in tags:
-                    continue
+                if role in ROLE_TIERS and tags is not None and ROLE_TAG_PREFIX + role in tags:  # glossary-ok: ROLE_TIERS is the existing name
+                    step = role_step_of(segment)
+                    # a lane's step must be a cs-step tag of its own record, exactly, and its record must name the lane-merge repo
+                    if role != ROLE_WITH_STEP or (step and STEP_TAG + step in tags and _tags_name_lane_merge_repo(tags)):
+                        continue
         except Exception:
             pass
-        return "merge role " + tier
+        return "merge role " + role
     return ""
 
 
@@ -1740,7 +1803,7 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int, local_se
                     continue
                 import session_role
                 judged, record = session_role.local_judgement(local_session)
-                if not judged or (record and record["role"] in ROLE_TIERS and repo and record.get("repo") == repo):  # glossary-ok: ROLE_TIERS is the existing name
+                if not judged or (record and record["role"] in LOCAL_ROLE_TIERS and repo and record.get("repo") == repo):  # glossary-ok: LOCAL_ROLE_TIERS is the existing name
                     continue
                 return True
             from override import remote_session_id
@@ -1754,6 +1817,58 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int, local_se
             pass
         return True
     return False
+
+
+LANE_READY_REASON = (
+    "merge-role-proof: this session's own record is a claude-settings lane's, and the batch runner marks a pull request ready, not a lane. "
+    "Leave the draft as it is. The batch runner finds it (list_sessions, tag cs-build:batch-runner, same cs-repo). "
+    "(decision session-tiers, a session's role decides which merge acts it may run)"  # glossary-ok: session-tiers is the decision's file name
+)
+
+
+def lane_ready_hit(stripped: str, transcript: str) -> str:
+    """Return a label when a cloud session whose own newest get_session record carries cs-build:lane and a cs-repo tag naming LANE_MERGE_REPO runs the
+    merge tool's ready mark, else ''. A batch runner, a lane of another repo or with no cs-repo tag, a session with another or no cs-build tag, and a
+    session with no readable record are not judged here: the repo proof
+    (repo_proof_hit) still judges each. A script a wrapper hands on is read as a top-level call is (_nested_segments); one nested deeper
+    than MERGE_NEST_DEPTH that holds the flag counts as a call. Cost: one parse per merge-tool segment, and one transcript read when a ready flag is found."""
+    if not is_cloud() or "--ready" not in stripped:   # the cheap filter: a call with no ready flag reads no transcript
+        return ""
+    for segment, too_deep in _nested_segments(stripped):
+        if too_deep:
+            called = "--ready" in segment
+        else:
+            rest = merge_tool_args(segment)
+            try:
+                called = rest is not None and "--ready" in _command_words(rest)
+            except Exception:
+                called = True   # an unreadable merge-tool segment fails closed, as the other clauses do
+        if not called:
+            continue
+        if _own_record_is_lane(transcript):
+            return "merge --ready from a lane"
+    return ""
+
+
+def _own_record_is_lane(transcript: str) -> bool:
+    """True when the own newest get_session record in `transcript` carries cs-build:lane and a cs-repo tag naming LANE_MERGE_REPO. No id, no transcript,
+    no record and a failed read are False: the callers refuse only a session that proves it is a claude-settings lane, and the repo proof judges the rest."""
+    try:
+        from override import remote_session_id
+        own_id = remote_session_id()
+        tags = _own_get_session_tags(transcript, own_id) if own_id and transcript else None
+    except Exception:
+        return False
+    return tags is not None and LANE_TAG in tags and _tags_name_lane_merge_repo(tags)
+
+
+def lane_mcp_ready_hit(tool: str, tool_input, transcript: str) -> str:
+    """Return a label when a cloud session whose own record is a claude-settings lane's (_own_record_is_lane) marks a pull request ready through the MCP update tool (draft false), else ''.
+    Only a draft of exactly False counts: a title edit, no draft field and draft true mark nothing ready. The refusal is LANE_READY_REASON, as for
+    lane_ready_hit. Cost: none for another tool; one transcript read for a draft-false update."""
+    if tool != READY_PAGE_MCP_TOOL or not is_cloud() or not isinstance(tool_input, dict) or tool_input.get("draft") is not False:
+        return ""
+    return "update_pull_request draft false from a lane" if _own_record_is_lane(transcript) else ""
 
 
 # ---- the record branch's one writer: only the triage session pushes to it (rule roadmap-one-writer)
