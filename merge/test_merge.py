@@ -5311,6 +5311,56 @@ class GhHalf(Env):
         self.assertIn("latest completed run is red", out, "the refusal does not name the red main")
         self.assertNotIn(MERGE_CALL, self.calls(), "the merge call was sent onto a red main")
 
+    # A lane-lint result that is not a PASS lifts no pending run: a FAIL, an unreadable Result, or no comment for the live head. Each case
+    # names its scope first, and asserts the refusal names the pending run, so a refusal from another cause cannot pass.
+
+    def lint_result_keeps_pending_run(self, verdict):
+        """A pending head whose lane lint reads `verdict` for it (None: no comment names it) is refused on its pending run, and no merge call is sent."""
+        head = self.pending_head(checks=[("checks", "pending", "")], runs=[("checks", "in_progress", "")])
+        self.set(issue_comments=[] if verdict is None else [lint_comment(501, head, verdict=verdict)])
+        host = self.gh_host()
+        want = {"FAIL": "fail", "unreadable": "unknown", None: "none"}[verdict]
+        # scope first: the lane-lint read of the live head is the verdict this case needs, and the head's own run is still pending
+        self.assertEqual(merge.lint_state(host.issue_comments("1970-01-01T00:00:00Z")[1].get(7, []), head), want, "scope: the lane-lint read is not " + want)
+        self.assertTrue(host.head_state(7).startswith("pending: "), "scope: the head is not pending: " + host.head_state(7))
+        rc, out = self.run_merge("7", "--confirm", host=host)
+        self.assertEqual(rc, 1, "a lane lint that reads %r lifted a pending run:\n%s" % (verdict, out))
+        self.assertIn("a check is pending: checks", out, "the refusal does not name the pending run:\n" + out)
+        self.assertNotIn(MERGE_CALL, self.calls(), "the merge call was sent for a pending head whose lane lint reads %r" % (verdict,))
+
+    def test_a_fail_lane_lint_on_the_live_head_does_not_lift_a_pending_run(self):
+        self.lint_result_keeps_pending_run("FAIL")
+
+    def test_an_unreadable_lane_lint_on_the_live_head_does_not_lift_a_pending_run(self):
+        self.lint_result_keeps_pending_run("unreadable")
+
+    def test_an_absent_lane_lint_does_not_lift_a_pending_run(self):
+        self.lint_result_keeps_pending_run(None)
+
+    # A lifted head is sent its PUT past GitHub's BLOCKED read, which a pending required check causes. BEHIND still refuses.
+
+    def lifted_head_reading(self, state):
+        """A pending head with a lane-lint PASS for it, whose pull request reads `state` (GitHub's word). -> (rc, out) of the confirm."""
+        head = self.pending_head(checks=[("checks", "pending", "")], runs=[("checks", "in_progress", "")])
+        self.set(issue_comments=[lint_comment(501, head)], pr_raw={"mergeable_state": state.lower()})
+        host = self.gh_host()
+        # scope first: the PASS names the live head, the head's own run is pending, and the pull request reads `state`
+        self.assertEqual(merge.lint_state(host.issue_comments("1970-01-01T00:00:00Z")[1].get(7, []), head), "pass", "scope: no lane-lint PASS names the live head")
+        self.assertTrue(host.head_state(7).startswith("pending: "), "scope: the head is not pending: " + host.head_state(7))
+        self.assertEqual(host.pr(7)["merge_state"], state, "scope: the pull request does not read " + state)
+        return self.run_merge("7", "--confirm", host=host)
+
+    def test_a_lifted_head_reading_blocked_sends_the_merge_call(self):
+        rc, out = self.lifted_head_reading("BLOCKED")
+        self.assertEqual(rc, 0, "a lane-lint PASS on the live head did not merge a pending head that reads BLOCKED:\n" + out)
+        self.assertIn(MERGE_CALL, self.calls(), "the merge call was not sent for a lifted head reading BLOCKED")
+
+    def test_a_lifted_head_reading_behind_still_refuses(self):
+        rc, out = self.lifted_head_reading("BEHIND")
+        self.assertEqual(rc, 1, "a lifted head reading BEHIND merged:\n" + out)
+        self.assertIn("reads BEHIND", out, "the refusal does not name BEHIND:\n" + out)
+        self.assertNotIn(MERGE_CALL, self.calls(), "the merge call was sent for a lifted head reading BEHIND")
+
 # Run ids on one head: a concurrency-cancelled run, the newer run of the same workflow, and a run of another workflow.
 OLD_RUN, NEW_RUN, CI_RUN = 41368432206, 41368432483, 41368432300
 MID_RUN = 41368432350  # a run of the same workflow between OLD_RUN and NEW_RUN
