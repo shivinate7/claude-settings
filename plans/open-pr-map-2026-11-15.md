@@ -69,7 +69,7 @@ Owners: 3 live lane sessions, plus runner 10, the coordinator and triage 8. PRs 
 | #3416 | Notes: stall-watch beat and phase-timing findings from the … | draft | no live session on it; draft; no hand-in | none |
 | #3415 | The debt-close lint prints a heartbeat while a Retire test … | draft | no live session on it; draft; no hand-in | none |
 | #3409 | ci: batch macOS jobs run on the owner's Mac, fall back to m… | draft | no live session on it; draft; no hand-in | park: #3409 held for ite… |
-| #3385 | CI: 41 checks-job steps that read docs run only when their … | draft | no live session on it; draft; no hand-in | replaced, not rebased (coordinator pick 04:54 CST Nov 16, relayed): lane ci-skip-untouched-steps builds 3b from main 8d0b4cb75, opens the new draft, then closes #3385 with a pointer; REST read of #3385 and the new PR owed |
+| #3385 | CI: 41 checks-job steps that read docs run only when their … | draft | no live session on it; draft; no hand-in | replaced, not rebased (coordinator pick 04:54 CST Nov 16, relayed): lane ci-skip-untouched-steps builds 3b from main 8d0b4cb75, opens the new draft, then closes #3385 with a pointer; closed as replaced (REST 05:39 CST Nov 16: #3385 closed 05:26 CST, not merged; replacement #3584 open draft, base main 8d0b4cb75) |
 | #3384 | Red-main check judges only runs that ran the tests | draft | no live session on it; draft; no hand-in | none |
 | #3383 | Every landed merge prints the idle-lane list; a stale live … | draft | no live session on it; draft; no hand-in | none |
 | #3380 | Allow entries name [--priority-rows <file>] on the runner's… | draft | no live session on it; draft; no hand-in | none |
