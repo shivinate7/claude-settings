@@ -14172,7 +14172,7 @@ class MergeRoleCheck(CloudSession):
 
     # ---- the constants and the reader
     # decision session-tiers: a batch runner merges. Ruling own-lanes-merge-claude-settings-prs (owner, 11:12 CST Nov 15, 2026) adds `lane`,
-    # for its own pull request only. Ruling own-tiny-fixes-b adds `standing`, the one tier a coordinator or triage records to merge its own small edit.
+    # for its own pull request only. Ruling own-tiny-fixes-b adds `standing`, the one tier a coordinator, triage or consultant records to merge its own pull request.
     # The coordinator and the triage hold no merge role of their own; they record standing.
     def test_the_merge_roles_are_the_batch_runner_the_lane_and_standing(self):
         self.assertEqual(set(merge.MERGE_ROLES), {"batch-runner", "lane", "standing"})
@@ -14408,8 +14408,7 @@ class StandingMergeRole(CloudSession):
     records the `standing` merge role and merges its OWN pull request through the merge tool, on green. The gate sits after the pull request
     read and before the lock or any claim. The pull request is this session's own when its body names this session's link. CI is green.
     A docs-only pull request with no guard path needs no record. Any other pull request needs one passing Sonnet review record on the live
-    head (owner ruling, 2026-11-16 08:51 CST). A pull request that holds rule text is bounded by the line and file counts; a code or
-    guard-path pull request is not. The batch runner is not judged by this gate. A refusal names no tier word and no command."""
+    head (owner ruling, 2026-11-16 08:51 CST). No pull request is bounded by line or file counts. The batch runner is not judged by this gate. A refusal names no tier word and no command."""
 
     def own_pr(self, changed, body=OWN_PR_BODY):
         """Make pull request 7 a case's pull request: its body is `body`, its files are `changed`, and this session records standing."""
@@ -14448,7 +14447,7 @@ class StandingMergeRole(CloudSession):
         rec = merge.parse_review(body)
         self.assertIsNotNone(rec, "the case's review record does not parse")
         self.assertEqual(merge.review_state(rec, self.head())[0], "done", "the case's review record is not a passing record on the live head")
-        self.assertTrue(any(not (merge.is_doc(p) or merge.is_rule_text(p)) for p, _, _ in changed), "the case holds no code path")
+        self.assertTrue(any(not merge.is_doc(p) for p, _, _ in changed), "the case holds no code path")
 
     # ---- the writer and the reader: standing is a merge role, recorded like the batch runner's
     def test_a_standing_role_is_recorded_like_a_batch_runner_role(self):
@@ -14464,7 +14463,7 @@ class StandingMergeRole(CloudSession):
         with self.cloud():
             self.assertEqual(merge.read_merge_role(), "standing")
 
-    # ---- the gate lets through: the session's own small edit, on green
+    # ---- the gate lets through: the session's own pull request, on green
     def test_an_own_docs_only_pr_merges_under_standing(self):
         self.commit_feat({"docs/notes.md": "Notes.\n"})
         self.own_pr([("docs/notes.md", "modified", 1)])
@@ -14540,6 +14539,21 @@ class StandingMergeRole(CloudSession):
         self.assert_standing_refused()
 
     # ---- ruling (owner, 2026-11-16 08:51 CST): one passing Sonnet record on the live head is the proof for a code pull request
+    def test_an_own_code_pr_whose_round_one_failed_and_a_sonnet_fix_check_passed_merges_under_standing(self):
+        # the fail-then-fix cycle: a haiku round 1 FAIL, then a passing sonnet fix verifier, ends review
+        self.commit_feat({"tools/note.py": "X = 1\n"})
+        self.own_pr([("tools/note.py", "added", 1)])
+        self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, haiku, FAIL",), fix=(fix_verifier_line(model="sonnet"),)))
+        rc, out, err = self.standing_confirm()
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+    def test_an_own_code_pr_whose_haiku_round_one_passed_alone_is_refused_under_standing(self):
+        self.commit_feat({"tools/note.py": "X = 1\n"})
+        self.own_pr([("tools/note.py", "added", 1)])
+        self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, haiku, FAIL", "Round 2: reviewer, haiku, PASS")))
+        self.assert_standing_refused()
+
     def test_an_own_code_pr_with_a_passing_sonnet_record_merges_under_standing(self):
         self.commit_feat({"tools/note.py": "X = 1\n"})
         changed = [("tools/note.py", "added", 1)]

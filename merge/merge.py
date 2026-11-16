@@ -5839,11 +5839,6 @@ def own_session_link(body):
     own = remote_session_id()
     return bool(own) and own in re.findall(r"https://claude\.ai/code/(session_[A-Za-z0-9_-]+)", body or "", re.ASCII)
 
-def is_rule_text(path):
-    """Rule text is a CLAUDE.md or AGENTS.md at any depth, or a .md file under agents/ or skills/. A script under skills/ is code, not rule text."""
-    low = path.lower()
-    return low.endswith(".md") and (os.path.basename(low) in ("claude.md", "agents.md") or low.startswith(("agents/", "skills/")))
-
 def standing_refusal(h, n, info, head):
     """-> why a standing session may not merge pull request `n`, or "" when it may (ruling own-tiny-fixes-b). It must be the session's own,
     and the head's own checks must be green. A pull request past docs, code and guard paths included, needs one sonnet reviewer record on the relayed head `head`.
@@ -5860,10 +5855,12 @@ def standing_refusal(h, n, info, head):
         return f"the head's own checks are not green: {not_green}."
     if kind_misfits("docs-only", files) or guard_hits(paths):  # any file past docs, code and guard paths included: one passing sonnet reviewer record on the live head (decision session-tiers)
         bodies = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(n, [])
-        rec = next((r for r in map(parse_review, reversed(bodies)) if r and r["n"] == n), None)
-        reviewers = [m for _, role, m, _ in (rec["rounds"] if rec else []) if role == REVIEW_ROLES[0]]
-        if not reviewers or any(m.lower() != "sonnet" for m in reviewers) or review_state(rec, head)[0] != "done":  # `head` is the relayed head, which relayed_head_holds ties to the live one: only this tool's claim commits may sit above it
-            return "this pull request changes more than docs, and its head has no passing sonnet review record."
+        recs = [r for r in map(parse_review, bodies) if r and r["n"] == n]
+        rec = recs[-1] if recs else None
+        # the pass that ends review must be sonnet's: the fix verifier's when the record has one, else the last reviewer round's
+        passer = rec["fix"][2] if rec and rec["fix"] else next((m for _, role, m, _ in reversed(rec["rounds"] if rec else []) if role == REVIEW_ROLES[0]), None)
+        if not passer or passer.lower() != "sonnet" or review_state(rec, head, recs[:-1])[0] != "done":  # `head` is the relayed head, which relayed_head_holds ties to the live one: only this tool's claim commits may sit above it
+            return "this pull request changes code, rule text or a guard path, and its head has no passing sonnet review record."
     return ""
 
 def guard_hits(paths):
