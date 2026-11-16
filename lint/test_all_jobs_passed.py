@@ -196,6 +196,36 @@ HOOKS_HEAD = "  checks-hooks:\n\n    runs-on: ubuntu-latest\n    needs: scope\n"
 HOOKS_IF = "    if: ${{ needs.scope.outputs.records_only_skip != 'true' }}\n"
 
 
+class PushOffRollup(unittest.TestCase):
+    """Owner page item 880 (11:53 CST Nov 15): a Windows or mutation job keeps the push guard, `github.event_name != 'push'`, as its
+    job-level if. all-jobs-passed runs only on a pull_request, and a pull_request runs every such job, so the rollup still needs it and
+    its skip is never read there. The rule (off_problems) refused every job-level if on a needed job, which the push guard is not.
+    Synthetic files: one Windows job, needed by all-jobs-passed, with the if under test."""
+
+    def rollup_text(self, job_if):
+        lines = ["jobs:", "  checks-windows:", "    runs-on: windows-latest", "    needs: scope"]
+        if job_if is not None:
+            lines.append(f"    if: {job_if}")
+        lines += ["    steps:", "      - run: echo ok", "  all-jobs-passed:", "    runs-on: ubuntu-latest",
+                  "    if: ${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}",
+                  "    needs:", "      - checks-windows", "    steps:", "      - run: echo ok"]
+        return "\n".join(lines) + "\n"
+
+    def test_a_needed_job_whose_job_level_if_is_the_push_guard_passes_the_rollup_rules(self):
+        # Named failure on the old rules: the push guard is a job-level if on a needed job, so the rule refuses it.
+        self.assertEqual(off_problems(self.rollup_text("${{ github.event_name != 'push' }}")), [],
+                         "a needed job whose if is the push guard is refused, though a pull_request always runs it")
+
+    def test_a_needed_job_whose_push_guard_reads_a_flag_is_refused(self):
+        # Control: a push guard with a flag skips the job on a pull_request whose flag is off, so the rollup must refuse it.
+        self.assertTrue(off_problems(self.rollup_text("${{ github.event_name != 'push' && needs.scope.outputs.checks_windows == 'true' }}")),
+                        "a needed job whose push guard reads a flag is accepted, so its skip on a pull_request reads as green")
+
+    def test_a_needed_job_with_no_job_level_if_passes_the_rollup_rules(self):
+        # Control, green on the old rules: a job with no job-level if is needed and passes.
+        self.assertEqual(off_problems(self.rollup_text(None)), [])
+
+
 class MacOnceByBatchRollup(unittest.TestCase):
     """R61 on the one required check: each macOS job's scope skip keeps it needed, the rollup still needs every job, and the
     nightly-skip job is an off-rollup job that is not a shard. Each case is a control that holds on the old rules and on the landed

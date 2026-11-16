@@ -1807,6 +1807,28 @@ def case_page_unfiled_remedy_offers_the_read_back():
           "read item 98 back from the page" in reason and "ArtifactData" in reason, reason)
 
 
+TWO_LINK_URL = "https://claude.ai/artifact/7a6b5c4d-3e2f-4a1b-8c9d-0e1f2a3b4c5d"  # the waiting page's link in another account
+
+
+def two_link_extras():
+    """The extras file of a waiting page with two account links: one registry entry holds PAGE_URL and TWO_LINK_URL."""
+    entry = {"id": "queue", "role": "waiting-page", "export": "waiting",
+             "links": [{"account": "current", "url": PAGE_URL}, {"account": "gmail", "url": TWO_LINK_URL}]}
+    return json.dumps({"kinds": {}, "artifacts": [entry]})
+
+
+def case_page_read_back_of_a_second_account_link_proves_the_filing():
+    """A read of item 98 through the waiting page's link in another account, after the owner's message, proves the
+    filing exactly as a read through the first link does. The copy lacks item 98, so only the read-back can pass it.
+    The check reads every link of the waiting page, not the first alone."""
+    repo = record_repo("unfiled-two-links", copy_files(UNFILED), extras=two_link_extras())
+    get98 = tool_input("get", collection="items", doc_id="disk-cleanup", url=TWO_LINK_URL)
+    p = page_run(new_cfg(), "page-readback-link2", [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL), send_rec(SENT), used_rec("ArtifactData", get98, tool_id="rb1"),
+                  result_rec("rb1", response_of([ITEM_98]))], cwd=repo)
+    expect_silent("page filing: n 98 read back through the waiting page's gmail link proves the filing", p)
+
+
 # --------------------------------------------------------------------------- repo cases
 
 def case_repo_send_naming_the_repo_passes():
@@ -4752,6 +4774,7 @@ CASES = (
     case_page_read_back_proves_the_filing,
     case_page_read_back_that_misses_n_does_not_prove_the_filing,
     case_page_unfiled_remedy_offers_the_read_back,
+    case_page_read_back_of_a_second_account_link_proves_the_filing,
     case_repo_send_naming_the_repo_passes,
     case_repo_send_with_error_result_does_not_count,
     case_repo_slug_match_ignores_case,
