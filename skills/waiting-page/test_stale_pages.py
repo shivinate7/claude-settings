@@ -1242,6 +1242,45 @@ class Stale(unittest.TestCase):
         self.assert_not_named_in_both_shapes([item], [("lane-answer", answer_for("lane-answer", 359))],
                                              "lane-answer", "an open busy-lane item with a last answer and a kept answer")
 
+    # A reopened item (status open, `added` moved past the owner's earlier answer) can keep answers/<id> in place. That record is stale:
+    # an open item whose kept answer is older than its `added` is named, with the remedy to delete it. A record at or after `added`
+    # is awaiting filing, so it is not named (the open-item cases above). The line starts "is open", not "is closed".
+
+    def assert_open_stale_named_in_both_shapes(self, extra_items, extra_answers, item_id, n, case, contains=None):
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file", case=case):
+                r = self.paired_run(extra_items, extra_answers, as_folder)
+                self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
+                line = self.assert_kept_line(r, n, item_id, want="kept-answer: item %d (%s) is open" % (n, item_id))
+                if contains is not None:
+                    self.assertIn(contains, line, "the open-item line for item %d does not say %r:\n%s" % (n, contains, line))
+
+    def test_reopened_open_item_whose_kept_answer_is_a_day_older_than_its_added_is_named_as_stale(self):
+        item = decision_item(360, "reopened-stale", status="open", added="2026-11-08T09:00:00Z")
+        self.assert_open_stale_named_in_both_shapes([item], [("reopened-stale", answer_for("reopened-stale", 360))],
+                                                    "reopened-stale", 360, "an open item whose kept answer is a day older than its added")
+
+    def test_reopened_open_item_whose_kept_answer_is_one_second_older_than_its_added_is_named_as_stale(self):
+        item = decision_item(361, "reopened-second", status="open", added="2026-11-07T19:41:51Z")  # ANSWER_AT is 0.965 s earlier
+        self.assert_open_stale_named_in_both_shapes([item], [("reopened-second", answer_for("reopened-second", 361))],
+                                                    "reopened-second", 361, "an open item whose kept answer is one second older than its added")
+
+    def test_reopened_open_item_whose_kept_answer_is_exactly_its_added_time_is_not_named(self):
+        item = decision_item(362, "reopened-equal", status="open", added=ANSWER_AT)
+        self.assert_not_named_in_both_shapes([item], [("reopened-equal", answer_for("reopened-equal", 362))],
+                                             "reopened-equal", "an open item whose kept answer is exactly its added time")
+
+    def test_reopened_open_item_whose_kept_answer_is_35_ms_after_a_whole_second_added_is_not_named(self):
+        # ANSWER_AT is 35 ms after this whole second. A string compare reads the "." before "Z" as older, so this pins a real time compare.
+        item = decision_item(363, "reopened-fraction", status="open", added="2026-11-07T19:41:50Z")
+        self.assert_not_named_in_both_shapes([item], [("reopened-fraction", answer_for("reopened-fraction", 363))],
+                                             "reopened-fraction", "an open item whose kept answer is 35 ms after a whole-second added")
+
+    def test_reopened_open_item_line_tells_the_writer_to_re_read_the_answer_before_it_deletes_it(self):
+        item = decision_item(371, "reopened-reread", status="open", added="2026-11-08T09:00:00Z")
+        self.assert_open_stale_named_in_both_shapes([item], [("reopened-reread", answer_for("reopened-reread", 371))],
+                                                    "reopened-reread", 371, "an open item whose kept answer is older than its added", contains="re-read")
+
     def test_a_routed_closed_item_with_a_kept_answer_is_not_named(self):
         # Closing at routing (SKILL.md, "Route and close", the busy-lane path): the item closes with its home and keeps `lane`,
         # `lastAnswer` and answers/<id> until the receiver's done report. The kept answer is the routed state, so no remedy names it.
@@ -1347,6 +1386,38 @@ class Stale(unittest.TestCase):
                                  % (len(got), r.stdout + r.stderr))
                 for line, prefix in zip(got, want):
                     self.assertTrue(line.startswith(prefix), "a kept-answer line is not the one for its item, in item order:\n" + line)
+                self.assert_page_word(r, "current", 0)
+
+    def test_reopened_full_size_names_only_the_open_items_whose_kept_answer_is_older_than_their_added(self):
+        current, _ = self.current_and_behind()
+        items, answers, want = [], [], []
+        for i in range(40):  # open, kept answer older than added: named, as stale
+            item_id = "reopened-%03d" % i
+            items.append(decision_item(1400 + i, item_id, status="open", added="2026-11-08T09:00:00Z"))
+            answers.append((item_id, answer_for(item_id, 1400 + i)))
+            want.append("kept-answer: item %d (%s) is open" % (1400 + i, item_id))
+        for i in range(40):  # open, kept answer at or after added: awaiting filing, not named
+            item_id = "awaiting-%03d" % i
+            items.append(decision_item(1500 + i, item_id, status="open"))
+            answers.append((item_id, answer_for(item_id, 1500 + i)))
+        for i in range(40):  # closed, answer kept: named, as before
+            item_id = "closed-%03d" % i
+            items.append(decision_item(1600 + i, item_id))
+            answers.append((item_id, answer_for(item_id, 1600 + i)))
+            want.append(kept_line(1600 + i, item_id))
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                items_arg, answers_arg = self.shaped(items, answers, as_folder)
+                r = self.items_run(current, items_arg, {}, answers=answers_arg)
+                got = kept_lines(r.stdout)
+                self.assertEqual(len(got), 80, "want 80 kept-answer lines (40 stale open, 40 closed), got %d:\n%s"
+                                 % (len(got), r.stdout + r.stderr))
+                for line, prefix in zip(got, want):
+                    self.assertTrue(line.startswith(prefix), "a kept-answer line is not the one for its item, in item order:\n" + line)
+                open_lines = [line for line in got if " is open and " in line]
+                self.assertEqual(len(open_lines), 40, "want 40 open-item lines, got %d:\n%s" % (len(open_lines), r.stdout))
+                for line in open_lines:
+                    self.assertIn("re-read", line, "an open-item line does not tell the writer to re-read its answer:\n" + line)
                 self.assert_page_word(r, "current", 0)
 
     def test_full_size_routed_items_are_not_named_and_closed_items_without_a_lane_still_are(self):
@@ -2180,6 +2251,172 @@ class UnreadStale(FolderCase):
         code, out, _, error = self.run_main("--unread", self.folder)
         self.assert_mode_lines(out, error)
         self.assertEqual((code, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY)]), "main() did not send --unread to its mode: " + out)
+
+
+class SessionLine(unittest.TestCase):
+    """`--session-line <root> --main-checkout <dir>` (rule page-stale, decision page-stale-publish). The stamps are the record file
+    roadmap/data/meta/page-built.json on origin/roadmap and the local stamp <git common dir>/waiting-page-built. While the record
+    file holds a 40-hex blob, either stamp equal to main's blob sha prints nothing, and a stamp that differs from it prints the
+    behind line. While the record file is missing or unreadable, the local stamp alone decides: it prints the behind line when it
+    differs from main's blob, and nothing when it is equal or missing. A repo with no waiting page prints nothing.
+    Every run exits 0 and prints no traceback. Each silence case asserts that before it asserts the silence."""
+
+    run_script = Stale.run_script  # the one script-run helper of this file: it reads no instance state
+    RECORD = "roadmap/data/meta/page-built.json"
+    BEHIND = "is behind main's page.html"
+    # record texts the reader counts as missing: not JSON, no blob key, and a blob that is not 40-hex
+    UNREADABLE = (("unparseable", "{not json"), ("no-blob-key", json.dumps({"at": "2026-11-15T00:00:00Z"})),
+                  ("short-blob", json.dumps({"blob": "abc123", "at": "2026-11-15T00:00:00Z"})))
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)  # test-temp-standard: never the system temp dir
+        self.addCleanup(self.tmp.cleanup)
+        self.main = os.path.join(self.tmp.name, "main")  # the claude-settings clone: its origin/main holds the skill's page
+        write_text(os.path.join(self.main, "skills", "waiting-page", "page.html"), "<!doctype html>\n<title>Queue</title>\n")
+        git(self.main, "init", "-q")
+        git(self.main, "add", "-A")
+        git(self.main, "commit", "-q", "-m", "main")
+        git(self.main, "update-ref", "refs/remotes/origin/main", "HEAD")
+        self.main_blob = git(self.main, "rev-parse", "origin/main:skills/waiting-page/page.html").stdout.strip()
+        older = write_text(os.path.join(self.tmp.name, "older.html"), "<!doctype html>\n<title>Queue, older</title>\n")
+        self.other_blob = git(self.main, "hash-object", older).stdout.strip()  # a blob that is not main's
+
+    def root(self, name="root", extras=True):
+        """A repo for the session line. Its extras file names a waiting page unless `extras` is False."""
+        root = os.path.join(self.tmp.name, name)
+        os.makedirs(root)
+        git(root, "init", "-q")
+        if extras:
+            write_text(os.path.join(root, ".claude", "layout-extras.json"),
+                       json.dumps({"kinds": {}, "waiting-page": URL % "sspage"}))
+        return root
+
+    def roadmap(self, root, record):
+        """origin/roadmap of `root` is a commit that holds the record file with the text `record`, or no record file when None."""
+        if record is not None:
+            write_text(os.path.join(root, self.RECORD), record)
+        git(root, "add", "-A")
+        git(root, "commit", "-q", "--allow-empty", "-m", "roadmap")
+        git(root, "update-ref", "refs/remotes/origin/roadmap", "HEAD")
+
+    def local_stamp(self, root, sha):
+        """Write `sha` as the local stamp in the common git dir of `root`, where an allowed publish puts it."""
+        write_text(os.path.join(root, ".git", "waiting-page-built"), sha + "\n")
+
+    def record(self, blob):
+        return json.dumps({"blob": blob, "at": "2026-11-15T00:00:00Z"})
+
+    def session_run(self, root):
+        return self.run_script("--session-line", root, "--main-checkout", self.main)
+
+    def assert_clean(self, r):
+        """The run exited 0 and printed no traceback. A silence case asserts this first, so a crash never reads as silence."""
+        self.assertEqual(r.returncode, 0, "the session line exited %d: %s" % (r.returncode, r.stderr))
+        self.assertNotIn("Traceback", r.stdout + r.stderr, "the session line crashed: " + r.stderr)
+
+    def test_1_a_record_equal_to_main_prints_nothing_even_over_a_stale_local_stamp(self):
+        root = self.root()
+        self.roadmap(root, self.record(self.main_blob))
+        self.local_stamp(root, self.other_blob)  # the record equals main's blob, so the page is not behind whatever the local stamp says
+        r = self.session_run(root)
+        self.assert_clean(r)
+        self.assertEqual(r.stdout, "", "a record equal to main's blob printed a line:\n" + r.stdout)
+
+    def test_1_a_current_local_stamp_silences_a_record_that_lags_main(self):
+        root = self.root()
+        self.roadmap(root, self.record(self.other_blob))  # the record lags: it names a blob that is not main's
+        self.local_stamp(root, self.main_blob)  # the local stamp is current: one stamp equals main, so the page is not behind
+        r = self.session_run(root)
+        self.assert_clean(r)
+        self.assertEqual(r.stdout, "", "a current local stamp did not silence a record that lags:\n" + r.stdout)
+
+    def test_2_a_record_differing_from_main_prints_the_behind_line(self):
+        root = self.root()
+        self.roadmap(root, self.record(self.other_blob))
+        r = self.session_run(root)
+        self.assert_clean(r)
+        lines = r.stdout.splitlines()
+        self.assertEqual(len(lines), 1, "want one session line for a record behind main:\n" + r.stdout)
+        self.assertIn(self.BEHIND, lines[0], "the line does not say the page is behind main's page.html: " + lines[0])
+
+    def test_2_both_stamps_differing_from_main_prints_the_behind_line(self):
+        root = self.root()
+        self.roadmap(root, self.record(self.other_blob))
+        third = write_text(os.path.join(self.tmp.name, "third.html"), "<!doctype html>\n<title>Queue, third</title>\n")
+        self.local_stamp(root, git(self.main, "hash-object", third).stdout.strip())  # a second stamp, and it is not main's either
+        r = self.session_run(root)
+        self.assert_clean(r)
+        lines = r.stdout.splitlines()
+        self.assertEqual(len(lines), 1, "want one session line when both stamps differ from main:\n" + r.stdout)
+        self.assertIn(self.BEHIND, lines[0], "the line does not say the page is behind main's page.html: " + lines[0])
+
+    def test_3_no_record_and_no_local_stamp_prints_nothing(self):
+        root = self.root()
+        self.roadmap(root, None)
+        r = self.session_run(root)
+        self.assert_clean(r)
+        self.assertEqual(r.stdout, "", "a repo with no record and no local stamp printed a line:\n" + r.stdout)
+
+    def test_4_no_record_and_a_local_stamp_equal_to_main_prints_nothing(self):
+        root = self.root()
+        self.roadmap(root, None)
+        self.local_stamp(root, self.main_blob)
+        r = self.session_run(root)
+        self.assert_clean(r)
+        self.assertEqual(r.stdout, "", "a local stamp equal to main's blob printed a line:\n" + r.stdout)
+
+    def test_4_no_record_and_a_stale_local_stamp_prints_the_behind_line(self):  # the fallback is read: silence above is not an unread stamp
+        root = self.root()
+        self.roadmap(root, None)
+        self.local_stamp(root, self.other_blob)
+        r = self.session_run(root)
+        self.assert_clean(r)
+        lines = r.stdout.splitlines()
+        self.assertEqual(len(lines), 1, "want one behind line from the local stamp when the record is missing:\n" + r.stdout)
+        self.assertIn(self.BEHIND, lines[0], "the fallback line does not say behind: " + lines[0])
+
+    def test_3_no_branch_and_no_local_stamp_prints_nothing(self):  # no roadmap branch at all: a missing ref is missing, not unreadable
+        root = self.root()
+        r = self.session_run(root)
+        self.assert_clean(r)
+        self.assertEqual(r.stdout, "", "a repo with no roadmap branch and no local stamp printed a line:\n" + r.stdout)
+
+    def test_4_no_branch_and_a_stale_local_stamp_prints_the_behind_line(self):  # the fallback with no roadmap branch at all
+        root = self.root()
+        self.local_stamp(root, self.other_blob)
+        r = self.session_run(root)
+        self.assert_clean(r)
+        lines = r.stdout.splitlines()
+        self.assertEqual(len(lines), 1, "want one behind line from the local stamp when there is no roadmap branch:\n" + r.stdout)
+        self.assertIn(self.BEHIND, lines[0], "the fallback line does not say behind: " + lines[0])
+
+    def test_5_an_unreadable_record_with_no_local_stamp_prints_nothing_and_never_crashes(self):
+        for name, text in self.UNREADABLE:
+            with self.subTest(record=name):
+                root = self.root(name)
+                self.roadmap(root, text)
+                r = self.session_run(root)
+                self.assert_clean(r)
+                self.assertEqual(r.stdout, "", "a record with no usable blob and no local stamp printed a line:\n" + r.stdout)
+
+    def test_5_an_unreadable_record_with_a_differing_local_stamp_prints_the_behind_line(self):
+        for name, text in self.UNREADABLE:
+            with self.subTest(record=name):
+                root = self.root(name)
+                self.roadmap(root, text)
+                self.local_stamp(root, self.other_blob)
+                r = self.session_run(root)
+                self.assert_clean(r)
+                lines = r.stdout.splitlines()
+                self.assertEqual(len(lines), 1, "want one behind line from the local stamp when the record has no usable blob:\n" + r.stdout)
+                self.assertIn(self.BEHIND, lines[0], "the fallback line does not say behind: " + lines[0])
+
+    def test_6_a_repo_without_the_page_prints_nothing(self):
+        root = self.root("nopage", extras=False)
+        self.roadmap(root, self.record(self.other_blob))  # a record behind main: the silence must come from the missing page
+        r = self.session_run(root)
+        self.assert_clean(r)
+        self.assertEqual(r.stdout, "", "a repo with no waiting page printed a line:\n" + r.stdout)
 
 
 if __name__ == "__main__":

@@ -146,6 +146,9 @@ add("local-tier: an own batch-runner file that names another repo refuses the co
     tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env=LT_IDS, config=LT_BATCH_WRONG)
 add("local-tier: an own batch-runner file with a null repo refuses the confirm", "deny", rule="merge-confirm-repo",
     tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env=LT_IDS, config=LT_BATCH_NULL)
+# CONTROL, green on the old code: the lane tier is a cloud tier only, so an own lane file for this repo refuses a local confirm.
+add("local-tier: an own lane file for this repo refuses a local confirm", "deny", rule="merge-confirm-repo",
+    tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env=LT_IDS, config=LT_LANE)
 
 # RED on the builder's head: no own file, so the confirm is today's behaviour and is allowed, though another session's file lingers.
 add("local-tier: another session's lingering file does not refuse a session with no own file", "allow",
