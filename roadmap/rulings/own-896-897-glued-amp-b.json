@@ -1,0 +1,11 @@
+{
+  "id": "own-896-897-glued-amp-b",
+  "at": "2026-11-16T13:30:57-06:00",
+  "title": "Glued-amp lane: keep the #2015 rows and change main's rules (896 b); a missing reread_check denies, and the block says how to fix it (897 b).",
+  "ruling": "Owner, page items 896 and 897, both option b, saved 13:30:57 CST Nov 16. 896 b: keep the #2015 test rows as written and change main's product rules to match them (this loosens refusals main added since Nov 11; the page marks option b as widening, and the owner picked it after the lane's reply on what loosens). 897 b: #2015's deny stands for a missing reread_check on the hu_copy_check row, and main's product rule changes to match. Owner's note on 897: \"there should be guidance int he block of what to do to resolve the block\". So the deny message must name the fix (per the item's own text: rerun install.sh); the lane builds that text and a test that shows the message names it.",
+  "quote": "there should be guidance int he block of what to do to resolve the block",
+  "source": "waiting/answers/glued-amp-hu-copy-check.json and glued-amp-stale-rows.json (2026-11-16T19:30:57Z = 13:30:57 CST). Owner; filed by triage. Triage read no code.",
+  "status": "open",
+  "step": "check-tail-amp-tidy",
+  "parent": "own-716-b-keep-2156-glued-amp"
+}
