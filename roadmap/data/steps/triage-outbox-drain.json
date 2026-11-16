@@ -1,0 +1,14 @@
+{
+ "id": "triage-outbox-drain",
+ "title": "Drain roadmap/outbox/triage.md: file each unfiled note on main or drop it as stale, then clear the file",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Owner goal to triage 9, 15:33 CST Nov 16: outbox drafts moved or marked. The file holds 1,898 bullets from earlier triage sessions. A read-only agent (sonnet, 15:58 CST) sorted them: FILED 862 (an upper bound; a strict test gives 587), UNFILED 1,036 (670 clear, 366 unsure: the bullet names an existing step or ruling that lacks its facts). Precision unmeasured; spot greps all confirmed UNFILED.",
+ "source": "Explore agent report to triage 9, 15:58 CST Nov 16; owner goal 15:33 CST. Filed by triage 9.",
+ "note": "Todo. Not started. Plan: a notes lane lands lines 1-600 (523 UNFILED, about 90% clear; one-line notes on main in the form at triage.md line 5, about 53 debt-shaped ones to docs/debts) in one pass; lines 901-1560 are step-journal lines (244 UNFILED, only 14 clear): drop as stale or append to the step note if the step is still open; lines 1916-1997 are the newest slice: topics lane-lint-reads-pr-body-unknown, ci-hygiene-ready-first-stale, lane-confirm-flags-unguarded, feedback-guard-is-writer-exact-match and the #3449, #3467, #3468, #3536 and #3583 reviewer notes go to notes on main; pr-3449-body-counts-stale and commit-8625cdcae9-no-role-trailer are moot (3449 merged). 32 lines dated before Nov 8 (7-14, 16, 19, 21-35, 336-338, 610, 734-735, 741): drop or file one note each. Main's notes live in docs/debts/notes.md; a note edit goes by PR. Nothing is moved or deleted yet. Whole-file read cost: the agent loaded the file into one Python process, no files written. Searched steps at 15:59 CST Nov 16: outbox-aggregate-plan and outbox-only-orphan-notes exist and cover other repos' outboxes and the keep-rule, not draining this file.",
+ "updatedAt": "2026-11-16T15:59:00-06:00",
+ "order": -270
+}
