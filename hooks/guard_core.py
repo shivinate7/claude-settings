@@ -213,7 +213,7 @@ def walk_quotes(text: str, line_comments: bool = False):
     that bash never closes is text, as in `_split_reading`'s second reading. BLIND text yields as
     unquoted. With `line_comments`, a PowerShell `#` line comment yields as quote `#` through its
     newline; the default reads no line comment, since `split_segments` already drops line comments
-    before this walk sees them)."""
+    before this walk sees them."""
     quote, index = "", 0
     while index < len(text):
         if not quote and text[index] == "'" and is_contraction(text, index):
