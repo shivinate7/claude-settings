@@ -7,8 +7,8 @@
  "lane": "session_013NEJL1mAqRFx3YEhj1G2WA",
  "owner": "triage",
  "blockedBy": [],
- "why": "Express lane from the unlanded ledger; ruling R31 (owner 11:02 CST Nov 11).",
+ "why": "Express lane from the unlanded ledger; ruling R31 (owner 11:02 CST Nov 11).\n\n[19:34 CST Nov 15, triage] Marked superseded by merge-conflict-mixed-roles in the note (coordinator relay). Status not changed: no done-as-duplicate status in the store.",
  "source": "coordinator 12:45 CST Nov 13, retrospective unlanded ledger (branch restart-plan, commit 2c0b173e, plans/unlanded-ledger-2026-11-13.md)",
- "note": "Doing, express lane from the retrospective's unlanded ledger; the ledger row holds the detail. Created by triage from the lane name, with no brief text of its own yet. Lane session_013NEJL1mAqRFx3YEhj1G2WA.",
- "updatedAt": "2026-11-13T12:45:31-06:00"
+ "note": "Superseded by merge-conflict-mixed-roles (duplicate, coordinator relay 19:34 CST Nov 15; PR #3293 is carried there). The store has no done-as-duplicate status (statuses seen: todo, ready, doing, blocked, done, done-obsolete, folded, dropped, queued, open), so status stays doing and this note marks it. Doing, express lane from the retrospective's unlanded ledger; the ledger row holds the detail. Created by triage from the lane name, with no brief text of its own yet. Lane session_013NEJL1mAqRFx3YEhj1G2WA.",
+ "updatedAt": "2026-11-15T19:34:00-06:00"
 }
