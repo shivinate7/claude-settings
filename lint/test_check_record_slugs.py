@@ -30,6 +30,7 @@ sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 MODULE = os.environ.get("RECORD_SLUGS_UNDER_TEST") or os.path.join(HERE, "check_record_slugs.py")
+RUNNER = os.path.join(HERE, "..", "hooks", "test_guard.py")  # its SECTION_DIR names the section folder the check reads
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 
@@ -85,6 +86,8 @@ class RecordSlugsTests(unittest.TestCase):
         self.addCleanup(tracked_tree.rm_tree, self.tree)
         tracked_tree.copy_tracked(self.tree, "lint", "hooks")  # the layout and the check's imports
         shutil.copyfile(MODULE, os.path.join(self.tree, "lint", "check_record_slugs.py"))
+        # tracked_tree leaves out test_ files, and the section check finds the folder through the runner, so copy it.
+        shutil.copyfile(RUNNER, os.path.join(self.tree, "hooks", "test_guard.py"))
 
     def put(self, rel, text="# Record\n"):
         path = os.path.join(self.tree, *rel.split("/"))
