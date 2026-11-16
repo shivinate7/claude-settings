@@ -269,7 +269,7 @@ jobs:
         run: python3 lint/test_clause.py
 
       - name: Stop-hook cannot-claim suite
-        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_rules == 'true' || github.event_name != 'pull_request' }}
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_rules == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_report_guard_cannot.py
 
       - name: Stop-hook landing fixture suite
@@ -718,7 +718,9 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Steps below read no .md file; `code` is false for a docs-only pull request (ci-scope.sh).
+      # A step below that reads no .md file runs only on code (`code` is false for a docs-only pull request, ci-scope.sh)
+      # and skips on a records-only push. A step that reads a .md file also runs when its doc groups change, and on a
+      # records-only push, because the records page is a .md file.
       - name: Config watch fixture suite
         if: ${{ (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_config_watch.py
@@ -758,7 +760,7 @@ jobs:
         run: python3 hooks/test_prose_judge.py
 
       - name: SendMessage state fixture suite
-        if: ${{ (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || github.event_name != 'pull_request' }}
         run: python3 hooks/test_sendmessage_state.py
 
       - name: Refusal note fixture suite
@@ -778,7 +780,7 @@ jobs:
         run: python3 hooks/test_call_judge.py
 
       - name: Question form fixture suite
-        if: ${{ (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 hooks/test_question_form.py
 
       - name: Question form option-key gap suite
@@ -798,11 +800,11 @@ jobs:
         run: python3 hooks/test_rm_prompt_answer.py
 
       - name: Agent brief fixture suite
-        if: ${{ (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_agents == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_agents == 'true' || github.event_name != 'pull_request' }}
         run: python3 hooks/test_agent_brief.py
 
       - name: Blind brief fixture suite
-        if: ${{ (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true' || needs.scope.outputs.doc_agents == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true' || needs.scope.outputs.doc_agents == 'true' || github.event_name != 'pull_request' }}
         run: python3 hooks/test_blind_brief.py
 
       - name: Local time line fixture suite
@@ -832,7 +834,7 @@ jobs:
         run: python3 hooks/test_mail.py
 
       - name: Git mailbox wait suite
-        if: ${{ (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_skills == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_skills == 'true' || github.event_name != 'pull_request' }}
         run: python3 hooks/test_mail_wait.py
 
       - name: No-window helper fixture suite
@@ -945,7 +947,7 @@ jobs:
           python3 hooks/test_mutate_ci.py
 
       - name: Map check
-        if: ${{ (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_map == 'true' || needs.scope.outputs.doc_other == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_map == 'true' || needs.scope.outputs.doc_other == 'true' || github.event_name != 'pull_request' }}
         run: bash .github/scripts/map-check.sh
 
       - name: Waiting page staleness fixture suite
@@ -969,7 +971,7 @@ jobs:
         if: ${{ (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/waiting-page/test_question_source.py
       - name: Waiting page park relay prose suite
-        if: ${{ (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true' || needs.scope.outputs.doc_other == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true' || needs.scope.outputs.doc_other == 'true' || github.event_name != 'pull_request' }}
         run: python3 skills/waiting-page/test_skill_park_relay.py
 
       - name: Roadmap builder fixture suite
@@ -980,7 +982,7 @@ jobs:
         run: python3 skills/roadmap/test_derived_status.py
 
       - name: project-ops skill scaffold suite
-        if: ${{ (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true' || github.event_name != 'pull_request' }}
         run: python3 skills/project-ops/tests/test_scaffold.py
 
       - name: project-ops brief tool suite
@@ -990,7 +992,7 @@ jobs:
         run: python3 skills/project-ops/tests/test_runner_state.py
 
       - name: ios-apps skill starter suite
-        if: ${{ (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true' || github.event_name != 'pull_request' }}
         run: python3 skills/ios-apps/tests/test_new_app.py
 
       - name: PowerShell syntax check, install.ps1
