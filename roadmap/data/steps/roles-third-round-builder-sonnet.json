@@ -2,13 +2,13 @@
  "id": "roles-third-round-builder-sonnet",
  "title": "Round 3 builders run Sonnet high: rewrite the rule, the table rows, the guard lift and CLAUDE.md",
  "priority": "next",
- "status": "todo",
+ "status": "ready",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "owner": "consultant",
  "blockedBy": [],
- "updatedAt": "2026-11-16T00:03:00-06:00",
+ "updatedAt": "2026-11-16T00:07:00-06:00",
  "why": "[00:03 CST Nov 16, triage] Ruling own-round3-builder-sonnet (owner in the census lane tonight, relayed by the consultant 00:00 CST Nov 16; time to follow): \"the round 3 builder should have run Sonnet too\". Extends the owner's 2026-11-13 14:05 CST ruling for the round 3 reviewer. Rewrite rule roles-third-round-steps-up, the round rows in agent-model-cap, the guard's Round 3 of 3 Opus lift, and root CLAUDE.md line 23. Page item 915 was drafted as a question and closed as not one. (source: consultant relay; not owner-typed in a session triage read; undoable)",
  "source": "consultant 00:00 CST Nov 16, relaying the census lane's report of the owner's words; not owner-typed",
- "note": "Todo, waits on the owner's answer to page item 915 (the words were hedged, \"i believe\"; consultant 00:01 CST Nov 16). Until then rule roles-third-round-steps-up stands. A builder's third try runs Sonnet high, as the round 3 reviewer already does. Edit rule roles-third-round-steps-up, the round rows in agent-model-cap, the guard's Round 3 of 3 Opus lift and CLAUDE.md line 23, in one lane, red then green on the guard. Owner of the work: the consultant, after goal item 1. No PR yet."
+ "note": "Ready. Owner pick b on page item 915 (typed \"B\" in the consultant's chat, 00:04 CST Nov 16; ruling own-round3-builder-sonnet): a builder's third try runs Sonnet high. Edit rule roles-third-round-steps-up, the round rows in agent-model-cap, the guard's Round 3 of 3 Opus lift and CLAUDE.md line 23 in one lane, red then green on the guard. Owner of the work: the consultant, after goal item 1. Until it lands, lanes follow the rule as written. No PR yet."
 }

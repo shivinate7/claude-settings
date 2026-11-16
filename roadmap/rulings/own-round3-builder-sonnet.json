@@ -1,10 +1,10 @@
 {
  "id": "own-round3-builder-sonnet",
- "at": "2026-11-15T23:57:00-06:00",
- "title": "A builder's third try runs Sonnet, not Opus (hedged; re-asked as page item 915)",
- "ruling": "Owner, in the census lane at 23:57 CST Nov 15, relayed by the consultant at 00:01 CST Nov 16, not typed in a session triage read: \"the builder round 3 shouldve ran sonnet too i believe. message consultant about this deviation u experienced\". It extends the owner's 2026-11-13 14:05 CST ruling \"no opus round 3 here just sonnet high\" (the round 3 reviewer) to the builder's third try. The words are hedged (\"i believe\"), and the consultant first read them as a ruling, then withdrew that reading: page item 915 stays open as a question. Until the owner answers item 915, rule roles-third-round-steps-up (Opus on a builder's third try) stands and lanes follow it. If he answers b, the consultant's rewrite (step roles-third-round-builder-sonnet) proceeds.",
- "quote": "the builder round 3 shouldve ran sonnet too i believe",
- "source": "Census lane report of the owner's words, relayed by the consultant 00:01 CST Nov 16; filed by triage 8",
- "status": "open",
+ "at": "2026-11-16T00:04:00-06:00",
+ "title": "A builder's third try runs Sonnet high, not Opus (owner pick b on item 915)",
+ "ruling": "Owner, typed in the consultant's chat at 00:04 CST Nov 16, relayed by the consultant, answering page item 915: \"B\". A builder's third try runs Sonnet high; it extends the owner's 2026-11-13 14:05 CST ruling (round 3 reviewer, \"no opus round 3 here just sonnet high\"). Earlier words at 23:57 CST Nov 15 in the census lane, hedged: \"the builder round 3 shouldve ran sonnet too i believe\". Rule roles-third-round-steps-up, the round rows in agent-model-cap, the guard's Round 3 of 3 Opus lift and root CLAUDE.md line 23 are to be rewritten by the consultant's lane (step roles-third-round-builder-sonnet), after goal item 1. Until that lands the rule as written stands and lanes follow it. Page item 915 closed 00:06 CST Nov 16.",
+ "quote": "B",
+ "source": "Owner's typed word in the consultant's chat 00:04 CST Nov 16, relayed by the consultant; filed by triage 8",
+ "status": "ruled",
  "step": "roles-third-round-builder-sonnet"
 }
