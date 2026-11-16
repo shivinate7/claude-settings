@@ -5243,10 +5243,8 @@ class GhHalf(Env):
         rc, out = self.run_merge("7", "--confirm", host=self.gh_host())
         self.assert_draft_stops(rc, out, before)
 
-    # Owner ruling, 2026-11-15 18:21 CST, option B: a pull request whose lane lint PASSED for its exact head (`merge --lane-lint` posts the
-    # PASS) merges while its own PR run is still in progress or queued. Main's run after the merge is the check; a red main reverts the blamed
-    # commit. Act 4 (the per-lane merge, pinned in PerLaneMerge) already refuses a pending head with no PASS, so these cases pin only the new
-    # path and its edges: an older head's PASS, a finished red run, and a red main still refuse.
+    # A pull request whose lane lint PASSED for its exact head merges while its own run is still in progress or queued. These cases
+    # also pin three refusals: a PASS on an older head, a finished red run on the head, and a red main.
 
     def pending_head(self, checks, runs):
         """The live head of feat, with feat's one pending record removed, so the run claims nothing and merges in one step. The head's checks
