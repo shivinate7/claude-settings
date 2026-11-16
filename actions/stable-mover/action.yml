@@ -1,11 +1,11 @@
 name: Stable mover
 description: >
-  Moves the stable branch to the head of a green main run that covers the slow legs. Fast-forward only: it refuses a run
-  that did not succeed, a push run that ran only the Linux fast jobs (no push-skip proof), and a head that does not
-  descend from stable, and it never forces. A green schedule run (the daily, which runs every job unless nightly-skip skipped it: then it runs no check job) and a green push run
-  that the push skip proved move stable (owner page item 880, 11:53 CST Nov 15). The caller needs actions/checkout with
-  fetch-depth 0 so the history reaches stable, and a token that can push to the repository and read its Actions runs
-  (the job's contents: write and actions: read).
+  Moves the stable branch to the head of a green main run. Fast-forward only: it refuses a run that did not succeed,
+  a run that is neither a push run nor a schedule run, and a head that does not descend from stable, and it never forces.
+  A green push run and a green schedule run (the daily, which runs every job unless nightly-skip skipped it: then it runs no
+  check job) move stable (owner, 12:59 CST Nov 16: stable follows each green push run of main, for now). The caller needs actions/checkout with
+  fetch-depth 0 so the history reaches stable, and a token that can push to the repository
+  (the job's contents: write).
 inputs:
   head-sha:
     description: "The commit the finished run ran on, such as github.event.workflow_run.head_sha."
@@ -16,43 +16,17 @@ inputs:
   event:
     description: "The finished run's event, such as github.event.workflow_run.event: schedule or push. Any other value moves nothing."
     required: true
-  run-id:
-    description: "The finished run's id, such as github.event.workflow_run.id. A push run's jobs are read from it for the push-skip proof."
-    required: true
   token:
-    description: "A token that can push to the repository and read its Actions runs, such as secrets.GITHUB_TOKEN."
+    description: "A token that can push to the repository, such as secrets.GITHUB_TOKEN."
     required: true
 runs:
   using: composite
   steps:
-    - name: Read the push-skip proof of a push run
-      id: proof
-      shell: bash
-      env:
-        RUN_EVENT: ${{ inputs.event }}
-        RUN_ID: ${{ inputs.run-id }}
-        REPO: ${{ github.repository }}
-        GH_TOKEN: ${{ inputs.token }}
-      run: |
-        # A push run is proven when its push-skip job succeeded and its scope job was skipped: every suite then rode a PR run,
-        # the Windows and mutation legs included. A push run whose scope ran covers the Linux fast jobs only. A failed read is
-        # UNKNOWN (exit 2), never proof.
-        # One of three homes of "proven push" (also clear_rule.py `empty_without_evidence` and nightly-skip.py `proven`). This is a bash
-        # composite step, so it cannot import their Python and reads the same two job conclusions with grep.
-        proven=false
-        if [ "$RUN_EVENT" = "push" ]; then
-          jobs=$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100" --jq '.jobs[] | "\(.name)=\(.conclusion)"') \
-            || { echo "stable-mover: UNKNOWN: the jobs of run $RUN_ID could not be read" >&2; exit 2; }
-          if grep -qx 'push-skip=success' <<<"$jobs" && grep -qx 'scope=skipped' <<<"$jobs"; then proven=true; fi
-        fi
-        echo "proven=$proven" >> "$GITHUB_OUTPUT"
-
     - name: Fast-forward stable to the green head
       shell: bash
       env:
         HEAD_SHA: ${{ inputs.head-sha }}
         RUN_CONCLUSION: ${{ inputs.conclusion }}
         RUN_EVENT: ${{ inputs.event }}
-        RUN_PROVEN: ${{ steps.proof.outputs.proven }}
         GH_TOKEN: ${{ inputs.token }}
       run: bash "${{ github.action_path }}/run.sh"
