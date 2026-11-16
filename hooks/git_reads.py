@@ -430,13 +430,29 @@ BASE_COPY_REFLOG_CAP = 20
 _now = time.monotonic
 
 
+def _install_settings_path():
+    """The settings.json one level above the folder named `hooks` that holds this module, or None when no
+    folder on the way up is named `hooks`. The module sits flat in `hooks/` (the repo, or a local install) or in
+    `hooks/guard.d/<id>/` (the guard set folder guard.py loads it from), so the look-up walks up to the folder
+    by name and does not count levels."""
+    folder = os.path.dirname(os.path.realpath(__file__))
+    while os.path.basename(folder) != "hooks":
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            return None
+        folder = parent
+    return os.path.join(os.path.dirname(folder), "settings.json")
+
+
 def _proof_budget():
     """Seconds the proof may spend before it refuses: half the guard hook's own `timeout` in the
-    settings.json that sits beside the hooks folder (the installed copy in the cloud, the repo's file
+    settings.json that sits above the hooks folder (the installed copy in the cloud, the repo's file
     behind a local symlink). Half, because a candidate read that starts just before the deadline may
     run to its own timeout, and the guard has work of its own before and after the proof.
     None when the timeout cannot be read: the caller answers None, which the guard refuses."""
-    path = os.path.join(os.path.dirname(os.path.realpath(__file__)), os.pardir, "settings.json")
+    path = _install_settings_path()
+    if path is None:
+        return None
     try:
         with open(path, encoding="utf-8") as f:
             rows = json.load(f)["hooks"]["PreToolUse"]
