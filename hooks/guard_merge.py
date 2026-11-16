@@ -1372,9 +1372,11 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
 
 
 # ---- merge --role: the role is read from this session's own get_session record
-ROLE_TIERS = ("batch-runner", "lane")  # glossary-ok: ROLE_TIERS is the existing name; merge.py MERGE_ROLES names the same roles
+ROLE_TIERS = ("batch-runner", "lane", "standing")  # glossary-ok: ROLE_TIERS is the existing name; merge.py MERGE_ROLES names the same roles
 LOCAL_ROLE_TIERS = ("batch-runner",)  # glossary-ok: the name a test reads; the roles a local role file may name (merge.py LOCAL_MERGE_ROLES), the lane role is a cloud role only
 ROLE_WITH_STEP = "lane"  # the role whose call also names a step (--step), proved by a cs-step tag of the own record
+STANDING_ROLE = "standing"  # ruling own-tiny-fixes-b: a standing session, not a batch runner, merges its own small edit
+STANDING_HOLDERS = ("coordinator", "triage")  # the cs-build tags that prove the standing session role (decision session-tiers)  # glossary-ok: session-tiers is the decision
 LANE_MERGE_REPO = "shivinate7/claude-settings"  # the one repo whose lanes hold the lane merge role; agrees with merge.py LANE_MERGE_REPO, which this module cannot import
 ROLE_TAG_PREFIX = BUILD_TAG
 ROLE_REASON = (
@@ -1409,7 +1411,7 @@ def merge_tool_args(segment: str):
 
 
 def role_call_of(segment: str):
-    """Return the tier word after the role flag when the segment runs the merge tool with it, else None.
+    """Return the role word after the role flag when the segment runs the merge tool with it, else None.
 
     A role flag with no value gives ''.
     """
@@ -1498,6 +1500,11 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
             from override import remote_session_id
             own_id = remote_session_id()
             if own_id and transcript:
+                if role == STANDING_ROLE:  # a tag set after the record may have changed the role, so that record proves nothing
+                    tags, tagged_after = _own_session_read(transcript, own_id)
+                    if tags is not None and not tagged_after and any(ROLE_TAG_PREFIX + r in tags for r in STANDING_HOLDERS):
+                        continue
+                    return "merge role " + role
                 tags = _own_get_session_tags(transcript, own_id)
                 if role in ROLE_TIERS and tags is not None and ROLE_TAG_PREFIX + role in tags:  # glossary-ok: ROLE_TIERS is the existing name
                     step = role_step_of(segment)

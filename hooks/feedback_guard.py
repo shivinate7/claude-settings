@@ -594,11 +594,9 @@ class Homes:
             return False
         try:
             root = self._cwd_root()
-            page = layout.waiting_page(root) if root else "unknown"
+            return bool(root) and any(layout.is_waiting_page_url(root, u) for u in urls)
         except (layout.LayoutError, ruling_home._GitFailure):
             return False
-        page_id = "" if page == "unknown" else layout.artifact_id(page)
-        return bool(page_id) and any(layout.artifact_id(u) == page_id for u in urls)
 
     def filed_numbers(self):
         """(numbers, branch, folder): the item numbers, as digit strings, that the waiting copy holds. `numbers`

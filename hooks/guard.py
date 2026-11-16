@@ -154,8 +154,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
-                       record (read from the transcript) does not show in its cs-build tags; for the lane
-                       tier, also a `--step` that is no cs-step tag of that record, or a record with no cs-repo
+                       record (read from the transcript) does not show in its cs-build tags. The standing tier
+                       needs the own newest record to show a coordinator or triage tag, with no set_session_tags after it.
+                       For the lane tier, also a `--step` that is no cs-step tag of that record, or a record with no cs-repo
                        tag for shivinate7/claude-settings. Read inside wrappers
                        (`bash -c`, `$(...)`) too. Also a cloud `merge <pr> --ready` from a session whose own
                        record carries cs-build:lane and that cs-repo tag, or an MCP update_pull_request with draft false from
@@ -7365,7 +7366,8 @@ def judge(payload) -> None:
     if tool == COMMENTS_TOOL:
         import question_form
         # A reply whose url names no artifact lands nowhere checkable, so it is refused wherever the repo has a waiting page.
-        if tool_input.get("action") == "reply" and (question_form.is_waiting_page(tool_input, cwd)
+        # The page matches by id in any url form (a bare id, an http link), as the rule's cases pin: a form missed is a reply let through.
+        if tool_input.get("action") == "reply" and (question_form.is_waiting_page(tool_input, cwd, any_form=True)  # glossary-ok: is_waiting_page is the name main already uses
                                                     or (question_form.names_no_artifact(tool_input.get("url"))
                                                         and question_form.has_waiting_page(cwd))):
             refuse(tool, "deny", "page-thread-reply", PAGE_THREAD_REPLY_REASON, str(tool_input.get("thread_id") or "?")[:120])
