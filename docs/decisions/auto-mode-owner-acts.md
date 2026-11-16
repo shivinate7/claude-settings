@@ -84,6 +84,10 @@ Owner, 2026-11-07 13:10 CST, coordinator-reported: a yes the coordinator passes 
 
 Gap update (coordinator, 2026-11-08 12:55 CST): in a session that recorded the batch-runner role, the merge tool now refuses `merge <pr> --confirm` with no `--head`. For such a session, the head binding no longer rests on the batch runner adding `--head` from the relay. The Gap above remains true outside such sessions.
 
+### Lane Own Merge
+
+Owner, 2026-11-16 12:58 CST: "everyone merges". Owner, 14:11 CST, typed in the consultant's chat, option a: "you type here 'yes, add the Lane Own Merge allow entry'. I then build it. It lifts no merge check (lint, review record and head binding stay), and never covers the flags that skip checks, admin merges or settings changes." Incident: the classifier refused a lane's `merge 3583 --confirm` at 13:21 CST and `merge 2917 --confirm` at about 14:02 CST, as "Destructive or Unwanted Actions". The entry allows `~/.claude/bin/merge <pr> --confirm --head <sha>` (optional `--role lane --step <slug>`) by any session. It never covers `--base-red-ok`, `--undo-check-unknown-ok`, an admin or bypass merge, a force push, or a change of permissions, settings or overrides. The "never merge" sentences in "Relayed Merge Yes" and "Consultant Relayed Merge Yes" now point to it.
+
 ### Consultant Relayed Merge Yes
 
 Owner, 2026-11-15 11:18 CST, typed in batch runner 12's chat: `i want the allow rule - u can do that in this lane and merge it in`. Incident: the classifier refused `merge 172 --confirm --head bc38039c4255188e8ab2e1393f4dd9f7e7cdf993` twice, at about 09:03 and 11:05 CST, as "Destructive or Unwanted Actions". The yes was "yes 172", relayed by the owner's consultant. "Relayed Merge Yes" covers only a coordinator relay.
