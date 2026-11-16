@@ -17,6 +17,7 @@ LAYOUT_LINT_UNDER_TEST names the lint folder under test (default: the folder of 
 same cases run against another checkout to show them red there.
 """
 import importlib.util
+import inspect
 import json
 import os
 import shutil
@@ -417,10 +418,12 @@ class GitTree(Tree):
     """The git steps of a fixture repo: one home for the cases that build one (WaitingCopy, DefaultBranchPage)."""
 
     def git(self, *args, input=None, env=None):
-        """One git step of the fixture repo. Commit signing is off for the run (lint/_test_git.py)."""
+        """One git step of the fixture repo. Commit signing is off for the run (lint/_test_git.py). Bytes in and out, so
+        Windows text mode does not write each LF as CRLF."""
         done = subprocess.run(["git", "-C", self.tree, "-c", "user.name=test", "-c", "user.email=test@example.invalid", *args],
-                              capture_output=True, text=True, input=input, env=env, timeout=30, check=True)
-        return done.stdout
+                              capture_output=True, input=None if input is None else input.encode("utf-8"), env=env,
+                              timeout=30, check=True)
+        return done.stdout.decode("utf-8")
 
     def record(self, branch, files):
         """A branch whose one commit holds `files` ({path: text}): refs/heads/<branch>, or the full ref when `branch`
@@ -561,7 +564,7 @@ class DefaultBranchPage(GitTree):
 
     def registry(self, url):
         """The extras file as main holds it: the page is the registry entry whose role is waiting-page."""
-        return json.dumps({"kinds": {}, "artifacts": [{"id": "queue", "url": url, "role": "waiting-page", "account": "current"}]})
+        return json.dumps({"kinds": {}, "artifacts": [{"id": "queue", "role": "waiting-page", "export": "waiting", "links": [{"account": "current", "url": url}]}]})
 
     def old_key(self, url):
         return json.dumps({"kinds": {}, "waiting-page": url})
@@ -696,7 +699,7 @@ class SetWaitingPage(Tree):
 
     def test_no_key_writes_it_and_returns_true(self):
         self.put(EXTRAS, json.dumps({"kinds": {}, "visibility": "public"}))
-        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL))
+        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL, "current"))
         found = json.loads(self.read_bytes())
         self.assertEqual(found["waiting-page"], self.URL)
         self.assertEqual(found["visibility"], "public")
@@ -704,7 +707,7 @@ class SetWaitingPage(Tree):
 
     def test_missing_extras_file_is_created_with_the_key(self):
         self.assertFalse(os.path.exists(self.extras))
-        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL))
+        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL, "current"))
         found = json.loads(self.read_bytes())
         self.assertLessEqual(set(found), {"kinds", "waiting-page"}, found)  # no other key is written
         self.assertEqual(found["waiting-page"], self.URL)
@@ -712,27 +715,27 @@ class SetWaitingPage(Tree):
         self.assertFalse(self.layout.rolled_out(self.tree))
 
     def test_second_call_writes_nothing(self):
-        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL))
+        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL, "current"))
         before = self.read_bytes()
-        self.assertFalse(self.layout.set_waiting_page(self.tree, self.OTHER))
+        self.assertFalse(self.layout.set_waiting_page(self.tree, self.OTHER, "current"))
         self.assertEqual(self.read_bytes(), before)
         self.assertEqual(self.layout.waiting_page(self.tree), self.URL)
 
     def test_key_already_set_returns_false_and_file_is_byte_identical(self):
         self.put(EXTRAS, '{"kinds": {}, "waiting-page": "%s"}\n' % self.URL)  # hand-formatted, never re-dumped
         before = self.read_bytes()
-        self.assertFalse(self.layout.set_waiting_page(self.tree, self.OTHER))
+        self.assertFalse(self.layout.set_waiting_page(self.tree, self.OTHER, "current"))
         self.assertEqual(self.read_bytes(), before)
 
     def test_rolled_out_mark_is_kept(self):
         self.put(EXTRAS, json.dumps({"kinds": {}, "rolled-out": True}))
-        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL))
+        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL, "current"))
         self.assertIs(json.loads(self.read_bytes())["rolled-out"], True)
         self.assertTrue(self.layout.rolled_out(self.tree))
 
     def test_a_repo_with_no_mark_is_not_marked_rolled_out(self):
         self.put(EXTRAS, json.dumps({"kinds": {}}))
-        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL))
+        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL, "current"))
         self.assertNotIn("rolled-out", json.loads(self.read_bytes()))
         self.assertFalse(self.layout.rolled_out(self.tree))
 
@@ -742,7 +745,7 @@ class SetWaitingPage(Tree):
                 if os.path.exists(self.extras):
                     os.remove(self.extras)
                 with self.assertRaises(self.layout.LayoutError):
-                    self.layout.set_waiting_page(self.tree, bad)
+                    self.layout.set_waiting_page(self.tree, bad, "current")
                 self.assertFalse(os.path.exists(self.extras))
 
     def test_a_real_artifact_link_in_either_form_is_accepted(self):
@@ -750,22 +753,36 @@ class SetWaitingPage(Tree):
             with self.subTest(url=url):
                 if os.path.exists(self.extras):
                     os.remove(self.extras)
-                self.assertTrue(self.layout.set_waiting_page(self.tree, url))
+                self.assertTrue(self.layout.set_waiting_page(self.tree, url, "current"))
                 self.assertEqual(self.layout.waiting_page(self.tree), url)
 
     def test_a_null_key_counts_as_unset_and_is_written(self):
         self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page": None, "visibility": "public"}))
-        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL))
+        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL, "current"))
         found = json.loads(self.read_bytes())
         self.assertEqual(found["waiting-page"], self.URL)
         self.assertEqual(found["visibility"], "public")
         self.assertEqual(self.layout.waiting_page(self.tree), self.URL)
 
-    def cli(self, url=None, root=None, cwd=None):
-        """The CLI, `set-waiting-page <root> <url>`, run from `cwd`. The default cwd is a subfolder of the
+    def cli(self, url=None, root=None, cwd=None, account="current"):
+        """The CLI, `set-waiting-page <root> <url> <label>`, run from `cwd`. The default cwd is a subfolder of the
         tree, so a run that writes into its working folder shows up there as a stray file."""
-        return run([os.path.join(LINT, "layout.py"), "set-waiting-page", root or self.tree, url or self.URL],
+        return run([os.path.join(LINT, "layout.py"), "set-waiting-page", root or self.tree, url or self.URL, account],
                    cwd or self.sub)
+
+    def test_set_page_has_no_default_account_label(self):
+        """The account label is a required argument: a call with no label is a TypeError, and writes nothing."""
+        with self.assertRaises(TypeError, msg="set_waiting_page(root, url) took no account label: the call did not raise TypeError"):
+            self.layout.set_waiting_page(self.tree, self.URL)
+        self.assertFalse(os.path.exists(self.extras), "set_waiting_page wrote the extras file with no account label")
+
+    def test_cli_with_no_label_exits_non_zero_with_a_usage_line_naming_the_label(self):
+        """`set-waiting-page <root> <url>` with no label is refused: non-zero, a usage line that names the label, and no file."""
+        code, out = run([os.path.join(LINT, "layout.py"), "set-waiting-page", self.tree, self.URL], self.sub)
+        self.assertNotEqual(code, 0, "the CLI exits 0 with no account label: %s" % out)
+        self.assertIn("usage", out.lower(), "the refusal of a CLI call with no label prints no usage line: %s" % out)
+        self.assertIn("label", out, "the usage line does not name the label: %s" % out)
+        self.assertFalse(os.path.exists(self.extras), "the CLI wrote the extras file with no account label")
 
     def test_cli_writes_the_key_and_exits_0(self):
         code, out = self.cli()
@@ -779,7 +796,7 @@ class SetWaitingPage(Tree):
         self.assertFalse(os.path.exists(os.path.join(self.sub, ".claude")), "the subfolder got a .claude folder")
 
     def test_the_old_form_with_no_root_is_refused_and_writes_nowhere(self):
-        code, out = run([os.path.join(LINT, "layout.py"), "set-waiting-page", self.URL], self.sub)
+        code, out = run([os.path.join(LINT, "layout.py"), "set-waiting-page", self.URL, "current"], self.sub)
         self.assertNotEqual(code, 0, out)
         self.assertFalse(os.path.exists(os.path.join(self.sub, ".claude")), "the old form wrote into the working folder")
         self.assertFalse(os.path.exists(self.extras))
@@ -819,10 +836,13 @@ class SetWaitingPage(Tree):
 
 class Registry(Tree):
     """The artifacts registry: each claude.ai artifact a repo holds is one entry under "artifacts" in its extras file.
-    The waiting page is the entry whose role is "waiting-page". The old "waiting-page" key stays a fallback after it."""
+    An entry's claude.ai links are a list, one {account, url} per account label; a session opens the link of its own
+    account. Each entry has its git export path, required. The waiting page is the
+    entry whose role is "waiting-page". The old "waiting-page" key stays a fallback after it."""
     PAGE = "https://claude.ai/artifact/page01"
     OLD = "https://claude.ai/artifact/old001"
     QUEUE = "https://claude.ai/code/artifact/queue02"
+    OTHER = "https://claude.ai/artifact/outlook3"
 
     def setUp(self):
         super().setUp()
@@ -835,23 +855,54 @@ class Registry(Tree):
         self.put(EXTRAS, json.dumps(data))
 
     def page_entry(self, **changes):
-        return dict({"id": "page01", "url": self.PAGE, "role": "waiting-page", "account": "work"}, **changes)
+        return dict({"id": "page01", "role": "waiting-page", "export": "waiting",
+                     "links": [{"account": "work", "url": self.PAGE}]}, **changes)
 
     def queue_entry(self, **changes):
-        return dict({"id": "queue02", "url": self.QUEUE, "role": "queue-page", "account": "work",
-                     "collections": ["items"]}, **changes)
+        return dict({"id": "queue02", "role": "queue-page", "export": "artifacts/queue02",
+                     "links": [{"account": "work", "url": self.QUEUE}], "collections": ["items"]}, **changes)
 
     def external_entry(self, entry_id="ext001", **changes):
         """An artifact the repo holds and does not export (`export` false): a page in an account this one cannot read."""
-        return dict({"id": entry_id, "url": "https://claude.ai/artifact/" + entry_id, "role": "page",
-                     "account": "other-account", "export": False}, **changes)
+        return dict({"id": entry_id, "role": "page", "export": False,
+                     "links": [{"account": "other-account", "url": "https://claude.ai/artifact/" + entry_id}]}, **changes)
 
     def read_registry(self, what):
         """layout.artifacts() of the fixture repo. A refusal fails the case with its cause, never as a crash."""
+        return self.call(self.layout.artifacts, self.tree, what=what)
+
+    def call(self, fn, *args, what=None, **kwargs):
+        """fn(*args) of the layout. A refusal fails the case with its cause, never as a crash."""
         try:
-            return self.artifacts()
+            return fn(*args, **kwargs)
         except self.layout.LayoutError as err:
-            self.fail("%s was refused: %s" % (what, err))
+            self.fail("%s was refused: %s" % (what or fn.__name__, err))
+
+    def waiting(self, **kwargs):
+        """layout.waiting_page(root) of the fixture repo, with the keyword `account` when given."""
+        return self.call(self.layout.waiting_page, self.tree, **kwargs)
+
+    def stored(self, entry_id):
+        """The entry `entry_id` as the extras file holds it, read back from disk."""
+        with open(os.path.join(self.tree, *EXTRAS.split("/")), encoding="utf-8") as handle:
+            data = json.load(handle)
+        return next(e for e in data["artifacts"] if e["id"] == entry_id)
+
+    def assertTakes(self, fn, name):
+        """`fn` reads the keyword `name`. Without it the call is a TypeError, so the case states the absence as a failure."""
+        self.assertIn(name, inspect.signature(fn).parameters, "%s takes no %s argument" % (fn.__name__, name))
+
+    def assertLinkShapeReads(self):
+        """Control, in a repo of its own: a valid entry with links reads and its links come back as written. A registry
+        that reads only the old entry-level url fails here first, with that cause."""
+        tree = tempfile.mkdtemp(prefix="links_", dir=RUN_FOLDER)
+        self.addCleanup(tracked_tree.rm_tree, tree)
+        path = os.path.join(tree, *EXTRAS.split("/"))
+        os.makedirs(os.path.dirname(path))
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump({"kinds": {}, "artifacts": [self.page_entry()]}, handle)
+        found = self.call(self.layout.artifacts, tree, what="a valid entry with links")
+        self.assertEqual(found[0].get("links"), [{"account": "work", "url": self.PAGE}], "a valid entry's links were not read back")
 
     def artifacts(self):
         self.assertTrue(hasattr(self.layout, "artifacts"), "layout.artifacts(root) is absent: the artifacts registry is not read")
@@ -859,44 +910,115 @@ class Registry(Tree):
 
     def assertReported(self, entry_id, cause):
         """layout.artifacts() refuses the registry, and its message names the entry by id."""
+        self.assertLinkShapeReads()
         with self.assertRaises(self.layout.LayoutError, msg="%s was not reported" % cause) as caught:
             self.artifacts()
         self.assertIn(entry_id, str(caught.exception), "the report for %s does not name entry %s" % (cause, entry_id))
 
+    def assertLinksRefused(self, entry, cause):
+        """`entry` alone in the registry is refused, and the message names its entry and the links remedy."""
+        self.registry([entry])
+        with self.assertRaises(self.layout.LayoutError, msg="%s was not refused" % cause) as caught:
+            self.artifacts()
+        message = str(caught.exception)
+        self.assertIn(entry["id"], message, "the refusal of %s does not name entry %s" % (cause, entry["id"]))
+        self.assertIn("links", message, "the refusal of %s does not name links, the remedy" % cause)
+
     def test_artifacts_reads_each_registry_entry_in_order(self):
         self.registry([self.page_entry(), self.queue_entry()])
-        found = self.artifacts()
+        found = self.read_registry("two registry entries")
         self.assertEqual([e["id"] for e in found], ["page01", "queue02"], "the registry entries were not read in order")
         self.assertEqual([e["role"] for e in found], ["waiting-page", "queue-page"], "an entry's role was not read")
-        self.assertEqual([e["url"] for e in found], [self.PAGE, self.QUEUE], "an entry's url was not read")
+        self.assertEqual([e["links"] for e in found], [[{"account": "work", "url": self.PAGE}],
+                                                      [{"account": "work", "url": self.QUEUE}]],
+                         "an entry's links were not read")
 
     def test_a_repo_with_no_extras_file_has_no_artifacts(self):
         self.assertEqual(self.artifacts(), [], "a repo with no extras file was given registry entries")
 
-    def test_the_waiting_page_is_the_waiting_page_role_entry(self):
-        self.registry([self.queue_entry(), self.page_entry()])
-        self.assertEqual(self.layout.waiting_page(self.tree), self.PAGE, "the waiting-page role entry was not read as the page")
-
-    def test_the_waiting_page_role_entry_beats_the_old_key(self):
-        self.registry([self.page_entry()], key=self.OLD)
-        self.assertEqual(self.layout.waiting_page(self.tree), self.PAGE, "the old key won over the waiting-page role entry")
-
-    def test_the_old_key_is_the_fallback_when_no_role_entry_is_set(self):
-        self.registry([self.queue_entry()], key=self.OLD)
-        self.assertEqual(self.layout.waiting_page(self.tree), self.OLD, "the old key was not read as the fallback page")
-
-    def test_a_queue_page_entry_is_not_the_waiting_page(self):
+    def test_set_waiting_page_writes_the_old_key_and_keeps_the_registry(self):
         self.registry([self.queue_entry()])
-        self.assertEqual(self.layout.waiting_page(self.tree), "unknown", "a queue-page entry was read as the waiting page")
+        self.assertTrue(self.call(self.layout.set_waiting_page, self.tree, self.OLD, "current"), "set_waiting_page did not write the key")
+        with open(os.path.join(self.tree, *EXTRAS.split("/")), encoding="utf-8") as handle:
+            data = json.load(handle)
+        self.assertEqual(data.get("waiting-page"), self.OLD, "set_waiting_page did not write the old key")
+        self.assertEqual(data.get("artifacts"), [self.queue_entry()], "set_waiting_page dropped the registry")
 
-    def test_a_waiting_page_role_entry_whose_url_is_not_an_artifact_link_is_an_error(self):
-        self.registry([self.page_entry(url="https://example.com/x")])
-        with self.assertRaises(self.layout.LayoutError, msg="a role entry that is not an artifact link was not an error"):
-            self.layout.waiting_page(self.tree)
+    def test_each_entry_carries_its_links_and_no_entry_level_url_or_account(self):
+        self.registry([self.page_entry()])
+        found = self.read_registry("an entry with links")
+        self.assertEqual(found[0]["links"], [{"account": "work", "url": self.PAGE}], "the entry's links were not read as a list")
+        self.assertNotIn("url", found[0], "the result still carries a url, not links")
+        self.assertNotIn("account", found[0], "the result still carries an account, not links")
 
-    def test_an_email_as_account_is_reported_by_its_entry(self):
-        self.registry([self.page_entry(account="someone@example.com")])
-        self.assertReported("page01", "an email as account")
+    def test_an_entry_with_links_for_two_accounts_reads_both_in_order(self):
+        """Two account labels, one link each; the second link is in the code form of the same artifact URL shape."""
+        code = "https://claude.ai/code/artifact/outlook3"
+        self.registry([self.page_entry(links=[{"account": "work", "url": self.PAGE},
+                                              {"account": "outlook", "url": code}])])
+        found = self.read_registry("an entry with two accounts' links")
+        self.assertEqual(found[0]["links"], [{"account": "work", "url": self.PAGE}, {"account": "outlook", "url": code}],
+                         "the two links were not read in order, in the code form too")
+
+    def test_links_may_be_empty(self):
+        self.registry([self.queue_entry(links=[])])
+        found = self.read_registry("an entry with links []")
+        self.assertEqual(found[0]["links"], [], "an entry with no links was not read with links []")
+
+    def test_an_entry_level_url_is_refused_and_names_the_entry_and_the_links_remedy(self):
+        self.registry([self.page_entry(url=self.PAGE)])
+        with self.assertRaises(self.layout.LayoutError, msg="an entry-level url was not refused") as caught:
+            self.artifacts()
+        self.assertIn("page01", str(caught.exception), "the refusal of an entry-level url does not name its entry")
+        self.assertIn("links", str(caught.exception), "the refusal of an entry-level url does not give the links remedy")
+
+    def test_an_entry_level_account_is_refused_and_names_the_entry_and_the_links_remedy(self):
+        self.registry([self.page_entry(account="work")])
+        with self.assertRaises(self.layout.LayoutError, msg="an entry-level account was not refused") as caught:
+            self.artifacts()
+        self.assertIn("page01", str(caught.exception), "the refusal of an entry-level account does not name its entry")
+        self.assertIn("links", str(caught.exception), "the refusal of an entry-level account does not give the links remedy")
+
+    def test_links_that_are_not_a_list_of_objects_are_refused_and_named(self):
+        for value in ({"account": "work", "url": self.PAGE}, "work"):
+            with self.subTest(links=value):
+                self.assertLinksRefused(self.page_entry(links=value), "links that is not a list of objects")
+
+    def test_a_link_url_that_is_not_an_artifact_link_with_an_id_is_refused_and_named(self):
+        for url in ("https://example.com/x", "https://claude.ai/artifact/", "claude.ai/artifact/page01", ""):
+            with self.subTest(url=url):
+                self.assertLinksRefused(self.page_entry(links=[{"account": "work", "url": url}]), "a link url %r" % url)
+
+    def test_a_link_url_with_text_after_its_id_is_refused_and_named(self):
+        """A link is the claude.ai artifact link of one id, the same rule as set_waiting_page's ARTIFACT_URL fullmatch: no
+        path after the id, no space, no `@`. The control reads the /code/artifact/ form, which stays accepted."""
+        self.registry([self.page_entry(links=[{"account": "work", "url": "https://claude.ai/code/artifact/abc123"}])])
+        self.assertEqual([e["id"] for e in self.read_registry("the /code/artifact/ form of a link")], ["page01"],
+                         "the /code/artifact/ form of a link was refused")
+        for url in ("https://claude.ai/artifact/AbC123/extra", "https://claude.ai/artifact/abc def", "https://claude.ai/artifact/abc@x"):
+            with self.subTest(url=url):
+                self.assertLinksRefused(self.page_entry(links=[{"account": "work", "url": url}]),
+                                        "a link url %r with text after its id" % url)
+
+    def test_a_link_account_that_is_an_email_or_empty_is_refused_and_named(self):
+        for account in ("someone@example.com", ""):
+            with self.subTest(account=account):
+                self.assertLinksRefused(self.page_entry(links=[{"account": account, "url": self.PAGE}]),
+                                        "a link account %r" % account)
+
+    def test_a_link_with_no_account_or_no_url_is_refused_and_named(self):
+        for link in ({"url": self.PAGE}, {"account": "work"}):
+            with self.subTest(link=link):
+                self.assertLinksRefused(self.page_entry(links=[link]), "a link missing a key: %r" % link)
+
+    def test_two_links_for_one_account_are_refused_and_named(self):
+        self.assertLinksRefused(self.page_entry(links=[{"account": "work", "url": self.PAGE},
+                                                       {"account": "work", "url": self.OTHER}]),
+                                "two links for one account")
+
+    def test_an_email_as_a_link_account_is_reported_by_its_entry(self):
+        self.registry([self.page_entry(links=[{"account": "someone@example.com", "url": self.PAGE}])])
+        self.assertReported("page01", "an email as a link account")
 
     def test_a_duplicate_id_is_reported_by_its_entry(self):
         self.registry([self.page_entry(), self.queue_entry(id="page01")])
@@ -904,21 +1026,39 @@ class Registry(Tree):
 
     def test_an_id_over_32_characters_is_reported_by_its_entry(self):
         long_id = "a" * 33
-        self.registry([self.page_entry(id=long_id, url="https://claude.ai/artifact/" + long_id)])
+        self.registry([self.page_entry(id=long_id, links=[{"account": "work", "url": "https://claude.ai/artifact/" + long_id}])])
         self.assertReported(long_id, "an id of 33 characters")
 
     def test_an_id_of_32_characters_is_accepted(self):
         long_id = "b" * 32
-        self.registry([self.page_entry(id=long_id, url="https://claude.ai/artifact/" + long_id)])
-        self.assertEqual([e["id"] for e in self.artifacts()], [long_id], "an id of 32 characters was refused")
+        self.registry([self.page_entry(id=long_id, links=[{"account": "work", "url": "https://claude.ai/artifact/" + long_id}])])
+        self.assertEqual([e["id"] for e in self.read_registry("an id of 32 characters")], [long_id],
+                         "an id of 32 characters was refused")
 
-    def test_set_waiting_page_writes_the_old_key_and_keeps_the_registry(self):
-        self.registry([self.queue_entry()])
-        self.assertTrue(self.layout.set_waiting_page(self.tree, self.OLD), "set_waiting_page did not write the key")
-        with open(os.path.join(self.tree, *EXTRAS.split("/")), encoding="utf-8") as handle:
-            data = json.load(handle)
-        self.assertEqual(data.get("waiting-page"), self.OLD, "set_waiting_page did not write the old key")
-        self.assertEqual(data.get("artifacts"), [self.queue_entry()], "set_waiting_page dropped the registry")
+    def test_an_entry_with_no_export_key_is_refused_and_names_export(self):
+        """The git export path of each entry is required, and `false` holds it. An entry with no export key is refused,
+        and the refusal names the entry."""
+        for entry in (self.queue_entry(), self.page_entry()):
+            entry = dict(entry)
+            del entry["export"]
+            with self.subTest(entry=entry["id"]):
+                self.assertLinkShapeReads()
+                self.registry([entry])
+                with self.assertRaises(self.layout.LayoutError, msg="an entry with no export key was not refused") as caught:
+                    self.artifacts()
+                self.assertIn(entry["id"], str(caught.exception), "the refusal does not name entry %s" % entry["id"])
+                self.assertIn("export", str(caught.exception), "the refusal does not name the missing export")
+
+    def test_an_export_outside_the_repo_is_refused_and_names_the_entry(self):
+        self.registry([self.queue_entry(export="../outside")])
+        self.assertReported("queue02", "an export path outside the repo")
+
+    def test_a_full_registry_of_nine_reads_in_order_and_the_waiting_page_stays_readable(self):
+        ids = ["ext%03d" % n for n in range(1, 9)]
+        self.registry([self.page_entry()] + [self.external_entry(i) for i in ids])
+        found = self.read_registry("a registry of nine entries, eight with export false")
+        self.assertEqual([e["id"] for e in found], ["page01"] + ids, "the nine registry entries were not read in order")
+        self.assertEqual(self.waiting(), self.PAGE, "the waiting page was not read beside the export false entries")
 
     def test_an_export_false_entry_is_read_with_no_export_path(self):
         self.registry([self.external_entry()])
@@ -926,27 +1066,18 @@ class Registry(Tree):
         self.assertEqual([e["id"] for e in found], ["ext001"], "the export false entry was not read")
         self.assertFalse(found[0].get("export"), "the export false entry was given an export path")
 
-    def test_a_full_registry_of_nine_reads_in_order_and_the_waiting_page_stays_readable(self):
-        ids = ["ext%03d" % n for n in range(1, 9)]
-        self.registry([self.page_entry()] + [self.external_entry(i) for i in ids])
-        found = self.read_registry("a registry of nine entries, eight with export false")
-        self.assertEqual([e["id"] for e in found], ["page01"] + ids, "the nine registry entries were not read in order")
-        try:
-            page = self.layout.waiting_page(self.tree)
-        except self.layout.LayoutError as err:
-            self.fail("the waiting page was refused beside the export false entries: %s" % err)
-        self.assertEqual(page, self.PAGE, "the waiting page was not read beside the export false entries")
-
-    def test_an_export_false_entry_still_refuses_a_bad_url_and_an_email_as_account(self):
-        """Control: export false skips only the collections and the export path. The other checks still refuse."""
-        for label, changes in (("a url that is not an artifact link", {"url": "https://example.com/x"}),
-                               ("an email as account", {"account": "someone@example.com"})):
+    def test_an_export_false_entry_still_refuses_a_bad_link_and_an_email_as_account(self):
+        """Control: export false skips only the collections and the export path. The link checks still refuse."""
+        for label, links in (("a link url that is not an artifact link",
+                              [{"account": "other-account", "url": "https://example.com/x"}]),
+                             ("an email as a link account",
+                              [{"account": "someone@example.com", "url": "https://claude.ai/artifact/ext001"}])):
             with self.subTest(check=label):
-                self.registry([self.external_entry(**changes)])
-                self.assertReported("ext001", label)
+                self.assertLinksRefused(self.external_entry(links=links), label)
 
     def test_an_export_that_is_true_or_empty_is_still_refused_and_names_its_entry(self):
         """Control: export is false or a path. True and an empty value stay refused, and the refusal names the entry."""
+        self.assertLinkShapeReads()
         for value in (True, ""):
             with self.subTest(export=value):
                 self.registry([self.external_entry(export=value, collections=["items"])])
@@ -955,10 +1086,13 @@ class Registry(Tree):
                 self.assertIn("export", str(caught.exception), "the refusal of export %r does not name export" % (value,))
                 self.assertIn("ext001", str(caught.exception), "the refusal of export %r does not name its entry" % (value,))
 
-    def test_an_entry_with_no_export_key_still_needs_collections(self):
-        """Control: export false is opt-in. An entry with neither collections nor export is still refused."""
-        self.registry([{"id": "ext001", "url": "https://claude.ai/artifact/ext001", "role": "page", "account": "other-account"}])
-        with self.assertRaises(self.layout.LayoutError, msg="an entry with no collections and no export was not refused") as caught:
+    def test_an_entry_with_its_export_but_no_collections_still_needs_collections(self):
+        """Control: an entry with a path and no collections is still refused for its collections. Its export path is given,
+        since the path is required, so the collections are the refusal left."""
+        self.assertLinkShapeReads()
+        self.registry([{"id": "ext001", "role": "page", "export": "artifacts/ext001",
+                        "links": [{"account": "other-account", "url": "https://claude.ai/artifact/ext001"}]}])
+        with self.assertRaises(self.layout.LayoutError, msg="an entry with no collections was not refused") as caught:
             self.artifacts()
         self.assertIn("collections", str(caught.exception), "the refusal does not name the missing collections")
         self.assertIn("ext001", str(caught.exception), "the refusal does not name its entry")
@@ -970,29 +1104,131 @@ class Registry(Tree):
         self.assertEqual([e["id"] for e in found], ["queue02"], "the page-only entry was not read")
         self.assertEqual(found[0]["collections"], [], "the page-only entry was not read with no collections")
 
-    def test_a_page_only_entry_exports_to_its_artifact_folder(self):
-        self.registry([self.queue_entry(collections=[])])
-        found = self.read_registry("a page-only entry with collections []")
-        self.assertEqual(found[0]["export"], "artifacts/queue02", "a page-only entry does not export to artifacts/<id>")
-
     def test_a_waiting_page_entry_with_empty_collections_is_still_refused_and_named(self):
-        """Control: the waiting page exports its five collections, so an empty list on its role is refused, not read."""
+        """Control: the waiting page exports its six collections, so an empty list on its role is refused, not read."""
         self.registry([self.page_entry(collections=[])])
         self.assertReported("page01", "a waiting-page entry with collections []")
 
     def test_an_export_path_entry_keeps_its_path(self):
         """Control: an entry with a path exports to that path, as it does today."""
         self.registry([self.queue_entry(export="artifacts/custom")])
-        found = self.artifacts()
+        found = self.read_registry("an entry with an export path")
         self.assertEqual(len(found), 1, "the entry with a path was not read")
         self.assertEqual(found[0]["export"], "artifacts/custom", "an entry's export path was not kept")
 
     def test_a_waiting_page_entry_with_export_false_is_refused_and_named(self):
         """The waiting page is always exported to the waiting-data folder, so export false on its role is refused, not held."""
+        self.assertLinkShapeReads()
         self.registry([self.page_entry(export=False)])
         with self.assertRaises(self.layout.LayoutError, msg="a waiting-page entry with export false was accepted") as caught:
             self.artifacts()
         self.assertIn("page01", str(caught.exception), "the refusal of a waiting-page entry with export false does not name its entry")
+
+    def test_the_waiting_page_is_the_waiting_page_role_entry(self):
+        self.registry([self.queue_entry(), self.page_entry()])
+        self.assertEqual(self.waiting(), self.PAGE, "the waiting-page role entry was not read as the page")
+
+    def test_the_waiting_page_role_entry_beats_the_old_key(self):
+        self.registry([self.page_entry()], key=self.OLD)
+        self.assertEqual(self.waiting(), self.PAGE, "the old key won over the waiting-page role entry")
+
+    def test_the_old_key_is_the_fallback_when_no_role_entry_is_set(self):
+        self.registry([self.queue_entry()], key=self.OLD)
+        self.assertEqual(self.waiting(), self.OLD, "the old key was not read as the fallback page")
+
+    def test_a_queue_page_entry_is_not_the_waiting_page(self):
+        self.registry([self.queue_entry()])
+        self.assertEqual(self.waiting(), "unknown", "a queue-page entry was read as the waiting page")
+
+    def test_a_page_link_that_is_not_an_artifact_link_is_an_error(self):
+        self.assertLinkShapeReads()
+        self.registry([self.page_entry(links=[{"account": "work", "url": "https://example.com/x"}])])
+        with self.assertRaises(self.layout.LayoutError, msg="a waiting-page link that is not an artifact link was not an error"):
+            self.layout.waiting_page(self.tree)
+
+    def test_page_reads_the_link_of_the_account_asked_for(self):
+        self.registry([self.page_entry(links=[{"account": "work", "url": self.PAGE},
+                                              {"account": "outlook", "url": self.OTHER}])])
+        self.assertTakes(self.layout.waiting_page, "account")
+        self.assertEqual(self.waiting(account="outlook"), self.OTHER, "the link of the account asked for was not read")
+
+    def test_page_without_an_account_reads_the_first_link(self):
+        self.registry([self.page_entry(links=[{"account": "work", "url": self.PAGE},
+                                              {"account": "outlook", "url": self.OTHER}])])
+        self.assertEqual(self.waiting(), self.PAGE, "with no account the first link was not read")
+
+    def test_page_for_an_account_with_no_link_reads_the_first_link(self):
+        self.registry([self.page_entry(links=[{"account": "work", "url": self.PAGE},
+                                              {"account": "outlook", "url": self.OTHER}])])
+        self.assertTakes(self.layout.waiting_page, "account")
+        self.assertEqual(self.waiting(account="gmail"), self.PAGE, "an account with no link did not read the first link")
+
+    def test_page_with_no_link_at_all_is_unknown(self):
+        self.registry([self.page_entry(links=[])])
+        self.assertEqual(self.waiting(), "unknown", "a waiting-page entry with no link was read as a page")
+
+    def test_is_page_url_is_true_for_any_link_of_the_waiting_entry(self):
+        self.registry([self.page_entry(links=[{"account": "work", "url": self.PAGE},
+                                              {"account": "outlook", "url": self.OTHER}])])
+        for url in (self.PAGE, self.OTHER, self.OTHER.replace("/artifact/", "/code/artifact/")):
+            with self.subTest(url=url):
+                self.assertTrue(self.call(self.layout.is_waiting_page_url, self.tree, url),
+                                "a link of the waiting entry is not the waiting page: %s" % url)
+
+    def test_is_page_url_is_false_for_a_link_of_another_entry(self):
+        self.registry([self.page_entry(), self.queue_entry()])
+        self.assertFalse(self.call(self.layout.is_waiting_page_url, self.tree, self.QUEUE),
+                         "a link of the queue entry was read as the waiting page")
+
+    def test_set_page_adds_the_named_accounts_link_and_keeps_the_others(self):
+        self.registry([self.page_entry()])
+        self.assertTakes(self.layout.set_waiting_page, "account")
+        self.assertTrue(self.call(self.layout.set_waiting_page, self.tree, self.OTHER, account="outlook"),
+                        "a new account link on the waiting page was not written")
+        stored = self.stored("page01")
+        self.assertEqual(stored["links"], [{"account": "work", "url": self.PAGE}, {"account": "outlook", "url": self.OTHER}],
+                         "the account link was not added beside the others")
+        self.assertNotIn("url", stored, "set_waiting_page wrote an entry-level url")
+        self.assertNotIn("account", stored, "set_waiting_page wrote an entry-level account")
+
+    def test_set_page_with_the_current_label_writes_the_current_account(self):
+        self.registry([self.page_entry(links=[])])
+        self.assertTrue(self.call(self.layout.set_waiting_page, self.tree, self.OTHER, "current"), "the link was not written")
+        self.assertEqual(self.stored("page01")["links"], [{"account": "current", "url": self.OTHER}],
+                         "with no account the link was not written as the current account")
+
+    def test_set_page_updates_only_the_named_accounts_link(self):
+        self.registry([self.page_entry(links=[{"account": "work", "url": self.PAGE},
+                                              {"account": "outlook", "url": self.OLD}])])
+        self.assertTakes(self.layout.set_waiting_page, "account")
+        self.assertTrue(self.call(self.layout.set_waiting_page, self.tree, self.OTHER, account="outlook"),
+                        "the outlook link was not changed to the new artifact")
+        self.assertEqual(self.stored("page01")["links"], [{"account": "work", "url": self.PAGE},
+                                                          {"account": "outlook", "url": self.OTHER}],
+                         "the other account's link changed, or the named one did not")
+
+    def test_set_page_for_the_same_artifact_on_that_account_is_false_and_writes_nothing(self):
+        self.registry([self.page_entry()])
+        self.assertTakes(self.layout.set_waiting_page, "account")
+        extras = os.path.join(self.tree, *EXTRAS.split("/"))
+        with open(extras, "rb") as handle:
+            before = handle.read()
+        code_form = self.PAGE.replace("/artifact/", "/code/artifact/")
+        self.assertFalse(self.call(self.layout.set_waiting_page, self.tree, code_form, account="work"),
+                         "the same artifact on the same account was counted as a change")
+        with open(extras, "rb") as handle:
+            self.assertEqual(handle.read(), before, "the same artifact on the same account rewrote the extras file")
+
+    def test_set_page_refuses_an_email_as_account_and_writes_nothing(self):
+        self.registry([self.page_entry()])
+        self.assertTakes(self.layout.set_waiting_page, "account")
+        extras = os.path.join(self.tree, *EXTRAS.split("/"))
+        with open(extras, "rb") as handle:
+            before = handle.read()
+        with self.assertRaises(self.layout.LayoutError, msg="an email as the account of a waiting-page link was accepted"):
+            self.layout.set_waiting_page(self.tree, self.OTHER, account="someone@example.com")
+        with open(extras, "rb") as handle:
+            self.assertEqual(handle.read(), before, "a refused account still rewrote the extras file")
 
 
 class WaitingPageBranding(Tree):

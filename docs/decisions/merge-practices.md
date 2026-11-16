@@ -12,8 +12,9 @@ M2. Before a merge, judge the base branch's newest completed run per event group
 - joyous #68 — a red scheduled run on old main blocked every joyous merge until a newer green run of the same jobs cleared it (decision `no-merge-onto-red-main`).
 Applies to: every merge.
 
-M3. Merge only on a head that is green on its own base and merges cleanly with the base tip. The head need not hold the tip.
-- claude-settings steps c97 and c150 (decision `merge-needs-current-base`).
+M3. Merge only on a head that merges cleanly with the base tip, and whose own run is green or still pending under a lane-lint PASS for that head. The head need not hold the tip. A finished red run, a red main and a PASS for another head refuse. A PASS for another head counts only when it carries over claim commits, or, for a PR that replaces a source PR, an identical tree.
+- claude-settings steps c97 and c150 (decision `merge-needs-current-base`, a clean merge with the base tip and a green or lint-passed run).
+- Owner ruling `own-merge-on-lint-pass` (owner, 2026-11-15 18:21 CST, typed "B for sure"): main's run after the merge is the check, and a red main reverts the blamed commit.
 Applies to: every merge.
 
 M4. Read every page of a PR's file list, or read git.

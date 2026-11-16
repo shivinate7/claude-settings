@@ -949,9 +949,11 @@ class ReviewRecordTests(unittest.TestCase):
                    GIT_INDEX_FILE=os.path.join(self.run_dir, "roadmap.index"))
 
         def git_in(*args, text=None):
-            r = subprocess.run(["git", "-C", self.repo, *args], input=text, capture_output=True, text=True, env=env)
-            self.assertEqual(r.returncode, 0, r.stderr)
-            return r.stdout.strip()
+            # Bytes, not text mode: Windows text mode writes each LF as CRLF, and the blob would keep the CR.
+            r = subprocess.run(["git", "-C", self.repo, *args], input=None if text is None else text.encode("utf-8"),
+                               capture_output=True, env=env)
+            self.assertEqual(r.returncode, 0, r.stderr.decode("utf-8", "replace"))
+            return r.stdout.decode("utf-8").strip()
 
         for path, body in files.items():
             blob = git_in("hash-object", "-w", "--stdin", text=body)
