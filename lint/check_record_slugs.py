@@ -8,8 +8,14 @@ Also fails when a debt file deleted, renamed out of the debt folder, or edited t
 origin/main was a feel-fix (a line starting `**Feel.**`) with no valid device-trial line (`**Device check.**`, then
 simulator or device, then an ISO time with a zone): a fix CI passes can still feel wrong on a device.
 
+Also fails on the notes (decision notes-merge-union): the old notes file takes deletes only, so a line added to it
+whose full text is not at the merge base is refused, an in-place edit included. A note is a file in the note folder
+(lint/layout.json, kind notes) that holds one line `- <slug>: <text>`, its slug equal to its file name. An added note
+file whose name is over 32 characters, or whose line is not in that form, is refused. The folder's README is not a
+note. A deleted or edited note file passes.
+
     python3 lint/check_record_slugs.py [file ...]
-        # files given: check those, skip git
+        # files given: check those, skip git, so only the slug length of a note file is read
 
 The functions take a repo root, so lint/compliance_probes.py reads a child's records with them.
 """
@@ -123,6 +129,59 @@ def unchecked_feel_debts(root, moved):
     return out
 
 
+NOTE_LINE = re.compile(r"^- ([a-z0-9-]+): ")  # the one line a note file holds: `- <slug>: <text>`
+NOTE_README = "README.md"  # the note folder's own description: not a note
+CLIP = 60  # characters of a refused line that a message shows
+
+
+def note_dir(root):
+    """The note folder of `root` with its trailing slash. Raises layout.LayoutError when the layout cannot be read."""
+    return layout.path(root, "notes") + "/"
+
+
+def note_files(files, folder):
+    """The note files among `files`: a .md file in the note folder other than its README."""
+    return [f for f in files if f.startswith(folder) and f.endswith(".md") and f != folder + NOTE_README]
+
+
+def merge_base(root):
+    """The commit where HEAD left origin/main. Raises Unknown when git cannot say."""
+    found = git_names(root, "merge-base", "origin/main", "HEAD")
+    if not found:
+        raise Unknown("git merge-base printed nothing")
+    return found[0].strip()
+
+
+def bad_note_form(root, files, folder):
+    """The note files among `files` whose text at HEAD is not one `- <slug>: <text>` line with the slug equal to the
+    file name. Raises Unknown when git cannot show a file."""
+    out = []
+    for f in note_files(files, folder):
+        lines = [l for l in show(root, "HEAD", f) if l.strip()]
+        slug = NOTE_LINE.match(lines[0]) if len(lines) == 1 else None
+        if not slug or slug.group(1) != os.path.basename(f)[:-3]:
+            out.append(f)
+    return out
+
+
+def new_note_lines(root, added, moved):
+    """The lines the branch adds to the old notes file that its merge base does not hold, in the file's order. A
+    blank line is not a note. A line moved within the file, or one of two swapped, is held already. Raises Unknown
+    when git cannot show a file."""
+    frozen = set(layout.candidates(root, "debt-notes"))
+    touched = (frozen & set(added)) | {new for status, old, new in moved if status != "D" and new in frozen}
+    out, base = [], None
+    for path in sorted(touched):
+        was = [old for status, old, new in moved if new == path]  # the path it had at the base: a rename names it
+        if path in added or not was:
+            held = set()
+        else:
+            base = base or merge_base(root)
+            held = set(show(root, base, was[0]))
+        out += [l for l in show(root, "HEAD", path) if l.strip() and l not in held]
+    return out
+
+
 def tracked(root):
     return git_names(root, "ls-files", "-z")
 
@@ -141,28 +200,37 @@ def main(args):
         return 1
     try:
         dirs = record_dirs(ROOT)
+        folder = note_dir(ROOT)
     except layout.LayoutError as err:  # a check that cannot read its folders is red, never green
         print("check_record_slugs: FAIL: " + str(err))
         return 1
     try:
-        if args:  # files given: git is not read, so the feel-fix check does not run
-            files, feel = args, []
+        if args:  # files given: git is not read, so the feel-fix and note checks do not run
+            files, feel, bad_form, new_lines, renamed = args, [], [], [], []
         else:
             files, moved = changes(ROOT)
             feel = unchecked_feel_debts(ROOT, moved)
+            renamed = [new for status, old, new in moved if status == "R"]  # a note like a deleted one reads as a rename
+            bad_form = bad_note_form(ROOT, files + renamed, folder)
+            new_lines = new_note_lines(ROOT, files, moved)
     except layout.LayoutError as err:
         print("check_record_slugs: FAIL: " + str(err))
         return 1
     except Unknown as err:
         print("check_record_slugs: UNKNOWN, " + str(err))
         return 1 if os.environ.get("CI") else 0  # CI exit code is a verdict: unknown is red there
-    bad = too_long(files, dirs)
+    bad = too_long(files, dirs + (folder,)) + too_long(note_files(renamed, folder), (folder,))
     for f in bad:
         print("check_record_slugs: FAIL: slug over %d characters: %s" % (MAX, f))
+    for f in bad_form:
+        print("check_record_slugs: FAIL: a note file holds one line `- <slug>: <text>`, its slug the file name: %s" % f)
+    for line in new_lines:
+        print("check_record_slugs: FAIL: a new or edited note is its own file, %s<slug>.md, as `- <slug>: <text>`: %s"
+              % (folder, line[:CLIP]))
     for f, how in feel:
         print("check_record_slugs: FAIL: feel-fix debt %s with no device check: %s"
               % ("deleted" if how == "deleted" else "lost its Feel line", f))
-    return 1 if bad or feel else 0
+    return 1 if bad or bad_form or new_lines or feel else 0
 
 
 if __name__ == "__main__":
