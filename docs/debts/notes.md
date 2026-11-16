@@ -2315,6 +2315,6 @@
 - train-pre-flight-two-names: the same bullet's "Pre-merge reads" is a second name for the wave plan's "Pre-flight row" (`plans/wave-plan-2026-11-13.md`, on the record branch). Pick one. Decision: session-tiers.
 - train-seconds-long-unmeasured: "seconds-long checks" in the Fold checks bullet is a relayed claim, not measured by the lane. Decision: session-tiers.
 - train-scope-all-unused: `merge/merge.py` clash scope `all` or `ready` is used by no command the batch runner calls; lane lint uses scope `lane` plus `--with`. Decision: session-tiers.
-- train-members-vs-lane-prs: the report numbers say "lane PRs in", the owner's word and the dry tool say "members in". One term would read better. Decision: session-tiers.
+- train-members-vs-lane-prs: the report numbers say "lane PRs in", the owner's wording and the dry tool say "members in". One term would read better. Decision: session-tiers.
 - train-bullet-dense: the "Rolling combine train" bullet and its sub-bullets are about 14 lines of dense prose; the template pointer restates scope facts and sits after the Lane bullet, not by the batch runner bullet. Decision: session-tiers.
 - train-wave-plan-cited-by-path: the train bullet names `plans/wave-plan-2026-11-13.md`, which lives on the record branch, by path, not by id (rule `git-cite-by-id`). Decision: session-tiers.
