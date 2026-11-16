@@ -15,7 +15,7 @@ merge only when it touches a rule's behaviour, a guard's or check's verdict, or 
 only when the change cannot move a verdict, one bounded command proves it, and the report
 names both. A change that touches a rule's behaviour, a guard's or check's verdict, or product code a
 reviewer must see goes to a lane, at
-any size. Keep a fix under 40 lines, against reading cost alone.<!-- rule:roles-orchestrator-never-builds --> Each agent is one role: builder, reviewer,
+any size. Keep a fix under 40 lines, against reading cost alone. The limit is on building only. A spawner sends its reads and sorts to read-only Explore agents and puts independent calls in one turn. Each role's duty is in decision `session-tiers`, Delegation duties.<!-- rule:roles-orchestrator-never-builds --> Each agent is one role: builder, reviewer,
 designer, design reviewer, refuter, or Explore, never two. A lane that touches a screen gets a designer before
 the builder and a design reviewer after it. A text-only change on an existing screen skips the designer (decision `design-agents`).<!-- rule:roles-one-role-per-agent --> A workflow agent takes the builder or reviewer role through `agentType`. Each
 agent runs its role's model and effort from `agent-model-cap`, the model-per-role table.<!-- rule:roles-model-per-role-table --> Sonnet is
