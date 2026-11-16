@@ -62,10 +62,10 @@ import sys
 import tempfile
 
 import mutate_shared
-sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
-HERE = os.path.dirname(os.path.realpath(__file__))
+HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  git's tracked files under a folder, suites left out (testing/tracked_tree.py)
 GUARD = os.path.join(HERE, "guard.py")

@@ -59,7 +59,7 @@ import shutil
 import sys
 import tempfile
 
-HERE = os.path.dirname(os.path.realpath(__file__))
+HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
 import mutate_shared  # noqa: E402
