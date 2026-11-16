@@ -420,7 +420,8 @@ ALLOWED = {
     "lint/test_ruled_store.py": (["README.md"], "a fixture file in make_repo"),
     "lint/test_sim_lease.py": (["decisions/test-temp-standard.md"], "named in the module docstring"),
     "lint/test_touched_tests.py": (["README.md", "skills/plain-english-map/SKILL.md"], "fixture docs and a path given to the selector"),
-    "skills/roadmap/test_build.py": (["README.md", "docs/todo.md"], "fixture repo files"),
+    "skills/roadmap/test_build.py": (["README.md", "debts/notes.md", "docs/debts/notes.md", "docs/todo.md"],
+                                     "fixture repo files, and the expected home and panel text of the notes cases; none is read from the repo"),
     "skills/waiting-page/test_stale_pages.py": (["CLAUDE.md"], "written into a temp claude folder"),
 }
 
