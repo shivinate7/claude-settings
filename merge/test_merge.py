@@ -13974,8 +13974,11 @@ class CloudSession(Env):
                     os.environ[name] = value
             yield
 
-    def put_role(self, role, session=ROLE_SESSION):
-        put(self.role_file, json.dumps({"session": session, "role": role}))
+    def put_role(self, role, session=ROLE_SESSION, step=None):
+        data = {"session": session, "role": role}
+        if step is not None:
+            data["step"] = step  # a lane's record names the step its own pull request carries (ruling own-lanes-merge-claude-settings-prs)
+        put(self.role_file, json.dumps(data))
 
     def put_bytes(self, data):
         os.makedirs(os.path.dirname(self.role_file), exist_ok=True)
@@ -14051,9 +14054,9 @@ class MergeRoleCheck(CloudSession):
         return err
 
     # ---- the constants and the reader
-    # decision session-tiers: only a batch runner merges
-    def test_the_merge_roles_are_the_batch_runner_only(self):
-        self.assertEqual(set(merge.MERGE_ROLES), {"batch-runner"})
+    # Ruling own-lanes-merge-claude-settings-prs (owner, 11:12 CST Nov 15, 2026): a lane joins the batch runner, for its own pull request only
+    def test_the_merge_roles_are_the_batch_runner_and_the_lane(self):
+        self.assertEqual(set(merge.MERGE_ROLES), {"batch-runner", "lane"})
 
     def test_the_role_path_is_the_state_file_under_the_config_dir(self):
         with self.cloud():
@@ -14275,6 +14278,206 @@ class MergeRoleCheck(CloudSession):
                 self.assert_writer_refused(*argv, rc_is=2)  # 2 is argparse's usage-error code, as p.error gives today
                 self.assertEqual(self.role_files(), {})
                 self.assertEqual(self.host.pr_calls, [])
+
+class LaneOwnMerge(CloudSession):
+    """Ruling own-lanes-merge-claude-settings-prs (owner, 11:12 CST Nov 15, 2026; the merge act only): a cloud lane session may run
+    `merge <pr> --confirm --head <sha>` on its OWN ready pull request. Its role file is {"session", "role": "lane", "step": <slug>}, and
+    its own pull request is one whose head ref is lane_head_refs(<slug>): the bare slug or lane/<slug>. The fixture's own pull request
+    is branch `feat`, so the step is `feat`. Every other merge check stays, and a lane never runs --ready (the batch runner marks ready)."""
+
+    def setUp(self):
+        super().setUp()
+        self.put_role("lane", step="feat")
+        self.host.repo = "shivinate7/claude-settings"  # ruling own-lanes-merge-claude-settings-prs: the lane's pull request is in this repo
+
+    def assert_role_file(self, step="feat"):
+        """The case probes the lane branch, so the role file it writes is read back first (P7). The file, not the reader, is read."""
+        with open(self.role_file, encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"session": ROLE_SESSION, "role": "lane", "step": step}, "the case did not write the lane role it probes")
+
+    def test_a_lane_merges_its_own_ready_pull_request_at_the_head_it_ran_on(self):
+        self.assert_role_file()
+        rc, out, err = self.run_main("7", "--confirm", "--head", self.head())
+        self.assertEqual(rc, 0, "a lane's confirm on its own ready pull request was refused: " + out + err)
+        self.assertTrue(self.host.merged, "a lane's confirm on its own ready pull request did not merge: " + out + err)
+        self.assertNotIn("Traceback", err)
+
+    def test_a_lane_merges_a_pull_request_whose_head_is_its_lane_branch(self):
+        self.assert_role_file()
+        self.push_branch("lane/feat")
+        self.host.branch = "lane/feat"
+        rc, out, err = self.run_main("7", "--confirm", "--head", self.head("lane/feat"))
+        self.assertEqual(rc, 0, "a lane's confirm on a pull request whose head is lane/<step> was refused: " + out + err)
+        self.assertTrue(self.host.merged, "a lane's confirm on a pull request whose head is lane/<step> did not merge: " + out + err)
+
+    def test_a_lane_confirm_with_no_head_names_the_head_the_ci_ran_on(self):
+        self.assert_role_file()
+        refs = self.refs()
+        rc, out, err = self.run_main("7", "--confirm")
+        self.assertEqual(rc, 1, out + err)
+        self.assertFalse(getattr(self.host, "merged", False), "a lane's confirm with no --head merged: " + out + err)
+        self.assertEqual(self.refs(), refs, "a lane's confirm with no --head pushed before it was refused")
+        self.assertRegex(err, r"(?i)needs the head the CI ran on", "a lane's confirm with no --head does not say the merge needs the head the CI ran on")
+        self.assertNotIn("--confirm", err)
+        self.assertNotIn("Traceback", err)
+
+    def test_a_lane_cannot_mark_its_own_draft_ready(self):
+        self.assert_role_file()
+        self.host.draft = True
+        rc, out, err = self.run_main("7", "--ready")
+        self.assertEqual(self.host.readies, [], "a lane's --ready marked its own draft ready: " + out + err)
+        self.assertNotEqual(rc, 0, "a lane's --ready on its own draft exited 0: " + out + err)
+        self.assertNotIn("Traceback", err)
+
+    def assert_refused_outside_claude_settings(self, repo):
+        """Ruling own-lanes-merge-claude-settings-prs covers claude-settings only: a lane's own ready pull request in `repo` is refused.
+        The refusal names neither flag nor the other repo."""
+        self.assert_role_file()
+        self.host.repo = repo
+        refs = self.refs()
+        rc, out, err = self.run_main("7", "--confirm", "--head", self.head())
+        self.assertEqual(rc, 1, "a lane merged its own ready pull request in " + repo + ": " + out + err)
+        self.assertFalse(getattr(self.host, "merged", False), "a lane's confirm merged a pull request in " + repo)
+        self.assertEqual(self.refs(), refs, "a lane's refused confirm in " + repo + " pushed")
+        self.assertNotIn("--confirm", err)
+        self.assertNotIn("--ready", err)
+        self.assertNotIn(repo, err)
+        self.assertNotIn("Traceback", err)
+
+    def test_a_lane_is_refused_its_own_ready_pull_request_in_another_repo(self):
+        self.assert_refused_outside_claude_settings("shivinate7/other-repo")
+
+    def test_a_lane_is_refused_its_own_ready_pull_request_in_another_owners_claude_settings(self):
+        self.assert_refused_outside_claude_settings("someone/claude-settings")
+
+
+class LaneRefusals(CloudSession):
+    """Pins for ruling own-lanes-merge-claude-settings-prs: a lane's confirm is refused on another lane's pull request, on a near-miss
+    step, on its own draft (the draft step would mark it ready), on a red check, and with no step in its role file. Each refusal
+    names neither --confirm nor --ready. These are green on the old code too, since it refuses every lane; LaneOwnMerge holds the red
+    for the lane's own pull request."""
+
+    def setUp(self):
+        super().setUp()
+        self.put_role("lane", step="feat")
+        self.host.repo = "shivinate7/claude-settings"  # the repo check passes, so each refusal below is the check its name gives
+
+    def assert_refused_quietly(self, *argv):
+        """A lane's run refused: rc 1, nothing merged, nothing pushed, a line on stderr that names neither --confirm nor --ready. -> stderr"""
+        refs, claims = self.refs(), self.claims()
+        rc, out, err = self.run_main(*argv)
+        self.assertEqual(rc, 1, out + err)
+        self.assertFalse(getattr(self.host, "merged", False), "a lane's refused run merged: " + out + err)
+        self.assertEqual(self.refs(), refs, "a lane's refused run pushed")
+        self.assertEqual(self.claims(), claims, "a lane's refused run pushed a claim to main")
+        self.assertTrue(err.strip(), "the refusal said nothing on stderr")
+        self.assertNotIn("Traceback", err)
+        self.assertNotIn("--confirm", err)
+        self.assertNotIn("--ready", err)
+        return err
+
+    def test_a_lane_cannot_merge_another_lanes_pull_request(self):
+        self.push_branch("lane/other")
+        self.host.branch = "lane/other"
+        self.assert_refused_quietly("7", "--confirm", "--head", self.head("lane/other"))
+
+    def test_a_near_miss_step_does_not_match_the_pull_request_branch(self):
+        self.put_role("lane", step="fea")  # lane_head_refs("fea") is fea and lane/fea; the pull request's branch is feat
+        self.assert_refused_quietly("7", "--confirm", "--head", self.head())
+
+    def test_a_lane_cannot_merge_its_own_draft(self):
+        self.host.draft = True
+        self.assert_refused_quietly("7", "--confirm", "--head", self.head())
+        self.assertEqual(self.host.readies, [], "a lane's confirm on its own draft ran the draft step and marked it ready")
+
+    def test_a_lane_is_refused_on_a_red_check(self):
+        self.host.state = "red: checks: fail"
+        self.host.seq = [(False, "a check is red: checks: fail")]
+        self.assert_refused_quietly("7", "--confirm", "--head", self.head())
+        self.assertEqual(self.host.waits, [], "a lane's confirm waited on a red head under the lock")
+
+    def test_a_lane_is_refused_on_a_missing_required_check(self):
+        # A required check that has not reported reads pending (Host.head_state), and a confirm refuses a pending head with no wait.
+        self.host.state = "pending: checks"
+        self.host.checks = (None, "a required check is pending")
+        self.assert_refused_quietly("7", "--confirm", "--head", self.head())
+        self.assertEqual(self.host.waits, [], "a lane's confirm waited on a missing required check under the lock")
+
+    def test_a_lane_role_with_no_step_is_refused_at_confirm(self):
+        self.put_role("lane")
+        self.assert_refused_quietly("7", "--confirm", "--head", self.head())
+
+    def assert_unread_repo_refused(self, api):
+        """The host names no repo and the REST read of it fails: the repo check fails closed. The refusal names that check, and nothing merges or pushes."""
+        self.host.repo = None  # the cwd host names no repo, so the check reads it through host.api
+        self.host.api = api
+        err = self.assert_refused_quietly("7", "--confirm", "--head", self.head())
+        self.assertRegex(err, r"(?i)in this repo only", "the refusal does not name the repo check: " + err)
+
+    def test_a_lane_is_refused_when_the_repo_read_fails(self):
+        self.assert_unread_repo_refused(lambda path: (1, "gh: HTTP 500 (HTTP 500)"))
+
+    def test_a_lane_is_refused_when_the_repo_read_raises(self):
+        def boom(path):
+            raise OSError("gh could not run")
+        self.assert_unread_repo_refused(boom)
+
+
+def role_tuple_in_source(text, name):
+    """The strings of the top-level assignment `name = (...)` in a Python source text, read with ast and never imported. None when no such assignment is."""
+    for node in ast.parse(text).body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            return set(ast.literal_eval(node.value))
+    return None
+
+
+class GuardRoleNamesMatch(unittest.TestCase):
+    """The guard cannot import merge/merge.py, so hooks/guard_merge.py names the merge tiers in its own constants, ROLE_TIERS and
+    LOCAL_ROLE_TIERS. These cases read those constants from the guard's source, never by import, and compare them with the merge tool's
+    MERGE_ROLES and LOCAL_MERGE_ROLES, so a drifted copy goes red."""
+
+    GUARD = os.path.join(os.path.dirname(HERE), "hooks", "guard_merge.py")
+
+    def guard_role_names(self, name):
+        with open(self.GUARD, encoding="utf-8") as f:
+            found = role_tuple_in_source(f.read(), name)
+        self.assertIsNotNone(found, f"hooks/guard_merge.py has no top-level {name} to compare with the merge tool")
+        return found
+
+    def test_the_guard_role_names_are_the_merge_roles(self):
+        self.assertEqual(self.guard_role_names("ROLE_TIERS"), set(merge.MERGE_ROLES), "the guard's ROLE_TIERS drifted from merge.py MERGE_ROLES")
+
+    def test_the_guard_local_role_names_are_the_local_merge_roles(self):
+        self.assertEqual(self.guard_role_names("LOCAL_ROLE_TIERS"), set(merge.LOCAL_MERGE_ROLES),
+                         "the guard's LOCAL_ROLE_TIERS drifted from merge.py LOCAL_MERGE_ROLES")
+
+    # green controls (P2): the reader takes a literal tuple, and a drifted copy differs from the merge tool's set
+    def test_the_source_reader_takes_a_literal_and_a_drifted_copy_differs(self):
+        self.assertEqual(role_tuple_in_source('ROLE_TIERS = ("batch-runner", "lane")', "ROLE_TIERS"), {"batch-runner", "lane"},
+                         "the reader does not take a literal tuple")
+        self.assertIsNone(role_tuple_in_source('OTHER = ("batch-runner",)', "ROLE_TIERS"), "a missing assignment is read as present")
+        self.assertNotEqual(role_tuple_in_source('ROLE_TIERS = ("batch-runner",)', "ROLE_TIERS"), set(merge.MERGE_ROLES),
+                            "a copy without the lane tier is read as equal to MERGE_ROLES")
+
+
+class LaneRoleWriter(CloudSession):
+    """Ruling own-lanes-merge-claude-settings-prs: `merge --role lane --step <slug>` records this cloud session's lane role with its step,
+    and a lane with no step is refused and writes nothing. The step is what a lane's confirm later judges its pull request by."""
+
+    assert_writer_refused = MergeRoleCheck.assert_writer_refused  # one home of the writer refusal assertions
+
+    def test_role_lane_with_a_step_writes_the_lane_and_its_step(self):
+        self.assertEqual(self.role_files(), {})
+        rc, out, err = self.run_main("--role", "lane", "--step", "feat")
+        self.assertEqual(rc, 0, "the writer refused a lane's --role lane --step: " + out + err)
+        with open(self.role_file, encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"session": ROLE_SESSION, "role": "lane", "step": "feat"}, "the writer did not record the lane and its step")
+        self.assertEqual(self.host.pr_calls, [], "the writer read the host")
+
+    def test_role_lane_with_no_step_is_refused_and_writes_nothing(self):
+        self.assert_writer_refused("--role", "lane")
+        self.assertEqual(self.role_files(), {})
+
 
 class StandingGrantSwitch(CloudSession):
     """merge.standingGrant (decision standing-merge-grant) switches the standing merge grant.
@@ -14694,9 +14897,14 @@ CLOUD_ALLOW_FILE = os.path.join(HERE, "cloud_allow.json")
 # repo's own bin/merge. No rule runs merge/merge.py by path: that runs the working copy's file, which on an old lane branch has no role check.
 CLOUD_ALLOW_SHIMS = ("~/.claude/bin/merge",)
 CLOUD_ALLOW_RULES = tuple(f"Bash({shim} * --confirm{tail})" for shim in CLOUD_ALLOW_SHIMS for tail in ("", " *"))
-# A role rule allows one exact `merge --role <tier>` per tier in merge.MERGE_ROLES. No `*` and no word after the tier, so it cannot
-# pass --confirm or a PR number. The tiers come from decision session-tiers (the session tier design).
-CLOUD_ROLE_RULES = tuple(f"Bash({shim} --role {tier})" for shim in CLOUD_ALLOW_SHIMS for tier in sorted(merge.MERGE_ROLES))
+# A role rule allows one exact `merge --role <tier>` per tier in merge.MERGE_ROLES, except the lane. No `*` and no word after an exact tier,
+# so it cannot pass --confirm or a PR number. The tiers come from decision session-tiers (the session tier design). The lane's one rule is
+# `--role lane --step *` (ruling own-lanes-merge-claude-settings-prs, owner 11:12 CST Nov 15, 2026): its step is the only word after the
+# tier, and the only star. No other lane form is allowed.
+LANE_ROLE = "lane"
+LANE_STEP_RULE = "Bash(~/.claude/bin/merge --role lane --step *)"
+CLOUD_ROLE_RULES = tuple(f"Bash({shim} --role {role})" for shim in CLOUD_ALLOW_SHIMS
+                         for role in sorted(merge.MERGE_ROLES - {LANE_ROLE})) + (LANE_STEP_RULE,)
 # One left-to-right pass over a shell script: a quoted string, an escaped character, or a comment, whichever starts first. A `#` opens a
 # comment at a line start or after a space, `;`, `&`, `|` or `(`, never inside a string or in `$#` and `${#x}`.
 SH_TOKEN = re.compile(r"""'[^']*'|"(?:\\.|[^"\\])*"|\\.|(?:^|(?<=[\s;&|(]))#[^\n]*""", re.M | re.S)
@@ -14789,12 +14997,14 @@ class CloudAllow(unittest.TestCase):
                 self.assertTrue(any(bash_rule_matches(rule, command) for rule in self.allow() if "--confirm" in rule),
                                 f"no confirm rule allows {command!r}")
 
-    # decision session-tiers: the coordinator never merges, so its role rule goes; the batch-runner rule stays
-    def test_the_rules_file_holds_three_rules_and_no_coordinator_role_rule(self):
+    # decision session-tiers: the coordinator never merges, so its role rule goes; the batch-runner rule stays. Ruling
+    # own-lanes-merge-claude-settings-prs adds the lane's one step rule, so the file holds four rules.
+    def test_the_rules_file_holds_four_rules_and_no_coordinator_role_rule(self):
         allow = self.allow()
-        self.assertEqual(len(allow), 3, allow)
+        self.assertEqual(len(allow), 4, allow)
         self.assertNotIn("Bash(~/.claude/bin/merge --role coordinator)", allow)
         self.assertIn("Bash(~/.claude/bin/merge --role batch-runner)", allow)
+        self.assertIn(LANE_STEP_RULE, allow)
 
     def test_the_rules_file_is_exactly_the_confirm_and_role_rules_of_the_home_shim(self):
         with open(CLOUD_ALLOW_FILE, encoding="utf-8") as f:
@@ -14827,6 +15037,8 @@ class CloudAllow(unittest.TestCase):
         for rule in self.allow():
             with self.subTest(rule=rule):
                 self.assertNotEqual(rule, "Bash(*)")
+                if rule == LANE_STEP_RULE:  # the lane's one form: test_no_role_rule_holds_a_star_or_anything_after_the_tier pins its shape
+                    continue
                 m = role.fullmatch(rule)
                 if m:
                     self.assertIn(m.group(1), merge.MERGE_ROLES, f"{rule} names a tier the code does not know")
@@ -14839,6 +15051,10 @@ class CloudAllow(unittest.TestCase):
         self.assertEqual(len(role_rules), len(merge.MERGE_ROLES), "want one role rule per tier")
         for rule in role_rules:
             with self.subTest(rule=rule):
+                if rule == LANE_STEP_RULE:  # the lane's one form: one star, for the step, and nothing after it
+                    self.assertEqual(rule.count("*"), 1, rule)
+                    self.assertTrue(rule.endswith(" --step *)"), rule)
+                    continue
                 self.assertNotIn("*", rule)
                 self.assertTrue(rule.endswith(")"), rule)
                 self.assertIn(rule[:-1].rsplit(" ", 1)[1], merge.MERGE_ROLES)  # the tier is the last word: nothing after it
@@ -23152,6 +23368,12 @@ class LocalSessionRoleCheck(CloudSession):
     # RED: the old local confirm reads no role file, so a coordinator file does not refuse it.
     def test_a_coordinator_file_refuses_a_local_confirm(self):
         self.put_local_role("coordinator")
+        self.assert_refused()
+
+    # Pin, green on the old code: a local session's lane file names no tier a local confirm may run as, so the confirm is refused.
+    # The lane role joins MERGE_ROLES for cloud sessions only, so this pins the local path that must not follow it.
+    def test_a_lane_file_refuses_a_local_confirm(self):
+        self.put_local_role("lane")
         self.assert_refused()
 
     # RED: the old local confirm reads no role file, so a file for another session does not refuse it.
