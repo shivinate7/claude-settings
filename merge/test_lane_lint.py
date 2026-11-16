@@ -70,7 +70,7 @@ files = {p: watched(p) for p in WATCH}
 with open(LOG, "a", encoding="utf-8") as f:
     print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached, "files": files,
                       "status": git("status", "--porcelain"), "first_parent": git("rev-parse", "--verify", "-q", "HEAD^1"),
-                      "head_sha_env": os.environ.get("CI_JOB_HEAD_SHA")}), file=f)
+                      "head_sha_env": os.environ.get("CI_JOB_HEAD_SHA"), "pr_body_env": os.environ.get("PR_BODY")}), file=f)
 JOB = sys.argv[1] if len(sys.argv) > 1 else ""  # a run names its job first, as ci-job does
 if isinstance(STEPS, dict):  # a dict names each job's steps: a run of job J prints STEPS[J], and a job the dict does not name prints none
     STEPS = STEPS.get(JOB, [])
@@ -5219,6 +5219,42 @@ class MergedLintTree(LaneFixture):
         run = self.lint_calls()[0]
         self.assertEqual(run["head_sha_env"], head,
                          "ci-job was not given the pushed head as CI_JOB_HEAD_SHA (it got %r), so its head.sha is the lint tree's HEAD: %s" % (run["head_sha_env"], text))
+
+    def test_the_lint_hands_ci_job_the_pr_body_as_pr_body(self):
+        """The aligned probe (Rules and records move together) reads PR_BODY, else an event file the lint has none of. The lint hands ci-job the body
+        its own PR read holds, so a body with the `Rules checked:` line reaches the probe."""
+        self.main_fix_after_branch()
+        self.host.body = lane_body(OWN, "Rules checked: some-record \u2014 no change")
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, text)
+        run = self.lint_calls()[0]
+        self.assertEqual(run["pr_body_env"], self.host.body,
+                         "ci-job was not given the PR body as PR_BODY (it got %r), so the aligned probe cannot read the Rules checked line: %s" % (run["pr_body_env"], text))
+
+    def test_an_empty_pr_body_is_handed_over_as_present_and_empty(self):
+        """The probe tells an unset PR_BODY (read the event file) from an empty one (a body with no line), so an empty body is still set."""
+        self.main_fix_after_branch()
+        self.host.body = ""
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(self.lint_calls()[0]["pr_body_env"], "", "an empty PR body did not reach ci-job as an empty PR_BODY: " + text)
+
+    def test_a_pr_body_in_the_callers_environment_never_reaches_ci_job(self):
+        """A PR_BODY left in the shell names some other PR: the lint's own PR read replaces it, and a ref target (no PR) gets none."""
+        self.main_fix_after_branch()
+        self.host.body = lane_body(OWN, "this PR's body")
+        self.use_ci_job(PASSING, 0)
+        with unittest.mock.patch.dict(os.environ, {"PR_BODY": "another PR's body"}):
+            rc, text = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(self.lint_calls()[0]["pr_body_env"], self.host.body, "the caller's PR_BODY reached ci-job beside the PR's own body: " + text)
+        os.remove(self.log)
+        with unittest.mock.patch.dict(os.environ, {"PR_BODY": "another PR's body"}):
+            rc, text = self.lint_run("--lane-lint", "feat")
+        self.assertEqual(rc, 0, text)
+        self.assertIsNone(self.lint_calls()[0]["pr_body_env"], "a ref target's lint was given the caller's PR_BODY: " + text)
 
     def test_the_merge_commit_keeps_the_base_tip_the_merge_read_when_main_moves_before_it_is_made(self):
         """A fetch between the merge read and the commit moves origin/<base>. cross_measure fetches every head when a sibling PR is named, and
