@@ -1697,6 +1697,24 @@ def case_exported_gh_repo_names_the_pr_repo():
         expect_verdict(label, res, "green")
 
 
+def case_callers_gh_repo_never_reaches_the_hook_or_the_stub():
+    """A GH_REPO in the shell that starts this suite names no repo for a case: base_env drops it, so the hook's gh calls
+    and the stub's here() see the folder's repo. The test sets a decoy itself and restores the caller's value."""
+    fx = fixture([pr(214, repo=REPO_HOME)], [in_repo(GREEN, REPO_HOME)], cwd_repo=REPO_HOME,
+                 workflows=[wf(repo=REPO_HOME)])
+    prior = os.environ.get("GH_REPO")
+    os.environ["GH_REPO"] = REPO_APP
+    try:
+        res = run_hook(bash("gh pr ready 214"), fx, extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+    finally:
+        if prior is None:
+            os.environ.pop("GH_REPO", None)
+        else:
+            os.environ["GH_REPO"] = prior
+    label = "caller's GH_REPO set to %s" % REPO_APP
+    expect_verdict(label, res, "green")
+
+
 def case_gh_repo_values_the_hook_cannot_read_fall_back_to_the_folder():
     """A GH_REPO the hook cannot expand (`$repo`, `$REPO`, `$(x)`, a backtick) names no repo, so the hook's own
     gh calls go to the folder's repo, as with no GH_REPO. `$null` clears it, and so does `Remove-Item Env:GH_REPO`
@@ -2261,6 +2279,7 @@ def main():
     case_attached_short_repo_flag_pins_pr_repo_on_later_calls()
     case_equals_short_repo_flag_pins_pr_repo_on_later_calls()
     case_folder_without_workflows_still_watches_the_pr_repo()
+    case_callers_gh_repo_never_reaches_the_hook_or_the_stub()
     case_exported_gh_repo_names_the_pr_repo()
     case_exported_gh_repo_is_cleared_by_unset_and_empty_export()
     case_gh_repo_values_the_hook_cannot_read_fall_back_to_the_folder()
