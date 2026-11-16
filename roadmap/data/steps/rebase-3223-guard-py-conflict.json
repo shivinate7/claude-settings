@@ -2,6 +2,7 @@
  "id": "rebase-3223-guard-py-conflict",
  "title": "PR #3223 is brought up to date on hooks/guard.py, so it can join the next combined PR",
  "status": "doing",
+ "pr": 3223,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL1k5MRDCFf5YCvW9ox",

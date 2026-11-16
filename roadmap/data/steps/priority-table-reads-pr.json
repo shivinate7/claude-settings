@@ -2,6 +2,7 @@
  "id": "priority-table-reads-pr",
  "title": "A tracked-priority row names its branch and reads its PR by REST at each wake",
  "status": "doing",
+ "pr": 3337,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJKz6CH8YwNg3W3wWq2n",

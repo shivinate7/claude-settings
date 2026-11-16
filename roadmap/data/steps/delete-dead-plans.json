@@ -2,6 +2,7 @@
   "id": "delete-dead-plans",
   "title": "Delete the dead plans (stalled-steps, plugin-assess-three, trial-results, trial-briefs) and repoint docs/debts/notes.md:1954",
   "status": "open",
+  "pr": 3511,
   "repo": "shivinate7/claude-settings",
   "phase": "now",
   "owner": "coordinator",

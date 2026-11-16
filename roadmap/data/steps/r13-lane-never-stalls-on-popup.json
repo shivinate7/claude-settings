@@ -2,6 +2,7 @@
  "id": "r13-lane-never-stalls-on-popup",
  "title": "r13: a lane never stalls on a popup (express, from the unlanded ledger)",
  "status": "doing",
+ "pr": 3236,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL3sxSM4t4Ty363zdzX",

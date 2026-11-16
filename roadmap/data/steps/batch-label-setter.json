@@ -2,6 +2,7 @@
  "id": "batch-label-setter",
  "title": "Set the batch label on a batch PR",
  "status": "doing",
+ "pr": 3252,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJKz9DMAhnNimZfuBt2L",

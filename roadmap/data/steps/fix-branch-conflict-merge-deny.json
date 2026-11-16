@@ -2,6 +2,7 @@
  "id": "fix-branch-conflict-merge-deny",
  "title": "The fix-branch deny lets a conflicted merge of main through, so it can get its one more fix verifier",
  "status": "ready",
+ "pr": 3102,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",

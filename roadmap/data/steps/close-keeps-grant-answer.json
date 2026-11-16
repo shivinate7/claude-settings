@@ -2,6 +2,7 @@
  "id": "close-keeps-grant-answer",
  "title": "Closing a waiting-page item refuses to delete its answer while the item's home names a grant or settings entry that a lane has not yet fetched",
  "status": "folded",
+ "pr": 2981,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",

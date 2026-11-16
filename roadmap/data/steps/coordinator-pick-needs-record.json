@@ -2,6 +2,7 @@
   "title": "A coordinator pick that changes how work merges or batches lives in a decision record",
   "phase": "now",
   "status": "doing",
+  "pr": 1771,
   "order": 103.8,
   "owner": "coordinator",
   "lane": "session_013NEJKytqADrBxakyssFEPg",

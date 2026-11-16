@@ -2,6 +2,7 @@
  "id": "dead-pr-wait-guard",
  "title": "A guard flags a step that waits on a dead PR, without rebuilding main's wait check",
  "status": "ready",
+ "pr": 2729,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",

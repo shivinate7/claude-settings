@@ -2,6 +2,7 @@
   "title": "The other-checkout guard does not read a read-only command's quoted pattern as shell text",
   "phase": "next",
   "status": "ready",
+  "pr": 2234,
   "order": 641,
   "owner": "coordinator",
   "lane": "",
