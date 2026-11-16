@@ -552,7 +552,8 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         self.assertTrue(told, "no affirmative sentence says a session with no parent merges its own PR under the merge grant")
 
     # Ruling own-lanes-merge-claude-settings-prs (owner, 11:12 CST Nov 15, 2026) and roles-pick-mode-from-request: the session the owner
-    # starts with no parent is a coordinator for a standing build, else a lane. A lane merges only its own ready PR, and never runs --ready.
+    # starts with no parent is a coordinator for a standing build, else a lane. A lane merges only its own ready PR, and marks it ready once
+    # in the role form (ruling Q2, decision draft-until-reviewed, owner, 12:58 CST Nov 16, 2026).
     def test_the_no_parent_sentence_names_the_coordinator_or_a_lane(self):
         told = [s for s in sentences(hook_role_line()) if "no parent_session_id" in s]
         self.assertEqual(len(told), 1, "expected one sentence naming no parent_session_id, found %d: %r" % (len(told), told))

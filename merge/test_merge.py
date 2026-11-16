@@ -14811,7 +14811,8 @@ class LaneOwnMerge(CloudSession):
     """Ruling own-lanes-merge-claude-settings-prs (owner, 11:12 CST Nov 15, 2026; the merge act only): a cloud lane session may run
     `merge <pr> --confirm --head <sha>` on its OWN ready pull request. Its role file is {"session", "role": "lane", "step": <slug>}, and
     its own pull request is one whose head ref is lane_head_refs(<slug>): the bare slug or lane/<slug>. The fixture's own pull request
-    is branch `feat`, so the step is `feat`. Every other merge check stays, and a lane never runs --ready (the batch runner marks ready)."""
+    is branch `feat`, so the step is `feat`. Every other merge check stays. A lane marks its own draft ready once, in the role form (ruling Q2,
+    decision draft-until-reviewed, owner, 12:58 CST Nov 16, 2026), and the other ready marks stay with the batch runner."""
 
     def setUp(self):
         super().setUp()
