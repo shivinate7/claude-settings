@@ -638,13 +638,15 @@ class UpkeepFixture(Fixture):
             row["createdAt"] = created
         return row
 
-    def pull_row(self, number, branch, head=None, merged=None):
-        """One landedPulls row. head and merged are left out when None, so a case can send a row with neither."""
+    def pull_row(self, number, branch, head=None, merged=None, **fields):
+        """One landedPulls row. head and merged are left out when None, so a case can send a row with neither. `fields`
+        add keys, such as replacedBy."""
         row = {"number": number, "branch": branch}
         if head is not None:
             row["head"] = head
         if merged is not None:
             row["merged"] = merged
+        row.update(fields)
         return row
 
     def created_before(self, minutes, read_ago=5):
@@ -4641,6 +4643,28 @@ class IdleLanes(UpkeepFixture):
         count, entries = self.archive("--main-branch", "nomain")
         self.assertEqual(count, 1, "an unreadable main reads the lanes row as %r" % (entries,))
         self.assertTrue(entries and entries[0].startswith("unknown ("), entries)
+
+    def test_upkeep_row_lists_a_superseded_lane_as_merge_idle_lanes_does(self):
+        # The control is session_a, done and idle, which both list. session_s is on c4, todo with no Step trailer on main,
+        # so only its closed pull's replacedBy (#8, merged) lists it. The upkeep row must list it too. Its work is not on
+        # main, so the landed rows must not name c4: they read marks from the merged rows only.
+        self.land({"c1": {"status": "done", "order": 1}, "c4": {"status": "todo", "order": 4}})
+        head = self.off_main()
+        self.publish(sessions=[self.idle_lane("session_a", "c1"), self.idle_lane("session_s", "c4")],
+                     landed=[self.pull_row(7, "lane/c4", head=head, merged=False, replacedBy=8),
+                             self.pull_row(8, "batch-7", head=head, merged=True)])
+        reported = self.reported()
+        self.assertIn("session_s", self.ids(reported),
+                      "scope: merge --idle-lanes does not list the superseded lane: %r" % (reported,))
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        entries = self.entries(self.row(out, self.ROW)[1])
+        self.assertIn("session_s", self.ids(entries),
+                      "the lanes-to-archive row does not list the superseded lane that merge --idle-lanes lists:\n%s" % out)
+        self.assertEqual(self.ids(entries), self.ids(reported),
+                         "the lanes-to-archive row and merge --idle-lanes list different lanes: %r" % (entries,))
+        closing = self.entries(self.row(out, "landed, waiting for triage to close")[1])
+        self.assertFalse([e for e in closing if e.startswith("c4 (")],
+                         "the landed row names c4, whose work is not on main: %r" % (closing,))
 
     def test_archived_rows_with_no_bucket_do_not_read_a_live_lane_unknown(self):
         # Green on the old code: a live row with an enum bucket makes the no-bucket check false, so the archived row
