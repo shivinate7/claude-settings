@@ -57,7 +57,7 @@ for _tool in ("Agent",):
 
 # ---- Step-up (rule roles-third-round-steps-up, decision agent-model-cap). The brief's fixed form
 # "Round N of 3" steps a reviewer up: the second needs sonnet, the third sonnet or opus. The
-# A builder's marker steps nothing up: its third try runs on its own row, sonnet (owner ruling item 893). The old
+# builder's marker steps nothing up. The builder row pins sonnet, so its third round needs no step-up. The old
 # builder form "Try N of 3" still counts until note try-marker-sunset.
 # A reviewer on the last step-up ("Round N of 3" with N = 3) passes the step-up on opus, and the Opus ceiling
 # below refuses it unless an owner override lifts it (item 127 pick a, Nov 1 17:25 CST). The middle step-up stays sonnet only.
