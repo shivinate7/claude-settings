@@ -2,6 +2,7 @@
  "id": "fix-check-reads-red-job-wakes",
  "title": "The fix check reads red-job wakes",
  "status": "doing",
+ "pr": "#2860 and #2940",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "lane": "session_013NEJKz4FSdVUgu9fC5JMhw",

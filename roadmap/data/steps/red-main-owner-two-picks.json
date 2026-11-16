@@ -2,6 +2,7 @@
  "id": "red-main-owner-two-picks",
  "title": "Rewrite no-merge-onto-red-main and the merge tool to the owner's 13:20 CST Nov 13 picks (resume at the revert; lanes off the blamed paths)",
  "status": "doing",
+ "pr": "#3268 and #3304",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL3KFBPuQT45U4xo8mE",
