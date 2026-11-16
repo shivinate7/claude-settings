@@ -19,7 +19,7 @@ from guard_core import (
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import BUILD_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, STEP_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags, repo_tag_names  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import opens_fence, BUILD_TAG, CONSULTANT_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_BRIEF_MARKER, LANE_GRANT_MARKER, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags, repo_tag_names  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -768,6 +768,8 @@ OCTOPUS_PUSH_REASON = (
     "Rule (Git, octopus-push; decision octopus-push-refused): this push would send {sha}, a merge commit of more than two parents. "
     "Remedy: redo that merge as a chain of two-parent merges, then retry the push."
 )
+OCTOPUS_PUSH_STALE = (" The remote's tracking refs could not be refreshed, so a merge the remote already holds may show as new."
+                      " Run `git fetch <remote>` and push again. If that merge is still listed, redo it as two-parent merges.")
 _READ_VERBS = ("status", "diff", "log", "show")
 _CONTINUE_VERBS = ("merge", "rebase", "cherry-pick")
 _CONFLICT_VERBS = ("merge", "pull", "rebase", "cherry-pick", "am")
@@ -1018,37 +1020,61 @@ def _remote_refs(where, remote):
     return "--remotes=" + remote
 
 
-def _octopus_hit(segment, stripped, cwd, args):
-    """Return the short sha of the first merge of more than two parents that a `git push` would send,
-    else ''. The range is what the push adds to the remote: the source ref, less every ref of the pushed
-    remote, so an octopus that a remote ref already holds (a merge of origin/main brings one in) is not
-    sent. A destination named like the default branch is skipped before any read: push-main asks about
-    that push, and a deny from here would win over the ask. One `git rev-list` for each ref, and one
-    `git config` more for a remote named by a URL or a path (`_remote_refs`)."""
-    for where, source, _dest, _tracking, remote, _memo in _push_refs(
-            segment, stripped, cwd, args, DEFAULT_BRANCH_FALLBACK):
-        done = _git(where, "rev-list", "--merges", "--parents", source, "--not", _remote_refs(where, remote), "--")
-        if done is None or done.returncode != 0:
-            continue
-        for line in done.stdout.splitlines():
-            fields = line.split()
-            if len(fields) > 3:
-                return fields[0][:12]
+def _octopus_in_range(where, source, refs):
+    """The short sha of the first merge of more than two parents in `source` less `refs`, else ''. A failed read is ''."""
+    done = _git(where, "rev-list", "--merges", "--parents", source, "--not", refs, "--")
+    if done is None or done.returncode != 0:
+        return ""
+    for line in done.stdout.splitlines():
+        fields = line.split()
+        if len(fields) > 3:
+            return fields[0][:12]
     return ""
 
 
-def octopus_push_hit(stripped: str, cwd: str, read_verb) -> str:
-    """Return the short sha of the first merge of more than two parents that a `git push` in the command
-    would send, else ''. Each segment is judged from its own command word. A push whose destination is
-    unnamed reads its source's range all the same. `read_verb("push", args)` is true for a dry run, which
-    sends nothing."""
+def _octopus_hit(segment, stripped, cwd, args):
+    """Return `(sha, stale)`: the short sha of the first merge of more than two parents that a `git push` would send,
+    else `("", False)`. The range is what the push adds to the remote: the source ref, less every ref of the pushed
+    remote, so an octopus that a remote ref already holds (a merge of origin/main brings one in) is not
+    sent. A clone's tracking refs can lag the remote, and a lagging ref hides an octopus the remote holds. So on a
+    hit, and only then, the tracking refs of a configured remote are refreshed once (`git_reads.fetch_remote`, once per
+    directory and remote in the call) and the range is read again; the refusal stands only when the hit survives. A
+    refresh that fails or times out keeps the refusal, with `stale` True so the reason says so. A destination named
+    like the default branch is skipped before any read: push-main asks about that push, and a deny from here would
+    win over the ask. One `git rev-list` for each ref, one `git config` more for a remote named by a URL or a path
+    (`_remote_refs`), and on a hit one `git fetch` of a plain remote name (a URL or a path has no tracking refs)."""
+    refreshed = {}
+    for where, source, _dest, _tracking, remote, _memo in _push_refs(
+            segment, stripped, cwd, args, DEFAULT_BRANCH_FALLBACK):
+        refs = _remote_refs(where, remote)
+        sha = _octopus_in_range(where, source, refs)
+        if not sha:
+            continue
+        if refs == "--remotes":
+            return sha, False
+        key = (where, remote)
+        if key not in refreshed:
+            import git_reads  # the one home of a git call and its timeout
+            refreshed[key] = git_reads.fetch_remote(where, remote)
+            sha = _octopus_in_range(where, source, refs)
+            if not sha:
+                continue
+        return sha, not refreshed[key]
+    return "", False
+
+
+def octopus_push_hit(stripped: str, cwd: str, read_verb):
+    """Return `(sha, stale)` as `_octopus_hit` does for the first merge of more than two parents that a `git push` in
+    the command would send, else `("", False)`. Each segment is judged from its own command word. A push whose
+    destination is unnamed reads its source's range all the same. `read_verb("push", args)` is true for a dry run,
+    which sends nothing."""
     for segment in split_segments(stripped):
         call = git_call_of(segment) if segment.strip() else None
         if call is not None and call[0] == "push" and not read_verb("push", call[1]):
-            sha = _octopus_hit(segment, stripped, cwd, call[1])
+            sha, stale = _octopus_hit(segment, stripped, cwd, call[1])
             if sha:
-                return sha
-    return ""
+                return sha, stale
+    return "", False
 
 
 def _untracked_names(where, specs):
@@ -1375,8 +1401,8 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
 ROLE_TIERS = ("batch-runner", "lane", "standing")  # glossary-ok: ROLE_TIERS is the existing name; merge.py MERGE_ROLES names the same roles
 LOCAL_ROLE_TIERS = ("batch-runner",)  # glossary-ok: the name a test reads; the roles a local role file may name (merge.py LOCAL_MERGE_ROLES), the lane role is a cloud role only
 ROLE_WITH_STEP = "lane"  # the role whose call also names a step (--step), proved by a cs-step tag of the own record
-STANDING_ROLE = "standing"  # ruling own-tiny-fixes-b: a standing session, not a batch runner, merges its own small edit
-STANDING_HOLDERS = ("coordinator", "triage")  # the cs-build tags that prove the standing session role (decision session-tiers)  # glossary-ok: session-tiers is the decision
+STANDING_ROLE = "standing"  # ruling own-tiny-fixes-b: a standing session, not a batch runner, merges its own pull request
+STANDING_HOLDERS = ("coordinator", "triage", CONSULTANT_TAG.split(":", 1)[1])  # the cs-build tags that prove the standing session role (decision session-tiers)  # glossary-ok: session-tiers is the decision
 LANE_MERGE_REPO = "shivinate7/claude-settings"  # the one repo whose lanes hold the lane merge role; agrees with merge.py LANE_MERGE_REPO, which this module cannot import
 ROLE_TAG_PREFIX = BUILD_TAG
 ROLE_REASON = (
@@ -2018,7 +2044,7 @@ def trust_card_hit(tool: str, transcript: str) -> str:
 # ---- archive_session: a lane closes only after its records pull request has left the open list
 ARCHIVE_TOOL = "mcp__claude-code-remote__archive_session"
 ARCHIVE_LANE_TAG = LANE_TAG
-ARCHIVE_STEP_PREFIX, ARCHIVE_REPO_PREFIX = "cs-step:", "cs-repo:"
+ARCHIVE_STEP_PREFIX, ARCHIVE_REPO_PREFIX = STEP_TAG, REPO_TAG
 ARCHIVE_NO_RECORD_REASON = (
     "this session's or this agent's transcript holds no get_session record of the target, so the guard cannot tell whether "
     "the target is a lane with records still to land. Run get_session on the target alone, in its own turn, "
@@ -2032,9 +2058,11 @@ ARCHIVE_TAGS_REASON = (
     "the target's record is a lane with no cs-step tag or no cs-repo tag, so the guard cannot find its "
     "records pull request. Fix the lane's tags, run get_session on the target alone, then retry. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
+# A template: %s is the lane's cs-repo repos, comma-separated.
 ARCHIVE_READ_REASON = (
-    "the open pull requests of the lane's repo could not be read, so the guard cannot tell whether its "
-    "records have landed. Retry once gh answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
+    "the open pull requests of the lane's repo (%s) could not be read, so the guard cannot tell whether its "  # glossary-ok: session-tiers is the decision's file name
+    "records have landed. If the repo is not attached to this session, attach it read-only with `add_repo` "
+    "(access read), then retry; if gh itself failed, retry when it answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_NO_PR_REASON = (
     "a branch of the lane is ahead of its repo's default branch and has no pull request that covers it, so closing "
@@ -2042,9 +2070,11 @@ ARCHIVE_NO_PR_REASON = (
     "push an archive copy of it under archive/, then retry. "
     "(decision session-tiers, a lane closes only after its records pull request has landed)"
 )
+# A template, as ARCHIVE_READ_REASON.
 ARCHIVE_BRANCH_READ_REASON = (
-    "the lane's branches or their pull requests could not be read, so the guard cannot tell whether any work of "
-    "the lane is stranded. Retry once gh answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
+    "the lane's branches or their pull requests (repo %s) could not be read, so the guard cannot tell whether any work of "  # glossary-ok: session-tiers is the decision's file name
+    "the lane is stranded. If a repo of the lane is not attached to this session, attach it read-only with `add_repo` "
+    "(access read), then retry; if gh itself failed, retry when it answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_STRANDED_MATCH = "archive of a lane with a branch that has no pull request"
 _REPO_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
@@ -2319,8 +2349,8 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
             stranded = _stranded_branch(module, lanes, repos, slugs, open_rows)
     except (Exception, SystemExit):
         if reading_branches:
-            return "archive with an unreadable branch read", ARCHIVE_BRANCH_READ_REASON
-        return "archive with an unreadable pull request list", ARCHIVE_READ_REASON
+            return "archive with an unreadable branch read", ARCHIVE_BRANCH_READ_REASON % ", ".join(repos)
+        return "archive with an unreadable pull request list", ARCHIVE_READ_REASON % ", ".join(repos)
     if stranded:
         return ARCHIVE_STRANDED_MATCH, ARCHIVE_NO_PR_REASON
     return None
@@ -2328,7 +2358,8 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
 
 # ---- send_message: a lane brief goes to a lane of its own topic (rule lane-one-topic)
 BRIEF_TOOL = "mcp__claude-code-remote__send_message"
-LANE_BRIEF_MARKER = "Lane brief:"  # the first non-blank line of a brief (after its Grant line, if any) starts `Lane brief: <step>. Topic: <topic>.`
+# The first non-blank line of a brief (after its Grant line, if any) starts `Lane brief: <step>. Topic: <topic>.`
+# (LANE_BRIEF_MARKER, shared_names).
 TOPIC_TAG_PREFIX = TOPIC_TAG
 _MARKDOWN_LEAD = r"[#*_>\s]*"  # a brief may open with markdown: a heading, bold, a quote
 _BRIEF_MARKER_LINE = re.compile(_MARKDOWN_LEAD + re.escape(LANE_BRIEF_MARKER), re.IGNORECASE)
@@ -2595,6 +2626,63 @@ def step_pr_hit(tool: str, tool_input, transcript: str):
     return None
 
 
+# ---- a build spawn names the prior work it searched (rule spawn-searches-existing-builds)
+# The line is `Prior work: #N (state) | <branch> | none found`, on a line of its own, with some text after the colon. The
+# text is not checked against GitHub: the guard reads the brief only. A line inside a ``` fence is a quoted example and
+# does not count. The marker matches without case, after optional markdown lead characters.
+PRIOR_WORK_LINE = "Prior work:"
+PRIOR_WORK_REASON = (
+    "this build spawn has no `Prior work:` line with text after it. Search the open and closed pull requests, the "
+    "branches and main for an existing build first, then add one line to the brief: `Prior work: #N (state) | <branch> "
+    "| none found`. A bare `Prior work:` line does not count. "
+    "(decision spawn-searches-existing-builds, a build spawn names the prior work it searched)"
+)
+# The colon may sit outside bold (`**Prior work**: x`), and a numbered-list lead (`1. `) may come before the marker.
+_PRIOR_WORK_LINE = re.compile(
+    r"[-#*_>\s]*(?:\d+[.)]\s+)?[-#*_>\s]*" + re.escape(PRIOR_WORK_LINE[:-1]) + r"[*_]*:[ \t*_]*(?P<text>\S.*)?$",
+    re.IGNORECASE)
+# An unfilled template placeholder (`<what you searched>`) names nothing.
+_PLACEHOLDER = re.compile(r"<[^<>]*>")
+
+
+def prior_work_named(text) -> bool:
+    """True when `text` has a Prior work line with text after the marker, outside a fence. Text that is only angle-bracket
+    placeholders does not count."""
+    if not isinstance(text, str):
+        return False
+    fenced = False
+    for line in text.split("\n"):
+        if opens_fence(line.strip()):
+            fenced = not fenced
+            continue
+        found = None if fenced else _PRIOR_WORK_LINE.match(line.rstrip())
+        if found and found.group("text") and _PLACEHOLDER.sub("", found.group("text")).strip(" \t|,;"):
+            return True
+    return False
+
+
+def prior_work_lane_hit(tool: str, tool_input):
+    """Return (matched, reason) when a lane start or a lane brief names no prior work, else None. A lane start is a
+    create_session that tags a lane (its prompt). A lane brief is a send_message whose first non-blank line after any
+    Grant line starts the Lane brief marker (its message), read as _step_call reads it. Pure text work: no read, no file.
+    The Agent side of the rule is guard.prior_work_agent_hit."""
+    if not isinstance(tool_input, dict):
+        return None
+    if tool == BRIEF_TOOL:
+        message = tool_input.get("message")
+        lines = [line.strip() for line in message.splitlines() if line.strip()] if isinstance(message, str) else []
+        if lines and lines[0].startswith(LANE_GRANT_MARKER):
+            lines = lines[1:]
+        if not (lines and _BRIEF_MARKER_LINE.match(lines[0])):
+            return None
+        text, matched = message, "lane brief with no Prior work line"
+    elif is_lane_create_session(tool, tool_input):
+        text, matched = tool_input.get("prompt"), "lane start with no Prior work line"
+    else:
+        return None
+    return None if prior_work_named(text) else (matched, PRIOR_WORK_REASON)
+
+
 # ---- A lane brief names a slug or a role, never a session id (rule brief-ids-in-roster)
 # A session id as a brief types it, in any case. SESSION_ID_RE (guard_shared_tree) is a full match, so this scans: the id
 # is `session_`, a digit, then letters and digits, so a parameter name such as `session_id` is no id, and a `.md`, a dot or
@@ -2604,7 +2692,10 @@ _DATA_QUOTES = "`\""  # an id with one of these right before it and right after 
 # A line that opens a brief: an optional markdown lead, then Grant: or Lane brief:. The lead is _MARKDOWN_LEAD plus the
 # list dash, which the other readers of the lead do not take.
 _BRIEF_LEAD = r"[-#*_>\s]*"
-_BRIEF_OPENER = re.compile(_BRIEF_LEAD + r"(?:" + re.escape(LANE_GRANT_MARKER) + r"|(?i:" + re.escape(LANE_BRIEF_MARKER) + r"))")
+# The standing sessions' briefs open with a role word (decision brief-ids-in-roster): `Brief:`, `Triage brief:`, `Batch runner brief:`.
+ROLE_BRIEF_MARKERS = ("Brief:", "Triage brief:", "Batch runner brief:")
+_BRIEF_OPENER = re.compile(_BRIEF_LEAD + r"(?:" + re.escape(LANE_GRANT_MARKER) + r"|(?i:"
+                           + "|".join(re.escape(m) for m in (LANE_BRIEF_MARKER,) + ROLE_BRIEF_MARKERS) + r"))")
 BRIEF_ID_REASON = (
     "this brief names a session id. A hand-typed id can wake the wrong session or none. Name the lane's slug or the "
     "session's role instead, and the lane looks the id up in the roster. "
@@ -2624,10 +2715,10 @@ def _bare_ids_in(text: str) -> list[str]:
 
 
 def brief_roster_hit(tool: str, tool_input, cwd: str):
-    """Return (matched, reason) when a lane brief names a bare session id, else None. Read: a create_session that tags a
-    lane (its prompt), and a send_message with a line that starts LANE_GRANT_MARKER or LANE_BRIEF_MARKER (its message). An
-    id inside backticks or double quotes is data and passes. The send_message target is not judged. No git read and no
-    file written: the text alone decides. Fails open on any error in the read. `cwd` is unused; the call site passes it."""
+    """Return (matched, reason) when a session brief names a bare session id, else None. Read: a create_session that tags a
+    lane (its prompt), and a send_message with a line that starts LANE_GRANT_MARKER, LANE_BRIEF_MARKER or a role-word
+    marker (ROLE_BRIEF_MARKERS), whatever session it goes to (its message). An id inside backticks or double quotes is
+    data and passes. The send_message target is judged by target_roster_hit. No git read and no file written: the text alone decides. Fails open on any error in the read. `cwd` is unused; the call site passes it."""
     if not isinstance(tool_input, dict):
         return None
     if tool == BRIEF_TOOL:
@@ -2646,7 +2737,91 @@ def brief_roster_hit(tool: str, tool_input, cwd: str):
         return None
     if not bare:
         return None
-    return "lane brief naming " + ", ".join(sorted(set(bare))), BRIEF_ID_REASON
+    return "session brief naming " + ", ".join(sorted(set(bare))), BRIEF_ID_REASON
+
+
+# ---- A send_message goes to an id the roster knows (rule target-id-in-roster)
+TARGET_ROSTER_REASON = (
+    "the target session id is in no roster source: not in the Standing sessions rows of the roadmap record, and not in "
+    "what your own list_sessions, get_session and create_session results show for this repo. A hand-typed id can wake "
+    "the wrong session or none. {rows} Copy the id from a row, or run list_sessions (every page, tag cs-repo:<owner>/<name>) "
+    "and take it from there, then send again. "
+    "(decision brief-ids-in-roster, every session knows the right ids from the harness)"
+)
+TARGET_UNKNOWN_LINE = ("target-id-in-roster: the roster is unknown (the roadmap record and the transcript could not be "
+                       "read), so the target session id is not checked")
+
+
+def _parent_targets():
+    """PARENT_TARGETS of lint/layout.py, the one home of the send targets that name the parent."""
+    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import layout
+    return layout.PARENT_TARGETS
+
+
+def _sender_facts(transcript: str, own_id):
+    """(slugs, parent, made) from one read of the sender's transcript. slugs: the owner/name repos named by the cs-repo
+    tags of the sender's own newest record, lowercased, or None when that record is unread or carries none. The
+    checkout's origin is not used: a session may coordinate one repo from another's checkout, so only its own record
+    says which repo its sessions belong to. parent: the parent_session_id of that record, or None. made: the lanes
+    the sender created, {id: tags}. Each is empty or None when the transcript does not read."""
+    if not (own_id and transcript):
+        return None, None, {}
+    try:
+        tags, parent, made = own_session.own_record_and_created(transcript, own_id)
+    except Exception:
+        return None, None, {}
+    slugs = {t[len(REPO_TAG):].lower() for t in tags or () if isinstance(t, str) and t.startswith(REPO_TAG)}
+    return slugs or None, parent, made
+
+
+def target_roster_hit(tool: str, tool_input, cwd: str, transcript: str = ""):
+    """Return (matched, reason) when a send_message names a target session id that is in no roster source, else None.
+    The parent alias (layout.PARENT_TARGETS) passes with no read. The roster is the Standing sessions rows of the
+    roadmap record (own_session.roster_rows), the sender's parent id (parent_session_id of its own get_session record),
+    every lane the sender created whatever its cs-repo tag, and every id the sender's own transcript shows from
+    list_sessions, get_session and create_session with a cs-repo tag of the sender's repo (the cs-repo tags of its own
+    record; with none read, every sighting counts). A lane has no row, so it counts only when the sender saw or made
+    it. The reason prints the record's rows and never the target. Cost: one local git read of the record, two
+    transcript reads (own_session.own_record_and_created, own_session.sessions_seen), on a send_message only; no
+    network, no file. Fails open with one stderr line when neither source reads, and on any error: the roster is advice
+    about an id."""
+    if tool != BRIEF_TOOL or not isinstance(tool_input, dict):
+        return None
+    target = tool_input.get("session_id")
+    if not isinstance(target, str) or not target:
+        return None
+    try:
+        from override import remote_session_id
+        if target in _parent_targets():
+            return None
+        text = own_session.roster_record(cwd)
+        rows = own_session.roster_rows(text) if text is not None else None
+        slugs, parent, made = _sender_facts(transcript, remote_session_id())
+        seen = None
+        if isinstance(transcript, str) and transcript:
+            seen = own_session.sessions_seen(transcript)
+        if rows is None and seen is None:
+            print(TARGET_UNKNOWN_LINE, file=sys.stderr)
+            return None
+        known = {row[2] for row in rows or ()} | set(made)
+        if parent:
+            known.add(parent)
+        known |= {sid for sid, tags in seen or () if (slugs is None or any(repo_tag_names(t, s) for t in tags for s in slugs))}
+        if target in known:
+            return None
+        if rows is None:
+            listing = "The roadmap record could not be read."
+        elif not rows:
+            listing = "The roadmap record holds no standing session rows."
+        else:
+            listing = "The standing sessions: " + "; ".join(
+                "%s%s %s" % (role, " " + title if title else "", sid) for role, title, sid in rows) + "."
+        return "send_message to a session id in no roster source", TARGET_ROSTER_REASON.format(rows=listing)
+    except Exception:
+        return None
 
 
 # ---- send_message: a header stamp matches the clock (rule message-time-matches-clock)

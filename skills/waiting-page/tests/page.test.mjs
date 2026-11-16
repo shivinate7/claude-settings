@@ -1814,13 +1814,36 @@ test("a batch of many items with long owners is cut to 4 KiB and keeps Owners", 
   assert.ok(text.endsWith("…"), "the cut did not run");
 });
 
-test("an owner name is capped at 80 characters", async (t) => {
+// A cut owner shows its cut with an ellipsis, so "triag" never reads as a whole name (step saved-comment-truncates-owner).
+test("an owner name is capped at 80 characters and a cut one ends in an ellipsis", async (t) => {
   const long = { ...DECISION, owner: "q".repeat(300) };
   const page = await open(t, { items: [long] }); if (!page) return;
   await takePick(page, long); await send(page);
   await page.waitForFunction(() => window.__sent.length === 1);
   const text = (await sent(page))[0].text;
-  assert.ok(text.includes("q".repeat(80)) && !text.includes("q".repeat(81)));
+  assert.ok(text.includes("q".repeat(79) + "…") && !text.includes("q".repeat(80)));
+});
+
+test("an owner of 80 characters or fewer is shown whole; the sighted long owner shows its cut", async (t) => {
+  const exact = { ...DECISION, owner: "e".repeat(80) };
+  const sighted = { ...DECISION, id: "pick-sighted", n: 29, owner: "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 02:44 CST Nov 15; posted by triage" + " x".repeat(10) };
+  const page = await open(t, { items: [exact, sighted] }); if (!page) return;
+  await takePick(page, exact); await takePick(page, sighted); await send(page);
+  await page.waitForFunction(() => window.__sent.length === 1);
+  const text = (await sent(page))[0].text;
+  assert.ok(text.includes("e".repeat(80) + ","), "an 80-character owner was cut");
+  assert.match(text, /posted by tria…[,.]/);
+});
+
+test("a cut owner never splits an emoji, and a blank owner shows ?", async (t) => {
+  const emoji = { ...DECISION, owner: "a".repeat(78) + "😀" + "bbb" };
+  const blank = { ...DECISION, id: "pick-blank", n: 30, owner: "   " };
+  const page = await open(t, { items: [emoji, blank] }); if (!page) return;
+  await takePick(page, emoji); await takePick(page, blank); await send(page);
+  await page.waitForFunction(() => window.__sent.length === 1);
+  const text = (await sent(page))[0].text;
+  assert.ok(!/[\ud800-\udbff](?![\udc00-\udfff])/.test(text), "a cut left half an emoji");
+  assert.match(text, /Owners: a{78}😀…, \?\./);
 });
 
 test("pressing Send again while a batch is in flight does nothing", async (t) => {
@@ -9989,4 +10012,22 @@ test("a multi answer carries a list of labels, one per tick, beside its list of 
   assert.equal(a.label.length, 2);
   assert.match(a.label[0], /^a: Red$/i);
   assert.match(a.label[1], /^c: Green$/i);
+});
+
+// The number on a card is the stable number the owner answers by, not a database id. Its hover text says so, so the owner never reads it as one. Both cases check that text: on an open card and on a ruling card.
+const N_MEANING = /item number: the stable number you answer by; not a database id/i;
+test("an open card's item number says it is the stable answer number, not a database id", async (t) => {
+  const page = await open(t, { items: [DECISION, TASK] });
+  if (!page) return;
+  for (const it of [DECISION, TASK]) {
+    const title = await card(page, it).locator(".top .num").getAttribute("title");
+    assert.match(title, N_MEANING, "No. " + it.n + " carries no label saying what the number is: " + title);
+  }
+});
+test("a ruling card's item number says it is the stable answer number, not a database id", async (t) => {
+  const page = await open(t, { items: [DECISION, ARBITER] });
+  if (!page) return;
+  await need(card(page, ARBITER), "the closed arbiter item has no card");
+  const title = await page.locator(`#item-${ARBITER.id} .num`).first().getAttribute("title");
+  assert.match(title, N_MEANING, "the ruling's number carries no label saying what it is: " + title);
 });

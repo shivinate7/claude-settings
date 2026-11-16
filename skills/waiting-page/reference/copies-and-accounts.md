@@ -14,11 +14,11 @@ never runs it. There is one path: the record branch's own worktree. Never write 
 1. Check out the record branch in its own worktree (`roadmap`; the repo's extras file may name another).
    Name the copy folder: take the path `python3 ~/.claude/lint/layout.py path <repo root> waiting-data` prints,
    and use that path inside the worktree.
-2. Fetch each of the five collections: `items`, `answers`, `groups`, `asks` and `meta`. Use
+2. Fetch each of the six collections: `items`, `answers`, `groups`, `asks`, `meta` and `receipts`. Use
    `ArtifactData list <collection>` with `out_dir` set to one new folder, and `query.limit` 1000.
    Follow `next_cursor` until it is empty. A list call that errors, or that ends with a cursor still
-   pending, stops the run: touch no `.complete` file and run no export. A missed cursor page deletes docs
-   from the copy. After the last page of a collection, touch `.complete` in its folder. An empty collection
+   pending, stops the run: touch no `.complete` file and run no export. A missed cursor page leaves its docs
+   stale in the copy. After the last page of a collection, touch `.complete` in its folder. An empty collection
    is an empty folder with that marker. Make the folder by hand if the tool wrote none.
 3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --fetched <folder> --out <copy folder> --page <file>`.
    `<file>` is the page that "Keep the page on main's code" step 1 already read. Its HTML lands in the copy as
@@ -63,7 +63,7 @@ rebuild the page from git (`--rebuild`, or `--all`) and add the new link to `lin
 is refused, with the remedy to move it into `links`. A role other than `waiting-page` also has `collections`,
 the collections to export. An empty list (`"collections": []`) makes a page-only entry: its page and files export, and
 no database does. `id` is a slug of 32 characters or fewer. The role `waiting-page` marks the repo's waiting page.
-Its default collections are the five above. `layout.waiting_page(root, account)` reads that account's link, else the
+Its default collections are the six above. `layout.waiting_page(root, account)` reads that account's link, else the
 first. When that entry has no link, the old `waiting-page` key is the fallback.
 
 A decision or a debt cites an artifact as `artifact:<id>`, never by its link. A link breaks when a page moves, and

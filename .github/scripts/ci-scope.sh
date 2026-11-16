@@ -3,7 +3,7 @@
 #   per job: checks_guard (set when code and guard are both set, or directly by a path the checks-guard job installs from: actions/playwright-setup, .github/shoot), checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep (the janitor sweep suites, set with checks_windows_rest) checks_macos shell_macos pointer_windows, and shoot (below)
 #   per suite: code (any non-docs file changed), mods (a path under mods/, or a .md path under skills/plain-english-map/: the mod tests and the
 #   map skill tests, one CI step in each of the `checks`, `checks-windows` and `checks-macos` jobs), guard (guard mutation test), sweep (janitor mutation test), shoot (the checks-shoot and checks-waiting-page jobs: the bin/shoot suite and the page suites, which install a browser).
-#   The `checks` lint job and the checks-merge-install, checks-install-checkout and checks-merge-git jobs always run, so they have no flag (their suites carry `code`).
+#   The `checks` lint job and the checks-merge-install, checks-install-checkout and checks-merge-git jobs have no flag of their own (their suites carry `code`). A records-only run skips them with the rest (records_only_skip, below).
 #   checks_macos gates both checks-macos and checks-macos-b.
 #   per lint step (the four pull-request steps of the `checks` job; each runs only when a file its lint reads changed):
 #     lint_red_run (Red-run trailer: any non-.md path, and a .md path under a test folder, since lint/check_red_run.py asks hooks/guard.py is_test_rel),
@@ -19,8 +19,8 @@
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event; false on a records-only skip.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
-# BASE_SHA, HEAD_REF, GREEN_HEAD (optional: the sha green-head.sh prints, the pull request's newest earlier fully green head), PR_HEAD
-# (optional: the pull request's head sha; HEAD when unset). GREEN_HEAD turns the 13 job and suite flags off on a pull request when it is an
+# BASE_SHA, HEAD_REF, GREEN_HEAD (optional: the sha green-head.sh prints, the pull request's newest earlier fully green head; a push may carry one too), PR_HEAD
+# (optional: the pull request's head sha; HEAD when unset). GREEN_HEAD turns the 13 job and suite flags off on a pull request or a push when it is an
 # ancestor of PR_HEAD and the delta from it to PR_HEAD is docs/records.md alone; the lint flags keep their whole-PR values and mutation_report is false. Any unreadable read: no skip.
 # The last output line, records_only_skip=true|false, is true exactly in that case.
 set -u
@@ -186,8 +186,10 @@ else
 fi
 # checks_guard: the checks-guard job runs the guard suite, which needs both flags (the old step if). The playwright-setup arm above also sets it directly.
 case "$on" in *" code "*) case "$on" in *" guard "*) on="$on checks_guard " ;; esac ;; esac
-# A records-only push after a fully green head: the earlier head's run proved everything but the lints and the mutation report,
-# so only docs/records.md moved since. The whole PR diff was read above (whole_read); every other case keeps its flags.
+# A records-only change after a fully green head: the earlier head's run proved everything but the lints and the mutation report,
+# so only docs/records.md moved since. On a pull request the whole PR diff was read above (whole_read). A push has no PR diff to read:
+# its GREEN_HEAD is the caller's word, and the ancestor and delta reads below hold it. A schedule, a dispatch and every other case keep
+# their flags.
 # The delta must be exactly one path: an empty or longer delta, an unreadable one or a head that is not an ancestor keeps `on`.
 # The delta runs to PR_HEAD, the pull request's own head: HEAD in CI is the merge commit, which also holds every base change since.
 # PR_HEAD counts only when it is a full hex sha, a commit, and an ancestor of HEAD; otherwise the delta runs to HEAD.
@@ -197,7 +199,7 @@ if [[ "${PR_HEAD:-}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] && git cat-file -e "$PR
    git merge-base --is-ancestor "$PR_HEAD" HEAD 2>/dev/null; then
   end=$PR_HEAD
 fi
-if [ "$whole_read" = 1 ] && [[ "${GREEN_HEAD:-}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] &&
+if { [ "$whole_read" = 1 ] || [ "${EVENT:-}" = push ]; } && [[ "${GREEN_HEAD:-}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] &&
    git merge-base --is-ancestor "$GREEN_HEAD" "$end" 2>/dev/null &&
    delta=$(git diff --name-only --no-renames "$GREEN_HEAD" "$end" 2>/dev/null) && [ "$delta" = docs/records.md ]; then
   kept=" "
@@ -223,5 +225,5 @@ case "${EVENT:-}" in
 esac
 [ "$skip" = true ] && v=false
 echo "mutation_report=$v" >> "$GITHUB_OUTPUT"
-# records_only_skip: true exactly when the records-only shortcut above forced the 13 flags off; checks.yml reads it to skip the run steps of the test jobs.
+# records_only_skip: true exactly when the records-only shortcut above forced the 13 flags off; checks.yml reads it in job-level `if:` to skip the test jobs themselves.
 echo "records_only_skip=$skip" >> "$GITHUB_OUTPUT"
