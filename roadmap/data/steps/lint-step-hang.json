@@ -1,0 +1,14 @@
+{
+ "id": "lint-step-hang",
+ "title": "Find which lint step hangs and kill its whole process group",
+ "priority": "next",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "consultant",
+ "blockedBy": [],
+ "updatedAt": "2026-11-16T00:43:53-06:00",
+ "why": "[00:43 CST Nov 16, triage] Coordinator relay 00:44 CST, on the consultant's word (his 00:44 CST message). Evidence: runner 10's lint of #2917 hung twice in the \"Debt retire fixture suite\" (silent 28 min; stopped at 00:38 CST); the consultant's lint of #3362 died at its 65-minute limit at 00:40 CST on the cloud host (node v22.23.4; his log parse could not name the hung step). The archive-flow lane reports the suite passes in 3.9 s (58 tests) on its own host at #2917's head, and proposes a process-group kill at lint/check_debt_retire.py:140 (not applied). Scope: find the hung step with `pgrep -l` or `ps -ef --forest` during a stall, then a process-group kill per step. It touches a check, so the build goes to a builder with a reviewer. Related steps, none the same: ready-step-hang-no-timeout (progress lines in the debt-close lint; lane of #3400), time-limits-end-hangs-only (#2863, stop on silence), ready-checks-time-bound (#3423, a time bound per check in merge --ready). Searched steps and rulings for lint-step-hang and the suite name before filing.",
+ "source": "coordinator relay 00:44 CST Nov 16, consultant's word; filed by triage 8; not owner-typed",
+ "note": "Todo, after goal item 1. Find the lint step that hangs: watch with `pgrep -l` or `ps -ef --forest` during a stall (the \"Debt retire fixture suite\" hung twice on #2917; #3362 hit the 65-minute limit). Then kill the whole process group per step (proposed at lint/check_debt_retire.py:140, not applied). The suite passes in 3.9 s (58 tests) on the archive-flow lane's host. A builder with a reviewer, started by the consultant. Related: ready-step-hang-no-timeout, time-limits-end-hangs-only, ready-checks-time-bound. No PR yet."
+}
