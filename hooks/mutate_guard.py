@@ -2053,8 +2053,8 @@ MUTATIONS = [
      '            if True:\n                scratchpad_record_writer(full, session, after[full])',
      "guard", "scratchpad-owner: approved 2 agent B's rm the owner approves keeps the record with agent A"),
     ("scratchpad-owner: an overwrite the owner lifts leaves the old record",
-     ', on_lift=record_writers)',
-     ')',
+     'taken,\n               on_lift=record_writers)',
+     'taken)',
      "guard", "scratchpad-owner: approved 1 agent B's overwrite the owner approves moves the record"),
     # Rule scratchpad-owner: the run forms a first-command reader does not read, and the copy and move destinations.
     # Each entry names the case that goes red when its mechanism is removed.
