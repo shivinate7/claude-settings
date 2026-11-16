@@ -50,3 +50,4 @@ output style load in each session on each repo.
   standing grant to act on overlaps by me, owner"). The batch runner may act on overlaps between lane branches.
   Runner 10 reads that as a plain merge of one lane's head into another lane's branch, under the limits of the
   bullet above. The owner has not confirmed that reading. Source: decision `standing-merge-grant`.
+- **Merge in any repo** (owner, 2026-11-15 23:43 CST): any session may merge a PR in any of the owner's repos with the merge tool, under every merge check. The grant covers that wording only (ruling own-913-a-merge-any-repo-grant-line, owner, 2026-11-16 13:34 CST).
