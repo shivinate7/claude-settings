@@ -20,6 +20,9 @@
                           Cost per draft-step ready: one ci-job run per job of the list, and one worktree; the run time is unmeasured for a step subset
                           (the 3600 s lint bound applies), and a head that lacks the default base's tip adds one merge commit, one more local `git merge` start and one push even when its page is current (a head that holds the tip with a current page pushes none; any head pushes at most once). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
+                          A head whose own run is still pending merges when a lane-lint PASS names its exact sha (a PASS carried over claim commits counts); main's run after
+                          the merge is the check. A finished red run, a red main and a PASS for another head still refuse. GitHub reads a pending required check as BLOCKED,
+                          so the PUT goes on past that one read and GitHub refuses it or not; BEHIND still refuses.
                           A confirm in the cloud needs a lane-lint PASS for the head's sha. Any pull request skips it, a lane PR included, when the all-jobs-passed rollup is green on that exact head:
                           then it skips the lint and prints one `merge: lane lint skipped ...` line naming the rollup and the head's first 9 characters.
   merge <pr> --confirm --express   go on to the merge only for a prose-only diff (main's ci-scope.sh turns on nothing) whose body has a `Ruling: <id>`
@@ -190,7 +193,7 @@
                           A repo with no readyChecks prints `unknown pre-ready: no merge.readyChecks declared` and exits 1.
                           Cost: see fast_checks, run_ready_checks, pre_ready_rows, cross_measure.
   merge --role TIER       cloud only: record this session's merge role (batch-runner, lane with `--step SLUG`, the cs-step slug of the session's own
-                          record, or standing: a coordinator or triage merges only its own docs or rule-text pull request, see standing_refusal). In a cloud session `--confirm`
+                          record, or standing: a coordinator, triage or the consultant merges only its own pull request, see standing_refusal). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role). A lane's confirm needs --head and runs only on its own ready pull request: a head ref of that step
                           (lane_own_pr_refusal), and a lane never runs --ready. A local session reads the role the launcher
                           (bin/claude-role) recorded in its role file instead: a session with its own role file runs `--confirm` only when
@@ -1124,6 +1127,7 @@ class Host:
         self.required, self.base, self.minute, self.now, self.pause = required, base, minute, now, pause
         self.repo = repo  # OWNER/NAME, or None for the repo of the working directory
         self.take_base = None  # confirm sets it to the base it read under the lock; merge compares the base it reads just before the PUT with it
+        self.pending_lifted = False  # confirm sets it when a lane-lint PASS on the live head lifted a pending run: merge then sends the PUT past a BLOCKED read, and GitHub refuses it or not
         self.cwd = cwd    # where `gh` runs, so it names the repo of that directory
         self.ignore = ignore or {}  # check name -> reason, from ignore_checks()
         self.warned = set()  # (check name, link) already warned about, so a poll loop prints each line once
@@ -2005,7 +2009,7 @@ class Host:
         if p["base"] != taken:
             return None, f"#{n} base changed from {taken} to {p['base']} after the take, so its checks and lock were for the old base. No merge call was sent."
         state_now = p["merge_state"]
-        if state_now in ("BLOCKED", "BEHIND"):
+        if state_now == "BEHIND" or (state_now == "BLOCKED" and not self.pending_lifted):  # GitHub reads a pending required check as BLOCKED: that one cause goes on to the PUT, and GitHub refuses it or not
             return None, f"#{n} reads {state_now}: its base rules are not met or its branch is behind the base {GRANT_CITE}. gh's merge refuses it the same way, so no merge call was sent."
         def merged_at_sha():  # a lost reply may still have merged: True when the PR reads merged at this run's head, False when it reads open, None when unread or merged elsewhere
             c4, v = self.api(f"pulls/{n}", memo=False)
@@ -3868,7 +3872,7 @@ def red_base(root, host, base, red_ok=""):
 
 def head_not_green(state):
     """-> why `state`, the one read of a head's own checks (Host.head_state), is not green; None when it is green. The read never waits:
-    rule M3 merges only a head that is already green, so a pending head is refused, and the lane runs --confirm again when its run ends."""
+    rule M3 merges only a head that is already green, so a pending head is refused unless a lane-lint PASS names it (confirm lifts that), and the lane runs --confirm again when its run ends."""
     if state == "green" or state.startswith("green ("):  # a trailing "(ignored: ...)" names the checks merge.ignoreChecks left out
         return None
     if state.startswith(("red: ", "pending: ")):
@@ -4370,7 +4374,10 @@ HEAD_MOVED = "the head of #{n} moved since the owner's yes was relayed, so that 
 
 BATCH_RUNNER_NEEDS_HEAD = "the merge needs the head the CI ran on, so pass it with the --head flag (decision auto-mode-owner-acts, a merge runs on the head its CI ran on). Nothing was claimed or pushed."
 
-def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok="", expected_head=None, linted_head=None, express=False):
+def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok="", expected_head=None, linted_head=None, express=False, lint_proof=None):
+    """`lint_proof`: a callable(info) -> True when a lane-lint PASS holds for that live head (lint_proves_head), None for a host that reads no comments. It is asked
+    only when the head's own run is still pending: a PASS lifts a pending run, and main's run after the merge is the check
+    (a red main reverts the blamed commit). A finished red run, a red main and a PASS for another head are never lifted."""
     m = cfg.get("merge", {})
     info = info or host.pr(n)  # main read it once already, and the config came from that base. A read; the head compare after the lock covers a head that moves before the lock is ours
     base = info["base"]  # the PR's own base; read again under the lock
@@ -4426,6 +4433,11 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             say("merge: checking the head's checks and runs ...")  # before the read, which can block
             state = host.head_state(n, info["head"])  # a resumed claim is the head: the claim commit's own checks are read, never the head under it
             not_green = head_not_green(state)
+            if not_green and state.startswith("pending: ") and lint_proof and lint_proof(info):
+                say(f"merge: the head's run is still pending ({state[len('pending: '):]}), and a lane-lint PASS names {info['head'][:9]}, so the run does not hold the merge "
+                    f"(owner, 2026-11-15 18:21 CST: {base}'s run after the merge is the check, and a red {base} reverts it).")
+                host.pending_lifted = True
+                not_green = None
             if not_green and state.startswith("unknown ("):  # a read that could not run, a network fault included, is not a verdict on the head
                 raise Stop(f"{not_green}. Nothing was claimed or pushed. {GREEN_CITE}")
             if not_green:
@@ -5185,6 +5197,14 @@ def lint_check(h, n, info, root, cfgrel):
     if rollup_green(h, n, info["head"]):
         say(f"merge: lane lint skipped for #{n}: {ROLLUP_JOB} is green on {info['head'][:9]}, so CI already proved this head.")
         return
+    lint = lint_verdict(h, n, info, root, cfgrel)
+    if lint != "pass":
+        raise Stop(f"#{n} at {info['head'][:9]} is not ready to join: {LINT_NOT_READY[lint][1]}. Run `merge --lane-lint {n}`, then join again. {LANE_LINT_CITE}")
+
+def lint_verdict(h, n, info, root, cfgrel):
+    """-> "pass", "fail", "unknown" or "none": the lane lint of the live head info["head"], read from the repo's comment list. "pass" also when a PASS for an earlier
+    head is carried to it (lint_carried). The one home of that read, for the join (lint_check) and the pending-run lift (lint_proves_head). It does not read the rollup.
+    A failed comment read is a Stop that names `merge --lane-lint <n>`: `lane lint unknown`, never a pass."""
     try:
         lints = h.issue_comments(info.get("created") or "1970-01-01T00:00:00Z")[1]
     except Stop as e:
@@ -5194,11 +5214,18 @@ def lint_check(h, n, info, root, cfgrel):
         older = lint_passed(lints.get(n, []))
         if older and not git(root, "fetch", "-q", "origin", f"+refs/heads/{info['branch']}:refs/remotes/origin/{info['branch']}")[0]:
             if lint_carried(root, cfgrel, info["base"], n, older, info["head"]):
-                return
+                return "pass"
         if lint_carried(root, cfgrel, info["base"], n, [], info["head"], h, source_lint_passed(h, n, info.get("body"))[1]):
-            return
-    if lint != "pass":
-        raise Stop(f"#{n} at {info['head'][:9]} is not ready to join: {LINT_NOT_READY[lint][1]}. Run `merge --lane-lint {n}`, then join again. {LANE_LINT_CITE}")
+            return "pass"
+    return lint
+
+def lint_proves_head(h, n, info, root, cfgrel):
+    """True when a lane-lint PASS holds for the live head info["head"] (lint_verdict). Any other verdict, and a failed read, is False and never a Stop: confirm asks it only
+    when the head's own run is pending, in the cloud or on a computer, and a False leaves the pending run holding the merge."""
+    try:
+        return lint_verdict(h, n, info, root, cfgrel) == "pass"
+    except Stop:
+        return False
 
 def own_records(n, bodies):
     """-> the parsed records among `bodies` that name pull request `n`, in order: the earlier records review_state walks back through."""
@@ -5733,13 +5760,11 @@ def replaced_names(info, n):
     return [x for x in dict.fromkeys(names) if x != n and x not in dropped]
 
 LANE_ROLE = "lane"  # a lane's merge role: its role record also names its step, and it merges only its own pull request (ruling own-lanes-merge-claude-settings-prs)
-STANDING_ROLE = "standing"  # ruling own-tiny-fixes-b: a coordinator or triage merges its own small edit, and only that
+STANDING_ROLE = "standing"  # ruling own-tiny-fixes-b: a coordinator, triage or the consultant merges its own pull request (decision session-tiers)
 MERGE_ROLES = {"batch-runner", LANE_ROLE, STANDING_ROLE}  # the tiers that may run `merge <pr> --confirm` in a cloud session; the standing one only past standing_refusal, the lane one only on its own pull request
 LANE_MERGE_REPO = "shivinate7/claude-settings"  # the one repo whose pull requests a lane merges itself; the lane role covers it alone
 LOCAL_MERGE_ROLES = {"batch-runner"}  # the roles a local session's role file may name; the lane role is a cloud role only
 
-STANDING_MAX_LINES = 40  # reading cost, unmeasured; the owner may change it
-STANDING_MAX_FILES = 3  # reading cost, unmeasured; the owner may change it
 
 def role_path():
     return pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")) / "state" / "merge-role.json"
@@ -5841,34 +5866,29 @@ def own_session_link(body):
     own = remote_session_id()
     return bool(own) and own in re.findall(r"https://claude\.ai/code/(session_[A-Za-z0-9_-]+)", body or "", re.ASCII)
 
-def is_rule_text(path):
-    """Rule text is a CLAUDE.md or AGENTS.md at any depth, or a .md file under agents/ or skills/. A script under skills/ is code, not rule text."""
-    low = path.lower()
-    return low.endswith(".md") and (os.path.basename(low) in ("claude.md", "agents.md") or low.startswith(("agents/", "skills/")))
-
 def standing_refusal(h, n, info, head):
-    """-> why a standing session may not merge pull request `n`, or "" when it may (ruling own-tiny-fixes-b). It must be the session's own, and every file
-    a doc or rule text outside the guard paths. The head's own checks must be green, and rule text needs one sonnet reviewer record on the relayed head `head`.
-    A rule-text pull request is also small: at most STANDING_MAX_LINES added lines (additions only) and STANDING_MAX_FILES files. A docs-only one skips the bound.
+    """-> why a standing session may not merge pull request `n`, or "" when it may (ruling own-tiny-fixes-b). It must be the session's own,
+    and the head's own checks must be green. A pull request past docs, code and guard paths included, needs one sonnet reviewer record on the relayed head `head`.
+    No size bound (decision session-tiers). A docs-only one needs no record.
     The text names no tier and no flag, so a lane learns nothing from it (git-remedy-never-names-target)."""
     if not own_session_link(info.get("body")):
         return "this session did not open this pull request, so it may not merge it."
     files = h.pr_files(n, info.get("changed_files"))
     paths = [p for p, _, _ in files]
-    if not paths or guard_hits(paths) or any(not (is_doc(p) or is_rule_text(p)) for p in paths):
-        return "this pull request changes a file that is not a doc or rule text, or sits on a guard path."
+    if not paths:
+        return "this pull request changes no file."
     not_green = head_not_green(h.head_state(n, info["head"]))
     if not_green:
         return f"the head's own checks are not green: {not_green}."
-    if kind_misfits("docs-only", files):  # rule text, not a doc: small, and one sonnet reviewer record on the live head
-        # additions only: pr_files carries no deletions, and adding a host read or changing its triples is out of scope here; a rename's old path counts as a file
-        if sum(a for _, _, a in files) > STANDING_MAX_LINES or len(files) > STANDING_MAX_FILES:
-            return "this pull request changes rule text and is too large for this session to merge."
+    if kind_misfits("docs-only", files) or guard_hits(paths):  # any file past docs, code and guard paths included: one passing sonnet reviewer record on the live head (decision session-tiers)
         bodies = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(n, [])
-        rec = next((r for r in map(parse_review, reversed(bodies)) if r and r["n"] == n), None)
-        reviewers = [m for _, role, m, _ in (rec["rounds"] if rec else []) if role == REVIEW_ROLES[0]]
-        if not reviewers or any(m.lower() != "sonnet" for m in reviewers) or review_state(rec, head)[0] != "done":  # `head` is the relayed head, which relayed_head_holds ties to the live one: only this tool's claim commits may sit above it
-            return "this pull request changes rule text, and its head has no passing sonnet review record."
+        recs = [r for r in map(parse_review, bodies) if r and r["n"] == n]
+        rec = recs[-1] if recs else None
+        # the pass that ends review must be sonnet's: the fix verifier's when the record has one, else the last reviewer round's
+        last = (rec["fix"][2], rec["fix"][3]) if rec and rec["fix"] else next(((m, v) for _, role, m, v in reversed(rec["rounds"] if rec else []) if role == REVIEW_ROLES[0]), (None, None))
+        passer = last[0] if last[1] == "PASS" else None  # a final round that failed reads done when no net value is owed, but it is no pass
+        if not passer or passer.lower() != "sonnet" or review_state(rec, head, recs[:-1])[0] != "done":  # `head` is the relayed head, which relayed_head_holds ties to the live one: only this tool's claim commits may sit above it
+            return "this pull request changes code, rule text or a guard path, and its head has no passing sonnet review record."
     return ""
 
 def guard_hits(paths):
@@ -6267,7 +6287,8 @@ def main(argv, host=None, lock=None, hosts=None):
             checked = info["head"]
         if a.confirm:
             with release_on_signals():
-                return confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok, a.head, checked, a.express) or 0
+                proof = (lambda live: lint_proves_head(h, a.pr, live, root, a.config)) if hasattr(h, "issue_comments") else None  # read in the cloud and on a computer; a scripted host with no comment read reads no comments
+                return confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok, a.head, checked, a.express, proof) or 0
         return (preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
     except Stop as e:
         print(f"merge: {e}" + ("" if isinstance(e, (Liftable, Unproven)) else " No override lifts this refusal, because this tool runs after the guard."), file=sys.stderr)

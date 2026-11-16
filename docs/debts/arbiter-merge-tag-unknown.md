@@ -4,6 +4,6 @@
 
 **Where.** `hooks/guard_merge.py`, `STANDING_HOLDERS` and `role_proof_hit`. The fixture is `ARBITER_TAGS` in `tests/guard/s13406-merge.py`.
 
-**Decision.** `session-tiers` (session roles), its standing merge role sub-bullets, the follow-up bullet.
+**Decision.** `session-tiers` (session roles), its standing merge role sub-bullets, the Arbiter follow-up bullet.
 
-**Retire.** Confirm the arbiter's tag in a live session's `get_session` record. Then add it to `STANDING_HOLDERS`, and rewrite the follow-up bullet in place. The case that closes it is in `hooks/test_guard.py`: a record with the confirmed arbiter tag passes the standing tier, and a record without it is refused. The consultant's tag `cs-build:consultant` is already known, so it joins `STANDING_HOLDERS` in its own change and not through this debt.
+**Retire.** Confirm the arbiter's tag in a live session's `get_session` record. Then add it to `STANDING_HOLDERS`, and rewrite the Arbiter follow-up bullet in place. The case that closes it is in `hooks/test_guard.py`: a record with the confirmed arbiter tag passes the standing tier, and a record without it is refused. The consultant's tag `cs-build:consultant` is already in `STANDING_HOLDERS`.

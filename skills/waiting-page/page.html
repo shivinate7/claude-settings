@@ -2346,8 +2346,10 @@ function fitBytes(text) {
   while (enc.encode(text).length > MAX_BYTES) text = text.slice(0, Math.floor(text.length * 0.9)) + "…";
   return text;
 }
+// An owner over MAX_OWNER is cut with an ellipsis inside the cap, so a cut name never reads as a whole one.
+const ownerCut = (o) => { const cp = [...plain(o)]; return cp.length > MAX_OWNER ? cp.slice(0, MAX_OWNER - 1).join("") + "…" : cp.join("") || "?"; };
 function noticeText(entries, head, tail) {
-  const owners = [...new Set(entries.map((e) => plain(e.owner).slice(0, MAX_OWNER) || "?"))].join(", ");
+  const owners = [...new Set(entries.map((e) => ownerCut(e.owner)))].join(", ");
   const line = entries.map((e) => { const note = plain(e.note).slice(0, MAX_NOTE); return e.n + (tail ? "" : " " + (e.act === "park" ? "park" : e.choice ? choiceText(e.choice) : e.done ? "done" : "note, not done") + (note ? " (" + note + ")" : "")); }).join(", ");
   return fitBytes(head + " Owners: " + owners + ". Items: " + line + (tail || "."));
 }
