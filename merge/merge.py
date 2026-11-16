@@ -195,7 +195,7 @@
   merge --role TIER       cloud only: record this session's merge role (batch-runner, lane with `--step SLUG`, the cs-step slug of the session's own
                           record, or standing: a coordinator, triage or the consultant merges only its own pull request, see standing_refusal). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role). A lane's confirm needs --head and runs only on its own ready pull request: a head ref of that step
-                          (lane_own_pr_refusal), and a lane never runs --ready. A local session reads the role the launcher
+                          (lane_own_pr_refusal). A lane marks its own draft ready once, with --role, --step and --ready in one call, on a pull request whose head is that step's lane branch. A local session reads the role the launcher
                           (bin/claude-role) recorded in its role file instead: a session with its own role file runs `--confirm` only when
                           that file names batch-runner, and one the launcher started (CS_SESSION_ROLE set) with no matching own file is refused.
                           A session with neither is as it was, whatever other sessions' files are on disk.
@@ -288,7 +288,7 @@ RERUN_IN_FLIGHT = "is a re-run still going"  # base_state words an unknown re-ru
 BREAKING_MERGE = "breaking merge:"  # base_state words the first red run with a green parent, once its re-run is red again, with it; red_base reads it back to name the revert route
 FIRST_RED_RERUN = re.compile(rf"`{RERUN_REMEDY} (\d+) --failed`")  # base_state names a first red run's re-run with it; red_base reads the run id back to name the re-run before the reason flag
 DROP_CITE = "(decision silent-undo-check-design, a branch that silently undoes earlier work does not merge)"
-BATCH_CITE = "(decision main-branch-protection, the merge tool reads the required checks from the ruleset or the protection and never merges with none)"
+BATCH_CITE = "(decision main-branch-protection, the merge tool reads the required checks from the ruleset or the protection; decision private-repos-no-ci, merge.requiredChecks \"none\" merges a repo with no required check)"
 EXPRESS_CITE = "(decision owner-override, ruling R59 part 5 of 15:05 CST Nov 12, a ruled prose change skips the batch queue and runs only the checks that read its files)"
 FREEZE_CITE = "(decision batch-freeze-lane-set, a batch's lane set freezes when its build starts)"  # the frozen-block refusals and the duplicate-head stop keep their own cite: BATCH_CITE names the required-checks home, which does not govern them
 DRAFT_CITE = "(decision draft-until-reviewed, every pull request opens as a draft and only the one integration PR goes ready)"
@@ -1510,7 +1510,10 @@ class Host:
         return names
 
     def required_names(self):
-        """The required check names. Never empty: an empty list would pass the wait without a read."""
+        """The required check names. Never empty, except for merge.requiredChecks "none", which names no check and reads neither the ruleset nor the protection:
+        GitHub's own merge call refuses a check that is still required."""
+        if self.required == "none":
+            return []
         if isinstance(self.required, list):
             names = self.required
         else:
@@ -1529,7 +1532,7 @@ class Host:
     def refuse_pinned_mismatch(self):
         """A pinned merge.requiredChecks list must equal a non-empty ruleset or branch protection list: a copy that drifted waits on checks no run reports (#746).
         An empty or unreadable protection leaves the pinned list in force; an unreadable one says so."""
-        if not isinstance(self.required, list):
+        if not isinstance(self.required, list):  # "protection" has no copy to compare, and "none" reads no protection
             return
         try:
             held = self.protection_names()
@@ -1955,7 +1958,7 @@ class Host:
         -> (verdict, detail): green, pending, red, or unknown when any read could not run. The guard's
         home for "has this head settled", so it shares classify and runs with the wait.
         No check and no run reads as pending, not green: right after a push GitHub has not created
-        them yet (the checks read settles for the same reason). `nothing_is_green` is for a repo with no workflows.
+        them yet (the checks read settles for the same reason). `nothing_is_green` is for a repo with no workflows; merge.requiredChecks "none" is that repo too.
         Another ready PR's running CI holds no merge (per-lane merge), and the branch protection feeds no verdict here, so neither is read.
         Its `gh` calls (the pull request, the check runs, the commit statuses, the workflow runs; a branch name adds the open pull request list;
         a head whose check runs link more than one run adds one more workflow runs read) share one deadline (SH_TIMEOUT, the guard's one budget for this whole
@@ -1969,7 +1972,7 @@ class Host:
                 red, pending, _ = self.classify(got, [], self.ignore, info["branch"])
                 runs = self.runs(info["head"])
                 red, pending = self.settle(red, pending, *self.judge_runs(runs))
-                unseen = not got and not runs and not nothing_is_green
+                unseen = not got and not runs and not nothing_is_green and self.required != "none"
         except subprocess.TimeoutExpired:  # its text names the resolved program path
             return "unknown", "a gh call timed out"
         except Exception as e:  # Stop, a missing gh, malformed JSON: all unread
@@ -2690,7 +2693,7 @@ def load_config(root, base, path, cite=""):
                   (isinstance(am, list) and all(map(ne, am)), "afterMerge"),
                   ("readyChecks" not in m or isinstance(m["readyChecks"], list) and m["readyChecks"] and all(map(ne, m["readyChecks"])), "readyChecks"),
                   (isinstance(m.get("keepBranches", []), list) and all(map(plain_name, m.get("keepBranches", []))), "keepBranches"),
-                  (rc == "protection" or isinstance(rc, list) and rc and all(map(ne, rc)), "requiredChecks")):
+                  (rc in ("protection", "none") or isinstance(rc, list) and rc and all(map(ne, rc)), "requiredChecks")):
         if not ok:
             raise Stop(f"{path} on {ref}: merge.{k} is not valid: {m[k]!r}.{cite}")
     if "defaultBranch" in cfg and not ne(cfg["defaultBranch"]):
@@ -3296,8 +3299,14 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             cross_fails, reports, stop = cross_measure(root, head, int(target), info["body"], host, with_prs, base, fetched, why is None, is_integration_pr(info))
             fails += cross_fails
             # one check-runs read: the draft's Windows and macOS runs, which this Linux lint never runs. A batch integration PR has no draft run of its own
-            # (a lane's run is the proof), so it reads none.
-            draft, draft_lines = ("pass", []) if is_integration_pr(info) else host.draft_run_state(head)
+            # (a lane's run is the proof), so it reads none. A base with merge.requiredChecks "none" runs no CI job, so no lane has a draft run to read
+            # and the local lint steps below are the whole proof (decision private-repos-no-ci).
+            if is_integration_pr(info):
+                no_draft_run = True
+            else:
+                with contextlib.redirect_stdout(io.StringIO()):  # load_config says its defaults; only requiredChecks is read here
+                    no_draft_run = load_config(root, base, DEFAULT_CONFIG, " " + LANE_LINT_CITE)["merge"].get("requiredChecks") == "none"
+            draft, draft_lines = ("pass", []) if no_draft_run else host.draft_run_state(head)
             if draft == "fail":
                 fails.append(f"its draft run of lane-touched-tests failed on {head[:9]}: " + "; ".join(draft_lines))
             elif draft != "pass" and not (fails or stop):
@@ -5802,9 +5811,9 @@ def read_merge_role():
     record = read_merge_record()
     return record["role"] if record else None
 
-def lane_own_pr_refusal(info, h):
-    """A lane's confirm is refused unless the pull request is in LANE_MERGE_REPO (the repo read from `h`, repo_full_name; a read that fails refuses), is its own and is ready: its head ref is one of lane_head_refs of the step its role record names, and it is no draft.
-    A draft would take the records step, which marks it ready, and only the batch runner does that. -> the refusal text without its cite (the raise adds it), or None (not a lane, or its own ready pull request).
+def lane_own_pr_refusal(info, h, marking_ready=False):
+    """A lane's confirm or ready mark is refused unless the pull request is in LANE_MERGE_REPO (the repo read from `h`, repo_full_name; a read that fails refuses) and is its own: its head ref is one of lane_head_refs of the step its role record names.
+    A confirm also needs it ready, because a draft would take the records step, which marks it ready. With `marking_ready` the draft is the point, so the draft test is skipped. -> the refusal text without its cite (the raise adds it), or None (not a lane, or its own pull request).
     The text names neither flag it refuses."""
     from shared_names import lane_head_refs  # hooks/shared_names.py, the one home of a lane's head refs, on sys.path from the top of this file
     record = read_merge_record()
@@ -5818,8 +5827,8 @@ def lane_own_pr_refusal(info, h):
         return "a session with this merge role merges its own pull request in this repo only. Hand the pull request to the batch runner. Nothing was claimed or pushed."
     if info["branch"] not in lane_head_refs(record["step"]):
         return "this session may merge only the pull request its own step carries, and this one has another head. Hand it to the batch runner. Nothing was claimed or pushed."
-    if info["draft"]:
-        return "this session may merge only its own ready pull request, and this one is a draft. The batch runner marks a draft ready. Nothing was claimed or pushed."
+    if info["draft"] and not marking_ready:
+        return "this session may merge only its own ready pull request, and this one is a draft. Mark it ready first, with the ready flag of this tool. Nothing was claimed or pushed."
     return None
 
 LOCAL_ROLE_REFUSAL = "this session may not merge: its own role record does not name the batch runner. Hand the pull request to the batch runner, or ask the owner. Nothing was claimed or pushed. " + ROLE_CITE
@@ -6059,8 +6068,8 @@ def main(argv, host=None, lock=None, hosts=None):
     elif a.fast_checks:  # the read-only pre-ready run: no lock, no push, no ready mark
         if a.pr is None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record or a.lane_lint or a.ready:
             p.error("--fast-checks takes a pull request number and stands alone")
-    elif a.ready:  # a lane's one act on its own draft: no lock, no merge
-        if a.pr is None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record or a.lane_lint:
+    elif a.ready:  # a lane's one act on its own draft: no lock, no merge. A role and its step may ride along: the guard proves the step from the call itself
+        if a.pr is None or a.confirm or a.unlock is not None or a.reviewed or a.review_record or a.lane_lint:
             p.error("--ready takes a pull request number and stands alone")
     elif a.lane_lint:
         if a.pr is None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record:
@@ -6149,7 +6158,8 @@ def main(argv, host=None, lock=None, hosts=None):
         if a.role is not None:
             write_merge_role(a.role, a.step)
             say(f"merge: merge role {a.role} recorded for this session.")
-            return 0
+            if not a.ready:
+                return 0
         if a.root:  # every block is built before any is printed
             lines, ok = reviewed_roots(a.root, hosts, a.config)
             say(*lines)
@@ -6158,8 +6168,6 @@ def main(argv, host=None, lock=None, hosts=None):
             raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") != "true" and not local_role_allows_confirm():  # a local session the launcher started; before any host read or lock
             raise Stop(LOCAL_ROLE_REFUSAL)
-        if a.ready and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and read_merge_role() == LANE_ROLE:  # a session with the lane merge role leaves the ready mark to the batch runner; before any host read or lock
-            raise Stop("this session's merge role does not mark a pull request ready: the batch runner does. Nothing was claimed or pushed. " + ROLE_CITE)
         if a.confirm and not a.head and read_merge_role() in MERGE_ROLES - {STANDING_ROLE}:  # before the lock, a claim or any write
             raise Stop(BATCH_RUNNER_NEEDS_HEAD)
         if a.confirm and not a.head and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and read_merge_role() == STANDING_ROLE:
@@ -6258,8 +6266,8 @@ def main(argv, host=None, lock=None, hosts=None):
             return 0
         if not a.reviewed:
             refuse_bad_pr(info)  # a closed PR stops before the config notice; a draft is previewed, or gets the records step under --confirm
-            if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true":  # a lane's own-PR proof: before the lock, a claim or any write
-                why = lane_own_pr_refusal(info, h)
+            if (a.confirm or a.ready) and os.environ.get("CLAUDE_CODE_REMOTE") == "true":  # a lane's own-PR proof: before the lock, a claim or any write
+                why = lane_own_pr_refusal(info, h, marking_ready=a.ready)
                 if why:
                     raise Stop(why + " " + ROLE_CITE)
         if a.confirm and a.head and not relayed_head_holds(root, info["branch"], a.head, info["head"]):  # a relayed yes binds to the head at relay time (decision auto-mode-owner-acts): refused before the lock, a claim or any write

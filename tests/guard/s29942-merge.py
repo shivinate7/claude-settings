@@ -81,7 +81,8 @@ repo_case("--ready with -C naming another checkout is denied", "deny", f"{MERGE_
 repo_case("--ready after a cd into another checkout is denied", "deny", f"cd '{REPO_B}' && {MERGE_SHIM} 5 --ready", REPO_A, TX_A)
 repo_case("--ready with a record that proves no repo is denied", "deny", f"{MERGE_SHIM} 5 --ready", REPO_A, TX_NONE)
 # Controls: a batch runner marks its own draft ready from its own repo, and a session whose record has no cs-build tag does too, as on main.
-# Ruling own-lanes-merge-claude-settings-prs: the batch runner marks ready, so a lane's record is refused below, not allowed here.
+# A lane's bare `--ready` names no step, so the lane's record is refused below. The role form that names the lane's step is judged in the
+# lane-may-mark-ready family, where the lane's own head is allowed.
 repo_case("--ready from this checkout's repo is allowed for a batch runner", "allow", f"{MERGE_SHIM} 5 --ready", REPO_A, TX_RUNNER_A)
 repo_case("--ready with --repo-dir naming this checkout is allowed for a batch runner from another directory", "allow",
           f"{MERGE_SHIM} --repo-dir '{REPO_A}' 5 --ready", REPO_B, TX_RUNNER_A)
@@ -103,8 +104,8 @@ for _command, _where in ((f"{MERGE_SHIM} 5 --ready", REPO_DEGEN), (f"{MERGE_SHIM
 # A lane with no repo tag: the repo proof denies its --ready, as on main. The lane rule does not decide it, so the deny names the repo rule.
 sh("lane with no repo tag: --ready is denied by the repo rule, not the lane rule", f"{MERGE_SHIM} 5 --ready", "deny", rule=REPO_RULE,
    lacks=ROLE_RULE, cwd=REPO_A, env=CLOUD_ENV, transcript=TX_LANE_NONE, config=LT_EMPTY)
-# A lane's `update_pull_request` with draft false marks a pull request ready, which the batch runner does (ruling own-lanes-merge-claude-
-# settings-prs). So a lane whose record names claude-settings is refused on that call, on its own pull request and on another. The refusal's
+# A lane's `update_pull_request` with draft false marks a pull request ready. The merge tool's role form is the lane's only way to mark
+# ready, so a lane whose record names claude-settings is refused on that call, on its own pull request and on another. The refusal's
 # rule is not pinned here; the lane `--ready` rows above pin it.
 def lane_mcp_ready(name, expected, transcript, **tool_input):
     add(name, expected, tool="mcp__github__update_pull_request", cwd=REPO_A, transcript=transcript, env=CLOUD_ENV, config=LT_EMPTY,
