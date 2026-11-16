@@ -29,7 +29,7 @@ For a test or merge change, read decisions `test-practices` and `merge-practices
 
 ## Failure classes
 
-Sort each failing test into class a, b, c or d (rule `outcomes-tests-are-statements`). Class d covers only a quoted ruling.
+Sort each failing test into class a, b, c or d (rule `outcomes-tests-are-statements`). Class d covers only a ruling quoted above.
 The test-author writes new cases red first.
 Review round 1 follows the store's round-1 review ruling. Round 3 is not automatic; that ruling says when.
 
@@ -47,11 +47,12 @@ Hand in a draft PR to the batch runner. Never merge.
 
 Time: `~/.claude/bin/now-central`. Cap {{cap}} lines: Done, Deviations, Input Needed, Next, "Port to other repos: yes or no, and why". Send questions to triage, and the green head and branch to the coordinator.
 
-End archive-ready (operating model, Lane bullet); a replaced lane names the replacing PR.
+End archive-ready (operating model, Lane bullet).
 
 Agent spawn brief head
 
-A spawn brief's first line holds a marker alone, at a line start of a real brief.
+A spawn brief's first line holds a marker alone.
 Markers: `Guard or check: yes`, `Fix check`, `Round 2 of 3`, `Round 3 of 3` and `Audit:`.
+A marker counts only alone at a line start of a real brief.
 
 None for product code or docs.
