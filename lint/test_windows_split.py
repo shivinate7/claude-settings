@@ -156,6 +156,7 @@ LINUX_SUITES = {
     "python3 lint/test_guard_merge_imports.py": (None, None),
     "python3 lint/test_refusal_route.py": (None, None),
     "python3 lint/test_report_guard.py": (SCOPE_DOC_ANY, None),
+    "python3 lint/test_report_guard_cannot.py": (SCOPE_DOC_DECISIONS_RULES, None),  # its slug check stats docs/decisions/<id>.md
     "python3 lint/test_ste_autofix.py": (LINUX_CODE, None),
     "python3 hooks/test_ruling_home.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_ruling_census.py": (NO_MD_SCOPE_CONDITION, None),
@@ -513,7 +514,7 @@ def unwrap(raw):
 # The records-only skip (ci-scope.sh's records_only_skip output, read as needs.scope.outputs.records_only_skip) turns off some
 # run steps. A step that takes the condition ends in it: `(E) && RECORDS_ONLY_CONDITION`, or `success() && RECORDS_ONLY_CONDITION` when it has no if:. Which steps take it:
 #   CONDITIONED_JOBS: every run step. A static trace found the Windows guard suite reads no records page.
-#   SPLIT_CONDITIONED_JOBS: only the run steps named by scope_named_steps(), each with the scope condition as its if:.
+#   SPLIT_CONDITIONED_JOBS: only the run steps named by scope_named_steps(), each with the scope condition as its if:. Its doc steps take none.
 #   UNCONDITIONED_JOBS: no run step.
 RECORDS_ONLY_CONDITION = "needs.scope.outputs.records_only_skip != 'true'"
 CONDITIONED_JOBS = ("checks-windows-guard", "checks-windows-guard-2", "checks-windows-guard-3", "checks-windows-merge",
@@ -525,10 +526,11 @@ SPEC_JOBS = CONDITIONED_JOBS + SPLIT_CONDITIONED_JOBS + UNCONDITIONED_JOBS
 
 
 def scope_named_steps():
-    """The step names that take the condition in SPLIT_CONDITIONED_JOBS: NO_MD, NAMES_ONLY and DOC_STEPS of lint/test_checks_step_scope.py, the
-    one home of those lists. Imported here, not at the top, because that module imports this one."""
-    from test_checks_step_scope import DOC_STEPS, NAMES_ONLY, NO_MD
-    return set(NO_MD) | set(NAMES_ONLY) | set(DOC_STEPS)
+    """The step names that take the condition in SPLIT_CONDITIONED_JOBS: NO_MD and NAMES_ONLY of lint/test_checks_step_scope.py, the
+    one home of those lists. Imported here, not at the top, because that module imports this one. A doc step is not named:
+    owner ruling own-830-c (decision records-index-at-merge, 2026-11-14 15:02 CST) keeps the steps that read a .md file running."""
+    from test_checks_step_scope import NAMES_ONLY, NO_MD
+    return set(NO_MD) | set(NAMES_ONLY)
 
 
 def drop_condition(expr):

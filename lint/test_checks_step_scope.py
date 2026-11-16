@@ -20,7 +20,9 @@ Pinned here:
 
 Steps are read by lint/workflow_steps.py. The `if:` evaluator is eval_if in lint/test_windows_split.py.
 Item 5 reads the entry file only. Item 7 reads each name as md_names_reached reads it: a whole path, or the constant
-arguments of an os.path.join, so join(ROOT, "docs", "decisions", "x.md") reads docs/decisions/x.md. Item 6 follows imports
+arguments of an os.path.join, so join(ROOT, "docs", "decisions", "x.md") reads docs/decisions/x.md. A leading `..` segment
+is folded, so join(HERE, "..", "docs", "x.md") reads docs/x.md. A join through pathlib `/` or an f-string is not read: a
+stated limit. Item 6 follows imports
 and read calls (open, run, join and the like), so a read one or two files down is seen. A comment names nothing in Python.
 """
 import ast
@@ -186,7 +188,6 @@ DOC_STEPS = {
     'SendMessage state fixture suite': ("decisions",),
     'Stop-hook owner-safe reason suite': ("decisions",),
     'Settings matcher fixture suite': ("decisions",),
-    'Stop-hook cannot-claim suite': ("rules",),
     'Stop-hook review-record fixture suite': ("rules",),
     'CLAUDE.md size (warns, never fails)': ("rules",),
     'Landed-directory manifest agreement': ("skills",),
@@ -196,6 +197,7 @@ DOC_STEPS = {
     # Several groups.
     'Blind brief fixture suite': ("skills", "agents"),
     'Git mailbox wait suite': ("skills", "decisions"),
+    'Stop-hook cannot-claim suite': ("decisions", "rules"),  # its slug check stats docs/decisions/<id>.md (lint/report_guard.py _names_rule_id)
     'Rule audit fixture suite': ("decisions", "rules"),
     'Rule mechanization audit': ("decisions", "rules"),
     'Route judge measure fixture suite': ("decisions", "rules", "other"),
@@ -858,10 +860,16 @@ class MdNamesInText(unittest.TestCase):
         text = 'path = os.path.join(ROOT, "docs", "decisions", "x.md")\n'
         self.assertEqual(md_names_reached(text, self.TRACKED), {"docs/decisions/x.md"})
 
-    # Control: a name between two constants ends the run, so the two pieces are not joined into a tracked path.
+    # A parent segment at the front of a join: the repo's own reads climb from lint/ to the repo root this way.
+    def test_a_join_through_a_parent_segment_is_reached(self):
+        text = 'path = os.path.join(HERE, "..", "docs", "decisions", "x.md")\n'
+        self.assertEqual(md_names_reached(text, self.TRACKED), {"docs/decisions/x.md"})
+
+    # Control: a name between two constants ends the run, so the two pieces are not joined into a tracked path. The joined
+    # path "docs/catalog.md" is tracked, so a run that is not reset (the over-join mutant) reaches it and goes red.
     def test_a_join_with_a_name_between_its_constants_joins_nothing(self):
-        text = 'path = os.path.join("docs", SUB, "x.md")\n'
-        self.assertEqual(md_names_reached(text, self.TRACKED), set())
+        text = 'path = os.path.join("docs", SUB, "catalog.md")\n'
+        self.assertEqual(md_names_reached(text, self.TRACKED + ["docs/catalog.md"]), set())
 
     def test_an_untracked_name_is_not_reached(self):
         self.assertEqual(md_names_reached('open("missing.md")', self.TRACKED), set())
@@ -1008,16 +1016,13 @@ class WholeTreeReadersOnAModsChange(ChecksStepBase):
 
 
 class DocStepScopeConditions(ChecksStepBase):
+    # Owner ruling own-830-c (decision records-index-at-merge, 2026-11-14 15:02 CST): a records-only push turns off no doc step, since each reads a .md file.
     def test_each_doc_step_carries_the_scope_condition_of_its_groups(self):
         steps = self.steps()
-        checks = {identity(st) for st in ws.step_blocks(ws.job_block(read_repo(WORKFLOW), JOB))}
         for name, groups in DOC_STEPS.items():
             with self.subTest(step=name):
                 got = if_of(self.named(steps, name))
-                # Outside the checks job, the records-only condition may follow the scope condition, as the NO_MD steps' does.
-                conditioned_ok = name not in checks and got is not None and drop_condition(unwrap(got)) == doc_scope_condition(tuple(groups))
-                self.assertTrue(got == expected_if(groups) or conditioned_ok,
-                                "step %r: if is %r, want the scope condition of %s" % (name, got, groups))
+                self.assertEqual(got, expected_if(groups), "step %r: if is %r, want the scope condition of %s alone" % (name, got, groups))
 
     def test_each_doc_step_group_set_has_one_constant_built_from_its_groups(self):
         for groups in sorted({tuple(g) for g in DOC_STEPS.values()}):
@@ -1092,6 +1097,17 @@ class DocsOnlyPullRequestSteps(ChecksStepBase):
         for path, _ in DOC_CASES:
             with self.subTest(path=path):
                 self.assert_steps_run_by_groups(path)
+
+    # Named failure: a new decision record does not run the cannot-claim suite. Its slug check stats the record, so a record
+    # that names a rule id (the pre-push-hook record) turns that suite's cannot-claim case red, and the step skipped it.
+    def test_a_new_decision_record_runs_the_cannot_claim_suite(self):
+        path = "docs/decisions/pre-push-hook.md"
+        got = scope_run([path])
+        self.assertEqual(got.get("doc_decisions"), "true", f"doc_decisions is not on for {path}: {got}")
+        self.assertEqual(got.get("code"), "false", f"{path} set code: {got}")
+        step = self.named(self.steps(), "Stop-hook cannot-claim suite")
+        self.assertTrue(runs_on(if_of(step), got),
+                        f"the cannot-claim suite skips a docs-only edit to {path}: its if is {if_of(step)!r}")
 
     # Named failure: a docs-only edit to the helper-home decision record skips the landed-dirs suite, which opens that record. The
     # flags are read first (P7): the record's decisions flag is on and code is off, then the step's `if:` decides.
