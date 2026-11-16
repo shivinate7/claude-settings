@@ -6,8 +6,9 @@ build_parser() in merge/merge.py builds the parser, and a test compares its long
 """
 
 MERGE_OPTIONS = (
-    "--help", "--confirm", "--lane-lint", "--base", "--lint-unknown-ok", "--with", "--role", "--unlock",
-    "--undo-check-unknown-ok", "--base-red-ok", "--session", "--config", "--idle-lanes", "--live",
-    "--reviewed", "--root", "--review-record", "--head", "--kind", "--guard", "--round", "--fix-check",
-    "--grant", "--net-value",
+    "--help", "--repo-dir", "--confirm", "--express", "--lane-lint", "--base", "--lint-unknown-ok", "--with",
+    "--touched-tests", "--role", "--step", "--ready", "--fast-checks", "--unlock", "--undo-check-unknown-ok",
+    "--base-red-ok", "--session", "--config", "--idle-lanes", "--live", "--reviewed", "--audit-prs", "--root",
+    "--release-check", "--lint", "--review-record", "--head", "--kind", "--guard", "--round", "--fix-check",
+    "--grant", "--accepted", "--net-value", "--touches", "--run", "--case", "--file",
 )
