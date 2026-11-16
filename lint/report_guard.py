@@ -980,7 +980,8 @@ NONE_ITEM_RE = re.compile(r"(?:none|nothing)\b", re.I)
 
 def message_asks(rec):
     """True when an incoming message holds a "?" outside quotes, code spans, fenced blocks and blockquoted
-    lines (the lane ack: such a reply is an answer, not an ack). A "?" inside a URL does not count."""
+    lines (the lane ack: such a reply is an answer, not an ack). A "?" followed by a word character, such as a
+    URL query (?id=1), does not count; a "?" that ends a URL does."""
     content = (rec.get("message") or {}).get("content")
     if isinstance(content, list):
         content = "\n".join(b.get("text", "") for b in content
@@ -2571,12 +2572,14 @@ def _prior_names_check(prior, act):
         act in _text_acts(span.group(2)) for span in CODE_SPAN.finditer(prior))
 
 
-def cannot_problem(records, text, refused=()):
+def cannot_problem(records, text, refused=(), past_records=None):
     """The refusal for reply sentences that claim a table act cannot be done, else ''. `records` are those after the last
     human message. A sentence passes when a failed try of its act sits in them (failed_tries) or it carries a cite
     (_cited), and it names its check (_names_check, or a reason when a failed try sits in the turn: _gives_reason). A
     sentence in the past tense (could not) whose failed try a later call of the same act and target cancelled reports a past
-    failure and is let pass; a present claim (cannot) after that later success still blocks.
+    failure and is let pass; a present claim (cannot) after that later success still blocks. A sentence in the past tense
+    is judged on `past_records` when given, the turn read across a peer's answer: a failed try before an answer still
+    backs a report that it failed, and the verdict is main's. A present claim is judged on `records` alone.
     A sentence with no try is listed under the no-try reason, one with a try and no check under the no-check reason. The remedy names no act (git-remedy-never-names-target)."""
     claims = cannot_lines(text)
     if not claims:
@@ -2587,10 +2590,15 @@ def cannot_problem(records, text, refused=()):
         print("cannot-claim guard: UNKNOWN, the transcript parser did not load, so the claims went unchecked.",
               file=sys.stderr)
         return ""
-    recovered = set()
-    tries = failed_tries(records, refused, recovered)
+    now_recovered = set()
+    now_tries = failed_tries(records, refused, now_recovered)
+    past_tries, past_recovered = now_tries, now_recovered
+    if past_records is not None and past_records is not records:
+        past_recovered = set()
+        past_tries = failed_tries(past_records, refused, past_recovered)
     no_try, no_check = [], []
     for sentence, act, _, past, prior, following, tail in claims:
+        tries, recovered = (past_tries, past_recovered) if past else (now_tries, now_recovered)
         backed = _backed(tries, act, sentence)
         if past and not tries.get(act) and act in recovered:  # every failed try of the act was later cancelled
             continue
@@ -3258,12 +3266,14 @@ def main():
     cannot = ""
     if last_human_idx is not None and cannot_refused is not None:
         try:
-            # A try backs a claim only in this turn: after the last message, a peer's included. message_asks keeps a
+            # A try backs a present claim only in this turn: after the last message, a peer's included. message_asks keeps a
             # peer reply that holds a "?" as an answer that starts a turn; a plain-text reply is an ack and starts none.
+            # A past-tense claim reads the wider turn, where every peer reply to a send is an ack.
             acks = {sender: {sender} | PARENT_TARGETS for sender in map(peer_sender, records) if sender}
             idx = last_incoming_index(records, acks, message_asks)
             ack_turn = records if idx is None else records[idx + 1:]
-            cannot = cannot_problem(ack_turn, text, cannot_refused)
+            wide = last_incoming_index(records, acks)  # a "?" reply is an ack here: a past report looks back across it
+            cannot = cannot_problem(ack_turn, text, cannot_refused, records if wide is None else records[wide + 1:])
         except Exception as exc:
             print("cannot-claim guard: UNKNOWN, the check did not run (%s), so the claims went unchecked."
                   % type(exc).__name__, file=sys.stderr)
