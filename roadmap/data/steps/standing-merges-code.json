@@ -1,0 +1,15 @@
+{
+ "id": "standing-merges-code",
+ "title": "Standing sessions merge their own code PRs",
+ "status": "done",
+ "priority": "next",
+ "phase": "next",
+ "repo": "shivinate7/claude-settings",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "pr": 3588,
+ "why": "[12:25 CST Nov 16, triage] Owner's goal item 6: once standing-merges-code is on main, triage merges its own PRs. Searched steps for standing-merges and rulings: none held it; new step filed to carry the merge.",
+ "source": "coordinator relay 12:23 CST Nov 16; merge read by triage by REST 12:23 CST",
+ "note": "Done. PR #3588 (Standing sessions merge their own code PRs) merged to main 12:22:55 CST Nov 16 (REST read by triage, merged_at 2026-11-16T18:22:55Z; coordinator relay: main cccef8183, before 149aeb1eb). Files by name only, triage read no diff: GLOSSARY.md, docs/debts/arbiter-merge-tag-unknown.md, docs/decisions/session-tiers.md, hooks/guard.py, hooks/guard_merge.py, merge/merge.py, merge/test_merge.py, tests/guard/s13406-merge.py. Triage self-merge is NOT started: the coordinator is asking the consultant what 'my own PRs' covers (relay, unverified), and triage has not read the decision text or the guard. Next act after that answer: read docs/decisions/session-tiers.md on main.",
+ "updatedAt": "2026-11-16T12:23:41-06:00"
+}
