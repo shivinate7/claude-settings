@@ -1,5 +1,5 @@
 {
- "id": "own-review-gate-any-model",
+ "id": "own-review-any-model",
  "at": "2026-11-16T15:37:00-06:00",
  "title": "Owner at 15:18 CST: option A on the review gate. Any passing reviewer record counts, whatever its model.",
  "ruling": "Owner, 15:18 CST Nov 16, relayed by the consultant (message to triage 9, 15:33 CST), word for word: \"ya you shouldn't have mentioned osnnet there  -- A is correct.\" Option A: any passing reviewer record counts, whatever its model. A Haiku round-1 pass on a change that edits no guard or check ends review, per decision agent-model-cap. Covers that reading of the review gate. It does not change the rounds, the net-value test or any other merge check. Home for the prose: decision session-tiers, review gate line (lines 154 to 156, now the record-writer's reading). The consultant builds the merge-tool fix after PR 3590 merges.",
