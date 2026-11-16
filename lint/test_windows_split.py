@@ -6,8 +6,9 @@ dropped, none run twice); (2) at least MIN_JOBS `windows-latest` jobs carry thos
 Cut F adds: the guard suite has its own Windows job (GUARD_JOB) and runs off it nowhere else; its
 slice (GUARD_TESTS=windows-slice) runs only on pull_request; the guard mutation test has its own
 Linux job (MUTATE_JOB) and runs nowhere else; both jobs skip on the `guard` scope flag. A scoped job's
-job-level if, if any, holds only the draft guard, or a macOS job's scope skip (macos_scope_skip_ok); its scope condition sits in each step
-(read_scope_condition, step_rest), so a step cannot run outside the scope condition.
+job-level if, if any, holds only the draft guard, or a macOS job's scope skip (macos_scope_skip_ok), each read after the records-only
+condition is taken off (job_if_without_records); its scope condition sits in each step (read_scope_condition, step_rest), so a step
+cannot run outside the scope condition.
 
 Why not rule_audit.py: it reads step names only. This needs job boundaries and `run:` lines.
 Line-based parse, stdlib only, like rule_audit. Only single-line `run: <cmd>` steps count.
@@ -336,8 +337,9 @@ GUARD_SLICE = "python hooks/test_guard.py [windows-slice]"
 GUARD_JOB = "checks-windows-guard"
 # A long suite splits across shard jobs: the base job, then `<base>-2` to `<base>-<n>`. The full step of each
 # carries SHARD_VAR[base]=<i>/<n> in its step env, and the n values cover 1 to n once each, so every case runs
-# once. A shard job past the first runs on a ready pull_request and never on a draft. Its if is the draft guard, and its
-# steps carry the base job's scope condition, so a run with no flag for the base job runs no shard.
+# once. A shard job past the first runs on a ready pull_request and never on a draft. Its if is the draft guard, with the
+# records-only condition after it (`(draft guard) && RECORDS_ONLY_CONDITION`), and its steps carry the base job's scope
+# condition, so a run with no flag for the base job runs no shard.
 SHARD_VAR = {"checks-windows-guard": "GUARD_SHARD", "checks-windows-merge": "MERGE_SHARD"}
 SHARD_CMD = {"checks-windows-guard": "python hooks/test_guard.py", "checks-windows-merge": "python merge/test_merge.py"}
 SHARD_JOB_IF = "${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}"
@@ -518,6 +520,16 @@ def step_if(st):
     """A step's `if:` expression with the records-only condition taken off, or None when the step has none. The pins read a step's
     own condition this way, and condition_problems pins the condition."""
     return drop_condition(unwrap(st.get("if")))
+
+
+def job_if_without_records(raw):
+    """A job-level `if:` (raw, with its `${{ }}`) with the records-only condition taken off, unwrapped. The condition alone gives None,
+    the job has no if. `(E) && RECORDS_ONLY_CONDITION` gives E, which a shard reads as its draft guard. Any other if comes back as it
+    is, so a wider one still fails the job-level rules. runs_with_condition pins the skip's value instead of taking it off."""
+    e = unwrap(raw)
+    if e == RECORDS_ONLY_CONDITION:
+        return None
+    return drop_condition(e)
 
 
 def condition_problem(name, st):
@@ -733,6 +745,8 @@ def sweep_job_problems(name, job, flag=None):
 def job_check_problems(name, job, flag=None):
     """`needs: scope`. A shard past the first keeps the event job-level if (SHARD_JOB_IF) and nothing else. The lint jobs
     (LINT_JOBS) have no scope condition. A lint or scoped job's job-level if, if any, is the draft guard (draft_guard_only).
+    The records-only condition may stand alone as a job-level if, or follow a shard's draft guard as `(draft guard) && RECORDS`;
+    job_if_without_records takes it off before these rules read the rest. A shard's if with it bare, or unparenthesised, fails.
     A scoped job's scope condition G is the one its steps carry (read_scope_condition), every step carries G
     (scope_condition_step_problems), and G keeps the scope condition rules (scope_condition_property_problems). `flag` names
     the scope output for a job whose flag is not its own name (FLAG_OF)."""
@@ -740,14 +754,16 @@ def job_check_problems(name, job, flag=None):
     if not re.fullmatch(r"\[?\s*scope\s*\]?", job["needs"] or ""):
         problems.append(f"{name}: needs is {job['needs']}, want scope")
     expr = job["if"]
+    rest = job_if_without_records(expr)
     if shard_base(name):
-        return problems + ([] if expr == SHARD_JOB_IF or (name in PUSH_OFF_JOBS and push_off_job_if(name, expr)) else [f"{name}: shard job if is {expr}, want {SHARD_JOB_IF}"])
+        return problems + ([] if rest == unwrap(SHARD_JOB_IF) or (name in PUSH_OFF_JOBS and push_off_job_if(name, rest)) else [f"{name}: shard job if is {expr}, want {SHARD_JOB_IF}"])
     if name in LINT_JOBS:  # they run on every PR: no scope condition, and a job-level if only when it is the draft guard
-        return problems + ([] if expr is None or draft_guard_only(expr) else [f"{name}: job-level if: {expr}"])
+        return problems + ([] if rest is None or draft_guard_only(rest) else [f"{name}: job-level if: {expr}"])
     # A macOS job's job-level if is its scope skip (macos_scope_skip_ok): the push guard and its own flags. A step-level skip still starts its runner.
     # A Windows or mutation job's job-level if is the push guard (push_off_job_if, owner page item 880), with the draft guard on a shard.
-    if expr is not None and not draft_guard_only(expr) and not (name in MACOS_JOBS and macos_scope_skip_ok(name, expr)) \
-            and not (name in PUSH_OFF_JOBS and push_off_job_if(name, expr)):
+    # The records-only condition may join it: rest has that condition taken off.
+    if rest is not None and not draft_guard_only(rest) and not (name in MACOS_JOBS and macos_scope_skip_ok(name, rest)) \
+            and not (name in PUSH_OFF_JOBS and push_off_job_if(name, rest)):
         why = ("is not its scope skip (the push guard and its own flags)" if name in MACOS_JOBS
                else "keeps a job-level if, its scope condition belongs in its steps")
         return problems + [f"{name}: job-level if {why}: {expr}"]
@@ -1254,6 +1270,32 @@ class WindowsSplit(unittest.TestCase):
         for label, j in bad.items():
             with self.subTest(defect=label):
                 self.assertTrue(job_check_problems("checks-macos", j), label)
+
+    def test_a_records_only_job_if_is_allowed_alone_or_after_the_draft_guard_and_no_wider(self):
+        # Controls: the records-only condition alone on a scoped job, and `(draft guard) && records-only` on a shard, pass the job-level
+        # rules. Named failure: the records-only job-level if is refused, or a shard's draft guard reads as absent beside it.
+        records = f"${{{{ {RECORDS_ONLY_CONDITION} }}}}"
+        for name, expr in (("checks-windows-merge", records),
+                           ("checks-windows-guard-2", f"${{{{ ({DRAFT_GUARD}) && {RECORDS_ONLY_CONDITION} }}}}"),
+                           ("checks-windows-guard-2", SHARD_JOB_IF)):
+            with self.subTest(job=name, if_=expr):
+                self.assertEqual(job_check_problems(name, {"needs": "scope", "if": expr, "steps": []}), [])
+        # Named failures: a job-level if wider than the records-only condition is flagged. A shard keeps its draft guard only with the
+        # condition after it in parentheses, since `||` binds looser than `&&` and a bare shard if would drop the draft guard.
+        wider = {
+            "a shard keeps the records-only condition alone": ("checks-windows-guard-2", records),
+            "a shard's draft guard is not parenthesised before the condition":
+                ("checks-windows-guard-2", f"${{{{ {DRAFT_GUARD} && {RECORDS_ONLY_CONDITION} }}}}"),
+            "a scoped job's flag beside the condition":
+                ("checks-windows-merge", f"${{{{ (needs.scope.outputs.code == 'true') && {RECORDS_ONLY_CONDITION} }}}}"),
+            "the condition or a push trigger":
+                ("checks-windows-merge", f"${{{{ {RECORDS_ONLY_CONDITION} || github.event_name == 'push' }}}}"),
+            "a lint job's flag beside the condition":
+                ("checks-merge-install", f"${{{{ {RECORDS_ONLY_CONDITION} && needs.scope.outputs.code == 'true' }}}}"),
+        }
+        for label, (name, expr) in wider.items():
+            with self.subTest(defect=label, job=name):
+                self.assertTrue(job_check_problems(name, {"needs": "scope", "if": expr, "steps": []}), f"{label}: {expr}")
 
     def test_suites_keep_their_conditions(self):
         self.assertEqual(hardening_problems(self.text), [])
@@ -2144,7 +2186,8 @@ class PushOffDaily(unittest.TestCase):
             with self.subTest(job=name):
                 expr = self.jobs.get(name, {}).get("if")
                 self.assertIsNotNone(expr, f"{name} has no job-level if, so a push starts its runner")
-                self.assertTrue(push_off_job_if(name, expr), f"{name} job-level if is not the push guard: {expr}")
+                # The records-only condition may join the push guard, so the push guard is read with that condition taken off.
+                self.assertTrue(push_off_job_if(name, job_if_without_records(expr)), f"{name} job-level if is not the push guard: {expr}")
 
     def test_no_windows_or_mutation_job_starts_on_a_push(self):
         # Named failure: the job-level if reads a push as a run, so the job starts on every push to main.
@@ -2218,8 +2261,10 @@ def step_label(st):
 
 def runs_on(job, st, event, flag_value, draft):
     """True when a step of `job` runs on `event`, with every scope flag set to flag_value and the pull request's draft state.
-    The job's own if counts, so a shard's draft guard is read with its steps."""
-    if job["if"] is not None and not eval_if(job["if"], event, flag_value, draft=draft):
+    The job's own if counts, with the records-only condition taken off (job_if_without_records), so a shard's draft guard is read
+    with its steps. The records-only skip is read by runs_with_condition, which sets it."""
+    jif = job_if_without_records(job["if"])
+    if jif is not None and not eval_if(jif, event, flag_value, draft=draft):
         return False
     expr = step_if(st)
     return expr is None or eval_if(expr, event, flag_value, draft=draft)

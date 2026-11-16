@@ -744,16 +744,23 @@ def case_n14_no_writer_named_and_an_export_run_makes_the_writer_block():
     expect_block("N14", run_stop("n14", base_repo("n14"), records, writer=None), (SCRIPT,))
 
 
-def case_n15_writer_set_of_receipts_passes():
-    """The writer sets receipts/x by doc_id: receipts is no exported collection."""
+def case_n15_writer_set_of_receipts_blocks():
+    """The writer sets receipts/x by doc_id, stale: receipts is an exported collection, so the write blocks."""
     records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="receipts/x")
-    expect_pass("N15", run_stop("n15", base_repo("n15"), records))
+    expect_block("N15", run_stop("n15", base_repo("n15"), records), (SCRIPT,))
 
 
-def case_n16_writer_write_by_path_to_receipts_passes():
-    """The writer writes receipts/x by its path key: the same collection filter, through the path."""
+def case_n16_writer_write_by_path_to_receipts_blocks():
+    """The writer writes receipts/x by its path key, stale: the same collection filter, through the path, so it blocks."""
     records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id=None, path="receipts/x")
-    expect_pass("N16", run_stop("n16", base_repo("n16"), records))
+    expect_block("N16", run_stop("n16", base_repo("n16"), records), (SCRIPT,))
+
+
+def case_n18_writer_receipts_write_then_a_same_export_passes():
+    """The writer writes receipts/x, which blocks the Stop, and a later export run prints `same`: the export has landed
+    since the write, so the Stop passes."""
+    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="receipts/x") + export_run(at(19, 5), verdict="same")
+    expect_pass("N18", run_stop("n18", base_repo("n18"), records))
 
 
 def case_n17_writer_write_by_path_to_items_blocks():
@@ -854,9 +861,10 @@ CASES.extend((
     case_n12e_dotted_id_near_the_remote_id_passes_with_no_note,
     case_n13_another_writer_is_not_overruled_by_a_mention_of_the_script,
     case_n14_no_writer_named_and_an_export_run_makes_the_writer_block,
-    case_n15_writer_set_of_receipts_passes,
-    case_n16_writer_write_by_path_to_receipts_passes,
+    case_n15_writer_set_of_receipts_blocks,
+    case_n16_writer_write_by_path_to_receipts_blocks,
     case_n17_writer_write_by_path_to_items_blocks,
+    case_n18_writer_receipts_write_then_a_same_export_passes,
     case_u1_export_check_returns_the_reason,
     case_u2_git_failure_gives_a_note_and_no_reason,
 ))
