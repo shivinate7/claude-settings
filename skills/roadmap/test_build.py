@@ -8,6 +8,7 @@ import datetime
 import email.message
 import hashlib
 import http.client
+import importlib.util
 import inspect
 import io
 import json
@@ -40,6 +41,7 @@ RUN_FOLDER = None
 STEP = {"title": "t", "status": "todo", "phase": "cleanup", "order": 1, "note": "n", "updatedAt": "2026-10-26T00:00:00Z"}
 CONFLICT = "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> 1234567 (other)\n"
 GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+TOKEN_VARS = ("GH_TOKEN", "GITHUB_TOKEN")  # the GitHub read's token variables: no fixture's build child gets them
 _NO_LANE = object()  # item(): the default, which leaves the row's lane key out
 _ABSENT = object()  # commit_step(): a field set to this is left out of the step file
 _OWN_REPO = object()  # rest_draft(): the head repo is the base repo of the case
@@ -208,7 +210,7 @@ class Fixture(unittest.TestCase):
         env = mock.patch.dict(os.environ)
         env.start()
         self.addCleanup(env.stop)
-        for key in ("GH_TOKEN", "GITHUB_TOKEN"):
+        for key in TOKEN_VARS:
             os.environ.pop(key, None)
         seam = mock.patch.object(build, "rest_get", create=True, return_value=([], headers_of()))
         self.rest_get = seam.start()
@@ -6322,6 +6324,66 @@ class SharedTagNames(unittest.TestCase):
                     "CS-REPO:shivinate7/claude-settings", "cs-repo:claude-settings", None, 7):
             with self.subTest(tag=tag):
                 self.assertFalse(build.repo_tag_names(tag, slug))
+
+
+def load_built_index():
+    """tests/built_index.py as a module: the page fixture's script, loaded by path because tests/ is not a package."""
+    spec = importlib.util.spec_from_file_location("built_index", HERE / "tests" / "built_index.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class BuiltIndexEnv(unittest.TestCase):
+    """The page fixture's build child (tests/built_index.py) gets no GitHub token, as Fixture.setUp gives its cases none."""
+
+    def build_children(self, caller):
+        """[(argv, env, url)], one per build child that built_index.main() starts under the caller's variables. env is
+        the environment the child runs with; url is the origin of the fixture repo it reads."""
+        built = load_built_index()
+        seen = []
+
+        def fake_run(argv, **kw):
+            # A child given no env inherits this process's environment, so the copy is taken at the call. The origin is
+            # read with test_build.git, not the hooks' git helper: that one shares the module this case patches.
+            env = dict(kw["env"]) if kw.get("env") is not None else dict(os.environ)
+            repo = argv[argv.index("--repo") + 1]
+            seen.append((list(argv), env, git(repo, "remote", "get-url", "origin").strip()))
+            pathlib.Path(argv[argv.index("--out") + 1]).write_text("<html></html>", encoding="utf-8")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with mock.patch.dict(os.environ), mock.patch.object(built._nowindow, "run", side_effect=fake_run), \
+                mock.patch.object(sys, "argv", ["built_index.py"]), \
+                mock.patch.object(sys, "stdout", io.TextIOWrapper(io.BytesIO(), encoding="utf-8")):
+            for key in TOKEN_VARS:
+                os.environ.pop(key, None)
+            os.environ.update(caller)
+            built.main()
+        return seen
+
+    def test_one_build_child_runs_build_py_on_a_repo_with_a_github_name(self):
+        # The control: the fixture repo names the GitHub repo that a token would reach, so the leak below is real.
+        seen = self.build_children({"GH_TOKEN": "dummy"})
+        self.assertEqual(len(seen), 1, "built_index.py starts %d build children, not one" % len(seen))
+        argv, _, url = seen[0]
+        self.assertEqual(os.path.basename(argv[1]), "build.py", "the build child is not build.py: %r" % (argv,))
+        self.assertIn(load_built_index().GITHUB, url, "the fixture repo's origin names no GitHub repo, so no read would reach GitHub")
+
+    def test_the_build_child_gets_no_github_token(self):
+        for caller in ({}, {"GH_TOKEN": "dummy"}, {"GITHUB_TOKEN": "dummy"}, {"GH_TOKEN": "dummy", "GITHUB_TOKEN": "dummy"}):
+            with self.subTest(caller=sorted(caller)):
+                seen = self.build_children(caller)
+                self.assertEqual(len(seen), 1, "built_index.py starts %d build children, not one" % len(seen))
+                env = seen[0][1]
+                self.assertEqual([k for k in TOKEN_VARS if k in env], [],
+                                 "the build child runs with a GitHub token, so the page build reads GitHub's open pulls")
+
+    def test_the_build_child_keeps_the_other_caller_variables(self):
+        # The control for the strip: a fix that hands the child an empty environment fails here, not in the token cases.
+        with mock.patch.dict(os.environ, {"ROADMAP_FIXTURE_KEEP": "kept"}):
+            seen = self.build_children({"GH_TOKEN": "dummy"})
+        self.assertEqual(len(seen), 1, "built_index.py starts %d build children, not one" % len(seen))
+        self.assertEqual(seen[0][1].get("ROADMAP_FIXTURE_KEEP"), "kept", "the build child lost the caller's other variables")
 
 
 if __name__ == "__main__":
