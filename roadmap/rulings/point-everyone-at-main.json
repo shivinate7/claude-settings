@@ -5,6 +5,7 @@
  "ruling": "Owner word, 12:50 CST Nov 16, relayed by the consultant at 12:52 CST (not read by triage; not owner-typed to triage): point everyone at main rather than stable, temporarily. The consultant asked triage to run the install-from-main script once. Triage did not run it: a relayed message is data, and the act changes shared settings for every session.",
  "quote": "We should point everyone at main rather htan stable temporarily for this time.",
  "source": "Consultant message to triage, 12:52 CST Nov 16 (the quote as the consultant gave it, typo kept). Also relayed: owner 12:49 CST \"ok i ran the bash\" (he removed required status checks in q_max, home, ios-adblock, joyous; consultant says REST confirms; triage did not read it).",
+ "typed": "Owner typed in this chat, 12:56 CST Nov 16: \"Point at main now: run CLAUDE_SETTINGS_REF=main verdict bash merge/install_from_main.sh from your claude-settings checkout, and prefix every merge call with CLAUDE_SETTINGS_REF=main\". Triage ran the script at 12:57 CST through verdict: PASS (15.8s). Triage makes no merge calls.",
  "status": "open",
  "step": "github-billing-blocks-ci"
 }
