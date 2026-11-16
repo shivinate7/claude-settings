@@ -1113,7 +1113,9 @@ class ClaudeMdFlag(Env):
     - A rename is a change to both paths: the old path is flagged too, and git's default rename detection hides it.
     - The timeout seam: `merge.sh` is patched for the one `git diff` call whose args hold a `...` range (the PR-paths
       read). Any other call goes to the real `sh`. A case that never reaches that call fails, so a changed read cannot pass blind.
-    - The match is case-insensitive on the whole rule-file path; the line prints the path as git names it."""
+    - The match is case-insensitive on the whole rule-file path; the line prints the path as git names it.
+    - The waiting-page line (exact path skills/waiting-page/page.html) reads the same PR paths and uses the same seams. Its cases
+      come after the rule-file cases, at the end of the class. A read that fails prints an UNKNOWN line that names page.html, never silence."""
 
     def line(self, path):
         return f"merge: #7 changes {path}, a rule file every session loads."
@@ -1191,15 +1193,23 @@ class ClaudeMdFlag(Env):
         self.assert_flagged(rc, out, "CLAUDE.md", ".claude/CLAUDE.md", "output-styles/a.md")
 
     def pr_renames(self, moves):
-        """Main holds each old path first. The PR merges main, then renames each (old, new). Same text, so git sees a rename."""
+        """Main holds each old path first. The PR merges main, then renames each (old, new), or deletes old when new is None. Same text, so git sees a rename."""
         for old, _ in moves:
             self.on_main(old, "".join(f"rule line {i}\n" for i in range(8)))
         o = self.other
         sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
         sh(o, "git", "merge", "-q", "-m", "sync main", "origin/main")
         for old, new in moves:
-            sh(o, "git", "mv", old, new)
-        sh(o, "git", "commit", "-qm", "pr: move"); sh(o, "git", "push", "-q", "origin", "feat")
+            if new is None:
+                sh(o, "git", "rm", "-q", old)
+            else:
+                sh(o, "git", "mv", old, new)
+        drops = [f"Drops-lines: {old} -- the test removes it" for old, new in moves if new is None]
+        if drops:  # a removal of work main holds names its reason in the last paragraph (decision silent-undo-check-design)
+            sh(o, "git", "commit", "-qm", "pr: delete", "-m", "\n".join(drops))
+        else:
+            sh(o, "git", "commit", "-qm", "pr: move")
+        sh(o, "git", "push", "-q", "origin", "feat")
 
     def test_a_rename_out_of_output_styles_flags_the_old_path(self):  # F1: --name-only names the new path only
         self.pr_renames([("output-styles/x.md", "docs/x.md")])
@@ -1291,6 +1301,67 @@ class ClaudeMdFlag(Env):
         self.pr_writes({".Claude/claude.md": "rules\n", "Output-Styles/A.md": "a\n", "notes/Output-Styles/b.md": "b\n"})
         rc, out = self.run_merge("7", "--confirm")
         self.assert_flagged(rc, out, ".Claude/claude.md", "Output-Styles/A.md")
+
+    PAGE_PATH = "skills/waiting-page/page.html"
+    PAGE_LINE = ('merge: #7 changes skills/waiting-page/page.html: republish each live waiting page now (skill waiting-page, '
+                 '"Update a repo\'s pages"), and put "republished: <pages>" or a reason in the report.')
+
+    def page_flags(self, out):
+        """The republish lines of the waiting page. A page line is the only line with this text."""
+        return [l for l in out.splitlines() if "republish each live waiting page now" in l]
+
+    def page_unknowns(self, out):
+        """The UNKNOWN lines of the waiting page: a read that could not run, named by its file."""
+        return [l for l in out.splitlines() if l.startswith("merge: #7 ") and "UNKNOWN:" in l and "page.html" in l]
+
+    def test_a_merged_pr_that_changes_the_page_prints_one_republish_line_after_the_merged_as_line(self):
+        self.pr_writes({self.PAGE_PATH: "<!doctype html>\n"})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out)  # the merge landed; page.html is no rule file, so no rule-file line
+        self.assertEqual(self.page_flags(out), [self.PAGE_LINE], "the republish line is missing, doubled or worded otherwise\n" + out)
+        self.assertEqual(self.page_unknowns(out), [], "the diff was readable, so no UNKNOWN line\n" + out)
+        lines = out.splitlines()
+        merged_at = [i for i, l in enumerate(lines) if l.startswith("merge: #7 merged as ")]
+        self.assertGreater(lines.index(self.PAGE_LINE), merged_at[0], "the republish line came before the merged-as line\n" + out)
+
+    def test_a_pr_that_changes_only_other_files_of_the_page_skill_prints_no_line_for_the_page(self):
+        self.pr_writes({"skills/waiting-page/SKILL.md": "# waiting page\n", "docs/notes.md": "x\n"})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out)  # the merge landed first, so the absence below is a read that ran and found no page.html
+        self.assertEqual(self.page_flags(out), [], "a diff without page.html printed a republish line\n" + out)
+        self.assertEqual(self.page_unknowns(out), [], "a diff that was read printed an UNKNOWN line for page.html\n" + out)
+
+    def test_an_unreadable_changed_paths_list_prints_an_unknown_line_for_the_page(self):
+        self.pr_writes({self.PAGE_PATH: "<!doctype html>\n"})
+        seen = self.unreadable(lambda args: (128, "fatal: bad revision"))
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_check_could_not_run(rc, out, seen)  # the merge landed; the rule-file line for the unread diff is the existing one
+        self.assertEqual(self.page_flags(out), [], "an unread diff printed a republish line for a file it never read\n" + out)
+        unknown = self.page_unknowns(out)
+        self.assertEqual(len(unknown), 1, "an unread diff must print one UNKNOWN line that names page.html\n" + out)
+        lines = out.splitlines()
+        merged_at = [i for i, l in enumerate(lines) if l.startswith("merge: #7 merged as ")]
+        self.assertGreater(lines.index(unknown[0]), merged_at[0], "the UNKNOWN line came before the merged-as line\n" + out)
+
+    def test_a_near_miss_of_the_page_path_prints_no_line_for_the_page(self):
+        self.pr_writes({"other/page.html": "x\n", "skills/waiting-page/page.html.bak": "x\n",
+                        "skills/waiting-page/page.htm": "x\n", "CLAUDE.md": "rules\n"})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out, "CLAUDE.md")  # the control: the same diff was read, and its rule file is flagged
+        self.assertEqual(self.page_flags(out), [], "a near-miss path printed a republish line\n" + out)
+        self.assertEqual(self.page_unknowns(out), [], "a near-miss path printed an UNKNOWN line for page.html\n" + out)
+
+    def test_a_pr_that_renames_the_page_away_still_prints_the_republish_line(self):
+        self.pr_renames([(self.PAGE_PATH, "docs/old-page.md")])  # --no-renames lists the old path as a removal, so the line still prints
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out)  # the merge landed; neither path is a rule file
+        self.assertEqual(self.page_flags(out), [self.PAGE_LINE], "a rename away from page.html printed no republish line\n" + out)
+
+    def test_a_pr_that_deletes_the_page_still_prints_the_republish_line(self):
+        self.pr_renames([(self.PAGE_PATH, None)])
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out)  # the merge landed; no rule file moved
+        self.assertEqual(self.page_flags(out), [self.PAGE_LINE], "a deletion of page.html printed no republish line\n" + out)
 
 class Race(Env):
     def test_two_runs_one_lock(self):
@@ -11851,6 +11922,43 @@ class RedMainBrake(Env):
                              {930: [main_job("readme-links", "failure", 20)], 931: [main_job("readme-links", "success", 20)]})
         self.merged(rc, out)
 
+    # Owner page item 880 (11:53 CST Nov 15): the daily runs the Windows and mutation jobs that a push no longer runs (their job-level if is
+    # `github.event_name != 'push'`, read from the real checks.yml). A red daily leaves main red under a Linux-only green push run, which
+    # skips them, and a green dispatch run, which runs every job, lifts it. These pin the rule as it stands; no product change is needed.
+    def test_a_linux_only_green_push_run_after_a_red_daily_leaves_main_red(self):
+        n_sha = f"{1951:040x}"
+        runs = [main_run(1951, "success", sha=n_sha, path=CHECKS_PATH), main_run(1950, "failure", event="schedule", path=CHECKS_PATH)]
+        jobs = {1950: [main_job("checks", "success", 20), main_job("checks-windows-merge-3", "failure", 19), main_job("all-jobs-passed", "skipped")],
+                1951: [main_job("checks", "success", 20), main_job("checks-windows-merge-3", "skipped"), main_job("all-jobs-passed", "skipped")]}
+        rc, out, before = self.go(runs, jobs, texts={n_sha: real_checks()})
+        self.refused(rc, out, before)
+        self.assertIn("run 1950", out, "the red daily is not named, so the refusal does not say what stays red")
+        self.assertIn("checks-windows-merge-3: fail", out)
+
+    def test_a_linux_red_daily_stays_red_under_a_green_push_run_that_skips_the_windows_and_mutation_jobs(self):
+        # The daily's red job is `checks`, a Linux job, so no step one finds a certain red: the push run's checks passed, and the rule reads
+        # the workflow file at the push run's head. The != push jobs stay needed there, so the skipped Windows job blocks the clear.
+        # Named failure: a rule that leaves the != push jobs out reads their skips as passed, and the push run clears the daily.
+        n_sha = f"{1971:040x}"
+        runs = [main_run(1971, "success", sha=n_sha, path=CHECKS_PATH), main_run(1970, "failure", event="schedule", path=CHECKS_PATH)]
+        jobs = {1970: [main_job("checks", "failure", 20), main_job("checks-windows-merge-3", "success", 19),
+                       main_job("checks-mutate-guard", "success", 19), main_job("all-jobs-passed", "skipped")],
+                1971: [main_job("checks", "success", 20), main_job("checks-windows-merge-3", "skipped"),
+                       main_job("checks-mutate-guard", "skipped"), main_job("all-jobs-passed", "skipped")]}
+        rc, out, before = self.go(runs, jobs, texts={n_sha: real_checks()})
+        self.refused(rc, out, before)
+        self.assertIn("run 1970", out, "the red daily is not named, so the refusal does not say what stays red")
+        self.assertIn(f"contents/{CHECKS_PATH}", self.host.reads, "the push run's workflow file was not read, so the rule never decided the clear")
+
+    def test_a_green_dispatch_run_with_every_job_of_the_red_daily_lifts_main(self):
+        n_sha = f"{1961:040x}"
+        runs = [main_run(1961, "success", event="workflow_dispatch", sha=n_sha, path=CHECKS_PATH),
+                main_run(1960, "failure", event="schedule", path=CHECKS_PATH)]
+        jobs = {1960: [main_job("checks", "success", 20), main_job("checks-windows-merge-3", "failure", 19), main_job("all-jobs-passed", "skipped")],
+                1961: [main_job("checks", "success", 20), main_job("checks-windows-merge-3", "success", 19), main_job("all-jobs-passed", "skipped")]}
+        rc, out, _ = self.go(runs, jobs, texts={n_sha: real_checks()})
+        self.merged(rc, out)
+
     # The failed-run clear, job by job: a job the red run did not fail, whose job-level if: names another event, is not needed by a green run of
     # that event. A red job always is. The workflow file is read at the green run's head (GET contents, ref = its head sha).
     def test_a_newer_push_run_clears_a_red_nightly_whose_pull_request_jobs_it_skipped(self):
@@ -14009,6 +14117,37 @@ class CloudSession(Env):
                 rc = e.code
         return rc, out.getvalue(), err.getvalue()
 
+    def assert_writer_refused(self, *argv, rc_is=None, **env):
+        """A `--role` call that failed from the writer: rc not 0, a line on stderr that is no old-parser error, and no file changed."""
+        before = self.role_files()
+        rc, out, err = self.run_main(*argv, **env)
+        self.assertNotEqual(rc, 0, out + err)
+        if rc_is is not None:
+            self.assertEqual(rc, rc_is, out + err)
+        self.assertTrue(err.strip(), "the refusal said nothing on stderr")
+        for old in OLD_PARSER_ERRORS:  # the failure must come from the writer, not from a parser that has never heard of --role
+            self.assertNotIn(old, err)
+        self.assertEqual(self.role_files(), before, "the refused call changed the config dir")
+        return err
+
+    def assert_reaches_host(self, *argv, **env):
+        """The run got past any role check to the host read. The PR is closed, so the run then stops with that one line and merges nothing."""
+        self.host.pr_state = "CLOSED"
+        reads = len(self.host.pr_calls)
+        rc, out, err = self.run_main(*argv, **env)
+        self.assertGreater(len(self.host.pr_calls), reads, out + err)
+        self.assertIn("CLOSED", err)
+        self.assertNotRegex(err, r"(?i)batch[ -]runner")
+
+    def commit_feat(self, files):
+        """Push one commit to origin/feat from the second clone, as a session's own edit lands: the head the merge reads moves to it."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        for path, text in files.items():
+            put(os.path.join(o, path), text)
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat moves"); sh(o, "git", "push", "-q", "origin", "feat")
+
     def runner_confirm(self):
         """-> run_main of `merge 7 --confirm --head <live head>`: a batch runner's confirm, which names the head its CI ran on
         (decision auto-mode-owner-acts). The head is read when the call is made, so a case that moves feat first reads the moved head."""
@@ -14031,32 +14170,12 @@ class MergeRoleCheck(CloudSession):
         self.assertNotIn("Traceback", err)
         return err
 
-    def assert_reaches_host(self, *argv, **env):
-        """The run got past any role check to the host read. The PR is closed, so the run then stops with that one line and merges nothing."""
-        self.host.pr_state = "CLOSED"
-        reads = len(self.host.pr_calls)
-        rc, out, err = self.run_main(*argv, **env)
-        self.assertGreater(len(self.host.pr_calls), reads, out + err)
-        self.assertIn("CLOSED", err)
-        self.assertNotRegex(err, r"(?i)batch[ -]runner")
-
-    def assert_writer_refused(self, *argv, rc_is=None, **env):
-        """A `--role` call that failed from the writer: rc not 0, a line on stderr that is no old-parser error, and no file changed."""
-        before = self.role_files()
-        rc, out, err = self.run_main(*argv, **env)
-        self.assertNotEqual(rc, 0, out + err)
-        if rc_is is not None:
-            self.assertEqual(rc, rc_is, out + err)
-        self.assertTrue(err.strip(), "the refusal said nothing on stderr")
-        for old in OLD_PARSER_ERRORS:  # the failure must come from the writer, not from a parser that has never heard of --role
-            self.assertNotIn(old, err)
-        self.assertEqual(self.role_files(), before, "the refused call changed the config dir")
-        return err
-
     # ---- the constants and the reader
-    # Ruling own-lanes-merge-claude-settings-prs (owner, 11:12 CST Nov 15, 2026): a lane joins the batch runner, for its own pull request only
-    def test_the_merge_roles_are_the_batch_runner_and_the_lane(self):
-        self.assertEqual(set(merge.MERGE_ROLES), {"batch-runner", "lane"})
+    # decision session-tiers: a batch runner merges. Ruling own-lanes-merge-claude-settings-prs (owner, 11:12 CST Nov 15, 2026) adds `lane`,
+    # for its own pull request only. Ruling own-tiny-fixes-b adds `standing`, the one tier a coordinator or triage records to merge its own small edit.
+    # The coordinator and the triage hold no merge role of their own; they record standing.
+    def test_the_merge_roles_are_the_batch_runner_the_lane_and_standing(self):
+        self.assertEqual(set(merge.MERGE_ROLES), {"batch-runner", "lane", "standing"})
 
     def test_the_role_path_is_the_state_file_under_the_config_dir(self):
         with self.cloud():
@@ -14156,6 +14275,7 @@ class MergeRoleCheck(CloudSession):
         # A session without a role must not learn which role to claim: the text names the batch runner only as the one that finds the PR.
         self.assertNotIn("coordinator", err.lower())
         self.assertNotIn("batch-runner", err.lower())
+        self.assertNotIn("standing", err.lower())  # ruling own-tiny-fixes-b: the tier word is no hint either
 
     def test_the_confirm_refusal_names_the_lane_lint_step(self):
         err = self.assert_refused()
@@ -14214,7 +14334,7 @@ class MergeRoleCheck(CloudSession):
         rc, out, err = self.run_main("--role", "coordinator")
         self.assertNotEqual(rc, 0, out + err)
         self.assertTrue(err.strip(), "the refusal said nothing on stderr")
-        for name in ("coordinator", "batch-runner"):
+        for name in ("coordinator", "batch-runner", "standing"):
             self.assertNotIn(name, err.lower())
         self.assertEqual(self.role_files(), {}, "the refused call wrote a role file")
 
@@ -14246,7 +14366,7 @@ class MergeRoleCheck(CloudSession):
                 rc, out, err = self.run_main("--role", tier)
                 self.assertNotEqual(rc, 0, out + err)
                 self.assertTrue(err.strip(), "the refusal said nothing on stderr")
-                for named in ("coordinator", "batch-runner"):
+                for named in ("coordinator", "batch-runner", "standing"):  # standing is a tier word too: a refusal names none (ruling own-tiny-fixes-b)
                     self.assertNotIn(named, err)
 
     def test_the_role_refusal_names_the_lane_lint_step(self):
@@ -14278,6 +14398,226 @@ class MergeRoleCheck(CloudSession):
                 self.assert_writer_refused(*argv, rc_is=2)  # 2 is argparse's usage-error code, as p.error gives today
                 self.assertEqual(self.role_files(), {})
                 self.assertEqual(self.host.pr_calls, [])
+
+OWN_SESSION_LINK ="https://claude.ai/code/session_" + ROLE_SESSION[len("cse_"):]  # the link a session's pull request ends with: session_<x> for cse_<x> (hooks/override.py remote_session_id)
+OWN_PR_BODY = "Small edit.\n\n" + OWN_SESSION_LINK + "\n"
+OTHER_PR_BODY = "Small edit.\n\nhttps://claude.ai/code/session_another_session\n"
+
+class StandingMergeRole(CloudSession):
+    """Ruling own-tiny-fixes-b: a standing session (a coordinator or a triage, decision session-tiers)
+    records the `standing` merge role and merges its OWN small edit through the merge tool, on green. The gate sits after the pull request
+    read and before the lock or any claim. The pull request is this session's own when its body names this session's link. Every file is a
+    doc or rule text (CLAUDE.md, agents, skills), no file is a guard path (guard_hits), CI is green, and rule text has one Sonnet review
+    record on the live head. The batch runner is not judged by this gate. A refusal names no tier word and no command."""
+
+    def own_pr(self, changed, body=OWN_PR_BODY):
+        """Make pull request 7 a case's pull request: its body is `body`, its files are `changed`, and this session records standing."""
+        self.host.body = body
+        self.host.changed = list(changed)
+        self.put_role("standing")
+
+    def scripted_records(self, *bodies):
+        """Pull request 7's review records, served through both readers of record bodies (review_comments and issue_comments), so the
+        case does not depend on which one the gate reads."""
+        records = {7: [(body, "2026-10-02T00:00:00Z", "2026-10-02T00:00:00Z") for body in bodies]}
+        self.host.review_comments = lambda since: {7: [body for body, _, _ in records[7]]}
+        self.host.issue_comments = lambda since: (records, {})
+
+    def standing_confirm(self):
+        """`merge 7 --confirm --head <live head>` as this cloud session. The head is named, as a standing merge names it (decision auto-mode-owner-acts)."""
+        return self.run_main("7", "--confirm", "--head", self.head())
+
+    def assert_standing_refused(self):
+        """`merge 7 --confirm` as a standing session is refused: rc 1, one line on stderr that names no tier word and no command, no traceback,
+        no claim, no lock and no merge. Returns the stderr text."""
+        refs = self.refs()
+        rc, out, err = self.standing_confirm()
+        self.assertEqual(rc, 1, out + err)
+        self.assertTrue(err.strip(), "the refusal said nothing on stderr")
+        self.assertNotIn("Traceback", err)
+        self.assertNotIn("standing", err.lower(), "the refusal names the tier word")
+        self.assertNotIn("--confirm", err)
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
+        self.assertEqual(self.refs(), refs, "the refused run took the lock or pushed a claim")
+        return err
+
+    # ---- the writer and the reader: standing is a merge role, recorded like the batch runner's
+    def test_a_standing_role_is_recorded_like_a_batch_runner_role(self):
+        rc, out, err = self.run_main("--role", "standing")
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(self.read_role_file(), (ROLE_SESSION, "standing"))
+        with self.cloud():
+            self.assertEqual(merge.read_merge_role(), "standing")
+        self.assertEqual(self.host.pr_calls, [])  # the writer reads no host
+
+    def test_a_standing_role_file_is_read_as_standing(self):
+        self.put_role("standing")
+        with self.cloud():
+            self.assertEqual(merge.read_merge_role(), "standing")
+
+    # ---- the gate lets through: the session's own small edit, on green
+    def test_an_own_docs_only_pr_merges_under_standing(self):
+        self.commit_feat({"docs/notes.md": "Notes.\n"})
+        self.own_pr([("docs/notes.md", "modified", 1)])
+        rc, out, err = self.standing_confirm()
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+    def test_an_own_rule_text_pr_with_one_sonnet_record_on_the_live_head_merges_under_standing(self):
+        self.commit_feat({"CLAUDE.md": "Rule text.\n"})
+        self.own_pr([("CLAUDE.md", "modified", 1)])
+        self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, PASS",)))
+        rc, out, err = self.standing_confirm()
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+    # ---- the gate refuses: not this session's pull request
+    def test_another_sessions_pr_is_refused_under_standing(self):
+        self.own_pr([("docs/notes.md", "modified", 1)], body=OTHER_PR_BODY)
+        self.assert_standing_refused()
+
+    def test_a_pr_that_names_no_session_is_refused_under_standing(self):
+        # no link is no proof that the pull request is this session's
+        self.own_pr([("docs/notes.md", "modified", 1)], body="Small edit.\n")
+        self.assert_standing_refused()
+
+    # ---- the gate refuses: a file that is code, or a guard path, is never a small edit
+    def test_an_own_pr_that_touches_code_is_refused_under_standing(self):
+        for changed in ([("tools/note.py", "added", 1)],
+                        [("docs/notes.md", "modified", 1), ("tools/note.py", "added", 1)]):
+            with self.subTest(changed=changed):
+                self.own_pr(changed)
+                self.assert_standing_refused()
+
+    def test_an_own_pr_that_touches_a_guard_path_is_refused_under_standing(self):
+        # the model record is a doc under docs/, yet a guard path (decision agent-model-cap); hooks/ is a guard path too
+        for path in ("docs/decisions/agent-model-cap.md", "hooks/rules.md"):
+            with self.subTest(path=path):
+                self.own_pr([(path, "modified", 1)])
+                self.assert_standing_refused()
+
+    # ---- the gate refuses: the head's checks are red
+    def test_an_own_docs_pr_with_red_ci_is_refused_under_standing(self):
+        self.own_pr([("docs/notes.md", "modified", 1)])
+        self.host.checks = (False, "a check is red: checks: fail")
+        self.host.state = "red: checks: fail"  # the head reads red, as the red-head cases above set it (head_state reads this)
+        self.assert_standing_refused()
+
+    def test_an_own_code_pr_with_a_sonnet_record_is_refused_under_standing(self):
+        # the code check alone: a valid Sonnet record on the live head is present, so only the file kind refuses this PR
+        self.commit_feat({"tools/note.py": "X = 1\n"})
+        self.own_pr([("tools/note.py", "added", 1)])
+        self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, PASS",)))
+        self.assert_standing_refused()
+
+    # ---- the gate refuses: rule text needs one Sonnet review record on the live head
+    def test_a_rule_text_pr_with_no_review_log_is_refused_under_standing(self):
+        self.own_pr([("CLAUDE.md", "modified", 1)])
+        self.scripted_records()
+        self.assert_standing_refused()
+
+    def test_a_rule_text_pr_whose_record_is_not_sonnet_is_refused_under_standing(self):
+        self.own_pr([("CLAUDE.md", "modified", 1)])
+        for model in ("haiku", "opus"):
+            with self.subTest(model=model):
+                self.scripted_records(record_text(head=self.head(), rounds=(f"Round 1: reviewer, {model}, PASS",)))
+                self.assert_standing_refused()
+
+    def test_a_rule_text_pr_whose_sonnet_record_names_an_old_head_is_refused_under_standing(self):
+        self.own_pr([("CLAUDE.md", "modified", 1)])
+        self.scripted_records(record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        self.assert_standing_refused()
+
+    # ---- the size bound: a rule-text pull request is small. merge.STANDING_MAX_LINES counts the lines a file adds, because
+    # Host.pr_files carries no deletions. merge.STANDING_MAX_FILES counts the changed files. Both are read by name, so the
+    # cases follow the bound the merge module names. A docs-only pull request is not bounded.
+    RULE_PATHS = ("CLAUDE.md", "agents/a.md", "agents/b.md", "skills/b/SKILL.md", "skills/c/SKILL.md")
+    DOC_PATHS = ("docs/a.md", "docs/b.md", "docs/c.md", "docs/d.md", "docs/e.md")
+
+    def bound(self, name):
+        """The size bound `name` of the merge module, read by name. A missing name fails the case with that name."""
+        value = getattr(merge, name, None)
+        if value is None:
+            self.fail(f"merge.{name} is not defined")
+        return value
+
+    def spread(self, paths, total):
+        """[(path, status, additions)] for `paths`, the additions summing to `total`: the first file takes what the others leave."""
+        rest = [1] * (len(paths) - 1)
+        return [(paths[0], "modified", total - sum(rest))] + [(p, "modified", 1) for p in paths[1:]]
+
+    def commit_files(self, paths):
+        """Commit one text file per path to origin/feat, so each case's merge is a real one."""
+        self.commit_feat({p: f"{p} text\n" for p in paths})
+
+    def assert_names_no_role(self, err):
+        """The refusal names no valid role: a lane learns no tier that passes from it."""
+        for named in ("batch-runner", "coordinator", "standing"):
+            self.assertNotIn(named, err.lower(), f"the refusal names {named}")
+
+    def test_a_rule_text_pr_at_exactly_the_size_bound_merges_under_standing(self):
+        lines, files = self.bound("STANDING_MAX_LINES"), self.bound("STANDING_MAX_FILES")
+        paths = self.RULE_PATHS[:files]
+        self.commit_files(paths)
+        self.own_pr(self.spread(paths, lines))
+        self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, PASS",)))
+        rc, out, err = self.standing_confirm()
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+    def test_a_rule_text_pr_one_line_over_the_line_bound_is_refused_under_standing(self):
+        # a valid Sonnet record is present, so only the line bound refuses this pull request
+        lines, files = self.bound("STANDING_MAX_LINES"), self.bound("STANDING_MAX_FILES")
+        paths = self.RULE_PATHS[:files]
+        self.commit_files(paths)
+        self.own_pr(self.spread(paths, lines + 1))
+        self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, PASS",)))
+        err = self.assert_standing_refused()
+        self.assertIn(merge.ROLE_CITE, err, "the size refusal does not print the cite")
+        self.assert_names_no_role(err)
+
+    def test_a_rule_text_pr_one_file_over_the_file_bound_is_refused_under_standing(self):
+        # a valid Sonnet record is present, so only the file bound refuses this pull request
+        files = self.bound("STANDING_MAX_FILES")
+        paths = self.RULE_PATHS[:files + 1]
+        self.commit_files(paths)
+        self.own_pr([(p, "modified", 1) for p in paths])
+        self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, PASS",)))
+        err = self.assert_standing_refused()
+        self.assertIn(merge.ROLE_CITE, err, "the size refusal does not print the cite")
+        self.assert_names_no_role(err)
+
+    def test_a_docs_only_pr_over_both_bounds_still_merges_under_standing(self):
+        # a docs-only pull request is not bounded: no record is needed, and it merges over both bounds
+        lines, files = self.bound("STANDING_MAX_LINES"), self.bound("STANDING_MAX_FILES")
+        paths = self.DOC_PATHS[:files + 1]
+        self.commit_files(paths)
+        self.own_pr(self.spread(paths, lines + 1))
+        rc, out, err = self.standing_confirm()
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+    # ---- regression: the batch runner and the local path say what they do today
+    def test_a_batch_runner_merges_a_code_pr_that_names_no_session(self):
+        # the standing gate never judges the batch runner: a code change with no session link merges as it does today
+        self.commit_feat({"tools/note.py": "X = 1\n"})
+        self.host.body = "Small edit.\n"
+        self.host.changed = [("tools/note.py", "added", 1)]
+        self.put_role("batch-runner")
+        rc, out, err = self.runner_confirm()
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+    def test_a_standing_writer_call_outside_the_cloud_writes_nothing(self):
+        for remote in (None, "", "false"):
+            with self.subTest(remote=remote):
+                self.assert_writer_refused("--role", "standing", CLAUDE_CODE_REMOTE=remote)
+                self.assertEqual(self.role_files(), {})
+
+    def test_a_local_confirm_is_not_judged_by_a_standing_role_file(self):
+        self.put_role("standing")
+        self.assert_reaches_host("7", "--confirm", CLAUDE_CODE_REMOTE=None, CLAUDE_CODE_REMOTE_SESSION_ID=None)
+
 
 class LaneOwnMerge(CloudSession):
     """Ruling own-lanes-merge-claude-settings-prs (owner, 11:12 CST Nov 15, 2026; the merge act only): a cloud lane session may run
@@ -14464,8 +14804,6 @@ class LaneRoleWriter(CloudSession):
     """Ruling own-lanes-merge-claude-settings-prs: `merge --role lane --step <slug>` records this cloud session's lane role with its step,
     and a lane with no step is refused and writes nothing. The step is what a lane's confirm later judges its pull request by."""
 
-    assert_writer_refused = MergeRoleCheck.assert_writer_refused  # one home of the writer refusal assertions
-
     def test_role_lane_with_a_step_writes_the_lane_and_its_step(self):
         self.assertEqual(self.role_files(), {})
         rc, out, err = self.run_main("--role", "lane", "--step", "feat")
@@ -14477,7 +14815,6 @@ class LaneRoleWriter(CloudSession):
     def test_role_lane_with_no_step_is_refused_and_writes_nothing(self):
         self.assert_writer_refused("--role", "lane")
         self.assertEqual(self.role_files(), {})
-
 
 class StandingGrantSwitch(CloudSession):
     """merge.standingGrant (decision standing-merge-grant) switches the standing merge grant.
@@ -14999,11 +15336,12 @@ class CloudAllow(unittest.TestCase):
 
     # decision session-tiers: the coordinator never merges, so its role rule goes; the batch-runner rule stays. Ruling
     # own-lanes-merge-claude-settings-prs adds the lane's one step rule, so the file holds four rules.
-    def test_the_rules_file_holds_four_rules_and_no_coordinator_role_rule(self):
+    def test_the_rules_file_holds_five_rules_and_no_coordinator_role_rule(self):
         allow = self.allow()
-        self.assertEqual(len(allow), 4, allow)
+        self.assertEqual(len(allow), 5, allow)
         self.assertNotIn("Bash(~/.claude/bin/merge --role coordinator)", allow)
         self.assertIn("Bash(~/.claude/bin/merge --role batch-runner)", allow)
+        self.assertIn("Bash(~/.claude/bin/merge --role standing)", allow)
         self.assertIn(LANE_STEP_RULE, allow)
 
     def test_the_rules_file_is_exactly_the_confirm_and_role_rules_of_the_home_shim(self):

@@ -286,8 +286,8 @@ class Store:
 
     def seed(self, addr, mid, kind, sender, body, re_id="-", eol="\n", body_eol=None):
         """Land one message on the mail ref with fixture plumbing, so a send bug cannot mask a read or take case.
-        eol ends the header lines and the blank line after them; body_eol ends the body (default: eol). A line ending
-        other than LF is written as bytes, so text-mode stdin on Windows does not turn each LF into CRLF."""
+        eol ends the header lines and the blank line after them; body_eol ends the body (default: eol). The text is
+        written as bytes, so text-mode stdin on Windows does not turn each LF into CRLF."""
         body_eol = eol if body_eol is None else body_eol
         text = ("Msg %s from %s to %s kind %s re %s try 1%sReply-to: %s%s%s%s%s"
                 % (mid, sender, addr, kind, re_id, eol, sender, eol, eol, body, body_eol))
@@ -300,7 +300,7 @@ class Store:
             git(self.path, ["read-tree", "--empty"], env)
         else:
             git(self.path, ["read-tree", tip], env)
-        data = text.encode("utf-8") if "\r" in text else text
+        data = text.encode("utf-8")
         blob = git(self.path, ["hash-object", "-w", "--stdin"], self.env, input_text=data).strip()
         git(self.path, ["update-index", "--add", "--cacheinfo",
                         "100644,%s,mail/%s/%s.md" % (blob, addr, mid)], env)

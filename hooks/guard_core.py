@@ -2094,12 +2094,15 @@ def _vetoed() -> bool:
         return True  # a veto that cannot be read is a veto: the refusal stands
 
 
-def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None, on_lift=None) -> None:
+def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None, on_lift=None,
+           continue_on_lift: bool = False):
     """Print a deny or an ask and exit, unless an owner override lifts it (decision
     owner-override). A lifted act prints nothing, so the normal permission flow runs. The
     veto runs before the override is taken, so a call that also holds a never-lifted act spends no override.
     spawn_role is set only on the Opus spawn refusal, the one refusal an Opus override may lift.
-    on_lift, when set, runs once when an override lifts the act, so a rule may keep state only for an act that lands."""
+    on_lift, when set, runs once when an override lifts the act, so a rule may keep state only for an act that lands.
+    continue_on_lift makes a lifted act return True instead of exiting, so the caller can judge the next rule of a
+    group (the lane start's rules); any other outcome exits as before."""
     vetoed = _vetoed()
     if not vetoed:
         try:  # an import or read failure is no override: the refusal stands
@@ -2114,6 +2117,8 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
             if lifted in override.LIFTS:
                 if on_lift:
                     on_lift()
+                if continue_on_lift:
+                    return True
                 sys.exit(0)
     record(tool, decision, rule, matched)
     try:  # the line the owner types to lift this refusal, or the words that none does; last in the reason
