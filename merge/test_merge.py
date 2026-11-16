@@ -5243,6 +5243,76 @@ class GhHalf(Env):
         rc, out = self.run_merge("7", "--confirm", host=self.gh_host())
         self.assert_draft_stops(rc, out, before)
 
+    # Owner ruling, 2026-11-15 18:21 CST, option B: a pull request whose lane lint PASSED for its exact head (`merge --lane-lint` posts the
+    # PASS) merges while its own PR run is still in progress or queued. Main's run after the merge is the check; a red main reverts the blamed
+    # commit. Act 4 (the per-lane merge, pinned in PerLaneMerge) already refuses a pending head with no PASS, so these cases pin only the new
+    # path and its edges: an older head's PASS, a finished red run, and a red main still refuse.
+
+    def pending_head(self, checks, runs):
+        """The live head of feat, with feat's one pending record removed, so the run claims nothing and merges in one step. The head's checks
+        and workflow runs read the same on every read (one-entry sequences). -> the live head sha. Each case seeds its own lane-lint comments."""
+        self.leave_no_pending_record()
+        self.set(checks_seq=[checks], runs_seq=[runs])
+        return self.head()
+
+    def lint_pass_merges_past(self, run_status):
+        head = self.pending_head(checks=[("checks", "pending", "")], runs=[("checks", run_status, "")])
+        self.set(issue_comments=[lint_comment(501, head)])
+        host = self.gh_host()
+        # scope first: a lane-lint PASS names this exact head, and the head's own run has not finished
+        self.assertEqual(merge.lint_state(host.issue_comments("1970-01-01T00:00:00Z")[1].get(7, []), head), "pass", "scope: no lane-lint PASS names the live head")
+        self.assertTrue(host.head_state(7).startswith("pending: "), "scope: the head is not pending: " + host.head_state(7))
+        rc, out = self.run_merge("7", "--confirm", host=host)
+        self.assertEqual(rc, 0, "a lane-lint PASS on the live head did not let its %s run merge:\n%s" % (run_status, out))
+        self.assertIn(MERGE_CALL, self.calls(), "the merge call was not sent")
+        self.assertEqual(self.paused, [], "the merge waited on the pending run")
+
+    def test_a_lint_pass_on_the_live_head_merges_past_its_run_in_progress(self):
+        self.lint_pass_merges_past("in_progress")
+
+    def test_a_lint_pass_on_the_live_head_merges_past_its_run_queued(self):
+        self.lint_pass_merges_past("queued")
+
+    def test_a_lint_pass_does_not_lift_a_finished_red_run_on_the_head(self):
+        head = self.pending_head(checks=[("checks", "fail", "https://x/y")], runs=[("checks", "completed", "failure")])
+        self.set(issue_comments=[lint_comment(501, head)])
+        host = self.gh_host()
+        # scope first: the PASS names the live head, and the head reads red
+        self.assertEqual(merge.lint_state(host.issue_comments("1970-01-01T00:00:00Z")[1].get(7, []), head), "pass", "scope: no lane-lint PASS names the live head")
+        self.assertTrue(host.head_state(7).startswith("red: "), "scope: the head is not red: " + host.head_state(7))
+        rc, out = self.run_merge("7", "--confirm", host=host)
+        self.assertEqual(rc, 1, "a finished red run on the head merged past its lane-lint PASS:\n" + out)
+        self.assertIn("a check is red", out, "the refusal does not name the red check")
+        self.assertNotIn(MERGE_CALL, self.calls(), "the merge call was sent for a red head")
+
+    def test_a_lint_pass_for_an_older_head_does_not_pass_the_live_head(self):
+        self.leave_no_pending_record()
+        old = self.head()
+        head = self.competitor_push()  # a later commit on feat, not a claim: claim_only does not carry the PASS over it
+        self.assertNotEqual(head, old, "scope: the live head did not move past the PASS's head")
+        self.set(checks_seq=[[("checks", "pending", "")]], runs_seq=[[("checks", "in_progress", "")]], issue_comments=[lint_comment(501, old)])
+        host = self.gh_host()
+        # scope first: the PASS names the older head only, and the live head is pending
+        self.assertEqual(merge.lint_state(host.issue_comments("1970-01-01T00:00:00Z")[1].get(7, []), head), "none", "scope: a lane-lint comment names the live head")
+        self.assertTrue(host.head_state(7).startswith("pending: "), "scope: the live head is not pending: " + host.head_state(7))
+        rc, out = self.run_merge("7", "--confirm", host=host)
+        self.assertEqual(rc, 1, "a lane-lint PASS on an older head let the live head merge:\n" + out)
+        self.assertNotIn(MERGE_CALL, self.calls(), "the merge call was sent for the live head on an older head's PASS")
+
+    def test_a_lint_pass_does_not_lift_a_red_main(self):
+        push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})  # only a workflow file on main is judged; the head takes main in before the PASS names it
+        self.set(base_runs=[main_run(901, "failure")], base_jobs={"901": [main_job("scope", "success"), main_job("checks", "failure", 20)]})
+        head = self.pending_head(checks=[("checks", "pending", "")], runs=[("checks", "in_progress", "")])
+        self.set(issue_comments=[lint_comment(501, head)])
+        host = self.gh_host()
+        # scope first: the PASS names the live head, and the head's own run is pending
+        self.assertEqual(merge.lint_state(host.issue_comments("1970-01-01T00:00:00Z")[1].get(7, []), head), "pass", "scope: no lane-lint PASS names the live head")
+        self.assertTrue(host.head_state(7).startswith("pending: "), "scope: the head is not pending: " + host.head_state(7))
+        rc, out = self.run_merge("7", "--confirm", host=host)
+        self.assertEqual(rc, 1, "a lane-lint PASS let a pending head merge onto a red main:\n" + out)
+        self.assertIn("latest completed run is red", out, "the refusal does not name the red main")
+        self.assertNotIn(MERGE_CALL, self.calls(), "the merge call was sent onto a red main")
+
 # Run ids on one head: a concurrency-cancelled run, the newer run of the same workflow, and a run of another workflow.
 OLD_RUN, NEW_RUN, CI_RUN = 41368432206, 41368432483, 41368432300
 MID_RUN = 41368432350  # a run of the same workflow between OLD_RUN and NEW_RUN
