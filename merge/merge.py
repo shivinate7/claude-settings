@@ -5858,7 +5858,8 @@ def standing_refusal(h, n, info, head):
         recs = [r for r in map(parse_review, bodies) if r and r["n"] == n]
         rec = recs[-1] if recs else None
         # the pass that ends review must be sonnet's: the fix verifier's when the record has one, else the last reviewer round's
-        passer = rec["fix"][2] if rec and rec["fix"] else next((m for _, role, m, _ in reversed(rec["rounds"] if rec else []) if role == REVIEW_ROLES[0]), None)
+        last = (rec["fix"][2], rec["fix"][3]) if rec and rec["fix"] else next(((m, v) for _, role, m, v in reversed(rec["rounds"] if rec else []) if role == REVIEW_ROLES[0]), (None, None))
+        passer = last[0] if last[1] == "PASS" else None  # a final round that failed reads done when no net value is owed, but it is no pass
         if not passer or passer.lower() != "sonnet" or review_state(rec, head, recs[:-1])[0] != "done":  # `head` is the relayed head, which relayed_head_holds ties to the live one: only this tool's claim commits may sit above it
             return "this pull request changes code, rule text or a guard path, and its head has no passing sonnet review record."
     return ""

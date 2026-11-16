@@ -14443,7 +14443,7 @@ class StandingMergeRole(CloudSession):
 
     def assert_passing_sonnet_record(self, body, changed):
         """P7, the scope before the gate reads it: `body` is one passing Sonnet record on the live head, and `changed` holds a code path
-        (neither a doc nor rule text). A case that passes calls this first, so its red comes from the gate alone."""
+        (not a doc). A case that passes calls this first, so its red comes from the gate alone."""
         rec = merge.parse_review(body)
         self.assertIsNotNone(rec, "the case's review record does not parse")
         self.assertEqual(merge.review_state(rec, self.head())[0], "done", "the case's review record is not a passing record on the live head")
@@ -14539,7 +14539,7 @@ class StandingMergeRole(CloudSession):
         self.assert_standing_refused()
 
     # ---- ruling (owner, 2026-11-16 08:51 CST): one passing Sonnet record on the live head is the proof for a code pull request
-    def test_an_own_code_pr_whose_round_one_failed_and_a_sonnet_fix_check_passed_merges_under_standing(self):
+    def test_an_own_code_pr_whose_round_one_failed_and_a_sonnet_fix_verifier_passed_merges_under_standing(self):
         # the fail-then-fix cycle: a haiku round 1 FAIL, then a passing sonnet fix verifier, ends review
         self.commit_feat({"tools/note.py": "X = 1\n"})
         self.own_pr([("tools/note.py", "added", 1)])
@@ -14552,6 +14552,13 @@ class StandingMergeRole(CloudSession):
         self.commit_feat({"tools/note.py": "X = 1\n"})
         self.own_pr([("tools/note.py", "added", 1)])
         self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, haiku, FAIL", "Round 2: reviewer, haiku, PASS")))
+        self.assert_standing_refused()
+
+    def test_an_own_code_pr_whose_three_rounds_all_failed_is_refused_under_standing(self):
+        # three failed rounds read done when no net value is owed, but no reviewer passed it
+        self.commit_feat({"tools/note.py": "X = 1\n"})
+        self.own_pr([("tools/note.py", "added", 1)])
+        self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, haiku, FAIL", "Round 2: reviewer, sonnet, FAIL", "Round 3: reviewer, sonnet, FAIL")))
         self.assert_standing_refused()
 
     def test_an_own_code_pr_with_a_passing_sonnet_record_merges_under_standing(self):
