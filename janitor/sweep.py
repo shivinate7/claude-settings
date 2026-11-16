@@ -3473,8 +3473,9 @@ def main(argv=None) -> int:
                               "worktree or a folder inside it); adds to any ROOT given")
     parser.add_argument("--session-end", action="store_true", dest="session_end",
                          help="the SessionEnd run only: judges branches and worktrees in its "
-                              "own repository only, stops proven orphans machine-wide like the "
-                              "scheduled job, and skips the loose-process report")
+                              "own repository only, stops proven dead-rooted servers rooted "
+                              "in that repository only (the scheduled job stops them in every "
+                              "repository), and skips the loose-process report")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--tier1", action="store_true",
                        help="only stale registrations and husks. The one mode that acts "
@@ -3590,11 +3591,14 @@ def _sweep_roots(args, roots, restore_log_path, mode):
     dead = find_dead_rooted()
     print_dead_rooted_report(dead)
     # SessionEnd skips the loose-process report: the hook discards its output.
-    if not getattr(args, "session_end", False) and not _past_deadline():
+    session_end = getattr(args, "session_end", False)
+    if not session_end and not _past_deadline():
         print_loose_processes_report(find_loose_processes())
     if args.confirm:
         reaped = reaped_listener_decisions(results)
         for d in dead or []:
+            if session_end and not _cwd_under_checkout(d["home"], roots[0]):
+                continue  # another repository's dead server waits for the daily job
             if d["action"] == "reap" and d["pid"] not in {r["pid"] for r in reaped}:
                 if _past_deadline():
                     break  # the next run reaps it

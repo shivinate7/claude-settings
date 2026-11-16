@@ -1373,7 +1373,7 @@ class RealListTests(unittest.TestCase):
             "new": "if _PW_ASSERT",
             "argv": ["python3", "hooks/test_mutate_replay.py", "PlaywrightClassifyTests"]},
         "3297d8fa-take-spare": {
-            "file": "merge/merge.py", "old": "+ 10) * 60)", "new": ") * 60)",
+            "file": "merge/merge.py", "old": "lock.acquire(base, LOCK_TTL_SECONDS)", "new": "lock.acquire(base, LOCK_TTL_SECONDS + 600)",
             "argv": ["python3", "merge/test_merge.py", "LockProseStatesTheCode"]},
     }
 
