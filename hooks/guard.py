@@ -1486,6 +1486,13 @@ CAP_ASK_REASON = (
     "time shown here is the one you want. "
     "(decision agent-model-cap, the owner's cap on the agent model lifts only with his word)"
 )
+CAP_MODEL_ASK_REASON = (
+    "Rule (configuration): this write sets the agent model cap, which the owner's user settings "
+    "hold. A project settings file overrides user settings, so the write lifts the cap for every "
+    "agent started there. Requested: {change}. File: {where}. "
+    "Approve it only when a model above Sonnet is wanted for this project. "
+    "(decision agent-model-cap, the owner's cap on the agent model lifts only with his word)"
+)
 CAP_ASK_REASON_COMPUTED = (
     "Rule (configuration): this write sets the agent model cap, which the owner's user settings "
     "hold. A project settings file overrides user settings, so the write lifts the cap for every "
@@ -1877,17 +1884,21 @@ def cap_with_deadline(change: str, end: str) -> str:
     return (change + ", " if change else "") + "cap lift ends " + end + " (US Central)"
 
 
-def cap_ask_reason(change: str, where: str, end_only: bool = False, computed: bool = False) -> str:
+def cap_ask_reason(change: str, where: str, end_only: bool = False, computed: bool = False,
+                   end_shown: bool = True) -> str:
     """Build the printed ask, BOUNDED BY CONSTRUCTION.
 
     The template is fixed, the change holds at most the cap's two keys with a value of at most
     CAP_MAX_VALUE characters each, and the path is cut at CAP_MAX_PATH. So the reason cannot run
     past roughly 800 characters however long the value or the path a tool passed. `cap_safe` does
     the cleaning and marks each cut. `end_only` is a write that sets the cap-lift end and no model:
-    it says so, and never says it sets the model cap.
+    it says so, and never says it sets the model cap. `end_shown` is false for a model-only write: it
+    sets no end, so its ask must not point at an end "shown here".
     """
     if computed:
         template = CAP_END_ASK_REASON_COMPUTED if end_only else CAP_ASK_REASON_COMPUTED
+    elif not end_only and not end_shown:
+        template = CAP_MODEL_ASK_REASON
     else:
         template = CAP_END_ASK_REASON if end_only else CAP_ASK_REASON
     return template.format(change=cap_safe(change, CAP_MAX_CHANGE), where=cap_safe(where, CAP_MAX_PATH))
@@ -5303,7 +5314,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         end = cap_shell_end(raw, matched, cwd)
         change = cap_with_deadline(model, end)
         if change:
-            ask_command("agent-model-cap", cap_ask_reason(change, matched, end_only=not model, computed=end == CAP_END_COMPUTED),
+            ask_command("agent-model-cap", cap_ask_reason(change, matched, end_only=not model, computed=end == CAP_END_COMPUTED,
+                                         end_shown=bool(end)),
                      log_path_and_text(matched, change), "settings write")
     settle_ask(tool, raw)
 
@@ -7625,9 +7637,10 @@ def judge(payload) -> None:
         # carry the name never fires, and no other file than a settings file reaches this rule.
         if is_settings_file(target, cwd):
             model = cap_change_parts(write_content_parts(tool_input))
-            change = cap_with_deadline(model, cap_deadline_end(cap_arriving_parts(tool_input, target, cwd)))
+            end = cap_deadline_end(cap_arriving_parts(tool_input, target, cwd))
+            change = cap_with_deadline(model, end)
             if change:
-                refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, target, end_only=not model),
+                refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, target, end_only=not model, end_shown=bool(end)),
                        log_path_and_text(target, change))
     scratchpad_owner_write(payload, tool, tool_input, cwd)   # every refusal above passed: refuse an overwrite, else record the writer
 
