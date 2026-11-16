@@ -2,14 +2,14 @@
  "id": "lanes-merge-own-pr-text",
  "title": "Lane lanes-merge-own-pr-text: close #3512 and #3508 as replaced by #3514",
  "priority": "now",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "owner": "triage",
  "blockedBy": [],
- "updatedAt": "2026-11-15T20:19:00-06:00",
+ "updatedAt": "2026-11-15T23:38:00-06:00",
  "why": "[12:57 CST Nov 15, triage] Lane lanes-merge-own-pr-text closes #3512 and #3508 as \"Replaced by #3514\": the merge tool's rule (decision session-tiers) refuses #3514's lint while they are open. (source: coordinator 12:57 CST, relayed by triage; not owner-typed, undoable) New step; none existed.\n\n[20:19 CST Nov 15, triage] PR #3514: open, draft, head 24cb8ea577c3, REST read at 20:19 CST Nov 15 (pull_request_read; the PR's title or branch names this step's work). It replaces #3512 and #3508.",
  "source": "coordinator 12:57 CST Nov 15, relayed by triage; not owner-typed",
- "note": "Doing. Closes #3512 and #3508 as \"Replaced by #3514\". Related steps: lane-merges-own-pr-code, rewrite-merge-decisions-for-lane-merge.",
+ "note": "Done. Merged: #3514 (lanes-merge-own-pr-text-r3, head 580205bb164a) merged 23:35:54 CST Nov 15, merge commit 183ede0dd992 (REST merged true). Pace: first lane commit 11:44:06 CST Nov 15 to merge 11 h 51 min 48 s (REST commits, n=4); lanes run about 50 started, most at once 26 at 06:04 CST, not recounted; minutes with no lane running unknown; brake refusals n/a (cloud). Closes #3512 and #3508 as \"Replaced by #3514\". Related steps: lane-merges-own-pr-code, rewrite-merge-decisions-for-lane-merge.",
  "pr": 3514
 }
