@@ -396,6 +396,14 @@ class StepFields(BriefCase):
         invented = sorted(set(PATH.findall(out)) - allowed)
         self.assertEqual(invented, [], "the brief names a file that no input holds")
 
+    def test_prior_work_placeholder_prints_and_the_tool_fills_no_search(self):
+        out = self.build(self.make_repo(step=step_doc()))
+        prior = [line.strip() for line in out.splitlines() if line.strip().startswith("Prior work:")]
+        self.assertEqual(len(prior), 1, "the brief has %d Prior work lines, want one placeholder for the coordinator"
+                         % len(prior))
+        self.assertRegex(prior[0], r"^Prior work:\s*<[^>]+>$",
+                         "the Prior work line is not a placeholder the coordinator fills: %r" % prior[0])
+
 
 class StoreStates(BriefCase):
 

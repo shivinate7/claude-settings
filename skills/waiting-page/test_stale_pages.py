@@ -2253,5 +2253,171 @@ class UnreadStale(FolderCase):
         self.assertEqual((code, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY)]), "main() did not send --unread to its mode: " + out)
 
 
+class SessionLine(unittest.TestCase):
+    """`--session-line <root> --main-checkout <dir>` (rule page-stale, decision page-stale-publish). The stamps are the record file
+    roadmap/data/meta/page-built.json on origin/roadmap and the local stamp <git common dir>/waiting-page-built. While the record
+    file holds a 40-hex blob, either stamp equal to main's blob sha prints nothing, and a stamp that differs from it prints the
+    behind line. While the record file is missing or unreadable, the local stamp alone decides: it prints the behind line when it
+    differs from main's blob, and nothing when it is equal or missing. A repo with no waiting page prints nothing.
+    Every run exits 0 and prints no traceback. Each silence case asserts that before it asserts the silence."""
+
+    run_script = Stale.run_script  # the one script-run helper of this file: it reads no instance state
+    RECORD = "roadmap/data/meta/page-built.json"
+    BEHIND = "is behind main's page.html"
+    # record texts the reader counts as missing: not JSON, no blob key, and a blob that is not 40-hex
+    UNREADABLE = (("unparseable", "{not json"), ("no-blob-key", json.dumps({"at": "2026-11-15T00:00:00Z"})),
+                  ("short-blob", json.dumps({"blob": "abc123", "at": "2026-11-15T00:00:00Z"})))
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)  # test-temp-standard: never the system temp dir
+        self.addCleanup(self.tmp.cleanup)
+        self.main = os.path.join(self.tmp.name, "main")  # the claude-settings clone: its origin/main holds the skill's page
+        write_text(os.path.join(self.main, "skills", "waiting-page", "page.html"), "<!doctype html>\n<title>Queue</title>\n")
+        git(self.main, "init", "-q")
+        git(self.main, "add", "-A")
+        git(self.main, "commit", "-q", "-m", "main")
+        git(self.main, "update-ref", "refs/remotes/origin/main", "HEAD")
+        self.main_blob = git(self.main, "rev-parse", "origin/main:skills/waiting-page/page.html").stdout.strip()
+        older = write_text(os.path.join(self.tmp.name, "older.html"), "<!doctype html>\n<title>Queue, older</title>\n")
+        self.other_blob = git(self.main, "hash-object", older).stdout.strip()  # a blob that is not main's
+
+    def root(self, name="root", extras=True):
+        """A repo for the session line. Its extras file names a waiting page unless `extras` is False."""
+        root = os.path.join(self.tmp.name, name)
+        os.makedirs(root)
+        git(root, "init", "-q")
+        if extras:
+            write_text(os.path.join(root, ".claude", "layout-extras.json"),
+                       json.dumps({"kinds": {}, "waiting-page": URL % "sspage"}))
+        return root
+
+    def roadmap(self, root, record):
+        """origin/roadmap of `root` is a commit that holds the record file with the text `record`, or no record file when None."""
+        if record is not None:
+            write_text(os.path.join(root, self.RECORD), record)
+        git(root, "add", "-A")
+        git(root, "commit", "-q", "--allow-empty", "-m", "roadmap")
+        git(root, "update-ref", "refs/remotes/origin/roadmap", "HEAD")
+
+    def local_stamp(self, root, sha):
+        """Write `sha` as the local stamp in the common git dir of `root`, where an allowed publish puts it."""
+        write_text(os.path.join(root, ".git", "waiting-page-built"), sha + "\n")
+
+    def record(self, blob):
+        return json.dumps({"blob": blob, "at": "2026-11-15T00:00:00Z"})
+
+    def session_run(self, root):
+        return self.run_script("--session-line", root, "--main-checkout", self.main)
+
+    def assert_clean(self, r):
+        """The run exited 0 and printed no traceback. A silence case asserts this first, so a crash never reads as silence."""
+        self.assertEqual(r.returncode, 0, "the session line exited %d: %s" % (r.returncode, r.stderr))
+        self.assertNotIn("Traceback", r.stdout + r.stderr, "the session line crashed: " + r.stderr)
+
+    def test_1_a_record_equal_to_main_prints_nothing_even_over_a_stale_local_stamp(self):
+        root = self.root()
+        self.roadmap(root, self.record(self.main_blob))
+        self.local_stamp(root, self.other_blob)  # the record equals main's blob, so the page is not behind whatever the local stamp says
+        r = self.session_run(root)
+        self.assert_clean(r)
+        self.assertEqual(r.stdout, "", "a record equal to main's blob printed a line:\n" + r.stdout)
+
+    def test_1_a_current_local_stamp_silences_a_record_that_lags_main(self):
+        root = self.root()
+        self.roadmap(root, self.record(self.other_blob))  # the record lags: it names a blob that is not main's
+        self.local_stamp(root, self.main_blob)  # the local stamp is current: one stamp equals main, so the page is not behind
+        r = self.session_run(root)
+        self.assert_clean(r)
+        self.assertEqual(r.stdout, "", "a current local stamp did not silence a record that lags:\n" + r.stdout)
+
+    def test_2_a_record_differing_from_main_prints_the_behind_line(self):
+        root = self.root()
+        self.roadmap(root, self.record(self.other_blob))
+        r = self.session_run(root)
+        self.assert_clean(r)
+        lines = r.stdout.splitlines()
+        self.assertEqual(len(lines), 1, "want one session line for a record behind main:\n" + r.stdout)
+        self.assertIn(self.BEHIND, lines[0], "the line does not say the page is behind main's page.html: " + lines[0])
+
+    def test_2_both_stamps_differing_from_main_prints_the_behind_line(self):
+        root = self.root()
+        self.roadmap(root, self.record(self.other_blob))
+        third = write_text(os.path.join(self.tmp.name, "third.html"), "<!doctype html>\n<title>Queue, third</title>\n")
+        self.local_stamp(root, git(self.main, "hash-object", third).stdout.strip())  # a second stamp, and it is not main's either
+        r = self.session_run(root)
+        self.assert_clean(r)
+        lines = r.stdout.splitlines()
+        self.assertEqual(len(lines), 1, "want one session line when both stamps differ from main:\n" + r.stdout)
+        self.assertIn(self.BEHIND, lines[0], "the line does not say the page is behind main's page.html: " + lines[0])
+
+    def test_3_no_record_and_no_local_stamp_prints_nothing(self):
+        root = self.root()
+        self.roadmap(root, None)
+        r = self.session_run(root)
+        self.assert_clean(r)
+        self.assertEqual(r.stdout, "", "a repo with no record and no local stamp printed a line:\n" + r.stdout)
+
+    def test_4_no_record_and_a_local_stamp_equal_to_main_prints_nothing(self):
+        root = self.root()
+        self.roadmap(root, None)
+        self.local_stamp(root, self.main_blob)
+        r = self.session_run(root)
+        self.assert_clean(r)
+        self.assertEqual(r.stdout, "", "a local stamp equal to main's blob printed a line:\n" + r.stdout)
+
+    def test_4_no_record_and_a_stale_local_stamp_prints_the_behind_line(self):  # the fallback is read: silence above is not an unread stamp
+        root = self.root()
+        self.roadmap(root, None)
+        self.local_stamp(root, self.other_blob)
+        r = self.session_run(root)
+        self.assert_clean(r)
+        lines = r.stdout.splitlines()
+        self.assertEqual(len(lines), 1, "want one behind line from the local stamp when the record is missing:\n" + r.stdout)
+        self.assertIn(self.BEHIND, lines[0], "the fallback line does not say behind: " + lines[0])
+
+    def test_3_no_branch_and_no_local_stamp_prints_nothing(self):  # no roadmap branch at all: a missing ref is missing, not unreadable
+        root = self.root()
+        r = self.session_run(root)
+        self.assert_clean(r)
+        self.assertEqual(r.stdout, "", "a repo with no roadmap branch and no local stamp printed a line:\n" + r.stdout)
+
+    def test_4_no_branch_and_a_stale_local_stamp_prints_the_behind_line(self):  # the fallback with no roadmap branch at all
+        root = self.root()
+        self.local_stamp(root, self.other_blob)
+        r = self.session_run(root)
+        self.assert_clean(r)
+        lines = r.stdout.splitlines()
+        self.assertEqual(len(lines), 1, "want one behind line from the local stamp when there is no roadmap branch:\n" + r.stdout)
+        self.assertIn(self.BEHIND, lines[0], "the fallback line does not say behind: " + lines[0])
+
+    def test_5_an_unreadable_record_with_no_local_stamp_prints_nothing_and_never_crashes(self):
+        for name, text in self.UNREADABLE:
+            with self.subTest(record=name):
+                root = self.root(name)
+                self.roadmap(root, text)
+                r = self.session_run(root)
+                self.assert_clean(r)
+                self.assertEqual(r.stdout, "", "a record with no usable blob and no local stamp printed a line:\n" + r.stdout)
+
+    def test_5_an_unreadable_record_with_a_differing_local_stamp_prints_the_behind_line(self):
+        for name, text in self.UNREADABLE:
+            with self.subTest(record=name):
+                root = self.root(name)
+                self.roadmap(root, text)
+                self.local_stamp(root, self.other_blob)
+                r = self.session_run(root)
+                self.assert_clean(r)
+                lines = r.stdout.splitlines()
+                self.assertEqual(len(lines), 1, "want one behind line from the local stamp when the record has no usable blob:\n" + r.stdout)
+                self.assertIn(self.BEHIND, lines[0], "the fallback line does not say behind: " + lines[0])
+
+    def test_6_a_repo_without_the_page_prints_nothing(self):
+        root = self.root("nopage", extras=False)
+        self.roadmap(root, self.record(self.other_blob))  # a record behind main: the silence must come from the missing page
+        r = self.session_run(root)
+        self.assert_clean(r)
+        self.assertEqual(r.stdout, "", "a repo with no waiting page printed a line:\n" + r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -9,9 +9,8 @@ A spawner is a session that starts its own agents. Each session role is a set of
 
 - **Coordinator.** One per repo. It is the one session that starts other sessions. It starts
   triage and the batch runner together, as a trio, before any lane. It holds lane state
-  and writes each lane brief. It starts each lane in roadmap order, with `model` (the lane row's),
-  `source_url` (the repo), effort `medium` and `title` `Lane <branch slug>: <task>`. It sets the tags `cs-repo`, `cs-build:lane`, `cs-step`
-  and `cs-topic`. Its whole brief is the first prompt, and it opens with the Grant line. It talks with the owner. Before a fix lane for a red CI case, it runs
+  and writes each lane brief. It starts each lane in roadmap order, with `~/.claude/bin/lane-start`, which prints
+  the start's fields (the helper holds the model, effort, title and tags). Its whole brief is the first prompt, and it opens with the Grant line. It talks with the owner. Before a fix lane for a red CI case, it runs
   `~/.claude/bin/merge --touches --run <run id>` and reads each open PR named (decision `session-tiers`, "Who starts which session"). On a local session, the load
   brake, not a number, decides how many lanes run at once. It does not rotate (see below).
   It archives each other finished session it started at its next wake, once it has read the report (ruling R46). It sends each lane that triage flags one line: reply if you are stuck and nobody picked it up (ruling R56 point 3).
@@ -19,7 +18,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
   A lane also gets `cs-topic:<topic slug>`, its one topic, and a `cs-step:<step id>` for each step it takes, so triage can see each step is live.
-  It plans, briefs, verifies and reports, and builds only as rule `roles-orchestrator-never-builds` allows. A change that touches a rule's behaviour, a check's verdict or product code goes to a lane. Long reads go to read-only agents: the red-run reads, each `merge --touches` read of an open PR, and audits. It keeps lane state, the briefs and the talk with the owner.
+  It plans, briefs, verifies and reports, and builds only as rule `roles-orchestrator-never-builds` allows. It builds what the owner asks of it and lands it on main. Long reads go to read-only agents: the red-run reads, each `merge --touches` read of an open PR, and audits. It keeps lane state, the briefs and the talk with the owner.
 - **Triage.** A standing session. It writes the roadmap. Only triage writes a new step,
   merges two steps, changes the work order, or closes a step. Triage always writes the waiting page; in a run with one lane the lane wears triage's hat and writes it.
   At triage start, when the repo has no waiting page, triage makes it, with no separate grant (skill
@@ -108,7 +107,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   names the machine. It may drive a Remote Control session on the owner's machine.
 - **Batch runner's standing duty: a rolling combine train.** In a repo that still batches, the batch runner keeps it all the time (ruled, not in force or built; both routes stay, picked by speed per situation; the scope reading is the lane's, unchecked; a repo on per-lane merging, where each lane PR merges alone, does not)
   (claude-settings decision `session-tiers`, the session roles decision, bullet "Rolling combine train": the levels L1 to L4, what is
-  frozen, what keeps folding, what a fold owes, and the per-batch report numbers).
+  frozen, what keeps folding, what a fold owes, the pre-merge reads and the fold checks (both relayed, not checked), and the per-batch report numbers).
 
 When the owner names the wrong session, or brings work that belongs to another session, the session
 says in one line whose job it is, then routes it.

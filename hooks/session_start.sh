@@ -187,6 +187,19 @@ n=$(cd "$cwd" 2>/dev/null && git status --porcelain 2>/dev/null | wc -l | tr -d 
 printf 'checkout %s on %s, %s dirty files\n' "$toplevel" "$branch" "$n"
 tier_line
 
+# roster_lines: the standing sessions of this repo with their ids, so a session never types an id by hand (decision
+# brief-ids-in-roster). The rows are the Standing sessions section of CLAUDE.md on the local origin/roadmap ref, read
+# by hooks/own_session.py; no row prints one line that says so. Status is the record's, not live: a hook cannot call
+# list_sessions (see tier_line). Cost: once per SessionStart event, one python start and two read-only reads of the
+# checkout (the record, the origin url); no network, no file written, no process kept.
+if command -v python3 >/dev/null 2>&1; then
+  ro_script="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/own_session.py"
+  if [ -f "$ro_script" ]; then
+    ro_lines=$(python3 "$ro_script" roster-lines "$toplevel" 2>/dev/null)
+    [ -n "$ro_lines" ] && printf '%s\n' "$ro_lines"
+  fi
+fi
+
 # Local origin/HEAD's target, empty when unset. The default-branch check below tests the checkout against it. The
 # grants compare reads gm_default instead: the remote HEAD's target when the refresh read the remote, since that is
 # the branch the fetch refreshed and a local origin/HEAD goes stale when the remote's default is renamed; else this.
@@ -522,12 +535,13 @@ if [ -n "$wl_out" ]; then
 fi
 
 # Rule page-stale: a repo whose extras name a waiting page prints one line when the page was last published
-# from a version other than main's page.html. The stamp an allowed publish wrote
-# (<git common dir>/waiting-page-built) holds main's blob sha at that publish; skills/waiting-page/stale_pages.py
-# --session-line compares it with origin/main of the claude-settings clone ($d) and prints the line, or nothing
-# (no stamp, or main unreadable, is silent). The grep is only a cheap filter on the extras file that
+# from a version other than main's page.html. Two stamps hold main's blob sha at the publish: the
+# page-built stamp roadmap/data/meta/page-built.json on origin/roadmap, and the local one an allowed publish wrote
+# (<git common dir>/waiting-page-built). skills/waiting-page/stale_pages.py --session-line compares them with origin/main
+# of the claude-settings clone ($d): nothing when either equals main's blob, the behind line when one exists and none
+# does, nothing when neither exists or main is unreadable. The grep is only a cheap filter on the extras file that
 # lint/layout.json names; layout.waiting_page, inside the python start, decides. Cost: in a repo with a page, one
-# python start and one read-only git process; in any other repo, one grep. No fetch, no file written, no timer.
+# python start and at most two read-only git processes; in any other repo, one grep. No fetch, no file written, no timer.
 wp_extras="$toplevel/.claude/layout-extras.json"
 if [ -f "$wp_extras" ] && grep -q '"waiting-page"' "$wp_extras" 2>/dev/null && command -v python3 >/dev/null 2>&1; then
   wp_script="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/../skills/waiting-page/stale_pages.py"
