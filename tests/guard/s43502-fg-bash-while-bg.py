@@ -140,8 +140,25 @@ FG_LONG = (
     ("pip install", "pip install -r requirements.txt"),
     ("npm install", "npm install"),
 )
+# The roster additions of the owner's ruling, and the shapes the roster must read through: a grouped command and a
+# wrapper (`timeout`, `nice`, `ionice`). The three loops below run each form in every state that FG_LONG forms run in.
+FG_LONG_ROSTER = (
+    ("grouped npm test", "(npm test)"),
+    ("grouped pytest", "(pytest)"),
+    ("grouped cd and npm test", "(cd x && npm test)"),
+    ("timeout 120 npm test", "timeout 120 npm test"),
+    ("nice and ionice pytest", "nice -n 19 ionice -c3 pytest"),
+    ("ruff check", "ruff check ."),
+    ("pre-commit run", "pre-commit run --all-files"),
+    ("black --check", "black --check ."),
+    ("rspec", "rspec spec/"),
+    ("deno test", "deno test"),
+    ("docker build", "docker build -t app ."),
+    ("git clone", "git clone https://example.invalid/repo.git"),
+)
+FG_LONG_ALL = FG_LONG + FG_LONG_ROSTER
 FG_LONG_LIMIT = {"merge --lane-lint": {"timeout": CHECK_TIMEOUT_MS}}
-FG_LONG_FOREGROUND_ALLOWED = tuple(item for item in FG_LONG if item[0] not in FG_LONG_LIMIT)
+FG_LONG_FOREGROUND_ALLOWED = tuple(item for item in FG_LONG_ALL if item[0] not in FG_LONG_LIMIT)
 FG_QUICK = (
     ("git status", "git status"),
     ("cat", "cat notes.txt"),
@@ -151,7 +168,7 @@ FG_QUICK = (
 )
 
 # DENY: a foreground long form while a background command runs.
-for fg_label, fg_command in FG_LONG:
+for fg_label, fg_command in FG_LONG_ALL:
     fg_refuse("fg-bash-while-bg: a foreground %s is refused while a background command runs" % fg_label,
             fg_command, fg_path("bg-running"))
 fg_refuse("fg-bash-while-bg: a foreground pytest is refused while a command its timeout moved to the background runs",
@@ -174,7 +191,7 @@ fg_refuse("fg-bash-while-bg: a foreground cat with the 600000 ms foreground maxi
         "cat notes.txt", fg_path("bg-running"), timeout=600000)
 
 # ALLOW: the same long forms with run_in_background true while a background command runs.
-for fg_label, fg_command in FG_LONG:
+for fg_label, fg_command in FG_LONG_ALL:
     fg_allow("fg-bash-while-bg: a %s with run_in_background true is allowed while a background command runs" % fg_label,
              fg_command, fg_path("bg-running"), run_in_background=True, **FG_LONG_LIMIT.get(fg_label, {}))
 
@@ -201,6 +218,42 @@ fg_allow("fg-bash-while-bg: a quick read with a 60000 ms limit, the boundary, is
          "ls -la", fg_path("bg-running"), timeout=60000, silent=True)
 fg_allow("fg-bash-while-bg: a quick read with a 120000 ms limit under run_in_background is allowed while background work runs",
          "ls -la", fg_path("bg-running"), run_in_background=True, timeout=120000)
+
+# ALLOW: a version or help read, and a git network call, stay in the foreground while background work runs. A version
+# or help flag runs no test, lint or build. A git fetch or push is a network call, not a long run.
+FG_NOT_LONG = (
+    ("pytest --version", "pytest --version", True),
+    ("tsc -v", "tsc -v", True),
+    ("make --help", "make --help", True),
+    ("mypy --version", "mypy --version", True),
+    ("git fetch", "git fetch origin", False),
+    ("git push", "git push origin HEAD:example-branch", False),
+)
+for fg_label, fg_command, fg_silent in FG_NOT_LONG:
+    fg_allow("fg-bash-while-bg: a %s is allowed in the foreground while a background command runs" % fg_label,
+             fg_command, fg_path("bg-running"), silent=fg_silent)
+
+# AGENT AND TRANSCRIPT PINS. A call from an agent is not judged: its payload carries agent_id and agent_type, and the
+# transcript is its parent's. The bg-running transcript holds a background command, so only the agent fields exempt
+# this call.
+fg_allow("fg-bash-while-bg: a foreground npm test from an agent, with agent_id and agent_type, is not judged while a background command runs",
+         "npm test", fg_path("bg-running"), agent_id="agentpin1", agent_type="general-purpose")
+# A missing transcript allows: the rule fails open. A payload with no transcript_path at all allows the same way.
+fg_allow("fg-bash-while-bg: a foreground npm test is allowed when its transcript file is missing",
+         "npm test", fg_path("missing"))
+fg_allow("fg-bash-while-bg: a foreground npm test is allowed when the payload names no transcript",
+         "npm test", None)
+
+# POWERSHELL PINS. The PowerShell tool is judged the same as Bash: a long form with no background flag is refused
+# while background work runs, and the same form with run_in_background is allowed.
+fg_refuse("fg-bash-while-bg: a foreground Invoke-Pester on the PowerShell tool is refused while a background command runs",
+          "Invoke-Pester -Path tests", fg_path("bg-running"), tool="PowerShell")
+fg_refuse("fg-bash-while-bg: a foreground npm test on the PowerShell tool is refused while a background command runs",
+          "npm test", fg_path("bg-running"), tool="PowerShell")
+fg_allow("fg-bash-while-bg: a foreground Invoke-Pester on the PowerShell tool is allowed with no background work",
+         "Invoke-Pester -Path tests", fg_path("idle"), tool="PowerShell")
+fg_allow("fg-bash-while-bg: an Invoke-Pester on the PowerShell tool with run_in_background true is allowed while background work runs",
+         "Invoke-Pester -Path tests", fg_path("bg-running"), run_in_background=True, tool="PowerShell")
 
 # SCOPE. Each transcript holds the state its name says, so a case that branches on that state reads what it means.
 # A fixture that lost its launch or its notice would turn a deny red for the wrong reason, so each state is checked
@@ -237,10 +290,22 @@ FG_SCOPE = (
     ("agent-done", "a background agent with a completion notice", ('"agentId": "agentdone1"',
                                                                    "<status>completed</status>"), ()),
 )
+
+
+def fg_absent_check(name):
+    """The file a missing-transcript case names must not exist, or that case reads a transcript after all."""
+    def check():
+        if os.path.exists(fg_path(name)):
+            return False, "the %s transcript exists, so the missing-transcript case reads a file that is there" % name
+        return True, "the %s transcript is absent, as the missing-transcript case needs" % name
+    return check
+
+
 FG_SCOPE_CHECKS = tuple(
     ("fg-bash-while-bg scope: the %s transcript holds %s" % (name, state),
      fg_scope_check(name, holds, lacks))
-    for name, state, holds, lacks in FG_SCOPE)
+    for name, state, holds, lacks in FG_SCOPE) + (
+    ("fg-bash-while-bg scope: the missing transcript file is absent", fg_absent_check("missing")),)
 for _fg_label, _fg_check in FG_SCOPE_CHECKS:
     LOG_FAMILY[_fg_label] = FAMILY
 LOG_CHECKS = LOG_CHECKS + FG_SCOPE_CHECKS
