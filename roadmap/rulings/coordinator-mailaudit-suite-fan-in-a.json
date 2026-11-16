@@ -1,0 +1,10 @@
+{
+ "id": "coordinator-mailaudit-suite-fan-in-a",
+ "at": "2026-11-16T00:37:00-06:00",
+ "title": "mailaudit adds a fan-in job named `suite`; the shared push-skip tool is not widened to accept `suite (N)` (coordinator pick; not owner-typed)",
+ "ruling": "Coordinator pick a, 00:37 CST Nov 16, for lane mailaudit-add-cites-check (push-skip-main-run): the shared push-skip.py matches the job name `suite` exactly, but mailaudit's `suite` is a 3-shard matrix whose rows read `suite (1..3)` (REST on run 43810021861), so the skip never fires (fail-closed). Option a: mailaudit adds a fan-in job named `suite`. Option b, the shared tool accepts `suite (N)`, was refused because it widens a shared tool to fit one repo, which the owner's rule rules out (a repo changes to fit the shared tool). Note for the shared tool: a matrix job name breaks push-skip.py in any repo with shards; the single-quoted 'push' miss in p9 is a note. Not owner-typed; undoable: the lane's branch is unpushed.",
+ "quote": "",
+ "source": "Coordinator message to triage 8, 00:37 CST Nov 16; filed by triage 8",
+ "status": "done",
+ "step": "claude-md-check-child-rollout"
+}
