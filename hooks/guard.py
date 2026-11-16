@@ -7271,7 +7271,8 @@ def judge(payload) -> None:
     if tool == COMMENTS_TOOL:
         import question_form
         # A reply whose url names no artifact lands nowhere checkable, so it is refused wherever the repo has a waiting page.
-        if tool_input.get("action") == "reply" and (question_form.is_waiting_page(tool_input, cwd)
+        # The page matches by id in any url form (a bare id, an http link), as the rule's cases pin: a form missed is a reply let through.
+        if tool_input.get("action") == "reply" and (question_form.is_waiting_page(tool_input, cwd, any_form=True)
                                                     or (question_form.names_no_artifact(tool_input.get("url"))
                                                         and question_form.has_waiting_page(cwd))):
             refuse(tool, "deny", "page-thread-reply", PAGE_THREAD_REPLY_REASON, str(tool_input.get("thread_id") or "?")[:120])

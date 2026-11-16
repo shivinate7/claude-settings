@@ -266,11 +266,13 @@ def _bare_link(url):
     return url.split("#", 1)[0].split("?", 1)[0].rstrip("/")
 
 
-def is_waiting_page_url(root, url):
+def is_waiting_page_url(root, url, any_form=False):
     """True when `url` is a claude.ai artifact link (ARTIFACT_URL, after _bare_link) that names the waiting page of `root`
     (same artifact id) in any account's link, false for a repo with no page. A URL on another host or with another path
-    is false, even with the page's id as its last segment."""
-    if not isinstance(url, str) or not ARTIFACT_URL.fullmatch(_bare_link(url)):
+    is false, even with the page's id as its last segment. `any_form` drops the link-shape test and compares the id
+    alone, so a bare id or an http link names the page too: a guard that refuses an act on the page needs it, since a
+    form it misses passes the act."""
+    if not isinstance(url, str) or not (any_form or ARTIFACT_URL.fullmatch(_bare_link(url))):
         return False
     wanted = artifact_id(url)
     return bool(wanted) and any(artifact_id(link["url"]) == wanted for link in _page_links(root))
