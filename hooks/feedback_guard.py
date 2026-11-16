@@ -1428,7 +1428,8 @@ def _cleared(exports, results, newest, page_id):
 
 def _is_page_writer(records, session_id, writes, exports=None):
     """True when this session is the page writer: the newest meta/page get names `session_id` or the id the
-    remote env names (override.remote_session_id). A writer named there decides alone. Only when none is named
+    remote env names (override.remote_session_id), bare or inside a label such as "Triage (session_x)"
+    (`_writer_names`). A writer named there decides alone. Only when none is named
     does an interpreter run of export_page.py before the newest of `writes` make this session the writer.
     `exports` is read from `records` when not given. The one home of the test, for the export and link checks."""
     writer = _transcript.page_writer_id(records)
