@@ -1,0 +1,10 @@
+{
+ "id": "own-subagents-allowed-triage",
+ "at": "2026-11-16T01:44:04-06:00",
+ "title": "Triage may start subagents; the 14:10 CST Nov 15 order covers only new sessions and lanes",
+ "ruling": "Owner 01:29 CST Nov 16, typed to triage 8: \"triage is absolutely allowed to start subagents message consultant to clear ur confusion\". The consultant confirmed at 01:30 CST (relayed): the 14:10 CST Nov 15 order (own-no-new-sessions-now) is narrowed to sessions: triage starts no new sessions or lanes; subagents inside triage are allowed, builder, test-author, reviewer and Explore under the usual roles. The consultant withdrew his 00:17 claim on goal items 5 and 7; triage owns both. Scope: each ruling covers the act it names, never a variant (rule outcomes-grant-covers-named-act): it grants subagents, not sessions, and no merge.",
+ "quote": "triage is absolutely allowed to start subagents",
+ "source": "Owner typed 01:29 CST Nov 16 to triage 8 (genuine user message); consultant reading relayed 01:30 CST; filed by triage",
+ "status": "open",
+ "step": ""
+}
