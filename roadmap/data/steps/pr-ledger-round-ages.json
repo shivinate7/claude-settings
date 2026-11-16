@@ -10,5 +10,6 @@
  "why": "Retrospective audit of stands item 572 (coordinator 12:59 CST Nov 12): the 72-hour window was a guessed number.",
  "source": "coordinator 12:59 CST Nov 12",
  "note": "Measure how old review rounds get, and set the PR ledger window from that measure, not a stored 72 h. [23:16 CST Nov 15, triage] Owner pick a on item 572 (ruling own-572-a-ledger-by-age-only): no 72 h number; the ledger flags a stalled review only by an age measured here. A record marked done whose lane check never passed belongs to its lane, not the batch runner.",
- "updatedAt": "2026-11-15T23:16:00-06:00"
+ "updatedAt": "2026-11-15T23:19:04-06:00",
+ "pr": 2869
 }

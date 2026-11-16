@@ -10,5 +10,6 @@
  "why": "Builders skipped their own app build twice on Nov 12 because another session's xcodebuild was running (lanes shares and board-links-view). Skill ios-apps \"Sharing the Mac\" opens \"Every session on this Mac shares its builds\" and widens the rule \"to every session on the Mac\", which reads as one build for all sessions.\n\nGitHub REST read 00:08 CST Nov 15 (Degen feedback status pass, triage fork; no diff read): its PR #3090 is an open draft.",
  "source": "retrospective 23:27 CST Nov 12; Degen ledger D28 (restart-plan 2a3fb3ca, plans/degen-report-2026-11-12.md)",
  "note": "Prose fix: put the per-session scope first in skills/ios-apps \"Sharing the Mac\", and the builder brief template says another session's build does not block yours. Express under R55 only if the coordinator counts it as a CI or merge fix; otherwise normal queue.",
- "updatedAt": "2026-11-12T23:31:11-06:00"
+ "updatedAt": "2026-11-15T23:19:04-06:00",
+ "pr": 3090
 }

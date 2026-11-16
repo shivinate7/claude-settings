@@ -10,5 +10,6 @@
  "why": "Lane timing-tests (#2933, coordinator 14:36 CST Nov 12): the finder has no keep marker, so a kept sleep that carries its reason as a comment still lists, and convert-time-pinned-tests' done line (\"lists none, or each kept carries its reason\") cannot be read by the finder alone.",
  "source": "coordinator 14:36 CST Nov 12, from lane timing-tests",
  "note": "Add a keep marker with a required reason that the finder honours; a marker with no reason still lists. Red first on a kept sleep from #2933. Kin: convert-time-pinned-tests. Folded into lane timing-tests 14:39 CST Nov 12 (coordinator).",
- "updatedAt": "2026-11-12T14:40:54-06:00"
+ "updatedAt": "2026-11-15T23:19:04-06:00",
+ "pr": 2975
 }

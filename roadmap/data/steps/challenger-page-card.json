@@ -12,5 +12,6 @@
  "why": "Lane challenger-page-against split (coordinator 13:43 CST Nov 12): part (b) of #1377.",
  "source": "coordinator 13:43 CST Nov 12",
  "note": "Part (a), the refuter call, is in build in lane challenger-page-against; part (c), the model pick, is settled by item 289 and recorded in (a). This card touches a screen: a designer comes before the builder and a design reviewer after it. Starts after (a) merges.",
- "updatedAt": "2026-11-12T13:46:18-06:00"
+ "updatedAt": "2026-11-15T23:19:04-06:00",
+ "pr": 2987
 }

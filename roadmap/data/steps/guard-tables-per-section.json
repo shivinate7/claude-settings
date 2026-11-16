@@ -10,5 +10,6 @@
  "why": "The shared tables FAMILIES, LOG_CHECKS and REASON_MAY_NAME hold about 78% of past conflict hunks between guard lanes (lane test-guard-split-per-rule).\n\nGitHub REST read 00:08 CST Nov 15 (Degen feedback status pass, triage fork; no diff read): #2635 (the guard test split it waited on) merged Nov 12. Its own PR #2801 is an open draft.",
  "source": "coordinator 06:14 CST Nov 12, from lane test-guard-split-per-rule",
  "note": "Links debt guard-split-f821-lint-gap. The split (#2635) is with batch runner 10, as a batch alone after batch 99. Unblocked: the guard test split merged (39e378f15, 07:16 CST Nov 12). Lane started 07:20 CST Nov 12 (coordinator, Sonnet, medium).",
- "updatedAt": "2026-11-12T07:22:00-06:00"
+ "updatedAt": "2026-11-15T23:19:04-06:00",
+ "pr": 2801
 }

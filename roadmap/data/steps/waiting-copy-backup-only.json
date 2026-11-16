@@ -12,5 +12,6 @@
  "why": "Owner item 593 a, 12:40 CST Nov 12: the page database is the one store, with a timely git export as backup.",
  "source": "coordinator 12:53 CST Nov 12, lane page-data-one-store re-cut (PR #2829 at runner 10)",
  "note": "The skill, the export script and the checks name the git copy a backup; a check fails when a tool other than export_page.py's recovery, merge and export modes reads the copy as live. Red first. Second of lane waiting-route-c. 23:34 CST Nov 14: its why (593 a, database is the one store) is superseded by ruling page-git-is-home (owner 12:11 CST Nov 13, item 730 a: git is home, database is the live view). The step name and text need a rewrite to match; the coordinator rules how, not the owner.",
- "updatedAt": "2026-11-14T23:34:00-06:00"
+ "updatedAt": "2026-11-15T23:19:04-06:00",
+ "pr": 2907
 }

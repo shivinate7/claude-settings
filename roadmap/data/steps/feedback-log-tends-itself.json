@@ -9,8 +9,9 @@
  "note": "Ruling R27 (owner 10:16 CST, relayed 10:18 CST; plan 6e0c790 under item 3.14 (moved from 3.6 by plan 7e04144, 10:52 CST), beside R16 and R24). Parts: (1) a ruling or task item closes itself when its home holds it on main, in the rewrite that marks repeats; (2) each refusal names [closed] as a way out (R24, step refusal-names-way-out); (3) the compaction reminder lists only items that still need work; (4) owner words from the question box or a relay are saved like a typed message. Home: decision owner-feedback-inbox. Stage 3. R28 (10:19 CST): this step is the first user of step prose-tending-contract and waits on it. Second in lane prose-tending-contract (coordinator 13:10 CST Nov 12).",
  "source": "owner 2026-11-11 10:16 CST, relayed by the retrospective session",
  "owner": "triage",
- "updatedAt": "2026-11-12T13:11:09-06:00",
+ "updatedAt": "2026-11-15T23:19:04-06:00",
  "blockedBy": [
   "prose-tending-contract"
- ]
+ ],
+ "pr": 2996
 }
