@@ -24,6 +24,7 @@
                           then it skips the lint and prints one `merge: lane lint skipped ...` line naming the rollup and the head's first 9 characters.
   merge <pr> --confirm --express   go on to the merge only for a prose-only diff (main's ci-scope.sh turns on nothing) whose body has a `Ruling: <id>`
                           line naming an entry in origin/roadmap's rulings; any other case refuses before a push.
+  merge <pr> --confirm, after a merge that changes skills/waiting-page/page.html: one report-only line says to republish each live page (UNKNOWN when the changed paths could not be read). The exit code is unchanged.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V] [--grant "#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT"]
@@ -188,8 +189,10 @@
                           with a draft is a report line `#N shares files: a, b`, read from the changed files alone, with no merge-tree (PRE_READY_CLASH_SCOPE: "ready", or "all" for every open PR).
                           A repo with no readyChecks prints `unknown pre-ready: no merge.readyChecks declared` and exits 1.
                           Cost: see fast_checks, run_ready_checks, pre_ready_rows, cross_measure.
-  merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
-                          runs only when that role is recorded for the session (read_merge_role). A local session reads the role the launcher
+  merge --role TIER       cloud only: record this session's merge role (batch-runner, lane with `--step SLUG`, the cs-step slug of the session's own
+                          record, or standing: a coordinator or triage merges only its own docs or rule-text pull request, see standing_refusal). In a cloud session `--confirm`
+                          runs only when that role is recorded for the session (read_merge_role). A lane's confirm needs --head and runs only on its own ready pull request: a head ref of that step
+                          (lane_own_pr_refusal), and a lane never runs --ready. A local session reads the role the launcher
                           (bin/claude-role) recorded in its role file instead: a session with its own role file runs `--confirm` only when
                           that file names batch-runner, and one the launcher started (CS_SESSION_ROLE set) with no matching own file is refused.
                           A session with neither is as it was, whatever other sessions' files are on disk.
@@ -378,6 +381,8 @@ def ancestor(cwd, tip, base):
 
 RULE_FILES = ("claude.md", ".claude/claude.md")  # lower case: the match ignores case. Plus each file under RULE_PREFIX (decision claude-md-change-is-flagged)
 RULE_PREFIX = "output-styles/"
+# merge.py cannot import stale_pages (a heavy import inside the merge lock), so it names the path itself: keep it equal to stale_pages.TEMPLATE_IN_GIT.
+PAGE_FILE = "skills/waiting-page/page.html"  # glossary-ok: the skill's folder name is a path, not the retired term. A merge that changes it says to republish each live page (decision page-stale-publish)
 SETTLE_SECONDS = 30
 NET_RETRIES, NET_PAUSE = 3, 5  # retry a network error 3 times, a short pause between (standing-merge-grant)
 PAGE_CEILING = 500  # pages of 100 one list read may take (50,000 items) before Host.pages stops instead of looping
@@ -4363,7 +4368,7 @@ def merged_page_stale(root, wt, base, base_ref):
 
 HEAD_MOVED = "the head of #{n} moved since the owner's yes was relayed, so that yes does not cover it (decision auto-mode-owner-acts, a relayed yes binds to the head at relay time). A new yes from the owner is needed. Nothing was claimed or pushed."
 
-BATCH_RUNNER_NEEDS_HEAD = "the merge needs the head the CI ran on, so pass it with the --head flag (decision auto-mode-owner-acts, the batch runner merges the head its CI ran on). Nothing was claimed or pushed."
+BATCH_RUNNER_NEEDS_HEAD = "the merge needs the head the CI ran on, so pass it with the --head flag (decision auto-mode-owner-acts, a merge runs on the head its CI ran on). Nothing was claimed or pushed."
 
 def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok="", expected_head=None, linted_head=None, express=False):
     m = cfg.get("merge", {})
@@ -4563,6 +4568,10 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             say(f"merge: #{n} the rule-file check could not run: git diff failed. Read the PR's files yourself.")
         for x in rule_files or []:
             say(f"merge: #{n} changes {x}, a rule file every session loads.")
+        if c != 0:  # report-only, like the rule-file line: an unread file list says UNKNOWN, never silence
+            say(f"merge: #{n} UNKNOWN: the changed paths could not be read, so whether {PAGE_FILE} changed is unknown. Republish each live page if it did.")
+        elif PAGE_FILE in names.split("\0"):
+            say(f'merge: #{n} changes {PAGE_FILE}: republish each live waiting page now (skill waiting-page, "Update a repo\'s pages"), and put "republished: <pages>" or a reason in the report.')
         try:  # ff_main's fetch moves origin/<base> onto the merge, which would empty the plan's diff; any failure leaves the base unknown and never holds the merge
             tip_c, tip = git(wt, "rev-parse", "--verify", "-q", base_ref + "^{commit}")
         except (subprocess.TimeoutExpired, OSError):
@@ -5368,6 +5377,16 @@ def default_branch(root):
     except OSError as e:  # the gh read runs in the root's folder (cwd=root): a missing or unreadable folder raises before gh starts
         raise Stop(f"the root {root} cannot be read: {e} " + UNKNOWN_CITE)
 
+def repo_full_name(h):
+    """-> OWNER/NAME of the repo a Host acts in: its own repo when it names one, else the repo of its working directory, one REST read (GET repos/{owner}/{repo}).
+    Raises ValueError, KeyError or TypeError when gh's reply cannot be read."""
+    if h.repo:
+        return h.repo
+    c, out = h.api("")
+    if c:
+        raise ValueError(out)
+    return json.loads(out)["full_name"]
+
 def root_host(root, hosts, config):
     """-> the Host of one --root, its base the root's default branch (default_branch) and its merge config read from that base (load_config).
     The config is applied to a real Host only: a test host in `hosts` under that exact string keeps its own checks, and gets the base too.
@@ -5382,11 +5401,8 @@ def root_host(root, hosts, config):
     cfg = load_config(root, h.base, config, " " + UNKNOWN_CITE)
     if hosts is not None:
         return h
-    c, out = h.api("")
     try:
-        if c:
-            raise ValueError(out)
-        h.repo = json.loads(out)["full_name"]
+        h.repo = repo_full_name(h)
     except (ValueError, KeyError, TypeError) as e:
         raise Stop(f"the repo of the root {root} cannot be read from gh: {e} " + UNKNOWN_CITE)
     h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore_checks(cfg)
@@ -5716,13 +5732,20 @@ def replaced_names(info, n):
         dropped = block["dropped"]
     return [x for x in dict.fromkeys(names) if x != n and x not in dropped]
 
-MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
+LANE_ROLE = "lane"  # a lane's merge role: its role record also names its step, and it merges only its own pull request (ruling own-lanes-merge-claude-settings-prs)
+STANDING_ROLE = "standing"  # ruling own-tiny-fixes-b: a coordinator or triage merges its own small edit, and only that
+MERGE_ROLES = {"batch-runner", LANE_ROLE, STANDING_ROLE}  # the tiers that may run `merge <pr> --confirm` in a cloud session; the standing one only past standing_refusal, the lane one only on its own pull request
+LANE_MERGE_REPO = "shivinate7/claude-settings"  # the one repo whose pull requests a lane merges itself; the lane role covers it alone
+LOCAL_MERGE_ROLES = {"batch-runner"}  # the roles a local session's role file may name; the lane role is a cloud role only
+
+STANDING_MAX_LINES = 40  # reading cost, unmeasured; the owner may change it
+STANDING_MAX_FILES = 3  # reading cost, unmeasured; the owner may change it
 
 def role_path():
     return pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")) / "state" / "merge-role.json"
 
-def read_merge_role():
-    """This session's recorded merge role, or None: no session id (cloud, else the local CLAUDE_CODE_SESSION_ID with the launcher's file), no file, unreadable or malformed, another session's, or a tier outside MERGE_ROLES.
+def read_merge_record():
+    """This session's recorded merge record, a dict with "role" (and "step" for a lane), or None: no session id (cloud, else the local CLAUDE_CODE_SESSION_ID with the launcher's file), no file, unreadable or malformed, another session's, a tier outside MERGE_ROLES (LOCAL_MERGE_ROLES for a local session), or a lane with no step.
     Every failure is None, so the check fails closed. An absent id never equals an absent record."""
     sid = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
     if not sid:
@@ -5734,7 +5757,7 @@ def read_merge_role():
             role = session_role.own_role(os.environ.get("CLAUDE_CODE_SESSION_ID"))
         except Exception:
             return None
-        return role if role in MERGE_ROLES else None
+        return {"role": role} if role in LOCAL_MERGE_ROLES else None
     try:
         data = json.loads(role_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):  # UnicodeDecodeError and JSONDecodeError are ValueErrors
@@ -5742,41 +5765,111 @@ def read_merge_role():
     if not isinstance(data, dict) or data.get("session") != sid:
         return None
     role = data.get("role")
-    return role if isinstance(role, str) and role in MERGE_ROLES else None  # a list is unhashable: test the type first
+    if not (isinstance(role, str) and role in MERGE_ROLES):  # a list is unhashable: test the type first
+        return None
+    if role == LANE_ROLE:
+        step = data.get("step")
+        return {"role": role, "step": step} if isinstance(step, str) and step else None
+    return {"role": role}
+
+def read_merge_role():
+    """This session's recorded merge role (read_merge_record), or None."""
+    record = read_merge_record()
+    return record["role"] if record else None
+
+def lane_own_pr_refusal(info, h):
+    """A lane's confirm is refused unless the pull request is in LANE_MERGE_REPO (the repo read from `h`, repo_full_name; a read that fails refuses), is its own and is ready: its head ref is one of lane_head_refs of the step its role record names, and it is no draft.
+    A draft would take the records step, which marks it ready, and only the batch runner does that. -> the refusal text without its cite (the raise adds it), or None (not a lane, or its own ready pull request).
+    The text names neither flag it refuses."""
+    from shared_names import lane_head_refs  # hooks/shared_names.py, the one home of a lane's head refs, on sys.path from the top of this file
+    record = read_merge_record()
+    if not record or record["role"] != LANE_ROLE:
+        return None
+    try:
+        in_repo = repo_full_name(h).casefold() == LANE_MERGE_REPO.casefold()
+    except Exception:  # an unread repo is no proof of the one repo: fail closed
+        in_repo = False
+    if not in_repo:
+        return "a session with this merge role merges its own pull request in this repo only. Hand the pull request to the batch runner. Nothing was claimed or pushed."
+    if info["branch"] not in lane_head_refs(record["step"]):
+        return "this session may merge only the pull request its own step carries, and this one has another head. Hand it to the batch runner. Nothing was claimed or pushed."
+    if info["draft"]:
+        return "this session may merge only its own ready pull request, and this one is a draft. The batch runner marks a draft ready. Nothing was claimed or pushed."
+    return None
 
 LOCAL_ROLE_REFUSAL = "this session may not merge: its own role record does not name the batch runner. Hand the pull request to the batch runner, or ask the owner. Nothing was claimed or pushed. " + ROLE_CITE
 
 def local_role_allows_confirm():
     """A local session's confirm check, judged by the session's OWN record only (hooks/session_role.py local_judgement, rules a, b, c). The id is
-    CLAUDE_CODE_SESSION_ID. An own file must name a MERGE_ROLES role; with no own file and no CS_SESSION_ROLE nothing is judged and today's
+    CLAUDE_CODE_SESSION_ID. An own file must name a LOCAL_MERGE_ROLES role; with no own file and no CS_SESSION_ROLE nothing is judged and today's
     local behaviour stands, whatever other sessions' files are on disk; CS_SESSION_ROLE set with no matching own file refuses.
     Fails closed: a reader that cannot load or run is a refusal, since the caller's crash path would otherwise let the confirm through."""
     try:
         import session_role  # hooks/session_role.py, on sys.path from the top of this file
         judged, record = session_role.local_judgement(os.environ.get("CLAUDE_CODE_SESSION_ID"))
-        return not judged or (record is not None and record["role"] in MERGE_ROLES)
+        return not judged or (record is not None and record["role"] in LOCAL_MERGE_ROLES)
     except Exception:
         return False
 
-def write_merge_role(tier):
-    """Record `tier` as this cloud session's merge role. Refuses outside the cloud, with no session id, or for a tier outside MERGE_ROLES; nothing is written then."""
+def write_merge_role(role, step=None):
+    """Record `role` as this cloud session's merge role. Refuses outside the cloud, with no session id, for a role outside MERGE_ROLES, for a lane with no step (with the hint-free text of a role outside the set), and for a step with any other role; nothing is written then.
+    A lane's record names its step, which the guard proves against the session's own cs-step tags."""
     sid = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
     if os.environ.get("CLAUDE_CODE_REMOTE") != "true":
         raise Stop("--role records a merge role in a cloud session only. " + ROLE_CITE)
     if not sid:
         raise Stop("--role needs CLAUDE_CODE_REMOTE_SESSION_ID, and it is not set. " + ROLE_CITE)
-    if tier not in MERGE_ROLES:
-        raise Stop("this session's tier may not record a merge role. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)  # names no valid tier: a lane must not learn which to claim
+    if role not in MERGE_ROLES or (role == LANE_ROLE and not step):  # a bare lane gets the same hint-free refusal as a role outside the set
+        raise Stop("this session may not record a merge role. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)  # names no valid tier: a lane must not learn which to claim
+    if role != LANE_ROLE and step:
+        raise Stop("--step goes with the lane role alone. " + ROLE_CITE)
     path = role_path()
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")  # replace, so a reader never sees half a file
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_text(json.dumps({"session": sid, "role": tier}), encoding="utf-8")
+        tmp.write_text(json.dumps({"session": sid, "role": role, **({"step": step} if step else {})}), encoding="utf-8")
         os.replace(tmp, path)
     except OSError as e:
         with contextlib.suppress(OSError):
             tmp.unlink()
         raise Stop(f"cannot write the merge role to {path} {ROLE_CITE}: {e}.")
+
+def own_session_link(body):
+    """True when `body` holds this cloud session's closing link, https://claude.ai/code/session_<x>. The id is hooks/override.py remote_session_id, the one reader
+    of the session_<x> form. No session id, or a body with another link only, is False."""
+    from override import remote_session_id
+    own = remote_session_id()
+    return bool(own) and own in re.findall(r"https://claude\.ai/code/(session_[A-Za-z0-9_-]+)", body or "", re.ASCII)
+
+def is_rule_text(path):
+    """Rule text is a CLAUDE.md or AGENTS.md at any depth, or a .md file under agents/ or skills/. A script under skills/ is code, not rule text."""
+    low = path.lower()
+    return low.endswith(".md") and (os.path.basename(low) in ("claude.md", "agents.md") or low.startswith(("agents/", "skills/")))
+
+def standing_refusal(h, n, info, head):
+    """-> why a standing session may not merge pull request `n`, or "" when it may (ruling own-tiny-fixes-b). It must be the session's own, and every file
+    a doc or rule text outside the guard paths. The head's own checks must be green, and rule text needs one sonnet reviewer record on the relayed head `head`.
+    A rule-text pull request is also small: at most STANDING_MAX_LINES added lines (additions only) and STANDING_MAX_FILES files. A docs-only one skips the bound.
+    The text names no tier and no flag, so a lane learns nothing from it (git-remedy-never-names-target)."""
+    if not own_session_link(info.get("body")):
+        return "this session did not open this pull request, so it may not merge it."
+    files = h.pr_files(n, info.get("changed_files"))
+    paths = [p for p, _, _ in files]
+    if not paths or guard_hits(paths) or any(not (is_doc(p) or is_rule_text(p)) for p in paths):
+        return "this pull request changes a file that is not a doc or rule text, or sits on a guard path."
+    not_green = head_not_green(h.head_state(n, info["head"]))
+    if not_green:
+        return f"the head's own checks are not green: {not_green}."
+    if kind_misfits("docs-only", files):  # rule text, not a doc: small, and one sonnet reviewer record on the live head
+        # additions only: pr_files carries no deletions, and adding a host read or changing its triples is out of scope here; a rename's old path counts as a file
+        if sum(a for _, _, a in files) > STANDING_MAX_LINES or len(files) > STANDING_MAX_FILES:
+            return "this pull request changes rule text and is too large for this session to merge."
+        bodies = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(n, [])
+        rec = next((r for r in map(parse_review, reversed(bodies)) if r and r["n"] == n), None)
+        reviewers = [m for _, role, m, _ in (rec["rounds"] if rec else []) if role == REVIEW_ROLES[0]]
+        if not reviewers or any(m.lower() != "sonnet" for m in reviewers) or review_state(rec, head)[0] != "done":  # `head` is the relayed head, which relayed_head_holds ties to the live one: only this tool's claim commits may sit above it
+            return "this pull request changes rule text, and its head has no passing sonnet review record."
+    return ""
 
 def guard_hits(paths):
     """-> the sorted paths that start with a GUARD_PATHS entry, or equal a GUARD_FILES entry or the model record, less each test path: a test
@@ -5851,7 +5944,8 @@ def build_parser():
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
     p.add_argument("--with", dest="with_prs", default=None, metavar="PR,PR,...", help="with --lane-lint on a PR number: also check the head against each named open PR (a comma list), even one of another session")
     p.add_argument("--touched-tests", action="store_true", help="with --lane-lint: after the lint passes, run the test files the diff touches in the lint worktree; a failing test refuses, a timeout is unknown (lifted by --lint-unknown-ok)")
-    p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
+    p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner, lane with --step, or standing)")  # glossary-ok: existing name
+    p.add_argument("--step", metavar="SLUG", help="with --role lane: the cs-step slug of this session's own record; the lane's confirm runs only on a pull request whose head is that step's lane branch")
     p.add_argument("--ready", action="store_true", help="mark a lane's draft pull request ready, once: on the default branch a merge of origin/<base> into a head that lacks its tip, the records step and the repo's ready checks, then close each open pull request the body names as replaced, then the host's mark; a ready pull request is left as it is; merges no pull request, takes no lock")
     p.add_argument("--fast-checks", action="store_true", help="the pre-ready run on a dry merge of the pull request onto its base, read-only: one pass, fail or unknown line per check; takes no lock, pushes nothing, marks nothing ready, posts nothing")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
@@ -6025,7 +6119,7 @@ def main(argv, host=None, lock=None, hosts=None):
             say(*lines)
             return 0 if ok else 1
         if a.role is not None:
-            write_merge_role(a.role)
+            write_merge_role(a.role, a.step)
             say(f"merge: merge role {a.role} recorded for this session.")
             return 0
         if a.root:  # every block is built before any is printed
@@ -6036,8 +6130,12 @@ def main(argv, host=None, lock=None, hosts=None):
             raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") != "true" and not local_role_allows_confirm():  # a local session the launcher started; before any host read or lock
             raise Stop(LOCAL_ROLE_REFUSAL)
-        if a.confirm and not a.head and read_merge_role() == "batch-runner":  # before the lock, a claim or any write
+        if a.ready and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and read_merge_role() == LANE_ROLE:  # a session with the lane merge role leaves the ready mark to the batch runner; before any host read or lock
+            raise Stop("this session's merge role does not mark a pull request ready: the batch runner does. Nothing was claimed or pushed. " + ROLE_CITE)
+        if a.confirm and not a.head and read_merge_role() in MERGE_ROLES - {STANDING_ROLE}:  # before the lock, a claim or any write
             raise Stop(BATCH_RUNNER_NEEDS_HEAD)
+        if a.confirm and not a.head and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and read_merge_role() == STANDING_ROLE:
+            raise Stop("the merge needs the head the CI ran on, so pass it with the --head flag (decision auto-mode-owner-acts). Nothing was claimed or pushed. " + ROLE_CITE)  # names no valid role: BATCH_RUNNER_NEEDS_HEAD names the runner
         c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=a.repo_dir)
         if c:
             raise Stop("not in a git checkout")
@@ -6104,6 +6202,8 @@ def main(argv, host=None, lock=None, hosts=None):
                     if not plain and review_state(last, last["head"])[0] != "done":  # after a FAIL Fix check line, or any record that is not done, no merge qualifies
                         parents = []
                     ok = plain or (len(parents) == 2 and h.holds_head(parents[1], info["base"]))
+                    if ok and plain and ancestor(h.cwd or ".", last["head"], a.head) is False:  # the verifier reads Head..head, so a head that git reads as not holding the Head is refused (real fix commits may lie between). Unknown keeps the rule that held before: a plain head takes the fix check
+                        ok = False
                     if ok and not plain and parents[0] != a.fix_check[0]:  # clean merges of main may sit between the Head and the last merge: the record survives them
                         try:
                             ok = clean_merges_after(h, a.fix_check[0], parents[0], info["base"])
@@ -6123,13 +6223,17 @@ def main(argv, host=None, lock=None, hosts=None):
                             print(f"merge: --fix-check: whether {a.head[:9]} is git's own merge of the base is unknown ({unread}), so the fix verifier is refused. Fetch both parents of that head into this checkout, then run again. " + REVIEW_CITE, file=sys.stderr)
                             return 2
                 if not ok:
-                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line or a PASS one. After a PASS one, a head that is a merge must be a merge of the base into that Head, and the log must read done, with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
+                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line or a PASS one. After a PASS one, a head that is a plain commit must descend from that Head, and a head that is a merge must be a merge of the base into that Head, and the log must read done, with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant, accepted=a.accepted).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
             return 0
         if not a.reviewed:
             refuse_bad_pr(info)  # a closed PR stops before the config notice; a draft is previewed, or gets the records step under --confirm
+            if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true":  # a lane's own-PR proof: before the lock, a claim or any write
+                why = lane_own_pr_refusal(info, h)
+                if why:
+                    raise Stop(why + " " + ROLE_CITE)
         if a.confirm and a.head and not relayed_head_holds(root, info["branch"], a.head, info["head"]):  # a relayed yes binds to the head at relay time (decision auto-mode-owner-acts): refused before the lock, a claim or any write
             raise Stop(HEAD_MOVED.format(n=a.pr))
         if not (a.reviewed and host):  # a test host brings its own checks, so --reviewed reads no config for it
@@ -6146,6 +6250,10 @@ def main(argv, host=None, lock=None, hosts=None):
         if not host:
             h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore
             h.refuse_pinned_mismatch()
+        if a.confirm and not a.reviewed and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and read_merge_role() == STANDING_ROLE:  # after the config sets h.required and h.ignore (head_state reads them), before the lock or any claim
+            why = standing_refusal(h, a.pr, info, a.head)
+            if why:
+                raise Stop(why + " Nothing was claimed or pushed. " + ROLE_CITE)
         if a.fast_checks:  # before any lock: it reads a dry merge and writes nothing
             return fast_checks(root, cfg, a.pr, h, info)
         if a.ready:  # before any lock: a lane marks its own draft ready once, and a ready pull request is left as it is
