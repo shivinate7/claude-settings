@@ -1,0 +1,10 @@
+{
+ "id": "consultant-no-step-per-open-pr",
+ "at": "2026-11-16T00:30:00-06:00",
+ "title": "File no step per open PR; the open-PR map owns the 338 PRs that have no step (consultant pick; not owner-typed)",
+ "ruling": "Consultant pick, 00:29 CST Nov 16, answering triage 8's 00:27 CST question: file no step per open PR. plans/open-pr-map-2026-11-15.md already gives each of the 338 an owner, and a step per PR would be record churn. Goal item 3 reads as met by its own words (live REST 00:27 CST: 0 open PRs on a branch that matches an open step lacking a pr). The goal line would need 'or owned in the open-PR map' for the Stop hook to stop counting them. Not owner-typed; undoable.",
+ "quote": "",
+ "source": "Consultant message to triage 8, 00:29 CST Nov 16; filed by triage 8",
+ "status": "done",
+ "step": "pr-backlog-clear"
+}
