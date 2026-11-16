@@ -184,10 +184,10 @@ for _label, _check in RELOAD_CHECKS:
 
 
 
-# A flat module (no INSTALL_ID line) is an older copy, or missing, when the guard first loads it. Its whole file
-# lands LATE_LAND_S after the guard starts, and the guard waits and reloads. A module that loaded stays in
-# sys.modules until the retry pops it, so each case needs its module popped: reread_check and proc_env cache
-# an older copy, and precompact_handoff caches an older copy that reread_check reuses on the retry.
+# A flat module (no INSTALL_ID line) is an older copy, or missing, when the guard first loads it. Main's guard does not
+# wait for one: each sibling is imported where a failed import allows the call (decision precompact-handoff), and the
+# retry covers only guard_core and the family modules. The stale precompact_handoff case below is the one that waits;
+# LATE_LAND_S is when its fresh module lands.
 LATE_LAND_S = 1.5
 
 
@@ -197,8 +197,9 @@ def _source_text(module):
 
 
 def late_land_case(module, older_text):
-    """`module` is in the copy as older_text, or missing for None. Its source file lands whole LATE_LAND_S
-    after the guard starts. The guard waits, reloads it, and allows the call."""
+    """`module` is in the copy as older_text, or missing for None, when the guard starts. The guard does not wait for
+    it: a plain call is allowed silently, exit 0, and a kill is still denied by its rule, so the guard judged the call
+    and did not crash. No fix runs, so no clock is read."""
     def check():
         name = "late-" + module[:-3]
         folder, _good = _reload_copy(name, INSTALL_ID)
@@ -207,16 +208,18 @@ def late_land_case(module, older_text):
             os.remove(target)
         else:
             _put_whole(target, older_text)
-        run, fixed = _reload_run(folder, name, _fix_with(folder, {module: _source_text(module)}, [module]),
-                                 delay=LATE_LAND_S)
-        decision, reason = _decision(run)
-        if not fixed:
-            return False, ("the guard finished with %r before %s landed, so it never waited to reload: %r"
-                           % (decision, module, reason[:90]))
-        if decision != "allow" or run.returncode != 0:
-            return False, ("%s landed late, but the call is %r, exit %d, want allow: %r"
-                           % (module, decision, run.returncode, reason[:90]))
-        return True, "%s landed late, the guard waited and reloaded it, and the call is allowed, exit 0" % module
+        plain, _fixed = _reload_run(folder, name, command=FAILCLOSED_CALL)
+        decision, reason = _decision(plain)
+        if plain.returncode != 0 or decision != "allow" or reason:
+            return False, ("%s is missing or older, and the call is %r as %r, exit %d, want a silent allow"
+                           % (module, decision, reason[:70], plain.returncode))
+        kill, _fixed = _reload_run(folder, name, command=FAILCLOSED_CONTROL)
+        decision, reason = _decision(kill)
+        if decision != "deny" or GUARD_CRASH in reason:
+            return False, ("%s is missing or older, and the kill is %r as %r, want a deny by its rule"
+                           % (module, decision, reason[:70]))
+        return True, ("%s missing or older at the start: a plain call is allowed silently, exit 0, and a kill is "
+                      "denied by its rule" % module)
     return check
 
 
@@ -262,11 +265,11 @@ def late_land_stale_ph_case():
 
 
 LATE_LAND_CHECKS = (
-    ("late-land: reread_check.py, an older copy with no ph name, lands late: the call is allowed",
+    ("late-land: reread_check.py, an older copy with no ph name, is not waited for: the call is allowed silently",
      late_land_case("reread_check.py", '"""An older copy: no ph name yet."""\n')),
-    ("late-land: precompact_handoff.py missing until it lands late: reread_check reloads ph, the call is allowed",
+    ("late-land: precompact_handoff.py missing at the start is not waited for: the call is allowed silently",
      late_land_case("precompact_handoff.py", None)),
-    ("late-land: proc_env.py, an older copy with no holds_session_tag name, lands late: the call is allowed",
+    ("late-land: proc_env.py, an older copy with no holds_session_tag name, is not waited for: the call is allowed silently",
      late_land_case("proc_env.py", '"""An older copy: no holds_session_tag name yet."""\n')),
     ("late-land: a stale precompact_handoff loads first, the reload picks up the fresh one: a flagged call is refused",
      late_land_stale_ph_case()),
