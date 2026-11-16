@@ -47,6 +47,14 @@ ACT_WORDS = re.compile(r"\bPR\b|pull request|\bopen\b|\bpush\b|\bmerge\b|\bgit\b
 WEREN_T_CLAIMS = ("We weren't able to merge PR 12", "We weren’t able to merge PR 12",
                   "We weren't allowed to merge PR 12", "We weren’t allowed to merge PR 12",
                   "We weren't going to be able to merge PR 12", "We weren’t going to be able to merge PR 12")
+# Why yours lines whose reason is an access or permission form, which the hand-off cite reads as a capability.
+WHY_YOURS_ACCESS_LINES = ("Why yours: I lack access to the mailbox, so the import is yours.",
+                          "Why yours: I don't have access to the mailbox, so the import is yours.",
+                          "Why yours: I have no permission to import, so the import is yours.")
+MEASURED_ACCESS_CITE = "(measured 2026-11-15, the mail service needs your login)"
+# The four false alarms of the cant-claim-design-talk debt: design talk that a probe blocks today.
+DESIGN_TALK_FALSE_ALARMS = ("I can't be more specific.", "I can't do both at once.", "I can't read your mind.",
+                            "I can't change the past.")
 
 
 # Runs report_guard.py as the Stop hook runs it, and writes to stderr the paths its process opened (the audit event
@@ -2607,6 +2615,18 @@ class CannotClaimTests(trg.SameTurnWriter, unittest.TestCase):
         self.assertNotIn(PROBE_RULE, reason, "the probe rule adds a second refusal to a table act: %s" % reason)
         return reason
 
+    def assert_hand_off_blocked(self, out, line):
+        """A block for the hand-off guard's no-cite variant, for the Why yours `line`, and no probe reason. Returns the reason.
+        The hand-off block lists no line, so the variant's words stand for the line."""
+        self.assertIsNotNone(out, "no block came for a Why yours line: %r" % line)
+        self.assertEqual(out.get("decision"), "block", "not a block: %s" % out)
+        reason = out.get("reason", "")
+        self.assertIn("Hand-off guard", reason, "the block is not the hand-off guard's: %s" % reason)
+        self.assertIn("gives a capability reason with no cite", reason,
+                      "the hand-off block is not the no-cite variant for %r: %s" % (line, reason))
+        self.assertNotIn(PROBE_RULE, reason, "the probe rule joins a hand-off line: %s" % reason)
+        return reason
+
     # ---- red: each fails on the current code, which reads no claim of an act outside the table.
 
     def test_cc_red_import_claim_with_no_tool_call_blocks_for_a_probe(self):
@@ -2773,10 +2793,7 @@ class CannotClaimTests(trg.SameTurnWriter, unittest.TestCase):
                 if cited:
                     self.assert_passes(out, "a Why yours line with a dated cite")
                 else:
-                    self.assertIsNotNone(out, "no block came for a Why yours line with no cite")
-                    reason = out.get("reason", "")
-                    self.assertIn("Hand-off guard", reason, "the block is not the hand-off guard's: %s" % reason)
-                    self.assertNotIn(PROBE_RULE, reason, "the probe rule joins a hand-off line: %s" % reason)
+                    self.assert_hand_off_blocked(out, line)
 
     # ---- Reds for the probe form. Each red below has zero tool calls in its turn. Each comment names the cause the red
     # fails for.
@@ -2933,6 +2950,26 @@ class CannotClaimTests(trg.SameTurnWriter, unittest.TestCase):
         acked = [*lane, trg.human("check the import"), *send, trg.peer_msg("got it", from_session=PARENT),
                  trg.assistant_text(line)]
         self.assert_passes(self.stop(acked, env_id=LANE_ENV), "a probe claim after the parent acks its send to @parent")
+
+    # ---- Why yours lines whose reason is an access or permission form. The hand-off guard reads these as capability words.
+
+    def test_cc_red_why_yours_access_forms_block_as_hand_off(self):
+        # Catches: the access and permission forms missing from the hand-off cite's capability words, so a Why yours line whose
+        # reason is "I lack access", "I don't have access" or "I have no permission" read as no capability reason and passed.
+        for line in WHY_YOURS_ACCESS_LINES:
+            for shape, record in why_yours_replies(line):
+                with self.subTest(line=line, shape=shape):
+                    self.assert_hand_off_blocked(self.stop([trg.human("import the mail export"), record]), line)
+
+    def test_cc_green_why_yours_access_forms_with_a_dated_cite_pass(self):
+        # Control: each access or permission Why yours line passes once it carries a dated cite, in each reply shape. The cite is
+        # the hand-off guard's own way out, so the line keeps the hand-off verdict and the probe rule does not join it.
+        for line in WHY_YOURS_ACCESS_LINES:
+            cited = line[:-1] + " " + MEASURED_ACCESS_CITE + "."
+            for shape, record in why_yours_replies(cited):
+                with self.subTest(line=cited, shape=shape):
+                    out = self.stop([trg.human("import the mail export"), record])
+                    self.assert_passes(out, "a Why yours access line with a dated cite (%s)" % shape)
 
 
 if __name__ == "__main__":
