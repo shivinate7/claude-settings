@@ -624,7 +624,8 @@ class SessionStartMergeRoleTests(unittest.TestCase):
                                           "runner and never merges."))
 
     # ---- the lane's own merge (ruling own-lanes-merge-claude-settings-prs, 11:12 CST Nov 15, 2026): a lane runs merge --role lane --step
-    # for its own step, merges only its own ready PR, and never runs --ready, because the batch runner marks a pull request ready.
+    # for its own step and merges only its own ready PR. It marks its own draft PR ready once, in the role form (ruling Q2, decision
+    # draft-until-reviewed, owner, 12:58 CST Nov 16, 2026).
     @staticmethod
     def get_session_before_lane_role(sentence):
         """True when get_session is named before the lane role command in the sentence."""
@@ -641,6 +642,12 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         """True when the sentence names a lane and says it never merges."""
         return SessionStartMergeRoleTests.names_a_lane(sentence) and re.search(r"\bnever merges\b", sentence, re.IGNORECASE) is not None
 
+    @staticmethod
+    def ready_form(sentence):
+        """True when the sentence holds the lane's own ready mark in the role form, `merge --role lane --step <slug> <pr> --ready` (the slug and
+        the pr are one token each), and says the mark is once."""
+        return re.search(r"merge --role lane --step \S+ \S+ --ready", sentence) is not None and re.search(r"\bready once\b", sentence) is not None
+
     def lane_role_sentence(self):
         """The one sentence that names `merge --role lane --step`. Asserts that scope before any content."""
         found = [s for s in sentences(hook_role_line()) if "merge --role lane --step" in s]
@@ -654,9 +661,11 @@ class SessionStartMergeRoleTests(unittest.TestCase):
     def test_the_lane_role_sentence_limits_the_merge_to_its_own_ready_pr(self):
         self.assertTrue(self.only_own_ready_pr(self.lane_role_sentence()), "the lane role sentence does not limit the merge to its own ready PR")
 
-    def test_the_lane_role_sentence_says_a_lane_never_runs_ready(self):
-        self.assertTrue(self.binds(self.lane_role_sentence(), r"\b(?:never|not|no)\b", r"--ready"),
-                        "the lane role sentence does not say a lane never runs --ready")
+    def test_the_lane_role_sentence_marks_its_own_draft_ready_once_in_the_role_form(self):
+        sentence = self.lane_role_sentence()
+        self.assertTrue(self.ready_form(sentence),
+                        "the lane role sentence does not mark its own draft ready once with merge --role lane --step <slug> <pr> --ready: %r" % sentence)
+        self.assertFalse(self.binds(sentence, r"\b(?:never|not|no)\b", r"--ready"), "the lane role sentence says a lane never runs --ready: %r" % sentence)
 
     def test_no_sentence_of_the_role_line_says_a_lane_never_merges(self):
         told = [s for s in sentences(hook_role_line()) if self.lane_never_merges(s)]
@@ -664,13 +673,19 @@ class SessionStartMergeRoleTests(unittest.TestCase):
 
     # green controls (P2): the helpers pass a sentence built like the lane rule, and reject its wrong forms
     def test_the_lane_helpers_pass_the_rule_and_reject_its_wrong_forms(self):
-        rule = "A lane runs get_session, then ~/.claude/bin/merge --role lane --step <slug>, and may merge only its own ready PR; never --ready."
+        rule = ("A lane runs get_session, then ~/.claude/bin/merge --role lane --step <slug>, and may merge only its own ready PR; "
+                "it marks its own draft PR ready once with merge --role lane --step <slug> <pr> --ready.")
         self.assertTrue(self.get_session_before_lane_role(rule), "the get_session order is not read")
         self.assertFalse(self.get_session_before_lane_role("A lane runs ~/.claude/bin/merge --role lane --step <slug>, then get_session."),
                          "a get_session after the role command is read as first")
         self.assertTrue(self.only_own_ready_pr(rule), "the own ready PR limit is not read")
         self.assertFalse(self.only_own_ready_pr("A lane may merge any ready PR; never --ready."), "a merge with no own-PR limit is read as limited")
-        self.assertTrue(self.binds(rule, r"\b(?:never|not|no)\b", r"--ready"), "the never --ready negation is not read")
+        self.assertTrue(self.ready_form(rule), "the role form of the own ready mark is not read")
+        self.assertFalse(self.ready_form("A lane runs merge --role lane --step <slug> <pr> --ready."), "a ready mark with no once is read as the once form")
+        self.assertFalse(self.ready_form("A lane marks its own draft PR ready once with merge --confirm <pr>."),
+                         "a ready once with no role form is read as the role form")
+        self.assertTrue(self.binds("A lane may merge only its own ready PR; never --ready.", r"\b(?:never|not|no)\b", r"--ready"),
+                        "the never --ready negation is not read")
         self.assertFalse(self.binds("A lane may run --ready on its own PR.", r"\b(?:never|not|no)\b", r"--ready"),
                          "a permission to run --ready is read as a negation")
         self.assertTrue(self.lane_never_merges("A lane session never merges its own PR."), "a lane that never merges is not read")
