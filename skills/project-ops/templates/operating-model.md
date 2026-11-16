@@ -18,7 +18,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
   A lane also gets `cs-topic:<topic slug>`, its one topic, and a `cs-step:<step id>` for each step it takes, so triage can see each step is live.
-  It plans, briefs, verifies and reports, and builds only as rule `roles-orchestrator-never-builds` allows. A change that touches a rule's behaviour, a check's verdict or product code goes to a lane. Long reads go to read-only agents: the red-run reads, each `merge --touches` read of an open PR, and audits. It keeps lane state, the briefs and the talk with the owner.
+  It plans, briefs, verifies and reports, and builds only as rule `roles-orchestrator-never-builds` allows. It builds what the owner asks of it and lands it on main. Long reads go to read-only agents: the red-run reads, each `merge --touches` read of an open PR, and audits. It keeps lane state, the briefs and the talk with the owner.
 - **Triage.** A standing session. It writes the roadmap. Only triage writes a new step,
   merges two steps, changes the work order, or closes a step. Triage always writes the waiting page; in a run with one lane the lane wears triage's hat and writes it.
   At triage start, when the repo has no waiting page, triage makes it, with no separate grant (skill
