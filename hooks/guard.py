@@ -297,6 +297,13 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        failed fetch keeps the refusal and says so. Cost: one `git rev-list` per pushed ref, one
                        `git config` more per pushed ref for a URL or path remote, and on a hit one `git fetch`
                        (10 s at most). (octopus-push-refused)
+  amend-foreign-head   deny. A Bash `git commit --amend` (any flag form, chained, or through `-C`) when HEAD's
+                       reflog in the folder it runs in holds no own entry (`commit`, `commit (initial)`, `commit
+                       (amend)`, `commit (merge)`, a resolved cherry-pick or revert, or a non-plain rebase step)
+                       whose new sha is HEAD: HEAD reached by a clone, reset, switch, pull or plain cherry-pick.
+                       A throwaway repo under the temp folder, an unreadable HEAD or reflog and a repo with no
+                       commit pass. Cost: one `git rev-parse` and one `git reflog show` for each amend.
+                       (amend-foreign-head)
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
   config-edit          noted. A write to a project's own settings or hooks. See below.
@@ -2605,6 +2612,12 @@ REBASE_PLAIN_STEPS = ("start", "finish", "abort", "pick", "reword", "edit")
 # How a builder's test path in one change counts: refused, logged, or logged as the upstream side a
 # rebase kept.
 OWN, NOTED, KEPT = "own", "noted", "kept"
+AMEND_FOREIGN_HEAD_REASON = (
+    "Rule (Git, amend-foreign-head; decision amend-foreign-head): HEAD here ({sha}) is not a commit this checkout's "
+    "reflog shows as made here. An amend would rewrite another agent's commit and the proof it carries. "
+    "Remedy: leave that commit as it is and make a new commit with `git commit`. If you meant to change your own "
+    "last commit, read `git reflog` and `git log -1` first to learn how HEAD got there."
+)
 
 
 def entry_kind(subject: str) -> str:
@@ -2619,6 +2632,45 @@ def entry_kind(subject: str) -> str:
     if ENTRY_OWN.match(subject):
         return OWN
     return NOTED if ENTRY_RESOLVED.match(subject) else ""
+
+
+def amend_foreign_head_hit(segments, number: int, cwd: str, ends=()) -> str:
+    """The short sha of HEAD when `segments[number]` is a `git commit --amend` and HEAD's reflog in the folder it
+    runs in (`dir_before_segment`, then its own `-C`) shows no entry of the agent's own (`entry_kind`: OWN or
+    NOTED) whose new sha is HEAD, else "". A HEAD reached by a clone, reset, switch, pull or plain cherry-pick
+    is another's commit. A folder, a HEAD or a reflog that cannot be read is no hit, and a throwaway repo under
+    the temp folder passes. Cost: one `git rev-parse` and one `git reflog show`, only for an amend."""
+    call = git_call_of(segments[number]) if segments[number].strip() else None
+    if call is None or call[0] != "commit":
+        return ""
+    args, amend, skip = call[1], False, False
+    for token in args:
+        if skip:
+            skip = False
+        elif token == "--":
+            break
+        elif token == "--amend":
+            amend = True
+        elif takes_next("commit", token):
+            skip = True
+    if not amend or in_throwaway(segments, number, cwd, ends):
+        return ""
+    where = dir_before_segment(segments, number, cwd, ends)
+    named = _segment_git_c_target(segment_tokens(segments[number]) or [])
+    if named is not None:
+        where = None if _unexpanded(named) else shell_abs(named, where)
+    if not where or not os.path.isabs(where):
+        return ""
+    head = guard_core._git(where, "rev-parse", "--verify", "-q", "HEAD")
+    log = guard_core._git(where, "reflog", "show", "--format=%H %gs", "HEAD")
+    if head is None or log is None or head.returncode or log.returncode:
+        return ""
+    head = head.stdout.strip()
+    for line in log.stdout.splitlines():
+        sha, _, subject = line.partition(" ")
+        if sha == head and entry_kind(subject) in (OWN, NOTED):
+            return ""
+    return head[:10]
 
 
 def git_names(root: str, *args):
@@ -5137,6 +5189,15 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched, stale = octopus_push_hit(stripped, cwd, read_verb)
     if matched:
         refuse(tool, "deny", "octopus-push", OCTOPUS_PUSH_REASON.format(sha=matched) + (OCTOPUS_PUSH_STALE if stale else ""), matched)
+
+    # 6c4. An amend of a commit this checkout did not make (rule amend-foreign-head).
+    # Cost: one `git rev-parse` and one `git reflog show` for each amend; none for any other command.
+    af_ends = []
+    af_segments = split_segments(stripped, af_ends)
+    for number in range(len(af_segments)):
+        matched = amend_foreign_head_hit(af_segments, number, cwd, af_ends)
+        if matched:
+            refuse(tool, "deny", "amend-foreign-head", AMEND_FOREIGN_HEAD_REASON.format(sha=matched), matched)
 
     # 7. A frozen path. The command is read as a shell reads it: a script's own strings are text, and its
     # shell spots are lines of their own (`shell_write_hit`).
