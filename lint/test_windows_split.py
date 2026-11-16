@@ -2467,7 +2467,7 @@ class ModTestStep(unittest.TestCase):
         if required == "protection":  # the list lives in branch protection, which no offline test reads: check only that the workflow gains no mod job
             self.assertEqual([n for n in all_jobs(self.text) if "mod" in n.lower()], [])
             return
-        if required == [ALL_JOBS_PASSED_JOB]:  # the shared ruleset (ruling r, 2026-11-11 16:43 CST): the one required check is the aggregate job
+        if required == [ALL_JOBS_PASSED_JOB]:  # the shared main ruleset (decision main-branch-protection, ruling r) makes the aggregate job the one required check
             needs = job_needs(self.text, ALL_JOBS_PASSED_JOB)
             for job in MOD_JOBS:
                 self.assertIn(job, needs, "%s gates no merge: %s does not need it" % (job, ALL_JOBS_PASSED_JOB))
