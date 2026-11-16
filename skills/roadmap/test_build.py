@@ -20,8 +20,8 @@ import sys
 import shutil
 import tempfile
 import unittest
-import urllib.error
 import urllib.parse
+import urllib.request
 from unittest import mock
 
 sys.dont_write_bytecode = True
@@ -34,6 +34,8 @@ import build  # noqa: E402
 import layout  # noqa: E402  the waiting page and record branch readers (lint/layout.py)
 import shared_names  # noqa: E402  the one home of the tag names (hooks/shared_names.py), on the path build set
 import guard_merge  # noqa: E402  the guard's lane-form rule (_on_lane_form), which the ready-pull case reads (hooks/guard_merge.py)
+sys.path.insert(1, str(HERE.parent.parent / "merge"))
+import merge  # noqa: E402  the merge tool (merge/merge.py): its gh call `sh` is the seam the pulls list read goes through
 
 # Made in setUpModule, not at import, so a helper that imports make_repo leaks no folder.
 RUN_FOLDER = None
@@ -140,20 +142,87 @@ def headers_of(pairs=None):
     return message
 
 
+class GhReply:
+    """One reply of a `gh api -i` call, as a case serves it: the status, the headers (a dict or an email Message), the
+    body text, and the line gh prints on stderr after the body (`error`, which a non-2xx reply carries)."""
+
+    def __init__(self, status=200, body="", headers=None, error=""):
+        self.status, self.body, self.error = status, body, error
+        self.headers = dict(headers.items()) if headers else {}
+
+    def output(self):
+        """(exit code, output) as merge's sh gives it: gh exits 1 on a non-2xx status, and sh joins stdout and stderr."""
+        lines = ["HTTP/2.0 %d %s" % (self.status, "OK" if self.status < 300 else "Error")]
+        lines += ["%s: %s" % (key, value) for key, value in self.headers.items()]
+        text = "\n".join(lines) + "\n\n" + self.body
+        if self.error:
+            text += "\n" + self.error
+        return (0 if self.status < 300 else 1), text
+
+
 def http_error(code, pairs=None):
-    """The HTTPError that the rest_get seam raises on a non-2xx reply: headers as a Message, an empty body."""
-    return urllib.error.HTTPError("https://api.github.com/repos/owner/fixture/pulls", code, "error %d" % code,
-                                  headers_of(pairs), io.BytesIO(b""))
+    """The reply of a non-2xx pulls read: the status, the headers, a JSON message, and the line gh prints after the body.
+    A 403 or 429 with a count at 0 or a Retry-After is a rate limit, and gh's line says so."""
+    headers = dict(pairs or {})
+    limited = code in (403, 429) and (headers.get("X-RateLimit-Remaining") == "0" or "Retry-After" in headers)
+    text = ("API rate limit exceeded for user ID 1." if limited
+            else "Server Error" if code >= 500 else "Resource not accessible by integration")
+    return GhReply(code, json.dumps({"message": text}), headers, "gh: %s (HTTP %d)" % (text, code))
 
 
-def request_url(call):
-    """The URL that a mocked rest_get call received, positional or by keyword."""
-    return call.args[0] if call.args else call.kwargs["url"]
+def budget_headers(remaining, limit=5000):
+    """The GitHub budget headers of a reply: the calls left of the limit, as the REST reply names them."""
+    return headers_of({"X-RateLimit-Limit": str(limit), "X-RateLimit-Remaining": str(remaining)})
 
 
-def request_token(call):
-    """The token that a mocked rest_get call received, positional or by keyword."""
-    return call.args[1] if len(call.args) > 1 else call.kwargs.get("token")
+def gh_route(argv):
+    """The route of a `gh api` call's argv: the repo's pulls route, as merge's Host writes it."""
+    return argv[2]
+
+
+def gh_fields(argv):
+    """The -f fields of a `gh api` call's argv, as {name: value}."""
+    return dict(argv[i + 1].split("=", 1) for i in range(len(argv) - 1) if argv[i] == "-f")
+
+
+def pulls_reply(pages, argv):
+    """(exit code, output) that the pulls read's `gh api -i` call `argv` gets from the served `pages`: page N is pages[N-1],
+    a page past the list is an empty list, and a page carries Link rel="next" when a page follows it in `pages`."""
+    number = int(gh_fields(argv)["page"])
+    item = pages[number - 1] if number <= len(pages) else []
+    if isinstance(item, BaseException):
+        raise item
+    if isinstance(item, GhReply):
+        reply = GhReply(item.status, item.body, item.headers, item.error)
+    else:
+        body, headers = item if isinstance(item, tuple) else (item, None)
+        reply = GhReply(200, json.dumps(body), headers)
+    if number < len(pages):
+        reply.headers["Link"] = '<https://api.github.com/%s?state=open&per_page=100&page=%d>; rel="next"' % (
+            gh_route(argv), number + 1)
+    return reply.output()
+
+
+@contextlib.contextmanager
+def merge_import_spy():
+    """Yields the list of the merge tool's import attempts. `merge` is out of sys.modules for the block, and a finder records
+    each attempt to import it and then lets the import go on. The list is empty when nothing in the block imported the tool."""
+    asked = []
+
+    class Finder:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "merge":
+                asked.append(fullname)
+            return None
+
+    finder = Finder()
+    with mock.patch.dict(sys.modules):
+        sys.modules.pop("merge", None)
+        sys.meta_path.insert(0, finder)
+        try:
+            yield asked
+        finally:
+            sys.meta_path.remove(finder)
 
 
 def make_repo(root, steps=None, meta=None):
@@ -217,9 +286,22 @@ class Fixture(unittest.TestCase):
         self.addCleanup(env.stop)
         for key in TOKEN_VARS:
             os.environ.pop(key, None)
-        seam = mock.patch.object(build, "rest_get", create=True, return_value=([], headers_of()))
-        self.rest_get = seam.start()
-        self.addCleanup(seam.stop)
+        # The pulls list read goes through merge's gh call (merge.sh), answered as `gh api -i` would. urlopen is a
+        # tripwire: a read that skips merge's gh call fails as an unreadable list, and no case reaches the network.
+        self.gh_calls = []  # the argv of each gh api call the build makes
+        self.pull_pages = []  # the pages serve_pulls serves, in order
+        real_sh = merge.sh
+
+        def answer(args, *rest, **kwargs):
+            if list(args[:2]) != ["gh", "api"]:
+                return real_sh(args, *rest, **kwargs)
+            self.gh_calls.append(list(args))
+            return pulls_reply(self.pull_pages, list(args))
+
+        for seam in (mock.patch.object(merge, "sh", answer),
+                     mock.patch.object(urllib.request, "urlopen", side_effect=OSError("a read skipped merge's gh call"))):
+            seam.start()
+            self.addCleanup(seam.stop)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -788,32 +870,46 @@ class UpkeepFixture(Fixture):
         return out
 
     def serve_pulls(self, *pages, token="test-token"):
-        """Serve the rest_get seam: page N is pages[N-1], and a page past the list is empty. A page is a list of
-        pulls rows, a (body, headers) pair, or an exception to raise. The seam, as the build reads it, returns
-        (body, headers) on a 200, raises urllib.error.HTTPError on a non-2xx and raises ValueError on a body that is
-        not JSON. token sets GH_TOKEN for the read; None leaves the environment as the case set it. Each stale draft
-        branch served here gets a commit 13 h old, so the build's commit read finds one, unless the case has already
-        set that branch's origin ref (origin_commit, set_origin, drop_origin, break_origin)."""
+        """Serve the pulls list read, merge's gh call: page N is pages[N-1], and a page past the list is empty. A page is a
+        list of pulls rows (a 200 with that JSON body), a (body, headers) pair, a GhReply (a status, headers and raw body,
+        as http_error builds one), or an exception the gh call raises. A page carries Link rel="next" when a page follows
+        it in pages, and the read follows that header, never the row count. token sets GH_TOKEN for the read; None leaves
+        the environment as the case set it. Each stale draft branch served here gets a commit 13 h old, so the build's
+        commit read finds one, unless the case has already set that branch's origin ref (origin_commit, set_origin,
+        drop_origin, break_origin)."""
         if token is not None:
             os.environ["GH_TOKEN"] = token
         for item in pages:
             for branch in self.stale_draft_branches(item):
                 if branch not in self.origin_set:
                     self.origin_commit(branch, iso_ago(780))
-
-        def reply(url, token):
-            number = int(urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("page", ["1"])[0])
-            item = pages[number - 1] if number <= len(pages) else []
-            if isinstance(item, BaseException):
-                raise item
-            return item if isinstance(item, tuple) else (item, headers_of())
-
-        self.rest_get.side_effect = reply
+        self.pull_pages = list(pages)
 
     def requested_pages(self):
-        """The page numbers that the REST read asked for, in the order it asked."""
-        return [int(urllib.parse.parse_qs(urllib.parse.urlparse(request_url(c)).query)["page"][0])
-                for c in self.rest_get.call_args_list]
+        """The page numbers that the pulls read asked for, in the order it asked."""
+        return [int(gh_fields(call)["page"]) for call in self.gh_calls]
+
+    def assert_merge_read(self):
+        """The pulls list read made a merge gh call. A read that skips merge fails here, by its test's name, so no claim
+        passes on the unknown entry that the tripwire gives."""
+        self.assertTrue(self.gh_calls, "%s: the pulls list read made no merge gh call" % self._testMethodName)
+
+    def draft_row(self):
+        """(count, detail) of the DRAFT row from one live build, after assert_merge_read."""
+        out = self.out_with_live()
+        self.assert_merge_read()
+        return self.row(out, self.DRAFT)
+
+    def claim_row(self):
+        """(count, detail) of the DRAFT row from one live build, for a failure the merge tool raises: a build that raises
+        or exits non-zero fails the case, named by its test. Such a failure may stop before any gh call, so no call is asserted."""
+        self.on_main()
+        try:
+            code, out = run_build("--repo", str(self.repo), "--out", str(self.out), "--live", str(self.live))
+        except Exception as err:
+            self.fail("%s: the build raised %s" % (self._testMethodName, type(err).__name__))
+        self.assertEqual(code, 0, "%s: the build exited with %r" % (self._testMethodName, code))
+        return self.row(out, self.DRAFT)
 
     def pull_row(self, number, branch, head=None, merged=None):
         """One landedPulls row. head and merged are left out when None, so a case can send a row with neither."""
@@ -3373,12 +3469,14 @@ class ReadyAndDraftRows(UpkeepFixture):
 
 class StaleDraftRestRead(UpkeepFixture):
     """The draft row reads GitHub's REST pulls list itself, not the live file's pulls (design `stale-drafts-read-rest`).
-    Pages are 100 rows, read in order until a page is short, and the read stops at 20 pages. A stale draft's updated_at
-    is over 12 h before the build run. A read that cannot finish reads the row as one `unknown (<why>)` entry, never a
-    partial list and never a clear row: no token, an HTTP or rate-limit error, a body that is not a list or not JSON, a
-    row of the wrong shape, a read past the 20-page cap, a page that fails midway, or a rate-limit count of 0 before the
-    last page. The live file still gives the sessions and the held and reviewLog marks. Those are read only when the
-    live file is fresh; otherwise the row is one `unknown (sessions not read: ...; REST read: ...)` entry.
+    The read is merge's Host.open_pulls: one `gh api -i` call per page of 100, and it goes on only while a page's Link
+    header has rel="next", so N open pulls cost max(1, ceil(N / 100)) calls. A reply whose GitHub budget is under a tenth
+    of its limit stops a bulk read before the next page (the tenth rule). A stale draft's updated_at is over 12 h before
+    the build run. A read that cannot finish reads the row as one `unknown (<why>)` entry, never a partial list and never
+    a clear row: no token, a gh failure (an HTTP error, a rate limit, a body that is not a list or not JSON), a row of
+    the wrong shape, a page that fails midway, a budget under a tenth, or an exception from the merge tool (gh missing,
+    gh hung, or any other error). The live file still gives the sessions and the held and reviewLog marks. Those are read
+    only when the live file is fresh; otherwise the row is one `unknown (sessions not read: ...; REST read: ...)` entry.
 
     Each stale draft's newest branch commit is read too, one git log per stale draft. A commit under 12 h old lists
     nothing, so the commit can only suppress a listing. A branch whose commit cannot be read (no ref, a ref on no
@@ -3394,61 +3492,49 @@ class StaleDraftRestRead(UpkeepFixture):
         self.serve_pulls(self.stale_first_page(), [self.rest_draft(2001, "old-2001", 780)])
         self.publish(sessions=[])
         self.out_with_live()
-        self.assertEqual(len(self.rest_get.call_args_list), 2, "the read did not make one call per page")
-        for call in self.rest_get.call_args_list:
-            parts = urllib.parse.urlparse(request_url(call))
-            query = urllib.parse.parse_qs(parts.query)
-            self.assertEqual(parts.netloc, "api.github.com")
-            self.assertEqual(parts.path, "/repos/owner/fixture/pulls")
-            self.assertEqual((query["state"], query["per_page"]), (["open"], ["100"]))
+        self.assertEqual(len(self.gh_calls), 2, "the read did not make one gh call per page")
+        for call in self.gh_calls:
+            fields = gh_fields(call)
+            self.assertEqual(gh_route(call), "repos/owner/fixture/pulls", "a page asked another route")
+            self.assertEqual((fields["state"], fields["per_page"]), ("open", "100"), "a page asked other fields")
 
     def test_pages_of_one_hundred_then_fewer_are_both_read(self):
         self.serve_pulls(self.stale_first_page(), [self.rest_draft(2001, "old-2001", 780)] + self.fresh_rows(2002, 1))
         self.publish(sessions=[], pulls=[self.live_pull(1001, "old-1001"), self.live_pull(2001, "old-2001")])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
-        self.assertEqual(self.requested_pages(), [1, 2], "a full page 1 did not lead to a read of page 2")
+        count, detail = self.draft_row()
+        self.assertEqual(self.requested_pages(), [1, 2], "a page 1 with a Link next did not lead to a read of page 2")
         self.assertEqual((count, self.entries(detail)), (2, ["#1001 (old-1001)", "#2001 (old-2001)"]))
 
-    def test_exactly_one_hundred_rows_reads_an_empty_second_page(self):
-        self.serve_pulls(self.stale_first_page(), [])
+    def test_a_full_page_with_no_next_link_is_the_last_page_read(self):
+        # The read follows the Link header, not the row count: a full page 1 with no rel="next" reads no page 2.
+        self.serve_pulls(self.stale_first_page())
         self.publish(sessions=[], pulls=[self.live_pull(1001, "old-1001")])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
-        self.assertEqual(self.requested_pages(), [1, 2], "a full page 1 did not lead to a read of page 2")
+        count, detail = self.draft_row()
+        self.assertEqual(self.requested_pages(), [1], "a full page with no Link next read a second page")
         self.assertEqual((count, self.entries(detail)), (1, ["#1001 (old-1001)"]))
+
+    def test_a_short_page_with_a_next_link_is_not_the_last_page(self):
+        # Page 1 holds 5 rows, fewer than 100, but its Link says a next page exists, so page 2 is read.
+        self.serve_pulls([self.rest_draft(1001, "old-1001", 780)] + self.fresh_rows(1002, 4),
+                         [self.rest_draft(2001, "old-2001", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "old-1001"), self.live_pull(2001, "old-2001")])
+        count, detail = self.draft_row()
+        self.assertEqual(self.requested_pages(), [1, 2], "a short page with a Link next ended the read")
+        self.assertEqual((count, self.entries(detail)), (2, ["#1001 (old-1001)", "#2001 (old-2001)"]))
 
     def test_two_hundred_fifty_rows_are_all_read(self):
         # More than the live file's 200 rows: the stale drafts on page 1 and on page 3 are both listed.
         self.serve_pulls(self.stale_first_page(), self.fresh_rows(1101, 100),
                          [self.rest_draft(3001, "old-3001", 780)] + self.fresh_rows(3002, 49))
         self.publish(sessions=[], pulls=[self.live_pull(1001, "old-1001"), self.live_pull(3001, "old-3001")])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        count, detail = self.draft_row()
         self.assertEqual(self.requested_pages(), [1, 2, 3])
         self.assertEqual((count, self.entries(detail)), (2, ["#1001 (old-1001)", "#3001 (old-3001)"]))
-
-    def test_twenty_full_pages_then_a_short_one_is_the_last_page_read(self):
-        # The cap is 20 pages. Page 20 is read, and it is short, so the read ends there and lists its draft.
-        pages = [self.fresh_rows(100 * i + 1, 100) for i in range(19)]
-        pages.append([self.rest_draft(2000, "old-2000", 780)] + self.fresh_rows(2001, 4))
-        self.serve_pulls(*pages)
-        self.publish(sessions=[], pulls=[self.live_pull(2000, "old-2000")])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
-        self.assertEqual(self.requested_pages(), list(range(1, 21)))
-        self.assertEqual((count, self.entries(detail)), (1, ["#2000 (old-2000)"]))
-
-    def test_past_twenty_pages_reads_one_unknown_entry_and_asks_for_no_page_twenty_one(self):
-        pages = [self.stale_first_page()] + [self.fresh_rows(10000 + 100 * i, 100) for i in range(1, 20)]
-        self.serve_pulls(*pages)
-        self.publish(sessions=[])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
-        self.assertLessEqual(max(self.requested_pages() or [0]), 20, "the read asked for a page past the 20-page cap")
-        self.assertEqual(count, 1, "the row was %r" % (detail,))
-        self.assertTrue(detail.startswith("unknown ("), detail)
-        self.assertNotIn("#1001", detail, "a read past the cap listed part of the drafts")
 
     def test_a_page_that_fails_midway_reads_one_unknown_entry_not_a_partial_list(self):
         self.serve_pulls(self.stale_first_page(), http_error(500))
         self.publish(sessions=[])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        count, detail = self.draft_row()
         self.assertEqual(count, 1, "the row was %r" % (detail,))
         self.assertTrue(detail.startswith("unknown ("), detail)
         self.assertNotIn("#1001", detail, "page 1's stale draft was listed beside a failed page 2")
@@ -3460,37 +3546,52 @@ class StaleDraftRestRead(UpkeepFixture):
             with self.subTest(name):
                 self.serve_pulls(self.stale_first_page(), reply)
                 self.publish(sessions=[])
-                count, detail = self.row(self.out_with_live(), self.DRAFT)
+                count, detail = self.draft_row()
                 self.assertEqual(count, 1, "the row was %r" % (detail,))
                 self.assertTrue(detail.startswith("unknown ("), detail)
                 self.assertIn("rate limit", detail.lower(), "the reason does not name the rate limit")
                 self.assertNotIn("#1001", detail)
 
-    def test_rate_limit_at_zero_before_the_last_page_reads_one_unknown_entry(self):
-        # Page 1 is full and says the count is at 0, so the read must stop there. Page 2 would list #2001 if read.
-        self.serve_pulls((self.stale_first_page(), headers_of({"X-RateLimit-Remaining": "0"})),
-                         [self.rest_draft(2001, "old-2001", 780)])
+    def test_a_budget_under_a_tenth_stops_the_read_before_the_next_page(self):
+        # Page 1 is full and its reply leaves 0 of 5000 calls, so page 2 is not sent. Page 2 would list #2001.
+        self.serve_pulls((self.stale_first_page(), budget_headers(0)), [self.rest_draft(2001, "old-2001", 780)])
         self.publish(sessions=[])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        count, detail = self.draft_row()
+        self.assertEqual(self.requested_pages(), [1], "page 2 was sent with the budget under a tenth")
         self.assertEqual(count, 1, "the row was %r" % (detail,))
-        self.assertTrue(detail.startswith("unknown ("), detail)
-        self.assertNotIn("#1001", detail, "page 1's stale draft was listed with the count at 0")
-        self.assertNotIn("#2001", detail, "a page after the count reached 0 was listed")
+        self.assertTrue(detail.startswith("unknown (") and "budget" in detail.lower(),
+                        "the tenth rule did not read one unknown entry naming the budget: %r" % (detail,))
+        self.assertNotIn("#1001", detail, "page 1's stale draft was listed with the budget under a tenth")
+        self.assertNotIn("#2001", detail, "a page after the budget went under a tenth was listed")
 
-    def test_rate_limit_at_zero_on_the_last_page_reads_clear(self):
-        # The count is 0 on page 2, which is short, so page 2 is the last page and the read is whole.
-        self.serve_pulls((self.stale_first_page(), headers_of({"X-RateLimit-Remaining": "5"})),
-                         ([self.rest_draft(2001, "old-2001", 780)], headers_of({"X-RateLimit-Remaining": "0"})))
+    def test_the_tenth_rule_applies_from_page_two_on(self):
+        # Page 1 leaves 4000 of 5000 calls, over a tenth, so page 2 is read. Page 2 leaves 400, under a tenth, so page 3
+        # (stale #3001) is not sent. A read has no budget until a reply gives one, so the rule starts at page 2.
+        self.serve_pulls((self.stale_first_page(), budget_headers(4000)), (self.fresh_rows(2001, 100), budget_headers(400)),
+                         [self.rest_draft(3001, "old-3001", 780)])
+        self.publish(sessions=[])
+        count, detail = self.draft_row()
+        self.assertEqual(self.requested_pages(), [1, 2], "the budget under a tenth on page 2 did not stop page 3")
+        self.assertTrue(detail.startswith("unknown (") and "budget" in detail.lower(),
+                        "the tenth rule did not read one unknown entry naming the budget: %r" % (detail,))
+        self.assertNotIn("#3001", detail, "page 3 was listed after the budget went under a tenth")
+        self.assertNotIn("#1001", detail, "page 1's stale draft was listed beside the budget entry")
+
+    def test_a_budget_at_a_tenth_or_over_lets_the_read_finish(self):
+        # The control for the tenth rule. Page 1 leaves exactly a tenth (500 of 5000), which is not under it, so page 2 is
+        # read. Page 2 is the last page, so its own count of 0 stops nothing.
+        self.serve_pulls((self.stale_first_page(), budget_headers(500)),
+                         ([self.rest_draft(2001, "old-2001", 780)], budget_headers(0)))
         self.publish(sessions=[], pulls=[self.live_pull(1001, "old-1001"), self.live_pull(2001, "old-2001")])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
-        self.assertEqual(self.requested_pages(), [1, 2])
+        count, detail = self.draft_row()
+        self.assertEqual(self.requested_pages(), [1, 2], "a budget at a tenth stopped the read before page 2")
         self.assertEqual((count, self.entries(detail)), (2, ["#1001 (old-1001)", "#2001 (old-2001)"]))
 
     def test_a_draft_is_aged_by_updated_at_not_created_at(self):
         self.serve_pulls([self.rest_draft(1001, "created-long-ago", 60, created_min=20 * 60),
                           self.rest_draft(1002, "updated-long-ago", 780, created_min=60)])
         self.publish(sessions=[], pulls=[self.live_pull(1002, "updated-long-ago")])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        count, detail = self.draft_row()
         self.assertEqual((count, self.entries(detail)), (1, ["#1002 (updated-long-ago)"]))
 
     def test_a_draft_is_aged_from_the_build_run_not_from_the_live_read(self):
@@ -3498,14 +3599,14 @@ class StaleDraftRestRead(UpkeepFixture):
         # the read would not list it. young-draft, 11 h 30 m before now, is not listed.
         self.serve_pulls([self.rest_draft(1001, "aged-from-now", 735), self.rest_draft(1002, "young-draft", 690)])
         self.publish(read_at=iso_ago(45), sessions=[], pulls=[self.live_pull(1001, "aged-from-now")])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        count, detail = self.draft_row()
         self.assertEqual((count, self.entries(detail)), (1, ["#1001 (aged-from-now)"]))
 
     def test_a_pull_that_is_not_a_draft_is_not_listed(self):
         self.serve_pulls([self.rest_draft(1001, "open-not-draft", 780, draft=False),
                           self.rest_draft(1002, "draft-stale", 780)])
         self.publish(sessions=[], pulls=[self.live_pull(1002, "draft-stale")])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        count, detail = self.draft_row()
         self.assertEqual((count, self.entries(detail)), (1, ["#1002 (draft-stale)"]))
 
     def test_the_row_reads_rest_not_the_live_pulls_list(self):
@@ -3524,7 +3625,7 @@ class StaleDraftRestRead(UpkeepFixture):
         # The control: a whole read with no stale draft reads the row clear, with no line at all.
         self.serve_pulls([self.rest_draft(1001, "fresh-draft", 60)])
         self.publish(sessions=[])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        count, detail = self.draft_row()
         self.assertEqual((count, detail), (0, ""))
 
     def test_a_row_of_the_wrong_shape_reads_one_unknown_entry_not_a_partial_list(self):
@@ -3548,19 +3649,19 @@ class StaleDraftRestRead(UpkeepFixture):
                         row[key] = value
                 self.serve_pulls([self.rest_draft(1001, "old-1001", 780), row])
                 self.publish(sessions=[])
-                count, detail = self.row(self.out_with_live(), self.DRAFT)
+                count, detail = self.draft_row()
                 self.assertEqual(count, 1, "the row did not read one entry")
                 self.assertTrue(detail.startswith("unknown ("), detail)
                 self.assertNotIn("#1001", detail)
 
     def test_a_body_that_is_not_a_list_or_not_json_reads_one_unknown_entry(self):
         replies = {"an object, not a list": ({"message": "Not Found"}, headers_of()),
-                   "not JSON": ValueError("Expecting value: line 1 column 1 (char 0)")}
+                   "not JSON": GhReply(200, "Expecting value: line 1 column 1 (char 0)")}
         for name, reply in replies.items():
             with self.subTest(name):
                 self.serve_pulls(reply)
                 self.publish(sessions=[])
-                count, detail = self.row(self.out_with_live(), self.DRAFT)
+                count, detail = self.draft_row()
                 self.assertEqual(count, 1, "the row was %r" % (detail,))
                 self.assertTrue(detail.startswith("unknown ("), detail)
 
@@ -3572,37 +3673,33 @@ class StaleDraftRestRead(UpkeepFixture):
         self.assertTrue(detail.startswith("unknown (") and "token" in detail.lower(), detail)
         self.assertNotIn("#1001", detail)
 
-    def test_the_token_is_gh_token_else_github_token(self):
-        cases = {"GITHUB_TOKEN only": ({"GITHUB_TOKEN": "from-github"}, "from-github"),
-                 "both set": ({"GH_TOKEN": "first", "GITHUB_TOKEN": "second"}, "first")}
-        for name, (env, want) in cases.items():
-            with self.subTest(name):
-                for key in ("GH_TOKEN", "GITHUB_TOKEN"):
-                    os.environ.pop(key, None)
-                os.environ.update(env)
-                self.rest_get.reset_mock()
-                self.serve_pulls([self.rest_draft(1001, "old-1001", 780)], token=None)
-                self.publish(sessions=[])
-                self.out_with_live()
-                tokens = {request_token(c) for c in self.rest_get.call_args_list}
-                self.assertEqual(tokens, {want}, "the read did not send the token that the design names")
+    def test_with_no_token_the_merge_tool_is_never_imported(self):
+        # A control on the old code too: the token gate returned before any read. On the new code it keeps the order: the
+        # merge tool loads only when a read is about to run, so a case with no token imports nothing from it.
+        with merge_import_spy() as asked:
+            self.serve_pulls([self.rest_draft(1001, "old-1001", 780)], token=None)
+            self.publish(sessions=[])
+            count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual(asked, [], "the no-token case imported the merge tool")
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown ("), detail)
 
-    def test_one_build_reads_one_call_per_hundred_open_pulls_plus_one(self):
-        # The cost the design states: floor(N / 100) + 1 calls for N open pulls, since a full page is followed by the
-        # page that ends the read. N = 0 reads one empty page. N = 100 reads a full page, then an empty one.
+    def test_one_call_per_hundred_open_pulls_and_one_for_none(self):
+        # The cost the design states: one gh call per page, and a page is read on only while its Link has rel="next".
+        # N = 0 reads one empty page. N = 100 reads one full page with no next link. N = 250 reads three pages.
         for total in (0, 99, 100, 250):
             with self.subTest(open_pulls=total):
                 rows = [self.rest_draft(n, "fresh-%d" % n, 60) for n in range(1, total + 1)]
-                self.rest_get.reset_mock()
+                self.gh_calls.clear()
                 self.serve_pulls(*[rows[i:i + 100] for i in range(0, total, 100)])
                 self.publish(sessions=[])
                 self.out_with_live()
-                self.assertEqual(len(self.rest_get.call_args_list), total // 100 + 1)
+                self.assertEqual(len(self.gh_calls), max(1, (total + 99) // 100), "the read did not make one call per page")
 
     def test_a_stale_live_file_reads_one_unknown_entry_that_names_the_rest_read(self):
         self.serve_pulls(self.stale_first_page())
         self.publish(read_at=iso_ago(90), sessions=[])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        count, detail = self.draft_row()
         self.assertEqual(count, 1, "the row was %r" % (detail,))
         self.assertTrue(detail.startswith("unknown (sessions not read: "), detail)
         self.assertIn("the live file was read", detail)
@@ -3613,7 +3710,7 @@ class StaleDraftRestRead(UpkeepFixture):
         # Never an empty row: a clean REST read under a stale live file is unknown, not clear.
         self.serve_pulls(self.fresh_rows(1001, 2))
         self.publish(read_at=iso_ago(90), sessions=[])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        count, detail = self.draft_row()
         self.assertEqual(count, 1, "a stale live file read the row clear")
         self.assertTrue(detail.startswith("unknown (sessions not read: "), detail)
         self.assertRegex(detail, r"REST read: 0 stale-looking")
@@ -3621,7 +3718,7 @@ class StaleDraftRestRead(UpkeepFixture):
     def test_a_live_file_with_no_sessions_list_reads_one_unknown_entry(self):
         self.serve_pulls([self.rest_draft(1001, "old-1001", 780)])
         self.publish()
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        count, detail = self.draft_row()
         self.assertEqual(count, 1, "the row was %r" % (detail,))
         self.assertTrue(detail.startswith("unknown (sessions not read: ") and "no sessions list" in detail, detail)
         self.assertRegex(detail, r"REST read: 1 stale-looking drafts?\b")
@@ -3632,11 +3729,12 @@ class StaleDraftRestRead(UpkeepFixture):
         self.serve_pulls([self.rest_draft(1001, "shared-branch", 780)])
         self.publish(sessions=[], pulls=[dict(self.mark(1005), branch="shared-branch", held=True),
                                          self.live_pull(1001, "shared-branch")])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        count, detail = self.draft_row()
         self.assertEqual((count, self.entries(detail)), (1, ["#1001 (shared-branch)"]))
 
     def row_or_named_crash(self, live=True):
-        """The DRAFT row's (count, detail) from one build. A build that raises fails the case with a named cause."""
+        """The DRAFT row's (count, detail) from one build. A build that raises fails the case with a named cause, and so does
+        a read that made no merge gh call (assert_merge_read)."""
         try:
             if live:
                 out = self.out_with_live()
@@ -3644,11 +3742,12 @@ class StaleDraftRestRead(UpkeepFixture):
                 _, out = self.build_from_main()
         except Exception as err:
             self.fail("the build raised %s instead of reading the row as one unknown entry" % type(err).__name__)
+        self.assert_merge_read()
         return self.row(out, self.DRAFT)
 
-    def test_a_transport_error_mid_read_reads_one_unknown_entry_and_does_not_crash(self):
-        # http.client raises these from inside the read, past HTTPError and OSError. Each ends as one unknown entry,
-        # never a raised exception and never a partial list: page 1's stale #1001 is not listed.
+    def test_an_http_client_error_raised_inside_the_read_reads_one_unknown_entry(self):
+        # http.client raises these from inside the read. The merge tool's read does not catch them, so the build reads one
+        # unknown entry, never a raised exception and never a partial list: page 1's stale #1001 is not listed.
         failures = {"IncompleteRead": http.client.IncompleteRead(b"partial body"),
                     "BadStatusLine": http.client.BadStatusLine("garbage"),
                     "HTTPException": http.client.HTTPException("transport failed")}
@@ -3658,8 +3757,49 @@ class StaleDraftRestRead(UpkeepFixture):
                 self.publish(sessions=[])
                 count, detail = self.row_or_named_crash()
                 self.assertEqual(count, 1, "the row was %r" % (detail,))
-                self.assertTrue(detail.startswith("unknown ("), detail)
+                self.assertIn("the merge tool's reader could not run", detail,
+                              "an http.client error from the read did not read the merge tool's reader as unable to run")
                 self.assertNotIn("#1001", detail)
+
+    def test_an_exception_or_exit_from_the_merge_tool_reads_one_unknown_entry(self):
+        # Any other exception or SystemExit from the read ends as one unknown entry naming the reader: never a crash, never
+        # a partial list.
+        failures = {"RuntimeError": RuntimeError("merge broke"), "SystemExit": SystemExit(3)}
+        for name, failure in failures.items():
+            with self.subTest(name):
+                self.serve_pulls(self.stale_first_page(), failure)
+                self.publish(sessions=[])
+                count, detail = self.claim_row()
+                self.assertEqual(count, 1, "the row was %r" % (detail,))
+                self.assertIn("the merge tool's reader could not run", detail, "the reader's failure did not read as unknown: %r" % (detail,))
+                self.assertNotIn("#1001", detail)
+
+    def test_an_os_error_from_gh_reads_one_unknown_entry_naming_gh(self):
+        # gh missing from the machine: the OSError from its launch reads one unknown entry that names gh.
+        self.serve_pulls(self.stale_first_page(), FileNotFoundError(2, "No such file or directory", "gh"))
+        self.publish(sessions=[])
+        count, detail = self.claim_row()
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertIn("gh could not run", detail, "a gh launch that failed did not read as gh could not run: %r" % (detail,))
+        self.assertNotIn("#1001", detail)
+
+    def test_a_hung_gh_reads_one_unknown_entry_naming_the_timeout(self):
+        # gh hangs past the read's shared deadline: the timeout reads one unknown entry that says it timed out.
+        self.serve_pulls(self.stale_first_page(), subprocess.TimeoutExpired(["gh", "api"], 120))
+        self.publish(sessions=[])
+        count, detail = self.claim_row()
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertIn("timed out", detail, "a hung gh did not read as timed out: %r" % (detail,))
+        self.assertNotIn("#1001", detail)
+
+    def test_an_import_error_for_the_merge_tool_reads_one_unknown_entry(self):
+        self.serve_pulls(self.stale_first_page())
+        self.publish(sessions=[])
+        with mock.patch.dict(sys.modules, {"merge": None}):  # an import of merge raises ImportError
+            count, detail = self.claim_row()
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertIn("the merge tool's reader could not run", detail, "an ImportError for the merge tool did not read unknown: %r" % (detail,))
+        self.assertNotIn("#1001", detail)
 
     def test_a_stale_draft_with_no_live_pulls_row_reads_unknown_and_is_not_listed(self):
         # The live file is fresh but has no pulls row for #1001, so its held and reviewLog marks are unread. The draft
@@ -3710,7 +3850,7 @@ class StaleDraftRestRead(UpkeepFixture):
         self.publish(sessions=[], pulls=[self.live_pull(1001, "pushed-today")])
         self.assertEqual(self.commit_time("pushed-today"), self.iso_time(when),
                          "the fixture's branch commit is not the 1 h old commit the case set")
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        count, detail = self.draft_row()
         self.assertEqual((count, detail), (0, ""), "a commit 1 h old did not suppress the stale draft: %r" % (detail,))
 
     def test_the_twelve_hour_line_for_the_branch_commit_holds_in_any_zone(self):
@@ -3723,7 +3863,7 @@ class StaleDraftRestRead(UpkeepFixture):
                 self.publish(sessions=[], pulls=[self.live_pull(1001, "aged-commit")])
                 self.assertEqual(self.commit_time("aged-commit"), self.iso_time(when),
                                  "the fixture's branch commit is not the one the case set")
-                count, detail = self.row(self.out_with_live(), self.DRAFT)
+                count, detail = self.draft_row()
                 self.assertEqual((count, self.entries(detail)), (len(listed), listed),
                                  "a branch commit %s was not read against 12 h" % name)
 
@@ -3736,7 +3876,7 @@ class StaleDraftRestRead(UpkeepFixture):
                           self.rest_draft(1003, "stale-recent-commit", 780)])
         self.publish(sessions=[], pulls=[self.live_pull(1002, "stale-old-commit"),
                                          self.live_pull(1003, "stale-recent-commit")])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        count, detail = self.draft_row()
         self.assertEqual((count, self.entries(detail)), (1, ["#1002 (stale-old-commit)"]),
                          "a recent branch commit did not suppress #1003, or a fresh draft was listed")
 
@@ -3744,7 +3884,7 @@ class StaleDraftRestRead(UpkeepFixture):
         self.drop_origin("no-ref")
         self.serve_pulls([self.rest_draft(1001, "no-ref", 780)])
         self.publish(sessions=[], pulls=[self.live_pull(1001, "no-ref")])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        count, detail = self.draft_row()
         self.assertEqual((count, detail), (1, self.unknown_no_commit(1001, "no-ref")),
                          "a draft whose branch has no ref was not read as one unknown entry")
 
@@ -3752,7 +3892,7 @@ class StaleDraftRestRead(UpkeepFixture):
         self.set_origin("tree-ref", self.EMPTY_TREE)
         self.serve_pulls([self.rest_draft(1001, "tree-ref", 780)])
         self.publish(sessions=[], pulls=[self.live_pull(1001, "tree-ref")])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        count, detail = self.draft_row()
         self.assertEqual((count, detail), (1, self.unknown_no_commit(1001, "tree-ref")),
                          "a branch ref that holds no commit was not read as one unknown entry")
 
@@ -3760,7 +3900,7 @@ class StaleDraftRestRead(UpkeepFixture):
         self.break_origin("broken-ref")
         self.serve_pulls([self.rest_draft(1001, "broken-ref", 780)])
         self.publish(sessions=[], pulls=[self.live_pull(1001, "broken-ref")])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        count, detail = self.draft_row()
         self.assertEqual((count, detail), (1, self.unknown_no_commit(1001, "broken-ref")),
                          "a branch ref git cannot read was not read as one unknown entry")
 
@@ -3777,7 +3917,7 @@ class StaleDraftRestRead(UpkeepFixture):
             return real_git(repo, *args, stdin=stdin)
 
         with mock.patch.object(build, "git", garbled):
-            count, detail = self.row(self.out_with_live(), self.DRAFT)
+            count, detail = self.draft_row()
         self.assertEqual((count, detail), (1, self.unknown_no_commit(1001, "garbled-time")),
                          "a commit time that does not parse was not read as one unknown entry")
 
@@ -3785,7 +3925,7 @@ class StaleDraftRestRead(UpkeepFixture):
         self.drop_origin("no-ref-beside")
         self.serve_pulls([self.rest_draft(1001, "no-ref-beside", 780), self.rest_draft(1002, "old-beside", 780)])
         self.publish(sessions=[], pulls=[self.live_pull(1001, "no-ref-beside"), self.live_pull(1002, "old-beside")])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        count, detail = self.draft_row()
         expected = sorted(["#1002 (old-beside)", self.unknown_no_commit(1001, "no-ref-beside")])
         self.assertEqual((count, self.entries(detail)), (2, expected),
                          "the unknown entry and the listed draft were not both in the row")
@@ -3796,7 +3936,7 @@ class StaleDraftRestRead(UpkeepFixture):
                           self.rest_draft(1003, "cost-fresh", 60)])
         self.publish(sessions=[], pulls=[self.live_pull(1001, "cost-a"), self.live_pull(1002, "cost-b")])
         with mock.patch.dict(os.environ, {"GIT_TRACE": str(trace)}):
-            count, detail = self.row(self.out_with_live(), self.DRAFT)
+            count, detail = self.draft_row()
         reads = {}
         for line in (trace.read_text(encoding="utf-8") if trace.exists() else "").splitlines():
             found = re.search(r" log .*refs/remotes/origin/(\S+)", line)
@@ -3805,14 +3945,14 @@ class StaleDraftRestRead(UpkeepFixture):
         self.assertEqual(reads, {"cost-a": 1, "cost-b": 1},
                          "the build did not read one branch commit per stale draft, or read a fresh draft's commit")
         self.assertEqual((count, self.entries(detail)), (2, ["#1001 (cost-a)", "#1002 (cost-b)"]))
-        self.assertEqual(len(self.rest_get.call_args_list), 1, "the branch commit read made a REST call")
+        self.assertEqual(len(self.gh_calls), 1, "the branch commit read made a gh call beside the one pulls page")
 
     def test_a_stale_draft_whose_branch_commit_is_after_the_build_reads_one_unknown_entry(self):
         # A commit an hour after the build is no proof of recency, so it reads the draft unknown, never fresh and silent.
         self.origin_commit("future-branch", iso_ago(-60))
         self.serve_pulls([self.rest_draft(1001, "future-branch", 780)])
         self.publish(sessions=[], pulls=[self.live_pull(1001, "future-branch")])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        count, detail = self.draft_row()
         self.assertEqual(count, 1, "a commit after the build read the stale draft as no entry at all: %r" % (detail,))
         self.assertTrue(detail.startswith("unknown (#1001"), "the entry is not an unknown for #1001: %r" % (detail,))
         self.assertIn("future-branch", detail, "the unknown entry does not name the branch")
@@ -3826,7 +3966,7 @@ class StaleDraftRestRead(UpkeepFixture):
         self.serve_pulls([self.rest_draft(1001, "main", 780, head_repo="someone/fixture"),
                           self.rest_draft(1002, "feature", 780)])
         self.publish(sessions=[], pulls=[self.live_pull(1001, "main"), self.live_pull(1002, "feature")])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        count, detail = self.draft_row()
         entries = self.entries(detail)
         self.assertEqual(count, 2, "the fork pull was silent: the origin commit suppressed it (%r)" % (detail,))
         self.assertIn("#1002 (feature)", entries, "this repo's own stale draft was not listed")
@@ -3838,7 +3978,7 @@ class StaleDraftRestRead(UpkeepFixture):
         self.origin_commit("topic", iso_ago(780))
         self.serve_pulls([self.rest_draft(1001, "topic", 780, head_repo="someone/fixture")])
         self.publish(sessions=[], pulls=[self.live_pull(1001, "topic")])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        count, detail = self.draft_row()
         self.assertEqual(count, 1, "the fork pull did not read as one entry: %r" % (detail,))
         self.assertTrue(detail.startswith("unknown (#1001"), "a fork pull with an old commit was not read unknown: %r" % (detail,))
         self.assertNotIn("#1001 (topic)", detail, "a fork pull was listed on its branch commit")
@@ -3848,7 +3988,7 @@ class StaleDraftRestRead(UpkeepFixture):
         self.origin_commit("gone", iso_ago(780))
         self.serve_pulls([self.rest_draft(1001, "gone", 780, head_repo=None)])
         self.publish(sessions=[], pulls=[self.live_pull(1001, "gone")])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        count, detail = self.draft_row()
         self.assertEqual(count, 1, "a pull with a null head repo did not read as one entry: %r" % (detail,))
         self.assertTrue(detail.startswith("unknown (#1001"), "a pull with a null head repo was not read unknown: %r" % (detail,))
         self.assertNotIn("#1001 (gone)", detail, "a pull with a null head repo was listed on its branch commit")
@@ -3924,7 +4064,7 @@ class StaleDraftTable(UpkeepFixture):
             if found:
                 reads[found.group(1)] = reads.get(found.group(1), 0) + 1
         self.assertEqual(reads, {"first": 1, "second": 1}, "the read was not one git log per distinct branch")
-        self.assertEqual(len(self.rest_get.call_args_list), 0, "the commit read made a REST call")
+        self.assertEqual(len(self.gh_calls), 0, "the commit read made a gh call")
 
     def test_no_checkout_named_reads_no_time_and_says_why(self):
         times, why = build.branch_commit_times(None, ["any-branch"])
