@@ -6,5 +6,7 @@
   "quote": "A: Yes: the consultant adds the line as worded under Standing grants",
   "source": "waiting/answers/merge-any-repo-grant-line.json (2026-11-16T19:34:21Z = 13:34:21 CST, choice a, optionId add-as-worded, no note). Owner; filed by triage.",
   "status": "open",
+  "pr": 3593,
+  "prNote": "Consultant 13:37 CST Nov 16 (relay): PR #3593, the merge-in-any-repo grant line, draft. Triage read no diff.",
   "step": "rewrite-merge-decisions-for-lane-merge"
 }

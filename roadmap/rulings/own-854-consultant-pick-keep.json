@@ -1,0 +1,10 @@
+{
+  "id": "own-854-consultant-pick-keep",
+  "at": "2026-11-16T13:39:00-06:00",
+  "title": "Keep the coordinator's pick d on item 837: send_later only for a session's own waits (consultant's pick, delegated by the owner on item 854).",
+  "ruling": "Owner, page item 854 \"none of these\", saved 13:35:54 CST Nov 16 with the note \"have consultant pick\". The consultant picked a (keep) at 13:39 CST (relay; its why: it is the working rule today, and reopening it without knowing the owner's question gains nothing). Under ruling own-consultant-speaks-for-owner (20:24 CST Nov 14) the consultant's pick stands for the owner's; the owner can reopen it with Overrule. Effect: the coordinator's pick d on item 837 stands (send_later only for a session's own waits; create_trigger, CronCreate and ScheduleWakeup stay for event waits a session cannot poll). The owner's earlier note \"i was actually asking\" (17:41 CST Nov 15) is still unanswered; triage asked him to restate his question in one line.",
+  "quote": "have consultant pick",
+  "source": "waiting/answers/taken-837-d-send-later.json (2026-11-16T19:35:54Z = 13:35:54 CST, choice none, note \"have consultant pick\"); consultant message to triage 13:39 CST Nov 16 (not read beyond the message). Filed by triage.",
+  "status": "open",
+  "step": "ci-wait-stop-needs-checkin"
+}
