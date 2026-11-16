@@ -4,8 +4,8 @@
     python3 ~/.claude/skills/waiting-page/stale_pages.py <fetched-dir> [<repo root> ...]
 
 A script cannot call the Artifact tool, so the session fetches first. For each page in the list
-(lint/layout.py `live_pages`, from the `waiting-page` key of each repo's extras file; with no root
-given, the claude-settings checkout and every sibling folder of it that has one), the session reads
+(lint/layout.py `live_pages`: the first link of the waiting-page entry in each repo's extras file, else its old
+`waiting-page` key; with no root given, the claude-settings checkout and every sibling folder of it that has one), the session reads
 the page with Artifact `read` and saves the text to <fetched-dir>/<artifact id>.html. A page it
 could not read gets an empty file <artifact id>.unreadable instead. A page that Artifact read
 reports as not found, and that this account's Artifact list (scope all) holds no id for, gets an empty
@@ -55,10 +55,10 @@ An item with `waits` keeps its one line. The word is
 `waiting` (the run or PR is still going), or `unknown` (gh missing, non-zero, timed out, not JSON, or a
 malformed `waits`; also an item past the WAIT_CAP-th call, which is not asked). The exit code stays the page verdict's.
 --answers, with --items, names the answers the session saved with `ArtifactData list answers`, in the same two shapes, read by the same
-loader (a list entry names its item in `item`, or is {"id", "data"}; a folder doc by its file name). After the wait and lane lines, one line per closed item,
+loader (a list entry names its item in `item`, or is {"id", "data"}; a folder doc by its file name). After the wait and lane lines, one line per open or closed item,
 in item order, whose answer is still kept: `kept-answer: item <n> (<id>) is closed and answers/<id> is kept`, then the remedy (delete
 the answer; a routed item stays closed). A closed item with `waits` prints `kept-answer: item <n> (<id>) is closed with waits and
-answers/<id> is kept`, then the remedy: when its wait has ended, drop `waits` and delete the answer; no gh call. Never named: an open item or one with no status,
+answers/<id> is kept`, then the remedy: when its wait has ended, drop `waits` and delete the answer; no gh call. An open item whose kept answer is older than its `added` (reopened or reworded, record left) prints `kept-answer: item <n> (<id>) is open and answers/<id> is older than its added`, then the remedy: re-read the answer, route it if new, then delete it. These lines come before the closed items' lines. Never named: an open item whose answer is not older than its `added` (awaiting filing), an item with no status,
 a closed item with a `lane` and a `lastAnswer` (routed: its answer stays until the done report), an item with `arbiter` true, a park answer (`park.<id>`, `parked: true` or `act: "park"`), an answer with no item. An unreadable file, a folder without the marker,
 unreadable items, an items folder without the marker, or --answers without --items print one `kept-answer: unknown (...)` line, with no other kept-answer line.
 The folder loader is export_page.docs_in, the one home of reading that folder.
@@ -66,9 +66,15 @@ Session-start mode, run by hooks/session_start.sh in a repo whose extras name a 
 
     python3 ~/.claude/skills/waiting-page/stale_pages.py --session-line <repo toplevel> [--main-checkout <dir>]
 
-It prints one line when the stamp an allowed publish wrote (<git common dir>/waiting-page-built, main's
-page.html blob sha) differs from main's blob sha, and nothing else: no stamp, or an unreadable main, prints
-nothing. It always exits 0. One python process and one read-only git process.
+Two stamps hold main's page.html blob sha at the last publish: the page-built stamp roadmap/data/meta/page-built.json on
+origin/roadmap of the repo (JSON {"blob", "at"}; triage writes it at each republish; the format is at RECORD_PATH below), and
+the local stamp an allowed publish wrote (<git common dir>/waiting-page-built). It prints nothing when either stamp equals
+main's blob sha, and the behind line when at least one stamp exists and none equals it. A missing or unreadable page-built
+stamp (no branch, no file, no parse, no 40-hex blob) leaves the local stamp alone: behind when it differs from main's blob,
+silent when equal. With no stamp at all, or a stamp with main unreadable, or a repo with no page in its extras, it prints
+nothing. It always exits 0. One python process and at most two read-only git
+processes: `git show` of the record in the repo, and the read of main's page.html in the claude-settings clone (two repos, so
+one process cannot read both).
 
 Parked mode, run by the writer at each wake when meta/page.parked is not empty (SKILL.md, "Route and close"):
 
@@ -106,7 +112,7 @@ own optional field in meta/page. The incident: an answer that sat unread 10.5 h 
 Write `read` and `filed` as ISO UTC with a trailing Z: a time with no zone is read in the host's zone.
 Cost: one python process, reads 4 files, writes none, starts no git, no timer.
 
-Cost: one python process, at most one read-only git process (no fetch, no network, 30 s cap), no
+Cost: one python process, at most one read-only git process (no fetch, no network, 30 s cap; --session-line at most two, see its mode), no
 extra process for --answers (it reads one more file, a folder one per answer), no
 file written without --write, no timer, thread or child left running. Single-page mode never imports `layout`; batch and session-line modes do.
 Without --items: 0 gh processes. With it: one gh process per open item with a `waits` field, at most WAIT_CAP, each
@@ -417,18 +423,45 @@ def read_published(root):
         return None
 
 
+# The page-built stamp: triage writes it on the record branch at each republish of the live page, after the publish
+# succeeds, so a fresh cloud container (no local stamp) can read it. JSON {"blob": ..., "at": ...}.
+#   blob: the 40-hex git blob sha of skills/waiting-page/page.html at origin/main at the republish (what read_origin_main
+#         returns as its sha; `git rev-parse origin/main:skills/waiting-page/page.html`). Written only from a real
+#         republish: a stamp for a build that did not happen would hide a stale page.
+#   at:   the republish time, ISO 8601 with the US Central offset, e.g. 2026-11-15T01:23:00-06:00. Informational: no reader reads it.
+RECORD_REF = "origin/roadmap"
+RECORD_PATH = "roadmap/data/meta/page-built.json"
+
+
+def read_record_stamp(root):
+    """The blob sha in the page-built stamp on origin/roadmap of `root`, or None: no branch, no file, unparseable text and a
+    missing or non-hex `blob` all read as missing. One git process, read only."""
+    try:
+        import _nowindow  # the one home of a no-window child start, as read_origin_main
+        done = _nowindow.run(["git", "-C", root, "show", "%s:%s" % (RECORD_REF, RECORD_PATH)],
+                             capture_output=True, timeout=GIT_TIMEOUT, stdin=subprocess.DEVNULL)
+        if done.returncode != 0:
+            return None
+        blob = json.loads(done.stdout.decode("utf-8", errors="replace")).get("blob")
+    except (ImportError, OSError, subprocess.SubprocessError, ValueError, AttributeError):
+        return None
+    return blob.strip() if isinstance(blob, str) and re.fullmatch(r"[0-9a-f]{40}", blob.strip()) else None
+
+
 def session_line(root, main_checkout=None):
-    """One line naming the repo's waiting page as behind when the stamp differs from main's blob, else "".
-    No stamp, or an unreadable main, gives "": an unread state is never reported as behind."""
-    stamp = read_stamp(root)
-    if not stamp:
-        return ""
-    blob = main_blob(main_checkout)
-    if not blob or blob == stamp:
-        return ""
-    import layout  # only for a repo that has a stamp
+    """One line about the repo's page, or "". A repo with no page in its extras gives "". No stamp gives "": an unread state is
+    never reported as behind. Either stamp (the page-built stamp on origin/roadmap, the local stamp) equal to main's blob gives
+    "". Otherwise the behind line. A missing or unreadable page-built stamp leaves the local stamp alone (decision
+    page-stale-publish). With stamps but main unreadable, "" too."""
+    import layout
     url = layout.waiting_page(root)
     if url == "unknown":
+        return ""
+    stamps = [x for x in (read_record_stamp(root), read_stamp(root)) if x]
+    if not stamps:
+        return ""
+    blob = main_blob(main_checkout)
+    if not blob or blob in stamps:
         return ""
     return ("waiting page %s is behind main's page.html: it was last published from another version. "
             "The writer runs stale_pages.py --page <file> --write <out> and publishes <out> "
@@ -549,10 +582,12 @@ def wait_lines(items, complete=True):
 
 
 def kept_answer_lines(items, answers, complete=True, answers_complete=True):
-    """One line per closed item, in item order, whose answer is still kept: the writer re-reads answers/<id>, then deletes it
+    """One line per open or closed item, in item order within each group, whose answer is still kept: the writer re-reads answers/<id>, routes it if new, then deletes it
     (SKILL.md, "Route and close"). `items` and `answers` are (doc id, data) pairs from load_docs. A closed item with `waits` and a kept answer (a chat
-    answer can close an item during a wait) gets its own line, "is closed with waits", whose remedy waits for the wait to end; no gh call. Never an open
-    item, an arbiter ruling (its overturn answer is read by its own route), a park answer, an answer with no item, or a routed closed item (a
+    answer can close an item during a wait) gets its own line, "is closed with waits", whose remedy waits for the wait to end; no gh call. An open
+    item gets a line, "is open", only when its kept answer is older than its `added` (a reopened item the writer left a stale record on); an open item
+    with a newer record is awaiting filing and is never named. The "is open" lines come first, then the closed lines; each group is in item order.
+    Never an arbiter ruling (its overturn answer is read by its own route), a park answer, an answer with no item, or a routed closed item (a
     non-empty string `lane` and a `lastAnswer` object: its answer stays until the done report).
     With `complete` or `answers_complete` False (that folder may be cut short), one unknown line naming it."""
     if not (complete and answers_complete):
@@ -566,12 +601,20 @@ def kept_answer_lines(items, answers, complete=True, answers_complete=True):
         if (isinstance(doc_id, str) and not doc_id.startswith("park.") and data.get("parked") is not True
                 and data.get("act") != "park"):
             kept[doc_id] = data
-    lines = []
+    lines, reopened = [], []
     for doc_id, item in items:
         if not isinstance(item, dict):
             continue
         item_id = doc_id if doc_id is not None else item.get("id")  # the file name is the doc id, as for the answers
-        if item.get("status") != "closed" or item.get("arbiter") is True or item_id not in kept:
+        if item.get("arbiter") is True or item_id not in kept:
+            continue
+        if item.get("status") != "closed":
+            # An open item is named only when its kept answer is older than its `added`: the writer reopened or reworded it and left the record.
+            # A newer record is the owner's answer awaiting filing. An unreadable time names nothing.
+            answered, added = parse_utc(kept[item_id].get("at")), parse_utc(item.get("added"))
+            if item.get("status") == "open" and answered is not None and added is not None and answered < added:
+                reopened.append('kept-answer: item %s (%s) is open and answers/%s is older than its added; re-read answers/%s, route it if new, then delete it '
+                             '(SKILL.md, "Route and close")' % (item.get("n", item_id), item_id, item_id, item_id))
             continue
         if isinstance(item.get("lane"), str) and item["lane"] and isinstance(item.get("lastAnswer"), dict):
             continue  # routed: closed at routing, answer kept until the receiver's done report
@@ -581,13 +624,13 @@ def kept_answer_lines(items, answers, complete=True, answers_complete=True):
         else:
             lines.append('kept-answer: item %s (%s) is closed and answers/%s is kept; re-read answers/%s, then delete it '
                          '(SKILL.md, "Route and close")' % (item.get("n", item_id), item_id, item_id, item_id))
-    return lines
+    return reopened + lines  # the stale open items lead, as they hold the page's wrong state
 
 
 def single_page(argv):
     """Exit 0 current, 1 behind, 2 unknown for one fetched page. Writes a file only with --write, never on unknown.
     With --items, prints after the verdict line one wait line per open item with a `waits` field, and one lane line per open
-    item with a `lane` and a `lastAnswer` and no `waits`. With --answers too, one kept-answer line per closed item whose answer is kept.
+    item with a `lane` and a `lastAnswer` and no `waits`. With --answers too, one kept-answer line per closed item whose answer is kept, and per open item whose answer is older than its `added`.
     The exit code stays the verdict's."""
     ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
     ap.add_argument("--page", required=True)
