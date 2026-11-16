@@ -3029,6 +3029,16 @@ class CannotClaimTests(trg.SameTurnWriter, unittest.TestCase):
         out = self.stop([trg.human("import it"), trg.assistant_text(line)])
         self.assert_passes(out, "a probe claim that says unchecked inside its sentence")
 
+    # ---- The design-talk false alarms, pinned at their current verdict.
+
+    def test_cc_pin_design_talk_false_alarms_keep_their_probe_block(self):
+        # Pins the current verdict of the four false alarms of the cant-claim-design-talk debt: each blocks as a probe claim
+        # with no call in its turn. The debt retires them as passes. When it does, this pin goes red and is re-pointed to passes.
+        for line in DESIGN_TALK_FALSE_ALARMS:
+            with self.subTest(line=line):
+                out = self.stop([trg.human("what should the guard do?"), trg.assistant_text(line)])
+                self.assert_probe_blocked(out, line)
+
 
 if __name__ == "__main__":
     unittest.main()
