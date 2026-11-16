@@ -1486,6 +1486,12 @@ CAP_ASK_REASON = (
     "time shown here is the one you want. "
     "(decision agent-model-cap, the owner's cap on the agent model lifts only with his word)"
 )
+CAP_END_ASK_REASON = (
+    "Rule (configuration): this write sets the cap-lift end, the time until which a project's "
+    "settings lift the owner's cap on the agent model. Requested: {change}. File: {where}. "
+    "Approve it only when the cap lift's end time shown here is the one you want. "
+    "(decision opus-grant-expires, the cap lift ends at a set time; decision agent-model-cap, the owner's cap on the agent model lifts only with his word)"
+)
 from shared_names import CAP_DEADLINE_FIELD, parse_deadline  # noqa: E402  the one home of the cap-lift deadline's field name, shared with hooks/config_watch.py
 
 # The cap-lift deadline a write sets: the field, then an ISO-8601 instant. Like AGENT_CAP_ASSIGN it reads a
@@ -1645,7 +1651,9 @@ def cap_deadline_text(parts) -> str:
     text = ""
     for part in parts:
         if isinstance(part, str):
-            for found in CAP_DEADLINE_ASSIGN.finditer(part):
+            # A double-quoted shell write spells each JSON quote as a backslash and a quote. One
+            # replace, linear, un-escapes it so the pattern reads the pair the file will hold.
+            for found in CAP_DEADLINE_ASSIGN.finditer(part.replace('\\"', '"')):
                 text = found.group(1)
     return text
 
@@ -1664,11 +1672,13 @@ def cap_deadline_end(parts) -> str:
     deadline = parse_deadline(text) if text else None
     if deadline is None:
         return ""
-    import local_time
     try:
+        import local_time   # inside the try: a missing file must reach the ask below, not main's fail-open
         if deadline < local_time.clock():
             return ""
         return local_time.central_full(deadline)
+    except ImportError:
+        return text + " (clock unreadable, so the Central time is not shown)"   # fail closed: the write still asks, with the raw end
     except (ValueError, OverflowError, TypeError):
         return ""
 
@@ -1769,15 +1779,16 @@ def cap_with_deadline(change: str, end: str) -> str:
     return (change + ", " if change else "") + "cap lift ends " + end + " (US Central)"
 
 
-def cap_ask_reason(change: str, where: str) -> str:
+def cap_ask_reason(change: str, where: str, end_only: bool = False) -> str:
     """Build the printed ask, BOUNDED BY CONSTRUCTION.
 
     The template is fixed, the change holds at most the cap's two keys with a value of at most
     CAP_MAX_VALUE characters each, and the path is cut at CAP_MAX_PATH. So the reason cannot run
     past roughly 800 characters however long the value or the path a tool passed. `cap_safe` does
-    the cleaning and marks each cut.
+    the cleaning and marks each cut. `end_only` is a write that sets the cap-lift end and no model:
+    it says so, and never says it sets the model cap.
     """
-    return CAP_ASK_REASON.format(change=cap_safe(change, CAP_MAX_CHANGE),
+    return (CAP_END_ASK_REASON if end_only else CAP_ASK_REASON).format(change=cap_safe(change, CAP_MAX_CHANGE),
                                  where=cap_safe(where, CAP_MAX_PATH))
 
 
@@ -5187,9 +5198,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # narrow, beats a bypass by a second segment.
     matched = shell_write_hit(raw, cwd, is_settings_file)
     if matched:
-        change = cap_with_deadline(cap_change(raw), cap_deadline_end(cap_sed_parts(raw, matched, cwd)))
+        model = cap_change(raw)
+        end = cap_deadline_end(cap_sed_parts(raw, matched, cwd))
+        change = cap_with_deadline(model, end)
         if change:
-            ask_command("agent-model-cap", cap_ask_reason(change, matched),
+            ask_command("agent-model-cap", cap_ask_reason(change, matched, end_only=not model),
                      log_path_and_text(matched, change), "settings write")
     settle_ask(tool, raw)
 
@@ -7510,10 +7523,10 @@ def judge(payload) -> None:
         # the alternative is a value test that a crafted spelling walks past. A write that does not
         # carry the name never fires, and no other file than a settings file reaches this rule.
         if is_settings_file(target, cwd):
-            change = cap_with_deadline(cap_change_parts(write_content_parts(tool_input)),
-                                       cap_deadline_end(cap_arriving_parts(tool_input, target, cwd)))
+            model = cap_change_parts(write_content_parts(tool_input))
+            change = cap_with_deadline(model, cap_deadline_end(cap_arriving_parts(tool_input, target, cwd)))
             if change:
-                refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, target),
+                refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, target, end_only=not model),
                        log_path_and_text(target, change))
     scratchpad_owner_write(payload, tool, tool_input, cwd)   # every refusal above passed: refuse an overwrite, else record the writer
 

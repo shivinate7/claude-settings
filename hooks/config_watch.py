@@ -365,10 +365,6 @@ def reading_text(reading) -> str:
 
 _MODEL_KEYS = ("CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL")
 EXPIRY_FIELD = CAP_DEADLINE_FIELD
-# The field's old name, read too until OLD_NAME_ENDS, so a deadline written before the rename still
-# counts. Delete both lines and the old name's reader on that day.
-OLD_EXPIRY_FIELD = "_subagentCapUntil"
-OLD_NAME_ENDS = "2026-11-09"
 
 
 # A `_FORCE` key is an on/off flag (decision `agent-model-cap`), so these values set no model.
@@ -436,13 +432,12 @@ def cap_expiry_location(content):
     if not isinstance(parsed, dict):
         return (None, None)
     env = parsed.get("env")
-    for field in (EXPIRY_FIELD, OLD_EXPIRY_FIELD):
-        value = parsed.get(field)
-        if isinstance(value, str):
-            return ("top", value)
-        value = env.get(field) if isinstance(env, dict) else None
-        if isinstance(value, str):
-            return ("env", value)
+    value = parsed.get(EXPIRY_FIELD)
+    if isinstance(value, str):
+        return ("top", value)
+    value = env.get(EXPIRY_FIELD) if isinstance(env, dict) else None
+    if isinstance(value, str):
+        return ("env", value)
     return (None, None)
 
 
