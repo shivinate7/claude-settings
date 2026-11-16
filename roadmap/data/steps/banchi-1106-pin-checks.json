@@ -2,14 +2,14 @@
  "id": "banchi-1106-pin-checks",
  "title": "Merge banchi #1106: pin .github/stamp.json requiredChecks to all-jobs-passed",
  "priority": "now",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/banchi",
  "phase": "now",
  "owner": "runner 12",
  "blockedBy": [],
- "updatedAt": "2026-11-15T19:42:00-06:00",
+ "updatedAt": "2026-11-15T20:07:00-06:00",
  "pr": 1106,
- "why": "[19:42 CST Nov 15, triage] Doing, owner runner 12. Merge shivinate7/banchi PR #1106 (head 0ec884639e5fa3e913d367cbea60a2532e5db015): a one-line change pinning .github/stamp.json merge.requiredChecks from \"protection\" to [\"all-jobs-passed\"]. Owner said \"yes on 905\" (relayed, 19:40 CST Nov 15; ruling own-905-a-banchi-1106-pin); the grant covers that PR only. Order: it merges before the owner removes the check from banchi's protection. Waiting page item 905 v2; runner 12's Sonnet round 2 PASS, comment 6904882124 (relayed, unverified by triage). Merge state not read by triage. (source: owner 19:40 CST Nov 15 (\"yes on 905\"), relayed by the consultant and the coordinator; not read by triage as typed) New step; no existing banchi step covers #1106 (searched steps).",
+ "why": "[19:42 CST Nov 15, triage] Doing, owner runner 12. Merge shivinate7/banchi PR #1106 (head 0ec884639e5fa3e913d367cbea60a2532e5db015): a one-line change pinning .github/stamp.json merge.requiredChecks from \"protection\" to [\"all-jobs-passed\"]. Owner said \"yes on 905\" (relayed, 19:40 CST Nov 15; ruling own-905-a-banchi-1106-pin); the grant covers that PR only. Order: it merges before the owner removes the check from banchi's protection. Waiting page item 905 v2; runner 12's Sonnet round 2 PASS, comment 6904882124 (relayed, unverified by triage). Merge state not read by triage. (source: owner 19:40 CST Nov 15 (\"yes on 905\"), relayed by the consultant and the coordinator; not read by triage as typed) New step; no existing banchi step covers #1106 (searched steps).\n\n[20:07 CST Nov 15, triage] DONE. banchi #1106 merged 20:05 CST Nov 15 by runner 12 on the owner's yes (ruling own-905-a-banchi-1106-pin; coordinator relay 19:42 CST). Runner 12's word via the coordinator, unread by triage (no banchi access): REST merged true, head 0ec884639e5f, banchi main tip e580239e2bb6, run 43787853534 green, lane lint skipped by the owner's skip ruling.",
  "source": "owner 19:40 CST Nov 15 (\"yes on 905\"), relayed by the consultant and the coordinator; not read by triage as typed",
- "note": "Doing, owner runner 12. Merge shivinate7/banchi PR #1106 (head 0ec884639e5fa3e913d367cbea60a2532e5db015): a one-line change pinning .github/stamp.json merge.requiredChecks from \"protection\" to [\"all-jobs-passed\"]. Owner said \"yes on 905\" (relayed, 19:40 CST Nov 15; ruling own-905-a-banchi-1106-pin); the grant covers that PR only. Order: it merges before the owner removes the check from banchi's protection. Waiting page item 905 v2; runner 12's Sonnet round 2 PASS, comment 6904882124 (relayed, unverified by triage). Merge state not read by triage."
+ "note": "Done. banchi #1106 merged 20:05 CST Nov 15 by runner 12 on the owner's yes (ruling own-905-a-banchi-1106-pin; coordinator relay 19:42 CST). Runner 12's word via the coordinator, unread by triage (no banchi access): REST merged true, head 0ec884639e5f, banchi main tip e580239e2bb6, run 43787853534 green, lane lint skipped by the owner's skip ruling. Merged before the check was removed from banchi's protection (the order point); whether the owner has removed it is unread."
 }

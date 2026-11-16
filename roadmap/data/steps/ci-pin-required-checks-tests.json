@@ -1,0 +1,15 @@
+{
+ "id": "ci-pin-required-checks-tests",
+ "title": "Fix-forward tests for the pin: PR #3567 re-points two stale tests",
+ "priority": "now",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "consultant",
+ "blockedBy": [],
+ "updatedAt": "2026-11-15T20:07:00-06:00",
+ "pr": 3567,
+ "why": "[20:07 CST Nov 15, triage] Todo, owner consultant. The consultant's fix-forward test PR #3567 (draft; head b97d632bf3908f8d04fda01dbd1b2258d9322bdd; 2 files, tests only), under the owner's 19:08 CST ruling own-all-jobs-passed-removed, class d. It re-points merge/test_merge.py:12356 and lint/test_windows_split.py:2473. #3469 waits on it. It is at the front of runner 10's queue (coordinator's word). Searched steps for test-pin-required-checks, #3567 and ci-pin: no step existed, so this is new. Related, done: merge-pin-required-checks (#3564, the pin itself). Triage did not read the PR. (source: coordinator 20:0x CST Nov 15, relaying the consultant; owner ruling own-all-jobs-passed-removed (19:08 CST, class d); not owner-typed here) The coordinator named branch test-pin-required-checks; no step by that name exists.",
+ "source": "coordinator 20:0x CST Nov 15, relaying the consultant; owner ruling own-all-jobs-passed-removed (19:08 CST, class d); not owner-typed here",
+ "note": "Todo, owner consultant. The consultant's fix-forward test PR #3567 (draft; head b97d632bf3908f8d04fda01dbd1b2258d9322bdd; 2 files, tests only), under the owner's 19:08 CST ruling own-all-jobs-passed-removed, class d. It re-points merge/test_merge.py:12356 and lint/test_windows_split.py:2473. #3469 waits on it. It is at the front of runner 10's queue (coordinator's word). Searched steps for test-pin-required-checks, #3567 and ci-pin: no step existed, so this is new. Related, done: merge-pin-required-checks (#3564, the pin itself). Triage did not read the PR."
+}
