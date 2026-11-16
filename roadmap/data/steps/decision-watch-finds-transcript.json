@@ -2,6 +2,7 @@
   "id": "decision-watch-finds-transcript",
   "title": "Decision watch finds the transcript by session id when the given path fails",
   "status": "doing",
+  "pr": 2769,
   "repo": "shivinate7/claude-settings",
   "phase": "next",
   "lane": "session_013NEJL1SWvL24cv7TG6nxAT",
