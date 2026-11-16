@@ -1,0 +1,58 @@
+{
+  "added": "2026-11-16T15:07:00-06:00",
+  "context": "Goal: the glued-& rebuild makes the check agree with one set of rows, not two.\nProblem (goal): pull request 2015, the earlier glued-& fix, carries test rows that disagree with main's rows for the same command in five groups (14 push rows, 4 owner-judge rows, 2 rule rows, 2 merge rows, 6 more rows), and your b pick on the glued-& question does not say how far it reaches into them.\nBased on (ruling): own-896-897-glued-amp-b, your b pick on the glued-& question.\nBased on (read): the lane's count of red rows by group, as it relayed at 15:01 CST; triage has not re-counted.\nDeparts from: main refuses or asks today in each of the five groups \u2014 option b follows the old pull request's row and loosens main there; option a changes nothing on main.\nMeanwhile: the lane builds only the families your b pick covers.",
+  "holds": "The lane builds only the families your b pick covers; the other red rows wait until you answer.",
+  "home": "step check-tail-amp-tidy; ruling own-896-897-glued-amp-b",
+  "kind": "decision",
+  "n": 927,
+  "options": [
+    {
+      "gain": "No refusal on main gets looser; the lane finishes without waiting.",
+      "how": "The lane keeps main's rows and drops the old pull request's conflicting rows.",
+      "id": "keep-main-rules",
+      "key": "a",
+      "label": "Main's rule wins every time",
+      "lose": "Your b pick covers less than you may have meant."
+    },
+    {
+      "gain": "Your b pick reaches every conflicting row.",
+      "how": "The lane changes main's rule to match each of the old pull request's rows.",
+      "id": "follow-2015-rows",
+      "key": "b",
+      "label": "The old row wins every time",
+      "lose": "Some refusals on main become allowed or asks."
+    },
+    {
+      "gain": "Each group gets the answer you want.",
+      "how": "The lane lists each group with both answers and you pick per group.",
+      "id": "rule-per-group",
+      "key": "c",
+      "label": "You rule each of the five groups",
+      "lose": "The red rows stay open until you answer five picks."
+    }
+  ],
+  "owner": "lane glued-amp-on-any-filter (session_013NEJL3C8YM2r4iexezbU7K); posted by triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
+  "recommended": "a",
+  "repo": "shivinate7/claude-settings",
+  "short": "Glued-& red rows scope",
+  "shown": [
+    {
+      "id": "keep-main-rules",
+      "key": "a",
+      "label": "Main's rule wins every time"
+    },
+    {
+      "id": "follow-2015-rows",
+      "key": "b",
+      "label": "The old row wins every time"
+    },
+    {
+      "id": "rule-per-group",
+      "key": "c",
+      "label": "You rule each of the five groups"
+    }
+  ],
+  "status": "open",
+  "title": "For the glued-& rebuild, when the old pull request 2015's test rows and main's rows give opposite answers for the same command, should main's rule win (a), the old row win (b), or do you rule per group (c)?",
+  "why": "The lane recommends a (its words, not yours): it loosens nothing on main."
+}
