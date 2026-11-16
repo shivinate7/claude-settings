@@ -1,0 +1,10 @@
+{
+ "id": "coordinator-close-drafts-on-closed-bases",
+ "at": "2026-11-16T00:10:00-06:00",
+ "title": "Close drafts whose base closed unmerged, naming the base (coordinator pick; not owner-typed)",
+ "ruling": "Coordinator pick, 00:10 CST Nov 16, relayed to triage 8: close, with the base named, the eight drafts that wait on a base closed unmerged, not rebase (a rebase needs a lane and no lane has a live session; owner 14:10 CST: no new lane sessions). Conditions: read each base by REST at close time and skip a draft whose base is merged or has a merged successor; delete no branch; one comment per PR naming the base and \"reopen to revive\". Not owner-typed; undoable (a close can be reopened). Done by triage 8 at 00:12 CST Nov 16, each base read by REST (merged false) and a search for merged PRs naming each base. Closed (6): #2855 (base #2826), #2808 (#2795), #2763 (#2762), #3336 (stacked on #3281), #2987 (stacked on #2938), #2912 (stacked on #2909). Skipped (2): #2717 and #2716, whose base #2715 has a merged successor, #3214 (\"replaces #2715\", merged 2026-11-15 06:59 CST, same head 38082ba61); the coordinator decides those two (retarget to main).",
+ "quote": "",
+ "source": "Coordinator message to triage 8, 00:10 CST Nov 16; done and filed by triage 8",
+ "status": "done",
+ "step": ""
+}
