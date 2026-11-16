@@ -13,7 +13,9 @@
 # and do not crash.
 #
 # NO CASE WAITS. The fake clock stands at 0 until the first `ls-tree` has run. Then it jumps by PROOF_TRIP_SECONDS, far
-# past any budget, so no case encodes a budget's value. The cases read answers and read counts, never seconds.
+# past any budget, so no case encodes a budget's value. The cases read answers and read counts, never seconds, except
+# the budget-against-timeout case at the end, which asserts only an inequality between the budget and the guard hook's
+# timeout, both read from settings.json.
 
 PD_MANY = 250  # past the 200 paths the removed cap held
 PD_EDITS = os.path.join(ROOT, "pd-edits")      # PD_MANY edits, each in no commit, on a pushed branch
@@ -281,6 +283,43 @@ def base_copies_readable_budget_control_case():
     return True, "a readable budget beside its settings.json lets the incident tree through"
 
 
+def _guard_row_timeout(settings):
+    """The timeout of the first PreToolUse hook that names /hooks/guard.py in SETTINGS: the row the proof reads. None
+    when the file cannot be read or that row has no numeric timeout. A second reader on purpose: _proof_budget returns
+    half this timeout, so reading the timeout through it would test the budget against itself."""
+    try:
+        with open(settings, encoding="utf-8") as f:
+            rows = json.load(f)["hooks"]["PreToolUse"]
+        for row in rows:
+            for hook in row["hooks"]:
+                if "/hooks/guard.py" in (hook.get("command") or ""):
+                    return float(hook["timeout"])
+    except Exception:
+        return None
+    return None
+
+
+def base_copies_budget_below_guard_timeout_case():
+    """The proof's budget is above zero and below the guard hook's own timeout, both read from the settings.json the
+    proof reads. A budget at or past that timeout is the hole this section guards: a timed-out guard lets the call
+    through. So `* 2` in place of `/ 2` (twice the timeout) fails this case. It asserts an inequality, not a number."""
+    git_reads = _load_git_reads()
+    settings = os.path.join(os.path.dirname(os.path.realpath(git_reads.__file__)), os.pardir, "settings.json")
+    timeout = _guard_row_timeout(settings)
+    if timeout is None:
+        return False, ("scope: %s has no PreToolUse row that names /hooks/guard.py with a numeric timeout, so there is "
+                       "no timeout to bound the budget against" % settings)
+    budget = git_reads._proof_budget()
+    if budget is None:
+        return False, ("_proof_budget answered None with the guard hook's timeout %g s read, want a number" % timeout)
+    if budget <= 0:
+        return False, "_proof_budget answered %g s, want above zero" % budget
+    if budget >= timeout:
+        return False, ("_proof_budget answered %g s, not below the guard hook's %g s timeout: a timed-out guard "
+                       "lets the call through" % (budget, timeout))
+    return True, "the proof's budget is above zero and below the guard hook's own timeout, both read from settings.json"
+
+
 for _label, _check in (
     ("base copies: 250 paths with an edit in no commit answer False and read no candidate tree",
      base_copies_edits_no_candidate_case),
@@ -301,6 +340,8 @@ for _label, _check in (
      base_copies_no_guard_row_budget_case),
     ("base copies: a readable budget beside its settings.json lets the incident tree through",
      base_copies_readable_budget_control_case),
+    ("base copies: the proof's budget is above zero and below the guard hook's timeout in settings.json",
+     base_copies_budget_below_guard_timeout_case),
 ):
     LOG_CHECKS_EXTRA.append((_label, _check))
     LOG_FAMILY[_label] = "branch-worktree"
