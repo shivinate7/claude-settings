@@ -1297,9 +1297,9 @@ jobs:
   shell-macos:
     runs-on: macos-latest
     needs: scope
-    if: ${{ github.event_name != 'push' && (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') }}
-    # A push to main starts no macOS runner, and a pull_request starts it only when its own flags are true: a step-level skip still starts a runner (R61).
-    # A schedule and a dispatch run it. all-jobs-passed reads the skip as green through scope-skips.
+    if: ${{ github.event_name != 'pull_request' && github.event_name != 'push' && (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') }}
+    # A push to main and a pull_request start no macOS runner (owner, 01:33 CST Nov 16: "turn off all mac runs for now"; a step-level skip still starts a runner (R61)).
+    # Only the daily schedule and a dispatch run it, with the scope flags below as before. all-jobs-passed does not need it, so its skip on a PR is no red.
     # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Newest 29 completed push runs on main, latest attempt of each (run 42445434802 to run 43184587111):
     # 29 green, median 23.0, slowest 31.3 min (run 43184587111). The stopgap ends with roadmap step time-pinned-tests-go.
     timeout-minutes: 75
@@ -1356,9 +1356,9 @@ jobs:
   checks-macos:
     runs-on: macos-latest
     needs: scope
-    if: ${{ github.event_name != 'push' && (needs.scope.outputs.checks_macos == 'true' || needs.scope.outputs.sweep == 'true' || github.event_name != 'pull_request') }}
-    # A push to main starts no macOS runner, and a pull_request starts it only when its own flags are true: a step-level skip still starts a runner (R61).
-    # A schedule and a dispatch run it. all-jobs-passed reads the skip as green through scope-skips.
+    if: ${{ github.event_name != 'pull_request' && github.event_name != 'push' && (needs.scope.outputs.checks_macos == 'true' || needs.scope.outputs.sweep == 'true' || github.event_name != 'pull_request') }}
+    # A push to main and a pull_request start no macOS runner (owner, 01:33 CST Nov 16: "turn off all mac runs for now"; a step-level skip still starts a runner (R61)).
+    # Only the daily schedule and a dispatch run it, with the scope flags below as before. all-jobs-passed does not need it, so its skip on a PR is no red.
     # Cap 75 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps: slowest 30.5 min
     # is 41% of it (range 14.3-30.5, median 19.4, n 30 green runs, same window as `checks`), after the split into
     # checks-macos and checks-macos-b. This job runs the janitor sweep mutation test on a pull request, a schedule and a dispatch when the scope
@@ -1607,9 +1607,9 @@ jobs:
   checks-macos-b:
     runs-on: macos-latest
     needs: scope
-    if: ${{ github.event_name != 'push' && (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') }}
-    # A push to main starts no macOS runner, and a pull_request starts it only when its own flags are true: a step-level skip still starts a runner (R61).
-    # A schedule and a dispatch run it. all-jobs-passed reads the skip as green through scope-skips.
+    if: ${{ github.event_name != 'pull_request' && github.event_name != 'push' && (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') }}
+    # A push to main and a pull_request start no macOS runner (owner, 01:33 CST Nov 16: "turn off all mac runs for now"; a step-level skip still starts a runner (R61)).
+    # Only the daily schedule and a dispatch run it, with the scope flags below as before. all-jobs-passed does not need it, so its skip on a PR is no red.
     # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The newest 29 completed push runs on main, latest attempt of each (run 42522167511 to run 43206612905):
     # 29 green, median 25.5, slowest 30.7 min (run 43197518392). The stopgap ends with roadmap step time-pinned-tests-go.
     # Unmeasured since R61: the guard shard left this job, so those 29 push runs no longer describe it.
@@ -2425,8 +2425,8 @@ jobs:
 
   # The one check branch protection requires. It fails on a needed job that failed, was cancelled or was
   # skipped, so every needed job runs on a ready PR and puts its scope condition on its steps, never on the job. The three macOS
-  # jobs are the exception: their job-level scope skip stops a runner that a step-level skip would still start, and scope-skips
-  # (actions/all-jobs-passed) names them so their skip reads as green only while scope succeeded with their flags false.
+  # jobs are the exception (owner, 01:33 CST Nov 16): they start on the daily schedule and a dispatch only, so a PR skips them and
+  # this job does not need them.
   # It runs on a ready pull_request only: on a push or a schedule it would read green over a red shard job it does not need.
   all-jobs-passed:
     runs-on: ubuntu-latest
@@ -2445,9 +2445,6 @@ jobs:
       - checks-shoot
       - checks-waiting-page
       - pointer-windows
-      - shell-macos
-      - checks-macos
-      - checks-macos-b
       - checks-windows
       - checks-mutate-guard
       - checks-mutate-guard-b
@@ -2474,7 +2471,6 @@ jobs:
       - uses: $/actions/all-jobs-passed
         with:
           needs: ${{ toJSON(needs) }}
-          scope-skips: '{"shell-macos":["shell_macos"],"checks-macos":["checks_macos","sweep"],"checks-macos-b":["checks_macos"]}'
 
   # Wakes a session that waits on this PR (decision ci-wait-reads-run-status, "The cloud wake").
   # A run with a red job sends no "all checks done" wake, so this job comments once when the run

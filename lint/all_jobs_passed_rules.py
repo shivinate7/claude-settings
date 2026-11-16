@@ -167,15 +167,15 @@ def steps_problems(text):
 
 
 def off_problems(text):
-    """Only a shard job may stay off all-jobs-passed. A needed job has no job-level if, except scope (its draft rule),
+    """Only a shard job or a macOS job (daily and dispatch only, owner 01:33 CST Nov 16) may stay off all-jobs-passed. A needed job has no job-level if, except scope (its draft rule),
     a macOS job (its scope skip, which scope-skips names), a Windows full shard (the draft guard) and a job on the R61 push-off
     list whose if is the push guard alone (owner page item 880, 11:53 CST Nov 15). all-jobs-passed runs on a pull_request only, a pull_request
     always runs a push-guarded job, so its skip is never read there; a shard keeps the draft guard beside the push guard."""
     jobs = all_jobs(text)
     needed, off, problems = split_jobs(text)
     for name in off:
-        if not shard_base(name):
-            problems.append(f"{name} is off all-jobs-passed but is not a shard: its job-level if skips it on a PR")
+        if not shard_base(name) and name not in MACOS_JOBS:
+            problems.append(f"{name} is off all-jobs-passed but is not a shard or a macOS job: its job-level if skips it on a PR")
     for name in needed:
         if shard_base(name):
             # R62: a Windows full shard runs on a ready pull request, so it is needed. Its job-level if is the draft guard only.
