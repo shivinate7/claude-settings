@@ -2,11 +2,11 @@
 
 ## Ruling
 
-Owner pick, waiting-page item 904, pick a (2026-11-15 19:13 CST): the old notes file, `docs/debts/notes.md`, takes deletes only. Every new note, and every edit of an old note, is its own file, `docs/notes/<slug>.md`. The old notes stay in that file: 2304 lines at 19:31 CST Nov 15. Moving them is a later step.
+Owner pick, waiting-page item 904, pick a (2026-11-15 19:13 CST): the old notes file, `docs/debts/notes.md`, takes deletes only. Every new note, and every edit of an old note, is its own file, `docs/notes/<slug>.md`. The old notes stay in that file: 2304 note lines, in 2313 lines in all, at 19:31 CST Nov 15. Moving them is a later step.
 
-Format. A note file is named `<slug>.md`. Its slug is `[a-z0-9-]`, at most 32 characters. It holds one line, `- <slug>: <text>`, and the slug on that line equals the file name. The text may hold an `Until:` marker. `docs/notes/README.md` is not a note.
+Format. A note file is named `<slug>.md`. Its slug is `[a-z0-9-]`, at most 32 characters, and not digits only: a digits-only slug would read as an old `note:<digits>` ref. It holds one line, `- <slug>: <text>`, and the slug on that line equals the file name. The text may hold an `Until:` marker. `docs/notes/README.md` is not a note.
 
-Check. `lint/check_record_slugs.py` refuses an added or edited line in the old file. It refuses a note file whose name is over 32 characters, one with no `- <slug>:` line, and one whose slug differs from its file name. A deleted line, a deleted or edited note file, and a valid new note file pass. The refusal names the notes folder, never the old file.
+Check. `lint/check_record_slugs.py` refuses a line of the old file whose count at head exceeds its count at the merge base. So a new line, an edited line and a second copy are refused. A moved line and a deleted line pass. It refuses a note file whose name is over 32 characters. It also refuses an added, renamed or edited note file in any of three cases: no `- <slug>:` line, a slug that differs from its file name, or a digits-only slug. A deleted note file and a valid note file pass. The refusal names the notes folder, never the old file.
 
 Merge. `.gitattributes` keeps its `merge=union` line for the old file while that file exists. A note file needs no merge line. `docs/records.md` and `docs/catalog.md` keep the default merge: they are generated tables with sections, and union would leave duplicate or stale rows silently. The merge tool rebuilds `docs/records.md` (decision records-index-at-merge, one records index page rebuilt at merge time).
 

@@ -31,8 +31,9 @@ the whole old read-only page. Nothing publishes it.
   first. Fetch the branch first, because the roadmap block is as old as the fetch.
 - `--block` needs `--out`, on either path.
 
-The record homes (decisions, debts, debt notes, plans, specs) come from the checkout, at the paths
-`lint/layout.py` gives. A home that is not there reads "unknown", never "none".
+The record homes (decisions, debts, debt notes, notes, plans, specs) come from the checkout, at the paths
+`lint/layout.py` gives. A home that is not there reads "unknown", never "none". The notes folder is optional in the
+layout, so a checkout without it reads "empty".
 
 ## Publish the roadmap block
 

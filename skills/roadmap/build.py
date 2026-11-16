@@ -499,15 +499,17 @@ def add_marks(marks, more):
 
 
 def homes(repo):
-    """{kind: (path, why)}: each HOMES kind's folder in the checkout, or None and why it is unknown."""
+    """{kind: (path, why)}: each HOMES kind's folder in the checkout, or None and why it is unknown. A layout kind set
+    "optional" has no folder in a checkout that never wrote one: that is empty, so its why is None."""
     try:
         sys.path.insert(0, str(LINT))
         import layout
+        optional = {name for name, kind in layout.kinds(str(repo)).items() if kind.get("set") == "optional"}
         found = {}
         for kind, _ in HOMES:
             paths = layout.candidates(str(repo), kind)
             hit = next((p for p in paths if (repo / p).exists()), None)
-            found[kind] = (hit, None if hit else "no %s in this checkout" % " or ".join(paths))
+            found[kind] = (hit, None if hit or kind in optional else "no %s in this checkout" % " or ".join(paths))
         return found
     except Exception as err:  # the layout is a shared file; any fault in it makes every home unknown
         return {kind: (None, "the layout could not be read: %s" % err) for kind, _ in HOMES}
@@ -861,7 +863,8 @@ def build_info(repo, source, why):
     for kind, name in HOMES:
         path, missing = found[kind]
         if path is None:
-            panels.append({"name": name, "kind": kind, "home": None, "read": "unknown (%s)" % missing})
+            panels.append({"name": name, "kind": kind, "home": None,
+                           "read": "unknown (%s)" % missing if missing else "empty (this checkout has no folder for it)"})
             continue
         read = head or "unknown (git could not name the commit)"
         if status is None:
