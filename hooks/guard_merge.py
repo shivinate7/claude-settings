@@ -738,9 +738,10 @@ CONFLICT_MARKERS_CHAIN_REASON = (
     "Remedy: run the push in a call of its own, after the commit has landed."
 )
 CONFLICT_MARKERS_CD_REASON = (
-    "Rule (Git, conflict-markers; ruling own-476-c-refuse-cd-missing-folder): the cd before this commit names a folder "
-    "that does not exist, so the shell stays where it was and the commit would run in that folder's repository, "
-    "which the guard did not judge. Remedy: check the folder path, or join the cd to the commit with `&&`, then retry."
+    "Rule (Git, conflict-markers; decision refuse-git-after-missing-cd; ruling own-476-c-refuse-cd-missing-folder): "
+    "the cd before this git write names a folder that does not exist, so the cd failed and the shell stays in the "
+    "current folder. The write would land in the current folder's repository, which is not the one you named. "
+    "Remedy: check the folder path, or join the cd to the git command with `&&`, then retry."
 )
 RED_RUN_PUSH_REASON = (
     "Rule (Git, red-run; decision red-run-trailer-on-test-commits): this push would send test commits with no "
@@ -1304,11 +1305,15 @@ def _after_missing_cd(segments, number, cwd, ends):
             and dir_before_segment(segments, number, cwd, ends) is None)
 
 
+# The git writes a failed `cd` redirects: each lands in the shell's old folder, which the guard did not judge.
+_CD_WRITE_VERBS = ("commit", "push", "merge")
+
+
 def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
     """Return `(kind, file)` for the first commit or push that would carry all three conflict markers
     in one file, else `('', '')`. The kind is `commit`, `push`, `chain` (a push after a commit the
-    guard could not judge; the file is then `git push`), or `cd` (a commit after a `cd` into a missing folder,
-    which the shell survives: the file is then `git commit`; the reason prints no folder, ruling own-476-c-refuse-cd-missing-folder). A push that carries no marker but sends a test
+    guard could not judge; the file is then `git push`), or `cd` (a commit, push, merge or `--continue` after a `cd` into a
+    missing folder, which the shell survives: the file is then `git <verb>`; the reason prints no folder, ruling own-476-c-refuse-cd-missing-folder). A push that carries no marker but sends a test
     commit with no valid Red-run trailer returns `('red-run', (found, last, rewritten))` (`_red_run_found`); a caller that
     passes no `is_test_rel` reads no red-run hit. A lone commit (no push after it in the call) that adds test lines with no
     valid trailer in its `-m` returns `('red-run-commit', (found, 'new', False))` (`_commit_red_run`). Each segment is judged from its own command word. `raw` is the
@@ -1329,6 +1334,9 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
             continue
         call = calls[number]
         before, heads_before = heads_before, heads_before + len(heredoc_heads(segment)[0])
+        if call is not None and (call[0] in _CD_WRITE_VERBS or _continues(call)) and _segment_git_c_target(segment_tokens(segment) or []) is None:
+            if _after_missing_cd(segments, number, cwd, ends) and _repo_of(repos, dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True)) is not None:
+                return "cd", "git " + call[0]
         if call is not None and call[0] == "push":
             if blind_commit and (blind_triplet or conflict_step):
                 return "chain", "git push"
@@ -1360,8 +1368,6 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
         repo = _repo_of(repos, where)
         if repo is None:
             continue
-        if call[0] == "commit" and c_target is None and _after_missing_cd(segments, number, cwd, ends):
-            return "cd", "git commit"
         top, has_head = repo
         taken, pending = pending, []   # this commit takes the adds so far; the next starts clean
         wholes, adds = set(), []   # tops an add stages whole / (where, top, specs) of adds that name paths
