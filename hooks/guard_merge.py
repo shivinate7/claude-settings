@@ -768,7 +768,8 @@ OCTOPUS_PUSH_REASON = (
     "Rule (Git, octopus-push; decision octopus-push-refused): this push would send {sha}, a merge commit of more than two parents. "
     "Remedy: redo that merge as a chain of two-parent merges, then retry the push."
 )
-OCTOPUS_PUSH_STALE = " The remote's tracking refs could not be refreshed, so a merge the remote already holds may show as new."
+OCTOPUS_PUSH_STALE = (" The remote's tracking refs could not be refreshed, so a merge the remote already holds may show as new."
+                      " Run `git fetch <remote>` and push again. If the octopus is still listed, redo it as two-parent merges.")
 _READ_VERBS = ("status", "diff", "log", "show")
 _CONTINUE_VERBS = ("merge", "rebase", "cherry-pick")
 _CONFLICT_VERBS = ("merge", "pull", "rebase", "cherry-pick", "am")
