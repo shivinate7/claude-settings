@@ -215,21 +215,30 @@ oct_allow("a dry run, -n, of a push with a three-parent merge in the range",
           VCS + " push -n origin topic", OCT_THREE)
 
 
+def octopus_remedy_fault(reason):
+    """What is wrong with an octopus-push refusal's remedy, or "" when it is right. The remedy is the text after the
+    `Remedy:` label, in lower case: it names the two-parent form and never the forbidden target
+    (git-remedy-never-names-target). The rule's name sits in the reason's header, so only the remedy is read."""
+    remedy = reason.lower().partition("remedy:")[2]
+    if "two-parent" not in remedy:
+        return "the remedy does not name the two-parent form: %s" % reason[:90]
+    if OCT_TARGET_WORD in remedy:
+        return "the remedy names the forbidden target %r: %s" % (OCT_TARGET_WORD, remedy[:90])
+    return ""
+
+
 def octopus_remedy_case():
     """The octopus-push refusal names the two-parent form in its remedy, and never the forbidden target
-    (git-remedy-never-names-target). The rule's name sits in the reason's header, so the target word is read
-    only after the `Remedy:` label, in lower case."""
+    (git-remedy-never-names-target)."""
     got, reason = decide({
         "raw": None, "tool": "Bash", "cwd": OCT_THREE, "session": None,
         "env_path": None, "tool_input": {"command": VCS + " push"},
     })
     if got != "deny":
         return False, "expected deny, got %s" % got
-    remedy = reason.lower().partition("remedy:")[2]
-    if "two-parent" not in remedy:
-        return False, "the remedy does not name the two-parent form: %s" % reason[:90]
-    if OCT_TARGET_WORD in remedy:
-        return False, "the remedy names the forbidden target %r: %s" % (OCT_TARGET_WORD, remedy[:90])
+    fault = octopus_remedy_fault(reason)
+    if fault:
+        return False, fault
     leak = names_the_target(reason, OCT_RULE)
     if leak:
         return False, "the reason names the forbidden target %r" % leak

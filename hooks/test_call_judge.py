@@ -205,7 +205,8 @@ def record_branch_checkout():
     git(repo, "checkout", "-q", "-b", "main")
     os.makedirs(os.path.join(repo, ".claude"))
     with open(os.path.join(repo, ".claude", "layout-extras.json"), "w", encoding="utf-8") as f:
-        json.dump({"kinds": {}, "artifacts": [{"id": "queue", "url": PAGE_URL, "role": "waiting-page", "account": "current"}]}, f)
+        json.dump({"kinds": {}, "artifacts": [{"id": "queue", "role": "waiting-page", "export": "waiting",
+                                               "links": [{"account": "current", "url": PAGE_URL}]}]}, f)
     git(repo, "add", ".claude/layout-extras.json")
     git(repo, "commit", "-q", "-m", "extras")
     git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
