@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# The stable mover (actions/stable-mover/run.sh) moves stable to a green main head, fast-forward only. It moves only on
-# proof that covers the slow legs (owner page item 880, 11:53 CST Nov 15): a green schedule run, or a green push run that
-# push-skip proved (RUN_PROVEN=true). It leaves stable alone on a Linux-only green push run, on a run with no event, on a
-# failed run, on a head that does not descend from stable, on a head that origin's main lacks, and on a head behind
-# stable (exit 0). It creates stable when origin has none, and exits 2 (UNKNOWN) when origin cannot be read. Run in a
-# checkout whose origin is the fixture, with HEAD_SHA, RUN_CONCLUSION, RUN_EVENT and RUN_PROVEN set.
+# The stable mover (actions/stable-mover/run.sh) moves stable to a green main head, fast-forward only. It moves on a green
+# push run or a green schedule run (owner, 12:59 CST Nov 16: stable follows each green push run of main, for now). It leaves
+# stable alone on a failed run, on a run with no event, on a head that does not descend from stable, on a head that origin's
+# main lacks, and on a head behind stable (exit 0). It creates stable when origin has none, and exits 2 (UNKNOWN) when origin
+# cannot be read. Run in a checkout whose origin is the fixture, with HEAD_SHA, RUN_CONCLUSION and RUN_EVENT set.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
@@ -64,8 +63,7 @@ run_mover() {
   mover_rc=$?
 }
 
-# Re-pointed (owner page item 880, 11:53 CST Nov 15): every case that expects a move names a run that covers the slow legs, a green
-# schedule run, so the case keeps its claim. The Linux-only push case below is the one that moves nothing.
+# A green push run and a green schedule run both move stable (owner, 12:59 CST Nov 16). The Linux-only push case below moves it too.
 scenario success "$base"
 control "a green run: the fixture stable is the old base" "$(origin_sha "$origin" stable)" "$base"
 control "a green run: the fixture main is the green head" "$(origin_sha "$origin" main)" "$green"
@@ -79,10 +77,10 @@ control "a Linux-only push run: the fixture stable is the old base" "$(origin_sh
 control "a Linux-only push run: the fixture main is the green head" "$(origin_sha "$origin" main)" "$green"
 run_mover "$ws" "$green" success push false
 got=$(origin_sha "$origin" stable)
-if [ "$got" = "$base" ]; then ok "a green Linux-only push run leaves stable where it was"
-else fail "Linux-only push: stable moved on a green push run that did not cover the slow legs (stable at $got, wanted $base)"; fi
-if [ "$mover_rc" -eq 1 ]; then ok "a green Linux-only push run is refused with exit 1"
-else fail "Linux-only push: the mover exited $mover_rc, wanted 1 (refused, not UNKNOWN)"; fi
+if [ "$got" = "$green" ]; then ok "a green Linux-only push run fast-forwards stable to the green head"
+else fail "Linux-only push run: stable did not move to the green head (stable at $got, wanted $green)"; fi
+if [ "$mover_rc" -eq 0 ]; then ok "a green Linux-only push run that fast-forwards stable exits 0"
+else fail "Linux-only push run: the mover exited $mover_rc, wanted 0"; fi
 
 scenario proven "$base"
 control "a proven push run: the fixture stable is the old base" "$(origin_sha "$origin" stable)" "$base"
