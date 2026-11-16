@@ -1,15 +1,15 @@
 {
  "id": "export-holds-every-record",
  "title": "The export holds every record",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "lane": "session_013NEJL1Qfnv7hnVTmkR9NTZ",
  "owner": "triage",
  "blockedBy": [],
- "why": "12:43 CST Nov 15 (coordinator, relayed; its pick, none owner-typed, undoable; triage read no lane): NEW step, lane session_013NEJL1Qfnv7hnVTmkR9NTZ started, doing now. PR #3468. Guard or check: yes. Triage's reading: the export is a check on what the records hold (reading from the name; unverified).\n\n[21:03 CST Nov 15, triage] Owner's class yes 906 b (page save about 21:02 CST Nov 15, time approximate; ruling own-906-b-page-prs-class; relayed by the coordinator, not read by triage): runner 10 merges PR #3468 at its live head when its lane lint passes and the record is at that head. Status unchanged.",
- "note": "The export holds every record. Guard or check: yes. Lane session_013NEJL1Qfnv7hnVTmkR9NTZ. PR #3468.",
+ "why": "12:43 CST Nov 15 (coordinator, relayed; its pick, none owner-typed, undoable; triage read no lane): NEW step, lane session_013NEJL1Qfnv7hnVTmkR9NTZ started, doing now. PR #3468. Guard or check: yes. Triage's reading: the export is a check on what the records hold (reading from the name; unverified).\n\n[21:03 CST Nov 15, triage] Owner's class yes 906 b (page save about 21:02 CST Nov 15, time approximate; ruling own-906-b-page-prs-class; relayed by the coordinator, not read by triage): runner 10 merges PR #3468 at its live head when its lane lint passes and the record is at that head. Status unchanged.\n\n[10:00 CST Nov 16, triage] PR #3468 merged to main at 09:59:52 CST (REST read by triage 10:00 CST; head 6bf1ed2af, merger shivinate7; triage read no diff). Its body says the real export run and the five other collections' mirror-delete are follow-ups, not in this PR. This is page PR 4 of the eight (906 b).",
+ "note": "Done. PR #3468 merged 09:59:52 CST Nov 16 (REST). The export holds every receipt as a sixth collection. The real export run and the mirror-delete follow-up are not in it. Guard or check: yes. Lane session_013NEJL1Qfnv7hnVTmkR9NTZ.",
  "order": -300,
  "pr": 3468,
- "updatedAt": "2026-11-15T21:03:00-06:00"
+ "updatedAt": "2026-11-16T10:00:06-06:00"
 }
