@@ -15,10 +15,11 @@ The guard refuses a git write after a `cd` only when the `cd` names a folder tha
 
 PR 3594 (draft, open, not on main) builds the ruling. Until it merges, main does not refuse this write.
 
-- Rule `conflict-markers` refuses a `git commit` only. Push, merge, `--continue` and an add with no commit are not refused. The build covers less than the ruling.
-- A commit that names its folder with `-C` is not refused, because `-C` does not depend on the `cd`.
-- The refusal names no folder. Its remedy says to check the path, or to join the `cd` to the commit with `&&`.
-- Protected by the cases in `tests/guard/s17500-conflict-markers.py` named "a cd into a missing folder, then ; add -A and commit, in a cwd repo whose edit is clean", with its control "a cd into an existing folder, then ; add -A and commit, in a cwd repo whose edit is clean". Red before the rule: 1 failed on the base commit 4680473b0c.
+- Rule `conflict-markers` refuses every git write in `GIT_WRITES`: add, commit, push, merge, pull, rebase, cherry-pick, `--continue`, reset and the rest. A git read, such as status, passes. The list counts `stash list`, `tag -l` and `config --get` as writes, so those are refused too.
+- A folder that an earlier part of the same call makes counts as present: a `mkdir`, a `git clone` or a `git worktree add`. A failed `cd` then `|| exit` or `|| return` ends the shell, so nothing after it runs and the call passes.
+- A git write that names its folder with `-C` is not refused, because `-C` does not depend on the `cd`.
+- The refusal names no folder. Its remedy says to check the path, or to join the `cd` to the git command with `&&`.
+- Protected by the cases in `tests/guard/s17500-conflict-markers.py` named "a cd into a missing folder, then ; add -A and commit, in a cwd repo whose edit is clean", with its control "a cd into an existing folder, then ; add -A and commit, in a cwd repo whose edit is clean". Red before the rule: 1 failed on the base commit 4680473b0c. The cases beside them cover each other write, the made folders and `|| exit`.
 
 Kind: process
 Home: hooks/guard_merge.py
