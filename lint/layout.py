@@ -283,13 +283,14 @@ WAITING_ROLE = "waiting-page"  # the role of the registry entry that is the repo
 ARTIFACT_ID = re.compile(r"[A-Za-z0-9_-]{1,32}")  # a slug of 32 characters or fewer, as a record slug is (git-slug-then-claim-number)
 ROLE = re.compile(r"[a-z0-9][a-z0-9-]*")
 COLLECTION = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
-WAITING_COLLECTIONS = ("items", "answers", "groups", "asks", "meta")  # what the waiting page's database holds
+RECEIPTS = "receipts"  # the append-only collection: the waiting page's export never drops it, whatever an entry lists
+WAITING_COLLECTIONS = ("items", "answers", "groups", "asks", "meta", RECEIPTS)  # what the waiting page's database holds
 
 
 def artifacts(root):
     """[{id, role, links, collections, export}] from the "artifacts" key of `root`'s extras file, in order; []
     for a repo with no extras file or no key. `export` is required: the entry's git path, or false. `collections` is
-    filled in for the waiting-page role, as the five waiting collections; any other role needs its own `collections`. A page-only entry (any other role, `"collections": []`) exports its page
+    filled in for the waiting-page role, as the six waiting collections; any other role needs its own `collections`. A page-only entry (any other role, `"collections": []`) exports its page
     and files and no database; an empty list is refused on the waiting-page role, and a missing key on any other. An entry with `"export": false` (never the waiting-page role) is held and never exported: it needs
     no collections and reads with `export` False and `collections` []. LayoutError, naming the entry by its id, for an email as an account label, a
     repeated id, an id over 32 characters, a link url that is no artifact link, an entry-level `url` or `account`, a second waiting-page role or an unsafe path."""
@@ -361,6 +362,8 @@ def _registry(root, found, where):
             names = list(WAITING_COLLECTIONS)
         else:
             raise LayoutError("%s: %s (id %s) has no collections to export" % (where, label, entry_id))
+        if role == WAITING_ROLE and RECEIPTS not in names:  # an entry listing the old five still exports receipts
+            names = list(names) + [RECEIPTS]
         if no_export:
             target = False
         else:

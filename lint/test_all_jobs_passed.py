@@ -193,6 +193,11 @@ def planned_nightly_skip(text):
     return text.replace("\n  checks:\n", "\n" + SKIP_JOB + "  checks:\n", 1)
 
 
+# checks-hooks' header and its job-level if in checks.yml. A case swaps that if line for its own, so the subject is the job's one if.
+HOOKS_HEAD = "  checks-hooks:\n\n    runs-on: ubuntu-latest\n    needs: scope\n"
+HOOKS_IF = "    if: ${{ needs.scope.outputs.records_only_skip != 'true' }}\n"
+
+
 class PushOffRollup(unittest.TestCase):
     """Owner page item 880 (11:53 CST Nov 15): a Windows or mutation job keeps the push guard, `github.event_name != 'push'`, as its
     job-level if. all-jobs-passed runs only on a pull_request, and a pull_request runs every such job, so the rollup still needs it and
@@ -263,9 +268,8 @@ class MacOnceByBatchRollup(unittest.TestCase):
 
     def test_a_flag_reading_job_level_if_on_a_job_with_no_macos_role_is_flagged(self):
         # Control: a job-level if that reads a scope flag is refused on a needed job that is no macOS job.
-        anchor = "  checks-hooks:\n"
-        self.assertEqual(self.text.count(anchor), 1, "checks-hooks' header changed: this case must follow it")
-        text = self.text.replace(anchor, anchor + "    if: ${{ needs.scope.outputs.checks_macos == 'true' }}\n", 1)
+        self.assertEqual(self.text.count(HOOKS_HEAD + HOOKS_IF), 1, "checks-hooks' header changed: this case must follow it")
+        text = self.text.replace(HOOKS_HEAD + HOOKS_IF, HOOKS_HEAD + "    if: ${{ needs.scope.outputs.checks_macos == 'true' }}\n", 1)
         self.assertTrue(off_problems(text) or needs_problems(text), "a flag-reading job-level if on an unnamed job passes the rollup rules")
 
 
@@ -370,9 +374,8 @@ class DailyOnlyWiring(unittest.TestCase):
 
     def test_a_job_level_if_on_a_job_that_is_no_macos_job_and_runs_on_a_pull_request_is_flagged(self):
         # Control: a needed job with a job-level if that is no macOS job is refused, since all-jobs-passed would read its skip as red.
-        anchor = "  checks-hooks:\n"
-        self.assertEqual(self.text.count(anchor), 1, "checks-hooks' header changed: this case must follow it")
-        text = self.text.replace(anchor, anchor + "    if: ${{ github.event_name != 'push' }}\n", 1)
+        self.assertEqual(self.text.count(HOOKS_HEAD + HOOKS_IF), 1, "checks-hooks' header changed: this case must follow it")
+        text = self.text.replace(HOOKS_HEAD + HOOKS_IF, HOOKS_HEAD + "    if: ${{ github.event_name != 'push' }}\n", 1)
         clean = all_problems(self.text)
         self.assertTrue([p for p in all_problems(text) if p not in clean], "a needed job with a job-level if passes the rules")
 

@@ -143,6 +143,17 @@ skips_case fail "SCOPE_SKIPS empty: a skipped macOS job stays red" "" "$SKIPS_OF
 SCOPE_ON='"scope":{"result":"success","outputs":{"shell_macos":"true","checks_macos":"true","sweep":"true"}}'
 MAC_OK='"shell-macos":{"result":"success"},"checks-macos":{"result":"success"},"checks-macos-b":{"result":"success"}'
 skips_case pass "map set, scope success, flags true, macOS jobs succeeded: a green run passes" "$map_json" "{$SCOPE_ON,$MAC_OK,$LINT_OK}"
+# (g) a records-only run (ruling 830 c, widened by item 857 pick b, 19:48 CST Nov 15): the scope job reads records_only_skip
+# "true", and every job the run did not start is skipped. Those skips pass, so the rollup passes. The controls: the same skips
+# stay red when records_only_skip is not "true", when a needed job failed, and when the scope job did not succeed.
+RECORDS_ONLY='"scope":{"result":"success","outputs":{"records_only_skip":"true","shell_macos":"false","checks_macos":"false","sweep":"false"}}'
+RECORDS_NOT_ONLY='"scope":{"result":"success","outputs":{"records_only_skip":"false","shell_macos":"false","checks_macos":"false","sweep":"false"}}'
+RECORDS_SCOPE_FAILED='"scope":{"result":"failure","outputs":{"records_only_skip":"true","shell_macos":"false","checks_macos":"false","sweep":"false"}}'
+RECORDS_JOBS_SKIPPED='"checks":{"result":"skipped"},"checks-hooks":{"result":"skipped"},"checks-windows-guard":{"result":"skipped"},"checks-windows":{"result":"skipped"}'
+skips_case pass "records-only run: every job the run did not start passes as skipped" "$map_json" "{$RECORDS_ONLY,$MAC_SKIPPED,$RECORDS_JOBS_SKIPPED,$LINT_OK}"
+skips_case fail "records-only flag not true: the same skipped jobs stay red" "$map_json" "{$RECORDS_NOT_ONLY,$MAC_SKIPPED,$RECORDS_JOBS_SKIPPED,$LINT_OK}"
+skips_case fail "records-only run with a failed needed job: the rollup stays red" "$map_json" "{$RECORDS_ONLY,$MAC_SKIPPED,$RECORDS_JOBS_SKIPPED,\"checks-windows\":{\"result\":\"failure\"},$LINT_OK}"
+skips_case fail "records-only run with the scope job failed: the skipped jobs stay red" "$map_json" "{$RECORDS_SCOPE_FAILED,$MAC_SKIPPED,$RECORDS_JOBS_SKIPPED,$LINT_OK}"
 # (i) action.yml declares scope-skips as an optional input with default '', and its one step passes it to check.sh as SCOPE_SKIPS.
 inputs_static() { # inputs_static <action.yml>: one line per problem, none when clean
   python3 -I - "$1" <<'PY'
