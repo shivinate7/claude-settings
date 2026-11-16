@@ -19,7 +19,10 @@
                           marked ready, and no flag lifts it. A repo with no list runs no ready check, and one line says so.
                           Cost per draft-step ready: one ci-job run per job of the list, and one worktree; the run time is unmeasured for a step subset
                           (the 3600 s lint bound applies), and a head that lacks the default base's tip adds one merge commit, one more local `git merge` start and one push even when its page is current (a head that holds the tip with a current page pushes none; any head pushes at most once). No new file but ci-job's own log.
-                          On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
+                          On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it. Under merge.requiredChecks "none" (no check
+                          gates the merge) --confirm heals it itself (page item 926 a, 14:32 CST): it merges the base in when the base gained a record, pushes one page commit, waits on no
+                          check, and merges that head in the one run. A base that moves after the push refuses and keeps the commit. A relayed yes binds across the heal's page and base-merge commits.
+                          A PR GitHub reads BLOCKED under "none" refuses and names the branch protection and requiredChecks, since the tool read no protection.
                           A head whose own run is still pending merges when a lane-lint PASS names its exact sha (a PASS carried over claim commits counts); main's run after
                           the merge is the check. A finished red run, a red main and a PASS for another head still refuse. GitHub reads a pending required check as BLOCKED,
                           so the PUT goes on past that one read and GitHub refuses it or not; BEHIND still refuses.
@@ -2013,7 +2016,8 @@ class Host:
             return None, f"#{n} base changed from {taken} to {p['base']} after the take, so its checks and lock were for the old base. No merge call was sent."
         state_now = p["merge_state"]
         if state_now == "BEHIND" or (state_now == "BLOCKED" and not self.pending_lifted):  # GitHub reads a pending required check as BLOCKED: that one cause goes on to the PUT, and GitHub refuses it or not
-            return None, f"#{n} reads {state_now}: its base rules are not met or its branch is behind the base {GRANT_CITE}. gh's merge refuses it the same way, so no merge call was sent."
+            return None, (f"#{n} reads {state_now}: its base rules are not met or its branch is behind the base {GRANT_CITE}. gh's merge refuses it the same way, so no merge call was sent."
+                          + (" " + HEAL_BLOCKED if state_now == "BLOCKED" and self.required == "none" else ""))  # under none the tool read no protection, so the text names the cause itself
         def merged_at_sha():  # a lost reply may still have merged: True when the PR reads merged at this run's head, False when it reads open, None when unread or merged elsewhere
             c4, v = self.api(f"pulls/{n}", memo=False)
             try:
@@ -3982,8 +3986,16 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
                 resumed = own_claim(wt, sc, f"origin/{base}")
                 trailer = do_claim(wt, sc, f"origin/{base}")  # as confirm: a record still pending is claimed over a resumed claim too
             records = "rebuild docs/records.md" if rebuild_records(wt) else "current"  # after the claim, as confirm does
+            if records == "current" and stands and cfg.get("merge", {}).get("requiredChecks") == "none" and not (info["draft"] or trailer or resumed or head_claim(wt)):
+                try:  # under none confirm merges the base in when the merged page would be stale: the line says so
+                    records = "rebuild docs/records.md, after the base is merged in" if records_proof(wt, f"origin/{base}") == "stale" else records
+                except (Stop, Unread):
+                    pass  # a read that could not run adds no claim to the line
             if records != "current" and not (info["draft"] or trailer or resumed):  # confirm refuses a page with no claim to ride, so a ready PR never gets a page-only push
-                records += ". --confirm refuses it. " + stale_page_remedy(n, head_claim(wt))
+                if cfg.get("merge", {}).get("requiredChecks") == "none" and not head_claim(wt):  # no check gates the merge: confirm heals the page itself
+                    records += ". --confirm heals it: it pushes a page commit (the base merged in first when the base gained a record), waits on no check, and merges that head in the one run"
+                else:
+                    records += ". --confirm refuses it. " + stale_page_remedy(n, head_claim(wt))
             elif info["draft"] and records != "current" and not (trailer or resumed or stale):  # a claim commits at confirm anyway, so the draft step would save no run; it refuses a stale head
                 records += f". merge {n} --confirm on the draft pushes it before ready, so the ready run is the merge run"
     finally:
@@ -4011,8 +4023,9 @@ def stale_page_remedy(n, claim=""):
     steps = (f"Return #{n} to draft (in cloud: MCP update_pull_request draft=true; on a computer: gh pr ready {n} --undo, route pr-draft-gh-cli-local; "
              f"route pr-draft-mcp-cloud), run merge {n} --confirm on the draft (the records step), "
              f"then mark it ready after its draft run shows.")
+    none = ' A base with merge.requiredChecks "none" heals a page on a head with no claim in --confirm itself: no draft step.'
     if not claim:
-        return steps
+        return steps + none
     return (f"The head holds a Record-claim ({claim}) that this base claims nothing for. "
             f"Revert that claim commit on the branch, then run the records step: " + steps)
 
@@ -4341,29 +4354,67 @@ def extend_lock(lock, wait):
     if extend:
         extend(wait)
 
-def relayed_head_holds(root, branch, relayed, live):
+def base_merge_commit(root, sha, base):
+    """True when `sha` is a merge of the base into the branch, as merge_base_in makes it (the commit a requiredChecks "none" heal pushes): two parents, the second
+    on origin/<base>, and a tree that is exactly git's clean merge of the two. An edited merge is a change the yes did not see. A read that fails is False."""
+    c, row = git(root, "rev-list", "--parents", "-n", "1", sha)
+    parts = row.split()
+    if c or len(parts) != 3 or git(root, "merge-base", "--is-ancestor", parts[2], f"refs/remotes/origin/{base}")[0]:
+        return False
+    try:
+        state, merged, _files = merge_tree(root, parts[1], parts[2])
+    except Exception:
+        return False
+    c, tree = git(root, "rev-parse", f"{sha}^{{tree}}")
+    return state == "clean" and not c and merged == tree.strip()
+
+def heals_stale_page(root, base, path):
+    """True when `base` is the default branch and its config sets merge.requiredChecks "none": a confirm heals a stale records page itself there. A quiet read of the
+    config on origin; a config that cannot be read is False, so the relayed yes keeps the narrow form."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        try:
+            cfg = load_config(root, base, path, " " + RECORDS_CITE)
+        except Stop:
+            return False
+    return cfg["merge"].get("requiredChecks") == "none" and base == cfg["defaultBranch"]
+
+def relayed_head_holds(root, branch, relayed, live, base=None, heals=None):
     """True when the live head is the head a relayed yes named, or sits on it with only this tool's own commits between: a Record-claim
-    commit (head_claim's trailer), its revert (claim_under_head's subject), or a page-only commit (page_only). The branch is fetched for the commits. A fetch or a log
-    that fails, or a live head the fetch did not read, counts as a head that moved: the yes needs no more than a refusal."""
+    commit (head_claim's trailer), its revert (claim_under_head's subject), a page-only commit (page_only), or, where `heals()` is true, a clean merge of `base`
+    (base_merge_commit): the commits a requiredChecks "none" heal pushes (heals_stale_page). Under any other setting a merge of the base moves the head. The walk follows
+    first parents, so the base's own commits behind a merge are not read. The branch is fetched for the commits; the base only when a merge commit is met.
+    A fetch or a log that fails, or a live head the fetch did not read, counts as a head that moved: the yes needs no more than a refusal."""
     if live == relayed:
         return True
     c, out = git(root, "fetch", "-q", "origin", f"refs/heads/{branch}")
     if c or git(root, "rev-parse", "FETCH_HEAD")[1].strip() != live:
         return False
-    c, out = git(root, "log", "--format=%H%x09%s%x09%(trailers:key=Record-claim,valueonly,separator=%x2C)", f"{relayed}..{live}")
+    base_read = []  # the one fetch of the base, made when a commit needs it
+
+    def base_merge(sha):
+        if not (base and heals and heals()):
+            return False
+        if not base_read:
+            base_read.append(not git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")[0])
+        return base_read[0] and base_merge_commit(root, sha, base)
+    c, out = git(root, "log", "--first-parent", "--format=%H%x09%s%x09%(trailers:key=Record-claim,valueonly,separator=%x2C)", f"{relayed}..{live}")
     if c or not out.strip():
         return False
     for line in out.splitlines():
         sha, subject, ids = (line.split("\t") + ["", ""])[:3]
-        if not (ids.strip() or subject.startswith('Revert "Claim record numbers"') or page_only(root, sha)):
+        if not (ids.strip() or subject.startswith('Revert "Claim record numbers"') or page_only(root, sha) or base_merge(sha)):
             return False
     return True
 
 CLAIM_STEP_CITE = "(a claim is a commit, and the merge call reads only a head whose own checks are green, decision records-index-at-merge)"
 
-def stale_merge_text(n, base_ref, pushed):
+def stale_merge_text(n, base_ref, pushed, healed=None):
     """The refusal for a records page that the merge of the base tip would leave stale, or that conflicts with it. `pushed`: the claim is on the
-    branch and is reverted next. A page rebuilt after the merge is a commit no check read, so the lane rebuilds it and pushes it before review."""
+    branch and is reverted next. A page rebuilt after the merge is a commit no check read, so the lane rebuilds it and pushes it before review.
+    `healed`: the sha of the heal commit this run pushed under merge.requiredChecks "none" (heal_page): it stays, and a new run heals again."""
+    if healed:
+        return (f"the records page is stale for the merge result: {base_ref} gained a record, or a page edit, since this run healed the page. "
+                f"Nothing was merged. The page commit {healed[:9]} stays on the branch. Run --confirm again: it heals the page once more.")
     return (f"the records page is stale for the merge result: {base_ref} gained a record, or a page edit, that the page on #{n} lacks. "
             f"Nothing was merged{', and the claim is reverted next' if pushed else ' or pushed'}. "
             f"The lane must rebuild the page and push it before review, so a check reads the new head.")
@@ -4378,6 +4429,32 @@ def merged_page_stale(root, wt, base, base_ref):
         return records_proof(wt, base_ref) == "stale"
     except Stop:
         return False
+
+def heal_page(wt, base, branch, base_ref, rebuilt, stands):
+    """Under merge.requiredChecks "none": the commits that heal the records page of a ready PR, made in `wt` and pushed by the caller. A page stale on
+    the head's own tree (`rebuilt`: rebuild_records changed it, and left it staged) is one page-only commit. Then, when the head lacks the base tip
+    and the merge is clean (`stands`) and the merged page would still be stale, the base is merged in (a merge commit) and the page rebuilt on that
+    tree, one more page-only commit. The merge is made only when the page needs it. -> True when it made a commit."""
+    start = git(wt, "rev-parse", "HEAD")[1]
+    if rebuilt:
+        commit_claim(wt, None)
+    if stands and records_proof(wt, base_ref) == "stale":
+        merge_base_in(wt, base, branch)
+        if rebuild_records(wt):
+            commit_claim(wt, None)
+    return git(wt, "rev-parse", "HEAD")[1] != start
+
+HEAL_BLOCKED = ("merge.requiredChecks is \"none\", so this tool reads no branch protection, and GitHub reads the pull request BLOCKED: the base's branch protection "
+                "requires a check this head does not report. Name that check in merge.requiredChecks, or change the branch protection, and run again. " + RECORDS_CITE)
+
+def wait_healed_head(host, n, sha, branch):
+    """Wait, bounded, for GitHub to show the head `sha` this run pushed, so the merge call names a head GitHub holds. No check is waited on."""
+    fresh = host.pr(n)
+    if fresh["head"] != sha:
+        fresh = wait_pushed_head(host, n, fresh, host.now() + PUSHED_HEAD_WAIT_MINUTES * 60, want=sha)
+        if fresh is None:
+            raise Stop(f"{sha[:9]} is pushed to {branch}, but GitHub never showed it: after {PUSHED_HEAD_WAIT_MINUTES} minutes the pull request still did not read it. "
+                       f"The page commit stays on {branch}. Nothing was merged. Run again: it merges the pushed head {RECORDS_CITE}")
 
 HEAD_MOVED = "the head of #{n} moved since the owner's yes was relayed, so that yes does not cover it (decision auto-mode-owner-acts, a relayed yes binds to the head at relay time). A new yes from the owner is needed. Nothing was claimed or pushed."
 
@@ -4399,13 +4476,14 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         token = lock.acquire(base, LOCK_TTL_SECONDS)
     host.use_memo = False  # a merge under the lock reads each state fresh (Host.use_memo)
     host.before_wait = getattr(lock, "extend_for", None)  # a rate wait extends the lock first (standing-merge-grant), so the fixed TTL need not cover it
-    tmp = wt = claim_sha = None
+    tmp = wt = claim_sha = heal_sha = None  # heal_sha: the page commit a requiredChecks "none" run pushed and then merges. Never claim_sha: a failed run reverts a claim, never a heal
+    heal = m.get("requiredChecks") == "none" and base == cfg["defaultBranch"]  # no check gates the merge, so a stale records page heals in this run (page item 926 a, 14:32 CST; decision records-index-at-merge)
     judge = None  # the prose judge's plan, built under the lock and run after it is released
     where_else = None  # the where-else judge's plan, built and run the same way
     try:
         info = host.pr(n)
         refuse_bad_pr(info)
-        if expected_head and not relayed_head_holds(root, info["branch"], expected_head, info["head"]):  # moved between main's read and the lock: still before any claim
+        if expected_head and not relayed_head_holds(root, info["branch"], expected_head, info["head"], base, lambda: heal):  # moved between main's read and the lock: still before any claim
             raise Stop(HEAD_MOVED.format(n=n))
         if linted_head and info["head"] != linted_head:  # the lane-lint PASS names linted_head; a push since then was not linted
             raise Stop(f"the head of #{n} moved from {linted_head[:9]} to {info['head'][:9]} after {linted_head[:9]} was checked. Run `merge --lane-lint {n}` on the new head, then join again. {LANE_LINT_CITE} Nothing was claimed or pushed.")
@@ -4461,7 +4539,18 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             if resumed and not trailer:
                 claim_sha = info["head"]
                 say(f"merge: resumed. {branch} already holds the claim {resumed}.")
-            rebuilt = rebuild_records(wt)  # after the claim, whatever the stamp config holds. A page with no claim to ride heals only in the draft step: a page-only push on a ready PR restarts its CI
+            rebuilt = rebuild_records(wt)  # after the claim, whatever the stamp config holds. A page with no claim to ride heals only in the draft step: a page-only push on a ready PR restarts its CI. Under requiredChecks "none" no run is restarted, so it heals here
+            if heal and not (trailer or resumed) and not head_claim(wt):  # a head holding a claim this base does not resume keeps the refusal: a page commit on it would hide the claim
+                if heal_page(wt, base, branch, base_ref, rebuilt, bool(stands)):
+                    heal_sha = git(wt, "rev-parse", "HEAD")[1]
+                    if info["merge_state"] == "BLOCKED":  # before the push: a head GitHub will not merge gets no commit
+                        raise Stop(f"#{n} reads BLOCKED. Nothing was pushed. {HEAL_BLOCKED}")
+                    if merged_page_stale(root, wt, base, base_ref):  # before the push: the base moved again, so a second heal is the next run's
+                        raise Stop(stale_merge_text(n, base_ref, pushed=False) + f" {RECORDS_CITE}")
+                    push_branch(wt, branch, cite=RECORDS_CITE)
+                    say(f"merge: the records page healed and pushed to {branch} at {heal_sha[:9]}. No check is waited on.")
+                    wait_healed_head(host, n, heal_sha, branch)
+                rebuilt = False  # healed, or nothing to heal: no claim commit follows
             if rebuilt and not (trailer or resumed):  # before any wait, commit or push: confirm's finally frees the lock and drops the worktree
                 raise Stop(f"the records page on the ready #{n} is stale, and there is no claim to make or resume, so a page-only push would restart its CI. "
                            f"Nothing was claimed or pushed. {stale_page_remedy(n, head_claim(wt))} {RECORDS_CITE}")
@@ -4474,11 +4563,11 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 say(f"merge: {trailer or 'the records page'} pushed to {branch} at {claim_sha[:9]}.")
             elif not resumed:
                 say("merge: nothing to claim.")
-        sha = claim_sha or info["head"]
+        sha = heal_sha or claim_sha or info["head"]
         under = None if claim_sha or base != cfg["defaultBranch"] else claim_under_head(wt, base_ref)  # a rerun over a merge commit on its claim: the claim is kept, never reverted
         if under and under == info["head"]:  # the head is the claim itself, and own_claim found a number taken: no merge commit sits on it, so a failure reverts it
             claim_sha, under = under, None
-        kept = claim_sha or under
+        kept = claim_sha or under or heal_sha
 
         def fail(why):
             if under:  # a revert of a merge commit would undo the base's own work in the branch
@@ -4499,7 +4588,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         def unproven(what, detail):  # a read after the claim push could not run: the result is unknown, so the claim stays
             if not kept:  # nothing was pushed, so nothing is kept
                 raise Stop(f"{what} {READ_CITE}\n{detail}")
-            raise Unproven(f"the result is unknown: {what}. The claim {kept[:9]} stays on {branch} and no revert was made. Rerun merge to resume {REFUSED_CITE}.\n{detail}")
+            raise Unproven(f"the result is unknown: {what}. The {'page commit' if kept == heal_sha else 'claim'} {kept[:9]} stays on {branch} and no revert was made. Rerun merge to resume {REFUSED_CITE}.\n{detail}")
 
         merging = False  # true while the merge call runs: its answer is lost, not refused
         try:  # after the push only a Stop may leave. A read that could not run is unknown (Unproven); any other error reverts the claim first
@@ -4546,7 +4635,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                     except Stop as e:
                         stop(str(e))
                 if proof == "stale":
-                    text = stale_merge_text(n, base_ref, pushed=pushed) + f" {RECORDS_CITE}"
+                    text = stale_merge_text(n, base_ref, pushed=pushed, healed=heal_sha) + f" {RECORDS_CITE}"
                     if not pushed:  # a claim this run did not push stays: the lane rebuilds the page on top of it, and the stop says nothing was pushed
                         raise Stop(text)
                     stop(text)
@@ -5896,7 +5985,7 @@ def standing_refusal(h, n, info, head):
         # the pass that ends review must be sonnet's: the fix verifier's when the record has one, else the last reviewer round's
         last = (rec["fix"][2], rec["fix"][3]) if rec and rec["fix"] else next(((m, v) for _, role, m, v in reversed(rec["rounds"] if rec else []) if role == REVIEW_ROLES[0]), (None, None))
         passer = last[0] if last[1] == "PASS" else None  # a final round that failed reads done when no net value is owed, but it is no pass
-        if not passer or passer.lower() != "sonnet" or review_state(rec, head, recs[:-1])[0] != "done":  # `head` is the relayed head, which relayed_head_holds ties to the live one: only this tool's claim commits may sit above it
+        if not passer or passer.lower() != "sonnet" or review_state(rec, head, recs[:-1])[0] != "done":  # `head` is the relayed head, which relayed_head_holds ties to the live one: only this tool's own commits may sit above it (a claim, its revert, a page commit, and under requiredChecks none a clean merge of the base)
             return "this pull request changes code, rule text or a guard path, and its head has no passing sonnet review record."
     return ""
 
@@ -6270,7 +6359,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 why = lane_own_pr_refusal(info, h, marking_ready=a.ready)
                 if why:
                     raise Stop(why + " " + ROLE_CITE)
-        if a.confirm and a.head and not relayed_head_holds(root, info["branch"], a.head, info["head"]):  # a relayed yes binds to the head at relay time (decision auto-mode-owner-acts): refused before the lock, a claim or any write
+        if a.confirm and a.head and not relayed_head_holds(root, info["branch"], a.head, info["head"], info["base"], lambda: heals_stale_page(root, info["base"], a.config)):  # a relayed yes binds to the head at relay time (decision auto-mode-owner-acts): refused before the lock, a claim or any write
             raise Stop(HEAD_MOVED.format(n=a.pr))
         if not (a.reviewed and host):  # a test host brings its own checks, so --reviewed reads no config for it
             cfg = load_config(root, h.base if a.reviewed else info["base"], a.config)
