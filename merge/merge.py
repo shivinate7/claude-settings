@@ -24,6 +24,7 @@
                           then it skips the lint and prints one `merge: lane lint skipped ...` line naming the rollup and the head's first 9 characters.
   merge <pr> --confirm --express   go on to the merge only for a prose-only diff (main's ci-scope.sh turns on nothing) whose body has a `Ruling: <id>`
                           line naming an entry in origin/roadmap's rulings; any other case refuses before a push.
+  merge <pr> --confirm, after a merge that changes skills/waiting-page/page.html: one report-only line says to republish each live page (UNKNOWN when the changed paths could not be read). The exit code is unchanged.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V] [--grant "#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT"]
@@ -380,6 +381,8 @@ def ancestor(cwd, tip, base):
 
 RULE_FILES = ("claude.md", ".claude/claude.md")  # lower case: the match ignores case. Plus each file under RULE_PREFIX (decision claude-md-change-is-flagged)
 RULE_PREFIX = "output-styles/"
+# merge.py cannot import stale_pages (a heavy import inside the merge lock), so it names the path itself: keep it equal to stale_pages.TEMPLATE_IN_GIT.
+PAGE_FILE = "skills/waiting-page/page.html"  # glossary-ok: the skill's folder name is a path, not the retired term. A merge that changes it says to republish each live page (decision page-stale-publish)
 SETTLE_SECONDS = 30
 NET_RETRIES, NET_PAUSE = 3, 5  # retry a network error 3 times, a short pause between (standing-merge-grant)
 PAGE_CEILING = 500  # pages of 100 one list read may take (50,000 items) before Host.pages stops instead of looping
@@ -4565,6 +4568,10 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             say(f"merge: #{n} the rule-file check could not run: git diff failed. Read the PR's files yourself.")
         for x in rule_files or []:
             say(f"merge: #{n} changes {x}, a rule file every session loads.")
+        if c != 0:  # report-only, like the rule-file line: an unread file list says UNKNOWN, never silence
+            say(f"merge: #{n} UNKNOWN: the changed paths could not be read, so whether {PAGE_FILE} changed is unknown. Republish each live page if it did.")
+        elif PAGE_FILE in names.split("\0"):
+            say(f'merge: #{n} changes {PAGE_FILE}: republish each live waiting page now (skill waiting-page, "Update a repo\'s pages"), and put "republished: <pages>" or a reason in the report.')
         try:  # ff_main's fetch moves origin/<base> onto the merge, which would empty the plan's diff; any failure leaves the base unknown and never holds the merge
             tip_c, tip = git(wt, "rev-parse", "--verify", "-q", base_ref + "^{commit}")
         except (subprocess.TimeoutExpired, OSError):

@@ -512,12 +512,13 @@ if [ -n "$wl_out" ]; then
 fi
 
 # Rule page-stale: a repo whose extras name a waiting page prints one line when the page was last published
-# from a version other than main's page.html. The stamp an allowed publish wrote
-# (<git common dir>/waiting-page-built) holds main's blob sha at that publish; skills/waiting-page/stale_pages.py
-# --session-line compares it with origin/main of the claude-settings clone ($d) and prints the line, or nothing
-# (no stamp, or main unreadable, is silent). The grep is only a cheap filter on the extras file that
+# from a version other than main's page.html. Two stamps hold main's blob sha at the publish: the
+# page-built stamp roadmap/data/meta/page-built.json on origin/roadmap, and the local one an allowed publish wrote
+# (<git common dir>/waiting-page-built). skills/waiting-page/stale_pages.py --session-line compares them with origin/main
+# of the claude-settings clone ($d): nothing when either equals main's blob, the behind line when one exists and none
+# does, nothing when neither exists or main is unreadable. The grep is only a cheap filter on the extras file that
 # lint/layout.json names; layout.waiting_page, inside the python start, decides. Cost: in a repo with a page, one
-# python start and one read-only git process; in any other repo, one grep. No fetch, no file written, no timer.
+# python start and at most two read-only git processes; in any other repo, one grep. No fetch, no file written, no timer.
 wp_extras="$toplevel/.claude/layout-extras.json"
 if [ -f "$wp_extras" ] && grep -q '"waiting-page"' "$wp_extras" 2>/dev/null && command -v python3 >/dev/null 2>&1; then
   wp_script="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/../skills/waiting-page/stale_pages.py"
