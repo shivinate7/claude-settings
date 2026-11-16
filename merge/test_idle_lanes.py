@@ -10,7 +10,8 @@ not landed on main. A waiting lane prints no line. A whole-read failure prints o
 takes its steps, marks and repo name from the checkout, as the roadmap build does. It stands alone: no other flag, and
 no merge role in a cloud session. A missing --live file exits 1 and prints no summary, so an unread list never reads
 as an empty one. A lane that only stale drafts hold prints one `joint (` line instead of nothing; the summary counts it
-among the lanes to archive.
+among the lanes to archive. A lane whose pull closed as replaced (a closed landedPulls row with replacedBy) is listed as
+superseded; a pull closed with no replacement is not.
 
 A lane tagged cs-archive-ready:<slug> is printed with a HOLD marker when its handoff, roadmap/outbox/<slug>-handoff.md,
 is not on the record branch, and the summary counts the held lanes. A slug that is empty or has a `/` or `..` reads the
@@ -108,10 +109,12 @@ class IdleLanesCli(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def publish(self, sessions, read_at=None, pulls=()):
-        """Write the --live file. Its readAt is five minutes old by default."""
+    def publish(self, sessions, read_at=None, pulls=(), landed=None):
+        """Write the --live file. Its readAt is five minutes old by default. `landed` is the landedPulls rows, written when given."""
         value = {"readAt": read_at or roadmap.iso_ago(5), "threads": [], "pulls": list(pulls), "items": [],
                  "sessions": list(sessions)}
+        if landed is not None:
+            value["landedPulls"] = list(landed)
         self.live.write_text(json.dumps(value), encoding="utf-8")
 
     def stale_draft(self, number, branch, **fields):
@@ -277,12 +280,12 @@ class IdleLanesCli(unittest.TestCase):
         self.assertEqual(len(found), 1, "lane %s is not listed once: out: %r" % (sid, out))
         return found[0]
 
-    def land_steps(self, stems):
-        """Commit one done step per stem on the record branch, numbered from 3 (c1 to c3 are in setUp, so a stem
-        already there changes nothing and the commit may be empty)."""
+    def land_steps(self, stems, status="done"):
+        """Commit one step per stem on the record branch, numbered from 3 (c1 to c3 are in setUp, so a stem
+        already there changes nothing and the commit may be empty). Each step carries `status`."""
         roadmap.git(self.repo, "checkout", "-q", "roadmap")
         for order, stem in enumerate(stems, start=3):
-            step = dict(roadmap.STEP, order=order, status="done")
+            step = dict(roadmap.STEP, order=order, status=status)
             (self.repo / "roadmap" / "data" / "steps" / (stem + ".json")).write_text(json.dumps(step), encoding="utf-8")
         roadmap.git(self.repo, "add", "-A")
         roadmap.git(self.repo, "commit", "-q", "--allow-empty", "-m", "steps " + ", ".join(stems))
@@ -478,6 +481,72 @@ class IdleLanesCli(unittest.TestCase):
                          "the held archive-ready joint lane did not print its joint line with the HOLD flag: %r" % out)
         self.assertEqual(lines[-1:], [HELD_ONE],
                          "a held joint line got the short tail, which names it archivable: %r" % out)
+
+
+    def listed_ids(self, out):
+        """The first word of each output line: the lane ids listed, and the word of each other line."""
+        return [line.split(" ", 1)[0] for line in out.splitlines()]
+
+    def closed_row(self, number, branch, head, **fields):
+        """A landedPulls row for a pull closed unmerged. `fields` add keys, such as replacedBy."""
+        return {"number": number, "branch": branch, "head": head, "merged": False, **fields}
+
+    def record_tip(self):
+        """The record branch's tip. The branch is an orphan from main, so main never reaches it: a head off main."""
+        return roadmap.git(self.repo, "rev-parse", "roadmap").strip()
+
+    def test_a_lane_whose_pull_closed_as_replaced_is_listed_as_superseded(self):
+        # The step is todo and no Step trailer is on main, so nothing lands the step. Only the closed pull's replacedBy
+        # link (#8) can list the lane. Its replacement is merged, or open on a branch that is no lane head. The stranded
+        # test below is the same closed row with no link and no replacement.
+        self.land_steps(["c4"], status="todo")
+        head = self.record_tip()
+        closed = self.closed_row(7, "lane/c4", head, replacedBy=8)
+        open_replacement = [{"number": 8, "title": "batch 7", "branch": "batch-7", "draft": False, "head": head}]
+        cases = (("merged", [closed, {"number": 8, "branch": "batch-7", "head": head, "merged": True}], ()),
+                 ("open", [closed], open_replacement))
+        for label, landed, pulls in cases:
+            with self.subTest(replacement=label):
+                self.publish([lane("session_a", "c4")], landed=landed, pulls=pulls)
+                out = self.run_idle()
+                self.assertIn("session_a", self.listed_ids(out),
+                              "a lane whose pull closed as replaced by #8 is not listed as superseded: out: %r" % out)
+                self.assertTrue(out.splitlines()[-1].startswith("merge: 1 lanes to archive"), out)
+
+    def test_a_pull_closed_unmerged_with_no_replacement_is_not_listed(self):
+        # The stranded lane: the same closed row as the replaced-lane test above, with no replacedBy link and no replacement pull.
+        self.land_steps(["c4"], status="todo")
+        self.publish([lane("session_a", "c4")], landed=[self.closed_row(7, "lane/c4", self.record_tip())])
+        out = self.run_idle()
+        self.assertNotIn("session_a", self.listed_ids(out),
+                         "a lane whose pull closed with no replacement is listed as superseded: out: %r" % out)
+        self.assertRegex(out, ZERO_LINE)
+
+    def test_a_lane_with_an_open_pull_on_its_head_is_not_listed(self):
+        # The control is the same lane with no pull: its step is done, so it is listed. Then an open pull on lane/c4
+        # holds it.
+        self.land_steps(["c4"])
+        head = self.record_tip()
+        self.publish([lane("session_a", "c4")])
+        out = self.run_idle()
+        self.assertIn("session_a", self.listed_ids(out), "scope: session_a is not listed before its pull opens: %r" % out)
+        self.publish([lane("session_a", "c4")],
+                     pulls=[{"number": 7, "title": "lane c4", "branch": "lane/c4", "draft": False, "head": head}])
+        out = self.run_idle()
+        self.assertNotIn("session_a", self.listed_ids(out),
+                         "a lane with an open pull on its head is listed: out: %r" % out)
+
+    def test_a_lane_whose_pull_merged_is_listed(self):
+        # The control: the step is todo and no pull has landed, so the lane is not listed. Then its pull on lane/c4
+        # merges, and the lane is listed.
+        self.land_steps(["c4"], status="todo")
+        head = self.record_tip()
+        self.publish([lane("session_a", "c4")])
+        out = self.run_idle()
+        self.assertNotIn("session_a", self.listed_ids(out), "scope: a todo lane with no pull is listed: %r" % out)
+        self.publish([lane("session_a", "c4")], landed=[{"number": 7, "branch": "lane/c4", "head": head, "merged": True}])
+        out = self.run_idle()
+        self.assertIn("session_a", self.listed_ids(out), "a lane whose pull merged is not listed: out: %r" % out)
 
 
 if __name__ == "__main__":
