@@ -1,0 +1,10 @@
+{
+ "id": "own-r12-standing-merge-authority",
+ "at": "2026-11-15T23:22:00-06:00",
+ "title": "Runner 12 has standing merge authority and need not ask to merge (scope unconfirmed)",
+ "ruling": "Runner 12's report (session_013NEJL33U96UiyE6UtCHct3), relayed by the coordinator at 23:28 CST Nov 15, not typed in a session triage read: the owner typed to runner 12 at 23:22 CST \"of course u can u have merge authority standing\" and \"no need to ask to merge anything\". Scope is unconfirmed: the consultant confirms whether it covers runner 12's five child repos only, or every batch runner. Until then it is a report, not a grant for any other session or repo, and the merge tool's checks (lane lint, record, green run at the head) are not waived by these words. Home of the final standing grant: the repo CLAUDE.md standing-grants list or the merge tool's config, written by a lane after the scope is confirmed; .claude/CLAUDE.md is owner-only.",
+ "quote": "of course u can u have merge authority standing; no need to ask to merge anything",
+ "source": "Runner 12 report to the coordinator, relayed 23:28 CST Nov 15 (not relayed through the consultant; the owner's words were typed in runner 12's chat); filed by triage 8",
+ "status": "open",
+ "step": ""
+}
