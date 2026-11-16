@@ -150,48 +150,6 @@ def pr2015_spo_case_4():
     return spo_result(problems, "agent B's run of agent A's script by its path is asked")
 
 
-def spo_case_1():
-    """Agent A writes probe2.py with Write; agent B runs it with python3: refused."""
-    fx = spo_fixture("c1")
-    probe = os.path.join(fx["scratch"], "probe2.py")
-    problems = [spo_scope(fx, "1", probe)] + spo_wrote(fx, "1", SPO_WRITER, probe, PY_TEXT)
-    got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % probe)
-    problems.append(spo_refused("1", got, reason, (fx["scratch"], "probe2.py")))
-    return spo_result(problems, "agent B's python3 run of agent A's script is refused")
-
-
-def spo_case_2():
-    """Agent A writes probe2.py with Write; agent B runs it after a cd into the scratchpad: refused."""
-    fx = spo_fixture("c2")
-    probe = os.path.join(fx["scratch"], "probe2.py")
-    problems = [spo_scope(fx, "2", probe)] + spo_wrote(fx, "2", SPO_WRITER, probe, PY_TEXT)
-    got, reason = spo_run(fx, SPO_OTHER, "cd %s && python3 probe2.py" % fx["scratch"])
-    problems.append(spo_refused("2", got, reason, (fx["scratch"], "probe2.py")))
-    return spo_result(problems, "agent B's cd and python3 run of agent A's script is refused")
-
-
-def spo_case_3():
-    """Agent A writes p.sh by a bash heredoc; agent B runs it through bash: refused."""
-    fx = spo_fixture("c3")
-    script = os.path.join(fx["scratch"], "p.sh")
-    heredoc = "cat > %s <<'EOF'\n%sEOF" % (script, SH_TEXT)
-    problems = [spo_scope(fx, "3", script)] + spo_wrote(
-        fx, "3", SPO_WRITER, script, SH_TEXT, tool="Bash", command=heredoc)
-    got, reason = spo_run(fx, SPO_OTHER, "bash %s" % script)
-    problems.append(spo_refused("3", got, reason, (fx["scratch"], "p.sh")))
-    return spo_result(problems, "agent B's bash run of agent A's heredoc script is refused")
-
-
-def spo_case_4():
-    """Agent A writes p.sh with Write; agent B runs it as the command word: refused."""
-    fx = spo_fixture("c4")
-    script = os.path.join(fx["scratch"], "p.sh")
-    problems = [spo_scope(fx, "4", script)] + spo_wrote(fx, "4", SPO_WRITER, script, SH_TEXT)
-    got, reason = spo_run(fx, SPO_OTHER, script)
-    problems.append(spo_refused("4", got, reason, (fx["scratch"], "p.sh")))
-    return spo_result(problems, "agent B's run of agent A's script by its path is refused")
-
-
 def spo_case_5():
     """Agent A writes probe2.py with Write, then runs it itself: allowed."""
     fx = spo_fixture("c5")
@@ -272,23 +230,6 @@ def pr2015_spo_case_10():
     return spo_result(problems, "agent B's run of the oldest of forty agent A scripts is asked")
 
 
-def spo_case_10():
-    """Full size: agent A writes forty scripts with Write, then agent B runs the oldest one: refused.
-    The record must hold the early files as well as the late ones."""
-    fx = spo_fixture("c10")
-    problems = []
-    for index in range(40):
-        path = os.path.join(fx["scratch"], "part%02d.py" % index)
-        problems += spo_wrote(fx, "10", SPO_WRITER, path, PY_TEXT)
-        if problems:
-            break
-    oldest = os.path.join(fx["scratch"], "part00.py")
-    problems.append(spo_scope(fx, "10", oldest))
-    got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % oldest)
-    problems.append(spo_refused("10", got, reason, (fx["scratch"], "part00.py")))
-    return spo_result(problems, "agent B's run of the oldest of forty agent A scripts is refused")
-
-
 def spo_text_case(tag, name, command_of, passed):
     """Agent A writes probe2.py; agent B's call holds the run's text as quoted text, a comment, a heredoc
     body or a multi-line string, or passes probe2.py as an argument to a command that runs another file, and runs
@@ -351,13 +292,6 @@ spo_register("scratchpad-owner: 3 agent B runs agent A's script through bash, af
 spo_register("scratchpad-owner: 4 agent B runs agent A's script as the command word: asked", pr2015_spo_case_4)
 
 
-spo_register("scratchpad-owner: 1 agent B runs agent A's script with python3, after A wrote it with Write: refused",
-             spo_case_1)
-spo_register("scratchpad-owner: 2 agent B runs agent A's script after cd into the scratchpad: refused",
-             spo_case_2)
-spo_register("scratchpad-owner: 3 agent B runs agent A's script through bash, after A wrote it by a heredoc: refused",
-             spo_case_3)
-spo_register("scratchpad-owner: 4 agent B runs agent A's script as the command word: refused", spo_case_4)
 spo_register("scratchpad-owner: 5 agent A runs its own script: allowed", spo_case_5)
 spo_register("scratchpad-owner: 6 agent B runs a script with no record, made outside the guard: allowed",
              spo_case_6)
@@ -369,8 +303,6 @@ spo_register("scratchpad-owner: 9 agent writes outside any scratchpad create no 
 
 spo_register("scratchpad-owner: 10 agent B runs the oldest of forty scripts agent A wrote: asked",
              pr2015_spo_case_10)
-spo_register("scratchpad-owner: 10 agent B runs the oldest of forty scripts agent A wrote: refused",
-             spo_case_10)
 spo_register("scratchpad-owner: extra, a run inside single quotes is text: allowed", spo_extra_quoted)
 spo_register("scratchpad-owner: extra, a run after a comment mark is text: allowed", spo_extra_comment)
 spo_register("scratchpad-owner: extra, a run in a heredoc body is text: allowed", spo_extra_heredoc)
@@ -420,41 +352,10 @@ def pr2015_ovw_case_3():
 
 
 # Rule scratchpad-owner, the overwrite form: an agent with a valid agent_id that writes over a file under
-# this session's scratchpad whose record names a different agent is refused. The writes are the ones the
+# this session's scratchpad whose record names a different agent is asked. The writes are the ones the
 # record covers: Write, and a shell write target (a redirect, a heredoc `cat > f`, or an append). The
 # first write of a file, a rewrite by its own writer, a call with no agent_id and a read pass. Each case
 # builds its own session, as the cases above do.
-
-
-def ovw_case_1():
-    """Agent A writes msg.txt with Write; agent B writes the same file with Write: refused."""
-    fx = spo_fixture("o1")
-    msg = os.path.join(fx["scratch"], "msg.txt")
-    problems = [spo_scope(fx, "o1", msg)] + spo_wrote(fx, "o1", SPO_WRITER, msg, "from A\n")
-    got, reason = spo_call(fx, "Write", SPO_OTHER, file_path=msg, content="from B\n")
-    problems.append(spo_refused("o1", got, reason, (fx["scratch"], "msg.txt")))
-    return spo_result(problems, "agent B's Write over agent A's file is refused")
-
-
-def ovw_case_2():
-    """Agent A writes msg.txt with Write; agent B redirects echo over it: refused."""
-    fx = spo_fixture("o2")
-    msg = os.path.join(fx["scratch"], "msg.txt")
-    problems = [spo_scope(fx, "o2", msg)] + spo_wrote(fx, "o2", SPO_WRITER, msg, "from A\n")
-    got, reason = spo_run(fx, SPO_OTHER, "echo x > %s" % msg)
-    problems.append(spo_refused("o2", got, reason, (fx["scratch"], "msg.txt")))
-    return spo_result(problems, "agent B's shell redirect over agent A's file is refused")
-
-
-def ovw_case_3():
-    """Agent A writes msg.txt with Write; agent B cds into the scratchpad and heredocs over it: refused."""
-    fx = spo_fixture("o3")
-    msg = os.path.join(fx["scratch"], "msg.txt")
-    problems = [spo_scope(fx, "o3", msg)] + spo_wrote(fx, "o3", SPO_WRITER, msg, "from A\n")
-    heredoc = "cd %s && cat > msg.txt <<'EOF'\nfrom B\nEOF" % fx["scratch"]
-    got, reason = spo_run(fx, SPO_OTHER, heredoc)
-    problems.append(spo_refused("o3", got, reason, (fx["scratch"], "msg.txt")))
-    return spo_result(problems, "agent B's heredoc after a cd over agent A's file is refused")
 
 
 def ovw_case_4():
@@ -504,20 +405,6 @@ spo_register("scratchpad-owner: overwrite 3 agent B's heredoc after a cd over ag
              pr2015_ovw_case_3)
 
 
-def ovw_case_7():
-    """Agent A writes msg.txt; agent B appends to it with >>: refused."""
-    fx = spo_fixture("o7")
-    msg = os.path.join(fx["scratch"], "msg.txt")
-    problems = [spo_scope(fx, "o7", msg)] + spo_wrote(fx, "o7", SPO_WRITER, msg, "from A\n")
-    got, reason = spo_run(fx, SPO_OTHER, "echo x >> %s" % msg)
-    problems.append(spo_refused("o7", got, reason, (fx["scratch"], "msg.txt")))
-    return spo_result(problems, "agent B's append to agent A's file is refused")
-
-
-spo_register("scratchpad-owner: overwrite 1 agent B's Write over agent A's file: refused", ovw_case_1)
-spo_register("scratchpad-owner: overwrite 2 agent B's shell redirect over agent A's file: refused", ovw_case_2)
-spo_register("scratchpad-owner: overwrite 3 agent B's heredoc after a cd over agent A's file: refused",
-             ovw_case_3)
 spo_register("scratchpad-owner: overwrite 4 agent A rewrites its own file: allowed", ovw_case_4)
 spo_register("scratchpad-owner: overwrite 5 agent B's first write of a file nobody wrote: allowed",
              ovw_case_5)
@@ -525,7 +412,6 @@ spo_register("scratchpad-owner: overwrite 6 a top-level call overwrites agent A'
              ovw_case_6)
 
 spo_register("scratchpad-owner: overwrite 7 agent B's append to agent A's file: asked", pr2015_ovw_case_7)
-spo_register("scratchpad-owner: overwrite 7 agent B's append to agent A's file: refused", ovw_case_7)
 
 
 # Rule scratchpad-owner, more cases. Each case's label says refused, allowed or passes,
@@ -890,38 +776,6 @@ def spo_two_call_case():
         os.rename(tmp, dest)   # the mv lands its file at the new name
     problems += spo_b_file_runs(fx, "two-call", dest, "x.py")
     return spo_result(problems, "agent B's two-call write then mv leaves the record with B: A's run is refused")
-
-
-def spo_flag_1():
-    return spo_run_case("flag1", "flag 1", "probe2.py", lambda fx, p: "python3 -W ignore %s" % p,
-                        "agent B's python3 -W ignore run of agent A's script is refused")
-
-
-def spo_flag_2():
-    return spo_run_case("flag2", "flag 2", "probe2.py", lambda fx, p: "python3 -X dev %s" % p,
-                        "agent B's python3 -X dev run of agent A's script is refused")
-
-
-def spo_flag_3():
-    return spo_run_case("flag3", "flag 3", "x.js", lambda fx, p: "node --require /x %s" % p,
-                        "agent B's node --require run of agent A's script is refused", text="console.log(1)\n")
-
-
-def spo_variable_1():
-    return spo_run_case("var1", "variable 1", "probe2.py",
-                        lambda fx, p: 'S=%s; python3 "$S/probe2.py"' % os.path.dirname(p),
-                        "agent B's run of agent A's script by a shell variable path is refused")
-
-
-def spo_removal_1():
-    return spo_run_case("rm1", "removal 1", "msg.txt", lambda fx, p: "rm %s" % p,
-                        "agent B's rm of agent A's file is refused", text="from A\n")
-
-
-def spo_move_1():
-    return spo_run_case("mv1", "move 1", "msg.txt",
-                        lambda fx, p: "mv %s %s" % (p, os.path.join(fx["work"], "moved.txt")),
-                        "agent B's mv of agent A's file is refused", text="from A\n")
 
 
 # Rule scratchpad-owner, a folder removed or moved. A record names a writer per file, so a folder has no record of
@@ -1332,11 +1186,6 @@ spo_register("scratchpad-owner: variable 1 agent B runs agent A's script by a sh
              pr2015_spo_variable_1)
 
 
-spo_register("scratchpad-owner: flag 1 agent B runs agent A's script past python3 -W ignore: refused", spo_flag_1)
-spo_register("scratchpad-owner: flag 2 agent B runs agent A's script past python3 -X dev: refused", spo_flag_2)
-spo_register("scratchpad-owner: flag 3 agent B runs agent A's script past node --require: refused", spo_flag_3)
-spo_register("scratchpad-owner: variable 1 agent B runs agent A's script by a shell variable path: refused",
-             spo_variable_1)
 spo_register("scratchpad-owner: approved 1 agent B's overwrite the owner approves moves the record: "
              "B's later run and rewrite pass", spo_approved_case)
 spo_register("scratchpad-owner: approved 2 agent B's rm the owner approves keeps the record with agent A: "
@@ -1352,8 +1201,6 @@ spo_register("scratchpad-owner: removed 1 agent A's file removed outside the gua
 
 spo_register("scratchpad-owner: removal 1 agent B's rm of agent A's file: asked", pr2015_spo_removal_1)
 spo_register("scratchpad-owner: move 1 agent B's mv of agent A's file: asked", pr2015_spo_move_1)
-spo_register("scratchpad-owner: removal 1 agent B's rm of agent A's file: refused", spo_removal_1)
-spo_register("scratchpad-owner: move 1 agent B's mv of agent A's file: refused", spo_move_1)
 # The folder forms: agent A's files sit under sub/ and sub/deep/, and agent B's call names the folder or its files.
 for _tag, _label, _command_of in SPO_FOLDER_FORMS:
     spo_register("scratchpad-owner: %s: refused" % _label,
@@ -1524,16 +1371,10 @@ def pr2015_spo_dashdash_1():
                         "agent B's python3 -- run of agent A's script is asked")
 
 
-def spo_dashdash_1():
-    return spo_run_case("dash1", "dashdash 1", "x.py", lambda fx, p: "python3 -- %s" % p,
-                        "agent B's python3 -- run of agent A's script is refused")
-
-
 spo_register("scratchpad-owner: stdin 1 agent B's python3 - with a heredoc and agent A's data.json as an "
              "argument: allowed", spo_stdin_case)
 
 spo_register("scratchpad-owner: dashdash 1 agent B's python3 -- run of agent A's script: asked", pr2015_spo_dashdash_1)
-spo_register("scratchpad-owner: dashdash 1 agent B's python3 -- run of agent A's script: refused", spo_dashdash_1)
 
 
 # Rule scratchpad-owner, the run forms and the copy and move destinations. Agent A writes its file; agent B's call

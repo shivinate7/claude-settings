@@ -799,7 +799,6 @@ for _label, pr2015__check in (
 for _label, _check in (
     ("role-model: the owner's real decision file reads to the rows the guard enforces", role_real_table_check),
     ("role-model: qualifier rows name no role, and a plain row reads its first Model word", role_rules_check),
-    ("role-model: the table is read at each spawn, so an edited row changes the next verdict", role_live_check),
     ("role-model: a missing decision file logs one unread line and allows the spawn", role_unread_missing_check),
     ("role-model: an unreadable decision file logs one unread line and allows the spawn", role_unread_bad_check),
     ("role-model: a pinned agent file sorts before an unreadable one, so the pin reads True", role_pin_first_check),
