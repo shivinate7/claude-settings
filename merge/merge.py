@@ -27,6 +27,7 @@
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V] [--grant "#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT"]
+                          [--accepted "RULING_ID,YYYY-MM-DD HH:MM CST|CDT"]
                           print the review record for the head SHA that was reviewed. It refuses a Kind or Guard that the diff contradicts. Stops (exit 1) when the PR's live head is another
                           sha. Posts nothing: the lane posts it as a PR comment. --fix-check adds the optional `Fix check:` line after
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
@@ -41,25 +42,38 @@
                           Any commit with one parent ends the walk as stale. `merge --reviewed` proves it
                           (live_review_state). A read or a merge-tree that cannot run, such as a commit the checkout lacks after one fetch, keeps
                           the record stale and the line says unknown; the fix verifier then refuses. Any other difference keeps today's rules.
-                          A replacement PR with no log of its own starts the fix check from its source's newest log when the trees match (see --reviewed).
+                          --accepted adds the optional `Owner accepted: <ruling id>, <time>` line directly before Net value. The id must be own-<PR>-<letters>
+                          for this PR. For a negative record, at its own Head only, `merge --reviewed` reads that ruling through the ruled store reader (two git
+                          starts, no fetch: this checkout's origin/roadmap; the entry must be open, checked, and name its own id) and then reads the record as at
+                          Net value zero; a ruling it cannot prove keeps the hold. A clean merge of main or a new head needs a new record.
+                          A replacement PR with no log of its own starts the fix check from its source's newest log when the trees match, or the live tree is
+                          a clean merge of main into the Head (see --reviewed).
                           The refusal of a restarting record offers, in order, carry by tree (this head holds the tree the earlier record reviewed: a new PR
                           whose body says `Replaces #N`), a fix verifier on the delta (the trees differ and no fix check failed), then a new branch as the last resort.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
                           A replacement PR names its source in its body on a line `Replaces #M` (or `Carries #M`; two different numbers, or its own,
                           name none). With no record of its own, it takes the newest record on #M when that record's `PR:` line is #M and the tree
-                          of its Head equals the tree of the live head, and #M's lane-lint PASS counts for it on the same tree test (replaces_source,
-                          carry_source, lint_carried). Trees are compared, never head shas. The carried record reads as it reads at its own Head: held stays
-                          held and a failed fix check stays open; its why says `carried from #M by tree`. #M may be closed. Every reader takes the same
-                          carry: `--reviewed`, `--release-check`, the join's lint check, and the fix check of `--review-record`.
+                          of its Head equals the tree of the live head, or the live tree is git's clean merge of that Head and main's current tip
+                          exactly (carry_source, carries_by_tree). #M's lane-lint PASS counts for it on the equal-tree test only (lint_carried, which the
+                          join's lint check, `--reviewed` and `--release-check` call). Trees are compared, never head shas. The carried record reads as
+                          it reads at its own Head: held stays held and a failed fix check stays open; its why says `carried from #M by tree`. #M may be
+                          closed. The record's carry (carry_source) is read the same way by `--reviewed`, `--release-check` and the fix check of `--review-record`.
                           Cost: for a PR that names a source and has no record or lint of its own, one paged read of issue M's comments (once a run)
-                          and two commit reads. A read that cannot run reads unknown, never done.
+                          and two commit reads; when the trees differ, also one `git fetch origin <main>` a run (at most one), then four git rev-parse
+                          starts and one git merge-tree start per read, plus at most one fetch of all branch heads a run when a commit is missing.
+                          A read that cannot run reads unknown, never done.
   merge --reviewed --root DIR [--root DIR ...]
                           the same list for each repo checkout DIR, in the order given, one block each: `repo OWNER/NAME:`, then that repo's lines.
                           Each lane merges on its own, so a block names no batch to open or build. The base is the root's
                           default branch, and its config is read from it. A root whose read fails, or whose folder is
                           missing or unreadable, prints `repo DIR: unknown (REASON)`; the other roots print in full, and the run exits 1.
                           Cost: the gh calls of one --reviewed per root; no new process, file or timer.
+  merge --audit-prs [-C PATH]
+                          one line per open PR: number, branch, head, draft or ready, mergeable state (UNKNOWN: the list does not carry it), the newest
+                          review record's last round and verdict, and the lane-lint state at that head. Then the gh calls of each route. It stops, with
+                          the remaining count, the limit and the reset time, when the GitHub API budget is under a tenth (decision gh-api-budget).
+                          Cost: one call per 100 open PRs and one per page of repo comments; no per-PR call, no file, no new process or timer.
   merge --touches [--run RUN_ID|URL] [--case TEXT ...] [--file PATH ...]
                           one line per open PR that touches a named file (a changed file of that path) or holds a named case in a `+` line of its
                           patch: `#N HEADREF SHA9 draft|ready: file PATH; case TEXT`. With --run, the run's failing log lines name the cases
@@ -146,6 +160,12 @@
                           Before any step: a lint worktree that lacks lint/check_python_floor.py or .github/workflows/checks.yml, which the head's
                           own tree holds, reads UNKNOWN (exit 1, as every lane-lint refusal) and names the file; no step runs and --lint-unknown-ok never lifts it. Cost:
                           one `git ls-tree` of the head.
+                          Replaced PRs: a hand-in that is not an integration PR is refused while its body names an open replaced PR (a
+                          `Replaces #N` or `Carries #N` line); no override lifts it. On a batch integration PR, a PASS posts a pointer
+                          comment on each open lane its freeze block names, then closes it as replaced (its branch stays); the same PASS
+                          reopens each closed lane the block has dropped when the tool closed it (its own pointer is the newest on that lane),
+                          and posts a pointer after the reopen. Cost: one open-list read, one read of each dropped lane not open, and one read
+                          of the repo's comments when any is closed.
   merge --idle-lanes --live FILE
                           lane lines (a lane the roadmap's live file shows done and safe to archive) and `hold (` lines (a lane not to archive now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane; the last clears when the step's status is set to todo or done), then a summary line. A lane that waits (a step not done, an open pull, an open item) prints no line, except a lane only stale drafts hold: that prints one `joint (close #N ...; archive archive/<branch> ...; archive lane <id>)` line, counted among the lanes to archive. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
@@ -156,6 +176,7 @@
                           the page commit, either one alone, or no push when the head holds the tip and its page is current; ask the host to mark the PR
                           ready) and nothing more. A PR that is ready already is left as it is. It
                           merges no pull request, takes no lock and needs no merge role. A red head or a head that conflicts with the base is not marked ready.
+                          The step also closes each open PR the body names as replaced, after the checks and the push and before the ready mark.
                           A repo with merge.readyChecks gets the pre-ready run: the checks, the debt-close lint and the open-PR clash (the head against every
                           other open PR on its base), each one line `pass NAME`, `fail NAME: why` or `unknown NAME: why`, before any push. A PR on a base
                           other than the default branch gets its ci-job steps run on the merge of its head with that base.
@@ -167,8 +188,10 @@
                           with a draft is a report line `#N shares files: a, b`, read from the changed files alone, with no merge-tree (PRE_READY_CLASH_SCOPE: "ready", or "all" for every open PR).
                           A repo with no readyChecks prints `unknown pre-ready: no merge.readyChecks declared` and exits 1.
                           Cost: see fast_checks, run_ready_checks, pre_ready_rows, cross_measure.
-  merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
-                          runs only when that role is recorded for the session (read_merge_role). A local session reads the role the launcher
+  merge --role TIER       cloud only: record this session's merge role (batch-runner, or lane with `--step SLUG`, the cs-step slug of the session's own
+                          record; the coordinator never merges). In a cloud session `--confirm` runs only when that role is recorded for the session
+                          (read_merge_role). A lane's confirm needs --head and runs only on its own ready pull request: a head ref of that step
+                          (lane_own_pr_refusal), and a lane never runs --ready. A local session reads the role the launcher
                           (bin/claude-role) recorded in its role file instead: a session with its own role file runs `--confirm` only when
                           that file names batch-runner, and one the launcher started (CS_SESSION_ROLE set) with no matching own file is refused.
                           A session with neither is as it was, whatever other sessions' files are on disk.
@@ -201,6 +224,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # required_check, pin_note and git_reads, loaded below
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
+import ruled_store  # noqa: E402  the one reader of the ruling store (lint/ruled_store.py)
 import stale_cites  # noqa: E402  the one home of the rule dirs (lint/stale_cites.py); the lint dir is on sys.path from the records import above
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 
@@ -282,6 +306,7 @@ def run_id(run):
 UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not run is reported as unknown, never as clear)"
 # The two role cites name no tier: a lane must not learn which tier may claim a merge.
 ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may merge)"
+BUDGET_CITE = "(decision gh-api-budget, a bulk read stops below a tenth of the GitHub API budget)"
 LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a head that passes `merge --lane-lint`)"
 # The paths a review record's `--guard no` refuses: the rule dirs, then the tool and the hooks, as folder prefixes. GUARD_FILES match a whole path.
 # It reads RULE_DIRS, never a copy.
@@ -402,6 +427,25 @@ def split_headers(out):
         return {}, out
     pairs = (line.partition(":") for line in m.group(0).splitlines()[1:])
     return {k.strip().lower(): v.strip() for k, sep, v in pairs if sep}, out[m.end():]
+
+_ROUTE_REPO = re.compile(r"^repos/(?:\{owner\}/\{repo\}|[^/]+/[^/]+)/?")
+_ROUTE_SHA = re.compile(r"\b[0-9a-f]{40}\b")
+_ROUTE_NUM = re.compile(r"(?<![\w{])\d+(?![\w}])")
+
+def route_template(path):
+    """-> the route of a `gh api` path without its repo, a number as {n} and a full sha as {sha}: the key the per-route call counts use (`pulls/7/files` -> `pulls/{n}/files`)."""
+    rel = _ROUTE_REPO.sub("", path)
+    return _ROUTE_NUM.sub("{n}", _ROUTE_SHA.sub("{sha}", rel)) or "(repo)"
+
+@contextlib.contextmanager
+def bulk_reads(h):
+    """Every GET host `h` makes inside the block is a bulk read: refused when the budget is under a tenth (Host.refuse_bulk), and sent fresh. For a list read of the whole repo."""
+    before = h.bulk_mode
+    h.bulk_mode = True
+    try:
+        yield h
+    finally:
+        h.bulk_mode = before
 
 def has_next_link(link):
     """True when a `Link` header value has an entry whose rel is next. Only the relation counts: the entry's URL is never read."""
@@ -1062,6 +1106,13 @@ def sort_comment(c, records, lints, number=None):
     elif n is not None and first == [LANE_LINT_MARKER] and c.get("author_association") == LANE_LINT_AUTHOR:
         lints.setdefault(n, []).append(body)
 
+def sort_pointer(c, pointers):
+    """Sort the issue comment `c` into `pointers` ({PR number: [bodies]}) when REPLACED_MARKER is its whole first line (any author: the tool posts as
+    whichever account runs it). The number is the comment's issue_url, as sort_comment reads it."""
+    body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
+    if m and body.splitlines()[:1] == [REPLACED_MARKER]:
+        pointers.setdefault(int(m.group(1)), []).append(body)
+
 class Host:
     """The GitHub half: `gh` for the pull request, the required checks, the wait and the merge.
     Tests pass a fake with the same pr and merge, or a `gh` shim on PATH."""
@@ -1074,6 +1125,10 @@ class Host:
         self.ignore = ignore or {}  # check name -> reason, from ignore_checks()
         self.warned = set()  # (check name, link) already warned about, so a poll loop prints each line once
         self.heads_fetch = None  # (code, output) of this run's one fetch_branch_heads, made by merge_state only when a commit is missing; None before it
+        self.main_fetch = None  # (code, output) of this run's one fetch of main (fetch_main_once), made by the first carry that needs main's tip; None before it
+        self.budget = {}  # remaining, limit, reset (epoch seconds) from the newest reply that had a header block; None for each one the reply lacks or garbles, so an unknown budget never refuses
+        self.memo = {}  # (route, query, flags) -> the reply of this run's GET, kept until any write (api)
+        self.route_counts = {}  # (method, route template) -> gh calls made, retries included (route_template)
 
     commit_message = None  # set by confirm just before the merge: one line per reason flag that lifted a check. None leaves GitHub's default message
     branch = "<branch>"  # the head branch of the last pr() read: the remedy of a "no check ran" red names it
@@ -1090,42 +1145,98 @@ class Host:
             raw[:] = [out]
             return c, out
         c, out, self.net_retries = retry_net(call, self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"`gh {' '.join(args[:2])}`", self.now, self.before_wait, net_method(args), idempotent, landed)
+        self.count_call(args, 1 + self.net_retries)
+        if "-i" in args:
+            self.note_budget(split_headers(raw[0])[0])  # the reply's own header block: no call is made to read the budget
         if is_net(c, out):
             raise NetStop(f"network error from `gh {' '.join(args[:2])}`, still failing after {self.net_retries} retries. Nothing was reverted. Run again.\n{out}")
         return c, raw[0] if "-i" in args else out
 
+    def count_call(self, args, calls):
+        """Add `calls` to the count of the route `args` names: the audit's reader (`merge --audit-prs`) prints the counts. A `gh api` call counts under its method and route
+        template, any other gh call under its first two words."""
+        key = (net_method(args), route_template(args[1])) if args[:1] == ["api"] and len(args) > 1 else ("gh", " ".join(args[:2]))
+        self.route_counts[key] = self.route_counts.get(key, 0) + calls
+
+    def note_budget(self, headers):
+        """Keep the budget a reply's headers name. A reply with no header block (a transport error) leaves the last one in place; a header that is missing
+        or not a number is None, so refuse_bulk never reads it."""
+        if headers:
+            self.budget = {k: _seconds(headers.get("x-ratelimit-" + k)) for k in ("remaining", "limit", "reset")}
+
+    use_memo = True  # confirm turns it off: a merge under the lock reads every state fresh, and a rate wait or a rival can change it between two reads
+    bulk_mode = False  # bulk_reads sets it: every GET of the block is a bulk read
+
+    def refuse_bulk(self, rel):
+        """Stop a bulk read when the newest reply left under a tenth of the limit. A budget not read (no header, not a number) never refuses. The reset prints as Central time.
+        Merge-path reads and writes never call this."""
+        left, limit, reset = (self.budget.get(k) for k in ("remaining", "limit", "reset"))
+        if left is None or not limit or limit <= 0 or left * 10 >= limit:
+            return
+        when = "unknown"
+        if reset is not None:
+            try:
+                import local_time  # hooks/local_time.py, the one home of the Central clock; on sys.path from the top of this file
+                when = local_time.central_hhmm(datetime.datetime.fromtimestamp(reset, datetime.timezone.utc)) or when
+            except (ImportError, OverflowError, OSError, ValueError):
+                pass
+        raise Stop(f"the GitHub API budget is {left} of {limit} calls left, under a tenth, so this bulk read of {rel} is not sent. The budget resets at {when}. "
+                   f"Run it again then. {BUDGET_CITE}")
+
     def _repo_args(self):
         return ["-R", self.repo] if self.repo else []
 
-    def api(self, rel, *extra, method="GET", fields=None, body=None, idempotent=False, landed=None):
+    def api(self, rel, *extra, method="GET", fields=None, body=None, idempotent=False, landed=None, bulk=False, memo=True):
         """-> (code, output) of one REST call, through Host.gh so its retries hold. The repo is Host.repo, else the repo of the working directory.
         `fields` go out as -f fields: a GET must say -X GET, or gh sends them as a POST body. A query value never goes in the route, because the
         Windows .cmd shim of gh lets cmd.exe split an argument at '&'.
         `body` (a dict) goes out as JSON through `--input <tempfile>`, for a value that can hold a newline: the same shim cuts an argument there.
-        The file is in the system temp dir, never the repo, and is removed after the call, also when it raises."""
+        The file is in the system temp dir, never the repo, and is removed after the call, also when it raises.
+        Every call goes out with `-i`, so its reply's budget headers are recorded (Host.budget); the output has no header block unless the caller passes `-i` itself.
+        A GET is kept for the run, keyed on its route and query, and a repeat is no call: `memo=False` always reads (a poll that waits for a change). Any other method
+        clears the memo. A bulk read (`bulk`, or inside bulk_reads) is refused below a tenth of the budget (refuse_bulk); it is always sent and never kept, so it
+        reads fresh. A write is never refused."""
         route = f"repos/{self.repo}" if self.repo else "repos/{owner}/{repo}"
+        wants_headers = "-i" in extra
+        extra = extra if wants_headers else (*extra, "-i")
         args = ["api", f"{route}/{rel}" if rel else route, "-X", method]
         for key, value in (fields or {}).items():
             args += ["-f", f"{key}={value}"]
+        keep = method == "GET" and body is None
+        key = (rel, tuple((k, str(v)) for k, v in (fields or {}).items()), extra)
+        bulk = bulk or self.bulk_mode
+        memo = memo and self.use_memo
+        if keep and memo and not bulk and key in self.memo:
+            c, out = self.memo[key]
+            return c, out if wants_headers else split_headers(out)[1]
+        if keep and bulk:
+            self.refuse_bulk(rel or "(repo)")
+        opts = {k: v for k, v in (("idempotent", idempotent), ("landed", landed)) if v}
         if body is None:
-            return self.gh([*args, *extra], self.cwd, **{k: v for k, v in (("idempotent", idempotent), ("landed", landed)) if v})
-        fd, tmp = tempfile.mkstemp(prefix="merge-body-", suffix=".json")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(body, f)
-            return self.gh([*args, "--input", tmp, *extra], self.cwd, **{k: v for k, v in (("idempotent", idempotent), ("landed", landed)) if v})
-        finally:
-            with contextlib.suppress(OSError):
-                os.unlink(tmp)
+            c, out = self.gh([*args, *extra], self.cwd, **opts)
+        else:
+            fd, tmp = tempfile.mkstemp(prefix="merge-body-", suffix=".json")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(body, f)
+                c, out = self.gh([*args, "--input", tmp, *extra], self.cwd, **opts)
+            finally:
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp)
+        if not keep:
+            self.memo.clear()
+        elif memo and not bulk and not c:
+            self.memo[key] = (c, out)
+        return c, out if wants_headers else split_headers(out)[1]
 
-    def pages(self, rel, key=None, fields=None):
+    def pages(self, rel, key=None, fields=None, bulk=False, memo=True):
         """-> every item of a list read, all pages. `key` names the field that holds the page in an object reply (check_runs, statuses); None is an array reply.
         Each page is asked for by number (`page=n`) with -i, and the read goes on to page n+1 only while its `Link` header has rel="next". The last page has none,
-        so a read costs one call per page. gh's own paging and the Link URL are not used: that URL is a numeric `repositories/<id>/...` route, which the cloud agent proxy refuses with 403.
+        so a read costs one call per page, each page asked for once a run (api's memo; `memo=False` reads again). `bulk` refuses a page when the budget is under a tenth (api). gh's own paging and the Link URL are not used: that URL is a numeric `repositories/<id>/...` route, which the cloud agent proxy refuses with 403.
         A failed read is a Stop: never an empty list, which would read as no checks or no pull requests. More than PAGE_CEILING pages is a Stop too."""
         items = []
         for n in range(1, PAGE_CEILING + 1):
-            c, out = self.api(rel, "-i", fields={**(fields or {}), "per_page": 100, "page": n})
+            c, out = self.api(rel, "-i", fields={**(fields or {}), "per_page": 100, "page": n}, bulk=bulk, memo=memo)
             headers, out = split_headers(out)
             try:
                 if c:
@@ -1208,12 +1319,16 @@ class Host:
         """-> the open pull requests (drafts too), every page, as `GET pulls` lists them. A failed read is a Stop, never an empty list."""
         return self.pages("pulls", fields={"state": "open"})
 
+    def read_pr(self, n):
+        """-> the pr() fields of pull request n, one read, with no change to this Host. A failed read is a Stop."""
+        c, out = self.api(f"pulls/{self.pr_number(n)}", memo=False)  # a poll waits for the head to move after a push, so it never reads the memo
+        if c:
+            raise Stop("reading the pull request failed " + READ_CITE + ": " + out)
+        return self.info(json.loads(out))
+
     def pr(self, n):
         """-> {head, branch, base, state, mergeable, merge_state, draft, body, created, changed_files}"""
-        c, out = self.api(f"pulls/{self.pr_number(n)}")
-        if c:
-            raise Stop("reading the pull request failed: " + out)
-        info = self.info(json.loads(out))
+        info = self.read_pr(n)
         self.base = info["base"]  # the PR's own base drives required_names
         self.branch = info["branch"]
         return info
@@ -1254,15 +1369,18 @@ class Host:
             raise Stop(f"reading the run {url} from GitHub failed: {e} {DEBT_CITE}")
 
     def issue_comments(self, since):
-        """-> (records, lints): one list read of the repo's issue comments updated since `since`. The number comes from the comment's issue_url.
+        """-> (records, lints, pointers): one list read of the repo's issue comments updated since `since`. The number comes from the comment's issue_url.
         records is {PR number: [(body, created_at, updated_at) of each review record comment, oldest first]}: a body counts only when the review record
         marker is its whole first line. A timestamp the read did not give is None.
         lints is {PR number: [lane-lint comment bodies, oldest first]}: the lint marker is the whole first line and the author is the repo's owner.
-        A failed read is a Stop. The one home of the comment read: review_records, review_comments and the lane-lint check each take their part."""
-        records, lints = {}, {}
+        pointers is {PR number: [pointer comment bodies, oldest first]}: the replaced-pointer marker (REPLACED_MARKER) is the whole first line. Any author
+        counts, since the tool posts as whichever account runs it; only the tool writes the marker.
+        A failed read is a Stop. The one home of the comment read: review_records, review_comments, the lane-lint check and reopen_dropped each take their part."""
+        records, lints, pointers = {}, {}, {}
         for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
             sort_comment(c, records, lints)
-        return records, lints
+            sort_pointer(c, pointers)
+        return records, lints, pointers
 
     def source_comments(self, m):
         """-> (records, lints) of issue `m`, in issue_comments' shapes ({m: [...]}, so each holds the list for `m`, oldest first): the comments a
@@ -1286,6 +1404,14 @@ class Host:
         c, out = self.api(f"issues/{n}/comments", method="POST", body={"body": body})
         if c:
             raise Stop(f"posting the comment on #{n} failed {LANE_LINT_CITE}: {out}")
+
+    def set_pr_state(self, m, state, by):
+        """Set pull request m to `state` (REST PATCH state=<state>): "closed" as replaced by pull request `by`, or "open" as dropped from the batch of `by`.
+        The branch stays. A failed call is a Stop."""
+        c, out = self.api(f"pulls/{m}", method="PATCH", fields={"state": state}, idempotent=True)
+        if c:
+            act = f"closing #{m} as replaced by #{by}" if state == "closed" else f"reopening #{m}, dropped from the batch of #{by},"
+            raise Stop(f"{act} failed {REPLACED_CITE}: {out}")
 
     def review_comments(self, since):
         """-> {PR number: [review record bodies, oldest first]}: review_records without the timestamps."""
@@ -1355,11 +1481,17 @@ class Host:
         """-> the required check names of the base: its ruleset's first (ruleset_names), else its classic branch protection's. None when neither names any
         (the classic read is an HTTP 404 that is not a network error). Through api, so the guard's -R repo and its cwd name the repo. Any other failed read
         raises Stop."""
+        key = ("protection_names", self.base)
+        if self.use_memo and key in self.memo:  # one read of the names a run, a 404 included: the base's protection does not change inside a run, and any write clears it
+            held = self.memo[key]
+            return list(held) if held else held
         names = self.ruleset_names()
         if names:
+            self.memo[key] = names
             return names
         c, out = self.api(f"branches/{self.base}/protection/required_status_checks", "--jq", ".contexts")
         if c and not is_net(c, out) and re.search(r"\bHTTP 404\b", out):
+            self.memo[key] = None
             return None
         try:
             names = json.loads(out) if not c else None
@@ -1367,6 +1499,7 @@ class Host:
                 raise ValueError
         except ValueError:
             raise Stop(f"cannot read the required checks of {self.base} {PIN_CITE}. Set merge.requiredChecks to a list of check names.\n{out}")
+        self.memo[key] = names
         return names
 
     def required_names(self):
@@ -1533,13 +1666,20 @@ class Host:
         return held, [x for x in pending if x not in held]
 
     def runs(self, sha):
-        """The workflow runs of `sha`, less the ignored ones."""
+        """The workflow runs of `sha`, less the ignored ones. Kept in the GET memo for the run, so superseded, head_state and run_state read a head's
+        list once; any write through api clears it, and a merge under the lock (use_memo off) reads it fresh. A failed read is never kept."""
+        key = ("runs", sha)
+        if self.use_memo and key in self.memo:
+            return list(self.memo[key])
         c, out = self.gh(["run", "list", *self._repo_args(), "--commit", sha, "--limit", "100", "--json", "status,conclusion,name,workflowDatabaseId,databaseId"], self.cwd)
         try:
             runs = json.loads(out)
         except ValueError:
             raise Stop("gh run list failed " + READ_CITE + ": " + out)
-        return [r for r in runs if r["name"] not in self.ignore]
+        runs = [r for r in runs if r["name"] not in self.ignore]
+        if self.use_memo and not c:
+            self.memo[key] = runs
+        return list(runs)
 
     def run_state(self, sha):
         """-> (red, pending) from the workflow runs of `sha`. A run that is not completed holds the wait even
@@ -1865,7 +2005,7 @@ class Host:
         if state_now in ("BLOCKED", "BEHIND"):
             return None, f"#{n} reads {state_now}: its base rules are not met or its branch is behind the base {GRANT_CITE}. gh's merge refuses it the same way, so no merge call was sent."
         def merged_at_sha():  # a lost reply may still have merged: True when the PR reads merged at this run's head, False when it reads open, None when unread or merged elsewhere
-            c4, v = self.api(f"pulls/{n}")
+            c4, v = self.api(f"pulls/{n}", memo=False)
             try:
                 d = json.loads(v) if not c4 else None
                 if d["merged"]:
@@ -1879,7 +2019,7 @@ class Host:
         except NetStop as e:
             lost, c, out = True, 1, str(e)
         try:
-            c2, view = self.api(f"pulls/{n}")
+            c2, view = self.api(f"pulls/{n}", memo=False)
             d = json.loads(view) if not c2 else None
             state, head, oid = "MERGED" if d["merged"] else d["state"].upper(), d["head"]["sha"], d["merged"] and d["merge_commit_sha"]
             if state == "MERGED" and not oid:
@@ -2150,6 +2290,7 @@ def records_proof(wt, base_ref):
         git(wt, "clean", "-fdq")
 
 CI_JOB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "ci-job")  # the lint steps of a job, read from the workflow; the tool brings it
+PR_BODY_ENV = "PR_BODY"  # the aligned probe's body source (lint/compliance_probes.py); a name copied, as the line below
 CI_JOB_HEAD_SHA_ENV = "CI_JOB_HEAD_SHA"  # ci-job's head.sha when set (bin/ci-job HEAD_SHA_ENV); ci-job is a script, not a module, so the name is copied
 READY_ROUTES = ("Mark ready in cloud by MCP update_pull_request draft=false; on a computer by `gh pr ready`, "
                 "a GraphQL call a cloud session gets 403 on (route pr-ready-mcp-cloud, route pr-ready-gh-cli-cloud, route pr-ready-gh-cli-local)")
@@ -2612,6 +2753,8 @@ def drop_worktree(root, tmp, wt):
     git(root, "worktree", "prune")
     shutil.rmtree(tmp, ignore_errors=True)
 
+REPLACED_CITE = "(decision session-tiers, a pull request closes as replaced when the pull request that replaces it opens)"
+REPLACED_MARKER = "<!-- replaced-pointer -->"  # the whole first line of each pointer the tool posts (close_replaced, reopen_dropped); issue_comments reads it back
 LANE_LINT_REMEDY = "Fix it on the lane, push, and run `merge --lane-lint` again. Do not hand this head to the batch runner or join it to a batch until the lint passes. " + LANE_LINT_CITE
 
 def lane_head_and_base(root, target, base):
@@ -2848,7 +2991,7 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
         stop = "\n".join([f"the cross-measure of {head[:9]} is unknown, not a pass:", *unknown, "Run again. " + LANE_LINT_REMEDY])
     return fails, reports, stop
 
-def ci_job_run(wt, *args, notes=None, raw=None, head_sha=None):
+def ci_job_run(wt, *args, notes=None, raw=None, head_sha=None, pr_body=None):
     """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     -> (state, lines, log, liftable). state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
@@ -2858,10 +3001,14 @@ def ci_job_run(wt, *args, notes=None, raw=None, head_sha=None):
     notes: a list the caller passes to receive, on a pass, each ci-job line that holds the pin note marker (a stale pin); the draft step passes none and ignores them.
     raw: a list the caller passes to receive every stdout line, for the pre-ready run's one verdict line per step (step_verdicts).
     head_sha: the pushed head, given to ci-job as CI_JOB_HEAD_SHA when the HEAD of `wt` is not that head (lane_lint's merge commit). With none, ci-job
-    reads HEAD, and an inherited CI_JOB_HEAD_SHA is dropped, so it never names another tree's head."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_") and k != CI_JOB_HEAD_SHA_ENV}  # as the merge's own lint run reads it
+    reads HEAD, and an inherited CI_JOB_HEAD_SHA is dropped, so it never names another tree's head.
+    pr_body: the description of the pull request being linted, given to ci-job as PR_BODY, which the aligned probe reads (a record and its rules move together)
+    when it has no event file. "" is a body that is present and empty. With none, an inherited PR_BODY is dropped, so it never names another PR's body."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_") and k not in (CI_JOB_HEAD_SHA_ENV, PR_BODY_ENV)}  # as the merge's own lint run reads it
     if head_sha:
         env[CI_JOB_HEAD_SHA_ENV] = head_sha
+    if pr_body is not None:
+        env[PR_BODY_ENV] = pr_body
     try:
         c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
     except subprocess.TimeoutExpired:
@@ -3103,7 +3250,10 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     `mutate_run` False skips the run. A skip prints MUTATE_SKIPPED.
     The PR-number call on the integration PR has no hand-off PASS, so it runs the mutation test.
     `touched_tests` (--touched-tests): after a lint pass only, run_touched_tests runs the tests the head's diff touches in the same tree. A failing test refuses always;
-    an unknown (timeout, unloadable selector, unreadable diff) refuses unless `unknown_ok` gives a reason. The PASS line then also names the run and skipped counts."""
+    an unknown (timeout, unloadable selector, unreadable diff) refuses unless `unknown_ok` gives a reason. The PASS line then also names the run and skipped counts.
+    A hand-in of a pull request that is not an integration PR is refused while its body names an open replaced pull request (open_named); no override lifts it.
+    On a batch integration PR, a PASS (after its lint comment) posts a pointer comment on each open lane its freeze block names, then closes it as replaced
+    (close_replaced); the same PASS reopens each closed lane the block has dropped when the tool closed it, and posts a pointer after the reopen (reopen_dropped)."""
     if target.isdigit():
         host = host or Host(cwd=root)
         n = int(target)
@@ -3111,6 +3261,11 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         base = info["base"]
         info = fetch_pr_head(root, info, base, host, n)  # a lane lints right after its push, when GitHub may still show the old head
         head = info["head"]
+        if not is_integration_pr(info):  # an integration PR's lanes close at its own pass, below
+            still_open = open_named(host, info, n)
+            if still_open:
+                raise Stop(f"the body of #{n} names {', '.join(f'#{m}' for m in still_open)} as replaced, and it is open. "
+                           f"Close it as replaced by #{n} (a pointer comment; its branch stays), then run `merge --lane-lint {n}` again. {REPLACED_CITE}")
         tmp, wt = add_worktree(root, head)
     else:
         head, base = lane_head_and_base(root, target, base)
@@ -3154,7 +3309,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         if c2:
             raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the merge of the head with {base} could not be made the lint worktree's HEAD: {out} {LANE_LINT_CITE}")
         refuse_incomplete_tree(wt, head, base, merge_commit)
-        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes, head_sha=head)
+        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes, head_sha=head,
+                                                 pr_body=(info.get("body") or "") if target.isdigit() else None)  # a ref or commit has no PR body
         if state == "pass" and touched_tests:
             touched = run_touched_tests(wt, base, head)
         mutate, mutate_fails, skipped = "", [], False
@@ -3199,6 +3355,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             except Stop as e:  # the lint stands; only the proof on the PR is missing, so say how to get it
                 say(f"merge: the lane-lint comment was not posted on #{n}: {' '.join(str(e).split())} The join and `merge --reviewed` read no PASS for {short} until it is. "
                     f"Run `merge --lane-lint {n}` again, or post this comment on #{n} as the repo's owner:", *lint_body(n, head).splitlines())
+            if is_integration_pr(info):  # after the proof, so a refused close or reopen still leaves the PASS on the pull request
+                close_replaced(host, n, info)
+                reopen_dropped(host, n, info)
         return 0
     if state == "fail":
         raise LintFail("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]), lines, log)
@@ -3956,6 +4115,59 @@ def run_ready_checks(wt, n, base, checks, remedy="Fix it on the branch, push, an
         raise LintFail(message, [f"{v} {name}: {d}" for v, name, d in bad], []) if failed else Stop(message)
     say(f"merge: the ready checks ({', '.join(checks)}) pass on {short}.")
 
+def open_named(host, info, n):
+    """-> the pull requests that the body of `n` (`info`) names as replaced and that are open now (replaced_names, then one read of the open list).
+    A body that names none reads nothing. A closed or merged one is not in the open list, so it gets no call."""
+    names = replaced_names(info, n)
+    if not names:
+        return []
+    still_open = {m for m, _ in host.open_prs()}
+    return [m for m in names if m in still_open]
+
+def close_replaced(host, n, info):
+    """Close each open pull request that pull request `n` names as replaced, with a pointer comment to `n` posted first (a retry after a refused close
+    posts a second pointer; a retry after a refused comment closes nothing without one). Cost: one read of the open list, then one comment and one
+    close for each open one, only at --ready and at a batch integration PR's lane-lint pass."""
+    done = open_named(host, info, n)
+    for m in done:
+        host.post_comment(m, f"{REPLACED_MARKER}\nReplaced by #{n}, which carries this work. This PR is closed and its branch stays. The tool reopens it when the lane is dropped from the batch; otherwise reopen it by hand if #{n} is dropped.")
+        host.set_pr_state(m, "closed", n)
+    if done:
+        say(f"merge: closed {', '.join(f'#{m}' for m in done)} as replaced by #{n}. Each branch stays; the tool reopens a lane dropped from the batch, and any other is reopened by hand. {REPLACED_CITE}")
+
+def closed_by_tool(pointers, n):
+    """-> whether the newest pointer the tool posted on a pull request (`pointers`, oldest first, from issue_comments) is its close as replaced by `n`.
+    A reopen pointer posted after it, a close by another pull request, or no pointer at all (a close by hand) reads False."""
+    return bool(pointers) and bool(re.match(rf"Replaced by #{n}\b", (pointers[-1].splitlines()[1:] or [""])[0]))
+
+def reopen_dropped(host, n, info):
+    """At the lane-lint pass of batch integration PR `n` (`info`): reopen each lane that its freeze block marks Dropped, that is closed now, and whose newest
+    pointer is the tool's close as replaced by `n` (closed_by_tool), so a lane the tool closed is open again once the batch lets it go. A lane closed by hand,
+    an open, a merged and an unnamed pull request is never touched. The reopen pointer is posted only after the reopen succeeds, so a refused reopen
+    leaves no pointer, and its retry posts one. A failed comment read leaves each lane closed and says so; the PASS stands.
+    Cost: one read of the open list, then one read of each dropped lane not in it, one read of the repo's comments since `n` opened when any of them is
+    closed, and one reopen and one comment for each lane the tool closed."""
+    dropped = parse_freeze(info["body"])["dropped"]
+    if not dropped:
+        return
+    still_open = {m for m, _ in host.open_prs()}
+    closed = [m for m in dropped if m not in still_open and host.read_pr(m)["state"] == "CLOSED"]  # a merged lane reads MERGED, so it stays
+    if not closed:
+        return
+    try:
+        pointers = host.issue_comments(info.get("created") or "1970-01-01T00:00:00Z")[2]
+    except Stop as e:
+        say(f"merge: {', '.join(f'#{m}' for m in closed)} left closed: the comments that show whether the tool closed it could not be read "
+            f"({' '.join(str(e).split())}). Run `merge --lane-lint {n}` again to retry, or reopen a lane the tool closed by hand. {REPLACED_CITE}")
+        return
+    done = []
+    for m in (m for m in closed if closed_by_tool(pointers.get(m, []), n)):
+        host.set_pr_state(m, "open", n)
+        done.append(m)
+        host.post_comment(m, f"{REPLACED_MARKER}\nDropped from the batch of #{n}, so this lane is reopened by the tool. Its branch stayed, and #{n} no longer carries this work.")
+    if done:
+        say(f"merge: reopened {', '.join(f'#{m}' for m in done)}, dropped from the batch of #{n}. {REPLACED_CITE}")
+
 def open_merge_worktree(root, info, base, host=None, n=None):
     """The dry merge: a detached, locked worktree on the merge of the PR's head with origin/<base>, built from merge_tree's written tree and one commit-tree
     (parents: the head, then the base tip), never a branch or a ref. -> (tmp, wt), the same pair as add_worktree; drop it with drop_worktree. When the head
@@ -4065,6 +4277,7 @@ def draft_step(root, cfg, n, host, info, merge_main=False):
                     say(f"merge: the records page on {info['branch']} at {info['head'][:9]} is current. Nothing was pushed.")
         finally:
             drop_worktree(root, tmp, wt)
+    close_replaced(host, n, info)  # after the checks and the push, so a red or refused step closes nothing; before the ready mark, which may stay unmarked
     ok, why = host.ready(n)
     if ok:
         say(f"merge: #{n} is ready now. No pull request was merged. When its run is green, run --confirm again to merge.")
@@ -4152,7 +4365,7 @@ def merged_page_stale(root, wt, base, base_ref):
 
 HEAD_MOVED = "the head of #{n} moved since the owner's yes was relayed, so that yes does not cover it (decision auto-mode-owner-acts, a relayed yes binds to the head at relay time). A new yes from the owner is needed. Nothing was claimed or pushed."
 
-BATCH_RUNNER_NEEDS_HEAD = "the merge needs the head the CI ran on, so pass it with the --head flag (decision auto-mode-owner-acts, the batch runner merges the head its CI ran on). Nothing was claimed or pushed."
+BATCH_RUNNER_NEEDS_HEAD = "the merge needs the head the CI ran on, so pass it with the --head flag (decision auto-mode-owner-acts, a merge runs on the head its CI ran on). Nothing was claimed or pushed."
 
 def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok="", expected_head=None, linted_head=None, express=False):
     m = cfg.get("merge", {})
@@ -4165,6 +4378,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
     lifts = {}  # each reason flag that lifts a check in this run, for the merge commit message
     with timed_phase("lock"):
         token = lock.acquire(base, LOCK_TTL_SECONDS)
+    host.use_memo = False  # a merge under the lock reads each state fresh (Host.use_memo)
     host.before_wait = getattr(lock, "extend_for", None)  # a rate wait extends the lock first (standing-merge-grant), so the fixed TTL need not cover it
     tmp = wt = claim_sha = None
     judge = None  # the prose judge's plan, built under the lock and run after it is released
@@ -4432,6 +4646,7 @@ REVIEW_MODEL = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds. The cap no review row may pass (the guard's REVIEW_POLICY_CAP; this file does not load the guard at import). A change's own last round is its review row's.
 REVIEW_GRANT = r"item \d+ [a-z], owner, \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CST|CDT)"  # the owner's grant of one round past REVIEW_LAST_ROUND
 REVIEW_SHA = r"[0-9a-f]{40}"
+REVIEW_ACCEPT_TIME = r"\d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CST|CDT)"  # the time on an Owner accepted line
 REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix verifier is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
 REVIEW_FIX_ROW = "fix verifier"  # the round cell of a fix verifier's row in the model record's round rows (decision agent-model-cap)
 
@@ -4464,29 +4679,32 @@ def __getattr__(name):
         return hook_guard.REVIEW_POLICY_FALLBACK
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-def grant_valid(cite):
-    """True when `cite` is a whole cite whose date and time are a real time; the pattern alone lets a month 99 or an hour 25 through."""
-    if not re.fullmatch(REVIEW_GRANT, cite, re.ASCII):
-        return False
+def time_real(stamp):
+    """True when `stamp`, which ends in `YYYY-MM-DD HH:MM CST|CDT`, holds a real date and time; the patterns alone let a month 99 or an hour 25 through."""
     try:
-        datetime.datetime.strptime(cite[-len("YYYY-MM-DD HH:MM CST"):-4], "%Y-%m-%d %H:%M")
+        datetime.datetime.strptime(stamp[-len("YYYY-MM-DD HH:MM CST"):-4], "%Y-%m-%d %H:%M")
     except ValueError:
         return False
     return True
+
+def grant_valid(cite):
+    """True when `cite` is a whole cite whose date and time are a real time."""
+    return bool(re.fullmatch(REVIEW_GRANT, cite, re.ASCII)) and time_real(cite)
 
 def grant_pr(text):
     """-> (pr, cite) of a Grant text `#<pr>, <cite>` whose cite grant_valid accepts, or None. The PR binds the grant to one pull request."""
     m = re.fullmatch(r"#(\d+), (.*)", text, re.ASCII)
     return (int(m.group(1)), m.group(2)) if m and grant_valid(m.group(2)) else None
 
-def review_body(n, head, kind, guard, rounds, net, fix=None, grant=None):
+def review_body(n, head, kind, guard, rounds, net, fix=None, grant=None, accepted=None):
     """-> the record text, one field per line, in the order of the form. `rounds` is a list of (number, role, model, verdict). `fix` is None or the
     fix check (reviewed head, role, model, verdict), printed after the rounds and before Net value. `grant` is None or the Grant text
-    `#<pr>, <cite>`, printed after Guard or check."""
+    `#<pr>, <cite>`, printed after Guard or check. `accepted` is None or the owner's (ruling id, time), printed last, directly before Net value."""
     return "\n".join([REVIEW_MARKER, f"PR: #{n}", f"Head: {head}", f"Kind: {kind}", f"Guard or check: {guard}",
                       *([f"Grant: {grant}"] if grant else []),
                       *(f"Round {i}: {role}, {model}, {verdict}" for i, role, model, verdict in rounds),
                       *([f"Fix check: {', '.join(fix)}"] if fix else []),
+                      *([f"Owner accepted: {', '.join(accepted)}"] if accepted else []),
                       f"Net value: {net}", REVIEW_CI_LINE]) + "\n"
 
 def parse_review(text):
@@ -4495,7 +4713,9 @@ def parse_review(text):
     optional `Grant: #<pr>, <REVIEW_GRANT>` line directly after Guard or check, whose PR is the record's own; with it the rounds must reach round REVIEW_LAST_ROUND + 1, and without it
     they stop at REVIEW_LAST_ROUND. The rounds open at 1, or at REVIEW_LAST_ROUND. `fix` is None, or the one optional
     `Fix check: <40-hex reviewed head>, reviewer, <model>, PASS|FAIL` line (after the rounds, before Net value) as a (head, role, model, verdict)
-    tuple; a malformed line, a second one, a round after it, or a reviewed head equal to Head is None. Trailing blank lines are allowed. The
+    tuple; a malformed line, a second one, a round after it, or a reviewed head equal to Head is None. `accepted` is None, or the (ruling id, time) of the
+    one optional `Owner accepted: <ruling id>, <YYYY-MM-DD HH:MM CST|CDT>` line directly before Net value (after any fix check); a second one, or one
+    anywhere else, makes the record None. Parsing reads no ruling: live_review_state does. Trailing blank lines are allowed. The
     record ends at the first line that is exactly `---`; it and everything after it (the GitHub attribution footer) are ignored."""
     lines = text.splitlines()
     if "---" in lines:
@@ -4510,6 +4730,9 @@ def parse_review(text):
     if not all(fields) or not net:
         return None
     n, head, kind, guard = (m.group(1) for m in fields)
+    owner = re.fullmatch(rf"Owner accepted: ({RULING_ID.pattern}), ({REVIEW_ACCEPT_TIME})", lines[-3], re.ASCII) if len(lines) > 7 else None
+    accepted = owner.group(1, 2) if owner and time_real(owner.group(2)) else None
+    tail = 2 + bool(accepted)  # the rounds stop before Net value and the CI line, and before the Owner accepted line when one stands there
     if kind not in REVIEW_KINDS or guard not in REVIEW_GUARDS or net.group(1) not in REVIEW_NETS:
         return None
     if kind == "docs-only" and guard == "yes":  # a docs-only change touches no guard or check (decision docs-only-prs-skip-review)
@@ -4519,7 +4742,7 @@ def parse_review(text):
     grant = g.group(1) if bound and bound[0] == int(n) else None  # a malformed or foreign Grant line falls through to the round loop, which refuses it
     ceiling = REVIEW_LAST_ROUND + bool(grant)
     rounds, last, fix = [], 0, None
-    for line in lines[5 + bool(grant):-2]:
+    for line in lines[5 + bool(grant):-tail]:
         if fix:  # nothing follows the fix check line
             return None
         f = re.fullmatch(rf"Fix check: ({REVIEW_SHA}), ({REVIEW_ROLES[0]}), ({REVIEW_MODEL}), ({'|'.join(REVIEW_FIX_VERDICTS)})", line, re.ASCII)
@@ -4538,7 +4761,7 @@ def parse_review(text):
         last = i
     if grant and last != ceiling:  # a grant that holds no granted round is not a record
         return None
-    return {"n": int(n), "head": head, "kind": kind, "guard": guard, "rounds": rounds, "net": net.group(1), "fix": fix, "grant": grant}
+    return {"n": int(n), "head": head, "kind": kind, "guard": guard, "rounds": rounds, "net": net.group(1), "fix": fix, "grant": grant, "accepted": accepted}
 
 def last_design_line(recs):
     """-> (round, verdict) of the last design-reviewer line, by position, in the newest of the parsed records `recs` (oldest first, None skipped) that holds
@@ -4744,32 +4967,70 @@ def replaces_source(n, body):
     found = {int(m) for m in REPLACES_LINE.findall(body or "")}
     return found.pop() if len(found) == 1 and n not in found else None
 
-def same_tree(h, a, b):
-    """True when the commits `a` and `b` hold one tree: one commit read each (Host.commit_read, so the commits API, never a head sha compared). A
-    commit read that names no tree raises Stop, as a failed read does, so the caller reads unknown and never a match."""
-    trees = []
-    for sha in (a, b):
-        tree = h.commit_read(sha)[1]
-        if not tree:
-            raise Stop(f"the commit read of {sha[:9]} names no tree {READ_CITE}")
-        trees.append(tree)
-    return trees[0] == trees[1]
+def tree_of(h, sha):
+    """-> the tree id of the commit `sha`: one commit read (Host.commit_read, so the commits API, never a head sha compared). A commit read that names no
+    tree raises Stop, as a failed read does, so the caller reads unknown and never a match."""
+    tree = h.commit_read(sha)[1]
+    if not tree:
+        raise Stop(f"the commit read of {sha[:9]} names no tree {READ_CITE}")
+    return tree
 
-def carry_source(h, m, live):
-    """-> (rec, row) of the newest review record on pull request `m` when it carries to the live head `live` of the pull request that names `m` as its
-    source, else None: rec is the parsed record and row its (body, created_at, updated_at). It carries only when its own `PR:` line names `m` and the
-    tree of its Head equals the tree of `live` (same_tree); a different tree, an unparsable newest record and a record for another number carry
-    nothing. A failed read raises Stop. Cost: Host.source_comments, which reads issue `m` once a run, then two commit reads."""
+def same_tree(h, a, b):
+    """True when the commits `a` and `b` hold one tree: one commit read each (tree_of)."""
+    return tree_of(h, a) == tree_of(h, b)
+
+CARRY_BY_TREE, CARRY_BY_MERGE = "tree", "merge"  # how a record carried (carries_by_tree)
+
+def fetch_main_once(h, root, main):
+    """Bring refs/remotes/origin/<main> to the remote's current tip with one `git fetch origin <main>` a run, its (code, output) kept on h.main_fetch. A fetch
+    that exits non-zero raises Stop on this call and on every later call of the run, with no new fetch. A fetch that raises TimeoutExpired or OSError
+    passes that error to the caller and leaves h.main_fetch None, so the next call fetches again. Either way a stale local ref is never read as main's tip.
+    Cost: one fetch a run, or one more after each fetch that raised."""
+    if getattr(h, "main_fetch", None) is None:
+        h.main_fetch = git(root, "fetch", "-q", "origin", f"+refs/heads/{main}:refs/remotes/origin/{main}")
+    code, out = h.main_fetch
+    if code:
+        raise Stop(f"git fetch origin {main} failed, so main's tip is unknown: {' '.join(out.split())[:200]} {READ_CITE}")
+
+def carries_by_tree(h, rec_head, live, main):
+    """-> how a record at `rec_head` carries to the live head `live`, or None when it does not: CARRY_BY_TREE when the two hold one tree (same_tree),
+    else CARRY_BY_MERGE when the tree of `live` is exactly git's clean merge of `rec_head` and main's current tip (merge_state "clean", run against
+    refs/remotes/origin/<main> in the host's checkout after fetch_main_once; never the first parent of `live`). `main` is the branch name, or a function
+    that returns it: it is read only when the trees differ, so an equal tree carries with no default branch read. An edited or conflicted merge
+    carries nothing. A merge git cannot read (a commit the checkout lacks after merge_state's one fetch, a git without merge-tree --write-tree), a fetch
+    of main that exits non-zero, no `main` and a commit read that names no tree raise Stop, so the caller reads unknown, never None. A fetch of main
+    that times out or cannot start raises that error (fetch_main_once).
+    The one home of the carry; the lane lint stays equal-tree (lint_carried). Cost: two commit reads; when the trees differ also fetch_main_once's one
+    fetch a run, then merge_state's reads: four git rev-parse starts and one git merge-tree start per read, plus its one fetch_branch_heads a run when a
+    commit is missing."""
+    live_tree = tree_of(h, live)
+    if tree_of(h, rec_head) == live_tree:
+        return CARRY_BY_TREE
+    main = main() if callable(main) else main
+    if not main:
+        raise Stop(f"no default branch is read, so the tip of main is unknown {READ_CITE}")
+    root = h.cwd or "."
+    fetch_main_once(h, root, main)
+    state, why = merge_state(h, (rec_head, f"refs/remotes/origin/{main}"), live_tree)
+    if state == "unknown":
+        raise Stop(f"git's merge of {rec_head[:9]} and main cannot be read: {why} {READ_CITE}")
+    return CARRY_BY_MERGE if state == "clean" else None
+
+def carry_source(h, m, live, main):
+    """-> (rec, row, how) of the newest review record on pull request `m` when it carries to the live head `live` of the pull request that names `m` as its
+    source, else None: rec is the parsed record, row its (body, created_at, updated_at) and how what carries_by_tree answers (the tree of its Head equals
+    the tree of `live`, or `live` is git's clean merge of that Head and main's current tip). `main` is a branch name or a function that returns one
+    (carries_by_tree). A tree that is neither, an unparsable newest record and a record for another number carry nothing. The lane lint is not carried
+    here: lint_carried takes equal trees only. A failed read raises Stop. Cost: Host.source_comments, which reads issue `m` once a run, then carries_by_tree's."""
     rows = h.source_comments(m)[0].get(m)
     rec = parse_review(rows[-1][0]) if rows else None
-    if not rec or rec["n"] != m or not same_tree(h, rec["head"], live):
-        return None
-    return rec, rows[-1]
+    how = carries_by_tree(h, rec["head"], live, main) if rec and rec["n"] == m else None
+    return (rec, rows[-1], how) if how else None
 
 def restart_remedies(h, n, last, head):
     """-> the remedies the refusal of a restarting review record prints, in order. `last` is the newest earlier record on pull request `n`, parsed
     (None when it does not parse, as the fix check reads it) and `head` the head the new record reviews. Carry by tree comes first when the tree of that record's Head equals the tree
-    of `head`: a new pull request whose body says `Replaces #n` takes the record and the lane lint by tree (carry_source). When the trees differ and
+    of `head`: a new pull request whose body says `Replaces #n` takes the record by tree (carry_source) and the lane lint by equal tree (lint_carried). When the trees differ and
     that record has no failed fix check, a fix verifier on the delta comes next. A new branch with a new PR is always the last resort. A tree read that
     cannot run offers neither, and says so. Cost: two commit reads (same_tree) when a record exists."""
     steps, unknown = [], ""
@@ -4783,6 +5044,25 @@ def restart_remedies(h, n, last, head):
         steps.append(f"First, a fix verifier on the delta: post the earlier rounds again, with --fix-check {last['head']}:reviewer:{review_round_model(REVIEW_FIX_ROW)}:PASS, after a reviewer has read only the diff since that head.")
     return unknown + " ".join(steps + ["A new branch with a new PR is the last resort."])
 
+def ruling_unproven(h, rec):
+    """-> "" when the record's Owner accepted line cites a ruling that holds, else one line on why it does not, so the caller keeps the hold. The
+    id must be `own-<N>-<letters>` with N the record's own pull request, so a ruling of another pull request or a bare slug lifts nothing. The
+    ruling is an entry of the one store reader (ruled_store) at this checkout's origin/roadmap: its own id is the cited id, its status is open,
+    check_entry flags nothing and it is not unchecked. Cost: the reader's two git starts (ls-tree, cat-file --batch), no fetch: it reads the copy
+    this checkout last fetched."""
+    rid = rec["accepted"][0]
+    if not re.fullmatch(rf"own-{rec['n']}-[a-z]+", rid):
+        return f"ruling {rid} is not named own-{rec['n']}-<letters>, for this pull request"
+    entries, state = ruled_store.read_store(h.cwd or ".")
+    if state != "ok":
+        return f"the ruling store at origin/roadmap is {state} in this checkout (fetch origin roadmap, then run again)"
+    entry = next((e for e in entries if e.get("id") == rid), None)
+    if entry is None:
+        return f"origin/roadmap holds no ruling whose own id is {rid}"
+    if entry.get("status") != "open" or ruled_store.check_entry(entry) or ruled_store.is_unchecked(entry):
+        return f"ruling {rid} is not an open, checked entry of the store"
+    return ""
+
 REVIEW_SURVIVAL_UNKNOWN = "whether only clean merges of main follow the reviewed head is unknown"  # the why of a stale record whose clean-merge read could not run
 
 def live_review_state(h, rec, live, main, claims=None, earlier=(), source=None):
@@ -4793,20 +5073,33 @@ def live_review_state(h, rec, live, main, claims=None, earlier=(), source=None):
     (a merge of a stacked pull request's base is no merge of main): the caller names it, because Host.pr rewrites the host's base on every read. The record survives a clean merge of main only,
     and with `claims` (the stamp config path, clean_merges_after's) a claim commit too.
     `source` is the number a replacement pull request names as its source (replaces_source), given only when the pull request has no record of its own
-    (`rec` None). Then the newest record on the source carries when its Head and the live head hold one tree (carry_source), and reads as it reads at its
-    own Head, so held stays held and a failed fix check stays open: a carry changes the head test only (step review-carries-by-tree). Its why says
-    `carried from #M by tree`. -> "none" when nothing carries, and "unknown" when the read could not run, never done. Cost: carry_source's."""
+    (`rec` None). Then the newest record on the source carries when its Head and the live head hold one tree, or the live tree is git's clean merge of its
+    Head and the tip of `main` (carry_source, carries_by_tree), and reads as it reads at its own Head, so held stays held and a failed fix check stays open:
+    a carry changes the head test only (step review-carries-by-tree). Its why says `carried from #M by tree`, and names a clean merge of main when that
+    carried it. -> "none" when nothing carries, and "unknown" when the read could not run, never done. Cost: carry_source's."""
     if rec is None and source is not None:
         try:
-            got = carry_source(h, source, live)
+            got = carry_source(h, source, live, main)
             rows = h.source_comments(source)[0].get(source) or []  # cached by carry_source: the source's records, whose earlier ones the walk back reads
         except (Stop, subprocess.TimeoutExpired, OSError) as e:
             return "unknown", f"whether the record of #{source} carries by tree is unknown ({' '.join(str(e).split())[:300]})"
         if got is None:
             return "none", f"no record of #{source} carries to this head by tree"
         state, why = review_state(got[0], got[0]["head"], own_records(source, [r[0] for r in rows[:-1]]))
-        return state, f"carried from #{source} by tree; {why}"
-    state, why = review_state(rec, live, earlier)
+        how = "by tree, as a clean merge of main into its Head" if got[2] == CARRY_BY_MERGE else "by tree"
+        return state, f"carried from #{source} {how}; {why}"
+    def read(head):
+        state, why = review_state(rec, head, earlier)
+        if state != "held" or not rec.get("accepted"):
+            return state, why
+        said = ruling_unproven(h, rec)
+        if said:
+            return state, f"{why}; the owner's acceptance is unproven: {said}"
+        # a recorded ruling lifts the hold only: every other rule reads the record as at Net value zero
+        lifted, why = review_state(dict(rec, net="zero"), head, earlier)
+        return lifted, f"{why}; the owner accepted the negative net value in ruling {rec['accepted'][0]}"
+
+    state, why = read(live)
     if state != "stale":
         return state, why
     try:
@@ -4814,8 +5107,8 @@ def live_review_state(h, rec, live, main, claims=None, earlier=(), source=None):
             return state, why
     except (Stop, subprocess.TimeoutExpired, OSError) as e:
         return state, f"{why}; {REVIEW_SURVIVAL_UNKNOWN} ({' '.join(str(e).split())[:300]})"
-    state, why = review_state(rec, rec["head"], earlier)
-    return state, why + "; the head is the reviewed head plus clean merges of main"
+    state, why = review_state(rec, rec["head"], earlier)  # an acceptance covers its Head only, so a clean merge of main carries the rest of the record and not the lift
+    return state, why + "; the head is the reviewed head plus clean merges of main" + ("; the owner's acceptance covers the reviewed head only" if rec.get("accepted") and state == "held" else "")
 
 def rollup_green(h, n, head):
     """True only when the ROLLUP_JOB rows of the newest run on `head` are all a pass and no older run's red row survives `superseded`. The newest run is the largest id in
@@ -4906,18 +5199,20 @@ def own_records(n, bodies):
 
 def reviewed_read(h, cfgrel=None):
     """-> the lines of `merge --reviewed`, built before any is printed so a failed read prints none. Two list reads (the open pull requests, then the
-    repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
-    the branch protection (decision pr-review-record, the cost). The comment list pages every comment of the repo since the oldest open pull request.
+    repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and the workflow run list (`head_state`'s `gh run list`) of its head,
+    read once (the lint step's rollup read and the CI state share them through the memo; Host.runs keeps the run list there, so a head whose check rows link two runs reads it once too), and the ruleset and the branch protection once a run (decision pr-review-record, the cost;
+    decision gh-api-budget). The two list reads are bulk reads: each stops when the budget is under a tenth. The comment list pages every comment of the repo since the oldest open pull request.
     The same list holds the lane-lint comments: a done record counts as done only with a lane-lint PASS at the live head (lint_state), else its line
     names `merge --lane-lint <n>`; no extra call. A ready pull request with no such PASS adds one rollup_green read (the check runs and the commit
-    statuses, two more `gh` calls): a green all-jobs-passed on the live head reads `lint skipped`, as the join (lint_check) does, and the state stays done. Each record's clean-merge walk judges against the host's base at entry, the repo's default branch, never the pull
+    statuses, the same two calls head_state reuses): a green all-jobs-passed on the live head reads `lint skipped`, as the join (lint_check) does, and the state stays done. Each record's clean-merge walk judges against the host's base at entry, the repo's default branch, never the pull
     request's own base. A claim commit on the reviewed head carries both the record and the lint (claim_only, with the stamp config `cfgrel`), as
     the join reads it; that reads git in the host's checkout, and fetches a pull request head it lacks."""
     main, cfgrel, root = h.base, cfgrel or DEFAULT_CONFIG, h.cwd or "."
-    pulls = h.pages("pulls", fields={"state": "open"})
-    if not pulls:
-        return ["no open pull requests."]
-    rows, lints = h.issue_comments(min(d["created_at"] for d in pulls))
+    with bulk_reads(h):
+        pulls = h.pages("pulls", fields={"state": "open"})
+        if not pulls:
+            return ["no open pull requests."]
+        rows, lints, _pointers = h.issue_comments(min(d["created_at"] for d in pulls))
     records = {n: [r[0] for r in rs] for n, rs in rows.items()}  # reviewed_read needs the bodies only
     lines, bare = [], []
     for d in sorted(pulls, key=lambda d: d["number"]):
@@ -4943,6 +5238,35 @@ def reviewed_read(h, cfgrel=None):
         ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
         lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}; CI {ci}")
     return lines + ([f"no record: {', '.join(bare)}"] if bare else [])
+
+def audit_prs(h):
+    """-> (lines, counts) of `merge --audit-prs`: one line per open pull request, then the gh calls of each route. Two bulk reads and no per-PR call: the open pull
+    list (one call per 100) and the repo's comments since the oldest open pull request (issue_comments). A line holds the number, branch, head, draft or ready,
+    the mergeable state (UNKNOWN: the list does not carry it, and a read for each pull request is the cost this audit avoids), the newest review record's
+    last round and verdict, and the lane-lint state at that head. Writes nothing, no file and no temp file. A bulk read under a tenth of the budget is a Stop."""
+    with bulk_reads(h):
+        pulls = h.pages("pulls", fields={"state": "open"})
+        made = [d["created_at"] for d in pulls if d.get("created_at")]
+        since = min(made) if made else datetime.datetime.fromtimestamp(h.now(), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if not pulls else "1970-01-01T00:00:00Z"  # no open pull request: nothing to match, so the read is of the newest comments only
+        records, lints, _pointers = h.issue_comments(since)
+    lines = []
+    for d in sorted(pulls, key=lambda d: d["number"]):
+        n, sha = d["number"], d["head"]["sha"]
+        rows = records.get(n)
+        rec = parse_review(rows[-1][0]) if rows else None
+        rec = rec if rec and rec["n"] == n else None
+        if not rows:
+            review = "none"
+        elif not rec:
+            review = "unreadable"
+        else:  # a record may hold a fix check and no round line (parse_review), so its fix check stands in for the last round
+            i, role, _model, verdict = rec["rounds"][-1] if rec["rounds"] else (None, None, None, None)
+            fix = rec["fix"]
+            review = (f"round {i} {verdict} ({role})" if i else f"fix check {fix[3]} ({fix[1]})" if fix else "no round")
+            review += "" if rec["head"] == sha else ", at an older head"
+        lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {'draft' if d.get('draft') else 'ready'} {(d.get('mergeable_state') or 'unknown').upper()} "
+                     f"review: {review}; lint: {lint_state(lints.get(n, []), sha)}")
+    return lines or ["no open pull requests."], [f"{method} {route}: {count}" for (method, route), count in sorted(h.route_counts.items())]
 
 def reviewed_lines(h, cfgrel=None):
     """-> the lines of `merge --reviewed` (see reviewed_read, which holds the gh cost of one repo). `--root` runs this once per root, so the
@@ -5046,6 +5370,16 @@ def default_branch(root):
     except OSError as e:  # the gh read runs in the root's folder (cwd=root): a missing or unreadable folder raises before gh starts
         raise Stop(f"the root {root} cannot be read: {e} " + UNKNOWN_CITE)
 
+def repo_full_name(h):
+    """-> OWNER/NAME of the repo a Host acts in: its own repo when it names one, else the repo of its working directory, one REST read (GET repos/{owner}/{repo}).
+    Raises ValueError, KeyError or TypeError when gh's reply cannot be read."""
+    if h.repo:
+        return h.repo
+    c, out = h.api("")
+    if c:
+        raise ValueError(out)
+    return json.loads(out)["full_name"]
+
 def root_host(root, hosts, config):
     """-> the Host of one --root, its base the root's default branch (default_branch) and its merge config read from that base (load_config).
     The config is applied to a real Host only: a test host in `hosts` under that exact string keeps its own checks, and gets the base too.
@@ -5060,11 +5394,8 @@ def root_host(root, hosts, config):
     cfg = load_config(root, h.base, config, " " + UNKNOWN_CITE)
     if hosts is not None:
         return h
-    c, out = h.api("")
     try:
-        if c:
-            raise ValueError(out)
-        h.repo = json.loads(out)["full_name"]
+        h.repo = repo_full_name(h)
     except (ValueError, KeyError, TypeError) as e:
         raise Stop(f"the repo of the root {root} cannot be read from gh: {e} " + UNKNOWN_CITE)
     h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore_checks(cfg)
@@ -5147,8 +5478,9 @@ def release_check(root, h, numbers, lints, root_why=None, cfgrel=None):
     A claim commit on the reviewed or linted head carries the record and the lint to the live head (claim_only, with the stamp config `cfgrel`,
     DEFAULT_CONFIG when None, as main calls it), as `--reviewed` reads them.
     Cost: one `pulls/N` read per number and one list read of the repo's comments since the oldest of them (every page), one fetch per distinct
-    base, one merge-tree per open number (it writes tree objects, never a ref), and a fetch of a pull request head the clone lacks; no new
-    process kept, file or timer."""
+    base, one merge-tree per open number (it writes tree objects, never a ref), and a fetch of a pull request head the clone lacks. A number
+    that reads a record from its source (carries_by_tree) and whose tree differs from the source Head's adds one fetch of main a run, and
+    four git rev-parse starts and one git merge-tree start per carry read. No new process kept, file or timer."""
     numbers = list(dict.fromkeys(numbers))  # a number given twice gets one line, at its first position
     infos, own, fetched, cfgrel = {}, {}, {}, cfgrel or DEFAULT_CONFIG
     for n in numbers if root_why is None else ():
@@ -5184,7 +5516,7 @@ def release_check(root, h, numbers, lints, root_why=None, cfgrel=None):
                 if carried[0] != "done":
                     out.append(carried[1])
                 try:
-                    got = carry_source(h, source, i["head"])
+                    got = carry_source(h, source, i["head"], default)
                 except (Stop, subprocess.TimeoutExpired, OSError):
                     got = None
                 created, updated = got[1][1:] if got else (None, None)
@@ -5271,6 +5603,13 @@ def grant_arg(text):
     if not grant_pr(text):
         raise argparse.ArgumentTypeError(f"{text!r} is not `#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT`, with x one lowercase letter")
     return text
+
+def accepted_arg(text):
+    """argparse type of --accepted RULING_ID,TIME -> (ruling id, time), when the id and a real time are well formed."""
+    m = re.fullmatch(rf"({RULING_ID.pattern}),[ \t]*({REVIEW_ACCEPT_TIME})", text, re.ASCII)
+    if not m or not time_real(m.group(2)):
+        raise argparse.ArgumentTypeError(f"{text!r} is not `RULING_ID,YYYY-MM-DD HH:MM CST|CDT` with a real time")
+    return m.group(1, 2)
 
 def fix_verifier_arg(text):
     """argparse type of --fix-check REVIEWED_HEAD:reviewer:MODEL:PASS|FAIL -> (head, role, model, verdict)."""
@@ -5362,13 +5701,40 @@ def freeze_lines(name, lanes, dropped=(), on=None, base=None, blamed=(), linted=
             *(f"Lane: #{n} {lanes[n]}" for n in sorted(lanes)),
             *(f"Dropped: #{n}" for n in dropped), *(f"Blamed: #{n}" for n in sorted(blamed)), *([f"Linted: {linted}"] if linted else []), BATCH_END]
 
-MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
+NAMED_REPLACED_LINE = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?\**(?:Replaces|Carries)\**:?\**[ \t]+(?:PR[ \t]+)?(#\d+(?:(?:[ \t]*,[ \t]*(?:and[ \t]+|&[ \t]*)?|[ \t]+and[ \t]+|[ \t]*&[ \t]*)(?:PR[ \t]+)?#\d+)*)(?=\**[ \t]*(?:$|[.!?;](?:[ \t]|$)))", re.I)
+
+def replaced_names(info, n):
+    """-> the numbers of the pull requests that the body of pull request `n` (`info`: its "branch" and "body") names as replaced, in order, once each.
+    A line that starts `Replaces #N` or `Carries #N` names them (`PR #N`, a colon and bold marks may stand between; a list like `#1, #2, and #3` may follow), outside a fenced block, a quote line and a code span, so an example
+    names none. The number list counts only when the line or its sentence ends right after it (`Replaces #1 in the docs`, `Replaces #12's polling`
+    and `Carries #5 forward` name nothing). A batch integration PR also names each lane of its freeze block, and never a lane it has dropped, not even
+    from a `Replaces` or `Carries` line. The PR itself and a reference to another repo (`org/repo#N`, a URL) are never named; `see #N` and `related #N`
+    start no line of either form."""
+    rows = info["body"].replace("\r\n", "\n").split("\n")
+    fenced = stale_cites.fenced_lines(rows)
+    names = []
+    for number, row in enumerate(rows, 1):
+        if number in fenced or stale_cites.HEADING_OR_QUOTE.match(row):
+            continue
+        m = NAMED_REPLACED_LINE.match(stale_cites.CODE_SPAN.sub("", row))
+        names += [int(x) for x in re.findall(r"#(\d+)", m.group(1))] if m else []
+    dropped = ()
+    if is_integration_pr(info):
+        block = parse_freeze(info["body"])
+        names += list(block["lanes"])
+        dropped = block["dropped"]
+    return [x for x in dict.fromkeys(names) if x != n and x not in dropped]
+
+LANE_ROLE = "lane"  # a lane's merge role: its role record also names its step, and it merges only its own pull request (ruling own-lanes-merge-claude-settings-prs)
+MERGE_ROLES = {"batch-runner", LANE_ROLE}  # the roles that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
+LANE_MERGE_REPO = "shivinate7/claude-settings"  # the one repo whose pull requests a lane merges itself; the lane role covers it alone
+LOCAL_MERGE_ROLES = {"batch-runner"}  # the roles a local session's role file may name; the lane role is a cloud role only
 
 def role_path():
     return pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")) / "state" / "merge-role.json"
 
-def read_merge_role():
-    """This session's recorded merge role, or None: no session id (cloud, else the local CLAUDE_CODE_SESSION_ID with the launcher's file), no file, unreadable or malformed, another session's, or a tier outside MERGE_ROLES.
+def read_merge_record():
+    """This session's recorded merge record, a dict with "role" (and "step" for a lane), or None: no session id (cloud, else the local CLAUDE_CODE_SESSION_ID with the launcher's file), no file, unreadable or malformed, another session's, a tier outside MERGE_ROLES (LOCAL_MERGE_ROLES for a local session), or a lane with no step.
     Every failure is None, so the check fails closed. An absent id never equals an absent record."""
     sid = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
     if not sid:
@@ -5380,7 +5746,7 @@ def read_merge_role():
             role = session_role.own_role(os.environ.get("CLAUDE_CODE_SESSION_ID"))
         except Exception:
             return None
-        return role if role in MERGE_ROLES else None
+        return {"role": role} if role in LOCAL_MERGE_ROLES else None
     try:
         data = json.loads(role_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):  # UnicodeDecodeError and JSONDecodeError are ValueErrors
@@ -5388,36 +5754,69 @@ def read_merge_role():
     if not isinstance(data, dict) or data.get("session") != sid:
         return None
     role = data.get("role")
-    return role if isinstance(role, str) and role in MERGE_ROLES else None  # a list is unhashable: test the type first
+    if not (isinstance(role, str) and role in MERGE_ROLES):  # a list is unhashable: test the type first
+        return None
+    if role == LANE_ROLE:
+        step = data.get("step")
+        return {"role": role, "step": step} if isinstance(step, str) and step else None
+    return {"role": role}
+
+def read_merge_role():
+    """This session's recorded merge role (read_merge_record), or None."""
+    record = read_merge_record()
+    return record["role"] if record else None
+
+def lane_own_pr_refusal(info, h):
+    """A lane's confirm is refused unless the pull request is in LANE_MERGE_REPO (the repo read from `h`, repo_full_name; a read that fails refuses), is its own and is ready: its head ref is one of lane_head_refs of the step its role record names, and it is no draft.
+    A draft would take the records step, which marks it ready, and only the batch runner does that. -> the refusal text without its cite (the raise adds it), or None (not a lane, or its own ready pull request).
+    The text names neither flag it refuses."""
+    from shared_names import lane_head_refs  # hooks/shared_names.py, the one home of a lane's head refs, on sys.path from the top of this file
+    record = read_merge_record()
+    if not record or record["role"] != LANE_ROLE:
+        return None
+    try:
+        in_repo = repo_full_name(h).casefold() == LANE_MERGE_REPO.casefold()
+    except Exception:  # an unread repo is no proof of the one repo: fail closed
+        in_repo = False
+    if not in_repo:
+        return "a session with this merge role merges its own pull request in this repo only. Hand the pull request to the batch runner. Nothing was claimed or pushed."
+    if info["branch"] not in lane_head_refs(record["step"]):
+        return "this session may merge only the pull request its own step carries, and this one has another head. Hand it to the batch runner. Nothing was claimed or pushed."
+    if info["draft"]:
+        return "this session may merge only its own ready pull request, and this one is a draft. The batch runner marks a draft ready. Nothing was claimed or pushed."
+    return None
 
 LOCAL_ROLE_REFUSAL = "this session may not merge: its own role record does not name the batch runner. Hand the pull request to the batch runner, or ask the owner. Nothing was claimed or pushed. " + ROLE_CITE
 
 def local_role_allows_confirm():
     """A local session's confirm check, judged by the session's OWN record only (hooks/session_role.py local_judgement, rules a, b, c). The id is
-    CLAUDE_CODE_SESSION_ID. An own file must name a MERGE_ROLES role; with no own file and no CS_SESSION_ROLE nothing is judged and today's
+    CLAUDE_CODE_SESSION_ID. An own file must name a LOCAL_MERGE_ROLES role; with no own file and no CS_SESSION_ROLE nothing is judged and today's
     local behaviour stands, whatever other sessions' files are on disk; CS_SESSION_ROLE set with no matching own file refuses.
     Fails closed: a reader that cannot load or run is a refusal, since the caller's crash path would otherwise let the confirm through."""
     try:
         import session_role  # hooks/session_role.py, on sys.path from the top of this file
         judged, record = session_role.local_judgement(os.environ.get("CLAUDE_CODE_SESSION_ID"))
-        return not judged or (record is not None and record["role"] in MERGE_ROLES)
+        return not judged or (record is not None and record["role"] in LOCAL_MERGE_ROLES)
     except Exception:
         return False
 
-def write_merge_role(tier):
-    """Record `tier` as this cloud session's merge role. Refuses outside the cloud, with no session id, or for a tier outside MERGE_ROLES; nothing is written then."""
+def write_merge_role(role, step=None):
+    """Record `role` as this cloud session's merge role. Refuses outside the cloud, with no session id, for a role outside MERGE_ROLES, for a lane with no step (with the hint-free text of a role outside the set), and for a step with any other role; nothing is written then.
+    A lane's record names its step, which the guard proves against the session's own cs-step tags."""
     sid = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
     if os.environ.get("CLAUDE_CODE_REMOTE") != "true":
         raise Stop("--role records a merge role in a cloud session only. " + ROLE_CITE)
     if not sid:
         raise Stop("--role needs CLAUDE_CODE_REMOTE_SESSION_ID, and it is not set. " + ROLE_CITE)
-    if tier not in MERGE_ROLES:
-        raise Stop("this session's tier may not record a merge role. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)  # names no valid tier: a lane must not learn which to claim
+    if role not in MERGE_ROLES or (role == LANE_ROLE and not step):  # a bare lane gets the same hint-free refusal as a role outside the set
+        raise Stop("this session may not record a merge role. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)  # names no valid tier: a lane must not learn which to claim
+    if role != LANE_ROLE and step:
+        raise Stop("--step goes with the lane role alone. " + ROLE_CITE)
     path = role_path()
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")  # replace, so a reader never sees half a file
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_text(json.dumps({"session": sid, "role": tier}), encoding="utf-8")
+        tmp.write_text(json.dumps({"session": sid, "role": role, **({"step": step} if step else {})}), encoding="utf-8")
         os.replace(tmp, path)
     except OSError as e:
         with contextlib.suppress(OSError):
@@ -5497,8 +5896,9 @@ def build_parser():
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
     p.add_argument("--with", dest="with_prs", default=None, metavar="PR,PR,...", help="with --lane-lint on a PR number: also check the head against each named open PR (a comma list), even one of another session")
     p.add_argument("--touched-tests", action="store_true", help="with --lane-lint: after the lint passes, run the test files the diff touches in the lint worktree; a failing test refuses, a timeout is unknown (lifted by --lint-unknown-ok)")
-    p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
-    p.add_argument("--ready", action="store_true", help="mark a lane's draft pull request ready, once: on the default branch a merge of origin/<base> into a head that lacks its tip, the records step and the repo's ready checks, then the host's mark; a ready pull request is left as it is; merges no pull request, takes no lock")
+    p.add_argument("--role", metavar="ROLE", help="cloud only: record this session's merge role (batch-runner, or lane with --step)")
+    p.add_argument("--step", metavar="SLUG", help="with --role lane: the cs-step slug of this session's own record; the lane's confirm runs only on a pull request whose head is that step's lane branch")
+    p.add_argument("--ready", action="store_true", help="mark a lane's draft pull request ready, once: on the default branch a merge of origin/<base> into a head that lacks its tip, the records step and the repo's ready checks, then close each open pull request the body names as replaced, then the host's mark; a ready pull request is left as it is; merges no pull request, takes no lock")
     p.add_argument("--fast-checks", action="store_true", help="the pre-ready run on a dry merge of the pull request onto its base, read-only: one pass, fail or unknown line per check; takes no lock, pushes nothing, marks nothing ready, posts nothing")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
@@ -5508,6 +5908,7 @@ def build_parser():
     p.add_argument("--idle-lanes", action="store_true", help="list the lanes to archive from the roadmap's live file; takes no lock, merges and posts nothing")
     p.add_argument("--live", default=None, metavar="FILE", help="with --idle-lanes: the publisher's live-work file")
     p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
+    p.add_argument("--audit-prs", action="store_true", help="one line per open pull request (head, draft, review verdict, lint state) from two bulk reads, then the gh calls of each route; takes no lock, writes nothing")
     p.add_argument("--root", action="append", default=[], metavar="DIR", help="with --reviewed: a repo checkout to list, in place of the working directory's; repeat it for each repo")
     p.add_argument("--release-check", nargs="+", action="extend", type=pr_arg, metavar="N", help="one line per pull request: PASS, or FAIL and the reasons (open, review record done at the live head and unedited, lint verdict, clean merge, stack); a missing line is a FAIL; takes no lock, merges nothing")
     p.add_argument("--lint", action="append", type=lint_arg, default=[], metavar="N@SHA:VERDICT", help="with --release-check: the lint verdict of pull request N on head SHA (full lowercase 40-hex; PASS, FAIL or UNKNOWN-AT-CAP); a SHA that is not the live head FAILs, and a number with none FAILs")
@@ -5518,6 +5919,7 @@ def build_parser():
     p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
     p.add_argument("--fix-check", type=fix_verifier_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the `Fix check:` line, after the rounds; HEAD is the reviewed head the fix diff starts from; the newest review log has no Fix check line or a PASS one; after a PASS one, a head that is a merge of main must be a merge of the base into that Head with no edit beyond git's own merge")
     p.add_argument("--grant", type=grant_arg, metavar="TEXT", help="with --review-record: the owner's grant of round 4, `#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT`, with PR the pull request's own number; the rounds must then reach round 4")
+    p.add_argument("--accepted", type=accepted_arg, metavar="ID,TIME", help="with --review-record: the owner's acceptance of a negative net value, `RULING_ID,YYYY-MM-DD HH:MM CST|CDT`; prints the `Owner accepted:` line directly before Net value. `merge --reviewed` then reads the record as at Net value zero only at the record's own Head, and only when this checkout's origin/roadmap holds an open, checked ruling named own-<PR>-<letters> for this PR (the ruled store reader's two git starts, only for a negative record with the line)")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after the final round (round 3, or 4 with --grant) when that round failed; a passing round, or a passing fix check after any round, owes none")
     p.add_argument("--touches", action="store_true", help="list the open pull requests that touch a failing case or a named file; takes no lock, merges and posts nothing")
     p.add_argument("--run", default=None, metavar="RUN", help="a workflow run, by its id or its Actions run URL. With --touches: the run whose failing log lines name the cases")
@@ -5530,9 +5932,10 @@ def main(argv, host=None, lock=None, hosts=None):
     p = build_parser()
     a = p.parse_args(argv)
     UNDO_MEMO.clear()  # one merge run owns the memo: equal shas in another run (or test) must not reuse its verdict
-    if ((a.head and not a.confirm) or a.kind or a.guard or a.round or a.fix_check or a.grant or a.net_value != "not owed") and not a.review_record:
+    if ((a.head and not a.confirm) or a.kind or a.guard or a.round or a.fix_check or a.grant or a.accepted or a.net_value != "not owed") and not a.review_record:
         p.error("--head, --kind, --guard, --round, --fix-check, --net-value and --grant go with --review-record (--head also goes with --confirm)" if a.grant
-                else "--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record (--head also goes with --confirm)")
+                else "--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record (--head also goes with --confirm)" if not a.accepted
+                else "--head, --kind, --guard, --round, --fix-check, --net-value and --accepted go with --review-record (--head also goes with --confirm)")
     if a.run is not None and not a.touches:
         p.error("--run goes with --touches")
     if any(not v.strip() for v in [*a.case, *a.file, *([a.run] if a.run is not None else [])]):
@@ -5573,7 +5976,9 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--lint-unknown-ok goes with --lane-lint")
         if a.pr is not None and not a.pr.isdigit():
             p.error(f"argument pr: invalid int value: {a.pr!r}")
-    if a.idle_lanes or a.touches or a.release_check:
+    if a.audit_prs and any(v != p.get_default(k) for k, v in vars(a).items() if k not in ("audit_prs", "repo_dir")):  # -C names the checkout to audit, not a second mode
+        p.error("--audit-prs stands alone")
+    if a.idle_lanes or a.touches or a.release_check or a.audit_prs:
         pass  # stands alone: checked above
     elif a.fast_checks:  # the read-only pre-ready run: no lock, no push, no ready mark
         if a.pr is None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record or a.lane_lint or a.ready:
@@ -5621,7 +6026,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 want, got = review_round_model(1, a.guard == "yes"), hook_guard.role_model_rank(model)
                 if want and got is not None and got < hook_guard.role_model_rank(want):  # no row for the first round leaves nothing to flag against
                     print(f"merge: round 1 ran {model}, below its row's {want} (decision agent-model-cap, the round rows)", file=sys.stderr)
-        if parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant)) is None:
+        if parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant, accepted=a.accepted)) is None:
             p.error("--round: the rounds must start at 1, rise by one at a time and stop at 3; a record may open at round 3 after a failed round 2 or a failed fix verifier; give round 1 with its real model, or unknown if not known" if not a.grant
                     else "--round: with --grant the rounds must start at 1, rise by one at a time and end at 4; a record may open at round 3; give round 1 with its real model, or unknown if not known")
     elif (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
@@ -5643,6 +6048,10 @@ def main(argv, host=None, lock=None, hosts=None):
                 print("merge: " + " ".join(unknown.split()), file=sys.stderr)
                 return 1
             return 0
+        if a.audit_prs:  # before the role check and any lock: it reads, merges and posts nothing
+            lines, counts = audit_prs(host or Host(cwd=a.repo_dir))
+            say(*lines, "gh calls by route:", *(f"  {c}" for c in counts))
+            return 0
         if a.idle_lanes:
             return idle_lanes(a.live, a.repo_dir)  # before the role check and any lock: it reads, merges and posts nothing
         if a.lane_lint:
@@ -5662,7 +6071,7 @@ def main(argv, host=None, lock=None, hosts=None):
             say(*lines)
             return 0 if ok else 1
         if a.role is not None:
-            write_merge_role(a.role)
+            write_merge_role(a.role, a.step)
             say(f"merge: merge role {a.role} recorded for this session.")
             return 0
         if a.root:  # every block is built before any is printed
@@ -5673,7 +6082,9 @@ def main(argv, host=None, lock=None, hosts=None):
             raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") != "true" and not local_role_allows_confirm():  # a local session the launcher started; before any host read or lock
             raise Stop(LOCAL_ROLE_REFUSAL)
-        if a.confirm and not a.head and read_merge_role() == "batch-runner":  # before the lock, a claim or any write
+        if a.ready and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and read_merge_role() == LANE_ROLE:  # a session with the lane merge role leaves the ready mark to the batch runner; before any host read or lock
+            raise Stop("this session's merge role does not mark a pull request ready: the batch runner does. Nothing was claimed or pushed. " + ROLE_CITE)
+        if a.confirm and not a.head and read_merge_role() in MERGE_ROLES:  # before the lock, a claim or any write
             raise Stop(BATCH_RUNNER_NEEDS_HEAD)
         c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=a.repo_dir)
         if c:
@@ -5724,9 +6135,9 @@ def main(argv, host=None, lock=None, hosts=None):
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed
                 last = earlier[-1] if earlier else None
                 source = replaces_source(a.pr, info["body"]) if not earlier else None
-                if source:  # a replacement with no log of its own starts from its source's newest log when the trees match (carry_source)
+                if source:  # a replacement with no log of its own starts from its source's newest log when the trees match or the live tree is git's clean merge of main (carry_source)
                     try:
-                        got = carry_source(h, source, a.head)
+                        got = carry_source(h, source, a.head, lambda: default_branch(root))
                     except (Stop, subprocess.TimeoutExpired, OSError) as e:
                         print(f"merge: --fix-check: whether the log of #{source} carries by tree is unknown ({' '.join(str(e).split())[:300]}), so the fix verifier is refused. " + REVIEW_CITE, file=sys.stderr)
                         return 2
@@ -5741,6 +6152,8 @@ def main(argv, host=None, lock=None, hosts=None):
                     if not plain and review_state(last, last["head"])[0] != "done":  # after a FAIL Fix check line, or any record that is not done, no merge qualifies
                         parents = []
                     ok = plain or (len(parents) == 2 and h.holds_head(parents[1], info["base"]))
+                    if ok and plain and ancestor(h.cwd or ".", last["head"], a.head) is False:  # the verifier reads Head..head, so a head that git reads as not holding the Head is refused (real fix commits may lie between). Unknown keeps the rule that held before: a plain head takes the fix check
+                        ok = False
                     if ok and not plain and parents[0] != a.fix_check[0]:  # clean merges of main may sit between the Head and the last merge: the record survives them
                         try:
                             ok = clean_merges_after(h, a.fix_check[0], parents[0], info["base"])
@@ -5760,13 +6173,17 @@ def main(argv, host=None, lock=None, hosts=None):
                             print(f"merge: --fix-check: whether {a.head[:9]} is git's own merge of the base is unknown ({unread}), so the fix verifier is refused. Fetch both parents of that head into this checkout, then run again. " + REVIEW_CITE, file=sys.stderr)
                             return 2
                 if not ok:
-                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line or a PASS one. After a PASS one, a head that is a merge must be a merge of the base into that Head, and the log must read done, with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
+                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line or a PASS one. After a PASS one, a head that is a plain commit must descend from that Head, and a head that is a merge must be a merge of the base into that Head, and the log must read done, with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
                     return 2
-            say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant).rstrip("\n"))
+            say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant, accepted=a.accepted).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
             return 0
         if not a.reviewed:
             refuse_bad_pr(info)  # a closed PR stops before the config notice; a draft is previewed, or gets the records step under --confirm
+            if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true":  # a lane's own-PR proof: before the lock, a claim or any write
+                why = lane_own_pr_refusal(info, h)
+                if why:
+                    raise Stop(why + " " + ROLE_CITE)
         if a.confirm and a.head and not relayed_head_holds(root, info["branch"], a.head, info["head"]):  # a relayed yes binds to the head at relay time (decision auto-mode-owner-acts): refused before the lock, a claim or any write
             raise Stop(HEAD_MOVED.format(n=a.pr))
         if not (a.reviewed and host):  # a test host brings its own checks, so --reviewed reads no config for it

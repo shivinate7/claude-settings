@@ -19,7 +19,7 @@ THE FORM. A decision on the page (in `context`), or a chat question with 2+ opti
     Based on (<kind>): <one premise>                                  one to three lines
     Departs from: <what on main> — <what changes>                     after the form; every such line must be valid
 
-<stake> is one of OWNER_STAKES. A stood pick (`stands: true`) may write `Problem: <text>` with no stake.
+<stake> is one of OWNER_STAKES. A Problem line with no stake refuses, on every item.
 <kind> is one of PREMISE_KINDS. Each option states its gain and its loss: page `gain` and `lose` fields;
 chat `Gain:` and `Lose:` in the option's description. Only a line at a line start counts.
 
@@ -37,7 +37,7 @@ nothing changes (a restatement of main) refuse as `question-departs`: the rule b
 in decision port-keeps-behaviour. departs_hit is its one predicate; lint/report_guard.py calls it too.
 The page writer's last three rules run after the form: `option-letter-keys` (an option's key is its
 position's letter, and a label that opens with a letter tag names that letter), `option-letters-frozen` (an option keeps the
-key, id and label it was shown with, and each option has a unique id) and `rework-off-page` (an open item never says it is being reworked).
+key and id it was shown with, may be reworded but never takes another shown option's label, and each option has a unique id) and `rework-off-page` (an open item never says it is being reworked).
 `option-labels-match-chat` runs in hooks/guard.py after all of those, because it reads the session's transcript, which item_hit never sees:
 page_label_hit(writes, transcript_path) -> (rule, matched). A chat question cites its item ("Page item: <id>") and writes "a) <text>" per
 option; a write of that item whose label for a letter differs from the chat's text for it is refused (chat_page_label_hit).
@@ -75,7 +75,6 @@ _STAKES = "|".join(re.escape(s) for s in OWNER_STAKES)
 GOAL_LINE = re.compile(r"^[ \t]*Goal:[ \t]*\S", re.I | re.M)
 PROBLEM_LABEL = re.compile(r"^[ \t]*Problem\b", re.I | re.M)
 PROBLEM_LINE = re.compile(r"^[ \t]*Problem[ \t]*\((?:%s)\):[ \t]*\S" % _STAKES, re.I | re.M)
-PROBLEM_STOOD_LINE = re.compile(r"^[ \t]*Problem(?:[ \t]*\((?:%s)\))?:[ \t]*\S" % _STAKES, re.I | re.M)
 # A Based on line starts `Based on (` or `Based on:`; prose that starts "Based on the log" is not one.
 BASED_LABEL = re.compile(r"^[ \t]*Based on[ \t]*[(:]", re.I | re.M)
 BASED_LINE = re.compile(r"^[ \t]*Based on[ \t]*\(([^()\n]*)\):[ \t]*\S", re.I | re.M)
@@ -108,24 +107,23 @@ FORM_REASON = ("A question to the owner states the form, in this order: a line \
                "his word>\" where stake is one of %s, and one to three lines \"Based on (<kind>): <one "
                "premise>\" where kind is one of %s. Each option states its gain and its loss."
                % (", ".join(OWNER_STAKES), ", ".join(PREMISE_KINDS)))
-PAGE_FORM_REASON = FORM_REASON + (" On the waiting page the lines go in `context`, and each option has a "
-                                  "non-empty `gain` and `lose`. If no stake fits, take your own pick and set "
-                                  "stands: true.")
+PAGE_FORM_REASON = FORM_REASON + (" On the page the lines go in `context`, and each option has a "
+                                  "non-empty `gain` and `lose`.")
 CHAT_FORM_REASON = FORM_REASON + (" In the question box the lines go in the question text, and each "
                                   "option's description holds \"Gain: <text>\" and \"Lose: <text>\".")
 STAKE_REASON = ("A decision is the owner's only when he can judge it. Write the Problem line as "
                 "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s. "
-                "A stood pick may write \"Problem: <text>\". If no stake fits, take your own pick and set "
-                "stands: true. (decision owner-judge-test, a decision reaches the owner only when he can judge it)"
+                "If no stake fits, do not ask: take your own pick and say it in the reply. "
+                "(decision owner-judge-test, a decision reaches the owner only when he can judge it)"
                 % ", ".join(OWNER_STAKES))
 
 
-def _lines_hit(text, stands=False):
+def _lines_hit(text):
     """(rule, matched) when `text` lacks a form line or holds a malformed one. The first miss, in the
     order of the form."""
     if not GOAL_LINE.search(text):
         return FORM_RULE, "no Goal line"
-    state = _problem_state(text, stands)
+    state = _problem_state(text)
     if state == "missing":
         return FORM_RULE, "no Problem line"
     if state == "malformed":
@@ -139,9 +137,9 @@ def _lines_hit(text, stands=False):
     return placeholder_form_hit(text)
 
 
-def _problem_state(text, stands):
+def _problem_state(text):
     """ok, malformed (a Problem line starts a line but is bare or names a stake outside the set), or missing."""
-    if (PROBLEM_STOOD_LINE if stands else PROBLEM_LINE).search(text):
+    if PROBLEM_LINE.search(text):
         return "ok"
     return "malformed" if PROBLEM_LABEL.search(text) else "missing"
 
@@ -926,7 +924,7 @@ def decision_form_hit(op: str, data):
         return PASS
     judged_context = op == "set" or "context" in data
     if judged_context:
-        hit = _lines_hit(str(data.get("context") or ""), data.get("stands") is True)
+        hit = _lines_hit(str(data.get("context") or ""))
         if hit[0]:
             return hit
     options = data.get("options")
@@ -948,20 +946,15 @@ def _filled(value) -> bool:
 
 def form_str_replace_hit(entry):
     """(rule, matched) when a str_replace on `context` removes a Goal, Problem or Based on line, or swaps
-    the Problem line for a malformed one. It carries no `data`, so it is read from old_str and new_str.
-    The stored `stands` is unseen, so new_str may drop a stake only where old_str had none."""
+    the Problem line for one that names no stake from the set. It carries no `data`, so it is read from old_str and new_str."""
     if entry.get("field") != "context":
         return PASS
     old, new = str(entry.get("old_str") or ""), str(entry.get("new_str") or "")
     if GOAL_LINE.search(old) and not GOAL_LINE.search(new):
         return FORM_RULE, "context edit that removes the Goal line"
-    # A stake in old_str stays a stake: a stood pick's bare `Problem:` is unseen here, so only a line that
-    # had no stake may stay without one.
-    if PROBLEM_LINE.search(old) and not PROBLEM_LINE.search(new):
-        if PROBLEM_LABEL.search(new):
-            return STAKE_RULE, "context edit that leaves a Problem line with no stake, or one outside the set"
-        return FORM_RULE, "context edit that removes the Problem line"
-    if PROBLEM_STOOD_LINE.search(old) and not PROBLEM_STOOD_LINE.search(new):
+    # Any Problem line in old_str, a stake line or a bare one stored before the stake rule held, may only
+    # become a labelled stake line. A page item carries no stood pick, so no edit keeps a bare line.
+    if PROBLEM_LABEL.search(old) and not PROBLEM_LINE.search(new):
         if PROBLEM_LABEL.search(new):
             return STAKE_RULE, "context edit that leaves a Problem line with no stake, or one outside the set"
         return FORM_RULE, "context edit that removes the Problem line"
@@ -1311,14 +1304,18 @@ def option_letter_hit(op: str, data) -> str:
 # Nov 12), built against a named incident (incident in the record): triage reordered item 646 after the chat question
 # went out, so chat a became page b, and the owner's "a" could have been filed as the opposite pick. option_letter_hit
 # cannot see that: after the swap each key is still its position's letter. The item therefore carries `shown`, the
-# options as first shown, in order, each as {key, id, label}. A later write keeps each shown position's key, id and
-# label, may add a `note` to an option, and may append options when `shown` is extended by them. Each option carries a unique `id` that a stored answer
-# records, so a later move of the letters cannot change which option the owner meant (page_grant.py holds such an
-# answer for his word).
+# options as first shown, in order, each as {key, id, label}. A later write keeps each shown position's key and id,
+# may add a `note` to an option, and may append options when `shown` is extended by them. Each option carries a unique
+# `id` that a stored answer records, so a later move of the letters cannot change which option the owner meant
+# (page_grant.py holds such an answer for his word). The label may be reworded (owner, Nov 15 2026, evening CST: a is
+# apple and b is banana, never a is banana): the letter's meaning is its key and id, not its wording. A reword that
+# lands on another shown position's label is a swap that kept the ids, so it is refused.
 FROZEN_RULE = "option-letters-frozen"
 FROZEN_REASON = ("An option keeps the letter it was first shown with. Carry `shown`, the options as first shown, in "
                  "order, each as {key, id, label}. Give each option a short unique `id` that is never a lone letter. "
-                 "Keep each shown option's key, id and label and its position: never reorder, relabel or drop one. "
+                 "Keep each shown option's key, id and position: never reorder or drop one. "
+                 "A label may be reworded to say the same option in new words: keep it non-empty text, and never give it "
+                 "another shown option's wording. "
                  "A rule-driven change adds a `note` to the option and moves nothing. A new option goes at the end, and `shown` gets it on the same write. "
                  "(decision option-keys-are-letters, ruling R60: an option keeps its letter and carries an id)")
 SHOWN_FIELDS = ("key", "id", "label")
@@ -1341,15 +1338,22 @@ def _option_id_hit(options) -> str:
 
 
 def _shown_entry(entry):
-    """(key, id, label) of one shown entry or option, else None when it is no mapping."""
-    return tuple(entry.get(f) for f in SHOWN_FIELDS) if isinstance(entry, dict) else None
+    """(key, id) of one shown entry or option, else None when it is no mapping. The label is judged apart: it may be
+    reworded."""
+    return tuple(entry.get(f) for f in ("key", "id")) if isinstance(entry, dict) else None
+
+
+def _label_form(label) -> str:
+    """The label as compared between options: trimmed and case-folded, so "blue" reads as "Blue"."""
+    return label.strip().casefold()
 
 
 def frozen_letters_hit(op: str, data) -> str:
     """The matched text when this write of an open waiting-page decision that carries `options` breaks the freeze:
     an option with no unique id (or an id that is a lone letter), no `shown` list, an option at a shown position
-    that differs from the shown entry in key, id or label, fewer options than shown, or a `shown` shorter than the
-    options (an appended option is shown on the same write). A task, a note, a closed item and a write with no
+    that differs from the shown entry in key or id, an option whose label is no non-empty string or is the label
+    shown at another position, fewer options than shown, or a `shown` shorter than the options (an appended option
+    is shown on the same write). A task, a note, a closed item and a write with no
     `options` pass. The stored item is unseen: a write that carries `shown` is trusted, as the record says."""
     if not _open_decision(data) or "options" not in data:
         return ""
@@ -1367,6 +1371,13 @@ def frozen_letters_hit(op: str, data) -> str:
     for i, entry in enumerate(shown):
         if _shown_entry(options[i]) != _shown_entry(entry):
             return "option %s differs from the option shown at its letter" % _letter_of(i)
+    shown_labels = [_label_form(e["label"]) if isinstance(e.get("label"), str) else None for e in shown]
+    for i in range(len(shown)):
+        label = options[i].get("label")
+        if not isinstance(label, str) or not label.strip():
+            return "option %s has no label text" % _letter_of(i)
+        if any(_label_form(label) == other for at, other in enumerate(shown_labels) if at != i):
+            return "option %s carries the wording shown for another letter" % _letter_of(i)
     if len(shown) != len(options):
         return "shown holds fewer options than the write carries: extend shown with each appended option"
     return ""

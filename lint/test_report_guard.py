@@ -898,19 +898,31 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
         self.addCleanup(self.tmp.cleanup)
 
-    def stop(self, records, reply, agent_model="sonnet"):
-        """Run the Stop hook over the turn's records, with the reply as its last text. Return its verdict or None."""
+    def stop(self, records, reply, agent_model="sonnet", agents_dir=None):
+        """Run the Stop hook over the turn's records, with the reply as its last text. Return its verdict or None.
+        `agents_dir` is a fixture agents folder for the guard's file pins; unset, the guard reads the repository's."""
         records = records + [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
                              assistant_text(reply)]
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
         env = dict(os.environ)
         env.pop("CLAUDE_CODE_SUBAGENT_MODEL", None)  # an unset spawn reads the agent file's pin, not this
+        env.pop("REPORT_GUARD_AGENTS_DIR", None)  # the repository's agents folder, unless a case names a fixture one
         if agent_model:
             env["CLAUDE_CODE_SUBAGENT_MODEL"] = agent_model
+        if agents_dir:
+            env["REPORT_GUARD_AGENTS_DIR"] = agents_dir
         run = run_guard(REPORT_GUARD, hook, env=env)
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def unpinned_agents(self):
+        """A fixture agents folder whose builder has no model pin: a spawn with no model and no pin resolves to ''."""
+        folder = os.path.join(self.tmp.name, "fixture-agents")
+        os.makedirs(folder)
+        with open(os.path.join(folder, "builder.md"), "w", encoding="utf-8") as handle:
+            handle.write("---\nname: builder\n---\nbody\n")
+        return folder
 
     def verdict(self, reply, spawns, denied=(), running=(), agent_model="sonnet"):
         records = [human("do the task")]
@@ -991,9 +1003,9 @@ class DoneNamesModelsTests(unittest.TestCase):
     RUNNING_NEXT = "> **Next** reviewer round 1 running; Unstarted: none"
 
     @staticmethod
-    def file_pin(role):
-        """The model: key of agents/<role>.md's frontmatter, read from the file the way the guard reads it."""
-        with open(os.path.join(HERE, "..", "agents", role + ".md"), encoding="utf-8") as f:
+    def file_pin(role, folder=os.path.join(HERE, "..", "agents")):
+        """The model: key of <folder>/<role>.md's frontmatter, read from the file the way the guard reads it."""
+        with open(os.path.join(folder, role + ".md"), encoding="utf-8") as f:
             front = f.read().split("---")[1].splitlines()
         for line in front:
             key, _, value = line.partition(":")
@@ -1157,20 +1169,26 @@ class DoneNamesModelsTests(unittest.TestCase):
     def test_dm_red_earlier_unresolved_spawn_hides_window_mismatch_blocks(self):
         # An earlier builder with no resolvable model is '' in the transcript's map. That must not switch off
         # the builder check for the window's builder, which ran opus.
-        self.assertEqual(self.file_pin("builder"), "", "agents/builder.md pins a model, so no spawn is unresolved")
+        # Re-pointed, the coordinator's ruling of 20:38 CST Nov 9 (step builder-model-pin): a builder with no pin is
+        # ruled out in the repository, so this case reads an unpinned fixture folder through REPORT_GUARD_AGENTS_DIR.
+        folder = self.unpinned_agents()
+        self.assertEqual(self.file_pin("builder", folder), "", "fixture error: the builder fixture pins a model")
         records = self.turn_records(earlier=[self.BUILDER_NO_MODEL], window=[self.BUILDER_OPUS])
         out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none",
-                        agent_model=None)
+                        agent_model=None, agents_dir=folder)
         self.assertIsNotNone(out, "Done named builder sonnet against a window builder that ran opus, and passed")
         self.assertIn("'builder sonnet' matches no builder spawn, which ran opus", out["reason"])
 
     def test_dm_red_earlier_unresolved_spawn_hides_window_wrong_model_blocks(self):
         # The mirror: the window's builder ran sonnet, and Done names opus. The earlier unresolved spawn must
         # not let that wrong name pass.
-        self.assertEqual(self.file_pin("builder"), "", "agents/builder.md pins a model, so no spawn is unresolved")
+        # Re-pointed, the coordinator's ruling of 20:38 CST Nov 9 (step builder-model-pin): a builder with no pin is
+        # ruled out in the repository, so this case reads an unpinned fixture folder through REPORT_GUARD_AGENTS_DIR.
+        folder = self.unpinned_agents()
+        self.assertEqual(self.file_pin("builder", folder), "", "fixture error: the builder fixture pins a model")
         records = self.turn_records(earlier=[self.BUILDER_NO_MODEL], window=[self.BUILDER_SONNET])
         out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder opus)\n> **Next** Unstarted: none",
-                        agent_model=None)
+                        agent_model=None, agents_dir=folder)
         self.assertIsNotNone(out, "Done named builder opus against a window builder that ran sonnet, and passed")
         self.assertIn("'builder opus' matches no builder spawn, which ran sonnet", out["reason"])
 
@@ -1490,6 +1508,15 @@ class CompactionCarryTests(unittest.TestCase):
         for name in names:
             self.assertIn(name, out["reason"])
 
+    def assertOnlyMissing(self, out, name):
+        """A block whose reason says the line `name` has not landed, and names no other carry line."""
+        self.assertBlocksNaming(out)
+        self.assertIn("no %s line has landed since" % name, out["reason"],
+                      "the refusal does not say %r is missing" % name)
+        for other in ("Recovered", "Handoff gave"):
+            if other != name:
+                self.assertNotIn("%s line" % other, out["reason"], "the refusal names %r, which is not missing" % other)
+
     def test_cc_red_landed_turn_after_compaction_without_line_blocks(self):
         # Catches: a landed turn after a compaction passes with no Recovered line.
         self.assertBlocksForRecovered(self.stop(self.compacted_turn(REPORT_NO_LINE)))
@@ -1500,6 +1527,8 @@ class CompactionCarryTests(unittest.TestCase):
             "Recovered: none\n\n" + REPORT_NO_LINE,
             # Catches: a word that ends in "recovered:" is read as the line.
             "> **Done** BUILT abc123\n> **Deviations** Unrecovered: P3 ruling\n> **Next** ship it",
+            # Catches: a Done-item line above the report blockquote counts, when only the blockquote may hold it.
+            "- OTHER: Recovered: x (git)\n\n" + REPORT_NO_LINE,
         ]
         for reply in rows:
             with self.subTest(reply=reply):
@@ -1653,16 +1682,22 @@ class CompactionCarryTests(unittest.TestCase):
 
     def test_cc_red_handoff_gave_missing_blocks(self):
         # Catches: a Recovered line with no Handoff gave line passes.
-        self.assertBlocksNaming(self.stop(self.compacted_turn(report_lines("Recovered: none"))), "Handoff gave")
+        out = self.stop(self.compacted_turn(report_lines("Recovered: none")))
+        self.assertBlocksNaming(out, "Handoff gave")
+        self.assertOnlyMissing(out, "Handoff gave")
 
     def test_cc_red_recovered_missing_with_handoff_present_blocks(self):
         # Catches: a Handoff gave line with no Recovered line passes.
-        self.assertBlocksNaming(self.stop(self.compacted_turn(report_lines("Handoff gave: none"))))
+        out = self.stop(self.compacted_turn(report_lines("Handoff gave: none")))
+        self.assertBlocksNaming(out)
+        self.assertOnlyMissing(out, "Recovered")
 
     def test_cc_red_handoff_line_outside_the_blockquote_blocks(self):
-        # Catches: a Handoff gave line above the report blockquote counts for the current reply.
-        reply = "Handoff gave: none\n\n" + report_lines("Recovered: none")
-        self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), "Handoff gave")
+        # Catches: a Handoff gave line above the report blockquote counts for the current reply, plain or as a Done item.
+        for above in ("Handoff gave: none", "- OTHER: Handoff gave: none"):
+            with self.subTest(above=above):
+                reply = above + "\n\n" + report_lines("Recovered: none")
+                self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), "Handoff gave")
 
     def test_cc_green_both_lines_with_sources_pass(self):
         rows = [
@@ -1822,6 +1857,51 @@ class CompactionCarryTests(unittest.TestCase):
         out = self.stop(self.compacted_turn(reply))
         self.assertBlocksNaming(out)
         self.assertIn("Recovered line", out["reason"])
+
+    def test_cc_red_both_lines_missing_join_with_and(self):
+        # Catches: the refusal joins the two missing lines with "or", which reads as either one being enough.
+        out = self.stop(self.compacted_turn(REPORT_NO_LINE))
+        self.assertBlocksNaming(out, "no Recovered line and no Handoff gave line has landed since")
+
+    def test_cc_green_other_done_item_lines_count(self):
+        # Catches: a Done item tagged OTHER, "- OTHER: Recovered:" or "- OTHER: Handoff gave:", is not read as its line.
+        reply = "> **Done** BUILT abc123\n> - OTHER: Recovered: x (git)\n> - OTHER: Handoff gave: x\n> **Next** ship it"
+        out = self.stop(self.compacted_turn(reply))
+        self.assertIsNone(out, "a Done item tagged OTHER does not count: %r" % (out,))
+
+    def test_cc_green_built_and_recorded_done_item_lines_count(self):
+        # Catches: a Done item tagged BUILT or RECORDED, "- BUILT: Recovered:" or "- RECORDED: Handoff gave:", is not read as its line.
+        reply = ("> **Done** BUILT abc123\n> - BUILT: Recovered: x from PR #978 (git)\n"
+                 "> - RECORDED: Handoff gave: x from PR #978\n> **Next** ship it")
+        out = self.stop(self.compacted_turn(reply))
+        self.assertIsNone(out, "a Done item tagged BUILT or RECORDED does not count: %r" % (out,))
+
+    def test_cc_red_tags_outside_the_done_kinds_do_not_count(self):
+        # Catches: a bullet tagged NOTE or DONE, which is no Done kind, is read as its carry line.
+        rows = [
+            (report_lines("Recovered: x (git)", "NOTE: Handoff gave: x"), "Handoff gave"),
+            (report_lines("DONE: Recovered: x (git)", "Handoff gave: x"), "Recovered"),
+        ]
+        for reply, name in rows:
+            with self.subTest(reply=reply):
+                self.assertOnlyMissing(self.stop(self.compacted_turn(reply)), name)
+
+    def test_cc_red_fenced_carry_lines_above_the_report_do_not_count(self):
+        # Catches: "Recovered:" and "Handoff gave:" inside a code fence above the report count as carry lines.
+        reply = "```\nRecovered: x (git)\nHandoff gave: x\n```\n\n" + REPORT_NO_LINE
+        self.assertBlocksForRecovered(self.stop(self.compacted_turn(reply)))
+
+    def test_cc_red_mid_item_recovered_text_is_not_a_carry_line(self):
+        # Catches: a backticked or mid-sentence "recovered:" after a Done-item tag is read as the Recovered line.
+        for item in ("- OTHER: built the `Recovered:` check", "- OTHER: the janitor recovered: 3 files from git"):
+            with self.subTest(item=item):
+                reply = "> **Done** BUILT abc123\n> **Deviations**\n> %s\n> Handoff gave: none\n> **Next** ship it" % item
+                self.assertOnlyMissing(self.stop(self.compacted_turn(reply)), "Recovered")
+
+    def test_cc_red_other_tag_with_no_bullet_is_not_a_carry_line(self):
+        # Catches: an OTHER tag at line start, with no bullet, is read as a Done item's Handoff gave line.
+        reply = "> **Done** BUILT abc123\n> **Deviations**\n> Recovered: x (git)\n> OTHER: Handoff gave: x\n> **Next** ship it"
+        self.assertOnlyMissing(self.stop(self.compacted_turn(reply)), "Handoff gave")
 
 
 class CompactionCarryCostTests(unittest.TestCase):
@@ -2810,6 +2890,25 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                 out = self.lane(peer_msg("pick?"), assistant_text(self.reply(body)))
                 self.assert_blocked(out, "Lane pick guard", "its parent")
 
+    def test_ln_red_consultant_with_parent_is_owner_facing(self):
+        # Catches: a session tagged cs-build:consultant that has a parent id read as a lane, so its question
+        # to the owner is refused for not going to a parent.
+        record = self.lane_record(tags=("cs-build:consultant",))
+        bare = self.make_repo("bare-consultant", page=False)
+        out = self.stop([*record, human("decide"), *self.box(), assistant_text(self.reply(self.PICK))],
+                        env_id=self.LANE_ENV, repo=bare)
+        self.assertIsNone(out)
+        out = self.stop([*record, human("decide"), assistant_text(self.reply(self.QUESTION))], env_id=self.LANE_ENV)
+        self.assert_blocked(out, "Pick guard")
+        self.assertNotIn("Lane pick guard", out.get("reason", ""))
+
+    def test_ln_red_lane_and_consultant_tags_together_stay_a_lane(self):
+        # Catches: the consultant exemption widened past its bug, so a record with the lane tag too passes
+        # a question that main refuses.
+        record = self.lane_record(tags=("cs-build:lane", "cs-build:consultant"))
+        out = self.stop([*record, peer_msg("pick?"), assistant_text(self.reply(self.PROMISE))], env_id=self.LANE_ENV)
+        self.assert_blocked(out, "Lane pick guard", "its parent")
+
     def test_ln_red_box_or_items_write_blocks(self):
         # Catches: a lane's box or items write read as its send. Neither passes a lane.
         for label, act in (("box", self.box()), ("items", self.items_write("set"))):
@@ -3101,29 +3200,45 @@ class ConfigReportTests(unittest.TestCase):
 
 
 class RemovedBudgetKeysTests(unittest.TestCase):
-    """load_config says so when a config still sets a removed word-budget key (plain-prose-lint)."""
+    """load_config says so when a config still sets a removed budget key, and the key changes no result
+    (plain-prose-lint: the lint never counts words)."""
 
     def load(self, data):
         import contextlib
         import io
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        with open(os.path.join(tmp.name, ".ste.json"), "w", encoding="utf-8") as f:
+        folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, folder, True)
+        with open(os.path.join(folder, ".ste.json"), "w", encoding="utf-8") as f:
             json.dump(data, f)
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
-            cfg = ste_lint.load_config(tmp.name)
+            cfg = ste_lint.load_config(folder)
         return cfg, err.getvalue()
 
     def test_removed_budget_keys_print_a_notice_each(self):
-        for key in ("max_words_procedural", "max_words_descriptive"):
+        for key in ("max_words", "max_words_procedural", "max_words_descriptive"):
             with self.subTest(key=key):
                 _cfg, err = self.load({key: 20})
                 self.assertIn(key, err)
+                self.assertIn("removed and ignored", err)
+
+    def test_the_notice_does_not_name_max_words_as_the_live_budget(self):
+        for key in ("max_words", "max_words_procedural", "max_words_descriptive"):
+            with self.subTest(key=key):
+                _cfg, err = self.load({key: 20})
+                self.assertNotIn("The budget is max_words", err)
+
+    def test_max_words_in_config_changes_no_finding(self):
+        text = "This step is not unsafe. " + plain_words(10)
+        cfg, _err = self.load({"max_words": 5})
+        with_key = sorted(f.code for f in ste_lint.Linter(cfg).check_text("t.md", text))
+        without = sorted(f.code for f in ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG)).check_text("t.md", text))
+        self.assertIn("STE013", without, "the control sentence was not linted")
+        self.assertEqual(with_key, without)
 
     def test_a_current_key_prints_no_notice(self):
-        cfg, err = self.load({"max_words": 20})
-        self.assertEqual(cfg["max_words"], 20)
+        cfg, err = self.load({"mode": "descriptive"})
+        self.assertEqual(cfg["mode"], "descriptive")
         self.assertEqual(err, "")
 
 
@@ -3135,112 +3250,93 @@ class SentenceSplitBoldTests(unittest.TestCase):
         linter = ste_lint.Linter(config)
         return linter.check_text("t.md", text)
 
-    def test_19_bold_split_sentences_each_under_limit_no_ste001(self):
-        text = (
-            "**First short sentence.** Second short sentence that alone is well "
-            "under the limit for this test case and it stays clear plain short "
-            "words here for every reader who checks the count today.\n"
-        )
-        # Each sentence alone is under the 30-word budget. Joined as
-        # one sentence (the pre-patch behavior), the word count would exceed it.
-        findings = self.lint(text)
-        codes = [f.code for f in findings]
-        self.assertNotIn("STE001", codes)
+    def test_19_a_sentence_end_inside_bold_still_splits(self):
+        parts = ste_lint.split_sentences("**First short sentence.** Second short sentence.", in_list=False)
+        self.assertEqual(len(parts), 2, "the sentence end inside bold did not split")
+        self.assertEqual(parts[1][1], "Second short sentence.")
 
-    def test_20_plain_thirty_one_word_sentence_still_ste001(self):
-        words = ["word"] * 31
-        text = " ".join(words).capitalize() + ".\n"
-        findings = self.lint(text)
-        codes = [f.code for f in findings]
-        self.assertIn("STE001", codes)
+    def test_20_a_plain_thirty_one_word_sentence_gives_no_ste001(self):
+        # The control sentence shows the text was linted before no STE001 is read from it.
+        codes = [f.code for f in self.lint(plain_words(31).rstrip() + " This step is not unsafe.\n")]
+        self.assertIn("STE013", codes, "the control sentence was not linted")
+        self.assertNotIn("STE001", codes)
 
 
 class DoubleBacktickMaskTests(unittest.TestCase):
     """A two-backtick code span is one span (MASK_PATTERNS in lint/ste_lint.py).
 
-    The tests guard that a double-backtick span is masked as code, so its text is not linted and a
-    backtick inside it does not hide the prose after it. They also guard that an unclosed
-    double-backtick run is literal text: it opens no span, so the prose before a later code span
-    is still linted, and that code span is still masked.
+    The probe is STE013, a double negative, which fires on "not unsafe" in prose and never inside code.
+    Each case pairs a control, which shows the text is linted, with the masked case. The tests guard
+    that a double-backtick span is masked as code, so its text is not linted and a backtick inside it
+    does not hide the prose after it. They also guard that an unclosed double-backtick run is literal
+    text: it opens no span, so the prose before a later code span is still linted, and that code span
+    is still masked.
     """
-
-    LONG_TAIL = ("The reviewer reads every changed line of the test file before the branch is pushed, "
-                 "then checks each new case against the old commit and records the failing run in the trailer")
 
     def codes(self, text):
         linter = ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG))
         return [f.code for f in linter.check_text("t.md", text)]
 
     def test_backtick_inside_double_backtick_span_does_not_hide_the_next_sentence(self):
-        single = "Write the span as `a b` in the note. " + self.LONG_TAIL + " with `code` at the end.\n"
-        self.assertIn("STE001", self.codes(single), "fixture sentence is not over budget")
-        double = "Write the span as ``a ` b`` in the note. " + self.LONG_TAIL + " with `code` at the end.\n"
-        self.assertIn("STE001", self.codes(double),
+        single = "Write the span as `a b` in the note. This step is not unsafe. Then `code` at the end.\n"
+        self.assertIn("STE013", self.codes(single), "fixture sentence is not linted")
+        double = "Write the span as ``a ` b`` in the note. This step is not unsafe. Then `code` at the end.\n"
+        self.assertIn("STE013", self.codes(double),
                       "a backtick inside a double-backtick span hides the sentence after it")
 
     def test_double_backtick_span_content_is_not_linted(self):
-        words = " ".join(["word"] * 31)
-        self.assertIn("STE001", self.codes("Run " + words + " now.\n"), "fixture sentence is not over budget")
-        self.assertNotIn("STE001", self.codes("Run ``" + words + "`` now.\n"),
+        self.assertIn("STE013", self.codes("Run not unsafe now.\n"), "fixture sentence is not linted")
+        self.assertNotIn("STE013", self.codes("Run ``not unsafe`` now.\n"),
                          "text inside a double-backtick span is linted as prose")
 
-    def test_double_backtick_span_without_inner_backtick_adds_no_finding(self):
-        self.assertNotIn("STE001", self.codes("Set the flag ``a b`` and then stop the pump now.\n"),
-                         "a double-backtick span with no backtick inside adds a finding")
+    def test_double_backtick_span_without_inner_backtick_is_not_linted(self):
+        self.assertIn("STE013", self.codes("Set the flag not unsafe and then stop the pump now.\n"),
+                      "fixture sentence is not linted")
+        self.assertNotIn("STE013", self.codes("Set the flag ``a b not unsafe`` and then stop the pump now.\n"),
+                         "a double-backtick span with no backtick inside is linted as prose")
 
     def test_unclosed_double_backtick_run_does_not_hide_prose_before_a_code_span(self):
         # The `` run has no closing run of two, so it is literal text and opens no span.
-        words = " ".join(["word"] * 31)
-        self.assertIn("STE001", self.codes("Run status and " + words + ", then `file`.\n"),
-                      "fixture sentence is not over budget")
-        self.assertIn("STE001", self.codes("Run ``status and " + words + ", then `file`.\n"),
+        self.assertIn("STE013", self.codes("Run status and not unsafe, then `file`.\n"),
+                      "fixture sentence is not linted")
+        self.assertIn("STE013", self.codes("Run ``status and not unsafe, then `file`.\n"),
                       "an unclosed double-backtick run hides the words before a later code span")
 
     def test_unclosed_double_backtick_run_does_not_lint_a_later_code_span_as_prose(self):
         # The run is literal, so the single-backtick span after it is valid and its words stay masked.
-        words = " ".join(["word"] * 31)
-        self.assertIn("STE001", self.codes("Run status then " + words + " now.\n"),
-                      "fixture sentence is not over budget")
-        self.assertNotIn("STE001", self.codes("Run ``status then `" + words + "` now.\n"),
+        self.assertIn("STE013", self.codes("Run status then not unsafe now.\n"), "fixture sentence is not linted")
+        self.assertNotIn("STE013", self.codes("Run ``status then `not unsafe` now.\n"),
                          "an unclosed double-backtick run makes a later code span read as prose")
 
     def test_lone_backtick_before_a_double_span_does_not_hide_the_words_before_it(self):
         # The lone backtick is an unclosed run, so it is literal and opens no span. The `` span after
-        # it is masked, and the 31 words before it stay prose.
-        words = " ".join(["word"] * 31)
-        self.assertIn("STE001", self.codes("Use " + words + " ``x`` now.\n"), "fixture sentence is not over budget")
-        self.assertIn("STE001", self.codes("Use ` then " + words + " ``x`` now.\n"),
+        # it is masked, and the words before it stay prose.
+        self.assertIn("STE013", self.codes("Use not unsafe ``x`` now.\n"), "fixture sentence is not linted")
+        self.assertIn("STE013", self.codes("Use ` then not unsafe ``x`` now.\n"),
                       "a lone backtick before a double-backtick span hides the words before it")
 
     def test_two_backtick_run_inside_a_three_backtick_run_does_not_close_the_span(self):
         # The ``` run is not a closing run of two, so the span runs on to the `` after the words and
         # the words stay inside it.
-        words = " ".join(["word"] * 31)
-        self.assertIn("STE001", self.codes("Use " + words + " now.\n"), "fixture sentence is not over budget")
-        self.assertNotIn("STE001", self.codes("Use ``x ``` " + words + " `` now.\n"),
+        self.assertIn("STE013", self.codes("Use not unsafe now.\n"), "fixture sentence is not linted")
+        self.assertNotIn("STE013", self.codes("Use ``x ``` not unsafe `` now.\n"),
                          "a two-backtick run inside a three-backtick run closes the span early")
 
     def test_single_backtick_span_content_is_not_linted(self):
-        words = " ".join(["word"] * 31)
-        self.assertIn("STE001", self.codes("Run " + words + " now.\n"), "fixture sentence is not over budget")
-        self.assertNotIn("STE001", self.codes("Run `" + words + "` now.\n"),
+        self.assertIn("STE013", self.codes("Run not unsafe now.\n"), "fixture sentence is not linted")
+        self.assertNotIn("STE013", self.codes("Run `not unsafe` now.\n"),
                          "text inside a single-backtick span is linted as prose")
-
-    def test_single_backtick_span_budget_is_thirty_words(self):
-        base = ("Set the flag `a b` and then the reviewer checks every changed line in the test file "
-                "before the branch is pushed to the shared remote today for the crew now")
-        self.assertIn("STE001", self.codes(base + " again.\n"), "fixture: a 31-word sentence is not over budget")
-        self.assertNotIn("STE001", self.codes(base + ".\n"), "a 30-word sentence with one span is over budget")
 
 
 class DecisionGlossCollapseTests(unittest.TestCase):
-    """STE001 must not count the words a gloss tool inserts after a citation
-    (lint/ste_lint.py build_gloss_pattern). A hermetic fixture folder stands
-    in for a real `docs/decisions/`, so this needs no other repository.
+    """The gloss tool writes a citation's title after its id. The masker drops that title for every
+    rule and for --stats (lint/ste_lint.py build_gloss_pattern), so a double negative in a title the
+    tool wrote fires nothing once collapsed, and the title's words are not counted. A hermetic fixture
+    folder stands in for a real `docs/decisions/`, so this needs no other repository.
     """
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)  # test-temp-standard: this run's folder
         self.decisions_dir = os.path.join(self.tmp.name, "decisions")
         os.makedirs(self.decisions_dir)
         self.addCleanup(self.tmp.cleanup)
@@ -3258,49 +3354,47 @@ class DecisionGlossCollapseTests(unittest.TestCase):
         linter = ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG))
         return linter.check_text("t.md", text)
 
-    def test_genuinely_long_sentence_without_citation_still_ste001(self):
-        self.write_entry("d-001.md", "D-001", "A short title")
-        words = ["word"] * 31
-        text = " ".join(words).capitalize() + ".\n"
-        codes = [f.code for f in self.lint(text, use_gloss=True)]
-        self.assertIn("STE001", codes)
+    def stats_words(self, text, use_gloss):
+        pattern = ste_lint.build_gloss_pattern(self.decisions_dir) if use_gloss else None
+        ste_lint.set_gloss_pattern(pattern)
+        return ste_lint.file_stats(text, dict(ste_lint.DEFAULT_CONFIG))["words"]
 
-    def test_gloss_only_overflow_is_not_ste001_once_collapsed(self):
-        self.write_entry("d-001.md", "D-001", "A title of exactly six whole words")
-        text = (
-            "The team agreed today that this long sentence about D-001, A title "
-            "of exactly six whole words still carries plenty of authored words "
-            "for the sentence count today at the main site now.\n")
+    def test_gloss_text_the_tool_wrote_is_not_linted_once_collapsed(self):
+        self.write_entry("d-001.md", "D-001", "A title that is not unsafe")
+        text = "The team agreed today about D-001, A title that is not unsafe, and it stays plain.\n"
         uncollapsed = [f.code for f in self.lint(text, use_gloss=False)]
-        self.assertIn("STE001", uncollapsed, "fixture sentence was not actually over budget")
+        self.assertIn("STE013", uncollapsed, "fixture title is not linted without the gloss")
         collapsed = [f.code for f in self.lint(text, use_gloss=True)]
-        self.assertNotIn("STE001", collapsed)
+        self.assertNotIn("STE013", collapsed)
+
+    def test_gloss_text_the_tool_wrote_is_not_counted_by_stats_once_collapsed(self):
+        self.write_entry("d-001.md", "D-001", "The rule that holds for every site")
+        text = "All sites follow D-001, The rule that holds for every site today.\n"
+        self.assertEqual(self.stats_words(text, use_gloss=False), 12,
+                         "fixture line is not 12 words without the gloss")
+        self.assertEqual(self.stats_words(text, use_gloss=True), 5,
+                         "gloss text the tool wrote is counted by --stats")
 
     def test_wrong_gloss_for_a_real_id_is_not_collapsed(self):
-        self.write_entry("d-001.md", "D-001", "A title of exactly six whole words")
-        text = (
-            "The team agreed today that this long sentence about D-001, some "
-            "text that is not entry one real title still carries plenty of "
-            "authored words for the count today at the main site now.\n")
+        self.write_entry("d-001.md", "D-001", "A title that is not unsafe")
+        text = "The team agreed today about D-001, some text that is not unsafe, and it stays plain.\n"
         codes = [f.code for f in self.lint(text, use_gloss=True)]
-        self.assertIn("STE001", codes)
+        self.assertIn("STE013", codes)
 
     def test_reversed_entry_gloss_suffix_also_collapses(self):
-        self.write_entry("d-001.md", "D-001", "A title of exactly six whole words")
-        self.write_entry("d-002.md", "D-002", "The newer rule", body="reverses: D-001\n")
-        text = (
-            "The team agreed that this sentence about D-001, A title of exactly six "
-            "whole words (reversed by D-002, The newer rule) still carries plenty of "
-            "words for the whole crew today and for the late shift too.\n")
+        self.write_entry("d-001.md", "D-001", "A title that is not unsafe")
+        self.write_entry("d-002.md", "D-002", "The newer rule is not unsafe", body="reverses: D-001\n")
+        text = ("The team agreed that this sentence about D-001, A title that is not unsafe "
+                "(reversed by D-002, The newer rule is not unsafe) still stays plain.\n")
         uncollapsed = [f.code for f in self.lint(text, use_gloss=False)]
-        self.assertIn("STE001", uncollapsed, "fixture sentence was not actually over budget")
+        self.assertIn("STE013", uncollapsed, "fixture titles are not linted without the gloss")
         codes = [f.code for f in self.lint(text, use_gloss=True)]
-        self.assertNotIn("STE001", codes)
+        self.assertNotIn("STE013", codes)
 
     def test_heading_gloss_trigger_word_does_not_force_procedural_mode(self):
         # D-448's real title in q_max, "The operator tiers run themselves", carries
-        # `run`, a `PROCEDURAL_HEADINGS` trigger word. The sentence limit is one number now, so
-        # the mode shows through STE015, a rule that reads procedural text only. The body holds a
+        # `run`, a `PROCEDURAL_HEADINGS` trigger word. The mode shows through STE015, a rule that
+        # reads procedural text only. The body holds a
         # condition after its instruction: STE015 fires in procedural mode, never in descriptive.
         self.write_entry("d-001.md", "D-001", "The operator tiers run themselves")
         body = (
@@ -3368,7 +3462,7 @@ class DecisionGlossCollapseTests(unittest.TestCase):
 
 class PromotedRuleTests(unittest.TestCase):
     """Plain-prose lint (decisions/plain-prose-lint.md): a rule either blocks or does not exist,
-    and six advisory codes are the one exception. Three rules block: STE001, STE011, STE013.
+    and six advisory codes are the one exception. Two rules block: STE011, STE013.
     Six are advisory: STE003, STE007, STE008, STE009, STE015, STE017 are
     warnings that the linter reports and no guard ever blocks on. Each case here proves a rule
     fires at its severity, the thing a table-row edit alone cannot prove. STE006 and STE018 are
@@ -3443,16 +3537,24 @@ class PromotedRuleTests(unittest.TestCase):
         findings = self.lint("This sentence uses a semicolon; and continues here.\n")
         self.assertEqual(findings, [])
 
-    def test_semicolon_joined_pair_over_budget_still_trips_ste001(self):
-        # split_sentences only splits at . ! ?, never at ;. A semicolon-joined pair
-        # that together cross the word budget is one sentence to the counter, and
-        # must still trip STE001.
+    def test_semicolon_joined_pair_over_the_old_budget_gives_no_ste001(self):
+        # split_sentences only splits at . ! ?, never at ;. A semicolon-joined 32-word pair is one
+        # sentence, and the lint never counts words, so it gives no STE001.
         text = ("w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12 w13; "
-                "w14 w15 w16 w17 w18 w19 w20 w21 w22 w23 w24 w25 w26 w27 w28 w29 w30 w31 w32.\n")
-        findings = self.lint(text)
-        self.assertIn("STE001", [f.code for f in findings])
+                "w14 w15 w16 w17 w18 w19 w20 w21 w22 w23 w24 w25 w26 w27 w28 w29 w30 w31 w32. "
+                "This step is not unsafe.\n")
+        codes = [f.code for f in self.lint(text)]
+        self.assertIn("STE013", codes, "the control sentence was not linted")
+        self.assertNotIn("STE001", codes)
 
-    def test_errors_are_exactly_the_three_blocking_codes_and_warnings_the_six_advisory_ones(self):
+    def test_ste001_is_no_rule(self):
+        self.assertNotIn("STE001", ste_lint.RULES, "STE001 is still a rule")
+
+    def test_the_error_rules_are_exactly_ste011_and_ste013(self):
+        errors = sorted(code for code, rule in ste_lint.RULES.items() if rule.severity == "error")
+        self.assertEqual(errors, ["STE011", "STE013"])
+
+    def test_errors_are_exactly_the_two_blocking_codes_and_warnings_the_six_advisory_ones(self):
         severities = {code: rule.severity for code, rule in ste_lint.RULES.items()}
         self.assertEqual({c for c, s in severities.items() if s == "error"}, set(ERROR_CODES))
         self.assertEqual({c for c, s in severities.items() if s == "warning"}, set(ADVISORY_CODES))
@@ -3887,8 +3989,8 @@ class RewriteStampTests(unittest.TestCase):
                 self.assertBlocks(self.run_stop(repo, done_reply(done)), name, "2026-10-28", "18:44")
 
 
-# These errors fail CI's STE lint on changed lines (plain-prose-lint):
-ERROR_CODES = ("STE001", "STE011", "STE013")
+# These errors fail CI's STE lint on changed lines (plain-prose-lint). No sentence length is one.
+ERROR_CODES = ("STE011", "STE013")
 # These six are advisory: reported as warnings, never a failed run.
 ADVISORY_CODES = ("STE003", "STE007", "STE008", "STE009", "STE015", "STE017")
 # One input per advisory code. Each holds that code's finding and no error finding, and none is
@@ -3910,88 +4012,73 @@ def plain_words(n):
 
 # One input per kept error code: (file suffix, text).
 KEPT_SAMPLES = {
-    "STE001": (".md", plain_words(31)),
     "STE011": (".md", "In conclusion, the plan works.\n"),
     "STE013": (".md", "This step is not unsafe.\n"),
 }
 
 
 def run_lint_cli(text, suffix=".md"):
-    """ste_lint.py at its defaults on a file holding text: (exit code, parsed JSON)."""
-    with tempfile.TemporaryDirectory() as d:
-        path = os.path.join(d, "t" + suffix)
+    """ste_lint.py at its defaults on a file holding text: (exit code, parsed JSON). The file's folder
+    is made in this run's folder (test-temp-standard)."""
+    folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+    try:
+        path = os.path.join(folder, "t" + suffix)
         with open(path, "w", encoding="utf-8") as f:
             f.write(text)
         run = subprocess.run([sys.executable, os.path.join(HERE, "ste_lint.py"), "--no-color",
                               "--format", "json", path], capture_output=True, text=True, timeout=15)
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
     return run.returncode, json.loads(run.stdout)
 
 
-class OneSentenceBudgetTests(unittest.TestCase):
-    """One sentence budget of 30 words, procedural or descriptive. No separate procedural limit
-    of 20 or descriptive limit of 25 exists."""
+class OneSentenceLengthTests(unittest.TestCase):
+    """No sentence length limit: a sentence of any length gives no STE001, procedural or descriptive.
+    The lint never counts words."""
 
     def lint(self, text, mode):
         config = dict(ste_lint.DEFAULT_CONFIG)
         config["mode"] = mode
         return ste_lint.Linter(config).check_text("t.md", text)
 
-    def test_b01_26_to_30_words_pass_in_both_modes(self):
-        for mode in ("descriptive", "procedural"):
-            for n in (26, 30):
+    def test_b01_no_sentence_length_gives_ste001_in_any_mode(self):
+        for mode in ("descriptive", "procedural", "auto"):
+            for n in (26, 31, 200):
                 with self.subTest(mode=mode, words=n):
-                    self.assertNotIn("STE001", [f.code for f in self.lint(plain_words(n), mode)])
+                    codes = [f.code for f in self.lint(plain_words(n).rstrip() + " This step is not unsafe.\n", mode)]
+                    self.assertIn("STE013", codes, "the control sentence was not linted")
+                    self.assertNotIn("STE001", codes)
 
-    def test_b02_31_words_error_in_both_modes_and_name_the_limit(self):
-        # The message states the one limit.
-        for mode in ("descriptive", "procedural"):
-            with self.subTest(mode=mode):
-                hit = [f for f in self.lint(plain_words(31), mode) if f.code == "STE001"]
-                self.assertTrue(hit)
-                self.assertEqual(hit[0].severity, "error")
-                self.assertRegex(hit[0].message, r"\b30\b")
+    def test_b03_the_cli_passes_long_sentences_in_a_procedural_file_and_a_descriptive_file(self):
+        # The advisory STE008 on the last line shows the file was linted. No STE001 may sit beside it.
+        for label, head in (("descriptive", ""), ("procedural", "<!-- ste: procedural -->\n\n")):
+            for n in (31, 200):
+                with self.subTest(file=label, words=n):
+                    rc, data = run_lint_cli(head + plain_words(n).rstrip() + " They'd finished the work.\n")
+                    self.assertEqual([f["code"] for f in data["findings"]], ["STE008"])
+                    self.assertEqual(rc, 0)
 
-    def test_b03_the_cli_passes_26_words_in_a_procedural_file_and_a_descriptive_file(self):
-        for label, text in (("descriptive", plain_words(26)),
-                            ("procedural", "<!-- ste: procedural -->\n\n" + plain_words(26))):
-            with self.subTest(file=label):
-                rc, data = run_lint_cli(text)
-                self.assertEqual(data["findings"], [])
-                self.assertEqual(rc, 0)
-
-    def test_b04_the_cli_fails_31_words_in_a_procedural_file_and_a_descriptive_file(self):
-        for label, text in (("descriptive", plain_words(31)),
-                            ("procedural", "<!-- ste: procedural -->\n\n" + plain_words(31))):
-            with self.subTest(file=label):
-                rc, data = run_lint_cli(text)
-                self.assertEqual([f["code"] for f in data["findings"]], ["STE001"])
-                self.assertEqual(rc, 1)
-
-
-    # building-scanner-respects-strings: text a scanner can misread must not move the boundary.
-    # (label, template, filler words that make the sentence exactly 30 words)
+    # building-scanner-respects-strings: text a scanner can misread must not hide the prose after it.
+    # Each trap is followed by a sentence the lint must read (STE013) and a control that is clean.
     TRAPS = [
         ("comment openers inside inline code",
-         'Run `x = "/* a */"` then `y = "// b"` and `z = "# c"` before you read %s.', 21),
+         'Run `x = "/* a */"` then `y = "// b"` and `z = "# c"` before you read this. %s'),
         ("a lone double quote and a JSX-style apostrophe",
-         'The 5" pipe and <p>Don\'t</p> stay in the line so please read %s.', 18),
+         'The 5" pipe and <p>Don\'t</p> stay in the line so please read on. %s'),
     ]
 
-    def test_b07_scanner_traps_do_not_move_the_boundary(self):
-        for label, template, fit in self.TRAPS:
-            for filler, flagged in ((fit, False), (fit + 1, True)):
-                with self.subTest(trap=label, filler=filler):
-                    text = template % " ".join(["word"] * filler)
-                    codes = [f.code for f in self.lint(text, "descriptive")]
-                    self.assertEqual("STE001" in codes, flagged)
+    def test_b07_scanner_traps_do_not_hide_the_sentence_after_them(self):
+        for label, template in self.TRAPS:
+            for sentence, flagged in (("This step is not unsafe.", True), ("This step is safe.", False)):
+                with self.subTest(trap=label, sentence=sentence):
+                    codes = [f.code for f in self.lint(template % sentence, "descriptive")]
+                    self.assertEqual("STE013" in codes, flagged)
 
-    def test_b08_a_fenced_multiline_template_literal_adds_no_words(self):
-        fence = ("```js\nconst s = `line one " + " ".join(["word"] * 20)
-                 + "\nline two // keep /* keep */`;\n```\n\n")
-        for n, flagged in ((30, False), (31, True)):
-            with self.subTest(words=n):
-                codes = [f.code for f in self.lint(fence + plain_words(n), "descriptive")]
-                self.assertEqual("STE001" in codes, flagged)
+    def test_b08_a_fenced_multiline_template_literal_adds_no_finding(self):
+        fence = ("```js\nconst s = `line one This step is not unsafe.\n"
+                 "line two // keep /* keep */`;\n```\n\n")
+        codes = [f.code for f in self.lint(fence + "This step is not unsafe.\n", "descriptive")]
+        self.assertEqual(codes, ["STE013"])
 
 
 class AdvisoryCodesTests(unittest.TestCase):
@@ -4029,7 +4116,7 @@ class AdvisoryCodesTests(unittest.TestCase):
 
 
 class KeptErrorCodesTests(unittest.TestCase):
-    """STE001, STE011 and STE013 are errors."""
+    """STE011 and STE013 are errors."""
 
     def test_k01_each_kept_code_is_an_error_and_the_cli_exits_one(self):
         for code, (suffix, text) in KEPT_SAMPLES.items():
@@ -4101,25 +4188,28 @@ class SourceProseLintTests(unittest.TestCase):
         self.assertEqual([f.code for f in findings], [])
 
     def test_72_reported_line_numbers_match_source(self):
-        rows = [
-            # Catches: a long sentence across comment lines is not reported.
-            ("\n".join("# " + w for w in ["word"] * 31) + "\n", None),
-            # Catches: a reported line number points at the wrong source line.
-            ("x = 1\n"
-             "# a short first comment line\n"
-             "# and this comment run keeps going to make the sentence long enough "
-             "that it holds more than thirty words in total across these comment lines "
-             "of the sample file for the test\n",
-             {2, 3}),
-        ]
-        for text, allowed_lines in rows:
-            with self.subTest(allowed_lines=allowed_lines):
-                findings = self.check("sample.py", text)
-                self.assertIn("STE001", [f.code for f in findings])
-                if allowed_lines is not None:
-                    lines = {f.line for f in findings}
-                    self.assertNotIn(1, lines)
-                    self.assertTrue(lines and lines.issubset(allowed_lines))
+        # Catches: a reported line number points at the wrong source line.
+        text = ("x = 1\n"
+                "# a short first comment line\n"
+                "# this comment line says this step is not unsafe\n")
+        lines = {f.line for f in self.check("sample.py", text) if f.code == "STE013"}
+        self.assertEqual(lines, {3}, "the double negative is not reported on its own source line")
+
+    def test_78_a_sentence_split_across_comment_lines_is_one_sentence(self):
+        # Catches: the consecutive-comment join is off, so a double negative split across two
+        # comment lines is never read as one sentence and gives no STE013.
+        one_line = "x = 1\n# This step is not unsafe.\n"
+        self.assertIn(("STE013", 2), [(f.code, f.line) for f in self.check("sample.py", one_line)],
+                      "the control comment was not linted")
+        split = "x = 1\n# This step is not\n# unsafe.\n"
+        self.assertIn(("STE013", 2), [(f.code, f.line) for f in self.check("sample.py", split)],
+                      "the double negative split across two comment lines is not one sentence")
+
+    def test_77_a_long_comment_sentence_gives_no_ste001(self):
+        text = "\n".join("# " + w for w in ["word"] * 31) + "\n# This step is not unsafe.\n"
+        codes = [f.code for f in self.check("sample.py", text)]
+        self.assertIn("STE013", codes, "the control comment was not linted")
+        self.assertNotIn("STE001", codes)
 
     def test_73_hash_inside_shell_quotes_is_not_a_comment(self):
         # No unquoted '#' exists on this line. A scanner that finds '#' without

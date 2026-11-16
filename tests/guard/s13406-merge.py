@@ -519,6 +519,9 @@ RUNNER_TAGS = ["cs-build:batch-runner", "cs-repo:o/r"]
 COORD_TAGS = ["cs-build:coordinator", "cs-repo:o/r"]
 TRIAGE_TAGS = ["cs-build:triage", "cs-repo:o/r"]  # the record branch's one writer (roadmap-one-writer)
 MERGE_SHIM = "~/.claude/bin/merge"
+# A lane's proof, for `--role lane` and the lane `--ready` refusal, needs this repo tag beside cs-build:lane: no lane role file exists
+# in another repo (ruling own-lanes-merge-claude-settings-prs).
+CS_REPO_TAG = "cs-repo:" + ARCH_REPO_SETTINGS
 
 
 def role_use(tool_id, name, tool_input=None):
@@ -599,18 +602,36 @@ CREATE_SESSION = "mcp__claude-code-remote__create_session"
 ROLE_NEW = "session_ROLENEW01"  # the id a create_session call starts, and a send_message names
 
 
-def role_create_call(tool_id, tags, session=ROLE_NEW, plain=False, key="id"):
+def role_create_call(tool_id, tags, session=ROLE_NEW, plain=False, key="id", body=None):
     """One paired create_session call that starts `session` with `tags`. Its result names the new id: as
-    JSON {`key`: ...} when `plain` is False, else as plain text. Each shape has its own fixture."""
-    body = "Created session " + session + "." if plain else json.dumps({key: session})
+    JSON {`key`: ...} when `plain` is False, else as plain text. Each shape has its own fixture. `body`, when given,
+    is the result text as it stands, for a shape the other options do not build."""
+    if body is None:
+        body = "Created session " + session + "." if plain else json.dumps({key: session})
     return [role_use(tool_id, CREATE_SESSION, {"title": "a lane session", "tags": list(tags)}),
             role_result(tool_id, body)]
+
+
+def stepdup_row(sid, status, tags):
+    """One list_sessions row: the keys the tool returns for a session, with `tags` as a list."""
+    return {"id": sid, "title": "a lane session", "session_status": status, "tags": list(tags)}
+
+
+def stepdup_list(tool_id, rows, more=False, args=None, cut=False):
+    """One list_sessions call and its result: `rows` in one wrapped record. `more` sets has_more, a read that is not the
+    last page. `args` is the call's input: an after_id cursor makes the read a page of a chain. `cut` drops the end of
+    the result, so the text is not a whole record."""
+    body = role_wrapped(json.dumps({"ccr": {"data": list(rows), "has_more": more}}))
+    return [role_use(tool_id, LIST_SESSIONS, dict(args or {})), role_result(tool_id, body[:-40] if cut else body)]
 
 
 # lane-one-topic: a lane on topic icons, and an older lane with two steps and no topic.
 STEP_TOPIC_TAGS = ["cs-build:lane", "cs-step:icon-a", "cs-topic:icons", "cs-repo:o/r"]
 STEP_OLD_TAGS = ["cs-build:lane", "cs-step:icon-a", "cs-step:icon-b", "cs-repo:o/r"]
 STEP_COLORS_TAGS = ["cs-build:lane", "cs-step:colors-a", "cs-topic:colors", "cs-repo:o/r"]
+# A whole list_sessions read with one live lane on another step, icon-a. It carries no session on the steps the
+# lane-step-dup briefs below name (icon-b, colors-a, lane-start-settings), so the read finds no carrier.
+LIST_NO_CARRIER = stepdup_list("l1", [stepdup_row("session_ROLELIST01", "SESSION_STATUS_RUNNING", STEP_TOPIC_TAGS)])
 
 
 # lane-closes-after-records: the tags of the target's record. A lane names its step slug and its repo.
@@ -713,6 +734,12 @@ ROLE_LINES = {
     # merge-confirm-repo shapes (section 5h): a lane that names o/a, a runner that names claude-settings, a runner whose
     # only repo is a child's, and an own record with no tags at all.
     "repo-o-a": role_call("g1", ["cs-build:lane", "cs-repo:o/a"]),
+    # Lane shapes for the lane `--ready` and draft-false refusals: a lane that also names claude-settings is judged; a lane of
+    # another repo, or with no repo tag, is not.
+    "repo-lane-o-a-settings": role_call("g1", ["cs-build:lane", "cs-repo:o/a", CS_REPO_TAG]),
+    "repo-lane-claude-settings": role_call("g1", ["cs-build:lane", CS_REPO_TAG]),
+    "repo-lane-degen": role_call("g1", ["cs-build:lane", "cs-repo:shivinate7/degen"]),
+    "repo-lane-none": role_call("g1", ["cs-build:lane"]),
     "repo-runner-claude-settings": role_call("g1", ["cs-build:batch-runner", "cs-repo:shivinate7/claude-settings"]),
     "repo-runner-children": role_call("g1", ["cs-build:batch-runner", "cs-repo:shivinate7/mailaudit"]),
     "repo-empty-tags": role_call("g1", []),
@@ -729,6 +756,17 @@ ROLE_LINES = {
     "step-old-lane-retagged": role_target_call("t1", STEP_OLD_TAGS) + role_tag_call("t2", session=ROLE_OTHER),
     # A create_session result that names the new id as {"session_id": ...}, not {"id": ...}.
     "step-create-session-id": role_create_call("c1", STEP_TOPIC_TAGS, key="session_id"),
+    # The lane-step-dup shapes: a brief that names a step needs a whole list read first (section 42900). Each is a
+    # lane-one-topic shape above with LIST_NO_CARRIER after its lines.
+    "step-topic-lane-listed": role_target_call("t1", STEP_TOPIC_TAGS) + LIST_NO_CARRIER,
+    "step-create-json-listed": role_create_call("c1", STEP_TOPIC_TAGS) + LIST_NO_CARRIER,
+    "step-create-text-listed": role_create_call("c1", STEP_TOPIC_TAGS, plain=True) + LIST_NO_CARRIER,
+    "step-triage-listed": role_target_call("t1", TRIAGE_TAGS) + LIST_NO_CARRIER,
+    "step-lane-then-triage-listed": role_target_call("t1", STEP_TOPIC_TAGS) + role_target_call("t2", TRIAGE_TAGS)
+                                    + LIST_NO_CARRIER,
+    "step-create-session-id-listed": role_create_call("c1", STEP_TOPIC_TAGS, key="session_id") + LIST_NO_CARRIER,
+    # A create_session for a lane that names a step, with the whole list read and no session on the step.
+    "lane-start-listed": LIST_NO_CARRIER,
     # A lane on topic colors: the marker variants below are judged against it.
     "step-colors-lane": role_target_call("t1", STEP_COLORS_TAGS),
     # A lane's record read as another session's untrusted text: wrapped, so the reader must find the JSON inside it.
@@ -829,6 +867,20 @@ ROLE_LINES = {
     # The lane in o/r alone, whose record names the branch ARCH_COPY_BRANCH. Its repo is judged by arch_copy's answers.
     "archive-copy-lane": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
         ARCH_LANE_TAGS, {"": ARCH_COPY_BRANCH}))),
+    # Ruling own-lanes-merge-claude-settings-prs: a lane records `--role lane --step <slug>`. The step must be a cs-step tag of the
+    # lane's own newest record; a title, another session's record, or a triage record never gives it.
+    "lane-step": role_call("g1", ARCH_LANE_TAGS + [CS_REPO_TAG]),
+    "lane-step-old": role_call("g1", STEP_OLD_TAGS + [CS_REPO_TAG]),
+    # A lane whose own step is `own`, in another repo, and with no repo tag: the lane role is not proven by either.
+    "lane-step-degen": role_call("g1", ["cs-build:lane", "cs-step:own", "cs-repo:shivinate7/degen"]),
+    "lane-step-none": role_call("g1", ["cs-build:lane", "cs-step:own"]),
+    "lane-step-title": role_call("g1", LANE_TAGS, title="cs-step:" + ARCHIVE_SLUG),
+    "lane-step-foreign": role_call("g1", ARCH_LANE_TAGS, session=ROLE_OTHER),
+    "lane-step-then-no-step": role_call("g1", ARCH_LANE_TAGS) + role_call("g2", LANE_TAGS),
+    "triage-step": role_call("g1", ARCH_TRIAGE_SLUG_TAGS),
+    # The repo-proof controls (section 29942): a batch runner, and a session with no cs-build tag, each naming the repo o/a.
+    "repo-runner-o-a": role_call("g1", ["cs-build:batch-runner", "cs-repo:o/a"]),
+    "repo-solo-o-a": role_call("g1", ["cs-repo:o/a"]),
 }
 
 
@@ -942,6 +994,60 @@ role_refuse("a lone quote inside a string does not hide the real call",
 role_refuse("a lone quote in a comment does not hide the call on the next line",
           "echo done # it's\n" + MERGE_SHIM + " --role batch-runner", role_path("lane"))
 
+# Ruling own-lanes-merge-claude-settings-prs (owner, 11:12 CST Nov 15, 2026): a cloud lane records `--role lane --step <slug>`.
+# The step must be a cs-step tag of the lane's own newest record. A title, another session's record, and a triage record never give it.
+LANE_ROLE = MERGE_SHIM + " --role lane --step " + ARCHIVE_SLUG
+role_allow("a lane records its own step: --role lane --step <its cs-step slug> allows", LANE_ROLE, role_path("lane-step"))
+role_allow("a lane's second cs-step tag allows the step it names: the full-size record", MERGE_SHIM + " --role lane --step icon-b",
+           role_path("lane-step-old"))
+role_allow("the = form of --role and --step allows as the space form does", MERGE_SHIM + " --role=lane --step=" + ARCHIVE_SLUG,
+           role_path("lane-step"))
+role_refuse("a lane with no --step is refused", MERGE_SHIM + " --role lane", role_path("lane-step"))
+role_refuse("a lane's --step that its record does not carry is refused", MERGE_SHIM + " --role lane --step other-step",
+            role_path("lane-step"))
+role_refuse("a --step that is a prefix of the lane's cs-step tag is refused", MERGE_SHIM + " --role lane --step lane-closes",
+            role_path("lane-step"))
+role_refuse("a lane with no cs-step tag is refused: the empty state", LANE_ROLE, role_path("lane"))
+role_refuse("a step named only in the lane's title does not allow", LANE_ROLE, role_path("lane-step-title"))
+role_refuse("a step on another session's record does not allow", LANE_ROLE, role_path("lane-step-foreign"))
+role_refuse("the newest own record has no step, so an older lane record's step does not allow", LANE_ROLE,
+            role_path("lane-step-then-no-step"))
+role_refuse("a batch runner record is refused for the lane role, even with a step tag", LANE_ROLE, role_path("runner"))
+role_refuse("a coordinator record is refused for the lane role", LANE_ROLE, role_path("coordinator"))
+role_refuse("a triage record that carries a step is refused for the lane role", LANE_ROLE, role_path("triage-step"))
+role_refuse("a step in quotes is one argument, not the --step flag", MERGE_SHIM + ' --role lane "--step ' + ARCHIVE_SLUG + '"',
+            role_path("lane-step"))
+role_refuse("a lane's --role lane with its step is refused outside a cloud session", LANE_ROLE, role_path("lane-step"), env=None)
+# The scanner respects strings and comments for the lane's call too, as it does for the batch runner's above.
+role_allow("a comment opener inside a string does not hide a lane's --role lane --step call", 'echo "# note" && ' + LANE_ROLE,
+           role_path("lane-step"))
+role_allow("a multi-line quoted string before a lane's --role lane --step call does not hide it", 'echo "first\nline" && ' + LANE_ROLE,
+           role_path("lane-step"))
+role_allow("a lone quote in a comment does not hide a lane's --role lane --step call on the next line",
+           "echo done # it's\n" + LANE_ROLE, role_path("lane-step"))
+role_allow("a quoted lane --role lane --step form is text", "echo '" + LANE_ROLE + "'", role_path("lane-step"))
+for _lane_prefix in ("", "cd somewhere && "):
+    for _lane_form in (MERGE_SHIM, "bin/merge", "python3 merge/merge.py", "python3 merge/launch.py"):
+        _lane_cmd = _lane_prefix + _lane_form + " --role lane --step " + ARCHIVE_SLUG
+        role_allow(_lane_cmd + " allows its own step", _lane_cmd, role_path("lane-step"))
+        role_refuse(_lane_cmd + " is refused on a record with no cs-step tag", _lane_cmd, role_path("lane"))
+        # The lane role is proven only by a record that also names claude-settings. A lane of another repo, or with no repo tag, is refused.
+        _own_cmd = _lane_prefix + _lane_form + " --role lane --step own"
+        role_refuse(_own_cmd + " is refused on a degen lane's own step", _own_cmd, role_path("lane-step-degen"))
+        role_refuse(_own_cmd + " is refused on a lane with no repo tag", _own_cmd, role_path("lane-step-none"))
+# A role flag inside a wrapper is judged as the top-level call is: `bash -c` and `$(...)` run the merge tool, so their inner command is read
+# (guard_core.inner_commands, the one reader of the wrappers). The lane's own step may run inside a wrapper, and is pinned allowed here, the
+# shape the fix keeps. Another step, and the batch runner's role, are refused inside one. These are red on the current guard, which reads
+# only top-level segments.
+LANE_OTHER_CMD = MERGE_SHIM + " --role lane --step other-step"
+role_allow("a lane's own step inside bash -c is judged as the top-level call and allowed", 'bash -c "' + LANE_ROLE + '"', role_path("lane-step"))
+role_allow("a lane's own step inside a command substitution is judged as the top-level call and allowed", "echo $(" + LANE_ROLE + ")",
+           role_path("lane-step"))
+role_refuse("a lane's other step inside bash -c is refused", 'bash -c "' + LANE_OTHER_CMD + '"', role_path("lane-step"))
+role_refuse("a lane's other step inside a command substitution is refused", "echo $(" + LANE_OTHER_CMD + ")", role_path("lane-step"))
+role_refuse("a batch-runner role inside bash -c is refused on a lane record", 'bash -c "' + MERGE_SHIM + ' --role batch-runner"',
+            role_path("lane-step"))
+
 
 # =========================================================================== 5e-2. the record branch's one writer
 #
@@ -957,13 +1063,17 @@ role_refuse("a lone quote in a comment does not hide the call on the next line",
 # RECFORK on roadmap-fork (its extras name that branch).
 RECORD_RULE = "roadmap-one-writer"
 RECORD_LACKS = ("origin roadmap", "HEAD:roadmap")  # the refusal never names the push it refuses
+# The remedy sends the session to fetch, then run `git merge-base --is-ancestor <commit> origin/<record branch>`,
+# so the owner is asked to push only a commit the record branch lacks. `git branch -r --contains` is not the check:
+# a commit on a lane branch alone would read as already on the record branch.
+RECORD_CARRIES = ("git fetch origin", "git merge-base --is-ancestor", "origin/<record branch>", "ask the owner only when")
 LANE_TRANSCRIPT = role_path("lane")
 TRIAGE_TRANSCRIPT = role_path("triage")
 
 
 def record_refuse(name, command, transcript, cwd=PUSHFEAT, env=ROLE_ENV, **kw):
     """A git push the guard refuses under roadmap-one-writer. The reason names the rule, never the push."""
-    sh("roadmap-one-writer: " + name, command, "deny", rule=RECORD_RULE, lacks=RECORD_LACKS,
+    sh("roadmap-one-writer: " + name, command, "deny", rule=RECORD_RULE, carries=RECORD_CARRIES, lacks=RECORD_LACKS,
        transcript=transcript, env=env, cwd=cwd, **kw)
 
 

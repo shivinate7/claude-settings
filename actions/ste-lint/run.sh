@@ -176,10 +176,12 @@ SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"
 LOG_OUT="$(mktemp)"
 
 # Stale prose (lint/stale_cites.py, decision stale-cites-at-merge): a Markdown line that names a path, or
-# a Python name bound at module level, that this range removed. Scope changed only. It runs before the
+# a Python name bound at module level, that this range removed. The check also fails an added cite to a
+# missing Python name (STALE010, decision record-cites-live-code). Scope changed only. It runs before the
 # "no markdown changed" exit, so a code-only PR is checked. Its findings never go through the split
-# script below: every stale line is untouched by the range, and the split makes an untouched line
-# report-only. FAIL=false prints them and keeps the exit 0, as it does for the STE findings.
+# script below: the split makes a finding on an untouched line report-only, and a removed name leaves its
+# stale line untouched by the range. STALE010 judges added lines and keeps its own exit too. FAIL=false
+# prints them and keeps the exit 0, as it does for the STE findings.
 STALE_EXIT=0
 if [ -n "${STALE_RANGE:-}" ]; then
   STALE_OUT="$(mktemp)"
