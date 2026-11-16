@@ -1,7 +1,7 @@
 """The one home of the guard test's section files: where they live, how a header reads, what a bad set is.
 
 lint/check_record_slugs.py reads the whole tree with it. hooks/test_guard.py's load_sections runs the files and
-should read its folder, header and faults from here too. A section file's first line is `# section <n>`, and its
+reads its folder, header and faults from here too. A section file's first line is `# section <n>`, and its
 name is `s<n>-<slug>.py`.
 """
 import os
@@ -9,7 +9,7 @@ import re
 
 SECTION_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tests", "guard")
 HEADER = re.compile(r"# section (\d+)\n")  # matched at the start of the text: the first line only
-NAME_NUMBER = re.compile(r"s(\d+)(?:-|\.py$)")
+NAME_NUMBER = re.compile(r"[sS]?(\d+)")  # any leading digits: s43501_x, s43501x, 43501-x and S43501-x each read as 43501
 
 
 def read(section_dir):

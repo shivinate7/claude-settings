@@ -157,9 +157,9 @@ def main(args):
     except layout.LayoutError as err:  # a check that cannot read its folders is red, never green
         print("check_record_slugs: FAIL: " + str(err))
         return 1
-    sections = [] if args else section_faults(ROOT)  # the tree, not the diff: a git read that fails does not hide it
+    sections = section_faults(ROOT)  # the tree, not the diff or the file arguments: a git read that fails does not hide it
     for f, message in sections:
-        print("check_record_slugs: FAIL: guard test section %s: %s" % (message, f))
+        print("check_record_slugs: FAIL: guard test section file %s: %s" % (message, f))
     try:
         if args:  # files given: git is not read, so the feel-fix check does not run
             files, feel = args, []
@@ -171,7 +171,8 @@ def main(args):
         return 1
     except Unknown as err:
         print("check_record_slugs: UNKNOWN, " + str(err))
-        return 1 if os.environ.get("CI") else 0  # CI exit code is a verdict: unknown is red there
+        # Unknown is red in CI, and red anywhere once a section fault has printed: that fault is a verdict already.
+        return 1 if os.environ.get("CI") or sections else 0
     bad = too_long(files, dirs)
     for f in bad:
         print("check_record_slugs: FAIL: slug over %d characters: %s" % (MAX, f))
