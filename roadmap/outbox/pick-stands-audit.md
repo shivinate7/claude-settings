@@ -1,3 +1,4 @@
+<!-- Marked 15:44 CST Nov 16 by triage 9: a deliverable for the owner or a coordinator to send, not a triage filing; kept. Not filed on the roadmap. -->
 # Pick stands audit
 
 Asked by the retrospective, 12:38 CST Nov 12 (owner, 12:36 CST, relayed by the coordinator: a one-time audit of every coordinator pick).

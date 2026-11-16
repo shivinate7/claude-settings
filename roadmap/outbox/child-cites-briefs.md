@@ -1,3 +1,4 @@
+<!-- Marked 15:44 CST Nov 16 by triage 9: a deliverable for the owner or a coordinator to send, not a triage filing; kept. Not filed on the roadmap. -->
 # Child-repo briefs: name claude-settings records, never copy them
 
 For the owner to send to each repo's coordinator. From lane child-rules-cite-records, branch child-rules-cite-records at 58a51bfa (docs/plans/child-cites-briefs/). Send after decision child-cites-not-copies and actions/claude-md-cites are on claude-settings main; fill <sha> with that main commit.
