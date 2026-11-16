@@ -898,6 +898,19 @@ class RecordsOnlyPush(unittest.TestCase):
                 for n in JOB_FLAGS + DERIVED_FLAGS + STEP_FLAGS:
                     self.assertEqual(got.get(n), "true", f"a {event} run turns {n} off: {got}")
 
+    # The records-only skip drops the 13 job and suite flags and keeps the doc_* flags: the Hook catalog, Glossary and Retired repo
+    # steps read them on a records-only push. The facts and the skip are read before the doc flags (P7).
+    def test_records_only_skip_keeps_the_doc_flags(self):
+        whole = self.whole_pr(self.CODE + [self.RECORDS])
+        self.assertEqual(whole.get("code"), "true", f"scope: the whole PR diff must turn code on: {whole}")
+        self.assertEqual(whole.get("doc_any"), "true", f"scope: the whole PR diff must set doc_any: {whole}")
+        facts = {}
+        got = run([self.RECORDS], green=self.CODE, facts=facts)
+        self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+        self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta from GREEN_HEAD to HEAD is not docs/records.md alone: {facts}")
+        self.assertSkipFlag(got, True)
+        self.assertEqual(differing(got, whole, DOC_FLAGS), [], f"the records-only skip moved a doc flag off the whole PR diff: {got}")
+
 
 # The job-level half of the wider skip. A job that holds its steps back with a step-level if still starts a runner, so the skip
 # is read where a job starts: its job-level if, evaluated on the outputs the scope job wrote for the run. _IfParser reads the
@@ -1125,19 +1138,6 @@ class RecordsOnlyEveryJob(unittest.TestCase):
                 if extra == ".github/workflows/checks.yml":
                     missing = sorted(set(rollup_needs(text)) - set(together))
                     self.assertEqual(missing, [], f"a workflow change beside records leaves rollup jobs off: {missing}")
-
-    # The records-only skip drops the 13 job and suite flags and keeps the doc_* flags: the Hook catalog, Glossary and Retired repo
-    # steps read them on a records-only push. The facts and the skip are read before the doc flags (P7).
-    def test_records_only_skip_keeps_the_doc_flags(self):
-        whole = self.whole_pr(self.CODE + [self.RECORDS])
-        self.assertEqual(whole.get("code"), "true", f"scope: the whole PR diff must turn code on: {whole}")
-        self.assertEqual(whole.get("doc_any"), "true", f"scope: the whole PR diff must set doc_any: {whole}")
-        facts = {}
-        got = run([self.RECORDS], green=self.CODE, facts=facts)
-        self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
-        self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta from GREEN_HEAD to HEAD is not docs/records.md alone: {facts}")
-        self.assertSkipFlag(got, True)
-        self.assertEqual(differing(got, whole, DOC_FLAGS), [], f"the records-only skip moved a doc flag off the whole PR diff: {got}")
 
 
 # The mod phase must run each mods check script (mods/**/check.mjs), not only *.test.mjs. The script cds to its own
