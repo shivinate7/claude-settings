@@ -251,8 +251,10 @@ After each build the roadmap build script prints the upkeep list for the triage 
   The build also reads each stale-looking draft's newest branch commit time, once, from the checkout's
   `refs/remotes/origin/<branch>` (`git log -1`; no network, no REST call). A commit under 12 hours old drops the draft
   from the row, so the commit only suppresses an entry and never adds one; a fresh REST draft gets no read. A draft
-  whose commit time cannot be read (no ref, a ref on no commit, a git failure, a time that does not parse) reads
-  `unknown (#N branch X has no commit time)`, unless a live lane, `held` or `reviewLog` already skips it. The live
+  whose commit time cannot be used reads `unknown (#N branch X has no commit time)`: no ref, a ref on no commit, a git
+  failure, a time that does not parse, a commit dated after the build run (a skewed clock, never fresh), or a pull
+  whose head repo is not this repo (a fork, whose head ref can equal an origin branch name, or a deleted fork, whose
+  head repo is null; the REST pulls row's `head.repo.full_name` must equal the base repo's name), unless a live lane, `held` or `reviewLog` already skips it. The live
   file is still needed for lane, `held` and `reviewLog`. Cost: one `git log` per stale-looking draft, no file, timer or log.
   A stale draft with no live pull row has unread `held` and `reviewLog`, so it reads
   `unknown (#N has no live pulls row, so held and reviewLog are unread)`, never listed. Each other entry is
