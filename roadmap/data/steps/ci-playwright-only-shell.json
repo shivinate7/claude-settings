@@ -1,0 +1,14 @@
+{
+ "id": "ci-playwright-only-shell",
+ "title": "actions/ci-playwright-shared takes an only-shell input",
+ "priority": "next",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "consultant",
+ "blockedBy": [],
+ "updatedAt": "2026-11-15T23:58:44-06:00",
+ "why": "[23:58 CST Nov 15, triage] Consultant's relay 23:59 CST Nov 15: claude-settings `actions/ci-playwright-shared` (or its source action) needs an `only-shell` input so q_max's ci-playwright-shared lane can use it. The consultant searched open PRs, branches and main: none exists. (source: consultant, relayed; not owner-typed, undoable)",
+ "source": "consultant 23:59 CST Nov 15, relayed; not owner-typed",
+ "note": "Todo. Add an `only-shell` input to `actions/ci-playwright-shared` (or its source action) so q_max's ci-playwright-shared lane can use it. Owner of the work: the consultant, after goal item 1 (the eight page PRs). No PR yet."
+}
