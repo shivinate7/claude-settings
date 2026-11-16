@@ -2314,7 +2314,7 @@
 - train-bullet-three-names: the "Rolling combine train" bullet in decision `session-tiers` says "fold round", "dry round" and "fast checks" for near the same act, and "dry round" reuses the glossary word "round". Pick one name. Decision: session-tiers (session roles).
 - train-pre-flight-two-names: the same bullet's "Pre-merge reads" is a second name for the wave plan's "Pre-flight row" (`plans/wave-plan-2026-11-13.md`, on the record branch). Pick one. Decision: session-tiers.
 - train-seconds-long-unmeasured: "seconds-long checks" in the Fold checks bullet is a relayed claim, not measured by the lane. Decision: session-tiers.
-- train-scope-all-unused: `merge/merge.py` clash scope `all` or `ready` is used by no command the batch runner calls; lane lint uses scope `lane` plus `--with`. Decision: session-tiers.
-- train-members-vs-lane-prs: the report numbers say "lane PRs in", the owner's wording and the dry tool say "members in". One term would read better. Decision: session-tiers.
-- train-bullet-dense: the "Rolling combine train" bullet and its sub-bullets are about 14 lines of dense prose; the template pointer restates scope facts and sits after the Lane bullet, not by the batch runner bullet. Decision: session-tiers.
+- train-scope-all-unused: `merge/merge.py` clash scope `all` is used by no command; the pre-ready run uses `ready` (`PRE_READY_CLASH_SCOPE`) and lane lint uses scope `lane` plus `--with`. Decision: session-tiers.
+- train-members-vs-lane-prs: the report numbers say "lane PRs in", the combine-train ruling and the dry tool say "members in". One term would read better. Decision: session-tiers.
+- train-bullet-dense: the "Rolling combine train" bullet and its sub-bullets are about 14 lines of dense prose; the template pointer in `skills/project-ops/templates/operating-model.md` restates scope facts and sits after the Lane bullet, not by the Batch runner bullet. Decision: session-tiers.
 - train-wave-plan-cited-by-path: the train bullet names `plans/wave-plan-2026-11-13.md`, which lives on the record branch, by path, not by id (rule `git-cite-by-id`). Decision: session-tiers.
