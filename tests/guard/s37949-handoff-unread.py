@@ -381,7 +381,7 @@ for _label, _check in (
      hu_cycle_check),
     ("handoff-unread: unread_handoff makes one existence check, on the flag, with no write or process start",
      hu_cost_check),
-    ("handoff-unread: a guard copy without reread_check.py fails open, and the intact copy refuses",
+    ("handoff-unread: a guard copy without reread_check.py refuses the flagged call as guard-crash, and the intact copy refuses it for the handoff",
      hu_copy_check),
     ("handoff-unread: an owner override lifts the refusal once, and the spent override refuses again",
      hu_override_check),
