@@ -2,6 +2,8 @@
 
 Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage writes only the roadmap branch, so the next lane that edits notes.md lands them.
 
+Sorted 14:39 CST Nov 16 (triage; a read-only Explore agent, sonnet, read the headed sections at lines 649-739 only; nothing in this file is marked moved). Debt and note drafts not on main (11 slugs checked against origin/main notes.md and docs/debts/): the sections headed 2026-11-10 20:15, 2026-11-10 20:17, 2026-11-10 23:35, 2026-11-11 11:07 and 2026-11-11 12:53. Tasks, not notes: the sections headed 2026-11-11 11:14 and 2026-11-11 11:34. Mixed: the section headed 2026-11-11 13:59 (lines 730-735 are tasks, 737-739 are notes). Not sorted: lines 5-648 and 740 to the end. Reader for the sorted notes: the lane that lands the notes slice after draft PR #3569 (one file per new note) is decided; slice A's first record is draft PR #3577. Form of a note on main: one line, `- <slug up to 32 characters>: <finding> (<file or symbol>). Decision: <slug>. Fix: <fix or none>. Until: <date>`.
+
 - ci-gate-stale-base (orchestrator, Oct 28 07:49 CDT): the lint gate passed on c122's head 1ea8c877 but failed STE001 at docs/debts/notes.md:606 on the batch 9 tree. Cause unmeasured; one guess is a stale origin/main in the lane.
 - shared-branch-stale-index (orchestrator, Oct 28 07:58 CDT): incident against rule shared-trees-one-checkout-per-agent: in c179's lane two builders shared one branch, and a stale index dropped install.sh's hunk inside d99be389; 23b4ff58 restored it.
 - code-check-exclude-unchecked (c127, Oct 28 09:53 CDT, from banchi #993's review): the rule that a repo's code-check exclude holds only vendored or generated files lives only as a comment in check.yml. A debt after a real incident.
