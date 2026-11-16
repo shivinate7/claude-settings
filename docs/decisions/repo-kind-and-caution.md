@@ -44,7 +44,7 @@ true) but had no `visibility` key. Session start printed `repo caution: public`,
 wrong spend premise on it. Governing rule: `verification-report-unknown-reads` (a read that cannot run is
 unknown, never clear or broken). Roadmap step `start-hook-reads-visibility` (session start reads visibility).
 
-Cost: one python start at session start and one at a designer spawn that carries a `cwd`. No network
+Cost: one python start at session start and one at a designer spawn that carries a `cwd` (unmeasured). No network
 call. No file is written.
 
 Protected by `lint/test_layout.py`, `hooks/test_session_start.py` and `hooks/test_blind_brief.py`.

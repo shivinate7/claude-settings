@@ -87,12 +87,17 @@ REQUIRED_CHECKS = ("judge_shell", "git_env_command_hit", "kill_hit", "rm_var_hit
                    "page_item_hit", "is_worktree", "data_tool_judge", "role_write_hit", "shared_tree_match",
                    "trust_card_hit")
 REQUIRED_TOOLS = ("Agent", "Task", "Workflow", "Bash", "PowerShell", "Edit", "Write", "ArtifactData",
-                  "Artifact", "mcp__github__merge_pull_request", "mcp__claude-code-remote__confirm_repository_trust")
+                  "Artifact", "ArtifactComments", "mcp__github__merge_pull_request",
+                  "mcp__claude-code-remote__confirm_repository_trust")
 # Hook functions reached by a call but not fuzzed directly, each with the reason. The rest are fuzzed.
 OUTSIDE = {
     ("own_session", "own_session_read"): "raises OSError on a transcript that is missing, by design; every caller in "
                                          "guard.py and guard_merge.py reads it inside a try that fails closed, and the "
                                          "direct callers are fuzzed, so a caller that lets the error out is still found",
+    ("own_session", "created_sessions"): "raises OSError on a transcript that is missing, by design; its one caller, "
+                                         "step_dup_hit, reads it inside a try that fails closed, and that caller is fuzzed",
+    ("own_session", "list_sessions_read"): "raises OSError on a transcript that is missing, by design; its one caller, "
+                                           "step_dup_hit, reads it inside a try that fails closed, and that caller is fuzzed",
 }
 
 RUN = _test_temp.run_folder()
