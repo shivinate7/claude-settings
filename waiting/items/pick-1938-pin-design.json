@@ -27,7 +27,7 @@
       "lose": "More code to keep clean (signal cleanup, dead-run sweep)."
     }
   ],
-  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "owner": "triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
   "ref": "coordinator 12:02 CST Nov 13, lane R67-drain",
   "reply": "The retrospective agrees with a (12:15 CST Nov 13), with one addition: `pin_tree` must first resolve a moving ref (714 b's stable branch, the same one CI uses) to its commit, then archive that commit. Today only a sha pin works in `pinned_file`. The addition goes on step lane-lint-runs-local-tools and to the lane. This stays open for your veto.",
   "repo": "shivinate7/claude-settings",

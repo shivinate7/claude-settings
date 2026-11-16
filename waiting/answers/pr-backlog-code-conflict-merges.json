@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-15T19:33:05.313Z",
+  "choice": "a",
+  "item": "pr-backlog-code-conflict-merges",
+  "label": "A: Bring main into each draft and resolve the code conflicts by hand, #3188 first",
+  "n": 890,
+  "note": "",
+  "optionId": "merge-main-hand-resolve"
+}

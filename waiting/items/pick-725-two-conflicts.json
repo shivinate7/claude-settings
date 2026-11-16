@@ -5,8 +5,9 @@
   "id": "pick-725-two-conflicts",
   "kind": "decision",
   "lastAnswer": {
-    "at": "2026-11-15T02:29:34Z",
-    "note": "Answered 20:29 CST Nov 14: your Mac note read; degen is the iOS repo, ios-adblock unknown; no pick; main's rules stand."
+    "at": "2026-11-16T05:10:39.004Z",
+    "choice": "none",
+    "note": "give me a prompt to tske local"
   },
   "n": 737,
   "options": [
@@ -27,9 +28,10 @@
       "lose": "Main's two rules change, though no real case needs it."
     }
   ],
-  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "owner": "triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
   "ref": "retrospective 12:21 CST Nov 13 (audit of 33 rulings, main fccff95e)",
-  "reply": "Read your note: you will handle this on a Mac with the degen repo or any repo that uses iOS. Neither a nor b is picked, so this stays open. Nothing waits on it; main's rules stand.",
+  "replied": "2026-11-16T05:12:00Z",
+  "reply": "Here is the prompt to paste into a Claude Code session on your Mac, started in your degen checkout (add ios-adblock if you want it covered too). It reads only and changes nothing:\n\nIn this checkout, read only, change and post nothing. 1) Find which lock a Mac session uses when it merges: search the merge tool and hooks for GitLock and GhLock and say which one runs on a Mac outside the cloud. 2) Find the simulator drive path (skills/ios-apps and the simulator tool) and say whether a drive that reuses an already booted simulator takes a lease. For each of the two, quote file and line, and say whether it matches (a) main's rule (GitLock only in the cloud, else GhLock; a reuse takes no lease) or (b) the owner's Nov 12 words (a Mac uses GitLock; every drive takes a lease). If both versions would give the same result on this Mac, say so. Report in 10 lines.\n\nPaste its report into this item's note and I rule from facts. Until then main's rules stand and nothing waits on this.",
   "repo": "shivinate7/claude-settings",
   "short": "725: two rulings conflict with main",
   "shown": [

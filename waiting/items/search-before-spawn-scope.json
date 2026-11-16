@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-16T07:41:13-06:00",
+  "context": "Goal: no duplicate work.\nProblem (rule): your ruling of 18:18 CST Nov 15 says to search open PRs, branches and main before every spawn. The guard in #3563 checks only builder, test-author and lane spawns. Reviewer, Explore and fix-check spawns are not checked, so the guard is narrower than your words and needs your word on the gap.\nBased on (ruling): own-search-before-spawn, filed on step spawn-searches-existing-builds (your 18:18 and 18:33 CST Nov 15 words, relayed): before any standing session spawns work it searches open and closed PRs, branches and main for an existing build, and the rule is mechanized as a hook. It does not limit the search to build spawns.\nBased on (read): the consultant's round 1 reviewer read of #3563 at 07:39 CST Nov 16 (relayed by the consultant at 07:42 CST; triage read no diff).\nDeparts from: your ruling's \"every spawn\" \u2014 the guard checks build spawns only.\nMeanwhile: #3563 continues as built, which is option A. Option B would be a follow-up change.",
+  "home": "spawn-searches-existing-builds",
+  "kind": "decision",
+  "n": 921,
+  "options": [
+    {
+      "gain": "No extra lines on read-only and review briefs, which never duplicate a build.",
+      "how": "The guard asks for a prior-work search line on builder, test-author and lane spawns. Reviewer, Explore and fix-check spawns pass unchecked.",
+      "id": "build-spawns-only",
+      "key": "a",
+      "label": "Check build spawns only, as built",
+      "lose": "An Explore could repeat a search that someone already did."
+    },
+    {
+      "gain": "Matches your ruling's words.",
+      "how": "Every spawn, review and fix-check included, must carry a Prior work line, as your ruling reads.",
+      "id": "every-spawn",
+      "key": "b",
+      "label": "Check every spawn",
+      "lose": "Every review and fix-check brief carries a Prior work line, so the guard refuses many more spawns."
+    }
+  ],
+  "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ); posted by triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
+  "recommended": "a",
+  "ref": "PR #3563 (the search-before-spawn guard), step spawn-searches-existing-builds, ruling own-search-before-spawn (your 18:18 CST Nov 15 words)",
+  "replied": "2026-11-16T13:40:30-06:00",
+  "reply": "The consultant's read, 13:35 CST Nov 16 (relayed, not your answer), on your lean to B with nuance. Four versions of B. B1, the full Prior work line on every spawn: gain, no duplicate reads anywhere; lose, friction on every Explore, reviewer and fix check, and agents pad the line to pass. B2, a short form for read-only spawns (`Prior work: searched <where>, none`): cheap and shows a search ran; lose, a one-line claim the guard cannot verify. B3, an opt-out tag (`Prior work: n/a (read-only)`): nearly no friction; lose, in practice it is A again. B4, by role: builders keep the full line; Explore, Plan and refuter use the short form; reviewers and fix checks are exempt because their brief names a PR head, so the prior work is the diff. Gain: the check lands where duplicate work happens. Lose: one more rule table in the guard. Its pick: B4, medium confidence. Your options a and b are unchanged; B4 is a version of b. Say \"B4\" to choose it, or pick a or b. Item stays open.",
+  "short": "Search-before-spawn scope",
+  "shown": [
+    {
+      "id": "build-spawns-only",
+      "key": "a",
+      "label": "Check build spawns only, as built"
+    },
+    {
+      "id": "every-spawn",
+      "key": "b",
+      "label": "Check every spawn"
+    }
+  ],
+  "status": "open",
+  "title": "Must the search-before-spawn guard check every spawn, or build spawns only?",
+  "why": "The consultant recommends A: read-only and review spawns never duplicate a build, and B adds many refusals. It is the consultant's ask, relayed, not owner-typed."
+}

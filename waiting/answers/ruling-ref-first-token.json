@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-15T19:33:05.313Z",
+  "choice": "a",
+  "item": "ruling-ref-first-token",
+  "label": "A: Strict first token: `<id> <prose>`",
+  "n": 885,
+  "note": "",
+  "optionId": "strict-first-token"
+}

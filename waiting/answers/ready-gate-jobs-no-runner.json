@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-16T16:52:57.484Z",
+  "choice": "a",
+  "item": "ready-gate-jobs-no-runner",
+  "label": "A: The ready gate ignores queued macOS jobs",
+  "n": 919,
+  "note": "",
+  "optionId": "gate-ignores-queued-macos"
+}

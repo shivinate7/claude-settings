@@ -1,12 +1,13 @@
 {
   "added": "2026-11-12T17:10:00Z",
+  "closed": "2026-11-16T04:55:58Z",
   "context": "Goal: a fix round never undoes work the lane already landed (your ask fb-1041-1, Nov 2 10:41 CST).\nProblem (rule): the fix needs one new sentence in rule roles-brief-contents (what a spawner's brief to an agent must hold) in CLAUDE.md, and a CLAUDE.md rule takes your wording.\nBased on (read): lane fan-prose-unmapped-3 checked old #1099 (an older no-undo PR that #2734 replaces) against main and #2734 at 11:08 CST Nov 12; the builder.md and brief.md prose ship on #2734, and this sentence is the part left.\nDeparts from: main \u2014 adds a Keep: line to every round 2 and 3 brief, naming the lane's earlier commits to keep.\nMeanwhile: the lane ships the builder.md and brief.md prose and does not wait.",
   "home": "no-undo-brief-rule-sentence",
   "kind": "decision",
   "lastAnswer": {
-    "at": "2026-11-12T17:15:00Z",
+    "at": "2026-11-13T20:28:07.074Z",
     "choice": "a",
-    "note": "Taken by triage, 11:15 CST Nov 12: a reversible wording edit, so no owner pick is needed (rule parallelism-keep-going). No record says a root CLAUDE.md rule edit takes the owner's wording; only .claude/CLAUDE.md is owner-only. Decision claude-md-change-is-flagged shows you the change at merge."
+    "note": ""
   },
   "links": [
     {
@@ -31,12 +32,12 @@
       "lose": "A spawner that writes its own brief may still leave out the commits to keep."
     }
   ],
-  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "owner": "triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
   "ref": "step no-undo-brief-rule-sentence; lane fan-prose-unmapped-3 audit 11:08 CST Nov 12; #2734",
   "reply": "Reopened 12:16 CST Nov 13 as a stood pick for your veto. PR #2821 cites this as 'owner pick a'. It was not: triage took pick a at 11:15 CST Nov 12 as a reversible wording edit; you never answered it. The edit is one sentence in the root CLAUDE.md rule roles-brief-contents; decision claude-md-change-is-flagged shows you the change at merge. The pick stands unless you choose b.",
   "repo": "shivinate7/claude-settings",
   "short": "Round 2 and 3 briefs name commits to keep?",
-  "status": "open",
+  "status": "closed",
   "title": "Should a round 2 or 3 brief name the lane's earlier commits to keep?",
   "why": "A brief is where the builder reads what to keep, and the rule governs every spawner's brief, not only the template."
 }

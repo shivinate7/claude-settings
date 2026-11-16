@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-15T12:56:00-06:00",
+  "context": "Goal: cloud sessions run the current hooks.\nProblem (rule): cloud sessions refresh hooks on startup, resume and compact only, not on clear or fork. A session after a clear or fork may run old hooks. Needs your word: keep this as a known limit, or open a new gap to fix.\nBased on (measured): the refresh runs on startup, resume and compact only.\nDeparts from: main \u2014 adds a hook refresh on clear and fork, if you pick b; a keeps main.\nMeanwhile: nothing waits; the lane takes no action on this until you answer.",
+  "home": "lane pr-backlog wave 1; a note or a debt in the repo's debt store",
+  "kind": "decision",
+  "n": 891,
+  "options": [
+    {
+      "gain": "No new work.",
+      "how": "File one note that cloud sessions refresh hooks on startup, resume and compact only. No change to the startup hook.",
+      "id": "wanted-limit-note",
+      "key": "a",
+      "label": "Wanted limit: record it as a note",
+      "lose": "A stale-hook window after clear or fork."
+    },
+    {
+      "gain": "Hooks stay current after clear and fork.",
+      "how": "Open a debt record. A later lane adds a hook refresh on clear and fork to the startup hook.",
+      "id": "new-gap-debt",
+      "key": "b",
+      "label": "New gap: open a debt for a refresh on clear and fork",
+      "lose": "New work in the startup hook."
+    }
+  ],
+  "owner": "lane pr-backlog wave 1",
+  "recommended": "a",
+  "ref": "cloud session hook refresh (startup, resume, compact; not clear, fork)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Cloud hooks refresh limit",
+  "shown": [
+    {
+      "id": "wanted-limit-note",
+      "key": "a",
+      "label": "Wanted limit: record it as a note"
+    },
+    {
+      "id": "new-gap-debt",
+      "key": "b",
+      "label": "New gap: open a debt for a refresh on clear and fork"
+    }
+  ],
+  "status": "open",
+  "title": "Cloud hook refresh skips clear and fork: keep it as a known limit, or open a gap?",
+  "why": "No real incident shows a stale hook caused harm, so a keeps main and costs nothing until one does."
+}

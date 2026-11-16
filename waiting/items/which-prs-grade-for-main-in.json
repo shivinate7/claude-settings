@@ -1,0 +1,58 @@
+{
+  "added": "2026-11-16T13:47:00-06:00",
+  "context": "Goal: the highest-grade PRs reach main first, in one wave, then the next grade when none is left.\nProblem (rule): that idea needs a grade on each PR, and PRs carry none. Your pick that only lanes that are ready or one step from it bring main in already stands without a grade, so this question is only for the extra idea. It needs your word because it adds a new grade to every PR, or reuses one.\nBased on (measured): triage read the roadmap record at 13:46 CST Nov 16: of 2,227 steps, 66 carry a `priority` field (now 32, next 28, later 1, low 5); every step has a `phase` and an `order`; 230 steps carry a `pr` field, so a PR reaches a grade only through its step. Most open PRs have no step (332 pulls with no step at the last recount).\nBased on (read): the coordinator read no grade on any PR (relayed 13:46 CST).\nDeparts from: main \u2014 PRs have no grade and merge in the order they are ready; the options set a grade or leave it.\nMeanwhile: lanes that are ready or near ready bring main in as you picked; nothing waits on this answer.",
+  "home": "rewrite-merge-decisions-for-lane-merge",
+  "kind": "decision",
+  "n": 924,
+  "options": [
+    {
+      "gain": "No new field; every step already has a phase.",
+      "how": "A PR's grade is the phase of the step that names it; a PR with no step is the lowest grade.",
+      "id": "step-phase-grade",
+      "key": "a",
+      "label": "Use the step's phase (now, next, later) as the grade",
+      "lose": "Most open PRs have no step, so most would be the lowest grade, and the grade says little."
+    },
+    {
+      "gain": "A grade you already set on purpose.",
+      "how": "A PR's grade is its step's priority (now, next, later, low); everything else is ungraded and waits.",
+      "id": "priority-field-only",
+      "key": "b",
+      "label": "Use only the 66 steps that carry a priority field",
+      "lose": "Only about 3 percent of steps are graded, so almost every PR is ungraded."
+    },
+    {
+      "gain": "No new field and no new work.",
+      "how": "Nothing is built; lanes that are ready or near ready bring main in, as you picked.",
+      "id": "no-grade",
+      "key": "c",
+      "label": "No grade: the pick you already made is enough",
+      "lose": "Higher-grade PRs get no extra push to main."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
+  "recommended": "c",
+  "ref": "your hedge on the main-in pick (\"probably this and/or PRs of a certain priority grade are all brought to main at once ... if there's no high priority than all the medium priority ones\"), relayed by the coordinator 13:46 CST Nov 16; ruling own-923-c-ready-lanes-bring-main-in",
+  "repo": "shivinate7/claude-settings",
+  "short": "Which PR grade for main-in",
+  "shown": [
+    {
+      "id": "step-phase-grade",
+      "key": "a",
+      "label": "Use the step's phase (now, next, later) as the grade"
+    },
+    {
+      "id": "priority-field-only",
+      "key": "b",
+      "label": "Use only the 66 steps that carry a priority field"
+    },
+    {
+      "id": "no-grade",
+      "key": "c",
+      "label": "No grade: the pick you already made is enough"
+    }
+  ],
+  "status": "open",
+  "title": "If PRs are brought to main together by priority grade, which grade should the system use?",
+  "why": "Triage recommends c: your pick already keeps the ready queue clean; a grade would need a field on every PR and most PRs have no step. It is triage's recommendation, not owner-typed."
+}

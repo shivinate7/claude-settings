@@ -5,8 +5,9 @@
   "id": "pick-queued-status-keeps",
   "kind": "decision",
   "lastAnswer": {
-    "at": "2026-11-15T02:29:34Z",
-    "note": "Answered 20:29 CST Nov 14: debt and deferred work already have homes; nothing overruled; the open point is only queued; no pick."
+    "at": "2026-11-16T05:10:39.004Z",
+    "choice": "none",
+    "note": "does it make sense to get another new word and if so make the case for it"
   },
   "n": 735,
   "options": [
@@ -27,9 +28,10 @@
       "lose": "A second lane for a small gain."
     }
   ],
-  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "owner": "triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
   "ref": "lane glossary-step-statuses, 12:17 CST Nov 13",
-  "reply": "Your 13:20 CST note on 735, answered 13:22 CST. Nothing is overruled. (1) Deferred work already has a glossary home on main: a debt (GLOSSARY.md line 33, 'a known gap, or deferred work') and a note (line 34). (2) Step statuses are the open part. Step glossary-step-statuses (doing) adds rows for blocked and folded. The lane's PR #3195 also adds queued. Main's glossary has no step-status rows yet. (3) 'deferred' is not a step status. It only appears in the roadmap build as a count of steps waiting on you (those need an Asked: or Due after: line). So the question left is only queued: keep it as its own status, or fold it into todo. Which do you want? Until you say, the lane keeps queued.",
+  "replied": "2026-11-16T13:40:45-06:00",
+  "reply": "The consultant's read, 13:39 CST Nov 16 (relayed, not your answer): it also picks the third way, fold the queued steps into blocked, each naming what it waits behind. Why: one fewer status, and \"waits behind X\" says more than \"queued\". Risk it names: blocked steps show in the build's blocked list and may nag as if a blocker needs action, when they only wait their turn. Its guard: the blocker named is a step id, and the nag skips a blocker whose step is open and moving. So you and the consultant both lean to the third way. It is not option a or b, and it changes about 22 records, so I have not done it. Say \"fold into blocked\" and the lane does it (the nag guard comes with it). Item stays open.",
   "repo": "shivinate7/claude-settings",
   "short": "Keep 'queued' as its own step status?",
   "shown": [

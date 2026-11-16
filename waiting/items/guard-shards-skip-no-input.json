@@ -1,0 +1,52 @@
+{
+  "added": "2026-11-15T15:10:20-06:00",
+  "closed": "2026-11-16T00:35:38Z",
+  "context": "Goal: skip the slow Windows guard shards when a change touches no file the guard suite reads.\nProblem (rule): main runs those shards on every ready pull request (your ruling R62, 15:55 CST Nov 12). This lane's change skips them on diffs outside one pinned list (.github/guard-inputs.txt, pinned by lint/test_guard_inputs.py), so it departs from R62. The lane re-points the one test that asserts R62 (lint/test_windows_split.py, ReadyPullFullSuite), as its own commit, under a coordinator pick that is not owner-typed.\nBased on (ruling): R62 and own-830-c, which narrows it to a records-only push.\nDeparts from: main runs the full Windows guard shards on every ready PR \u2014 this lane skips them when no guard input changed.\nYour answer on item 893 (the daily run for the slow legs) is related and still open; this lane is stacked on #3540.",
+  "holds": "That lane's merge waits on this answer; it stays stacked on draft PR #3540 and nothing merges meanwhile.",
+  "home": "guard-input-scope",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-16T00:12:03.575Z",
+    "choice": "a",
+    "note": "this has long been settled how did u have this gap"
+  },
+  "n": 901,
+  "options": [
+    {
+      "gain": "Fewer slow runs.",
+      "how": "The narrowing is granted and the lane goes ahead after #3540.",
+      "id": "grant-narrowing",
+      "key": "a",
+      "label": "Yes, grant it",
+      "lose": "The R62 guarantee that every ready PR proves the full guard."
+    },
+    {
+      "gain": "R62 is kept.",
+      "how": "R62 stays as written and the lane is dropped.",
+      "id": "keep-r62-drop-lane",
+      "key": "b",
+      "label": "No, keep R62 and drop this lane",
+      "lose": "The slow runs stay."
+    }
+  ],
+  "owner": "lane skip-guard-shards-no-input",
+  "recommended": "a",
+  "ref": "R62, own-830-c, PR #3540, lane skip-guard-shards-no-input",
+  "repo": "shivinate7/claude-settings",
+  "short": "Skip guard shards, no input",
+  "shown": [
+    {
+      "id": "grant-narrowing",
+      "key": "a",
+      "label": "Yes, grant it"
+    },
+    {
+      "id": "keep-r62-drop-lane",
+      "key": "b",
+      "label": "No, keep R62 and drop this lane"
+    }
+  ],
+  "status": "closed",
+  "title": "May the lane skip the slow Windows guard shards when a change touches no file the guard suite reads?",
+  "why": "The lane's recommendation."
+}

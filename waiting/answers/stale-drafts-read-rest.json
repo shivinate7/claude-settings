@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-15T19:33:05.313Z",
+  "choice": "b",
+  "item": "stale-drafts-read-rest",
+  "label": "B: Give build.py a sessions read from a named source",
+  "n": 889,
+  "note": "",
+  "optionId": "sessions-from-source"
+}

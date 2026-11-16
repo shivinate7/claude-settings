@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-15T18:53:00Z",
+  "context": "Goal: the stale-draft row needs no hand-dumped live file.\nProblem (goal): the build reads open PRs from REST itself, but Python cannot list sessions, so the lane, held and reviewLog checks still need a fresh live file. With a stale or missing file the row reads unknown, never clear. Needs the owner's word because option b adds a secret and a reach to a service.\nBased on (measured): the live file was 19 h old and held 200 of about 500 PRs.\nDeparts from: main \u2014 the row needs the live file for the PR list; this lane \u2014 only for sessions.\nMeanwhile: the lane keeps option a; its draft PR #3531 waits on nothing.",
+  "home": "step stale-drafts-read-rest",
+  "kind": "decision",
+  "n": 889,
+  "options": [
+    {
+      "gain": "No new reach.",
+      "how": "The row keeps reading sessions from the live file; the PR list already comes from REST.",
+      "id": "keep-live-file",
+      "key": "a",
+      "label": "Keep as is, sessions from the live file",
+      "lose": "The row still reads unknown when the file is stale."
+    },
+    {
+      "gain": "The row is fully independent of the live file.",
+      "how": "build.py reads sessions from a source the owner names, such as an API token.",
+      "id": "sessions-from-source",
+      "key": "b",
+      "label": "Give build.py a sessions read from a named source",
+      "lose": "A new secret and a reach to a service.",
+      "widens": true
+    }
+  ],
+  "owner": "lane stale-drafts-read-rest",
+  "recommended": "a",
+  "ref": "lane stale-drafts-read-rest; draft PR #3531 (the stale-draft row)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Stale-draft row sessions",
+  "shown": [
+    {
+      "id": "keep-live-file",
+      "key": "a",
+      "label": "Keep as is, sessions from the live file"
+    },
+    {
+      "id": "sessions-from-source",
+      "key": "b",
+      "label": "Give build.py a sessions read from a named source"
+    }
+  ],
+  "status": "open",
+  "title": "Should the stale-draft row read sessions from a named source, so it needs no hand-dumped live file?",
+  "why": "Option a adds no secret and no reach; the row already reads unknown, never clear, when the file is stale."
+}

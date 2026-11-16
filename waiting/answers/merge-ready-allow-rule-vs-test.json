@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-16T00:12:03.575Z",
+  "choice": "a",
+  "item": "merge-ready-allow-rule-vs-test",
+  "label": "A: Keep the allow rule and re-point the test",
+  "n": 900,
+  "note": "",
+  "optionId": "keep-rule-repoint-test"
+}

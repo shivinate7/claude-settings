@@ -1,0 +1,52 @@
+{
+  "added": "2026-11-15T12:56:00-06:00",
+  "closed": "2026-11-15T20:20:18Z",
+  "context": "Goal: clear the 132 conflicting drafts.\nProblem (rule): #2808, #2850, #2943, #3186 (conflicts in code files against main ae13fcab3) and #3188 (a new conflict in hooks/test_install_src.sh after main moved to b600c126) need a merge that may change how a guard, a check or a rule behaves. Your order sends that back to you before the lane pushes.\nBased on (ruling): \"any conflict that changes behaviour of a guard, a check or a rule comes back to me before you push\".\nDeparts from: main \u2014 the lane merges main into drafts whose conflicts are in code files, and resolves them by hand.\nMeanwhile: the lane does nothing on these five; it already merged main into #3084 (8237024e), #3164 (2e2be170) and #2881 (c4fb57ed), fix check PASS, lane-lint PASS.",
+  "holds": "The push of five conflicting drafts waits on this answer.",
+  "home": "lane pr-backlog wave 1; drafts #2808, #2850, #2943, #3186, #3188",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-15T19:33:05.313Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 890,
+  "options": [
+    {
+      "gain": "Five drafts handed in.",
+      "how": "The lane merges main into #2808, #2850, #2943, #3186 and #3188, resolves each code conflict by hand, and pushes. #3188 goes first because it is one test file.",
+      "id": "merge-main-hand-resolve",
+      "key": "a",
+      "label": "Bring main into each draft and resolve the code conflicts by hand, #3188 first",
+      "lose": "Your review of hand-resolved code hunks."
+    },
+    {
+      "gain": "No hand resolution by this lane.",
+      "how": "The lane does not touch them. Each original lane resolves its own conflict.",
+      "id": "leave-to-lanes",
+      "key": "b",
+      "label": "Leave the five to their original lanes",
+      "lose": "Five drafts stay dirty."
+    }
+  ],
+  "owner": "lane pr-backlog wave 1",
+  "recommended": "a",
+  "ref": "PRs #2808, #2850, #2943, #3186 (conflicts in code files against main ae13fcab3); PR #3188 (new conflict in hooks/test_install_src.sh after main moved to b600c126)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Code-conflict draft merges",
+  "shown": [
+    {
+      "id": "merge-main-hand-resolve",
+      "key": "a",
+      "label": "Bring main into each draft and resolve the code conflicts by hand, #3188 first"
+    },
+    {
+      "id": "leave-to-lanes",
+      "key": "b",
+      "label": "Leave the five to their original lanes"
+    }
+  ],
+  "status": "closed",
+  "title": "Five conflicting drafts: may the lane merge main into them and resolve code conflicts by hand?",
+  "why": "Five drafts are handed in; the cost is your review of hand-resolved code hunks, which this question asks you to waive."
+}

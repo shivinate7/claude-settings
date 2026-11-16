@@ -1,0 +1,52 @@
+{
+  "added": "2026-11-15T23:25:07-06:00",
+  "closed": "2026-11-16T05:33:00Z",
+  "context": "Goal: PR #2848 reaches a merge-ready review record.\nProblem (rule): PR #2848 at f33b681d5 passed round 4 (sonnet) and a fix verifier, but used its three rounds and one fix check; a fourth round needs your word (rule roles-review-cap-three, decision pr-review-record).\nBased on (notes): the lane archive-flow reported at 23:24 CST Nov 15 that you typed in its chat: \"reset its roudns it cna have up to 3 more if it needs it\". The lane's report is not relayed through the coordinator, and the consultant confirms the words with you first.\nDeparts from: main \u2014 a change gets at most three review rounds and a fourth needs your grant; this gives #2848 up to three more if it needs them.\nMeanwhile: the lane holds; no grant string is issued until you confirm.",
+  "holds": "Lane archive-flow holds PR #2848 until the rounds question is answered.",
+  "home": "PR #2848",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-16T05:29:00Z",
+    "choice": "a",
+    "note": "Owner, typed in the consultant's chat 23:29 CST Nov 15: \"yes i did type that\", confirming his 23:24 CST words in lane archive-flow's chat: \"reset its roudns it cna have up to 3 more if it needs it\". Relayed by the consultant; no page save."
+  },
+  "n": 911,
+  "options": [
+    {
+      "gain": "The lane finishes review on #2848 without a new pull request.",
+      "how": "The review count for #2848 resets. The merge tool takes a round beyond three only as a grant string naming this item, which the batch runner builds from your answer.",
+      "id": "three-more-rounds",
+      "key": "a",
+      "label": "Yes: PR #2848 may have up to three more review rounds if it needs them",
+      "lose": "#2848 may take up to three more review rounds."
+    },
+    {
+      "gain": "The three-round cap stands for #2848.",
+      "how": "The lane splits or replaces #2848 as the review rules say.",
+      "id": "no-more-rounds",
+      "key": "b",
+      "label": "No: #2848 stays at its three rounds",
+      "lose": "The lane replaces or splits #2848, which restarts its review."
+    }
+  ],
+  "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ); posted by triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
+  "recommended": "a",
+  "ref": "PR #2848 (head f33b681d5), lane archive-flow (session_013NEJKzCV3NzW5wxzNQ6fWU)",
+  "repo": "shivinate7/claude-settings",
+  "short": "PR 2848: three more rounds",
+  "shown": [
+    {
+      "id": "three-more-rounds",
+      "key": "a",
+      "label": "Yes: PR #2848 may have up to three more review rounds if it needs them"
+    },
+    {
+      "id": "no-more-rounds",
+      "key": "b",
+      "label": "No: #2848 stays at its three rounds"
+    }
+  ],
+  "status": "closed",
+  "title": "May PR #2848 have up to three more review rounds, since it used its three rounds and one fix check?",
+  "why": "It matches the words the lane reported from you, which keeps one pull request alive instead of restarting its review."
+}

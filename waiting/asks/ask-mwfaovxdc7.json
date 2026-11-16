@@ -1,6 +1,12 @@
 {
+  "answered": "2026-11-16T05:14:00Z",
   "at": "2026-11-13T18:13:14.785Z",
+  "filed": "2026-11-16T05:14:00Z",
+  "home": "consultant session_013NEJKz5AWFJhGvmCUoi6wQ (you said at 23:10 CST Nov 15: the retrospective is now the consultant)",
   "id": "ask-mwfaovxdc7",
+  "owner": "triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
   "re": "ask-mwf8dnrv3u",
+  "read": "2026-11-16T05:14:00Z",
+  "reply": "Routed 23:14 CST Nov 15. You said the retrospective session is now the consultant, so I sent your ask to it. Meanwhile I ran a read-only Sonnet audit of all 61 asks: 29 delivered, 29 in flight, 3 with no answer, 0 not found. 'Delivered' means the step record says done or the decision is on main; 'done' is record-only for most steps, and a step once marked done was later reset to doing (roadmap-push-refusal-says-fetch). The 3 with no answer: this ask (now routed), the one on how item numbers and order are set (the reply only explains), and the past-ruling timeout one (the retry half is covered by step judge-timeout-retries-once; no step covers the session adding the Unvetted line itself). Oldest in flight: banchi's blank page block (step roadmap-blank-pages), parked-line-id-guard, state-file-parse-check, cloud-snapshot-age-check, page-usage-counters.",
   "text": "message the retrospective session that after it finishes its sonnet workflow and gets its results, that it should send a sonnet workflow through this entire area of \"my asks\" on the artifact to do the same sorta audit check"
 }

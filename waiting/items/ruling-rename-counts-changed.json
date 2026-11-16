@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-15T12:30:00-06:00",
+  "context": "Goal: the supersedes check covers new and changed entries, through a git diff of the store (your item 881, option b).\nProblem (rule): does a rename of an old entry's file after 11:33 CST Nov 15 count as a change that brings it into the check?\nBased on (read): lint/ruled_store.py, round 1 review note 5 (reviewer read).\nDeparts from: main \u2014 adds a scope rule for the check; main has none today.",
+  "holds": "Lane supersedes-names-an-id builds the other parts meanwhile.",
+  "home": "decision ruling-names-overtaken; lane supersedes-names-an-id",
+  "id": "ruling-rename-counts-changed",
+  "kind": "decision",
+  "n": 886,
+  "options": [
+    {
+      "gain": "Simple: no extra git flag.",
+      "how": "The check treats an entry whose file the git diff shows as renamed after the cutoff as changed, and checks it.",
+      "id": "rename-is-change",
+      "key": "a",
+      "label": "Yes, a rename is a change",
+      "lose": "A pure rename flags an old entry."
+    },
+    {
+      "gain": "No backfill pressure.",
+      "how": "The git read detects renames and skips an entry whose content is unchanged.",
+      "id": "rename-not-change",
+      "key": "b",
+      "label": "No, a pure rename is not a change",
+      "lose": "The git read needs rename detection."
+    }
+  ],
+  "owner": "lane supersedes-names-an-id (session_013NEJL4RGc1wTSm6XH62k2i)",
+  "recommended": "a",
+  "ref": "item 881 (ruling-supersedes-names-id, option b); lane supersedes-names-an-id round 1",
+  "repo": "shivinate7/claude-settings",
+  "short": "Rename: a change?",
+  "shown": [
+    {
+      "id": "rename-is-change",
+      "key": "a",
+      "label": "Yes, a rename is a change"
+    },
+    {
+      "id": "rename-not-change",
+      "key": "b",
+      "label": "No, a pure rename is not a change"
+    }
+  ],
+  "status": "open",
+  "title": "Does a pure rename of an old ruling entry count as a change for the check",
+  "why": "The lane's recommendation, not the owner's: A needs no extra git flag."
+}

@@ -27,7 +27,7 @@
     }
   ],
   "n": 240,
-  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "owner": "triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
   "rank": 2,
   "ref": "claude-settings batch 4 (e2e999e8, #1171 roadmap-blank-pages)",
   "reply": "Thanks. This closes when you say mailaudit is done too.\n\nOn the tag for local sessions: no, it isn't built. On Nov 5 (item 213) you said a file version must work on both Mac and Windows, and otherwise to build nothing for now and record it as a debt. So it's a debt (local-triage-tier-proof, on main via 94b0df6b0), and a Mac or Windows triage session still can't prove it is triage.",

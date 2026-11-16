@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-16T00:13:40-06:00",
+  "closed": "2026-11-16T15:37:54Z",
+  "context": "Goal: CI runs again in ios-adblock and joyous, so their pull requests can merge.\nWhy yours: only the account owner reaches GitHub Billing & plans; no session logs in as the account owner (measured 2026-11-16, an ios-adblock check failed within 31 seconds with no machine to run on and said \"recent account payments have failed or your spending limit needs to be increased\").\nUpdate 00:54 CST: a helper session checked again at 00:51 CST. The earlier recovery was only for the public repos. Banchi and claude-settings checks run and pass. The two private repos, ios-adblock and joyous, failed again after a re-run at 00:33 CST, with no steps run and the same billing message, so this is blocking again for those two repos.\nUpdate 04:59 CST: coordinator relay (not read by triage): one more private repository, home, is blocked. Its pull request #597 (head 6c6b3ef3), run 43853012591: the scope job never started, with the same message (\"recent account payments have failed or your spending limit needs to be increased\"), read by the lane artifact-pages-other-account at 04:58 CST. The coordinator measured that claude-settings (run 43834588227 green at 04:42 CST), banchi and mailaudit jobs run, so the block is not every repository of the account. After the billing page is cleared, the failed jobs are re-run, with no empty commit.\nUpdate 05:04 CST: coordinator relay of runner 11 (not read by triage): the home run 43853012591 (head 6c6b3ef306a7) is red with the billing signature: job scope failed at 10:56:21Z after 1m43s, no steps, no runner assigned; all-jobs-passed and ci-done failed. An earlier home run, 43813745133 (the #729 merge, 00:08 CST), was green, so the block on home started after that. Blocked list now: ios-adblock, joyous, q_max and home. Runner 11 reruns the failed jobs once after you clear billing, then merges on a green all-jobs-passed.\nUpdate 09:40 CST: coordinator relay of runner 11 (not read by triage): on home #597, run 43853012591, attempt 2 started 09:35 CST, job scope failed in 6 s with runner_id 0, no steps, no logs; all-jobs-passed and ci-done failed. Same signature as attempt 1, so billing may still block the private repos. This item was closed at 09:37 CST on the owner's typed /goal line, before this measurement reached triage; it stays closed until the owner says to reopen it.\nUpdate 09:43 CST: coordinator relay of runner 12 (not read by triage): billing looks partly fixed. joyous #92 run 43814947251 and #94 run 43814955554, attempt 3: scope succeeded on real runners, but build, checks, all-jobs-passed and ci-done failed with runner_id 0 and no steps (the billing signature). ios-adblock #175 run 43815026279, attempt 3: every job failed that way. q_max #1178, #1181, #1183, #1184, #1185, ios-adblock #176 and joyous #95 have only skipped runs; a failed-jobs rerun answers 403. claude-settings main may be green while these private-repo jobs still fail.\nUpdate 09:45 CST, correction to the 09:43 CST line: coordinator relay of runner 12 (not read by triage). The skipped runs on q_max #1178, #1181, #1183, #1184, #1185, ios-adblock #176 and joyous #95 come from those repos' own CI gate (a draft runs no job; jobs run only on a non-draft PR with a head branch starting batch-), not from billing. The billing signature (runner_id 0, no steps) shows only on ios-adblock #175, joyous #92 and #94 (build, checks), and home #597 (scope, three attempts).\nUpdate 09:46 CST: coordinator relay of runner 12 (not read by triage): q_max PR #1181, marked ready at 09:44 CST, had its CI jobs fail before they started, because GitHub gave them no machine. That makes five PRs in four private repos (q_max, home, ios-adblock, joyous) still failing the same way. Public repos and claude-settings run. The coordinator has runners 11 and 12 holding merges and probes until the owner confirms.\nEarlier: the same failure showed in ios-adblock and joyous, and banchi had 12 jobs waiting.",
+  "holds": "The ios-adblock, joyous and home pull requests cannot run their checks, so none of them can merge until the billing page is cleared. Reported blocked at 04:59 CST: home; q_max is also private (coordinator relay).",
+  "home": "github-billing-blocks-ci",
+  "kind": "task",
+  "links": [
+    {
+      "label": "GitHub Billing & plans",
+      "url": "https://github.com/settings/billing"
+    }
+  ],
+  "minutes": "3 min",
+  "n": 916,
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
+  "ref": "ios-adblock #175, job 133125009327, run 43815026279 (runner 12, relayed by the coordinator 00:14 CST Nov 16)",
+  "replied": "2026-11-16T11:31:31-06:00",
+  "reply": "Update 11:31 CST Nov 16. Closed 09:37 CST on your typed /goal line, but reruns at 11:12 CST (runners 11 and 12, relayed by the coordinator; I did not read the runs) show billing is not cleared for the private repos: five private-repo jobs failed on ubuntu-latest with no runner and no steps. 49 child-repo pull requests are open. Your later words (relayed by the consultant, 11:20 CST) replace the clear-billing path: drop every private-repo job that could cost money and merge without it. Filed as ruling billing-drop-private-jobs, home step github-billing-blocks-ci. The consultant builds it; runners 11 and 12 hold until his route. Nothing is open for you here. This item stays closed.",
+  "repo": "shivinate7/claude-settings",
+  "short": "GitHub billing blocks CI",
+  "status": "closed",
+  "steps": [
+    "Open GitHub Billing & plans and look for a failed payment or a spending limit that is reached.",
+    "If there is one, fix the payment method or raise the spending limit.",
+    "Tell the consultant what you saw, even if nothing was wrong."
+  ],
+  "title": "Check GitHub Billing & plans: a CI job failed at once with a payment or spending-limit message",
+  "why": "A failed payment or a reached spending limit stops every CI run before it starts."
+}

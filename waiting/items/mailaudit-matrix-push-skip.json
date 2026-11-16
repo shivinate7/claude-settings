@@ -1,0 +1,61 @@
+{
+  "added": "2026-11-16T00:55:59-06:00",
+  "context": "Goal: mailaudit's runs skip the work a passing branch already proved, as other repos do.\nProblem (rule): the shared skip tool looks for one job named `suite`, but mailaudit's `suite` runs as three parts named `suite (1)` to `suite (3)`, so the skip never fires; a lane tried to fix it and failed its third review round.\nBased on (read): a reviewer ran the shared tool's real reader at 00:54 CST: it lists every pull-request job except four named ones, and a job named like `suite (N)` is never matched.\nBased on (ruling): decisions/uniform-over-variants (owner, 2026-10-27 12:51 CDT): a repo changes to fit the shared format, never the tool to fit a repo. This item is asked because option a changes a lot in mailaudit and a fourth review round needs your grant.\nDeparts from: main \u2014 the shared skip finds only a job named exactly `suite`; option a renames mailaudit's jobs, option b makes the shared tool read split names, option c changes nothing.\nMeanwhile: the work is saved on a branch and mailaudit keeps its own skip step; nothing waits.",
+  "home": "push-skip-main-run",
+  "kind": "decision",
+  "n": 917,
+  "options": [
+    {
+      "gain": "Mailaudit follows the shared tool, as your rule says a repo should.",
+      "how": "Mailaudit's test job is split into three separate jobs, each with its own name, so the shared skip can find them.",
+      "id": "de-matrix-mailaudit",
+      "key": "a",
+      "label": "Change mailaudit: replace its three-part test job with three plain jobs",
+      "lose": "A large change in mailaudit for one skip, and a new run to prove it."
+    },
+    {
+      "gain": "Mailaudit needs no change, and any repo with split test jobs works.",
+      "how": "The shared skip action learns job names written like `suite (1)`, `suite (2)`, `suite (3)`.",
+      "id": "shared-tool-reads-matrix",
+      "key": "b",
+      "label": "Change the shared skip tool so it reads three-part test jobs",
+      "lose": "A shared tool changes to fit one repo, which goes against your ruling.",
+      "widens": true
+    },
+    {
+      "gain": "No new work and no risk to the shared tool.",
+      "how": "Nothing changes. The skip for mailaudit stays in its own workflow step.",
+      "id": "leave-parked",
+      "key": "c",
+      "label": "Leave it parked; mailaudit keeps its own hand-written skip step",
+      "lose": "Mailaudit keeps a skip step that the shared tool does not cover."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
+  "recommended": "c",
+  "ref": "mailaudit lane push-skip-main-run (failed review round 3 of 3), archive branch archive/push-skip-main-run",
+  "replied": "2026-11-16T13:40:30-06:00",
+  "reply": "Count for your 13:33 CST question (is split test running common?), from the coordinator at 13:36 CST, each read from the repo's main workflows by runner 11, runner 12 and the coordinator (claude-settings by a checkout read that may lag): 5 of 8 repos split their tests. Yes: claude-settings (lane-touched-tests.yml, computed matrix), degen (jobs server and app, 2 and 6 legs), q_max (job test, shown test (1) to test (12)), banchi (ci-check per target, 5 targets), mailaudit (suite (1) to suite (3)). No: home, ios-adblock, joyous. So a split form is common, but the exact name `suite (N)` is used only in mailaudit; the others name theirs differently. Reading it against your ruling: option b would teach the shared skip a form used in 5 of 8 repos, which looks like a shared feature, not one repo's variant; but the tool would need to read each repo's different job names, not just `suite (N)`, so the work is wider than the option says. Recommendation unchanged (c) until you say b is fine. Item stays open for your pick.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Mailaudit matrix vs push-skip",
+  "shown": [
+    {
+      "id": "de-matrix-mailaudit",
+      "key": "a",
+      "label": "Change mailaudit: replace its three-part test job with three plain jobs"
+    },
+    {
+      "id": "shared-tool-reads-matrix",
+      "key": "b",
+      "label": "Change the shared skip tool so it reads three-part test jobs"
+    },
+    {
+      "id": "leave-parked",
+      "key": "c",
+      "label": "Leave it parked; mailaudit keeps its own hand-written skip step"
+    }
+  ],
+  "status": "open",
+  "title": "Mailaudit's split test job is invisible to the shared skip: change mailaudit, change the shared tool, or leave it?",
+  "why": "The coordinator recommends c: it costs nothing and mailaudit still has a working skip. Option b goes against your ruling, so it is never recommended."
+}

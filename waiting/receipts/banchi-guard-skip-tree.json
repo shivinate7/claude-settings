@@ -1,0 +1,4 @@
+{
+  "note": "Done answer read 11:36 CST. The owner's edit (c174-guard-skip-tree 2aa3cb68) dropped the script call: the Write|Edit hook is now the bare `GUARD_SHELL_SKIP=tree`, which runs nothing. Asked the owner to restore `GUARD_SHELL_SKIP=tree scripts/guard-shell.py --hook`.",
+  "read": "2026-11-01T17:36:00Z"
+}

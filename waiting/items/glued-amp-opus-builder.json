@@ -1,0 +1,49 @@
+{
+  "added": "2026-11-15T14:36:06-06:00",
+  "closed": "2026-11-16T19:43:00Z",
+  "context": "Goal: land the long port of #2015 and #2156 without losing work.\nProblem (money): the port is long (about 10,000 test rows touched); the lane offers an Opus builder for it. Opus above the Sonnet ceiling needs your grant for this spawn.\nBased on (ruling): the roles rule roles-sonnet-is-the-ceiling: Sonnet is the ceiling except on your grant for the spawn named.\nDeparts from: main \u2014 builders run Sonnet; this one would run Opus for this one lane.",
+  "home": "own-716-b-keep-2156-glued-amp",
+  "kind": "decision",
+  "n": 898,
+  "options": [
+    {
+      "gain": "Fewer mistakes on a long port.",
+      "how": "One builder in this lane runs Opus for the port; later builders run Sonnet.",
+      "id": "grant-opus-one-builder",
+      "key": "a",
+      "label": "Grant Opus for this one builder",
+      "lose": "More cost; the lane's gain is not measured."
+    },
+    {
+      "gain": "No extra cost.",
+      "how": "The builder runs Sonnet, as the roles rule sets.",
+      "id": "keep-sonnet",
+      "key": "b",
+      "label": "Keep Sonnet",
+      "lose": "A longer port with more rework risk."
+    }
+  ],
+  "owner": "lane glued-amp-on-any-filter",
+  "port": false,
+  "recommended": "b",
+  "ref": "own-716-b-keep-2156-glued-amp (your ruling), PR #2156, #2015",
+  "replied": "2026-11-16T13:43:00-06:00",
+  "reply": "Closed as stale at 13:43 CST Nov 16, on the sweep you asked the consultant for (item 909). Evidence, GitHub at 13:42 CST: PRs 2015 and 2156 are closed unmerged, and the consultant reports they were replaced by PR 3287, rebuilt fresh; 3287 is an open draft. So the long port of 2015 and 2156 this asked about no longer exists, and no Opus builder was granted (the item was never answered). The lane owner has not confirmed this; I told the coordinator. Reopen if the new build needs an Opus builder.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Glued-amp: Opus builder",
+  "shown": [
+    {
+      "id": "grant-opus-one-builder",
+      "key": "a",
+      "label": "Grant Opus for this one builder"
+    },
+    {
+      "id": "keep-sonnet",
+      "key": "b",
+      "label": "Keep Sonnet"
+    }
+  ],
+  "status": "closed",
+  "title": "May the lane run an Opus builder for the long port of #2015 and #2156?",
+  "why": "The lane named no failure that Sonnet caused."
+}

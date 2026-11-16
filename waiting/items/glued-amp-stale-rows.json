@@ -1,0 +1,56 @@
+{
+  "added": "2026-11-15T14:36:06-06:00",
+  "closed": "2026-11-16T19:31:26Z",
+  "context": "Goal: #2015 (any-filter) plus the glued-& reader on main.\nProblem (rule): lane branch glued-amp-on-any-filter (head 8ea6264c2, #2015 merged on main b600c126d, pushed, no PR) has 71 of 10286 test rows red. They are #2015's expectations that main's rules changed since Nov 11: scratchpad-owner 16, push 14, check-tail 13, the merge-batch family 10, others small. Dropping or re-pointing a failing row needs your word. The stake is a rule: the refusals main holds today.\nBased on (measured): the test-author's failure count by family (3 shards, 9 skipped); the counts are not checked row by row.\nDeparts from: main refuses these acts today \u2014 option a changes no refusal; option b would turn main's refusals back into the old allowances.",
+  "holds": "The lane's #2156 merge, the curl x?a=1&b=2 case, review and the draft PR wait on this answer.",
+  "home": "check-tail-amp-tidy",
+  "kind": "decision",
+  "lane": "glued-amp-on-any-filter",
+  "lastAnswer": {
+    "at": "2026-11-16T19:30:57.699Z",
+    "choice": "b",
+    "note": ""
+  },
+  "n": 896,
+  "options": [
+    {
+      "gain": "Main is not weakened.",
+      "how": "Re-point or drop the stale #2015 rows, red then green, for the families scratchpad-owner, push and the merge-batch group. The check-tail rows go to a builder.",
+      "id": "keep-main-repoint-rows",
+      "key": "a",
+      "label": "Keep main's rules; re-point or drop the stale #2015 rows",
+      "lose": "Some #2015 rows retire; the check-tail rows go to a builder (`merge --release-check 5 6 | head -1` allowed may be a product defect)."
+    },
+    {
+      "gain": "All #2015 cases survive.",
+      "how": "The #2015 rows stay as written, and main's product rules change to match them.",
+      "id": "keep-rows-change-main",
+      "key": "b",
+      "label": "Keep the #2015 rows; change main's product rules",
+      "lose": "Main's newer refusals are loosened.",
+      "widens": true
+    }
+  ],
+  "owner": "lane glued-amp-on-any-filter",
+  "recommended": "a",
+  "ref": "own-716-b-keep-2156-glued-amp (your ruling), PR #2156, #2015",
+  "replied": "2026-11-16T13:31:30-06:00",
+  "reply": "Option b, closed at 13:31 CST Nov 16: the #2015 test rows stay as written and main's product rules change to match them. That loosens the refusals main added since Nov 11 (the page marks option b as widening). The lane carries the work. Filed as ruling own-896-897-glued-amp-b and sent to the coordinator for the lane. Your answer stays on the page until the lane reports it done.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Glued-amp: 71 stale rows",
+  "shown": [
+    {
+      "id": "keep-main-repoint-rows",
+      "key": "a",
+      "label": "Keep main's rules; re-point or drop the stale #2015 rows"
+    },
+    {
+      "id": "keep-rows-change-main",
+      "key": "b",
+      "label": "Keep the #2015 rows; change main's product rules"
+    }
+  ],
+  "status": "closed",
+  "title": "May the lane re-point or drop 71 stale #2015 test rows so main's newer rules stand?",
+  "why": "Main is not weakened; option b loosens refusals main added on purpose."
+}

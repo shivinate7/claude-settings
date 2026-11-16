@@ -1,0 +1,65 @@
+{
+  "added": "2026-11-15T13:34:50-06:00",
+  "context": "Goal: the stale-draft row is independent of the live file.\nProblem (risk): you picked 889 b, to read sessions from a named source. build.py needs one to list sessions from Python, and wiring a source adds a secret and a reach to a service, so it needs your word. Also held and reviewLog still come from triage's live pulls rows, so full independence needs a source for those too.\nBased on (measured): Python has no sessions reader today; the only session tool is list_sessions (MCP, not callable from the build).\nDeparts from: main \u2014 sessions come only from the live file; this lane makes the sessions source a parameter, default still the live file.\nMeanwhile the lane builds the source as a parameter, default live file, no token wired. Triage's earlier read of 889 b: the pick named no source.",
+  "home": "stale-row-reads-rest",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-16T01:48:22.586Z",
+    "choice": "none",
+    "note": "why cant it just use the live file with git commits too? just needs a table right"
+  },
+  "n": 894,
+  "options": [
+    {
+      "gain": "The lane check is independent.",
+      "how": "build.py lists sessions over an HTTP API with a token you name.",
+      "id": "sessions-http-token",
+      "key": "a",
+      "label": "Sessions over an HTTP API token you name",
+      "lose": "A new secret and a new reach."
+    },
+    {
+      "gain": "No new reach.",
+      "how": "No new source; the lane check keeps reading the live file.",
+      "id": "live-file-only",
+      "key": "b",
+      "label": "Keep the live file as the only source and drop the independence goal for lane checks",
+      "lose": "The row stays unknown when the file is stale."
+    },
+    {
+      "gain": "Fully independent, no second secret.",
+      "how": "Sessions come over the HTTP API as in option a; held and reviewLog come from PR labels and comments over the same GitHub REST token.",
+      "id": "sessions-plus-github-rest",
+      "key": "c",
+      "label": "Sessions as in (a), and held and reviewLog read from PR labels and comments over the GitHub REST token already used",
+      "lose": "More REST calls per build."
+    }
+  ],
+  "owner": "lane stale-drafts-read-rest",
+  "recommended": "c",
+  "ref": "item 889 pick b (read sessions from a named source), PR #3531",
+  "replied": "2026-11-16T13:36:00-06:00",
+  "reply": "You asked, 13:35 CST Nov 16: why couldn't cloud sessions refresh the live file, if the commits point at the roadmap branch that never goes to main? They can, and I did: this session (a cloud session) rebuilt the live file at 13:26 CST and pushed it to the roadmap branch (commit b8afbff390), with no PR and no CI. So the consultant's line \"cloud sessions cannot refresh it\" (relayed 11:00 CST, not measured by it) is wrong for a session like mine. What is true, measured today: a refresh is a manual job for a session. It took about 21 list_sessions pages (2,100 session rows), 12 pages of open PRs over GitHub REST, then a commit and push. No timer does it, so the file is stale between refreshes (the last one before today was 12:27 CST). build.py, which is Python, cannot call list_sessions at all. That makes option b real: keep the live file as the only source, committed to the roadmap branch, and the row reads UNKNOWN only when nobody has refreshed it. The cost is that someone must refresh it. The earlier note of yours (\"just needs a table\") fits option b. Options are unchanged; the item stays open for your pick.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Stale-draft row: sessions source",
+  "shown": [
+    {
+      "id": "sessions-http-token",
+      "key": "a",
+      "label": "Sessions over an HTTP API token you name"
+    },
+    {
+      "id": "live-file-only",
+      "key": "b",
+      "label": "Keep the live file as the only source and drop the independence goal for lane checks"
+    },
+    {
+      "id": "sessions-plus-github-rest",
+      "key": "c",
+      "label": "Sessions as in (a), and held and reviewLog read from PR labels and comments over the GitHub REST token already used"
+    }
+  ],
+  "status": "open",
+  "title": "Where should the stale-draft row read sessions from, now that build.py cannot call list_sessions?",
+  "why": "The lane's recommendation: fully independent with no second secret."
+}

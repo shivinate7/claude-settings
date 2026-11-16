@@ -5,6 +5,11 @@
   "home": "PR 2701, step merge-role-raw-paths; decision pr-review-record",
   "id": "pick-post-old-head-rounds-2701",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-15T17:37:01.046Z",
+    "choice": "none",
+    "note": "A is better than B but arent both bending for rules rather than thinking from outcomes"
+  },
   "n": 862,
   "options": [
     {
@@ -27,6 +32,8 @@
   "owner": "lane solo-batch-hat (session_013NEJKzruqvkmdxZx6AXoH8) 01:05 CST Nov 15, same question sent to the coordinator; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "recommended": "a",
   "ref": "lane message 01:05 CST Nov 15; related: item 858 (fix verifier, no round recorded)",
+  "replied": "2026-11-16T11:14:00-06:00",
+  "reply": "The consultant read this at 11:00 CST (read-only audit, relayed; I did not read the code). It recommends option c: carry the earlier review record across a head that adds only a clean merge of main, a claim commit or a trailer-only commit, with a Carried from line. The merge tool still refuses any edit no reviewer saw. Gain: an honest record survives merges of main. Lose: one new path to guard (a guard change, so up to 3 review rounds). It would run as one lane. Unknown: how #2701's record at e6b5571 was posted, since main's tool refuses that line. Your options are unchanged.",
   "repo": "shivinate7/claude-settings",
   "short": "Post old-head rounds for PR 2701?",
   "shown": [

@@ -1,0 +1,61 @@
+{
+  "added": "2026-11-16T06:44:23-06:00",
+  "context": "Goal: q_max's test helper skip-locally-fail-in-ci.mjs comes from claude-settings by pointer, with no copy (goal item 5, shared tooling by pointer).\nProblem (rule): q_max PR #1185 (branch qmax-skip-locally-pointer) replaces the copy with a pointer. It needs a claude-settings checkout, so a q_max test run with no checkout fails loudly and names each place it looked. It never skips. This changes how every q_max test run starts, so it needs your word. CI is unaffected: each test shard already sets CLAUDE_SETTINGS_DIR.\nBased on (ruling): claude-settings decision uniform-over-variants says a repo changes to fit the shared file.\nBased on (read): runner 12, relayed by the coordinator at 06:43 CST Nov 16 (triage read no diff): the two copies are byte-identical in code, and only the header comments differ (PR #1185 body, \"Diff of the two copies first\"). q_max's own copy of the test and its timing entry in harness/run-tests.mjs are deleted, because the shared test lives in claude-settings.\nDeparts from: main has a q_max-owned copy of the helper that runs with no claude-settings checkout. #1185 has q_max tests import the shared file, so a local run with no checkout fails with a clear error.\nMeanwhile: #1185 is blocked on billing (page item 916) and stays draft. Runner 12 keeps merging other lanes and does not merge #1185 until you answer.",
+  "home": "qmax-harness-copies-resolve",
+  "kind": "decision",
+  "n": 920,
+  "options": [
+    {
+      "gain": "One home for the helper, no drift, and it matches your ruling.",
+      "how": "q_max tests import the shared helper from a claude-settings checkout. With no checkout, a test run fails and names each place it looked.",
+      "id": "pointer-loud-fail",
+      "key": "a",
+      "label": "Pointer, loud failure with no checkout",
+      "lose": "A q_max test run with no claude-settings checkout fails until one is cloned or CLAUDE_SETTINGS_DIR is set."
+    },
+    {
+      "gain": "q_max tests run with no checkout.",
+      "how": "q_max keeps its own copy and a check refuses it when it differs from the shared file.",
+      "id": "keep-copy-with-check",
+      "key": "b",
+      "label": "Keep the copy and add a match check",
+      "lose": "Still a copy and a second form. It goes against your ruling that a repo changes to fit the shared file.",
+      "widens": true
+    },
+    {
+      "gain": "A local run with no checkout does not fail.",
+      "how": "Pointer as in A, but the helper's tests skip when no checkout exists.",
+      "id": "pointer-skip-silent",
+      "key": "c",
+      "label": "Pointer, and skip the helper's tests with no checkout",
+      "lose": "A silent skip hides the helper in CI, which is the failure the helper exists to prevent."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); relayed from runner 12 (session_013NEJL33U96UiyE6UtCHct3); posted by triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
+  "recommended": "a",
+  "ref": "q_max PR #1185 (qmax-skip-locally-pointer), helper skip-locally-fail-in-ci.mjs, decision uniform-over-variants, step qmax-harness-copies-resolve",
+  "replied": "2026-11-16T13:34:30-06:00",
+  "reply": "You asked for the pros and cons of a claude-settings checkout existing for q_max tests (read from this item and runner 12's relay; not measured). Pros: one home for the helper and no drift; it matches your ruling that a repo changes to fit the shared file; CI is unaffected, because each shard already sets CLAUDE_SETTINGS_DIR. Cons: a local q_max test run with no checkout fails until one is cloned or CLAUDE_SETTINGS_DIR is set, and q_max tests now depend on a folder in another repo. Unmeasured: how often a q_max local run has no checkout. Options a, b and c are unchanged; the item stays open for your pick.",
+  "repo": "shivinate7/claude-settings",
+  "short": "q_max helper by pointer",
+  "shown": [
+    {
+      "id": "pointer-loud-fail",
+      "key": "a",
+      "label": "Pointer, loud failure with no checkout"
+    },
+    {
+      "id": "keep-copy-with-check",
+      "key": "b",
+      "label": "Keep the copy and add a match check"
+    },
+    {
+      "id": "pointer-skip-silent",
+      "key": "c",
+      "label": "Pointer, and skip the helper's tests with no checkout"
+    }
+  ],
+  "status": "open",
+  "title": "q_max tests would import the shared skip-locally helper by pointer: fail loudly with no checkout, keep a checked copy, or skip silently?",
+  "why": "Runner 12 recommends A: it matches uniform-over-variants and loses only a local run with no checkout. It is runner 12's ask, relayed by the coordinator, not owner-typed."
+}

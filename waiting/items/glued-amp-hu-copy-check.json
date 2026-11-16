@@ -1,0 +1,55 @@
+{
+  "added": "2026-11-15T14:36:06-06:00",
+  "closed": "2026-11-16T19:31:26Z",
+  "context": "Goal: one answer for a missing reread_check on the hu_copy_check row.\nProblem (rule): #2015 expects deny for a missing reread_check; main's row says it fails open. Needs your word because the two disagree. The stake is a rule: what a check does when its input is missing.\nBased on (measured): the lane's read of both rows (not checked by triage).\nDeparts from: main \u2014 fails open today; option b would deny.",
+  "holds": "The lane's #2156 merge, the curl x?a=1&b=2 case, review and the draft PR wait on this answer.",
+  "home": "check-tail-amp-tidy",
+  "kind": "decision",
+  "lane": "glued-amp-on-any-filter",
+  "lastAnswer": {
+    "at": "2026-11-16T19:30:57.699Z",
+    "choice": "b",
+    "note": "there should be guidance int he block of what to do to resolve the block"
+  },
+  "n": 897,
+  "options": [
+    {
+      "gain": "Main is not changed.",
+      "how": "A missing reread_check keeps failing open; the #2015 deny case retires.",
+      "id": "main-fails-open",
+      "key": "a",
+      "label": "Main's row stands (fails open)",
+      "lose": "#2015's deny case retires."
+    },
+    {
+      "gain": "The #2015 case survives.",
+      "how": "A missing reread_check is denied, and main's product rule changes to match.",
+      "id": "deny-stands-change-main",
+      "key": "b",
+      "label": "#2015's deny stands; change main's product rule",
+      "lose": "A missing reread_check now blocks where main lets it through."
+    }
+  ],
+  "owner": "lane glued-amp-on-any-filter",
+  "recommended": "a",
+  "ref": "own-716-b-keep-2156-glued-amp (your ruling), PR #2156, #2015",
+  "replied": "2026-11-16T13:31:30-06:00",
+  "reply": "Option b, closed at 13:31 CST Nov 16: #2015's deny stands for a missing reread_check, and main's rule changes to match. Your note is part of the answer: the block message must say how to resolve the block (the item says rerun install.sh). The lane builds that text and a test that shows the message names the fix. Filed as ruling own-896-897-glued-amp-b and sent to the coordinator for the lane. Your answer stays on the page until the lane reports it done.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Glued-amp: hu_copy_check",
+  "shown": [
+    {
+      "id": "main-fails-open",
+      "key": "a",
+      "label": "Main's row stands (fails open)"
+    },
+    {
+      "id": "deny-stands-change-main",
+      "key": "b",
+      "label": "#2015's deny stands; change main's product rule"
+    }
+  ],
+  "status": "closed",
+  "title": "Should a missing reread_check on the hu_copy_check row deny, as #2015 expects, or fail open, as main does?",
+  "why": "Main is not changed, and no incident shows the fail-open row harmed anyone."
+}

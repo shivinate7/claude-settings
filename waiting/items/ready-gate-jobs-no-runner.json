@@ -1,0 +1,54 @@
+{
+  "added": "2026-11-16T03:12:00-06:00",
+  "closed": "2026-11-16T16:53:22Z",
+  "context": "Not moot (consultant correction, 07:05 CST Nov 16, relayed; triage read no run): #3560's ready run, created 06:07 CST after #3540 merged, still has its shell-macos job running since 06:32 CST. #3540 did not take every Mac job off pull request runs. Earlier text: pull request #3540 merged at 04:03 CST Nov 16 (triage REST read, merged true), which, by its body, moves the slow legs (including 3 macOS jobs) off pushes to main into one daily run. Whether pull request runs also lose their Mac jobs is unread by triage (the consultant says they do). Runs already queued keep their Mac jobs. This item stays open for your answer (consultant, 07:05 CST).\nGoal: lanes merge fast with no waste.\nProblem (rule): the batch runner marks a pull request ready only while no CI job is queued, and a ready run's macOS jobs wait 40 to 70 minutes each in a slow pool, so the gate holds ready marks for hours.\nBased on (measured): consultant relay, 03:13 CST Nov 16, from the coordinator's read at 03:11 CST of one run on the daily-schedule pull request: 3 macOS jobs waited 39, 68 and over 84 minutes, and one ran 12 minutes (n=3 jobs, 1 run; not read by triage). Mac machines exist but form a slow queue; an earlier relay said \"no machine\", and that was wrong.\nBased on (unmeasured): the slow Mac queue may come from GitHub-hosted macOS slots held by two long runs (over 2 hours) in other repos; the coordinator relayed this from runner 12 at 03:30 CST, and runner 12 asked their owners to cancel them. The cause is unmeasured; one mailaudit pull request's macOS jobs queued 22 to 30 minutes while those two runs held the runner (coordinator's relay, 03:31 CST). The consultant cannot read other repos; runner 12 can.\nBased on (ruling): own-ready-gate-unrelated-prs (your pick b on 902, 18:37 CST Nov 15: the gate is overturned only for pull requests that touch different areas) and own-ready-pr-no-queue-wait (18:10 CST Nov 15: a ready pull request does not wait behind unrelated ones). Neither says whether queued macOS jobs count, so this is a new question.\nBased on (measured): consultant relay, 03:57 CST Nov 16, from runner 12 (n=1 run, mailaudit repo only; not read by triage): after two old duo-ui runs ended (one cancelled by runner 12, one by the mailaudit lane), the three queued macOS jobs of mailaudit #342 started and finished in about 22 min. That favours \"slots held by long runs in other repos\" over \"slow pool\", from one case.\nBased on (ruling): your 01:33 CST Nov 16 words, relayed by runner 10: turn off all Mac runs for now, run them at night later.\nDeparts from: the Batch runner bullet of decision session-tiers, \"marks ready only while no job is queued\" \u2014 queued macOS jobs would no longer count as queued.\nMeanwhile: the consultant waits on this for the gate and keeps fixing two other pull requests; runner 10 keeps its gate as it is.\nAsked by the consultant (session_013NEJKz5AWFJhGvmCUoi6wQ) at 03:11 CST Nov 16, premise corrected at 03:13 CST; posted by triage.",
+  "holds": "The ready marks on pull requests that only need Linux and Windows checks wait on queued macOS jobs.",
+  "home": "step ready-no-queue-wait",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-16T16:52:57.484Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 919,
+  "options": [
+    {
+      "gain": "Linux and Windows pull requests get their ready mark now, and the shared Linux pool is still protected.",
+      "how": "The gate ignores queued macOS jobs when it decides whether a job is queued.",
+      "id": "gate-ignores-queued-macos",
+      "key": "a",
+      "label": "The ready gate ignores queued macOS jobs",
+      "lose": "Mac jobs pile up deeper until the daily-schedule change moves them to night."
+    },
+    {
+      "gain": "No rule change.",
+      "how": "The gate stays as it is: any queued job holds the ready mark.",
+      "id": "leave-gate-as-it-is",
+      "key": "b",
+      "label": "Leave the gate as it is",
+      "lose": "Ready marks keep waiting 40 to 70 minutes per macOS job until the daily-schedule change merges, and it may be stuck on the same queued jobs."
+    }
+  ],
+  "owner": "batch runner 10 (session_013NEJL2f1YCYsvLdpFqtWP3); asked by the consultant (session_013NEJKz5AWFJhGvmCUoi6wQ); posted by triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
+  "recommended": "a",
+  "ref": "Batch runner bullet of decision session-tiers; rulings own-ready-gate-unrelated-prs, own-ready-pr-no-queue-wait",
+  "replied": "2026-11-16T10:53:22-06:00",
+  "reply": "Option a, picked 10:52 CST Nov 16: the batch runner's ready gate ignores queued macOS jobs. Item closed. Sent to runner 10 (it owns the gate) and the consultant at 10:53 CST. Not yet built: the change to the Batch runner bullet of decision session-tiers and to the gate itself is runner 10's lane work under step ready-no-queue-wait. Your answer stays on the page until runner 10 reports the act done.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Ready gate: queued Mac jobs",
+  "shown": [
+    {
+      "id": "gate-ignores-queued-macos",
+      "key": "a",
+      "label": "The ready gate ignores queued macOS jobs"
+    },
+    {
+      "id": "leave-gate-as-it-is",
+      "key": "b",
+      "label": "Leave the gate as it is"
+    }
+  ],
+  "status": "closed",
+  "title": "May the batch runner's ready gate ignore queued macOS jobs?",
+  "why": "The consultant recommends option a: Linux and Windows pull requests mark ready now, and the shared Linux pool stays protected."
+}

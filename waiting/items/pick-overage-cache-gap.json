@@ -1,12 +1,14 @@
 {
   "added": "2026-11-12T18:18:00Z",
+  "closed": "2026-11-16T05:20:00Z",
   "context": "ANSWER to your \"the tradeoff is not well written\" (20:30 CST Nov 14): in plain words, when your account is in overage, Claude keeps a session's earlier conversation for 5 minutes, not an hour. A session that waits longer than that on CI pays to re-read it when it wakes. Option a leaves the CI wait cap alone and records the gap: no hook can tell when overage is on, and the cost is unmeasured. Option b adds a second, shorter cap (300 s) used only while overage shows; a reader for overage has to be built first. The work this pick governs is built: step ci-wait-cap-55 is done (#3414 merged 15:34 CST Nov 14, the 55-minute cap read from one dated constant, with no overage switch, which is what a says). So a stands unless you say b. Triage proposes closing this item as a; that is yours to say.\nGoal: the work goes on now, and you can overrule any coordinator pick.\nIn plain words: when your account runs in 'overage' (over its normal use), Claude remembers a session's earlier conversation for only 5 minutes instead of an hour. A session that waits on CI longer than 5 minutes then pays to re-read its whole conversation when it wakes. The CI wait cap is how long a session waits before it checks in.\nProblem (goal): the coordinator left the wait cap alone for overage, because no hook can tell when overage is on, so a second, shorter cap has nothing to switch it. The cost of that gap is unmeasured on the Mac and the PC.\nBased on (notes): coordinator message, 12:17 CST Nov 12; the retrospective's audit 13:19 CST found the pick sound.\nDeparts from: main has no such pick on record \u2014 the work it governs follows this pick.",
   "home": "step ci-wait-cap-55",
   "id": "pick-overage-cache-gap",
   "kind": "decision",
   "lastAnswer": {
-    "at": "2026-11-15T02:31:00Z",
-    "note": "your question answered in the item (triage 20:30 CST Nov 14); no pick"
+    "at": "2026-11-16T05:10:39.004Z",
+    "choice": "b",
+    "note": ""
   },
   "n": 584,
   "options": [
@@ -27,10 +29,10 @@
   ],
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
   "ref": "coordinator pick, Nov 12, 12:17 CST",
-  "reply": "You said the tradeoff was not well written; the item now says in plain words what overage does and what the cap is. In short: a leaves the wait cap alone and records the gap (no way to detect overage yet, cost unmeasured); b adds a second 300 s cap that is used only while overage shows, which needs a reader for overage first. Say b in the thread or on the page to overrule.",
+  "reply": "Filed as ruling own-584-b-second-300s-cap and new step overage-reader-then-300s-cap (todo, the consultant builds it). Step ci-wait-cap-55 stays done; the 55 minute cap stands. First act: find out whether any reader of overage exists.",
   "repo": "shivinate7/claude-settings",
   "short": "CI wait cap: leave the 5-minute overage cache as a known gap",
-  "status": "open",
+  "status": "closed",
   "title": "CI wait cap: leave the 5-minute overage cache as a known gap",
   "why": "A coordinator pick you could not see before."
 }

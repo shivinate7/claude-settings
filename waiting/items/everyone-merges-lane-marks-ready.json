@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-16T13:08:50-06:00",
+  "closed": "2026-11-16T19:09:33Z",
+  "context": "Goal: every session merges its own PR, and lanes stop handing finished PRs to runner 10.\nProblem (rule): decision standing-merge-grant on main says only the batch runner marks a PR ready, and a lane never does. Your 12:58 CST words say everyone merges. A lane cannot merge a draft, so the two cannot both stand. This needs your word because it changes a rule you set.\nBased on (ruling): own-everyone-merges, filed on step rewrite-merge-decisions-for-lane-merge (your 12:58 CST Nov 16 words, relayed by the coordinator at 13:07 CST): each session merges its own PR with the merge tool; lanes no longer hand a finished PR to runner 10; the limits stay.\nBased on (read): the coordinator's 13:07 CST message that decision standing-merge-grant keeps marking ready with the batch runner (relayed; triage did not read the decision).\nDeparts from: standing-merge-grant and the \"Lane draft PR\" standing grant: a lane never marks its own PR ready. Option A changes that; option B keeps it.\nMeanwhile: lanes #3569, #3449, #3469 and #3570 proceed under ruling own-lanes-merge-claude-settings-prs. The coordinator also asked you in chat; an answer there closes this item.",
+  "home": "rewrite-merge-decisions-for-lane-merge",
+  "kind": "decision",
+  "n": 922,
+  "options": [
+    {
+      "gain": "Matches your words: no handing a finished PR to runner 10, and no wait for it.",
+      "how": "A lane marks its own PR ready once its limits hold (green run of its head, lane lint PASS, review rounds, record at the live head), then merges it with the merge tool. The \"Lane draft PR\" grant and decision standing-merge-grant are rewritten.",
+      "id": "lane-marks-own-ready",
+      "key": "a",
+      "label": "A lane marks its own PR ready, then merges it",
+      "lose": "The batch runner's ready check no longer stands between a lane and a merge."
+    },
+    {
+      "gain": "Keeps the one check that only the batch runner makes before a merge.",
+      "how": "A lane hands its finished PR to the batch runner only to mark it ready, then merges it itself. Nothing in the standing grant or the decision changes.",
+      "id": "runner-keeps-ready",
+      "key": "b",
+      "label": "The batch runner still marks ready; the lane merges after",
+      "lose": "Lanes still wait for the batch runner, which is the hand-off you said to end."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
+  "recommended": "a",
+  "ref": "ruling own-everyone-merges (your 12:58 CST Nov 16 words, typed in the coordinator's session); decision standing-merge-grant; the standing grant \"Lane draft PR\" in .claude/CLAUDE.md",
+  "replied": "2026-11-16T13:09:33-06:00",
+  "reply": "Closed by triage at 13:09 CST: a past ruling already settles it. Decision draft-until-reviewed, owner ruling Q2 of 09:44 CST Nov 12: a lane may move its own PR from draft to ready once, after its last review and lane lint, never per push. That is option A. The coordinator's reading that only the batch runner marks ready was out of date. Not owner-answered; triage read the decision's line 7 and did not read standing-merge-grant. If you disagree, reopen this item.",
+  "short": "Lane marks own PR ready",
+  "shown": [
+    {
+      "id": "lane-marks-own-ready",
+      "key": "a",
+      "label": "A lane marks its own PR ready, then merges it"
+    },
+    {
+      "id": "runner-keeps-ready",
+      "key": "b",
+      "label": "The batch runner still marks ready; the lane merges after"
+    }
+  ],
+  "status": "closed",
+  "title": "Does \"everyone merges\" let a lane mark its own PR ready?",
+  "why": "Option A matches your words, because a lane cannot merge a draft and you ended the hand-off to runner 10. This is triage's reading, not measured. The coordinator asked, relayed, not owner-typed."
+}

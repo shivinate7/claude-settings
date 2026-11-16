@@ -1,0 +1,50 @@
+{
+  "added": "2026-11-15T12:43:47-06:00",
+  "closed": "2026-11-15T20:15:31Z",
+  "context": "Goal: land the stale PR #3415 on current main.\nProblem (rule): merging main conflicts in run_span(). Main strips the CHILD_SECRETS keys from the child env. The PR replaces run(..., timeout=) with a Popen heartbeat loop. A correct merge applies main's env filter inside the PR's loop, which changes a check's behaviour. The import line in lint/test_check_debt_retire.py also conflicts (the PR imports signal, main imports re), and builders may not edit tests. The consultant's order of 12:00 CST Nov 15 reserves any check-behaviour conflict for the consultant or the owner.\nBased on (read): the lane's read of the conflict (run_span(), the import lines).\nDeparts from: main \u2014 a check's code changes to run main's env filter inside a heartbeat loop.\nMeanwhile: nothing is pushed; PR #3415 stays at its old head.",
+  "home": "PR #3415; step pr-backlog-clear",
+  "id": "pr-3415-heartbeat-merge",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-15T19:33:40.108Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 887,
+  "options": [
+    {
+      "gain": "The PR lands with both behaviours.",
+      "how": "A test-author plus a builder do the merge: keep the heartbeat loop, add main's env filter inside it, keep both imports.",
+      "id": "merge-with-env-filter",
+      "key": "a",
+      "label": "Yes, merge with both behaviours",
+      "lose": "A check's behaviour changes; the merge needs a review round."
+    },
+    {
+      "gain": "No check change.",
+      "how": "Nothing is pushed; the PR stays as it is.",
+      "id": "leave-old-head",
+      "key": "b",
+      "label": "No, leave PR #3415 at its old head",
+      "lose": "The heartbeat stays unbuilt."
+    }
+  ],
+  "owner": "lane rebase-wave-1c (session_013NEJKyzkbY7Ayvxza5a6o9), via coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "ref": "PR #3415 (lint/check_debt_retire.py heartbeat); lane rebase-wave-1c; PR backlog wave 1 (step pr-backlog-clear)",
+  "repo": "shivinate7/claude-settings",
+  "short": "PR 3415: heartbeat merge",
+  "shown": [
+    {
+      "id": "merge-with-env-filter",
+      "key": "a",
+      "label": "Yes, merge with both behaviours"
+    },
+    {
+      "id": "leave-old-head",
+      "key": "b",
+      "label": "No, leave PR #3415 at its old head"
+    }
+  ],
+  "status": "closed",
+  "title": "May a stale PR change a check's behaviour so it lands: the heartbeat loop in check_debt_retire.py with main's env filter inside it?"
+}

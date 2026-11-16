@@ -1,0 +1,8 @@
+{
+  "at": "2026-11-16T19:35:28.102Z",
+  "choice": "none",
+  "item": "stale-drafts-sessions-source",
+  "label": "none of these",
+  "n": 894,
+  "note": "why wouldnt cloud sessions be able to refresh if it's let's say commitments pointed to the roadmap branch that never goes to main?"
+}

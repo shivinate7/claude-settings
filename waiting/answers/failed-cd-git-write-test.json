@@ -1,0 +1,8 @@
+{
+  "at": "2026-11-16T19:36:41.966Z",
+  "choice": "c",
+  "item": "failed-cd-git-write-test",
+  "label": "C: Refuse only a cd into a missing folder (Recommended)",
+  "n": 476,
+  "note": ""
+}

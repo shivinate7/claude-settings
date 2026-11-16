@@ -1,0 +1,66 @@
+{
+  "added": "2026-11-15T18:15:05-06:00",
+  "closed": "2026-11-16T09:26:19Z",
+  "context": "Goal: a ready PR does not sit waiting behind other work to merge.\nProblem (rule): session-tiers.md line 114, Batch runner bullet, says the runner \"marks ready only while no job is queued\". Your 18:10 CST Nov 15 words (relayed by the consultant, not read as typed): \"in general things shouldnt have had to wait for other stuff behind to merge imagine sand shifting through multiple strainers in a sense man cmon we\u2019ve talked abt this\". Whether that overturns the gate fully or only for unrelated PRs is not settled; runner 10 keeps its gate meanwhile (coordinator told it).\nBased on (measured): runner 10 14:12 CST Nov 15: the gate cost 53 to 81 min from mark to merge, n=3, limit was the CI queue (relayed).\nBased on (ruling): own-ready-pr-no-queue-wait (relayed, filed 345d86753).\nDeparts from: main \u2014 the runner marks ready only while no job is queued; this changes when it may mark.\nA related fact: #3341's red ready run came from a stale merge ref (parents 685fa1631 + ec3aa9a22 before the revert), not from the gate (coordinator measured, n=1).",
+  "home": "ruling own-ready-gate-unrelated-prs; step ready-no-queue-wait",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-15T18:37:54-06:00",
+    "choice": "b",
+    "note": "Saved on the waiting page: B, overturn the ready gate only for pull requests that touch different areas."
+  },
+  "n": 902,
+  "options": [
+    {
+      "gain": "No PR waits on another.",
+      "how": "The runner drops the no-queued-job condition; each PR goes ready once its head is current.",
+      "id": "overturn-fully",
+      "key": "a",
+      "label": "Overturn the gate fully: a PR goes ready as soon as its head is current",
+      "lose": "Several full CI runs share the queue, so each takes longer and a red run is harder to blame."
+    },
+    {
+      "gain": "Unrelated PRs stop waiting; related ones still go one at a time.",
+      "how": "PRs that touch different areas go ready together; related ones still go one at a time.",
+      "id": "overturn-unrelated",
+      "key": "b",
+      "label": "Overturn it only for PRs that touch different areas",
+      "lose": "Runner 10 must first measure what counts as an area, so it starts later than option a."
+    },
+    {
+      "gain": "One run at a time, clear blame.",
+      "how": "The runner keeps marking ready only while no job is queued.",
+      "id": "keep-gate",
+      "key": "c",
+      "label": "Keep the gate as it is",
+      "lose": "Your 18:10 CST words are not acted on; waits of 53 to 81 min stay."
+    }
+  ],
+  "owner": "batch runner 10",
+  "recommended": "b",
+  "ref": "session-tiers Batch runner bullet (line 114), own-ready-pr-no-queue-wait, PR #3341",
+  "replied": "2026-11-16T03:26:19-06:00",
+  "reply": "Closed: you picked b on 18:37 CST Nov 15. The ruling own-ready-gate-unrelated-prs holds it, and runner 10 and the step ready-no-queue-wait carry the rest. A new, narrower question about queued macOS jobs is a separate item.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Ready gate: how far to overturn",
+  "shown": [
+    {
+      "id": "overturn-fully",
+      "key": "a",
+      "label": "Overturn the gate fully: a PR goes ready as soon as its head is current"
+    },
+    {
+      "id": "overturn-unrelated",
+      "key": "b",
+      "label": "Overturn it only for PRs that touch different areas"
+    },
+    {
+      "id": "keep-gate",
+      "key": "c",
+      "label": "Keep the gate as it is"
+    }
+  ],
+  "status": "closed",
+  "title": "Does \"things shouldn't have to wait behind other PRs\" overturn the batch runner's ready gate fully, or only for unrelated PRs?",
+  "why": "The coordinator's lean (relayed): marks proceed one run at a time per area, measured by runner 10 first."
+}

@@ -27,7 +27,7 @@
       "lose": "Wrong refusals with an unmeasured rate."
     }
   ],
-  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "owner": "triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
   "ref": "backlog-drain lane, #3154",
   "reply": "You asked what 'glued' and 'reader' mean; the item now says it in plain words. Nothing else changed: a drops the glued-& reader, b keeps it.",
   "repo": "shivinate7/claude-settings",

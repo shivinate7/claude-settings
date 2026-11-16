@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-16T03:02:24.287Z",
+  "choice": "b",
+  "item": "page-prs-runner10-merge",
+  "label": "B: Yes, the named page PRs, each at its live head, when its lane lint passes and its review record is at that head",
+  "n": 906,
+  "note": "",
+  "optionId": "merge-page-prs-class"
+}

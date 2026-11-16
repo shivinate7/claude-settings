@@ -1,0 +1,51 @@
+{
+  "added": "2026-11-15T12:43:47-06:00",
+  "closed": "2026-11-16T04:58:30Z",
+  "context": "Goal: land PR #3319 on current main.\nProblem (rule): merging main conflicts in the upkeep rows list (about line 1867). The PR adds the unreadable_check_fields row and main adds the DRIFT_LINE row, both before \"done without check\". The SKILL.md bullet list conflicts the same way. Either order changes a check's output order. The consultant's order of 12:00 CST Nov 15 reserves any check-behaviour conflict for the consultant or the owner.\nBased on (read): the lane's read of the conflict.\nDeparts from: main \u2014 adds the PR's upkeep row before main's.\nMeanwhile: nothing is pushed; PR #3319 stays at its old head.",
+  "home": "PR #3319; step step-done-check-field",
+  "id": "pr-3319-upkeep-row-order",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-16T01:48:22.586Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 888,
+  "options": [
+    {
+      "gain": "Both rows exist.",
+      "how": "The union: both rows, the PR's first; a test-author re-points any test that pins row order or count.",
+      "id": "keep-both-rows",
+      "key": "a",
+      "label": "Yes, keep both rows, the PR's first",
+      "lose": "A check's output order changes; tests are re-pointed."
+    },
+    {
+      "gain": "No change to the check.",
+      "how": "Nothing is pushed; the PR stays as it is.",
+      "id": "leave-old-head",
+      "key": "b",
+      "label": "No, leave PR #3319 at its old head",
+      "lose": "The unreadable-check-fields row stays unbuilt."
+    }
+  ],
+  "owner": "lane rebase-wave-1c (session_013NEJKyzkbY7Ayvxza5a6o9), via coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "ref": "PR #3319 (skills/roadmap/build.py, step step-done-check-field); lane rebase-wave-1c; PR backlog wave 1 (step pr-backlog-clear)",
+  "reply": "Lane rebase-wave-1c applied a at head 886c2616c and handed #3319 in to runner 10 (review record comment 6907554881, lane lint PASS). The merge itself waits on runner 10.",
+  "repo": "shivinate7/claude-settings",
+  "short": "PR 3319: upkeep row order",
+  "shown": [
+    {
+      "id": "keep-both-rows",
+      "key": "a",
+      "label": "Yes, keep both rows, the PR's first"
+    },
+    {
+      "id": "leave-old-head",
+      "key": "b",
+      "label": "No, leave PR #3319 at its old head"
+    }
+  ],
+  "status": "closed",
+  "title": "May PR #3319 add its unreadable_check_fields upkeep row before main's DRIFT_LINE row in build.py, so both rows exist?"
+}

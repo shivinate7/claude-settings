@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-15T18:26:19-06:00",
+  "context": "Goal: a draft that adds a debt note does not need a main merge to clear a conflict.\nProblem (rule): every draft and every main merge that adds a note insert at the same place in docs/debts/notes.md; GitHub ignores the .gitattributes line 7 merge=union driver that hides it locally, so the PR reads dirty, runs no workflow and lint ends unknown (lane pr-backlog wave 1, measured on #3186 and #3188: main +3 lines, #3186 +4, #3188 +1 at base line ~2148). Fixing it departs from decision notes-merge-union and needs your word.\nBased on (measured): lane lint times per draft this wave 337.8, 383.2, 401.4, 622.1, 1048.7 s (5 runs); merge and fix check not timed. Unmeasured: how many of the 132 open drafts add a notes line.\nBased on (ruling): rule git-record-own-file-per-kind says each record gets its own file; notes.md is the exception.\nBased on (measured): the decision's own census, read by lane pr-backlog wave 1 and not re-checked by triage: 26 real content conflicts in notes.md since Oct 15 (most of any file; records.md 11, catalog.md 10), and a batch left out four reviewed lanes over it.\nDeparts from: main \u2014 one shared notes file with a union merge driver; this gives each note its own file.\nThe decision at stake is docs/decisions/notes-merge-union.md (Kind process, landed 2026-10-29). Two statements in it rotted (lane pr-backlog wave 1, read-only search, 18:28 CST Nov 15): lines 5-8 and 27-28, \"Until the cutover, the batch runner builds the integration branch with a local git merge, so it gets this\" and \"Unverified: GitHub's own server-side merge ... does not depend on GitHub's merge\". Lanes now merge by PR, and this wave measured the unverified part: GitHub ignores merge=union and holds the PR dirty (#3186, #3188; no pull_request run, so no draft run for lint). The outcome the decision protected: lanes append one-line findings without clashing. One file per note protects that on GitHub too; merge=union only protects local merges. Readers the lane keeps: check_silent_undo (revived-note count by slug), lint/test_notes_union_merge.py, lint/check_record_slugs.py, and the stale cites into notes.md.",
+  "home": "decision notes-merge-union / rule git-record-own-file-per-kind",
+  "kind": "decision",
+  "n": 903,
+  "options": [
+    {
+      "gain": "No same-place insert, so no draft goes dirty for notes and no extra main merge per draft.",
+      "how": "Each debt note gets its own file under docs/debts/, and notes.md stops being the shared insert point.",
+      "id": "one-file-per-note",
+      "key": "a",
+      "label": "One file per note",
+      "lose": "One lane touching docs/debts/ and its readers (check_record_slugs, cites into notes.md)."
+    },
+    {
+      "gain": "Nothing to build.",
+      "how": "Nothing changes; each draft that adds a note takes a main merge when main adds one.",
+      "id": "keep-shared-file",
+      "key": "b",
+      "label": "Keep the shared file and bring main in per draft",
+      "lose": "Each draft that adds a note takes a merge, a fix check and a 6 to 17 min lane lint again, every time main adds a note."
+    }
+  ],
+  "owner": "lane pr-backlog wave 1",
+  "recommended": "a",
+  "ref": "decision notes-merge-union, rule git-record-own-file-per-kind, PRs #3186 and #3188",
+  "repo": "shivinate7/claude-settings",
+  "short": "Debt notes: one file each",
+  "shown": [
+    {
+      "id": "one-file-per-note",
+      "key": "a",
+      "label": "One file per note"
+    },
+    {
+      "id": "keep-shared-file",
+      "key": "b",
+      "label": "Keep the shared file and bring main in per draft"
+    }
+  ],
+  "status": "open",
+  "title": "Should each debt note get its own file, so drafts stop going dirty on docs/debts/notes.md?",
+  "why": "It removes the cause and matches git-record-own-file-per-kind."
+}

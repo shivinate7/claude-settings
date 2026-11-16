@@ -1,0 +1,51 @@
+{
+  "added": "2026-11-15T13:58:04-06:00",
+  "closed": "2026-11-16T01:49:43Z",
+  "context": "Goal: more of the done pull requests merge each hour.\nProblem (rule): your ruling own-848-a (a hand-built combine) excludes any combine \"that touches a guard or check\". About 13 of runner 10's 20 done PRs today are guard or check changes, so they merge one at a time, at about 1.3 per hour. Allowing them in a combine needs your word.\nBased on (ruling): own-848-a-hand-built-docs-combine. Based on (measured): about 13 of runner 10's 20 done PRs today are guard or check changes; the 1.3 per hour is the consultant's figure, unmeasured by triage.\nDeparts from: own-848-a \u2014 also allows a combine that touches a guard or check.\nAsked by you in chat 13:58 CST (relayed by the consultant).\nANSWER (page save, 19:48 CST Nov 15): none of these, note \"this question is stale message consultant\". Moot under ruling own-merge-on-lint-pass (consultant's confirmation 19:50 CST Nov 15, relayed); owner session runner 10 already told.",
+  "home": "own-848-a-hand-built-docs-combine",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-16T01:48:22.586Z",
+    "choice": "none",
+    "note": "this question is stale message consultant"
+  },
+  "n": 895,
+  "options": [
+    {
+      "gain": "More merges per hour.",
+      "how": "A hand-built combine may hold guard or check changes; one review at the combine head, plus the net-value read, covers it.",
+      "id": "allow-guard-combine",
+      "key": "a",
+      "label": "Allow it, with one review at the combine head plus the net-value read",
+      "lose": "A guard change that would fail on its own can hide in a bigger diff; one review covers the whole combine."
+    },
+    {
+      "gain": "Each guard or check change gets its own review and run.",
+      "how": "Guard and check changes stay out of a hand-built combine.",
+      "id": "keep-exclusion",
+      "key": "b",
+      "label": "Keep the exclusion",
+      "lose": "Those merges stay one at a time, at about 1.3 per hour."
+    }
+  ],
+  "owner": "batch runner 10",
+  "recommended": "a",
+  "ref": "own-848-a-hand-built-docs-combine (your ruling on the hand-built combine)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Combine may hold guard PRs",
+  "shown": [
+    {
+      "id": "allow-guard-combine",
+      "key": "a",
+      "label": "Allow it, with one review at the combine head plus the net-value read"
+    },
+    {
+      "id": "keep-exclusion",
+      "key": "b",
+      "label": "Keep the exclusion"
+    }
+  ],
+  "status": "closed",
+  "title": "May a hand-built combine of pull requests include guard or check changes?",
+  "why": "The consultant's recommendation: most done PRs are guard or check changes, so the exclusion holds the pace down."
+}

@@ -1,0 +1,53 @@
+{
+  "added": "2026-11-15T23:38:30-06:00",
+  "context": "Goal: the git-after-cd guard fix (PR #2099) reaches main, or is dropped on purpose.\nProblem (rule): PR #2099 refuses a `cd` into a missing folder followed by `git add -A` and a commit, but a test on main expects that to be allowed; a guard's verdict is yours to set, and the lane that asked is archived (rule roles-review-cap-three, decision guard-guards-mistakes-only).\nBased on (notes): the archived lane git-write-after-failed-cd asked this on 2026-11-10 and recommended keeping the refusal: bash runs the add and commit in the starting folder, which is the failure the lane was opened to stop. The transcript ends with no answer; no ruling or decision names #2099 (searched roadmap/rulings and docs/decisions).\nDeparts from: main \u2014 a test on main expects a cd into a missing folder then `git add -A` and commit to be allowed; this refuses it and re-points that test.\nMeanwhile: #2099 stays a draft; PRs #2144 and #2191 build on it and wait; the coordinator holds it.",
+  "holds": "PR #2099 and the two pull requests built on it (#2144, #2191) wait for this answer.",
+  "home": "git-write-after-failed-cd",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-16T16:53:25.130Z",
+    "choice": "none",
+    "note": "which is staler/older the test or the pr"
+  },
+  "n": 912,
+  "options": [
+    {
+      "gain": "A commit never lands in the wrong folder after a failed cd.",
+      "how": "The lane that resumes #2099 changes the main test to match the guard, red then green.",
+      "id": "keep-refusal",
+      "key": "a",
+      "label": "Keep the refusal: re-point the test on main so it expects a refusal",
+      "lose": "A command that used to pass now stops, and one test on main changes."
+    },
+    {
+      "gain": "No test on main changes and no new refusal appears.",
+      "how": "The lane drops that refusal from #2099 and keeps the other fixes.",
+      "id": "allow-like-main",
+      "key": "b",
+      "label": "Allow it, as the test on main expects",
+      "lose": "A commit can land in the starting folder after a failed cd, the mistake this lane was opened to stop."
+    }
+  ],
+  "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ); posted by triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
+  "recommended": "a",
+  "ref": "PR #2099 (head c16ae94ca), step git-write-after-failed-cd, archived lane session_013NEJL1Eaa8LA5StpPbWgvA",
+  "replied": "2026-11-16T13:37:30-06:00",
+  "reply": "New at 13:37 CST Nov 16: you picked option c on item 476, the same case: refuse a git write after a cd only when the cd target is missing, and re-point main's one test. It also answers my earlier gap: that test is on main at tests/guard/s17500-conflict-markers.py:311 (commit 94f68f2fa); the coordinator's search missed it. So option a here (keep the refusal, re-point the test) is what your 476 c already chose. I did not close 912 on it, because your answer covers the act it named. To close 912, tap a. The consultant's read from 13:33 CST (relayed, low confidence, weak lean to a) is on file. The lane acts on 476 c either way.",
+  "repo": "shivinate7/claude-settings",
+  "short": "PR 2099: refuse cd then add",
+  "shown": [
+    {
+      "id": "keep-refusal",
+      "key": "a",
+      "label": "Keep the refusal: re-point the test on main so it expects a refusal"
+    },
+    {
+      "id": "allow-like-main",
+      "key": "b",
+      "label": "Allow it, as the test on main expects"
+    }
+  ],
+  "status": "open",
+  "title": "Should PR #2099 keep refusing a commit after a failed cd, even though a test on main expects it allowed?",
+  "why": "The lane's own recommendation; bash runs the add and commit in the starting folder, the failure the lane was opened to stop."
+}

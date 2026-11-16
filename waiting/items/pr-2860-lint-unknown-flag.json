@@ -1,0 +1,67 @@
+{
+  "added": "2026-11-16T01:03:00-06:00",
+  "closed": "2026-11-16T19:34:30Z",
+  "context": "Goal: PR 2860 (a failing job wakes the batch runner) reaches main.\nProblem (rule): the PR's lane lint reads UNKNOWN because the shared bin/ci-job on main cannot read the draft flag inside an `if:`, and the fix that adds that reader is in the same PR, so the lint cannot pass until it merges.\nBased on (read): the consultant says the route is `merge --lane-lint 2860 --lint-unknown-ok \"<reason>\"`; the batch runner and the lane refuse that flag without your own word, and the coordinator gives no check-lifting flag.\nBased on (read): coordinator relay, 04:55 CST Nov 16 (not read by triage): the lane artifact-pages-other-account handed pull request 6c6b3ef3 in claude-settings to runner 11, and its lane lint passed only with `--lint-unknown-ok` because the draft had no CI run. The flag was used unprompted. The coordinator told the lane and runner 11 to lint again without it. The consultant also uses the flag; the coordinator refuses it.\nBased on (ruling): your answer a at 21:01 CST Nov 13, which let this flag be used one PR at a time in the five child repos (q_max, banchi, mailaudit, ios-adblock, joyous); PR 2860 is in claude-settings, not a child repo, so that answer does not cover it. Only option a lifts a check.\nDeparts from: main \u2014 the lane lint blocks PR 2860 as UNKNOWN; option a lets it merge past that check once, option b adds the draft-flag reader to main in a separate PR so the check can pass, option c keeps the block.\nMeanwhile: only PR 2860 waits; no other PR depends on it.",
+  "home": "lane-lint-unknown-on-ready-pr",
+  "kind": "decision",
+  "lane": "batch-runner",
+  "lastAnswer": {
+    "at": "2026-11-16T19:33:52.111Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 918,
+  "options": [
+    {
+      "gain": "PR 2860 (a failing job wakes the batch runner) reaches main now.",
+      "how": "You type your yes in the batch runner's chat; the runner then merges with the flag and the reason \"this PR adds the draft-field reader to bin/ci-job; main's copy cannot read it yet\".",
+      "id": "grant-flag-once-2860",
+      "key": "a",
+      "label": "Grant the lint-unknown flag once for PR 2860",
+      "lose": "One lint check is lifted for one PR."
+    },
+    {
+      "gain": "No check is lifted for anyone.",
+      "how": "The consultant opens a separate small PR that carries only the draft-flag reader (the fix, commit ce9db4590, already shown red then green); once it merges, PR 2860 lints clean.",
+      "id": "ship-reader-first",
+      "key": "b",
+      "label": "Ship the reader as its own small PR first",
+      "lose": "One more PR to build, review and merge before 2860 moves."
+    },
+    {
+      "gain": "Nothing is lifted and no new PR is made.",
+      "how": "Nothing changes; the lane stays where it is.",
+      "id": "leave-2860-parked",
+      "key": "c",
+      "label": "Leave PR 2860 parked",
+      "lose": "The red-job wake for the batch runner stays unbuilt."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
+  "recommended": "b",
+  "ref": "PR 2860 (red job wakes the batch runner), commit ce9db4590, merge flag --lint-unknown-ok, step lane-lint-unknown-on-ready-pr",
+  "replied": "2026-11-16T13:34:30-06:00",
+  "reply": "Option a, closed at 13:34 CST Nov 16: the batch runner may merge PR 2860 with the lint-unknown flag once and the reason in the item. It covers that PR and that flag only; if the PR's head changes (it read ce9db4590 at 13:29 CST), the runner says so first. Filed as ruling own-918-a-grant-lint-unknown-2860 and sent to the coordinator and runner 10. Your answer stays on the page until the runner reports the merge.",
+  "repo": "shivinate7/claude-settings",
+  "short": "PR 2860 lint-unknown flag",
+  "shown": [
+    {
+      "id": "grant-flag-once-2860",
+      "key": "a",
+      "label": "Grant the lint-unknown flag once for PR 2860"
+    },
+    {
+      "id": "ship-reader-first",
+      "key": "b",
+      "label": "Ship the reader as its own small PR first"
+    },
+    {
+      "id": "leave-2860-parked",
+      "key": "c",
+      "label": "Leave PR 2860 parked"
+    }
+  ],
+  "status": "closed",
+  "title": "PR 2860 cannot pass its lint until a reader it adds merges: grant the lint flag once, ship the reader first, or leave it parked?",
+  "why": "The coordinator recommends b: it lifts no check. It is the coordinator's ask, not owner-typed."
+}

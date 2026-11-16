@@ -1,0 +1,54 @@
+{
+  "added": "2026-11-15T23:50:00-06:00",
+  "closed": "2026-11-16T19:35:30Z",
+  "context": "Goal: your standing merge words have one home in the repo, so every session reads the same grant.\nProblem (rule): the grant line belongs in `.claude/CLAUDE.md` Standing grants, a file only you may change; the consultant asks to add the line below, and it says more than runner 12's five repos.\nBased on (notes): you typed in the consultant's chat at 23:43 CST Nov 15: \"runner 12\u2019s repos it has standing merge authority in just like any session anything can merge rn isnt that not a surprise\". The consultant's reading of the line is wider than the ruling I filed (scope a, runner 12's five repos); this item lets you choose.\nProposed line: \"Merge in any repo (owner, 2026-11-15 23:43 CST): any session may merge a PR in any of the owner's repos with the merge tool, under every merge check.\"\nDeparts from: main \u2014 `.claude/CLAUDE.md` Standing grants lets only the batch runner merge, on a named yes or the relayed yes; this adds a line that lets any session merge in any of your repos.\nMeanwhile: sessions act on your relayed chat words; the merge tool's checks still apply.",
+  "home": "rewrite-merge-decisions-for-lane-merge",
+  "kind": "decision",
+  "lane": "consultant",
+  "lastAnswer": {
+    "at": "2026-11-16T19:34:21.216Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 913,
+  "options": [
+    {
+      "gain": "Every session reads one standing merge grant; no more relays.",
+      "how": "The consultant adds the proposed line to `.claude/CLAUDE.md` in a pull request, which merges by the merge tool.",
+      "id": "add-as-worded",
+      "key": "a",
+      "label": "Yes: the consultant adds the line as worded under Standing grants",
+      "lose": "Any session, not only batch runners, may merge in any of your repos."
+    },
+    {
+      "gain": "The grant says exactly what you mean, such as runner 12's repos only.",
+      "how": "You type the line in the consultant's chat; the consultant adds it as typed.",
+      "id": "reword",
+      "key": "b",
+      "label": "No: you type the wording yourself",
+      "lose": "The line waits for your typing; relays continue meanwhile."
+    }
+  ],
+  "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ); posted by triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
+  "recommended": "b",
+  "ref": "owner words 23:43 CST Nov 15, ruling own-r12-standing-merge-authority, decision standing-merge-grant",
+  "replied": "2026-11-16T13:35:30-06:00",
+  "reply": "Option a, closed at 13:35 CST Nov 16: the consultant adds the line as worded to Standing grants in .claude/CLAUDE.md, by a pull request merged with the merge tool. It covers that wording only; every merge check stays, and the private repos still hold until PR #3590 and a setup PR per repo. Filed as ruling own-913-a-merge-any-repo-grant-line and sent to the consultant. Your answer stays on the page until it reports the line merged.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Standing merge grant line",
+  "shown": [
+    {
+      "id": "add-as-worded",
+      "key": "a",
+      "label": "Yes: the consultant adds the line as worded under Standing grants"
+    },
+    {
+      "id": "reword",
+      "key": "b",
+      "label": "No: you type the wording yourself"
+    }
+  ],
+  "status": "closed",
+  "title": "May the consultant add a standing grant line saying any session may merge in any of your repos?",
+  "why": "The consultant recommended a; I recommend b because the line is wider than the ruling on file (runner 12's five repos), and only you can say which you meant."
+}

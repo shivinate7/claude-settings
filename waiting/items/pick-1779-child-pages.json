@@ -23,7 +23,7 @@
       "lose": "Banchi, q_max and joyous keep blank Status tabs; a single-branch clone still bakes nothing."
     }
   ],
-  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "owner": "triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
   "ref": "coordinator 11:44 CST Nov 13, backlog-drain ledger",
   "reply": "Corrected 11:59 CST Nov 13: the item said #1779 fixes child repos' pages. It does not. #1779 changes two claude-settings scripts (skills/roadmap/build.py and skills/waiting-page/stale_pages.py); runner 11 asked what it was and I read the PR. Your 11:53 CST pick a (with the note that all accounts' data is already exported to a branch on each child repo as plain git) was made on my wrong text, so I reopened this with new options. Your note stands as context.",
   "repo": "shivinate7/claude-settings",

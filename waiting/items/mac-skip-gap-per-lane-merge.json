@@ -1,0 +1,48 @@
+{
+  "added": "2026-11-15T23:20:33-06:00",
+  "closed": "2026-11-16T19:43:00Z",
+  "context": "Goal: the child repos merge fast without spending Mac minutes you do not need.\nProblem (money): main skips macOS on a push, so with each lane merged alone a Mac break can reach main untested; running macOS on those pushes costs more Mac minutes and a change to each repo's checks.yml.\nBased on (notes): the consultant relayed this at 23:19 CST Nov 15; I did not measure the Mac minutes.\nDeparts from: main \u2014 main skips macOS on a push; option b keeps macOS on for a push whose head lacked the base tip.",
+  "home": "step ci-batch-mac-runner and the child repos' checks.yml",
+  "kind": "decision",
+  "n": 909,
+  "options": [
+    {
+      "gain": "No extra Mac minutes.",
+      "how": "Main keeps skipping macOS on a push; the nightly run tests it.",
+      "id": "accept-gap",
+      "key": "a",
+      "label": "Accept the gap; the nightly run catches a Mac break",
+      "lose": "A Mac break can sit on main for up to a day."
+    },
+    {
+      "gain": "Each merge is Mac-tested when it lands.",
+      "how": "A checks.yml change keeps macos=true on such a push.",
+      "id": "keep-mac-on-push",
+      "key": "b",
+      "label": "Keep macOS on for a push whose head lacked the base tip",
+      "lose": "More Mac minutes, and a checks.yml change in each child repo."
+    }
+  ],
+  "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ); posted by triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
+  "recommended": "a",
+  "ref": "macOS skip on child-repo pushes (consultant relay)",
+  "replied": "2026-11-16T13:43:00-06:00",
+  "reply": "Closed as stale at 13:43 CST Nov 16, on your own words (13:28 CST: \"mac runs are off now\") and the consultant's sweep. The consultant reports by GitHub that the hosted workflows are manually disabled in degen, q_max, home, ios-adblock and joyous; banchi and mailaudit it did not measure; I read none of them (outside my GitHub scope). Both options assumed Mac minutes are spent, so neither applies now. Reopen if Mac runs come back.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Mac skip gap, child repos",
+  "shown": [
+    {
+      "id": "accept-gap",
+      "key": "a",
+      "label": "Accept the gap; the nightly run catches a Mac break"
+    },
+    {
+      "id": "keep-mac-on-push",
+      "key": "b",
+      "label": "Keep macOS on for a push whose head lacked the base tip"
+    }
+  ],
+  "status": "closed",
+  "title": "Under per-lane merging in the child repos, should a Mac break be allowed to sit until the nightly run?",
+  "why": "The nightly run already tests macOS, so the gap is at most one day, and it spends no extra Mac minutes (consultant's recommendation, unmeasured)."
+}

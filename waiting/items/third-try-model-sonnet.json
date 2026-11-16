@@ -1,0 +1,51 @@
+{
+  "added": "2026-11-15T23:59:40-06:00",
+  "closed": "2026-11-16T06:06:00Z",
+  "context": "Goal: a builder that failed twice gets the model you want on its third try.\nProblem (rule): the rules say a builder's third try runs Opus, and you were relayed as saying Sonnet but hedged, so changing which model a failing builder gets needs your check.\nBased on (ruling): own-round3-builder-sonnet (filed 00:04 CST Nov 16 from the consultant's relay) already rules Sonnet; it is re-asked because the consultant says the words were hedged and his first reading overreached.\nBased on (ruling): decisions/agent-model-cap (your rulings of 2026-10-26 and 2026-11-06 set Sonnet as the ceiling, with Opus for a builder's third try by a standing grant that has no date); it is re-asked because the words below reverse that grant.\nBased on (notes): you wrote in the census lane at 23:57 CST Nov 15 that the builder's third try should have run Sonnet, hedged with \"i believe\"; the consultant relayed it at 00:01 CST Nov 16, quoting you: \"the builder round 3 shouldve ran sonnet too i believe. message consultant about this deviation u experienced\". Your earlier word at 14:05 CST Nov 13 reads \"no opus round 3 here just sonnet high\" (the round 3 reviewer). Unmeasured: whether Opus on round 3 lands more fixes.\nWaiting on: you, through the consultant.\nDeparts from: main \u2014 a builder's third try runs Opus (`roles-third-round-steps-up`, the agent-role-model guard); option b makes it Sonnet and rewrites both.\nMeanwhile: lanes follow the rule as written.",
+  "home": "roles-third-round-steps-up",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-16T06:04:00Z",
+    "choice": "b",
+    "note": "Owner, typed in the consultant's chat 00:04 CST Nov 16, verbatim: \"B\". A builder's third try runs Sonnet high. Relayed by the consultant; no page save."
+  },
+  "n": 915,
+  "options": [
+    {
+      "gain": "A builder that failed twice gets a stronger model.",
+      "how": "No change to the rule or the guard.",
+      "id": "keep-opus",
+      "key": "a",
+      "label": "Keep Opus on a builder's third try",
+      "lose": "Round 3 costs more."
+    },
+    {
+      "gain": "Lower cost; round 3 already has a fresh reviewer.",
+      "how": "A lane rewrites the rule and the guard, red then green.",
+      "id": "sonnet-round-3",
+      "key": "b",
+      "label": "A builder's third try runs Sonnet",
+      "lose": "A builder that failed twice keeps the same model that failed."
+    }
+  ],
+  "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ); posted by triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
+  "recommended": "a",
+  "ref": "rule roles-third-round-steps-up, census lane report (consultant relay 23:59 CST Nov 15)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Third try: Opus or Sonnet",
+  "shown": [
+    {
+      "id": "keep-opus",
+      "key": "a",
+      "label": "Keep Opus on a builder's third try"
+    },
+    {
+      "id": "sonnet-round-3",
+      "key": "b",
+      "label": "A builder's third try runs Sonnet"
+    }
+  ],
+  "status": "closed",
+  "title": "Should a builder's third try run Sonnet instead of Opus?",
+  "why": "The reported words are not typed or timed, and nothing measures cost against fixes; the rule stands until you say. The consultant leaned b if your word stands."
+}

@@ -1,0 +1,80 @@
+{
+  "added": "2026-11-15T13:31:39-06:00",
+  "closed": "2026-11-16T07:43:39Z",
+  "context": "Goal: Slow CI jobs (Windows, mutation, macOS) stop running on every push to main and run once a day.\nProblem (goal): you already allowed slow checks to run later, but only you can say whether the Windows and mutation tests leave the push to main along with macOS.\nBased on (ruling): own-880-free-slots (your words, 11:52 CST Nov 15: \"free as many slots as u can if stuff can be ran later that works for me\"). It supersedes drop-nightly-schedule (done 16:01 CST Nov 14, which dropped the nightly run).\nBased on (measured): Windows-only failures on 4 of 5 red pushes to main (Nov 13 to 15); about 4,700 runner minutes a day freed, before macOS (unmeasured); n=5 push runs, 3 days.\nDeparts from: main \u2014 adds one daily run at 02:47 CST and takes the Windows, mutation and macOS jobs off every push.\nPR #3540 is the built change; the coordinator read it live at 13:31 CST.",
+  "holds": "The merge of PR #3540 waits on this answer.",
+  "home": "push-daily-slow-legs",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-16T01:43:39-06:00",
+    "choice": "a",
+    "note": "Typed \"A\" in the consultant's chat at 01:43 CST Nov 16 (relayed by the consultant; triage did not see it typed). Release PR #3540 as built; the consultant drives it to ready."
+  },
+  "n": 893,
+  "options": [
+    {
+      "gain": "About 4,700 runner minutes freed per day.",
+      "how": "PR #3540 goes ahead: one daily schedule (cron 47 8 * * *), and the Windows, mutation and macOS jobs leave push.",
+      "id": "ship-with-daily",
+      "key": "a",
+      "label": "Yes, ship with the daily",
+      "lose": "A Windows-only red reaches main up to about 24 hours later."
+    },
+    {
+      "gain": "Per-merge Windows catches.",
+      "how": "The daily schedule takes only mutation and macOS; Windows keeps running on every push.",
+      "id": "windows-stays-on-push",
+      "key": "b",
+      "label": "Keep the Windows jobs on push, move only mutation and macOS",
+      "lose": "Most of the freed minutes (Windows is 245 of 287 job-minutes per full run)."
+    },
+    {
+      "gain": "Nothing changes.",
+      "how": "PR #3540 does not go ahead; push runs stay as they are.",
+      "id": "do-not-ship",
+      "key": "c",
+      "label": "Do not ship it",
+      "lose": "The freed minutes."
+    },
+    {
+      "gain": "Matches your words to turn off the Mac runs and run them at night, with no change to Windows or mutation.",
+      "how": "A new, narrower pull request takes only macOS off push and onto the daily schedule; PR #3540 does not go ahead as built.",
+      "id": "macos-only-daily",
+      "key": "d",
+      "label": "Move only the macOS jobs to the daily; Windows and mutation stay on push",
+      "lose": "The Windows minutes stay on every push, and a new pull request has to be built and reviewed first."
+    }
+  ],
+  "owner": "batch runner 10",
+  "recommended": "a",
+  "ref": "own-880-free-slots (item 880, free CI slots), PR #3540",
+  "replied": "2026-11-16T01:43:39-06:00",
+  "reply": "Closed: option a (ship PR #3540 with the daily). The consultant is driving it to ready. Your answer came by relay from his chat.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Slow CI jobs run daily",
+  "shown": [
+    {
+      "id": "ship-with-daily",
+      "key": "a",
+      "label": "Yes, ship with the daily"
+    },
+    {
+      "id": "windows-stays-on-push",
+      "key": "b",
+      "label": "Keep the Windows jobs on push, move only mutation and macOS"
+    },
+    {
+      "id": "do-not-ship",
+      "key": "c",
+      "label": "Do not ship it"
+    },
+    {
+      "id": "macos-only-daily",
+      "key": "d",
+      "label": "Move only the macOS jobs to the daily; Windows and mutation stay on push"
+    }
+  ],
+  "status": "closed",
+  "title": "May the Windows, mutation and macOS CI jobs leave every push to main and run once a day instead?",
+  "why": "It frees the most runner minutes, and you said later runs work for you."
+}

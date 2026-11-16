@@ -1,0 +1,59 @@
+{
+  "added": "2026-11-15T19:31:27-06:00",
+  "checked_with": "session_013NEJL1gw6EdrSyvHkTUEx6",
+  "closed": "2026-11-16T01:41:19Z",
+  "context": "Goal: banchi's merge tool keeps working after the required check on main was removed.\nProblem (risk): banchi's .github/stamp.json names merge.requiredChecks \"protection\"; with no protection check on main the merge tool stops. PR banchi #1106 (head 0ec884639e5fa3e913d367cbea60a2532e5db015, as runner 12 reported; live head unread, this session has no GitHub access to banchi) is a one-line change that pins it to [\"all-jobs-passed\"]. No owner word names #1106, and the auto-mode classifier denied runner 12's merge step, so it needs your word on that exact PR.\nBased on (read): coordinator relay 19:31 CST Nov 15: runner 12 searched first and found no existing PR or branch; the other four repos (q_max, mailaudit, ios-adblock, joyous) already pin it, per runner 12 (relayed, not checked by triage).\nBased on (read): runner 12's report at 19:34 CST Nov 15 (its word, relayed by the coordinator; banchi is unreadable to triage): a Sonnet review at head 0ec884639e5f (live head matched) PASS with no findings (reviewer Sonnet, round 2 of 3); the record with both rounds is PR comment 6904882124 (round 1 Haiku PASS, round 2 Sonnet PASS). It read that the rollup job is named exactly all-jobs-passed, and that banchi's main ruleset is empty while classic protection holds [\"all-jobs-passed\"], so the pin equals today's list.\nDeparts from: banchi main today \u2014 requiredChecks \"protection\" (stops the merge tool once main has no protection check) \u2014 one line sets the named list [\"all-jobs-passed\"].\nORDER: #1106 must merge BEFORE you remove the check from banchi's protection, because the merge tool reads the config from origin/main, and \"protection\" with no check left stops #1106's own merge (same trap as claude-settings). Unknown: what you leave in protection after removal.\nAlso bears on your ask for a bash to turn the check off on every repo: each repo whose stamp reads \"protection\" needs the pin on main first; per runner 12, q_max, mailaudit, ios-adblock and joyous already pin it.\nThe grant covers only the named act: merge of banchi #1106 at that head. Held behind it: banchi #1104, mailaudit #331 and ios-adblock #173.\nANSWER (chat, relayed): option a \"Yes, #1106 only\", owner chat 19:40 CST Nov 15, relayed by the consultant, verbatim \"yes on 905\" (not a page save). Runner 12 has not yet confirmed the merge; a receiver needs the grant checked from the page or typed in its own session.",
+  "holds": "Merges in banchi stop, and banchi #1104, mailaudit #331 and ios-adblock #173 stay held.",
+  "home": "banchi-1106-pin-checks / banchi PR #1106",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-16T01:40:00Z",
+    "choice": "a",
+    "note": "yes on 905 (owner chat 19:40 CST Nov 15, relayed by the consultant, not a page save)"
+  },
+  "n": 905,
+  "options": [
+    {
+      "gain": "banchi merges work again, and #1104, mailaudit #331 and ios-adblock #173 un-hold.",
+      "how": "The merge tool merges banchi #1106 at head 0ec884639e5f, nothing else.",
+      "id": "merge-1106-only",
+      "key": "a",
+      "label": "Yes, #1106 only",
+      "links": [
+        {
+          "label": "banchi PR #1106",
+          "url": "https://github.com/shivinate7/banchi/pull/1106"
+        }
+      ],
+      "lose": "A pin to a check that is no longer required on main, until the pin is rewritten; revert is one PR."
+    },
+    {
+      "gain": "Nothing changes in banchi.",
+      "how": "banchi #1106 stays unmerged.",
+      "id": "hold-1106",
+      "key": "b",
+      "label": "No, hold",
+      "lose": "Four PRs stay held and runner 12 waits."
+    }
+  ],
+  "owner": "batch runner 12 (session_013NEJL33U96UiyE6UtCHct3)",
+  "recommended": "a",
+  "ref": "banchi PR #1106 (pin merge.requiredChecks to all-jobs-passed), PRs #1104, mailaudit #331, ios-adblock #173",
+  "repo": "shivinate7/banchi",
+  "short": "banchi #1106 pin merge",
+  "shown": [
+    {
+      "id": "merge-1106-only",
+      "key": "a",
+      "label": "Yes, #1106 only"
+    },
+    {
+      "id": "hold-1106",
+      "key": "b",
+      "label": "No, hold"
+    }
+  ],
+  "status": "closed",
+  "title": "May the merge tool merge banchi #1106, which pins requiredChecks to all-jobs-passed?",
+  "why": "One line, one-PR revert, a Sonnet review passed at the live head, and four held PRs wait on it."
+}

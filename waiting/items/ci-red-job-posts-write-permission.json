@@ -1,0 +1,59 @@
+{
+  "added": "2026-11-15T13:26:00-06:00",
+  "context": "Goal: a red job wakes the batch runner at once (r50).\nProblem (rule): PR #2860 needs `pull-requests: write` on 31 CI jobs in checks.yml and a run-end comment; your ruling R50 (12:14 CST Nov 12, page item 559 pick c) names neither. The stake is a rule: the permissions that CI jobs hold.\nBased on (ruling): R50, roadmap/rulings/r50.json. Based on (read): PR #2860, head abdbab2563b9; the 31-job count comes from the coordinator and runner 10 (unmeasured by triage).\nDeparts from: main \u2014 jobs hold read-only pull-request permission (unverified by triage) \u2014 the PR gives 31 jobs write.\nCost of (c), from the lane's line counts, not measured: a poster job wired with needs: fires only after the last job ends, which ci-done already does. To wake on the first red job it must start with the run and poll the job list, so the delay is the poll interval, not at once. About 8 files, about 150 lines added and 350 removed; checks.yml loses 31 wake steps and 31 permission blocks and gains one wake-poster job; actions/ci-done-comment gets a polling mode; tests rewritten. One extra ubuntu runner is held for the whole CI duration on every ready PR run (minutes unmeasured). The lane's read: keeping per-job write with the two skip jobs exempt (push-skip and nightly-skip run only on push or schedule; push-skip keeps read) is the smaller change. A workflow-level pull-requests: write is wider, so it is not an option.",
+  "holds": "The merge of PR #2860 waits on this answer.",
+  "home": "red-job-wakes-runner",
+  "kind": "decision",
+  "n": 892,
+  "options": [
+    {
+      "gain": "It goes ahead as is, and the wake works.",
+      "how": "PR #2860 goes ahead as built: write permission on 31 jobs, plus the run-end comment.",
+      "id": "yes-31-and-comment",
+      "key": "a",
+      "label": "Yes, 31 jobs and the run-end comment as built",
+      "lose": "31 job tokens can write to pull requests."
+    },
+    {
+      "gain": "A smaller change.",
+      "how": "The lane drops the run-end comment and keeps the write permission on 31 jobs.",
+      "id": "yes-permission-no-comment",
+      "key": "b",
+      "label": "Yes to the permission, no run-end comment",
+      "lose": "A second bad lane found after the first red job may go unannounced; the lane edits."
+    },
+    {
+      "gain": "One write token, not 31.",
+      "how": "Only one poster job holds write permission; the lane rebuilds the wake around it.",
+      "id": "one-poster-job",
+      "key": "c",
+      "label": "Permission on one job only, a separate poster job",
+      "lose": "Loses 'at once' (30 to 60 s poll), adds a held runner on every ready PR run, about 8 files rebuilt."
+    }
+  ],
+  "owner": "batch runner 10",
+  "recommended": "a",
+  "ref": "R50 (ruling on per-job red notice, page item 559 pick c), PR #2860",
+  "repo": "shivinate7/claude-settings",
+  "short": "Red job posts: write permission",
+  "shown": [
+    {
+      "id": "yes-31-and-comment",
+      "key": "a",
+      "label": "Yes, 31 jobs and the run-end comment as built"
+    },
+    {
+      "id": "yes-permission-no-comment",
+      "key": "b",
+      "label": "Yes to the permission, no run-end comment"
+    },
+    {
+      "id": "one-poster-job",
+      "key": "c",
+      "label": "Permission on one job only, a separate poster job"
+    }
+  ],
+  "status": "open",
+  "title": "May PR #2860 give 31 CI jobs pull-requests: write so a red job wakes the batch runner at once?",
+  "why": "Fastest; the lane's cost for (c) is unmeasured."
+}

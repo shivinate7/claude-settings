@@ -1,0 +1,48 @@
+{
+  "added": "2026-11-15T12:30:00-06:00",
+  "context": "Goal: a `ruling` ref in `supersedes` names one exact older ruling by id.\nProblem (rule): is a ref written `own-820-c: keeps` valid? Today the first whitespace token must equal the id, so `own-820-c:` fails.\nBased on (read): lint/ruled_store.py, round 1 review note 4 (reviewer read).\nDeparts from: main \u2014 the `ruling` ref is free prose today; this fixes the form of its first token.",
+  "holds": "Lane supersedes-names-an-id builds the other parts meanwhile.",
+  "home": "decision ruling-names-overtaken; lane supersedes-names-an-id",
+  "id": "ruling-ref-first-token",
+  "kind": "decision",
+  "n": 885,
+  "options": [
+    {
+      "gain": "No name likeness at all.",
+      "how": "The first whitespace token of a `ruling` ref must equal the id exactly, so `own-820-c: keeps` fails and `own-820-c keeps` passes.",
+      "id": "strict-first-token",
+      "key": "a",
+      "label": "Strict first token: `<id> <prose>`",
+      "lose": "Authors must leave a space after the id."
+    },
+    {
+      "gain": "Forgiving: `own-820-c: keeps` passes.",
+      "how": "The check strips one trailing `:`, `,` or `;` from the first token before it compares with the id.",
+      "id": "strip-trailing-punct",
+      "key": "b",
+      "label": "Strip a trailing `:` `,` `;` from the first token",
+      "lose": "A second accepted form of the ref. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    }
+  ],
+  "owner": "lane supersedes-names-an-id (session_013NEJL4RGc1wTSm6XH62k2i)",
+  "recommended": "a",
+  "ref": "item 877 (ruling-names-overtaken, option a); lane supersedes-names-an-id round 1",
+  "repo": "shivinate7/claude-settings",
+  "short": "Ruling ref: first token form",
+  "shown": [
+    {
+      "id": "strict-first-token",
+      "key": "a",
+      "label": "Strict first token: `<id> <prose>`"
+    },
+    {
+      "id": "strip-trailing-punct",
+      "key": "b",
+      "label": "Strip a trailing `:` `,` `;` from the first token"
+    }
+  ],
+  "status": "open",
+  "title": "A ruling ref's first token: strict, or strip trailing punctuation",
+  "why": "The lane's recommendation, not the owner's: A leaves no name likeness; B adds a second accepted form."
+}

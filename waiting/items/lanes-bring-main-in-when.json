@@ -1,0 +1,67 @@
+{
+  "added": "2026-11-16T13:44:30-06:00",
+  "closed": "2026-11-16T19:48:00Z",
+  "context": "Goal: merges get faster and easier because lanes stay close to main.\nProblem (rule): no rule or hook says when a lane brings main into its branch, and most open PRs are far behind. Each time a lane brings main in, it pushes, so its checks and review run again; that costs runs, time and tokens. It needs your word because it sets how often every lane pushes.\nBased on (measured): the coordinator's REST read at 13:43 CST, main at 4680473b0, first 300 open PRs (a fourth page not read): 8 at main, 5 are 6 to 50 commits behind, 287 are more than 50 behind. Ready ones: #3553 at main, #3577 354 behind, #2917 394, #3548 482, #3097 1,710 (why #3097 is ready that far behind: unknown). Relayed; triage did not re-read it.\nBased on (read): the four lanes the coordinator told brought main in within minutes, so it is easy to do; the cost is the re-run, not the effort.\nDeparts from: main \u2014 no rule says when a lane merges main in; a lane does it when it chooses, which today is right before lint and record. The options set a time.\nMeanwhile: the coordinator acts on your pick, not before; nothing waits on this answer.",
+  "home": "rewrite-merge-decisions-for-lane-merge",
+  "kind": "decision",
+  "lane": "coordinator",
+  "lastAnswer": {
+    "at": "2026-11-16T19:46:00Z",
+    "choice": "c",
+    "note": "typed in the coordinator's chat at 13:46 CST (relayed): probably this and/or PRs of a certain priority grade are all brought to main at once"
+  },
+  "n": 923,
+  "options": [
+    {
+      "gain": "The fewest re-runs, so the least cost in runs, time and tokens.",
+      "how": "A lane brings main in once, right before its lane lint and review record, and not again unless the merge tool says it is behind.",
+      "id": "only-before-lint",
+      "key": "a",
+      "label": "Only right before lint and record (today's habit, written down)",
+      "lose": "Most open PRs stay far behind main, and a late catch-up can bring a big conflict at the end."
+    },
+    {
+      "gain": "Every lane stays at main, so a merge is a small step and conflicts show early.",
+      "how": "Each lane brings main in after every merge to main.",
+      "id": "every-lane-every-merge",
+      "key": "b",
+      "label": "Every live lane, after each merge to main",
+      "lose": "Every live lane re-runs its checks and review after each merge to main, which costs many more runs, time and tokens."
+    },
+    {
+      "gain": "The lanes about to merge stay close to main for a few extra re-runs.",
+      "how": "A lane that is ready, or one step from ready, brings main in; the others stay put until they near ready.",
+      "id": "only-ready-or-near",
+      "key": "c",
+      "label": "Only lanes marked ready or one step from it",
+      "lose": "Lanes still in work fall behind, and a long-lived lane can drift far before it is ready."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
+  "recommended": "c",
+  "ref": "your question in the coordinator's chat, 13:39 CST Nov 16 (\"how come lanes/checkouts are still not moving up to main when they are able to easily be fast forwarding their checkouts in their builds\"); coordinator's measure, relayed at 13:45 CST",
+  "replied": "2026-11-16T13:48:00-06:00",
+  "reply": "Option c, closed at 13:48 CST Nov 16, from your words typed in the coordinator's chat at 13:46 CST (relayed): only lanes that are ready or one step from it bring main in after each merge. \"One step from ready\" is read as: lane lint PASS and the review record posted at the live head, not yet marked ready; tell me if you meant something else. The coordinator acts on it now. Your extra idea (PRs brought to main together by priority grade) was a hedge, not a pick: it is the new question below this one, with what grades exist today. Filed as ruling own-923-c-ready-lanes-bring-main-in; the rule's written home is step rewrite-merge-decisions-for-lane-merge.",
+  "repo": "shivinate7/claude-settings",
+  "short": "When lanes bring main in",
+  "shown": [
+    {
+      "id": "only-before-lint",
+      "key": "a",
+      "label": "Only right before lint and record (today's habit, written down)"
+    },
+    {
+      "id": "every-lane-every-merge",
+      "key": "b",
+      "label": "Every live lane, after each merge to main"
+    },
+    {
+      "id": "only-ready-or-near",
+      "key": "c",
+      "label": "Only lanes marked ready or one step from it"
+    }
+  ],
+  "status": "closed",
+  "title": "When should a lane bring main into its own branch: only before lint, after every merge to main, or only when it is ready or close to it?",
+  "why": "The coordinator recommends c: it keeps the lanes about to merge close to main without a re-run on every lane after each merge. It is the coordinator's recommendation, not owner-typed."
+}
