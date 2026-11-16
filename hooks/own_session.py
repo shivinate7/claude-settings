@@ -15,23 +15,28 @@ import re
 _OTHER_SESSION = re.compile(
     r'<other-session nonce="([0-9A-Fa-f]+)" untrusted="true">(.*)</other-session nonce="\1">', re.DOTALL)
 _CREATED_ID = re.compile(r"session_[A-Za-z0-9_-]+")
+_CREATED_LINE = re.compile(r"Created session (" + _CREATED_ID.pattern + ")")
 
 
-def _created_session_id(body):
-    """The id a create_session result names: the `id` or `session_id` of a JSON object, else the first
-    `session_...` word of the body. None when the result names none."""
-    if not isinstance(body, str):
+def _created_session_id(body, is_error=False):
+    """The id a successful create_session result names: the `id` or `session_id` string of a JSON object or of its
+    top-level `ccr` object, or a `Created session <id>` line. None for an errored result, and for any other text, so
+    a session word in an error names no session."""
+    if is_error or not isinstance(body, str):
         return None
     try:
         parsed = json.loads(body)
     except ValueError:
         parsed = None
     if isinstance(parsed, dict):
-        for key in ("id", "session_id"):
-            if isinstance(parsed.get(key), str):
-                return parsed[key]
-    found = _CREATED_ID.search(body)
-    return found.group(0) if found else None
+        nested = parsed.get("ccr")
+        for holder in (parsed, nested if isinstance(nested, dict) else {}):
+            for key in ("id", "session_id"):
+                if isinstance(holder.get(key), str):
+                    return holder[key]
+        return None
+    found = _CREATED_LINE.match(body.strip())
+    return found.group(1) if found else None
 
 
 def _record_json(body):
@@ -62,6 +67,30 @@ def agent_transcript_path(transcript, agent_id):
     return os.path.join(agent_transcript_dir(transcript), "agent-" + agent_id + ".jsonl")
 
 
+def tag_name(tag):
+    """A tag as it is compared: stripped and casefolded, as hooks/guard.py reads tags."""
+    return str(tag).strip().casefold()
+
+
+def record_tags(body, own_id):
+    """The tags, by tag_name, of the get_session record `body` holds when its ccr.id is own_id, else None."""
+    try:
+        ccr = _record_json(body)["ccr"]
+        if ccr["id"] == own_id and isinstance(ccr["tags"], list):
+            return {tag_name(t) for t in ccr["tags"]}
+    except (ValueError, KeyError, TypeError):
+        pass
+    return None
+
+
+def move_tags(tags, call_input):
+    """Apply one set_session_tags call's `add` and `remove` lists, by tag_name, to the set `tags`, in place."""
+    for key, op in (("add", tags.update), ("remove", tags.difference_update)):
+        given = call_input.get(key) if isinstance(call_input, dict) else None
+        if isinstance(given, list):
+            op(tag_name(t) for t in given)
+
+
 def own_session_read(transcript, own_id, created=False):
     """(tags, tagged_after, parent): the tags and parent_session_id of the newest get_session result
     whose ccr.id is own_id, else None for each, and whether a set_session_tags call follows that
@@ -87,10 +116,21 @@ def own_session_ccr(transcript, own_id):
         return None
 
 
-def _scan(transcript, own_id, created):
-    """(tags, tagged_after, parent, ccr): the one pass over the transcript behind both readers."""
+def created_sessions(transcript):
+    """{session id: tags} of the sessions the create_session calls of a transcript started, minus each one an
+    archive_session call names after its create (an unarchive_session call after that restores it). A create whose
+    result names no session started none. Cost: one read of the transcript; no file written, no process."""
+    made = {}
+    _scan(transcript, None, True, made)
+    return made
+
+
+def _scan(transcript, own_id, created, made=None):
+    """(tags, tagged_after, parent, ccr): the one pass over the transcript behind both readers. With a `made` dict,
+    it also fills it with the sessions the create results name (created_sessions)."""
     uses, newest, parent, tagged_after, newest_ccr = set(), None, None, False, None
     creates = {}  # tool_use id -> (tags, parent) a create_session call set
+    archived = {}  # session id -> tags of a created session an archive_session call named, for an unarchive
     with open(transcript, encoding="utf-8") as handle:
         for line in handle:
             try:
@@ -109,6 +149,14 @@ def _scan(transcript, own_id, created):
                     if isinstance(given, list):
                         named = block["input"].get("parent_session_id")
                         creates[block.get("id")] = ([str(t) for t in given], named if isinstance(named, str) and named else None)
+                elif made is not None and block.get("type") == "tool_use" and str(block.get("name", "")).endswith(
+                        ("archive_session", "unarchive_session")):
+                    given = block.get("input", {}).get("session_id") if isinstance(block.get("input"), dict) else None
+                    if str(block["name"]).endswith("unarchive_session"):
+                        if given in archived:
+                            made[given] = archived.pop(given)
+                    elif given in made:
+                        archived[given] = made.pop(given)
                 elif block.get("type") == "tool_use" and str(block.get("name", "")).endswith("set_session_tags"):
                     # Only a call that names the own session changes the own tags. A call with no readable
                     # list of ids counts too: the safe reading is that it may have named this session.
@@ -120,7 +168,10 @@ def _scan(transcript, own_id, created):
                     if isinstance(body, list):
                         body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
                     if block.get("tool_use_id") in creates:
-                        if _created_session_id(body) == own_id:
+                        made_id = _created_session_id(body, block.get("is_error") is True)
+                        if made is not None and made_id:
+                            made[made_id] = creates[block.get("tool_use_id")][0]
+                        if made_id == own_id:
                             (newest, parent), tagged_after, newest_ccr = creates[block.get("tool_use_id")], False, None
                         continue
                     if not isinstance(body, str):
@@ -134,3 +185,66 @@ def _scan(transcript, own_id, created):
                     except (ValueError, KeyError, TypeError):
                         continue
     return newest, tagged_after, parent, newest_ccr
+
+
+def _list_rows(body):
+    """(rows, has_more) of a list_sessions body: `{"ccr": {"data": [rows], "has_more": bool}}`, bare or in the
+    untrusted wrapper. Each row is (id, tags, archived). Raises ValueError, KeyError, TypeError or AttributeError when
+    the body is not that."""
+    ccr = _record_json(body)["ccr"]
+    rows, more = ccr["data"], ccr["has_more"]
+    if not isinstance(rows, list) or not isinstance(more, bool):
+        raise ValueError("not a list page")
+    found = []
+    for row in rows:
+        tags = row.get("tags") or []
+        if not isinstance(row.get("id"), str) or not isinstance(tags, list):
+            raise ValueError("not a session row")
+        found.append((row["id"], [str(t) for t in tags], "ARCHIVED" in str(row.get("session_status", "")).upper()))
+    return found, more
+
+
+def list_sessions_read(transcript):
+    """(rows, whole) of the list_sessions reads in a transcript (rule lane-step-dup). `rows` maps each session id a read
+    showed to (tags, archived), the newest row deciding. `whole` is True when one chain of reads is the whole list: a
+    read with no cursor, then reads whose after_id is the previous page's last row id, the last with has_more false.
+    A tags, mine or before_id read lists only part of the sessions and breaks a chain, as does an after_id that is not
+    the previous page's last row id. A read whose text does not parse adds no rows and breaks the chain. A whole read
+    stays whole after later reads, because every session they show is a row here.
+    Cost: one read of the transcript; no file written, no process."""
+    rows, whole, chain = {}, False, None  # chain: the last row id of the newest page of an unbroken chain, else None
+    reads = {}  # tool_use id -> (after_id, partial) of a list_sessions call
+    with open(transcript, encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                content = json.loads(line)["message"]["content"]
+            except (ValueError, KeyError, TypeError):
+                continue
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                given = block.get("input")
+                if block.get("type") == "tool_use" and str(block.get("name", "")).endswith("list_sessions"):
+                    partial = not isinstance(given, dict) or bool(given.get("before_id") or given.get("tags") or given.get("mine"))
+                    after = given.get("after_id") if isinstance(given, dict) and not partial else None
+                    reads[block.get("id")] = (after if isinstance(after, str) and after else None, partial)
+                elif block.get("type") == "tool_result" and block.get("tool_use_id") in reads:
+                    body = block.get("content")
+                    if isinstance(body, list):
+                        body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
+                    try:
+                        page, more = _list_rows(body)
+                    except (ValueError, KeyError, TypeError, AttributeError):
+                        chain = None
+                        continue
+                    for sid, tags, archived in page:
+                        rows[sid] = (tags, archived)
+                    after, partial = reads[block.get("tool_use_id")]
+                    linked = not partial and (after is None or (chain is not None and after == chain))
+                    if linked and not more:
+                        whole, chain = True, None
+                    else:
+                        chain = page[-1][0] if linked and page else None
+    return rows, whole

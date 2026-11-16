@@ -8,7 +8,7 @@ Sources:
 - Asks: owner rulings, Cockpit, 2026-11-03 22:23 CST.
 - Agent-branch refusal: see its bullet below.
 - Every-branch refusal: owner ruling, page item 502, 2026-11-10 16:08 CST: "I either want it approved or declined whichever is correct. I know for a fact I dont want to be asked."
-- Every-branch refusal, agent-branch part, and the source-side reading of a glob: owner answer A, 2026-11-11 09:12 CST, relayed by the coordinator at 09:14 CST. Goal: never asked, no conflicts, no lost work.
+- Every-branch refusal, agent-branch part, and the source-side reading of a glob: owner delegated 2026-11-11 09:12 CST; coordinator pick A, relayed 09:14 CST. Goal: never asked, no conflicts, no lost work.
 
 | Push | Outcome | Rule id |
 |---|---|---|
@@ -57,8 +57,8 @@ Sources:
     (`refs/remotes/<remote>/<name>`) is missing or differs from it. A matching ref is trusted. The
     guard never contacts the remote. A failed ref read refuses. No local main or master allows.
   - Agent branch. A local branch named like an agent worktree (`agent-<hex>`, `claude/agent-<hex>`,
-    `worktree-agent-<hex>`) is among the branches it sends (owner answer A, 2026-11-11 09:12 CST, relayed
-    by the coordinator at 09:14 CST). `--all` and `--branches` send every local branch. A glob sends the
+    `worktree-agent-<hex>`) is among the branches it sends (owner delegated 2026-11-11 09:12 CST; coordinator pick A,
+    relayed 09:14 CST). `--all` and `--branches` send every local branch. A glob sends the
     branches its source side matches, whatever its target name: `refs/heads/*:refs/heads/lane/*` is
     refused while `worktree-agent-<hex>` exists. Worktrees of one clone share local branches, so one agent
     worktree's branch refuses from any checkout of that clone. Code: `_local_agent_branches` (the branch

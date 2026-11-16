@@ -16,7 +16,7 @@ Owner ruling, item 298 (14:17 CST Nov 6 2026): build both the check at export an
 - Budget sizing (measured, 2026-11-08): the live page has 3 open pictured items of 420 (counted from the `origin/roadmap` waiting items, Nov 8). A healthy run takes 0.7 to 1.0 s per item (8 items in 6.2 s, and single-item runs, review probes, 2 samples). So 60 s holds about 60 to 85 items, and the live page is far under it. A run over the budget exits 3 on every `--check` until the items are fewer or faster. Source of the budget, and of the re-pointed no-budget tests: the coordinator order of 07:04 CST, Nov 8, under the owner rule of 13:20 Nov 7, "a found gap gets a fix".
 - One loop: `page_check.run_within_budget` is the one deadline loop. `check_items` calls it with `CHECK_BUDGET`. The guard (`page_design_hit`) calls it with its own 45 s budget, and its wording, verdicts and fail-open are as before.
 - Stop check: `hooks/feedback_guard.py` `_cleared` clears a Stop check when an export prints `same`, even with exit 4 (held) or, under `--all`, another artifact's refusal. Main blocked there. The copy is current, so no unsafe act gets through.
-- Cost: one node start and one Chromium start per pictured item, answered or not, at each export and each `--check`. The budget stops new starts, so a run takes at most 85 s. One clock read per item. The run adds no timer and no log.
+- Cost: one node start and one Chromium start per pictured item, answered or not, at each export and each `--check` (unmeasured). The budget stops new starts, so a run takes at most 85 s. One clock read per item (unmeasured). The run adds no timer and no log.
 
 Kind: process
 Home: rule:questions-go-to-owner
