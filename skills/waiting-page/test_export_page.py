@@ -35,7 +35,7 @@ Contract the page cases assume (the builder builds to it):
     host with no credentials passes.
   --rebuild DIR --batches OUT --collections NAME [NAME ...]. The named collections are the only folders allowed besides
     page/, and a batch entry's `collection` is its folder name. A named collection with no folder is empty. A folder not
-    named is unknown, exit 2, even one of the five waiting collections. Without --collections the five are allowed.
+    named is unknown, exit 2, even one of the six waiting collections. Without --collections the six are allowed.
     --collections without --rebuild, or a name that is not a collection slug, is a usage error: exit 2, an argparse
     `error:` line, nothing written. The error for --collections without --rebuild names --rebuild.
   --merge COPY --live LIVE --batches OUT [--collections NAME ...] [--live-page PATH]. COPY holds the --rebuild layout.
@@ -71,6 +71,10 @@ Contract the page cases assume (the builder builds to it):
     <name>`, the copy written, exit 2, and no item held for that entry (an unread answers collection holds answered items).
   The picture checks of one run share one time budget. Items not checked when it runs out print
     `checks unknown: time budget spent, <k> item(s) not checked`; --check exits 3; export keeps its copy and its exit code.
+  Receipts, the sixth waiting collection: `receipts/<doc_id>.json` (a doc id may hold a dot, `park.colour-pick`) exports,
+    is scanned, rebuilds and merges as the other five do, and the live page wins a merge. An export is append-safe for
+    receipts: a receipt the copy holds and the fetch no longer lists stays. An emptied receipts fetch is unknown unless
+    `--allow-empty receipts` names it. A fetch with no receipts folder, or no marker in it, is unknown.
 """
 import collections
 import contextlib
@@ -95,8 +99,9 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the
 import export_page  # noqa: E402  the in-process budget cases stub page_check's per-run seam
 import page_check  # noqa: E402
 import _nowindow  # noqa: E402  the answers cases stub its run, the one start of node (page_check imports it from hooks/)
+import layout  # noqa: E402  the registry's waiting collections, pinned equal to export_page.COLLECTIONS
 
-COLLECTIONS = ("items", "answers", "groups", "asks", "meta")
+COLLECTIONS = ("items", "answers", "groups", "asks", "meta", "receipts")  # the waiting page's six collections
 MARKER = ".complete"  # the session touches it in each collection folder after the last list page
 ARTIFACT = "https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx"
 SENTINEL = 1000000000  # a fixed mtime for a file a run must not rewrite; no clock is read
@@ -838,6 +843,11 @@ def verdict_lines(r):
     return [line.strip() for line in (r.stdout + r.stderr).splitlines() if line.strip()]
 
 
+def skipped_for_account(lines, entry_id):
+    """The line that skips `entry_id` for want of a link for the --account label, when it names the rebuild remedy, else None."""
+    return next((line for line in lines if line.startswith(entry_id + ": skipped") and "rebuild" in line), None)
+
+
 def says(r, word):
     """True when a line the run printed starts with the verdict word, as `unknown` or `unknown - asks missing` does."""
     return any(re.match(re.escape(word) + r"\b", line) for line in verdict_lines(r))
@@ -888,6 +898,12 @@ def full_size():
     return {"items": items, "answers": answers, "groups": groups, "asks": asks, "meta": {"page": META}}
 
 
+def receipt(n):
+    """A receipt shaped as the owning session writes it: `read` and `filed`, ISO UTC with a trailing Z. Synthetic times."""
+    day = 1 + n % 28
+    return {"read": "2026-10-%02dT%02d:05:00Z" % (day, n % 24), "filed": "2026-10-%02dT%02d:20:00Z" % (day, n % 24)}
+
+
 def setUpModule():
     global RUN_FOLDER
     RUN_FOLDER = _test_temp.run_folder()
@@ -902,13 +918,13 @@ class Base(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)  # test-temp-standard: never the system temp dir
         self.addCleanup(self.tmp.cleanup)
 
-    def fetch(self, items=None, answers=None, groups=None, asks=None, meta=None, folders=None):
+    def fetch(self, items=None, answers=None, groups=None, asks=None, meta=None, receipts=None, folders=None):
         """A fetched folder: one folder per collection, each doc a JSON file, and the completeness marker. An empty
-        collection is an empty folder with its marker. `folders`, when given, names the folders instead of the five:
+        collection is an empty folder with its marker. `folders`, when given, names the folders instead of the six:
         {folder: {doc_id: data}}, for a page whose collections are named by --collections."""
         root = tempfile.mkdtemp(prefix="fetched-", dir=self.tmp.name)
         docs = folders if folders is not None else {"items": items, "answers": answers, "groups": groups,
-                                                     "asks": asks, "meta": meta}
+                                                     "asks": asks, "meta": meta, "receipts": receipts}
         for name, found in docs.items():
             os.makedirs(os.path.join(root, name))
             for doc_id, data in (found or {}).items():
@@ -1178,6 +1194,153 @@ class Mirror(Base):
         r = self.run_cmd("--fetched", fetched, "--out", out, env=dict(os.environ, PATH=empty, PYTHONDONTWRITEBYTECODE="1"))
         self.assertChanged(r, 1)
         self.assertEqual(r.returncode, 0, shown(r))
+
+
+class Receipts(Base):
+    """The sixth waiting collection. `receipts/<doc_id>.json` is written by the owning session, never by the page. An export
+    writes, scans and mirrors it like the other five, except that it is append-safe: a receipt the copy holds and the fetch
+    no longer lists stays, since the owner keeps archived receipts through a later page cleanup. The pins at the end hold
+    the export's list equal to the registry's."""
+
+    def test_807_closed_items_and_442_receipts_export_and_a_second_run_is_same(self):
+        items = {"item-%03d" % n: dict(item(n), status="closed") for n in range(1, 808)}
+        answers = {"item-%03d" % n: {"item": "item-%03d" % n, "pick": "a", "note": "Synthetic answer %d" % n}
+                   for n in range(1, 442)}
+        answers["park.colour-pick"] = {"parked": True, "id": "colour-pick", "act": "unpark", "ref": "R-442",
+                                       "note": "Synthetic", "at": "2026-10-20T09:00:00Z"}
+        receipts = {"item-%03d" % n: receipt(n) for n in range(1, 442)}
+        receipts["park.colour-pick"] = receipt(442)
+        fetched = self.fetch(items=items, answers=answers, meta={"page": META}, receipts=receipts)
+        out = self.out()
+        r = self.export(fetched, out, timeout=120)
+        self.assertEqual(r.returncode, 0, shown(r))
+        self.assertEqual(len(glob.glob(os.path.join(out, "items", "*.json"))), 807, "the copy does not hold 807 item files")
+        self.assertEqual(len(glob.glob(os.path.join(out, "receipts", "*.json"))), 442,
+                         "the copy does not hold 442 receipt files")
+        second = self.export(fetched, out, timeout=120)
+        self.assertVerdict(second, "same")
+
+    def test_a_receipt_lands_under_its_doc_id_in_the_canonical_form_of_the_others(self):
+        fetched = self.fetch(items={"item-001": item(1)}, receipts={"item-001": receipt(1), "park.colour-pick": receipt(2)})
+        out = self.out()
+        r = self.export(fetched, out)
+        self.assertEqual(r.returncode, 0, shown(r))
+        path = os.path.join(out, "receipts", "park.colour-pick.json")
+        self.assertTrue(os.path.isfile(path), "the receipt park.colour-pick did not land at receipts/park.colour-pick.json. "
+                                              "Output:\n" + shown(r))
+        self.assertEqual(read_text(path), canonical(receipt(2)), "the receipt is not in the canonical form the others use")
+
+    def test_a_secret_in_a_receipt_refuses_the_export_and_writes_nothing(self):
+        cases = (("token in a receipt's note", TOKEN), ("email in a receipt's note", MAIL))
+        for index, (label, value) in enumerate(cases):
+            with self.subTest(label=label):
+                fetched = self.fetch(items={"item-001": item(1)}, receipts={"item-001": dict(receipt(1), note=value)})
+                out = self.out("refused-%d" % index)
+                before = snapshot(out)
+                r = self.export(fetched, out)
+                self.assertVerdict(r, "refused", [value])
+                self.assertEqual(r.returncode, 1, shown(r, [value]))
+                self.assertNotIn(value, r.stdout + r.stderr, "%s: the matched value was printed" % label)
+                self.assertTrue(any("receipts/item-001.json" in line for line in verdict_lines(r)),
+                                "%s: no find names receipts/item-001.json. Output:\n%s" % (label, shown(r, [value])))
+                self.assertEqual(snapshot(out), before, "%s: a refused run wrote into the copy" % label)
+
+    def test_a_fetch_with_no_receipts_folder_is_unknown_and_writes_nothing(self):
+        fetched = self.fetch(items={"item-001": item(1)}, meta={"page": META})
+        shutil.rmtree(os.path.join(fetched, "receipts"))
+        out = self.out()
+        write_text(os.path.join(out, "items", "old.json"), "{}\n")
+        before = snapshot(out)
+        r = self.export(fetched, out)
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(r.returncode, 2, shown(r))
+        self.assertEqual(snapshot(out), before, "a fetch with no receipts folder wrote into the copy")
+
+    def test_a_receipts_folder_with_no_marker_is_unknown_and_writes_nothing(self):
+        fetched = self.fetch(items={"item-001": item(1)}, meta={"page": META}, receipts={"item-001": receipt(1)})
+        os.remove(os.path.join(fetched, "receipts", MARKER))
+        out = self.out()
+        write_text(os.path.join(out, "items", "old.json"), "{}\n")
+        before = snapshot(out)
+        r = self.export(fetched, out)
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(r.returncode, 2, shown(r))
+        self.assertEqual(snapshot(out), before, "a receipts folder with no marker wrote into the copy")
+
+    def test_a_receipt_the_copy_holds_and_the_fetch_no_longer_lists_stays(self):
+        out = self.out()
+        first = self.fetch(items={"item-001": item(1), "item-002": item(2)},
+                           receipts={"item-001": receipt(1), "item-002": receipt(2)})
+        seeded = self.export(first, out)
+        self.assertEqual(seeded.returncode, 0, "scope: the first export did not run. Output:\n" + shown(seeded))
+        self.assertTrue(os.path.isfile(os.path.join(out, "receipts", "item-002.json")),
+                        "scope: the copy holds no receipts/item-002.json to archive")
+        archived = read_text(os.path.join(out, "receipts", "item-002.json"))
+        later = self.fetch(items={"item-001": item(1)}, receipts={"item-001": receipt(1), "item-003": receipt(3)})
+        r = self.export(later, out)
+        self.assertEqual(r.returncode, 0, shown(r))
+        self.assertTrue(os.path.isfile(os.path.join(out, "receipts", "item-003.json")),
+                        "the receipt item-003 that the fetch lists was not exported")
+        self.assertEqual(read_text(os.path.join(out, "receipts", "item-002.json")), archived,
+                         "the archived receipt item-002 was changed or deleted")
+        self.assertFalse(os.path.exists(os.path.join(out, "items", "item-002.json")),
+                         "control: the item the fetch no longer lists was kept, so the mirror delete did not run")
+        self.assertChanged(r, 2)  # one receipt written and one item deleted; the archived receipt counts for nothing
+
+    def export_in_process(self, fetched, out):
+        """export() with receipts among its collections and no design block, run in this process. A Stop is a failure."""
+        try:
+            return export_page.export(fetched, out, None, (), collections=("items", "receipts"), design=False)
+        except export_page.Stop as stop:
+            self.fail("export(design=False) stopped: %s" % stop)
+
+    def test_a_receipt_the_fetch_lacks_stays_when_the_export_runs_without_its_design_block(self):
+        """Append-only follows the collection name, not the design flag: export(design=False) with receipts among its
+        collections keeps an archived receipt. Items still mirror-delete, the control."""
+        out = self.out()
+        self.export_in_process(self.fetch(folders={"items": {"item-001": item(1), "item-gone": item(9)},
+                                                   "receipts": {"item-001": receipt(1), "item-002": receipt(2)}}), out)
+        self.assertTrue(os.path.isfile(os.path.join(out, "receipts", "item-002.json")),
+                        "scope: the copy holds no receipts/item-002.json to archive")
+        self.assertTrue(os.path.isfile(os.path.join(out, "items", "item-gone.json")),
+                        "scope: the copy holds no items/item-gone.json for the control")
+        self.export_in_process(self.fetch(folders={"items": {"item-001": item(1)}, "receipts": {"item-001": receipt(1)}}), out)
+        self.assertTrue(os.path.isfile(os.path.join(out, "receipts", "item-002.json")),
+                        "export(design=False) deleted an archived receipt the fetch no longer lists")
+        self.assertFalse(os.path.exists(os.path.join(out, "items", "item-gone.json")),
+                         "control: the item the fetch no longer lists was kept, so the mirror delete did not run")
+
+    def test_an_emptied_receipts_fetch_is_unknown_unless_named_and_the_archive_stays(self):
+        out = self.out()
+        full = self.fetch(items={"item-001": item(1)}, receipts={"item-001": receipt(1)})
+        first = self.export(full, out)
+        self.assertEqual(first.returncode, 0, "scope: the first export did not run. Output:\n" + shown(first))
+        emptied = self.fetch(items={"item-001": item(1)}, receipts={})  # the page cleaned up its receipts
+        before = snapshot(out)
+        r = self.export(emptied, out)
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(r.returncode, 2, shown(r))
+        self.assertEqual(snapshot(out), before, "an emptied receipts fetch changed the copy without --allow-empty receipts")
+        r = self.export(emptied, out, allow_empty=("receipts",))
+        self.assertEqual(r.returncode, 0, shown(r))
+        self.assertVerdict(r, "same")
+        self.assertEqual(read_text(os.path.join(out, "receipts", "item-001.json")), canonical(receipt(1)),
+                         "the archived receipt did not survive the allowed empty fetch")
+
+    def test_allow_empty_accepts_receipts(self):
+        fetched = self.fetch(items={"item-001": item(1)})
+        r = self.export(fetched, self.out(), allow_empty=("receipts",))
+        self.assertIsNone(error_line(r), "--allow-empty receipts is a usage error: %s" % error_line(r))
+        self.assertEqual(r.returncode, 0, shown(r))
+
+    def test_export_collections_equal_the_registry_waiting_collections(self):
+        self.assertEqual(tuple(export_page.COLLECTIONS), tuple(layout.WAITING_COLLECTIONS),
+                         "export_page.COLLECTIONS is not lint/layout.py WAITING_COLLECTIONS: the export and the "
+                         "registry disagree")
+
+    def test_receipts_is_a_waiting_collection_in_the_export_and_in_the_registry(self):
+        self.assertIn("receipts", export_page.COLLECTIONS, "export_page.COLLECTIONS does not name receipts")
+        self.assertIn("receipts", layout.WAITING_COLLECTIONS, "lint/layout.py WAITING_COLLECTIONS does not name receipts")
 
 
 class Page(Base):
@@ -1475,6 +1638,44 @@ class Rebuild(Base):
         self.assertVerdict(r, "unknown")
         self.assertEqual(r.returncode, 2, shown(r))
 
+    def test_a_copy_holding_receipts_rebuilds_them_as_set_entries_in_batches_of_fifty(self):
+        receipts = {"item-%03d" % n: receipt(n) for n in range(1, 443)}
+        waiting = self.copy_of({"receipts": receipts})
+        self.assertTrue(os.path.isdir(os.path.join(waiting, "receipts")), "scope: the copy has no receipts folder")
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.rebuild(waiting, batches)
+        self.assertEqual(r.returncode, 0, shown(r))
+        files, entries, sizes = self.batch_entries(batches)
+        self.assertBatches(r, 9, 442)  # 442 receipts in batches of at most 50
+        self.assertTrue(all(size <= 50 for size in sizes), "a batch holds more than 50 entries: %s" % sizes)
+        for entry in entries:
+            self.assertEqual(set(entry), {"op", "collection", "doc_id", "data"}, "an entry has the wrong keys")
+            self.assertEqual(entry["op"], "set")
+        want = collections.Counter(("receipts", doc_id, canonical(doc)) for doc_id, doc in receipts.items())
+        got = collections.Counter((e["collection"], e["doc_id"], canonical(e["data"])) for e in entries)
+        self.assertEqual(got, want, "the batches do not hold each receipt as a set entry under the collection receipts")
+
+    def test_receipts_split_under_the_900_kb_batch_cap(self):
+        # Five receipts of about 400 KB: two fit in one batch and three do not, so the split is 2, 2 and 1.
+        big = {"big-%d" % n: dict(receipt(n), note="word " * 80000) for n in range(1, 6)}
+        waiting = self.copy_of({"receipts": big})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.rebuild(waiting, batches)
+        self.assertEqual(r.returncode, 0, shown(r))
+        files, entries, sizes = self.batch_entries(batches)
+        for path in files:
+            self.assertLessEqual(os.path.getsize(path), 900000, "%s is over 900 KB" % os.path.basename(path))
+        self.assertEqual(sizes, [2, 2, 1], "the receipts split as %s, not as 2, 2 and 1 under the byte cap" % sizes)
+        self.assertBatches(r, 3, 5)
+
+    def test_a_receipt_over_900_kb_is_unknown_and_the_line_names_it_and_the_cap(self):
+        waiting = self.copy_of({"receipts": {"big-1": dict(receipt(1), note="word " * 200000)}})
+        r = self.rebuild(waiting, os.path.join(self.tmp.name, "batches"))
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(r.returncode, 2, shown(r))
+        self.assertTrue(any("receipts/big-1" in line and "cap" in line for line in verdict_lines(r)),
+                        "no unknown line names receipts/big-1 and the byte cap. Output:\n" + shown(r))
+
     def test_a_crash_in_rebuild_exits_3_with_one_unknown_line(self):
         waiting = self.exported({"items": {"item-001": item(1)}}, page=False)
         # 100,000 levels: json.load raises RecursionError inside rebuild, and no Stop handler takes it, so it is a crash.
@@ -1662,6 +1863,31 @@ class Rebuild(Base):
                 self.assertEqual(r.returncode, 2, shown(r))
                 self.assertNoBatches(batches, "a usage error")
 
+    def test_merge_writes_the_receipts_the_live_page_lacks_and_never_one_it_holds(self):
+        copy = self.copy_of({"items": {"item-001": item(1)},
+                             "receipts": {"item-001": receipt(1), "item-002": receipt(2), "item-003": receipt(3)}})
+        live = self.fetch(items={"item-001": item(1)}, receipts={"item-001": dict(receipt(1), filed="2026-10-30T12:00:00Z")})
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 1, 2, kept=2, renumbered=0)  # item-001 and receipts/item-001 are kept for the live page
+        files, entries, _ = self.batch_entries(batches)
+        got = {(e["collection"], e["doc_id"]): canonical(e["data"]) for e in entries}
+        self.assertEqual(got, {("receipts", "item-002"): canonical(receipt(2)), ("receipts", "item-003"): canonical(receipt(3))},
+                         "the merge wrote other receipts than the two the live page lacks, or their copy data is wrong")
+
+    def test_a_live_receipts_folder_with_no_marker_is_unknown_and_writes_nothing(self):
+        copy = self.copy_of({"receipts": {"item-001": receipt(1)}})
+        whole = self.merge_run(copy, self.fetch(receipts={}), os.path.join(self.tmp.name, "batches-whole"))
+        self.assertEqual(whole.returncode, 0, "scope: a live receipts folder with its marker does not merge. Output:\n"
+                         + shown(whole))
+        cut = self.fetch(receipts={})
+        os.remove(os.path.join(cut, "receipts", MARKER))
+        batches = os.path.join(self.tmp.name, "batches-cut")
+        r = self.merge_run(copy, cut, batches)
+        self.assertVerdict(r, "unknown")
+        self.assertEqual(r.returncode, 2, shown(r))
+        self.assertNoBatches(batches, "a live receipts folder with no marker")
+
     def test_merge_with_a_missing_or_empty_copy_is_unknown_and_writes_nothing(self):
         empty = self.out("empty-copy")
         os.makedirs(empty)
@@ -1723,7 +1949,7 @@ class Rebuild(Base):
     def test_merge_of_a_full_size_copy_into_an_empty_live_page_writes_every_doc(self):
         data = full_size()
         copy = self.exported(data, page=False)  # no page, so no designData: the merge needs no --live-page here
-        live = self.fetch()  # five empty collections, each with its marker
+        live = self.fetch()  # six empty collections, each with its marker
         batches = os.path.join(self.tmp.name, "batches")
         r = self.merge_run(copy, live, batches)
         self.assertMergeSummary(r, 3, 133, 0, 0)
@@ -2027,15 +2253,18 @@ class All(Base):
     WAIT, QUEUE = "page01", "queue02"
     VERDICT = r"\b(changed\s+\d+|same|refused|unknown)\b"
 
-    def queue_entry(self, **changes):
-        return dict({"id": self.QUEUE, "url": "https://claude.ai/artifact/" + self.QUEUE, "role": "queue-page", "account": "work",
+    def queue_entry(self, account="work", **changes):
+        """The queue entry with its one link, in `account`. Its export is artifacts/<id>, the path the registry requires."""
+        return dict({"id": self.QUEUE, "role": "queue-page", "export": "artifacts/" + self.QUEUE,
+                     "links": [{"account": account, "url": "https://claude.ai/artifact/" + self.QUEUE}],
                      "collections": ["items"]}, **changes)
 
     def repo(self, queue=None):
         """The registry: the waiting page, then the queue entry. `queue` replaces the queue entry for a case of another shape."""
         root = os.path.join(self.tmp.name, "repo")
         registry = {"kinds": {}, "artifacts": [
-            {"id": self.WAIT, "url": "https://claude.ai/artifact/" + self.WAIT, "role": "waiting-page", "account": "work"},
+            {"id": self.WAIT, "role": "waiting-page", "export": "waiting",
+             "links": [{"account": "work", "url": "https://claude.ai/artifact/" + self.WAIT}]},
             queue or self.queue_entry()]}
         write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps(registry))
         return root
@@ -2043,7 +2272,8 @@ class All(Base):
     def docs(self):
         """What each artifact's fetch holds. The queue lists items only, so its answers are fetched but never exported."""
         return {self.WAIT: dict(items={"i1": item(1)}, answers={"a1": {"item": "i1", "pick": "a"}},
-                                groups={"g1": {"name": "Group"}}, asks={"k1": {"item": "i1"}}, meta={"page": META}),
+                                groups={"g1": {"name": "Group"}}, asks={"k1": {"item": "i1"}}, meta={"page": META},
+                                receipts={"a1": receipt(1)}),
                 self.QUEUE: dict(items={"q1": item(2)}, answers={"qa1": {"item": "q1", "pick": "b"}})}
 
     def fetched_all(self, docs, pages=None, files=None):
@@ -2093,11 +2323,20 @@ class All(Base):
         self.assertEqual(read_text(os.path.join(queue, "items", "q1.json")), canonical(item(2)), "the queue's item did not land")
         self.assertFalse(os.path.exists(os.path.join(queue, "answers")), "an artifact exported a collection its entry does not list")
 
+    def test_the_registry_entry_exports_each_receipt_to_its_export_path(self):
+        worktree = self.out("worktree")
+        r = self.run_all(self.repo(), self.fetched_all(self.docs()), worktree)
+        self.assertEqual(r.returncode, 0, shown(r))
+        path = os.path.join(self.export_folder(worktree, self.WAIT), "receipts", "a1.json")
+        self.assertTrue(os.path.isfile(path), "the waiting page's receipt a1 is not at waiting/receipts/a1.json. Output:\n"
+                        + shown(r))
+        self.assertEqual(read_text(path), canonical(receipt(1)), "the waiting page's receipt is not in the canonical form")
+
     def test_each_artifact_gets_one_verdict_line_with_its_verdict(self):
         root, fetched, worktree = self.repo(), self.fetched_all(self.docs()), self.out("worktree")
         first = self.run_all(root, fetched, worktree)
         self.assertEqual(first.returncode, 0, shown(first))
-        self.assertVerdictOf(first, self.WAIT, r"changed\s+5\b")  # five docs, one per collection
+        self.assertVerdictOf(first, self.WAIT, r"changed\s+6\b")  # six docs, one per collection
         self.assertVerdictOf(first, self.QUEUE, r"changed\s+1\b")  # one item; the answers are not exported
         second = self.run_all(root, fetched, worktree)
         self.assertEqual(second.returncode, 0, shown(second))
@@ -2185,8 +2424,8 @@ class All(Base):
         base = os.path.join(self.export_folder(worktree, self.QUEUE), "page")
         self.assertEqual(read_bytes(os.path.join(base, "page.html")), QUEUE_PAGE, "page/page.html is not byte-identical")
         self.assertEqual(read_bytes(os.path.join(base, "files", "x.js")), script, "page/files/x.js is not byte-identical")
-        self.assertIn("%s: skipped - account work" % self.WAIT, verdict_lines(first),
-                      "the waiting page of another account was not skipped")
+        self.assertIsNotNone(skipped_for_account(verdict_lines(first), self.WAIT),
+                             "the waiting page with no link for the flag's account was not skipped with the rebuild remedy")
         second = self.run_cmd(*args)
         self.assertEqual(second.returncode, 0, "the second run of a page-only entry failed. Output:\n" + shown(second))
         self.assertVerdictOf(second, self.QUEUE, r"\bsame\b")
@@ -2370,13 +2609,15 @@ class NoExport(Base):
     EXTERNAL = ["ext%03d" % n for n in range(1, 9)]  # the eight pages of the other account, with synthetic ids
 
     def waiting(self):
-        return {"id": self.WAIT, "url": "https://claude.ai/artifact/" + self.WAIT, "role": "waiting-page", "account": "work"}
+        return {"id": self.WAIT, "role": "waiting-page", "export": "waiting",
+                "links": [{"account": "work", "url": "https://claude.ai/artifact/" + self.WAIT}]}
 
     def external(self, entry_id, held=True, **changes):
-        """An artifact of the other account. `held` (the default) adds `export` false: the repo holds the page, never exports it."""
-        entry = {"id": entry_id, "url": "https://claude.ai/artifact/" + entry_id, "role": "page", "account": "other-account"}
-        if held:
-            entry["export"] = False
+        """An artifact of the other account, with its one link in that account. `held` (the default) gives `export` false: the
+        repo holds the page and never exports it. Otherwise the entry exports to artifacts/<id>, the path the registry requires."""
+        entry = {"id": entry_id, "role": "page",
+                 "links": [{"account": "other-account", "url": "https://claude.ai/artifact/" + entry_id}],
+                 "export": False if held else "artifacts/" + entry_id}
         return dict(entry, **changes)
 
     def repo(self, entries):
@@ -2433,6 +2674,8 @@ class NoExport(Base):
         r = self.run_all(root, self.fetched_waiting(), self.out("worktree"))
         self.assertEqual(r.returncode, 2, "an export of true must make the run unknown with exit 2. Output:\n" + shown(r))
         self.assertTrue(says(r, "unknown"), "no unknown verdict printed. Output:\n" + shown(r))
+        self.assertTrue(any(line.startswith("unknown") and re.search(r"\bexport\b", line) for line in verdict_lines(r)),
+                        "the unknown verdict does not name the export that is not a path. Output:\n" + shown(r))
 
     def test_a_waiting_page_entry_with_export_false_is_unknown_not_skipped(self):
         """The waiting page is never held: export false on its role makes the registry unknown, exit 2, as a refused entry does."""
@@ -2440,6 +2683,8 @@ class NoExport(Base):
         r = self.run_all(root, self.fetched_waiting(), self.out("worktree"))
         self.assertEqual(r.returncode, 2, "a waiting-page entry with export false must make the run unknown with exit 2. Output:\n" + shown(r))
         self.assertTrue(says(r, "unknown"), "no unknown verdict printed for a waiting-page entry with export false. Output:\n" + shown(r))
+        self.assertTrue(any(line.startswith("unknown") and re.search(r"\bexport\b", line) for line in verdict_lines(r)),
+                        "the unknown verdict does not name the export false on the waiting page. Output:\n" + shown(r))
         self.assertNotIn("%s: skipped - no export" % self.WAIT, verdict_lines(r),
                          "the waiting page was skipped instead of refused. Output:\n" + shown(r))
 
@@ -2451,19 +2696,19 @@ class NoExport(Base):
         self.assertEqual(r.returncode, 0, "a run with --account must exit 0 when its other-account entries are skipped. Output:\n"
                          + shown(r))
         for entry_id in self.EXTERNAL:
-            self.assertIn("%s: skipped - account other-account" % entry_id, verdict_lines(r),
-                          "%s has no `skipped - account` line. Output:\n%s" % (entry_id, shown(r)))
+            self.assertIsNotNone(skipped_for_account(verdict_lines(r), entry_id),
+                                 "%s has no skipped line that names the rebuild remedy. Output:\n%s" % (entry_id, shown(r)))
 
     def test_an_entry_of_the_flag_account_exports_as_today_beside_the_skipped_one(self):
         """--account LABEL: an entry whose account matches exports as it does without the flag, and the waiting page does too."""
         own, other = "own001", self.EXTERNAL[0]
-        matching = {"id": own, "url": "https://claude.ai/artifact/" + own, "role": "page", "account": "work",
-                    "collections": ["items"]}
+        matching = {"id": own, "role": "page", "export": "artifacts/" + own, "collections": ["items"],
+                    "links": [{"account": "work", "url": "https://claude.ai/artifact/" + own}]}
         entries = [self.waiting(), matching, self.external(other, held=False, collections=["items"])]
         r = self.run_all(self.repo(entries), self.fetched_waiting(also=(own,)), self.out("worktree"), account="work")
         self.assertEqual(r.returncode, 0, "a run with --account must exit 0. Output:\n" + shown(r))
-        self.assertIn("%s: skipped - account other-account" % other, verdict_lines(r),
-                      "the other-account entry was not skipped. Output:\n" + shown(r))
+        self.assertIsNotNone(skipped_for_account(verdict_lines(r), other),
+                             "the other-account entry was not skipped with the rebuild remedy. Output:\n" + shown(r))
         self.assertIn("%s: changed 5" % self.WAIT, verdict_lines(r),
                       "the waiting page of the flag's account did not export. Output:\n" + shown(r))
         self.assertIn("%s: changed 1" % own, verdict_lines(r),
@@ -2474,8 +2719,8 @@ class NoExport(Base):
         r = self.run_all(self.repo([self.waiting(), self.external(other, held=False, collections=["items"])]),
                          self.fetched_waiting(also=(other,)), worktree, account="work")
         self.assertEqual(r.returncode, 0, "a run with --account must exit 0. Output:\n" + shown(r))
-        self.assertIn("%s: skipped - account other-account" % other, verdict_lines(r),
-                      "the other-account entry was not skipped. Output:\n" + shown(r))
+        self.assertIsNotNone(skipped_for_account(verdict_lines(r), other),
+                             "the other-account entry was not skipped with the rebuild remedy. Output:\n" + shown(r))
         self.assertFalse(os.path.exists(os.path.join(worktree, "artifacts")),
                          "a skipped entry wrote an artifacts folder although its account was not the flag's")
 
@@ -2487,8 +2732,38 @@ class NoExport(Base):
         self.assertEqual(r.returncode, 0, "a run without --account must exit 0. Output:\n" + shown(r))
         self.assertIn("%s: changed 1" % other, verdict_lines(r),
                       "an other-account entry did not export without the flag. Output:\n" + shown(r))
-        self.assertEqual([line for line in verdict_lines(r) if "skipped - account" in line], [],
+        self.assertEqual([line for line in verdict_lines(r) if "skipped" in line], [],
                          "a run without --account skipped an entry")
+
+    def test_an_entry_with_a_link_for_the_flag_account_exports_though_another_link_comes_first(self):
+        """--account LABEL reads every link of an entry, not only its first: an entry whose second link is the flag's account
+        exports as it does without the flag."""
+        own = "own001"
+        entry = {"id": own, "role": "page", "export": "artifacts/" + own, "collections": ["items"],
+                 "links": [{"account": "other-account", "url": "https://claude.ai/artifact/" + own},
+                           {"account": "work", "url": "https://claude.ai/artifact/" + own}]}
+        r = self.run_all(self.repo([self.waiting(), entry]), self.fetched_waiting(also=(own,)), self.out("worktree"), account="work")
+        self.assertEqual(r.returncode, 0, "a run with --account must exit 0. Output:\n" + shown(r))
+        self.assertTrue(any(line.startswith(own + ": changed ") for line in verdict_lines(r)),
+                        "the entry whose second link is the flag's account did not export. Output:\n" + shown(r))
+        self.assertEqual([line for line in verdict_lines(r) if line.startswith(own + ": skipped")], [],
+                         "the entry was skipped though one of its links is the flag's account. Output:\n" + shown(r))
+
+    def test_a_label_held_only_in_a_second_link_is_not_unknown(self):
+        """--account LABEL is unknown only when no entry holds the label in any of its links."""
+        second = "two001"
+        entry = {"id": second, "role": "page", "export": "artifacts/" + second, "collections": ["items"],
+                 "links": [{"account": "other-account", "url": "https://claude.ai/artifact/" + second},
+                           {"account": "gmail", "url": "https://claude.ai/artifact/" + second}]}
+        r = self.run_all(self.repo([self.waiting(), entry]), self.fetched_waiting(also=(second,)), self.out("worktree"), account="gmail")
+        lines = verdict_lines(r)
+        self.assertEqual([line for line in lines if line.startswith("unknown")], [],
+                         "a label held in a second link was reported unknown. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 0, "a label held in a second link must exit 0. Output:\n" + shown(r))
+        self.assertTrue(any(line.startswith(second + ": changed ") for line in lines),
+                        "the entry holding the label in its second link did not export. Output:\n" + shown(r))
+        self.assertIsNotNone(skipped_for_account(lines, self.WAIT),
+                             "the waiting page with no gmail link was not skipped with the rebuild remedy")
 
     def label_run(self, label):
         """--all --account LABEL over the waiting page and one other-account entry, both fetched: the run and its worktree."""
@@ -2794,8 +3069,8 @@ class PictureHoldAll(PictureChecks):
 
     def test_the_waiting_page_entry_of_all_holds_item_292(self):
         root = os.path.join(self.tmp.name, "repo")
-        registry = {"kinds": {}, "artifacts": [{"id": "page01", "url": "https://claude.ai/artifact/page01",
-                                                "role": "waiting-page", "account": "work"}]}
+        registry = {"kinds": {}, "artifacts": [{"id": "page01", "role": "waiting-page", "export": "waiting",
+                                                "links": [{"account": "work", "url": "https://claude.ai/artifact/page01"}]}]}
         write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps(registry))
         folder = self.fetch(items={ITEM_292["id"]: ITEM_292}, meta={"page": META})
         write_bytes(os.path.join(folder, "page.html"), page_with_mockups(MOCKS_292).encode("utf-8"))
@@ -2913,8 +3188,8 @@ class NoPageFile(Copied):
 
     def test_an_all_entry_without_its_page_names_the_missing_page(self):
         root = os.path.join(self.tmp.name, "repo")
-        registry = {"kinds": {}, "artifacts": [{"id": "page01", "url": "https://claude.ai/artifact/page01",
-                                                "role": "waiting-page", "account": "work"}]}
+        registry = {"kinds": {}, "artifacts": [{"id": "page01", "role": "waiting-page", "export": "waiting",
+                                                "links": [{"account": "work", "url": "https://claude.ai/artifact/page01"}]}]}
         write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps(registry))
         folder = self.fetch(items={ITEM_292["id"]: ITEM_292}, meta={"page": META})  # no page.html in this folder
         fetched = os.path.join(self.tmp.name, "fetched-no-page")
@@ -2947,9 +3222,10 @@ class ExitRank(PictureChecks):
     def repo(self):
         root = os.path.join(self.tmp.name, "repo")
         registry = {"kinds": {}, "artifacts": [
-            {"id": "page01", "url": "https://claude.ai/artifact/page01", "role": "waiting-page", "account": "work"},
-            {"id": "queue02", "url": "https://claude.ai/artifact/queue02", "role": "queue-page", "account": "work",
-             "collections": ["items"]}]}
+            {"id": "page01", "role": "waiting-page", "export": "waiting",
+             "links": [{"account": "work", "url": "https://claude.ai/artifact/page01"}]},
+            {"id": "queue02", "role": "queue-page", "export": "artifacts/queue02",
+             "links": [{"account": "work", "url": "https://claude.ai/artifact/queue02"}], "collections": ["items"]}]}
         write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps(registry))
         return root
 
@@ -3216,16 +3492,17 @@ class RepublishChecksFirst(Base):
 
 class WaitingCollectionsRun(Copied):
     """--all with one registry entry `entry_id` of `role`, whose own `collections` is `collections` (None: no list, so the
-    waiting page gets the default five). The fetched page holds `items`, `answers` and the page with item 292's mockups.
-    Returns (the run, the worktree)."""
+    waiting page gets the default six). The fetched page holds `items`, `answers`, `receipts` and the page with item 292's
+    mockups. Returns (the run, the worktree)."""
 
-    def run_all(self, collections, items, answers=None, role="waiting-page", entry_id="page01"):
+    def run_all(self, collections, items, answers=None, role="waiting-page", entry_id="page01", receipts=None):
         root = os.path.join(self.tmp.name, "repo")
-        entry = {"id": entry_id, "url": "https://claude.ai/artifact/" + entry_id, "role": role, "account": "work"}
+        entry = {"id": entry_id, "role": role, "export": "waiting" if role == "waiting-page" else "artifacts/" + entry_id,
+                 "links": [{"account": "work", "url": "https://claude.ai/artifact/" + entry_id}]}
         if collections is not None:
             entry["collections"] = list(collections)
         write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps({"kinds": {}, "artifacts": [entry]}))
-        folder = self.fetch(items=items, answers=answers, meta={"page": META})
+        folder = self.fetch(items=items, answers=answers, meta={"page": META}, receipts=receipts)
         write_bytes(os.path.join(folder, "page.html"), page_with_mockups(MOCKS_292).encode("utf-8"))
         fetched = os.path.join(self.tmp.name, "fetched-collections")
         os.makedirs(fetched)
@@ -3268,6 +3545,18 @@ class WaitingCollections(WaitingCollectionsRun):
         checks = [line for line in verdict_lines(r) if "checks" in line]
         self.assertEqual(checks, [], "a queue page with no waiting role was given a check line. Output:\n" + shown(r))
         self.assertEqual(r.returncode, 0, "a queue page with a plain item must exit 0. Output:\n" + shown(r))
+
+
+    def test_a_waiting_entry_listing_the_old_five_still_exports_its_receipts(self):
+        """The waiting page always exports receipts. An explicit list of the old five, with no receipts, does not drop them:
+        the registry adds receipts to the waiting role's list."""
+        r, worktree = self.run_all(("items", "answers", "groups", "asks", "meta"), {"plain": item(1)},
+                                   receipts={"plain": receipt(1)})
+        waiting = os.path.join(worktree, "waiting")
+        self.assertTrue(os.path.isfile(os.path.join(waiting, "items", "plain.json")),
+                        "scope: the waiting page's item did not export. Output:\n" + shown(r))
+        self.assertTrue(os.path.isfile(os.path.join(waiting, "receipts", "plain.json")),
+                        "the waiting page's explicit list of the old five dropped its receipts. Output:\n" + shown(r))
 
 
 class WaitingCollectionsHold(WaitingCollectionsRun, PictureChecks):

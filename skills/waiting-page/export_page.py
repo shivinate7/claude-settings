@@ -8,11 +8,12 @@ Export, the writer's step at each wake and before each republish:
     python3 ~/.claude/skills/waiting-page/export_page.py --fetched DIR --out WAITING_DIR [--page FETCHED.html]
         [--allow-empty COLLECTION]
 
-DIR holds `<collection>/<doc_id>.json` for each of the five collections, as `ArtifactData list ... out_dir=DIR`
+DIR holds `<collection>/<doc_id>.json` for each of the six collections, as `ArtifactData list ... out_dir=DIR`
 saves them; an empty collection is an empty folder. A script cannot call that tool, so the session fetches first.
 The session touches `.complete` in each collection folder after the last list page, so a fetch that stopped early
 shows: a collection with no marker is unknown. A collection that is empty now while the copy holds docs of it is
 unknown too, unless the session names it with --allow-empty.
+A receipt the copy holds and the fetch no longer lists stays: `receipts` is append-safe, the others mirror-delete.
 WAITING_DIR is the `waiting-data` folder of the record branch (`layout.py path <root> waiting-data`). With --page,
 the page's bytes land in `page/page.html`, and its designData block in `page/designData.json`. A file is written
 only when its bytes differ. The script never runs git: the session commits.
@@ -64,10 +65,10 @@ Rebuild, the recovery path. It reads only the repo copy, never the live page:
 Writes OUT_DIR/batch-NNN.json, each a JSON list of at most 50 `{op: "set", collection, doc_id, data}` entries and
 under 900,000 bytes, one entry per doc in WAITING_DIR except `page/`, and prints `batches K docs N`. The session
 sends each list as an `ArtifactData batch`. Unknown, exit 2: a missing or empty WAITING_DIR, a folder in it that is
-neither one of the five collections (or the `--collections` names) nor `page/`, or one doc over the byte cap.
+neither one of the six collections (or the `--collections` names) nor `page/`, or one doc over the byte cap.
 For an artifact other than the waiting page, `--collections NAME [NAME ...]` names its collections (the registry
-entry's `collections`). They replace the five as the allowed folders, and a batch entry's `collection` is the folder
-name. A named collection with no folder is empty and fine; a folder not named is unknown, even one of the five.
+entry's `collections`). They replace the six as the allowed folders, and a batch entry's `collection` is the folder
+name. A named collection with no folder is empty and fine; a folder not named is unknown, even one of the six.
 `--collections` without `--rebuild`, a name that is not a collection slug, or the name `page` is a usage error, exit 2.
 
 Every artifact, the step "Before you switch Claude accounts":
@@ -83,9 +84,10 @@ waiting-data folder; any other artifact: `artifacts/<id>/`), with the same scan 
 also exports its designData block. A supporting file no longer fetched stays in the copy; history is the delete.
 An entry with `"export": false` prints `<id>: skipped - no export`, needs no folder in DIR, writes nothing and
 counts as exit 0. An entry with `"collections": []` is page-only: its page and files export, and no database does.
-With --account LABEL, an entry whose account differs prints `<id>: skipped - account <its account>` and is treated the
-same way, so a session that can read only one account's pages exports those and holds the rest. A LABEL that is empty or
-that no entry's account holds prints one line, `unknown - --account ... matches no registry entry's account ...`, writes
+With --account LABEL, an entry with no link for LABEL prints `<id>: skipped - no link for account LABEL; rebuild it from
+git and add the link` and is treated the same way, so a session that can read only one account's pages exports those and
+holds the rest. An entry with a link for LABEL exports, whatever its other links. A LABEL that is empty or that no link of
+any entry holds prints one line, `unknown - --account ... matches no link of any registry entry ...`, writes
 nothing and exits 2. Without the flag every entry exports. A page-only entry whose fetched folder has no `page.html`
 prints `<id>: unknown - ...` that names `page.html`, writes nothing and counts as exit 2. Each other artifact prints one line `<id>: <verdict>`, and a find's lines start with `<id>:` too. One artifact's refusal or
 unknown leaves its own folder as it was and holds back no other. Exit: 0 when every artifact is changed or same; else
@@ -122,9 +124,10 @@ sys.path.insert(0, HERE)
 import splice  # noqa: E402  the one home of the designData block's span
 import page_check  # noqa: E402  the one home that runs the page's picture check
 
-# The same five as lint/layout.py WAITING_COLLECTIONS. A copy, because a single export and the rebuild must run with no
+# The same six as lint/layout.py WAITING_COLLECTIONS. A copy, because a single export and the rebuild must run with no
 # lint/ beside them: the recovery path may not depend on the repo it recovers (verification-recovery-independent-of-state).
-COLLECTIONS = ("items", "answers", "groups", "asks", "meta")
+COLLECTIONS = ("items", "answers", "groups", "asks", "meta", "receipts")
+APPEND_ONLY = ("receipts",)  # the waiting page's own export never deletes a doc of these: the owner keeps archived receipts
 COLLECTION_SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")  # copy of lint/layout.py COLLECTION, for the same reason
 PAGE_FOLDER, DESIGN_FILE, PAGE_FILE, FILES_FOLDER = "page", "designData.json", "page.html", "files"
 MARKER = ".complete"  # the session touches it in a collection folder after the last list page
@@ -678,8 +681,9 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
             with open(target, "wb") as handle:
                 handle.write(raw)
             changed += 1
+    keep = APPEND_ONLY
     for label in have:
-        if label not in want:
+        if label not in want and label.split("/")[0] not in keep:
             os.remove(os.path.join(out, *label.split("/")))
             changed += 1
     unknown, held = None, []
@@ -705,17 +709,18 @@ def export_all(root, fetched, worktree, allow_empty, account=None):
         raise Stop("unknown - the artifacts registry cannot be read: %s" % err, UNKNOWN)
     if not entries:
         raise Stop("unknown - %s has no artifacts registry entry to export" % root, UNKNOWN)
-    if account is not None and account not in {entry["account"] for entry in entries}:
+    if account is not None and not any(link["account"] == account for entry in entries for link in entry["links"]):
         # a mistyped or empty label would otherwise skip every entry and still exit 0, which reads as a clean copy
-        raise Stop("unknown - --account %r matches no registry entry's account, so nothing was exported" % account, UNKNOWN)
+        raise Stop("unknown - --account %r matches no link of any registry entry, so nothing was exported" % account, UNKNOWN)
     worst, held_any = 0, False
     for entry in entries:
         name = entry["id"]
         if entry["export"] is False:  # held in the registry, never exported: no folder needed, nothing written
             print("%s: skipped - no export" % name)
             continue
-        if account is not None and entry["account"] != account:  # a page this session cannot read: no folder needed
-            print("%s: skipped - account %s" % (name, entry["account"]))
+        if account is not None and not any(link["account"] == account for link in entry["links"]):
+            # no link for this account, so this session cannot read the page: no folder needed
+            print("%s: skipped - no link for account %s; rebuild it from git and add the link" % (name, account))
             continue
         folder = os.path.join(fetched, name)
         page = os.path.join(folder, PAGE_FILE)
@@ -925,7 +930,7 @@ def main(argv):
     ap.add_argument("--live", help="with --merge: the folder `ArtifactData list` saved from the live page, markers included")
     ap.add_argument("--live-page", help="with --merge: the live page's fetched html, for its designData block")
     ap.add_argument("--collections", nargs="+", metavar="NAME",
-                    help="with --rebuild or --merge: the collection folders to allow, in place of the waiting page's five")
+                    help="with --rebuild or --merge: the collection folders to allow, in place of the waiting page's six")
     args = ap.parse_args(argv)
     if args.collections is not None and not (args.rebuild or args.merge):
         ap.error("--collections goes with --rebuild or --merge")

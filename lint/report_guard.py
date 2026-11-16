@@ -1286,11 +1286,11 @@ def question_problem(records, turn, text, hook):
             if any(writer in t and u.get("id") in delivered for u, t in zip(uses, sends)):
                 return "", ""
     page = layout.waiting_page(root) if root else "unknown"
-    here = None if page == "unknown" else page.rstrip("/")
+    here = None if page == "unknown" else page
     for u in uses:
         inp = u.get("input")
         if (str(u.get("name", "")).startswith(ARTIFACT_DATA) and isinstance(inp, dict) and items_write(inp)
-                and (here is None or str(inp.get("url", "")).rstrip("/") == here)):
+                and (here is None or layout.is_waiting_page_url(root, str(inp.get("url", ""))))):
             return "", ""
     if here is None:
         # No page: the question is asked in the reply or the box, so the box counts.
