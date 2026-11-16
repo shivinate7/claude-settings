@@ -3940,7 +3940,7 @@ class GhHalf(Env):
                 self.at_pause.append((s, self.now, cur[1] if cur else None))
             if pause:
                 pause()
-        return merge.Host(required if required == "protection" else list(required), "main", minute=minute, now=lambda: self.now, pause=tick, ignore=ignore)
+        return merge.Host(required if required in ("protection", "none") else list(required), "main", minute=minute, now=lambda: self.now, pause=tick, ignore=ignore)
 
     def go(self, **kw):
         return self.run_merge("7", "--confirm", host=self.gh_host(**kw))
@@ -5326,6 +5326,45 @@ class GhHalf(Env):
 OLD_RUN, NEW_RUN, CI_RUN = 41368432206, 41368432483, 41368432300
 MID_RUN = 41368432350  # a run of the same workflow between OLD_RUN and NEW_RUN
 
+class NoneRequiredChecks(Env):
+    """merge.requiredChecks "none": the base names no required check, so the head reads from the checks and runs it has. Each case
+    runs through the fake gh, as GhHalf does. Borrows GhHalf's helpers, as SilentWait does, so GhHalf's tests do not run twice."""
+    set, calls, gh_host, go = GhHalf.set, GhHalf.calls, GhHalf.gh_host, GhHalf.go
+
+    def setUp(self):  # the fake-gh setup of GhHalf.setUp, without its tests
+        Env.setUp(self)
+        gh_case_setup(self)
+
+    def none_host(self):
+        return self.gh_host(required="none")
+
+    def test_a_head_with_no_check_and_no_run_reads_green(self):
+        self.set(checks_seq=[[]])
+        host = self.none_host()
+        head = host.pr(7)["head"]
+        self.assertEqual((host.checks(7, warn=False, sha=head), host.runs(head)), ({}, []), "the fixture's head holds a check or a run")
+        self.assertEqual(host.head_state(7), "green")
+
+    def test_a_red_check_row_on_the_head_still_reads_red(self):
+        self.set(checks_seq=[[("checks", "fail", "https://x/y")]])
+        state = self.none_host().head_state(7)
+        self.assertTrue(state.startswith("red: checks: fail"), state)
+
+    def test_confirm_does_not_stop_on_required_checks_when_none_is_set(self):
+        self.set(checks_seq=[[]])
+        rc, out = self.run_merge("7", "--confirm", host=self.none_host())
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls())
+
+    def test_a_pending_run_with_no_workflow_folder_refuses_at_once_under_none(self):
+        # The base has no workflow folder, so the run's file cannot be read. A run whose file cannot be read holds the head.
+        self.set(checks_seq=[[]], runs_seq=[[("docs", "in_progress", "")]])
+        rc, out = self.go(required="none")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("a check is pending: workflow docs", out)
+        self.assertEqual(self.paused, [], "the pending run waited before it refused")
+        self.assertNotIn(MERGE_CALL, self.calls())
+
 def job_link(run, job):
     """A check run's details_url as GitHub writes it: the id of the run is in the link."""
     return f"https://github.com/o/r/actions/runs/{run}/job/{job}"
@@ -6586,6 +6625,11 @@ class ConfigFile(Env):
                 put_base_config(self, self.config_text(fields))
                 rc, out = self.run_merge("7")
                 self.assertEqual(rc, 0, out)
+
+    def test_requiredChecks_none_is_accepted_at_preview(self):
+        put_base_config(self, self.config_text({"requiredChecks": "none"}))
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
 
     def test_ready_checks_is_a_merge_field(self):  # decision: merge.readyChecks names the ready checks of the draft step
         self.assertIn("readyChecks", merge.MERGE_FIELDS)
