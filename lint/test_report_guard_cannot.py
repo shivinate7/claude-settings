@@ -3012,6 +3012,23 @@ class CannotClaimTests(trg.SameTurnWriter, unittest.TestCase):
         out = self.stop([trg.human("import the file"), *ok_bash("ls inbox", "tu_c"), trg.assistant_text(text)])
         self.assert_passes(out, "a past report and hand-off with one call in the turn")
 
+    # ---- The probe remedy names where the word unchecked goes.
+
+    def test_cc_red_probe_remedy_puts_unchecked_inside_the_sentence(self):
+        # Catches: the remedy that sent the word to "on the line", which names the line as the place for the word. The word
+        # goes inside the sentence the claim is in.
+        line = "I cannot import it myself."
+        reason = self.assert_probe_blocked(self.stop([trg.human("import it"), trg.assistant_text(line)]), line)
+        self.assertIn("`unchecked` inside the sentence", reason,
+                      "the remedy does not put the word inside the sentence: %s" % reason)
+        self.assertNotIn("on the line", reason, "the remedy puts the word on the line: %s" % reason)
+
+    def test_cc_control_unchecked_in_parentheses_passes_a_probe_claim(self):
+        # Control: a probe claim whose sentence holds unchecked as a whole word passes, here inside parentheses.
+        line = "I cannot import it myself (unchecked)."
+        out = self.stop([trg.human("import it"), trg.assistant_text(line)])
+        self.assert_passes(out, "a probe claim that says unchecked inside its sentence")
+
 
 if __name__ == "__main__":
     unittest.main()
