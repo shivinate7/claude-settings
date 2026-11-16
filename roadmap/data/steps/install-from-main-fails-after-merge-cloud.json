@@ -1,0 +1,14 @@
+{
+ "id": "install-from-main-fails-after-merge-cloud",
+ "title": "merge/install_from_main.sh fails after every merge in the cloud session: pinned checkout not detached at origin/stable",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "owner": "consultant",
+ "blockedBy": [],
+ "why": "Consultant relay 15:59 CST Nov 16: after every merge in this cloud session merge/install_from_main.sh fails with 'pinned checkout ... not detached at origin/stable', and running it from the clone fails the same way. Cause unmeasured. It may relate to stable lagging main by two merges (coordinator, 15:46 CST).",
+ "source": "Consultant message to triage 9, 15:59 CST Nov 16 (the consultant's finding, relayed; not read by triage). Filed by triage 9.",
+ "note": "Todo. Note: one sighting per merge; the error text is the consultant's quote, not read by triage. Searched steps at 15:58 CST Nov 16: no like step found. No lane, no PR.",
+ "updatedAt": "2026-11-16T15:58:00-06:00",
+ "order": 211
+}

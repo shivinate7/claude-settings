@@ -1,0 +1,14 @@
+{
+ "id": "lane-ready-mark-refused-on-replacement-head",
+ "title": "A lane's ready mark is refused when its PR head is a replacement branch, not the step's branch",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "owner": "consultant",
+ "blockedBy": [],
+ "why": "Consultant relay 15:59 CST Nov 16, from the coordinator at 15:48 CST on PR 3570: a lane's --ready call is refused when the pull request's head is a replacement branch rather than its step's lane branch. PR 3592 allows a lane's ready mark only when the head is the step's own lane branch (either head form).",
+ "source": "Consultant message to triage 9, 15:59 CST Nov 16 (the consultant's finding, relayed; not read by triage). Filed by triage 9.",
+ "note": "Todo. Sighting: PR 3570. A fix would extend the proof in merge-role-proof to a replacement branch the record names; a guard or check change, so review rounds apply. Searched steps at 15:58 CST Nov 16: no like step found. No lane, no PR.",
+ "updatedAt": "2026-11-16T15:58:00-06:00",
+ "order": 210
+}
