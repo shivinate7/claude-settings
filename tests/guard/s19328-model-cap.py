@@ -690,6 +690,55 @@ add("control: a sed whose pattern holds a 4-backslash run in the same shape asks
     "ask", "agent-model-cap", cwd=_folder, command=_command, carries=("18:00 CST",),
     max_seconds=SED_LIMIT_S, env=DISK_CLOCK)
 
+# A DOUBLE-QUOTED SHELL WRITE WITH ESCAPED QUOTES. Each quote around the key and the value is a backslash
+# and a quote, so the end the file will hold is still in the command, and the ask must show it. The
+# single-quoted printf above is the control for the end, and the escaped echo of the model is the control
+# for the model key: it asks, as it always did.
+ESCAPED_DEADLINE_ECHO = 'echo "{\\"' + EXPIRY_KEY + '\\": \\"' + DEADLINE_WINTER + '\\"}" > ' + PROJ_LOCAL
+sh("cap deadline: a double-quoted echo with escaped quotes that sets only the cap-lift end asks under "
+   "agent-model-cap and names the end in CST",
+   ESCAPED_DEADLINE_ECHO, "ask", "agent-model-cap", cwd=NOGIT, carries=(WANT_WINTER,))
+ESCAPED_MODEL_ECHO = 'echo "{\\"env\\": {\\"' + CAP_KEY + '\\": \\"' + OPUS + '\\"}}" > ' + PROJ_LOCAL
+sh("cap: a double-quoted echo with escaped quotes that sets the model still asks [control]",
+   ESCAPED_MODEL_ECHO, "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
+
+# THE RETIRED FIELD NAME, `_subagentCapUntil`. The guard does not read it, as it reads no unknown key, so a
+# write that sets only the old name is silent, and a model raise that also sets it asks with no end shown.
+# The watch's own reading of the old name is pinned in hooks/test_config_watch.py.
+OLD_EXPIRY_KEY = "_subagentCapUntil"
+add("cap deadline: a Write that sets only the retired _subagentCapUntil name is silent, as an unknown key is",
+    "allow", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
+    content=json.dumps({OLD_EXPIRY_KEY: DEADLINE_WINTER}), silent=True)
+add("cap deadline: a model raise that also sets the retired _subagentCapUntil name asks, and shows no end",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL,
+    content=json.dumps({"env": {CAP_KEY: OPUS, CAP_FORCE: "1"}, OLD_EXPIRY_KEY: DEADLINE_WINTER}),
+    carries=(CAP_KEY + " = " + OPUS,), lacks=(" CST", " CDT", "cap lift ends"))
+
+# THE ASK FOR A DEADLINE-ONLY WRITE. Such a write sets no model, so its ask must not say that it sets the
+# agent model cap, nor tell the approver to approve it only for a model above Sonnet. It says what it
+# sets: the cap-lift end, with the end named in Central.
+WRONG_FOR_END_ONLY = ("this write sets the agent model cap", "a model above Sonnet is wanted")
+END_SET_WORDS = ("sets the cap-lift end", "extends the cap-lift end", "sets the cap lift end",
+                 "extends the cap lift end")
+add("cap deadline: a Write that sets only the cap-lift end does not say it sets the model cap, or ask for a model",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
+    content=json.dumps({EXPIRY_KEY: DEADLINE_WINTER}), carries=(WANT_WINTER,), lacks=WRONG_FOR_END_ONLY)
+add("cap deadline: a Write that sets only the cap-lift end says that it sets or extends the end",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
+    content=json.dumps({EXPIRY_KEY: DEADLINE_WINTER}), carries=(END_SET_WORDS,))
+add("cap deadline: an Edit that moves only a settings file's cap-lift end does not say it sets the model cap, or ask for a model",
+    "ask", "agent-model-cap", tool="Edit", cwd=NOGIT,
+    file_path=disk_settings("copy-edit-end", SONNET_UNTIL_WINTER),
+    old_string='"%s"' % DEADLINE_WINTER, new_string='"%s"' % DEADLINE_SUMMER,
+    carries=(WANT_SUMMER,), lacks=WRONG_FOR_END_ONLY, env=DISK_CLOCK)
+sh("cap deadline: a printf that sets only the cap-lift end does not say it sets the model cap, or ask for a model",
+   "printf '%s' '" + json.dumps({EXPIRY_KEY: DEADLINE_WINTER}) + "' > " + PROJ_SETTINGS,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(WANT_WINTER,), lacks=WRONG_FOR_END_ONLY)
+# The model raise keeps its own wording: it says it sets the model cap, and asks for a model above Sonnet.
+add("cap deadline: a model raise keeps the model wording and asks for a model above Sonnet [control]",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL, content=cap_settings(),
+    carries=("this write sets the agent model cap", "a model above Sonnet is wanted", OPUS))
+
 # ----------------------------------------------------- one reading of each offset form of the end
 #
 # The same instant, 03:30 UTC on 15 January 2099 (21:30 CST on the 14th), written in each form. The

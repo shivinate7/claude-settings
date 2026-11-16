@@ -543,10 +543,11 @@ approved_case("a file with no lift above Sonnet and a stray _agentCapUntil does 
 approved_case("an approved lift with _agentCapUntil misplaced inside env is revoked, "
               "and says where it belongs",
               cap_json_until_in_env("opus", "1", VALID_UNTIL), "wrong_place")
-# The field's old name is read until its end day, so a deadline written before the rename counts.
-approved_case("an approved lift with a valid, current _subagentCapUntil (the old name) is NOT "
-              "reverted", cap_json(model="opus", force="1", extra={"_subagentCapUntil": VALID_UNTIL}),
-              "valid")
+# The retired name `_subagentCapUntil` is no deadline. A lift that names only it has no `_agentCapUntil`,
+# so it reads as missing and is revoked, at any length, and the message says so.
+approved_case("an approved lift whose only end is the retired _subagentCapUntil, 400 days ahead, is "
+              "revoked as missing", cap_json(model="opus", force="1", extra={"_subagentCapUntil": FAR_400D_UNTIL}),
+              "old_name", clock=CLOCK_AT_REFERENCE)
 
 chain_case("a second approved lift keeps the ORIGINAL pre-lift content as prior, so a later "
            "revert never installs the first lift's own content")
@@ -731,6 +732,14 @@ def expectation(entry, result):
                 "kept and silent" if not message else "reverted an ordinary edit")
     if group == "expiry":
         kind = entry["kind"]
+        if kind == "old_name":
+            if lifted:
+                return (False, "cap STILL LIFTED on the retired _subagentCapUntil: the watch still reads "
+                        "the old name as a deadline")
+            if "_agentCapUntil is missing" not in message:
+                return (False, "reverted, but not as a missing _agentCapUntil: the old name must count as "
+                        "no deadline -- got: %r" % message)
+            return (True, "reverted as a missing _agentCapUntil: the retired name is no deadline")
         if kind == "bad":
             if lifted:
                 return (False, "cap STILL LIFTED past a bad deadline: the expiry rule missed it")
