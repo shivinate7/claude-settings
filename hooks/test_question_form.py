@@ -1453,8 +1453,8 @@ def case_powershell_bash_forms():
     # A lone backslash argument is the drive root, a path, so a line that names a tool after it is no continuation.
     page("a PowerShell cd to a lone backslash, then a line that names a tool, passes", "set",
          entry_of(ps_task("cd \\\ntool x")), None)
-    # A backslash glued to a word (origin\) is a path end, not a continuation, and passes as it does today.
-    page("a PowerShell push with origin\\ then a line, the backslash glued to a word, passes as today", "set",
+    # A backslash glued to a word (origin\) is a path end, not a continuation, so it passes.
+    page("a PowerShell push with origin\\ then a line, the backslash glued to a word, passes", "set",
          entry_of(ps_task("git push origin\\\nmain")), None)
     for name, ps in (("a Select-Object pipe", "Get-ChildItem | Select-Object -First 5"),
                      ("a PowerShell variable assignment", '$env:FOO = "1"; git push'),
@@ -1474,10 +1474,29 @@ def case_powershell_bash_forms():
         page("a PowerShell trap, %s, passes" % name, "set", entry_of(ps_task(ps)), None)
 
 
+def case_command_refusal_names_the_bash_forms():
+    # A PowerShell command with a bash-only form is refused by command-in-item, and the reason a refused Claude reads
+    # (PAGE_REASONS) names that form, so Claude sees its own form in the printed list. Each form is refused first (the
+    # scope), then its reason is read for its fragment.
+    for form, ps, fragment, named in (
+            ("a pipe to head", "git log | head -5", r"\bpipe\b.*\bhead\b|\|\s*head\b",
+             "a pipe to a Unix tool, such as head"),
+            ("a leading NAME=value", "FOO=1 git push", r"\w+=value\b", "a NAME=value prefix"),
+            ("a bracket test", "if [ -f x ]; then git push; fi", r"bracket|\[\s*\]|\[\[", "a bracket test"),
+            ("a backslash line end", "git push origin \\\nmain", r"backslash", "a backslash line end")):
+        got = call("item_hit", "set", entry_of(ps_task(ps)))
+        refused = isinstance(got, tuple) and got[0] == "command-in-item"
+        check("%s is refused by command-in-item, the rule whose reason is checked" % form, refused,
+              "got %r" % (got,))
+        reason = question_form.PAGE_REASONS.get(got[0], "") if refused else ""
+        check("the reason a refused Claude reads names %s" % named,
+              re.search(fragment, reason, re.I) is not None, "reason %r" % reason)
+
+
 def case_powershell_hashtable_is_no_bash_form():
-    # The NAME=value form in PS_BASH_FORMS ran its value past a `;`, so the second pair of a hashtable read as a
-    # `NAME=value tool` line and was refused. A hashtable with `;` between its pairs passes. A leading NAME=value
-    # before a command is still refused, and so is one after a `;`.
+    # PS_BASH_FORMS ends a NAME=value value at a `;`, so a hashtable's second pair is no `NAME=value tool` line.
+    # A hashtable with `;` between its pairs passes. A leading NAME=value before a command is refused, and so is
+    # one after a `;`.
     for name, ps in (("a hashtable of three pairs", "$h = @{a=1; b=2; c=3}"),
                      ("a hashtable of two named pairs", "$o = @{Name='x'; Value=2}")):
         page("a PowerShell %s passes" % name, "set", entry_of(ps_task(ps)), None)
@@ -1498,10 +1517,9 @@ def case_powershell_hashtable_is_no_bash_form():
 
 
 def case_powershell_comment_quote_ends_at_its_line():
-    # The quote walk reads `<#` block comments but not `#` line comments, so an unpaired quote in a line comment
-    # opened a quote that ran to the end of the text, and a bash form on the next line was blanked out. A quote in a
-    # line comment is text, so the next line is read as it stands. A contraction in a comment is text too, and a
-    # comment opener inside a string opens no comment.
+    # The quote walk ends a `#` line comment at its newline, so a quote in the comment opens nothing past its line,
+    # and the next line is read as it stands. A contraction in a comment is text too, and a comment opener inside a
+    # string opens no comment.
     refused = ("command-in-item", "bash operator")
     page("a PowerShell comment with an unpaired single quote, then a pipe to head on the next line, is refused",
          "set", entry_of(ps_task("# the 'main branch\ngit log | head -5")), refused)
@@ -3008,7 +3026,8 @@ def main():
                  case_claude_own_merge_needs_no_link,
                  case_chat_reasons_name_a_remedy_and_no_page_field, case_page_reasons_are_one_table,
                  case_gh_login_hit_direct, case_gh_login_switch_on_the_page, case_command_in_item_spans,
-                 case_powershell_bash_forms, case_powershell_hashtable_is_no_bash_form,
+                 case_powershell_bash_forms, case_command_refusal_names_the_bash_forms,
+                 case_powershell_hashtable_is_no_bash_form,
                  case_powershell_comment_quote_ends_at_its_line, case_powershell_bash_prefix_braced_expansion,
                  case_powershell_hash_mid_token_is_no_comment, case_step_shell_programs_partial,
                  case_quoted_span_after_edit_verb, case_delete_remove_span_is_a_shell_line,
