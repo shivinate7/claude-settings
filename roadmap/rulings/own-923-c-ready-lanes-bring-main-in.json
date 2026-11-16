@@ -1,0 +1,10 @@
+{
+  "id": "own-923-c-ready-lanes-bring-main-in",
+  "at": "2026-11-16T13:46:00-06:00",
+  "title": "Only lanes marked ready or one step from it bring main in after each merge to main (owner pick c, item 923).",
+  "ruling": "Owner, typed in the coordinator's chat at 13:46 CST Nov 16 (relayed by the coordinator at 13:46 CST; not read by triage), word for word: \"c) Only lanes that are marked ready or one step from it bring main in after each merge. Recommended. Gain: the ready queue stays clean. Lose: idle lanes stay behind.\" probably this and/or PRs of a certain priority grade are all brought to main at once and so if there's no high priority than all the medium priority ones are etc\". The pick is c. His hedge (\"probably this and/or\") adds an idea he did not pick for sure: PRs brought to main together by priority grade, highest grade first, then the next when none is left; that part is not a ruling and is open as page item 924. The coordinator reads \"one step from ready\" as: lane lint PASS and the review record posted at the live head, not yet marked ready; triage reads it the same way, and the owner has not said. The coordinator acts on c now and told runner 10 and the near-ready lanes. The rule needs a written home: the decisions `draft-until-reviewed` or the merge decisions, by step rewrite-merge-decisions-for-lane-merge.",
+  "quote": "c) Only lanes that are marked ready or one step from it bring main in after each merge.",
+  "source": "Coordinator message to triage 13:46 CST Nov 16 (the owner's words as the coordinator gave them). Owner typed them in the coordinator's chat. Filed by triage; the page item 923 had no saved answer from the owner on the page.",
+  "status": "open",
+  "step": "rewrite-merge-decisions-for-lane-merge"
+}
