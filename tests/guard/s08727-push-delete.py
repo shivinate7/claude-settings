@@ -3,7 +3,6 @@ FAMILY = "push-delete"
 
 LEASE = " --force-with-lease --force-if-includes"
 SHA = "0123456789abcdef0123456789abcdef01234567"
-REMEDY = "retry with --force-with-lease=<branch>:<sha>"
 
 # THE RETRY FORM. The refusal's last sentence names the push to retry with. A retry must be a form the
 # guard allows (decision stale-safe-force-push): a lease naming a branch and a sha, with no
@@ -29,6 +28,8 @@ def retry_form():
 RETRY_FORM, RETRY_WHY = retry_form()
 if RETRY_FORM is None:
     sys.exit("fixture setup failed: " + RETRY_WHY)
+# The retry form the guard prints, read from its constant, so the carry checks follow the constant.
+REMEDY = "retry with " + RETRY_FORM
 
 
 def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent=False, lacks=(), word=VCS):
@@ -77,11 +78,12 @@ push_case("includes alone is not a force, so a plain push allows", "--force-if-i
 # The refusal names no --force-if-includes: the form the classifier refuses must not be the one it prints.
 sh("push: the refusal names no --force-if-includes", VCS + " push --force origin feat", "deny", "force-push",
    cwd=PUSHFEAT, lacks=("--force-if-includes",))
-# The sha is the tip this session's own last push left, not a remote-tracking ref: a fetch refreshes that
-# ref, so a lease read from it passes over newer work.
+# The sha is the tip this session's own last push left, never one read after a fetch: a fetch refreshes the
+# remote-tracking ref, so a lease read after it passes over newer work. The remedy must carry the rule's
+# phrase itself, so a reworded remedy such as "the ref a fetch read" fails this case.
 sh("push: the refusal names the tip your own last push left, not a remote-tracking ref",
    VCS + " push --force origin feat", "deny", "force-push", cwd=PUSHFEAT,
-   carries=("your own last push",), lacks=("remote-tracking",))
+   carries=("your own last push", "never one read after a fetch"), lacks=("remote-tracking",))
 push_case("a force while the default branch is trunk, main is ordinary there",
           "--force origin HEAD:main", "deny", cwd=PUSHTRUNK)
 push_case("a push option value is not the remote", "--force-with-lease --force-if-includes -o x origin HEAD:trunk",
