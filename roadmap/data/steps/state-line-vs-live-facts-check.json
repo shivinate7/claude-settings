@@ -1,15 +1,15 @@
 {
-  "id": "state-line-vs-live-facts-check",
-  "title": "Check a decision's State: line against live facts (low, note only)",
-  "priority": "low",
-  "status": "open",
-  "pr": 3525,
-  "repo": "shivinate7/claude-settings",
-  "phase": "next",
-  "owner": "triage",
-  "blockedBy": [],
-  "updatedAt": "2026-11-15T12:40:00-06:00",
-  "why": "Third candidate check from the #3471 lane (head 8d672383, record 6892637662; relayed by the coordinator 11:13 CST Nov 15, not read by triage): no merged check catches its stale-claim kinds; a decision's `State:` line could be checked against live facts. Unmeasured. Triage looked for a like step at 11:20 CST: none found (nearest, record-vs-later-ruling-check, checks a decision against a later ruling, a different check). No lane; it would ship inside the shared action actions/claude-md-cites (owner scope change 11:10 CST).\n\n12:36 CST Nov 15 (coordinator, relayed; its pick, none owner-typed, undoable): pick 4 (PR 3525; the coordinator's name state-line-live-facts-check is an alias, matched by title): wiring b stays; the check reports unknown, never clear, if the child token cannot read a private claude-settings.\n\n12:36 CST Nov 15 (coordinator, relayed; its pick, none owner-typed, undoable): pick 4 (PR 3525; the coordinator's name state-line-live-facts-check is an alias, matched by title): wiring b stays; the check reports unknown, never clear, if the child token cannot read a private claude-settings.",
-  "source": "#3471 lane via the coordinator, 11:13 CST Nov 15 (relayed)",
-  "note": "Open, low, a note. No lane started. Filed 11:20 CST Nov 15. Coordinator started a lane under the alias state-line-live-facts-check (relayed 11:24 CST, not read by triage): design reply first; lane id not relayed. One name kept: this slug."
+ "id": "state-line-vs-live-facts-check",
+ "title": "Check a decision's State: line against live facts (low, note only)",
+ "priority": "low",
+ "status": "open",
+ "pr": 3525,
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "triage",
+ "blockedBy": [],
+ "updatedAt": "2026-11-16T15:34:00-06:00",
+ "why": "Third candidate check from the #3471 lane (head 8d672383, record 6892637662; relayed by the coordinator 11:13 CST Nov 15, not read by triage): no merged check catches its stale-claim kinds; a decision's `State:` line could be checked against live facts. Unmeasured. Triage looked for a like step at 11:20 CST: none found (nearest, record-vs-later-ruling-check, checks a decision against a later ruling, a different check). No lane; it would ship inside the shared action actions/claude-md-cites (owner scope change 11:10 CST).\n\n12:36 CST Nov 15 (coordinator, relayed; its pick, none owner-typed, undoable): pick 4 (PR 3525; the coordinator's name state-line-live-facts-check is an alias, matched by title): wiring b stays; the check reports unknown, never clear, if the child token cannot read a private claude-settings.\n\n12:36 CST Nov 15 (coordinator, relayed; its pick, none owner-typed, undoable): pick 4 (PR 3525; the coordinator's name state-line-live-facts-check is an alias, matched by title): wiring b stays; the check reports unknown, never clear, if the child token cannot read a private claude-settings.",
+ "source": "#3471 lane via the coordinator, 11:13 CST Nov 15 (relayed)",
+ "note": "Open, low, a note. No lane started. Filed 11:20 CST Nov 15. Coordinator started a lane under the alias state-line-live-facts-check (relayed 11:24 CST, not read by triage): design reply first; lane id not relayed. One name kept: this slug. Update 15:34 CST Nov 16 (triage 9, from the hand-off): PR 3525 is at head bae3aff6a and waits on PR 3559 to merge first. Lane id still not relayed."
 }

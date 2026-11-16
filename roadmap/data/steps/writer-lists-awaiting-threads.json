@@ -1,7 +1,7 @@
 {
  "id": "writer-lists-awaiting-threads",
  "title": "At each wake the page writer lists comment threads awaiting its reply",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "lane": "session_013NEJL3xgSYjY89nAFwhq9R",
@@ -9,8 +9,8 @@
  "blockedBy": [],
  "why": "An owner comment sent to Claude can sit unanswered for days: thread be1a03d4 waited 37 hours (Nov 10 22:05 to Nov 12 11:22 CST). Set ready 23:12 CST Nov 14 on the consultant's ask; coordinator starts the lane. Verified by REST and a read of origin/main dc35317d3: the lane session_013NEJL3xt6pvdeobzwsPMSq reads ARCHIVED (get_session), so the stale lane field is cleared; its PR #2857 is closed and not merged (closed 23:10 CST Nov 13; its body says round 3 PASS at 8817212fa); no open PR names this step (a search found #2880 and #3044, whose bodies only mention the lane); stale_pages.py on main has no --awaiting mode.\n\n[21:04 CST Nov 15, triage] PR #3449: open, draft, head 53cf9cba0236, branch writer-lists-awaiting-threads-3, REST read at 21:04 CST Nov 15 (pull_request_read; the PR body names this step: \"Step writer-lists-awaiting-threads\"). Owner's class yes 906 b (ruling own-906-b-page-prs-class; relayed, not read by triage), runner 10 merges at live head when lint passes and the record is at that head.",
  "source": "triage, 11:25 CST Nov 12, after the retrospective relayed the owner's 11:19 CST question",
- "note": "Incident: the owner's thread be1a03d4 (Nov 10 22:05 CST) on the claude-settings page got no reply until 11:22 CST Nov 12. At that point 19 of 52 threads were open, and 3 had the owner's comment as the last word. ArtifactComments read marks a thread \"awaiting reply\". Fix: skill waiting-page's wake routine reads the threads and puts each awaiting one in the writer's report under Input Needed until it is answered. A check reads the writer's report for a missing count. Cost: one comments read per wake, which already happens. Red case first. Ready, no lane. Coordinator started the lane 23:15 CST Nov 14; draft PR to follow.",
- "updatedAt": "2026-11-15T21:04:00-06:00",
+ "note": "Incident: the owner's thread be1a03d4 (Nov 10 22:05 CST) on the claude-settings page got no reply until 11:22 CST Nov 12. At that point 19 of 52 threads were open, and 3 had the owner's comment as the last word. ArtifactComments read marks a thread \"awaiting reply\". Fix: skill waiting-page's wake routine reads the threads and puts each awaiting one in the writer's report under Input Needed until it is answered. A check reads the writer's report for a missing count. Cost: one comments read per wake, which already happens. Red case first. Ready, no lane. Coordinator started the lane 23:15 CST Nov 14; draft PR to follow. Merged 15:29:35 CST Nov 16 by runner 10, PR 3449 alone at head 99a8db7755c9, merge commit ce341560d954 (REST merged true, read 15:34 CST, filed by triage 9).",
+ "updatedAt": "2026-11-16T15:34:00-06:00",
  "order": -295,
  "pr": 3449
 }
