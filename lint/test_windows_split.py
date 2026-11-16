@@ -2400,7 +2400,7 @@ class ReadyPullFullSuite(unittest.TestCase):
             self.assertIn(base, names, f"no {base} job in the full Windows suite")
         return names
 
-    # R62 re-pointed for windows_guard; the owner's grant (waiting-page item 901) holds the merge.
+    # R62 re-pointed for windows_guard: the owner granted the narrowing (waiting-page item 901 a, 18:20 CST Nov 15).
     def test_a_docs_only_ready_pull_request_runs_every_step_of_the_full_suite_jobs(self):
         # Named failure: a step of a full-suite job is conditioned on a scope flag or on code, which a docs-only PR leaves false.
         # The guard shards read windows_guard, so this case sets it true; the sibling case below sets it false.
