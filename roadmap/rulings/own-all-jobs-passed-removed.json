@@ -1,0 +1,16 @@
+{
+ "id": "own-all-jobs-passed-removed",
+ "at": "2026-11-15T19:08:00-06:00",
+ "title": "The owner removed the required all-jobs-passed status check on main (his own act); a command for every repo is asked",
+ "ruling": "Owner words, verbatim as relayed (RELAYED, not read by triage as typed): \"all jobs passed has been removed as a status requirement (also give me the bash to turn this off on all my repos i think we turned it on on all of them a while ago)!\". It answers the consultant's #3562 blocker (pick a: untick the required check on main). Read (consultant's reading): the owner removed the required all-jobs-passed status check on main (his own act, on GitHub); he asked for a command that removes it on every repo's default branch, and the consultant is giving him a gh loop. Not done by any session here. STALE RECORD to rewrite (the consultant's, with #3562 or its own PR; NOT edited by triage): the standing grant bullet \"Acts the cloud refuses\" in .claude/CLAUDE.md names that shared protection form (only the all-jobs-passed check required), and decision main-branch-protection says main requires that one check. Step: merge-on-lint-pass.",
+ "quote": "all jobs passed has been removed as a status requirement (also give me the bash to turn this off on all my repos i think we turned it on on all of them a while ago)!",
+ "source": "Owner chat 19:08 CST Nov 15 (verbatim as relayed), relayed by the consultant (consultant → triage 19:08 CST) and the coordinator; not read by triage as typed",
+ "status": "open",
+ "step": "merge-on-lint-pass",
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/main-branch-protection.md lines 5-8: \"`main` of shivinate7/claude-settings requires one check: `all-jobs-passed`\" (owner ruling r, the shared ruleset; read by triage on origin/main): the owner removed the requirement on GitHub, 19:08 CST"
+  }
+ ]
+}
