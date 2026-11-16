@@ -1,0 +1,14 @@
+{
+ "id": "review-gate-any-reviewer-model",
+ "title": "The review gate counts any passing reviewer record, whatever the reviewer's model",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "consultant",
+ "blockedBy": [],
+ "why": "Owner 15:18 CST Nov 16, \"A is correct\" on the review-gate question (ruling own-review-gate-any-model). Home: decision session-tiers, review gate line.",
+ "source": "ruling own-review-gate-any-model; hand-off of triage 8",
+ "note": "Todo. The consultant builds the fix after PR 3590 merges. No lane or PR yet. Filed by triage 9 at 15:35 CST Nov 16. Searched steps for review gate and PR 3590 at 15:35 CST: no step covers it.",
+ "updatedAt": "2026-11-16T15:35:00-06:00",
+ "order": -280
+}
