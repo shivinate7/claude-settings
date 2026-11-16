@@ -190,7 +190,7 @@
                           A repo with no readyChecks prints `unknown pre-ready: no merge.readyChecks declared` and exits 1.
                           Cost: see fast_checks, run_ready_checks, pre_ready_rows, cross_measure.
   merge --role TIER       cloud only: record this session's merge role (batch-runner, lane with `--step SLUG`, the cs-step slug of the session's own
-                          record, or standing: a coordinator or triage merges only its own docs or rule-text pull request, see standing_refusal). In a cloud session `--confirm`
+                          record, or standing: a coordinator, triage or the consultant merges only its own pull request, see standing_refusal). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role). A lane's confirm needs --head and runs only on its own ready pull request: a head ref of that step
                           (lane_own_pr_refusal), and a lane never runs --ready. A local session reads the role the launcher
                           (bin/claude-role) recorded in its role file instead: a session with its own role file runs `--confirm` only when
@@ -5733,13 +5733,11 @@ def replaced_names(info, n):
     return [x for x in dict.fromkeys(names) if x != n and x not in dropped]
 
 LANE_ROLE = "lane"  # a lane's merge role: its role record also names its step, and it merges only its own pull request (ruling own-lanes-merge-claude-settings-prs)
-STANDING_ROLE = "standing"  # ruling own-tiny-fixes-b: a coordinator or triage merges its own small edit, and only that
+STANDING_ROLE = "standing"  # ruling own-tiny-fixes-b: a coordinator, triage or the consultant merges its own pull request (owner, 2026-11-16 08:51 CST)
 MERGE_ROLES = {"batch-runner", LANE_ROLE, STANDING_ROLE}  # the tiers that may run `merge <pr> --confirm` in a cloud session; the standing one only past standing_refusal, the lane one only on its own pull request
 LANE_MERGE_REPO = "shivinate7/claude-settings"  # the one repo whose pull requests a lane merges itself; the lane role covers it alone
 LOCAL_MERGE_ROLES = {"batch-runner"}  # the roles a local session's role file may name; the lane role is a cloud role only
 
-STANDING_MAX_LINES = 40  # reading cost, unmeasured; the owner may change it
-STANDING_MAX_FILES = 3  # reading cost, unmeasured; the owner may change it
 
 def role_path():
     return pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")) / "state" / "merge-role.json"
@@ -5847,28 +5845,25 @@ def is_rule_text(path):
     return low.endswith(".md") and (os.path.basename(low) in ("claude.md", "agents.md") or low.startswith(("agents/", "skills/")))
 
 def standing_refusal(h, n, info, head):
-    """-> why a standing session may not merge pull request `n`, or "" when it may (ruling own-tiny-fixes-b). It must be the session's own, and every file
-    a doc or rule text outside the guard paths. The head's own checks must be green, and rule text needs one sonnet reviewer record on the relayed head `head`.
-    A rule-text pull request is also small: at most STANDING_MAX_LINES added lines (additions only) and STANDING_MAX_FILES files. A docs-only one skips the bound.
+    """-> why a standing session may not merge pull request `n`, or "" when it may (ruling own-tiny-fixes-b). It must be the session's own,
+    and the head's own checks must be green. A pull request past docs, code and guard paths included, needs one sonnet reviewer record on the relayed head `head`.
+    No size bound (owner, 2026-11-16 08:51 CST). A docs-only one needs no record.
     The text names no tier and no flag, so a lane learns nothing from it (git-remedy-never-names-target)."""
     if not own_session_link(info.get("body")):
         return "this session did not open this pull request, so it may not merge it."
     files = h.pr_files(n, info.get("changed_files"))
     paths = [p for p, _, _ in files]
-    if not paths or guard_hits(paths) or any(not (is_doc(p) or is_rule_text(p)) for p in paths):
-        return "this pull request changes a file that is not a doc or rule text, or sits on a guard path."
+    if not paths:
+        return "this pull request changes no file."
     not_green = head_not_green(h.head_state(n, info["head"]))
     if not_green:
         return f"the head's own checks are not green: {not_green}."
-    if kind_misfits("docs-only", files):  # rule text, not a doc: small, and one sonnet reviewer record on the live head
-        # additions only: pr_files carries no deletions, and adding a host read or changing its triples is out of scope here; a rename's old path counts as a file
-        if sum(a for _, _, a in files) > STANDING_MAX_LINES or len(files) > STANDING_MAX_FILES:
-            return "this pull request changes rule text and is too large for this session to merge."
+    if kind_misfits("docs-only", files) or guard_hits(paths):  # any file past docs, code and guard paths included: one passing sonnet reviewer record on the live head (owner, 2026-11-16 08:51 CST)
         bodies = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(n, [])
         rec = next((r for r in map(parse_review, reversed(bodies)) if r and r["n"] == n), None)
         reviewers = [m for _, role, m, _ in (rec["rounds"] if rec else []) if role == REVIEW_ROLES[0]]
         if not reviewers or any(m.lower() != "sonnet" for m in reviewers) or review_state(rec, head)[0] != "done":  # `head` is the relayed head, which relayed_head_holds ties to the live one: only this tool's claim commits may sit above it
-            return "this pull request changes rule text, and its head has no passing sonnet review record."
+            return "this pull request changes more than docs, and its head has no passing sonnet review record."
     return ""
 
 def guard_hits(paths):

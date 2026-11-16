@@ -14520,7 +14520,7 @@ class StandingMergeRole(CloudSession):
 
     def test_an_own_guard_path_pr_with_a_passing_sonnet_record_merges_under_standing(self):
         # ruling (owner, 2026-11-16 08:51 CST): a guard path is code, so one passing Sonnet record on the live head is its proof
-        paths = ("docs/decisions/agent-model-cap.md", "hooks/rules.md", "merge/x.py", "settings.json")
+        paths = ("hooks/rules.md", "merge/x.py", "settings.json")  # the model record fails the stamp check as a stub; the no-record case covers it
         self.commit_files(paths)
         changed = [(p, "modified", 1) for p in paths]
         self.own_pr(changed)
@@ -14567,7 +14567,7 @@ class StandingMergeRole(CloudSession):
 
     def test_a_code_pr_over_both_size_bounds_with_a_passing_sonnet_record_merges_under_standing(self):
         # ruling (owner, 2026-11-16 08:51 CST): a code pull request has no line or file bound, so one over both bounds still merges
-        lines, files = self.bound("STANDING_MAX_LINES"), self.bound("STANDING_MAX_FILES")
+        lines, files = 40, 3  # the bound this ruling removed
         paths = tuple(f"tools/part{i}.py" for i in range(files + 1))
         self.commit_files(paths)
         changed = self.spread(paths, lines + 1)
@@ -14599,18 +14599,9 @@ class StandingMergeRole(CloudSession):
         self.scripted_records(record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
         self.assert_standing_refused()
 
-    # ---- the size bound: a rule-text pull request is small. merge.STANDING_MAX_LINES counts the lines a file adds, because
-    # Host.pr_files carries no deletions. merge.STANDING_MAX_FILES counts the changed files. Both are read by name, so the
-    # cases follow the bound the merge module names. A docs-only pull request is not bounded.
+    # ---- no size bound: a pull request past docs needs a passing sonnet record; a docs-only one needs none.
     RULE_PATHS = ("CLAUDE.md", "agents/a.md", "agents/b.md", "skills/b/SKILL.md", "skills/c/SKILL.md")
     DOC_PATHS = ("docs/a.md", "docs/b.md", "docs/c.md", "docs/d.md", "docs/e.md")
-
-    def bound(self, name):
-        """The size bound `name` of the merge module, read by name. A missing name fails the case with that name."""
-        value = getattr(merge, name, None)
-        if value is None:
-            self.fail(f"merge.{name} is not defined")
-        return value
 
     def spread(self, paths, total):
         """[(path, status, additions)] for `paths`, the additions summing to `total`: the first file takes what the others leave."""
@@ -14626,44 +14617,21 @@ class StandingMergeRole(CloudSession):
         for named in ("batch-runner", "coordinator", "standing"):
             self.assertNotIn(named, err.lower(), f"the refusal names {named}")
 
-    def test_a_rule_text_pr_at_exactly_the_size_bound_merges_under_standing(self):
-        lines, files = self.bound("STANDING_MAX_LINES"), self.bound("STANDING_MAX_FILES")
-        paths = self.RULE_PATHS[:files]
+    def test_a_large_rule_text_pr_with_a_sonnet_record_merges_under_standing(self):
+        # no size bound (owner, 2026-11-16 08:51 CST): a passing sonnet record is the gate
+        paths = self.RULE_PATHS
         self.commit_files(paths)
-        self.own_pr(self.spread(paths, lines))
+        self.own_pr(self.spread(paths, 400))
         self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, PASS",)))
         rc, out, err = self.standing_confirm()
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(getattr(self.host, "merged", False), out + err)
 
-    def test_a_rule_text_pr_one_line_over_the_line_bound_is_refused_under_standing(self):
-        # a valid Sonnet record is present, so only the line bound refuses this pull request
-        lines, files = self.bound("STANDING_MAX_LINES"), self.bound("STANDING_MAX_FILES")
-        paths = self.RULE_PATHS[:files]
-        self.commit_files(paths)
-        self.own_pr(self.spread(paths, lines + 1))
-        self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, PASS",)))
-        err = self.assert_standing_refused()
-        self.assertIn(merge.ROLE_CITE, err, "the size refusal does not print the cite")
-        self.assert_names_no_role(err)
-
-    def test_a_rule_text_pr_one_file_over_the_file_bound_is_refused_under_standing(self):
-        # a valid Sonnet record is present, so only the file bound refuses this pull request
-        files = self.bound("STANDING_MAX_FILES")
-        paths = self.RULE_PATHS[:files + 1]
-        self.commit_files(paths)
-        self.own_pr([(p, "modified", 1) for p in paths])
-        self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, PASS",)))
-        err = self.assert_standing_refused()
-        self.assertIn(merge.ROLE_CITE, err, "the size refusal does not print the cite")
-        self.assert_names_no_role(err)
-
     def test_a_docs_only_pr_over_both_bounds_still_merges_under_standing(self):
         # a docs-only pull request is not bounded: no record is needed, and it merges over both bounds
-        lines, files = self.bound("STANDING_MAX_LINES"), self.bound("STANDING_MAX_FILES")
-        paths = self.DOC_PATHS[:files + 1]
+        paths = self.DOC_PATHS
         self.commit_files(paths)
-        self.own_pr(self.spread(paths, lines + 1))
+        self.own_pr(self.spread(paths, 400))
         rc, out, err = self.standing_confirm()
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(getattr(self.host, "merged", False), out + err)
