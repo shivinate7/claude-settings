@@ -123,13 +123,37 @@ _check = fail_closed_case("git_reads")
 FAILCLOSED_CHECKS.append(_check)
 LOG_CHECKS_EXTRA.append(("audit-high fail-closed: a copy missing git_reads refuses a Bash call", _check))
 
-# guard_kill.py imports proc_env.py at its top level, for its session-tag read. proc_env.py is no guard_*
-# sibling, so FAILCLOSED_MODULES does not hold it either. A copy without it refuses as guard-crash, never
-# judges the call with the read missing (decision install-hooks-whole).
-pr2015__check = fail_closed_case("proc_env")
+def proc_env_fallback_check():
+    """A copy without proc_env.py allows a plain Bash call, and still denies a kill by its rule. guard_kill imports
+    proc_env inside a try, and its ImportError fallback reads no session tag. The intact copy is the control, so the
+    kill's deny is shown to come from the rule, not from a copy that never loaded."""
+    drop = "proc_env.py"
+    if not os.path.exists(os.path.join(os.path.dirname(GUARD), drop)):
+        return False, "%s is not beside guard.py, so the case cannot delete it" % drop
+    control = _run_copy(_guard_copy("proc_env-intact", None), FAILCLOSED_CONTROL, "proc_env-intact")
+    if _decision(control)[0] != "deny":
+        return False, "the intact copy did not deny the control call: %r" % (_decision(control),)
+    folder = _guard_copy("proc_env", drop)
+    plain = _run_copy(folder, FAILCLOSED_CALL, "proc_env")
+    decision, reason = _decision(plain)
+    if plain.returncode != 0 or decision != "allow" or reason:
+        return False, "without %s a plain call is %r as %r (exit %d), want a silent allow" % (
+            drop, decision, reason[:70], plain.returncode)
+    kill = _run_copy(folder, FAILCLOSED_CONTROL, "proc_env")
+    decision, reason = _decision(kill)
+    if decision != "deny" or GUARD_CRASH in reason:
+        return False, "without %s the kill is %r as %r, want a deny by its rule" % (drop, decision, reason[:70])
+    return True, ("proc_env.py missing: a plain call is allowed silently, exit 0, and a kill is denied by its rule, "
+                  "not as guard-crash")
+
+
+# guard_kill.py imports proc_env.py inside a try, for its session-tag read. proc_env.py is no guard_* sibling, so
+# FAILCLOSED_MODULES does not hold it either. A copy without it falls back to no read: a plain call is allowed, and a
+# kill is still denied by its rule (decision install-hooks-whole).
+pr2015__check = proc_env_fallback_check
 FAILCLOSED_CHECKS.append(pr2015__check)
 LOG_CHECKS_EXTRA.append(("install-hooks-whole fail-closed: a copy missing proc_env (guard_kill's session-tag read) "
-                         "refuses a Bash call as guard-crash", pr2015__check))
+                         "allows a plain Bash call and denies a kill by its rule", pr2015__check))
 for _label, _check in (
     ("audit-high fail-closed: an intact copy allows a plain Bash call", _intact_allows_a_plain_call),
 ):
