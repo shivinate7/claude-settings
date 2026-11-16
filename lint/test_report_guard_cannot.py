@@ -2990,6 +2990,28 @@ class CannotClaimTests(trg.SameTurnWriter, unittest.TestCase):
         line = "I'm unable here."
         self.assert_probe_blocked(self.stop([trg.human("import it"), trg.assistant_text(line)]), line)
 
+    # ---- A past report whose hand-off is in the next sentence. The hand-off is read in the claim's sentence and the one after it.
+
+    def test_cc_red_couldnt_file_with_its_hand_off_in_the_next_sentence_blocks(self):
+        # Catches: the hand-off read only in the claim's own sentence, so a past report whose owner hand-off sits in the sentence
+        # after it passed with no probe.
+        line = "I couldn't import the file."
+        out = self.stop([trg.human("import the file"), trg.assistant_text(line + " You'll need to run it yourself.")])
+        self.assert_probe_blocked(out, line)
+
+    def test_cc_control_couldnt_file_with_a_sentence_before_its_hand_off_passes(self):
+        # Control: a sentence between the claim and its hand-off takes the hand-off out of the next-sentence read, so the claim
+        # passes. This pins the next-sentence read and no wider one.
+        text = "I couldn't import the file. The log holds no entry. You'll need to run it yourself."
+        out = self.stop([trg.human("import the file"), trg.assistant_text(text)])
+        self.assert_passes(out, "a past report with a sentence between it and its hand-off")
+
+    def test_cc_control_couldnt_file_with_a_hand_off_and_one_call_passes(self):
+        # Control: a call in the turn backs a probe claim, so the hand-off sentence after the claim is not listed either.
+        text = "I couldn't import the file. You'll need to run it yourself."
+        out = self.stop([trg.human("import the file"), *ok_bash("ls inbox", "tu_c"), trg.assistant_text(text)])
+        self.assert_passes(out, "a past report and hand-off with one call in the turn")
+
 
 if __name__ == "__main__":
     unittest.main()
