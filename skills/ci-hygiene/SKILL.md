@@ -208,18 +208,19 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     in the daily run, except on macOS (R61): every macOS run takes the slice, and a push to main
     starts no macOS job (a job-level `github.event_name != 'push'`, since a step-level skip still starts
     the runner). Slow legs run daily (owner item 880, 11:53 CST Nov 15). A push runs the Linux fast jobs
-    only. The Windows, mutation and macOS jobs run in the one daily scheduled run, a pull request and a
-    manual run. When the newest completed daily is green and `push-skip` proved every push run since it, the
+    only. The Windows and mutation jobs run in the one daily scheduled run, a pull request and a
+    manual run. The macOS jobs run on a manual run, and on a daily that runs, never on a pull request or a push (owner,
+    01:33 CST Nov 16: "turn off all mac runs for now"). The lane-touched-tests workflow has no macOS leg either. `all-jobs-passed` does not need them. When the newest completed daily is green and `push-skip` proved every push run since it, the
     newest at this head, the daily skips (the `nightly-skip` job). `scope` waits on that job,
     so nothing is cancelled.
 18. **Profile before you refactor test setup.** Compare setup time to test-body time. If the saving is
     under 20%, stop.
 19. **Run one scope job first.** Make it a cheap Linux job named `scope`. Every other job needs it.
-    A scope skip sits on the CI step that runs the suite or lint. The three macOS jobs also carry
-    the flag in a job-level `if:`, because a step-level skip still starts a runner and bills its setup
+    A scope skip sits on the CI step that runs the suite or lint. The three macOS jobs carry their
+    event guard (daily and dispatch only) and the flag in a job-level `if:`, because a step-level skip still starts a runner and bills its setup
     minutes (step 13), macOS most. Decision `same-check-kinds` (every repo runs the same check kinds)
-    and decision `main-branch-protection` (the required checks on main) hold the rule. Unless
-    `scope-skips` names it, the rollup fails a skipped job.
+    and decision `main-branch-protection` (the required checks on main) hold the rule. The rollup fails a
+    skipped job it needs, and it does not need the macOS jobs.
     Apart from those three and the push-off jobs (the Windows and mutation jobs, whose job-level `if:` is
     `github.event_name != 'push'` alone, with the draft guard on a shard), a job-level `if:` holds only the draft guard, or the records-only condition
     `needs.scope.outputs.records_only_skip != 'true'`. That condition stands alone, or joins a shard's

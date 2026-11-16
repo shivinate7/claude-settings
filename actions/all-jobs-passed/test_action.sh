@@ -88,9 +88,9 @@ nopy_case() { # nopy_case <label>: wiring.sh with python3 off PATH must exit non
 nopy_case "wiring: python3 off PATH exits non-zero, never 0"
 
 # Scope-skips (decision: roadmap step macos-jobs-gated-by-scope). A skipped job that the scope-skips input names passes only when the
-# scope job succeeded and every flag the input lists is exactly "false". The map is testing/scope_skips.py's, the one home of the scope skips.
-map_json="$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import scope_skips; sys.stdout.write(scope_skips.SCOPE_SKIPS_JSON)' "$root/testing")" || map_json=""
-[ -n "$map_json" ] || { echo "FAIL - scope-skips fixture: testing/scope_skips.py did not load"; exit 1; }
+# scope job succeeded and every flag the input lists is exactly "false". This suite holds its own map literal: check.sh is the generic action,
+# and no macOS job has a scope skip in this repo now (owner, 01:33 CST Nov 16), so the names below are the action's fixture data.
+map_json='{"shell-macos":["shell_macos"],"checks-macos":["checks_macos","sweep"],"checks-macos-b":["checks_macos"]}'
 skips_case() { # skips_case <pass|fail> <label> <SCOPE_SKIPS value> <NEEDS json>: check.sh with the input set to that value
   SCOPE_SKIPS="$3" NEEDS="$4" bash "$here/check.sh" >/dev/null 2>&1; got=$?
   if { [ "$1" = pass ] && [ $got -eq 0 ]; } || { [ "$1" = fail ] && [ $got -ne 0 ]; }; then echo "ok   $2"
