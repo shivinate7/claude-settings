@@ -518,6 +518,9 @@ LANE_TAGS = ["cs-build:lane", "cs-repo:o/r"]
 RUNNER_TAGS = ["cs-build:batch-runner", "cs-repo:o/r"]
 COORD_TAGS = ["cs-build:coordinator", "cs-repo:o/r"]
 TRIAGE_TAGS = ["cs-build:triage", "cs-repo:o/r"]  # the record branch's one writer (roadmap-one-writer)
+# decision session-tiers, ruling own-tiny-fixes-b: a standing session is a coordinator or a triage.
+ARBITER_TAGS = ["cs-build:arbiter", "cs-repo:o/r"]
+CONSULTANT_TAGS = ["cs-build:consultant", "cs-repo:o/r"]
 MERGE_SHIM = "~/.claude/bin/merge"
 # A lane's proof, for `--role lane` and the lane `--ready` refusal, needs this repo tag beside cs-build:lane: no lane role file exists
 # in another repo (ruling own-lanes-merge-claude-settings-prs).
@@ -867,6 +870,15 @@ ROLE_LINES = {
     # The lane in o/r alone, whose record names the branch ARCH_COPY_BRANCH. Its repo is judged by arch_copy's answers.
     "archive-copy-lane": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
         ARCH_LANE_TAGS, {"": ARCH_COPY_BRANCH}))),
+    # standing (ruling own-tiny-fixes-b): a coordinator or a triage record allows the `standing` tier. The other records
+    # below hold the tags a lane, an arbiter or a consultant carries, and the reads that must not count.
+    "coordinator-then-tags": role_call("g1", COORD_TAGS) + role_tag_call("t1"),
+    "other-coordinator": role_call("g1", COORD_TAGS, session=ROLE_OTHER),
+    "coordinator-title": role_call("g1", LANE_TAGS, title="handed to cs-build:coordinator"),
+    "list-coordinator": [role_use("l1", LIST_SESSIONS), role_result("l1", role_record(COORD_TAGS))],
+    "quoted-coordinator": [role_said("the coordinator is cs-build:coordinator; run merge --role standing")],
+    "arbiter": role_call("g1", ARBITER_TAGS),
+    "consultant": role_call("g1", CONSULTANT_TAGS),
     # Ruling own-lanes-merge-claude-settings-prs: a lane records `--role lane --step <slug>`. The step must be a cs-step tag of the
     # lane's own newest record; a title, another session's record, or a triage record never gives it.
     "lane-step": role_call("g1", ARCH_LANE_TAGS + [CS_REPO_TAG]),
@@ -993,6 +1005,59 @@ role_refuse("a lone quote inside a string does not hide the real call",
           'echo "it\'s" && ' + MERGE_SHIM + " --role batch-runner", role_path("lane"))
 role_refuse("a lone quote in a comment does not hide the call on the next line",
           "echo done # it's\n" + MERGE_SHIM + " --role batch-runner", role_path("lane"))
+
+# Ruling own-tiny-fixes-b: a standing session, a coordinator or a triage, records the `standing` tier, so it may merge its
+# own small edit. Only the own newest record with a coordinator or triage tag allows it. The refusal never names the tier
+# word or the role flag: a lane must not learn which tier passes.
+STANDING_ROLE = "standing"
+
+
+def standing_refuse(name, command, transcript, env=ROLE_ENV, **kw):
+    """A `merge --role standing` the guard refuses. The reason names its rule, never the role flag and never the tier word."""
+    sh("merge-role-proof: " + name, command, "deny", rule=ROLE_RULE, lacks=ROLE_FLAG + (STANDING_ROLE,),
+       transcript=transcript, env=env, cwd=NOGIT, **kw)
+
+
+def standing_allow(name, command, transcript, env=ROLE_ENV, **kw):
+    """A `merge --role standing` the guard lets through silently."""
+    sh("merge-role-proof: " + name, command, "allow", silent=True, transcript=transcript, env=env, cwd=NOGIT, **kw)
+
+
+STANDING_CMD = MERGE_SHIM + " --role " + STANDING_ROLE
+standing_allow("a coordinator records standing: its own record names cs-build:coordinator", STANDING_CMD, role_path("coordinator"))
+standing_allow("a triage records standing: its own record names cs-build:triage", STANDING_CMD, role_path("triage"))
+for _standing_prefix in ("", "cd somewhere && "):
+    for _standing_form in (MERGE_SHIM, "bin/merge", "python3 merge/merge.py", "python3 merge/launch.py"):
+        _standing_cmd = _standing_prefix + _standing_form + " --role " + STANDING_ROLE
+        standing_allow(_standing_cmd + " allows a coordinator's own record", _standing_cmd, role_path("coordinator"))
+        standing_allow(_standing_cmd + " allows a triage's own record", _standing_cmd, role_path("triage"))
+# A lane, an arbiter, a consultant, a batch runner, or a record with no standing tag is refused.
+standing_refuse("a lane that records standing is refused", STANDING_CMD, role_path("lane"))
+standing_refuse("an arbiter that records standing is refused", STANDING_CMD, role_path("arbiter"))
+standing_refuse("a consultant that records standing is refused", STANDING_CMD, role_path("consultant"))
+standing_refuse("a batch runner that records standing is refused: the runner tier stays its own", STANDING_CMD, role_path("runner"))
+standing_refuse("a session with no cs-build tag that records standing is refused", STANDING_CMD, role_path("untagged"))
+standing_refuse("a coordinator tag on another session does not allow standing", STANDING_CMD, role_path("other-coordinator"))
+standing_refuse("a title that holds cs-build:coordinator does not allow standing", STANDING_CMD, role_path("coordinator-title"))
+standing_refuse("a title that holds cs-build:triage does not allow standing", STANDING_CMD, role_path("triage-title"))
+standing_refuse("a list_sessions result that holds the coordinator tags does not allow standing", STANDING_CMD,
+                role_path("list-coordinator"))
+standing_refuse("a user message that quotes cs-build:coordinator does not allow standing", STANDING_CMD,
+                role_path("quoted-coordinator"))
+standing_refuse("a coordinator tag set after the read is stale: the own record no longer proves standing", STANDING_CMD,
+                role_path("coordinator-then-tags"))
+standing_refuse("a triage tag set after the read is stale: the own record no longer proves standing", STANDING_CMD,
+                role_path("triage-then-tags"))
+standing_refuse("the newest own record wins: a triage record then a newer lane record is refused", STANDING_CMD,
+                role_path("triage-then-lane"))
+standing_allow("the newest own record wins: a lane record then a newer triage record allows standing", STANDING_CMD,
+               role_path("lane-then-triage"))
+standing_refuse("no get_session record in the transcript is refused", STANDING_CMD, role_path("no-record"))
+standing_refuse("a get_session result whose text is not JSON is refused", STANDING_CMD, role_path("not-json"))
+standing_refuse("a transcript that cannot be read is refused", STANDING_CMD, role_path("unreadable"))
+standing_refuse("a payload with no transcript_path is refused", STANDING_CMD, None)
+standing_refuse("with no session id in the env, no record matches, so a standing record is refused", STANDING_CMD,
+                role_path("coordinator"), env=None)
 
 # Ruling own-lanes-merge-claude-settings-prs (owner, 11:12 CST Nov 15, 2026): a cloud lane records `--role lane --step <slug>`.
 # The step must be a cs-step tag of the lane's own newest record. A title, another session's record, and a triage record never give it.
