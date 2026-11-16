@@ -54,7 +54,7 @@ Built in `ruleset_names` and `protection_names` (`merge/merge.py`), and in `main
 - Protect script, owner ruling r (2026-11-11 16:43 CST) and its bypass (2026-11-11 16:49 CST, "yes with bypass"). `protect.py` writes the ruled form: active, on the named branch, `all-jobs-passed` as its one required check, deletion and non_fast_forward (force-push) blocked, and the Admin role as its one bypass actor, on pull requests only. On update it keeps the held ruleset's name, conditions, strict value and other rules.
   - Not set: no pull-request rule, no approval count, no strict policy of its own. Those are planned, not ruled.
   - The Admin role's actor id is 5 (`ADMIN_ROLE_ID`). UNKNOWN: not confirmed against a live ruleset. No ruleset exists on any repo yet. Verify when the sweep applies the first one.
-- `merge.requiredChecks` stays `"protection"` in `.github/stamp.json`. That is the lane's pick, not an owner ruling. The merge tool names the ruleset's checks when it names any, and classic protection's only when it names none. So `"protection"` names one set, never both. A private repo with no CI sets `"none"` and names no check (decision `private-repos-no-ci`, a private repo runs no GitHub-hosted job, so the merge tool merges with no required check).
+- `merge.requiredChecks` stays `"protection"` in `.github/stamp.json`. That is the lane's pick, not an owner ruling. The merge tool names the ruleset's checks when it names any, and classic protection's only when it names none. So `"protection"` names one set, never both.
 
 ## Ruled, not yet built
 
