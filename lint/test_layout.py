@@ -402,10 +402,12 @@ class GitTree(Tree):
     """The git steps of a fixture repo: one home for the cases that build one (WaitingCopy, DefaultBranchPage)."""
 
     def git(self, *args, input=None, env=None):
-        """One git step of the fixture repo. Commit signing is off for the run (lint/_test_git.py)."""
+        """One git step of the fixture repo. Commit signing is off for the run (lint/_test_git.py). Bytes in and out, so
+        Windows text mode does not write each LF as CRLF."""
         done = subprocess.run(["git", "-C", self.tree, "-c", "user.name=test", "-c", "user.email=test@example.invalid", *args],
-                              capture_output=True, text=True, input=input, env=env, timeout=30, check=True)
-        return done.stdout
+                              capture_output=True, input=None if input is None else input.encode("utf-8"), env=env,
+                              timeout=30, check=True)
+        return done.stdout.decode("utf-8")
 
     def record(self, branch, files):
         """A branch whose one commit holds `files` ({path: text}): refs/heads/<branch>, or the full ref when `branch`

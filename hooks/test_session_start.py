@@ -775,6 +775,162 @@ class SessionStartMergeRoleTests(unittest.TestCase):
                          "a solo session subject is accepted")
 
 
+# The SessionStart roster block (decision brief-ids-in-roster). Its rows are the Standing sessions rows of CLAUDE.md on the
+# roadmap ref. The row shape is the one section 43300 of tests/guard writes. That section lives in the guard runner's
+# globals, which this module cannot import, so the rows are built here too (a copy with that stated reason).
+ROSTER_REPO_NAME = "example-org/roster-fixture"  # the origin's owner and name: the repo tag the block prints
+ROSTER_COORD_ID = "session_01RosterCoordAa0001"
+ROSTER_TRIAGE_ID = "session_01RosterTriageBb0002"
+ROSTER_RUNNER_ID = "session_013RosterRunnerCc0003"
+ROSTER_LANE_ID = "session_01RosterLaneOutside9"  # a lane's id on a notes line, which is no row
+# (role word the block must print, the row's id) for each of the three rows the default fixture holds.
+ROSTER_ROWS_ASSERTED = (("coordinator", ROSTER_COORD_ID), ("triage", ROSTER_TRIAGE_ID),
+                        ("batch runner 10", ROSTER_RUNNER_ID))
+ROSTER_RECORD_HEAD = ("## Standing sessions\n\nThis roster is the one record of who holds each standing session.\n\n")
+ROSTER_PLACEHOLDER = ('- Coordinator (starts every other session, holds lane state, talks with the owner): '
+                      '"<session title>", <session id>, since <date and time>.')
+
+
+def roster_row(role, title, sid):
+    return '- %s (a standing session): "%s", %s, since 2026-11-10 14:29 CST.' % (role, title, sid)
+
+
+def roster_record(rows):
+    """CLAUDE.md with a Standing sessions section holding `rows`, then a lane notes section that names a lane's id."""
+    return ("# Fixture\n\nThe rules of this repo live beside this file.\n\n" + ROSTER_RECORD_HEAD + "\n".join(rows)
+            + "\n\n## Lane notes\n\nThe lane for step roster-at-start is " + ROSTER_LANE_ID + ". It is not on the roster.\n")
+
+
+DEFAULT_ROSTER_ROWS = [roster_row("Coordinator", "coordinator", ROSTER_COORD_ID),
+                       roster_row("Triage", "triage", ROSTER_TRIAGE_ID),
+                       roster_row("Batch runner", "batch runner 10", ROSTER_RUNNER_ID)]
+
+
+class SessionStartRosterTests(SessionStartAgentWorktreeNoticeTests):
+    """The roster block prints each standing session of the repo's roadmap record with its role, the repo tag, its id, and
+    the source. Status is from the record, not live, and the block names list_sessions for the live status. No roster
+    record prints one line that says so. The read uses no network and starts no process but the git read."""
+
+    def setUp(self):
+        super().setUp()
+        origin = os.path.join(self.root, "example-org", "roster-fixture.git")
+        os.makedirs(os.path.dirname(origin))
+        answer = subprocess.run([VCS, "init", "-q", "--bare", origin], capture_output=True, text=True, timeout=60)
+        if answer.returncode != 0:
+            sys.exit("fixture setup failed: git init --bare: %s" % answer.stderr.strip())
+        vcs(self.primary, "remote", "add", "origin", origin)
+
+    def git_in(self, args, text=None):
+        # Bytes, not text mode: Windows text mode writes each LF as CRLF, and mktree would read a CR in the name.
+        answer = subprocess.run([VCS, "-C", self.primary, *IDENT, *args],
+                                input=None if text is None else text.encode("utf-8"), capture_output=True, timeout=60)
+        if answer.returncode != 0:
+            sys.exit("fixture setup failed: %s %s: %s"
+                     % (VCS, " ".join(args), answer.stderr.decode("utf-8", "replace").strip()))
+        return answer.stdout.decode("utf-8").strip()
+
+    def put_record(self, text):
+        """Point refs/remotes/origin/roadmap at a commit whose only file is CLAUDE.md `text`. The checkout's branch and
+        files stay as they were: the record is read, never checked out."""
+        blob = self.git_in(["hash-object", "-w", "--stdin"], text)
+        tree = self.git_in(["mktree"], "100644 blob %s\tCLAUDE.md\n" % blob)
+        commit = self.git_in(["commit-tree", tree, "-m", "roster record"])
+        vcs(self.primary, "update-ref", "refs/remotes/origin/roadmap", commit)
+
+    def block_lines(self, lines):
+        """The lines that name the default fixture's first row, so a block with none fails here, not later."""
+        return [line for line in lines if ROSTER_COORD_ID in line]
+
+    def assert_one_roster_line_saying_none(self, lines):
+        named = [line for line in lines if re.search(r"roster", line, re.IGNORECASE)]
+        self.assertEqual(len(named), 1, "expected one roster line when there is no roster record, got %r" % named)
+        self.assertRegex(named[0], r"\b(no|not|none|missing)\b",
+                         "the roster line does not say there is no roster record: %r" % named[0])
+
+    def test_the_block_prints_one_line_per_row_with_its_role_repo_tag_and_id(self):
+        self.put_record(roster_record(DEFAULT_ROSTER_ROWS))
+        lines = self.run_hook()
+        self.assertEqual(self.last_stderr, "", "the hook printed on stderr: %r" % self.last_stderr)
+        for role, sid in ROSTER_ROWS_ASSERTED:
+            with self.subTest(row=sid):
+                named = [line for line in lines if sid in line]
+                self.assertEqual(len(named), 1, "expected one line that names %s, got %r" % (sid, named))
+                self.assertIn(ROSTER_REPO_NAME, named[0], "the row's line lacks the repo tag: %r" % named[0])
+                self.assertIn(role, named[0].lower(), "the row's line lacks its role %r: %r" % (role, named[0]))
+
+    def test_a_lane_id_on_a_lane_notes_line_is_not_printed_as_a_row(self):
+        self.put_record(roster_record(DEFAULT_ROSTER_ROWS))
+        lines = self.run_hook()
+        self.assertTrue(self.block_lines(lines), "the roster block is not printed, so no row can be judged")
+        self.assertEqual([line for line in lines if ROSTER_LANE_ID in line], [],
+                         "a lane's notes-line id is printed as a roster row")
+
+    def test_the_block_names_the_roadmap_standing_sessions_section_as_its_source(self):
+        self.put_record(roster_record(DEFAULT_ROSTER_ROWS))
+        lines = self.run_hook()
+        self.assertTrue(self.block_lines(lines), "the roster block is not printed, so no source line can be judged")
+        self.assertTrue(any("roadmap" in line.lower() and "Standing sessions" in line for line in lines),
+                        "no line names the roadmap record's Standing sessions section as the source: %r" % lines)
+
+    def test_the_block_says_status_is_from_the_record_and_not_live(self):
+        self.put_record(roster_record(DEFAULT_ROSTER_ROWS))
+        lines = self.run_hook()
+        self.assertTrue(self.block_lines(lines), "the roster block is not printed, so no status line can be judged")
+        self.assertTrue(any(re.search(r"status", line, re.IGNORECASE) and re.search(r"record", line, re.IGNORECASE)
+                            and re.search(r"not\s+live", line, re.IGNORECASE) for line in lines),
+                        "no line says the status is from the record and not live: %r" % lines)
+
+    def test_the_block_tells_the_session_to_run_list_sessions_for_live_status(self):
+        self.put_record(roster_record(DEFAULT_ROSTER_ROWS))
+        lines = self.run_hook()
+        self.assertTrue(self.block_lines(lines), "the roster block is not printed, so no list_sessions line can be judged")
+        self.assertTrue(any("list_sessions" in line and "live" in line.lower() for line in lines),
+                        "no line tells the session to run list_sessions for live status: %r" % lines)
+
+    def test_no_roster_record_prints_one_line_that_says_so_and_exits_zero(self):
+        lines = self.run_hook()
+        self.assertEqual(self.last_stderr, "", "the hook printed on stderr: %r" % self.last_stderr)
+        self.assert_one_roster_line_saying_none(lines)
+
+    def test_a_record_with_no_standing_sessions_section_prints_the_same_one_line(self):
+        self.put_record("# Notes\n\nNo roster is kept in this repo yet.\n")
+        lines = self.run_hook()
+        self.assertEqual(self.last_stderr, "", "the hook printed on stderr: %r" % self.last_stderr)
+        self.assert_one_roster_line_saying_none(lines)
+
+    def test_an_empty_roster_of_placeholders_prints_no_row_and_the_one_line(self):
+        self.put_record(roster_record([ROSTER_PLACEHOLDER]))
+        lines = self.run_hook()
+        self.assertEqual([line for line in lines if "<session" in line], [],
+                         "a template placeholder is printed as a roster row")
+        self.assert_one_roster_line_saying_none(lines)
+
+    def test_a_full_roster_prints_a_line_for_each_of_its_five_rows(self):
+        full = DEFAULT_ROSTER_ROWS + [roster_row("Batch runner", "batch runner, claude-settings", "session_01RosterBatchDd0004"),
+                                      roster_row("Arbiter", "arbiter", "session_01RosterArbiterEe0005")]
+        self.put_record(roster_record(full))
+        lines = self.run_hook()
+        self.assertEqual(self.last_stderr, "", "the hook printed on stderr: %r" % self.last_stderr)
+        for sid in ("session_01RosterBatchDd0004", "session_01RosterArbiterEe0005", ROSTER_COORD_ID, ROSTER_RUNNER_ID):
+            with self.subTest(row=sid):
+                named = [line for line in lines if sid in line]
+                self.assertEqual(len(named), 1, "expected one line that names %s, got %r" % (sid, named))
+
+    def test_the_roster_read_calls_no_gh_or_curl(self):
+        self.put_record(roster_record(DEFAULT_ROSTER_ROWS))
+        shims = os.path.join(self.root, "netshims")
+        marker = os.path.join(self.root, "network-calls.txt")
+        os.makedirs(shims)
+        for name in ("gh", "curl"):
+            path = os.path.join(shims, name)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("#!/bin/sh\necho %s >> '%s'\nexit 1\n" % (name, marker))
+            os.chmod(path, 0o755)
+        lines = self.run_hook(path_dir=shims)
+        self.assertTrue(self.block_lines(lines), "the roster block is not printed, so the network check proves nothing")
+        self.assertFalse(os.path.exists(marker), "the roster read started gh or curl")
+
+
 class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
     """A cwd inside a claude-settings live pin prints one line that names the pin, the words "live pin", and the
     clone to cd to. The pin is the linked worktree <clone>-live-<12 hex>, or the <clone>-live link to it. A pin

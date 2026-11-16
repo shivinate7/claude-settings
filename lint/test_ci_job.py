@@ -2605,8 +2605,8 @@ class PinnedHarness(Job):
         git_in(self.source, "checkout", "-qb", "symlinked", self.pin_a)
         write_lf(os.path.join(self.source, "CLAUDE.md"), "rules\n")
         git_in(self.source, "add", "CLAUDE.md")
-        blob = subprocess.run(["git", "-C", self.source, "hash-object", "-w", "--stdin"], input="CLAUDE.md", check=True,
-                              env=ENV, capture_output=True, text=True).stdout.strip()
+        blob = subprocess.run(["git", "-C", self.source, "hash-object", "-w", "--stdin"], input=b"CLAUDE.md", check=True,
+                              env=ENV, capture_output=True).stdout.decode("utf-8").strip()
         git_in(self.source, "update-index", "--add", "--cacheinfo", "120000,%s,AGENTS.md" % blob)
         git_in(self.source, "commit", "-qm", "AGENTS.md is a symlink to CLAUDE.md")
         sha = git_in(self.source, "rev-parse", "HEAD")

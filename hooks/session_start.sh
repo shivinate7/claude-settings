@@ -177,6 +177,19 @@ n=$(cd "$cwd" 2>/dev/null && git status --porcelain 2>/dev/null | wc -l | tr -d 
 printf 'checkout %s on %s, %s dirty files\n' "$toplevel" "$branch" "$n"
 tier_line
 
+# roster_lines: the standing sessions of this repo with their ids, so a session never types an id by hand (decision
+# brief-ids-in-roster). The rows are the Standing sessions section of CLAUDE.md on the local origin/roadmap ref, read
+# by hooks/own_session.py; no row prints one line that says so. Status is the record's, not live: a hook cannot call
+# list_sessions (see tier_line). Cost: once per SessionStart event, one python start and two read-only reads of the
+# checkout (the record, the origin url); no network, no file written, no process kept.
+if command -v python3 >/dev/null 2>&1; then
+  ro_script="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/own_session.py"
+  if [ -f "$ro_script" ]; then
+    ro_lines=$(python3 "$ro_script" roster-lines "$toplevel" 2>/dev/null)
+    [ -n "$ro_lines" ] && printf '%s\n' "$ro_lines"
+  fi
+fi
+
 # Local origin/HEAD's target, empty when unset. The default-branch check below tests the checkout against it. The
 # grants compare reads gm_default instead: the remote HEAD's target when the refresh read the remote, since that is
 # the branch the fetch refreshed and a local origin/HEAD goes stale when the remote's default is renamed; else this.

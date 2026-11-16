@@ -303,9 +303,11 @@ def origin_slug(url):
     follows the colon; a POSIX path with no scheme is the path itself."""
     if not isinstance(url, str):
         return None
-    url = url.strip()
+    url = url.strip().replace("\\", "/")  # a Windows path (`D:\\a\\owner\\name.git`) is a path, not an scp `host:path`
     if "://" in url:
         path = url.split("://", 1)[1].partition("/")[2]
+    elif len(url) > 2 and url[0].isalpha() and url[1] == ":" and url[2] == "/":  # a drive letter, not an scp host
+        path = url[2:]
     elif ":" in url.partition("/")[0]:
         path = url.partition(":")[2]
     else:
