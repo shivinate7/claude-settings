@@ -114,6 +114,14 @@ LANE_TITLE_EXAMPLE_OPENING = _FORM_HEAD + "my-step" + _FORM_TAIL
 # lane-effort-pin and lane-one-topic).
 LANE_GRANT_MARKER = "Grant:"
 CREATE_SESSION_TOOL = REMOTE_SERVER + "__create_session"
+# The one lane start: bin/lane-start prints these values and the guard's lane-start rules judge the same ones, so a
+# start the helper prints is never refused for a value it chose. lint/check_agent_models.py reads LANE_EFFORT through
+# hooks/guard.py and checks the lane row of the model table against it.
+LANE_EFFORT = "medium"
+LANE_MODEL = "sonnet"
+# The first non-blank line of a brief, after its Grant line, starts `Lane brief: <step>. Topic: <topic>.`
+LANE_BRIEF_MARKER = "Lane brief:"
+LANE_SOURCE_HOST = "https://github.com/"
 
 
 def lane_tags(tool_input: dict[str, Any]) -> list[Any]:
@@ -137,6 +145,21 @@ def grant_line_holds_words(line: str) -> bool:
     lane-one-topic."""
     words = line[len(LANE_GRANT_MARKER):].strip() if line.startswith(LANE_GRANT_MARKER) else ""
     return "<" not in words and any(c.isalnum() for c in words)
+
+
+def lane_title(slug: str, topic: str) -> str:
+    """The title of a lane start: LANE_TITLE_FORM with the slug filled in, then the topic."""
+    return LANE_TITLE_FORM.replace("<branch slug>", slug) + " " + topic
+
+
+def lane_start_tags(slug: str, topic: str, repo: str) -> list[str]:
+    """The tags of a lane start: the lane tag, then its topic, step and repo tags."""
+    return [LANE_TAG, TOPIC_TAG + topic, STEP_TAG + slug, REPO_TAG + repo]
+
+
+def lane_brief_line(slug: str, topic: str) -> str:
+    """The line that follows the Grant line in a lane's prompt."""
+    return "%s %s. Topic: %s." % (LANE_BRIEF_MARKER, slug, topic)
 
 
 def lane_head_refs(slug: str) -> tuple[str, str]:
