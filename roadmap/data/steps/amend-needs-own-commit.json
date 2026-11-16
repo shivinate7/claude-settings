@@ -1,0 +1,14 @@
+{
+ "id": "amend-needs-own-commit",
+ "title": "A guard refuses git commit --amend unless HEAD is a commit this session made",
+ "priority": "next",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "updatedAt": "2026-11-16T11:50:43-06:00",
+ "why": "[11:51 CST Nov 16, triage] Coordinator relay 11:40 CST, from the lane of #3536 (its words, not verified by triage; coordinator did not verify): the lane's amend rewrote an unrelated commit; its work is archived at origin archive/saved-comment-owner-cut. Searched before filing: steps (no step names an amend guard for another agent's commit; amend-guard-merge-head is a different guard), open PRs and branches. Found: PR #3589 (branch amend-foreign-head, rule amend-foreign-head, red tests only) was closed unmerged at 10:08 CST Nov 16 (REST); its body says the rule is not built there and the incident form is left for the owner to rule. The reason for the close is not read. Reuse that branch and rule name rather than start a second.",
+ "source": "coordinator relay 11:40 CST Nov 16 of the #3536 lane; filed by triage 8",
+ "note": "Todo. Build a guard that refuses a Bash git commit --amend when HEAD's commit was not made by this checkout. Incident: the #3536 lane amended an unrelated commit (archived at archive/saved-comment-owner-cut). Prior work: PR #3589 (branch amend-foreign-head, red tests for rule amend-foreign-head), closed unmerged 10:08 CST Nov 16, reason unread; it leaves the session form (no agent_id) for the owner to rule. A guard change: guard rounds apply. Reuse before building new."
+}
