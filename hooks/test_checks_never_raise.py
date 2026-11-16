@@ -94,6 +94,10 @@ OUTSIDE = {
     ("own_session", "own_session_read"): "raises OSError on a transcript that is missing, by design; every caller in "
                                          "guard.py and guard_merge.py reads it inside a try that fails closed, and the "
                                          "direct callers are fuzzed, so a caller that lets the error out is still found",
+    ("own_session", "created_sessions"): "raises OSError on a transcript that is missing, by design; its one caller, "
+                                         "step_dup_hit, reads it inside a try that fails closed, and that caller is fuzzed",
+    ("own_session", "list_sessions_read"): "raises OSError on a transcript that is missing, by design; its one caller, "
+                                           "step_dup_hit, reads it inside a try that fails closed, and that caller is fuzzed",
 }
 
 RUN = _test_temp.run_folder()
