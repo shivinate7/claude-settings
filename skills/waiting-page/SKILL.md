@@ -46,7 +46,7 @@ The URL is the link of the `waiting-page` role entry in the `artifacts` key of t
 
 ## Print the page link
 
-Whenever the writer posts, changes or closes an item, its chat reply for that turn carries the page link as one line, `https://claude.ai/artifact/<id>`, the repo's page from "Find the page". A closed item and a change count too: the owner opens the page from chat (owner asks, Nov 12 12:50 CST to Nov 14 23:02 CST; roadmap step `surface-page-link-in-chat`). The Stop check `page_link_check` in `hooks/feedback_guard.py` blocks a turn that wrote an item, answer, group or ask on the page and whose last reply lacks the page link. A `meta/page` stamp owes none, and a link in a reply that a later notice follows covers every write before it. A repo with no page prints no link.
+Whenever the writer posts, changes or closes an item, its chat reply for that turn carries the page link as one line, `https://claude.ai/artifact/<id>`, the repo's page from "Find the page". A closed item and a change count too: the owner opens the page from chat (owner asks, Nov 12 12:50 CST to Nov 14 23:02 CST; roadmap step `surface-page-link-in-chat`). The Stop check `page_link_check` in `hooks/feedback_guard.py` blocks a turn that wrote an item, answer, group, ask or receipt on the page and whose last reply lacks the page link. A `meta/page` stamp owes none, and a link in a reply that a later notice follows covers every write before it. A repo with no page prints no link.
 
 ## The database
 
