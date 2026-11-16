@@ -1,0 +1,12 @@
+{
+ "id": "own-907-a-fix-on-red-main",
+ "at": "2026-11-15T21:01:00-06:00",
+ "title": "The owner says yes, merge #3567 onto red main as a fix-forward (item 907)",
+ "ruling": "Owner words, verbatim as relayed (RELAYED by the consultant, not read by triage as typed): \"yes merge of course\". Act named: merge PR #3567 (shivinate7/claude-settings; tests only; re-points merge/test_merge.py:12356 and lint/test_windows_split.py:2473) onto red main as a fix-forward. Covers that PR only. It makes one exception to rule git-red-main-reverts (while main's newest finished run is red, only the revert of the blamed commit merges) for that PR; the rule stands for every other PR. Source item: waiting page item 907; the coordinator's reads of runs 43785958800 and 43786153106 (unread by triage). Step: ci-pin-required-checks-tests. PAGE SAVE as well: item 907 a was saved on the waiting page at about the same moment as item 906 b, about 21:02 CST Nov 15 (time approximate; after the chat yes at 21:01 CST), per the coordinator's relay of the page comment \"Saved on the waiting page. Owners: batch runner 10; the consultant. Items: 907 a, 906 b.\" Not read by triage.",
+ "quote": "yes merge of course",
+ "source": "Owner chat 21:01 CST Nov 15 (verbatim as relayed), relayed by the consultant and the coordinator; not read by triage as typed; waiting page item 907",
+ "status": "open",
+ "step": "ci-pin-required-checks-tests",
+ "supersedes_none": "A one-PR exception to a rule; it supersedes no ruling. It leaves rule git-red-main-reverts in force for every other PR.",
+ "updatedAt": "2026-11-15T21:03:00-06:00"
+}

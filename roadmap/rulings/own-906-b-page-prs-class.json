@@ -1,0 +1,11 @@
+{
+ "id": "own-906-b-page-prs-class",
+ "at": "2026-11-15T21:02:00-06:00",
+ "title": "The owner says yes to nine named page PRs, each merged alone at its live head (item 906 b)",
+ "ruling": "Owner page save, item 906 option b, as relayed by the coordinator (not read by triage). Time approximate, about 21:02 CST Nov 15: the coordinator gave the page comment's text, \"Saved on the waiting page. Owners: batch runner 10; the consultant. Items: 907 a, 906 b.\", but no timestamp, so the exact time is unread. Option b text, quoted: \"Yes, the named page PRs, each at its live head, when its lane lint passes and its review record is at that head.\" Named PRs: #3479, #3543, #3457, #3529, #3449, #3468, #3467, #3469, #3530. Covers those nine only, each alone at its live head, when its lane lint passes and its review record is at that head; no other PR and no variant (rule outcomes-grant-covers-named-act). Source: waiting page item 906. The coordinator relays that batch runner 10 merges them.",
+ "quote": "Yes, the named page PRs, each at its live head, when its lane lint passes and its review record is at that head.",
+ "source": "Owner page save about 21:02 CST Nov 15 (time approximate), item 906 option b, relayed by the coordinator; triage did not read the save",
+ "status": "open",
+ "supersedes_none": "A class yes for nine named PRs; it supersedes no ruling. It is a class form of the per-PR merge yes (relayed yes, standing grant).",
+ "updatedAt": "2026-11-15T21:03:00-06:00"
+}
