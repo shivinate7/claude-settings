@@ -512,7 +512,7 @@ def load_json(path, label):
 
 def docs_in(folder, label):
     """{doc_id: parsed JSON} of the `<doc_id>.json` files in `folder`. Anything but the marker is unknown: a doc that
-    is skipped would be deleted from the copy as if it were gone."""
+    is skipped would go missing from the copy's update, and in a non-waiting collection it would be deleted."""
     found = {}
     for name in sorted(os.listdir(folder)):
         path = os.path.join(folder, name)
