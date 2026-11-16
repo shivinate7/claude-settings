@@ -746,7 +746,7 @@ class RecordsOnlyPush(unittest.TestCase):
         keep = list(LINT_FLAGS)
         self.assertEqual(differing(got, whole, keep), [], f"a lint flag moved for a hand-edited page: {got}")
 
-    # A push past a fully green head skips the same 13 flags as a pull request. Owner ruling 830 c (every job on a records-only
+    # A push past a fully green head skips the same 13 flags as a pull request. Ruling 830 c (every job on a records-only
     # push after a green head), widened by item 857 pick b (19:48 CST Nov 15). Named failure: a records-only push keeps a job
     # flag on, so its job still runs.
     # The delta is asserted before the flags (P7).
@@ -835,7 +835,7 @@ class RecordsOnlyPush(unittest.TestCase):
         self.assertSkipFlag(got, False)
         self.assertEqual(got.get("mutation_report"), "true", f"a batch pull request with no green head turns mutation_report off: {got}")
 
-    # Owner ruling 830 c, widened by item 857 pick b (19:48 CST Nov 15): a records-only push past a green head turns
+    # Ruling 830 c, widened by item 857 pick b (19:48 CST Nov 15): a records-only push past a green head turns
     # mutation_report off too. Named failure: the
     # mutation-report job starts on a records-only push. The scope is asserted before the flag (P7).
     def test_records_only_push_after_green_head_turns_mutation_report_off(self):
@@ -846,7 +846,7 @@ class RecordsOnlyPush(unittest.TestCase):
         self.assertSkipFlag(got, True)
         self.assertEqual(got.get("mutation_report"), "false", f"a records-only push past a green head turns mutation_report on: {got}")
 
-    # Controls, green on the head before the wider skip: a push with no green head, or with a second delta path, runs every
+    # Controls for the wider skip: a push with no earlier green head, or with a second delta path, runs every
     # flag as before. Named failure: the skip reads a GREEN_HEAD or a delta it must not.
     def test_records_only_push_with_no_earlier_green_head_runs_everything(self):
         facts = {}
@@ -1013,7 +1013,7 @@ def rollup_needs(text):
 
 @unittest.skipUnless(BASH, "bash not on PATH")
 class RecordsOnlyEveryJob(unittest.TestCase):
-    """The wider skip, owner ruling 830 c widened by item 857 pick b (19:48 CST Nov 15): a records-only run starts no job
+    """The wider skip, ruling 830 c widened by item 857 pick b (19:48 CST Nov 15): a records-only run starts no job
     except the decision jobs, which decide or read the skip, and the rollup on a pull request. A step-level skip still starts
     a runner, so each job's job-level if is read on the outputs ci-scope.sh wrote for a real records-only run."""
     RECORDS = RecordsOnlyPush.RECORDS
@@ -1060,7 +1060,7 @@ class RecordsOnlyEveryJob(unittest.TestCase):
                         self.assertFalse(job_runs(expr, got, event),
                                          f"{job} starts on a records-only {event} run; its job-level if is {expr or 'absent'}")
 
-    # Control, green on main: the decision jobs and, on a pull request, the rollup start on a records-only run.
+    # Control: the decision jobs and, on a pull request, the rollup start on a records-only run.
     def test_the_decision_jobs_and_the_rollup_start_on_a_records_only_run(self):
         text = self.workflow()
         for event in self.EVENTS:
@@ -1076,7 +1076,7 @@ class RecordsOnlyEveryJob(unittest.TestCase):
                         self.assertTrue(job_runs(expr, got, event),
                                         f"{job} does not start on a records-only {event} run; its job-level if is {expr}")
 
-    # Control, green on main: the reader reads the wider skip's form as off when records_only_skip is 'true' and on when it is
+    # Control: the reader reads the wider skip's form as off when records_only_skip is 'true' and on when it is
     # 'false', and refuses a form it does not know rather than reading it as true.
     def test_the_if_reader_reads_the_records_only_skip_and_refuses_an_unknown_form(self):
         expr = "needs.scope.outputs.records_only_skip != 'true'"
@@ -1087,7 +1087,7 @@ class RecordsOnlyEveryJob(unittest.TestCase):
         with self.assertRaises(ValueError, msg="the reader accepts a form it does not know"):
             _IfParser("github.event_name == 'push' ? 'a' : 'b'", {}).parse()
 
-    # Controls, green on main: a records change beside another file starts the jobs that file starts alone, and a workflow
+    # Controls: a records change beside another file starts the jobs that file starts alone, and a workflow
     # change beside records starts every job the rollup needs. The delta is asserted before the jobs (P7).
     def test_a_records_change_beside_another_file_starts_the_jobs_that_file_starts_alone(self):
         text = self.workflow()

@@ -143,7 +143,7 @@ skips_case fail "SCOPE_SKIPS empty: a skipped macOS job stays red" "" "$SKIPS_OF
 SCOPE_ON='"scope":{"result":"success","outputs":{"shell_macos":"true","checks_macos":"true","sweep":"true"}}'
 MAC_OK='"shell-macos":{"result":"success"},"checks-macos":{"result":"success"},"checks-macos-b":{"result":"success"}'
 skips_case pass "map set, scope success, flags true, macOS jobs succeeded: a green run passes" "$map_json" "{$SCOPE_ON,$MAC_OK,$LINT_OK}"
-# (g) a records-only run (owner ruling 830 c, widened by item 857 pick b, 19:48 CST Nov 15): the scope job reads records_only_skip
+# (g) a records-only run (ruling 830 c, widened by item 857 pick b, 19:48 CST Nov 15): the scope job reads records_only_skip
 # "true", and every job the run did not start is skipped. Those skips pass, so the rollup passes. The controls: the same skips
 # stay red when records_only_skip is not "true", when a needed job failed, and when the scope job did not succeed.
 RECORDS_ONLY='"scope":{"result":"success","outputs":{"records_only_skip":"true","shell_macos":"false","checks_macos":"false","sweep":"false"}}'
