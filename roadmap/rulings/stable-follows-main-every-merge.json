@@ -1,0 +1,10 @@
+{
+ "id": "stable-follows-main-every-merge",
+ "at": "2026-11-16T12:59:00-06:00",
+ "title": "For now, stable follows main: stable moves every time main merges green.",
+ "ruling": "Owner rulings, 12:59 CST Nov 16, relayed by the consultant at 12:59 CST (not read by triage; not owner-typed to triage): keep stable matching main for now, as a match every time main merges, so stable goes ahead too. The consultant reports it fast-forwarded stable to main 107b667642 at 12:59 CST and has a lane making stable.yml move stable on every green push run of main. The consultant says this changes decision stable-branch. Triage read neither the branch nor the decision, and has not changed the decision.",
+ "quote": "Just keep stable matching main for now then if that's easiest / Probably is easiest; Like keep that as a match every time main merges stable goes ahead too",
+ "source": "Consultant message to triage, 12:59 CST Nov 16 (the two quotes as the consultant gave them). Not owner-typed to triage.",
+ "status": "open",
+ "step": "github-billing-blocks-ci"
+}
