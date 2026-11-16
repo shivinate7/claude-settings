@@ -94,10 +94,15 @@ def done(tid="tu_1", content="ok", error=False):
     return trg.tool_result_msg(tid, content=content, is_error=error)
 
 
-def failed_pr_create(tid="tu_pr"):
-    """A failed call to the GitHub MCP create-PR tool, a landing tool, so the turn it sits in lands."""
-    return [use(OPEN_PR, {"title": "t", "head": "b", "base": "main"}, tid),
+def failed_pr_create(tid="tu_pr", head="b"):
+    """A failed call to the GitHub MCP create-PR tool for `head`, a landing tool, so the turn it sits in lands."""
+    return [use(OPEN_PR, {"title": "t", "head": head, "base": "main"}, tid),
             done(tid, "HTTP 422 Validation Failed: head is invalid", error=True)]
+
+
+def ok_pr_create(head, tid="tu_ok"):
+    """A successful call to the GitHub MCP create-PR tool for `head`. It cancels a failed create of the same head."""
+    return [use(OPEN_PR, {"title": "t", "head": head, "base": "main"}, tid), done(tid)]
 
 
 def failed_bash(command, tid="tu_b", error=True):
@@ -122,6 +127,19 @@ def notice(text):
 def landed_reply(text):
     """A reply on a landed turn: the claim lines above the good report, which ends the reply."""
     return trg.assistant_text(text + "\n\n" + trg.GOOD_REPORT)
+
+
+PARENT_SESSION = "session_parent1"  # the id the parent's replies carry as their sender
+
+
+def parent_send():
+    """A send to @parent that the parent delivered: the send a parent's reply answers, so the reply is its ack."""
+    return trg.SameTurnWriter().send(session_id="@parent", result=trg.SameTurnWriter.DELIVERED)
+
+
+def parent_reply(body):
+    """A reply from the parent session, a peer message in the shape a real transcript stores."""
+    return trg.peer_msg(body, from_session=PARENT_SESSION)
 
 
 def input_report(first, *more):
@@ -191,6 +209,11 @@ class CannotClaimTests(unittest.TestCase):
         self.assertLess(reason.index("Remedy:"), reason.index("Lines:"), "the remedy follows the lines: %s" % reason)
         remedy = reason[reason.index("Remedy:"):reason.index("Lines:")]
         self.assertNotRegex(remedy, ACT_WORDS, "the remedy names the act it refuses: %s" % remedy)
+
+    def assert_blocks_for(self, out, variant, line, cause):
+        """assert_blocked_for, with the cause named first, so a failure says which gap it is."""
+        self.assertIsNotNone(out, cause)
+        return self.assert_blocked_for(out, variant, line)
 
     def assert_passes(self, out, case):
         self.assertIsNone(out, "%s was refused: %s" % (case, out and out.get("reason")))
@@ -310,6 +333,82 @@ class CannotClaimTests(unittest.TestCase):
         out = self.stop([trg.human("open a PR"), *failed_pr_create(), trg.assistant_text("Opened nothing."),
                          trg.human("try again"), trg.assistant_text(line)])
         self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_parent_reply_with_a_question_mark_moves_the_claim_window(self):
+        # Catches: the parent's first reply read as the ack of the lane's send when it asks a new question, so the
+        # failed try before it backs the claim after it. The twin with no "?" comes first: that ack keeps the try in
+        # the window.
+        line = "I can't open the PR: `mcp__github__create_pull_request` returned 422."
+        before = [trg.human("open a PR"), *failed_pr_create(), *parent_send()]
+        self.assert_passes(self.stop([*before, parent_reply("Got it."), landed_reply(line)]),
+                           "scope: a reply with no ? is an ack, so the failed try backs the claim")
+        out = self.stop([*before, parent_reply("Is the pick still open?"), landed_reply(line)])
+        self.assert_blocks_for(out, NO_TRY, line, "the parent's plain ? was read as its ack, so the try backed the claim")
+
+    def test_cc_red_a_lone_apostrophe_or_quote_does_not_hide_the_question_mark(self):
+        # Catches: a scan that reads a lone apostrophe, or a lone opening quote, as the start of a quoted span that
+        # runs to the end of the reply, so the plain "?" after it is hidden. The reply then reads as an ack, and the
+        # try backs the claim. Each shape's twin with no "?" comes first: that ack keeps the try in the window.
+        line = "I can't open the PR: `mcp__github__create_pull_request` returned 422."
+        before = [trg.human("open a PR"), *failed_pr_create(), *parent_send()]
+        for label, body in (("a lone apostrophe", "Don't you want it?"),
+                            ("a lone opening quote", 'Quick check: "ship it, want it?')):
+            with self.subTest(shape=label):
+                self.assert_passes(self.stop([*before, parent_reply(body.replace("?", ".")), landed_reply(line)]),
+                                   "scope: the twin of %s with no ? is an ack" % label)
+                out = self.stop([*before, parent_reply(body), landed_reply(line)])
+                self.assert_blocks_for(out, NO_TRY, line, "the plain ? after %s was hidden, so it read as an ack" % label)
+
+    def test_cc_red_past_claim_after_a_question_reply_passes_after_a_retry(self):
+        # Catches: the parent's "?" reply cut the turn before the failed create, so the past claim (could not, then opened
+        # it) found no try and blocked, though the retry of the same head cancels that failure. The "Can you retry." twin
+        # is an ack, so the failure stays in the window and the claim passes the same way. The present twin (cannot)
+        # after the same "?" reply still blocks with no try: only a past claim reads the wider window.
+        line = "I could not open the PR at first (the tool returned 422), then opened it."
+        before = [trg.human("open a PR"), *failed_pr_create("tu_pr", "b"), *parent_send()]
+        self.assert_passes(self.stop([*before, parent_reply("Can you retry."), *ok_pr_create("b", "tu_ok"),
+                                      landed_reply(line)]),
+                           "scope: a reply with no ? is an ack, so the retry reads the claim as a past failure")
+        out = self.stop([*before, parent_reply("Can you retry?"), *ok_pr_create("b", "tu_ok"), landed_reply(line)])
+        self.assert_passes(out, "the ? reply cut the failed create out of the window, so the past claim read as no try")
+        present = "I cannot open the PR (the tool returned 422)."
+        out = self.stop([*before, parent_reply("Can you retry?"), *ok_pr_create("b", "tu_ok"), landed_reply(present)])
+        self.assert_blocks_for(out, NO_TRY, present, "the present claim read the wider window, so it found the failed try")
+
+    def test_cc_red_past_claim_after_a_question_reply_bare_passes_after_a_retry(self):
+        # Catches: the same cut as the case above, with a bare past claim. The failed create of head x sits before the "?"
+        # reply, so it is out of the narrow window, and the claim read as no try. The same-head retry cancels it, so the
+        # bare claim is no claim.
+        line = "I could not open the PR at first."
+        before = [trg.human("open a PR"), *failed_pr_create("tu_pr", "x"), *parent_send()]
+        self.assert_passes(self.stop([*before, parent_reply("Can you retry."), *ok_pr_create("x", "tu_ok"),
+                                      landed_reply(line)]),
+                           "scope: a reply with no ? is an ack, so the retry reads the bare claim as a past failure")
+        out = self.stop([*before, parent_reply("Can you retry?"), *ok_pr_create("x", "tu_ok"), landed_reply(line)])
+        self.assert_passes(out, "the ? reply cut the failed create of head x out of the window, so the claim read as no try")
+
+    def test_cc_red_past_claim_after_a_question_reply_bare_blocks_on_a_retry_of_another_head(self):
+        # Catches: the same cut, and a retry of a different head read as cancelling the failure of head x. The keys differ,
+        # so the failure of x stands, the bare claim has a try and names no check: the no-check variant.
+        line = "I could not open the PR."
+        before = [trg.human("open a PR"), *failed_pr_create("tu_pr", "x"), *parent_send()]
+        self.assert_blocks_for(self.stop([*before, parent_reply("Can you retry."), *ok_pr_create("y", "tu_ok"),
+                                          landed_reply(line)]),
+                               NO_CHECK, line, "scope: a reply with no ? is an ack, so the failed create of x is in the window")
+        out = self.stop([*before, parent_reply("Can you retry?"), *ok_pr_create("y", "tu_ok"), landed_reply(line)])
+        self.assert_blocks_for(out, NO_CHECK, line,
+                               "the ? reply cut the failed create of head x out of the window, so the claim read as no try")
+
+    def test_cc_red_past_claim_after_a_question_reply_bare_blocks_with_no_retry(self):
+        # Catches: the same cut, and no later call at all. The failed create of head x is in the wider window, so the bare
+        # claim has a try and names no check: the no-check variant, not the no-try one.
+        line = "I could not open the PR."
+        before = [trg.human("open a PR"), *failed_pr_create("tu_pr", "x"), *parent_send()]
+        self.assert_blocks_for(self.stop([*before, parent_reply("Can you retry."), landed_reply(line)]),
+                               NO_CHECK, line, "scope: a reply with no ? is an ack, so the failed create of x is in the window")
+        out = self.stop([*before, parent_reply("Can you retry?"), landed_reply(line)])
+        self.assert_blocks_for(out, NO_CHECK, line,
+                               "the ? reply cut the failed create of head x out of the window, so the claim read as no try")
 
     # ---- green: the twins of the reds, and the cites. Each passes for its named reason, with no confounder.
 
