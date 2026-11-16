@@ -17,6 +17,8 @@ def lane_cost_run(body):
         env.pop("CLAUDE_CODE_SESSION_ID", None)
         env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
         spec = {"mode": "judge", "reading": LB_NORMAL}
+        # The default Prior work line goes on a build spawn here too, as decide() adds it (see with_prior_work).
+        body = dict(body, tool_input=with_prior_work(body["tool_name"], body["tool_input"]))
         done = subprocess.run([sys.executable, "-c", LB_PROBE, GUARD, side_file, json.dumps(spec)],
                               input=json.dumps(body), capture_output=True, text=True, env=env, timeout=120)
         try:
