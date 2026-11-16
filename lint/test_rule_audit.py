@@ -738,6 +738,9 @@ class RealRepoOutputTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.rc, cls.out = audit(rule_audit.ROOT)
+        # With no origin/main the audit cannot compare, so its OK does not vouch for the real tree: skip UNKNOWN.
+        if "not compared" in cls.out:
+            raise unittest.SkipTest("UNKNOWN: no origin/main to read")
 
     def test_the_real_report_names_no_pinned_number(self):
         self.assertIn("rule_audit: OK", self.out, self.out)
