@@ -9837,7 +9837,7 @@ test("a multi answer carries a list of labels, one per tick, beside its list of 
   assert.match(a.label[1], /^c: Green$/i);
 });
 
-// Owner 13:14 CST Nov 12: a number on the page must say it is not a database id or a slug (step page-n-meaning-doc).
+// The number on a card is the stable number the owner answers by, not a database id. Its hover text says so, so the owner never reads it as one. Both cases check that text: on an open card and on a ruling card.
 const N_MEANING = /item number: the stable number you answer by; not a database id/i;
 test("an open card's item number says it is the stable answer number, not a database id", async (t) => {
   const page = await open(t, { items: [DECISION, TASK] });
