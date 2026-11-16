@@ -21,7 +21,9 @@ SCANNED, and writes no page. Cost: one more git process and one read of each sca
 working tree, and refuses the commit when it adds or grows an open step's note past NOTE_WORDS words, or
 stages a symlink as a step file. A long note the commit leaves alone or trims passes, so one writer's
 note never blocks another's commit. It also refuses a staged roadmap/rulings/*.json that is empty, not
-UTF-8, not valid JSON, or not a JSON object. It writes no page.
+UTF-8, not valid JSON, or not a JSON object. It also refuses a staged step whose `updatedAt`, or ruling whose
+`at`, is more than SKEW_MINUTES later than the clock (step updatedat-not-future); a time that is not an ISO
+time with a UTC offset is reported, not judged. It writes no page.
 """
 import datetime
 import json
@@ -111,6 +113,10 @@ def over_cap(steps):
 
 STEPS_PATH = "roadmap/data/steps"
 RULINGS_PATH = "roadmap/rulings"
+# now-central stamps never run ahead of the clock on the same machine, but a cloud session's clock can
+# differ by a few minutes. 5 minutes covers that and sits far below the 90 to 120 minute slips this
+# check exists for (step updatedat-not-future).
+SKEW_MINUTES = 5
 
 
 def git(repo, *args):
@@ -124,9 +130,61 @@ def merge_parents(repo):
     return merge_head.read_text().split() if merge_head.is_file() else []
 
 
+def stamp_is_future(value, now):
+    """True when value is an ISO time more than SKEW_MINUTES after now (an aware datetime), False when not.
+
+    None when value is not an ISO time with a UTC offset: a time without one cannot be placed against now,
+    so the caller says it was not checked instead of guessing a zone.
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        # fromisoformat reads a trailing Z only from Python 3.11.
+        t = datetime.datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
+    except ValueError:
+        return None
+    if t.tzinfo is None:
+        return None
+    return t > now + datetime.timedelta(minutes=SKEW_MINUTES)
+
+
 def shown(path):
     """A path for a message: non-UTF8 bytes survive git's surrogateescape, so print them as U+FFFD."""
     return path.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+
+
+def bases(repo):
+    """The revisions a staged commit builds on: HEAD when there is one, plus a merge's incoming parents."""
+    head = ["HEAD"] if git(repo, "rev-parse", "-q", "--verify", "HEAD^{commit}").returncode == 0 else []
+    return head + merge_parents(repo)
+
+
+def json_at(repo, rev, path):
+    """The JSON object stored at rev:path, or None when it is missing, not JSON, or not an object."""
+    r = git(repo, "show", f"{rev}:{path}")
+    try:
+        d = json.loads(r.stdout) if r.returncode == 0 else None
+    except ValueError:
+        return None
+    return d if isinstance(d, dict) else None
+
+
+def future_stamp_refusals(repo, path, d, field, now):
+    """Refusal lines when the staged object d holds a future time in field (updatedAt on a step, at on a ruling).
+
+    A base holding the same value excuses it, so a commit that only touches another field of a record
+    with an old bad stamp is not blocked: only the commit that writes the stamp answers for it.
+    """
+    value = d.get(field)
+    late = stamp_is_future(value, now) if value is not None else False
+    # The base lookup costs a process per base, so only a stamp that is not plainly past pays for it.
+    if late is False or any(o and o.get(field) == value for o in (json_at(repo, b, path) for b in bases(repo))):
+        return []
+    if late is None:
+        print(f"pre-commit: {shown(path)} {field} {value!r} is not an ISO time with a UTC offset; not checked",
+              file=sys.stderr)
+        return []
+    return [f"{shown(path)}: {field} {value} is later than now. Stamp it from ~/.claude/bin/now-central, never from memory."]
 
 
 def staged_entries(repo, folder):
@@ -156,7 +214,7 @@ def staged_top_level_json(repo, folder):
             if str(pathlib.PurePosixPath(e[2]).parent) == folder and e[2].endswith(".json")]
 
 
-def staged_unparsable_rulings(repo):
+def staged_unparsable_rulings(repo, now):
     """Refusal lines for each staged roadmap/rulings/*.json that a ruling reader (lint/ruled_store.py) drops or may misread.
 
     That is a blob that is not strict UTF-8, is empty, is not valid JSON, or is not a JSON object. NaN and
@@ -164,6 +222,7 @@ def staged_unparsable_rulings(repo):
     at a ruling that other JSON parsers reject. The blob is read from the index as bytes. Only the commit's own adds and changes count, so a
     broken ruling already on HEAD never makes this check refuse another writer's commit. A merge's own
     parent holding the identical blob excuses it, as steps are excused; a ruling the merge edits is checked.
+    A ruling whose `at` is later than now is refused too (step updatedat-not-future).
     """
     def reject(name):
         raise ValueError(f"{name} is not valid JSON")
@@ -181,28 +240,22 @@ def staged_unparsable_rulings(repo):
             continue
         if not isinstance(body, dict):
             refused.append(f"{shown(path)} is not a JSON object")
+            continue
+        refused += future_stamp_refusals(repo, path, body, "at", now)
     return refused
 
 
-def staged_notes_over_cap(repo):
+def staged_notes_over_cap(repo, now):
     """(over_cap pairs, refusal lines) for the step files the staged commit adds or changes, read from the index.
 
     Only files directly in STEPS_PATH count, as in load(). An open note over the cap passes only when some
     base (HEAD, or a MERGE_HEAD while a merge is committed) held the same step open with at least as many
     words: a commit may keep or trim a long note, never add or grow one. A staged symlink there is refused,
     since load() would follow it. A staged file that is not valid JSON is skipped: it has no note to count,
-    and the next build fails loudly on it.
+    and the next build fails loudly on it. A step whose `updatedAt` is later than now is refused too, and
+    returned in the refusal lines (step updatedat-not-future).
     """
-    def step_at(rev, path):
-        r = git(repo, "show", f"{rev}:{path}")
-        try:
-            d = json.loads(r.stdout) if r.returncode == 0 else None
-        except ValueError:
-            return None
-        return d if isinstance(d, dict) else None
-
-    bases = ["HEAD"] if git(repo, "rev-parse", "-q", "--verify", "HEAD^{commit}").returncode == 0 else []
-    bases += merge_parents(repo)
+    base_revs = bases(repo)
     steps, refused = {}, []
     for mode, blob, path in staged_top_level_json(repo, STEPS_PATH):
         p = pathlib.PurePosixPath(path)
@@ -216,7 +269,8 @@ def staged_notes_over_cap(repo):
             continue
         if not isinstance(d, dict):
             continue
-        olds = [step_at(b, path) for b in bases]
+        refused += future_stamp_refusals(repo, path, d, "updatedAt", now)
+        olds = [json_at(repo, b, path) for b in base_revs]
         if any(o and o.get("status") != "done" and note_words(o) >= note_words(d) for o in olds):
             continue
         steps[shown(p.stem)] = d
@@ -227,8 +281,9 @@ def check_staged():
     top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True,
                          encoding="utf-8", errors="surrogateescape")
     repo = top.stdout.strip() if top.returncode == 0 else str(ROOT.parent)
-    hits, refused = staged_notes_over_cap(repo)
-    refused += staged_unparsable_rulings(repo)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    hits, refused = staged_notes_over_cap(repo, now)
+    refused += staged_unparsable_rulings(repo, now)
     if hits:
         print(f"Commit refused: these notes are over {NOTE_WORDS} words. Cut them, stage, and commit again:",
               file=sys.stderr)
