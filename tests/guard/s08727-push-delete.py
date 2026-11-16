@@ -3,7 +3,32 @@ FAMILY = "push-delete"
 
 LEASE = " --force-with-lease --force-if-includes"
 SHA = "0123456789abcdef0123456789abcdef01234567"
-REMEDY = "retry with --force-with-lease --force-if-includes"
+REMEDY = "retry with --force-with-lease=<branch>:<sha>"
+
+# THE RETRY FORM. The refusal's last sentence names the push to retry with. A retry must be a form the
+# guard allows (decision stale-safe-force-push): a lease naming a branch and a sha, with no
+# --force-if-includes. The sentence is read from the guard under test, beside GUARD, so a copy whose
+# remedy text differs is the one read.
+import importlib.util  # noqa: E402  the one reader of the retry form sits with the cases that use it
+
+RETRY_FORM_RE = re.compile(r"Remedy: retry with (.+?)\.\s*$")
+
+
+def retry_form():
+    """(form, why): the form the push refusal says to retry with, or (None, why) when it names none."""
+    spec = importlib.util.spec_from_file_location(
+        "guard_push_delete_under_test", os.path.join(os.path.dirname(GUARD), "guard_push_delete.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    found = RETRY_FORM_RE.search(module.PUSH_REASON)
+    if found is None:
+        return None, "PUSH_REASON does not end with a 'Remedy: retry with <form>.' sentence"
+    return found.group(1), ""
+
+
+RETRY_FORM, RETRY_WHY = retry_form()
+if RETRY_FORM is None:
+    sys.exit("fixture setup failed: " + RETRY_WHY)
 
 
 def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent=False, lacks=(), word=VCS):
@@ -33,6 +58,9 @@ push_case("lease with includes to a branch under the default name's prefix",
           "--force-with-lease --force-if-includes origin HEAD:refs/heads/main-fix", "allow")
 push_case("lease to a branch main-fix when the default branch is trunk",
           "--force-with-lease --force-if-includes origin HEAD:main", "allow", cwd=PUSHTRUNK)
+# The named way out, with its placeholders filled in, passes. Green on the code that prints the old form too.
+push_case("the retry form, filled in, is allowed off the default branch",
+          RETRY_FORM.replace("<branch>", "feat").replace("<sha>", SHA) + " origin feat", "allow")
 
 # DENY with the remedy: any force that can overwrite newer work.
 push_case("the long force flag", "--force", "deny")
@@ -46,6 +74,14 @@ push_case("a bare lease without includes", "--force-with-lease", "deny")
 push_case("a lease naming a ref, without includes", "--force-with-lease=feat origin feat", "deny")
 push_case("a force beside a lease and includes", "--force" + LEASE, "deny")
 push_case("includes alone is not a force, so a plain push allows", "--force-if-includes", "allow")
+# The refusal names no --force-if-includes: the form the classifier refuses must not be the one it prints.
+sh("push: the refusal names no --force-if-includes", VCS + " push --force origin feat", "deny", "force-push",
+   cwd=PUSHFEAT, lacks=("--force-if-includes",))
+# The sha is the tip this session's own last push left, not a remote-tracking ref: a fetch refreshes that
+# ref, so a lease read from it passes over newer work.
+sh("push: the refusal names the tip your own last push left, not a remote-tracking ref",
+   VCS + " push --force origin feat", "deny", "force-push", cwd=PUSHFEAT,
+   carries=("your own last push",), lacks=("remote-tracking",))
 push_case("a force while the default branch is trunk, main is ordinary there",
           "--force origin HEAD:main", "deny", cwd=PUSHTRUNK)
 push_case("a push option value is not the remote", "--force-with-lease --force-if-includes -o x origin HEAD:trunk",
