@@ -3295,8 +3295,14 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             cross_fails, reports, stop = cross_measure(root, head, int(target), info["body"], host, with_prs, base, fetched, why is None, is_integration_pr(info))
             fails += cross_fails
             # one check-runs read: the draft's Windows and macOS runs, which this Linux lint never runs. A batch integration PR has no draft run of its own
-            # (a lane's run is the proof), so it reads none.
-            draft, draft_lines = ("pass", []) if is_integration_pr(info) else host.draft_run_state(head)
+            # (a lane's run is the proof), so it reads none. A base with merge.requiredChecks "none" runs no CI job, so no lane has a draft run to read
+            # and the local lint steps below are the whole proof (decision private-repos-no-ci).
+            if is_integration_pr(info):
+                no_draft_run = True
+            else:
+                with contextlib.redirect_stdout(io.StringIO()):  # load_config says its defaults; only requiredChecks is read here
+                    no_draft_run = load_config(root, base, DEFAULT_CONFIG, " " + LANE_LINT_CITE)["merge"].get("requiredChecks") == "none"
+            draft, draft_lines = ("pass", []) if no_draft_run else host.draft_run_state(head)
             if draft == "fail":
                 fails.append(f"its draft run of lane-touched-tests failed on {head[:9]}: " + "; ".join(draft_lines))
             elif draft != "pass" and not (fails or stop):
