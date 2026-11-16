@@ -6,5 +6,7 @@
  "quote": "Just keep stable matching main for now then if that's easiest / Probably is easiest; Like keep that as a match every time main merges stable goes ahead too",
  "source": "Consultant message to triage, 12:59 CST Nov 16 (the two quotes as the consultant gave them). Not owner-typed to triage.",
  "status": "open",
+ "pr": 3591,
+ "prNote": "Consultant 13:04 CST (relay): PR #3591, branch stable-follows-main, rewrites decision stable-branch. Triage REST read 13:04 CST: #3591 is open, draft, head 2da836785; triage read no diff. No step id exists for it.",
  "step": "github-billing-blocks-ci"
 }
