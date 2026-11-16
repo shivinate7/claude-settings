@@ -14874,6 +14874,25 @@ class NoneLaneLint(CloudSession):
         self.assertIn("no `touched` job", text, "the unknown refusal does not name the missing touched job: " + text)
         self.assertEqual(self.host.posted, [], "an unknown lint posted a PASS comment")
 
+    def test_a_failing_lint_step_under_none_with_no_check_run_still_fails_and_names_the_step(self):
+        self.lane_head("none", [])
+        with self.local_lint_answers("fail") as calls:
+            rc, text = self.lane_lint_run()
+        self.assertEqual(len(calls), 1, "under requiredChecks none, a head with no check run never reached its local steps, so the failing step did not FAIL: " + text)
+        self.assertEqual(rc, 1, text)
+        self.assertIn("FAIL: lint-marker", text, text)
+        self.assertEqual(len([line for line in text.splitlines() if line.startswith("PASS:")]), 0, text)
+        self.assertEqual(self.host.posted, [], "a failing lint posted a PASS comment")
+
+    def test_a_failing_lint_step_under_none_with_a_passing_touched_job_still_fails_and_names_the_step(self):  # control: green on the old code
+        self.lane_head("none", [draft_row("touched")])
+        with self.local_lint_answers("fail") as calls:
+            rc, text = self.lane_lint_run()
+        self.assertEqual(len(calls), 1, "the local lint ran %d times, want once: %s" % (len(calls), text))
+        self.assertEqual(rc, 1, text)
+        self.assertIn("FAIL: lint-marker", text, text)
+        self.assertEqual(self.host.posted, [], "a failing lint posted a PASS comment")
+
 
 class GuardRoleNamesMatch(unittest.TestCase):
     """The guard cannot import merge/merge.py, so hooks/guard_merge.py names the merge tiers in its own constants, ROLE_TIERS and
