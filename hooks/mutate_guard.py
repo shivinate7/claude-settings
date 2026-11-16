@@ -1617,8 +1617,8 @@ MUTATIONS = [
      ')"', "guard",
      "a Write that sets the cap-lift end in the space form asks"),
     ("guard: a double-quoted shell write keeps its escaped quotes, so an escaped cap-lift end reads as no end",
-     r"""            for found in CAP_DEADLINE_ASSIGN.finditer(part.replace('\\"', '"')):""",
-     '            for found in CAP_DEADLINE_ASSIGN.finditer(part):', "guard",
+     r"""            plain = part.replace('\\"', '"')""",
+     '            plain = part', "guard",
      "a double-quoted echo with escaped quotes that sets only the cap-lift end"),
     ("guard: a deadline-only write is asked with the model wording, so it says it sets the model cap",
      '(CAP_END_ASK_REASON if end_only else CAP_ASK_REASON)',
@@ -1628,6 +1628,30 @@ MUTATIONS = [
      'return text + " (clock unreadable, so the Central time is not shown)"',
      'return ""', "guard",
      "still asks when the clock module cannot be imported"),
+
+    # ---- the end a shell command computes at write time (`$(date ...)`, a backtick, a shell variable), and the
+    # end a jq --arg literal binds. A shell write with a computed end asks and says the end is computed. A
+    # literal bound by --arg is read and shown. Each required name is a case in tests/guard/s19328-model-cap.py.
+    ("guard: a jq --arg literal end is not read, so a literal instant bound by --arg reads as no end",
+     r"""            for ref in CAP_DEADLINE_VALUE_REF.finditer(plain):
+                bound = re.search(r"--arg\s+" + re.escape(ref.group(1)) + r"\s+['\"]?(" + CAP_ISO_END + ")", plain)
+                if bound:
+                    text = bound.group(1)
+""",
+     "            pass\n", "guard",
+     "a jq --arg whose cap-lift end is a literal instant asks"),
+    ("guard: a shell write with a computed end is not called computed, so its ask shows no end",
+     "def cap_deadline_computed(raw: str) -> bool:",
+     "def cap_deadline_computed(raw: str) -> bool:\n    return False", "guard",
+     "a shell echo whose cap-lift end is a $(date) substitution asks under agent-model-cap"),
+    ("guard: the computed-end ask drops its phrase, so the approver is not told the end is computed",
+     '        return (change + ", " if change else "") + "cap lift end " + end',
+     '        return (change + ", " if change else "") + "cap lift end"', "guard",
+     "a shell echo that sets the model and a $(date) cap-lift end"),
+    ("guard: the shell route drops the computed end, so a $(date) end is never named as computed",
+     '        end = cap_deadline_end(cap_sed_parts(raw, matched, cwd)) or (CAP_END_COMPUTED if cap_deadline_computed(raw) else "")',
+     '        end = cap_deadline_end(cap_sed_parts(raw, matched, cwd))', "guard",
+     "a jq filter whose cap-lift end is a $(date) substitution, writing the settings file"),
 
     # ---- the one deadline parser, hooks/shared_names.py parse_deadline, which the guard and the config
     # watch both call. These break its space form and its no-offset form.
