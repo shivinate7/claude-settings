@@ -2147,6 +2147,9 @@
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
 - compact-refresh-edges: docs/decisions/cloud-start-hooks-run-fresh.md lines 16, 37 and 38 are stale after the matcher change to startup|resume|compact. Line 16 says hooks fire after the refresh, but on compact settings.json:160 runs in parallel with it. Line 37 says the repo has no resume-only entry, and line 38 says startup hooks run once per session start. Each compaction now runs a curl, a git fetch and session_start.sh under the 60 s timeout, with stdout entering the compacted context: unmeasured. Decision: cloud-start-hooks-run-fresh.
+- lane-step-dup-untagged: A `create_session` with no `cs-step` tag, a carrier row with no `cs-repo` tag, and `list_sessions` filters other than `before_id`, `tags` and `mine` are not judged by rule lane-step-dup. Decision: session-tiers.
+- lane-step-dup-archived-after-read: A carrier archived after the whole `list_sessions` read still reads live until the session reads the list again, so the guard may refuse a step it could pass. Decision: session-tiers.
+- lane-step-dup-one-rule-id: Part two (open pull request) refuses under rule id `lane-step-dup`, the same as part one, so one override lifts both parts. Decision: session-tiers.
 - idle-lanes-reads-closed-lane-item: `idle_lanes` in `skills/roadmap/build.py` may read a lane whose only item is closed (routed) as idle; unpinned.
 - routed-waits-skipped: a routed closed item with `waits` is skipped by `kept_answer_lines` before its waits branch.
 - routed-kept-answer-at-unchecked: `kept_answer_lines` skips a routed closed item without comparing the kept answer's `at` to `lastAnswer.at`, so a changed answer on it is silent.
