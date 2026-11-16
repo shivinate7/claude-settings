@@ -1668,12 +1668,13 @@ def test_update_of_task_options_with_context_is_judged():
 # is refused for its Goal line; these cases leave that as it is.
 
 def steps_no_kind(context=TASK_WHY):
-    """A set with steps and options and no kind. A context of None leaves the key out."""
+    """A set with steps and options and no kind. A context of None leaves the key out. Its options carry an id and
+    `shown` as a session writes them (with_frozen_fields), so only the form can refuse it."""
     item = {"title": "Merge the batch", "status": "open", "steps": ["Open Terminal"],
             "options": copy.deepcopy(TASK_OPTIONS)}
     if context is not None:
         item["context"] = context
-    return item
+    return tcj.with_frozen_fields(item)
 
 
 def steps_no_kind_update(context=TASK_WHY):
@@ -1685,13 +1686,6 @@ def steps_no_kind_update(context=TASK_WHY):
     return tcj.with_frozen_fields(item)
 
 
-def refused_by_some_rule(name, op, entry):
-    """A write that some rule refuses, by item_hit and by the guard. A crash or a missing name is no refusal."""
-    for surface, got in (("page item_hit", call("item_hit", op, entry)), ("page guard", guard_hit(op, entry))):
-        check(surface + ": " + name, got[0] not in ("", "RAISED", "MISSING"),
-              "want a refusal by some rule, got %r" % (got,))
-
-
 def case_steps_no_kind_update_departs_missing_is_refused():
     page("an update with steps, options and no kind, and no Departs from line, is refused as question-departs",
          "update", entry_of(steps_no_kind_update()), DEPARTS_REFUSAL)
@@ -1699,11 +1693,12 @@ def case_steps_no_kind_update_departs_missing_is_refused():
 
 def case_steps_no_kind_set_stays_refused():
     # A set with no kind keeps the decision form on main, so it is refused for its Goal line. Steps do not change
-    # that, and a valid Departs from line does not pass it.
-    refused_by_some_rule("a set with steps, options and no kind, and no Departs from line, is refused", "set",
-                         entry_of(steps_no_kind()))
-    refused_by_some_rule("a set with steps, options and no kind, and a valid Departs from line, is still refused",
-                         "set", entry_of(steps_no_kind(context=TASK_WHY + "\n" + DEPARTS)))
+    # that, and a valid Departs from line does not pass it. The named refusal pins the set routing: a set read as a
+    # task would be refused for its Departs from line, or pass.
+    page("a set with steps, options and no kind, and no Departs from line, is refused for its Goal line", "set",
+         entry_of(steps_no_kind()), (FORM_RULE, "Goal"))
+    page("a set with steps, options and no kind, and a valid Departs from line, is still refused for its Goal line",
+         "set", entry_of(steps_no_kind(context=TASK_WHY + "\n" + DEPARTS)), (FORM_RULE, "Goal"))
 
 
 def case_steps_no_kind_update_valid_departs_passes():
