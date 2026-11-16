@@ -931,6 +931,9 @@ jobs:
       - name: project-ops brief tool suite
         run: python3 skills/project-ops/tests/test_brief_from_step.py
 
+      - name: project-ops runner state suite
+        run: python3 skills/project-ops/tests/test_runner_state.py
+
       - name: ios-apps skill starter suite
         if: ${{ (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/ios-apps/tests/test_new_app.py
