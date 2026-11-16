@@ -594,3 +594,13 @@ All four are open drafts with a stale base and no activity since Nov 12-13. No r
 - #2798: builder cannot edit an .xctestplan. Head 566cf5369. Needs #2725 to merge first. Parked on #2725.
 - #2792: test-only pins for ask-phase-out; build already on main. Head 4b460f27f. No guard change. Parked: live step, no owner session named.
 - #2805: prose-only stale-cites clean-up, one commit. Head ee9ad636c. Parked: lane lint passed at that head; no live lane named.
+
+## Triage 9 REST reads of the other parked drafts (read-only agent, sonnet, 16:43 CST Nov 16)
+
+95 PRs read on REST: 84 open drafts, 11 closed. 0 unreadable. 0 replaced (searched the last 800 main commits only; older history not searched). Class by REST base branch and updated time, taken at face value. 37 open PRs share one update at Nov 13 12:01-12:02 CST, cause unknown.
+
+- STACKED, 11 (REST base is not main): #2928, #2867, #2841, #2824, #2821, #2812, #2799, #2774, #2757, #2753, #2744. Parked until the parent merges.
+- LIVE, 4 (updated Nov 15 or later): #2963, #2751, #2742, #2681. These need their owning session named; none read.
+- STALE-BASE, 69 (updated Nov 13 or earlier, base main): #3019, #2991, #2910, #2901, #2846, #2831, #2827, #2815, #2813, #2811, #2806, #2804, #2803, #2802, #2797, #2791, #2790, #2789, #2788, #2786, #2782, #2780, #2779, #2777, #2775, #2772, #2769, #2768, #2767, #2766, #2759, #2758, #2755, #2752, #2750, #2749, #2747, #2740, #2736, #2735, #2734, #2732, #2728, #2727, #2726, #2724, #2717, #2716, #2709, #2704, #2702, #2699, #2697, #2695, #2693, #2692, #2691, #2689, #2678, #2677, #2676, #2675, #2674, #2672, #2667, #2666, #2665, #2664, #2663.
+- Closed, 11 (moot): #3336, #2987, #2912, #2855, #2808, #2763 (Nov 16 00:12 CST); #2721, #2820, #2680, #2661 (Nov 16 14:04 CST); #2708 (Nov 16 03:56 CST, closer unknown).
+- Plan versus REST: the plan puts #2717 and #2716 on base #2715, but REST base is main for both.
