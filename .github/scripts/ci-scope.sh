@@ -12,10 +12,13 @@
 #     lint_comment_narration (Comment narration check: any non-.md path; the checker reads no .md file).
 #   lint/layout.py, lint/layout.json and .claude/layout-extras.json set all four: each lint finds its record folders through them.
 #   checks_windows_rest_2 repeats checks_windows_rest's value (R62). No job reads it: checks-windows-rest-2 runs every step on a ready pull_request, so the output is kept only for the tests that derive it.
-# mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event.
+# mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event; false on a records-only skip.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
-# BASE_SHA, HEAD_REF.
+# BASE_SHA, HEAD_REF, GREEN_HEAD (optional: the sha green-head.sh prints, the pull request's newest earlier fully green head), PR_HEAD
+# (optional: the pull request's head sha; HEAD when unset). GREEN_HEAD turns the 13 job and suite flags off on a pull request when it is an
+# ancestor of PR_HEAD and the delta from it to PR_HEAD is docs/records.md alone; the lint flags keep their whole-PR values and mutation_report is false. Any unreadable read: no skip.
+# The last output line, records_only_skip=true|false, is true exactly in that case.
 set -u
 JOBS="checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos pointer_windows"
 LINTS="lint_red_run lint_plan_refuter lint_ruling_kind lint_comment_narration"
@@ -23,13 +26,14 @@ ALL="$JOBS checks_guard code mods guard sweep shoot $LINTS"
 range=""
 [ "${EVENT:-}" = pull_request ] && [ -n "${BASE_SHA:-}" ] && range="$BASE_SHA...HEAD"
 on=" "
+whole_read=0
 # --no-renames lists the old path of a rename too, so a move out of a mapped path counts.
 if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name-only --no-renames "$range" 2>/dev/null) && [ -n "$files" ]; then
   W=checks_windows M=checks_windows_merge R=checks_windows_rest Z=checks_windows_sweep X=checks_macos S=shell_macos P=pointer_windows
   while IFS= read -r f; do
     case "$f" in
-      # Fail safe: this script, the workflow, and git settings that change every checkout.
-      .github/scripts/ci-scope.sh|.github/workflows/checks.yml|.gitattributes) on="$on $ALL " ;;
+      # Fail safe: this script, green-head.sh (its line is GREEN_HEAD), the workflow, and git settings that change every checkout.
+      .github/scripts/ci-scope.sh|.github/scripts/green-head.sh|.github/workflows/checks.yml|.gitattributes) on="$on $ALL " ;;
       # Guard and its installers' inputs: test_guard, the janitor suites and config_watch run guard.py.
       # guard_<family>.py modules are guard.py; guard_test_* is not (it falls to hooks/* below).
       hooks/guard_test_*) on="$on $R $Z $X code guard " ;;
@@ -99,7 +103,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       *) on="$on $ALL " ;;
     esac
     # shoot also covers the files the waiting page export suite (skills/waiting-page/test_export_page.py) imports, lazy
-    # imports included: page_check.py reaches the guard family (guard_merge.py imports ci_wake.py), question_form.py, _nowindow.py, report_guard.py and its lint/_clause.py;
+    # imports included: page_check.py reaches the guard family (guard_merge.py imports ci_wake.py and lint/check_red_run.py), question_form.py, _nowindow.py, report_guard.py and its lint/_clause.py;
     # the suite's run folder is lint/_test_temp.py; layout.artifacts reads lint/layout.json at run time; SKILL.md and every file in reference/ hold the steps it and the page suite read. This is a second case, so the
     # flags each path sets above stay as they are, and guard_test_* (not imported) stays out. Chosen over one arm
     # (hooks/*.py, lint/*.py): that would start the browser job on every hook and lint edit, 88 + 94 files, most of
@@ -109,7 +113,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
     # runs beside the others on its own runner, so it adds billed minutes and no wall time.
     case "$f" in
       hooks/guard_test_*) ;;
-      hooks/guard.py|hooks/guard_*.py|hooks/git_reads.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/shared_names.py|hooks/question_form.py|hooks/_nowindow.py|lint/report_guard.py|lint/_clause.py|lint/layout.py|lint/layout.json|lint/_test_temp.py|skills/waiting-page/SKILL.md|skills/waiting-page/reference/*|skills/waiting-page/export_page.py|hooks/call_judge.py|hooks/ci_wake.py|hooks/decision_watch.py|hooks/feedback_guard.py|hooks/local_time.py|hooks/override.py|hooks/proc_env.py|hooks/session_role.py|hooks/reply_judge.py|hooks/reread_check.py|hooks/route_match.py|hooks/ruling_home.py|janitor/sweep.py|janitor/temp_sweep.py|lint/_transcript.py|lint/guard_log_report.py|lint/rule_audit.py|lint/ruled_store.py|hooks/mail.py|hooks/agent_brief.py|hooks/stall_watch.py) on="$on shoot " ;;
+      hooks/guard.py|hooks/guard_*.py|hooks/git_reads.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/shared_names.py|hooks/question_form.py|hooks/_nowindow.py|lint/report_guard.py|lint/_clause.py|lint/check_red_run.py|lint/layout.py|lint/layout.json|lint/_test_temp.py|skills/waiting-page/SKILL.md|skills/waiting-page/reference/*|skills/waiting-page/export_page.py|hooks/call_judge.py|hooks/ci_wake.py|hooks/decision_watch.py|hooks/feedback_guard.py|hooks/local_time.py|hooks/override.py|hooks/proc_env.py|hooks/session_role.py|hooks/reply_judge.py|hooks/reread_check.py|hooks/route_match.py|hooks/ruling_home.py|janitor/sweep.py|janitor/temp_sweep.py|lint/_transcript.py|lint/guard_log_report.py|lint/rule_audit.py|lint/ruled_store.py|hooks/mail.py|hooks/agent_brief.py|hooks/stall_watch.py|hooks/ci_wait_cap.py|hooks/ci_wait_cap.json) on="$on shoot " ;;
     esac
     # The four pull-request lint steps of the `checks` job. This is a third case, so the flags each path sets above stay as
     # they are. A path the table above does not name has set every flag already (the `*)` arm).
@@ -144,14 +148,40 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
   if [ -z "$dirs" ]; then
     on="$on $ALL "
   else
-    added=$(git diff --name-only --diff-filter=A --no-renames "$range" 2>/dev/null) || on="$on $ALL "
-    grep -Eq "^($dirs)/" <<< "$added" && on="$on $W $S code guard "
+    if added=$(git diff --name-only --diff-filter=A --no-renames "$range" 2>/dev/null); then
+      whole_read=1
+      grep -Eq "^($dirs)/" <<< "$added" && on="$on $W $S code guard "
+    else
+      on="$on $ALL "
+    fi
   fi
 else
   on=" $ALL "
 fi
 # checks_guard: the checks-guard job runs the guard suite, which needs both flags (the old step if). The playwright-setup arm above also sets it directly.
 case "$on" in *" code "*) case "$on" in *" guard "*) on="$on checks_guard " ;; esac ;; esac
+# A records-only push after a fully green head: the earlier head's run proved everything but the lints and the mutation report,
+# so only docs/records.md moved since. The whole PR diff was read above (whole_read); every other case keeps its flags.
+# The delta must be exactly one path: an empty or longer delta, an unreadable one or a head that is not an ancestor keeps `on`.
+# The delta runs to PR_HEAD, the pull request's own head: HEAD in CI is the merge commit, which also holds every base change since.
+# PR_HEAD counts only when it is a full hex sha, a commit, and an ancestor of HEAD; otherwise the delta runs to HEAD.
+skip=false
+end=HEAD
+if [[ "${PR_HEAD:-}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] && git cat-file -e "$PR_HEAD^{commit}" 2>/dev/null &&
+   git merge-base --is-ancestor "$PR_HEAD" HEAD 2>/dev/null; then
+  end=$PR_HEAD
+fi
+if [ "$whole_read" = 1 ] && [[ "${GREEN_HEAD:-}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] &&
+   git merge-base --is-ancestor "$GREEN_HEAD" "$end" 2>/dev/null &&
+   delta=$(git diff --name-only --no-renames "$GREEN_HEAD" "$end" 2>/dev/null) && [ "$delta" = docs/records.md ]; then
+  kept=" "
+  for t in $on; do
+    case " $JOBS checks_guard code mods guard sweep shoot " in *" $t "*) ;; *) kept="$kept$t " ;; esac
+  done
+  on="$kept"
+  skip=true
+  echo "CI scope: records-only push after green head $GREEN_HEAD"
+fi
 echo "CI scope: event=${EVENT:-} range=${range:-none} on=$on"
 for n in $ALL; do
   case "$on" in *" $n "*) v=true ;; *) v=false ;; esac
@@ -165,4 +195,7 @@ case "${EVENT:-}" in
   pull_request) case "${HEAD_REF:-}" in batch-*) v=true ;; *) v=false ;; esac ;;
   *) v=true ;;
 esac
+[ "$skip" = true ] && v=false
 echo "mutation_report=$v" >> "$GITHUB_OUTPUT"
+# records_only_skip: true exactly when the records-only shortcut above forced the 13 flags off; checks.yml reads it to skip the run steps of the test jobs.
+echo "records_only_skip=$skip" >> "$GITHUB_OUTPUT"

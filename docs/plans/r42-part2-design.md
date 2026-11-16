@@ -39,7 +39,7 @@ Premises (decision premise-format):
 - Practices used: P2, P6, P11 (test-practices); M2 kept, M3 changed, M7 kept (merge-practices).
 
 (3) Risks and guards:
-- Red main: sessions never see it, because stable does not move (acts 1-2); the red-main check (no-merge-onto-red-main) stops other merges until the revert's run is green (33-38 min per run, restart-plan.md:268).
+- Red main: sessions never see it, because stable does not move (acts 1-2). The red-main check (no-merge-onto-red-main) stops other merges until the revert merges with its tree proven (owner ruling `own-823-b-revert-merge-lifts-red`, 2026-11-14 15:04 CST). It does not wait for the revert's run (33-38 min per run, restart-plan.md:268).
 - Two lanes green alone, red together: lane-lint's merge-tree catches text clashes (lanes-run-no-full-ci-job.md:17); silent-undo check stays at merge (SKILL.md:124); main's run catches the rest and bisect names the later commit, so that lane is reverted.
 - Revert loops: a revert is never itself reverted (trailer). A red that survives one revert stops all reverts and posts one waiting-page item. A PR reverted twice goes to a fix lane (R26 part 2 shape). A flake re-run comes before any blame (debt windows-main-run-flakes).
 - Child repos on stable: stable moves only on a fully green main run that includes the actions' own tests (checks.yml:618-619). A child red from an action is fixed by a revert on claude-settings main. A child may hold a sha pin as a cited exception (R44).

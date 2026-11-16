@@ -17,8 +17,8 @@ Interface the module must match (the lane's form contract):
       Goal: <the goal>
       Problem (<stake>): <the problem, and why it needs his word>     <stake> is one of OWNER_STAKES
       Based on (<kind>): <one premise>                                 one to three; <kind> is in PREMISE_KINDS
-  A stood pick (`stands: true`) may write `Problem: ...` with no stake kind. A line out of this order
-  refuses. Only `Based on (<kind>):` is a Based on line: prose that starts with "Based on the log" is not.
+  A line out of this order refuses. A Problem line with no stake kind refuses too, on every item.
+  Only `Based on (<kind>):` is a Based on line: prose that starts with "Based on the log" is not.
 - Each option states gain and loss: page `gain` and `lose` fields; chat `Gain:` and `Lose:` in the description.
 - A question to the owner holds a line at a line start, `Departs from: <what on main> — <what changes>`
   (rule question-departs), after the form passes. Both sides are non-empty, and the change side says a change,
@@ -249,7 +249,7 @@ FORM_VARIANTS = [
      (STAKE_RULES, "Problem")),
     ("a Problem stake outside the set (internals)", parts(problem="Problem (internals): which job runs it."),
      (STAKE_RULES, "Problem")),
-    ("a Problem line with no stake kind (no stood pick)", parts(problem="Problem: which job runs it."),
+    ("a Problem line with no stake kind", parts(problem="Problem: which job runs it."),
      (STAKE_RULES, "Problem")),
     ("no Based on line", parts(based=[]), (FORM_RULE, "Based on")),
     ("four Based on lines", parts(based=[*BASED, THIRD, "Based on (notes): a fourth premise."]),
@@ -299,9 +299,6 @@ def case_form_placeholders_on_edits():
                     "Goal: <the goal>", (FORM_RULE, "Goal"))
     context_replace("placeholder: that swaps the Goal line for real text with angle brackets passes", GOAL,
                     "Goal: render <Button> right", None)
-    page("placeholder: a stood pick with the copied Problem line is refused", "set",
-         entry_of(page_item(problem="Problem: <the problem, and why it needs his word>", stands=True)),
-         (FORM_RULE, "Problem"))
 
 
 # ------------------------------------------------------------------ gain and loss in each option
@@ -371,11 +368,8 @@ def case_closed_stood_and_updates():
          entry_of(dict(ITEM92, status="closed", context=answered)), None)
     page("an open item with the chat answer and no form lines is refused", "set",
          entry_of(dict(ITEM92, status="open", context=answered)), (FORM_RULE, None))
-    page("a stood pick with `Problem:` and no stake kind passes", "set",
-         entry_of(page_item(problem="Problem: which job runs it, and why it needs your word.", stands=True)), None)
-    page("a stood pick with a stake kind passes", "set", entry_of(page_item(stands=True)), None)
-    page("stands false with no form lines is refused", "set",
-         entry_of(dict(ITEM92, stands=False, context="No form here.")), (FORM_RULE, None))
+    page("an item with no form lines is refused", "set",
+         entry_of(dict(ITEM92, context="No form here.")), (FORM_RULE, None))
     page("an update of the status only passes", "update", entry_of({"status": "closed"}), None)
     page("an update of the rank only passes", "update", entry_of({"rank": 3}), None)
     page("an update that carries kind decision and a title only passes", "update",
@@ -415,6 +409,77 @@ def case_str_replace():
     replace("on the title is allowed", "Let the batch runner merge each batch on its own?",
             "Let the runner merge alone?", None, field="title")
     replace("on why is not judged", PROBLEM, "A keeps the allow list to one form.", None, field="why")
+
+
+# ------------------------------------------------------------------ a stands:true item is an ordinary item
+
+def case_stands_gets_no_relaxed_stake_rule():
+    # A stands item gets no relaxed stake rule. The stake rule is judged on the form (decision_form_hit),
+    # not item_hit: item_hit refuses a write that names a field the page does not draw before it reads the form.
+    bare = page_item(problem="Problem: which job runs it, and why it needs your word.", stands=True)
+    verdict("a stands:true decision with a bare Problem line gets no relaxed stake rule",
+            call("decision_form_hit", "set", bare), (STAKE_RULES, "Problem"))
+    update = {"kind": "decision", "context": form_text(problem="Problem: which job runs it."), "stands": True}
+    verdict("an update with stands:true and a bare Problem line gets no relaxed stake rule",
+            call("decision_form_hit", "update", update), (STAKE_RULES, "Problem"))
+    verdict("a stands:true decision with a stake Problem line passes the form",
+            call("decision_form_hit", "set", page_item(stands=True)), None)
+
+
+def case_page_reasons_name_no_stands_field():
+    # The refusal remedy no longer tells a writer to take a pick and set `stands: true`.
+    reasons = getattr(question_form, "PAGE_REASONS", None) or {}
+    for rule in (FORM_RULE, STAKE_RULES[1]):
+        text = reasons.get(rule)
+        check("the page reason for %s is present and names no stands or stood field" % rule,
+              text is not None and not re.search(r"stands|stood", text), repr(text)[:160])
+
+
+def case_str_replace_bare_problem_lines():
+    # A bare Problem line is no form line. An edit that removes it, or swaps a stake line for it, is refused.
+    context_replace("that removes a bare Problem line from context is refused, as a stake line is",
+                    "Problem: which job runs it.", "", (FORM_RULE, "Problem"))
+    context_replace("that swaps a stake Problem line for a bare one is refused as no stake",
+                    PROBLEM, "Problem: which job runs it.", (STAKE_RULES, "Problem"))
+
+
+def case_str_replace_bare_to_malformed_stake():
+    # A Problem line that is not a labelled stake line is refused as no stake: PROBLEM_LABEL matches the new line and
+    # PROBLEM_LINE does not. That covers a stake outside the set, a stake with no text, and a line with no parenthesised
+    # stake at all. A page item carries no stood pick, so a bare line swapped for
+    # another bare line is refused too. A bare line swapped for a labelled stake line is allowed.
+    context_replace("that swaps a bare Problem line for a stake outside the set is refused as no stake",
+                    "Problem: which job runs it.", "Problem (internals): which job runs it.", (STAKE_RULES, "Problem"))
+    context_replace("that swaps a bare Problem line for a stake with no text is refused as no stake",
+                    "Problem: which job runs it.", "Problem (money):", (STAKE_RULES, "Problem"))
+    context_replace("that swaps a bare Problem line for another bare line is refused as no stake",
+                    "Problem: which job runs it.", "Problem: which job runs it, and why it needs your word.",
+                    (STAKE_RULES, "Problem"))
+    for shape in ("Problem goal: which job runs it.", "Problem - goal: which job runs it.",
+                  "Problem is which job runs it.", "Problem:"):
+        context_replace("that swaps a bare Problem line for %r is refused as no stake" % shape,
+                        "Problem: which job runs it.", shape, (STAKE_RULES, "Problem"))
+    context_replace("that swaps a bare Problem line for a labelled stake line is allowed",
+                    "Problem: which job runs it.", "Problem (goal): which job runs it.", None)
+    context_replace("that swaps a labelled Problem line for another labelled line is allowed",
+                    "Problem (goal): a", "Problem (goal): b", None)
+
+
+def case_page_form_reason_names_the_pick_on_stake_only():
+    # The take-your-own-pick sentence belongs on the stake refusal alone. A missing Goal line is a form refusal, so the
+    # reason the writer reads for it names no pick. Both reasons are read off the guard, as the writer sees them.
+    missing_goal = {"url": PAGE_URL, "action": "set", "collection": "items", "doc_id": DOC, "data": page_item(goal=None)}
+    stake = {"url": PAGE_URL, "action": "set", "collection": "items", "doc_id": DOC,
+             "data": page_item(problem="Problem (internals): which job runs it")}
+    scope = guard.data_tool_hit(missing_goal, PAGE_REPO)[0]
+    check("page form reason: a missing Goal line is refused by the form rule", scope == FORM_RULE, repr(scope))
+    goal_reason = printed_reason(missing_goal)
+    check("page form reason: a missing Goal line is refused with a reason", goal_reason != "", repr(goal_reason)[:200])
+    check("page form reason: a missing Goal refusal does not say take your own pick",
+          "take your own pick" not in goal_reason, goal_reason[:200])
+    stake_reason = printed_reason(stake)
+    check("page form reason: a stake refusal says take your own pick",
+          "take your own pick" in stake_reason, stake_reason[:200])
 
 
 def page_batch(writes):
@@ -2669,7 +2734,11 @@ def main():
                  case_item_stray_field_refused_from_a_record_branch_checkout,
                  case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
-                 case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
+                 case_closed_stood_and_updates, case_str_replace, case_str_replace_bare_problem_lines,
+                 case_str_replace_bare_to_malformed_stake,
+                 case_stands_gets_no_relaxed_stake_rule, case_page_reasons_name_no_stands_field,
+                 case_page_form_reason_names_the_pick_on_stake_only,
+                 case_batch, case_chat_boxes,
                  case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose, case_session_press_needs_no_link,
                  case_claude_own_merge_needs_no_link,
                  case_chat_reasons_name_a_remedy_and_no_page_field, case_page_reasons_are_one_table,
