@@ -84,9 +84,10 @@ waiting-data folder; any other artifact: `artifacts/<id>/`), with the same scan 
 also exports its designData block. A supporting file no longer fetched stays in the copy; history is the delete.
 An entry with `"export": false` prints `<id>: skipped - no export`, needs no folder in DIR, writes nothing and
 counts as exit 0. An entry with `"collections": []` is page-only: its page and files export, and no database does.
-With --account LABEL, an entry whose account differs prints `<id>: skipped - account <its account>` and is treated the
-same way, so a session that can read only one account's pages exports those and holds the rest. A LABEL that is empty or
-that no entry's account holds prints one line, `unknown - --account ... matches no registry entry's account ...`, writes
+With --account LABEL, an entry with no link for LABEL prints `<id>: skipped - no link for account LABEL; rebuild it from
+git and add the link` and is treated the same way, so a session that can read only one account's pages exports those and
+holds the rest. An entry with a link for LABEL exports, whatever its other links. A LABEL that is empty or that no link of
+any entry holds prints one line, `unknown - --account ... matches no link of any registry entry ...`, writes
 nothing and exits 2. Without the flag every entry exports. A page-only entry whose fetched folder has no `page.html`
 prints `<id>: unknown - ...` that names `page.html`, writes nothing and counts as exit 2. Each other artifact prints one line `<id>: <verdict>`, and a find's lines start with `<id>:` too. One artifact's refusal or
 unknown leaves its own folder as it was and holds back no other. Exit: 0 when every artifact is changed or same; else
@@ -708,17 +709,18 @@ def export_all(root, fetched, worktree, allow_empty, account=None):
         raise Stop("unknown - the artifacts registry cannot be read: %s" % err, UNKNOWN)
     if not entries:
         raise Stop("unknown - %s has no artifacts registry entry to export" % root, UNKNOWN)
-    if account is not None and account not in {entry["account"] for entry in entries}:
+    if account is not None and not any(link["account"] == account for entry in entries for link in entry["links"]):
         # a mistyped or empty label would otherwise skip every entry and still exit 0, which reads as a clean copy
-        raise Stop("unknown - --account %r matches no registry entry's account, so nothing was exported" % account, UNKNOWN)
+        raise Stop("unknown - --account %r matches no link of any registry entry, so nothing was exported" % account, UNKNOWN)
     worst, held_any = 0, False
     for entry in entries:
         name = entry["id"]
         if entry["export"] is False:  # held in the registry, never exported: no folder needed, nothing written
             print("%s: skipped - no export" % name)
             continue
-        if account is not None and entry["account"] != account:  # a page this session cannot read: no folder needed
-            print("%s: skipped - account %s" % (name, entry["account"]))
+        if account is not None and not any(link["account"] == account for link in entry["links"]):
+            # no link for this account, so this session cannot read the page: no folder needed
+            print("%s: skipped - no link for account %s; rebuild it from git and add the link" % (name, account))
             continue
         folder = os.path.join(fetched, name)
         page = os.path.join(folder, PAGE_FILE)

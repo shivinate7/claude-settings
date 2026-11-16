@@ -37,7 +37,9 @@ from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 from workflow_steps import CHECKS_SUITE_JOBS, gating_text, job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
+from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 CHECKS = os.environ.get("CHECKS_YML") or os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
 MIN_JOBS = 3
 
@@ -91,6 +93,7 @@ LINUX_SUITES = {
     "python3 janitor/mutate_sweep.py": (LINUX_SWEEP, None),
     "python3 hooks/test_config_watch.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_config_watch_fast_exit.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 hooks/test_reinstall_stale.py": (None, None),
     "python3 hooks/test_shared_names.py": (None, None),
     "python3 hooks/test_precompact_handoff.py": (None, None),
     "python3 hooks/test_cc_version_check.py": (NO_MD_SCOPE_CONDITION, None),
@@ -225,6 +228,17 @@ MAC_PICK_RUNS_ON = (f"${{{{ (github.event_name == 'pull_request' && github.event
                     f"&& fromJSON('[\"macos-latest\"]') || fromJSON({MAC_PICK}) }}}}")
 # R61 part 1: a push starts no macOS runner. Each job named here keeps `github.event_name != 'push'` as its job-level if.
 MACOS_JOBS = ("shell-macos", "checks-macos", "checks-macos-b")
+# The one R61 list of jobs a push starts no runner for (owner page item 880, 11:53 CST Nov 15): the macOS jobs, every Windows job and
+# every mutation job. The daily scheduled run runs them. Each job keeps `github.event_name != 'push'` as its job-level if; a shard also
+# keeps the draft guard (SHARD_JOB_IF). Linux fast jobs are every other ubuntu job (the default reading of item 880).
+WINDOWS_PUSH_OFF_JOBS = ("pointer-windows", "checks-windows", "checks-windows-guard", "checks-windows-guard-2", "checks-windows-guard-3",
+                         "checks-windows-merge", "checks-windows-merge-2", "checks-windows-merge-3", "checks-windows-merge-4",
+                         "checks-windows-merge-5", "checks-windows-sweep", "checks-windows-rest", "checks-windows-rest-2")
+MUTATE_PUSH_OFF_JOBS = ("checks-mutate-guard", "checks-mutate-guard-b", "checks-mutate-guard-c", "mutation-report")
+PUSH_OFF_JOBS = MACOS_JOBS + WINDOWS_PUSH_OFF_JOBS + MUTATE_PUSH_OFF_JOBS
+# The shards whose job-level if keeps the draft guard with the push guard (SHARD_JOB_IF). rest-2 has the push guard alone, no draft guard.
+PUSH_OFF_SHARDS = ("checks-windows-guard-2", "checks-windows-guard-3", "checks-windows-merge-2", "checks-windows-merge-3",
+                   "checks-windows-merge-4", "checks-windows-merge-5")
 # R61 part 3: the 03:17 nightly's skip job, and the one scope output it reads (the skip job's output).
 NIGHTLY_SKIP_JOB = "nightly-skip"
 PUSH_SKIP_JOB = "push-skip"
@@ -725,11 +739,13 @@ def job_check_problems(name, job, flag=None):
         problems.append(f"{name}: needs is {job['needs']}, want scope")
     expr = job["if"]
     if shard_base(name):
-        return problems + ([] if expr == SHARD_JOB_IF else [f"{name}: shard job if is {expr}, want {SHARD_JOB_IF}"])
+        return problems + ([] if expr == SHARD_JOB_IF or (name in PUSH_OFF_JOBS and push_off_job_if(name, expr)) else [f"{name}: shard job if is {expr}, want {SHARD_JOB_IF}"])
     if name in LINT_JOBS:  # they run on every PR: no scope condition, and a job-level if only when it is the draft guard
         return problems + ([] if expr is None or draft_guard_only(expr) else [f"{name}: job-level if: {expr}"])
     # A macOS job's job-level if is its scope skip (macos_scope_skip_ok): the push guard and its own flags. A step-level skip still starts its runner.
-    if expr is not None and not draft_guard_only(expr) and not (name in MACOS_JOBS and macos_scope_skip_ok(name, expr)):
+    # A Windows or mutation job's job-level if is the push guard (push_off_job_if, owner page item 880), with the draft guard on a shard.
+    if expr is not None and not draft_guard_only(expr) and not (name in MACOS_JOBS and macos_scope_skip_ok(name, expr)) \
+            and not (name in PUSH_OFF_JOBS and push_off_job_if(name, expr)):
         why = ("is not its scope skip (the push guard and its own flags)" if name in MACOS_JOBS
                else "keeps a job-level if, its scope condition belongs in its steps")
         return problems + [f"{name}: job-level if {why}: {expr}"]
@@ -1756,9 +1772,51 @@ def schedule_only(expr):
         return False
 
 
+def push_off_only(expr):
+    """True when a job-level `if:` is the push guard and nothing else: false on a push with any flag and any draft state, true on a
+    schedule, a dispatch and a pull_request that is not a draft. A draft pull_request may read either way (a shard keeps the draft
+    guard, see shard_push_off). It reads no scope flag and no other job's output, so its answer holds for every flag and skip value."""
+    e = unwrap(expr)
+    if not e:
+        return False
+    try:
+        return all(eval_if(e, event, flag, draft=draft, nightly_skip=skip) == want
+                   for skip in SKIP_VALUES for flag in ("true", "false")
+                   for event, draft, want in (("push", False, False), ("push", True, False), ("schedule", False, True),
+                                              ("workflow_dispatch", False, True), ("pull_request", False, True)))
+    except Exception:
+        return False
+
+
+def shard_push_off(expr):
+    """True when a shard's job-level `if:` is the push guard with the shard draft guard (SHARD_JOB_IF): false on a push, false on a
+    draft pull_request, true on a ready pull_request, a schedule and a dispatch. No scope flag is read."""
+    e = unwrap(expr)
+    if not e:
+        return False
+    try:
+        return all(eval_if(e, event, "true", draft=draft) == want
+                   for event, draft, want in (("push", False, False), ("pull_request", True, False), ("pull_request", False, True),
+                                              ("schedule", False, True), ("workflow_dispatch", False, True)))
+    except Exception:
+        return False
+
+
+def push_off_job_if(name, expr):
+    """True when job `name`'s job-level if is its push-off form: the push guard alone, or a shard's push guard with its draft guard."""
+    if expr is None:
+        return False
+    return push_off_only(expr) or (name in PUSH_OFF_SHARDS and shard_push_off(expr))
+
+
+def holds_push_guard(name, expr):
+    """True when a job-level if keeps the push guard: the push-off form, or a macOS job's scope skip, which also starts on no push."""
+    return push_off_job_if(name, expr) or (name in MACOS_JOBS and macos_scope_skip_ok(name, expr))
+
+
 def push_guard_jobs(text):
-    """The jobs whose job-level if is the push guard, sorted."""
-    return sorted(n for n, j in all_jobs(text).items() if j["if"] is not None and push_guard_only(j["if"]))
+    """The jobs whose job-level if keeps the push guard (holds_push_guard), sorted."""
+    return sorted(n for n, j in all_jobs(text).items() if j["if"] is not None and holds_push_guard(n, j["if"]))
 
 
 def scope_skips_module():
@@ -1797,7 +1855,7 @@ def macos_scope_skip_ok(name, expr):
 
 def macos_scope_skip_problems(text):
     """Each MACOS_JOBS job's job-level if is its scope skip (macos_scope_skip_ok). A step-level skip still starts the macOS runner, so
-    its scope skip sits on the job. No job outside the macOS jobs holds the push guard alone."""
+    its scope skip sits on the job. No job outside PUSH_OFF_JOBS holds the push guard (item 880 added the Windows and mutation jobs)."""
     jobs = all_jobs(text)
     problems = []
     if sorted(macos_scope_skips()) != sorted(MACOS_JOBS):
@@ -1811,8 +1869,8 @@ def macos_scope_skip_problems(text):
         elif not macos_scope_skip_ok(name, job["if"]):
             problems.append(f"{name} job-level if is not its scope skip: {job['if']}")
     for name in push_guard_jobs(text):
-        if name not in MACOS_JOBS:
-            problems.append(f"{name} has the push guard as its job-level if and is not a macOS job")
+        if name not in PUSH_OFF_JOBS:
+            problems.append(f"{name} has the push guard as its job-level if and is not on the R61 push-off list")
     return problems
 
 
@@ -1978,7 +2036,10 @@ class MacOnceByBatch(unittest.TestCase):
         bad = {
             "a push-only guard": ("checks-macos", "github.event_name == 'push'"),
             "a pull-request-only guard": ("checks-macos", "github.event_name == 'pull_request'"),
-            "the push guard on a Windows job": ("checks-windows", "github.event_name != 'push'"),
+            # Re-pointed (owner page item 880, 11:53 CST Nov 15): the push guard on a Windows job is the new shape, so it is no defect.
+            # The defect is the push guard on a job outside the R61 list, or a Windows job whose push guard also reads a flag.
+            "the push guard on a job outside the R61 list": ("checks-rest", "github.event_name != 'push'"),
+            "the push guard with a flag on a Windows job": ("checks-windows", "github.event_name != 'push' && needs.scope.outputs.checks_windows == 'true'"),
             "the scope skip without the push guard": ("checks-macos", "needs.scope.outputs.checks_macos == 'true' || needs.scope.outputs.sweep == 'true' || github.event_name != 'pull_request'"),
             "the push guard with checks_macos and no sweep": ("checks-macos", "github.event_name != 'push' && (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request')"),
             "the push guard with a flag of another job": ("checks-macos", "github.event_name != 'push' && (needs.scope.outputs.checks_windows == 'true' || needs.scope.outputs.sweep == 'true' || github.event_name != 'pull_request')"),
@@ -2038,6 +2099,105 @@ class MacOnceByBatch(unittest.TestCase):
         for label, text in scope_bad.items():
             with self.subTest(defect=label):
                 self.assertTrue(scope_waits_on_skip_jobs_problems("jobs:\n" + text + nightly_skip), label)
+
+
+def runs_on_event(expr, event, draft=False):
+    """True when a job whose job-level if is `expr` runs on `event`. A job with no job-level if runs on every event. The push-off forms
+    read no scope flag, so the flag reads false."""
+    if expr is None:
+        return True
+    return eval_if(expr, event, "false", draft=draft)
+
+
+class PushOffDaily(unittest.TestCase):
+    """Owner page item 880 (11:53 CST Nov 15): a push starts no Windows job and no mutation job. Their job-level if is the push guard, and
+    the daily scheduled run runs them. Each case reads the real checks.yml, so it is red until the change lands. The predicate cases
+    below read synthetic ifs and pass on any file."""
+
+    def setUp(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            self.text = f.read()
+        self.jobs = all_jobs(self.text)
+
+    def mutation_jobs(self):
+        return sorted(n for n in self.jobs if n.startswith(MUTATE_JOB) or n == "mutation-report")
+
+    def test_every_windows_job_and_mutation_job_is_on_the_push_off_list(self):
+        # Named failure: a Windows or mutation job that is not on the list, so no case keeps it off a push.
+        named = sorted(windows_jobs(self.text)) + self.mutation_jobs()
+        self.assertTrue(named, "checks.yml has no Windows or mutation job to check")  # scope before the subject
+        for name in named:
+            with self.subTest(job=name):
+                self.assertIn(name, PUSH_OFF_JOBS, f"{name} runs on Windows or is a mutation job and is not on the push-off list")
+
+    def test_every_name_on_the_push_off_list_is_a_job_of_checks_yml(self):
+        # Control, green on the old code: the list names the jobs the file has, so the cases below read real jobs.
+        for name in PUSH_OFF_JOBS:
+            with self.subTest(job=name):
+                self.assertIn(name, self.jobs, f"the push-off list names {name}, which checks.yml does not have")
+
+    def test_each_windows_and_mutation_job_has_the_push_guard_as_its_job_level_if(self):
+        # Named failure: a Windows or mutation job with no job-level if, or one that is not the push guard, so a push starts its runner.
+        for name in WINDOWS_PUSH_OFF_JOBS + MUTATE_PUSH_OFF_JOBS:
+            with self.subTest(job=name):
+                expr = self.jobs.get(name, {}).get("if")
+                self.assertIsNotNone(expr, f"{name} has no job-level if, so a push starts its runner")
+                self.assertTrue(push_off_job_if(name, expr), f"{name} job-level if is not the push guard: {expr}")
+
+    def test_no_windows_or_mutation_job_starts_on_a_push(self):
+        # Named failure: the job-level if reads a push as a run, so the job starts on every push to main.
+        for name in WINDOWS_PUSH_OFF_JOBS + MUTATE_PUSH_OFF_JOBS:
+            with self.subTest(job=name):
+                self.assertFalse(runs_on_event(self.jobs.get(name, {}).get("if"), "push"), f"{name} starts on a push")
+
+    def test_each_push_off_job_still_runs_on_a_schedule_and_on_a_dispatch(self):
+        # Control, green on the old code: the daily scheduled run and a dispatch run every job the push skips, so none is lost.
+        # Named failure: a push-off if that also skips the schedule, so the daily never runs the job.
+        for name in WINDOWS_PUSH_OFF_JOBS + MUTATE_PUSH_OFF_JOBS:
+            for event in ("schedule", "workflow_dispatch"):
+                with self.subTest(job=name, event=event):
+                    self.assertTrue(runs_on_event(self.jobs.get(name, {}).get("if"), event), f"{name} does not run on {event}")
+
+    def test_each_push_off_job_still_runs_on_a_ready_pull_request(self):
+        # Control, green on the old code: the pull request run keeps every Windows and mutation job.
+        for name in WINDOWS_PUSH_OFF_JOBS + MUTATE_PUSH_OFF_JOBS:
+            with self.subTest(job=name):
+                self.assertTrue(runs_on_event(self.jobs.get(name, {}).get("if"), "pull_request"), f"{name} does not run on a ready pull request")
+
+    def test_each_shard_keeps_the_draft_guard_beside_the_push_guard(self):
+        # Named failure: a shard's job-level if drops the draft guard, so a draft pull request starts every shard. Control on the old file.
+        for name in PUSH_OFF_SHARDS:
+            with self.subTest(job=name):
+                expr = self.jobs.get(name, {}).get("if")
+                self.assertIsNotNone(expr, f"{name} has no job-level if, so a draft pull request starts it")
+                self.assertFalse(runs_on_event(expr, "pull_request", draft=True), f"{name} runs on a draft pull request: {expr}")
+
+
+class PushOffPredicates(unittest.TestCase):
+    """The push-off predicates on synthetic ifs. Each defect below is the only thing that changes the answer."""
+
+    def test_the_push_guard_alone_is_push_off(self):
+        self.assertTrue(push_off_job_if("checks-windows", "github.event_name != 'push'"))
+        self.assertTrue(push_off_job_if("checks-mutate-guard", "${{ github.event_name != 'push' }}"))
+
+    def test_the_push_guard_with_the_shard_draft_guard_is_push_off_on_a_shard(self):
+        expr = "${{ github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}"
+        self.assertTrue(push_off_job_if("checks-windows-guard-2", expr))
+
+    def test_a_push_guard_that_reads_a_flag_is_not_push_off(self):
+        expr = "github.event_name != 'push' && needs.scope.outputs.checks_windows == 'true'"
+        self.assertFalse(push_off_job_if("checks-windows", expr), "a push guard that reads a flag starts the job on a push when the flag is set")
+
+    def test_a_push_only_guard_is_not_push_off(self):
+        self.assertFalse(push_off_job_if("checks-windows", "github.event_name == 'push'"))
+
+    def test_an_or_clause_that_drops_the_dispatch_run_is_not_push_off(self):
+        # Named failure: the or-clause skips a dispatch run, so the daily's dispatch twin never runs the job.
+        self.assertFalse(push_off_job_if("checks-windows", "github.event_name == 'schedule' || github.event_name == 'pull_request'"),
+                         "an or-clause that skips a dispatch run is accepted as the push guard")
+
+    def test_no_job_level_if_is_not_push_off(self):
+        self.assertFalse(push_off_job_if("checks-windows", None))
 
 
 FULL_SUITE_BASES = (GUARD_JOB, "checks-windows-merge", "checks-windows-rest")
@@ -2250,15 +2410,20 @@ class ReadyPullFullSuite(unittest.TestCase):
                     self.assertFalse(runs_on(job, st, "pull_request", "false", draft=True),
                                      f"{name} step {step_label(st)!r} runs on a draft pull_request with no scope flag set")
 
-    def test_the_full_suite_steps_run_on_push_schedule_and_dispatch_with_every_flag_set(self):
-        # Control, green on the old code: push, schedule and dispatch keep the flag rule, and with every flag set they run.
+    def test_the_full_suite_steps_run_on_schedule_and_dispatch_and_not_on_a_push_with_every_flag_set(self):
+        # Re-pointed (owner page item 880, 11:53 CST Nov 15): a push starts no Windows job, so no full suite step runs on a push. The
+        # daily schedule and a dispatch still run every step with every flag set. Named failure on the old file: a step runs on a push.
         for name in self.suite_jobs():
             job = self.jobs[name]
             for st in job["steps"]:
                 for event in ("push", "schedule", "workflow_dispatch"):
                     with self.subTest(job=name, step=step_label(st), event=event):
-                        self.assertTrue(runs_on(job, st, event, "true", draft=False),
-                                        f"{name} step {step_label(st)!r} does not run on {event} with every flag set")
+                        if event == "push" and name in PUSH_OFF_JOBS:
+                            self.assertFalse(runs_on(job, st, event, "true", draft=False),
+                                             f"{name} step {step_label(st)!r} runs on a push, which item 880 takes off the push path")
+                        else:
+                            self.assertTrue(runs_on(job, st, event, "true", draft=False),
+                                            f"{name} step {step_label(st)!r} does not run on {event} with every flag set")
 
 
 class TopLevelOr(unittest.TestCase):
@@ -2459,16 +2624,11 @@ class ModTestStep(unittest.TestCase):
         copies = [c for c in run_commands(self.text) if INLINE_COPY.search(c)]
         self.assertEqual(copies, [])
 
-    def test_checks_stays_a_required_check_and_mods_adds_no_name(self):
-        """Control, green now: the step rides jobs that are already required, so the list gains no name."""
+    def test_all_jobs_passed_stays_the_one_required_check_and_mods_adds_no_name(self):
+        """The owner removed the branch's required check, so main's stamp pins the one name. The mod step adds no name to that pin."""
         with open(STAMP, encoding="utf-8") as f:
             required = json.load(f)["merge"]["requiredChecks"]
-        if required == "protection":  # the list lives in branch protection, which no offline test reads: check only that the workflow gains no mod job
-            self.assertEqual([n for n in all_jobs(self.text) if "mod" in n.lower()], [])
-            return
-        for job in MOD_JOBS:
-            self.assertIn(job, required)
-        self.assertEqual([n for n in required if "mod" in n.lower()], [])
+        self.assertEqual(required, [REQUIRED_CHECK])
 
 
 @unittest.skipUnless(shutil.which("bash") and shutil.which("node") and shutil.which("find"), "needs bash, node and find on PATH")

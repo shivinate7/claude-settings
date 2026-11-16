@@ -18,7 +18,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from test_windows_split import (ALL_JOBS_PASSED_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB, all_jobs, draft_guard_only, eval_if, macos_scope_skips, macos_scope_skip_ok,  # noqa: E402,F401  the one home of the scope condition and scalar parsers
-                                push_guard_only, shard_base, yaml_scalar)  # NIGHTLY_SKIP_JOB and PUSH_SKIP_JOB are read from here by actions/push-skip/push-skip.py
+                                PUSH_OFF_JOBS, push_guard_only, push_off_only, shard_base, shard_push_off, yaml_scalar)  # NIGHTLY_SKIP_JOB and PUSH_SKIP_JOB are read from here by actions/push-skip/push-skip.py
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
 
 ALL_JOBS_PASSED_USES = "$/actions/all-jobs-passed"
@@ -168,7 +168,9 @@ def steps_problems(text):
 
 def off_problems(text):
     """Only a shard job may stay off all-jobs-passed. A needed job has no job-level if, except scope (its draft rule),
-    a macOS job (its scope skip, which scope-skips names) and a Windows full shard (the draft guard)."""
+    a macOS job (its scope skip, which scope-skips names), a Windows full shard (the draft guard) and a job on the R61 push-off
+    list whose if is the push guard alone (owner page item 880, 11:53 CST Nov 15). all-jobs-passed runs on a pull_request only, a pull_request
+    always runs a push-guarded job, so its skip is never read there; a shard keeps the draft guard beside the push guard."""
     jobs = all_jobs(text)
     needed, off, problems = split_jobs(text)
     for name in off:
@@ -177,11 +179,13 @@ def off_problems(text):
     for name in needed:
         if shard_base(name):
             # R62: a Windows full shard runs on a ready pull request, so it is needed. Its job-level if is the draft guard only.
-            if not draft_guard_only(jobs[name]["if"] or ""):
+            if not draft_guard_only(jobs[name]["if"] or "") and not shard_push_off(jobs[name]["if"] or ""):
                 problems.append(f"shard {name} is in all-jobs-passed's needs but its job-level if is not the draft guard: "
                                 f"{jobs[name]['if']}")
         elif name in MACOS_JOBS and macos_scope_skip_ok(name, jobs[name]["if"] or ""):
             continue  # its scope skip is off on a PR whose flags are on, so the macOS job stays needed; scope_skips_problems reads its skip
+        elif name in PUSH_OFF_JOBS and jobs[name]["if"] is not None and push_off_only(jobs[name]["if"]):
+            continue  # a listed job (R61 push-off list) with the push guard alone: a pull_request runs it, so the rollup needs it and never reads a skip
         elif name != "scope" and jobs[name]["if"] is not None:
             problems.append(f"{name} is needed and keeps a job-level if: all-jobs-passed reads its skip as red, "
                             "so its scope condition belongs in its steps")

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # The shared push-skip action's fixture suite. Static: action.yml is a composite with one decide step, which runs push-skip.py
 # from the action path, is not continue-on-error, and reads WORKFLOW from inputs.workflow. Pinned: the script runs from a copy
-# that holds only actions/push-skip, lint/, .github/scripts/nightly-skip.py and this repo's checks.yml. That checks.yml is a
-# decoy: a pinned child must never read it. The calling workspace holds the child's checks.yml, CHILD_GOOD from
-# lint/test_all_jobs_passed.py. api_get answers canned reads, so nothing reaches the network. Each case prints ok or FAIL,
-# and the exit is 0 only when every case is ok.
+# that holds only actions/push-skip, lint/, hooks/required_check.py (lint/ imports the required check's name from it),
+# .github/scripts/nightly-skip.py and this repo's checks.yml. That checks.yml is a decoy: a pinned child must never read it.
+# The calling workspace holds the child's checks.yml, CHILD_GOOD from lint/test_all_jobs_passed.py. api_get answers canned
+# reads, so nothing reaches the network. Each case prints ok or FAIL, and the exit is 0 only when every case is ok.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
@@ -32,6 +32,7 @@ grep -qF 'WORKFLOW: ${{ inputs.workflow }}' "$action" && ok "static: WORKFLOW is
 pin="$work/pin"; caller="$work/caller"
 mkdir -p "$pin/actions" "$pin/.github/scripts" "$pin/.github/workflows" "$caller/.github/workflows"
 cp -r "$here" "$pin/actions/push-skip" && cp -r "$root/lint" "$pin/lint" \
+  && mkdir -p "$pin/hooks" && cp "$root/hooks/required_check.py" "$pin/hooks/" \
   && cp "$root/.github/scripts/nightly-skip.py" "$pin/.github/scripts/" && cp "$root/.github/workflows/checks.yml" "$pin/.github/workflows/checks.yml" \
   || { echo "FAIL - pin: the copy of the action and its readers failed"; exit 1; }
 python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import test_all_jobs_passed as t; sys.stdout.write(t.CHILD_GOOD)' "$root/lint" \

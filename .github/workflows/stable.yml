@@ -1,12 +1,17 @@
 name: stable
 
-# Moves the stable branch to a main commit whose checks run finished green. Sessions install from
-# stable, so a red main never reaches them. The job reads the run's result and runs no check of
-# its own. Only a push run on main counts: a pull request run never moves stable.
+# Moves the stable branch to a main commit whose checks run finished green and covered the slow legs.
+# Sessions install from stable, so a red main never reaches them. The job reads the run's result and
+# runs no check of its own. Only a push or a schedule run on main counts: a pull request run never
+# moves stable. A push run runs the Linux fast jobs only (owner page item 880, 11:53 CST Nov 15), so
+# the mover moves stable on a push run only when its push-skip job proved it (scope skipped, which
+# needs `actions: read` to see the run's jobs); the green daily schedule run moves it too. A schedule
+# run that nightly-skip skipped runs no check job (only nightly-skip and push-skip start; scope is skipped), and stable still moves on it, because the skip requires
+# every push since the green daily to be proven. A green Linux-only push run moves nothing.
 # zizmor flags workflow_run as dangerous because it can run with a pull request's code or secrets.
-# It is safe here: the job's `if:` passes only a push run on main of this repository, no step checks
-# out pull request code (checkout takes a main sha), and the run's values reach the action through
-# env, never into a shell script.
+# It is safe here: the job's `if:` passes only a push or schedule run on main of this repository, no
+# step checks out pull request code (checkout takes a main sha), and the run's values reach the
+# action through env, never into a shell script.
 on:
   workflow_run: # zizmor: ignore[dangerous-triggers]
     workflows: [checks]
@@ -23,13 +28,14 @@ jobs:
       cancel-in-progress: false
     if: >-
       ${{ github.event.workflow_run.conclusion == 'success'
-      && github.event.workflow_run.event == 'push'
+      && (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'schedule')
       && github.event.workflow_run.head_branch == 'main'
       && github.event.workflow_run.head_repository.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -42,4 +48,6 @@ jobs:
         with:
           head-sha: ${{ github.event.workflow_run.head_sha }}
           conclusion: ${{ github.event.workflow_run.conclusion }}
+          event: ${{ github.event.workflow_run.event }}
+          run-id: ${{ github.event.workflow_run.id }}
           token: ${{ secrets.GITHUB_TOKEN }}

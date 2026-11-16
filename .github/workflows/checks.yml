@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  # The one daily run (owner page item 880, 11:53 CST Nov 15): a push runs the Linux fast jobs only, and this run adds every job a
+  # push skips (the Windows jobs, the mutation jobs, the macOS jobs). 08:47 UTC, off the hour, so it avoids the top-of-hour load.
+  schedule:
+    - cron: "47 8 * * *"
   workflow_dispatch:
     inputs:
       full_ste_audit:
@@ -33,14 +37,17 @@ env:
   GIT_CONFIG_VALUE_1: "false"
 
 jobs:
-  # The 03:17 nightly's skip job (R61, owner pick b, Nov 12; decision test-strategy-reset). It says skip when main's head already has a
-  # green push run of checks.yml and the newest completed schedule run is green (.github/scripts/nightly-skip.py). Scope waits on it,
-  # so a skip reaches every job through needs and the run is a visible success: nothing is cancelled, since a cancelled run reads
-  # UNKNOWN and blocks merges. A failed read says skip=false: unknown runs everything. The job itself starts on every event and
-  # its steps run on a schedule only: a job-level `if` would leave it skipped, and a skipped ancestor skips every job behind scope.
+  # The daily run's skip job (R61, owner pick b, Nov 12; owner page item 880, 11:53 CST Nov 15; decisions test-strategy-reset and
+  # push-skip-on-proven-tree). It says skip when the newest completed daily is green and every push run since it was proven by the push
+  # skip, the newest at this head (.github/scripts/nightly-skip.py). It prints the range the daily covers, to the log and the step
+  # summary. Scope waits on it, so a skip reaches every job through needs and the run is a visible success: nothing is cancelled,
+  # since a cancelled run reads UNKNOWN and blocks merges. A failed read, or another daily still going, says skip=false: unknown runs
+  # everything. The job itself starts on every event and its steps run on a schedule only: a job-level `if` would leave it skipped,
+  # and a skipped ancestor skips every job behind scope. Reads per daily: one schedule runs read, one push runs read per page of 100, up to 5 pages,
+  # one jobs read per push run since the green daily.
   nightly-skip:
     runs-on: ubuntu-latest
-    # Cap 5 min, unmeasured: the job makes one runs read.
+    # Cap 5 min, unmeasured: the job makes a handful of reads.
     timeout-minutes: 5
     permissions:
       contents: read
@@ -53,7 +60,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Decide whether the nightly can skip
+      - name: Decide whether the daily can skip
         id: decide
         if: ${{ github.event_name == 'schedule' }}
         shell: bash
@@ -100,7 +107,7 @@ jobs:
   # Decides which jobs and suites a run needs (.github/scripts/ci-scope.sh). Every other job
   # needs it. An error in the script turns every flag on, never off. A job behind a scope flag always runs; its steps skip when the flag is off.
   # A draft PR skips this job, so every job that needs it skips too (decision draft-until-reviewed).
-  # It also skips on a scheduled run whose skip job said skip. The skip job runs on every event, and its steps run on a schedule only, so
+  # It also skips on a daily run whose skip job said skip. The skip job runs on every event, and its steps run on a schedule only, so
   # off a schedule its skip output is empty. A failed skip job also has no skip output, which reads as not-skip, and !cancelled() keeps scope running.
   scope:
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.nightly-skip.outputs.skip != 'true' && needs.push-skip.outputs.skip != 'true' }}
@@ -352,7 +359,7 @@ jobs:
       - name: Nightly skip fixture suite
         run: python3 lint/test_nightly_skip.py
 
-      - name: No nightly schedule fixture suite
+      - name: Daily schedule fixture suite
         run: python3 lint/test_no_nightly_schedule.py
 
       - name: Windows rest split fixture suite
@@ -630,6 +637,7 @@ jobs:
           bash actions/zizmor/test_action.sh
           bash actions/silent-undo/test_action.sh
           bash actions/stable-mover/test_action.sh
+          python3 actions/stable-mover/test_proof_step.py
           python3 actions/readme-links/test_readme_links.py
           bash githooks/main-ref/test_hook.sh
           bash githooks/test_pre_commit.sh
@@ -638,6 +646,9 @@ jobs:
 
       - name: Claude role launcher suite
         run: python3 lint/test_claude_role.py
+
+      - name: Lane start helper and template suite
+        run: python3 lint/test_lane_start.py
 
       - name: Refusal route suite
         run: python3 lint/test_refusal_route.py
@@ -679,6 +690,9 @@ jobs:
       - name: Config watch fast-exit suite
         if: ${{ (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_config_watch_fast_exit.py
+
+      - name: Stale install suite
+        run: python3 hooks/test_reinstall_stale.py
 
       - name: Shared names suite
         run: python3 hooks/test_shared_names.py
@@ -927,6 +941,9 @@ jobs:
 
       - name: project-ops brief tool suite
         run: python3 skills/project-ops/tests/test_brief_from_step.py
+
+      - name: project-ops runner state suite
+        run: python3 skills/project-ops/tests/test_runner_state.py
 
       - name: ios-apps skill starter suite
         if: ${{ (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
@@ -1237,6 +1254,7 @@ jobs:
   pointer-windows:
     runs-on: windows-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
     # Cap 10 min, about 2.4x the slowest of 30 runs, 4.2 min, for install-set.test.ps1 on a slow runner
     # (decision ci-job-caps).
     timeout-minutes: 10
@@ -1658,6 +1676,7 @@ jobs:
   checks-windows:
     runs-on: windows-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
     # Cut F moved the guard suite out. Run time since the install.sh leg left is unmeasured; 10 min leaves room.
     timeout-minutes: 10
     steps:
@@ -1767,6 +1786,7 @@ jobs:
   checks-mutate-guard:
     runs-on: ubuntu-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
     # The step grew from 193 s to 400 s (batch 4), then ran 580 s or more before the 10 min cap cut it (run 41786084869).
     # Faster slow kills cut the local run 710 s to 651 s (4 jobs). Batch 7's lanes add mutants. On main, the coordinator
     # measured lane PR 1163 alone at 946 s locally (+236 s) and lane PR 1157 at 768 s (+58 s). If those add up and the
@@ -1805,6 +1825,7 @@ jobs:
   checks-mutate-guard-b:
     runs-on: ubuntu-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
     # Shard 2/3 of the guard mutation test; see checks-mutate-guard. Provisional 60 min cap until 5 green runs (ci-job-caps); unmeasured until the first PR run.
     timeout-minutes: 60
     steps:
@@ -1828,6 +1849,7 @@ jobs:
   checks-mutate-guard-c:
     runs-on: ubuntu-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
     # Shard 3/3 of the guard mutation test; see checks-mutate-guard. Provisional 60 min cap until 5 green runs (ci-job-caps); unmeasured until the first PR run.
     timeout-minutes: 60
     steps:
@@ -1850,8 +1872,11 @@ jobs:
 
   # The mutation report of a batch (decision mutation-report-scores-suites, owner item mutation-ci-job, 2026-11-05). It runs on
   # a pull request from a `batch-` branch (the scope flag mutation_report, set from the head ref) and on workflow_dispatch.
-  # A pull request from any other branch skips its steps, so the job reads passed. A push or a schedule reaches the action,
-  # which skips there itself: the scope rules read a scoped job as running on those events.
+  # A pull request from any other branch skips its steps, so the job reads passed. A push starts no job at all (job-level
+  # `github.event_name != 'push'`, owner page item 880, 11:53 CST Nov 15), so the report is never built for a merge to main. The daily
+  # schedule reaches the action, which skips there itself: there is no batch to report on a schedule. What it writes, on a batch
+  # pull request and a dispatch: the catch share and the untested lines in the job summary, and both JSON logs as the `mutation-report`
+  # artifact. Its readers are the batch's reviewer and the lane that reads a red run; nothing reads it on a push or a schedule.
   # It reports the catch share of the changed lines and never fails on it. It fails only when a known defect (.github/known-defects.json)
   # is MISS or UNKNOWN, or a base entry is MISSING from the head list or CHANGED on it. Cap (ci-job-caps): the budget is a wall deadline, so the `--changed` step lasts at most the budget (1800 s, raised from 300 s under the interim stopgap of decision ci-job-caps: a change to hooks/guard.py ran 10 of 10 mutants in 978 s with a 1800 s budget, 1 of 10 at 600 s; step mutation-tests-for-cost) plus
   # its setup (installs and control runs, before the deadline's mutants), not the 337 s the old start-only budget took on batch 11
@@ -1864,6 +1889,7 @@ jobs:
   mutation-report:
     runs-on: ubuntu-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -1898,6 +1924,7 @@ jobs:
   checks-windows-guard:
     runs-on: windows-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
     # Full guard suite in 3 shards, on a ready pull_request too since R62 (the figures below are push runs). A 2-shard split ran 19:31 and past 20:00 (cancelled) under the old
     # 20 min cap (runs 42406480975, 42408558620), so each of 3 shards takes a third of the cases. Under that cap, 11 main push
     # runs from 42700538152 to 43038567637 (Nov 9 to Nov 11) cut a shard at 20.05 to 20.08 min with no red test; green shards took
@@ -1924,7 +1951,7 @@ jobs:
   checks-windows-guard-2:
     runs-on: windows-latest
     needs: scope
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     # A shard of checks-windows-guard: its figures and cap are there.
     timeout-minutes: 75
     steps:
@@ -1948,7 +1975,7 @@ jobs:
   checks-windows-guard-3:
     runs-on: windows-latest
     needs: scope
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     # A shard of checks-windows-guard: its figures and cap are there.
     timeout-minutes: 75
     steps:
@@ -1974,6 +2001,7 @@ jobs:
   checks-windows-merge:
     runs-on: windows-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
     # Push figures; a ready PR run carries the full suite since R62, unmeasured. 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The newest 29 completed push runs on main, latest attempt of each (run 42522167511 to run 43206612905):
     # 29 green, median 17.6, slowest 21.2 min (run 43155288101). All 5 merge shards share cap 75. The stopgap ends with roadmap step time-pinned-tests-go.
     timeout-minutes: 75
@@ -2007,7 +2035,7 @@ jobs:
   checks-windows-merge-2:
     runs-on: windows-latest
     needs: scope
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     # A shard of checks-windows-merge, with the same cap.
     # 29 green, median 16.8, slowest 20.7 min (run 43197518392), same window as checks-windows-merge.
     # Cap 75 is shared by the 5 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
@@ -2033,7 +2061,7 @@ jobs:
   checks-windows-merge-3:
     runs-on: windows-latest
     needs: scope
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     # A shard of checks-windows-merge, with the same cap.
     # 29 green, median 17.1, slowest 21.2 min (run 43197518392), same window as checks-windows-merge.
     # Cap 75 is shared by the 5 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
@@ -2059,7 +2087,7 @@ jobs:
   checks-windows-merge-4:
     runs-on: windows-latest
     needs: scope
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     # A shard of checks-windows-merge, with the same cap.
     # 29 green, median 16.5, slowest 21.1 min (run 43136344305), same window as checks-windows-merge.
     # Cap 75 is shared by the 5 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
@@ -2085,7 +2113,7 @@ jobs:
   checks-windows-merge-5:
     runs-on: windows-latest
     needs: scope
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     # A shard of checks-windows-merge, with the same cap.
     # 29 green, median 16.0, slowest 18.2 min (run 43119184355), same window as checks-windows-merge.
     # Cap 75 is shared by the 5 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
@@ -2113,6 +2141,7 @@ jobs:
   checks-windows-sweep:
     runs-on: windows-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
     # Now 75, above the 3600 s suite cap that the janitor sweep mutation test runs under (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go).
     timeout-minutes: 75
     steps:
@@ -2141,6 +2170,7 @@ jobs:
   checks-windows-rest:
     runs-on: windows-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
     # Cap 60 min, provisional and unmeasured: half the suites of the old job (slowest 31.7 min), so about half the time (decision ci-job-caps).
     timeout-minutes: 60   # provisional
     steps:
@@ -2276,6 +2306,7 @@ jobs:
   checks-windows-rest-2:
     runs-on: windows-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
     # Cap 60 min, provisional and unmeasured: see checks-windows-rest (decision ci-job-caps).
     timeout-minutes: 60   # provisional
     steps:
