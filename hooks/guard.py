@@ -32,6 +32,16 @@ set_override_veto and session_home_keep):
                        unread. The reason names the handoff and says to Read it. A payload with
                        `agent_id` passes. An override lifts it. A failed import allows.
                        (precompact-handoff, item 9)
+  compaction-audit     deny. After compaction, once the handoff is read, a call from the main session
+                       until it spawns one agent (Agent or Task) whose brief's first non-blank line
+                       starts with `Audit:`. That spawn clears the audit flag only once it has passed every
+                       later rule (main() clears it after judge() returns); a refused, asked or
+                       override-lifted spawn clears nothing. The reason names the remedy. A payload with `agent_id` passes and
+                       clears nothing. An override lifts it and keeps the flag. A failed import allows.
+                       While the handoff is unread, handoff-unread speaks first. Cost: one flag-file
+                       existence check on a call with no flag; one small file written at compaction
+                       (reread_check --post-compact); no log line, hook, timer or process start on an
+                       allowed call. (precompact-handoff, item 16)
 
 Shell tools (Bash, PowerShell), in judge_shell order:
   builder-diff         deny. A builder commit or push whose diff holds a test path, judged
@@ -154,7 +164,13 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
-                       record (read from the transcript) does not show in its cs-build tags.
+                       record (read from the transcript) does not show in its cs-build tags. The standing tier
+                       needs the own newest record to show a coordinator, triage or consultant tag, with no set_session_tags after it.
+                       For the lane tier, also a `--step` that is no cs-step tag of that record, or a record with no cs-repo
+                       tag for shivinate7/claude-settings. Read inside wrappers
+                       (`bash -c`, `$(...)`) too. Also a cloud `merge <pr> --ready` from a session whose own
+                       record carries cs-build:lane and that cs-repo tag, or an MCP update_pull_request with draft false from
+                       one: the batch runner marks a pull request ready. A lane of another repo is not judged.
   merge-confirm-repo   deny. In a cloud session, a merge-tool call with --confirm whose checkout (the -C or
                        --repo-dir value as the merge tool's own parser reads it, else the `cd X &&` directory, else
                        the working directory) has a repo (`git_reads.github_repo`) that no cs-repo tag of the
@@ -276,8 +292,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        remote, else origin) adds a merge commit of more than two parents; a merge that a
                        ref of the pushed remote already holds passes. A dry run and a destination named main or master are
                        left out; push-main asks about the latter. A remote named by a URL or a path
-                       counts every remote's refs. Cost: one `git rev-list` per pushed ref, and one `git
-                       config` more per pushed ref for such a remote. (octopus-push-refused)
+                       counts every remote's refs. A range that shows an octopus is read again after one `git
+                       fetch` of the remote, so a lagging tracking ref cannot hide a merge the remote holds; a
+                       failed fetch keeps the refusal and says so. Cost: one `git rev-list` per pushed ref, one
+                       `git config` more per pushed ref for a URL or path remote, and on a hit one `git fetch`
+                       (10 s at most). (octopus-push-refused)
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
   config-edit          noted. A write to a project's own settings or hooks. See below.
@@ -337,6 +356,12 @@ Other tools, in `judge` order:
                        write deletes the file's record) and a read pass. A refused write leaves the record with the first
                        writer; an override that lifts it moves the record. The reason names no path. A call that names no scratchpad touches no file. An override lifts it.
                        (scratchpad-owner)
+  spawn-searches-existing-builds
+                       deny. A builder or test-author Agent or Task spawn, a `create_session` tagged cs-build:lane and a
+                       lane brief (a `send_message` whose first line after any Grant line starts `Lane brief:`) whose text
+                       has no `Prior work:` line with text after the colon, outside a fence. A bare line counts as none. A
+                       reviewer, an Explore and any other role pass. The text alone decides: nothing is read from GitHub.
+                       An override lifts it. (spawn-searches-existing-builds)
   agent-role-model     deny. A spawn whose model ranks above its role's row in the decision record
                        (haiku < sonnet < opus), or that names no model where the role has no `model:`
                        pin and no default model is set. An Explore whose brief's first line
@@ -410,6 +435,20 @@ Other tools, in `judge` order:
                        form LANE_TITLE_FORM the deny reason prints: `Lane <branch slug>:`. A missing, empty or
                        non-text title is refused. A call with no lane tag passes. Runs after lane-start-settings.
                        An override lifts it. (agent-model-cap)
+  lane start, one pass
+                       A `create_session` call with a lane tag from a session is judged by every lane-start rule
+                       at once, in this order: lane-one-topic, brief-ids-in-roster, agent-model-floor,
+                       lane-effort-pin, lane-repo-tag, lane-start-settings, lane-title-slug, then lane-step-dup
+                       part one (`lane_start_hits`). The open-pull-request part of lane-step-dup stays a rule of its own.
+                       It is refused once, under the first broken rule's name. With two or more broken, the reason
+                       opens with `N lane-start rules broken:` and lists each as `<rule>: <remedy>`, each remedy
+                       unchanged; with one, the reason is that rule's own. An override names one rule: it lifts
+                       the first, and the call goes on to the rules still broken, refused the same way; it never
+                       lifts another rule. A send_message brief is still judged by one rule at a time. An
+                       agent's lane start is refused by agent-no-remote-tools after the two brief rules. Each rule
+                       reads its own call, so a read that fails open there fails open here. `bin/lane-start` prints
+                       a start from the same constants (hooks/shared_names.py) and runs `lane_start_hits` on it
+                       before printing. (agent-model-cap, The lane start in one pass)
   load-brake           deny. On a local session, a lane-start call, an agent's shell or file write, or a lane
                        session's own shell or file write, when the machine is busy (lane starts only) or full. A
                        lane session is one whose own newest get_session record carries `cs-build:lane` and no other
@@ -633,10 +672,11 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
+            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, OCTOPUS_PUSH_STALE, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, LANE_READY_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
-            records_page_hit, repo_proof_hit, role_proof_hit, self_role_child_hit, self_role_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, stamp_hit, step_dup_hit, step_pr_hit, trust_card_hit, written_time_hit,
+            records_page_hit, repo_proof_hit, role_proof_hit, lane_ready_hit, lane_mcp_ready_hit, self_role_child_hit, self_role_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, PRIOR_WORK_REASON, prior_work_lane_hit, prior_work_named, stamp_hit, step_dup_hit, step_pr_hit, target_roster_hit, trust_card_hit, written_time_hit,
+            BRIEF_ID_REASON, BRIEF_TOPIC_REASON, STEP_DUP_REASON,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
         _loading = "guard_frozen"
@@ -1263,6 +1303,14 @@ WORKTREE_HOME_REASON = (
 HANDOFF_UNREAD_REASON = (
     "Rule (handoff unread): context was compacted and this session has not read its handoff. "
     "Remedy: Read %s now. The Read clears this check. Then repeat the call."
+)
+
+COMPACTION_AUDIT_REASON = (
+    "Rule (compaction audit): context was compacted and the handoff audit is still owed. "
+    "Remedy: spawn one Explore agent on Sonnet whose brief's first line is `Audit:`, as step 3 of the "
+    "handoff prompt says. It reads the transcript from the last compaction marker and compares it "
+    "with %s. That spawn clears this check. Then repeat the call. "
+    "(decision precompact-handoff, item 16)"
 )
 
 HANDOFF_SECTIONS_REASON = (
@@ -2002,7 +2050,7 @@ def disables_tests(new_lines, old_lines) -> bool:
 BUILDER_TEST_REASON = (
     "A builder does not change tests or test config. Report the needed test change in your "
     "report. The orchestrator assigns it to a test-author."
-    " A merge conflict in a test file takes the same route."
+    " A merge conflict in a test file takes the same route, unless you keep every test case of both parents unchanged."
     " (decision builders-cannot-edit-tests, a builder never changes a test or test config)"
 )
 READONLY_SHELL_WRITE_REASON = (
@@ -2506,6 +2554,17 @@ def builder_shell_test_hit(raw: str, stripped: str, cwd: str, tool) -> str:
             or interpreter_write_hit(raw, cwd, builder_test_path, script_files=True))
 
 
+def builder_merge_write_ok(target: str, cwd: str, rel: str) -> bool:
+    """True when a builder's write tool may write the test path `target`: the open merge left it conflicted,
+    and it is no mutation test. The content is judged at commit, push and stop (`builder_merge_test_why`).
+    Git runs only for a test path already refused, and reads none of the target's text."""
+    if is_mutation_test_rel(rel):
+        return False
+    where = norm(os.path.normpath(_expanded(target, cwd)))
+    where = where[:len(where) - len(rel)] if rel and where.endswith(rel) else ""
+    return bool(where) and norm(rel).lstrip("/") in {norm(c).lstrip("/") for c in merge_conflicts(where) or ()}
+
+
 def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:
     """The early warning for a write tool call: the target path a role may not change, else ''.
 
@@ -2541,7 +2600,7 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         return target
     if role == WRITER_ROLE:
         return "" if rel.lower().endswith(".md") else target
-    if builder_test_path(target, cwd):
+    if builder_test_path(target, cwd) and not builder_merge_write_ok(target, cwd, rel):
         return target
     if is_test_config_rel(rel) and any(
             disables_tests(part.splitlines(), []) for part in write_content_parts(tool_input)):
@@ -2624,6 +2683,14 @@ def merge_tree(root: str, ours: str, theirs: str):
         if not entry:
             break
         conflicts.add(entry.partition("\t")[2])
+    if conflicts:
+        # From a subfolder git names each path from that folder (`../tests/x.py`): put it back to the checkout's top.
+        prefix = guard_core._git(root, "rev-parse", "--show-prefix")
+        if prefix is None or prefix.returncode != 0:
+            return None
+        if prefix.stdout.strip():
+            conflicts = {os.path.normpath(os.path.join(prefix.stdout.strip(), path)).replace(os.sep, "/")
+                         for path in conflicts}
     return tree.strip(), sorted(conflicts)
 
 
@@ -2796,20 +2863,275 @@ def pyproject_author_ok(old: str, new: str) -> bool:
                for key in set(before) | set(after) if not key.startswith("tool.pytest"))
 
 
-def text_at(root: str, rev, rel: str, top: str = "") -> str:
-    """The file's text at `rev` (a commit or tree), in the working tree when `rev` is None, and ''
+def text_at(root: str, rev, rel: str, top: str = "", missing="") -> str:
+    """The file's text at `rev` (a commit or tree), in the working tree when `rev` is None, and `missing`
     when it does not exist there or `rev` is '' (no commit). `rel` is relative to the top of the checkout,
-    so the working tree is read from `top`; `top` defaults to `root`."""
+    so the working tree is read from `top`; `top` defaults to `root`. A caller that must tell a missing file
+    from an empty one passes `missing=None`."""
     if rev is None:
         try:
             with open(os.path.join(top or root, rel), encoding="utf-8", errors="replace") as handle:
                 return handle.read()
         except Exception:
-            return ""
+            return missing
     if not rev:
-        return ""
+        return missing
     answer = guard_core._git(root, "show", rev + ":" + norm(rel))
-    return answer.stdout if answer is not None and answer.returncode == 0 else ""
+    return answer.stdout if answer is not None and answer.returncode == 0 else missing
+
+
+# ---- a builder's resolution of a merge conflict in a test file (decision builders-cannot-edit-tests).
+# The one home of the reading: `builder_merge_test_why` names the class of loss, or '' when the resolution
+# keeps every test case of both parents as the parents have it.
+MERGE_TEST_REASONS = {
+    "lost": "A test case of a parent is missing from your merge result.",
+    "renamed": "Your merge result renames a test case of a parent.",
+    "moved": "Your merge result has a test case of a parent moved to another file.",
+    "skip": "Your merge result adds a skip or expected-fail mark to a test.",
+    "body": "A test case body or test file part in your merge result differs from both parents' versions.",
+    "new": "Your merge result holds a new test case that no parent had.",
+    "config": "Your merge result changes test config beyond one parent's version.",
+    "mutation": "A merge that conflicts in a mutation test goes to a test-author, whatever you keep.",
+    "unread": "The guard could not read a test file of this merge, so it cannot tell that every case survived.",
+}
+# The classes in the order the reason names them, when a file holds more than one.
+MERGE_TEST_ORDER = ("unread", "lost", "renamed", "moved", "skip", "body", "new")
+MERGE_SKIP_NAMES = {"skip", "skipif", "skiptest", "skipunless", "xfail", "expectedfailure", "importorskip"}
+# The files a builder may add a dependency to: a conflict there keeps its own content check, not this reading.
+MERGE_MANIFESTS = {"package.json", "pyproject.toml", "setup.cfg", "tox.ini"}
+
+
+class MergeOffence(str):
+    """A path a builder's merge resolution is refused for, with the class of loss in `why`."""
+    why = ""
+
+
+def _skip_marks(node) -> int:
+    import ast
+    return sum(1 for n in ast.walk(node)
+               if (isinstance(n, ast.Attribute) and n.attr.lower() in MERGE_SKIP_NAMES)
+               or (isinstance(n, ast.Name) and n.id.lower() in MERGE_SKIP_NAMES))
+
+
+def _node_key(node, prefix):
+    """What names a module or class statement across the parents and the result: a def or class by its name, an
+    assignment by its targets. Any other statement is its own key, so a missing one reads as lost."""
+    import ast
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return (prefix, type(node).__name__, node.name)
+    if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        return (prefix, "assign", "|".join(ast.dump(t) for t in targets))
+    return None
+
+
+def test_file_parts(text: str):
+    """A python test file read with `ast`, or None when it does not parse. `cases` maps each test function by
+    its class path and name to `(dump, node)`. `others` holds each other statement, and each class header with
+    its members taken out as their own entries, as `(dump, node)`; `keys` holds `(key, dump)` for each of them
+    but an import (a union of imports is free) and a bare string, and `calls` each module-level call statement. Comments are no
+    node, so they are free, and a test written inside a string is no case."""
+    import ast
+    import copy
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return None
+    cases, others, keys, calls = {}, [], [], []
+
+    def walk(body, prefix, top_level):
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test"):
+                key, count = prefix + node.name, 1
+                while key in cases:
+                    count += 1
+                    key = "%s%s#%d" % (prefix, node.name, count)
+                cases[key] = (ast.dump(node), node)
+            elif isinstance(node, ast.ClassDef):
+                shell = copy.copy(node)
+                shell.body = []
+                others.append((ast.dump(shell), shell))
+                keys.append((_node_key(node, prefix), ast.dump(shell)))
+                walk(node.body, prefix + node.name + ".", False)
+            elif top_level and isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+                calls.append((ast.dump(node), node))
+            else:
+                others.append((ast.dump(node), node))
+                # An import, or a bare string (a docstring or a ghost test in a string), runs nothing: free.
+                if not isinstance(node, (ast.Import, ast.ImportFrom)) and not (
+                        isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)):
+                    keys.append((_node_key(node, prefix) or (prefix, ast.dump(node)), ast.dump(node)))
+
+    walk(tree.body, "", True)
+    return {"cases": cases, "others": others, "keys": keys, "calls": calls}
+
+
+def _case_shape(node) -> str:
+    import ast
+    import copy
+    bare = copy.copy(node)
+    bare.name = ""
+    return ast.dump(bare)
+
+
+def _key_versions(parts):
+    """Each statement key of `parts` with the dumps it holds, in file order, so a key held twice (an assign and
+    an augmented assign of one name) compares as one version."""
+    versions = {}
+    for key, dump in parts["keys"]:
+        versions[key] = versions.get(key, ()) + (dump,)
+    return versions
+
+
+def _key_counts(parts):
+    return {key: len(dumps) for key, dumps in _key_versions(parts).items()}
+
+
+def _edit_dropped(first, second, base, result) -> bool:
+    """True when a key both parents hold at different versions loses a parent's edit. Each argument maps a key to
+    its version. Both parents changed it from the base: the result keeps one version at most. One changed it: the
+    result must keep that version, since the base version drops that parent's edit."""
+    for key in set(first) & set(second):
+        mine, theirs, origin = first[key], second[key], base.get(key)
+        if mine != theirs and (origin not in (mine, theirs) or result.get(key) == origin):
+            return True
+    return False
+
+
+def merge_test_issue(result, first, second, elsewhere, base=None):
+    """The class of loss in a merge result of a test file, else ''. `result`, `first`, `second` and `base` (the
+    merge base's file; None skips the same-name check) come from `test_file_parts`; `elsewhere(key)` is True when
+    another test file of the merge holds that case as new."""
+    issues = set()
+    parents = (first, second)
+    parent_keys = set(first["cases"]) | set(second["cases"])
+    fresh = {k: v for k, v in result["cases"].items() if k not in parent_keys}
+    fresh_shapes = {}
+    for key, (_, node) in fresh.items():
+        fresh_shapes.setdefault(_case_shape(node), key)
+    renamed = set()
+    for key in parent_keys - set(result["cases"]):
+        node = (first["cases"].get(key) or second["cases"][key])[1]
+        if elsewhere(key):
+            issues.add("moved")
+        elif _case_shape(node) in fresh_shapes:
+            issues.add("renamed")
+            renamed.add(fresh_shapes[_case_shape(node)])
+        else:
+            issues.add("lost")
+    if set(fresh) - renamed:
+        issues.add("new")
+    for key, (dump, node) in result["cases"].items():
+        held = [p["cases"][key] for p in parents if key in p["cases"]]
+        if held and all(dump != h[0] for h in held):
+            issues.add("skip" if _skip_marks(node) > max(_skip_marks(h[1]) for h in held) else "body")
+    if base is not None:
+        # The same reading for a case body and for any other statement a parent edited (a table, a helper, a class
+        # header): a result that keeps the other parent's version drops the edit, though every key survives.
+        read = (first, second, base, result)
+        if _edit_dropped(*({key: dump for key, (dump, _) in p["cases"].items()} for p in read)) or _edit_dropped(
+                *(_key_versions(p) for p in read)):
+            issues.add("lost")
+    # A statement a parent holds (not an import, not a comment) that the result no longer holds.
+    have = _key_counts(result)
+    for part in parents:
+        for key, count in _key_counts(part).items():
+            if have.get(key, 0) < count:
+                issues.add("lost")
+    kept = {d for p in parents for d, _ in p["others"]}
+    for dump, node in result["others"]:
+        if dump not in kept:
+            issues.add("skip" if _skip_marks(node) else "body")
+    held_calls = {d for p in parents for d, _ in p["calls"]}
+    for dump, node in result["calls"]:
+        if dump not in held_calls:
+            issues.add("skip" if _skip_marks(node) else "new")
+    for dump in held_calls:
+        needed = max(sum(1 for d, _ in p["calls"] if d == dump) for p in parents)
+        if sum(1 for d, _ in result["calls"] if d == dump) < needed:
+            issues.add("lost")
+    return next((name for name in MERGE_TEST_ORDER if name in issues), "")
+
+
+def merge_parent_revs(root: str, new):
+    """The two parents of the merge commit `new`, or of the merge in progress (HEAD and MERGE_HEAD) when `new`
+    is None; None when git could not say."""
+    if new is None:
+        answer = guard_core._git(root, "rev-parse", "-q", "--verify", "MERGE_HEAD")
+        return ("HEAD", answer.stdout.strip()) if answer is not None and answer.returncode == 0 else None
+    answer = guard_core._git(root, "show", "-s", "--format=%P", new)
+    found = answer.stdout.split() if answer is not None and answer.returncode == 0 else []
+    return tuple(found) if len(found) == 2 else None
+
+
+def merge_base_parts(root: str, parents, rel: str, top: str):
+    """`test_file_parts` of `rel` at the merge base of the two parents, with `held` True when the base holds the
+    file; an empty reading with `held` False when they share no ancestor or the base lacks the file; None when
+    git or the parse could not say."""
+    answer = guard_core._git(root, "merge-base", parents[0], parents[1])
+    if answer is None or answer.returncode not in (0, 1):
+        return None
+    found = answer.stdout.split()
+    text = text_at(root, found[0], rel, top, missing=None) if found else None
+    parts = test_file_parts(text or "")
+    if parts is not None:
+        parts["held"] = text is not None
+    return parts
+
+
+def builder_merge_test_path(rel: str, names, conflicts) -> bool:
+    """True when `rel`, a path a builder changed in a merge, is one the merge left conflicted that this check
+    reads: a test path, a mutation test, or test config other than a manifest."""
+    held = {norm(c).lstrip("/") for c in conflicts}
+    if not all(norm(n).lstrip("/") in held for n in names):
+        return False
+    return is_builder_test_rel(rel) or (is_test_config_rel(rel) and basename(rel) not in MERGE_MANIFESTS)
+
+
+def builder_merge_test_why(root: str, top: str, rel: str, paths, new=None) -> str:
+    """Why a builder's resolution of the conflicted test path `rel` is refused: a key of `MERGE_TEST_REASONS`;
+    '' when it keeps every test case of both parents as the parents have it. `paths` holds the files the
+    resolution changed, for a case moved to another test file. A mutation test is always refused. Test config
+    must equal one parent's version. Any test file the check cannot parse as python is unread."""
+    if is_mutation_test_rel(rel):
+        return "mutation"
+    parents = merge_parent_revs(root, new)
+    if parents is None:
+        return "unread"
+
+    def same_text(left, right):
+        return left.replace("\r\n", "\n") == right.replace("\r\n", "\n")
+
+    result = text_at(root, new, rel, top)
+    if is_test_config_rel(rel) and not is_test_rel(rel):
+        return "" if any(same_text(result, text_at(root, p, rel, top)) for p in parents) else "config"
+    if not rel.lower().endswith(".py"):
+        return "unread"
+    texts = [text_at(root, p, rel, top, missing=None) for p in parents]
+    read = [test_file_parts(text or "") for text in [result] + texts]
+    if None in read:
+        return "unread"
+    base = merge_base_parts(root, parents, rel, top)
+    if base is None:
+        return "unread"
+    if None in texts and not base["held"]:
+        # A rename that conflicts: the path is new since the base, and the parent that lacks it holds the file at
+        # another path, so its cases cannot be matched here. A delete against a modify keeps the base's file.
+        return "unread"
+
+    def elsewhere(key):
+        for other in paths:
+            if other == rel or not other.lower().endswith(".py") or not is_test_rel(other):
+                continue
+            there = test_file_parts(text_at(root, new, other, top))
+            if there is None or key not in there["cases"]:
+                continue
+            before = [test_file_parts(text_at(root, p, other, top)) for p in parents]
+            if not any(b and key in b["cases"] for b in before):
+                return True
+        return False
+
+    return merge_test_issue(read[0], read[1], read[2], elsewhere, base)
 
 
 def role_offences(root: str, top: str, role: str, paths, old: str, new=None, conflicts=()):
@@ -2841,8 +3163,16 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None, con
             bad = any(is_builder_test_rel(n) for n in names) or (is_test_config_rel(rel) and disables_tests(
                 text_at(root, new, rel, top).splitlines(), text_at(root, old, rel, top).splitlines())) or (
                 is_workflow_rel(rel) and workflow_builder_refused(text_at(root, old, rel, top), text_at(root, new, rel, top)))
+        why = ""
+        if role == BUILDER_ROLE and builder_merge_test_path(rel, names, conflicts):
+            # The merge route: a builder resolves a conflict in a test file when no test case of either parent
+            # is lost, and the reading says which loss when one is. Git runs only for a conflicted path.
+            why = builder_merge_test_why(root, top, rel, paths, new)
+            bad = bool(why) or (bad and not is_builder_test_rel(rel))
         if bad:
-            found.append(rel)
+            offence = MergeOffence(rel)
+            offence.why = why
+            found.append(offence)
     return found
 
 
@@ -2877,8 +3207,18 @@ def diff_rule(role: str) -> str:
             DESIGNER_ROLE: "designer-diff"}.get(role, "builder-diff")
 
 
-def builder_diff_reason() -> str:
-    """The refusal text for a builder's test change. It names no path: it gives the undo route."""
+def builder_diff_reason(offence="") -> str:
+    """The refusal text for a builder's test change. It names no path: it gives the undo route. A merge
+    resolution that loses a test case (`MergeOffence`) gets the class of loss and the merge route."""
+    why = getattr(offence, "why", "")
+    if why:
+        return (
+            MERGE_TEST_REASONS[why] + " A builder may resolve a merge conflict in a test file only by keeping every "
+            "test case of both parents exactly as the parents have it. The guard judges it at commit, push and stop. "
+            "Undo your resolution, or run `git merge --abort` and report it, so the orchestrator hands the whole "
+            "merge to a test-author. This refusal is final: never write the files another way. "
+            "(decision builders-cannot-edit-tests, a builder never changes a test or test config)"
+        )
     return (
         BUILDER_TEST_REASON + " The guard refuses a test change you made, at commit, push and stop. "
         "Undo it: restore each test file you changed to its text at HEAD, and delete each test file "
@@ -2899,7 +3239,7 @@ def diff_refusal(tool: str, role: str, root: str) -> None:
     elif found and role == BUILDER_ROLE:
         # A role guard stays outside every override (decision owner-override): a refusal is final.
         guard_core.set_override_veto(lambda: True)
-        refuse(tool, "deny", "builder-diff", builder_diff_reason(), found)
+        refuse(tool, "deny", "builder-diff", builder_diff_reason(found), found)
     elif found or noted:
         record(tool, "noted", diff_rule(role), found or noted[0])
 
@@ -2927,7 +3267,7 @@ def judge_stop(payload) -> None:
         record("SubagentStop", "noted", "role-diff-unread", where)
     elif found and role == BUILDER_ROLE:
         record("SubagentStop", "deny", diff_rule(role), found)
-        print(json.dumps({"decision": "block", "reason": diff_rule(role) + ": " + builder_diff_reason()}))
+        print(json.dumps({"decision": "block", "reason": diff_rule(role) + ": " + builder_diff_reason(found)}))
         sys.exit(0)
     elif found or noted:
         record("SubagentStop", "noted", diff_rule(role), found or noted[0])
@@ -2940,18 +3280,16 @@ SPAWN_TOOLS = ("Agent", "Task")
 # unread_handoff. The judge() branches below that name it run only if a matcher is added again, and the guard's cases
 # call them directly.
 SESSION_TOOL = "mcp__ccd_session__start_session"
-from shared_names import (  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER from here
-    CREATE_SESSION_TOOL, REMOTE_OUTWARD_TOOLS, REMOTE_SERVER, is_lane_create_session, lane_tags,  # noqa: F401  REMOTE_SERVER re-exported: lint/check_agent_models.py reads guard.REMOTE_SERVER
+from shared_names import (  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER and LANE_EFFORT from here
+    CREATE_SESSION_TOOL, LANE_EFFORT, REMOTE_OUTWARD_TOOLS, REMOTE_SERVER, is_lane_create_session, lane_tags,  # noqa: F401  REMOTE_SERVER and LANE_EFFORT re-exported: lint/check_agent_models.py reads guard.REMOTE_SERVER and guard.LANE_EFFORT
 )
-# The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
-LANE_EFFORT = "medium"
 AGENT_NO_REMOTE_REASON = (
     "An agent never starts, messages, tags, interrupts or archives sessions, and never sets scheduled tasks, "
     "watches, pull request subscriptions, repos, computer folders or the owner's trust card. The session that spawned this agent does "
     "that. Finish your own work and put the request in your report so that session can act on it. "
     "(decision lanes-start-as-agents, an agent is not a lane)"
 )
-from shared_names import LANE_TAG, LANE_TITLE_EXAMPLE_OPENING, LANE_TITLE_FORM, LANE_TITLE_OPENING, grant_line_holds_words  # noqa: E402  the one home of the lane tag, the lane title form and the Grant reader, shared with guard_merge
+from shared_names import opens_fence, LANE_TAG, LANE_TITLE_EXAMPLE_OPENING, LANE_TITLE_FORM, LANE_TITLE_OPENING, grant_line_holds_words  # noqa: E402  the one home of the lane tag, the lane title form and the Grant reader, shared with guard_merge
 LANE_EFFORT_REASON = (
     "A lane starts with the effort field set to `%s` and the whole brief as its prompt. The prompt's "
     "first non-blank line is `Grant: <the grant>, <time>`, the owner's grant that starts this lane. Set the "
@@ -2987,7 +3325,8 @@ MODEL_FLOOR_REASON = (
 )
 # A lane start may not drop the model (rule lane-start-settings), so its remedy names both required inputs.
 LANE_MODEL_FLOOR_REASON = (
-    "Sonnet is the floor for a lane. Start the lane with model sonnet and the source_url of its repo."
+    "Sonnet is the floor for a lane. Start the lane with model sonnet and the source_url of its repo. "
+    "(decision agent-model-cap, the lane start)"
 )
 AGENT_CALL = re.compile(r"\bagent\s*\(")
 SCRIPT_PAIR = re.compile(r"(?:(\w+)|\x00(\d+)\x00)\s*:\s*\x00(\d+)\x00")
@@ -3168,6 +3507,85 @@ def lane_title_hit(tool: str, tool_input) -> str:
     if LANE_TITLE_OPENING.match(text):
         return ""
     return text[:80] or "(none)"
+
+
+# The lane-start rules, judged together for one create_session that tags a lane. The order is the order the rules refused
+# in one at a time, so the first broken rule is the one a refusal is filed under. Each rule keeps its own override.
+LANE_START_COUNT = "%d lane-start rules broken:"
+
+
+def lane_start_hits(tool: str, tool_input, cwd: str, transcript: str = "", judge_step: bool = True) -> list:
+    """[(rule, reason, matched)] for each lane-start rule a create_session call that tags a lane breaks, in judge order,
+    or [] for a call that is no lane start or breaks none. The seven rules come first; lane-step-dup (part one, the live
+    carrier read from `transcript`) follows them. The one collection, read by judge() and by bin/lane-start, so the
+    helper checks its own start with the rules the guard applies. Each rule is judged by its own function, so a read that
+    fails open there fails open here. `judge_step` False leaves lane-step-dup out, for a caller with no transcript to
+    read: with none, step_dup_hit can only answer "unknown", which is a refusal."""
+    if not is_lane_create_session(tool, tool_input):
+        return []
+    hits = []
+    briefed = brief_hit(tool, tool_input, transcript)
+    if briefed:
+        hits.append(("lane-one-topic", briefed[1], briefed[0]))
+    # lane-step-dup part two sits where main judged it, right after lane-one-topic and ahead of the rest, so a start that
+    # breaks another rule and holds a step an open pull request holds is still filed under it and names the pull request.
+    held = step_pr_hit(tool, tool_input, transcript) if judge_step else None
+    if held:
+        hits.append(("lane-step-dup", held[1], held[0]))
+    named_id = brief_roster_hit(tool, tool_input, cwd)
+    if named_id:
+        hits.append(("brief-ids-in-roster", named_id[1], named_id[0]))
+    floor_model = floor_hit(tool, tool_input)
+    if floor_model:
+        hits.append(("agent-model-floor", LANE_MODEL_FLOOR_REASON, floor_model))
+    lane_prompt = lane_effort_hit(tool, tool_input)
+    if lane_prompt:
+        hits.append(("lane-effort-pin", LANE_EFFORT_REASON, lane_prompt))
+    repo_tag_hit_tags, lane_repo = lane_repo_tag_hit(tool, tool_input, cwd)
+    if repo_tag_hit_tags:
+        hits.append(("lane-repo-tag", LANE_REPO_TAG_REASON % (REPO_TAG + (lane_repo or "<owner>/<name>")), repo_tag_hit_tags))
+    lane_missing = lane_start_settings_hit(tool, tool_input)
+    if lane_missing:
+        hits.append(("lane-start-settings", LANE_START_SETTINGS_REASON, lane_missing))
+    lane_title = lane_title_hit(tool, tool_input)
+    if lane_title:
+        hits.append(("lane-title-slug", LANE_TITLE_REASON, lane_title))
+    doubled = step_dup_hit(tool, tool_input, transcript) if judge_step else None
+    if doubled:
+        hits.append(("lane-step-dup", doubled[1], doubled[0]))
+    return hits
+
+
+def lane_start_text(hits: list) -> str:
+    """The refusal text for the broken rules `hits`: their own remedy for one, else a count line and a line per rule."""
+    if len(hits) == 1:
+        return hits[0][1]
+    return "\n".join([LANE_START_COUNT % len(hits)] + [rule + ": " + reason for rule, reason, _ in hits])
+
+
+def refuse_lane_start(tool: str, hits: list) -> None:
+    """Refuse once for the broken lane-start rules `hits`, under the first one's name, listing every one still broken. An
+    override names one rule: when it lifts the first, the call goes on to the rules still broken, refused the same way
+    under the next one's name. When it lifts the last, refuse() ends the call as for any lifted rule. Never lifts another
+    rule's refusal."""
+    for at in range(len(hits)):
+        rest = hits[at:]
+        rule, _, matched = rest[0]
+        # The table gives the refusal audit a literal id for each lane-start rule, with a reason that rule can print. The
+        # printed text is lane_start_text(rest). An id outside the table still refuses, under lane-one-topic.
+        code, why = {
+            "lane-one-topic": ("lane-one-topic", BRIEF_TOPIC_REASON),
+            "lane-step-dup": ("lane-step-dup", STEP_DUP_REASON),
+            "brief-ids-in-roster": ("brief-ids-in-roster", BRIEF_ID_REASON),
+            "agent-model-floor": ("agent-model-floor", LANE_MODEL_FLOOR_REASON),
+            "lane-effort-pin": ("lane-effort-pin", LANE_EFFORT_REASON),
+            "lane-repo-tag": ("lane-repo-tag", LANE_REPO_TAG_REASON),
+            "lane-start-settings": ("lane-start-settings", LANE_START_SETTINGS_REASON),
+            "lane-title-slug": ("lane-title-slug", LANE_TITLE_REASON),
+        }.get(rule, ("lane-one-topic", BRIEF_TOPIC_REASON))
+        last = len(rest) == 1
+        refuse(tool, "deny", code, lane_start_text(rest), matched if last else "; ".join(m for _, _, m in rest),
+               continue_on_lift=not last)
 
 
 # A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
@@ -3485,6 +3903,13 @@ def brief_claim_hit(tool: str, tool_input) -> list:
     return brief_claim_gaps(tool_input.get("prompt"))
 
 
+def prior_work_agent_hit(tool: str, tool_input) -> bool:
+    """True when an Agent or Task brief to a builder or a test-author names no prior work (rule
+    spawn-searches-existing-builds; the reader and the lane forms are in guard_merge). Another role passes."""
+    return (tool in SPAWN_TOOLS and role_key(tool_input.get("subagent_type")) in BRIEF_CLAIM_ROLES
+            and not prior_work_named(tool_input.get("prompt")))
+
+
 # A BRIEF MUST NOT ORDER A DISCARD (rule brief-destructive-git, rule shared-trees-no-destructive-git). A brief that tells a
 # builder to run a command the shell guard refuses starts a lane that hits the refusal, or one that works around it. The
 # scan reads only the command-shaped parts of a brief: a backtick span, a line inside a fence, and a line led by `$ `.
@@ -3507,7 +3932,6 @@ try:
 except Exception:  # fail closed (decision guard-hooks-fail-closed): with no read-only list, every role is judged
     READ_ONLY = frozenset()
 BRIEF_DESTRUCTIVE_SPAN = re.compile(r"(`+)(.+?)\1(?!`)")
-BRIEF_DESTRUCTIVE_INLINE = re.compile(r"(`{3,})[^`].*?\1")
 BRIEF_DESTRUCTIVE_CASE_DATA = re.compile(r"must deny:|add a case:", re.IGNORECASE)  # glossary-ok: the marker text briefs carry
 BRIEF_DESTRUCTIVE_NEGATORS = ("never", "no", "don't", "do-not", "shouldn't", "mustn't", "can't", "cannot")
 BRIEF_DESTRUCTIVE_NEXT_TO = ("avoid", "without")   # a negator only as the word directly before the part
@@ -3548,7 +3972,7 @@ def _brief_commands(prompt: str):
     fenced, covered, cover_indent = False, False, -1
     for line in prompt.replace("\x00", " ").splitlines():
         stripped = line.strip()
-        if stripped.startswith("```") and not BRIEF_DESTRUCTIVE_INLINE.match(stripped):
+        if opens_fence(stripped):
             fenced = not fenced
             continue
         if fenced:
@@ -4962,6 +5386,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         refuse(tool, "deny", "merge-confirm-repo", REPO_REASON if is_cloud() else LOCAL_REPO_REASON, matched)
 
+    # 6a1'. A cloud `merge --ready` from a session whose own record is a lane's (rule merge-role-proof): after the repo proof, which names
+    # the repo first. Cost: one substring test per call, and a parse and a transcript read only on a ready flag.
+    matched = lane_ready_hit(stripped, transcript)
+    if matched:
+        refuse(tool, "deny", "merge-role-proof", LANE_READY_REASON, matched)
+
     # 6a1a. A session that sets the role variable or runs the launcher: it would start a child session that claims a role (rule
     # self-role-claim). Cost: one substring test per call.
     matched = self_role_hit(stripped)
@@ -5005,11 +5435,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "conflict-markers", markers_reason.format(file=matched), matched)
 
     # 6c3. A push whose range adds a merge of more than two parents (rule octopus-push).
-    # Cost: one `git rev-list` per pushed ref, plus one `git config` for a remote named by a URL or a path;
-    # none for a dry run, a main or master destination, or a command with no push.
-    matched = octopus_push_hit(stripped, cwd, read_verb)
+    # Cost: one `git rev-list` per pushed ref, plus one `git config` for a remote named by a URL or a path, plus one
+    # `git fetch` (10 s at most) only when a range first shows an octopus; none for a dry run, a main or master
+    # destination, or a command with no push.
+    matched, stale = octopus_push_hit(stripped, cwd, read_verb)
     if matched:
-        refuse(tool, "deny", "octopus-push", OCTOPUS_PUSH_REASON.format(sha=matched), matched)
+        refuse(tool, "deny", "octopus-push", OCTOPUS_PUSH_REASON.format(sha=matched) + (OCTOPUS_PUSH_STALE if stale else ""), matched)
 
     # 7. A frozen path. The command is read as a shell reads it: a script's own strings are text, and its
     # shell spots are lines of their own (`shell_write_hit`).
@@ -6934,6 +7365,21 @@ def workflow_args_hit(tool: str, tool_input: dict) -> str:
     return next((v.strip() for v in values if workflow_args_placeholder(v)), "")
 
 
+# Set by rule compaction-audit when an Audit: spawn passes it. main() reads it after judge() returns.
+AUDIT_SPAWN_PASSED: list = []
+
+
+def audit_flag_clear_after_allow(payload) -> None:
+    """Drop the audit flag when the call was the Audit: spawn and judge() returned, so no later rule refused it
+    (a refusal, an ask or an override lift all end judge() in sys.exit). Never raises."""
+    try:
+        if AUDIT_SPAWN_PASSED:
+            from reread_check import audit_clear
+            audit_clear(payload)
+    except Exception:
+        pass
+
+
 # A send_later check-in that waits on CI for longer than the cap (rule ci-wait-cap; decision ci-wait-cap-guard).
 # Mistake: a session sets a CI check-in that wakes after the 1-hour prompt cache ends. Harm: the wake pays a full
 # context rewrite. The cap is cap_minutes() in hooks/ci_wait_cap.py, read on each call and never copied here. The message
@@ -7018,6 +7464,20 @@ def judge(payload) -> None:
     unread = unread_handoff(payload) if unread_handoff else ""
     if unread:
         refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % unread, unread)
+    # 0, compaction-audit. Once the handoff is read, no call runs from the main session until it sends the audit
+    # step 3 of the handoff prompt asks for: a spawn whose brief opens with `Audit:`. The spawn passes this rule
+    # and is marked; main() clears the flag only once judge() returns, that is, after every later rule allowed it.
+    # A failed import allows.
+    try:
+        from reread_check import audit_pending, audit_spawn
+    except Exception:
+        audit_pending = None
+    pending = audit_pending(payload) if audit_pending else ""
+    if pending:
+        if audit_spawn(payload, SPAWN_TOOLS):
+            AUDIT_SPAWN_PASSED.append(True)
+        else:
+            refuse(tool, "deny", "compaction-audit", COMPACTION_AUDIT_REASON % pending, pending)
     # 0. Each agent stays inside its own worktree.
     home_hit = worktree_home_hit(payload, tool, tool_input, cwd)
     if home_hit:
@@ -7066,69 +7526,55 @@ def judge(payload) -> None:
     if archived:
         refuse(tool, "deny", "lane-closes-after-records", archived[1], archived[0])
 
-    # A lane brief for a topic the target lane does not hold (rule lane-one-topic).
-    briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
-    if briefed:
-        refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
+    # A lane start (create_session tagged as a lane, made by a session) is judged by every lane-start rule at once and
+    # refused once, with each broken rule listed (lane_start_hits, refuse_lane_start). An agent's lane start is refused
+    # by agent-no-remote-tools (8b) after the two brief rules, as every agent's create_session is.
+    lane_start = is_lane_create_session(tool, tool_input) and not (payload.get("agent_id") and tool in REMOTE_OUTWARD_TOOLS)
+    if lane_start:
+        refuse_lane_start(tool, lane_start_hits(tool, tool_input, cwd, trust_transcript if isinstance(trust_transcript, str) else ""))
+    else:
+        # A lane brief for a topic the target lane does not hold (rule lane-one-topic).
+        briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+        if briefed:
+            refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
 
-    # A brief or a create naming a step another live session of the repo carries (rule lane-step-dup).
-    doubled = step_dup_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
-    if doubled:
-        refuse(tool, "deny", "lane-step-dup", doubled[1], doubled[0])
-    # The same call, for an open lane pull request that holds the step (rule lane-step-dup, part two).
-    held = step_pr_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
-    if held:
-        refuse(tool, "deny", "lane-step-dup", held[1], held[0])
-    # A lane brief that names a bare session id (rule brief-ids-in-roster).
-    named_id = brief_roster_hit(tool, tool_input, cwd)
-    if named_id:
-        refuse(tool, "deny", "brief-ids-in-roster", named_id[1], named_id[0])
+    # A brief naming a step another live session of the repo carries, or an open lane pull request holds (rule
+    # lane-step-dup, both parts). A lane start is judged for both in the one pass above (lane_start_hits).
+    if not lane_start:
+        doubled = step_dup_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+        if doubled:
+            refuse(tool, "deny", "lane-step-dup", doubled[1], doubled[0])
+        held = step_pr_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+        if held:
+            refuse(tool, "deny", "lane-step-dup", held[1], held[0])
+        # A lane brief that names a bare session id (rule brief-ids-in-roster).
+        named_id = brief_roster_hit(tool, tool_input, cwd)
+        if named_id:
+            refuse(tool, "deny", "brief-ids-in-roster", named_id[1], named_id[0])
+
+    # A send_message to a session id no roster source holds (rule target-id-in-roster).
+    unknown_target = target_roster_hit(tool, tool_input, cwd, trust_transcript if isinstance(trust_transcript, str) else "")
+    if unknown_target:
+        refuse(tool, "deny", "target-id-in-roster", unknown_target[1], unknown_target[0])
 
     # 8b. agent-no-remote-tools. An agent never starts, messages, tags or archives sessions, nor sets scheduled tasks;
     # the session that spawned it does. Keyed on a truthy agent_id of any shape, so a drifted id stays refused. After the
-    # rules of 8a, which refuse first with their own remedy; before the spawn rules (agent-model-floor, lane-effort-pin), so an
+    # rules of 8a, which refuse first with their own remedy; before the spawn rules (agent-model-floor, step-up), so an
     # agent's create_session is refused here. An override lifts it.
     if payload.get("agent_id") and tool in REMOTE_OUTWARD_TOOLS:
         refuse(tool, "deny", "agent-no-remote-tools", AGENT_NO_REMOTE_REASON, tool)
 
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
-    # model; the log holds what the call asked for.
+    # model; the log holds what the call asked for. A lane start's floor is judged with the lane-start rules (8a).
     floor_model = floor_hit(tool, tool_input)
     if floor_model:
-        refuse(tool, "deny", "agent-model-floor",
-               LANE_MODEL_FLOOR_REASON if is_lane_create_session(tool, tool_input) else MODEL_FLOOR_REASON,
-               floor_model)
+        refuse(tool, "deny", "agent-model-floor", MODEL_FLOOR_REASON, floor_model)
 
     # 9b. Step-up: a reviewer's second round on Sonnet, a builder's third on Opus. A reviewer's third round passes here on
     # Sonnet or Opus; the Opus ceiling (9d, opus_spawn_hit) then refuses Opus unless an override lifts it.
     step_up = step_up_hit(tool, tool_input)
     if step_up:
         refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model")))
-
-    # 9b2. The lane effort pin: a lane starts with the effort field at medium and the whole brief as its
-    # prompt, the owner's Grant line first. An override lifts it: it is not in never_lifted, because the owner
-    # may mean another start.
-    lane_prompt = lane_effort_hit(tool, tool_input)
-    if lane_prompt:
-        refuse(tool, "deny", "lane-effort-pin", LANE_EFFORT_REASON, lane_prompt)
-
-    # 9b2b. The lane repo tag: a lane session carries the full `cs-repo` tag of the checkout that starts it.
-    # After the effort pin, so a call that breaks both reads the pin first. An override lifts it.
-    repo_tag_hit_tags, lane_repo = lane_repo_tag_hit(tool, tool_input, cwd)
-    if repo_tag_hit_tags:
-        refuse(tool, "deny", "lane-repo-tag", LANE_REPO_TAG_REASON % (REPO_TAG + (lane_repo or "<owner>/<name>")), repo_tag_hit_tags)
-
-    # 9b2c. The lane start settings: a lane session names its model and its source_url. After the repo tag. An
-    # override lifts it.
-    lane_missing = lane_start_settings_hit(tool, tool_input)
-    if lane_missing:
-        refuse(tool, "deny", "lane-start-settings", LANE_START_SETTINGS_REASON, lane_missing)
-
-    # 9b2d. The lane title: a lane's title opens with `Lane <branch slug>:`. After the start settings, so a call
-    # that breaks both reads the settings first. An override lifts it.
-    lane_title = lane_title_hit(tool, tool_input)
-    if lane_title:
-        refuse(tool, "deny", "lane-title-slug", LANE_TITLE_REASON, lane_title)
 
     # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is refused.
     # The override lifts the above-row refusal and never the no-model one (never_lifted).
@@ -7167,6 +7613,13 @@ def judge(payload) -> None:
         named = ", ".join("`" + item[:120].replace("`", "'") + "`" for item in claimed)
         refuse(tool, "deny", "brief-claim-has-probe", BRIEF_CLAIM_REASON % named, named[:120])
 
+    # 9e1. A build spawn names the prior work it searched (rule spawn-searches-existing-builds): a builder or test-author
+    # spawn, a lane start, a lane brief. An override lifts it: the owner may mean the spawn as it stands.
+    unsearched = ("build spawn with no Prior work line", PRIOR_WORK_REASON) if prior_work_agent_hit(tool, tool_input) \
+        else prior_work_lane_hit(tool, tool_input)
+    if unsearched:
+        refuse(tool, "deny", "spawn-searches-existing-builds", unsearched[1], unsearched[0])
+
     # 9e2. A brief that orders a discard of a working tree (rule brief-destructive-git). Any role; an override lifts it,
     # because the owner may mean the brief as it stands.
     ordered = brief_destructive_hit(tool, tool_input)
@@ -7184,6 +7637,10 @@ def judge(payload) -> None:
 
     # The MCP update tool marks a pull request ready with draft false (rule records-page-ready).
     if tool == "mcp__github__update_pull_request":
+        # A lane's own record never marks a pull request ready (rule merge-role-proof, as for `merge --ready`): judged before the page read.
+        matched = lane_mcp_ready_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+        if matched:
+            refuse(tool, "deny", "merge-role-proof", LANE_READY_REASON, matched)
         refuse_ready_page(tool, tool_input, "", cwd)
 
     # The MCP create tool carries its own `draft` field.
@@ -7271,7 +7728,8 @@ def judge(payload) -> None:
     if tool == COMMENTS_TOOL:
         import question_form
         # A reply whose url names no artifact lands nowhere checkable, so it is refused wherever the repo has a waiting page.
-        if tool_input.get("action") == "reply" and (question_form.is_waiting_page(tool_input, cwd)
+        # The page matches by id in any url form (a bare id, an http link), as the rule's cases pin: a form missed is a reply let through.
+        if tool_input.get("action") == "reply" and (question_form.is_waiting_page(tool_input, cwd, any_form=True)  # glossary-ok: is_waiting_page is the name main already uses
                                                     or (question_form.names_no_artifact(tool_input.get("url"))
                                                         and question_form.has_waiting_page(cwd))):
             refuse(tool, "deny", "page-thread-reply", PAGE_THREAD_REPLY_REASON, str(tool_input.get("thread_id") or "?")[:120])
@@ -7402,6 +7860,7 @@ def main() -> None:
         pass  # a guard_core without the setter has no override: every refusal stands
     try:
         judge(payload)
+        audit_flag_clear_after_allow(payload)
     except SystemExit:
         raise
     except Exception as exc:

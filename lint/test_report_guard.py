@@ -1968,6 +1968,7 @@ class PickGuardTests(unittest.TestCase):
 
     PAGE = "https://claude.ai/artifact/waitpage1"
     OTHER = "https://claude.ai/artifact/otherrepo9"
+    GMAIL = "https://claude.ai/artifact/gmailpage2"  # the waiting page's link in another account, a second link of one page
     # The line a pick carries in its Input Needed item (rule question-departs): what is on main, and what changes.
     DEPARTS_LINE = "Departs from: lint/report_guard.py pick check — it also needs a Departs from line"
     PICK_BARE = ("> **Done** OTHER read the code\n"
@@ -2042,6 +2043,54 @@ class PickGuardTests(unittest.TestCase):
     def test_pk_green_page_write_without_link_passes(self):
         # The writer's items write is the send. It reaches the page without a link in the reply, so no link is needed.
         self.assertIsNone(self.verdict(self.PICK, [self.page_set()]))
+
+    def two_link_repo(self):
+        """A repo whose waiting page entry holds two account links, one page: the current link and the gmail link."""
+        repo = os.path.join(self.tmp.name, "two-links")
+        os.makedirs(os.path.join(repo, ".git"))
+        os.makedirs(os.path.join(repo, ".claude"))
+        entry = {"id": "queue", "role": "waiting-page", "export": "waiting",
+                 "links": [{"account": "current", "url": self.PAGE}, {"account": "gmail", "url": self.GMAIL}]}
+        with open(os.path.join(repo, ".claude", "layout-extras.json"), "w") as f:
+            json.dump({"kinds": {}, "artifacts": [entry]}, f)
+        return repo
+
+    def test_pk_green_page_write_to_the_gmail_link_passes(self):
+        # Catches: an items write to the waiting page's link in another account refused as a write to another page,
+        # because the pick check compares the write to the first link only. Any link of the waiting page is the page.
+        repo = self.two_link_repo()
+        out = self.verdict(self.PICK, [self.page_set(self.GMAIL)], repo=repo)
+        self.assertIsNone(out, "an items write to the waiting page's gmail link was refused: %r" % out)
+
+    def test_pk_green_page_write_to_the_current_link_passes_in_a_two_link_repo(self):
+        # Control: the first link still passes when the entry holds a second link.
+        repo = self.two_link_repo()
+        self.assertIsNone(self.verdict(self.PICK, [self.page_set()], repo=repo))
+
+    def test_pk_red_page_write_to_a_link_the_page_does_not_hold_blocks_in_a_two_link_repo(self):
+        # Catches: any artifact link passing as the waiting page once the entry holds two links.
+        repo = self.two_link_repo()
+        self.assertIsNotNone(self.verdict(self.PICK, [self.page_set(self.OTHER)], repo=repo))
+
+    def test_pk_red_page_write_on_another_host_blocks(self):
+        # Catches: a URL on another host passing as the waiting page, because the write is matched on its artifact id alone.
+        out = self.verdict(self.PICK, [self.page_set("https://evil.example/artifact/waitpage1")])
+        self.assertIsNotNone(out, "an items write to a URL on another host, naming the waiting page's id, was accepted")
+
+    def test_pk_red_page_write_with_an_extra_path_segment_blocks(self):
+        # Catches: a claude.ai URL with a segment before the id passing as the waiting page, because only the last segment is compared.
+        out = self.verdict(self.PICK, [self.page_set("https://claude.ai/artifact/OTHER/waitpage1")])
+        self.assertIsNotNone(out, "an items write to a claude.ai URL with an extra path segment was accepted as the waiting page")
+
+    def test_pk_green_page_write_to_the_code_form_of_the_page_passes(self):
+        # Control: the /code/ form of the page's own link is the same page.
+        out = self.verdict(self.PICK, [self.page_set("https://claude.ai/code/artifact/waitpage1")])
+        self.assertIsNone(out, "an items write to the /code/ form of the waiting page was refused: %r" % out)
+
+    def test_pk_green_page_write_with_a_trailing_slash_passes(self):
+        # Control: a trailing slash on the page's own link is the same page.
+        out = self.verdict(self.PICK, [self.page_set("https://claude.ai/artifact/waitpage1/")])
+        self.assertIsNone(out, "an items write to the waiting page's link with a trailing slash was refused: %r" % out)
 
     def test_pk_red_agent_calls_do_not_count(self):
         # An agent's box and write do not count. With no link in the reply, the pick still blocks

@@ -357,6 +357,15 @@ class Scaffold(TempDest):
                       "isolated in a worktree: Claude Code's worktree check can refuse it there.", flat,
                       "templates/brief.md does not say where lane lint runs")
 
+    def test_brief_has_a_prior_work_placeholder_line(self):
+        files = tree(SKILL)
+        self.assertIn("templates/brief.md", files)  # the scope first: a missing brief fails here, once
+        prior = [line.strip() for line in files["templates/brief.md"].splitlines()
+                 if line.strip().startswith("Prior work:")]
+        self.assertEqual(len(prior), 1, "templates/brief.md has %d Prior work lines, want one placeholder" % len(prior))
+        self.assertRegex(prior[0], r"^Prior work:\s*<[^>]+>$",
+                         "the Prior work line of templates/brief.md is not a placeholder the coordinator fills")
+
     def test_writes_nothing_private(self):
         run("--dest", self.dest, "--repo", "acme/widgets")
         for rel, text in tree(self.dest).items():
