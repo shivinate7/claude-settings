@@ -1761,9 +1761,10 @@ class ScopedRepo:
 
     @staticmethod
     def turned_on(flags):
-        """The job and suite flags that are on. Not mutation_report (it is set only for a batch branch), and not the lint_* flags: merge
-        counts no lint as a job, since every merge runs the lints anyway (ci-job checks --lint)."""
-        return sorted(k for k, v in flags.items() if k != "mutation_report" and not k.startswith("lint_") and v != "false")
+        """The job and suite flags that are on. Not mutation_report (it is set only for a batch branch), not the lint_* flags: merge
+        counts no lint as a job, since every merge runs the lints anyway (ci-job checks --lint), and not the doc_* flags, which a prose
+        change sets and the express check lets through."""
+        return sorted(k for k, v in flags.items() if k != "mutation_report" and not k.startswith(("lint_", "doc_")) and v != "false")
 
     @staticmethod
     def lints_on(flags):
@@ -13631,8 +13632,10 @@ class ExpressPath(ScopedRepo, Env):
     SILENT_PRELUDE = "exit 0\n"  # for stub_scope: exits 0 and writes no flag
     JOB_FLAGS_OFF = ('checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos '
                      'pointer_windows checks_guard code mods guard sweep shoot')  # the script's JOBS and suite names, minus the lint flags
-    ALL_OFF_PRELUDE = ('for n in %s %s; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 0\n' % (JOB_FLAGS_OFF, scope_line("LINTS")))  # for stub_scope: every flag off, the lint flags too, exits 0
-    NO_LINT_PRELUDE = ('for n in %s; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 0\n' % JOB_FLAGS_OFF)  # for stub_scope: every job and suite flag off, no lint flag written, exits 0
+    ALL_OFF_PRELUDE = ('for n in %s %s %s; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 0\n'
+                       % (JOB_FLAGS_OFF, scope_line("LINTS"), scope_line("DOCS")))  # for stub_scope: every flag off, the lint and doc flags too, exits 0
+    NO_LINT_PRELUDE = ('for n in %s %s; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 0\n'
+                       % (JOB_FLAGS_OFF, scope_line("DOCS")))  # for stub_scope: every job, suite and doc flag off, no lint flag written, exits 0
 
     def setUp(self):
         super().setUp()
@@ -13652,6 +13655,26 @@ class ExpressPath(ScopedRepo, Env):
         if branch == "main":
             o = self.other
             sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
+
+    def stub_flags_prelude(self, on=(), doc_on=()):
+        """A stub ci-scope.sh body for stub_scope: every job, suite, lint and doc flag the script names, off (the names come from the
+        script's own lines, so they cannot drift), then `true` for each name in `on` and `doc_on`, written last so it wins. A name the
+        script does not yet name is written too, so the stub stands in for the script the express reader reads."""
+        off = " ".join([self.JOB_FLAGS_OFF, scope_line("LINTS"), scope_line("DOCS")])
+        lines = ['for n in %s; do echo "$n=false" >> "$GITHUB_OUTPUT"; done' % off]
+        if on or doc_on:
+            lines.append('for n in %s; do echo "$n=true" >> "$GITHUB_OUTPUT"; done' % " ".join(list(on) + list(doc_on)))
+        return "\n".join(lines) + "\nexit 0\n"
+
+    def assert_doc_flags_on(self, *names):
+        """The scope assert, before a doc case relies on it (P7): the real ci-scope.sh writes each named doc flag as true, and turns on
+        no job and no suite for the fixture's feat."""
+        rc, flags = self.scope_run()
+        self.assertEqual(rc, 0, "the real ci-scope.sh exits %d on the fixture's feat" % rc)
+        for n in names:
+            self.assertIn(n, flags, "the real ci-scope.sh writes no %s line for the fixture: %r" % (n, flags))
+            self.assertEqual(flags[n], "true", "the real ci-scope.sh sets %s off for the fixture: %r" % (n, flags))
+        self.assertEqual(self.turned_on(flags), [], "the fixture is not prose-only: the real ci-scope.sh turns on %r" % self.turned_on(flags))
 
     def test_scope_run_finds_bash_through_resolve_program(self):
         """A bare `bash` on a Windows runner is the WSL stub in System32, which exits 1 on any script (decision
@@ -13810,6 +13833,60 @@ class ExpressPath(ScopedRepo, Env):
         self.assertEqual(rc, 0, "the real ci-scope.sh exits %d on the fixture's feat" % rc)
         self.assertIn("lint_ruling_kind", self.lints_on(flags), "the decision record no longer sets its lint flag: %r" % flags)
         self.assertIn("code", self.turned_on(flags), "the code path no longer turns the code job on beside a lint flag: %r" % flags)
+
+    def test_a_prose_pr_across_two_doc_groups_merges(self):
+        """A rules file and a docs file set two doc flags and no job flag: the express check reads the doc flags as prose and merges."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.on("feat", {"CLAUDE.md": "# Rules\n", "docs/shared.md": "one\ntwo\nthree\nfour\nsix\n"})
+        self.assert_doc_flags_on("doc_rules", "doc_other")
+        calls = self.record_express()
+        rc, out = self.run_express()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertEqual(calls, [None, None], "express_refusal should run once per run (the claim run, the merge run) and return None on a pass: %r" % (calls,))
+
+    def test_a_doc_flag_on_is_no_job_for_express(self):
+        """A script that turns only a doc flag on: express reads it as prose and merges. The doc flags pick which .md-reading steps of
+        the pull request's own run start, and express relies on those steps, so a doc flag never refuses a diff."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope(self.stub_flags_prelude(doc_on=("doc_decisions",)), branch="main")
+        rc_scope, flags = self.scope_run(base=True)
+        self.assertEqual(rc_scope, 0, "the stub scope script does not exit 0: %d" % rc_scope)
+        self.assertEqual(flags.get("doc_decisions"), "true", "the stub does not turn doc_decisions on, so the case proves nothing: %r" % flags)
+        self.on("feat", {"docs/decisions/x.md": "# Decision\n"})
+        calls = self.record_express()
+        rc, out = self.run_express()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertEqual(calls, [None, None], "express_refusal should run once per run (the claim run, the merge run) and return None on a pass: %r" % (calls,))
+
+    def test_a_job_flag_beside_a_doc_flag_refuses_and_names_only_the_job_flag(self):
+        """A script that turns checks_windows and doc_any on: the refusal names checks_windows, and does not name doc_any, a doc flag."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope(self.stub_flags_prelude(on=("checks_windows",), doc_on=("doc_any",)), branch="main")
+        rc_scope, flags = self.scope_run(base=True)
+        self.assertEqual(rc_scope, 0, "the stub scope script does not exit 0: %d" % rc_scope)
+        self.assertEqual((flags.get("checks_windows"), flags.get("doc_any")), ("true", "true"),
+                         "the stub does not turn both flags on, so the case proves nothing: %r" % flags)
+        self.on("feat", {"CLAUDE.md": "# Rules\n"})
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "checks_windows", "CLAUDE.md")
+        self.assertNotIn("doc_any", out, "the refusal names doc_any, a doc flag, as a job: %s" % out)
+
+    def test_a_script_that_writes_no_doc_flag_is_refused_as_unknown(self):
+        """Control: a script whose ALL names the doc flags, and that writes none of them, is refused as unknown. On main the reader
+        reports the name it cannot expand; once the doc flags are named, it reports each one missing. Either way the refusal holds."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope('ALL="$JOBS $LINTS $DOCS"\nfor n in %s %s; do echo "$n=false" >> "$GITHUB_OUTPUT"; done\nexit 0\n'
+                        % (self.JOB_FLAGS_OFF, scope_line("LINTS")), branch="main")
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "unknown", "wrote no flag for")
 
     def test_a_code_file_in_the_pr_is_refused(self):
         self.store(self.RULINGS)
