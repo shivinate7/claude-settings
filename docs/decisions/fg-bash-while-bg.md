@@ -1,6 +1,6 @@
 ---
 id: pending
-slug: fg-bash-while-bg-needs-background
+slug: fg-bash-while-bg
 ---
 
 # A long foreground command waits in the background while the session's agents and background commands run

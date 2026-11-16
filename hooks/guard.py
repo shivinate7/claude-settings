@@ -116,7 +116,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   fg-bash-while-bg     deny. A foreground call that can run long (a test, lint, merge, build or install, or a time
                        limit over 60000 ms), while this session has a background command or agent running, read from
                        the transcript. A call from an agent, a missing transcript and a failed read allow.
-                       (fg-bash-while-bg-needs-background)
+                       (fg-bash-while-bg)
   playwright-browsers-path, playwright-install
                        deny. (playwright-browsers-path, playwright-install-once)
   rm-var-unguarded     deny. A recursive delete under an unguarded variable.
