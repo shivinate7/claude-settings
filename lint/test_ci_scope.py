@@ -862,6 +862,19 @@ class RecordsOnlyPush(unittest.TestCase):
         self.assertSkipFlag(got, False)
         self.assertEqual(got.get("mutation_report"), "true", f"a push with GREEN_HEAD set turns mutation_report off: {got}")
 
+    # The records-only skip drops the 13 job and suite flags and keeps the doc_* flags: the Hook catalog, Glossary and Retired repo
+    # steps read them on a records-only push. The facts and the skip are read before the doc flags (P7).
+    def test_records_only_skip_keeps_the_doc_flags(self):
+        whole = self.whole_pr(self.CODE + [self.RECORDS])
+        self.assertEqual(whole.get("code"), "true", f"scope: the whole PR diff must turn code on: {whole}")
+        self.assertEqual(whole.get("doc_any"), "true", f"scope: the whole PR diff must set doc_any: {whole}")
+        facts = {}
+        got = run([self.RECORDS], green=self.CODE, facts=facts)
+        self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+        self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta from GREEN_HEAD to HEAD is not docs/records.md alone: {facts}")
+        self.assertSkipFlag(got, True)
+        self.assertEqual(differing(got, whole, DOC_FLAGS), [], f"the records-only skip moved a doc flag off the whole PR diff: {got}")
+
 
 # The mod phase must run each mods check script (mods/**/check.mjs), not only *.test.mjs. The script cds to its own
 # root, so each case runs a copy of it inside a scratch tree under the run folder.
