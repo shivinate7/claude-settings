@@ -15228,11 +15228,12 @@ class CloudAllow(unittest.TestCase):
 
     # decision session-tiers: the coordinator never merges, so its role rule goes; the batch-runner rule stays. Ruling
     # own-lanes-merge-claude-settings-prs adds the lane's one step rule, so the file holds four rules.
-    def test_the_rules_file_holds_four_rules_and_no_coordinator_role_rule(self):
+    def test_the_rules_file_holds_five_rules_and_no_coordinator_role_rule(self):
         allow = self.allow()
-        self.assertEqual(len(allow), 4, allow)
+        self.assertEqual(len(allow), 5, allow)
         self.assertNotIn("Bash(~/.claude/bin/merge --role coordinator)", allow)
         self.assertIn("Bash(~/.claude/bin/merge --role batch-runner)", allow)
+        self.assertIn("Bash(~/.claude/bin/merge --role standing)", allow)
         self.assertIn(LANE_STEP_RULE, allow)
 
     def test_the_rules_file_is_exactly_the_confirm_and_role_rules_of_the_home_shim(self):
