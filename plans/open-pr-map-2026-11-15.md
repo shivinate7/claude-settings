@@ -585,3 +585,12 @@ Session: session_013NEJL3tMVa6d437aatxvYY (cs-build:lane cs-repo:shivinate7/clau
 | PR | Title | Draft | Why this owner | Older plan verdict |
 |---|---|---|---|---|
 | #3570 | Stale-draft row reads open PRs from GitHub REST and branch … | draft | its own live session | none |
+
+## Triage 9 reads of the four unknown drafts (REST, 16:36 CST Nov 16)
+
+All four are open drafts with a stale base and no activity since Nov 12-13. No replacement PR found yet; not searched.
+
+- #2725: carry of #2103, builder cannot edit test config. Head 8d53a3a50. Open: owner item 437 on the same rule. #2798 stacks on it.
+- #2798: builder cannot edit an .xctestplan. Head 566cf5369. Needs #2725 to merge first. Parked on #2725.
+- #2792: test-only pins for ask-phase-out; build already on main. Head 4b460f27f. No guard change. Parked: live step, no owner session named.
+- #2805: prose-only stale-cites clean-up, one commit. Head ee9ad636c. Parked: lane lint passed at that head; no live lane named.
