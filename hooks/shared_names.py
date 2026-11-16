@@ -147,6 +147,16 @@ def grant_line_holds_words(line: str) -> bool:
     return "<" not in words and any(c.isalnum() for c in words)
 
 
+_INLINE_TRIPLE_SPAN = re.compile(r"(`{3,})[^`].*?\1")
+
+
+def opens_fence(stripped: str) -> bool:
+    """True when a stripped brief line opens or closes a ``` fence. A line led by a triple-backtick span that closes on
+    itself (```git status``` first) is inline text, no fence. The one fence reader, shared by rules
+    brief-destructive-git and spawn-searches-existing-builds."""
+    return stripped.startswith("```") and not _INLINE_TRIPLE_SPAN.match(stripped)
+
+
 def lane_title(slug: str, topic: str) -> str:
     """The title of a lane start: LANE_TITLE_FORM with the slug filled in, then the topic."""
     return LANE_TITLE_FORM.replace("<branch slug>", slug) + " " + topic

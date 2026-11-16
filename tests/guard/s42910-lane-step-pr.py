@@ -50,20 +50,23 @@ def build_archopen_two():
 lazy_fixture([ARCHOPEN_TWO_5, ARCHOPEN_TWO_7], build_archopen_two)
 
 
-def steppr_create(name, expected, env_path, prompt=LANE_PROMPT, tags=STEPPR_TAGS, carries=(), effort=LANE_EFFORT_FIELD):
+def steppr_create(name, expected, env_path, prompt=LANE_PROMPT, tags=STEPPR_TAGS, carries=(), rule=STEPPR_RULE,
+                  prefix="lane-step-dup: ", effort=LANE_EFFORT_FIELD):
     """A create_session the pull request rule judges, over a whole read with no live session on the step. The call is a
     lane start that passes the lane rules, so only this rule decides it (`effort` is the field a case breaks, or none).
+    `rule` is the rule a refusal names, and `prefix` leads the case name: the Prior work cases below pass their own.
     An allow must print nothing."""
-    add("lane-step-dup: " + name, expected, rule=None if expected == "allow" else STEPPR_RULE, tool=CREATE_SESSION,
+    add(prefix + name, expected, rule=None if expected == "allow" else rule, tool=CREATE_SESSION,
         cwd=NOGIT, transcript=role_path("stepdup-create-empty"), env=ROLE_ENV, silent=expected == "allow",
         carries=carries, env_path=env_path, title="Lane dup-step: do the step", tags=list(tags), prompt=prompt,
         effort=effort, model="sonnet", source_url=LANE_SOURCE_URL)
 
 
-def steppr_send(name, expected, env_path, message, carries=()):
+def steppr_send(name, expected, env_path, message, carries=(), rule=STEPPR_RULE, prefix="lane-step-dup: "):
     """A send_message the pull request rule judges. The target is a lane on the brief's topic, and the transcript holds
-    its record, so lane-one-topic passes the brief and only this rule decides it. An allow must print nothing."""
-    add("lane-step-dup: " + name, expected, rule=None if expected == "allow" else STEPPR_RULE, tool=SEND_MESSAGE,
+    its record, so lane-one-topic passes the brief and only this rule decides it. An allow must print nothing. `rule` and
+    `prefix` work as in steppr_create."""
+    add(prefix + name, expected, rule=None if expected == "allow" else rule, tool=SEND_MESSAGE,
         cwd=NOGIT, transcript=role_path("stepdup-send-empty"), env=ROLE_ENV, silent=expected == "allow",
         carries=carries, env_path=env_path, session_id=STEPDUP_NEW, message=message)
 
@@ -133,3 +136,18 @@ steppr_send("a brief whose body says continues #5 is allowed while open pull req
 # the step's open pull requests, whichever the list reads first. A tuple in carries is any-of.
 steppr_create("a create_session whose brief says continues #9 is refused while open pull requests #5 and #7 hold the step, and names one of them",
               "deny", ARCHOPEN_TWO_7, prompt=LANE_PROMPT + " It continues #9.", carries=(("#5", "#7"),))
+
+# ---- Prior work (rule spawn-searches-existing-builds). A lane start or a lane brief names the prior work it searched, on a
+# line of its own. The constants and the Agent side are in section 40805. Each case below passes the step rules, since its
+# slug has a closed pull request and no open one, so only the Prior work line can refuse it.
+steppr_create("a lane start with no Prior work line is refused while the slug's pull request is closed",
+              "deny", fake_gh_path(ARCHCLOSED), rule=PW_RULE, prefix="prior-work: ", carries=PW_LINE)
+steppr_create("a lane start whose Prior work line is empty is refused while the slug's pull request is closed",
+              "deny", fake_gh_path(ARCHCLOSED), prompt=LANE_PROMPT + "\n" + PW_LINE, rule=PW_RULE, prefix="prior-work: ",
+              carries=PW_LINE)
+steppr_create("a lane start whose Prior work line says none found is allowed while the slug's pull request is closed",
+              "allow", fake_gh_path(ARCHCLOSED), prompt=LANE_PROMPT + "\n" + PW_NONE, prefix="prior-work: ")
+steppr_send("a lane brief with no Prior work line is refused while the slug's pull request is closed",
+            "deny", fake_gh_path(ARCHCLOSED), STEPPR_BRIEF, rule=PW_RULE, prefix="prior-work: ", carries=PW_LINE)
+steppr_send("a lane brief whose body says Prior work: none found is allowed while the slug's pull request is closed",
+            "allow", fake_gh_path(ARCHCLOSED), STEPPR_BRIEF + "\n" + PW_NONE, prefix="prior-work: ")
