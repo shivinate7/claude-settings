@@ -242,9 +242,13 @@ After each build the roadmap build script prints the upkeep list for the triage 
 - `todo` steps whose note has the sentence `Ready.`, in the row `ready todo steps`. A live phase is not
   needed. Each entry is the step id;
 - draft pull requests over 12 hours old with no live lane, in the row `draft PRs over 12 h with no live
-  lane`. The build reads GitHub's REST open-PR list itself (draft, `updated_at`, head ref; token from `GH_TOKEN`,
-  else `GITHUB_TOKEN`), not the live file's `pulls`. A pull's age is `updated_at` against the build run. Cost: N // 100
-  + 1 REST calls per build run for N open pulls (floor, not ceil; at most 20 pages), with no file, timer or log. The
+  lane`. The build reads GitHub's open-PR list itself (draft, `updated_at`, head ref; needs `GH_TOKEN` or
+  `GITHUB_TOKEN` set), not the live file's `pulls`. It reads through the merge tool's `Host` (`merge/merge.py`) as a
+  bulk read. A pull's age is `updated_at` against the build run. Cost: one `gh` call per page of 100, so ceil(N / 100)
+  calls per build run for N open pulls, at least 1, with no file, timer or log. A page is followed by another only while
+  its `Link` header has `rel="next"`; the merge tool stops a read at 500 pages. Its tenth rule stops the read, as
+  unknown, once a reply leaves under a tenth of the call budget (from page 2 on). The read has a 120 second deadline
+  and no retry waits. The
   sessions, `held` and `reviewLog` still come from a fresh live file: a pull has a live lane when a live
   session step equals its branch exactly (the in-progress row also counts a `lane/<id>` branch). An ended
   session holds no draft. A draft whose live pull row (matched by number) has `held` or `reviewLog` true is skipped.
@@ -261,8 +265,9 @@ After each build the roadmap build script prints the upkeep list for the triage 
   `unknown (#N has no live pulls row, so held and reviewLog are unread)`, never listed. Each other entry is
   `#N (<branch or title>)`. When the sessions cannot be read, the row is one
   `unknown (sessions not read: <why>; REST read: N stale-looking drafts)`, a count with no number or branch, never a
-  clear row. When the REST read cannot finish whole (no token or GitHub name, an HTTP error, a transport error cut
-  short, a rate limit, a reply that is not a JSON list, a row of the wrong shape, over 20 pages) the row is one
+  clear row. When the read cannot finish whole (no token or GitHub name, a refusal from the merge tool such as an
+  HTTP error, a rate limit, a budget under a tenth or over 500 pages, gh missing, gh timed out, a reader that could
+  not run, a row of the wrong shape) the row is one
   `unknown (<why>)` entry. `--sessions-source NAME` (default `live-file`) names where this row reads the live
   sessions. `live-file` is the behaviour above. A name in `SESSION_SOURCES` (`build.py`) replaces the live file's
   sessions for the lane check: its reader is called with no arguments and returns `(rows, None)` or `(None, why)`,

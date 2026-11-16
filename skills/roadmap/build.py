@@ -60,10 +60,13 @@ and landedPulls and one more git log of main, and repeats the landed rows' git m
 The upkeep list also holds two rows for the stale-ready report (step triage-stale-ready-report): "ready todo
 steps" (each todo step whose note holds the sentence "Ready.", not gated on live phases) and "draft PRs over
 STALE_DRAFT_HOURS h with no live lane" (each open draft pull whose GitHub updated_at is that far before this build
-run). That row reads GitHub's REST open-PR list itself (open_pulls_rest: draft, updated_at, head ref, head repo; token from
-GH_TOKEN, else GITHUB_TOKEN), not the live file's pulls. The list is read a page of 100 at a time, so the cost is
-N // 100 + 1 REST calls per build run for N open pulls (floor, not ceil: a full page is followed by the page that ends
-the read), at most 20; it writes no file, starts no timer and keeps no log. Sessions, `held` and `reviewLog` still come
+run). That row reads GitHub's open-PR list itself (open_pulls_rest: draft, updated_at, head ref, head repo; needs
+GH_TOKEN or GITHUB_TOKEN set), not the live file's pulls. The read goes through the merge tool's Host (merge/merge.py,
+the one home of GitHub reads) as a bulk read, one gh call per page of 100. A page is followed by another only while its
+Link header has rel="next", so N open pulls cost ceil(N / 100) gh calls per build run, at least 1, and the merge
+tool's PAGE_CEILING (500 pages) stops a read that never ends. The merge tool's tenth rule applies from page 2 on: a
+read stops, as unknown, when a reply leaves under a tenth of the call budget. The read has a 120 second deadline and
+no retry waits. It writes no file, starts no timer and keeps no log. Sessions, `held` and `reviewLog` still come
 from a fresh live file (a pull's marks are matched by number): a draft is skipped when a live session step equals its
 branch or its `lane/<id>` form, or its live row has `held` or `reviewLog` true. The row also reads each REST-stale
 draft's newest branch commit time (branch_commit_times, one `git log -1` of refs/remotes/origin/<branch> per
@@ -77,9 +80,9 @@ time)`, unless a live lane, `held` or `reviewLog` already skips it. Those three 
 draft_table holds the one reading (number, branch, lane, commit, verdict per REST draft) that the entries derive from. When the sessions cannot be read the row is one
 `unknown (sessions not read: <why>; REST read: N stale-looking drafts)`, a count with no number or branch. A stale
 draft with no live pulls row reads `unknown (#N has no live pulls row, ...)`, never listed. The row reads one
-`unknown (<why>)` entry when the REST read cannot finish whole: no token or GitHub name, an HTTP error (403 and 429
-name the rate limit), a transport error cut short, a rate-limit count of 0 before the last page, a reply that is not a JSON list, a row of the wrong shape, or
-more than 20 pages. A pull names a step when its branch equals the step id or
+`unknown (<why>)` entry when the read cannot finish whole: no token or GitHub name, a refusal from the merge tool
+(an HTTP error, a rate limit, a budget under a tenth, more than 500 pages), gh missing, gh timed out, a reader that could
+not run, or a row of the wrong shape. A pull names a step when its branch equals the step id or
 its title holds the id as a whole token (names_step), used by the pair line below. The stale-draft row's lane check is
 unlaned's: the branch, bare or as lane/<id>, equals a live session step. On each live pulls row, triage sets `held` from the batch runner's hand-in or hold list and `reviewLog`
 from the pull's posted review log. A present key must be a JSON bool (`null` and text are not); absent means false. A
@@ -165,15 +168,13 @@ joint line (stale_draft_pull) reads it now.
 """
 import argparse
 import datetime
-import http.client
 import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
-import urllib.error
 import urllib.parse
-import urllib.request
 
 NOTE_WORDS = 250
 STALE_DAYS = 5
@@ -1255,18 +1256,24 @@ def live_lane_holds(work, branch, skip=None):
                                 for k in ids)
 
 
-REST_PAGE_SIZE = 100
-REST_PAGE_CAP = 20
+# Seconds for the whole open-pulls read: merge.shared_deadline turns off its rate-limit and network waits (so a read never
+# sleeps for minutes) and, since merge.SH_TIMEOUT is unset, it is also the bound on a hung gh.
+REST_DEADLINE_SECONDS = 120
+MERGE_DIR = HERE.parent.parent / "merge"
 
 
-def rest_get(url, token):
-    """(parsed JSON body, response headers) for one GitHub REST GET. Raises urllib.error.HTTPError on a non-2xx reply and
-    ValueError on a body that is not JSON. The one place that touches the network, so a test replaces it."""
-    request = urllib.request.Request(url, headers={
-        "Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "roadmap-build"})
-    with urllib.request.urlopen(request, timeout=30) as reply:
-        return json.loads(reply.read().decode("utf-8")), reply.headers
+def load_merge():
+    """The merge tool module (merge/merge.py), the one home of the GitHub reads. Loaded when a read is about to run, so a
+    run with no token never imports it. Its folder is on sys.path only for the import."""
+    added = str(MERGE_DIR) not in sys.path
+    if added:
+        sys.path.insert(1, str(MERGE_DIR))
+    try:
+        import merge
+        return merge
+    finally:
+        if added and str(MERGE_DIR) in sys.path:
+            sys.path.remove(str(MERGE_DIR))
 
 
 def pull_shape_why(row):
@@ -1289,46 +1296,43 @@ def open_pulls_rest(slug):
     """([{number, title, branch, head_repo, draft, updated_at}], None) for every open pull of `slug`, or (None, why).
     head_repo is head.repo.full_name, None when GitHub gives no head repo (a deleted fork).
 
-    Reads GitHub's pulls list a page at a time (a manual page loop: the list is complete or the read is unknown, never a
-    partial list). A full page is followed by one more, so N open pulls cost N // 100 + 1 calls, at most REST_PAGE_CAP.
+    The read goes through the merge tool's Host (open_pulls, as a bulk read), so its paging, budget rule and rate-limit
+    text have one home. The list is complete or the read is unknown, never a partial list. Any failure is one `unknown
+    (...)` reason: the merge tool's refusal, gh missing, gh hung, or a reader that could not run at all.
     """
-    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if not slug:
         return None, "unknown (the repo's GitHub name could not be read)"
-    if not token:
+    if not (os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")):
         return None, "unknown (no GH_TOKEN or GITHUB_TOKEN to read the open pulls)"
+    try:
+        merge = load_merge()
+        host = merge.Host(repo=slug)
+        with merge.shared_deadline(REST_DEADLINE_SECONDS), merge.bulk_reads(host):
+            body = host.open_pulls()
+    except OSError as err:
+        return None, "unknown (gh could not run: %s)" % (err or type(err).__name__,)
+    except subprocess.SubprocessError:
+        return None, "unknown (the open pulls read timed out)"
+    except (Exception, SystemExit) as err:
+        # Only merge's own refusal (Stop) carries a reason worth showing. The class may be missing when the import failed.
+        stop = getattr(sys.modules.get("merge"), "Stop", None)
+        if stop is None or not isinstance(err, stop):
+            return None, "unknown (the merge tool's reader could not run: %s)" % (type(err).__name__,)
+        text = str(err).strip().splitlines()[0] if str(err).strip() else type(err).__name__
+        text = re.sub(r"\s*Run (?:it )?again\b.*$", "", text).strip()
+        limited = merge.RATE_LIMIT.search(str(err)) is not None
+        return None, "unknown (the open pulls read failed%s: %s)" % (" on the rate limit" if limited else "", text)
     rows = []
-    for page in range(1, REST_PAGE_CAP + 1):
-        url = "https://api.github.com/repos/%s/pulls?state=open&per_page=%d&page=%d" % (
-            urllib.parse.quote(slug, safe="/"), REST_PAGE_SIZE, page)
-        try:
-            body, headers = rest_get(url, token)
-        except urllib.error.HTTPError as err:
-            if err.code in (403, 429):
-                return None, "unknown (GitHub refused the read, HTTP %d: rate limit or no access)" % err.code
-            return None, "unknown (the open pulls read failed: HTTP %d)" % err.code
-        except ValueError:
-            return None, "unknown (the open pulls reply was not JSON)"
-        except (OSError, http.client.HTTPException) as err:
-            return None, "unknown (the open pulls read failed: %s)" % (err or type(err).__name__,)
-        if not isinstance(body, list):
-            return None, "unknown (the open pulls reply was not a list)"
-        for row in body:
-            bad = pull_shape_why(row)
-            if bad:
-                return None, "unknown (open pulls read: %s)" % bad
-            head_repo = row["head"].get("repo")
-            full_name = head_repo.get("full_name") if isinstance(head_repo, dict) else None
-            rows.append({"number": row["number"], "title": row.get("title") if isinstance(row.get("title"), str) else "",
-                         "branch": row["head"]["ref"], "head_repo": full_name if isinstance(full_name, str) else None,
-                         "draft": row["draft"], "updated_at": zoned_time(row["updated_at"])})
-        if len(body) < REST_PAGE_SIZE:
-            return rows, None
-        left = headers.get("X-RateLimit-Remaining") if headers is not None else None
-        if left is not None and str(left).strip() == "0":
-            return None, "unknown (GitHub rate limit reached before the last page of open pulls)"
-    return None, "unknown (more than %d open pulls: the read stopped at %d pages)" % (
-        REST_PAGE_CAP * REST_PAGE_SIZE, REST_PAGE_CAP)
+    for row in body:
+        bad = pull_shape_why(row)
+        if bad:
+            return None, "unknown (open pulls read: %s)" % bad
+        head_repo = row["head"].get("repo")
+        full_name = head_repo.get("full_name") if isinstance(head_repo, dict) else None
+        rows.append({"number": row["number"], "title": row.get("title") if isinstance(row.get("title"), str) else "",
+                     "branch": row["head"]["ref"], "head_repo": full_name if isinstance(full_name, str) else None,
+                     "draft": row["draft"], "updated_at": zoned_time(row["updated_at"])})
+    return rows, None
 
 
 LIVE_FILE_SOURCE = "live-file"

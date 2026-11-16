@@ -28,7 +28,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   and `--live`. The `--live` file carries a `sessions` key: each `list_sessions` row (every page) with
   `id`, `session_status` and `tags`. The roadmap build script reads it to list steps in progress with no live lane.
   Each pull row carries `createdAt`. Only the joint line (`stale_draft_pull`) in the roadmap build script reads it.
-  It also carries `held` (true when
+  Each pull row also carries `held` (true when
   the batch runner's hand-in or hold list names the pull) and `reviewLog` (true when the pull has a posted review log),
   JSON bools, omitted when false or unknown. Each item row carries
   `lane` when the page item has one, so it can list an item whose lane is gone.
