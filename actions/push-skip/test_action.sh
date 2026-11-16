@@ -47,6 +47,28 @@ mkdir -p "$macos_caller/.github/workflows"
 cp "$root/.github/workflows/checks.yml" "$macos_caller/.github/workflows/checks.yml" \
   || { echo "FAIL - fixture: the macOS caller could not be written"; exit 1; }
 
+# The scope-skips proof, on a literal map: the mapped caller is CHILD_GOOD with a scope-skips input that names lint, one of its own suite
+# jobs. No macOS job is named, so these cases do not depend on the macOS jobs. The step is spelled $/actions/all-jobs-passed, the spelling
+# the rules reader matches (ALL_JOBS_PASSED_USES in lint/all_jobs_passed_rules.py); a child's pinned spelling reads as no map.
+mapped="$work/mapped_caller"
+mkdir -p "$mapped/.github/workflows"
+cat > "$work/mapped.py" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import test_all_jobs_passed as t
+anchor = "          needs: ${{ toJSON(needs) }} # every job above\n"
+pinned_uses = "shivinate7/claude-settings/actions/all-jobs-passed@" + t.CHILD_PIN
+assert t.CHILD_GOOD.count(anchor) == 1 and t.CHILD_GOOD.count(pinned_uses) == 1, "the all-jobs-passed step changed: the map must follow it"
+text = t.CHILD_GOOD.replace(pinned_uses, "$/actions/all-jobs-passed").replace(anchor, anchor + "          scope-skips: '{\"lint\": [\"code\"]}'\n", 1)
+sys.stdout.write(text)
+PY
+python3 -I "$work/mapped.py" "$root/lint" > "$mapped/.github/workflows/checks.yml" \
+  || { echo "FAIL - fixture: the mapped caller could not be written"; exit 1; }
+# P7: the map reads back from the mapped caller before any verdict is read from it.
+readback=$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import all_jobs_passed_rules as r; print(sorted(r.scope_skips_map(open(sys.argv[2], encoding="utf-8").read())))' "$root/lint" "$mapped/.github/workflows/checks.yml") || readback=""
+[ "$readback" = "['lint']" ] && ok "fixture: the mapped caller's scope-skips map reads back as lint" \
+  || no "fixture: the mapped caller's scope-skips map reads back as $readback, wanted ['lint']"
+
 # The driver: loads the pinned script, answers its reads from the case's canned routes, and prints the skip value it wrote.
 cat > "$work/drive.py" <<'PY'
 import contextlib, importlib.util, io, os, sys, urllib.parse
@@ -118,6 +140,17 @@ if case.startswith("macos"):  # the macOS cases read the caller's own jobs, so t
 CASES["macos_skipped_batch"] = (batch_reads(skipped_runs(ALL_JOBS, MACOS)), {})
 CASES["macos_skipped_lane"] = (lane_reads(skipped_jobs(ALL_JOBS, MACOS)), {})
 CASES["macos_and_suite_skipped_batch"] = (batch_reads(skipped_runs(ALL_JOBS, MACOS | {SUITE})), {})
+# The scope-skips proof: the mapped caller names lint, so a skipped lint is proven only by the same run's scope job. Each case without a
+# passing scope job, and each skipped job the map does not name, must stay a gap.
+CASES["map_batch_proven"] = (batch_reads([run(ROLLUP), run("scope"), run("lint", "skipped"), run("test-mac")]), {})
+CASES["map_batch_scope_failed"] = (batch_reads([run(ROLLUP), run("scope", "failure"), run("lint", "skipped"), run("test-mac")]), {})
+CASES["map_batch_scope_absent"] = (batch_reads([run(ROLLUP), run("lint", "skipped"), run("test-mac")]), {})
+CASES["map_batch_unnamed"] = (batch_reads([run(ROLLUP), run("scope"), run("lint"), run("test-mac", "skipped")]), {})
+CASES["map_lane_proven"] = (lane_reads([job(ROLLUP), job("scope"), job("lint", "skipped", steps=[]), job("test-mac")]), {})
+CASES["map_lane_scope_failed"] = (lane_reads([job(ROLLUP), job("scope", "failure"), job("lint", "skipped", steps=[]), job("test-mac")]), {})
+CASES["map_lane_scope_absent"] = (lane_reads([job(ROLLUP), job("lint", "skipped", steps=[]), job("test-mac")]), {})
+# No map at all (the empty state): the same run as map_batch_proven gives skip=false on the caller with no scope-skips input.
+CASES["unmapped_batch_proven"] = (batch_reads([run(ROLLUP), run("scope"), run("lint", "skipped"), run("test-mac")]), {})
 routes, extra = CASES[case]
 
 
@@ -159,5 +192,13 @@ pinned dispatch false
 pinned macos_skipped_batch true "$macos_caller"
 pinned macos_skipped_lane true "$macos_caller"
 pinned macos_and_suite_skipped_batch false "$macos_caller"
+pinned map_batch_proven true "$mapped"
+pinned map_batch_scope_failed false "$mapped"
+pinned map_batch_scope_absent false "$mapped"
+pinned map_batch_unnamed false "$mapped"
+pinned map_lane_proven true "$mapped"
+pinned map_lane_scope_failed false "$mapped"
+pinned map_lane_scope_absent false "$mapped"
+pinned unmapped_batch_proven false "$caller"
 
 exit "$bad"
