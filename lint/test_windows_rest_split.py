@@ -14,7 +14,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_windows_split import (CHECKS, RECORDS_ONLY_CONDITION, CONDITIONED_JOBS, SPLIT_CONDITIONED_JOBS, UNCONDITIONED_JOBS, all_jobs, eval_if,  # noqa: E402  the one home of the checks.yml reader
-                                condition_problem, scope_named_steps)
+                                condition_problem, job_if_without_records, scope_named_steps)
 from all_jobs_passed_rules import needs_of  # noqa: E402  the one home of the needs reader
 from workflow_steps import job_block  # noqa: E402  the one home of the job parser
 
@@ -73,14 +73,14 @@ class WindowsRestSplit(unittest.TestCase):
         for name in HELD_SHARDS:
             expr = self.jobs.get(name, {}).get("if")
             self.assertIsNotNone(expr, f"{name} has no job-level if, so it cannot be held to a ready pull request")
-            self.assertTrue(eval_if(expr, "pull_request", "true", draft=False),
+            self.assertTrue(eval_if(job_if_without_records(expr), "pull_request", "true", draft=False),
                             f"{name} does not run on a ready pull request: if {expr}")
 
     def test_a_draft_pull_request_runs_no_held_windows_full_shard(self):
         for name in HELD_SHARDS:
             expr = self.jobs.get(name, {}).get("if")
             self.assertIsNotNone(expr, f"{name} has no job-level if, so it would run on a draft pull request")
-            self.assertFalse(eval_if(expr, "pull_request", "true", draft=True),
+            self.assertFalse(eval_if(job_if_without_records(expr), "pull_request", "true", draft=True),
                              f"{name} runs on a draft pull request: if {expr}")
 
 
