@@ -506,7 +506,7 @@ Session: session_013NEJL2f1YCYsvLdpFqtWP3 (cs-build:batch-runner cs-repo:shivina
 | #3332 | Combine d1: 33 reviewed PRs (batch) | draft | its own live session | park: Holds list 11:59 C… |
 | #3331 | Combine c1: 27 reviewed PRs (batch) | draft | its own live session | park: Holds list 11:59 C… |
 | #3325 | Refuse a page task item that carries choice options (step t… | draft | runner 10 section | merge: - Older queue nam… |
-| #3322 | State f of the lost-work check skips a named record branch | draft | runner 10 section | live: owned by lane lost-work-sweep, merges after #3528 (lane's word, 17:16 CST Nov 16: #3322 holds 5 own commits #3528 lacks; the lane merges origin/lost-work-rows into it once, then hands runner 10 the head) |
+| #3322 | State f of the lost-work check skips a named record branch | draft | runner 10 section | replaced by the new PR from lost-work-sweep; number to follow (coordinator's pick, 17:34 CST Nov 16, not owner-typed; lane word 17:33 CST: the merge tool refuses every true review-record form on #3322, so the lane opens a new branch and draft from head 60f5f7b5d and closes #3322; this replaces the lane's 17:16 CST answer that #3322 stays live) |
 | #3312 | Decision merge-needs-current-base: a red main resumes when … | draft | runner 10 section | close: Also (coordinator… |
 | #3304 | Rule git-red-main-reverts: merges resume when the revert me… | draft | runner 10 section | close: Also (coordinator… |
 | #3299 | ci-hygiene step 8: recipe for a combined PR built by hand | draft | runner 10 section | close: left out by name:… |
