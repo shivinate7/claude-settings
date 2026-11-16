@@ -14573,7 +14573,7 @@ class StandingMergeRole(CloudSession):
     records the `standing` merge role and merges its OWN pull request through the merge tool, on green. The gate sits after the pull request
     read and before the lock or any claim. The pull request is this session's own when its body names this session's link. CI is green.
     A docs-only pull request with no guard path needs no record. Any other pull request needs one passing reviewer record on the live
-    head, whatever its model (owner, 2026-11-16 15:18 CST, pick A). No pull request is bounded by line or file counts. The batch runner is not judged by this gate. A refusal names no tier word and no command."""
+    head, whatever its model (owner, pick A). No pull request is bounded by line or file counts. The batch runner is not judged by this gate. A refusal names no tier word and no command."""
 
     def own_pr(self, changed, body=OWN_PR_BODY):
         """Make pull request 7 a case's pull request: its body is `body`, its files are `changed`, and this session records standing."""
@@ -14671,7 +14671,7 @@ class StandingMergeRole(CloudSession):
     # ---- a code pull request, guard paths included, merges under standing with one passing reviewer
     # record on the live head, whatever its model. Without that record it is refused, whatever its size.
     def test_an_own_code_pr_with_no_passing_record_is_refused_under_standing(self):
-        # control, case 3 (owner, 2026-11-16 15:18 CST, pick A): no record, and no record that passes on the live head, whatever its model
+        # control, case 3 (owner, pick A): no record, and no record that passes on the live head, whatever its model
         head = self.head()
         records = {
             "no record": None,
@@ -14728,28 +14728,28 @@ class StandingMergeRole(CloudSession):
         self.assertTrue(getattr(self.host, "merged", False), out + err)
 
     def test_an_own_code_pr_whose_haiku_round_two_passed_after_a_round_one_fail_merges_under_standing(self):
-        # re-pointed from the refused "haiku round one passed alone" case (owner, 2026-11-16 15:18 CST, pick A): the pass that ends review is the gate's, whatever its model
+        # re-pointed from the refused "haiku round one passed alone" case (owner, pick A): the pass that ends review is the gate's, whatever its model
         self.commit_feat({"tools/note.py": "X = 1\n"})
         changed = [("tools/note.py", "added", 1)]
         self.own_pr(changed)
         self.assert_standing_merges(changed, record_text(head=self.head(), rounds=("Round 1: reviewer, haiku, FAIL", "Round 2: reviewer, haiku, PASS")))
 
     def test_an_own_code_pr_with_a_passing_haiku_round_one_record_merges_under_standing(self):
-        # case 1 (owner, 2026-11-16 15:18 CST, pick A): a round-one haiku pass ends review, and the gate reads the pass, not its model
+        # case 1 (owner, pick A): a round-one haiku pass ends review, and the gate reads the pass, not its model
         self.commit_feat({"tools/note.py": "X = 1\n"})
         changed = [("tools/note.py", "added", 1)]
         self.own_pr(changed)
         self.assert_standing_merges(changed, record_text(head=self.head(), rounds=("Round 1: reviewer, haiku, PASS",)))
 
     def test_an_own_code_pr_with_a_passing_opus_round_one_record_merges_under_standing(self):
-        # re-pointed from the refused "an opus record" subtest (owner, 2026-11-16 15:18 CST, pick A): the gate reads the pass, not its model
+        # re-pointed from the refused "an opus record" subtest (owner, pick A): the gate reads the pass, not its model
         self.commit_feat({"tools/note.py": "X = 1\n"})
         changed = [("tools/note.py", "added", 1)]
         self.own_pr(changed)
         self.assert_standing_merges(changed, record_text(head=self.head(), rounds=("Round 1: reviewer, opus, PASS",)))
 
     def test_an_own_code_pr_whose_sonnet_round_failed_and_a_haiku_fix_verifier_passed_is_refused_under_standing(self):
-        # control (owner item 444 a, 2026-11-08 15:04 CST; the 15:18 CST ruling keeps fix checks on sonnet): a haiku fix check PASS does not end review
+        # control (owner item 444 a; the pick A ruling keeps fix checks on sonnet): a haiku fix check PASS does not end review
         self.commit_feat({"tools/note.py": "X = 1\n"})
         self.own_pr([("tools/note.py", "added", 1)])
         self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, FAIL",), fix=(fix_verifier_line(model="haiku"),)))
@@ -14763,7 +14763,7 @@ class StandingMergeRole(CloudSession):
         self.assert_standing_refused()
 
     def test_an_own_code_pr_whose_final_round_failed_on_haiku_is_refused_under_standing(self):
-        # control, case 4 (owner, 2026-11-16 15:18 CST, pick A): a failed final round is no pass, whatever its model
+        # control, case 4 (owner, pick A): a failed final round is no pass, whatever its model
         self.commit_feat({"tools/note.py": "X = 1\n"})
         self.own_pr([("tools/note.py", "added", 1)])
         self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, haiku, FAIL", "Round 2: reviewer, haiku, FAIL", "Round 3: reviewer, haiku, FAIL")))
@@ -14817,14 +14817,14 @@ class StandingMergeRole(CloudSession):
         self.assert_standing_refused()
 
     def test_a_rule_text_pr_with_a_passing_haiku_record_merges_under_standing(self):
-        # re-pointed from the refused non-sonnet case (owner, 2026-11-16 15:18 CST, pick A): the gate reads the pass, not its model
+        # re-pointed from the refused non-sonnet case (owner, pick A): the gate reads the pass, not its model
         self.commit_feat({"CLAUDE.md": "Rule text.\n"})
         changed = [("CLAUDE.md", "modified", 1)]
         self.own_pr(changed)
         self.assert_standing_merges(changed, record_text(head=self.head(), rounds=("Round 1: reviewer, haiku, PASS",)))
 
     def test_a_rule_text_pr_with_a_passing_opus_record_merges_under_standing(self):
-        # re-pointed from the refused non-sonnet case (owner, 2026-11-16 15:18 CST, pick A): the gate reads the pass, not its model
+        # re-pointed from the refused non-sonnet case (owner, pick A): the gate reads the pass, not its model
         self.commit_feat({"CLAUDE.md": "Rule text.\n"})
         changed = [("CLAUDE.md", "modified", 1)]
         self.own_pr(changed)
