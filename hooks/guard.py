@@ -656,6 +656,7 @@ while True:
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit, lane_ready_hit, lane_mcp_ready_hit, self_role_child_hit, self_role_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, stamp_hit, step_dup_hit, step_pr_hit, target_roster_hit, trust_card_hit, written_time_hit,
+            BRIEF_ID_REASON, BRIEF_TOPIC_REASON, STEP_DUP_REASON,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
         _loading = "guard_frozen"
@@ -3004,7 +3005,8 @@ MODEL_FLOOR_REASON = (
 )
 # A lane start may not drop the model (rule lane-start-settings), so its remedy names both required inputs.
 LANE_MODEL_FLOOR_REASON = (
-    "Sonnet is the floor for a lane. Start the lane with model sonnet and the source_url of its repo."
+    "Sonnet is the floor for a lane. Start the lane with model sonnet and the source_url of its repo. "
+    "(decision agent-model-cap, the lane start)"
 )
 AGENT_CALL = re.compile(r"\bagent\s*\(")
 SCRIPT_PAIR = re.compile(r"(?:(\w+)|\x00(\d+)\x00)\s*:\s*\x00(\d+)\x00")
@@ -3249,8 +3251,20 @@ def refuse_lane_start(tool: str, hits: list) -> None:
     for at in range(len(hits)):
         rest = hits[at:]
         rule, _, matched = rest[0]
+        # The table gives the refusal audit a literal id for each lane-start rule, with a reason that rule can print. The
+        # printed text is lane_start_text(rest). An id outside the table still refuses, under lane-one-topic.
+        code, why = {
+            "lane-one-topic": ("lane-one-topic", BRIEF_TOPIC_REASON),
+            "lane-step-dup": ("lane-step-dup", STEP_DUP_REASON),
+            "brief-ids-in-roster": ("brief-ids-in-roster", BRIEF_ID_REASON),
+            "agent-model-floor": ("agent-model-floor", LANE_MODEL_FLOOR_REASON),
+            "lane-effort-pin": ("lane-effort-pin", LANE_EFFORT_REASON),
+            "lane-repo-tag": ("lane-repo-tag", LANE_REPO_TAG_REASON),
+            "lane-start-settings": ("lane-start-settings", LANE_START_SETTINGS_REASON),
+            "lane-title-slug": ("lane-title-slug", LANE_TITLE_REASON),
+        }.get(rule, ("lane-one-topic", BRIEF_TOPIC_REASON))
         last = len(rest) == 1
-        refuse(tool, "deny", rule, lane_start_text(rest), matched if last else "; ".join(m for _, _, m in rest),
+        refuse(tool, "deny", code, lane_start_text(rest), matched if last else "; ".join(m for _, _, m in rest),
                continue_on_lift=not last)
 
 
