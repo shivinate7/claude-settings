@@ -196,11 +196,17 @@ def _source_text(module):
         return handle.read()
 
 
-def late_land_case(module, older_text):
+def late_land_case(module, older_text, tagged=False):
     """`module` is in the copy as older_text, or missing for None, when the guard starts. The guard does not wait for
     it: a plain call is allowed silently, exit 0, and a kill is still denied by its rule, so the guard judged the call
-    and did not crash. No fix runs, so no clock is read."""
+    and did not crash. `tagged` makes the kill a kill by pid of a session-tagged holder (tagged_kill, s35642), because a
+    kill by name is refused by the machine-wide rule before any module is read. No fix runs, so no clock is read."""
     def check():
+        if tagged:
+            if os.name == "nt":
+                return SKIP, NO_PS
+            if not ORPHAN_CASES:
+                return SKIP, NO_ORPHAN
         name = "late-" + module[:-3]
         folder, _good = _reload_copy(name, INSTALL_ID)
         target = os.path.join(folder, module)
@@ -213,7 +219,10 @@ def late_land_case(module, older_text):
         if plain.returncode != 0 or decision != "allow" or reason:
             return False, ("%s is missing or older, and the call is %r as %r, exit %d, want a silent allow"
                            % (module, decision, reason[:70], plain.returncode))
-        kill, _fixed = _reload_run(folder, name, command=FAILCLOSED_CONTROL)
+        command, session = tagged_kill() if tagged else (FAILCLOSED_CONTROL, None)
+        if command is None:
+            return False, "the host gave no session-tagged PPID-1 holder to kill by pid"
+        kill, _fixed = _reload_run(folder, name, command=command, session=session)
         decision, reason = _decision(kill)
         if decision != "deny" or GUARD_CRASH in reason:
             return False, ("%s is missing or older, and the kill is %r as %r, want a deny by its rule"
@@ -270,7 +279,7 @@ LATE_LAND_CHECKS = (
     ("late-land: precompact_handoff.py missing at the start is not waited for: the call is allowed silently",
      late_land_case("precompact_handoff.py", None)),
     ("late-land: proc_env.py, an older copy with no holds_session_tag name, is not waited for: the call is allowed silently",
-     late_land_case("proc_env.py", '"""An older copy: no holds_session_tag name yet."""\n')),
+     late_land_case("proc_env.py", '"""An older copy: no holds_session_tag name yet."""\n', tagged=True)),
     ("late-land: a stale precompact_handoff loads first, the reload picks up the fresh one: a flagged call is refused",
      late_land_stale_ph_case()),
 )

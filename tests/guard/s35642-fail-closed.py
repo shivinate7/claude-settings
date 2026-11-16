@@ -48,11 +48,13 @@ def _copy_env(name, pythonpath=None):
     return env
 
 
-def _run_copy(folder, command, name, pythonpath=None):
+def _run_copy(folder, command, name, pythonpath=None, session=None):
     """One Bash call through the copy's guard.py, with a config folder of its own. The script's own folder
-    is on the path, so the sibling imports resolve there."""
-    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": NOGIT})
-    return subprocess.run([sys.executable, os.path.join(folder, "guard.py")], input=payload,
+    is on the path, so the sibling imports resolve there. `session`, when given, is the payload's session_id."""
+    body = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": NOGIT}
+    if session:
+        body["session_id"] = session
+    return subprocess.run([sys.executable, os.path.join(folder, "guard.py")], input=json.dumps(body),
                           capture_output=True, text=True, env=_copy_env(name, pythonpath), timeout=120)
 
 
@@ -123,37 +125,59 @@ _check = fail_closed_case("git_reads")
 FAILCLOSED_CHECKS.append(_check)
 LOG_CHECKS_EXTRA.append(("audit-high fail-closed: a copy missing git_reads refuses a Bash call", _check))
 
+FAILCLOSED_SESSION = "failclosed-session-0001"   # the payload's session_id, and the tag the kill's holder carries
+
+
+def tagged_kill():
+    """(command, session) for a kill by pid of a holder this row starts: a process that carries the session tag and
+    that a shell orphans, so init adopts it (PPID 1). tag_orphan (s05163-kill.py) is the one home of that holder.
+    Returns (None, None) when the host gives no such holder."""
+    pid = tag_orphan([TAG + "=" + FAILCLOSED_SESSION])
+    if pid is None:
+        return None, None
+    return "kill %d" % pid, FAILCLOSED_SESSION
+
+
 def proc_env_fallback_check():
-    """A copy without proc_env.py allows a plain Bash call, and still denies a kill by its rule. guard_kill imports
-    proc_env inside a try, and its ImportError fallback reads no session tag. The intact copy is the control, so the
-    kill's deny is shown to come from the rule, not from a copy that never loaded."""
+    """A copy without proc_env.py allows a plain Bash call, and refuses a kill by pid of a session-tagged PPID-1
+    holder that the intact copy allows. guard_kill imports proc_env inside a try, and its ImportError fallback reads
+    no session tag, so the holder reads as foreign. A kill by name is no control here: the machine-wide rule refuses
+    it before the tag is read. The intact copy is the control, so the refusal is shown to come from the missing read."""
+    if os.name == "nt":
+        return SKIP, NO_PS
+    if not ORPHAN_CASES:
+        return SKIP, NO_ORPHAN
     drop = "proc_env.py"
     if not os.path.exists(os.path.join(os.path.dirname(GUARD), drop)):
         return False, "%s is not beside guard.py, so the case cannot delete it" % drop
-    control = _run_copy(_guard_copy("proc_env-intact", None), FAILCLOSED_CONTROL, "proc_env-intact")
-    if _decision(control)[0] != "deny":
-        return False, "the intact copy did not deny the control call: %r" % (_decision(control),)
+    command, session = tagged_kill()
+    if command is None:
+        return False, "the host gave no session-tagged PPID-1 holder to kill by pid"
+    control = _run_copy(_guard_copy("proc_env-intact", None), command, "proc_env-intact", session=session)
+    if _decision(control) != ("allow", "") or control.returncode != 0:
+        return False, "the intact copy did not allow the tagged kill: %r" % (_decision(control),)
     folder = _guard_copy("proc_env", drop)
     plain = _run_copy(folder, FAILCLOSED_CALL, "proc_env")
     decision, reason = _decision(plain)
     if plain.returncode != 0 or decision != "allow" or reason:
         return False, "without %s a plain call is %r as %r (exit %d), want a silent allow" % (
             drop, decision, reason[:70], plain.returncode)
-    kill = _run_copy(folder, FAILCLOSED_CONTROL, "proc_env")
+    kill = _run_copy(folder, command, "proc_env", session=session)
     decision, reason = _decision(kill)
-    if decision != "deny" or GUARD_CRASH in reason:
-        return False, "without %s the kill is %r as %r, want a deny by its rule" % (drop, decision, reason[:70])
-    return True, ("proc_env.py missing: a plain call is allowed silently, exit 0, and a kill is denied by its rule, "
-                  "not as guard-crash")
+    if decision != "deny" or GUARD_CRASH in reason or "did not start" not in reason:
+        return False, "without %s the tagged kill is %r as %r, want a deny for a pid the session did not start" % (
+            drop, decision, reason[:70])
+    return True, ("proc_env.py missing: a plain call is allowed silently, exit 0, and a kill by pid of a tagged "
+                  "PPID-1 holder is refused as a pid the session did not start, which the intact copy allows")
 
 
 # guard_kill.py imports proc_env.py inside a try, for its session-tag read. proc_env.py is no guard_* sibling, so
 # FAILCLOSED_MODULES does not hold it either. A copy without it falls back to no read: a plain call is allowed, and a
-# kill is still denied by its rule (decision install-hooks-whole).
+# kill by pid of a tagged holder is refused as foreign (decision install-hooks-whole).
 pr2015__check = proc_env_fallback_check
 FAILCLOSED_CHECKS.append(pr2015__check)
-LOG_CHECKS_EXTRA.append(("install-hooks-whole fail-closed: a copy missing proc_env (guard_kill's session-tag read) "
-                         "allows a plain Bash call and denies a kill by its rule", pr2015__check))
+LOG_CHECKS_EXTRA.append(("install-hooks-whole fail-closed: a copy missing proc_env refuses a kill by pid of a tagged "
+                         "PPID-1 holder that the intact copy allows, and allows a plain Bash call", pr2015__check))
 for _label, _check in (
     ("audit-high fail-closed: an intact copy allows a plain Bash call", _intact_allows_a_plain_call),
 ):
