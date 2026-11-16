@@ -170,7 +170,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        tag for shivinate7/claude-settings. Read inside wrappers
                        (`bash -c`, `$(...)`) too. Also a cloud `merge <pr> --ready` from a session whose own
                        record carries cs-build:lane and that cs-repo tag, or an MCP update_pull_request with draft false from
-                       one: the batch runner marks a pull request ready. A lane of another repo is not judged.
+                       one, except a lane's own: `merge --role lane --step <its step> <pr> --ready`, where the
+                       step is a cs-step tag of that record and the pull request's head is that step's lane branch
+                       (a pull request read that fails refuses). A lane of another repo is not judged.
   merge-confirm-repo   deny. In a cloud session, a merge-tool call with --confirm whose checkout (the -C or
                        --repo-dir value as the merge tool's own parser reads it, else the `cd X &&` directory, else
                        the working directory) has a repo (`git_reads.github_repo`) that no cs-repo tag of the
@@ -5398,9 +5400,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         refuse(tool, "deny", "self-role-claim", SELF_ROLE_REASON, matched)
 
-    # 6a2. A push to the record branch from a session its own record does not prove triage (rule
-    # roadmap-one-writer). Cost: one `git rev-parse` and one small file read per push, and one
-    # transcript read only when the push reaches the record branch.
+    # 6a2. A push to the record branch from a session its own record does not prove triage, or a lane
+    # pushing its own handoff (rule roadmap-one-writer). Cost: one `git rev-parse` and one small file read
+    # per push, and one transcript read only when the push reaches the record branch. A lane's push that
+    # reaches it adds two git processes, one `git rev-list --parents` and one `git diff-tree --stdin` that reads
+    # every pushed commit's paths (and one `git symbolic-ref` when no cs-step tag names the slug); a triage push, any other session's push and a push to another branch read no diff.
     matched = record_writer_hit(stripped, cwd, transcript, record_branch_of, read_verb, session_id)
     if matched:
         refuse(tool, "deny", "roadmap-one-writer", RECORD_REASON, matched)

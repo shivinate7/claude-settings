@@ -1160,9 +1160,12 @@ LANE_TRANSCRIPT = role_path("lane")
 TRIAGE_TRANSCRIPT = role_path("triage")
 
 
-def record_refuse(name, command, transcript, cwd=PUSHFEAT, env=ROLE_ENV, **kw):
-    """A git push the guard refuses under roadmap-one-writer. The reason names the rule, never the push."""
-    sh("roadmap-one-writer: " + name, command, "deny", rule=RECORD_RULE, carries=RECORD_CARRIES, lacks=RECORD_LACKS,
+def record_refuse(name, command, transcript, cwd=PUSHFEAT, env=ROLE_ENV, carries=(), **kw):
+    """A git push the guard refuses under roadmap-one-writer. The reason names the rule, never the push.
+    `carries` is the caller's own fragments, added to RECORD_CARRIES, which every record refusal holds."""
+    more = (carries,) if isinstance(carries, str) else tuple(carries)
+    sh("roadmap-one-writer: " + name, command, "deny", rule=RECORD_RULE,
+       carries=RECORD_CARRIES + more, lacks=RECORD_LACKS,
        transcript=transcript, env=env, cwd=cwd, **kw)
 
 

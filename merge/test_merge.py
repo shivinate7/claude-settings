@@ -15116,7 +15116,8 @@ class LaneOwnMerge(CloudSession):
     """Ruling own-lanes-merge-claude-settings-prs (owner, 11:12 CST Nov 15, 2026; the merge act only): a cloud lane session may run
     `merge <pr> --confirm --head <sha>` on its OWN ready pull request. Its role file is {"session", "role": "lane", "step": <slug>}, and
     its own pull request is one whose head ref is lane_head_refs(<slug>): the bare slug or lane/<slug>. The fixture's own pull request
-    is branch `feat`, so the step is `feat`. Every other merge check stays, and a lane never runs --ready (the batch runner marks ready)."""
+    is branch `feat`, so the step is `feat`. Every other merge check stays. A lane marks its own draft ready once, in the role form (ruling Q2,
+    decision draft-until-reviewed, owner, 12:58 CST Nov 16, 2026), and the other ready marks stay with the batch runner."""
 
     def setUp(self):
         super().setUp()
@@ -15154,24 +15155,38 @@ class LaneOwnMerge(CloudSession):
         self.assertNotIn("--confirm", err)
         self.assertNotIn("Traceback", err)
 
-    def test_a_lane_cannot_mark_its_own_draft_ready(self):
+    def test_a_lane_marks_its_own_draft_ready_with_the_role_form(self):
+        """Ruling Q2 (decision draft-until-reviewed, owner, 12:58 CST Nov 16, 2026): a lane marks its own PR ready once. The role and its step ride in the same call."""
         self.assert_role_file()
         self.host.draft = True
-        rc, out, err = self.run_main("7", "--ready")
-        self.assertEqual(self.host.readies, [], "a lane's --ready marked its own draft ready: " + out + err)
-        self.assertNotEqual(rc, 0, "a lane's --ready on its own draft exited 0: " + out + err)
+        rc, out, err = self.run_main("--role", "lane", "--step", "feat", "7", "--ready")
+        self.assertEqual(rc, 0, "a lane's role-form --ready on its own draft was refused: " + out + err)
+        self.assertEqual(self.host.readies, [7], "a lane's role-form --ready did not mark its own draft ready: " + out + err)
+        self.assertFalse(getattr(self.host, "merged", False), "a lane's ready mark merged its pull request")
         self.assertNotIn("Traceback", err)
 
-    def assert_refused_outside_claude_settings(self, repo):
+    def test_the_role_form_of_ready_writes_the_lane_role_and_marks_the_draft(self):
+        """The call names the role, so the call itself writes the role file. The case removes the file first, then reads it back (P7)."""
+        os.remove(self.role_file)
+        self.host.draft = True
+        rc, out, err = self.run_main("--role", "lane", "--step", "feat", "7", "--ready")
+        self.assertTrue(os.path.exists(self.role_file), "the role form of --ready did not write the lane role: " + out + err)
+        self.assert_role_file()
+        self.assertEqual(rc, 0, "the role form of --ready was refused: " + out + err)
+        self.assertEqual(self.host.readies, [7], "the role form of --ready did not mark the draft ready: " + out + err)
+        self.assertNotIn("Traceback", err)
+
+    def assert_refused_outside_claude_settings(self, repo, argv=None):
         """Ruling own-lanes-merge-claude-settings-prs covers claude-settings only: a lane's own ready pull request in `repo` is refused.
-        The refusal names neither flag nor the other repo."""
+        The refusal names neither flag nor the other repo. `argv` is the call; the default is the confirm form."""
         self.assert_role_file()
         self.host.repo = repo
         refs = self.refs()
-        rc, out, err = self.run_main("7", "--confirm", "--head", self.head())
-        self.assertEqual(rc, 1, "a lane merged its own ready pull request in " + repo + ": " + out + err)
-        self.assertFalse(getattr(self.host, "merged", False), "a lane's confirm merged a pull request in " + repo)
-        self.assertEqual(self.refs(), refs, "a lane's refused confirm in " + repo + " pushed")
+        rc, out, err = self.run_main(*(argv or ("7", "--confirm", "--head", self.head())))
+        self.assertEqual(rc, 1, "a lane merged or marked ready its own pull request in " + repo + ": " + out + err)
+        self.assertFalse(getattr(self.host, "merged", False), "a lane's call merged a pull request in " + repo)
+        self.assertEqual(self.host.readies, [], "a lane's call marked a pull request ready in " + repo)
+        self.assertEqual(self.refs(), refs, "a lane's refused call in " + repo + " pushed")
         self.assertNotIn("--confirm", err)
         self.assertNotIn("--ready", err)
         self.assertNotIn(repo, err)
@@ -15183,12 +15198,16 @@ class LaneOwnMerge(CloudSession):
     def test_a_lane_is_refused_its_own_ready_pull_request_in_another_owners_claude_settings(self):
         self.assert_refused_outside_claude_settings("someone/claude-settings")
 
+    def test_a_lane_is_refused_the_role_form_of_its_own_draft_ready_mark_in_another_repo(self):
+        self.host.draft = True
+        self.assert_refused_outside_claude_settings("shivinate7/other-repo", argv=("--role", "lane", "--step", "feat", "7", "--ready"))
+
 
 class LaneRefusals(CloudSession):
     """Pins for ruling own-lanes-merge-claude-settings-prs: a lane's confirm is refused on another lane's pull request, on a near-miss
     step, on its own draft (the draft step would mark it ready), on a red check, and with no step in its role file. Each refusal
     names neither --confirm nor --ready. These are green on the old code too, since it refuses every lane; LaneOwnMerge holds the red
-    for the lane's own pull request."""
+    for the lane's own pull request. The role-form ready case below is red on the old code: the old parser refuses that form first."""
 
     def setUp(self):
         super().setUp()
@@ -15213,6 +15232,13 @@ class LaneRefusals(CloudSession):
         self.push_branch("lane/other")
         self.host.branch = "lane/other"
         self.assert_refused_quietly("7", "--confirm", "--head", self.head("lane/other"))
+
+    def test_a_lane_cannot_mark_another_lanes_pull_request_ready_in_the_role_form(self):
+        self.push_branch("lane/other")
+        self.host.branch = "lane/other"
+        self.host.draft = True
+        self.assert_refused_quietly("--role", "lane", "--step", "feat", "7", "--ready")
+        self.assertEqual(self.host.readies, [], "a lane marked another lane's draft ready")
 
     def test_a_near_miss_step_does_not_match_the_pull_request_branch(self):
         self.put_role("lane", step="fea")  # lane_head_refs("fea") is fea and lane/fea; the pull request's branch is feat
