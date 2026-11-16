@@ -44,5 +44,5 @@ Home: hooks/local_time.py
     - A Bash test or echo that quotes an ahead value, such as `assert row == {'updatedAt': '<ahead>'}`. Put the value in a shell variable.
     - A step Edit whose prose or other field holds an instant ahead of the clock. Write the whole file with Write, which reads only `updatedAt`.
     - A fragment fix to an older item, to a time up to 12 hours later in the day than the clock. Example: yesterday's `T18:00Z` set to `T19:00Z` at 08:00Z. Write the whole value.
-  - Cost: one clock read per send_message, and per ArtifactData, Write, Edit, MultiEdit or Bash call that carries a judged value, inside the guard process the PreToolUse matcher already starts. One local file read, only for an ArtifactData items write that carries `file_path` and no inline data. No transcript read, process or timer.
+  - Cost: one clock read per send_message, and per ArtifactData, Write, Edit, MultiEdit or Bash call that carries a judged value, inside the guard process the PreToolUse matcher already starts (unmeasured). One local file read, only for an ArtifactData items write that carries `file_path` and no inline data (unmeasured). No transcript read, process or timer.
   - Tests: family `message-time-matches-clock` in `hooks/test_guard.py`.

@@ -92,7 +92,8 @@ def pd_plain():
 
 def pd_body(repo, data, action="set"):
     return {"tool_name": "ArtifactData", "cwd": repo,
-            "tool_input": {"url": PQ_URL, "action": action, "collection": "items", "doc_id": PD_DOC, "data": data}}
+            "tool_input": {"url": PQ_URL, "action": action, "collection": "items", "doc_id": PD_DOC,
+                           "data": with_shown(data)}}
 
 
 def pd_run(name, body):
