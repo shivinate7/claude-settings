@@ -1,0 +1,11 @@
+{
+ "id": "own-search-before-spawn",
+ "at": "2026-11-15T18:18:00-06:00",
+ "title": "Before spawning work, search for an existing build of it (process rule, every standing session)",
+ "ruling": "Owner words, 18:18 CST Nov 15 (RELAYED, verbatim as the consultant relayed them, typos kept): \"im 10000% sure a pr already exists that rors that. u need to (abd all standing sessions frankly)) eed to first see if what they dpawn hasnt already been built somewhere before just starting it again\". Context: the consultant had said it would queue a step for CI runs whose base is older than a revert on main (debt draft stale-merge-ref-ready-red). Consultant's reading, NOT the owner's words: a standing rule for every standing session: before spawning work, search open and closed PRs, branches and main for an existing build of it. PROCESS RULE (process-only, no code asked). Step: spawn-searches-existing-builds.",
+ "quote": "im 10000% sure a pr already exists that rors that. u need to (abd all standing sessions frankly)) eed to first see if what they dpawn hasnt already been built somewhere before just starting it again",
+ "source": "Owner chat 18:18 CST Nov 15 (verbatim as relayed, typos kept), relayed by the consultant (consultant → triage 18:19 CST), relayed by the coordinator; not read by triage as typed",
+ "status": "open",
+ "step": "spawn-searches-existing-builds",
+ "supersedes_none": "Triage read no main sentence this contradicts. Neighbouring rule: lane-step-dup-check (refuses a lane for a step another live session or an open lane PR holds), which covers a lane for a roadmap step only, not a search of closed PRs, branches and main."
+}

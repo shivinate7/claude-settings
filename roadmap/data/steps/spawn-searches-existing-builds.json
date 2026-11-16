@@ -1,0 +1,14 @@
+{
+ "id": "spawn-searches-existing-builds",
+ "title": "Before spawning work, a standing session searches for an existing build of it",
+ "priority": "now",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "triage",
+ "blockedBy": [],
+ "updatedAt": "2026-11-15T19:00:00-06:00",
+ "why": "[18:18 CST Nov 15, triage] Owner words (relayed, verbatim as the consultant relayed them, typos kept): \"im 10000% sure a pr already exists that rors that. u need to (abd all standing sessions frankly)) eed to first see if what they dpawn hasnt already been built somewhere before just starting it again\". Context: the consultant had said it would queue a step for CI runs whose base is older than a revert on main. Consultant's reading: a standing rule for every standing session: search open and closed PRs, branches and main for an existing build before spawning. Guard or check: unknown; what check could prove it is open. Ruling own-search-before-spawn. (source: consultant 18:19 CST via the coordinator, relayed by triage; not owner-typed here)",
+ "source": "consultant 18:19 CST via the coordinator, relayed by triage; not owner-typed here",
+ "note": "Todo. Owner 18:18 CST Nov 15 (relayed): before any standing session spawns work, it first searches open and closed PRs, branches and main for an existing build. Ruling own-search-before-spawn (process rule). Guard or check: unknown. What check could prove it is open: lane-step-dup-check covers only a lane for a roadmap step held by a live session or an open lane PR; a check on a spawn brief that names a search (PR title search, branch list, main grep) is one candidate, not chosen."
+}
