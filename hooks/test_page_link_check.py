@@ -283,6 +283,18 @@ def case_b03_groups_and_asks_writes_still_block():
                                                                           doc_id="x1")))
 
 
+def case_b04_receipts_write_blocks():
+    """B03 with one change: the write is a receipt, `receipts/x`. Receipts are exported, so they owe the link."""
+    expect_link_block("B04", twe.run_stop("b04", page_repo("b04"), page_turn("Nothing to do.", collection=None,
+                                                                            doc_id="receipts/x")))
+
+
+def case_b05_receipts_write_with_the_link_passes():
+    """B04 with one change: the reply names the page's link."""
+    twe.expect_pass("B05", twe.run_stop("b05", page_repo("b05"), page_turn("Page: " + twe.PAGE_URL, collection=None,
+                                                                          doc_id="receipts/x")))
+
+
 CASES = (
     case_p01_writes_page_reply_lacks_id_blocks,
     case_p02_update_of_the_page_blocks,
@@ -313,6 +325,8 @@ CASES = (
     case_b01_meta_page_update_with_nothing_to_do_passes,
     case_b02_meta_stamp_with_an_item_write_still_blocks,
     case_b03_groups_and_asks_writes_still_block,
+    case_b04_receipts_write_blocks,
+    case_b05_receipts_write_with_the_link_passes,
 )
 
 
