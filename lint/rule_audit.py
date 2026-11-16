@@ -52,8 +52,8 @@ THE MAP. lint/rule_mechanisms.json holds one row per anchor. A row's mechanism i
 NON-VACUITY, AND NO FIXED NUMBERS. A reader that finds no anchors must never print `ok`: that
 is this repo's own signature defect in a new coat, a check that cannot tell "nothing is wrong"
 from "nothing is known yet". So zero anchors fails loud. The check holds no pinned count of
-anchors, `unmechanized` rows or `judgment` rows (owner ruling R37, 2026-11-11: a fixed number
-that refuses without an owner ruling is retired). It measures instead. It prints the anchor
+anchors, `unmechanized` rows or `judgment` rows: a fixed number would refuse a change that
+no owner has ruled on. It measures instead. It prints the anchor
 count and both row counts from lint/rule_mechanisms.json, and it names each anchor removed
 since origin/main. A removal that takes its row with it passes. A removal that leaves its row
 fails as an orphan row. With no git history, no git on PATH or no origin/main, the removed-anchor
@@ -652,8 +652,8 @@ def moved_off_mechanism(rule_map: dict, root: str = ROOT, head_text=None):
         judgment. Always a problem: the mechanism went with the old slug. A new slug still on a mechanism passes.
     A row with no base row (a new rule) is never a move. A pure delete of an anchor and its row is none of these:
     this check does not see it. With no repository, no git on PATH, no origin/main or no common history, nothing is
-    compared, one line says so, and nothing fails. This is the measure that replaced the fixed unmechanized and
-    judgment counts (owner ruling R37, 2026-11-11; item 595, 2026-11-12 12:54 CST)."""
+    compared, one line says so, and nothing fails. This is the measure in place of a fixed unmechanized and
+    judgment count."""
     not_compared = ["rule_audit: moves off a mechanism not compared, no origin/main to read."]
     text = _base_text(root, os.path.join("lint", "rule_mechanisms.json"))
     if text is None:
