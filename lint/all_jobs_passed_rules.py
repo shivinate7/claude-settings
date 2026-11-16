@@ -17,8 +17,8 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from test_windows_split import (ALL_JOBS_PASSED_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB, all_jobs, draft_guard_only, eval_if, macos_scope_skips, macos_scope_skip_ok,  # noqa: E402,F401  the one home of the scope condition and scalar parsers
-                                push_guard_only, shard_base, yaml_scalar)  # NIGHTLY_SKIP_JOB and PUSH_SKIP_JOB are read from here by actions/push-skip/push-skip.py
+from test_windows_split import (ALL_JOBS_PASSED_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB, RECORDS_ONLY_CONDITION, all_jobs, draft_guard_only, drop_condition, eval_if, macos_scope_skips, macos_scope_skip_ok,  # noqa: E402,F401  the one home of the scope condition and scalar parsers
+                                push_guard_only, shard_base, unwrap, yaml_scalar)  # NIGHTLY_SKIP_JOB and PUSH_SKIP_JOB are read from here by actions/push-skip/push-skip.py
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
 
 ALL_JOBS_PASSED_USES = "$/actions/all-jobs-passed"
@@ -81,7 +81,7 @@ def needs_of(block):
 
 def split_jobs(text):
     """(needed, off, problems) over the jobs of checks.yml. A job is off all-jobs-passed when its job-level if is false on a
-    non-draft pull_request with every scope flag true. all-jobs-passed and ci-done are neither needed nor off."""
+    non-draft pull_request with every scope flag true and the records-only skip not set. all-jobs-passed and ci-done are neither needed nor off."""
     needed, off, problems = [], [], []
     for name, job in all_jobs(text).items():
         if name in (ALL_JOBS_PASSED_JOB, FAN_IN):
@@ -90,7 +90,8 @@ def split_jobs(text):
             needed.append(name)
             continue
         try:
-            on = eval_if(yaml_scalar(job["if"]), "pull_request", "true")
+            # A pull request that is not records-only starts the job: the records-only skip reads as not set, whatever flag value the rest reads.
+            on = eval_if(yaml_scalar(job["if"]).replace(RECORDS_ONLY_CONDITION, "'on' != 'off'"), "pull_request", "true")
         except Exception as ex:  # an if this reader cannot evaluate counts as needed, and is named
             problems.append(f"{name}: job-level if is unreadable ({ex!r}): {job['if']}")
             on = True
@@ -166,9 +167,22 @@ def steps_problems(text):
     return problems
 
 
+def records_only_if(expr):
+    """True when a job-level if is the records-only skip alone. check.sh passes the job's skip on a run whose scope job says
+    records_only_skip true, and reads any wider condition as a skip it cannot tell from a failure."""
+    return unwrap(expr) == RECORDS_ONLY_CONDITION
+
+
+def shard_records_only_if(expr):
+    """True when a shard's job-level if is the draft guard followed by the records-only skip: `(DRAFT GUARD) && RECORDS_ONLY_CONDITION`."""
+    inner = drop_condition(unwrap(expr))
+    return inner is not None and inner != unwrap(expr) and draft_guard_only(inner)
+
+
 def off_problems(text):
     """Only a shard job may stay off all-jobs-passed. A needed job has no job-level if, except scope (its draft rule),
-    a macOS job (its scope skip, which scope-skips names) and a Windows full shard (the draft guard)."""
+    a macOS job (its scope skip, which scope-skips names), a Windows full shard (the draft guard) and the records-only skip
+    (RECORDS_ONLY_CONDITION alone, or after a shard's draft guard): check.sh passes the skip it makes, and no wider condition."""
     jobs = all_jobs(text)
     needed, off, problems = split_jobs(text)
     for name in off:
@@ -177,12 +191,12 @@ def off_problems(text):
     for name in needed:
         if shard_base(name):
             # R62: a Windows full shard runs on a ready pull request, so it is needed. Its job-level if is the draft guard only.
-            if not draft_guard_only(jobs[name]["if"] or ""):
+            if not draft_guard_only(jobs[name]["if"] or "") and not shard_records_only_if(jobs[name]["if"]) and not records_only_if(jobs[name]["if"]):
                 problems.append(f"shard {name} is in all-jobs-passed's needs but its job-level if is not the draft guard: "
                                 f"{jobs[name]['if']}")
         elif name in MACOS_JOBS and macos_scope_skip_ok(name, jobs[name]["if"] or ""):
             continue  # its scope skip is off on a PR whose flags are on, so the macOS job stays needed; scope_skips_problems reads its skip
-        elif name != "scope" and jobs[name]["if"] is not None:
+        elif name != "scope" and jobs[name]["if"] is not None and not records_only_if(jobs[name]["if"]):
             problems.append(f"{name} is needed and keeps a job-level if: all-jobs-passed reads its skip as red, "
                             "so its scope condition belongs in its steps")
     return problems

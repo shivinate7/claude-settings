@@ -15,8 +15,8 @@
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event; false on a records-only skip.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
-# BASE_SHA, HEAD_REF, GREEN_HEAD (optional: the sha green-head.sh prints, the pull request's newest earlier fully green head), PR_HEAD
-# (optional: the pull request's head sha; HEAD when unset). GREEN_HEAD turns the 13 job and suite flags off on a pull request when it is an
+# BASE_SHA, HEAD_REF, GREEN_HEAD (optional: the sha green-head.sh prints, the pull request's newest earlier fully green head; a push may carry one too), PR_HEAD
+# (optional: the pull request's head sha; HEAD when unset). GREEN_HEAD turns the 13 job and suite flags off on a pull request or a push when it is an
 # ancestor of PR_HEAD and the delta from it to PR_HEAD is docs/records.md alone; the lint flags keep their whole-PR values and mutation_report is false. Any unreadable read: no skip.
 # The last output line, records_only_skip=true|false, is true exactly in that case.
 set -u
@@ -160,8 +160,10 @@ else
 fi
 # checks_guard: the checks-guard job runs the guard suite, which needs both flags (the old step if). The playwright-setup arm above also sets it directly.
 case "$on" in *" code "*) case "$on" in *" guard "*) on="$on checks_guard " ;; esac ;; esac
-# A records-only push after a fully green head: the earlier head's run proved everything but the lints and the mutation report,
-# so only docs/records.md moved since. The whole PR diff was read above (whole_read); every other case keeps its flags.
+# A records-only change after a fully green head: the earlier head's run proved everything but the lints and the mutation report,
+# so only docs/records.md moved since. On a pull request the whole PR diff was read above (whole_read). A push has no PR diff to read:
+# its GREEN_HEAD is the caller's word, and the ancestor and delta reads below hold it. A schedule, a dispatch and every other case keep
+# their flags.
 # The delta must be exactly one path: an empty or longer delta, an unreadable one or a head that is not an ancestor keeps `on`.
 # The delta runs to PR_HEAD, the pull request's own head: HEAD in CI is the merge commit, which also holds every base change since.
 # PR_HEAD counts only when it is a full hex sha, a commit, and an ancestor of HEAD; otherwise the delta runs to HEAD.
@@ -171,7 +173,7 @@ if [[ "${PR_HEAD:-}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] && git cat-file -e "$PR
    git merge-base --is-ancestor "$PR_HEAD" HEAD 2>/dev/null; then
   end=$PR_HEAD
 fi
-if [ "$whole_read" = 1 ] && [[ "${GREEN_HEAD:-}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] &&
+if { [ "$whole_read" = 1 ] || [ "${EVENT:-}" = push ]; } && [[ "${GREEN_HEAD:-}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] &&
    git merge-base --is-ancestor "$GREEN_HEAD" "$end" 2>/dev/null &&
    delta=$(git diff --name-only --no-renames "$GREEN_HEAD" "$end" 2>/dev/null) && [ "$delta" = docs/records.md ]; then
   kept=" "
