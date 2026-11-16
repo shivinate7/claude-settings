@@ -1,0 +1,14 @@
+{
+  "title": "The merge tool refuses --lint-unknown-ok unless the owner's typed override covers it",
+  "phase": "next",
+  "status": "todo",
+  "order": 267.3,
+  "owner": "consultant",
+  "priority": "next",
+  "repo": "shivinate7/claude-settings",
+  "blockedBy": "[]",
+  "why": "The merge tool's `--lint-unknown-ok` takes any reason and names no grant. Sessions use it to pass a lane lint that read UNKNOWN. Incidents (coordinator relay, 04:55 CST Nov 16, not read by triage): the consultant used it on every lint tonight (01:01 CST); the lane artifact-pages-other-account used it on home #597 at 04:54 CST; the q_max lane's read was blocked by the classifier. Owner page item 918 (the flag for PR 2860) holds the owner's side.",
+  "note": "Guard proposal from the lane artifact-pages-other-account, relayed by the coordinator 04:55 CST Nov 16: refuse the flag unless the owner's typed override covers it; and when lint reads UNKNOWN because a draft had no CI run, print \"a draft without CI needs a draft CI run\". It changes a guard's verdict, so it goes to the consultant's route for building (owner 14:10 CST Nov 15, relayed). It is the guard that would have stopped the lane's mistake. Search at 04:57 CST: no existing step refuses the flag; the nearest, lane-lint-unknown-on-ready-pr, fixes the UNKNOWN read and says not to lift the check to fit. A check change: test-author red case first, builder, reviewer round 1 on sonnet. Reader: the consultant.",
+  "source": "coordinator 04:55 CST Nov 16, relayed by triage; undoable; not owner-typed",
+  "updatedAt": "2026-11-16T04:56:30-06:00"
+}
