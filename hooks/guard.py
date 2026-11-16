@@ -154,7 +154,13 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
-                       record (read from the transcript) does not show in its cs-build tags.
+                       record (read from the transcript) does not show in its cs-build tags. The standing tier
+                       needs the own newest record to show a coordinator or triage tag, with no set_session_tags after it.
+                       For the lane tier, also a `--step` that is no cs-step tag of that record, or a record with no cs-repo
+                       tag for shivinate7/claude-settings. Read inside wrappers
+                       (`bash -c`, `$(...)`) too. Also a cloud `merge <pr> --ready` from a session whose own
+                       record carries cs-build:lane and that cs-repo tag, or an MCP update_pull_request with draft false from
+                       one: the batch runner marks a pull request ready. A lane of another repo is not judged.
   merge-confirm-repo   deny. In a cloud session, a merge-tool call with --confirm whose checkout (the -C or
                        --repo-dir value as the merge tool's own parser reads it, else the `cd X &&` directory, else
                        the working directory) has a repo (`git_reads.github_repo`) that no cs-repo tag of the
@@ -276,8 +282,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        remote, else origin) adds a merge commit of more than two parents; a merge that a
                        ref of the pushed remote already holds passes. A dry run and a destination named main or master are
                        left out; push-main asks about the latter. A remote named by a URL or a path
-                       counts every remote's refs. Cost: one `git rev-list` per pushed ref, and one `git
-                       config` more per pushed ref for such a remote. (octopus-push-refused)
+                       counts every remote's refs. A range that shows an octopus is read again after one `git
+                       fetch` of the remote, so a lagging tracking ref cannot hide a merge the remote holds; a
+                       failed fetch keeps the refusal and says so. Cost: one `git rev-list` per pushed ref, one
+                       `git config` more per pushed ref for a URL or path remote, and on a hit one `git fetch`
+                       (10 s at most). (octopus-push-refused)
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
   config-edit          noted. A write to a project's own settings or hooks. See below.
@@ -416,6 +425,20 @@ Other tools, in `judge` order:
                        form LANE_TITLE_FORM the deny reason prints: `Lane <branch slug>:`. A missing, empty or
                        non-text title is refused. A call with no lane tag passes. Runs after lane-start-settings.
                        An override lifts it. (agent-model-cap)
+  lane start, one pass
+                       A `create_session` call with a lane tag from a session is judged by every lane-start rule
+                       at once, in this order: lane-one-topic, brief-ids-in-roster, agent-model-floor,
+                       lane-effort-pin, lane-repo-tag, lane-start-settings, lane-title-slug, then lane-step-dup
+                       part one (`lane_start_hits`). The open-pull-request part of lane-step-dup stays a rule of its own.
+                       It is refused once, under the first broken rule's name. With two or more broken, the reason
+                       opens with `N lane-start rules broken:` and lists each as `<rule>: <remedy>`, each remedy
+                       unchanged; with one, the reason is that rule's own. An override names one rule: it lifts
+                       the first, and the call goes on to the rules still broken, refused the same way; it never
+                       lifts another rule. A send_message brief is still judged by one rule at a time. An
+                       agent's lane start is refused by agent-no-remote-tools after the two brief rules. Each rule
+                       reads its own call, so a read that fails open there fails open here. `bin/lane-start` prints
+                       a start from the same constants (hooks/shared_names.py) and runs `lane_start_hits` on it
+                       before printing. (agent-model-cap, The lane start in one pass)
   load-brake           deny. On a local session, a lane-start call, an agent's shell or file write, or a lane
                        session's own shell or file write, when the machine is busy (lane starts only) or full. A
                        lane session is one whose own newest get_session record carries `cs-build:lane` and no other
@@ -639,10 +662,11 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
+            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, OCTOPUS_PUSH_STALE, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, LANE_READY_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
-            records_page_hit, repo_proof_hit, role_proof_hit, self_role_child_hit, self_role_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, PRIOR_WORK_REASON, prior_work_lane_hit, prior_work_named, stamp_hit, step_dup_hit, step_pr_hit, trust_card_hit, written_time_hit,
+            records_page_hit, repo_proof_hit, role_proof_hit, lane_ready_hit, lane_mcp_ready_hit, self_role_child_hit, self_role_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, PRIOR_WORK_REASON, prior_work_lane_hit, prior_work_named, stamp_hit, step_dup_hit, step_pr_hit, target_roster_hit, trust_card_hit, written_time_hit,
+            BRIEF_ID_REASON, BRIEF_TOPIC_REASON, STEP_DUP_REASON,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
         _loading = "guard_frozen"
@@ -2946,11 +2970,9 @@ SPAWN_TOOLS = ("Agent", "Task")
 # unread_handoff. The judge() branches below that name it run only if a matcher is added again, and the guard's cases
 # call them directly.
 SESSION_TOOL = "mcp__ccd_session__start_session"
-from shared_names import (  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER from here
-    CREATE_SESSION_TOOL, REMOTE_OUTWARD_TOOLS, REMOTE_SERVER, is_lane_create_session, lane_tags,  # noqa: F401  REMOTE_SERVER re-exported: lint/check_agent_models.py reads guard.REMOTE_SERVER
+from shared_names import (  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER and LANE_EFFORT from here
+    CREATE_SESSION_TOOL, LANE_EFFORT, REMOTE_OUTWARD_TOOLS, REMOTE_SERVER, is_lane_create_session, lane_tags,  # noqa: F401  REMOTE_SERVER and LANE_EFFORT re-exported: lint/check_agent_models.py reads guard.REMOTE_SERVER and guard.LANE_EFFORT
 )
-# The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
-LANE_EFFORT = "medium"
 AGENT_NO_REMOTE_REASON = (
     "An agent never starts, messages, tags, interrupts or archives sessions, and never sets scheduled tasks, "
     "watches, pull request subscriptions, repos, computer folders or the owner's trust card. The session that spawned this agent does "
@@ -2993,7 +3015,8 @@ MODEL_FLOOR_REASON = (
 )
 # A lane start may not drop the model (rule lane-start-settings), so its remedy names both required inputs.
 LANE_MODEL_FLOOR_REASON = (
-    "Sonnet is the floor for a lane. Start the lane with model sonnet and the source_url of its repo."
+    "Sonnet is the floor for a lane. Start the lane with model sonnet and the source_url of its repo. "
+    "(decision agent-model-cap, the lane start)"
 )
 AGENT_CALL = re.compile(r"\bagent\s*\(")
 SCRIPT_PAIR = re.compile(r"(?:(\w+)|\x00(\d+)\x00)\s*:\s*\x00(\d+)\x00")
@@ -3174,6 +3197,85 @@ def lane_title_hit(tool: str, tool_input) -> str:
     if LANE_TITLE_OPENING.match(text):
         return ""
     return text[:80] or "(none)"
+
+
+# The lane-start rules, judged together for one create_session that tags a lane. The order is the order the rules refused
+# in one at a time, so the first broken rule is the one a refusal is filed under. Each rule keeps its own override.
+LANE_START_COUNT = "%d lane-start rules broken:"
+
+
+def lane_start_hits(tool: str, tool_input, cwd: str, transcript: str = "", judge_step: bool = True) -> list:
+    """[(rule, reason, matched)] for each lane-start rule a create_session call that tags a lane breaks, in judge order,
+    or [] for a call that is no lane start or breaks none. The seven rules come first; lane-step-dup (part one, the live
+    carrier read from `transcript`) follows them. The one collection, read by judge() and by bin/lane-start, so the
+    helper checks its own start with the rules the guard applies. Each rule is judged by its own function, so a read that
+    fails open there fails open here. `judge_step` False leaves lane-step-dup out, for a caller with no transcript to
+    read: with none, step_dup_hit can only answer "unknown", which is a refusal."""
+    if not is_lane_create_session(tool, tool_input):
+        return []
+    hits = []
+    briefed = brief_hit(tool, tool_input, transcript)
+    if briefed:
+        hits.append(("lane-one-topic", briefed[1], briefed[0]))
+    # lane-step-dup part two sits where main judged it, right after lane-one-topic and ahead of the rest, so a start that
+    # breaks another rule and holds a step an open pull request holds is still filed under it and names the pull request.
+    held = step_pr_hit(tool, tool_input, transcript) if judge_step else None
+    if held:
+        hits.append(("lane-step-dup", held[1], held[0]))
+    named_id = brief_roster_hit(tool, tool_input, cwd)
+    if named_id:
+        hits.append(("brief-ids-in-roster", named_id[1], named_id[0]))
+    floor_model = floor_hit(tool, tool_input)
+    if floor_model:
+        hits.append(("agent-model-floor", LANE_MODEL_FLOOR_REASON, floor_model))
+    lane_prompt = lane_effort_hit(tool, tool_input)
+    if lane_prompt:
+        hits.append(("lane-effort-pin", LANE_EFFORT_REASON, lane_prompt))
+    repo_tag_hit_tags, lane_repo = lane_repo_tag_hit(tool, tool_input, cwd)
+    if repo_tag_hit_tags:
+        hits.append(("lane-repo-tag", LANE_REPO_TAG_REASON % (REPO_TAG + (lane_repo or "<owner>/<name>")), repo_tag_hit_tags))
+    lane_missing = lane_start_settings_hit(tool, tool_input)
+    if lane_missing:
+        hits.append(("lane-start-settings", LANE_START_SETTINGS_REASON, lane_missing))
+    lane_title = lane_title_hit(tool, tool_input)
+    if lane_title:
+        hits.append(("lane-title-slug", LANE_TITLE_REASON, lane_title))
+    doubled = step_dup_hit(tool, tool_input, transcript) if judge_step else None
+    if doubled:
+        hits.append(("lane-step-dup", doubled[1], doubled[0]))
+    return hits
+
+
+def lane_start_text(hits: list) -> str:
+    """The refusal text for the broken rules `hits`: their own remedy for one, else a count line and a line per rule."""
+    if len(hits) == 1:
+        return hits[0][1]
+    return "\n".join([LANE_START_COUNT % len(hits)] + [rule + ": " + reason for rule, reason, _ in hits])
+
+
+def refuse_lane_start(tool: str, hits: list) -> None:
+    """Refuse once for the broken lane-start rules `hits`, under the first one's name, listing every one still broken. An
+    override names one rule: when it lifts the first, the call goes on to the rules still broken, refused the same way
+    under the next one's name. When it lifts the last, refuse() ends the call as for any lifted rule. Never lifts another
+    rule's refusal."""
+    for at in range(len(hits)):
+        rest = hits[at:]
+        rule, _, matched = rest[0]
+        # The table gives the refusal audit a literal id for each lane-start rule, with a reason that rule can print. The
+        # printed text is lane_start_text(rest). An id outside the table still refuses, under lane-one-topic.
+        code, why = {
+            "lane-one-topic": ("lane-one-topic", BRIEF_TOPIC_REASON),
+            "lane-step-dup": ("lane-step-dup", STEP_DUP_REASON),
+            "brief-ids-in-roster": ("brief-ids-in-roster", BRIEF_ID_REASON),
+            "agent-model-floor": ("agent-model-floor", LANE_MODEL_FLOOR_REASON),
+            "lane-effort-pin": ("lane-effort-pin", LANE_EFFORT_REASON),
+            "lane-repo-tag": ("lane-repo-tag", LANE_REPO_TAG_REASON),
+            "lane-start-settings": ("lane-start-settings", LANE_START_SETTINGS_REASON),
+            "lane-title-slug": ("lane-title-slug", LANE_TITLE_REASON),
+        }.get(rule, ("lane-one-topic", BRIEF_TOPIC_REASON))
+        last = len(rest) == 1
+        refuse(tool, "deny", code, lane_start_text(rest), matched if last else "; ".join(m for _, _, m in rest),
+               continue_on_lift=not last)
 
 
 # A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
@@ -4974,6 +5076,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         refuse(tool, "deny", "merge-confirm-repo", REPO_REASON if is_cloud() else LOCAL_REPO_REASON, matched)
 
+    # 6a1'. A cloud `merge --ready` from a session whose own record is a lane's (rule merge-role-proof): after the repo proof, which names
+    # the repo first. Cost: one substring test per call, and a parse and a transcript read only on a ready flag.
+    matched = lane_ready_hit(stripped, transcript)
+    if matched:
+        refuse(tool, "deny", "merge-role-proof", LANE_READY_REASON, matched)
+
     # 6a1a. A session that sets the role variable or runs the launcher: it would start a child session that claims a role (rule
     # self-role-claim). Cost: one substring test per call.
     matched = self_role_hit(stripped)
@@ -5017,11 +5125,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "conflict-markers", markers_reason.format(file=matched), matched)
 
     # 6c3. A push whose range adds a merge of more than two parents (rule octopus-push).
-    # Cost: one `git rev-list` per pushed ref, plus one `git config` for a remote named by a URL or a path;
-    # none for a dry run, a main or master destination, or a command with no push.
-    matched = octopus_push_hit(stripped, cwd, read_verb)
+    # Cost: one `git rev-list` per pushed ref, plus one `git config` for a remote named by a URL or a path, plus one
+    # `git fetch` (10 s at most) only when a range first shows an octopus; none for a dry run, a main or master
+    # destination, or a command with no push.
+    matched, stale = octopus_push_hit(stripped, cwd, read_verb)
     if matched:
-        refuse(tool, "deny", "octopus-push", OCTOPUS_PUSH_REASON.format(sha=matched), matched)
+        refuse(tool, "deny", "octopus-push", OCTOPUS_PUSH_REASON.format(sha=matched) + (OCTOPUS_PUSH_STALE if stale else ""), matched)
 
     # 7. A frozen path. The command is read as a shell reads it: a script's own strings are text, and its
     # shell spots are lines of their own (`shell_write_hit`).
@@ -7078,69 +7187,55 @@ def judge(payload) -> None:
     if archived:
         refuse(tool, "deny", "lane-closes-after-records", archived[1], archived[0])
 
-    # A lane brief for a topic the target lane does not hold (rule lane-one-topic).
-    briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
-    if briefed:
-        refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
+    # A lane start (create_session tagged as a lane, made by a session) is judged by every lane-start rule at once and
+    # refused once, with each broken rule listed (lane_start_hits, refuse_lane_start). An agent's lane start is refused
+    # by agent-no-remote-tools (8b) after the two brief rules, as every agent's create_session is.
+    lane_start = is_lane_create_session(tool, tool_input) and not (payload.get("agent_id") and tool in REMOTE_OUTWARD_TOOLS)
+    if lane_start:
+        refuse_lane_start(tool, lane_start_hits(tool, tool_input, cwd, trust_transcript if isinstance(trust_transcript, str) else ""))
+    else:
+        # A lane brief for a topic the target lane does not hold (rule lane-one-topic).
+        briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+        if briefed:
+            refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
 
-    # A brief or a create naming a step another live session of the repo carries (rule lane-step-dup).
-    doubled = step_dup_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
-    if doubled:
-        refuse(tool, "deny", "lane-step-dup", doubled[1], doubled[0])
-    # The same call, for an open lane pull request that holds the step (rule lane-step-dup, part two).
-    held = step_pr_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
-    if held:
-        refuse(tool, "deny", "lane-step-dup", held[1], held[0])
-    # A lane brief that names a bare session id (rule brief-ids-in-roster).
-    named_id = brief_roster_hit(tool, tool_input, cwd)
-    if named_id:
-        refuse(tool, "deny", "brief-ids-in-roster", named_id[1], named_id[0])
+    # A brief naming a step another live session of the repo carries, or an open lane pull request holds (rule
+    # lane-step-dup, both parts). A lane start is judged for both in the one pass above (lane_start_hits).
+    if not lane_start:
+        doubled = step_dup_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+        if doubled:
+            refuse(tool, "deny", "lane-step-dup", doubled[1], doubled[0])
+        held = step_pr_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+        if held:
+            refuse(tool, "deny", "lane-step-dup", held[1], held[0])
+        # A lane brief that names a bare session id (rule brief-ids-in-roster).
+        named_id = brief_roster_hit(tool, tool_input, cwd)
+        if named_id:
+            refuse(tool, "deny", "brief-ids-in-roster", named_id[1], named_id[0])
+
+    # A send_message to a session id no roster source holds (rule target-id-in-roster).
+    unknown_target = target_roster_hit(tool, tool_input, cwd, trust_transcript if isinstance(trust_transcript, str) else "")
+    if unknown_target:
+        refuse(tool, "deny", "target-id-in-roster", unknown_target[1], unknown_target[0])
 
     # 8b. agent-no-remote-tools. An agent never starts, messages, tags or archives sessions, nor sets scheduled tasks;
     # the session that spawned it does. Keyed on a truthy agent_id of any shape, so a drifted id stays refused. After the
-    # rules of 8a, which refuse first with their own remedy; before the spawn rules (agent-model-floor, lane-effort-pin), so an
+    # rules of 8a, which refuse first with their own remedy; before the spawn rules (agent-model-floor, step-up), so an
     # agent's create_session is refused here. An override lifts it.
     if payload.get("agent_id") and tool in REMOTE_OUTWARD_TOOLS:
         refuse(tool, "deny", "agent-no-remote-tools", AGENT_NO_REMOTE_REASON, tool)
 
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
-    # model; the log holds what the call asked for.
+    # model; the log holds what the call asked for. A lane start's floor is judged with the lane-start rules (8a).
     floor_model = floor_hit(tool, tool_input)
     if floor_model:
-        refuse(tool, "deny", "agent-model-floor",
-               LANE_MODEL_FLOOR_REASON if is_lane_create_session(tool, tool_input) else MODEL_FLOOR_REASON,
-               floor_model)
+        refuse(tool, "deny", "agent-model-floor", MODEL_FLOOR_REASON, floor_model)
 
     # 9b. Step-up: a reviewer's second round on Sonnet, a builder's third on Opus. A reviewer's third round passes here on
     # Sonnet or Opus; the Opus ceiling (9d, opus_spawn_hit) then refuses Opus unless an override lifts it.
     step_up = step_up_hit(tool, tool_input)
     if step_up:
         refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model")))
-
-    # 9b2. The lane effort pin: a lane starts with the effort field at medium and the whole brief as its
-    # prompt, the owner's Grant line first. An override lifts it: it is not in never_lifted, because the owner
-    # may mean another start.
-    lane_prompt = lane_effort_hit(tool, tool_input)
-    if lane_prompt:
-        refuse(tool, "deny", "lane-effort-pin", LANE_EFFORT_REASON, lane_prompt)
-
-    # 9b2b. The lane repo tag: a lane session carries the full `cs-repo` tag of the checkout that starts it.
-    # After the effort pin, so a call that breaks both reads the pin first. An override lifts it.
-    repo_tag_hit_tags, lane_repo = lane_repo_tag_hit(tool, tool_input, cwd)
-    if repo_tag_hit_tags:
-        refuse(tool, "deny", "lane-repo-tag", LANE_REPO_TAG_REASON % (REPO_TAG + (lane_repo or "<owner>/<name>")), repo_tag_hit_tags)
-
-    # 9b2c. The lane start settings: a lane session names its model and its source_url. After the repo tag. An
-    # override lifts it.
-    lane_missing = lane_start_settings_hit(tool, tool_input)
-    if lane_missing:
-        refuse(tool, "deny", "lane-start-settings", LANE_START_SETTINGS_REASON, lane_missing)
-
-    # 9b2d. The lane title: a lane's title opens with `Lane <branch slug>:`. After the start settings, so a call
-    # that breaks both reads the settings first. An override lifts it.
-    lane_title = lane_title_hit(tool, tool_input)
-    if lane_title:
-        refuse(tool, "deny", "lane-title-slug", LANE_TITLE_REASON, lane_title)
 
     # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is refused.
     # The override lifts the above-row refusal and never the no-model one (never_lifted).
@@ -7203,6 +7298,10 @@ def judge(payload) -> None:
 
     # The MCP update tool marks a pull request ready with draft false (rule records-page-ready).
     if tool == "mcp__github__update_pull_request":
+        # A lane's own record never marks a pull request ready (rule merge-role-proof, as for `merge --ready`): judged before the page read.
+        matched = lane_mcp_ready_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+        if matched:
+            refuse(tool, "deny", "merge-role-proof", LANE_READY_REASON, matched)
         refuse_ready_page(tool, tool_input, "", cwd)
 
     # The MCP create tool carries its own `draft` field.
@@ -7290,7 +7389,8 @@ def judge(payload) -> None:
     if tool == COMMENTS_TOOL:
         import question_form
         # A reply whose url names no artifact lands nowhere checkable, so it is refused wherever the repo has a waiting page.
-        if tool_input.get("action") == "reply" and (question_form.is_waiting_page(tool_input, cwd)
+        # The page matches by id in any url form (a bare id, an http link), as the rule's cases pin: a form missed is a reply let through.
+        if tool_input.get("action") == "reply" and (question_form.is_waiting_page(tool_input, cwd, any_form=True)  # glossary-ok: is_waiting_page is the name main already uses
                                                     or (question_form.names_no_artifact(tool_input.get("url"))
                                                         and question_form.has_waiting_page(cwd))):
             refuse(tool, "deny", "page-thread-reply", PAGE_THREAD_REPLY_REASON, str(tool_input.get("thread_id") or "?")[:120])
