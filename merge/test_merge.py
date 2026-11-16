@@ -4329,6 +4329,11 @@ try:
     elif method == "POST" and re.fullmatch(r"issues/\d+/comments", rel):  # a comment a lane posts (Host.post_comment): kept in the state, as GitHub files it
         S.setdefault("posted", []).append({"n": int(rel.split("/")[1]), "body": params.get("body")}); save()
         finish(one({"id": 555, "body": params.get("body")}, jq), 0, include)
+    elif method == "POST" and re.fullmatch(r"issues/\d+/labels", rel) and S.get("label_fail"):  # a case's failed label add: the text gh prints, and no label kept
+        raise Refused(S["label_fail"])
+    elif method == "POST" and re.fullmatch(r"issues/\d+/labels", rel):  # a label a session adds (Host.add_label): kept in the state, as GitHub files it
+        S.setdefault("labeled", []).append({"n": int(rel.split("/")[1]), "labels": params.get("labels")}); save()
+        finish(one([{"name": x} for x in params.get("labels") or []], jq), 0, include)
     elif method == "GET" and rel == "issues/comments" and S.get("comments_fail"):  # a case's failed comment read: the text gh prints
         raise Refused(S["comments_fail"])
     elif method == "GET" and rel == "issues/comments" and "issue_comments" in S:  # the repo's issue comments, seeded by a case (the review record reads them)

@@ -77,6 +77,7 @@ RELAYED_MERGE = "Relayed Merge Yes:"
 BATCH_MERGE = "Batch Runner Merge:"
 MERGE_CLOUD_ALLOW = os.path.join(REPO_ROOT, "merge", "cloud_allow.json")
 OWNER_MESSAGE = "Owner Session Message:"
+BATCH_LABEL = "Merge Batch Label:"
 PR_CLOSE = "gh api -X PATCH repos/shivinate7/joyous/pulls/54 -f state=closed"
 SEND_MESSAGE = "mcp__claude-code-remote__send_message"
 # (name, case-insensitive pattern) for each act an entry's "Never covers" sentence must name.
@@ -610,6 +611,40 @@ class OwnerSessionMessageIsAllowed(unittest.TestCase):
         self.assertFalse(missing,
                          "Never covers does not name a session outside the owner's account: %r"
                          % missing)
+
+
+class MergeBatchLabelIsAllowed(unittest.TestCase):
+    """The owner's pick, page item 759 b (ruling own-759-b-label-allow-entry): one entry for `merge --batch-label <pr>`."""
+
+    def test_one_entry_names_the_batch_label_write(self):
+        self.assertIsNotNone(allow_entry(BATCH_LABEL), "need exactly one 'Merge Batch Label:' entry in autoMode.allow")
+
+    def test_entry_quotes_both_spellings_of_the_command(self):
+        entry = allow_entry(BATCH_LABEL) or ""
+        for form in ("`merge --batch-label <pr>`", "`~/.claude/bin/merge`"):
+            self.assertIn(form, entry, "the entry does not quote %s" % form)
+
+    def test_the_flag_it_quotes_is_the_flag_merge_py_parses(self):
+        with open(MERGE_PY, encoding="utf-8") as handle:
+            self.assertIn('add_argument("--batch-label"', handle.read(), "merge.py parses no --batch-label flag")
+
+    def test_covers_names_the_target_check(self):
+        covers = entry_part(self, BATCH_LABEL)
+        missing = unnamed_terms(covers, (("open", "open pull request"), ("batch- head branch", "head branch starts with `batch-`"),
+                                         ("refuses other pull requests", "refuses any other pull request"),
+                                         ("no lock", "no lock"), ("merges nothing", "merges nothing")))
+        self.assertFalse(missing, "the Merge Batch Label entry does not name %r" % missing)
+
+    def test_covers_names_the_ruling(self):
+        self.assertIn("own-759-b-label-allow-entry", allow_entry(BATCH_LABEL) or "")
+
+    def test_never_covers_names_each_refused_act(self):
+        never = entry_part(self, BATCH_LABEL, never=True)
+        missing = unnamed_terms(never, (("--confirm", "--confirm"), ("--base-red-ok", "--base-red-ok"),
+                                        ("--undo-check-unknown-ok", "--undo-check-unknown-ok"),
+                                        ("any other flag that lifts a check", "any other flag that lifts a check"),
+                                        ("any other label", "any other label"), ("gh pr merge", "gh pr merge")))
+        self.assertFalse(missing, "the Merge Batch Label Never covers does not name %r" % missing)
 
 
 class OwnBranchLeasePushIsAllowed(unittest.TestCase):
