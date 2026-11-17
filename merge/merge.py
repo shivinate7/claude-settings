@@ -3862,7 +3862,7 @@ def fix_proven(root, host, base, n, info):
     - exactly one red run, no cancelled run, no re-run in flight and no other red read beside it, and exactly one breaking merge B, named by its full sha;
     - the pull request's head holds the head the red run was read at, so the head's own run tested the breaking merge too;
     - one of two routes. Path: the pull request changes a path that B changed (B against its first parent, each path whole, renames by both names). Test file: the pull
-      request changes a test file that a failing line of the red run's log names (Host.failed_lines). Both routes need the red run to have red jobs, and each of them to
+      request changes a test file that a failing line of the red run's log names (Host.failed_lines) and keeps it: a file the head deletes or renames away is no fix. Both routes need the red run to have red jobs, and each of them to
       read "pass" on the head (Host.check_state: a missing or pending row is no pass); the path route also needs the head's own checks green (Host.head_state, the one reader).
     Any read that fails is not proven: unknown never reads clear, and a log that Host.failed_lines cannot account for gives no test file."""
     facts = getattr(host, "base_facts", None)
@@ -3874,7 +3874,9 @@ def fix_proven(root, host, base, n, info):
         if c:
             return None
         blamed = {p for p in out.split("\0") if p}
-        changed = {posixpath.normpath(p) for p, _, _ in host.pr_files(n, info.get("changed_files"))}
+        files = host.pr_files(n, info.get("changed_files"))
+        changed = {posixpath.normpath(p) for p, _, _ in files}
+        kept = {posixpath.normpath(p) for p, status, _ in files if status != "removed"}  # a test file the head deletes or renames away is no fix of it
         info = fetch_pr_head(root, info, base)  # the head's commits are local, and the head is the one gh named
         if not facts["head"] or git(root, "merge-base", "--is-ancestor", facts["head"], info["head"])[0]:
             return None
@@ -3887,7 +3889,7 @@ def fix_proven(root, host, base, n, info):
             tests = {posixpath.normpath(p[0]) for p in parsed if p and p[0]}
         except UnreadJobs:
             return None
-        hit = sorted(tests & changed)
+        hit = sorted(tests & kept)
         if hit and same_check_passes:
             return f"the failing test file {hit[0]} (its own check {', '.join(names)} is pass on its head)"
         return None
