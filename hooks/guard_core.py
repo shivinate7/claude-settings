@@ -1524,8 +1524,9 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
     leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
     worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
-    a segment in it gets None, and its own `cd` moves nothing. A failed cd then `|| exit` or `|| return`
-    ends the shell: every later segment gets None. A brace group after the `||` is not read. Off by
+    a segment in it gets None, and its own `cd` moves nothing. A failed cd then `|| exit`
+    ends the shell: every later segment gets None. A `return` does not: outside a function bash reports an error and
+    the next command runs. A brace group after the `||` is not read. Off by
     default, so a rule that fails closed on an untrusted `cd` keeps doing so.
     `made` holds normalized folders an earlier segment of the same call makes (a mkdir, a clone): a `cd`
     into one is read as one that works, though the folder is missing at check time. Empty by default."""
@@ -1535,7 +1536,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     doubt = False      # the last cd may have failed in an `&&` chain: a segment after it may not run
     unsure = False     # the last segment may have failed or not run: an assignment after its `&&` may not run
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
-    bail = False       # a failed cd ended in `||`: an `exit` or `return` next ends the shell
+    bail = False       # a failed cd ended in `||`: an `exit` next ends the shell
     gone = False       # the shell has ended: nothing after runs
     last_end = ""      # the operator that ended the last non-empty segment
     for at, segment in enumerate(segments[:number + 1]):
@@ -1565,7 +1566,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         last_end = end
         if bail and before == "||" and not stack and tokens:
             word = resolve_command(tokens)
-            gone = word is not None and basename(tokens[word]) in ("exit", "return")
+            gone = word is not None and basename(tokens[word]) == "exit"
             if gone:
                 continue
         bail = False

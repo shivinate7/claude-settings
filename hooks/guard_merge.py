@@ -1315,6 +1315,7 @@ _CLONE_VALUE_FLAGS = ("-b", "--branch", "-o", "--origin", "-c", "--config", "-u"
                       "--depth", "--reference", "--reference-if-able", "--separate-git-dir", "--template", "--filter",
                       "--shallow-since", "--shallow-exclude", "--server-option", "--bundle-uri", "--ref-format")
 _WORKTREE_ADD_VALUE_FLAGS = ("-b", "-B", "--reason")
+_INIT_VALUE_FLAGS = ("-b", "--initial-branch", "--template", "--separate-git-dir", "--object-format", "--ref-format")
 
 
 def _operands(args, value_flags):
@@ -1335,8 +1336,9 @@ def _operands(args, value_flags):
 
 def _made_folders(segments, number, cwd, ends):
     """The normalized folders that a segment ahead of `segments[number]` makes: a `mkdir`'s operands, a `git clone`'s
-    target (git's default name when none is given) and a `git worktree add`'s path, each with its parents (a `mkdir`'s
-    only with `-p`). Each is resolved against the folder its own segment runs in. Parsing only: no process is
+    target (git's default name when none is given), a `git init`'s folder and a `git worktree add`'s path, each with its
+    parents. A `mkdir`'s parents count only with `-p`; without it the folder counts only when its parent is present
+    (a folder on disk, or one made earlier), because the mkdir fails otherwise. Each is resolved against the folder its own segment runs in. Parsing only: no process is
     spawned."""
     made = set()
     for at in range(number):
@@ -1355,6 +1357,8 @@ def _made_folders(segments, number, cwd, ends):
             elif operands:
                 default = operands[0].rstrip("/").rsplit("/", 1)[-1].rsplit(":", 1)[-1]
                 paths = [default[:-4] if default.endswith(".git") else default]
+        elif call is not None and call[0] == "init":
+            paths = _operands(call[1], _INIT_VALUE_FLAGS)[:1]
         elif call is not None and call[0] == "worktree" and call[1][:1] == ["add"]:
             paths = _operands(call[1][1:], _WORKTREE_ADD_VALUE_FLAGS)[:1]
         if not paths:
@@ -1369,6 +1373,9 @@ def _made_folders(segments, number, cwd, ends):
                 target = os.path.normpath(target)
                 if target in made or os.path.dirname(target) == target:
                     break
+                parent = os.path.dirname(target)
+                if not parents and parent not in made and not os.path.isdir(parent):
+                    break   # a mkdir without -p fails when its parent is missing, so nothing is made
                 made.add(target)
                 target = os.path.dirname(target) if parents else None
     return frozenset(made)

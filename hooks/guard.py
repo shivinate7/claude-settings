@@ -279,8 +279,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        write (`GIT_WRITES`: add, commit, push, merge, pull, rebase, cherry-pick, reset and
                        the rest) after a `cd` into a folder that is missing now, ended by `;`, a newline or
                        `||`: the shell stays put and the write lands in a repo the call did not name. A
-                       folder an earlier segment makes (mkdir, git clone, git worktree add) counts as
-                       present. After `&&`, or `|| exit` or `|| return`, nothing more runs, so that passes.
+                       folder an earlier segment makes (mkdir with its parent present or with -p, git clone,
+                       git init, git worktree add) counts as present. After `&&`, or `|| exit`, nothing more runs, so that passes. A `|| return` does not end
+                       the shell outside a function, so the write after it is judged.
                        A git read passes.
                        (commit-refuses-conflict-markers; ruling own-476-c-refuse-cd-missing-folder)
   red-run              deny. A `git commit` with no push after it, or a `git push` whose range (the one
