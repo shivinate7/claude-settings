@@ -5569,6 +5569,99 @@ class NoneRequiredChecks(ScopedRepo, Env):
         cfg = merge.load_config(self.co, "main", merge.DEFAULT_CONFIG, head=head, branch="feat")
         self.assertEqual(cfg["merge"]["requiredChecks"], ["checks"], "a head stamp with requiredChecks ['gate'] replaced main's stamp")
 
+    def base_fields_stamp(self):
+        """Main's stamp, with each merge field that a setup head's stamp must not replace set off its default, so a case sees each one come from main."""
+        return json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="protection", method="squash", deleteBranch=False,
+                                                  standingGrant=False, afterMerge=["make release"],
+                                                  ignoreChecks=[{"name": "lint", "reason": "a known flake"}],
+                                                  keepBranches=["release"], readyChecks=["check invariants"])))
+
+    def assert_base_fields(self, m, source):
+        """-> each merge field that main's stamp sets (base_fields_stamp) reads as main sets it. `source` names the stamp that must not replace it."""
+        kept = (("standingGrant", False), ("afterMerge", ["make release"]), ("ignoreChecks", [{"name": "lint", "reason": "a known flake"}]),
+                ("keepBranches", ["release"]), ("readyChecks", ["check invariants"]), ("deleteBranch", False), ("method", "squash"))
+        for field, want in kept:
+            with self.subTest(field=field):
+                self.assertEqual(m.get(field), want, f"the {source} replaced main's merge.{field}")
+
+    def head_setup_config(self, head_merge):
+        """Put main's base_fields_stamp on origin, then commit `head_merge` as the feat branch's stamp. -> the head sha, read from the other clone."""
+        put_base_config(self, self.base_fields_stamp())
+        self.on("feat", {".github/stamp.json": json.dumps(dict(CONFIG, merge=head_merge))})
+        return sh(self.other, "git", "rev-parse", "feat")
+
+    def test_a_setup_head_none_stamp_still_sets_required_checks(self):  # control: green on the old code
+        head = self.head_setup_config({"requiredChecks": "none"})
+        cfg = merge.load_config(self.co, "main", merge.DEFAULT_CONFIG, head=head, branch="feat")
+        self.assertEqual(cfg["merge"]["requiredChecks"], "none", "a setup head's none stamp did not set requiredChecks")
+
+    def test_a_setup_head_none_stamp_keeps_each_field_of_main_merge_block(self):
+        # Owner ruling, page item 929 b (decision private-repos-no-ci: a PR never loosens its own gate). The head's stamp sets requiredChecks
+        # only, so every other merge field is main's.
+        head = self.head_setup_config({"requiredChecks": "none"})
+        self.assertEqual(json.loads(sh(self.other, "git", "show", f"{head}:.github/stamp.json"))["merge"], {"requiredChecks": "none"}, "scope: the head's stamp sets more than requiredChecks")
+        self.assertIs(json.loads(sh(self.other, "git", "show", "origin/main:.github/stamp.json"))["merge"]["standingGrant"], False, "scope: main's stamp does not set standingGrant false")
+        cfg = merge.load_config(self.co, "main", merge.DEFAULT_CONFIG, head=head, branch="feat")
+        self.assertEqual(cfg["merge"]["requiredChecks"], "none", "scope: the head's none stamp was not the config")
+        self.assert_base_fields(cfg["merge"], "head's none stamp")
+
+    def test_a_setup_head_none_stamp_sets_no_base_field_of_its_own(self):
+        # Owner ruling, page item 929 b (decision private-repos-no-ci: a PR never loosens its own gate). The head sets values for the base's
+        # fields too, and none of them reaches the config: only requiredChecks comes from the head.
+        head = self.head_setup_config({"requiredChecks": "none", "method": "rebase", "deleteBranch": True, "standingGrant": True,
+                                       "afterMerge": ["make nothing"], "keepBranches": ["other"]})
+        self.assertEqual(json.loads(sh(self.other, "git", "show", f"{head}:.github/stamp.json"))["merge"]["method"], "rebase", "scope: the head's stamp does not set method")
+        cfg = merge.load_config(self.co, "main", merge.DEFAULT_CONFIG, head=head, branch="feat")
+        self.assertEqual(cfg["merge"]["requiredChecks"], "none", "scope: the head's none stamp was not the config")
+        self.assert_base_fields(cfg["merge"], "head's own stamp")
+
+    def requiredChecks_at(self, ref):
+        """-> requiredChecks as the stamp at `ref` (a commit, or origin/main) says it, read from the other clone."""
+        return json.loads(sh(self.other, "git", "show", f"{ref}:.github/stamp.json"))["merge"].get("requiredChecks")
+
+    def test_a_none_head_stamp_the_pr_did_not_change_yields_to_main(self):
+        # Owner ruling, page item 929 b (decision private-repos-no-ci: a PR never loosens its own gate). The base said "none" when the PR was cut,
+        # and the PR left it there. Main says "protection" now, so main's stamp decides.
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="none"))))
+        self.on("feat", {"docs/notes.md": "a note\n"})  # the PR's own change: its stamp still says none
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="protection"))), takes_head=False)
+        head = sh(self.other, "git", "rev-parse", "feat")
+        base = sh(self.other, "git", "merge-base", head, "origin/main")
+        self.assertEqual(self.requiredChecks_at(base), "none", "scope: the merge base does not say none")
+        self.assertEqual(self.requiredChecks_at(head), "none", "scope: the head does not say none")
+        self.assertEqual(self.requiredChecks_at("origin/main"), "protection", "scope: main does not say protection")
+        cfg = merge.load_config(self.co, "main", merge.DEFAULT_CONFIG, head=head, branch="feat")
+        self.assertEqual(cfg["merge"]["requiredChecks"], "protection", "the head's none stamp, which the PR did not change, replaced main's stamp")
+
+    def test_a_none_head_stamp_the_pr_changed_still_counts_over_a_protection_base(self):  # control: green on the old code
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="protection"))))
+        self.on("feat", {".github/stamp.json": json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="none")))})  # the PR changes it
+        head = sh(self.other, "git", "rev-parse", "feat")
+        base = sh(self.other, "git", "merge-base", head, "origin/main")
+        self.assertEqual(self.requiredChecks_at(base), "protection", "scope: the merge base does not say protection")
+        self.assertEqual(self.requiredChecks_at(head), "none", "scope: the head does not say none")
+        cfg = merge.load_config(self.co, "main", merge.DEFAULT_CONFIG, head=head, branch="feat")
+        self.assertEqual(cfg["merge"]["requiredChecks"], "none", "a none stamp the PR changed did not set requiredChecks")
+
+    def test_head_read_does_not_take_an_unchanged_none_stamp_over_main(self):
+        # The guard reads the head through head_read, which takes the same stamp rule as load_config. The base said "none" when the PR was cut
+        # and says "protection" now, so the head reads as its checks and runs say: none, so pending.
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="none"))))
+        self.on("feat", {"docs/notes.md": "a note\n"})
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="protection"))), takes_head=False)
+        self.set(checks_seq=[[]])
+        sh(self.co, "git", "fetch", "-q", "origin")  # head_read reads the stamp in the checkout gh runs in: the head must be there
+        head = sh(self.other, "git", "rev-parse", "feat")
+        self.assertEqual(self.requiredChecks_at(head), "none", "scope: the head does not say none")
+        self.assertEqual(self.requiredChecks_at("origin/main"), "protection", "scope: main does not say protection")
+        cwd = os.getcwd()
+        os.chdir(self.co)
+        try:
+            verdict, detail = self.gh_host().head_read(7)
+        finally:
+            os.chdir(cwd)
+        self.assertEqual(verdict, "pending", f"the head's unchanged none stamp read the head green over main's protection ({detail!r})")
+
     def test_a_blocked_pull_request_under_none_refuses_and_names_the_branch_protection(self):
         # GitHub reads the pull request BLOCKED: the base's branch protection still requires a check that this head does not report.
         # Under none the tool reads no protection, so the refusal must name the cause itself: the branch protection, and the setting
@@ -6704,15 +6797,17 @@ class ReadyUsage(unittest.TestCase):
         self.assert_names_the_close("\n".join(lines[start:end]), "the module docstring")
 
 
-def put_base_config(env, text):
-    """Commit `text` as .github/stamp.json on origin's main from the other clone. env.co keeps its local checkout."""
+def put_base_config(env, text, takes_head=True):
+    """Commit `text` as .github/stamp.json on origin's main from the other clone. env.co keeps its local checkout. takes_head=False leaves the
+    PR branch where it is, so a case can move main past a branch that holds the stamp as it was when the branch was cut."""
     o = env.other
     sh(o, "git", "fetch", "-q", "origin")
     sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
     put(os.path.join(o, ".github/stamp.json"), text)
     sh(o, "git", "commit", "-qam", "base config")
     sh(o, "git", "push", "-q", "origin", "main")
-    head_takes_base(env)
+    if takes_head:
+        head_takes_base(env)
 
 def head_takes_base(env):
     """Merge origin's main into the PR branch, as a lane does before its run, so a setup push to main is not a moved base (merge-needs-current-base)."""
