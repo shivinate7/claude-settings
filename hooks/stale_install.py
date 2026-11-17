@@ -4,10 +4,9 @@
 A cloud session copies hooks at start, so a hook merged later stays stale for the whole session. A prompt reads no
 origin (owner, 2026-11-17 09:34 CST, decision stale-install-cost). It reads the install record that install.sh --cloud
 writes (<config dir>/.claude-settings-install.json: ref, sha, source, installer) and compares it with the local
-refs/remotes/origin/<record ref> of the record's source clone. It acts on two triggers only:
-- the local ref names a commit the record's sha does not cover (a session start, a resume or a fetch moved it);
-- the newest merge notice in the session's inbox, "main moved to <sha>; refresh", names such a commit.
-A commit the record's sha already contains is no trigger. With no trigger a prompt prints nothing and runs no installer.
+refs/remotes/origin/<record ref> of the record's source clone. It acts on one trigger only: the local ref names a
+commit the record's sha does not cover (a session start, a resume or a fetch moved it). A commit the record's sha
+already contains is no trigger. With no trigger a prompt prints nothing and runs no installer.
 A record, a source or a local ref that cannot be read prints one "install freshness unknown (reason)" line and
 installs nothing. Unknown is never reported as current.
 - source on a branch (a checkout or a mirror): runs the recorded installer once (`install.sh --cloud`), then reads
@@ -28,8 +27,8 @@ environment. The hook names no branch of its own. The installer also gets a CS_H
 entry fires on, so install.sh runs no startup entry for a reinstall in a running session.
 
 Cost: one python process start per prompt. Network calls per prompt: 0. Local reads per prompt in a cloud session:
-the install record, the session inbox's last 256 KB, the config dir's CLAUDE.md, and at most 5 local git reads
-(rev-parse of the ref, one merge-base per trigger, symbolic-ref, rev-parse and rev-list of the shared clone). None
+the install record, the config dir's CLAUDE.md, and at most 5 local git reads (rev-parse of the ref, one
+merge-base on a trigger, symbolic-ref, rev-parse and rev-list of the shared clone). None
 outside a cloud session. A trigger adds one installer run (the installer fetches; this hook does not) and, to find the
 restart line, a few more local git reads. Files written by this hook: the seen file, only when a pin refresh or a
 clone flag acts on a new head. No timer, no long-lived process.
@@ -63,9 +62,6 @@ INSTALL_HOOK_INPUT = '{"source":"stale-install"}'
 RESTART_PATHS = ("CLAUDE.md", "output-styles/")
 RESTART_SETTINGS_KEYS = ("model", "effortLevel")
 PREFIX = "claude-settings: "
-# The merge notice the merge tool mails a session: its text lands in the session inbox as one fenced message.
-NOTICE = re.compile(r"^main moved to ([0-9a-f]{40}); refresh[ \t]*$", re.MULTILINE)
-INBOX_TAIL = 256 * 1024
 PIN_SCRIPT = os.path.join("merge", "install_from_main.sh")
 SHARED_LINE = re.compile(r"@(.+)/CLAUDE\.md")
 
@@ -132,7 +128,7 @@ def local_sha(source, rev):
 
 def covered(source, sha, installed):
     """True when `sha` is the installed commit or one of its ancestors. An object the clone lacks, or a failed read,
-    is not covered: a notice naming a commit not fetched yet is new."""
+    is not covered."""
     if sha == installed:
         return True
     done = git_run(source, "merge-base", "--is-ancestor", sha, installed)
@@ -147,23 +143,6 @@ def commits_behind(source, base, tip):
 
 def plural(count):
     return "%d commit%s" % (count, "" if count == 1 else "s")
-
-
-def newest_notice(payload):
-    """The sha of the newest merge notice in the session's inbox, or None. Reads the file's last INBOX_TAIL bytes."""
-    try:
-        import local_time  # the one home of the inbox path, a flat hooks/ file
-        paths = local_time.inbox_paths(payload.get("session_id"))
-        if paths is None:
-            return None
-        with open(paths[0], "rb") as handle:
-            handle.seek(0, os.SEEK_END)
-            handle.seek(max(0, handle.tell() - INBOX_TAIL))
-            text = handle.read().decode("utf-8", "replace")
-    except (ImportError, OSError, ValueError, AttributeError):
-        return None
-    found = NOTICE.findall(text)
-    return found[-1] if found else None
 
 
 def load_seen():
@@ -313,14 +292,6 @@ def shared_lines(record, seen):
             % (clone, plural(behind), record["ref"], tip[:SHORT])]
 
 
-def target_for(record, head, notice):
-    """The commit a trigger names that the record does not cover, or None. The local ref comes before the notice."""
-    for sha in (head, notice):
-        if sha and not covered(record["source"], sha, record["sha"]):
-            return sha
-    return None
-
-
 def is_pin(source):
     """True when the source is a detached checkout that holds the pin's refresh script."""
     if not os.path.isfile(os.path.join(source, PIN_SCRIPT)):
@@ -329,7 +300,7 @@ def is_pin(source):
     return done is not None and done.returncode == 1
 
 
-def check(payload):
+def check():
     """The lines to print for one prompt."""
     if os.environ.get("CLAUDE_CODE_REMOTE") != "true":
         return []
@@ -342,7 +313,7 @@ def check(payload):
         return [unknown("no local origin/%s in %s" % (record["ref"], source))]
     seen = load_seen()
     lines = []
-    target = target_for(record, head, newest_notice(payload))
+    target = None if covered(source, head, record["sha"]) else head
     if target is not None:
         if not is_pin(source):
             lines += reinstall_lines(record, target)
@@ -353,12 +324,8 @@ def check(payload):
 
 def main():
     try:
-        raw = sys.stdin.buffer.read()  # drained, so the caller's write never blocks
-        try:
-            payload = json.loads(raw.decode("utf-8"))
-        except ValueError:
-            payload = {}
-        for text in check(payload if isinstance(payload, dict) else {}):
+        sys.stdin.buffer.read()  # the payload is not needed; drain it so the caller's write never blocks
+        for text in check():
             print(text)
     except Exception as err:  # advisory hook: fail open, and say the freshness is unknown
         print(unknown("hook error: %s" % " ".join(str(err).split())[:100]))

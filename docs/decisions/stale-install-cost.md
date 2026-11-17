@@ -4,7 +4,7 @@
 
 A cloud prompt makes no network call (owner, 2026-11-17 09:34 CST).
 
-The owner's words: "none of those are scenarios to guard against on what gets past the merge tool so that cheaper approach will work best" (09:34 CST; the event triggers, 09:30 CST). The install refreshes on three events: a merge notice from the merge tool, a session start or resume, and a move of the local `origin/<record ref>` ref that a prompt sees. No lookup of origin runs on any prompt, and no fallback timer asks origin on a clock.
+The owner's words: "none of those are scenarios to guard against on what gets past the merge tool so that cheaper approach will work best" (09:34 CST; the event triggers, 09:30 CST). The install refreshes on two events: a session start or resume, and a move of the local `origin/<record ref>` ref that a prompt sees. Decision of the owner's coordinator, 2026-11-17: the merge-notice trigger (an inbox message "main moved to <sha>; refresh") is dropped, because nothing sends it and the merged mid-session reinstall (pull request 3487, the hook this one rewrites) already reinstalls when main's hooks move. No lookup of origin runs on any prompt, and no fallback timer asks origin on a clock.
 
 The hook is `hooks/stale_install.py`, a UserPromptSubmit hook. It compares the install record's sha with the record's source clone's own local ref. A trigger starts the recorded installer once, which fetches. The pin (a detached checkout that holds `merge/install_from_main.sh`) runs that script once per new head and prints how many commits it is behind. The clone the config dir's `CLAUDE.md` points at gets one line when it is behind, once per head. A missing local ref, record or source prints `install freshness unknown`, never "current". A linked worktree pin reads like a clone: git follows its common dir, so its verdict is real.
 
@@ -14,19 +14,19 @@ Cost, as the hook's module docstring states it:
 
 - Python process starts: one per prompt, in every session, cloud or local. The `settings.json` command starts python before the hook checks for a cloud session. The note `stale-hook-python-every-prompt` (python starts in local sessions) names this gap.
 - Network calls per prompt: 0. The installer a trigger starts fetches origin; the hook does not.
-- Local reads per cloud prompt: the install record, the last 256 KB of the session inbox, the config dir's `CLAUDE.md`, and at most 5 git reads in a clone (ref, merge-base per trigger, symbolic-ref, and the shared clone's ref and count). None outside a cloud session. A trigger adds one installer run and a few reads for the restart line.
+- Local reads per cloud prompt: the install record, the config dir's `CLAUDE.md`, and at most 5 git reads in a clone (ref, merge-base on a trigger, symbolic-ref, and the shared clone's ref and count). None outside a cloud session. A trigger adds one installer run and a few reads for the restart line.
 - Files written by the hook: the seen file, `.claude-settings-refresh-seen` in the config dir, only when a pin refresh or a clone flag acts on a new head. It keeps the last 20 heads. The installer writes the install record.
 - Timer: none. Long-lived process: none.
 - Frequency: every prompt.
 
 Whether the reinstalls it saves are worth one python start per prompt is unmeasured.
 
-Not built: nothing yet writes `main moved to <sha>; refresh` into a session inbox, so the merge-notice trigger is read but not sent. Session start and resume already run the installer's own refresh, so that trigger needs nothing here.
+Session start and resume run the installer's own refresh, so that trigger needs nothing in this hook.
 
 Proof, in `hooks/test_reinstall_stale.py`:
 
 - No lookup on a prompt: `StaleInstall::test_prompt_with_no_trigger_reads_no_origin`, `test_hanging_origin_is_not_read_on_a_prompt`, `test_failing_origin_is_not_read_on_a_prompt`, `test_current_prompt_makes_no_network_read_and_no_install`, `test_second_turn_after_reinstall_is_silent` and `test_shared_check_reads_no_origin_on_a_prompt`.
-- The triggers: `test_merge_notice_triggers_the_refresh_with_no_read_of_origin` and `test_local_ref_move_triggers_the_refresh_with_no_lookup`.
+- The trigger: `test_local_ref_move_triggers_the_refresh_with_no_lookup`.
 - Once per head, pin and shared clone: `test_behind_pin_refreshes_once_per_head`, `test_behind_pin_stale_line_names_its_commit_count`, `test_behind_shared_clone_is_flagged_with_its_commit_count`.
 - Linked pin: `test_linked_pin_current_is_silent_with_no_read` and `test_linked_pin_behind_gets_a_verdict_not_unknown`. A missing local ref is unknown: `test_unknown_ref_reports_unknown_without_a_read`.
 - No git outside a cloud session: `test_not_cloud_is_silent_with_no_git_call`.
