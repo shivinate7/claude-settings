@@ -1804,6 +1804,26 @@ class Slugs(unittest.TestCase):
         self.assertEqual(len([r for r in rows.splitlines() if r.startswith("| slugs: ") and new in r]), 1, body)
         self.assertTrue(all(slug in notes and slug not in rows for slug in self.OLD[:3]), body)
 
+    def test_a_note_file_name_over_32_characters_is_out_of_shape(self):
+        # A note file is a slug too: the notes folder is read with the record folders.
+        repo, _ = self.child()
+        note = "%s/%s.md" % (layout.path(repo.root, "notes"), "n" * 33)
+        repo.branch("work").write(note).commit()
+        code, out = repo.run("slugs")
+        self.assertEqual(code, 1, out)
+        self.assertTrue(head(out).startswith("slugs: out"), out)
+        items = self.items(out)
+        self.assertEqual(len(items), 1, out)
+        self.assertIn(note, items[0])
+
+    def test_a_valid_note_file_and_the_notes_readme_read_in_shape(self):
+        repo, _ = self.child()
+        folder = layout.path(repo.root, "notes")
+        repo.branch("work").write("%s/%s.md" % (folder, "v" * 32)).write("%s/README.md" % folder).commit()
+        code, out = repo.run("slugs")
+        self.assertEqual((code, self.items(out)), (0, []), out)
+        self.assertTrue(head(out).startswith("slugs: in shape"), out)
+
     def test_registered_in_groups(self):
         self.assertIn("slugs", load_probes().GROUPS)
 
