@@ -26,10 +26,22 @@ output style load in each session on each repo.
   13:19 CST). An owner yes to merge a named pull request, which a coordinator (tag `cs-build:coordinator`)
   relays to its batch runner, is the owner's grant for that merge. The batch runner merges it with the merge tool,
   under every merge check (`settings.json` `autoMode.allow`, entry "Relayed Merge Yes"; decision
-  `auto-mode-owner-acts`). A relayed yes covers no other act and no other session.
-- **Lane draft PR** (owner, 2026-11-12 17:19 CST; until withdrawn). Any lane that a coordinator or another
-  lane started may open its own draft PR, and never marks it ready. Only the batch runner marks a
-  PR ready. Source: decision `draft-until-reviewed` (every PR opens as a draft).
+  `auto-mode-owner-acts`). A relayed yes covers no other act and no other session. The owner's
+  consultant (tag `cs-build:consultant`) may also relay a yes to a batch runner (entry "Consultant
+  Relayed Merge Yes"). The entry has two paths. Direct: the owner typed `i want the allow rule` in batch
+  runner 12's chat at 11:18 CST on 2026-11-15, which covers a consultant relay to the batch runner.
+  Through triage: the consultant relayed at 11:31 CST, through the coordinator, that the owner typed "a" at
+  11:29 CST. The incident path ran from the owner to the consultant, to triage, to the runner.
+  The owner's own typed words do not name the triage hop. A yes that started at triage with no consultant is
+  not covered. The yes binds to the head the pull request had when the consultant relayed it. That binding
+  rests on the runner passing that head as `--head`, and on the classifier reading the chat. The merge tool
+  accepts a live head that equals the `--head` passed, or sits on it with only a Record-claim commit,
+  its revert or a page-only commit. It does not check that `--head` against the relay.
+  `relayed_head_holds` in `merge/merge.py` reads no review record.
+- **Lane draft PR** (owner, 2026-11-12 17:19 CST; changed by owner, 12:58 CST Nov 16, "No now everyone merges",
+  ruling Q2). Any lane that a coordinator or another lane started may open its own draft PR. It marks that PR
+  ready once, by the merge tool, after its last review and lane lint, and never marks another PR ready. Source:
+  decision `draft-until-reviewed` (every PR opens as a draft).
 - **Main merge into handed-in branches** (owner, 2026-11-13 13:12 CST; until withdrawn; changed by owner,
   23:40 CST, waiting-page item 806 d). The batch runner may push a plain merge of main into a PR that a lane
   has handed in, with no clock rule. A lane that pushes again to a handed-in branch says so first. No rebase,

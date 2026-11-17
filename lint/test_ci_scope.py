@@ -746,15 +746,18 @@ class RecordsOnlyPush(unittest.TestCase):
         keep = list(LINT_FLAGS)
         self.assertEqual(differing(got, whole, keep), [], f"a lint flag moved for a hand-edited page: {got}")
 
-    # A push never reads GREEN_HEAD: every flag is on, as it was before the change.
-    def test_records_only_push_event_runs_everything(self):
+    # A push past a fully green head skips the same 13 flags as a pull request. Ruling 830 c (every job on a records-only
+    # push after a green head), widened by item 857 pick b (19:48 CST Nov 15). Named failure: a records-only push keeps a job
+    # flag on, so its job still runs.
+    # The delta is asserted before the flags (P7).
+    def test_records_only_push_after_green_head_turns_the_jobs_off(self):
         facts = {}
         got = run([self.RECORDS], green=self.CODE, event="push", facts=facts)
+        self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
         self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta is not docs/records.md alone: {facts}")
-        for n in JOB_FLAGS + DERIVED_FLAGS + STEP_FLAGS + list(LINT_FLAGS):
-            self.assertEqual(got.get(n), "true", f"a push runs {n} whatever GREEN_HEAD says: {got}")
-        self.assertEqual(got.get("mutation_report"), "true", f"a push turns mutation_report on: {got}")
-        self.assertSkipFlag(got, False)
+        for n in self.OFF:
+            self.assertEqual(got.get(n), "false", f"{n} stays on after a records-only push past a green head: {got}")
+        self.assertSkipFlag(got, True)
 
     # An empty delta (no commit past GREEN_HEAD) is not records-only, so the whole PR diff decides.
     def test_records_only_empty_delta_runs_as_before(self):
@@ -832,15 +835,276 @@ class RecordsOnlyPush(unittest.TestCase):
         self.assertSkipFlag(got, False)
         self.assertEqual(got.get("mutation_report"), "true", f"a batch pull request with no green head turns mutation_report off: {got}")
 
-    # The control: a push never takes the shortcut, so mutation_report is on for a push even with GREEN_HEAD set. The scope
-    # is asserted before the flag (P7).
-    def test_records_only_mutation_report_push_with_green_head_is_true(self):
+    # Ruling 830 c, widened by item 857 pick b (19:48 CST Nov 15): a records-only push past a green head turns
+    # mutation_report off too. Named failure: the
+    # mutation-report job starts on a records-only push. The scope is asserted before the flag (P7).
+    def test_records_only_push_after_green_head_turns_mutation_report_off(self):
         facts = {}
         got = run([self.RECORDS], green=self.CODE, event="push", facts=facts)
         self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
         self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta is not docs/records.md alone: {facts}")
+        self.assertSkipFlag(got, True)
+        self.assertEqual(got.get("mutation_report"), "false", f"a records-only push past a green head turns mutation_report on: {got}")
+
+    # Controls for the wider skip: a push with no earlier green head, or with a second delta path, runs every
+    # flag as before. Named failure: the skip reads a GREEN_HEAD or a delta it must not.
+    def test_records_only_push_with_no_earlier_green_head_runs_everything(self):
+        facts = {}
+        got = run([self.RECORDS], green=self.CODE, green_head="", event="push", facts=facts)
+        self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta is not docs/records.md alone: {facts}")
         self.assertSkipFlag(got, False)
-        self.assertEqual(got.get("mutation_report"), "true", f"a push with GREEN_HEAD set turns mutation_report off: {got}")
+        for n in JOB_FLAGS + DERIVED_FLAGS + STEP_FLAGS:
+            self.assertEqual(got.get(n), "true", f"a push with no green head runs {n} as before: {got}")
+        self.assertEqual(got.get("mutation_report"), "true", f"a push with no green head turns mutation_report off: {got}")
+
+    def test_records_only_push_with_a_second_path_runs_everything(self):
+        other = "hooks/extra.py"
+        facts = {}
+        got = run([self.RECORDS, other], green=self.CODE, event="push", facts=facts)
+        self.assertEqual(facts.get("delta"), sorted([self.RECORDS, other]), f"scope: the delta is not the two paths: {facts}")
+        self.assertSkipFlag(got, False)
+        for n in JOB_FLAGS + DERIVED_FLAGS + STEP_FLAGS:
+            self.assertEqual(got.get(n), "true", f"a push with a second delta path runs {n} as before: {got}")
+
+    # A schedule and a dispatch never take the shortcut, whatever the delta and GREEN_HEAD: the nightly run and a manual run keep
+    # every job on. Named failure: the wider skip reaches a run that is neither a push nor a pull request.
+    def test_records_only_schedule_and_dispatch_run_everything(self):
+        for event in ("schedule", "workflow_dispatch"):
+            with self.subTest(event=event):
+                facts = {}
+                got = run([self.RECORDS], green=self.CODE, event=event, facts=facts)
+                self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta is not docs/records.md alone: {facts}")
+                self.assertSkipFlag(got, False)
+                for n in JOB_FLAGS + DERIVED_FLAGS + STEP_FLAGS:
+                    self.assertEqual(got.get(n), "true", f"a {event} run turns {n} off: {got}")
+
+
+# The job-level half of the wider skip. A job that holds its steps back with a step-level if still starts a runner, so the skip
+# is read where a job starts: its job-level if, evaluated on the outputs the scope job wrote for the run. _IfParser reads the
+# forms checks.yml's job-level ifs use (names, string literals, ==, !=, !, &&, ||, parentheses, always(), cancelled(),
+# success()). Any other text fails the case; it never reads as true.
+_IF_TOKEN = re.compile(r"==|!=|&&|\|\||\(|\)|!|'[^']*'|[A-Za-z_][\w.\-]*(?:\(\))?")
+_IF_FUNCTIONS = {"always()": True, "cancelled()": False, "success()": True}
+
+
+def _as_text(value):
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def _truthy(value):
+    return value if isinstance(value, bool) else _as_text(value) != ""
+
+
+class _IfParser:
+    """Recursive descent over one if: expression, without its ${{ }} wrapper. Precedence as GitHub's: ! binds first, then
+    == and !=, then &&, then ||. A name the env does not hold reads as empty, as a missing scope output does."""
+
+    def __init__(self, src, env):
+        self.toks = _IF_TOKEN.findall(src)
+        if re.sub(r"\s+", "", src) != "".join(self.toks):
+            raise ValueError(f"an if: form this reader does not know: {src!r}")
+        self.env = env
+        self.i = 0
+
+    def peek(self):
+        return self.toks[self.i] if self.i < len(self.toks) else None
+
+    def take(self):
+        tok = self.peek()
+        if tok is None:
+            raise ValueError("an if: ends early")
+        self.i += 1
+        return tok
+
+    def parse(self):
+        value = self.disjunction()
+        if self.peek() is not None:
+            raise ValueError(f"an if: has text after its end: {self.peek()!r}")
+        return _truthy(value)
+
+    # Both operands are parsed before they combine: a short-circuit would leave the right side's tokens unread.
+    def disjunction(self):
+        value = self.conjunction()
+        while self.peek() == "||":
+            self.take()
+            right = self.conjunction()
+            value = _truthy(value) or _truthy(right)
+        return value
+
+    def conjunction(self):
+        value = self.comparison()
+        while self.peek() == "&&":
+            self.take()
+            right = self.comparison()
+            value = _truthy(value) and _truthy(right)
+        return value
+
+    def comparison(self):
+        value = self.unary()
+        if self.peek() in ("==", "!="):
+            op = self.take()
+            same = _as_text(value).lower() == _as_text(self.unary()).lower()
+            return same if op == "==" else not same
+        return value
+
+    def unary(self):
+        if self.peek() == "!":
+            self.take()
+            return not _truthy(self.unary())
+        return self.primary()
+
+    def primary(self):
+        tok = self.take()
+        if tok == "(":
+            value = self.disjunction()
+            if self.take() != ")":
+                raise ValueError("an if: has an open parenthesis")
+            return value
+        if tok.startswith("'"):
+            return tok[1:-1]
+        if tok in _IF_FUNCTIONS:
+            return _IF_FUNCTIONS[tok]
+        if tok.endswith("()"):
+            raise ValueError(f"an if: calls {tok}, which this reader does not know")
+        return self.env.get(tok, "")
+
+
+def if_env(outs, event):
+    """The names an if: reads: the event, the pull request's draft flag, and each scope output of the run."""
+    env = {"github.event_name": event, "github.event.pull_request.draft": False if event == "pull_request" else None}
+    env.update({f"needs.scope.outputs.{name}": value for name, value in outs.items()})
+    return env
+
+
+def job_names(text):
+    """The job keys of checks.yml, in file order: the lines under `jobs:` that open a job."""
+    return re.findall(r"^  ([A-Za-z0-9_-]+):\s*$", text.split("\njobs:\n", 1)[-1], re.M)
+
+
+def job_if(text, job):
+    """A job's job-level if: expression, without its ${{ }} wrapper. None when the job has no job-level if."""
+    m = re.search(r"^    if: (.*)$", job_block(text, job) or "", re.M)
+    if m is None:
+        return None
+    raw = m.group(1).strip()
+    wrapped = re.fullmatch(r"\$\{\{(.*)\}\}", raw)
+    return (wrapped.group(1) if wrapped else raw).strip()
+
+
+def job_runs(expr, outs, event):
+    """True when the job starts on this run: it has no job-level if, or its if: is true on the run's outputs."""
+    return True if expr is None else _IfParser(expr, if_env(outs, event)).parse()
+
+
+def running_jobs(text, outs, event):
+    """The jobs of checks.yml that start on this run, sorted."""
+    return sorted(job for job in job_names(text) if job_runs(job_if(text, job), outs, event))
+
+
+def rollup_needs(text):
+    """The jobs all-jobs-passed lists under needs:, in file order."""
+    m = re.search(r"^    needs:\n((?:      - [\w-]+\n)+)", job_block(text, "all-jobs-passed") or "", re.M)
+    return re.findall(r"^      - ([\w-]+)$", m.group(1), re.M) if m else []
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class RecordsOnlyEveryJob(unittest.TestCase):
+    """The wider skip, ruling 830 c widened by item 857 pick b (19:48 CST Nov 15): a records-only run starts no job
+    except the decision jobs, which decide or read the skip, and the rollup on a pull request. A step-level skip still starts
+    a runner, so each job's job-level if is read on the outputs ci-scope.sh wrote for a real records-only run."""
+    RECORDS = RecordsOnlyPush.RECORDS
+    CODE = RecordsOnlyPush.CODE
+    EARLIER = ["README.md"]  # an earlier head's change that no job reads: a markdown file, not records
+    EVENTS = ("pull_request", "push")
+    # Decide the skip (scope), or read it on every run (the two skip jobs). The rollup joins them on a pull request only.
+    DECISION_JOBS = ("scope", "nightly-skip", "push-skip")
+    # A records change beside one of these must start every job the file alone starts.
+    CONTROL_EXTRAS = (
+        ("a code file", "hooks/extra.py"),
+        ("a test file", "lint/test_ci_scope.py"),
+        ("a guard file", "hooks/guard.py"),
+        ("a workflow file", ".github/workflows/checks.yml"),
+        ("the scope script", ".github/scripts/ci-scope.sh"),
+    )
+
+    def workflow(self):
+        path, why = job_workflow(os.path.join(HERE, ".."), "checks")
+        if why:
+            self.fail(why)
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+
+    # Named failure: a job starts on a records-only run. One subtest per job and event, so each job reports its own if:.
+    # The delta is asserted before the jobs (P7).
+    def test_every_job_but_the_decision_jobs_is_off_on_a_records_only_run(self):
+        text = self.workflow()
+        self.assertIn("\njobs:\n", text, "checks.yml has no jobs: section")
+        jobs = job_names(text)
+        self.assertIn("checks", jobs, f"checks.yml names no checks job: {jobs}")
+        for event in self.EVENTS:
+            with self.subTest(event=event):
+                facts = {}
+                got = run([self.RECORDS], green=self.CODE, event=event, facts=facts)
+                self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+                self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta is not docs/records.md alone: {facts}")
+                skip = {*self.DECISION_JOBS, "all-jobs-passed"}
+                for job in jobs:
+                    if job in skip:
+                        continue
+                    with self.subTest(job=job):
+                        expr = job_if(text, job)
+                        self.assertFalse(job_runs(expr, got, event),
+                                         f"{job} starts on a records-only {event} run; its job-level if is {expr or 'absent'}")
+
+    # Control: the decision jobs and, on a pull request, the rollup start on a records-only run.
+    def test_the_decision_jobs_and_the_rollup_start_on_a_records_only_run(self):
+        text = self.workflow()
+        for event in self.EVENTS:
+            with self.subTest(event=event):
+                facts = {}
+                got = run([self.RECORDS], green=self.CODE, event=event, facts=facts)
+                self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+                self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta is not docs/records.md alone: {facts}")
+                jobs = list(self.DECISION_JOBS) + (["all-jobs-passed"] if event == "pull_request" else [])
+                for job in jobs:
+                    with self.subTest(job=job):
+                        expr = job_if(text, job)
+                        self.assertTrue(job_runs(expr, got, event),
+                                        f"{job} does not start on a records-only {event} run; its job-level if is {expr}")
+
+    # Control: the reader reads the wider skip's form as off when records_only_skip is 'true' and on when it is
+    # 'false', and refuses a form it does not know rather than reading it as true.
+    def test_the_if_reader_reads_the_records_only_skip_and_refuses_an_unknown_form(self):
+        expr = "needs.scope.outputs.records_only_skip != 'true'"
+        self.assertFalse(_IfParser(expr, {"needs.scope.outputs.records_only_skip": "true"}).parse(),
+                         "the reader reads a records-only skip as on")
+        self.assertTrue(_IfParser(expr, {"needs.scope.outputs.records_only_skip": "false"}).parse(),
+                        "the reader reads a run with no records-only skip as off")
+        with self.assertRaises(ValueError, msg="the reader accepts a form it does not know"):
+            _IfParser("github.event_name == 'push' ? 'a' : 'b'", {}).parse()
+
+    # Controls: a records change beside another file starts the jobs that file starts alone, and a workflow
+    # change beside records starts every job the rollup needs. The delta is asserted before the jobs (P7).
+    def test_a_records_change_beside_another_file_starts_the_jobs_that_file_starts_alone(self):
+        text = self.workflow()
+        for label, extra in self.CONTROL_EXTRAS:
+            with self.subTest(extra=label):
+                facts = {}
+                got = run([self.RECORDS, extra], green=self.EARLIER, facts=facts)
+                self.assertEqual(facts.get("delta"), sorted([self.RECORDS, extra]),
+                                 f"scope: the delta is not the records file and {extra}: {facts}")
+                self.assertEqual(got.get("records_only_skip"), "false", f"scope: a records change beside {extra} reads as records-only: {got}")
+                alone = running_jobs(text, run(self.EARLIER + [self.RECORDS, extra]), "pull_request")
+                together = running_jobs(text, got, "pull_request")
+                self.assertIn("checks", together, f"the lint job does not start for a records change beside {extra}: {together}")
+                self.assertEqual(together, alone, f"a records change beside {extra} starts other jobs than {extra} alone: {together}")
+                if extra == ".github/workflows/checks.yml":
+                    missing = sorted(set(rollup_needs(text)) - set(together))
+                    self.assertEqual(missing, [], f"a workflow change beside records leaves rollup jobs off: {missing}")
 
 
 # The mod phase must run each mods check script (mods/**/check.mjs), not only *.test.mjs. The script cds to its own

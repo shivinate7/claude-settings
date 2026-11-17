@@ -5,7 +5,7 @@ merge/merge.py (Host.base_state) imports `clears`; actions/ci-alarm/alarm.sh cal
 
 The rule. N clears R when every job of R that "may run" in N has conclusion `success` in every N entry of that name. A job of R
 is left out, and N need not have run it, when both hold: it is not red in R, and its job-level `if:` has a top-level `&&`
-conjunct `github.event_name == 'X'` with X not N's event, so it cannot run in N. Why: checks.yml gates `all-jobs-passed` and
+conjunct `github.event_name == 'X'` with X not N's event (a conjunct inside a parenthesized `&&` group counts), so it cannot run in N. Why: checks.yml gates `all-jobs-passed` and
 `ci-done` on `pull_request`, so a push or schedule run always skips them, and a newer green push run never cleared a red nightly.
 A job is kept (needed) when its test sits inside `||`, uses `!=`, its `if:` cannot be parsed, or its name maps to no job of the
 workflow text. A red job (a completed job whose conclusion is not success, skipped, neutral or cancelled) is never left out.
@@ -102,6 +102,8 @@ def other_event_only(expr, event):
             return False
         m = EVENT_TEST.match(part) or EVENT_TEST_REVERSED.match(part)
         if m and m.group(1).lower() != event.lower():
+            return True
+        if len(ands) > 1 and other_event_only(part, event):  # a parenthesized `&&` group is a conjunct of the whole: (A && B) && C
             return True
     return False
 
@@ -235,6 +237,8 @@ def empty_without_evidence(jobs, event):
     """True when a completed `success` run of `event` (a push-group event) ran no check and carries no evidence (the module docstring).
     Empty: no job but `scope`, `push-skip` and `nightly-skip` concluded success. Evidence: a `push` run whose push-skip job is success and scope job is skipped.
     Callers check the run-level conditions (the event is in rule_events, the run concluded success) before they read the jobs."""
+    # One of two homes of "proven push" (push-skip success and scope skipped; also nightly-skip.py `proven`).
+    # This file cannot import the others: it runs from a bare action path in other repos (module docstring), so only the standard library exists.
     if any(j.get("status") == "completed" and j.get("conclusion") == "success" and j["name"] not in BOOKKEEPING for j in jobs):
         return False
     return not (event == "push" and concluded("push-skip", jobs, "success") and concluded("scope", jobs, "skipped"))
