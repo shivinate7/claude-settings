@@ -10,5 +10,6 @@
  "why": "A builder agent's compaction replaced its coordinator's handoff, digest and state in excel-ui-kit, so the coordinator lost its record.",
  "source": "owner chat 11:02 CST Nov 12 via retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ) and coordinator 11:04 CST; plan docs/plans/agent-handoff-lock-report.md on branch agent-handoff-lock-report (5328b4e70)",
  "note": "Plan part 1. Root fix: the compaction hooks skip agent worktrees (a call that carries a valid agent_id). Plus a guard rule refusing an agent's write to the session's handoff, named a bandaid; it covers the shell-write form too, or files that form as a debt. Red test: an agent Write to the handoff is refused after the fix; the same Write with no agent_id is allowed on main and after. Lane handoff-agent-write started 11:03 CST Nov 12 (coordinator).",
- "updatedAt": "2026-11-12T11:05:05-06:00"
+ "updatedAt": "2026-11-17T13:39:30-06:00",
+ "pr": 2856
 }

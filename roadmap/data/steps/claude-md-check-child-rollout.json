@@ -8,5 +8,6 @@
   "source": "coordinator 11:10 CST Nov 15, relayed by triage (not read by triage)",
   "note": "Doing. Lane session_013NEJKyk1LM2FRmVruNdc58. Draft #3506 (fetch-depth remedy). Teeth table and rollout facts in why, 11:21 CST Nov 15 (relayed, not read by triage). Mailaudit and ios-adblock have no job in the check yet. Guard or check: yes. #3506 head 2ecfc521, clean draft, round 1 Sonnet PASS (lane's word).\n\n12:38 CST Nov 15 (coordinator, REST read 12:36; relayed, not read by triage): lane claude-md-check-child-rollout's PR #3506 (aligned: name the fetch-depth remedy when the PR base cannot) MERGED by runner 10 at 12:35:58 CST, head 2ecfc5217cdd, merge commit b600c126d55c1ba53a3d9d3550e5108fc0e3142f; main b600c126d55c. Marked 11:43 CST; mark to merge 53 min. First lane commit 11:07:44 CST (f812a5b6d3a6). Main's push run not yet read; step stays doing.",
   "lane": "session_013NEJKyk1LM2FRmVruNdc58",
-  "updatedAt": "2026-11-15T12:50:00-06:00"
+  "updatedAt": "2026-11-17T13:39:30-06:00",
+  "pr": 3506
 }

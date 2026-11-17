@@ -10,5 +10,6 @@
  "why": "red_base (merge.py 2961-2987) waits longer than the rulings say. Saves 10-15 min per red-main incident per queued PR (debt measured-time-table; consultant's figure, unmeasured by triage). OVERLAP 20:34 CST Nov 14 (triage): the new step base-red-ok-checks-revert (lane session_013NEJKzCZ1krtxV8AmLaddU) covers the half \"--base-red-ok covers only that revert\". Lane merge-tool-audit-fixes (session_013NEJL1k9L6aaoYwt9rkang) reads idle and disconnected at 20:33 CST; whether it built either half is unread. The queue-resume half stays here.",
  "source": "Consultant 20:59 CST Nov 13, from its Opus read-only audit of merge/merge.py at origin/main 309fa5ed5b; line numbers and debts are its, unchecked by triage.",
  "note": "Triage 21:00 CST Nov 13: rulings own-745-b (13:20 CST Nov 13) and own-772-a (18:24 CST Nov 13), per the consultant; triage has not reread them. Red case first. Fix is inside the rulings, so no owner item. Coordinator 21:01 CST Nov 13 (21:00): lane merge-tool-audit-fixes (session_013NEJL1k9L6aaoYwt9rkang) started, built on #3269. Whether it covers this step: unchecked by triage.",
- "updatedAt": "2026-11-14T20:34:00-06:00"
+ "updatedAt": "2026-11-17T13:39:30-06:00",
+ "pr": 3312
 }

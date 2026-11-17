@@ -7,9 +7,10 @@
  "phase": "now",
  "owner": "triage",
  "blockedBy": [],
- "updatedAt": "2026-11-15T13:32:00-06:00",
+ "updatedAt": "2026-11-17T13:39:30-06:00",
  "why": "[13:30 CST Nov 15, triage] Lane session_013NEJL2fP71oxAPczKdc3ru: Skips the Windows guard shards only when no guard input changed, and proves a test goes red when one does. Stacked on lane push-daily-slow-legs' draft #3540 (head 1f8509817c). Guard or check: yes. (source: coordinator 13:30 CST, relayed by triage; not owner-typed, undoable) New step; none existed.",
  "source": "coordinator 13:30 CST, relayed by triage; not owner-typed, undoable",
  "note": "Doing. Skips the Windows guard shards only when no guard input changed, and proves a test goes red when one does. Stacked on lane push-daily-slow-legs' draft #3540 (head 1f8509817c). Guard or check: yes.",
- "lane": "session_013NEJL2fP71oxAPczKdc3ru"
+ "lane": "session_013NEJL2fP71oxAPczKdc3ru",
+ "pr": 3556
 }

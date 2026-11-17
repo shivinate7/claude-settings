@@ -10,5 +10,6 @@
  "why": "11:39 CST Nov 15 (coordinator, relayed, not read by triage): the coordinator started a lane for item 872 b (owner answer read by the coordinator). It carries the item 873 note '...its checking them to ensure the rot is cleaned deeply' as a remedy-wording change (the coordinator's reading). Guard or check: yes. Sonnet, round 1. Item-owner lane rules-decisions-aligned was told to check its answers for 872 and 873 and write receipts. Lane id not relayed.",
  "source": "Coordinator 11:39 CST Nov 15 (relayed, not read by triage)",
  "note": "Doing. Guard or check: yes. Lane id not relayed. Filed 11:40 CST Nov 15.",
- "updatedAt": "2026-11-15T11:40:00-06:00"
+ "updatedAt": "2026-11-17T13:39:30-06:00",
+ "pr": 3526
 }
