@@ -334,6 +334,7 @@ ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may me
 BUDGET_CITE = "(decision gh-api-budget, a bulk read stops below a tenth of the GitHub API budget)"
 LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a head that passes `merge --lane-lint`)"
 WORKFLOW_READ_CITE = "(decision private-repos-no-ci, the workflow files on the base set the wait, so a file the tool cannot read stops the merge)"
+HEAD_STAMP_CITE = "(decision private-repos-no-ci, a setup PR's own stamp that turns CI off is read and checked in full, so a broken one stops the merge)"
 # The paths a review record's `--guard no` refuses: the rule dirs, then the tool and the hooks, as folder prefixes. GUARD_FILES match a whole path.
 # It reads RULE_DIRS, never a copy.
 GUARD_PATHS = stale_cites.RULE_DIRS + ("merge/", "githooks/")
@@ -2779,7 +2780,7 @@ def load_config(root, base, path, cite="", head=None, branch=None):
         raise Stop(f"git fetch origin {base} failed: {out}{cite}")
     setup = head_none_stamp(root, head, path, branch, base)
     if setup is not None:
-        parse_config(root, setup, head, f"the head {head[:9]}", path, cite, fill=False)
+        parse_config(root, setup, head, f"the head {head[:9]}", path, cite + " " + HEAD_STAMP_CITE, fill=False)
     cfg = base_config(root, base, path, cite)
     if setup is not None:
         cfg["merge"]["requiredChecks"] = "none"
