@@ -174,6 +174,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `env-file-stays-unread` | No session reads, writes or commits the contents of an environment file. | [`docs/decisions/env-file-stays-unread.md`](../docs/decisions/env-file-stays-unread.md) |
 | `express-batch` | Express lanes that are ready at the same time go to main in one express batch, ahead of every other lane (ruling R65). | [`docs/decisions/express-batch.md`](../docs/decisions/express-batch.md) |
 | `express-batch-per-act` | Owner ruling R55 (how each act of R42 part 2, a merge-flow step, merges), 2026-11-12 13:21 CST. | [`docs/decisions/express-batch-per-act.md`](../docs/decisions/express-batch-per-act.md) |
+| `facts-line-checks-state` | Owner, 2026-11-15 11:27 CST, option b, on the consultant's design question. | [`docs/decisions/facts-line-checks-state.md`](../docs/decisions/facts-line-checks-state.md) |
 | `feel-fix-waits-device-check` | A feel-fix is a change to how a screen feels: its motion, touch, timing or scroll. | [`docs/decisions/feel-fix-waits-device-check.md`](../docs/decisions/feel-fix-waits-device-check.md) |
 | `fewest-words-mandate` | Fewest words, most of all in front-end copy | [`docs/decisions/fewest-words-mandate.md`](../docs/decisions/fewest-words-mandate.md) |
 | `fg-bash-while-bg` | Owner, 2026-11-16 13:47 CST: "refuse only commands that can run long, such as tests, lint, merges, builds and installs, or anything asking a time limit over 60 s. | [`docs/decisions/fg-bash-while-bg.md`](../docs/decisions/fg-bash-while-bg.md) |
