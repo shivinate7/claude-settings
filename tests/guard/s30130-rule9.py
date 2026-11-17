@@ -17,6 +17,8 @@ def lane_cost_run(body):
         env.pop("CLAUDE_CODE_SESSION_ID", None)
         env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
         spec = {"mode": "judge", "reading": LB_NORMAL}
+        # The default Prior work line goes on a build spawn here too, as decide() adds it (see with_prior_work).
+        body = dict(body, tool_input=with_prior_work(body["tool_name"], body["tool_input"]))
         done = subprocess.run([sys.executable, "-c", LB_PROBE, GUARD, side_file, json.dumps(spec)],
                               input=json.dumps(body), capture_output=True, text=True, env=env, timeout=120)
         try:
@@ -50,8 +52,8 @@ def lane_cost_check(label, body, want_git, want_decision):
 
 lane_cost_check("lane-repo-tag: a lane create_session starts one git process, to read the origin",
                 {"tool_name": LANE_TOOL, "session_id": "lane-cost-lane", "cwd": LANE_REPO,
-                 "tool_input": {"prompt": LANE_PROMPT, "effort": LANE_EFFORT_FIELD, "tags": OWN_LANE_TAGS,
-                                "model": "sonnet", "source_url": LANE_SOURCE_URL}}, 1, "allow")
+                 "tool_input": {"title": LANE_TITLE, "prompt": LANE_PROMPT, "effort": LANE_EFFORT_FIELD,
+                                "tags": OWN_LANE_TAGS, "model": "sonnet", "source_url": LANE_SOURCE_URL}}, 1, "allow")
 lane_cost_check("lane-repo-tag: a non-lane create_session starts no git process",
                 {"tool_name": LANE_TOOL, "session_id": "lane-cost-triage", "cwd": LANE_REPO,
                  "tool_input": {"prompt": "/effort medium", "tags": ["cs-build:triage"]}}, 0, "allow")
@@ -66,69 +68,80 @@ lane_cost_check("lane-repo-tag: a Read call starts no git process",
 # A lane call with both passes. A call with no lane tag is never judged by this rule. Each lane case below carries
 # the grant line, effort medium and the origin repo tag, so the other lane rules pass it and only this rule decides it.
 add("lane-start-settings: lane tag with no model is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS, source_url=LANE_SOURCE_URL)
+    tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS, source_url=LANE_SOURCE_URL)
 add("lane-start-settings: lane tag with no source_url is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS, model="sonnet")
+    tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS, model="sonnet")
 add("lane-start-settings: lane tag with neither model nor source_url is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS)
+    tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS)
 add("lane-start-settings: lane tag with an empty model is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="", source_url=LANE_SOURCE_URL)
 add("lane-start-settings: lane tag with an empty source_url is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="sonnet", source_url="")
 add("lane-start-settings: lane tag with an empty model and an empty source_url is denied", "deny",
-    "lane-start-settings", tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    "lane-start-settings", tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="", source_url="")
 add("lane-start-settings: lane tag with a whitespace-only model is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="   ", source_url=LANE_SOURCE_URL)
 add("lane-start-settings: lane tag with a whitespace-only source_url is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="sonnet", source_url=" \t\n ")
 add("lane-start-settings: lane tag with a non-text model (null) is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model=None, source_url=LANE_SOURCE_URL)
 add("lane-start-settings: lane tag with a non-text model (number) is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model=5, source_url=LANE_SOURCE_URL)
 add("lane-start-settings: lane tag with a non-text model (list) is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model=["x"], source_url=LANE_SOURCE_URL)
 add("lane-start-settings: lane tag with a non-text source_url (null) is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="sonnet", source_url=None)
 add("lane-start-settings: lane tag with a non-text source_url (number) is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="sonnet", source_url=5)
 add("lane-start-settings: lane tag with a non-text source_url (list) is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="sonnet", source_url=["x"])
 add("lane-start-settings: lane tag with a no-break-space-only model is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="\u00a0", source_url=LANE_SOURCE_URL)
 add("lane-start-settings: lane tag with a no-break-space-only source_url is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="sonnet", source_url="\u00a0")
 add("lane-start-settings: upper-case lane tag with no model is denied", "deny", "lane-start-settings",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["CS-BUILD:LANE", "cs-repo:shivinate7/claude-settings"], source_url=LANE_SOURCE_URL)
 add("lane-start-settings: lane tag among several tags with no source_url is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
+    tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-repo:shivinate7/claude-settings", "cs-step:lane-start-settings", "cs-build:lane"], model="sonnet")
 add("lane-start-settings: a denied lane with no source_url names source_url in its reason", "deny",
-    "lane-start-settings", tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    "lane-start-settings", tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="sonnet", carries="source_url")
 add("lane-start-settings: a denied lane with no model names model in its reason", "deny",
-    "lane-start-settings", tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    "lane-start-settings", tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     source_url=LANE_SOURCE_URL, carries="model")
 add("lane-start-settings: lane tag with a model and a source_url is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="sonnet", source_url=LANE_SOURCE_URL)
+# The open pull requests of the lane's cs-repo, for lane-step-dup-pr: a stand-in for claude-settings with none open.
+LANE_START_GH = os.path.join(ROOT, "lanestart-gh")
+
+
+def build_lane_start_gh():
+    """The stand-in pull request tool for claude-settings: it answers only that repo, and holds no open pull request."""
+    make_fake_gh(LANE_START_GH, "main", need=["shivinate7/claude-settings"])
+
+
+lazy_fixture([LANE_START_GH], build_lane_start_gh)
 add("lane-start-settings: lane tag among several tags with a model and a source_url is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
+    tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-repo:shivinate7/claude-settings", "cs-step:lane-start-settings", "cs-build:lane"],
-    model="sonnet", source_url=LANE_SOURCE_URL)
+    model="sonnet", source_url=LANE_SOURCE_URL,
+    transcript=role_path("lane-start-listed"), env_path=fake_gh_path(LANE_START_GH))
 add("lane-start-settings: coordinator call with no model and no source_url is allowed", "allow",
     tool=LANE_TOOL, tags=["cs-build:coordinator"], prompt="do the task")
 add("lane-start-settings: triage call with no model and no source_url is allowed", "allow",
@@ -136,26 +149,71 @@ add("lane-start-settings: triage call with no model and no source_url is allowed
 add("lane-start-settings: batch-runner call with no model and no source_url is allowed", "allow",
     tool=LANE_TOOL, tags=["cs-build:batch-runner"], prompt="do the task")
 
+
+# The settings rule's own contract: a call with no lane tag is not judged (lane_start_settings_hit's docstring). The judge
+# reaches the function only through lane_start_hits, which gates on the same tag first, so a judged case cannot see that
+# inner gate go. This check calls the function on the guard under test, loaded from the folder GUARD sits in.
+def _guard_under_test():
+    """guard.py loaded from the folder of GUARD, with that folder first on sys.path, so its sibling modules come from
+    the same copy."""
+    import importlib.util
+    folder = os.path.dirname(GUARD)
+    spec = importlib.util.spec_from_file_location("guard_settings_direct", os.path.join(folder, "guard.py"))
+    module = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, folder)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(folder)
+    return module
+
+
+def lane_settings_direct_case():
+    """A call with no lane tag reads no missing settings, whatever it leaves out. The scope is asserted first: the
+    coordinator input must not be a lane start. The control beside it is a lane start with no model or source_url,
+    which must read both."""
+    guard = _guard_under_test()
+    coordinator = {"tags": ["cs-build:coordinator"], "prompt": "do the task"}
+    if guard.is_lane_create_session(LANE_TOOL, coordinator):
+        return False, "scope: the coordinator tag reads as a lane start, so this case proves nothing"
+    got = guard.lane_start_settings_hit(LANE_TOOL, coordinator)
+    if got:
+        return False, "lane_start_settings_hit reads %r for a call with no lane tag, want an empty reading" % got
+    lane = {"tags": ["cs-build:lane"], "prompt": "do the task"}
+    if not guard.is_lane_create_session(LANE_TOOL, lane):
+        return False, "control: the lane tag reads as no lane start, so the control proves nothing"
+    control = guard.lane_start_settings_hit(LANE_TOOL, lane)
+    if control != "model, source_url":
+        return False, ("lane_start_settings_hit reads %r for a lane start with no model or source_url, "
+                       "want 'model, source_url'" % control)
+    return True, "a call with no lane tag reads no missing settings, and a lane start reads model, source_url"
+
+
+FIXTURELESS_CHECKS.add(lane_settings_direct_case)
+LOG_CHECKS_EXTRA.append((
+    "lane-start-settings: coordinator call with no model and no source_url is allowed, read straight from "
+    "lane_start_settings_hit", lane_settings_direct_case))
+
 # ---- The floor's remedy for a lane start. A lane create_session below the floor is refused, and its reason must not
 # tell the caller to name no model: with no model, rule lane-start-settings refuses the lane again. The reason names
 # `model sonnet` and `source_url`, the lane's two required inputs. An Agent or Task spawn, a start_session, and a
 # create_session with no lane tag keep the no-model remedy, so a builder cannot drop it for everyone.
 LANE_FLOOR_LACKS = ("name no model", "let the default apply")
 add("floor lane: a lane create_session on haiku is denied with the lane remedy, not the no-model one", "deny",
-    "agent-model-floor", tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    "agent-model-floor", tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="haiku", source_url=LANE_SOURCE_URL, carries="model sonnet", lacks=LANE_FLOOR_LACKS)
 add("floor lane: a lane refused below the floor names source_url in its reason", "deny",
-    "agent-model-floor", tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    "agent-model-floor", tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="haiku", source_url=LANE_SOURCE_URL, carries="source_url")
 add("floor lane: an upper-case lane tag on haiku gets the lane remedy", "deny", "agent-model-floor",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["CS-BUILD:LANE", "cs-repo:shivinate7/claude-settings"],
     model="haiku", source_url=LANE_SOURCE_URL, carries="model sonnet", lacks=LANE_FLOOR_LACKS)
 add("floor lane: a lane tag given as one string on haiku gets the lane remedy", "deny", "agent-model-floor",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags="cs-build:lane",
+    tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags="cs-build:lane",
     model="haiku", source_url=LANE_SOURCE_URL, carries="model sonnet", lacks=LANE_FLOOR_LACKS)
 add("floor lane: a lane start on the remedy's inputs, model sonnet, source_url, the repo tag, the grant line and "
-    "effort medium, is allowed", "allow", tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    "effort medium, is allowed", "allow", tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="sonnet", source_url=LANE_SOURCE_URL)
 # Controls: the no-model remedy holds wherever no lane is. These pass on the old code and must keep passing.
 for _name, _call in (

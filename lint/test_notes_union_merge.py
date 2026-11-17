@@ -66,22 +66,26 @@ class NotesRepo(unittest.TestCase):
         git_ok(self.root, "commit", "-q", "-m", "base")
         self.base = git_ok(self.root, "rev-parse", "HEAD").stdout.strip()
 
-    def path(self):
-        return os.path.join(self.root, *NOTES.split("/"))
+    def path(self, rel=NOTES):
+        return os.path.join(self.root, *rel.split("/"))
 
-    def write(self, text):
-        os.makedirs(os.path.dirname(self.path()), exist_ok=True)
-        with open(self.path(), "w", encoding="utf-8", newline="\n") as f:
+    def write(self, text, rel=NOTES):
+        os.makedirs(os.path.dirname(self.path(rel)), exist_ok=True)
+        with open(self.path(rel), "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
 
-    def read(self):
-        with open(self.path(), encoding="utf-8", newline="") as f:
+    def read(self, rel=NOTES):
+        with open(self.path(rel), encoding="utf-8", newline="") as f:
             return f.read()
 
-    def lane(self, name, edit):
-        """A branch off the base commit whose notes.md is `edit(base text)`. Main is checked out again after."""
+    def lane(self, name, edit, rel=NOTES):
+        """A branch off the base commit whose `rel` file is `edit(its text)`, or deleted when `edit` is None. Main is
+        checked out again after."""
         git_ok(self.root, "checkout", "-q", "-b", name, self.base)
-        self.write(edit(self.read()))
+        if edit is None:
+            os.remove(self.path(rel))
+        else:
+            self.write(edit(self.read(rel)), rel)
         git_ok(self.root, "commit", "-q", "-am", name)
         git_ok(self.root, "checkout", "-q", "main")
 
@@ -151,6 +155,24 @@ class RewrittenNote(NotesRepo):
         self.assertNotIn(OLD, lines)
         self.assert_lines_once(lines, [one, two])
         self.assertEqual(lines[0], HEADING)
+
+
+class NoteFiles(NotesRepo):
+    def test_a_plain_merge_keeps_a_deleted_note_file_deleted(self):
+        """Green control: a note file is its own file, and a lane that deletes it leaves it deleted after a plain merge
+        into a main that moved on. No merge driver is needed for it."""
+        note = "docs/notes/wheel-speed-cap.md"
+        self.write("- wheel-speed-cap: the spin rate is capped at twelve degrees per frame (hooks/guard.py)\n", note)
+        git_ok(self.root, "add", "-A")
+        git_ok(self.root, "commit", "-q", "-m", "note on main")
+        self.base = git_ok(self.root, "rev-parse", "HEAD").stdout.strip()
+        self.lane("lane-drop", None, note)
+        self.write(self.read() + "- main-note: appended on main after the lane branched (lint/check_main.py)\n")
+        git_ok(self.root, "commit", "-q", "-am", "main moves on")
+        done = self.merge("lane-drop")
+        self.assertEqual(done.returncode, 0, "merge of lane-drop: %s%s" % (done.stdout, done.stderr))
+        self.assertFalse(os.path.exists(self.path(note)), "the plain merge brought the deleted note back")
+        self.assertEqual(git_ok(self.root, "ls-files", "--", note).stdout.strip(), "")
 
 
 class RealCheckout(unittest.TestCase):

@@ -1,0 +1,13 @@
+{
+ "schema": 1,
+ "repo": "owner/name",
+ "version": 0,
+ "writtenAt": "2026-01-01T00:00:00-06:00",
+ "runner": "session_id of the batch runner",
+ "afterMerge": {"pr": null, "commit": null},
+ "queue": [],
+ "folds": [],
+ "gos": [],
+ "holds": [],
+ "archivePass": {"lastRunAt": null, "pending": []}
+}

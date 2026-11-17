@@ -13,6 +13,7 @@ This suite never calls `schtasks` and never writes outside a throwaway temp dire
 case passes `--output-dir` pointing at one.
 """
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -25,7 +26,9 @@ INSTALLER = os.path.join(HERE, "install_schtasks.py")
 sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 import guard  # noqa: E402
 import install_schtasks  # noqa: E402
 
@@ -254,6 +257,60 @@ class WritesXmlEncodingRealSchtasksAccepts(unittest.TestCase):
         # The XML declaration must name UTF-16, the encoding the byte order mark sets.
         declaration = raw[:100].decode("utf-16")
         self.assertIn("UTF-16", declaration.upper())
+
+
+# The cost of one install. The installer writes one task file and starts no scheduler; its only child starts are the
+# two git reads of is_worktree. The task runs once a day: one calendar trigger that repeats by day, and no boot or
+# logon trigger. The cases pin its schedule, its trigger and the installer's starts.
+
+class CostTests(unittest.TestCase):
+    """What one install costs (rule outcomes-mechanize-rules). The installer runs in process, so
+    cost_probe.children() counts each child it starts. make_repo runs before the count starts."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.base = os.path.join(ROOT, "cost")  # a subfolder of this run's ROOT: the run removes ROOT, not this
+        os.makedirs(cls.base, exist_ok=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.base, ignore_errors=True)
+
+    def install(self):
+        case = tempfile.mkdtemp(dir=self.base)
+        checkout, out_dir = os.path.join(case, "checkout"), os.path.join(case, "out")
+        make_repo(checkout)
+        with cost_probe.children() as log:
+            code = install_schtasks.main(["--repo-root", checkout, "--output-dir", out_dir])
+        return code, log, out_dir
+
+    def test_one_task_file_is_written_and_no_scheduler_is_started(self):
+        code, log, out_dir = self.install()
+        self.assertEqual(code, 0)
+        self.assertEqual(os.listdir(out_dir), [install_schtasks.TASK_NAME + ".xml"], "one task file is written")
+        names = cost_probe.names(log.argvs)
+        self.assertNotIn("schtasks", names, "the installer never starts schtasks")
+        self.assertEqual(names, ["git", "git"],
+                         "the only starts are the two git reads of is_worktree; got %r" % log.argvs)
+
+    def test_the_task_runs_once_a_day_and_never_repeats(self):
+        code, log, out_dir = self.install()
+        root = ET.parse(os.path.join(out_dir, install_schtasks.TASK_NAME + ".xml")).getroot()
+        self.assertEqual(root.find(".//" + NS + "DaysInterval").text, "1", "every one day")
+        self.assertIsNone(root.find(".//" + NS + "Repetition"), "no repetition inside the day")
+
+    def test_the_task_has_exactly_one_trigger_the_daily_calendar_time_and_no_boot_or_logon_start(self):
+        # Task Scheduler has no RunAtLoad key. The task starts by itself only through its Triggers, so the one
+        # trigger must be a calendar trigger that repeats every day, and no boot or logon trigger may sit beside it.
+        code, log, out_dir = self.install()
+        root = ET.parse(os.path.join(out_dir, install_schtasks.TASK_NAME + ".xml")).getroot()
+        triggers = root.find(NS + "Triggers")
+        self.assertIsNotNone(triggers, "the task has a Triggers element")
+        self.assertEqual([child.tag for child in triggers], [NS + "CalendarTrigger"],
+                         "one trigger, a calendar trigger, and no other; got %r" % [c.tag for c in triggers])
+        calendar = triggers.find(NS + "CalendarTrigger")
+        schedules = [child.tag for child in calendar if child.tag.startswith(NS + "Schedule")]
+        self.assertEqual(schedules, [NS + "ScheduleByDay"], "the calendar trigger repeats by day; got %r" % schedules)
 
 
 if __name__ == "__main__":

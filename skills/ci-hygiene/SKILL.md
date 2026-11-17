@@ -56,14 +56,21 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    session then moves the pin in a lane of its own. No bot and no schedule moves it. That tool reads
    only the `ste-lint` and `zizmor` pins. Other claude-settings pins can drift unseen.
    Other pins keep full-SHA pinning. Which bot, if any, bumps them is set per repo.
-8. **Batch lanes.** Batch lanes into one integration branch and one integration PR. A batch runs one
+8. **Batch lanes.** Degen and home switch to the per-lane flow on stable now (ruling `own-degen-home-switch-now`, degen and home switch now). Every other child repo waits for the drain, and the batch rules below stay live there until the cutover (decision `all-repos-switch-together`).
+
+   Per-lane flow (in use in degen and home; target, not live elsewhere): each lane PR merges alone through the merge tool, on its own green run and the review its risk needs (rule `git-integration-branch-merge`). Each lane PR goes ready once, after its last review and lane lint (decision `draft-until-reviewed`). After a merge, main's run skips when a passing PR run proved the tree (rule `roles-each-layer-proves-once`). A breaking merge is one after which main's newest finished run is red. Its revert PR is an ordinary lane PR, merged with `--base-red-ok` (decision `no-merge-onto-red-main`). After a red main, merges resume when the revert merges with its tree proven, with the revert's own run still going (owner ruling `own-823-b-revert-merge-lifts-red`, 2026-11-14 15:04 CST, which made pick 745 b live). While main is red, a lane that touches none of the blamed paths may merge (owner pick 746 b; target, not live: the blame step is not built).
+
+   Until the cutover, every repo except degen and home batches lanes into one integration branch and one integration PR. A batch runs one
    CI run (rule `git-integration-branch-merge`, one CI run per batch). Only the integration PR goes
    ready. Each lane PR stays a draft until the integration PR merges. A lane runs
    `~/.claude/bin/merge --lane-lint <pr>` before it hands off, and the batch runner runs it again on
    each lane head before the build starts, once per lane. A red lane does not join. Before it marks
-   the integration PR ready, the batch runner runs `~/.claude/bin/merge --lane-lint <integration PR number>`
-   on the batch head, after the draft step's page push. A ref target posts no comment, so it cannot
-   satisfy the join. A FAIL keeps it a draft. The lint counts a clash between two heads only when both
+   the PR ready, the batch runner runs `~/.claude/bin/merge --lane-lint <PR number>`
+   on the head, after the draft step's page push. The ready route (`merge <pr> --ready`) runs the records step and the repo's ready checks (`merge.readyChecks`).
+   A lane run of `merge --lane-lint` goes through `verdict` in the background with a Bash `timeout` above the merge tool's bound
+   (`LINT_SECONDS` plus `PUSHED_HEAD_WAIT_MINUTES` times 60, in ms); a shorter limit ends it with no verdict (guard rule `check-timeout`).
+   A lane's `merge --lane-lint <pr> --touched-tests` runs each test file the diff touches, once, in the lint worktree, after the lint passes. That catches a test that fails only on that head before the CI run. A ref target posts no comment, so it cannot
+   satisfy the join. The integration PR's lint runs the mutation test when the batch touches a mutation test file. A FAIL keeps it a draft. The lint counts a clash between two heads only when both
    merge clean with their base (decision `lanes-run-no-full-ci-job`). A hand list of checks never stands in for that run: `bin/ci-job`
    reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).
@@ -78,19 +85,14 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    the running batch may merge (decision `no-merge-during-batch-ci`, the contains rule). A drop
    changes the running batch's head, so the brake refuses that merge until the next batch is built
    on the new head.
-   The merge tool enforces the freeze (decision `batch-freeze-lane-set`, a batch's lane set freezes at its build). `merge --batch-build NAME PR...`
-   builds the integration branch `batch-NAME` and its draft integration PR, and writes the frozen lane set into the PR body. A changed set is
-   refused, so a late PR goes to the next batch. `merge --batch-build NAME --ready` runs the one lane lint on the batch head, then the ready
-   checks, then records the head that passed. When the head moved since the last lint, it lints again. It does not mark the PR ready:
-   the tool sends no GraphQL, so it names the route, and the batch runner marks the PR ready. A FAIL of the lint or of a ready check
-   stores the lanes it names (`Blamed:`). For a red CI run, `merge --batch-build NAME --blame PR --run <run URL>` stores the blame. It
-   refuses a run that is still running, a run that did not fail, a run on an older head, and a lane outside the batch.
-   `merge --batch-drop NAME PR` takes off only a stored-blamed lane and its dependents, rebuilds from the frozen set, runs no lane lint, and asks
-   to return a ready PR to draft. Any other lane waits for the next batch. `--on BRANCH` stacks a batch on a running batch.
+   Each lane merges alone: `merge <pr> --confirm` takes one PR, with no batch to build, freeze, blame or stack.
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
    Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run, and
-   the new run is the re-run. A lone lane is its own integration PR. When the integration PR merges,
-   each lane PR closes as replaced.
+   the new run is the re-run. A lone lane is its own integration PR. When
+   the integration PR that replaces a lane PR opens, the lane PR closes as replaced, and its branch stays. The merge tool closes it, at
+   `--ready` and at the integration PR's hand-in, from a `Replaces #N` or `Carries #N` line in the
+   body or the batch-freeze member list. The tool reopens each lane it closed that is marked Dropped
+   at the next lint pass.
    When the integration run is red, read the failing job. Find the lane whose files it touches.
    Search one lane merge commit at a time: for each lane merge commit `M` on the integration branch,
    run `git diff --name-only M^1 M` or `git log -1 -m -S<text> M` as its own command, and print the
@@ -100,8 +102,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    lanes is two names, so read each lane's diff before you drop either. Example: the failing job
    reads `lint/foo.py`. Lane A's own search lists `lint/foo.py` and lane B's lists nothing. Blame A.
    (At 17:10 CST on Nov 8 two searches printed together, so the runner blamed lane B for lane A's
-   red.) Store the blame with `merge --batch-build NAME --blame PR --run <run URL>`. Then drop that lane and any lane that depends on it. Rebuild the branch from main without them. Never
-   revert. A lane dropped by a revert re-applies its diff after it merges main, and checks that each
+   red.) Then revert the blamed lane's merge as an ordinary PR, merged with `--base-red-ok "<reason>"` (rule `git-red-main-reverts`). A lane whose merge was reverted re-applies its diff after it merges main, and checks that each
    file is there. A job that ends at its cap with no red CI step is re-capped or split. That is not a
    reason to drop the lane.
    A lane that is red on form (record format, version bump, lint) is dropped like any red lane. Its
@@ -116,18 +117,51 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    `batch-freeze-lane-set`). Fix the dropped lane in its own lane. It joins the next batch after its fix. A held lane
    (rule `roles-review-cap-three`, three review rounds) is the exception. Drop it and park it. It
    gets no fix lane until the owner decides.
-   No merge to main while a batch's run is in progress. The owner is included. Decision
+   Until the cutover, no merge to main while a batch's run is in progress. The owner is included. Decision
    `no-merge-during-batch-ci` (no merge while a batch runs) holds the rule. A merge needs a green
    run on the current base (decision `merge-needs-current-base`). A head that lacks the base tip is
    refused, except a small move.
+   Ready express lanes share one express batch, ahead of every other lane (decision `express-batch`).
    "No conflicts" does not prove the lanes work together. A green integration run does not prove that
    no line was lost either. Run `lint/check_silent_undo.py` before the merge. First run `git fetch origin <base>`. Then pass `--upstream origin/<base>`, the PR's base branch, `--head <head SHA>`, the PR's head commit, and `--strict`, as CI does. Without `--strict`, a local run exits 0 on UNKNOWN, so a skipped check reads as clean.
    GitHub's merge queue needs an organization-owned repo. A personal repo batches by hand or through
    the merge tool.
-   Batch across sessions too (`git-integration-branch-merge`).
+   **After a batch merges, route the PRs that now conflict with main.** In the same turn as the merge
+   report, the batch runner runs `merge --release-check N... --lint N@<live head>:PASS` (the full 40-hex head) on the handed-in
+   lane PRs. Without the lint verdicts, every line FAILs on the lint. A line that says `not clean (merge
+   conflict)` names a PR that conflicts with the new main. A line that says `unknown` does not say there is a conflict. Route a PR only when the
+   conflict is the line's only reason. A line that also says the log was edited needs the full review. A line that also says the log is not done follows the ledger's `lane round n`.
+   The runner names each conflicting PR to its lane and picks nothing per PR, so no coordinator pick is
+   needed. The owner's ruling holds the route after a PASS fix verifier (record `pr-review-record`, The review
+   a changed head owes). On a log with no Fix check line, the ledger and `--fix-check` take one fix verifier
+   too, but the record's line on an older head asks for a full review. That clash is open with the
+   coordinator. Each named lane does these acts in its own checkout:
+   1. Merge main into the lane branch once: `git fetch origin main`, then `git merge origin/main`.
+      Resolve the conflicted paths only. Never rebase, never force-push, never edit a path git merged
+      without conflict. Push the merge. A review log can only name a head that is live.
+   2. Spawn a fresh fix verifier on Sonnet. Its brief opens `Fix check`, and gives the reviewed head (the
+      Head of the PR's newest review log), the conflicted paths as the named finding, and that log's
+      `Guard or check:` value. The brief names the read: for each conflicted path, `git diff <merge head>^1
+      <merge head> -- <path>` and the same with `^2`. `git show --cc` prints nothing for a conflict that
+      took one side whole, and `git diff origin/main...<merge head>` holds the lane's whole diff.
+   3. Print the log with `merge <pr> --review-record --head <merge head> --kind K --guard G`, then the
+      earlier `--round` lines, and `--net-value` and `--grant` when the earlier log has them, copied in,
+      then `--fix-check <reviewed head>:reviewer:sonnet:<PASS|FAIL>`. The tool posts nothing: post the
+      printed text as a PR comment. The tool refuses a chain it cannot prove (record
+      `pr-review-record`, the fix verifier order).
+   4. Run `merge --lane-lint <pr>` at the merge head. Then hand in again.
+   A passing round, or a PASS fix check after any round, ends review for every change, with no net value owed.
+   A negative net value still holds the change (record `pr-review-record`). A PR that merges clean needs no fix verifier and no new log: the log
+   stays valid (record `pr-review-record`, clean merge survival). It still needs item 4 of this list, because the
+   lint verdict names an exact head. A refused chain means that the lane gets the full review of its
+   new head. Two examples: a second fix verifier on a head whose record is open (its fix verifier FAILed), and, after a
+   PASS fix verifier, a merge whose second parent is not on main. The first fix verifier on a log with
+   no Fix check line meets no merge-shape test, so the verifier's read is the check there. The lane never works around the refusal. A FAIL starts a
+   new lane at round 1.
+   Until the cutover, every repo except degen and home batches across sessions too (`git-integration-branch-merge`).
 9. **Wait without loops.** Wait for the CI-wake notice that follows `gh pr ready`. A push starts no
-   notice. In cloud, mark ready by MCP `update_pull_request` `draft: false` (route
-   pr-ready-mcp-cloud); the same CI-wake notice is meant to follow (decision `ci-wait-reads-run-status`; unmeasured in cloud), so
+   notice. Run `merge <pr> --ready` first. When it exits 0 with the line "stays a draft (", in cloud mark ready by MCP `update_pull_request` `draft: false` (route
+   pr-ready-mcp-cloud). Never mark before `--ready` has run. After the draft run of the pushed head shows, mark ready, then run `merge <pr> --confirm`. The tool's printed hint gives those last two steps (decision `records-index-at-merge`). The same CI-wake notice is meant to follow (decision `ci-wait-reads-run-status`; unmeasured in cloud), so
    also wait on the PR subscription and a check-in. Never run `gh run watch`. One watch made 131 API calls in one minute (decision
    `ci-wait-reads-run-status`, CI waits read the run status). Never poll with a sleep loop. Repeated
    `gh run view` or `gh pr checks` calls are a poll. To wait for any other condition, use the
@@ -148,7 +182,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     A workflow that also has `on: push` for all branches still runs on a draft branch.
     `gh pr create --draft` then `gh pr ready` fires two runs. Keep the draft state in the concurrency
     group (step 4). Otherwise the skipped draft run cancels an in-progress ready run.
-    Mark ready (`gh pr ready`, or in cloud MCP `update_pull_request`) only after the draft run shows in `gh run list`. A ready sent seconds after the
+    Run `merge <pr> --ready` first. When it exits 0 with the line "stays a draft (", mark ready by hand (`gh pr ready`, or in cloud MCP `update_pull_request`) and only after the draft run shows in `gh run list`. A ready sent seconds after the
     PR opens can give both runs `draft=false`. One then cancels the other. Its cancelled check runs
     can stop the merge, even for an admin (PR 381, Sonnet prompt judges).
     After `gh pr ready`, a run of only skipped jobs proves nothing. Wait for a run on the head that
@@ -171,21 +205,39 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     PR 293 (the Windows merge-test slice), is the case for it. A CI step's `if:` names only its own
     scope flag, or a non-PR event (step 19).
 17. **Slice tests on a slow platform.** On PRs, run a platform-specific test slice. Run the full suite
-    on main and nightly.
+    in the daily run, except on macOS (R61): every macOS run takes the slice, and a push to main
+    starts no macOS job (a job-level `github.event_name != 'push'`, since a step-level skip still starts
+    the runner). Slow legs run daily (owner item 880, 11:53 CST Nov 15). A push runs the Linux fast jobs
+    only. The Windows and mutation jobs run in the one daily scheduled run, a pull request and a
+    manual run. The macOS jobs run on a manual run, and on a daily that runs, never on a pull request or a push (owner,
+    01:33 CST Nov 16: "turn off all mac runs for now"). The lane-touched-tests workflow has no macOS leg either. `all-jobs-passed` does not need them. When the newest completed daily is green and `push-skip` proved every push run since it, the
+    newest at this head, the daily skips (the `nightly-skip` job). `scope` waits on that job,
+    so nothing is cancelled.
 18. **Profile before you refactor test setup.** Compare setup time to test-body time. If the saving is
     under 20%, stop.
 19. **Run one scope job first.** Make it a cheap Linux job named `scope`. Every other job needs it.
-    A scope skip sits on the CI step that runs the suite or lint, never on the job. Decision
-    `same-check-kinds` (every repo runs the same check kinds) and decision `main-branch-protection`
-    (the required checks on main) hold the rule: the rollup fails a skipped job. A job whose CI steps
-    all skip still starts a runner and bills its setup minutes (step 13), macOS most.
-    A job-level `if:` holds only the draft guard. A job that runs only off pull
+    A scope skip sits on the CI step that runs the suite or lint. The three macOS jobs carry their
+    event guard (daily and dispatch only) and the flag in a job-level `if:`, because a step-level skip still starts a runner and bills its setup
+    minutes (step 13), macOS most. Decision `same-check-kinds` (every repo runs the same check kinds)
+    and decision `main-branch-protection` (the required checks on main) hold the rule. The rollup fails a
+    skipped job it needs, and it does not need the macOS jobs.
+    Apart from those three and the push-off jobs (the Windows and mutation jobs, whose job-level `if:` is
+    `github.event_name != 'push'` alone, with the draft guard on a shard), a job-level `if:` holds only the draft guard, or the records-only condition
+    `needs.scope.outputs.records_only_skip != 'true'`. That condition stands alone, or joins a shard's
+    draft guard as `(draft guard) && it`, or joins the guard of `ci-done`, or joins a push-off job's guard as `(push guard) && it`. A records-only run skips those
+    jobs. The rollup reads that all-skipped run as green on the output `true` alone. A job that runs only off pull
     requests, such as a push-only job, also skips at its CI steps. A job-level trigger guard would
     skip a needed job on every PR, and the rollup would fail on it. Each scoped CI step's `if:` names
     its scope flag and `|| github.event_name != 'pull_request'`, so push, nightly and dispatch runs
     start it. See `snippets.md`, section 19.
     Two jobs may share a flag. A docs-only PR skips the code suites. Lint CI steps still run. An
     unreadable diff or an unmapped path runs everything.
+20. **Skip a push whose tree a PR run already proved.** The `push-skip` job runs the shared action
+    `actions/push-skip`. It says skip only when the push tree equals the head tree of a merged PR
+    (a `batch-*` PR or a lone lane) whose run passed: every suite job passed. A step that scope skipped does not stop the skip.
+    A direct push, an admin merge, a tree mismatch and any read error run everything. A schedule or
+    dispatch run never skips. A suite a narrowed PR run left out is not run on main until a later change touches it. Decision
+    `push-skip-on-proven-tree` (a push skips on a proven tree). See `snippets.md`, section 20.
 
 ## Public repos
 
@@ -207,8 +259,9 @@ Fork PRs run code you did not write. Apply these to a public repo. See `snippets
 Branch protection decides what counts as passing. Decision `same-check-kinds` (every repo runs the
 same check kinds) sets the rule. Branch protection requires one check: the `all-jobs-passed` rollup.
 That job lists every other job in `needs:`, and its `if:` holds `always()`. The rollup fails a
-needed job that failed, was cancelled or was skipped. Without the rollup, a skipped job reads as
-passing. So a scoped-out suite skips at its CI step, and its job still runs and passes (step 19).
+needed job that failed, was cancelled or was skipped, unless `scope-skips` names the skip. Without
+the rollup, a skipped job reads as passing. So a scoped-out suite skips at its CI step, and its job
+still runs and passes (step 19).
 The rollup skips on a draft, and a draft cannot merge (step 11). Read the protection rule first:
 `snippets.md`, section 3b.
 
@@ -247,8 +300,11 @@ The seven opt-in templates of that decision:
   from a weekly schedule, never per PR. `open-issue: true` opens or updates one issue.
 - `ruling-kind`: fails a PR that adds or edits a record with no valid Kind line. The caller needs
   checkout at `fetch-depth: 0`. It fails closed when the base cannot be read.
-- `claude-md-cites`: fails a run when a unit of the caller's `CLAUDE.md` files or `.claude/**/*.md` copies
-  claude-settings record text instead of naming the record. The caller needs checkout first.
+- `claude-md-cites`: fails a run when a unit of the caller's rule files (`CLAUDE.md`, `.claude/**/*.md`,
+  `docs/rules/**/*.md`) copies claude-settings record text instead of naming the record. On a pull request it also
+  fails when a record and a rule unit that cites it change without each other (probe group `aligned`), unless
+  the PR body has `Rules checked: <record> — no change`. It reads the PR body from the event through env. The
+  caller needs checkout first, at `fetch-depth: 0`, and must not skip it on a docs-only change: records are `.md`.
 - `githooks/main-ref`: refuses a local move of main to a commit that origin lacks. Run
   `sh githooks/main-ref/install.sh` in each clone. `sh githooks/main-ref/install.sh --check` writes
   nothing and compares each armed copy to main; the shared pre-commit runs it and refuses a commit
@@ -278,6 +334,7 @@ n/a where an item says so. A no is a finding. A read that cannot run is unknown,
    the draft guard? Read its job block. A job skipped by design may stay off `needs:` when its own
    job-level `if:` skips it on every `pull_request` event, such as a nightly-only or push-only job. A
    PR can then never turn it red. Read that job's `if:`. A job off `needs:` that can run on a PR is a no.
+   A job with a scope flag in its job-level `if:` stays in `needs:`, and `scope-skips` names it with that flag.
 3. Does branch protection require exactly one check, `all-jobs-passed`? Read
    `gh api repos/<owner>/<repo>/branches/main/protection`, and count `required_status_checks.checks`.
    A 403 is unknown.
@@ -297,10 +354,13 @@ n/a where an item says so. A no is a finding. A read that cannot run is unknown,
     `jobs:` in each workflow.
 11. Is there no `pull_request_target` that checks out the PR head? Run
     `grep -n "pull_request_target" .github/workflows/*.yml`. For each hit, read its `ref:`.
-12. Does every job-level `if:` hold only the draft guard, or the guard of `ci-done`? Run
-    `grep -n "^    if:" .github/workflows/*.yml`. A scope flag or a trigger guard at job level is a
-    finding. It skips a needed job. A job that no rollup needs is judged by items 1 and 2 instead, so
-    do not flag it here.
+12. Does every job-level `if:` hold only the draft guard, the guard of `ci-done`, the records-only
+    condition (alone, as `(draft guard) && it`, or in the guard of `ci-done`), the push-off guard of a
+    Windows or mutation job (`github.event_name != 'push'`, alone or with the draft guard and the
+    records-only condition), or the scope flag and event guard of a job that `scope-skips` names?
+    Run `grep -n "^    if:" .github/workflows/*.yml`.
+    Any other scope flag or trigger guard at job level is a finding. It skips a needed job. A job that
+    no rollup needs is judged by items 1 and 2 instead, so do not flag it here.
 13. If sessions wait on this repo's CI, is the last job `ci-done`, with `needs:` every other job and a
     call to `ci-done-comment`? Read the last job block. A repo no session waits on answers n/a.
 14. Does no `run:` pipe a check into `tail` or `head` without `set -o pipefail`? Run
