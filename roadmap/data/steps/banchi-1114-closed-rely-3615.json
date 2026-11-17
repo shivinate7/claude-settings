@@ -1,0 +1,15 @@
+{
+  "id": "banchi-1114-closed-rely-3615",
+  "title": "Banchi #1114 closed unmerged: banchi relies on claude-settings #3615",
+  "priority": "later",
+  "status": "done",
+  "repo": "shivinate7/banchi",
+  "phase": "later",
+  "owner": "consultant",
+  "blockedBy": [],
+  "pr": 1114,
+  "why": "Coordinator relay 11:54 CST Nov 17: the consultant chose option b (rely on claude-settings #3615, merged 11:46 CST as the Main Installer entry) and banchi #1114 was closed at 11:54 CST.",
+  "source": "Coordinator message 11:54 CST Nov 17, relaying the consultant's word; not read by triage as typed.",
+  "note": "Done. banchi #1114 closed unmerged 11:54 CST Nov 17 (coordinator relay; consultant option b, rely on #3615). Not read by triage: no banchi access, so its closed state is unverified here. No page item asked about it (checked the items by text at 11:55 CST: none names 1114).",
+  "updatedAt": "2026-11-17T11:56:00-06:00"
+}
