@@ -1,0 +1,1 @@
+- roadmap-skill-lane-field-writer: skills/roadmap/SKILL.md lines 46-47 say the coordinator writes a step's lane field when it starts the lane. Triage writes it now (lane fan-prose-unmapped-5, 16:13 CST Nov 12). Fix: none recorded.
