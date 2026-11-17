@@ -1086,7 +1086,7 @@ class MainInstallerIsAllowed(unittest.TestCase):
         self.assertEqual(len(hits), 1, "need exactly one '%s' entry in autoMode.allow, found %d"
                          % (MAIN_INSTALLER, len(hits)))
 
-    def test_covers_quotes_both_forms_and_the_script_exists(self):
+    def test_covers_quotes_the_one_form_and_the_script_exists(self):
         covers = entry_part(self, MAIN_INSTALLER)
         for form in MAIN_INSTALL_FORMS:
             self.assertIn("`%s`" % form, covers)
@@ -1096,7 +1096,7 @@ class MainInstallerIsAllowed(unittest.TestCase):
     def test_covers_quotes_no_other_command(self):
         spans = [x for x in re.findall(r"`([^`]+)`", entry_part(self, MAIN_INSTALLER))
                  if "install" in x or "&&" in x or "bash" in x]
-        self.assertEqual(sorted(spans), sorted(MAIN_INSTALL_FORMS), "Covers text quotes a command other than the two ruled")
+        self.assertEqual(sorted(spans), sorted(MAIN_INSTALL_FORMS), "Covers text quotes a command other than the one ruled")
 
     def test_covers_says_nothing_comes_before_or_after_the_command(self):
         self.assertIn("nothing before it and nothing after it", entry_part(self, MAIN_INSTALLER))
