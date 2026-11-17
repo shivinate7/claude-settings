@@ -19,7 +19,8 @@ Controls pin the wording detector on fixed sentences, so a detector that flags n
 
 The triage hold on a rewrite ends with the same line (TriageRewriteHoldTail, on the stalled suite's fixture). The
 source scan (StopBlockEmitRouting) reads each Stop hook that settings.json registers, and fails a block that a hook
-prints without report_guard.emit_stop. Its controls run on fixed sources.
+prints without report_guard.emit_stop. One print is exempt: the import fallback of hooks/stall_watch.py (FALLBACK_FILE),
+the one block that prints without the tail. Its controls run on fixed sources.
 
 Run it as:
 
@@ -127,6 +128,11 @@ class TriageRewriteHoldTail(trs.StalledFixture, unittest.TestCase):
 
 EMIT_FILE = "lint/report_guard.py"  # the file that holds the one emitter of the Stop output
 EMIT_FUNC = "emit_stop"  # the only function that may print a block
+# The one exemption. The tail cannot be added when the module that holds it fails to load, so the import fallback of
+# this hook prints its block without report_guard.emit_stop. Only a print in the except handler of a try whose body
+# imports report_guard is exempt, and only in this file.
+FALLBACK_FILE = "hooks/stall_watch.py"
+FALLBACK_MODULE = "report_guard"
 SCRIPT_OF_COMMAND = re.compile(r'/((?:hooks|lint)/[\w.-]+\.py)"')  # the script a Stop command runs, per settings.json
 
 # Stop hooks whose block refuses no reply, so the scan does not read them. Each names its decision.
@@ -179,8 +185,8 @@ def _dumped_payload(call):
 
 
 def _sinks(tree):
-    """(line, scope, payload) for each JSON output call in `tree`. The scope is the def that holds the call, or the
-    module."""
+    """(line, scope, payload, call) for each JSON output call in `tree`. The scope is the def that holds the call, or
+    the module."""
     found = []
 
     def visit(node, scope):
@@ -188,7 +194,7 @@ def _sinks(tree):
             if isinstance(child, ast.Call):
                 payload = _dumped_payload(child)
                 if payload is not None:
-                    found.append((child.lineno, scope, payload))
+                    found.append((child.lineno, scope, payload, child))
             inner = child if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) else scope
             visit(child, inner)
 
@@ -225,16 +231,41 @@ def _name_holds_block(scope, name):
     return False
 
 
-def bypass_lines(rel, text):
-    """The lines of `text`, the source of the repo file `rel`, that print a block outside the emitter."""
-    lines = []
-    for line, scope, payload in _sinks(ast.parse(text, filename=rel)):
+def _imports_fallback_module(stmt):
+    """True when `stmt` is `import report_guard` or `from <module> import report_guard`."""
+    return isinstance(stmt, (ast.Import, ast.ImportFrom)) and any(alias.name == FALLBACK_MODULE for alias in stmt.names)
+
+
+def fallback_calls(tree):
+    """The calls in an except handler of a try whose body imports report_guard by a direct statement. A call in the
+    try body, its else or below the try is no fallback, and a handler of any other try is no fallback either."""
+    exempt = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Try) and any(_imports_fallback_module(stmt) for stmt in node.body):
+            for handler in node.handlers:
+                exempt.update(sub for sub in ast.walk(handler) if isinstance(sub, ast.Call))
+    return exempt
+
+
+def block_prints(rel, text):
+    """(line, exempt) for each print of a block in the repo file `rel`, outside the emitter. `exempt` marks a print that
+    is the named fallback of FALLBACK_FILE, and only that file's."""
+    tree = ast.parse(text, filename=rel)
+    fallback = fallback_calls(tree) if rel == FALLBACK_FILE else set()
+    rows = []
+    for line, scope, payload, call in _sinks(tree):
         if rel == EMIT_FILE and getattr(scope, "name", "") == EMIT_FUNC:
             continue
         blocked = _name_holds_block(scope, payload.id) if isinstance(payload, ast.Name) else _holds_block(payload)
         if blocked:
-            lines.append(line)
-    return lines
+            rows.append((line, call in fallback))
+    return rows
+
+
+def bypass_lines(rel, text):
+    """The lines of `text`, the source of the repo file `rel`, that print a block outside the emitter and outside the
+    named fallback."""
+    return [line for line, exempt in block_prints(rel, text) if not exempt]
 
 
 HAND_PRINTED = source("import json", "", "def stop():",
@@ -264,6 +295,7 @@ class StopBlockEmitRouting(unittest.TestCase):
         self.assertIn(EMIT_FILE, stops, "settings.json registers no Stop hook at %s" % EMIT_FILE)
         self.assertIn("hooks/feedback_guard.py", stops,
                       "settings.json registers no Stop hook at hooks/feedback_guard.py")
+        self.assertIn(FALLBACK_FILE, stops, "settings.json registers no Stop hook at %s" % FALLBACK_FILE)
         self.assertEqual(sorted(set(NON_REPLY_BLOCKS) - set(stops)), [],
                          "an exempt Stop hook is no longer registered in settings.json")
         bypasses = []
@@ -273,6 +305,14 @@ class StopBlockEmitRouting(unittest.TestCase):
             with open(os.path.join(REPO, rel), encoding="utf-8") as handle:
                 bypasses += ["%s:%d" % (rel, line) for line in bypass_lines(rel, handle.read())]
         self.assertEqual(bypasses, [], "a Stop block prints outside report_guard.emit_stop: %s" % ", ".join(bypasses))
+
+    def test_the_fallback_file_holds_one_exempt_block_print(self):
+        # Scope first: the file is a registered Stop hook, before its exempt prints are counted.
+        self.assertIn(FALLBACK_FILE, stop_scripts(REPO), "settings.json registers no Stop hook at %s" % FALLBACK_FILE)
+        with open(os.path.join(REPO, FALLBACK_FILE), encoding="utf-8") as handle:
+            rows = block_prints(FALLBACK_FILE, handle.read())
+        self.assertEqual(sum(1 for _line, exempt in rows if exempt), 1,
+                         "%s must hold one exempt block print, the import fallback: %r" % (FALLBACK_FILE, rows))
 
 
 class StopBlockScanControls(unittest.TestCase):
@@ -308,6 +348,83 @@ class StopBlockScanControls(unittest.TestCase):
         self.assertEqual(bypass_lines("hooks/x.py", source()), [], "control: an empty source reads as a bypass")
         self.assertEqual(bypass_lines("hooks/x.py", FULL_SIZE), [len(FULL_SIZE_BODY) + 2],
                          "control: a block at the end of a full-size source is not read")
+
+
+# --------------------------------------------------------------------------- the one fallback print (source scan)
+#
+# The exemption is narrow: a block print in the except handler of a try whose body imports report_guard, in FALLBACK_FILE
+# only. Each fixed source holds one cause, so each failure names that cause. The line numbers are the fixed sources' own.
+
+def stop_source(try_body, handler, orelse=(), after=()):
+    """A Stop hook's stop(): it builds a block, runs `try_body` in a try, `handler` in its except, `orelse` in its else
+    and `after` below the try. Each part is a list of source lines, indented here."""
+    lines = ["import json", "", "def stop():", "    out = {}", "    out[\"decision\"] = \"block\"", "    try:"]
+    lines += ["        " + line for line in try_body]
+    lines += ["    except Exception:"] + ["        " + line for line in handler]
+    if orelse:
+        lines += ["    else:"] + ["        " + line for line in orelse]
+    lines += ["    " + line for line in after]
+    return source(*lines)
+
+
+IMPORT_FALLBACK = stop_source(["import report_guard"], ["print(json.dumps(out))"],
+                              orelse=["report_guard.emit_stop(out)"])  # the print is line 9
+FROM_IMPORT_FALLBACK = stop_source(["from lint import report_guard"], ["print(json.dumps(out))"],
+                                   orelse=["report_guard.emit_stop(out)"])  # the print is line 9
+FALLBACK_LINE = 9
+
+
+class StopBlockFallbackExemption(unittest.TestCase):
+    # The positive: the one fallback is exempt. The controls: the same print, moved or in another file, is still flagged.
+
+    def test_the_import_fallback_print_in_stall_watch_is_exempt(self):
+        self.assertEqual(bypass_lines(FALLBACK_FILE, IMPORT_FALLBACK), [],
+                         "the import fallback print of %s is flagged" % FALLBACK_FILE)
+
+    def test_the_from_import_fallback_print_in_stall_watch_is_exempt(self):
+        self.assertEqual(bypass_lines(FALLBACK_FILE, FROM_IMPORT_FALLBACK), [],
+                         "the from-import fallback print of %s is flagged" % FALLBACK_FILE)
+
+    def test_the_import_fallback_at_the_end_of_a_full_size_stall_watch_is_exempt(self):
+        self.assertEqual(bypass_lines(FALLBACK_FILE, source(*FULL_SIZE_BODY, IMPORT_FALLBACK)), [],
+                         "the import fallback print of %s is flagged at the end of a full-size source" % FALLBACK_FILE)
+
+    def test_control_the_same_fallback_shape_in_another_hook_is_flagged(self):
+        self.assertEqual(bypass_lines("hooks/feedback_guard.py", IMPORT_FALLBACK), [FALLBACK_LINE],
+                         "control: the import fallback shape of another hook is exempt")
+
+    def test_control_a_handler_of_a_try_that_imports_another_module_is_flagged(self):
+        other = stop_source(["import os"], ["print(json.dumps(out))"], orelse=["report_guard.emit_stop(out)"])
+        self.assertEqual(bypass_lines(FALLBACK_FILE, other), [FALLBACK_LINE],
+                         "control: a handler print of a try that imports no report_guard is exempt")
+
+    def test_control_a_try_that_names_report_guard_in_a_string_is_no_import(self):
+        named = stop_source(["NAME = \"import report_guard\""], ["print(json.dumps(out))"],
+                            orelse=["report_guard.emit_stop(out)"])
+        self.assertEqual(bypass_lines(FALLBACK_FILE, named), [FALLBACK_LINE],
+                         "control: a try that names report_guard only in a string is exempt")
+
+    def test_control_a_block_print_in_the_try_body_is_flagged(self):
+        body = stop_source(["print(json.dumps(out))", "import report_guard"], ["pass"])
+        self.assertEqual(bypass_lines(FALLBACK_FILE, body), [7],
+                         "control: a block print in the try body of the import is exempt")
+
+    def test_control_a_block_print_in_the_try_else_is_flagged(self):
+        orelse = stop_source(["import report_guard"], ["pass"], orelse=["print(json.dumps(out))"])
+        self.assertEqual(bypass_lines(FALLBACK_FILE, orelse), [11],
+                         "control: a block print in the else of the import's try is exempt")
+
+    def test_control_a_block_print_below_the_try_is_flagged(self):
+        after = stop_source(["import report_guard"], ["pass"], after=["print(json.dumps(out))"])
+        self.assertEqual(bypass_lines(FALLBACK_FILE, after), [10],
+                         "control: a block print below the import's try is exempt")
+
+    def test_control_a_block_print_in_another_def_of_stall_watch_is_flagged(self):
+        other_def = source("import json", "", "def fallback():", "    try:", "        import report_guard",
+                           "    except Exception:", "        pass", "", "def stop():",
+                           "    print(json.dumps({\"decision\": \"block\", \"reason\": \"x\"}))")
+        self.assertEqual(bypass_lines(FALLBACK_FILE, other_def), [10],
+                         "control: a block print in another def of the file is exempt")
 
 
 if __name__ == "__main__":
