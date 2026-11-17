@@ -1,0 +1,14 @@
+{
+ "id": "item-n-must-be-number",
+ "title": "A page item write whose n is text is refused, so the page never shows \"This item has no number\"",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner report, 09:43 CST Nov 17 (typed in triage 9 chat): item 929 showed \"This item has no number, so it cannot be answered. Ask the session to fix this item.\" Cause read by triage 9 at 09:43 CST: items 928 and 929 were written with n as text (\"929\"), and the page needs a number (page.html problem(), typeof it.n === number). Triage 9 wrote both. Data fixed at 09:44 CST (items 928 v2, 929 v9). The owner believes a draft PR with the fix exists: triage searched PRs by words at 09:44 CST and found none for this; unmeasured beyond that search.",
+ "source": "Owner chat 09:43 CST Nov 17; triage 9 read of page.html and the item docs. Searched steps by words and PRs by search at 09:44 CST: no like step or PR found.",
+ "note": "Doing: triage 9 starts a builder for a write-time check in hooks/question_form.py that refuses an item whose n is not a number (red row first). Mistake it stops: triage 9 wrote n as text twice; harm: the owner cannot answer the item. Not yet built; PR number to come.",
+ "updatedAt": "2026-11-17T09:44:00-06:00",
+ "order": 243
+}
