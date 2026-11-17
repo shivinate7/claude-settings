@@ -15,9 +15,8 @@ writes, so a session cannot grant itself an override. It is valid only while now
   `override off` ends any override at once. `override`, `override <n>[m|h]` and `override off` mean
   that only as the whole prompt: a word after the length or after `off` is ambiguous, so it grants
   nothing on this route (an intended "off" must never become a grant). A whole line that is a keyword form
-  (`override`, `override <n>[m|h]`, `override off`, `override: <reason>`) inside a prose message grants the same (owner,
-  2026-11-17 09:12 CST), only for an owner-typed prompt: the gates of the plain asks (_owner_ask) refuse a notice, a
-  fired task, an agent's `source` and a cloud session's seed brief. A line inside a backtick or tilde fence, an
+  (`override`, `override <n>[m|h]`, `override off`, `override: <reason>`) inside a prose message grants the same, only for an owner-typed prompt:
+  the gates of the plain asks (_owner_ask) refuse a notice, a fired task, an agent's `source` and a cloud session's seed brief. A line inside a backtick or tilde fence, an
   indented code line, or a pasted or notice block grants nothing, and neither does a word inside a sentence.
   A plain ask (`yes override that`, `override that for 15 minutes please`) writes the same file when a model judges the
   prompt to be the owner's own present request to override a refusal (grant_override_ask, call_judge.override_ask). Cost:
@@ -524,8 +523,8 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=N
     return _write_opus(session_id, path, at, length, _file_role(roles), said)
 
 
-# One prose line that is the whole keyword form (owner, 2026-11-17 09:12 CST: an override line inside a prose message
-# counts): `override`, `override <n>[m|h]`, `override off`, or `override: <reason>`.
+# One prose line that is the whole keyword form (an override line inside a prose message counts):
+# `override`, `override <n>[m|h]`, `override off`, or `override: <reason>`.
 FENCED = re.compile(r"```.*?```|```.*|~~~.*?~~~|~~~.*", re.S)
 INDENTED = re.compile(r"(?: {4}|\t)")  # markdown's code block: a line that starts with 4 spaces or a tab
 KEYWORD_LINE = re.compile(r"override(?:\s*:\s*(\S.*)|\s+(off|\d+[mh]?))?", re.I)
