@@ -119,7 +119,7 @@ OLD_WIDENS_CARD = "uniform ruling (t18)"
 
 # Waiting item 92 as the writer sent it (Oct 30): a decision with a Goal line and no Problem line, no Based
 # on line, and a widening option 'b' not marked widens. It holds no personal data.
-ITEM92 = json.loads(r'''{"kind":"decision","title":"Let the batch runner merge each batch on its own?","context":"Goal: the batch runner merges each batch with no help from the coordinator or you. Today auto mode refuses the runner's `merge --role batch-runner` (03:04 CDT, main d545baf4): the cloud allow rules from #841 cover only `merge N --confirm`. The lane that would widen them was refused as a change to the sessions' own rules, so it needs your word. Asked in chat 03:05 CDT, no answer. Task home: docs/todo.md line fb-0303-1 (#845).","options":[{"gain":"No new form on the shared allow list.","how":"The coordinator merges each batch the runner builds.","key":"a","label":"Keep it as is","lose":"Each batch waits until the coordinator wakes."},{"gain":"The runner merges alone, so batches land sooner.","how":"Lane merge-role-allow adds `merge --role` to the auto-mode allow list, for the coordinator and batch-runner tiers only.","key":"b","label":"Allow merge --role","lose":"A second merge form on the shared allow list, against your one-form ruling (t18)."}],"pick":"a","why":"Your 16:54 CDT ruling (no owner step per merge) holds either way; a keeps the allow list to one form.","status":"open"}''')
+ITEM92 = json.loads(r'''{"n":928,"kind":"decision","title":"Let the batch runner merge each batch on its own?","context":"Goal: the batch runner merges each batch with no help from the coordinator or you. Today auto mode refuses the runner's `merge --role batch-runner` (03:04 CDT, main d545baf4): the cloud allow rules from #841 cover only `merge N --confirm`. The lane that would widen them was refused as a change to the sessions' own rules, so it needs your word. Asked in chat 03:05 CDT, no answer. Task home: docs/todo.md line fb-0303-1 (#845).","options":[{"gain":"No new form on the shared allow list.","how":"The coordinator merges each batch the runner builds.","key":"a","label":"Keep it as is","lose":"Each batch waits until the coordinator wakes."},{"gain":"The runner merges alone, so batches land sooner.","how":"Lane merge-role-allow adds `merge --role` to the auto-mode allow list, for the coordinator and batch-runner tiers only.","key":"b","label":"Allow merge --role","lose":"A second merge form on the shared allow list, against your one-form ruling (t18)."}],"pick":"a","why":"Your 16:54 CDT ruling (no owner step per merge) holds either way; a keeps the allow list to one form.","status":"open"}''')
 
 # The form lines of the rewrite. Item 92's subject, in the owner's terms; no web marker, no press verb.
 GOAL = "Goal: the batch runner merges each batch with no help from the coordinator or you."
@@ -168,7 +168,7 @@ TASK_WHY = "Why yours: a session on your computer was asked first and none could
 def task_item(steps, **over):
     """A waiting-page task with these steps and the Why yours line in `context`, so only the rule a case
     names judges it (task-names-check reads that line). `over` sets or replaces any field."""
-    item = {"kind": "task", "title": "Merge the batch", "status": "open", "steps": list(steps), "context": TASK_WHY}
+    item = {"n": 928, "kind": "task", "title": "Merge the batch", "status": "open", "steps": list(steps), "context": TASK_WHY}
     item.update(over)
     return item
 
@@ -1143,7 +1143,7 @@ GH_WHY = "Why yours: a session on your computer was asked first and none could r
 
 def gh_task(mac, ps, **over):
     """A task whose command is {powershell, mac}. `mac` is bash and `ps` its PowerShell 5.1-safe twin."""
-    task = {"kind": "task", "title": "Protect main on claude-settings", "status": "open",
+    task = {"n": 928, "kind": "task", "title": "Protect main on claude-settings", "status": "open",
             "steps": ["Open Terminal", "Paste the command below and run it"], "context": GH_WHY,
             "command": {"powershell": ps, "mac": mac}}
     task.update(over)
@@ -1684,7 +1684,7 @@ def case_departs_out_of_scope_passes():
     one = tcj.good_box(departs=None)
     one["questions"][0].update(question="Ship it?", options=[{"label": "Yes", "description": "go"}])
     chat("a one-option question with no Departs from line passes", one, None)
-    task = {"kind": "task", "title": "Merge the batch", "status": "open", "steps": ["Open Terminal"],
+    task = {"n": 928, "kind": "task", "title": "Merge the batch", "status": "open", "steps": ["Open Terminal"],
             "context": "Why yours: a session on your computer was asked first and none could reach the remote"}
     page("a task with a Why yours line and no Departs from line passes", "set", entry_of(task), None)
     page("a closed decision with no form lines and no Departs from line passes", "set",
@@ -1842,7 +1842,7 @@ PORT_BAD_LINES = [
 
 def port_task(departs):
     """A port task with a Why yours line, so only the port and departs checks can refuse it."""
-    return {"kind": "task", "port": True, "title": "Merge the batch", "status": "open",
+    return {"n": 928, "kind": "task", "port": True, "title": "Merge the batch", "status": "open",
             "context": "Why yours: a session on your computer was asked first and none could reach the remote\n"
                        + departs}
 
@@ -2289,6 +2289,134 @@ def case_item_51_stray_field():
     refused as item-field-rendered and names the field, on both surfaces."""
     page("a top-level focus the page does not list is refused, naming it", "set",
          entry_of(page_item(focus="#fill")), ("item-field-rendered", "focus"))
+
+
+# ------------------------------------------------------------------ n is a number (step item-n-must-be-number)
+
+# The page's own rule is `typeof it.n === "number" && isFinite(it.n)` (skills/waiting-page/page.html, problem()).
+# An item whose n fails it shows "This item has no number, so it cannot be answered". The guard refuses the write
+# under the rule item-field-rendered with the reason "item-n-number", and names the item id.
+N_RULE = "item-field-rendered"
+N_ITEM_ID = "item-n-case"
+
+
+def with_n(**over):
+    """The form item with n set to a value, or with no n when `absent` is passed."""
+    item = page_item()
+    if over.pop("absent", False):
+        item.pop("n", None)
+    else:
+        item["n"] = over.pop("n", 929)
+    item.update(over)
+    return item
+
+
+def case_item_n_text_is_refused():
+    for value in ("929", "", " 929", "9.29e2"):
+        page("a set whose n is the text %r is refused, naming the item" % value, "set",
+             entry_of(with_n(n=value), doc_id=N_ITEM_ID), (N_RULE, N_ITEM_ID))
+    page("an update whose n is the text \"929\" is refused, naming the item", "update",
+         entry_of({"n": "929"}, doc_id=N_ITEM_ID), (N_RULE, N_ITEM_ID))
+    page("a str_replace on the field n is refused, since it can only give text", "str_replace",
+         {"collection": "items", "doc_id": N_ITEM_ID, "field": "n", "old_str": "9", "new_str": "8"},
+         (N_RULE, N_ITEM_ID))
+
+
+def case_item_n_other_non_numbers_are_refused():
+    # The page's rule: a number that isfinite. A bool, a null, a list, an object, NaN and infinity all fail it.
+    for label, value in (("true", True), ("null", None), ("a list", [929]), ("an object", {"n": 929}),
+                         ("NaN", float("nan")), ("infinity", float("inf")), ("minus infinity", float("-inf")),
+                         ("an int too big for a float", 10 ** 400)):
+        page("a set whose n is %s is refused" % label, "set",
+             entry_of(with_n(n=value), doc_id=N_ITEM_ID), (N_RULE, N_ITEM_ID))
+    page("an update that removes n with the delete marker is refused", "update",
+         entry_of({"n": {"__delete__": True}}, doc_id=N_ITEM_ID), (N_RULE, N_ITEM_ID))
+
+
+def case_item_n_number_passes():
+    for label, value in (("929", 929), ("0", 0), ("a negative number", -3), ("a float, which the page accepts", 929.5)):
+        page("a set whose n is %s passes" % label, "set", entry_of(with_n(n=value), doc_id=N_ITEM_ID), None)
+    page("an update whose n is the number 929 passes", "update", entry_of({"n": 929}, doc_id=N_ITEM_ID), None)
+
+
+def case_item_n_absent():
+    page("a set with no n is refused: a new item needs a number", "set",
+         entry_of(with_n(absent=True), doc_id=N_ITEM_ID), (N_RULE, N_ITEM_ID))
+    page("an update that does not touch n passes", "update",
+         entry_of({"title": "A new title"}, doc_id=N_ITEM_ID), None)
+    page("an update of the form fields that does not touch n passes", "update",
+         entry_of({"kind": "decision", "context": form_text()}, doc_id=N_ITEM_ID), None)
+    page("a str_replace on another field is not judged for n", "str_replace",
+         {"collection": "items", "doc_id": N_ITEM_ID, "field": "title", "old_str": "a", "new_str": "b"}, None)
+
+
+def case_item_n_batch_and_file_path():
+    def write(op, data, doc_id):
+        return {"op": op, "collection": "items", "doc_id": doc_id, "data": data}
+
+    def batch(*writes):
+        return {"action": "batch", "url": PAGE_URL, "writes": list(writes)}
+
+    bad = batch(write("set", with_n(n=928), "good-one"), write("set", with_n(n="929"), "bad-one"),
+                write("update", {"title": "x"}, "fine-one"))
+    verdict("batch: one item with a text n refuses the call, naming that item",
+            guard.data_tool_hit(bad, PAGE_REPO), (N_RULE, "bad-one"))
+    verdict("batch: the same call through question_form.page_item_hit refuses the same item",
+            question_form.page_item_hit(bad, PAGE_REPO)[0], (N_RULE, "bad-one"))
+    ok = batch(write("set", with_n(n=928), "good-one"), write("set", with_n(n=929), "good-two"),
+               write("update", {"title": "x"}, "fine-one"))
+    verdict("batch: numbers on every set and an update with no n pass", guard.data_tool_hit(ok, PAGE_REPO), None)
+    # The file_path form: the data is read from the file, a relative path against the payload cwd.
+    folder = judged_folder()
+    write_json_file(os.path.join(folder, "n-text.json"), with_n(n="929"))
+    write_json_file(os.path.join(folder, "n-number.json"), with_n(n=929))
+    refused = {"collection": "items", "doc_id": N_ITEM_ID, "file_path": "n-text.json"}
+    passed = {"collection": "items", "doc_id": N_ITEM_ID, "file_path": "n-number.json"}
+    verdict("file_path: a file whose n is text is refused, read at the payload cwd",
+            call("item_hit", "set", refused, folder), (N_RULE, N_ITEM_ID))
+    verdict("file_path: a file whose n is a number passes", call("item_hit", "set", passed, folder), None)
+
+
+def case_item_n_posted_text_names_the_item():
+    # The text Claude sees is the printed reason, not the log line: in a batch it must say which write to fix.
+    def write(op, data, doc_id):
+        return {"op": op, "collection": "items", "doc_id": doc_id, "data": data}
+
+    bad = {"action": "batch", "url": PAGE_URL,
+           "writes": [write("set", with_n(n=928), "good-one"), write("set", with_n(n="929"), "bad-one"),
+                      write("update", {"title": "x"}, "fine-one")]}
+    said = printed_reason(bad)
+    check("batch: the posted n refusal names the bad item", "bad-one" in said, repr(said)[:300])
+    check("batch: the posted n refusal names no good item",
+          not re.search(r"good-one|fine-one", said), repr(said)[:300])
+    check("batch: the posted n refusal still carries the correction",
+          "number such as 929" in said, repr(said)[:300])
+
+
+def case_item_n_text_inside_other_text_is_not_judged():
+    # Scanner-safe: the check reads the parsed n, never the text of the write. Text that looks like an n, and
+    # comment openers and a lone quote, beside a real number are plain text.
+    context = form_text(goal='Goal: keep "n": "929" and n: "929" as plain text, with //path, /* glob and # tags, and don\'t parse it.')
+    page("a real number n beside text that reads as a text n passes", "set",
+         entry_of(with_n(n=929, context=context), doc_id=N_ITEM_ID), None)
+    page("a text n beside text that reads as a number n is still refused", "set",
+         entry_of(with_n(n="929", context=form_text(goal='Goal: keep "n": 929 as plain text.')), doc_id=N_ITEM_ID),
+         (N_RULE, N_ITEM_ID))
+
+
+def case_item_n_reason_and_the_pages_own_rule():
+    reasons = getattr(question_form, "PAGE_REASONS", None) or {}
+    text = reasons.get("item-n-number") or ""
+    check("the n reason says n must be a number such as 929, not \"929\"",
+          "number such as 929" in text and '"929"' in text, repr(text)[:200])
+    check("the n reason cites the decision item-field-rendered", "decision item-field-rendered" in text, repr(text)[:200])
+    check("the n reason posts only the correction: it names no other rule's remedy",
+          not re.search(r"itemFields|Goal|Problem|__delete__", text), repr(text)[:200])
+    # The allow list points at the page's own rule: the page must still carry the predicate the guard follows.
+    with open(os.path.join(REPO, "skills", "waiting-page", "page.html"), encoding="utf-8") as f:
+        page_text = f.read()
+    check("the page's problem() still judges n by typeof number and isFinite",
+          'typeof it.n === "number" && isFinite(it.n)' in page_text, "page.html no longer carries the n rule")
 
 
 # ------------------------------------------------------------------ dismissed: the page's own Mark read
@@ -3329,7 +3457,11 @@ def main():
                  case_recommended_list_is_the_multi_form, case_recommend_exemptions_pass,
                  case_recommend_applies_to_a_port_and_a_set_without_kind, case_five_real_forms,
                  case_five_real_forms_as_written, case_widens_reason_no_longer_leaves_recommended_out,
-                 case_item_92, case_item_51_stray_field, case_session_update_naming_dismissed_is_refused,
+                 case_item_92, case_item_51_stray_field, case_item_n_text_is_refused,
+                 case_item_n_other_non_numbers_are_refused, case_item_n_number_passes, case_item_n_absent,
+                 case_item_n_batch_and_file_path, case_item_n_posted_text_names_the_item,
+                 case_item_n_text_inside_other_text_is_not_judged,
+                 case_item_n_reason_and_the_pages_own_rule, case_session_update_naming_dismissed_is_refused,
                  case_dismissed_refused_on_every_route, case_dismissed_refused_without_a_readable_field_list,
                  case_dismissed_reason_keeps_the_generic_remedy_for_other_fields,
                  case_item_stray_field_refused_from_a_record_branch_checkout,

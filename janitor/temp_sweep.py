@@ -24,7 +24,7 @@ import shutil
 import sys
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
 from shared_names import config_dir  # noqa: E402  the one home of the config dir, no guard module
 
 IDLE_SECONDS = 24 * 3600
