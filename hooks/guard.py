@@ -116,6 +116,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   check-timeout        deny. A `merge --lane-lint` run in the foreground with a time limit set, or in the
                        background under a time limit below its bound. A run with no limit passes.
                        (background-check-through-verdict)
+  fg-bash-while-bg     deny. A foreground call that can run long (a test, lint, merge, build or install, or a time
+                       limit over 60000 ms), while this session has a background command or agent running, read from
+                       the transcript. A call from an agent, a missing transcript and a failed read allow.
+                       (fg-bash-while-bg)
   playwright-browsers-path, playwright-install
                        deny. (playwright-browsers-path, playwright-install-once)
   rm-var-unguarded     deny. A recursive delete under an unguarded variable.
@@ -720,9 +724,10 @@ while True:
         from guard_argv import PROCESS_ARGS_REASON, process_args_hit
         _loading = "guard_stream"
         from guard_stream import (
-            BACKGROUND_END_REASON, CHECK_TAIL_REASON, CHECK_TIMEOUT_TEMPLATE, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
+            BACKGROUND_END_REASON, CHECK_TAIL_REASON, CHECK_TIMEOUT_TEMPLATE, FG_BACKGROUND_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
             NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, UV_VALUE_FLAGS, VERDICT_PIPE_REASON, WAITER_REASON,
-            background_end_hit, check_tail_hit, check_timeout_hit, check_timeout_limit_text, live_stream_hit, ln_descends_hit,
+            background_end_hit, background_work_running, check_tail_hit, check_timeout_hit, check_timeout_limit_text, fg_long_hit,
+            live_stream_hit, ln_descends_hit,
             loop_condition_polls_a_pattern, narrated_tail_hit, verdict_pipe_hit, waiter_verdict,
         )
         _loading = "guard_rm_var"
@@ -5287,6 +5292,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = check_tail_hit(stripped, background, cwd)
     if matched:
         refuse(tool, "deny", "check-tail", CHECK_TAIL_REASON, matched)
+    # The long foreground call is read first, so a foreground lane lint under background work gets this refusal and
+    # its rerun then meets check-timeout's limit. Only a call that can run long reads the transcript.
+    if not background and not agent:
+        matched = fg_long_hit(split_segments(stripped), timeout_ms)
+        if matched and background_work_running(transcript):
+            refuse(tool, "deny", "fg-bash-while-bg", FG_BACKGROUND_REASON, matched)
     matched = check_timeout_hit(stripped, background, timeout_ms)
     if matched:
         refuse(tool, "deny", "check-timeout", CHECK_TIMEOUT_TEMPLATE % check_timeout_limit_text(), matched)
@@ -7765,6 +7776,8 @@ def judge(payload) -> None:
         if rule == "item-field-rendered":
             if str(matched).endswith(question_form.PAGE_ONLY_MARK):
                 refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-page-only"], matched)
+            if str(matched).endswith(question_form.N_MARK):
+                refuse(tool, "deny", "item-field-rendered", question_form.n_lead(matched) + question_form.PAGE_REASONS["item-n-number"], matched)
             refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-rendered"], matched)
         if rule == "question-checked-with-repo":
             refuse(tool, "deny", "question-checked-with-repo", question_form.PAGE_REASONS["question-checked-with-repo"], matched)

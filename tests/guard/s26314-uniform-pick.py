@@ -16,7 +16,7 @@ TN_WHY = "Why yours: a session on your computer was asked first and none could r
 
 
 def up_item(**over):
-    item = {"id": "banchi-titles", "kind": "decision", "status": "open", "title": "Banchi record titles",
+    item = {"id": "banchi-titles", "n": 928, "kind": "decision", "status": "open", "title": "Banchi record titles",
             "context": "Banchi's titles differ from the shared form.", "options": [UP_WIDE, UP_MATCH],
             "pick": "a", "why": "Fewer renames."}
     item.update(over)

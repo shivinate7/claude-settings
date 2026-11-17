@@ -24,7 +24,7 @@ THE FORM. A decision on the page (in `context`), or a chat question with 2+ opti
 chat `Gain:` and `Lose:` in the option's description. Only a line at a line start counts.
 
 THE OLDER RULES keep their ids and run first, in this order, then the form:
-`item-field-rendered` (a field the page draws), `port-question`, `uniform-pick`, `press-link`, `command-in-item`,
+`item-field-rendered` (a field the page draws, and an `n` that is a number: item_n_hit), `port-question`, `uniform-pick`, `press-link`, `command-in-item`,
 `gh-login-switch`, `task-names-check`, `task-why-cited` (page items), then the form. A missing Goal, Problem or Based on line, a
 Based on count outside 1-3, a kind outside
 PREMISE_KINDS and an option with no gain or no loss refuse as `question-form`, and so does a Goal, Problem or
@@ -47,6 +47,7 @@ nothing, and the chat-answer flow writes one. A str_replace on `context` that re
 refused.
 """
 import json
+import math
 import os
 import re
 import sys
@@ -1143,6 +1144,9 @@ def item_hit(op, entry, cwd="", session_id=None):
     hit = item_field_hit(op, entry, data)
     if hit:
         return "item-field-rendered", hit
+    hit = item_n_hit(op, entry, data)
+    if hit:
+        return "item-field-rendered", hit
     if op == "str_replace":
         if entry.get("field") in CROSS_REPO_FIELDS:
             return CROSS_REPO_RULE, CROSS_REPO_EDIT_REASON
@@ -1874,6 +1878,55 @@ def item_field_hit(op, entry, data) -> str:
     return ""
 
 
+# An item's `n` is the number the owner answers by. The page's own rule for it is `typeof it.n === "number" &&
+# isFinite(it.n)` (skills/waiting-page/page.html, function problem()); an item that fails it shows "This item has
+# no number, so it cannot be answered". `page_number` follows that rule and no other, so the guard and the page agree.
+# Rule item-field-rendered, its own reason: the matched text ends with N_MARK, and guard.py prints N_REASON for it.
+N_MARK = " (n must be a number)"
+N_REASON = ("An item's `n` is a number such as 929, not the text \"929\". The page cannot let the owner answer an "
+            "item whose `n` is not a number, and a new item needs one. Write `n` as a JSON number. "
+            "(decision item-field-rendered, a waiting item names only fields the page can draw and read)")
+
+
+def n_lead(matched) -> str:
+    """The write to fix first, ahead of the n correction: the item id and what its n is, from `matched`. A batch holds
+    up to 50 writes, so the posted reason must say which one. guard.py joins it to PAGE_REASONS["item-n-number"], so
+    the refusal audit still reads that subscript at the call."""
+    found = str(matched)
+    if found.endswith(N_MARK):
+        found = found[:-len(N_MARK)]
+    return "Fix this write: %s. " % found
+
+
+def page_number(value) -> bool:
+    """True when `value` passes the page's rule for n: a number that isFinite. A bool is no number in JSON."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:  # an int past float range: the page reads it as Infinity
+        return False
+
+
+def item_n_hit(op, entry, data) -> str:
+    """The matched text when this write of a waiting item leaves n as no number: a set with no n or a bad n, an
+    update that names a bad n, or a str_replace on n (it can only give text). An update that does not name n passes.
+    Data that did not read (`data` not a dict) is unknown and passes."""
+    item = str(entry.get("doc_id") or "?")[:80]
+    if op == "str_replace":
+        field = entry.get("field")
+        if isinstance(field, str) and field.split(".", 1)[0] == "n":
+            return "item %s: str_replace on n%s" % (item, N_MARK)
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    if "n" not in data:
+        return "item %s: a new item has no n%s" % (item, N_MARK) if op == "set" else ""
+    if page_number(data["n"]):
+        return ""
+    return "item %s: n is %s%s" % (item, json.dumps(data["n"], default=str)[:40], N_MARK)
+
+
 # ------------------------------------------------------------------ the chat question box
 
 
@@ -1991,7 +2044,7 @@ PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "pr
                 "command-in-item": COMMAND_REASON, "gh-login-switch": GH_LOGIN_REASON,
                 "task-names-check": TASK_REASON, WHY_RULE: WHY_CITED_REASON, CROSS_REPO_RULE: CROSS_REPO_REASON,
                 FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON, "item-field-rendered": ITEM_FIELD_REASON,
-                "item-field-page-only": PAGE_ONLY_REASON,
+                "item-field-page-only": PAGE_ONLY_REASON, "item-n-number": N_REASON,
                 DEPARTS_RULE: PAGE_DEPARTS_REASON,
                 "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON,
                 LABELS_RULE: LABELS_REASON, FROZEN_RULE: FROZEN_REASON}

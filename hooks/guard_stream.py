@@ -4,14 +4,15 @@ note, a waiter loop over a pattern and two ported shell traps.
 guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
+import importlib
 import os
 import re
 import shlex
 
 from guard_core import (
     DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords,
-    backgrounding_amp, basename, bare_words, command_indexes, inline_script, inner_commands, is_powershell,
-    resolve_command, git_calls, segment_dirs, segment_tokens, split_segments,
+    _wrapper_flags, backgrounding_amp, basename, bare_words, command_indexes, inline_script, inner_commands,
+    is_powershell, resolve_command, git_calls, segment_dirs, segment_tokens, split_segments,
 )
 from guard_env import _substitutions
 from merge_options import MERGE_OPTIONS
@@ -1022,6 +1023,265 @@ BACKGROUND_END_REASON = (
     "should stop, so it can run unnoticed for a day. "
     "Remedy: put an end condition in this tool call's description, as `until: <condition>`, such "
     "as `until: round 1 bids are served`. The Stop check shows that note beside the job."
+)
+
+
+# ------------------------------------------------------------------ a long foreground call while background work runs
+#
+# Guard rule fg-bash-while-bg (decision fg-bash-while-bg). It refuses only a call that can
+# run long: a test, lint, merge, build or install, or a time limit over 60 s. Quick reads stay in the foreground.
+# A foreground call that runs long holds the session still while its agents and background commands run, so nothing
+# can read their notices until it ends. The call is refused only while this session has background work: a
+# background command or a background agent with no terminal notice and no TaskStop (stall_watch.scan_jobs, the
+# one reader of that state). A call from an agent is not judged: the transcript is its parent's, and an agent's
+# own wait freezes no session. A missing or unreadable transcript, or a failed import, allows.
+# THE LONG FORMS are read by shape, per command word, and never by substring, so `grep test notes.txt` and
+# `git status` stay quick. Wrappers (`verdict`, `timeout`, `sudo`, `uv run`) and `bash -c` text are read through.
+# A call that runs nothing stays quick: a version or help flag, a dry run (`make -n`) and a `command -v` lookup.
+FG_LIMIT_MS = 60000
+FG_PROGRAMS = frozenset((
+    "pytest", "py.test", "tox", "nox", "jest", "vitest", "mocha", "playwright", "eslint", "pylint", "flake8", "mypy",
+    "pyright", "shellcheck", "markdownlint", "make", "gmake", "cmake", "ninja", "xcodebuild", "gradle", "gradlew",
+    "mvn", "bazel", "ci-job", "sim-test", "ruff", "black", "rspec", "invoke-pester",
+))
+FG_PYTHON_MODULES = frozenset((
+    "pytest", "unittest", "tox", "nox", "mypy", "pylint", "flake8", "ruff", "black", "build", "pip", "playwright",
+))
+FG_INSTALLERS = {  # the install verbs of each installer
+    "pip": ("install",), "pip3": ("install",), "pipx": ("install", "upgrade"), "poetry": ("install", "add", "update"),
+    "uv": ("sync", "add", "install", "pip", "tool"), "brew": ("install", "upgrade", "reinstall"),
+    "apt": ("install", "upgrade"), "apt-get": ("install", "upgrade"), "gem": ("install",), "bundle": ("install",),
+    "composer": ("install", "update"), "conda": ("install", "create"), "dotnet": ("build", "test", "restore"),
+    "swift": ("build", "test"), "cargo": ("build", "test", "check", "clippy", "install"),
+    "go": ("build", "test", "install", "vet"),
+}
+FG_VERBS = {  # a program that runs long only for some verbs: the verbs, read after the program's own flags
+    "pre-commit": ("run", "run-hooks", "autoupdate", "install-hooks"),
+    "deno": ("test", "lint", "check", "bench", "compile", "install"),
+    "docker": ("build", "buildx", "compose"),
+    "git": ("clone",),
+}
+FG_VERB_FLAGS = {  # the flags of a FG_VERBS program that take a value
+    "git": ("-C", "-c", "--git-dir", "--work-tree", "--namespace"),
+    "docker": ("-H", "--host", "-c", "--context"),
+}
+FG_PACKAGE_MANAGERS = ("npm", "pnpm", "yarn", "bun")
+FG_PACKAGE_VERBS = frozenset(("test", "t", "tst", "install", "i", "ci", "add", "build", "lint"))
+FG_SCRIPT_NAME = re.compile(r"test|lint|build|check|install|verify|compile|e2e|ci$")
+FG_INTERPRETERS = frozenset(("node", "bash", "sh", "zsh", "ruby", "deno", "pwsh", "powershell"))
+FG_TEST_FILE = re.compile(r"(?:^tests?\.\w+$|^test[_-]|[_-]tests?\.\w+$|\.(?:test|spec)\.\w+$|^run[_-]?tests?\.\w+$)")
+FG_TEST_DIR = re.compile(r"(?:^|/)tests?/")  # a script kept in a test folder, such as tests/run.sh
+# The programs whose lone `-v` prints the version. For pytest, flake8, mypy, pip and most others `-v` is verbose,
+# and `pytest -v` runs the tests.
+FG_VERSION_V = frozenset((
+    "tsc", "node", "npm", "npx", "pnpm", "yarn", "bun", "make", "gmake", "gradle", "gradlew", "mvn", "rspec",
+    "eslint", "jest", "vitest", "docker", "ruby", "gem",
+))
+FG_QUICK_FLAGS = {  # per program, the flags that run nothing: an info read or a dry run
+    "xcodebuild": ("-version", "-showsdks", "-help", "-usage"),
+    "make": ("-n", "--dry-run", "--just-print", "--recon"),
+    "gmake": ("-n", "--dry-run", "--just-print", "--recon"),
+}
+# RUNNER_VALUE_FLAGS is the one list of a package manager's flags that take a value. These managers read one of
+# its flags as taking no value: pnpm `-w` is --workspace-root and npm `-p` is --parseable.
+FG_PACKAGE_BOOL_FLAGS = {"pnpm": ("-w",), "npm": ("-p",)}
+
+
+def _fg_verb_hit(word: str, args) -> str:
+    """The matched text when `word` (a FG_VERBS program) runs one of its long verbs, else ''. `docker buildx` and
+    `docker compose` count for their `build` verb only. A flag that takes a value is skipped with it."""
+    at = 0
+    while at < len(args) and args[at].startswith("-"):
+        at += 2 if args[at] in FG_VERB_FLAGS.get(word, ()) else 1
+    verb = args[at] if at < len(args) else ""
+    if verb not in FG_VERBS[word]:
+        return ""
+    if verb in ("buildx", "compose") and args[at + 1:at + 2] != ["build"]:
+        return ""
+    return word + " " + verb
+
+
+def _fg_info_read(word: str, args) -> bool:
+    """True for a call that runs nothing. `--version`, `--help` and `-h` print and exit, so they count anywhere.
+    A lone `-v` counts only for a FG_VERSION_V program, since `pytest -v` runs the tests. A FG_QUICK_FLAGS flag
+    counts for its own program only, so `make -n` is quick and `pytest -n 4` is not."""
+    if "--version" in args or "--help" in args or "-h" in args:
+        return True
+    if word in FG_VERSION_V and list(args) == ["-v"]:
+        return True
+    return any(arg in FG_QUICK_FLAGS.get(word, ()) for arg in args)
+
+
+def _fg_lookup(tokens, at: int) -> bool:
+    """True when `tokens[at]` follows `command -v` or `command -V`, which prints where the word is and runs
+    nothing. `command` is a COMMAND_WRAPPERS entry, so the resolver has already stepped past it and its flags."""
+    start = at
+    while start > 0 and tokens[start - 1].startswith("-"):
+        start -= 1
+    if start == 0 or basename(tokens[start - 1].lstrip("$(")) != "command":
+        return False
+    return any(not flag.startswith("--") and ("v" in flag or "V" in flag) for flag in tokens[start:at])
+
+
+class _FgTokens(list):
+    quoted = frozenset()
+
+
+def _fg_clean(tokens):
+    """The tokens with the `)` that closes a group cut off each unquoted word, so `(npm test)` reads as
+    `npm test`. A word that is only `)` stays. `quoted` is kept for command_indexes."""
+    quoted = getattr(tokens, "quoted", frozenset())
+    cleaned = _FgTokens(token.rstrip(")") if i not in quoted and token.rstrip(")") else token
+                        for i, token in enumerate(tokens))
+    cleaned.quoted = quoted
+    return cleaned
+
+
+def _fg_skip_ionice(tokens, index: int) -> int:
+    """The index of the command `ionice [flags] ...` runs, read through `resolve_command` again, else `index`.
+    `ionice` is no entry of COMMAND_WRAPPERS, which would move every rule that reads the command word."""
+    while index < len(tokens) and basename(tokens[index]) == "ionice":
+        start = _wrapper_flags("ionice", tokens, index + 1)[0]
+        at = resolve_command(tokens[start:])
+        if at is None:
+            break
+        index = start + at
+    return index
+
+
+def _fg_positional(args):
+    return [arg for arg in args if not arg.startswith("-")]
+
+
+def _fg_package_positional(word: str, args):
+    """The positional words of a package manager's args. A RUNNER_VALUE_FLAGS flag's value is skipped with it,
+    so `npm --prefix web test` reads `test`, unless FG_PACKAGE_BOOL_FLAGS names that flag for this manager."""
+    found, at = [], 0
+    while at < len(args):
+        arg = args[at]
+        at += 1
+        if not arg.startswith("-"):
+            found.append(arg)
+        elif arg in RUNNER_VALUE_FLAGS and arg not in FG_PACKAGE_BOOL_FLAGS.get(word, ()):
+            at += 1
+    return found
+
+
+def _fg_test_file(path: str) -> bool:
+    """True for a file named as a test, or kept in a `test` or `tests` folder."""
+    return bool(FG_TEST_FILE.search(basename(path)) or FG_TEST_DIR.search(path))
+
+
+def _fg_script_long(word: str, args) -> str:
+    """The script an interpreter runs when it is a test file, else ''. `-m <module>` names the module instead.
+    `node --test` runs node's own test runner."""
+    at = 0
+    while at < len(args) and args[at].startswith("-"):
+        flag = args[at]
+        if word == "node" and flag == "--test":
+            return flag
+        if flag == "-m":
+            module = args[at + 1] if at + 1 < len(args) else ""
+            return "-m " + module if module in FG_PYTHON_MODULES and (
+                module != "pip" or "install" in args[at + 2:]) else ""
+        if flag == "-c":
+            return ""
+        at += 2 if flag in INTERPRETER_VALUE_FLAGS else 1
+    script = args[at] if at < len(args) else ""
+    return script if script and _fg_test_file(script) else ""
+
+
+def _fg_package_hit(word: str, positional) -> str:
+    """The matched text when an npm, pnpm, yarn or bun call installs, tests, lints or builds, else ''.
+    `run <script>` reads the script's name. The other managers also run a script by its bare name."""
+    verb = positional[0] if positional else ""
+    runs = verb in ("run", "run-script")
+    script = positional[1] if runs and len(positional) > 1 else verb
+    if verb in FG_PACKAGE_VERBS or (runs or word != "npm") and FG_SCRIPT_NAME.search(script):
+        return word + " " + script
+    return ""
+
+
+def _fg_word_hit(tokens, at: int) -> str:
+    """The matched text when the command at `tokens[at]` can run long, else ''."""
+    word, args = program_name(tokens[at]), tokens[at + 1:]
+    positional = _fg_positional(args)
+    if _fg_info_read(word, args) or _fg_lookup(tokens, at):
+        return ""
+    if any(basename(token) in VERDICT_WORDS for token in tokens[:at]):
+        return "verdict " + word
+    if word in FG_PROGRAMS:
+        return word
+    if word in FG_VERBS:
+        return _fg_verb_hit(word, args)
+    if _roster_word(tokens, at, interpreter_only=True):
+        return "merge"
+    if word in FG_PACKAGE_MANAGERS:
+        return _fg_package_hit(word, _fg_package_positional(word, args))
+    if word == "npx" and positional[:1] and (positional[0] in FG_PROGRAMS or positional[0] == "tsc"):
+        return word + " " + positional[0]
+    if word in FG_INSTALLERS:
+        verb = positional[0] if positional else ""
+        if verb in FG_INSTALLERS[word] and (word != "uv" or verb != "tool" and (
+                verb != "pip" or positional[1:2] == ["install"])):
+            return word + " " + verb
+        return ""
+    if word == "tsc":
+        return "" if "-w" in args or "--watch" in args else word
+    if _fg_test_file(tokens[at]):  # a test file run directly
+        return word
+    if SCRIPT_INTERPRETER.match(word) or word in FG_INTERPRETERS:
+        script = _fg_script_long(word, args)
+        return word + " " + script if script else ""
+    return ""
+
+
+def _fg_tokens_hit(tokens, depth: int) -> str:
+    """The matched text when the one segment `tokens` runs a command that can run long, else ''. A shell's
+    `-c` text, `cmd /c` and `pwsh -Command` are read as segments of their own."""
+    tokens = _fg_clean(tokens)
+    for start in command_indexes(tokens):
+        at = _fg_skip_ionice(tokens, _skip_uv_run(tokens, start))
+        hit = _fg_word_hit(tokens, at)
+        if hit:
+            return hit
+    script = _inner_scripts(tokens, resolve_command(tokens)) if depth < 3 and resolve_command(tokens) is not None else ""
+    return next((hit for seg in split_segments(script) if (hit := fg_long_segment(seg, depth + 1))), "") if script else ""
+
+
+def fg_long_segment(segment: str, depth: int = 0) -> str:
+    """The matched text when one segment can run long, else ''."""
+    tokens = segment_tokens(segment)
+    return _fg_tokens_hit(tokens, depth) if tokens else ""
+
+
+def fg_long_hit(segments, timeout_ms=None) -> str:
+    """The matched text when a foreground call can run long, else ''. A `timeout` over FG_LIMIT_MS is long too."""
+    if isinstance(timeout_ms, (int, float)) and not isinstance(timeout_ms, bool) and timeout_ms > FG_LIMIT_MS:
+        return "timeout %d ms" % timeout_ms
+    return next((hit for hit in map(fg_long_segment, segments) if hit), "")
+
+
+def background_work_running(transcript) -> bool:
+    """True when the session's transcript shows a background command or agent with no terminal notice and no
+    TaskStop. False for no transcript, an unreadable one, or a failed import: the rule fails open."""
+    if not isinstance(transcript, str) or not transcript:
+        return False
+    try:
+        # Loaded by name, and only for a call that can run long. The darwin-arm scan of test_guard reads import
+        # statements, and scan_jobs reads one file and never reaches the process-table arms of stall_watch.
+        jobs, _stop = importlib.import_module("stall_watch").scan_jobs(transcript)
+        return bool(jobs)
+    except Exception:
+        return False
+
+
+FG_BACKGROUND_REASON = (
+    "refused in the foreground while background work runs: this call can run long, and this session has a "
+    "background command or agent that is still running. A long foreground call holds the session still, so no "
+    "notice from that work can be read until it ends (decision fg-bash-while-bg, owner, 2026-11-16 13:47 CST). "
+    "Remedy: rerun it with run_in_background and it is allowed. Read its result when its notice arrives. "
+    "A quick read stays in the foreground."
 )
 
 
