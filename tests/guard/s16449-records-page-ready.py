@@ -215,8 +215,9 @@ rpr_bash("records-page-ready: gh pr view 12 on a stale page is allowed", "gh pr 
 
 # THE SHARED CHECKOUT. guard_merge.settings_roots puts the checkout a hook runs from first, so a copy of the guard family
 # there loads that checkout's merge/merge.py. The merge tool here is a stand-in whose read of a head cannot run. Its
-# checkout's origin/main is one commit past its HEAD (behind), or is its HEAD (now). Only the behind refusal names the
-# cause and the fix; the now refusal keeps the retry remedy.
+# checkout's HEAD stands behind, now at, ahead of, or diverged from origin/main. Only the behind refusal names the
+# stale-checkout cause, and its remedy runs the reinstall from main, never a write in the shared checkout. The other
+# three keep the retry remedy.
 RPR_TOOL_V1 = '''"""A merge tool stand-in for the records-page-ready fixture: its read of a head cannot run."""
 import contextlib
 
@@ -244,17 +245,25 @@ def stale_page_remedy(number, claim=""):
     return "Return #%s to draft" % number
 '''
 RPR_TOOL_V2 = RPR_TOOL_V1 + "\n# A later commit of the same tool.\n"
-RPR_SHARED_BEHIND = os.path.join(RPR, "shared-behind")  # its origin/main is one commit past its HEAD
-RPR_SHARED_NOW = os.path.join(RPR, "shared-now")        # its origin/main is its HEAD
+RPR_TOOL_V3 = RPR_TOOL_V1 + "\n# A local commit of the same tool.\n"
+RPR_SHARED_BEHIND = os.path.join(RPR, "shared-behind")      # its origin/main is one commit past its HEAD
+RPR_SHARED_NOW = os.path.join(RPR, "shared-now")            # its origin/main is its HEAD
+RPR_SHARED_AHEAD = os.path.join(RPR, "shared-ahead")        # its HEAD is one local commit past origin/main
+RPR_SHARED_DIVERGED = os.path.join(RPR, "shared-diverged")  # HEAD and origin/main each hold a commit the other lacks
 RPR_SHARED_GUARD = os.path.join(RPR_SHARED_BEHIND, "hooks", "guard.py")
 RPR_SHARED_NOW_GUARD = os.path.join(RPR_SHARED_NOW, "hooks", "guard.py")
-RPR_SHARED_CAUSE = ("behind origin/main", "bring the shared checkout to", "main")  # the cause, then the fix
+RPR_SHARED_AHEAD_GUARD = os.path.join(RPR_SHARED_AHEAD, "hooks", "guard.py")
+RPR_SHARED_DIVERGED_GUARD = os.path.join(RPR_SHARED_DIVERGED, "hooks", "guard.py")
+RPR_SHARED_CAUSE = ("behind origin/main", "install_from_main.sh")  # the cause, then the remedy: reinstall from main
+RPR_SHARED_WRITE = ("bring the shared checkout", "pull it")  # the old remedy: a session writes in the shared checkout
 RPR_SHARED_LACKS = RPR_UNKNOWN_LACKS + ("gh pr ready",)  # the refused command is no remedy
+RPR_SHARED_NO_STALE = RPR_SHARED_CAUSE + RPR_SHARED_WRITE  # a head ahead of or diverged from main names neither
 
 
-def _rpr_shared_checkout(folder, behind):
-    """A checkout with a copy of the guard family and merge/merge.py, committed on origin/main. With `behind`, origin/main
-    gets one more commit, and the checkout stays at the commit before it."""
+def _rpr_shared_checkout(folder, relation):
+    """A checkout with a copy of the guard family and merge/merge.py, committed on origin/main. Its HEAD stands in
+    `relation` to origin/main: "behind" (origin/main gets one more commit), "now" (the same commit), "ahead" (HEAD gets
+    one local commit, origin/main stays) or "diverged" (origin/main and HEAD each get a commit the other lacks)."""
     os.makedirs(RPR, exist_ok=True)
     origin, seed = folder + "-origin.git", folder + "-seed"
     _rpr_git(RPR, "init", "-q", "--bare", "-b", "main", origin)
@@ -267,16 +276,25 @@ def _rpr_shared_checkout(folder, behind):
     _rpr_git(seed, "commit", "-q", "-m", "the shared checkout's tool")
     _rpr_git(seed, "push", "-q", "origin", "main")
     _rpr_git(RPR, "clone", "-q", origin, folder)
-    if behind:
+    if relation in ("behind", "diverged"):
         write(os.path.join(seed, "merge", "merge.py"), RPR_TOOL_V2)
         _rpr_git(seed, "add", "-A")
         _rpr_git(seed, "commit", "-q", "-m", "the tool moves on")
         _rpr_git(seed, "push", "-q", "origin", "main")
         _rpr_git(folder, "fetch", "-q", "origin")
+    if relation in ("ahead", "diverged"):
+        write(os.path.join(folder, "merge", "merge.py"), RPR_TOOL_V3)
+        _rpr_git(folder, "add", "-A")
+        _rpr_git(folder, "commit", "-q", "-m", "a local change to the tool")
     head, main = _rpr_git(folder, "rev-parse", "HEAD"), _rpr_git(folder, "rev-parse", "origin/main")
-    behind_ok = run_vcs(folder, "merge-base", "--is-ancestor", "HEAD", "origin/main").returncode == 0 and head != main
-    _rpr_need(behind_ok if behind else head == main,
-              "the shared checkout %r is not %s origin/main" % (folder, "behind" if behind else "at"))
+
+    def ancestor(a, b):
+        return run_vcs(folder, "merge-base", "--is-ancestor", a, b).returncode == 0
+    shape = {"behind": ancestor("HEAD", "origin/main") and head != main,
+             "now": head == main,
+             "ahead": ancestor("origin/main", "HEAD") and head != main,
+             "diverged": not ancestor("HEAD", "origin/main") and not ancestor("origin/main", "HEAD")}
+    _rpr_need(shape[relation], "the shared checkout %r does not stand %r to origin/main" % (folder, relation))
     _rpr_need(os.path.isfile(os.path.join(folder, "hooks", "guard.py")), "the shared checkout holds no guard copy")
     # Scope before subject: the merge tool the guard loads from this checkout is this checkout's own stand-in.
     probe = "import sys; sys.path.insert(0, %r); import guard_merge; print(guard_merge.merge_module().__file__)" % (
@@ -288,18 +306,37 @@ def _rpr_shared_checkout(folder, behind):
 
 
 def _build_shared_behind():
-    _rpr_shared_checkout(RPR_SHARED_BEHIND, behind=True)
+    _rpr_shared_checkout(RPR_SHARED_BEHIND, "behind")
 
 
 def _build_shared_now():
-    _rpr_shared_checkout(RPR_SHARED_NOW, behind=False)
+    _rpr_shared_checkout(RPR_SHARED_NOW, "now")
+
+
+def _build_shared_ahead():
+    _rpr_shared_checkout(RPR_SHARED_AHEAD, "ahead")
+
+
+def _build_shared_diverged():
+    _rpr_shared_checkout(RPR_SHARED_DIVERGED, "diverged")
 
 
 lazy_fixture([RPR_SHARED_GUARD], _build_shared_behind)
 lazy_fixture([RPR_SHARED_NOW_GUARD], _build_shared_now)
-add("records-page-ready: a read that fails in a merge tool behind origin/main names that cause and the fix",
+lazy_fixture([RPR_SHARED_AHEAD_GUARD], _build_shared_ahead)
+lazy_fixture([RPR_SHARED_DIVERGED_GUARD], _build_shared_diverged)
+add("records-page-ready: a read that fails in a merge tool behind origin/main names that cause and the reinstall",
     "deny", rule=RPR_RULE, tool="Bash", cwd=RPR_REPO, env_path=_rpr_env(GHREADY_STALE), config=MERGECFG,
     carries=RPR_SHARED_CAUSE, lacks=RPR_SHARED_LACKS, guard=RPR_SHARED_GUARD, command="gh pr ready 12")
+add("records-page-ready: a merge tool behind origin/main gets no remedy that writes in the shared checkout",
+    "deny", rule=RPR_RULE, tool="Bash", cwd=RPR_REPO, env_path=_rpr_env(GHREADY_STALE), config=MERGECFG,
+    carries=("behind origin/main",), lacks=RPR_SHARED_WRITE, guard=RPR_SHARED_GUARD, command="gh pr ready 12")
+add("records-page-ready: a read that fails in a merge tool ahead of origin/main names no stale cause",
+    "deny", rule=RPR_RULE, tool="Bash", cwd=RPR_REPO, env_path=_rpr_env(GHREADY_STALE), config=MERGECFG,
+    carries=("unknown",), lacks=RPR_SHARED_NO_STALE, guard=RPR_SHARED_AHEAD_GUARD, command="gh pr ready 12")
+add("records-page-ready: a read that fails in a merge tool diverged from origin/main names no stale cause",
+    "deny", rule=RPR_RULE, tool="Bash", cwd=RPR_REPO, env_path=_rpr_env(GHREADY_STALE), config=MERGECFG,
+    carries=("unknown",), lacks=RPR_SHARED_NO_STALE, guard=RPR_SHARED_DIVERGED_GUARD, command="gh pr ready 12")
 add("records-page-ready: a read that fails in a merge tool at origin/main keeps the retry remedy",
     "deny", rule=RPR_RULE, tool="Bash", cwd=RPR_REPO, env_path=_rpr_env(GHREADY_STALE), config=MERGECFG,
     carries=("retry when the read works",), lacks=("behind origin/main",), guard=RPR_SHARED_NOW_GUARD,

@@ -48,6 +48,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tokenize
 import unittest
 from datetime import datetime, timedelta, timezone
 
@@ -353,21 +354,26 @@ HIDE_DRIVER = ("import runpy, sys\n"
                "runpy.run_path(hook, run_name='__main__')\n")
 
 
-def ov_type(cfg, prompt, session=OV_SESSION, hide=()):
+def ov_type(cfg, prompt, session=OV_SESSION, hide=(), transcript=None, remote=None):
     """The owner types `prompt`. Returns the finished child, or None when it timed out. `hide` names modules the child
-    cannot import."""
+    cannot import. `transcript` is the payload's transcript_path (no key when None); `remote` is the child's
+    CLAUDE_CODE_REMOTE_SESSION_ID (unset when None)."""
     env = dict(os.environ)
     for name in ("PYTHONUTF8", "PYTHONIOENCODING"):
         env.pop(name, None)
     env.update(CLAUDE_CONFIG_DIR=cfg, HOME=cfg, USERPROFILE=cfg, LOCAL_TIME_NOW=OV_NOW.isoformat())
     env.pop(REMOTE_ENV, None)  # a cloud session's variable reaches a case only when the case sets it
+    if remote is not None:
+        env[REMOTE_ENV] = remote
     # No model in these cases: the judge runs `claude` from PATH, so an empty PATH makes a plain Opus ask fail
     # closed. The key is matched without case, because Windows keeps `Path` and a second key would race it.
     for name in [key for key in env if key.upper() == "PATH"]:
         del env[name]
     env["PATH"] = NO_MODEL_PATH
-    payload = json.dumps({"hook_event_name": "UserPromptSubmit", "session_id": session,
-                          "prompt": prompt, "cwd": HERE})
+    payload = {"hook_event_name": "UserPromptSubmit", "session_id": session, "prompt": prompt, "cwd": HERE}
+    if transcript is not None:
+        payload["transcript_path"] = transcript
+    payload = json.dumps(payload)
     command = [sys.executable, MODULE_PATH]
     if hide:
         command = [sys.executable, "-c", HIDE_DRIVER, os.path.dirname(MODULE_PATH), MODULE_PATH] + list(hide)
@@ -593,12 +599,16 @@ OV_PROSE_GRANTS = [
     ("a message of about 20,000 characters, `override 2h` on its last line",
      "The review notes are long. " * 740 + "\noverride 2h", "timed", timedelta(hours=2)),
 ]
-# A word that is not the whole line grants nothing, and neither does a line inside quoted or pasted text. Each case
-# reads the hook's exit before its files, so a crash cannot pass as no grant.
+# A word that is not the whole line grants nothing, and neither does a line inside quoted, pasted or code text: a
+# backtick fence, a tilde fence, or an indented line (markdown's code block). Each case reads the hook's exit before
+# its files, so a crash cannot pass as no grant. The indented line sits in a message: a whole prompt that starts with
+# spaces is the first-word form, which the leading-whitespace case above grants.
 OV_PROSE_NO_GRANT = [
     ("a sentence that mentions the word", "the override didn't work"),
     ("`override 4h` in the middle of a line", "Earlier you said override 4h, so do it"),
     ("a line inside a fenced block", "Run this:\n```\noverride 4h\n```"),
+    ("a line inside a tilde fence", "~~~\noverride 4h\n~~~"),
+    ("an indented line in a message", "Run this:\n    override 4h\nthen tell me."),
     ("a line inside a pasted block",
      'Here is the log:\n<pasted_content index="1">\noverride 4h\n</pasted_content>\nplease look'),
 ]
@@ -623,6 +633,78 @@ def case_override_prose_mention_grants_nothing():
               "rc=%s stderr %r" % (proc and proc.returncode, proc and proc.stderr.strip()[-120:]))
         check("override: prose control, %s: grants nothing" % name, not ov_pass_files(cfg),
               "files %r; got %r" % (ov_pass_files(cfg), ov_pass(cfg)))
+
+
+# A LINE IN A SEED BRIEF (decision owner-override). A cloud session's first owner turn is the seed brief its coordinator
+# wrote, so no word of it is the owner's. An override line inside it grants nothing: no file is written, and no agent's
+# call lifts. The control is the owner's own second turn in the same cloud session, which grants.
+OV_SEED_BRIEFS = [
+    ("a seed brief with `Override: none` on a later line", "Task: fix the parser\nOverride: none"),
+    ("a seed brief with `override 2h` under a heading line", "Owner ruling:\noverride 2h\nDo the rest."),
+]
+OV_SEED_REMOTE = "cse_seed0001"
+
+
+def case_override_line_in_a_seed_brief_grants_nothing():
+    override, _ = hooks_modules()
+    cfg = ov_cfg()
+    prompt = "The build is red.\noverride 2h\nTell me when it is green."
+    path = transcript_file([owner_turn("set up the lane"), owner_turn(prompt)])
+    proc = ov_type(cfg, prompt, transcript=path, remote=OV_SEED_REMOTE)
+    check("override: seed control, the owner's second turn in a cloud session: the hook exits 0",
+          proc is not None and proc.returncode == 0,
+          "rc=%s stderr %r" % (proc and proc.returncode, proc and proc.stderr.strip()[-120:]))
+    check("override: seed control, a prose override line in the owner's second turn grants a 2-hour override",
+          ends_after(ov_pass(cfg), "timed", timedelta(hours=2)),
+          "got %r; files %r" % (ov_pass(cfg), ov_pass_files(cfg)))
+    for name, brief in OV_SEED_BRIEFS:
+        cfg = ov_cfg()
+        path = transcript_file([owner_turn(brief)])  # the brief is the only owner turn: the seed prompt
+        proc = ov_type(cfg, brief, transcript=path, remote=OV_SEED_REMOTE)
+        check("override: seed brief, %s: the hook exits 0" % name, proc is not None and proc.returncode == 0,
+              "rc=%s stderr %r" % (proc and proc.returncode, proc and proc.stderr.strip()[-120:]))
+        check("override: seed brief, %s: grants no override file" % name, not ov_pass_files(cfg),
+              "files %r; got %r" % (ov_pass_files(cfg), ov_pass(cfg)))
+        with config_dir_env(cfg):
+            agent_lift = override.take(OV_SESSION, "agent-1", OV_NOW)
+        check("override: seed brief, %s: take() with an agent id lifts nothing" % name, not lifted(agent_lift),
+              "take returned %r" % (agent_lift,))
+
+
+# RULING CITES IN COMMENTS. A comment that cites the owner's ruling gives its date and time, so a reader can find the
+# ruling. The language's own tokenizer reads the comments, so the same words inside a string are no cite.
+RULING_CITE = re.compile(r"owner ruling\b")
+RULING_TIMED = re.compile(r"owner ruling, \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CST|CDT)")
+
+
+def untimed_ruling_cites(source):
+    """The line numbers of the comments in `source` that cite an owner ruling with no date and time after it."""
+    lines = []
+    for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+        if tok.type == tokenize.COMMENT:
+            for cite in RULING_CITE.finditer(tok.string):
+                if not RULING_TIMED.match(tok.string, cite.start()):
+                    lines.append(tok.start[0])
+    return lines
+
+
+def case_ruling_cites_carry_their_time():
+    edges = [
+        ("a timed cite after code is no problem", "x = 1  # owner ruling, 2026-11-17 09:15 CST: keep it\n", []),
+        ("an untimed cite in a comment is a problem", "x = 1\n# owner ruling, 2026-11-17: keep it\n", [2]),
+        ("the words inside a string are no comment", 'MSG = "owner ruling, 2026-11-17: keep it"\n', []),
+        ("a comment opener inside a string starts no comment", 's = "# owner ruling, 2026-11-17: keep it"\n', []),
+        ("the words in a multi-line string are no comment", 'S = """\nowner ruling, 2026-11-17: keep it\n"""\n', []),
+        ("a lone quote in a comment hides no cite", "# Don't drop it (owner ruling, 2026-11-17: keep it)\n", [1]),
+    ]
+    for name, source, want in edges:
+        got = untimed_ruling_cites(source)
+        check("ruling cites: scanner, %s" % name, got == want, "want lines %r, got %r" % (want, got))
+    for path in (os.path.join(HERE, "override.py"), os.path.abspath(__file__)):
+        with open(path, encoding="utf-8") as handle:
+            got = untimed_ruling_cites(handle.read())
+        check("ruling cites: %s gives each owner ruling its date and time" % os.path.basename(path), not got,
+              "comment lines with an untimed cite: %r" % (got,))
 
 
 def case_override_reason_goes_through_the_log_writer():
@@ -2779,6 +2861,8 @@ def main():
         case_override_not_the_first_word()
         case_override_line_in_prose()
         case_override_prose_mention_grants_nothing()
+        case_override_line_in_a_seed_brief_grants_nothing()
+        case_ruling_cites_carry_their_time()
         case_override_corrupt_file_replaced()
         case_override_session_id_stays_inside()
         case_override_fail_open()
