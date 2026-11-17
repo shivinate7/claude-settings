@@ -8,8 +8,8 @@
   "blockedBy": [],
   "why": "Owner report, 09:43 CST Nov 17 (typed in triage 9 chat): item 929 showed \"This item has no number, so it cannot be answered. Ask the session to fix this item.\" Cause read by triage 9 at 09:43 CST: items 928 and 929 were written with n as text (\"929\"), and the page needs a number (page.html problem(), typeof it.n === number). Triage 9 wrote both. Data fixed at 09:44 CST (items 928 v2, 929 v9). The owner believes a draft PR with the fix exists: triage searched PRs by words at 09:44 CST and found none for this; unmeasured beyond that search.",
   "source": "Owner chat 09:43 CST Nov 17; triage 9 read of page.html and the item docs. Searched steps by words and PRs by search at 09:44 CST: no like step or PR found.",
-  "note": "Review. Draft PR #3618 (head 446e1c093ff4, base 26a4268b5200, 17 files, +198/-29; REST read 16:27Z by triage 9, again by triage 10). Builder: red 39 failed on old code (11bc49267), green at 446e1c093; 14 guard families run. NOT run: hooks/mutate_guard.py and full test_guard (CI runs both). Added a str_replace-on-n refusal the brief did not name. Round 1 reviewer started by triage 10 (roles-review-cap-three). Merge only through the merge tool, then merge/install_from_main.sh.",
-  "updatedAt": "2026-11-17T10:28:00-06:00",
+  "note": "Review done, CI running. PR #3618 now head 9811f9a7a, marked ready 10:42 CST by triage 10 so the draft-skipped checks run. Round 1 FAIL (posted refusal did not name the item); builder fixed it (red fd952100d, fix 9811f9a7a); fix check PASS (sonnet), so review ends (roles-review-cap-three). Added note docs/notes/item-n-page-url-gate.md (n check inherits the strict page-url and cwd gate). Merge only after checks-guard, checks-mutate-guard and all-jobs-passed are green, through the merge tool; then merge/install_from_main.sh. Nit left: comment at hooks/question_form.py:1867 says guard.py prints N_REASON, now n_reason(matched).",
+  "updatedAt": "2026-11-17T10:42:00-06:00",
   "order": 243,
   "pr": 3618
 }
