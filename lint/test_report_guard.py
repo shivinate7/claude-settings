@@ -273,11 +273,13 @@ def run_config_report(hook, env=None):
 
 # The one home of the landing-turn drive: one human message, one Bash call (a git write unless the
 # caller names another command), then the reply, run through main() as the Stop hook.
-def landed_run(folder, reply, command="git commit -m x"):
+def landed_run(folder, reply, command="git commit -m x", cwd=None):
     records = [human("do the task"), tool_use_msg("Bash", {"command": command}), tool_result_msg(),
                assistant_text(reply)]
     path = write_transcript(records, folder)
     hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
+    if cwd is not None:  # the repo the hook reads its waiting page from (the Pick guard)
+        hook["cwd"] = cwd
     return run_guard(REPORT_GUARD, hook)
 
 
@@ -904,9 +906,13 @@ class PlainFormTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
         self.addCleanup(self.tmp.cleanup)
+        # A repo with no waiting page. The Pick guard reads the page from the hook's cwd, so a question case names
+        # this repo, never the checkout the tests run in.
+        self.bare = os.path.join(self.tmp.name, "bare")
+        os.makedirs(os.path.join(self.bare, ".git"))
 
-    def verdict(self, reply):
-        run = landed_run(self.tmp.name, reply)
+    def verdict(self, reply, cwd=None):
+        run = landed_run(self.tmp.name, reply, cwd=cwd)
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
 
@@ -921,15 +927,13 @@ class PlainFormTests(unittest.TestCase):
         for needle in needles:
             self.assertIn(needle, out["reason"])
 
-    def assert_allowed(self, reply):
-        self.assertIsNone(self.verdict(reply), "a false block for: " + reply)
+    def assert_allowed(self, reply, cwd=None):
+        self.assertIsNone(self.verdict(reply, cwd), "a false block for: " + reply)
 
-    def assert_no_contradiction_block(self, reply):
-        # Pick guard and question-departs can block a bare question. This case asks only that the contradiction
-        # check does not block it.
-        out = self.verdict(reply)
-        if out is not None:
-            self.assertNotIn("output-bring-decisions-as-question", out["reason"], "a contradiction with a question: " + reply)
+    def assert_no_block(self, reply, cwd=None):
+        # A systemMessage note is no block. Only a decision stops the reply.
+        out = self.verdict(reply, cwd) or {}
+        self.assertNotIn("decision", out, "a block for: %s: %s" % (reply, out.get("reason")))
 
     def test_pf_red_sample_trips_all_three(self):
         self.assert_blocked(self.report(self.SAMPLE), "'#2015'", "style-time-central-24h",
@@ -1002,18 +1006,71 @@ class PlainFormTests(unittest.TestCase):
                 self.assert_blocked(self.report(deviations), "output-bring-decisions-as-question")
 
     def test_pf_allowed_contradiction_with_a_question(self):
+        # A contradiction with an Input Needed question passes with no block at all. The run names a repo with no
+        # waiting page, so the Pick guard can only note the question, never block it.
         rows = [
             "Which row stands, the ask or the deny?",
-            "Pick one:\n> A: ask (my pick)\n> B: deny",
+            "Pick one:\n> A: ask (my pick)\n> B: deny\n> Departs from: main keeps both rows as written — the owner "
+            "picks which one stands",
         ]
         for needed in rows:
             with self.subTest(needed=needed):
-                self.assert_no_contradiction_block(self.report("Contradiction: the two rows disagree.", needed))
+                self.assert_no_block(self.report("Contradiction: the two rows disagree.", needed), self.bare)
 
     def test_pf_allowed_no_contradiction_words(self):
         self.assert_allowed(self.report("none"))
         # The word outside Deviations is no claim.
         self.assert_allowed("Contradiction: noted in prose above.\n\n" + self.report("none"))
+
+    def test_pf_red_bare_id_forms_block(self):
+        # PR#N and lane#N are ids with no gloss, and so is a #N with a hyphen after it. "Rows in #N" blocks too:
+        # "in" passes only for a built-in ref. "needs review" after the id says nothing about it.
+        rows = [
+            "PR#2015 is open.",
+            "lane#2015 is open.",
+            "#2015-check-tail filter is open.",
+            "Rows in #2015 disagree.",
+            "Blocked on #2015, needs review.",
+        ]
+        for prose in rows:
+            with self.subTest(prose=prose):
+                self.assert_blocked(prose + "\n\n" + self.DONE + "> **Next** none", "2015", "speak-cite-id-plus-gloss")
+
+    def test_pf_red_utc_forms_block(self):
+        rows = ["Logged 20:34 Z.", "It ran at 20:34 utc."]
+        for prose in rows:
+            with self.subTest(prose=prose):
+                self.assert_blocked(prose + "\n\n" + self.DONE + "> **Next** none", "20:34", "style-time-central-24h")
+
+    def test_pf_red_contradiction_forms_block(self):
+        rows = [
+            "Contradiction - the two rows disagree.",
+            "Contradiction — the two rows disagree.",
+            "The builder chose neither row.",
+            "Choose neither row.",
+        ]
+        for deviations in rows:
+            with self.subTest(deviations=deviations):
+                self.assert_blocked(self.report(deviations), "output-bring-decisions-as-question")
+
+    def test_pf_allowed_pr_ref_lists_and_labels(self):
+        # A #N after PR or PRs, or in a list of PR numbers, names a PR. A colon after PR is no break in that.
+        rows = [
+            "Merged PRs #2015, #2016.",
+            "Merged PR #2015 and #2016.",
+            "PR: #2015 merged.",
+        ]
+        for prose in rows:
+            with self.subTest(prose=prose):
+                self.assert_allowed(prose + "\n\n" + self.DONE + "> **Next** none")
+
+    def test_pf_allowed_resolved_contradiction(self):
+        # A contradiction whose choice is already made leaves no owner question to ask.
+        self.assert_allowed(self.report("Contradiction: resolved to ask per the rule."))
+
+    def test_pf_allowed_lone_quote_in_code_before_gloss(self):
+        # A lone quote inside a code span does not end the span, so the gloss after the span still counts.
+        self.assert_allowed("D12 `<75 x's>`, short titles for records is set.\n\n" + self.DONE + "> **Next** none")
 
 
 class DoneNamesModelsTests(unittest.TestCase):
@@ -1466,7 +1523,7 @@ class NoResendTests(unittest.TestCase):
 
 
 class RewriteAfterMissingReportTests(unittest.TestCase):
-    """The rewrite after a missing-report block is checked once for model names and the Unstarted line."""
+    """The rewrite after a missing-report block is checked once for model names, the Unstarted line and the plain-form faults."""
 
     BUILDER = {"subagent_type": "builder", "prompt": "build it"}
     GOOD = "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none"
@@ -1521,6 +1578,25 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.missing_report_block()
         self.assertIsNone(self.stop(self.GOOD, True))
         self.assertIsNone(self.stop(self.GOOD, True))
+
+    def test_rw_red_rewrite_runs_the_plain_form_checks(self):
+        # The rewrite is the report the owner reads, so the plain-form checks apply to it as they do to a first report.
+        contradiction = ("> **Done** BUILT the guard, PR #5 (builder sonnet)\n"
+                         "> **Deviations** Contradiction: the two rows disagree.\n"
+                         "> **Input Needed** none\n> **Next** Unstarted: none")
+        rows = [
+            ("Tracked as #2015 for now.\n\n" + self.GOOD, "2015", "speak-cite-id-plus-gloss"),
+            ("Logged 20:34 Z.\n\n" + self.GOOD, "20:34", "style-time-central-24h"),
+            (contradiction, "Contradiction", "output-bring-decisions-as-question"),
+        ]
+        for reply, needle, rule in rows:
+            with self.subTest(reply=reply):
+                self.missing_report_block()
+                out = self.stop(reply, True)
+                self.assertIsNotNone(out, "the rewrite passed with no block: " + reply)
+                self.assertEqual(out["decision"], "block")
+                self.assertIn(needle, out["reason"])
+                self.assertIn(rule, out["reason"])
 
     def earlier_round_records(self, reply):
         """A turn whose reviewer ran before the owner's second message, on its file pin (haiku), and whose
