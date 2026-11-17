@@ -130,7 +130,7 @@ Text: `HAND_OFF_NO_CITE`, `HAND_OFF_NO_DATE`, two inline forms, and `HAND_OFF_TA
 Text: `refusal_reason`. Decision `refusals-reach-the-owner` (a refused tool reaches the owner).
 
 - Add an Input Needed line "allow `<tool_name>`?" for each tool. Put the tool's name in place of `<tool_name>`.
-- Add a line in the repo's debt notes file (`notes.md`) that names the tool.
+- Add one file in the repo's notes folder (`docs/notes/` here) that names the tool.
 - Or, if the refusal was right, write "`<tool_name>`: refusal was right" on one line, with the tool's full name in place of the placeholder.
 - A built-in tool, such as Edit or Bash, goes in backticks. An MCP tool goes by its full name.
 
