@@ -46,9 +46,9 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `shared-trees-reverify-after-incident` | Re-verify every edit after an incident. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-delete-names-absolute-path` | A delete names its target as an absolute or quoted-variable path, never after a cd. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-main-only-by-pr` | Move main only by pull request, merged only when I name the act, or under a repo grant. | [`CLAUDE.md`](../CLAUDE.md) |
-| `git-never-merge-failing-ci` | Never merge a PR whose own run is red, or onto a red main, except its revert. | [`CLAUDE.md`](../CLAUDE.md) |
+| `git-never-merge-failing-ci` | Never merge a PR whose own run is red, or onto a red main, except its revert or a fix. | [`CLAUDE.md`](../CLAUDE.md) |
 | `gh-write-cloud` | In a cloud session, a `gh` pr, issue or `gh api` write is refused: write through the GitHub MCP tools or the merge tool. | [`CLAUDE.md`](../CLAUDE.md) |
-| `git-red-main-reverts` | While main's newest finished run is red, only the revert of the blamed commit merges, with `--base-red-ok "<reason>"`. | [`CLAUDE.md`](../CLAUDE.md) |
+| `git-red-main-reverts` | While main's newest finished run is red, only a revert of the blamed commit or a fix merges (owner, 2026-11-17 09:20 CST). | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-ci-wait-checks-in` | A session that waits on CI sets a one-time check-in when it starts to wait, and again after each red job, each wider apart, never past 55 minutes. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-ci-done-comment-wakes` | A run that ends red posts one PR comment, which wakes the session that watches the PR (decision `ci-wait-reads-run-status`). | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-never-discard-output` | Keep git write output. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -224,7 +224,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `mutation-ci-report-and-replay` | Owner, 2026-11-05 07:41 CST (waiting-page item 163, Cockpit item `mutation-ci-job`, pick d): "Report only, plus known-bug replay". | [`docs/decisions/mutation-ci-report-and-replay.md`](../docs/decisions/mutation-ci-report-and-replay.md) |
 | `mutation-report-scores-suites` | `hooks/mutate_guard.py --report` scores the suites of other verdict-deciding files with mechanical mutants, on demand. | [`docs/decisions/mutation-report-scores-suites.md`](../docs/decisions/mutation-report-scores-suites.md) |
 | `no-merge-during-batch-ci` | State: live until the cutover (decision `all-repos-switch-together`). | [`docs/decisions/no-merge-during-batch-ci.md`](../docs/decisions/no-merge-during-batch-ci.md) |
-| `no-merge-onto-red-main` | Owner ruling Q4 g (how a revert merges), 2026-11-12 09:46 CST, relayed by the coordinator at 09:50 CST: a revert is an ordinary lane PR, merged with `--base-red-ok`. | [`docs/decisions/no-merge-onto-red-main.md`](../docs/decisions/no-merge-onto-red-main.md) |
+| `no-merge-onto-red-main` | Owner ruling 2026-11-17 09:20 CST (approved option, relayed by the consultant): "main allows only a revert onto red main" becomes "a fix also merges onto red main when it touches the failing test or its code, and its own run is green on the red test." The same day's case was a flaky test file the breaking merge did not touch. | [`docs/decisions/no-merge-onto-red-main.md`](../docs/decisions/no-merge-onto-red-main.md) |
 | `notes-merge-union` | Owner pick, waiting-page item 904, pick a (2026-11-15 19:13 CST): the old notes file, `docs/debts/notes.md`, takes deletes only. | [`docs/decisions/notes-merge-union.md`](../docs/decisions/notes-merge-union.md) |
 | `octopus-push-refused` | Rule `octopus-push` in `hooks/guard.py` refuses a `git push` whose new commits hold a merge with more than two parents. | [`docs/decisions/octopus-push-refused.md`](../docs/decisions/octopus-push-refused.md) |
 | `one-layout-every-repo` | Every repo keeps each kind of file in the same place. | [`docs/decisions/one-layout-every-repo.md`](../docs/decisions/one-layout-every-repo.md) |
