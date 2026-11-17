@@ -5037,6 +5037,38 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         self.assertIn("inline code span", refusal,
                       "the refusal text does not name the inline code span route: %r" % refusal)
 
+    def test_an_red_owner_answer_claims_block_under_the_new_exemptions(self):
+        # Red on the guard's newer exemptions: a first-person clause, "claim", a modal and its own printed name.
+        # Each row claims that the owner or an item was answered and cites no source, so each must block.
+        rows = [
+            # Catches: a first-person clause ("I think") exempts an unsourced owner answer.
+            "I think the owner answered it.",
+            # Catches: a first-person clause ("I believe") exempts an unsourced answer by another person.
+            "I believe they answered it.",
+            # Catches: a first-person clause ("I was told") exempts an unsourced owner answer.
+            "I was told the owner answered it.",
+            # Catches: a first-person act with an object exempts a claim that Claude answered for the owner.
+            "I answered the item for him.",
+            # Catches: the word "claim" in the clause exempts an answer that is stated as a claim.
+            "We claim he answered.",
+            # Catches: the word "claims" in the clause exempts an unsourced owner answer.
+            "Claude claims the owner answered it.",
+            # Catches: a modal in the clause exempts a past answer stated as fact.
+            "The owner must have answered it already.",
+            # Catches: a modal in the clause exempts an unsourced answer, though a later clause closes the item.
+            "The owner should have answered it, so the item is closed.",
+            # Catches: the guard's printed name exempts a line that claims the owner answered questions.
+            "The owner answered guard questions.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_an_red_answered_as_a_modifier_passes(self):
+        # Must pass: "answered" here modifies "page item", so the line claims nothing. A rule about a future item.
+        # Catches: an adjective "answered" before a noun is read as a claim, so a rule about a page item is refused.
+        self.assert_allowed("- When an answered page item isn't on main, check open PRs first, then start a builder.")
+
     # Green: these pass before the verdict exists too. Each guards against a false alarm.
 
     def test_an_green_each_source_cites_the_word(self):
