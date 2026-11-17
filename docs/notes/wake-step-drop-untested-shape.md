@@ -1,0 +1,1 @@
+- wake-step-drop-untested-shape: `lint/workflow_steps.py` and `lint/test_windows_split.py` drop the red-job wake step silently, so `bin/ci-job`'s failure()-only branch never fires on the real step, and no test pins the drop. Found in PR 2860. Decision: ci-wait-reads-run-status.
