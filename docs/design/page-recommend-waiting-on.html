@@ -1,0 +1,1240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Page recommend and waiting on</title>
+<style>
+/* Harness only: the toolbar and frames around the drawn screen. The screen itself is page.html's own CSS. */
+:root { --h-bg: #eef0f3; --h-ink: #161b22; --h-muted: #565f6b; --h-line: #cfd5dd; --h-btn: #ffffff; --h-on: #161b22; --h-on-ink: #ffffff; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; } }
+:root[data-theme="dark"] { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.sample { background: #5b21b6; color: #fff; font-weight: 700; text-align: center; padding: 8px 16px; }
+.tool { display: grid; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--h-line); }
+.tool h1 { margin: 0; font-size: 17px; }
+.tool .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tool .row > span { color: var(--h-muted); font-size: 13px; min-width: 52px; }
+.tool button { min-height: 32px; padding: 4px 12px; border-radius: 8px; border: 1px solid var(--h-line); background: var(--h-btn); color: var(--h-ink); font: inherit; font-size: 13.5px; cursor: pointer; }
+.tool button[aria-pressed="true"] { background: var(--h-on); color: var(--h-on-ink); border-color: var(--h-on); }
+.tool button.hide { border-style: dashed; color: var(--h-muted); }
+.tool p { margin: 0; font-size: 13.5px; color: var(--h-muted); max-width: 90ch; overflow-wrap: anywhere; }
+#stage { padding: 16px; }
+.st[data-state] { display: none; gap: 16px; justify-items: center; }
+.st[data-state].on { display: grid; }
+.st > h2 { margin: 0; font-size: 16px; justify-self: start; }
+.st > p { margin: 0; font-size: 13.5px; color: var(--h-muted); max-width: 90ch; justify-self: start; }
+.frames { display: flex; flex-wrap: wrap; gap: 24px; width: 100%; justify-content: center; align-items: flex-start; }
+.fr { display: grid; gap: 8px; justify-items: center; max-width: 100%; }
+.fr > b { font-size: 13px; color: var(--h-muted); }
+.fw { overflow: hidden; border: 1px solid var(--h-line); border-radius: 8px; background: var(--h-btn); }
+.fw iframe { border: 0; display: block; transform-origin: 0 0; }
+</style>
+</head>
+<body>
+<div class="sample" id="sampleBanner">Sample. The item text comes from waiting-page items 836, 837, 844, 857 and 878. Each Waiting on line, the multi and ranked lists, and every time and answer state here are made up for this mockup.</div>
+<header class="tool">
+  <h1>Waiting page: the Recommended line and the Waiting on line on an open decision</h1>
+  <div class="row" id="rowS"><span>State</span>
+    <button data-s="both">Both lines (pick)</button>
+    <button data-s="bothtop">Both lines under the title</button>
+    <button data-s="holds">Both lines with a holds line</button>
+    <button data-s="widens">Widening option not recommended</button>
+    <button data-s="widenscut">Widening, label cut at 28</button>
+    <button data-s="multi">Multi</button>
+    <button data-s="ranked">Ranked</button>
+    <button data-s="oneline">Waiting on only</button>
+    <button data-s="old">Old item: neither</button>
+    <button data-s="oldsay">Old item: says none</button>
+    <button data-s="today">Today, for comparison</button>
+  </div>
+  <div class="row" id="rowH"><span>Hide</span>
+    <button class="hide" data-hide="bothtop">Hide "under the title"</button>
+    <button class="hide" data-hide="widenscut">Hide "label cut at 28"</button>
+    <button class="hide" data-hide="oldsay">Hide "says none"</button>
+  </div>
+  <div class="row" id="rowW"><span>Size</span>
+    <button data-w="all">All three</button><button data-w="360">Phone 360</button><button data-w="390">Phone 390</button><button data-w="430">Phone 430</button>
+  </div>
+  <div class="row" id="rowT"><span>Theme</span>
+    <button data-t="light">Light</button><button data-t="dark">Dark</button><button data-t="both">Both</button>
+    <button data-lab="1" id="labBtn">Labels on</button>
+  </div>
+  <p>Deep links: <code>#s=both|bothtop|holds|widens|widenscut|multi|ranked|oneline|old|oldsay|today</code>, <code>&amp;w=all|360|390|430</code>, <code>&amp;t=light|dark|both</code>, <code>&amp;lab=off</code>, <code>&amp;hide=bothtop,widenscut,oldsay</code>. Notes: <code>page-recommend-waiting-on-notes.md</code>. Screen: <code>skills/waiting-page/page.html</code> at 066cc6d3 (branch pr3479), <code>buildCard</code> and <code>optCard</code>; its CSS is copied whole.</p>
+</header>
+<main id="stage">
+  <section class="st" data-state="both" id="stBoth"><h2>Both lines (pick): item 836</h2><p>Waiting on sits under the title, out of the clamped context. Recommended sits right above the options, with the why. The option card keeps only the star.</p><div class="frames"></div></section>
+  <section class="st" data-state="bothtop" id="stBothTop"><h2>Both lines under the title: item 836</h2><p>The other place: both lines together at the top, before the context. The options start further down.</p><div class="frames"></div></section>
+  <section class="st" data-state="holds" id="stHolds"><h2>Both lines with a holds line: item 878</h2><p>An item with <code>holds</code> shows the red holds line and the Waiting on line. They can say the same thing.</p><div class="frames"></div></section>
+  <section class="st" data-state="widens" id="stWidens"><h2>Widening option not recommended: item 837</h2><p>C is recommended. A widens and keeps its warning. The line shows C's whole label; the line stops at three lines and the card holds the rest.</p><div class="frames"></div></section>
+  <section class="st" data-state="widenscut" id="stWidensCut"><h2>Widening, label cut at 28: item 837</h2><p>The other label length: the page's own <code>optName</code> cut, as the ready line uses.</p><div class="frames"></div></section>
+  <section class="st" data-state="multi" id="stMulti"><h2>Multi: item 837 drawn as multi</h2><p>Made up from 837: <code>multi: true</code>, <code>recommended: ["c", "d"]</code>. One row per recommended option, in option order.</p><div class="frames"></div></section>
+  <section class="st" data-state="ranked" id="stRanked"><h2>Ranked: item 837 drawn as ranked</h2><p>Made up from 837: <code>ranked: true</code>, <code>recommended: ["c", "d", "b"]</code>. Rows in the recommended order, each with its place.</p><div class="frames"></div></section>
+  <section class="st" data-state="oneline" id="stOneLine"><h2>Waiting on only: item 844</h2><p>844 stores <code>recommended: true</code> on option B, not on the item. The page does not read that field, so no Recommended line and no star. The Waiting on line still shows.</p><div class="frames"></div></section>
+  <section class="st" data-state="old" id="stOld"><h2>Old item, neither line (pick): item 857</h2><p>No <code>recommended</code> and no Waiting on line. The page draws neither, as today. Its <code>why</code> is not a reason for an option, so it stays unshown, as today.</p><div class="frames"></div></section>
+  <section class="st" data-state="oldsay" id="stOldSay"><h2>Old item, says none: item 857</h2><p>The other way: two muted lines say the item states no recommendation and no Waiting on.</p><div class="frames"></div></section>
+  <section class="st" data-state="today" id="stToday"><h2>Today, for comparison: item 836</h2><p>The why sits only inside option B's card, at the bottom, under the star. What is stopped is somewhere in the context, clamped to three lines.</p><div class="frames"></div></section>
+</main>
+
+<script type="text/plain" id="pagecss">
+/* page.html lines 8-954 at 066cc6d3 (branch pr3479), unchanged. */
+/* Layout: one stable list in three tiers and a last section for picks that stand. A slim bar in the
+   repo's colour and a tinted ground carry the repo. Nothing on the page moves when an answer is picked or sent. */
+:root {
+  /* Neutrals and state colours. The script replaces the --r-* values when meta/page names a brand. */
+  --surface: #ffffff; --ink: #161b22; --muted: #565f6b; --faint: #5b6470; --line: #d9dee5; --chip: #eef1f4;
+  --holds: var(--r-holds-l, #b3261e); --on-holds: var(--r-on-holds-l, #ffffff); --due: var(--r-due-l, #8a5300); --due-soft: #fbefd9; --calm: #56606e;
+  --good: var(--r-good-l, #1d7445); --good-soft: #e0f2e7; --gold-soft: #fbf3d6; --gold-ink: #6b5000;
+  --ground: var(--r-ground-l, #f3f4f6); --hdr: var(--r-hdr-l, #4b5a6b); --on-hdr: var(--r-on-hdr-l, #ffffff);
+  --acc: var(--r-ink-l, #4b5a6b); --on-acc: #ffffff; --acc-soft: var(--r-soft-l, #eceff3);
+  --body: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --wm: system-ui, sans-serif; --wmw: 700; --wmls: -0.01em;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35); color-scheme: dark } }
+:root[data-theme="dark"] {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35); color-scheme: dark }
+
+* { box-sizing: border-box; }
+/* The fixed send bar covers the bottom of the viewport, so a focused or scrolled-to element stops above it. */
+html { scroll-padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 16px/1.55 var(--body); padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--hdr); }
+button, input, textarea { font: inherit; color: inherit; }
+a { color: var(--acc); }
+:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.in { max-width: 1160px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+
+/* Repo bar: the repo's colour at full strength, one slim sticky band. */
+.hdr { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 7; background: var(--hdr); color: var(--on-hdr); box-shadow: 0 1px 0 color-mix(in srgb, var(--ink) 12%, transparent); }
+.hdr .in { padding-block: 6px; min-height: 44px; display: flex; align-items: center; gap: 12px; }
+.mark { flex: none; width: 28px; height: 28px; border-radius: 7px; background: var(--on-hdr); color: var(--hdr); display: grid; place-items: center; font: 800 15px/1 var(--wm); }
+/* The repo's own icon sits on a tile chosen so most of its drawn pixels stand out (applyIcon). */
+.mark.icon { background: var(--tile, var(--on-hdr)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--on-hdr) 28%, transparent); }
+.mark img { width: 22px; height: 22px; object-fit: contain; display: block; }
+.who { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.who .repo { margin: 0; font: var(--wmw) 18px/1.2 var(--wm); letter-spacing: var(--wmls); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); padding-top: 10px; }
+.tabs a { padding: 8px 14px; border-radius: 8px 8px 0 0; color: var(--muted); text-decoration: none; font-weight: 600; border: 1px solid transparent; border-bottom: none; margin-bottom: -1px; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+.tabs a[aria-selected="true"] { color: var(--ink); background: var(--surface); border-color: var(--line); }
+.tabs .cnt { font: 600 12px/1 var(--mono); color: var(--muted); }
+
+/* State shapes: a tier shows by shape and word, never by colour alone. */
+.g { display: inline-block; flex: none; width: 12px; height: 12px; }
+.g.holds { background: var(--holds); border-radius: 2px; }
+.g.due { width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 12px solid var(--due); }
+.g.calm { border: 2px solid var(--calm); border-radius: 50%; }
+.g.stands { border-radius: 50%; background: var(--gold-ink); }
+.g.done { background: var(--good); border-radius: 50%; position: relative; }
+.g.done::after { content: ""; position: absolute; left: 4px; top: 1.5px; width: 3px; height: 6px; border: solid var(--surface); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+
+/* Main grid: the overview beside the list on wide screens, above it on a phone. */
+.main { padding-block: 18px 40px; display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 28px; align-items: start; }
+.rail { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 60px); display: grid; gap: 16px; align-content: start; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+.ov-prog { display: grid; gap: 8px; }
+.ov-prog .big { font: 700 15px/1.3 var(--body); }
+.ov-prog .big b { font: inherit; font-variant-numeric: normal; color: var(--acc); margin-right: 4px; }
+.ov-prog .sub { min-height: 22px; display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--muted); }
+.ov-prog .sub.none { visibility: hidden; }
+.ov-prog .sw { width: 10px; height: 10px; border-radius: 3px; background: color-mix(in srgb, var(--acc) 55%, transparent); }
+.ov-prog .track { height: 6px; border-radius: 99px; background: var(--chip); overflow: hidden; display: flex; }
+.ov-prog .track i { display: block; height: 100%; }
+.ov-prog .track .s { background: var(--good); }
+.ov-prog .track .r { background: color-mix(in srgb, var(--acc) 55%, transparent); }
+.ov-tier { display: grid; gap: 8px; align-items: start; padding-top: 12px; border-top: 1px solid var(--line); }
+.ov-head { display: flex; align-items: center; gap: 7px; min-height: 32px; color: var(--ink); text-decoration: none; font: 700 16px var(--body); font-variant-numeric: tabular-nums; }
+.ov-head .ct { margin-left: auto; padding-left: 8px; color: var(--muted); font-weight: 600; }
+@media (pointer: coarse) { .ov-head { min-height: 44px; } }
+.chips-n { display: flex; flex-wrap: wrap; gap: 6px; }
+.nchip { width: 48px; height: 32px; padding: 0; border-radius: 8px; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); font: 600 13.5px var(--mono); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.nchip:hover { border-color: var(--acc); }
+.nchip.ready { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
+.nchip.sent { background: var(--good-soft); border-color: transparent; color: var(--good); }
+.nchip.sent::before { content: "\2713"; margin-right: 3px; }
+.nchip.sent:not(.filed)::before { content: "\25CB"; }
+.pairchips { display: inline-flex; flex-wrap: wrap; max-width: 100%; gap: 4px; padding: 4px; border: 1.5px dashed color-mix(in srgb, var(--acc) 60%, var(--line)); border-radius: 12px; }
+.pairchips .nchip { height: 32px; width: 48px; }
+.nchip .nt { display: none; }
+.ov-tier, .chips-n, .pairchips { min-width: 0; }
+.nchip { min-width: 0; overflow: hidden; }
+@media (min-width: 961px) {
+  .chips-n, .pairchips { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+  .chips-n { gap: 4px; }
+  .pairchips { display: flex; }
+  .nchip.sent::before { flex: none; margin-right: 0; }
+  .nchip, .pairchips .nchip { width: 100%; height: 32px; justify-content: flex-start; gap: 8px; padding-inline: 8px; }
+  .nchip .no { flex: none; min-width: 2ch; text-align: end; font-variant-numeric: tabular-nums; }
+  .nchip .nt { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13px var(--body); }
+}
+@media (pointer: coarse) { .nchip, .pairchips .nchip { height: 44px; } }
+@media (max-width: 960px) { .main { grid-template-columns: minmax(0, 1fr); } .main > .rail { position: static; padding: 12px; gap: 10px; } .ov-tier { padding-top: 8px; } }
+
+.list { display: grid; gap: 30px; min-width: 0; grid-column: 2; }
+@media (max-width: 960px) { .list { grid-column: 1; } }
+.tier { display: grid; gap: 12px; scroll-margin-top: 64px; }
+.tier > header { display: flex; align-items: center; }
+.tier > header h2 { font: 700 19px/1.25 var(--body); display: flex; align-items: center; gap: 10px; }
+.tier > header .ct { font: 600 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
+.empty { color: var(--muted); padding: 20px; border: 1px dashed var(--line); border-radius: 12px; background: var(--surface); }
+
+/* Item card */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: clamp(16px, 2.4vw, 24px); display: grid; gap: 14px; align-content: start; scroll-margin-top: 64px; min-width: 0; }
+.card.holds { border-left: 6px solid var(--holds); }
+.card.due { border-left: 6px solid var(--due); }
+.card.answered { background: color-mix(in srgb, var(--good-soft) 45%, var(--surface)); }
+.top { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; font-size: 14px; color: var(--muted); }
+.top .num { font: 600 15px var(--mono); color: var(--acc); }
+.title { font: 700 clamp(19px, 2vw, 22px)/1.3 var(--body); max-width: 40ch; }
+.stake { margin: 0; display: flex; gap: 10px; align-items: baseline; padding: 9px 12px; border-radius: 8px; font-size: 15px; }
+/* The Blocking line is a solid fill, so it reads at full strength next to any repo colour. */
+.stake.holds { background: var(--holds); color: var(--on-holds); font-weight: 600; }
+.stake.holds .g.holds { background: var(--on-holds); }
+.stake.due { background: var(--due-soft); box-shadow: inset 0 0 0 1.5px var(--due); }
+.stake.due b { color: var(--due); }
+.ctx { margin: 0; max-width: 70ch; white-space: pre-line; overflow-wrap: anywhere; }
+.ctx.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.morebtn { justify-self: start; background: none; border: 0; padding: 0; min-height: 32px; color: var(--acc); font-weight: 600; cursor: pointer; font-size: 14.5px; }
+.about { margin: 0; font-size: 14px; color: var(--muted); }
+/* Related items sit together in one frame, with one sentence on how they connect. */
+.bundle { display: grid; gap: 10px; padding: 12px; border: 1.5px solid color-mix(in srgb, var(--acc) 55%, var(--line)); border-radius: 16px; background: var(--acc-soft); scroll-margin-top: 64px; }
+.bundle > header { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; padding: 4px 6px 2px; align-items: start; }
+.bundle > header svg { grid-row: span 2; margin-top: 2px; color: var(--acc); }
+.bundle > header b { font-size: 16px; }
+.bundle > header p { margin: 0; font-size: 15px; max-width: 72ch; }
+.inbundle { font-weight: 600; color: var(--acc); }
+/* The lane the item waits on: the weight and colour of "goes with No. 4". It never holds the owner's answer, so it is no stake line. */
+.onlane { font-weight: 600; color: var(--acc); min-width: 0; overflow-wrap: anywhere; }
+/* A wait on a CI run or a PR extends the lane span: same weight and accent, and its link is the one target in it. */
+.onlane.waits a { display: inline-flex; align-items: center; gap: 2px; min-height: 24px; color: inherit; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1.5px; border-radius: 4px; }
+.onlane.waits a:hover { text-decoration-thickness: 2.5px; }
+.onlane.waits a:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+@media (pointer: coarse) { .onlane.waits a { min-height: 44px; } }
+@media (forced-colors: active) { .onlane.waits a { color: LinkText; } }
+
+/* Options side by side; each card's rows line up so lose sits beside lose. */
+.opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 10px; }
+.opt { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 8px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); cursor: pointer; text-align: left; }
+@supports (grid-template-rows: subgrid) { .opts { grid-auto-rows: auto; } .opt { grid-row: span 4; grid-template-rows: subgrid; } }
+.opt:hover { border-color: var(--faint); }
+.opt input { position: absolute; opacity: 0; pointer-events: none; }
+.opt:has(input:focus-visible) { outline: 2px solid var(--acc); outline-offset: 2px; }
+.opt.sel { border-color: var(--acc); background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--acc); }
+.opt .head { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.key { flex: 0 1 auto; min-width: 26px; max-width: 45%; height: 26px; padding-inline: 6px; box-sizing: border-box; border-radius: 7px; border: 1.5px solid var(--line); display: block; text-align: center; line-height: 23px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 600 13px/23px var(--mono); color: var(--muted); }
+.opt .lab { min-width: 0; overflow-wrap: anywhere; }
+.opt .opic { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 8px; position: relative; cursor: zoom-in; min-height: 44px; }
+.opt .opic .dfitwrap { justify-self: center; }
+.opt .opic .view { display: flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 8px; background: var(--hdr); color: var(--on-hdr); font: 600 14px var(--body); }
+.opts.pics { grid-auto-rows: auto; }
+.opts.pics .opt { grid-template-rows: auto auto auto 1fr auto; }
+@supports (grid-template-rows: subgrid) { .opts.pics .opt { grid-row: span 5; grid-template-rows: subgrid; } }
+.opt .dwarn { margin: 0; font-size: 13.5px; }
+.opt.sel .dfitwrap { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc); }
+.opt.sel .key { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
+.opt .lab { font-weight: 700; line-height: 1.3; padding-top: 2px; }
+.opt .how { margin: 0; font-size: 14.5px; color: var(--muted); }
+.opt .how .optnote { display: block; margin-top: 4px; font-weight: 600; color: var(--ink); }
+.opt .tr { margin: 0; display: grid; gap: 4px; font-size: 14.5px; align-content: start; }
+.opt .tr div { display: grid; grid-template-columns: 18px minmax(0, 1fr); }
+.opt .tr .s { font: 600 15px/1.4 var(--mono); }
+.opt .tr .gain .s { color: var(--good); }
+.opt .tr .lose .s { color: var(--holds); }
+/* What sets an option apart: a bar on the row, a not-equal sign and hidden words. Shape, sign and words carry it; the accent colour only adds. */
+.opt .dif { position: relative; border-left: 3px solid var(--acc); margin-left: -11px; padding-left: 8px; padding-right: 20px; }
+.opt .tr .dif { grid-template-columns: 18px minmax(0, 1fr); }
+.opt .dif > .ne { position: absolute; right: 0; top: 0; }
+.ne { font: 700 15px/1.4 var(--mono); color: var(--acc); }
+.opt .opic.dif { border-left: 0; margin-left: 0; padding: 0; }
+.opt .opic.dif .view { position: relative; }
+.opt .opic.dif .dfitwrap { border-left: 3px solid var(--acc); }
+.opt .opic.dif .view .ne { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--on-hdr); }
+.difkey { margin: 0; display: flex; gap: 8px; align-items: baseline; font-size: 14px; color: var(--muted); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.opt .pick { align-self: end; display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--gold-soft); color: var(--ink); font-size: 14px; }
+.opt .pick b { display: inline-flex; padding-top: 1px; color: var(--gold-ink); }
+.opt .nopick { align-self: end; }
+/* A multi item: the options are checkboxes. The tick box is one fixed square, so a tick moves nothing. */
+.multihint { margin: 0; font-size: 14.5px; color: var(--muted); }
+.tick { flex: none; width: 26px; height: 26px; border-radius: 6px; border: 2px solid var(--faint); background: var(--surface); display: grid; place-items: center; font: 700 14px/1 var(--mono); color: var(--on-acc); }
+.opt.sel .tick { background: var(--acc); border-color: var(--acc); }
+.opt.sel .tick.mark::before { content: ""; width: 6px; height: 12px; border: solid var(--on-acc); border-width: 0 2.5px 2.5px 0; transform: translateY(-1px) rotate(45deg); }
+/* Ranked: the card is a div, and its label stretches over it so a press anywhere ticks it. The rank number sits in the tick box. Up, Down, View and the marked rows sit above the label. */
+.opt.ranked { cursor: default; }
+.opt.ranked > label.head { cursor: pointer; }
+.opt.ranked > label.head::after { content: ""; position: absolute; inset: 0; border-radius: var(--r); z-index: 1; }
+.opt.ranked .rank, .opt.ranked .opic { position: relative; z-index: 2; }
+.opts.ranked .opt { grid-template-rows: auto auto 1fr auto auto; }
+.opts.ranked.pics .opt { grid-template-rows: auto auto auto 1fr auto auto; }
+@supports (grid-template-rows: subgrid) { .opts.ranked .opt { grid-row: span 5; grid-template-rows: subgrid; } .opts.ranked.pics .opt { grid-row: span 6; } }
+.opt .rank { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.opt .rank.gone { visibility: hidden; }
+.btn.mv { position: relative; min-height: 44px; min-width: 44px; padding: 8px 12px; background: var(--surface); color: var(--acc); }
+.btn.mv svg { flex: none; }
+/* At an end of the order the button stays in place and focusable. It is marked off by a dashed border, and the reason shows on hover and focus. */
+.btn.mv[aria-disabled="true"] { border-style: dashed; border-color: var(--faint); color: var(--muted); cursor: default; }
+.btn.mv[aria-disabled="true"] svg { opacity: .5; }
+.btn.mv[aria-disabled="true"]:is(:hover, :focus-visible)::after { content: attr(data-why); position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 2; white-space: nowrap; padding: 2px 8px; border-radius: 6px; background: var(--ink); color: var(--surface); font: 500 13px/1.5 var(--body); pointer-events: none; }
+/* Links on an option card: optCard puts <div class="links"> after .how and before .tr. A card with no links gets <span class="nolinks">,
+   as .nopick does, so the subgrid rows still line up. buildCard adds "olinks" to .opts only when some option has links. */
+.opts.olinks .opt { grid-template-rows: auto auto auto 1fr auto; }
+@supports (grid-template-rows: subgrid) { .opts.olinks .opt { grid-row: span 5; grid-template-rows: subgrid; } }
+.opts.pics.olinks .opt { grid-template-rows: auto auto auto auto 1fr auto; }
+@supports (grid-template-rows: subgrid) { .opts.pics.olinks .opt { grid-row: span 6; grid-template-rows: subgrid; } }
+/* A miss on a small link lands on the <label> and picks the option, so each link gets a 44px tap box. A flex item
+   is a block, and a screen reader puts a space between blocks, so the one span inside the link holds all its text:
+   the arrow's gap sits in CSS and the link's name is the label plus the hidden phrase. */
+.links a { display: inline-flex; align-items: center; min-height: 44px; }
+.links a [aria-hidden] { margin-inline-start: 4px; }
+/* A block-level .sr (position: absolute is one) gets a space before it in the link's name, so in a link it stays inline and takes no room. */
+.links a .sr { position: static; display: inline; font-size: 0; }
+/* Links on a ranked card: one more row than the ranked rows above. The label's ::after overlay covers the card, so the links row sits above it as .rank and .opic do. */
+.opt.ranked .links { position: relative; z-index: 2; }
+/* A press anywhere on a ranked card ticks it, so only the link itself is raised above the overlay. */
+.opt.ranked .links { pointer-events: none; }
+.opt.ranked .links a { pointer-events: auto; }
+.opts.ranked.olinks .opt { grid-template-rows: auto auto auto 1fr auto auto; }
+.opts.ranked.pics.olinks .opt { grid-template-rows: auto auto auto auto 1fr auto auto; }
+@supports (grid-template-rows: subgrid) { .opts.ranked.olinks .opt { grid-row: span 6; grid-template-rows: subgrid; } .opts.ranked.pics.olinks .opt { grid-row: span 7; grid-template-rows: subgrid; } }
+
+.ready { min-height: 1.55em; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14.5px; color: var(--muted); }
+.ready.on { color: var(--good); font-weight: 600; }
+/* A multi item names its picks, so its line may wrap. Hidden copies of its longest possible lines share the live line's grid cell,
+   so the cell is always as tall as the longest line at the current width: the tail is never cut and the cards never move. */
+.readybox { display: grid; }
+.readybox > * { grid-area: 1 / 1; min-width: 0; }
+.ready.multi, .readyfit { white-space: normal; overflow: visible; }
+.readyfit { visibility: hidden; margin: 0; font-size: 14.5px; font-weight: 600; }
+.ready.on::before, .readyfit::before { content: "\2713  "; }
+/* The row under the body: None of these on a decision, Mark done on a task. */
+.alts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.btn { min-height: 44px; padding: 8px 16px; border-radius: var(--r); border: 1.5px solid var(--acc); background: var(--acc); color: var(--on-acc); font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+.btn.alt { background: transparent; color: var(--acc); }
+.btn.quiet { border-color: transparent; background: transparent; color: var(--muted); font-weight: 500; padding-inline: 10px; }
+.btn.dash { border: 1.5px dashed var(--faint); background: transparent; color: var(--muted); font-weight: 500; }
+.btn.dash[aria-pressed="true"] { border-style: solid; border-color: var(--ink); color: var(--ink); }
+.btn:disabled { opacity: .45; cursor: default; }
+.note { display: grid; gap: 6px; }
+.note label { font-size: 14px; color: var(--muted); }
+.note.need label { color: var(--due); font-weight: 600; }
+.note textarea { width: 100%; min-height: 60px; resize: vertical; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--ground); }
+.note.need textarea { border-color: var(--due); }
+/* A blocked card's note box dims like its other disabled controls; the label stays readable. */
+.note textarea:disabled { opacity: .45; cursor: default; }
+ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.links { display: flex; flex-wrap: wrap; gap: 12px; font-size: 15px; }
+/* A command on a task: a head row (status, then Copy), then the command in a closed disclosure. Copy works while it is closed. */
+.cmd { display: grid; gap: 8px; min-width: 0; }
+.cmd + .cmd { border-top: 1px solid var(--line); padding-top: 14px; }
+.cmd-head { display: flex; align-items: center; gap: 12px; min-height: 44px; }
+.cmd-say { flex: 1 1 0; min-width: 0; margin: 0; font-size: 14px; line-height: 1.4; color: var(--muted); }
+.cmd.shell .cmd-say { color: var(--ink); font-weight: 600; }
+.cmd.failed .cmd-say { color: var(--due); font-weight: 600; }
+/* Both labels share one grid cell, so the button keeps the box of "Copied" in every state. */
+.btn.cmd-copy { flex: none; display: inline-grid; justify-items: center; }
+.cmd-copy > span { grid-area: 1 / 1; }
+.cmd-copy .ok, .cmd.copied .cmd-copy .go { visibility: hidden; }
+.cmd.copied .cmd-copy .ok { visibility: visible; }
+.cmd-more > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--acc); font-weight: 600; font-size: 14.5px; }
+.cmd-more[open] > summary { margin-bottom: 8px; }
+.status .cmd-more { font-weight: 400; color: var(--ink); }
+/* Each written line is one block. A long line wraps in the block, and its wrapped part hangs 2ch in. */
+.cmd-text { margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--ground); color: var(--ink); font: 14px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2; }
+.cmd-text code { font: inherit; }
+.cmd-text .ln { display: block; padding-inline-start: 2ch; text-indent: -2ch; }
+.cmd-text .ln:empty::after { content: " "; }
+.dest { margin: 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+.status.broken { padding: 9px 12px; border-radius: 8px; box-shadow: inset 0 0 0 1.5px var(--due); background: var(--due-soft); }
+.status { font-size: 14px; color: var(--due); font-weight: 600; margin: 0; }
+
+/* Receipt: the card stays where it was and shows what happened to the answer. */
+.receipt { display: grid; gap: 8px; }
+.receipt .line { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; min-height: 44px; font-size: 15.5px; }
+.receipt .line > .g { grid-column: 1; grid-row: 1; }
+.receipt .line b { grid-column: 2; grid-row: 1; }
+.receipt .line .read { grid-column: 2; grid-row: 2; }
+.receipt .line .changebtn { grid-column: 3; grid-row: 1; }
+.receipt .line:has(.read) .changebtn { grid-row: 1 / span 2; }
+.receipt .line b { overflow-wrap: anywhere; color: var(--good); }
+.receipt .rnote, .foldbody > .rnote { margin: 0; color: var(--muted); font-size: 14.5px; }
+/* A multi answer lists each pick with its letter and title, in order. */
+.receipt .picks { margin: 0; padding: 0 0 0 20px; list-style: none; display: grid; gap: 6px; counter-reset: pk; }
+.receipt .picks li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; min-height: 32px; font-size: 15.5px; }
+.receipt ol.picks li { grid-template-columns: 2ch auto minmax(0, 1fr); }
+.receipt ol.picks li::before { counter-increment: pk; content: counter(pk) "."; font: 600 14px var(--mono); color: var(--muted); text-align: end; }
+.receipt .picks .key { color: var(--ink); }
+/* The thread: the owner's last answer, then the writer's reply, in one calm panel with the shape of .stake. */
+.thread { display: grid; gap: 8px; padding: 12px; border-radius: 8px; background: var(--chip); min-width: 0; }
+.thread > .last:has(+ .reply) { padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+/* The last answer extends the receipt: muted head, ink answer, no done mark, no Change button. */
+.receipt.last { gap: 4px; }
+.receipt.last .lhead { margin: 0; font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
+.receipt.last .line { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+.receipt.last .line b { grid-column: 1; color: var(--ink); font-weight: 600; }
+.thread .reply { font-size: 15px; }
+.card.answered { border-left: 6px solid var(--good); }
+.ans { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 24px; padding: 0 8px; border-radius: 12px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; line-height: 20px; }
+.ans::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 2px solid currentColor; }
+.ans.filed { background: var(--good); color: var(--surface); }
+.ans.filed::before { content: "\2713"; width: auto; height: auto; border: 0; }
+.ans .t { white-space: nowrap; }
+.receipt .read { color: var(--muted); font-size: 14.5px; }
+.nchip.sent.filed { background: var(--good); color: var(--surface); }
+
+.checked { font: 13px var(--mono); color: var(--faint); margin: 0; }
+.parked { background: var(--surface); border: 1px dashed var(--line); border-radius: 12px; padding: 14px 18px; font-size: 15px; display: grid; gap: 8px; container-type: inline-size; color: var(--ink); }
+.parked > h2 { font: 700 15px/1.4 var(--body); margin: 0; }
+.pk-hint { margin: 0; font-size: 14px; color: var(--muted); max-width: 70ch; }
+.parked .pk-list { list-style: none; margin: 0; padding: 0; display: grid; }
+/* One line: the text, then its acts. Narrow: the acts wrap under the text. Wide: they sit at the right, in a column as wide as the widest state (a sent badge with Change, 287px), so no state re-wraps the text. */
+.pk { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding-block: 10px; border-top: 1px solid var(--line); scroll-margin-top: 64px; }
+@container (min-width: 600px) { .pk { grid-template-columns: minmax(0, 1fr) minmax(19rem, auto); align-items: center; gap: 16px; } .pk-acts { justify-content: flex-end; } }
+.pk-txt { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.pk-txt .ref { font-weight: 600; }
+.pk-txt .nt { color: var(--muted); }
+/* A staged or sent Drop strikes the line: a shape, so the act does not rest on colour. */
+.pk.drop .pk-txt { text-decoration: line-through; text-decoration-thickness: 1.5px; }
+/* The acts row is one 44px cluster in every state, so a press, a Send or a badge moves nothing. */
+.pk-acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 44px; }
+.pk-acts .ans { min-height: 32px; }
+.pk .status, .pk-why { grid-column: 1 / -1; }
+/* The reason an act is off, as text under the line: a touch screen has no hover, and a bubble clips at the edge. */
+.pk-why { margin: 0; font-size: 14px; color: var(--muted); max-width: 70ch; }
+/* A toggle keeps the box of its widest label: both labels share one grid cell. */
+.btn.pkb { display: inline-grid; justify-items: center; position: relative; }
+.pkb > span { grid-area: 1 / 1; white-space: nowrap; }
+.pkb .on, .pkb[aria-pressed="true"] .off { visibility: hidden; }
+.pkb[aria-pressed="true"] .on { visibility: visible; }
+.btn.alt.pkb[aria-pressed="true"] { background: var(--acc); color: var(--on-acc); }
+/* Off: still focusable, with a solid --faint edge (3:1, a11y.md state cue) and a struck label, so an off act never rests on colour alone.
+   This strike marks an off button. A staged Drop strikes the line text, never its button. The reason shows as .pk-why under the line.
+   This rule stays after .btn.dash[aria-pressed="true"]: both have the same weight, so the source order decides. */
+.btn.pkb[aria-disabled="true"] { border-style: solid; border-color: var(--faint); background: transparent; color: var(--muted); cursor: default; font-weight: 500; }
+.btn.pkb[aria-disabled="true"] .off { text-decoration: line-through; text-decoration-thickness: 1.5px; }
+/* The Sent panel names a parked act by its act, where an item shows "No. n". */
+.sent-list .pkref { max-width: 24ch; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Forced colours drop --faint and --muted, so an off act draws in the system's off colour. */
+@media (forced-colors: active) { .btn.pkb[aria-disabled="true"] { color: GrayText; border-color: GrayText; } }
+
+/* Answer bar: what is ready, then one Send. The stamp and Undo sit above it after a Send. */
+.bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.bar .in { padding-block: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.bar .brow { flex: 1 1 100%; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; } /* the status and its buttons; the read-only copy box sits below the row */
+.bar .st { flex: 1 1 0; font-size: 14.5px; color: var(--muted); min-width: 0; }
+.bar .st b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.bar textarea { flex: 1 1 100%; font: 13px var(--mono); background: var(--ground); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.btn.send { min-height: 48px; padding-inline: 18px; white-space: nowrap; }
+.sent { background: var(--surface); border-bottom: 1px solid var(--line); }
+.sent .in { padding-block: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; font-size: 15px; }
+.sent-head { flex: 1 1 320px; min-width: 0; display: flex; gap: 16px; align-items: center; }
+.sent-what { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.sent-line { margin: 0; }
+.stamp { flex: none; transform: rotate(-4deg); border: 2px solid var(--good); color: var(--good); border-radius: 8px; padding: 4px 8px; font: 700 18px/20px var(--body); letter-spacing: .06em; text-transform: uppercase; text-align: center; }
+.stamp small { display: block; font: 500 12px/16px var(--mono); letter-spacing: 0; text-transform: none; }
+@media (prefers-reduced-motion: no-preference) { .sent:not([hidden]) .stamp { animation: stamp-settle 200ms cubic-bezier(0.2, 0, 0, 1) both; } }
+@keyframes stamp-settle { from { transform: rotate(-4deg) scale(1.06); opacity: 0; } to { transform: rotate(-4deg) scale(1); opacity: 1; } }
+.sent-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; max-height: 22vh; overflow: auto; }
+.sent-list li { max-width: 100%; display: inline-flex; gap: 8px; align-items: center; min-height: 28px; padding: 0 4px 0 12px; border-radius: 999px; background: var(--chip); font-size: 13.5px; }
+.sent-list .no { color: var(--acc); font: 600 12px var(--mono); }
+.sent-list li:not(:has(.dstate)) { padding-inline-end: 12px; }
+.dstate { padding: 0 8px; line-height: 20px; border-radius: 999px; background: var(--surface); color: var(--faint); font-size: 12.5px; }
+.dstate.on { background: var(--good-soft); color: var(--good); font-weight: 600; }
+.sent .row { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; gap: 8px; min-width: 16rem; margin-inline-start: auto; } /* a fixed width, so the bar wraps the same with or without Undo */
+#undoBtn { font-variant-numeric: tabular-nums; }
+@media (max-width: 520px) { .bar .st { flex-basis: 0; font-size: 13.5px; } .btn.send { padding-inline: 12px; } }
+/* With Copy answers shown on a phone, two buttons leave the status too narrow to read, so it takes its own row. */
+@media (max-width: 520px) { .bar .brow:has(> #copy:not([hidden])) > .st { flex-basis: 100%; } }
+
+/* Designs: a mockup shows in a sandboxed frame on its card, and a sheet pages through all of them. */
+.dprev { display: grid; gap: 8px; }
+.dprev .dbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.dprev .dbar .sp { flex: 1; }
+.dframe { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #fff; display: block; }
+.dfitwrap { position: relative; width: 100%; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.dfitwrap .dframe.dfit { position: absolute; top: 0; left: 0; max-width: none; border: 0; border-radius: 0; transform-origin: 0 0; }
+.dfitwrap.inert .dframe { pointer-events: none; }
+/* A card picture taller than its 480px box scrolls inside it (fitFrame, maxH). The pill sits on the wrap's #fff gutter and the white mockup frame in both themes, so the cue keeps one pair: 17.3:1. */
+:root { --pic-cue: #161b22; --on-pic-cue: #ffffff; }
+.dfitwrap .dsizer { display: block; position: relative; overflow: hidden; }
+.dfitwrap .dtop, .dfitwrap .dcue { display: none; }
+.dfitwrap.scroll { overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-gutter: stable; }
+.dfitwrap.scroll .dtop { display: block; position: sticky; top: 0; z-index: 1; height: 12px; margin-bottom: -12px; background: linear-gradient(rgb(22 27 34 / 0.28), rgb(22 27 34 / 0)); opacity: 0; pointer-events: none; }
+.dfitwrap.scroll.scrolled .dtop { opacity: 1; }
+.dfitwrap.scroll .dcue { display: flex; position: sticky; bottom: 0; z-index: 1; height: 40px; margin-top: -40px; align-items: flex-end; justify-content: center; padding-bottom: 8px; background: linear-gradient(rgb(22 27 34 / 0), rgb(22 27 34 / 0.28)); pointer-events: none; }
+.dfitwrap.scroll.at-end .dcue { opacity: 0; }
+.dfitwrap .dmore { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: 12px; background: var(--pic-cue); color: var(--on-pic-cue); box-shadow: 0 0 0 1px var(--on-pic-cue); font: 600 12px/1 var(--body); white-space: nowrap; }
+@media (prefers-reduced-motion: no-preference) { .dfitwrap.scroll .dcue, .dfitwrap.scroll .dtop { transition: opacity 150ms linear; } }
+.dsheet { position: fixed; inset: 0; z-index: 20; background: var(--ground); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
+.dsh-head { background: var(--hdr); color: var(--on-hdr); padding-top: env(safe-area-inset-top, 0px); }
+.dsh-head .in { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; padding-block: 8px; }
+.dsh-head h2 { font: 700 17px/1.25 var(--body); flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-head .btn { flex: none; white-space: nowrap; }
+.dsh-head .sm { display: none; }
+@media (max-width: 520px) { .dsh-head .lg { display: none; } .dsh-head .sm { display: inline; font-size: 20px; line-height: 1; } .dsh-head .btn { min-width: 40px; padding-inline: 8px; } #dBack { display: none; } }
+.dsh-head .btn { min-height: 40px; }
+.dsh-head .btn { border-color: color-mix(in srgb, var(--on-hdr) 50%, transparent); }
+.dsh-head .btn:focus-visible { outline-color: var(--on-hdr); }
+.dsh-head .btn.quiet { color: var(--on-hdr); }
+.dsh-body { position: relative; min-height: 0; overflow: auto; display: grid; justify-items: center; align-content: start; margin: 10px clamp(8px, 2vw, 20px) calc(10px + env(safe-area-inset-bottom, 0px)); }
+.dsh-body .dfitwrap { width: min(100%, 780px); }
+.dsh-body .dfitwrap.off { display: none; }
+/* The caption shows only while the head cuts the title. Its min-height keeps a grid row the stage overflows from squeezing it to 0. */
+.dcap { display: none; margin: 0 0 6px; justify-self: stretch; min-width: 0; min-height: 1.4em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 14px/1.4 var(--body); color: var(--muted); }
+.dcap.on { display: block; }
+body.sheet-open { overflow: hidden; }
+
+/* Status tab: the roadmap's layout in this page's tokens, under .sv. The names page.html also uses
+   (.bar, .rail, .card, .tabs, .steps, .g, .top, .big, .sub, .empty) are renamed here, so no rule above reaches status. */
+.tabs .tl { display: flex; gap: 4px; }
+.tabs .cnt:empty { display: none; }
+.tabs .cnt { display: inline-block; min-width: 3.5ch; font-variant-numeric: tabular-nums; text-align: start; }
+/* Three tabs with a count box each must fit a 320 phone: the page never scrolls sideways. The row wraps when a wide fallback font makes them too wide. It wraps in reverse so the tab list stays on the bottom row, on the border, and Designs moves above. */
+@media (max-width: 400px) { .tabs a { padding-inline: 6px; gap: 4px; } .tabs, .tabs .tl { gap: 2px; } .tabs { flex-wrap: wrap-reverse; } }
+.tabs #qCount:empty { display: inline-block; }
+.svwrap { container-type: inline-size; padding-block: 18px 40px; }
+.sv { display: grid; gap: 16px; min-width: 0; }
+.sv h2, .sv h3, .sv h4, .sv p { margin: 0; }
+:where(.sv) button { background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
+:where(.sv) button:disabled { cursor: default; }
+.sv .id, .sv .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.sv-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+.readat { font-size: 14px; color: var(--muted); min-width: 0; }
+.readat summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+.readat ul { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 4px; font-size: 13.5px; }
+.readat li { overflow-wrap: anywhere; }
+.unk { color: var(--due); font-weight: 600; }
+.sv summary { list-style: none; }
+.sv summary::-webkit-details-marker { display: none; }
+.sv summary::before { content: "\25B8"; flex: none; width: 1em; color: var(--muted); }
+.sv details[open] > summary::before { content: "\25BE"; }
+.rg.unk { display: inline-block; width: 12px; height: 12px; vertical-align: -1px; border: 2px dashed var(--due); border-radius: 50%; }
+
+.live { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.live summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 14px; min-height: 44px; font-size: 14.5px; }
+.live summary .lh { font-weight: 700; }
+.live summary .asof { margin-left: auto; font-size: 13px; color: var(--muted); padding: 0; }
+/* nowrap keeps the ring and "threads unknown" on one line at phone width. */
+.live summary .thr-unk { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.live h4 { padding: 8px 14px 4px; font-size: 13px; font-weight: 600; color: var(--muted); border-top: 1px solid var(--line); }
+.live ul { list-style: none; margin: 0; padding: 0; }
+.live li { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px; padding: 7px 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.live li .nm { display: block; font: 13px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.livenone { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 8px 14px; display: grid; gap: 2px; font-size: 14.5px; }
+.livenone .lh { font-weight: 700; }
+.livenone details { font-size: 14px; color: var(--muted); }
+.livenone summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; }
+.livenone pre { margin: 0 0 6px; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.live a { color: var(--acc); text-decoration: none; }
+.live a:hover { text-decoration: underline; }
+@container (max-width: 559px) { .live li { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+/* The stalled band: the same box, head and row grid as Live work, so the two read as one family. Red edge only while something is stalled. */
+.stall { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.stall.hot { box-shadow: inset 4px 0 0 var(--holds); }
+.stall .sth { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; padding: 8px 14px; min-height: 44px; font-size: 14.5px; }
+.stall .sth h3 { display: inline-flex; align-items: center; gap: 6px; font: 700 14.5px/1.3 var(--body); }
+.stall .sth .lead { color: var(--muted); font-size: 14px; flex: 1 1 24ch; min-width: 0; }
+.stall .sth.calm h3 { font-weight: 600; color: var(--muted); }
+.stall h4 { margin: 0; padding: 8px 14px 4px; font-size: 13px; font-weight: 600; color: var(--muted); border-top: 1px solid var(--line); }
+.stall ul { list-style: none; margin: 0; padding: 0; }
+.stall li { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 6px 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.stall h4 + ul > li:first-child { border-top: 0; }
+.stall li .k { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.stall li .tx { min-height: 32px; padding: 0; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; }
+.stall li .tx:hover { text-decoration: underline; }
+.stall li .fx { display: block; font-size: 13.5px; color: var(--muted); }
+.stall li .fx.land { color: var(--good); font-weight: 600; }
+.stall li .fx.bad { color: var(--due); }
+.stall li .fx.why { color: var(--ink); }
+.stall li .ln { font: 13px var(--mono); overflow-wrap: anywhere; }
+.stall li.unkrow { grid-template-columns: minmax(0, 1fr); }
+.stall li.unkrow details { font-size: 14px; color: var(--muted); }
+.stall li.unkrow summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; }
+.stall li.unkrow pre { margin: 0 0 6px; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.stall .pz { border-top: 1px solid var(--line); }
+.stall .pz > summary { display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; font-size: 14px; font-weight: 600; color: var(--muted); cursor: pointer; }
+@container (max-width: 559px) { .stall li { grid-template-columns: 40px minmax(0, 1fr); gap: 0 8px; padding-inline: 10px; } .stall li.it, .stall li.unkrow { grid-template-columns: minmax(0, 1fr); } .stall .sth { padding-inline: 10px; } .stall .sth .lead { flex-basis: 100%; } }
+@media (pointer: coarse) { .stall li .tx { min-height: 44px; } }
+.tag { font-size: 12.5px; font-weight: 600; padding: 0 8px; border-radius: 999px; border: 1.5px solid currentColor; line-height: 19px; white-space: nowrap; }
+.tag.st-working { color: var(--acc); }
+.tag.st-blocked, .tag.blk { color: var(--holds); }
+.tag.st-review_ready, .tag.landed { color: var(--good); }
+.tag.st-failed, .tag.st-stopped { color: var(--due); }
+.tag.st-done { color: var(--muted); }
+.tag.next { color: var(--muted); border-style: dashed; }
+.tag.stl { color: var(--holds); }
+.tag.pzd { color: var(--muted); }
+.tag.ic { display: inline-grid; place-items: center; min-width: 26px; padding: 0 4px; }
+.tag.ic svg { width: 12px; height: 12px; }
+
+.now { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.now > div { background: var(--surface); padding: 12px 14px; min-width: 0; display: grid; gap: 6px; align-content: start; }
+.now h3 { font: 600 13.5px/1.3 var(--body); color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+.now .ph { font: 700 19px/1.2 var(--body); }
+.now .lead { padding: 0; font-size: 14px; color: var(--muted); }
+/* The count line breaks only between groups ("2 in progress,"): a group never splits. */
+.now .lead .grp { white-space: nowrap; }
+.now ul, .now ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.now li { display: flex; gap: 8px; align-items: center; min-width: 0; font-size: 14.5px; }
+.now li .id { flex: none; font-size: 13px; color: var(--muted); }
+.now li .tx { min-width: 0; min-height: 32px; padding: 0; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; }
+.now li .tx:hover, .lnk:hover { text-decoration: underline; }
+.now li.none { color: var(--muted); }
+.now .ix { flex: none; width: 12px; font: 13px var(--mono); color: var(--muted); }
+.now .offt .ic { flex: none; font-size: 12px; font-weight: 700; color: var(--holds); border: 1.5px solid currentColor; border-radius: 4px; padding: 0 5px; }
+@container (min-width: 640px) { .now { grid-template-columns: 1fr 1fr; } }
+@container (min-width: 1000px) { .now { grid-template-columns: 1.1fr 1.4fr 1.6fr 1.6fr; } }
+
+.segbar { height: 6px; display: flex; gap: 2px; border-radius: 3px; overflow: hidden; }
+.segbar i { flex: 1; background: var(--line); }
+.segbar i.done { background: var(--acc); }
+.segbar i.act { background: color-mix(in srgb, var(--acc) 45%, transparent); }
+.segbar i.blk { background: var(--holds); }
+.segbar i.stl { background: repeating-linear-gradient(135deg, var(--holds) 0 2px, transparent 2px 4px); }
+.segbar i.pzd { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
+
+/* The view switch sits right above the view it changes. What every view shares sits above the switch. */
+.views { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; padding: 3px; max-width: 520px; background: var(--chip); border-radius: 11px; }
+.views button { min-height: 44px; padding: 4px 2px; font-size: 14.5px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-weight: 600; cursor: pointer; white-space: nowrap; text-align: center; }
+/* Below 340px four equal columns cut "Reference": each column takes its label's width, and the rest is shared. */
+@container (max-width: 339px) {
+  .views { grid-template-columns: repeat(4, auto); }
+  .views button { padding-inline: 4px; font-size: 14px; }
+}
+.views button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
+.sview { display: grid; gap: 14px; min-width: 0; }
+
+.prail { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.prail button { display: grid; gap: 6px; min-width: 0; min-height: 44px; padding: 8px 10px; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; color: var(--ink); cursor: pointer; }
+.prail button[aria-pressed="true"] { border-color: var(--acc); box-shadow: inset 0 3px 0 var(--acc); }
+.prail .nm { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; font: 600 14px/1.25 var(--body); flex-wrap: wrap; white-space: normal; }
+.prail .nm > span:first-child { overflow-wrap: anywhere; }
+.prail .nm .num { font-weight: 400; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.prail .here { display: inline-block; width: 7px; height: 7px; margin-left: 5px; border-radius: 50%; background: var(--acc); vertical-align: 2px; }
+@container (max-width: 639px) {
+  .prail { gap: 4px; }
+  .prail button { padding: 6px 5px; }
+  .prail .nm { flex-direction: column; gap: 0; font-size: 12.5px; }
+}
+/* Five chips keep each phase name and the current-phase dot on one line from a 452px box in DejaVu Sans, a wide fallback if the web font fails, and from a 410px box in the web font (Organize current is the widest). Five columns start at 464px, a 12px margin over the wide font. Below that the rail wraps to three columns. A longer name, such as a repo's own phase name, wraps at its spaces. */
+@container (max-width: 463px) { .prail { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+.cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+@container (min-width: 1000px) { .cols { grid-template-columns: minmax(0, 1fr) 320px; } }
+.side { display: grid; gap: 12px; min-width: 0; }
+.box { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; min-width: 0; }
+.box > header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.box > header h3 { font: 700 15px/1.3 var(--body); }
+.sv .lbl { font-size: 13px; color: var(--muted); }
+.ph-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 12px 14px; }
+.ph-head h3 { font: 700 18px/1.25 var(--body); }
+.ph-head .prog { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+.ph-head .prog .segbar { width: 110px; }
+@container (max-width: 639px) { .ph-head .prog { margin-left: 0; width: 100%; } .ph-head .prog .segbar { flex: 1; } }
+.asof { font-size: 13px; color: var(--muted); padding: 0 14px 8px; }
+.howto { display: inline-flex; align-items: center; min-height: 32px; margin-left: 4px; font-size: 13px; font-weight: 600; color: var(--acc); }
+.howbody { font-size: 13.5px; color: var(--muted); padding: 0 14px 10px; }
+.foot { font-size: 13px; color: var(--muted); padding: 6px 14px; border-bottom: 1px solid var(--line); }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--line); border-block: 1px solid var(--line); }
+.tile { background: var(--surface); padding: 10px 14px; display: grid; gap: 4px; min-width: 0; align-content: start; text-align: left; }
+button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surface)); }
+.tile .tl { font-size: 13.5px; color: var(--muted); }
+.tile .row { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.tile .v { font: 600 20px/1.1 var(--mono); overflow-wrap: anywhere; }
+.tile .v small { font-size: 14px; font-weight: 400; color: var(--muted); }
+.tile .goal { font-size: 13px; color: var(--muted); }
+.tile svg { display: block; width: 100%; height: 30px; overflow: visible; }
+.tile .ft { font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; gap: 6px; }
+.tile .rule { display: none; font-size: 13.5px; color: var(--ink); border-top: 1px dashed var(--line); padding-top: 5px; margin-top: 2px; }
+.tile[aria-expanded="true"] .rule { display: block; }
+.tiles .none { grid-column: 1 / -1; background: var(--surface); padding: 12px 14px; font-size: 14px; color: var(--muted); }
+.dl { font: 500 12px var(--mono); padding: 0 4px; border-radius: 3px; white-space: nowrap; }
+.dl.good { color: var(--good); background: var(--good-soft); }
+.dl.bad { color: var(--holds); background: color-mix(in srgb, var(--holds) 14%, var(--surface)); }
+.dl.flat { color: var(--muted); background: var(--chip); }
+.meter { display: flex; gap: 2px; height: 8px; }
+.meter i { flex: 1; background: var(--line); border-radius: 2px; }
+.meter i.on { background: var(--acc); }
+.one { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; min-height: 30px; }
+.one::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--acc); }
+.hint { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 8px; padding: 8px 14px; font-size: 13.5px; color: var(--muted); border-bottom: 1px solid var(--line); }
+.rsteps { list-style: none; margin: 0; padding: 0; }
+.rsteps > li + li { border-top: 1px solid var(--line); }
+.rrow { display: grid; grid-template-columns: 16px 44px minmax(0, 1fr) auto 12px; gap: 8px; align-items: center; width: 100%; min-height: 44px; padding: 8px 14px; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; }
+.rrow:hover { background: color-mix(in srgb, var(--chip) 60%, transparent); }
+.rrow .ttl { min-width: 0; overflow-wrap: anywhere; }
+.rrow .id { font-size: 13px; color: var(--muted); }
+.rrow .meta { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.rrow .chev { font-size: 11px; color: var(--muted); }
+.rsteps li.open .chev, .donefold.open > .fold .chev { transform: rotate(90deg); }
+.rsteps .active > .rrow { background: var(--acc-soft); box-shadow: inset 3px 0 0 var(--acc); }
+.rsteps .active .ttl { font-weight: 700; }
+.rsteps .blocked > .rrow { box-shadow: inset 3px 0 0 var(--holds); }
+.rsteps .stl-row > .rrow { background: color-mix(in srgb, var(--holds) 14%, var(--surface)); box-shadow: inset 3px 0 0 var(--holds); }
+/* A paused step keeps status active: no tint, and a muted edge in the paused band's grey. */
+.rsteps .pzd-row > .rrow { background: none; box-shadow: inset 3px 0 0 var(--muted); }
+.rsteps .pzd-row > .rrow:hover { background: color-mix(in srgb, var(--chip) 60%, transparent); }
+.rsteps .done .ttl { text-decoration: line-through; text-decoration-color: var(--line); color: var(--muted); }
+.rbody { display: none; padding: 2px 14px 12px 70px; font-size: 14px; color: var(--muted); }
+.rsteps li.open .rbody { display: block; }
+.rbody dl { margin: 0; display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 6px 10px; }
+.rbody dt { font-size: 13px; padding-top: 2px; }
+.rbody dd { margin: 0; overflow-wrap: anywhere; min-width: 0; color: var(--ink); }
+.ask { display: flex; gap: 8px; align-items: flex-start; background: var(--ground); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: 13px var(--mono); color: var(--ink); }
+.ask span { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; max-height: 12em; overflow: auto; }
+.copy { flex: none; min-height: 44px; padding: 0 12px; border-radius: var(--r); background: var(--acc); color: var(--on-acc); font: 600 14px var(--body); }
+.sv .clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.more { min-height: 32px; font-size: 13.5px; font-weight: 600; color: var(--acc); }
+.noneyet { padding: 12px 14px; font-size: 14px; color: var(--muted); }
+.rg { width: 16px; height: 16px; display: grid; place-items: center; }
+.rg svg { width: 14px; height: 14px; }
+.fold { display: flex; gap: 8px; align-items: center; width: 100%; min-height: 44px; padding: 8px 14px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--muted); cursor: pointer; text-align: left; }
+.donefold .fb { display: none; border-top: 1px solid var(--line); }
+.donefold.open .fb { display: block; }
+@container (max-width: 639px) {
+  .rrow { grid-template-columns: 16px 40px minmax(0, 1fr) 12px; gap: 4px 8px; padding-inline: 10px; }
+  .rrow .meta { grid-column: 3; grid-row: 2; justify-content: flex-start; }
+  .rrow .chev { grid-column: 4; grid-row: 1; }
+  .rbody { padding: 2px 10px 12px; }
+}
+.pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 14px; border-top: 1px solid var(--line); background: var(--ground); }
+.pager .pc { font-size: 13.5px; color: var(--muted); text-align: center; }
+.pager button { min-height: 44px; padding: 4px 12px; font-size: 13.5px; font-weight: 600; color: var(--acc); border: 1px solid var(--line); background: var(--surface); border-radius: 8px; white-space: nowrap; }
+.pager button:disabled { color: var(--muted); opacity: .5; }
+.box > .pager:last-child { border-radius: 0 0 12px 12px; }
+
+.feed { list-style: none; margin: 0; padding: 4px 0; }
+.feed li { display: grid; grid-template-columns: 76px 16px minmax(0, 1fr); gap: 8px; align-items: start; padding: 6px 14px; font-size: 14px; }
+.feed .when, .ev .when { font: 13px var(--mono); color: var(--muted); padding-top: 1px; }
+.lnk { display: inline; min-height: 32px; color: var(--ink); text-align: left; }
+.lnk .id { color: var(--muted); }
+.morelink { display: flex; align-items: center; width: 100%; min-height: 44px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 14px; font-weight: 600; color: var(--acc); }
+.trend { padding: 8px 14px 10px; display: grid; gap: 8px; }
+.trow { display: grid; grid-template-columns: 96px minmax(0, 1fr) 64px; gap: 8px; align-items: center; }
+.trow .k { font-size: 13px; color: var(--muted); line-height: 1.2; }
+.trow svg { width: 100%; height: 30px; display: block; overflow: visible; }
+.trow .r { text-align: right; line-height: 1.15; }
+.trow .r .num { font-size: 13px; font-weight: 600; display: block; }
+.legend { display: flex; gap: 12px; font-size: 13px; color: var(--muted); padding: 0 14px 10px; flex-wrap: wrap; }
+.legend i { display: inline-block; width: 12px; border-top: 1px dashed var(--muted); vertical-align: middle; margin-right: 4px; }
+.burn { padding: 10px 14px 12px; display: grid; gap: 6px; }
+.burn svg { width: 100%; height: 110px; display: block; overflow: visible; }
+.dot { width: 8px; height: 8px; display: inline-block; flex: none; border-radius: 2px; background: var(--acc); }
+
+.day h3 { padding: 10px 14px; font: 700 15px/1.3 var(--body); display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); background: var(--chip); }
+.day:not(:first-child) h3 { border-top: 1px solid var(--line); }
+.day h3 .lbl { font-weight: 400; }
+.ev { display: grid; grid-template-columns: 76px 16px minmax(0, 1fr); gap: 8px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.day h3 + .ev { border-top: 0; }
+.ev .rg { margin-top: 3px; }
+.ev .gist { color: var(--muted); font-size: 13.5px; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ev.done .t { text-decoration: line-through; text-decoration-color: var(--line); }
+.lead { padding: 10px 14px; font-size: 14px; color: var(--muted); }
+.gcard { margin-bottom: 16px; }
+.gcard ol { margin: 0; padding: 0 0 0 18px; font-size: 14px; }
+.gcard ol li { padding: 2px 0; }
+.tp > button { display: grid; grid-template-columns: 30px minmax(0, 1fr) 14px; gap: 8px; width: 100%; min-height: 44px; padding: 8px 14px; border-top: 1px solid var(--line); align-items: baseline; }
+.tp:first-of-type > button { border-top: 0; }
+.tp > button:hover { background: color-mix(in srgb, var(--chip) 60%, transparent); }
+.tp .id { font-size: 13px; color: var(--muted); }
+.tp .sm { display: block; font-size: 13px; color: var(--muted); }
+.tp .tb { display: none; padding: 0 14px 12px 52px; min-width: 0; }
+.tp.open .tb { display: block; }
+.tp.open .chev { transform: rotate(90deg); }
+.tp .chev { font-size: 11px; color: var(--muted); }
+.tp ul { margin: 0; padding-left: 16px; font-size: 14px; color: var(--ink); }
+.tp ul li { margin: 3px 0; }
+.tp .ask { margin-top: 6px; }
+.tp .ask span { max-height: 16em; }
+.tp .blbl { margin-top: 10px; font-size: 13px; color: var(--muted); }
+.src { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13.5px; margin-top: 8px; }
+.hl, .rc { list-style: none; margin: 0; padding: 0; }
+.hl li, .rc li { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 10px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.hl li:first-child, .rc li:first-child { border-top: 0; }
+.hl .k { color: var(--muted); font-weight: 600; }
+.rc li { grid-template-columns: 72px minmax(0, 1fr); }
+.rc .when { font: 13px var(--mono); color: var(--muted); padding-top: 2px; }
+.rc a, .hl a { color: var(--acc); text-decoration: none; }
+.rc a:hover, .hl a:hover { text-decoration: underline; }
+.rc .nm { display: block; font: 13px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.count { font: 600 22px var(--mono); padding: 10px 14px 2px; }
+@container (max-width: 559px) { .hl li { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+
+/* No roadmap: unknown, why, and one control that leads on. */
+.nob { padding: 16px; display: grid; gap: 10px; justify-items: start; }
+.nob h3 { font: 700 17px/1.3 var(--body); display: flex; gap: 8px; align-items: center; }
+.nob p { max-width: 62ch; }
+.nob details { font-size: 14px; color: var(--muted); }
+.nob summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; }
+.nob pre, .nob textarea { margin: 0; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.nob textarea { width: 100%; background: var(--ground); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.sv-tip { position: fixed; z-index: 12; pointer-events: none; background: var(--ink); color: var(--surface); font-size: 13px; padding: 4px 7px; border-radius: 4px; max-width: 240px; opacity: 0; transition: opacity .08s; left: 0; top: 0; }
+.sv-tip.on { opacity: 1; }
+.sv-toast { position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 12; background: var(--ink); color: var(--surface); font-size: 14px; padding: 8px 14px; border-radius: 8px; max-width: calc(100vw - 32px); }
+@media (pointer: coarse) { .now li .tx, .feed .lnk, .ev .lnk { min-height: 44px; } }
+/* Arbiter rulings: a section after the open tiers; each ruling is a quiet card with one Overturn toggle. */
+/* Its own shape: a hollow diamond, unlike the square, triangle, ring, dot and check of the other sections. */
+.g.ruled { width: 10px; height: 10px; margin: 0 1px; border: 2px solid var(--muted); border-radius: 1px; transform: rotate(45deg); }
+/* The section sits after the open tiers. Its head is a disclosure button inside the h2, so the heading stays a heading.
+   The Answered section (.sunk) has the same shape, and its cards take a ruling card's size. */
+.tier.ruled, .tier.sunk { gap: 10px; }
+.tier.ruled > header, .tier.sunk > header { display: grid; gap: 2px; }
+.tier.ruled > header h2, .tier.sunk > header h2 { font: 700 17px/1.25 var(--body); }
+.rhead { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 6px 0 0; border: 0; background: none; color: var(--ink); font: inherit; cursor: pointer; text-align: left; }
+.rhead .ct { font: 600 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
+.rhead .chev { width: 1em; color: var(--muted); font-size: 15px; }
+.rhead[aria-expanded="false"] .chev::before { content: "\25B8"; }
+.rhead[aria-expanded="true"] .chev::before { content: "\25BE"; }
+.rsub { margin: 0; font-size: 14px; color: var(--muted); }
+/* Not .rbody: the Status tab already uses that class. */
+.rlist { display: grid; gap: 10px; }
+/* A ruling card is quieter than an ask: a lighter ground, a smaller title, no tier edge. */
+.card.rcard, .tier.sunk .card { padding: 14px 16px; gap: 8px; }
+.card.rcard:not(.answered) { background: color-mix(in srgb, var(--surface) 55%, var(--ground)); }
+.rcard .title, .tier.sunk .card .title { font-size: 17px; max-width: 60ch; }
+.rcard.armed { border-color: var(--acc); box-shadow: inset 0 0 0 1px var(--acc); }
+.ruledline { margin: 0; display: flex; gap: 10px; align-items: flex-start; font-size: 15.5px; }
+.ruledline .key { flex: none; max-width: none; }
+.ruledline b { min-width: 0; overflow-wrap: anywhere; line-height: 1.4; padding-top: 1px; }
+.rwhy { margin: 0; max-width: 70ch; font-size: 14.5px; color: var(--muted); }
+.rfoot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.rfoot .dest { flex: 1 1 12rem; border: 0; padding: 0; }
+.rfoot .btn { min-width: 7.5rem; justify-content: center; }
+/* A seen item (open, asked before the owner's last Send, no answer) sinks under the new ones in its tier. A divider marks the line, the card is quieter, and its answer parts fold. */
+.seenhead { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; min-height: 24px; color: var(--muted); font-size: 14px; font-weight: 600; }
+.seenhead > svg { flex: none; color: var(--faint); }
+.seenhead > .seenrule { flex: 1 1 0; min-width: 24px; border-top: 2px dotted var(--faint); }
+.card[data-seen="true"]:not(.answered) { background: color-mix(in srgb, var(--surface) 55%, var(--ground)); }
+/* The fold control. All three labels share one grid cell, so the box keeps the widest label in every state and a press moves nothing beside it. */
+.unfold { width: 100%; min-height: 48px; display: flex; align-items: center; gap: 10px; padding: 8px 14px; border: 1.5px dashed var(--faint); border-radius: var(--r); background: var(--surface); color: var(--acc); font-weight: 600; font-size: 15px; line-height: 1.35; text-align: left; cursor: pointer; }
+.unfold:hover { border-color: var(--acc); background: var(--acc-soft); }
+.unfold .chev { flex: none; width: 1em; text-align: center; }
+.unfold[aria-expanded="false"] .chev::before { content: "\25B8"; }
+.unfold[aria-expanded="true"] .chev::before { content: "\25BE"; }
+.unfold .uf-labels { display: grid; min-width: 0; }
+.unfold .uf-labels > span { grid-area: 1 / 1; visibility: hidden; }
+.unfold[aria-expanded="false"] .uf-show, .unfold[aria-expanded="true"]:not([aria-disabled="true"]) .uf-hide, .unfold[aria-disabled="true"] .uf-lock { visibility: visible; }
+/* Locked open: the card holds an answer Send would submit, so the fold cannot close. */
+.unfold[aria-disabled="true"] { border-style: solid; border-color: var(--line); background: transparent; color: var(--muted); cursor: default; }
+.foldbody { display: grid; gap: 14px; min-width: 0; }
+.foldbody[hidden] { display: none; }
+
+/* The Ask box: one section after both tab panels, so it ends the Questions tab and the Status tab. Wide, it keeps the list's two
+   columns: the heading in the rail's column, the box and the asks in the list's. Not .ask: the Status tab already uses that class. */
+.asks { border-top: 1px solid var(--line); padding-block: 24px 40px; display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 28px; align-items: start; scroll-margin-top: 64px; }
+@media (max-width: 960px) { .asks { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
+.asks-head { display: grid; gap: 4px; align-content: start; }
+.asks-head h2 { font: 700 19px/1.25 var(--body); display: flex; align-items: center; gap: 12px; }
+.asks-head h2 .ct { font: 600 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
+.asks-head p { margin: 0; font-size: 14.5px; color: var(--muted); max-width: 44ch; }
+.asks-body { display: grid; gap: 16px; min-width: 0; }
+/* Pending: a half-filled disc, its own shape. The hollow ring already means Whenever, and the check means answered. */
+.g.wait { border: 2px solid var(--acc); border-radius: 50%; background: linear-gradient(90deg, var(--acc) 50%, transparent 50%); }
+.askform { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 8px; }
+.askform > label { font-weight: 600; }
+.askform textarea { width: 100%; min-height: 88px; resize: vertical; padding: 8px 12px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--ground); }
+.askform textarea:focus-visible { border-color: var(--acc); }
+/* The hint and the buttons keep one grid: Send never moves when Copy ask shows beside it. Each keeps its own column, so a hidden
+   slot leaves its track empty and Send stays flush with the box's right edge. */
+.askrow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 8px 12px; }
+.askrow .slot { min-width: 0; grid-column: 2; }
+.askrow .slot:empty { display: none; }
+.askrow .btn.askadd { grid-column: 3; }
+.askrow .btn.askgo { grid-column: 4; }
+.askhint { margin: 0; min-height: 44px; display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+.askhint.bad { color: var(--due); font-weight: 600; }
+.btn.askgo, .btn.askadd { min-height: 48px; white-space: nowrap; }
+/* Off, they keep their box and label, marked by a dashed edge as .btn.mv is at an end of the order; the hint beside them says why. */
+.btn.askgo:disabled, .btn.askadd:disabled { opacity: 1; background: transparent; border-style: dashed; border-color: var(--faint); color: var(--muted); }
+/* A label that changes keeps the box of its widest form: the shown label and a hidden sizer share one grid cell. */
+.btn.fixw { display: inline-grid; justify-items: center; }
+.btn.fixw > span { grid-area: 1 / 1; }
+.btn.fixw > .sz { visibility: hidden; }
+@media (pointer: coarse) { .askhint .kbd { display: none; } }
+@media (max-width: 520px) {
+  .askrow { grid-template-columns: minmax(0, 1fr) auto; }
+  /* Three lines reserved, so typing or a new count never moves the buttons under the hint. */
+  .askrow .askhint { grid-column: 1 / -1; min-height: 66px; }
+  .askrow .btn.askadd { grid-column: 1; grid-row: 2; justify-self: start; }
+  .askrow .btn.askgo { grid-column: 2; grid-row: 2; }
+  .askrow .slot { grid-column: 1 / -1; grid-row: 3; justify-self: start; }
+}
+/* The tray under the row: the line that answers Send or Undo, then the asks not sent yet. */
+.tray { display: grid; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.tray[hidden], .tray > div:empty { display: none; }
+.tray > div { display: grid; gap: 8px; }
+.sline { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; min-height: 44px; font-size: 14.5px; }
+.sline b { color: var(--good); }
+.sline .bad { color: var(--due); font-weight: 600; }
+.sline .btn { font-variant-numeric: tabular-nums; }
+/* When the count ends the Undo keeps its box, hidden, so the line does not move. */
+.sline .btn.spent { visibility: hidden; }
+@media (max-width: 520px) { .sline { grid-template-columns: auto minmax(0, 1fr); } .sline .btn { grid-column: 2; justify-self: start; } }
+.stackh { margin: 0; font-size: 14px; font-weight: 600; color: var(--muted); }
+.stack { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+/* A stacked ask is not in the store yet: a dashed edge, the look the page gives a thing not yet sent. */
+.stack > li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: start; gap: 4px 12px; padding: 8px 8px 8px 12px; border: 1.5px dashed var(--faint); border-radius: var(--r); background: var(--ground); }
+.stack .sn { font: 600 13px/44px var(--mono); color: var(--muted); text-align: end; }
+.stack .stext { margin: 0; min-width: 0; padding-block: 10px; white-space: pre-line; overflow-wrap: anywhere; }
+.stack .stext.sedit { padding-block: 0; }
+.stack .sacts { display: flex; gap: 4px; justify-content: flex-end; }
+.stack .sacts .btn { min-height: 44px; }
+.stack .sstate { min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding-inline: 10px; font-size: 14px; color: var(--muted); white-space: nowrap; }
+.stack .sstate.ok { color: var(--good); font-weight: 600; }
+.stack textarea, .askform textarea.copybox { width: 100%; min-height: 66px; resize: vertical; padding: 8px 12px; border: 1.5px solid var(--acc); border-radius: var(--r); background: var(--surface); font: inherit; color: var(--ink); }
+.stack .serr { grid-column: 2 / -1; margin: 0; font-size: 14.5px; font-weight: 600; color: var(--due); }
+.stack > li.failed { border-color: var(--due); }
+.stack > li.gone { background: transparent; }
+.stack > li.gone .stext { color: var(--muted); }
+@media (max-width: 520px) {
+  .stack > li { grid-template-columns: 24px minmax(0, 1fr); }
+  .stack .sacts { grid-column: 2; justify-content: flex-start; }
+  .stack .serr { grid-column: 2; }
+}
+#askList { display: grid; gap: 8px; }
+.asklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.askc { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; display: grid; gap: 8px; min-width: 0; }
+.ahead { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; min-height: 44px; font-size: 14px; color: var(--muted); }
+.ahead .aby { min-width: 0; }
+.ahead .morebtn { margin-inline-start: auto; min-height: 44px; padding-inline: 4px; }
+@media (pointer: coarse) { .ahead .morebtn { min-width: 44px; } }
+.atext { margin: 0; max-width: 70ch; white-space: pre-line; overflow-wrap: anywhere; font-size: 16px; }
+.astate { margin: 0; font-size: 14.5px; color: var(--ink); font-weight: 600; }
+.astate .t { color: var(--muted); font-weight: 400; }
+/* The one "new since your baseline" mark: an ask's New answer, a card's New reply, a step's Updated. Green, the answered colour. */
+.newmark { display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; border-radius: 12px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; white-space: nowrap; }
+/* Each later mark on a screen: a filled dot in an outline pill wider than tall, so it never reads as a radio button beside the options.
+   The chart legend's .dot (a filled square, 8px high) shares the class name, so this rule resets its ground, height and corner. */
+.newmark.dot { padding: 0; width: 34px; height: 22px; border-radius: 12px; background: none; justify-content: center; }
+.newmark.dot::before, .newmark.ct::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+/* A count of updated steps, on the phase rail and the done fold: the dot, then the number. */
+.newmark.ct { padding: 0 7px; gap: 5px; font: 600 12px/20px var(--mono); }
+.rrow .meta .newmark { font-size: 12.5px; line-height: 19px; min-height: 0; }
+.prail .nm .newmark, .fold .newmark { min-height: 0; }
+.prail .nmr { display: inline-flex; align-items: center; gap: 6px; }
+.askc .thread .lhead { margin: 0; font-size: 14px; color: var(--muted); }
+.askc .thread .reply { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
+.askc .thread .filed { margin: 0; padding-top: 8px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+/* A folded answer is one button: the whole row unfolds it. */
+.askc.folded { padding: 0; }
+.frow { width: 100%; min-height: 48px; padding: 4px 16px; background: none; border: 0; border-radius: 12px; text-align: left; cursor: pointer; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 4px 12px; color: var(--ink); }
+.frow:hover { background: var(--acc-soft); }
+.frow .ftext { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.frow .fwhen { font-size: 14px; color: var(--muted); white-space: nowrap; }
+.frow .fgo { color: var(--acc); font-weight: 600; font-size: 14.5px; white-space: nowrap; }
+@media (max-width: 520px) {
+  .frow { grid-template-columns: auto minmax(0, 1fr) auto; padding-block: 8px; }
+  .frow .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .frow .fwhen { grid-column: 2; grid-row: 2; }
+  .frow .fgo { grid-column: 3; grid-row: 1 / span 2; }
+}
+.older { justify-self: start; width: auto; }
+/* The owner's reply sits inside the thread it follows, on the surface ground of "You asked", so his words and a session's differ by ground. */
+.askc .thread .myreply { display: grid; gap: 4px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); min-width: 0; }
+.askc .thread .myreply .lhead { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.askc .thread .myreply .reply { font-size: 16px; }
+.askc .thread .myreply + .lhead, .askc .thread .reply + .myreply { margin-top: 4px; }
+/* The thread's end: the line that answers Send reply and Undo, then Reply or the reply box. */
+.replyend { display: grid; gap: 8px; min-width: 0; }
+.replyend > .btn.replybtn { justify-self: start; min-height: 44px; }
+.replyform { padding: 12px; border-radius: var(--r); background: var(--ground); }
+.replyform textarea { background: var(--surface); }
+.replyform .askrow .btn.rx { grid-column: 3; min-height: 48px; }
+@media (max-width: 520px) { .replyform .askrow .btn.rx { grid-column: 1; grid-row: 2; justify-self: start; } }
+/* A folded thread with a reply that waits or a new answer to one: the row stays one button; the reply shows under it, outside the fold. */
+.askc.folded .fwait { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 2px 12px; margin: 0; padding: 8px 16px 12px; border-top: 1px solid var(--line); }
+.askc.folded .fwait > .g { margin-top: 5px; }
+.askc.folded .fwait .ftext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.askc.folded .fwait .astate { grid-column: 2; }
+@media (max-width: 520px) { .askc.folded .fwait .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; } }
+/* Mark read: it shares the thread's end with Reply, Reply first. It is the quieter act, kept 44 px. Off while a reply waits: a dashed edge, with the reason beside it. */
+.replyend .endrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }
+.replyend .endrow > .btn { min-height: 44px; }
+.btn.dismiss, .btn.restore { min-height: 44px; }
+.btn.dismiss[aria-disabled="true"] { border: 1.5px dashed var(--faint); color: var(--muted); cursor: default; }
+.endrow .dwhy { font-size: 14px; color: var(--muted); min-width: 0; }
+/* A folded row with a side press: the row button and Mark read (or Mark unread) are siblings, never one inside the other. */
+.askc.folded.withd { grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 4px; padding-inline-end: 8px; }
+.askc.folded.withd > .fwait { grid-column: 1 / -1; }
+.askc.folded.withd > .sline, .askc.folded > .sline.dline { grid-column: 1 / -1; padding: 0 16px 8px; }
+/* The Marked read line keeps the row's place until the next load, at the folded row's height. */
+.askc.dropped { padding: 2px 8px 2px 16px; background: transparent; border-style: dashed; border-color: var(--faint); }
+.askc.dropped:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.askc.dropped .sline { min-height: 44px; }
+.askc.dropped .sline > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.askc.dropped .sline .dt { color: var(--muted); }
+.asklist.dlist .askc.folded { background: transparent; border-style: dashed; border-color: var(--faint); }
+@media (max-width: 520px) {
+  /* With a side press, the row has no room for "Show answer" on a phone: the words stay in the row button's name, and the row is the press. */
+  .askc.folded.withd .frow { grid-template-columns: auto minmax(0, 1fr); padding-inline-end: 4px; }
+  .askc.folded.withd .frow .fwhen { grid-column: 2; grid-row: 2; }
+  .askc.folded.withd .frow .fgo { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+  .askc.dropped .sline > span { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .askc.dropped .sline .btn { grid-column: 3; grid-row: 1; }
+  .askc.dropped .sline { grid-template-columns: auto minmax(0, 1fr) auto; }
+}
+.reline { margin: 0; font-size: 14.5px; color: var(--muted); overflow-wrap: anywhere; }
+.asks .empty.unk { color: var(--due); border-color: var(--due); }
+/* The rail row for asks: the head of an overview tier, no chips. With no waiting ask it is grey, as an empty tier is. */
+.ov-tier.zero .ov-head { color: var(--muted); }
+/* The routed line extends the ask's folded row with a side press (.askc.folded.withd), so an ask and an item share one shape.
+   The row button holds two text lines: what it was with its home, then the short reply. Mark read is the side press. */
+.askc.folded.withd.rline .frow { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto auto; align-items: start; row-gap: 2px; padding-block: 8px; }
+.askc.rline .frow > .g { margin-top: 7px; }
+.frow .fhead { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.frow .fhead .ftext { flex: 0 1 auto; }
+/* From 701px the head is one row: a long text shrinks and is cut with an ellipsis, so the number, the new mark and the home keep their place. Under 701px the head wraps. With the New reply mark drawn, a one-row head leaves the title under 60 px below about 665px, so the break sits at 701px, a round figure above that width with a margin. Its other widths are 520px and 960px, so 701px is this rule's own choice. */
+@media (min-width: 701px) {
+  .frow .fhead { flex-wrap: nowrap; }
+  .frow .fhead .ftext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .frow .fhead .fno, .frow .fhead .newmark { flex: none; }
+  .frow .fhead .hometag { flex: 0 0 auto; max-width: 40%; }
+}
+.frow .fno { font: 600 13.5px var(--mono); color: var(--acc); white-space: nowrap; }
+.frow .freply { grid-column: 2; grid-row: 2; min-width: 0; font-size: 14.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.askc.folded.withd.rline .frow .fgo { grid-column: 3; grid-row: 1 / span 2; align-self: center; }
+/* The home: a neutral pill, its word "Home:" in a .sr span. A line with no home says so on a dashed edge. */
+.hometag { display: inline-flex; align-items: center; min-height: 22px; max-width: 100%; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--chip); color: var(--ink); font-size: 13px; font-weight: 600; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hometag.none { background: transparent; border-style: dashed; border-color: var(--faint); color: var(--muted); }
+.frow .newmark { min-height: 22px; font-size: 13px; line-height: 19px; }
+/* Mark read keeps the box of its widest label (.fixw), so "Marking…" moves nothing. */
+.rline > .btn.dismiss { white-space: nowrap; }
+/* The opened line: the open ask card's shape, with its home and number in the head. */
+.askc.rline.ropen .ahead .fno { font: 600 13.5px var(--mono); color: var(--acc); }
+.askc.rline.ropen .rtitle { margin: 0; font: 600 16px/1.4 var(--body); max-width: 70ch; }
+.askc.rline.ropen .thread { display: grid; gap: 6px; padding: 10px 12px; border-radius: 8px; background: var(--ground); min-width: 0; }
+.askc .thread .filed a { color: var(--acc); }
+/* An item line sits in the Answered section's list, beside the cards that still wait to be filed. */
+.tier.sunk .rlist > .askc { scroll-margin-top: 64px; }
+.rlist > .older { margin-top: 2px; }
+.asklist.dlist.items { margin: 0; }
+.allread { margin: 0; font-size: 15px; color: var(--ink); }
+@media (max-width: 520px) {
+  .askc.folded.withd.rline .frow { grid-template-columns: auto minmax(0, 1fr); }
+  .askc.folded.withd.rline .frow .freply { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .askc.folded.withd.rline .frow .fhead .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+}
+</script>
+
+<script type="text/plain" id="newcss">
+/* ---- New for page-recommend-and-waiting-on. Today's rules above are page.html's own, unchanged. ---- */
+/* The Recommended line: one gold panel, the same tokens as today's .pick, at card level above the options. */
+.recline { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; align-items: start; padding: 8px 12px; border-radius: 8px; background: var(--gold-soft); color: var(--ink); max-width: 70ch; }
+.recline > .spark { display: inline-flex; padding-top: 2px; color: var(--gold-ink); }
+.recline p { margin: 0; }
+.recline .rechead { font-size: 15px; }
+.recline .rechead > b { font-weight: 700; }
+.recline .rechead.one { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.recline .rechead .rn { font-weight: 600; }
+.recline .key { display: inline-block; max-width: none; vertical-align: 1px; border-color: var(--gold-ink); color: var(--gold-ink); background: transparent; }
+/* Inside a sentence the chip keeps the line's height, so the first line does not sit lower than the rest. */
+.recline .rechead.one .key { height: 20px; min-width: 22px; line-height: 17px; padding-inline: 4px; vertical-align: 2px; }
+.recline .rl { min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-weight: 600; }
+.recline ol { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 4px; }
+.recline li { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.recline ol.unordered li { grid-template-columns: auto minmax(0, 1fr); }
+.recline li .rl { -webkit-line-clamp: 1; }
+.recline li .ord { font: 600 13px var(--mono); color: var(--gold-ink); min-width: 3ch; }
+.recline .recwhy { font-size: 14.5px; overflow-wrap: anywhere; }
+/* The Waiting on line: parsed out of context, so the context clamp never hides it. Shaped like .stake, neutral. */
+.waitline { margin: 0; padding: 8px 12px; border-radius: 8px; background: var(--chip); font-size: 15px; overflow-wrap: anywhere; max-width: 70ch; }
+.waitline > b { font-weight: 700; }
+/* Old item, "says none": muted, dashed, so it never reads as a stated fact about the work. */
+.saynone { margin: 0; padding: 8px 12px; border-radius: 8px; border: 1.5px dashed var(--line); color: var(--muted); font-size: 14.5px; max-width: 70ch; }
+/* The option card keeps only the star (and a ranked place): the why has one home, the line. */
+.opt .pick.star { justify-self: start; grid-template-columns: auto auto; align-items: center; padding: 4px 8px; }
+.opt .pick.star .ord { font: 600 13px var(--mono); color: var(--gold-ink); }
+[data-new], [data-today] { position: relative; outline: 2px dashed #7c3aed; outline-offset: 3px; }
+[data-today] { outline-color: #0f766e; }
+[data-new]::after, [data-today]::after { position: absolute; z-index: 6; left: 4px; top: -11px; padding: 1px 6px; border-radius: 4px; font: 600 11px/1.4 system-ui, sans-serif; color: #fff; white-space: nowrap; pointer-events: none; max-width: calc(100% - 8px); overflow: hidden; text-overflow: ellipsis; }
+[data-new]::after { content: "New: " attr(data-new); background: #6d28d9; }
+[data-today]::after { content: "Today: " attr(data-today); background: #0f766e; }
+html.nolab [data-new], html.nolab [data-today] { outline: none; }
+html.nolab [data-new]::after, html.nolab [data-today]::after { display: none; }
+</script>
+
+<script>
+const FIX = {"836": {"n": 836, "title": "When a session has marked two PRs ready, does the Stop check keep one wait, the newest (a), or one wait per ready PR (b)?", "context": "Goal: the Stop hook refuses to end a turn with an open CI wait and no check-in, without false alarms or misses.\nProblem (rule): the hook keeps ONE wait, the newest ready call. Ready PR 5, then ready PR 6, then a CI green line that names no PR: the wait closes, PR 5 has no check-in, and Stop passes. Only you can say which loss is worth the cost: a miss on an older PR (a), or a new rule for a green line with no PR (b).\nBased on (code, lane's read, unchecked by triage): hooks/stall_watch.py `open_ci_wait`; reviewer round 1 probe on #3410.\nBased on (ruling): own-ci-wait-subscribe-guard (owner 21:39 CST Nov 13, relayed): a session should subscribe or poll to be woken; check-ins are the safety net. It says nothing on one wait versus many.\nDeparts from: main — it has no CI-wait check at all; the lane adds one wait (a) or one wait per ready PR (b).\nWaiting on: nothing stopped, the lane keeps this as a recorded Limit; lane ci-wait-stop-checkin-v2 builds the option you pick.\nMeanwhile: the lane keeps this as a recorded Limit in decision ci-wait-reads-run-status and does not wait for you.\nOption a is starred at the lane's recommendation (simpler: a green line cannot tell which PR it means). Neither option widens what a shared tool accepts.\nYour question, 15:01 CST Nov 14: \"which is best to prioritize speed?\" Triage's answer (unmeasured; neither option was timed): option a is the cheaper change and the one the lane recommends; the check stays one line, and nothing new is written or tested. Option b costs a new rule (a green line with no PR closes all waits or none) and its tests, and gains that no ready PR goes unchecked. Per the coordinator's 14:42 CST report, runner 10 now sets a check-in on each ready mark by hand, which covers the older PR that option a leaves open. Your pick; the star on a stays the lane's recommendation, not triage's.\nYour question, 18:37 CST Nov 14: \"is B better\". Triage's answer (a reading, not a measure; you have not picked): b is better at the outcome, a is better at cost. b leaves no ready PR without a check-in; a can leave an older one uncovered while Stop passes. b's price is one new rule (a green line with no PR closes all waits or none) and its tests. Not measured: how often a session has two ready PRs at once. What covers a today: runner 10 sets a check-in on each ready mark by hand (coordinator's 14:42 CST report, not read by triage). Only the lane recommends, and it recommends a; no session recommends b, so the star stays on a. The coordinator is asked for its view on b. Nothing waits.\nUpdate 18:43 CST Nov 14: Source: coordinator's Explore read (read-only Sonnet agent, hooks/stall_watch.py, hooks/guard.py and step ci-wait-stop-needs-checkin at local main af2c312c, shallow, later edits unknown); unverified by triage; the coordinator did not read this item's text. The lane recommended a earlier. The coordinator now recommends b (its own pick, undoable). b widens nothing: it makes the check stricter. Its gain: after ready PR 5, ready PR 6, then a green line naming no PR, PR 5 still needs its check-in, so no PR is left without a wake; the case is real: two ready runs were in CI at once (#3424 and #3425, 18:02 to 18:15 CST Nov 14, n=1). Its cost: one new rule and its tests, and a Stop that blocks more often. The star moves from a to b at the coordinator's named recommendation; the lane's a is unstarred. Stop check, coordinator's Explore read, unverified by triage: it counts send_later, create_trigger, CronCreate and ScheduleWakeup as a check-in (stall_watch.py:862, tests CI03-CI06). It reads only the tool name (:975), never run_once_at, cron_expression or recurring, so a recurring check-in passes; only the remedy text says one-time. It reads the transcript only and keeps ONE wait, the newest ready call. The 55-minute cap (guard.py, ci_wait_cap.json) guards only send_later with CI wording. Cost: no new process, file or timer. Usage by sessions is unmeasured except list_triggers at 18:41 CST Nov 14: 2 one-shot, 0 recurring, both runner 10's check-ins. Your pick. Nothing waits.", "options": [{"gain": "No new rule; the check stays simple.", "key": "a", "label": "Keep one wait, the newest ready call", "lose": "An older ready PR can go without a check-in while Stop passes."}, {"gain": "No ready PR goes unchecked.", "key": "b", "label": "Keep one wait per ready PR", "lose": "A green line with no PR must close all waits or none, which is a new rule to write and test."}], "recommended": "b", "why": "The check keeps one wait today. A green line names no PR, so one line can close the wait while an older ready PR has no check-in, and Stop then passes.", "ref": "lane ci-wait-stop-checkin-v2 message 11:43 CST Nov 14 (question 1); reviewer round 1 probe on #3410", "home": "step ci-wait-stop-needs-checkin; decision ci-wait-reads-run-status; ruling own-ci-wait-subscribe-guard (a watcher first, check-ins as the safety net)", "owner": "lane ci-wait-stop-checkin-v2 (draft PR #3410); posted by triage"}, "837": {"n": 837, "title": "Does any of four scheduling tools count as the check-in the Stop check wants (a), or only send_later, which the remedy text names (b)?", "context": "Goal: the Stop hook refuses to end a turn with an open CI wait and no check-in, without false alarms or misses.\nProblem (rule): the check counts CronCreate as a check-in, and any check-in covers the wait. The root rule says \"check-in\", not a tool, and describes a one-time check-in that fires once. The coordinator picked keep (2026-11-14 11:07 CST, undoable); you have not been asked.\nBased on (code, lane's read, unchecked by triage): test CI05 in hooks/test_stall_watch_stop.py pins the four-tool count.\nBased on (ruling): own-ci-wait-subscribe-guard (owner 21:39 CST Nov 13, relayed): subscribe or poll first; check-ins are the safety net. It names no tool.\nDeparts from: main — it names send_later only in the remedy text; the lane counts four tools (option a) or one (option b).\nWaiting on: nothing stopped, the lane keeps option A as a recorded Limit; lane ci-wait-stop-checkin-v2 builds the option you pick.\nMeanwhile: the lane keeps option a as a recorded Limit in decision ci-wait-reads-run-status and does not wait for you.\nOption a is the lane's and the coordinator's pick but is not starred: it widens what the check accepts (four tools where the text names one), and a widening is never starred.\nYour question, 15:01 CST Nov 14: \"are these my only options and which is good and why?\" Triage's answer (a reading, not your word): not the only ones in principle. A third shape counts the one-time tools (send_later, ScheduleWakeup) and refuses a recurring CronCreate. Whether the check can tell a one-time call from a recurring one is unread; triage asked the coordinator. Of the two shown: b matches the rule text and does not widen, and its cost is that sessions on create_trigger or ScheduleWakeup are blocked at Stop until they also set a send_later. a is the lane's and the coordinator's pick, blocks nothing, and widens, so it carries the line above and is not starred. Nothing waits on this item.\nUpdate 15:11 CST Nov 14 (coordinator's grep, not a read of the check): hooks on main name send_later only in hooks/shared_names.py line 23 (a name list) and CronCreate only in a comment in hooks/test_local_time.py line 1542; it found no code that tells a recurring cron from a one-time one. No lane that read the Stop check is in its notes. So whether a third shape is buildable is unknown.\nYour question, 18:37 CST Nov 14: \"is B better but just needs to be better thought out?\" Triage's answer (a reading, not a measure; you have not picked): on the rule text, yes: b matches the remedy text and the one-time check-in the rule describes, and it widens nothing. And yes, it needs more thought: its price is that a session that waits with create_trigger or ScheduleWakeup is blocked at Stop until it also sets a send_later, and how many sessions do that is unmeasured. The third shape (count one-time tools, refuse a recurring cron) is unbuilt, and whether the check can tell them apart is unknown. A lane could measure which tools sessions use to wait and read whether the check can tell one-time from recurring, then bring b or the third shape back to you. No star: a widens, and no session recommends b. The coordinator is asked for its view. Nothing waits.\nUpdate 18:43 CST Nov 14: Source: coordinator's Explore read (read-only Sonnet agent, hooks/stall_watch.py, hooks/guard.py and step ci-wait-stop-needs-checkin at local main af2c312c, shallow, later edits unknown); unverified by triage; the coordinator did not read this item's text. Stop check, coordinator's Explore read, unverified by triage: it counts send_later, create_trigger, CronCreate and ScheduleWakeup as a check-in (stall_watch.py:862, tests CI03-CI06). It reads only the tool name (:975), never run_once_at, cron_expression or recurring, so a recurring check-in passes; only the remedy text says one-time. It reads the transcript only and keeps ONE wait, the newest ready call. The 55-minute cap (guard.py, ci_wait_cap.json) guards only send_later with CI wording. Cost: no new process, file or timer. Usage by sessions is unmeasured except list_triggers at 18:41 CST Nov 14: 2 one-shot, 0 recurring, both runner 10's check-ins. The coordinator recommends NEITHER a nor b. It proposes a new option c, added below: keep all four tools but read each call's input. It narrows what passes, so it widens nothing, and it is starred at the coordinator's recommendation. b (send_later only) would block runner 10's create_trigger check-ins, the only measured ones. Your pick. Nothing waits.", "options": [{"gain": "No case changes; sessions on create_trigger or ScheduleWakeup are not blocked.", "key": "a", "label": "Keep counting the four scheduling tools the lane counts, CronCreate included", "lose": "A recurring cron counts as a one-time check-in, so a wait can stay covered by a job that never ends. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.", "widens": true}, {"gain": "The check matches the remedy text and the one-time check-in the rule describes.", "key": "b", "label": "Count send_later only, as the remedy text says", "lose": "Sessions that use create_trigger or ScheduleWakeup are blocked at Stop until they also set a send_later."}, {"gain": "The rule text becomes true in code; runner 10's one-shot check-ins pass as today.", "key": "c", "label": "Keep all four tools, but read each call: accept send_later, create_trigger with run_once_at, CronCreate with recurring false, and ScheduleWakeup; refuse create_trigger with cron_expression and CronCreate recurring", "lose": "A new rule and its tests. How many sessions wait with CronCreate or ScheduleWakeup is unmeasured, so the Stop block rate is unknown."}, {"gain": "The Stop check can tell a one-time session wait from an event wait.", "key": "d", "label": "Count send_later only for a session's own waits; keep the four tools for event waits a session cannot poll", "lose": "Unknown: how many sessions wait with create_trigger or ScheduleWakeup, and how the check tells a session wait from an event wait, are unmeasured.", "widens": false}], "recommended": "c", "why": "The rule says \"check-in\", not a tool. The lane's check counts CronCreate as one, and a recurring cron is not the one-time check-in the rule describes.", "ref": "lane ci-wait-stop-checkin-v2 message 11:43 CST Nov 14 (question 2); coordinator pick 11:07 CST Nov 14", "home": "step ci-wait-stop-needs-checkin; decision ci-wait-reads-run-status; test CI05 in hooks/test_stall_watch_stop.py", "owner": "lane ci-wait-stop-checkin-v2 (draft PR #3410); posted by triage"}, "844": {"n": 844, "title": "Stopping the owning session from counting its own kept routed answer needs a new page_grant flag and an edit of the Relayed Grant allow entry's command. Add --as-lane and edit the entry (a), refuse it in prose only (b), or add the flag but leave the entry alone (c)?", "context": "Goal: stop the owning session from counting its own kept routed answer before the receiver is done (harm: the named act runs twice), without changing more than you ruled.\nProblem (rule): page_grant.py has no input that names the caller (its flags are --root --page-url --item --fetched --pick), so it cannot tell the receiver from the owning session. Refusing the owner path needs one new flag. The \"Relayed Grant\" allow entry in settings.json autoMode quotes the full command (built from CHECK_FLAGS), and hooks/test_auto_mode_allow.py pins it, so a new flag turns #3224 red unless the entry's quoted command changes in the same PR. That is an edit of an allow-list entry, so it needs your word.\nBased on (read): the lane's words, relayed; triage read no code: page_grant.py (CHECK_FLAGS, COMMAND, routed_close) and the decision relayed-grant-read-from-page (\"What counts\", \"Deleted answers\").\nBased on (ruling): read by triage in roadmap/rulings: own-748-b-rule-4 (13:20 CST Nov 13) lands page_grant rule 4 as in closed PR #1383, so a closed routed answer keeps a counted grant route. own-753-a-relayed-grant-entry (18:24 CST Nov 13) edits the \"Relayed Grant\" entry (settings.json autoMode.allow, line 56) and its pinned test hooks/test_auto_mode_allow.py so a routed closed item counts. own-842-a-leave-out-fix-alone (16:30 CST Nov 14) leaves #3224 and #3308 out of #3418, fixes each in its own lane (the receiver's routed case counts; the owning session's own count before done is refused), then merges each alone; \"this one narrow path; nothing wider\".\nTriage's reading of those rulings: 842 a orders the refusal of the owner path but names no flag and no entry edit. 753 a names the entry and its pinned test, for the closed-item clause; it does not name the command text or a new flag. The coordinator reads both as not covering the command edit, and triage reads them the same way. One could read 753 a's \"edit the entry\" wider; no ruling says so. So it is asked.\nDeparts from: main (page_grant takes no caller identity; the entry's quoted command has five flags) — adds a sixth flag --as-lane <slug> and changes the entry's quoted command.\nWaiting on: #3224 and #3308 stay unpushed and the lane builds nothing on them; lane page-grant builds the option you pick.\nMeanwhile: the lane waits (it builds fix-3224-own-count-closed and fix-3308-own-count-closed); nothing else runs on it; #3224 and #3308 stay unpushed.\nNo option is starred. The coordinator recommends none of a, b or c (its 16:40 CST word; it first recommended a, then withdrew it). Whether b (prose only) counts as \"refused\" under ruling own-842-a is unmeasured; you read that. Option a edits an allow-list entry's command text, which counts as widening, so it is never starred.\nYOU ASKED 18:34 CST Nov 14, \"is a best?\" Triage's answer: no session recommends any option today. The coordinator withdrew its recommendation at 16:44 CST (\"I recommend none of a, b, c\"). What each option does: a is the only one where a check, not prose, closes the path; its price is one flag added to your edited allow entry's command text, and the receiver must pass its lane. b changes no entry and is smallest, but only prose stops the double run. c fails closed for every receiver, so it works only if you want the flag later. Unmeasured: whether prose alone (b) counts as \"refused\" under your 842 a, and how often the owning session would hit this path. Triage has asked the coordinator and lane page-grant whether either now recommends one. Nothing is starred until a named session recommends a non-widening option. Your pick stands open.\n\nCoordinator 18:39 CST Nov 14 (replaces its 18:37 text): its recommendation is now b, and lane page-grant recommends b too. Basis (lane read; coordinator checked page_grant.py line 299 and test_page_grant.py lines 239-242): main already counts an open item with a lane and a kept answer for any caller, so rule 4 (#3224) only moves the same case onto closed items. A fourth way (compare the item's lane to the caller's branch) fails closed for tier receivers and worktree-agent branches, so it is unsafe. b = ship rule 4 as built, plus the sentence \"the owning session never counts its own kept answer\" in the decision and the skill; no flag, no allow-entry edit. Gain: your two rulings land and nothing widens. Lose: prose refuses nothing, the same as main's open-lane case today; it departs from the wording of your 842 a. Unmeasured: how often the owning session does this. a and c still widen. b carries no widens flag and has a gain and a lose. #3224 and #3308 stay out of main until you pick.", "options": [{"gain": "A check closes the path, not prose.", "key": "a", "label": "Add --as-lane <slug>: rule 4 counts a routed close only when it equals the item's lane, so the owning session, on another lane, is refused. #3224 also edits the entry's quoted command (one flag added, nothing else) so its pin stays green; #3308 then edits only the Never-covers clause on top. #3224 lands first, #3308 second, each alone.", "lose": "You let #3224 edit your owner-edited entry's command text. The receiver must pass its lane. A session can still pass another lane (a form only an attacker writes). Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.", "widens": true}, {"gain": "No entry edit, and both PRs stay small.", "key": "b", "label": "No new flag: the refusal lives in SKILL.md and the decision text only (\"the owning session never counts its own kept answer\")", "lose": "No check. The named act running twice is stopped by prose only.", "recommended": true}, {"gain": "No entry edit.", "key": "c", "label": "Add the flag but keep it out of the entry's quoted command", "lose": "The receiver's instructions never tell it to pass the flag, so it fails closed for every receiver."}], "why": "The fix for #3224 and #3308, under your 842 a, needs a flag that names the caller, and the allow entry quotes the command, so it must change too. No ruling names that edit, so it needs your word.", "ref": "coordinator message 16:37 CST Nov 14; lane page-grant report 16:36 CST Nov 14", "home": "steps fix-3224-own-count-closed and fix-3308-own-count-closed; PRs #3224 and #3308; rulings own-748-b-rule-4, own-753-a-relayed-grant-entry, own-842-a-leave-out-fix-alone", "owner": "coordinator, from lane page-grant's report; posted by triage"}, "857": {"n": 857, "title": "Taken for you: the records-only CI skip was built narrower than your \"every job\". Overrule?", "context": "In plain words (rewritten 11:42 CST Nov 15, after your note \"sxplain this more simply and what we r waiting on\"): You told us to skip every CI job when a push to main only changes the records file. We built it to skip fewer jobs than that, because skipping the rest would weaken a safety check on CI itself. That version is already live (merged 20:42 CST Nov 14). We do not know yet how much time it saves: one full run took 44 min 32 s, and one run is not enough to say. WE ARE WAITING ON YOU, nothing else: press Keep (leave it as built, no new work) or Overrule (we widen it to every job; a lane loosens that safety check and it gets a fresh review). The coordinator does not recommend Overrule before the list of steps that read the records file exists.\n\nGoal: you see and can overrule every pick a session takes for you (\"Nothing can't be undone don't wait on me\", your 20:18 CST Nov 14 words; and your 00:11 CST Nov 15 question where the picks went).\nProblem (rule): you chose c (\"every job\") knowingly. The coordinator's own pick of 17:15 CST narrowed the build, undoable, and you had not been told. #3426 merged with the narrower gate at 20:42:52 CST Nov 14. Going wider relaxes a pin (a guard change), so it needs your word.\nBased on (ruling): own-830-c-ci-scope-green-before-head, and the step ci-scope-skips-records-only-push (the coordinator's hand-in at 18:46 CST: 34 steps stay unconditioned; 3 steps always and 3 conditional steps read docs/records.md; 6 unknown; the Windows guard read by static trace only; gain unmeasured, one full run 44 min 32 s after the records step, n=1). Relayed; triage read no code or record.\nDeparts from: main - all jobs run on every push; the merged build skips part of them on a records-only push, less than you chose.\nMeanwhile: the pick stands and the work under it continues. Undo: say Overrule; a lane widens the gate. An answer of Keep closes this with no act.\nTAKEN FOR YOU: the build of your item 830 c (skip CI on a push that changes only docs/records.md after a fully green head) does less than the \"every job\" you chose: it gates only what main already scopes by `code`, plus the merge, rest and mutation-report jobs, and leaves the unconditioned md-reading steps and the Windows guard job ungated unless traced safe. Taken by coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) at 17:15 CST Nov 14.", "options": [{"gain": "no guard change; the pins and MUST_STAY_UNSCOPED stay.", "key": "a", "label": "Keep: the pick stands", "lose": "a smaller, unmeasured saving than your \"every job\"."}, {"gain": "the full \"every job\" you chose.", "key": "b", "label": "Overrule: the ruling reopens", "lose": "a lane relaxes a pin (a guard change) and needs a fresh review round; the coordinator does not recommend it before the list of md-reading steps exists."}], "why": "A session took this pick for you. Keep it, or overrule it and the ruling reopens.", "ref": "ruling own-830-c-ci-scope-green-before-head", "home": "ruling own-830-c-ci-scope-green-before-head; step ci-scope-skips-records-only-push", "owner": "coordinator; posted by triage"}, "878": {"n": 878, "title": "Make main push runs skip: B reason line, A require main's tip, or C", "context": "This item asks how to stop most main push runs from re-running the whole suite. The lane waits meanwhile.\nPlain words: a push run is the CI run that starts when a commit lands on main. A tree is the exact set of files a commit holds; equal trees mean equal files. A head is the newest commit of a PR branch. The tip is the newest commit on main. A merge ref is GitHub's test merge of a PR into main (refs/pull/N/merge).\nGoal: cut full main runs (30 to 45 min each) after merges, so merges cost less CI and the next merge waits less (CI speed).\nProblem (rule): 9 of the last 10 main push runs ran in full because the merge commit's tree matches no PR head tree. The head lacked main's tip in all 9 (5 to 41 commits behind). The skip gate works as designed. The saving needs a change to a ruling, so it needs your word.\nBased on (ruling): merge-needs-current-base (owner pick A for R42 part 2), read in its record: \"the head must already be green on its own base, and it must merge cleanly with the base tip. The head need not hold the tip.\" This matches the lane's wording, so no correction.\nBased on (ruling): own-840-a-ready-merges-main-skip-page-commits (owner 19:56 CST Nov 14, item 840 a): `merge <pr> --ready` pushes a merge of main into the PR branch; built in #3440 (merged 22:32 CST Nov 14). Your own item 840 measured that this helps at most 6 of 15 merges, because main moves between ready and merge. The consultant's later pick own-ready-push-keep-as-is (08:39 CST Nov 15, not owner-typed) left the tool as it is. Option A below is not covered by your 840 a: A needs the head to hold the tip at the merge, not at ready.\nBased on (measured): the lane's reads, relayed; triage read none of its data and has not checked it. REST reads of main push runs 43716148486 to 43741257797. Only PR 3500 (run 43732993553) had a head equal to main's tip and skipped.\nDeparts from: main lets a green head that merges cleanly with main's tip merge without holding the tip (merge-needs-current-base) — option A makes the merge tool require the head to hold the tip; B and C change nothing about merging.\nWaiting on: lane push-skip-measure builds nothing until your answer; it builds B, or A against a ruling, on your word.\nWho recommends what: option B is the lane's recommendation, not yours. Option A goes against your ruling and needs your word. Triage checked first: no ruling answers this question. Step push-skip-reads-why (the coordinator closed its lane because #3502 recorded the 'why' as a decision-record line) added no printed reason line, so B is not a repeat.\nWidens: no option marks widens. A makes the merge tool stricter and B and C accept nothing new from a shared tool.", "options": [{"gain": "The PR run proves the merged tree, so most main pushes skip the full run.", "how": "The merge tool refuses a PR whose head lacks main's tip. The lane merges main into the head first, and the PR run then tests the tree that main will get.", "key": "a", "label": "The merge tool requires the head to hold main's tip", "lose": "One more PR run per lane when main moves (30 to 45 min each), and the ruling merge-needs-current-base changes. Goes against your ruling merge-needs-current-base (owner pick A, R42 part 2)."}, {"gain": "No silent skip=false: a reader sees why a main run ran in full.", "how": "On every push run the push-skip step prints one line with the reason it ran in full or skipped. No ruling is touched.", "key": "b", "label": "The push-skip step prints one reason line on every run (the lane's recommendation)", "lose": "Saves no CI minutes."}, {"gain": "No ruling change.", "how": "Compare the tree main will get with the tree of the PR run's merge ref, instead of the PR head tree.", "key": "c", "label": "Read the PR run's merge-ref tree", "lose": "Unproven: the lane says the API does not show that tree."}], "recommended": "b", "why": "The lane's recommendation, not the owner's: B costs no ruling and removes the silent skip=false; A saves the minutes but reverses merge-needs-current-base.", "holds": "Lane push-skip-measure waits: it builds B only on your word, and A only on your word against a ruling.", "ref": "lane push-skip-measure page-item request 11:31 CST Nov 15; ruling merge-needs-current-base (owner pick A, R42 part 2); ruling own-840-a-ready-merges-main-skip-page-commits (owner 19:56 CST Nov 14); decision push-skip-on-proven-tree", "home": "decision push-skip-on-proven-tree; decision merge-needs-current-base (lane push-skip-measure; triage files the step)", "owner": "coordinator, took over from lane push-skip-measure"}};
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// page.html's own helpers at 066cc6d3, copied: letterOf (:1032), shorten (:1033), pickName (:1035), optName (:1045), ordinal (:1047).
+const letterOf = (it, key) => { const i = (it.options || []).findIndex((o) => o.key === key); return i < 0 ? "" : String.fromCharCode(65 + i % 26); };
+const shorten = (t, n) => (t.length > n ? t.slice(0, n - 1).trimEnd() + "…" : t);
+const pickName = (it, key) => { const o = (it.options || []).find((x) => x.key === key); return o && o.label != null && String(o.label).trim() ? shorten(String(o.label), 28) : ""; };
+const optName = (it, key) => pickName(it, key) || letterOf(it, key);
+const ordinal = (n) => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10 < 4 ? n % 10 : 0]);
+const isMulti = (it) => it.multi === true || it.ranked === true;
+const validKeys = (it, l) => Array.isArray(l) && l.length > 0 && new Set(l).size === l.length && l.every((k) => (it.options || []).some((o) => o.key === k));
+const recOf = (it) => (it.recommended != null ? it.recommended : it.pick);
+const pickKeys = (it) => { const r = recOf(it); return isMulti(it) ? (validKeys(it, r) ? (it.ranked === true ? r : it.options.map((o) => o.key).filter((k) => r.includes(k))) : null) : typeof r === "string" && it.options.some((o) => o.key === r) ? [r] : null; };
+const labelOf = (it, k) => String((it.options.find((o) => o.key === k) || {}).label || "");
+const SPARK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M10 4c.7 4.6 2.9 6.8 7.5 7.5-4.6.7-6.8 2.9-7.5 7.5-.7-4.6-2.9-6.8-7.5-7.5C7.1 10.8 9.3 8.6 10 4z"/><path d="M19 2.5c.3 1.8 1 2.5 2.8 2.8-1.8.3-2.5 1-2.8 2.8-.3-1.8-1-2.5-2.8-2.8 1.8-.3 2.5-1 2.8-2.8z"/><path d="M19 15c.25 1.4.8 1.95 2.2 2.2-1.4.25-1.95.8-2.2 2.2-.25-1.4-.8-1.95-2.2-2.2 1.4-.25 1.95-.8 2.2-2.2z"/></svg>';
+
+// The parse the page would run: the first context line that starts "Waiting on:" leaves the context and becomes its own line.
+function splitWait(ctx) {
+  const lines = String(ctx || "").split("\n"), i = lines.findIndex((l) => /^Waiting on:\s*\S/.test(l));
+  if (i < 0) return { ctx: ctx || "", wait: "" };
+  return { wait: lines[i].replace(/^Waiting on:\s*/, ""), ctx: lines.filter((_, j) => j !== i).join("\n") };
+}
+
+// State -> the item drawn, and how. `fix` names the fixture; the rest are the design's switches.
+const STATE = {
+  both: { fix: 836, place: "opts" },
+  bothtop: { fix: 836, place: "top" },
+  holds: { fix: 878, place: "opts" },
+  widens: { fix: 837, place: "opts" },
+  widenscut: { fix: 837, place: "opts", cut: true },
+  multi: { fix: 837, place: "opts", multi: ["c", "d"] },
+  ranked: { fix: 837, place: "opts", ranked: ["c", "d", "b"] },
+  oneline: { fix: 844, place: "opts" },
+  old: { fix: 857, place: "opts" },
+  oldsay: { fix: 857, place: "opts", say: true },
+  today: { fix: 836, today: true },
+};
+const NAME = { both: "Recommended line", bothtop: "both lines at the top", holds: "Recommended line", widens: "whole label, up to three lines", widenscut: "label cut at 28", multi: "one row per option", ranked: "rows in order, with place", oneline: "Waiting on line", old: "nothing drawn", oldsay: "says none" };
+
+function itemFor(s) {
+  const S = STATE[s], it = JSON.parse(JSON.stringify(FIX[S.fix]));
+  if (S.multi) { it.multi = true; it.recommended = S.multi; }
+  if (S.ranked) { it.ranked = true; it.recommended = S.ranked; }
+  if (S.today) it.context = it.context.split("\n").filter((l) => !/^Waiting on:/.test(l)).join("\n");
+  return it;
+}
+
+function recLine(it, s, lab) {
+  const S = STATE[s], ks = pickKeys(it);
+  const tag = lab ? ` data-new="${esc(NAME[s])}"` : "";
+  if (!ks) return S.say ? `<p class="saynone"${tag}>This item names no recommended option.</p>` : "";
+  const multi = isMulti(it), ranked = it.ranked === true;
+  let head = `<p class="rechead"><b>${ranked ? "Recommended, in order:" : "Recommended:"}</b></p>`, names = "";
+  if (!multi) {
+    // One option: one sentence-like line, the label in full up to three lines with the lead word and chip.
+    const k = ks[0], full = labelOf(it, k), shown = S.cut ? optName(it, k) : full;
+    head = `<p class="rechead one" title="${esc(full)}"><b>Recommended:</b> <span class="key">${letterOf(it, k)}</span> <span class="rn">${esc(shown)}</span></p>`;
+  } else {
+    names = `<ol class="${ranked ? "inorder" : "unordered"}" aria-label="${ranked ? "Recommended order" : "Recommended options"}">${ks.map((k, i) => `<li>${ranked ? `<span class="ord">${ordinal(i + 1)}</span>` : ""}<span class="key">${letterOf(it, k)}</span><span class="rl" title="${esc(labelOf(it, k))}">${esc(labelOf(it, k))}</span></li>`).join("")}</ol>`;
+  }
+  return `<div class="recline" id="rec-${it.n}"${tag}><b class="spark" aria-hidden="true">${SPARK}</b><div>${head}${names}<p class="recwhy">${esc(it.why)}</p></div></div>`;
+}
+
+function waitLine(wait, s, lab) {
+  const S = STATE[s];
+  if (wait) return `<p class="waitline" id="wait-${s}"${lab ? ' data-new="Waiting on line"' : ""}><b>Waiting on:</b> ${esc(wait)}</p>`;
+  return S.say ? `<p class="saynone"${lab ? ' data-new="says none"' : ""}>This item states no Waiting on line.</p>` : "";
+}
+
+function optCard(it, o, s, lab) {
+  const S = STATE[s], sfx = it.n + "-" + o.key, multi = isMulti(it), ranked = it.ranked === true;
+  const pk = pickKeys(it), pi = pk ? pk.indexOf(o.key) : -1;
+  const star = `<b class="spark" aria-label="Recommended" title="Recommended">${SPARK}</b>`;
+  let pick = `<span class="nopick"></span>`;
+  if (pi >= 0 && S.today) pick = `<div class="pick" id="p-${sfx}"${lab ? ' data-today="why inside the option card"' : ""}>${star}${esc(it.why)}</div>`;
+  else if (pi >= 0) pick = `<div class="pick star" id="p-${sfx}"${lab && pi === 0 ? ' data-new="star only"' : ""}>${star}${ranked ? `<span class="ord">${ordinal(pi + 1)}</span>` : ""}</div>`;
+  const input = multi ? `<input type="checkbox" id="o-${sfx}" value="${o.key}">` : `<input type="radio" name="g-${it.n}" id="o-${sfx}" value="${o.key}">`;
+  const tick = multi ? `<span class="tick${ranked ? "" : " mark"}" aria-hidden="true"></span>` : "";
+  const widens = o.widens === true ? `<p class="stake due dwarn widens"><span class="g due" aria-hidden="true"></span><span>Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo</span></p>` : "";
+  const body = `<p class="how" id="h-${sfx}">${esc(o.how || "")}</p><div class="tr" id="t-${sfx}">${widens}<div class="gain"><span class="s" aria-label="You gain">+</span><span>${esc(o.gain)}</span></div><div class="lose"><span class="s" aria-label="You lose">−</span><span>${esc(o.lose)}</span></div></div>${pick}`;
+  const head = `<span class="head">${tick}<span class="key">${letterOf(it, o.key)}</span><span class="lab" id="l-${sfx}">${esc(o.label)}</span></span>`;
+  if (!ranked) return `<label class="opt" for="o-${sfx}">${input}${head}${body}</label>`;
+  const rank = `<div class="rank gone"><span class="sr">Not in your order</span><button class="btn alt mv" type="button" aria-disabled="true">Up</button><button class="btn alt mv" type="button" aria-disabled="true">Down</button></div>`;
+  return `<div class="opt ranked">${input}<label class="head" for="o-${sfx}">${tick}<span class="key">${letterOf(it, o.key)}</span><span class="lab">${esc(o.label)}</span></label>${body}${rank}</div>`;
+}
+
+function card(s, lab) {
+  const S = STATE[s], it = itemFor(s);
+  const { ctx, wait } = S.today ? { ctx: it.context, wait: "" } : splitWait(it.context);
+  const T = it.holds ? "holds" : "calm", multi = isMulti(it);
+  const clamp = ctx.length > 220;
+  const top = `<div class="top"><span class="num" title="From ${esc(it.owner)}">No. ${it.n}</span><span>waited 2 hours</span></div>`;
+  const holds = it.holds ? `<p class="stake holds"><span class="g holds" aria-hidden="true"></span><span>${esc(it.holds)}</span></p>` : "";
+  const wl = S.today ? "" : waitLine(wait, s, lab), rl = S.today ? "" : recLine(it, s, lab);
+  const ctxEl = `<p class="ctx${clamp ? " clamp" : ""}"${lab && S.today ? ' data-today="context, clamped to 3 lines"' : ""}>${esc(ctx)}</p>${clamp ? `<button class="morebtn" type="button" aria-expanded="false">More context</button>` : ""}`;
+  const about = it.ref ? `<p class="about">${esc(it.ref)}</p>` : "";
+  const hint = multi ? `<p class="multihint">${it.ranked === true ? "Tick any that apply, then order them, best first." : "Tick any that apply."}</p>` : "";
+  const opts = `<div class="opts${it.ranked === true ? " ranked" : ""}" role="${multi ? "group" : "radiogroup"}" aria-label="Options for No. ${it.n}">${it.options.map((o) => optCard(it, o, s, lab)).join("")}</div>`;
+  const ready = multi ? `<div class="readybox"><p class="ready multi" aria-live="polite"></p></div>` : `<p class="ready" aria-live="polite"></p>`;
+  const alts = `<div class="alts"><button class="btn dash nonebtn" type="button" aria-pressed="false">None of these</button><button class="btn dash parkbtn" type="button" aria-pressed="false">Park</button></div>`;
+  const note = `<div class="note"><label for="n-${s}">Note to the session (optional)</label><textarea id="n-${s}" placeholder="Anything the session should know"></textarea></div>`;
+  const dest = `<p class="dest">Lands in ${esc(it.home)}. Added Nov 14, 11:49.</p>`;
+  const upper = S.place === "top" ? holds + wl + rl : holds + wl;
+  const lower = S.place === "top" ? "" : rl;
+  return `<article class="card ${T}" id="item-${it.n}">${top}<h3 class="title">${esc(it.title)}</h3>${upper}${ctxEl}${about}${lower}${hint}${opts}${ready}${alts}${note}${dest}</article>`;
+}
+
+function screen(s, theme, lab) {
+  const it = itemFor(s), T = it.holds ? { k: "holds", name: "Blocking" } : { k: "calm", name: "Whenever" };
+  return `<!doctype html><html lang="en" data-theme="${theme}" class="${lab ? "" : "nolab"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${document.getElementById("pagecss").textContent}${document.getElementById("newcss").textContent}</style></head><body>
+<header class="hdr"><div class="in"><div class="mark" aria-hidden="true">C</div><div class="who"><h1 class="repo">claude-settings</h1></div></div></header>
+<nav class="in tabs" aria-label="Page"><div class="tl" role="tablist" aria-label="Page parts"><a href="#" role="tab" aria-selected="true">Questions <span class="cnt">1</span></a><a href="#" role="tab" aria-selected="false" tabindex="-1">Status</a></div></nav>
+<div class="in main"><div class="list" id="list"><section class="tier" id="tier-${T.k}"><header><h2><span class="g ${T.k}" aria-hidden="true"></span>${T.name}<span class="ct">1</span></h2></header>${card(s, lab)}</section></div></div>
+<div class="bar"><div class="in"><span class="st"><b>0</b> ready. <b>1</b> stays open.</span><button class="btn send" type="button" disabled>Send answers</button></div></div></body></html>`;
+}
+
+/* ---------- Harness ---------- */
+const STATES = Object.keys(STATE);
+const P = { s: "both", w: "all", t: "", lab: "on", hide: [] };
+const gone = (s) => P.hide.includes(s);
+function readHash() { new URLSearchParams(location.hash.slice(1)).forEach((v, k) => { if (k === "hide") P.hide = v.split(",").filter(Boolean); else if (k in P) P[k] = v; }); if (!STATES.includes(P.s)) P.s = "both"; }
+function writeHash() { const q = new URLSearchParams({ s: P.s, w: P.w }); if (P.t) q.set("t", P.t); if (P.lab === "off") q.set("lab", "off"); if (P.hide.length) q.set("hide", P.hide.join(",")); history.replaceState(null, "", "#" + q); }
+const sysTheme = () => (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+const themes = () => (P.t === "both" ? ["light", "dark"] : [P.t === "light" || P.t === "dark" ? P.t : sysTheme()]);
+const fits = [];
+function frame(host, w, theme) {
+  const box = document.createElement("div"); box.className = "fr";
+  const cap = document.createElement("b"); cap.textContent = "Phone " + w + ", " + theme;
+  const wrap = document.createElement("div"); wrap.className = "fw";
+  const f = document.createElement("iframe"); f.title = "Waiting page at " + w + " wide, " + theme + ", state " + P.s; f.style.width = w + "px";
+  wrap.append(f); box.append(cap, wrap); host.append(box);
+  const fit = () => {
+    if (!f.isConnected) return;
+    const avail = Math.min(host.clientWidth - 2, w), sc = avail / w;
+    let hgt = 900;
+    try { hgt = f.contentDocument.documentElement.scrollHeight; } catch (e) {}
+    f.style.height = hgt + "px"; f.style.transform = "scale(" + sc + ")";
+    wrap.style.width = Math.ceil(w * sc) + 2 + "px"; wrap.style.height = Math.ceil(hgt * sc) + 2 + "px";
+  };
+  f.addEventListener("load", () => { fit(); setTimeout(fit, 200); });
+  f.srcdoc = screen(P.s, theme, P.lab !== "off");
+  fits.push(fit);
+}
+addEventListener("resize", () => fits.forEach((f) => f()));
+function render() {
+  if (gone(P.s)) P.s = STATES.find((s) => !gone(s)) || "both";
+  writeHash();
+  fits.length = 0;
+  document.documentElement.dataset.theme = P.t === "light" || P.t === "dark" ? P.t : sysTheme();
+  document.querySelectorAll("[data-s]").forEach((b) => { b.hidden = gone(b.dataset.s); b.setAttribute("aria-pressed", String(b.dataset.s === P.s)); });
+  document.querySelectorAll("[data-hide]").forEach((b) => { const on = P.hide.includes(b.dataset.hide); b.textContent = b.textContent.replace(/^(Hide|Show)/, on ? "Show" : "Hide"); b.setAttribute("aria-pressed", String(on)); });
+  document.querySelectorAll("[data-w]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.w === P.w)));
+  document.querySelectorAll("[data-t]").forEach((b) => b.setAttribute("aria-pressed", String(P.t === "both" ? b.dataset.t === "both" : b.dataset.t === themes()[0])));
+  const lb = document.getElementById("labBtn"); lb.textContent = P.lab === "off" ? "Labels off" : "Labels on"; lb.setAttribute("aria-pressed", String(P.lab !== "off"));
+  document.querySelectorAll(".st[data-state]").forEach((sec) => { const on = sec.dataset.state === P.s; sec.classList.toggle("on", on); sec.hidden = gone(sec.dataset.state); sec.querySelector(".frames").replaceChildren(); });
+  const host = document.querySelector(`.st[data-state="${P.s}"] .frames`);
+  const ws = P.w === "all" ? [360, 390, 430] : [[360, 430].includes(Number(P.w)) ? Number(P.w) : 390];
+  themes().forEach((t) => ws.forEach((w) => frame(host, w, t)));
+}
+document.querySelector(".tool").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.s) P.s = b.dataset.s;
+  if (b.dataset.w) P.w = b.dataset.w;
+  if (b.dataset.t) P.t = b.dataset.t;
+  if (b.dataset.lab) P.lab = P.lab === "off" ? "on" : "off";
+  if (b.dataset.hide) { const k = b.dataset.hide; P.hide = P.hide.includes(k) ? P.hide.filter((x) => x !== k) : [...P.hide, k]; }
+  render();
+});
+addEventListener("hashchange", () => { readHash(); render(); });
+readHash(); render();
+</script>
+</body>
+</html>
