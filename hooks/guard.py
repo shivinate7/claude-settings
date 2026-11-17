@@ -6917,6 +6917,23 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
     record_writers()
 
 
+def scratchpad_folder_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
+    """Rule scratchpad-owner, the folder form: the log detail when an agent's call removes or moves a folder, the
+    scratchpad itself or a glob that holds a file another agent wrote, else ''. A removed file that is itself
+    another agent's is an overwrite ask (`scratchpad_owner_write`), not a folder, so it is skipped here. The shell
+    path reads this before the run ask: a folder removal is a deny, and the run ask must not hide it."""
+    agent, session, files, removed, _moved = scratchpad_writes(payload, tool, tool_input, cwd)
+    if not agent:
+        return ""
+    for full in files:
+        writer = scratchpad_writer_of(full, session)
+        if full in removed and not (writer and writer != agent):
+            held = scratchpad_folder_writer(full, session, agent)
+            if held:
+                return "agent %s removes a scratchpad folder holding a file agent %s wrote: %s" % (agent, held[1], held[0])
+    return ""
+
+
 def scratchpad_command_words(tokens):
     """(command word, the words after it up to the group's close) at each command of one segment: its own, and
     the one in each `(` or `$(` or backtick group, glued or spaced, with or without an assignment before it
@@ -7798,9 +7815,13 @@ def judge(payload) -> None:
                     remedies.setdefault(n[0], remedy)
             if names:
                 sim_boot_refusal(tool, names, remedies)
-            # After the denies above: the shell call runs another agent's scratchpad script.
+            # After the denies above: the shell call runs another agent's scratchpad script. A folder removal in the
+            # same call is still a deny, so it is judged before the run ask.
             owned = scratchpad_owner_hit(payload, tool, tool_input, cwd)
             if owned:
+                folder = scratchpad_folder_hit(payload, tool, tool_input, cwd)
+                if folder:
+                    refuse(tool, "deny", "scratchpad-owner", SCRATCHPAD_FOLDER_REASON, folder)
                 refuse(tool, "ask", "scratchpad-owner", SCRATCHPAD_OWNER_REASON, owned)
             scratchpad_owner_write(payload, tool, tool_input, cwd)   # the call passed: refuse an overwrite, else record the writer
         return

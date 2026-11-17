@@ -290,11 +290,12 @@ def _skip_uv_run(tokens, index: int) -> int:
 
 
 def _merge_flag(tokens, flag: str) -> bool:
-    """True when a token is the merge tool's option `flag` or an argparse prefix that names it alone.
-    argparse takes an exact name first, else a prefix that matches one option (`--lane` is `--lane-lint`).
-    A prefix that matches two or more is an error and runs nothing, so it is no flag (`--l`). The option
-    names are MERGE_OPTIONS, the list the merge parser is checked against. argparse splits `--name=value`
-    at the first `=` before it matches, so `--lane=7` names --lane-lint as `--lane 7` does."""
+    """True when a token is the merge tool's option `flag`, or a prefix that names it alone. The merge parser sets
+    allow_abbrev off, so a prefix runs no check (`--lane` is an error, not `--lane-lint`). The guard still reads a
+    unique prefix as the flag: a tail after it is refused, which costs nothing, because the command fails anyway.
+    A prefix that matches two or more options is no flag (`--l`). The option names are MERGE_OPTIONS, the list
+    the merge parser is checked against. `--name=value` is split at the first `=`, so `--lane=7` reads as `--lane 7`.
+    `check_timeout_hit` takes the exact token only."""
     for token in tokens:
         if token.startswith("--"):
             token = token.split("=", 1)[0]
