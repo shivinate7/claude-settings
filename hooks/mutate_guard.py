@@ -2735,10 +2735,10 @@ MUTATIONS = [
      '        index = start + at\n',
      "guard", 'a 2>/dev/null redirect after uv run'),
     # A redirect word between a pipe and its filter is skipped before the filter word is read.
-    ('check-tail lint: a redirect word between a pipe and its filter is skipped',
+    ('check-tail: a redirect word between a pipe and its filter is skipped',
      '            at = _skip_redirects(tokens, at)\n',
      '',
-     "guard", 'check-tail: merge --lane-lint piped to a redirect word, then tail, is refused'),
+     "guard", 'check-tail: merge --lane-lint piped to a redirect word, then tee, backgrounded, is allowed'),
     ('check-tail: a substitution is not read as its own text',
      '    texts = [_pipelines(text, flags) for (text, _in_message), flags in zip(texts, amps)]\n',
      '    texts = [_pipelines(stripped, flags) for (text, _in_message), flags in zip(texts[:1], amps)]\n',

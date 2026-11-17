@@ -586,6 +586,11 @@ sh("check-tail: " + TAIL_REDIRECT_THEN_COMMIT[0] + ", is refused", TAIL_REDIRECT
 # A redirect word between a pipe and its filter is skipped, so `| 2>/dev/null tail` still reads as tail.
 sh("check-tail: merge --lane-lint piped to a redirect word, then tail, is refused",
    "merge --lane-lint 7 | 2>/dev/null tail -3", "deny", "check-tail", cwd=NOGIT)
+# The same skip reads the file writer past a redirect word. tee keeps every byte, so the call is allowed.
+# Without the skip, the redirect word is read as the filter, and the call is refused.
+add("check-tail: merge --lane-lint piped to a redirect word, then tee, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, timeout=CHECK_TIMEOUT_MS, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 7 | 2>/dev/null tee lint.log")
 # A commit or a push inside `$(...)` is a follow-up of a lint piped to tail before it, as a commit outside is.
 sh("check-tail: a lint piped to tail, then && out=$(commit) in a substitution, is refused",
    "python3 lint/ste_lint.py d.md | tail -2 && out=$(" + VCS + " commit -m m 2>&1)", "deny", "check-tail",
