@@ -58,6 +58,7 @@ HOOK = os.path.join(HERE, "stale_install.py")
 SETTINGS = os.path.join(REPO, "settings.json")
 REAL_GIT = shutil.which("git") or "git"
 RECORD = ".claude-settings-install.json"
+SEEN_NAME = ".claude-settings-refresh-seen"
 PAYLOAD = json.dumps({"hook_event_name": "UserPromptSubmit", "session_id": "test-session", "prompt": "hi"})
 # The git subcommands that reach origin. A prompt makes none of them.
 NETWORK = ("ls-remote", "fetch", "clone", "pull")
@@ -260,6 +261,7 @@ class Fixture:
         self.grand_path = os.path.join(self.root, "installer-child.pid")
         self.lock_path = os.path.join(self.config, ".claude-settings-install.lock")
         self.record_path = os.path.join(self.config, RECORD)
+        self.seen_path = os.path.join(self.config, SEEN_NAME)
         self.source = None
         self.ref = "main"
         for folder in (self.home, self.config, self.shim_dir, self.seed):
@@ -529,6 +531,15 @@ def shared_behind(name, behind_by=0):
     fx.write_record("main", fx.origin_tip("main"))
     write_file(os.path.join(fx.config, "CLAUDE.md"), "@%s/CLAUDE.md\n" % shared)
     return fx, shared, base
+
+
+def no_trigger_worst(name):
+    """A cloud fixture with no trigger that makes the most reads: the record is ahead of the local origin/main ref, so
+    the prompt reads ancestry, and the clone the global rules file points at is current with its own origin ref. The
+    record is ahead of the ref, so no trigger fires. The clone's count is zero, so no flag fires either."""
+    fx, shared, base = shared_behind(name)
+    fx.write_record("main", fx.child_commit(base))
+    return fx, shared
 
 
 def network_reads(fx):
@@ -886,6 +897,23 @@ class StaleInstall(unittest.TestCase):
         run = fx.run_hook()
         self.assertEqual(run.lines, [], "a record ahead of the local ref printed %r, want silence" % run.lines)
         self.assertEqual(fx.installer_runs(), [], "a record ahead of the local ref ran the installer")
+
+    # A prompt with no trigger writes no file. The seen file records a head that a reinstall, a pin refresh or a clone
+    # flag acted on, so a prompt that acts on none of them leaves the config dir as it was. This is the worst no-trigger
+    # prompt: the record ahead of the local ref, and the shared clone current.
+
+    def test_no_trigger_prompt_writes_no_seen_file(self):
+        fx, shared = no_trigger_worst(self._testMethodName)
+        self.assertNotEqual(fx.git("-C", fx.source, "rev-parse", "refs/remotes/origin/main").strip(), fx.record_sha(),
+                            "scope: the record is not ahead of the local origin/main ref")
+        self.assertEqual(fx.sha(shared, "HEAD"), fx.sha(shared, "refs/remotes/origin/main"),
+                         "scope: the shared clone is not current with its own origin ref")
+        self.assertFalse(os.path.exists(fx.seen_path), "scope: the seen file exists before the prompt")
+        before = sorted(os.listdir(fx.config))
+        fx.run_hook()
+        self.assertFalse(os.path.exists(fx.seen_path), "a no-trigger prompt wrote the seen file")
+        self.assertEqual(sorted(os.listdir(fx.config)), before,
+                         "a no-trigger prompt wrote a file in the config dir")
 
     # The installer's environment: the record's ref, and a hook input that no SessionStart entry fires on.
 
