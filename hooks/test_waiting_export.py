@@ -100,13 +100,13 @@ def git(where, *args, env=None):
 
 # --------------------------------------------------------------------------- repo fixtures
 
-def registry(page_export=None, page_id=PAGE_ID, page_url=PAGE_URL):
-    """The repo's extras file: a waiting page and a reference artifact. `page_export` names the copy folder."""
-    page = {"id": page_id, "url": page_url, "role": "waiting-page", "account": "shivam"}
-    if page_export is not None:
-        page["export"] = page_export
-    reference = {"id": REF_ID, "url": REF_URL, "role": "reference", "account": "shivam",
-                 "collections": ["notes"]}
+def registry(page_export="waiting", page_id=PAGE_ID, page_url=PAGE_URL):
+    """The repo's extras file: a waiting page and a reference artifact. `page_export` names the copy folder; every entry
+    has its export path, which the registry requires, and its one link in the account `shivam`."""
+    page = {"id": page_id, "role": "waiting-page", "export": page_export,
+            "links": [{"account": "shivam", "url": page_url}]}
+    reference = {"id": REF_ID, "role": "reference", "export": "artifacts/" + REF_ID,
+                 "links": [{"account": "shivam", "url": REF_URL}], "collections": ["notes"]}
     return json.dumps({"kinds": {}, "artifacts": [page, reference]})
 
 
@@ -213,6 +213,12 @@ def export_run(when, tid="e1", verdict="same", command=EXPORT_CMD, name="Bash", 
     return [call(when, tid, name, {"command": command}), result(when + 1, tid, "\n".join(lines) + "\n", bool(exit_code))]
 
 
+def page_writer_of(records):
+    """The writer string the check reads from meta/page in these records, or None."""
+    import _transcript  # lint/ is on sys.path (see the imports above)
+    return _transcript.page_writer_id(records)
+
+
 def writer_get(when, writer, tid="m1"):
     """An ArtifactData get of meta/page and its result, which names the page writer's session."""
     return [call(when, tid, ARTIFACT_TOOL, {"action": "get", "url": PAGE_URL, "collection": "meta",
@@ -272,16 +278,19 @@ def run_dir(label):
     return path
 
 
-def run_stop(label, cwd, records, stop_active=False, count_git=False, writer=SESSION, extra_env=None):
+def run_stop(label, cwd, records, stop_active=False, count_git=False, writer=SESSION, extra_env=None,
+             transcript_path=None):
     """One Stop of the guard in `cwd`, with the transcript `records`. `writer` is the session the transcript
-    names as the page writer (None: unknown). `extra_env` adds variables for this run. No inbox file is written."""
+    names as the page writer (None: unknown). `extra_env` adds variables for this run. `transcript_path` names a
+    file the guard reads instead of one written from `records`: a missing path is the unreadable state.
+    No inbox file is written."""
     folder = run_dir(label)
     records = with_writer(records, writer)
     cfg, home = os.path.join(folder, "cfg"), os.path.join(folder, "home")
     os.makedirs(cfg)
     os.makedirs(home)
     payload = {"hook_event_name": "Stop", "session_id": SESSION, "stop_hook_active": stop_active,
-               "cwd": cwd, "transcript_path": transcript(folder, records)}
+               "cwd": cwd, "transcript_path": transcript(folder, records) if transcript_path is None else transcript_path}
     if not os.path.exists(PROBE_PATH):
         write_file(PROBE_PATH, PROBE_SOURCE)
     env = dict(os.environ)
@@ -364,14 +373,15 @@ def case_s2_later_copy_commit_passes():
                                (at(21), {"roadmap/data/steps/x.json": "{}\n"})])
     check("S2 scope: the newest copy commit is the 20:00 one", newest_copy(root, FOLDER) == at(20),
           newest_copy(root, FOLDER))
-    p = run_stop("s2", root, [owner(at(18, 50))] + page_write(at(19)))
+    p = run_stop("s2", root, [owner(at(18, 50))] + page_write(at(19)) + [say(at(19, 2), "Page: " + PAGE_URL)])
     expect_pass("S2", p)
 
 
 def case_s3_same_export_after_the_write_passes():
     """S1 with one change: a later export_page.py run whose verdict is `same`."""
     root = base_repo("s3")
-    records = [owner(at(18, 50))] + page_write(at(19)) + export_run(at(19, 5), verdict="same")
+    records = ([owner(at(18, 50))] + page_write(at(19)) + export_run(at(19, 5), verdict="same")
+               + [say(at(19, 6), "Page: " + PAGE_URL)])
     expect_pass("S3", run_stop("s3", root, records))
 
 
@@ -395,7 +405,8 @@ def case_s3d_same_then_held_lines_clears_the_single_form():
     and is unchanged, and the held line is enforced at the republish, so the write is cleared as in S3."""
     root = base_repo("s3d")
     held = ["held item 292: The picture of option A shows nothing the focus names."]
-    records = [owner(at(18, 50))] + page_write(at(19)) + export_run(at(19, 5), verdict="same", held=held, exit_code=4)
+    records = ([owner(at(18, 50))] + page_write(at(19)) + export_run(at(19, 5), verdict="same", held=held, exit_code=4)
+               + [say(at(19, 6), "Page: " + PAGE_URL)])
     expect_pass("S3d", run_stop("s3d", root, records))
 
 
@@ -449,7 +460,8 @@ def case_s7a_no_roadmap_ref_passes_with_a_note():
     """No origin/roadmap ref at all: the check cannot tell whether the copy is current, so it passes and says so."""
     root = make_repo("s7a", registry())
     check("S7a scope: origin/roadmap is absent", not copy_readable(root, FOLDER), "the copy reads")
-    expect_note("S7a", run_stop("s7a", root, [owner(at(18, 50))] + page_write(at(19))))
+    expect_note("S7a", run_stop("s7a", root, [owner(at(18, 50))] + page_write(at(19))
+                                + [say(at(19, 2), "Page: " + PAGE_URL)]))
 
 
 def case_s7b_unreadable_roadmap_ref_passes_with_a_note():
@@ -457,7 +469,8 @@ def case_s7b_unreadable_roadmap_ref_passes_with_a_note():
     root = base_repo("s7b")
     torn_ref(root)
     check("S7b scope: the copy cannot be read", not copy_readable(root, FOLDER), "the copy reads")
-    expect_note("S7b", run_stop("s7b", root, [owner(at(18, 50))] + page_write(at(19))))
+    expect_note("S7b", run_stop("s7b", root, [owner(at(18, 50))] + page_write(at(19))
+                                + [say(at(19, 2), "Page: " + PAGE_URL)]))
 
 
 def case_s7c_no_commit_touched_the_copy_folder_blocks():
@@ -498,7 +511,8 @@ def case_s10b_commit_in_the_export_folder_passes():
                         extras=registry(page_export="waitcopy"))
     check("S10b scope: the export folder's newest commit is 20:00", newest_copy(root, "waitcopy") == at(20),
           newest_copy(root, "waitcopy"))
-    expect_pass("S10b", run_stop("s10b", root, [owner(at(18, 50))] + page_write(at(19))))
+    expect_pass("S10b", run_stop("s10b", root, [owner(at(18, 50))] + page_write(at(19))
+                                 + [say(at(19, 2), "Page: " + PAGE_URL)]))
 
 
 def case_s11_write_in_an_earlier_turn_still_blocks():
@@ -532,10 +546,11 @@ def case_s13b_update_verb_blocks():
 def case_s14_newest_write_after_the_copy_commit_blocks():
     """An older write, covered by the 17:00 copy commit, does not cover a newer write at 19:00."""
     root = base_repo("s14")
-    early = [owner(at(16))] + page_write(at(16, 30))
+    early = [owner(at(16))] + page_write(at(16, 30)) + [say(at(16, 31), "Page: " + PAGE_URL)]
     expect_pass("S14 control: the older write alone is covered by the 17:00 commit",
                 run_stop("s14-early", root, early))
-    expect_block("S14", run_stop("s14", root, early + page_write(at(19), tid="w2")), (SCRIPT,))
+    late = early + page_write(at(19), tid="w2") + [say(at(19, 2), "Page: " + PAGE_URL)]
+    expect_block("S14", run_stop("s14", root, late), (SCRIPT,))
 
 
 def case_s15_export_run_before_the_write_does_not_clear_it():
@@ -596,7 +611,8 @@ def case_n5_writer_delete_of_an_exported_collection_blocks():
 def case_n6_all_form_verdict_for_the_page_id_passes():
     """export_page.py --all prints `<id>: <verdict>` for each artifact. The waiting page's own line clears a write."""
     records = ([owner(at(18, 50))] + page_write(at(19), url=QUEUE_URL)
-               + export_run(at(19, 5), verdict=QUEUE_ID + ": same", command=EXPORT_ALL))
+               + export_run(at(19, 5), verdict=QUEUE_ID + ": same", command=EXPORT_ALL)
+               + [say(at(19, 6), "Page: " + QUEUE_URL)])
     expect_pass("N6", run_stop("n6", queue_repo("n6"), records))
 
 
@@ -611,13 +627,15 @@ def case_n6c_all_form_same_then_held_lines_clears_the_waiting_page():
     """N6 with one change: the `--all` form exits 4 and prints the waiting page's `same`, then its held line."""
     held = [QUEUE_ID + ": held item 292: The picture of option A shows nothing the focus names."]
     records = ([owner(at(18, 50))] + page_write(at(19), url=QUEUE_URL)
-               + export_run(at(19, 5), verdict=QUEUE_ID + ": same", command=EXPORT_ALL, held=held, exit_code=4))
+               + export_run(at(19, 5), verdict=QUEUE_ID + ": same", command=EXPORT_ALL, held=held, exit_code=4)
+               + [say(at(19, 6), "Page: " + QUEUE_URL)])
     expect_pass("N6c", run_stop("n6c", queue_repo("n6c"), records))
 
 
 def case_n7_powershell_run_with_same_passes():
     """The same verdict from a PowerShell run of export_page.py clears a write."""
-    records = [owner(at(18, 50))] + page_write(at(19)) + export_run(at(19, 5), verdict="same", name="PowerShell")
+    records = ([owner(at(18, 50))] + page_write(at(19)) + export_run(at(19, 5), verdict="same", name="PowerShell")
+               + [say(at(19, 6), "Page: " + PAGE_URL)])
     expect_pass("N7", run_stop("n7", base_repo("n7"), records))
 
 
@@ -649,6 +667,64 @@ def case_n12_remote_writer_without_the_env_passes():
     expect_pass("N12", p)
 
 
+def case_n12a_cloud_writer_named_in_parentheses_blocks():
+    """The writer is stored as "Triage (<cloud id>)", the form meta/page holds. This run's env names the cloud id
+    as cse_9f, which override.remote_session_id maps to session_9f, so this session is the writer and its stale
+    page write blocks. No export run is in the transcript, so only the match can make this session the writer."""
+    writer = "Triage (session_9f)"
+    records = [owner(at(18, 50))] + page_write(at(19))
+    check("N12a scope: the writer reads back as the cloud form", page_writer_of(with_writer(records, writer)) == writer,
+          page_writer_of(with_writer(records, writer)))
+    p = run_stop("n12a", base_repo("n12a"), records, writer=writer, extra_env={REMOTE_ENV: "cse_9f"})
+    expect_block("N12a", p, (SCRIPT,))
+
+
+def case_n12b_other_cloud_id_in_parentheses_passes_with_no_note():
+    """The writer is "Triage (session_9fa)": another cloud id, which has the env's id as a prefix. An export run
+    before the write would make an unknown writer this session, so a pass here shows the writer was read and not matched."""
+    writer = "Triage (session_9fa)"
+    records = [owner(at(18, 50))] + export_run(at(18, 40), verdict="changed 1") + page_write(at(19))
+    check("N12b scope: the writer reads back as the other cloud form",
+          page_writer_of(with_writer(records, writer)) == writer, page_writer_of(with_writer(records, writer)))
+    p = run_stop("n12b", base_repo("n12b"), records, writer=writer, extra_env={REMOTE_ENV: "cse_9f"})
+    obj = expect_pass("N12b", p)
+    check("N12b: no systemMessage", not obj.get("systemMessage"), obj.get("systemMessage"))
+
+
+def case_n12c_bare_session_id_writer_blocks_with_a_cloud_env_set():
+    """The writer is this session's bare id, and the env names another cloud id. The bare match still holds."""
+    records = [owner(at(18, 50))] + page_write(at(19))
+    check("N12c scope: the writer reads back as the bare session id",
+          page_writer_of(with_writer(records, SESSION)) == SESSION, page_writer_of(with_writer(records, SESSION)))
+    p = run_stop("n12c", base_repo("n12c"), records, writer=SESSION, extra_env={REMOTE_ENV: "cse_9f"})
+    expect_block("N12c", p, (SCRIPT,))
+
+
+def case_n12d_label_around_the_hook_session_id_blocks():
+    """The writer is "Triage (<this hook's session id>)": the bare id inside a label, with the env naming another
+    cloud id (cse_9f). The id inside the label is this session, so its stale write blocks. A match that reads only
+    the remote id passes it."""
+    writer = "Triage (%s)" % SESSION
+    records = [owner(at(18, 50))] + page_write(at(19))
+    check("N12d scope: the writer reads back as the label around the session id",
+          page_writer_of(with_writer(records, writer)) == writer, page_writer_of(with_writer(records, writer)))
+    p = run_stop("n12d", base_repo("n12d"), records, writer=writer, extra_env={REMOTE_ENV: "cse_9f"})
+    expect_block("N12d", p, (SCRIPT,))
+
+
+def case_n12e_dotted_id_near_the_remote_id_passes_with_no_note():
+    """The writer is "Triage (session_9f.x)": a dotted id with the env's remote id (cse_9f, so session_9f) as its
+    prefix. An export run before the write would make an unknown writer this session, so a pass here shows the id
+    was read whole and not matched. A token that stops at the dot reads session_9f and blocks."""
+    writer = "Triage (session_9f.x)"
+    records = [owner(at(18, 50))] + export_run(at(18, 40), verdict="changed 1") + page_write(at(19))
+    check("N12e scope: the writer reads back as the dotted label", page_writer_of(with_writer(records, writer)) == writer,
+          page_writer_of(with_writer(records, writer)))
+    p = run_stop("n12e", base_repo("n12e"), records, writer=writer, extra_env={REMOTE_ENV: "cse_9f"})
+    obj = expect_pass("N12e", p)
+    check("N12e: no systemMessage", not obj.get("systemMessage"), obj.get("systemMessage"))
+
+
 def case_n13_another_writer_is_not_overruled_by_a_mention_of_the_script():
     """The page names another writer. Earlier shell runs that only mention export_page.py do not make this
     session the writer: the grep is no export run, and the test file's name ends in export_page.py."""
@@ -668,16 +744,24 @@ def case_n14_no_writer_named_and_an_export_run_makes_the_writer_block():
     expect_block("N14", run_stop("n14", base_repo("n14"), records, writer=None), (SCRIPT,))
 
 
-def case_n15_writer_set_of_receipts_passes():
-    """The writer sets receipts/x by doc_id: receipts is no exported collection."""
+def case_n15_writer_set_of_receipts_blocks():
+    """The writer sets receipts/x by doc_id, stale: receipts is an exported collection, so the write blocks."""
     records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="receipts/x")
-    expect_pass("N15", run_stop("n15", base_repo("n15"), records))
+    expect_block("N15", run_stop("n15", base_repo("n15"), records), (SCRIPT,))
 
 
-def case_n16_writer_write_by_path_to_receipts_passes():
-    """The writer writes receipts/x by its path key: the same collection filter, through the path."""
+def case_n16_writer_write_by_path_to_receipts_blocks():
+    """The writer writes receipts/x by its path key, stale: the same collection filter, through the path, so it blocks."""
     records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id=None, path="receipts/x")
-    expect_pass("N16", run_stop("n16", base_repo("n16"), records))
+    expect_block("N16", run_stop("n16", base_repo("n16"), records), (SCRIPT,))
+
+
+def case_n18_writer_receipts_write_then_a_same_export_passes():
+    """The writer writes receipts/x, which blocks the Stop, and a later export run prints `same`: the export has landed
+    since the write, so the Stop passes."""
+    records = ([owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="receipts/x")
+               + export_run(at(19, 5), verdict="same") + [say(at(19, 7), "Page: " + PAGE_URL)])
+    expect_pass("N18", run_stop("n18", base_repo("n18"), records))
 
 
 def case_n17_writer_write_by_path_to_items_blocks():
@@ -771,11 +855,17 @@ CASES.extend((
     case_n10_unknown_writer_passes_with_no_note,
     case_n11_writer_named_by_the_remote_session_id_blocks,
     case_n12_remote_writer_without_the_env_passes,
+    case_n12a_cloud_writer_named_in_parentheses_blocks,
+    case_n12b_other_cloud_id_in_parentheses_passes_with_no_note,
+    case_n12c_bare_session_id_writer_blocks_with_a_cloud_env_set,
+    case_n12d_label_around_the_hook_session_id_blocks,
+    case_n12e_dotted_id_near_the_remote_id_passes_with_no_note,
     case_n13_another_writer_is_not_overruled_by_a_mention_of_the_script,
     case_n14_no_writer_named_and_an_export_run_makes_the_writer_block,
-    case_n15_writer_set_of_receipts_passes,
-    case_n16_writer_write_by_path_to_receipts_passes,
+    case_n15_writer_set_of_receipts_blocks,
+    case_n16_writer_write_by_path_to_receipts_blocks,
     case_n17_writer_write_by_path_to_items_blocks,
+    case_n18_writer_receipts_write_then_a_same_export_passes,
     case_u1_export_check_returns_the_reason,
     case_u2_git_failure_gives_a_note_and_no_reason,
 ))

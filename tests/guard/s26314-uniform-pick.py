@@ -24,7 +24,7 @@ def up_item(**over):
 
 
 def up(name, expected, item, action="set", **extra):
-    kw = dict(action=action, collection="items", doc_id="banchi-titles", data=item)
+    kw = dict(action=action, collection="items", doc_id="banchi-titles", data=with_shown(item))
     kw.update(extra)
     add("uniform pick: " + name, expected, "uniform-pick" if expected == "deny" else None,
         tool="ArtifactData", cwd=PQ_REPO, **{"url": PQ_URL, **kw})
@@ -33,10 +33,9 @@ def up(name, expected, item, action="set", **extra):
 up("today's item (pick names the widening option) is denied", "deny", up_item())
 up("a pick of the option that matches the shared form is allowed", "allow", up_item(pick="b"))
 up("a widening option offered and not picked is allowed", "allow", up_item(pick="b", why="One form."))
-up("an item with no pick is allowed", "allow", up_item(pick=None, why=None))
+up("an item with no pick is allowed", "allow", up_item(pick=None, recommended="b"))
 up("widens false is not a widening option", "allow",
    up_item(options=[dict(UP_WIDE, widens=False), UP_MATCH]))
-up("a stood pick of a widening option is denied", "deny", up_item(stands=True))
 up("an update that carries options and a widening pick is denied", "deny",
    {"options": [UP_WIDE, UP_MATCH], "pick": "a"}, action="update")
 up("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
@@ -72,10 +71,6 @@ up("a ranked item whose list pick holds the widening option is denied", "deny",
    up_item(ranked=True, options=UP_THREE, pick=["b", "a"]))
 up("a ranked item whose list pick holds only non-widening keys is allowed", "allow",
    up_item(ranked=True, options=UP_THREE, pick=["c", "b"]))
-up("a stood multi pick that holds the widening option is denied", "deny",
-   up_item(multi=True, options=UP_THREE, pick=["a", "c"], stands=True))
-up("a stood multi pick of non-widening keys is allowed", "allow",
-   up_item(multi=True, options=UP_THREE, pick=["b", "c"], stands=True))
 up("an update that carries options and a widening list pick is denied", "deny",
    {"multi": True, "options": UP_THREE, "pick": ["b", "a"]}, action="update")
 up("an update that carries options and a non-widening list pick is allowed", "allow",
@@ -102,11 +97,11 @@ def up_keyless(name, item):
 
 
 up_keyless("a widening option with no key and an item with no pick is refused by option-letter-keys",
-           up_item(options=[UP_KEYLESS, UP_MATCH], pick=None, why=None))
+           up_item(options=[UP_KEYLESS, UP_MATCH], pick=None, recommended="b"))
 up_keyless("a widening option with no key and an item with a null pick is refused by option-letter-keys",
-           dict(up_item(options=[UP_KEYLESS, UP_MATCH], why=None), pick=None))
+           dict(up_item(options=[UP_KEYLESS, UP_MATCH]), pick=None, recommended="b"))
 up_keyless("a widening option with no key and a multi item with no pick is refused by option-letter-keys",
-           up_item(multi=True, options=[UP_KEYLESS, UP_MATCH, UP_THIRD], pick=None, why=None))
+           up_item(multi=True, options=[UP_KEYLESS, UP_MATCH, UP_THIRD], pick=None, recommended=["b", "c"]))
 add("uniform pick: a batch with a multi item whose list pick holds the widening option is denied",
     "deny", "uniform-pick", tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
     writes=[{"op": "set", "collection": "items", "doc_id": "banchi-titles",

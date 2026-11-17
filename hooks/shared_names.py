@@ -45,6 +45,11 @@ NOTICE_FRAMES = tuple(tag + end for tag in ("<webhook-payload", "<wake", "<teamm
 # An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries this marker
 # (rule agent-role-model). Here, not in the guard, so the spawn judge names it without importing the guard.
 EXPLORE_AUDIT_MARKER = "Audit:"
+
+# A reviewer's brief for a guard or check diff has a line that starts with this text (rule agent-role-model); the guard then
+# reads the `1 guard` round row of the model record for it. It is the review record's field line for such a change, which
+# merge/merge.py review_body writes, so the record and the brief carry one text.
+REVIEW_GUARD_MARKER = "Guard or check: yes"
 # A reviewer may run Sonnet, above its Haiku row, when its brief's first non-blank line starts with this marker: the brief is a fix check.
 FIX_CHECK_MARKER = "Fix check"
 
@@ -92,10 +97,34 @@ STEP_TAG = "cs-step:"
 TOPIC_TAG = "cs-topic:"
 BUILD_TAG = "cs-build:"
 LANE_TAG = BUILD_TAG + "lane"
+# A lane that wrote its handoff carries ARCHIVE_READY_TAG plus the handoff's slug; the lanes-to-archive list checks that
+# roadmap/outbox/<slug>-handoff.md is on the record branch before the lane is archived.
+ARCHIVE_READY_TAG = "cs-archive-ready:"
+# The consultant is owner-facing: its questions go to the owner, never to a parent, so it carries no lane duty even
+# when its record names a parent id.
+CONSULTANT_TAG = BUILD_TAG + "consultant"
+# A lane start's title opens with LANE_TITLE_FORM, so the owner's sidebar shows which branch a lane runs (rule
+# lane-title-slug). The check's pattern is cut from the form, so the form the remedy prints and the opening the
+# guard accepts cannot differ: the text round the placeholder is kept literal, and the placeholder reads a branch
+# slug (lower-case letters and digits, joined by single hyphens).
+LANE_TITLE_FORM = "Lane <branch slug>:"
+LANE_SLUG_PATTERN = r"[a-z0-9]+(?:-[a-z0-9]+)*"
+_FORM_HEAD, _FORM_TAIL = LANE_TITLE_FORM.split("<branch slug>")
+LANE_TITLE_OPENING = re.compile(re.escape(_FORM_HEAD) + LANE_SLUG_PATTERN + re.escape(_FORM_TAIL))
+# The remedy's example opening: the form with a slug filled in, so an edit of the form cannot leave an example the check refuses.
+LANE_TITLE_EXAMPLE_OPENING = _FORM_HEAD + "my-step" + _FORM_TAIL
 # A lane start prompt opens with `Grant: <owner words>, <time>`; the guard reads the line by this marker (rules
 # lane-effort-pin and lane-one-topic).
 LANE_GRANT_MARKER = "Grant:"
 CREATE_SESSION_TOOL = REMOTE_SERVER + "__create_session"
+# The one lane start: bin/lane-start prints these values and the guard's lane-start rules judge the same ones, so a
+# start the helper prints is never refused for a value it chose. lint/check_agent_models.py reads LANE_EFFORT through
+# hooks/guard.py and checks the lane row of the model table against it.
+LANE_EFFORT = "medium"
+LANE_MODEL = "sonnet"
+# The first non-blank line of a brief, after its Grant line, starts `Lane brief: <step>. Topic: <topic>.`
+LANE_BRIEF_MARKER = "Lane brief:"
+LANE_SOURCE_HOST = "https://github.com/"
 
 
 def lane_tags(tool_input: dict[str, Any]) -> list[Any]:
@@ -121,6 +150,31 @@ def grant_line_holds_words(line: str) -> bool:
     return "<" not in words and any(c.isalnum() for c in words)
 
 
+_INLINE_TRIPLE_SPAN = re.compile(r"(`{3,})[^`].*?\1")
+
+
+def opens_fence(stripped: str) -> bool:
+    """True when a stripped brief line opens or closes a ``` fence. A line led by a triple-backtick span that closes on
+    itself (```git status``` first) is inline text, no fence. The one fence reader, shared by rules
+    brief-destructive-git and spawn-searches-existing-builds."""
+    return stripped.startswith("```") and not _INLINE_TRIPLE_SPAN.match(stripped)
+
+
+def lane_title(slug: str, topic: str) -> str:
+    """The title of a lane start: LANE_TITLE_FORM with the slug filled in, then the topic."""
+    return LANE_TITLE_FORM.replace("<branch slug>", slug) + " " + topic
+
+
+def lane_start_tags(slug: str, topic: str, repo: str) -> list[str]:
+    """The tags of a lane start: the lane tag, then its topic, step and repo tags."""
+    return [LANE_TAG, TOPIC_TAG + topic, STEP_TAG + slug, REPO_TAG + repo]
+
+
+def lane_brief_line(slug: str, topic: str) -> str:
+    """The line that follows the Grant line in a lane's prompt."""
+    return "%s %s. Topic: %s." % (LANE_BRIEF_MARKER, slug, topic)
+
+
 def lane_head_refs(slug: str) -> tuple[str, str]:
     """The head refs a lane's pull request may carry for its step `slug`: the bare slug and `lane/<slug>`. The one
     home, read by the roadmap build (idle lanes, stalled steps) and by the archive guard, so the two forms cannot
@@ -136,6 +190,8 @@ def repo_tag_names(tag: object, slug: str) -> bool:
 
 # The tool that reads and writes the waiting page's items (hooks/guard.py, hooks/call_judge.py).
 DATA_TOOL = "ArtifactData"
+# The tool that reads, watches, replies to and resolves comment threads on an artifact (hooks/guard.py rule page-thread-reply).
+COMMENTS_TOOL = "ArtifactComments"
 
 # The folder under the config dir that holds per-hook state files.
 STATE_DIR_NAME = "state"

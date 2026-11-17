@@ -1158,6 +1158,9 @@ STAYS = {  # path: the one old name it may still hold, and why
     "testing/skip-locally-fail-in-ci.test.mjs": "Red proof",  # header shared with copies in other repos
     "lint/test_find_copies.py": "Red proof",        # the fixture copy of that header
     "mods/plain-diff/docs/mockup.html": "red proof",  # sample diff text
+    # the writer-label alternation of OTHER_WRITER_ROW_RE: the harness writes "Subagent report:". Only this fragment
+    # stays, so a bare "subagent" elsewhere in the file still fails.
+    "lint/report_guard.py": "agent|subagent|",
 }
 SKIP = ("skills/impeccable/", "lint/test_check_glossary.py", "GLOSSARY.md")  # GLOSSARY names them as "Not"
 

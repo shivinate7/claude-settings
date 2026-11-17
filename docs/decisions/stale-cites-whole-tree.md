@@ -25,7 +25,7 @@ Measured 2026-11-03 on origin/main at 72034d9a: `python3 lint/stale_cites.py --t
 
 ## Cost
 
-- One python3 start. Git runs rev-parse, ls-tree and one cat-file --batch. It writes no file.
+- One python3 start (unmeasured). Git runs rev-parse, ls-tree and one cat-file --batch. It writes no file.
 - `CostTests` in `lint/test_stale_cites.py` proves the git reads. `actions/ste-lint/test_action.py` proves the default is "false".
 
 ## Not covered
