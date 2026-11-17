@@ -6,7 +6,7 @@ description: Use when a session builds a repo's roadmap block, or the user says 
 A repo has one page. Its Status tab shows the repo's plan from its homes. This
 skill publishes no page. The script makes one marked roadmap block, and the page writer splices
 it into the live page (see "Publish the roadmap block"). The old roadmap URL retires: it gets no more
-publishes. The page's URL is the `waiting-page` key of the layout extras file. The `roadmap` key there
+publishes. The page's URL is the link of the `waiting-page` role entry in `artifacts` of the layout extras file. The old `waiting-page` key is the fallback. The `roadmap` key there
 is the `{map, github}` object build.py reads, never a URL. The tab stores
 no copy: each panel prints the commit it read, or "unknown" and why.
 
