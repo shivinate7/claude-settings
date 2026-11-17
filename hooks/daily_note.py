@@ -50,14 +50,15 @@ import re
 import sys
 from datetime import date, datetime, timedelta, timezone
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 for sub in (HERE, os.path.join(HERE, "..", "lint")):
     if sub not in sys.path:
         sys.path.insert(0, sub)
 
 MAX_WINDOW = 7    # days
 MAX_LINE = 240    # characters in one failure line
-READER = os.path.normpath(os.path.join(HERE, "..", "lint", "guard_log_report.py"))
+# The Read path names the stable linked path, so it comes from abspath: realpath would name one generation.
+READER = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint", "guard_log_report.py"))
 
 
 def central_day(at):

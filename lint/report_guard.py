@@ -183,7 +183,7 @@ import os
 import re
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
     ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender,

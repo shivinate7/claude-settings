@@ -16,7 +16,7 @@ import json
 import os
 import re
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 WINDOW_DAYS = 14
@@ -49,7 +49,7 @@ def strings(node):
 
 
 def main(argv):
-    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    repo = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     args = list(argv)
     while args:
         a = args.pop(0)

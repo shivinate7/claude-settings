@@ -16072,22 +16072,29 @@ def shell_views(text):
     return "".join(code), "".join(masked)
 
 def settings_branches(text):
-    """-> (head, cloud, local): the code of install.sh's settings.json step. head runs from the TARGET_JSON line to the cloud `if`.
-    cloud and local are its two branches, cut at the `else` and `fi` that stand at a line start. Comments are blank."""
+    """-> (head, cloud, local) of install.sh's settings.json step, comments blank. head runs from the TARGET_JSON line to the
+    `cloud_settings() {` line. cloud is that function, to its closing `}` at a line start. local runs from there to the `fi` that
+    closes the local link block, after its `log "linked ..."` line. That span also holds cloud-gated lines, and none names the rules file."""
     code, masked = shell_views(text)
     start = code.index('TARGET_JSON="$CLAUDE_DIR/settings.json"')
     found = []
-    for pattern, view in ((r'^if \[ "\$CLOUD" = 1 \]; then$', code), (r"^else$", masked), (r"^fi$", masked)):
+    for pattern, view in ((r"^cloud_settings\(\) \{$", masked), (r"^\}$", masked),
+                          (r'^    log "linked \$TARGET_JSON -> \$SRC/settings\.json"$', code), (r"^fi$", masked)):
         m = re.compile(pattern, re.M).search(view, found[-1].end() if found else start)
         assert m, f"install.sh's settings step has no line matching {pattern!r}"
         found.append(m)
-    opener, other, close = found
-    return code[start:opener.start()], code[opener.end():other.start()], code[other.end():close.start()]
+    opener, close, linked, end = found
+    return code[start:opener.start()], code[opener.start():close.end()], code[close.end():end.end()]
+
+def assert_local_branch_names_no_rules_file(test, text):
+    """Fails with one cause, "the local path names the rules file", when the local branch of install.sh's settings step mentions it."""
+    local = settings_branches(text)[2]
+    test.assertNotIn("cloud_allow", local, "the local path names the rules file")
 
 class ShellScan(unittest.TestCase):
     """settings_branches on small scripts: comment openers in strings, a multi-line string and a lone quote must not move a branch edge."""
     NAME = "merge/cloud_allow.json"
-    SCRIPT = 'TARGET_JSON="$CLAUDE_DIR/settings.json"\n%s\nif [ "$CLOUD" = 1 ]; then\n%s\nelse\n%s\nfi\necho after\n'
+    SCRIPT = 'TARGET_JSON="$CLAUDE_DIR/settings.json"\n%s\ncloud_settings() {\n%s\n}\n%s\n    log "linked $TARGET_JSON -> $SRC/settings.json"\n  fi\nfi\necho after\n'
 
     def branches(self, head="", cloud="", local=""):
         return settings_branches(self.SCRIPT % (head, cloud, local))
@@ -16104,13 +16111,21 @@ class ShellScan(unittest.TestCase):
         self.assertIn(self.NAME, cloud)
         self.assertNotIn(self.NAME, head + local)
 
-    def test_a_multi_line_string_hides_an_else_and_a_fi(self):
-        cloud_body = f"  jq '\nelse\nfi\n# not a comment: {self.NAME}\n' in.json"
+    def test_a_multi_line_string_hides_a_closing_brace(self):
+        cloud_body = f"  jq '\n}}\n# not a comment: {self.NAME}\n' in.json"
         head, cloud, local = self.branches(cloud=cloud_body, local="  ln -sfn a b")
         self.assertIn(self.NAME, cloud)
         self.assertIn("ln -sfn a b", local)
         self.assertNotIn(self.NAME, head + local)
         self.assertNotIn("after", cloud + local)
+
+    def test_a_rules_file_named_on_the_local_path_fails_the_local_check(self):
+        clean = self.SCRIPT % ("", "  ok", "  ln -sfn a b")
+        assert_local_branch_names_no_rules_file(self, clean)  # the control: this shape parses, and a clean local path passes
+        for local in (f"  ln -sfn a b\n  jq . {self.NAME}", f'  ln -sfn a b\n  echo "{self.NAME}"'):
+            with self.subTest(local=local):
+                with self.assertRaisesRegex(AssertionError, "the local path names the rules file"):
+                    assert_local_branch_names_no_rules_file(self, self.SCRIPT % ("", "  ok", local))
 
     def test_a_lone_quote_in_a_comment_or_after_a_backslash_opens_no_string(self):
         head, cloud, local = self.branches(head="# it's the head", cloud=f"  # don't stop\n  echo don\\'t {self.NAME}",
@@ -16127,7 +16142,7 @@ def bash_rule_matches(rule, command):
 
 class CloudAllow(unittest.TestCase):
     """merge/cloud_allow.json holds the `merge --confirm` and `merge --role` allow rules that only a cloud session's settings.json gets
-    (install.sh's cloud branch). A local settings.json is a link to the repo's settings.json and gets none."""
+    (install.sh's cloud_settings function). A local settings.json is a link to the repo's settings.json and gets none."""
 
     def allow(self):
         with open(CLOUD_ALLOW_FILE, encoding="utf-8") as f:
@@ -16207,14 +16222,19 @@ class CloudAllow(unittest.TestCase):
 
     def test_install_sh_names_the_rules_file_in_its_cloud_branch(self):
         with open(os.path.join(REPO_ROOT, "install.sh"), encoding="utf-8") as f:
-            head, cloud, local = settings_branches(f.read())
-        self.assertIn("merge/cloud_allow.json", head + cloud)  # head: a path the branch gets from a variable set above its `if`
+            cloud = settings_branches(f.read())[1]
+        self.assertTrue(cloud.startswith("cloud_settings() {"), "the cloud branch is not the cloud_settings function")  # scope before subject
+        # a log line names the file too, so pin the read: the variable set to the file, and the jq that reads that variable
+        self.assertIn('ALLOW_FILE="$SRC/merge/cloud_allow.json"', cloud, "the cloud branch does not set the rules file as the file to read")
+        self.assertIn('--slurpfile extra "$ALLOW_FILE"', cloud, "the cloud branch does not read the rules file")
 
     def test_install_sh_names_the_rules_file_nowhere_in_its_local_branch(self):
         with open(os.path.join(REPO_ROOT, "install.sh"), encoding="utf-8") as f:
-            head, cloud, local = settings_branches(f.read())
-        self.assertNotIn("cloud_allow", local)
-        self.assertTrue(local.strip(), "the local branch of the settings step was not found")
+            text = f.read()
+        local = settings_branches(text)[2]
+        self.assertIn('done < "$SRC/landed-dirs.txt"', local, "the local branch does not hold the landing loop")  # scope before subject
+        self.assertIn('ln -sfn "$SRC/settings.json"', local, "the local branch does not reach the link block")
+        assert_local_branch_names_no_rules_file(self, text)
 
     def test_the_repo_settings_json_has_no_merge_allow_rule(self):
         # The repo's settings.json is what a local session reads (a link to it). Not matched on a bare "merge": `Bash(gh pr merge:*)` is there.
