@@ -3323,16 +3323,25 @@ def refuse_incomplete_tree(wt, head, base, tree=None):
 SWEEP = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "janitor", "sweep.py"))  # the one home of the sweep, named in the disk refusal
 
 def refuse_full_disk(root):
-    """Refuse a lane lint on a drive under the guard's full disk floor, min(5% of the drive, 5 GiB) (decision machine-load-brake). A lint tree is a full
-    checkout, and a full disk fails it half made. The reader and the floor are the guard's (hooks/guard.py _read_disk, load_full), fed the disk reading
-    alone, so memory never refuses here. The floor holds in a cloud session too. An unreadable disk prints one line that says so and goes ahead."""
+    """Refuse a lane lint when a drive it writes to is under the guard's full disk floor, min(5% of the drive, 5 GiB) (decision machine-load-brake): the
+    drive of the home folder (the guard's reader, hooks/guard.py _read_disk) or the drive of the temp folder, where add_worktree makes the lint tree.
+    A lint tree is a full checkout, and a full disk fails it half made. The floor is the guard's (load_full), fed the disk reading alone, so memory
+    never refuses here. The floor holds in a cloud session too. A drive that cannot be read prints one line that says so; the other is still checked,
+    and the lint goes ahead when none is full."""
     import guard as hook_guard  # here, not at the top: it loads the whole guard set, and only the lane lint and the review record need it
-    try:
-        free, total = hook_guard._read_disk()
-    except Exception:
-        print("merge: the free disk read as unknown, so the lane lint goes ahead", file=sys.stderr)
-        return
-    full = hook_guard.load_full({"disk_free_gb": free, "disk_total_gb": total})
+    def temp_read():
+        usage = shutil.disk_usage(tempfile.gettempdir())
+        return usage.free / hook_guard.GIB, usage.total / hook_guard.GIB
+    full, unknown = [], False
+    for read in (hook_guard._read_disk, temp_read):
+        try:
+            free, total = read()
+        except Exception:
+            unknown = True
+            continue
+        full += [t for t in hook_guard.load_full({"disk_free_gb": free, "disk_total_gb": total}) if t not in full]  # one drive under both folders is named once
+    if unknown:
+        print("merge: the free disk read as unknown, so the lane lint goes ahead" if not full else "merge: a free disk read as unknown", file=sys.stderr)
     if full:
         raise Stop(f"the lane lint makes a full checkout, and the machine is full ({', '.join(full)}). Free space first: "
                    f"`python3 {shlex.quote(SWEEP)} --root {shlex.quote(str(root))} --confirm` "
