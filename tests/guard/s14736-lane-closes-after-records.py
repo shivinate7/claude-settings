@@ -104,9 +104,14 @@ archive_refuse("a payload with no transcript_path is refused", None, fake_gh_pat
 ARCHIVE_OPEN_PIN = ("still open",)
 
 
+# The owner's ruling (page item 937 a, 13:11 CST Nov 17): the refusal names the route for a private repo, attach with
+# add_repo access push, then retry. OLD_READ_PIN is the "(read)" scope that ruling rules out, so the pins lack it.
+OLD_READ_PIN = ("(read)",)
+
+
 def add_repo_pin(repo):
     """The fragment a 403 or 404 on the read of `repo` names: the act, then the retry. The reason keeps ARCHIVE_READ_PIN too."""
-    return "add_repo " + repo + " (read), then retry"
+    return "add_repo " + repo + " access push, then retry"
 
 
 # Only a 403 or 404 on a repo's read names add_repo for that repo. Every other failure (a 500, a timeout, a refused
@@ -131,7 +136,7 @@ archive_refuse("a lane whose first cs-repo open pull request list is a server er
 # A 403 or 404 on a repo's read names add_repo for that repo, and for that repo only. An unattached repo answers 403.
 archive_refuse("a lane whose second cs-repo open pull request list answers 403 names add_repo for q_max, not claude-settings",
                role_path("archive-inc"), fake_gh_path(ARCHINC_OPENLIST403_QMAX),
-               carries=(add_repo_pin(ARCH_REPO_QMAX),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_SETTINGS,))
+               carries=(add_repo_pin(ARCH_REPO_QMAX),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_SETTINGS,) + OLD_READ_PIN)
 # A rate limit answers 403 too, with gh's rate-limit text, and it is no answer about the repo: the refusal names no add_repo.
 # The control is the 403 above, the same repo and the same read; only the text differs, so add_repo is what the text decides.
 archive_refuse("a lane whose second cs-repo open pull request list answers a rate-limit 403 names no add_repo, and says retry",
@@ -139,19 +144,68 @@ archive_refuse("a lane whose second cs-repo open pull request list answers a rat
                carries=ARCHIVE_READ_PIN + ARCHIVE_RETRY_PIN, lacks=ARCHIVE_NO_ACT)
 archive_refuse("a lane whose first cs-repo open pull request list answers 404 names add_repo for claude-settings, not q_max",
                role_path("archive-inc"), fake_gh_path(ARCHINC_OPENLIST404_SETTINGS),
-               carries=(add_repo_pin(ARCH_REPO_SETTINGS),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_QMAX,))
+               carries=(add_repo_pin(ARCH_REPO_SETTINGS),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_QMAX,) + OLD_READ_PIN)
 archive_refuse("a lane whose q_max pull request list for its branch answers 403 names add_repo for q_max, not claude-settings",
                role_path("archive-inc"), fake_gh_path(ARCHINC_PULLS403),
-               carries=(add_repo_pin(ARCH_REPO_QMAX),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_SETTINGS,))
+               carries=(add_repo_pin(ARCH_REPO_QMAX),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_SETTINGS,) + OLD_READ_PIN)
 archive_refuse("a lane whose q_max pull request list for its branch answers 404 names add_repo for q_max, not claude-settings",
                role_path("archive-inc"), fake_gh_path(ARCHINC_PULLS404),
-               carries=(add_repo_pin(ARCH_REPO_QMAX),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_SETTINGS,))
+               carries=(add_repo_pin(ARCH_REPO_QMAX),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_SETTINGS,) + OLD_READ_PIN)
 archive_refuse("a lane whose q_max default-branch read answers 403 names add_repo for q_max, not claude-settings",
                role_path("archive-inc"), fake_gh_path(ARCHINC_REPO403),
-               carries=(add_repo_pin(ARCH_REPO_QMAX),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_SETTINGS,))
+               carries=(add_repo_pin(ARCH_REPO_QMAX),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_SETTINGS,) + OLD_READ_PIN)
 archive_refuse("a lane whose q_max compare of its branch answers 403 names add_repo for q_max, not claude-settings",
                role_path("archive-inc"), fake_gh_path(ARCHINC_COMPARE403),
-               carries=(add_repo_pin(ARCH_REPO_QMAX),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_SETTINGS,))
+               carries=(add_repo_pin(ARCH_REPO_QMAX),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_SETTINGS,) + OLD_READ_PIN)
+# The anonymous read, by the same ruling. A read with the session's token goes through its proxy, which answers 403 for a repo
+# the session is not attached to. The guard reads a PUBLIC repo's open pull requests with no token, so an unattached public
+# repo is read, not refused. A PRIVATE repo answers that anonymous read 404, and its refusal names the route (add_repo_pin).
+ARCHPUB_ATTACHED = os.path.join(ROOT, "archpub-attached")      # public o/r, attached: the token read answers the open list
+ARCHPUB_OPENLIST = os.path.join(ROOT, "archpub-openlist")      # public o/r, unattached: the token read is 403, the anonymous read has no open lane pull request
+ARCHPUB_SLUGOPEN = os.path.join(ROOT, "archpub-slugopen")      # public o/r, unattached: the anonymous read holds the lane's own open pull request
+ARCHPRIV_OPENLIST = os.path.join(ROOT, "archpriv-openlist")    # private o/r, unattached: the token read is 403, the anonymous read is 404
+ANON_ENV = dict(ROLE_ENV, GH_TOKEN="fake-session-token", GITHUB_TOKEN=None)  # the session holds a token; the runner's GITHUB_TOKEN is unset
+ANON_SLUG_ROW = {"number": 13, "head": "d" * 40, "ref": ARCHIVE_SLUG}  # the lane's own open pull request, named as the other fakes name it
+
+
+def build_anon_fixtures():
+    """The four anonymous-read fakes. An unattached repo answers its open list 403 through the proxy, as the other fakes do."""
+    make_fake_gh(ARCHPUB_ATTACHED, "main", need=["o/r"], visibility="public", repos={"o/r": {}})
+    make_fake_gh(ARCHPUB_OPENLIST, "main", need=["o/r"], visibility="public",
+                 repos={"o/r": {"pulls_error": ["open", "forbidden"]}})
+    make_fake_gh(ARCHPUB_SLUGOPEN, "main", need=["o/r"], visibility="public",
+                 repos={"o/r": {"pulls_error": ["open", "forbidden"], "others": [ANON_SLUG_ROW]}})
+    make_fake_gh(ARCHPRIV_OPENLIST, "main", need=["o/r"], visibility="private",
+                 repos={"o/r": {"pulls_error": ["open", "forbidden"]}})
+
+
+lazy_fixture([ARCHPUB_ATTACHED, ARCHPUB_OPENLIST, ARCHPUB_SLUGOPEN, ARCHPRIV_OPENLIST], build_anon_fixtures)
+
+
+def anon_case(name, expected, env_path, carries=(), lacks=()):
+    """An archive_session of the role's lane, read with the session's token set. The token-less read is the fake's to answer."""
+    more = (lacks,) if isinstance(lacks, str) else tuple(lacks)
+    if expected == "allow":
+        add("lane-closes-after-records: " + name, "allow", tool=ARCHIVE_TOOL, cwd=NOGIT, silent=True,
+            transcript=role_path("archive-lane"), env=ANON_ENV, env_path=env_path, session_id=ROLE_OTHER)
+        return
+    add("lane-closes-after-records: " + name, "deny", rule=ARCHIVE_RULE, tool=ARCHIVE_TOOL, cwd=NOGIT,
+        lacks=ARCHIVE_NAMED + more, carries=carries, transcript=role_path("archive-lane"), env=ANON_ENV,
+        env_path=env_path, session_id=ROLE_OTHER)
+
+
+# The control: an attached public repo answers its token read, and the lane allows. The token alone refuses nothing.
+anon_case("an attached public repo with no open lane pull request is allowed, with the session's token set",
+          "allow", fake_gh_path(ARCHPUB_ATTACHED))
+# An unattached public repo: the token read is 403, and the anonymous read lists no open lane pull request. The archive is allowed.
+anon_case("an unattached public repo with no open lane pull request is read with no token, and allowed",
+          "allow", fake_gh_path(ARCHPUB_OPENLIST))
+# The same read with the lane's own pull request open: the anonymous list shows it, so the refusal is the open one, not an unreadable list.
+anon_case("an unattached public repo whose anonymous list holds the lane's open pull request is refused as open, not unreadable",
+          "deny", fake_gh_path(ARCHPUB_SLUGOPEN), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_READ_PIN + ARCHIVE_NO_ACT)
+# An unattached private repo: the anonymous read answers 404, so the refusal names the route for that repo, with access push.
+anon_case("an unattached private repo is refused, and names add_repo for it with access push, then retry, not (read)",
+          "deny", fake_gh_path(ARCHPRIV_OPENLIST), carries=(add_repo_pin("o/r"),) + ARCHIVE_READ_PIN, lacks=OLD_READ_PIN)
 # The refusals that are not an unreadable read name no repo to add: an open pull request, no record, no cs-repo tag.
 archive_refuse("a lane with an open pull request names no add_repo", role_path("archive-lane"), fake_gh_path(ARCHOPEN),
                carries=ARCHIVE_OPEN_PIN, lacks=("add_repo",))
@@ -299,7 +353,7 @@ archive_refuse("a source URL ending in .git names its repo: a branch ahead there
 archive_refuse("a sources-only repo whose own read answers 404 is refused, and names add_repo for that repo",
                role_path("archive-inc-source-only"), fake_gh_path(ARCHINC_REPO404),
                carries=(add_repo_pin(ARCH_REPO_QMAX),) + ARCHIVE_READ_PIN,
-               lacks=ARCHIVE_READ_LACKS)
+               lacks=ARCHIVE_READ_LACKS + OLD_READ_PIN)
 # Shape drift fails closed: a current_branches that is not a map is a shape the read does not know, so it refuses as unreadable.
 # A shape error names no act and no repo: no add_repo, and no list of every cs-repo tag. Both repos are tagged here, so an
 # all-tags list would show two acts.

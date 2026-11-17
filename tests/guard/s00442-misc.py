@@ -891,7 +891,10 @@ else:
     elif re.fullmatch(r"pulls/\d+", rel):
         print(json.dumps(dict(state["pr"], number=int(rel.split("/")[1]))))
     elif rel == "pulls":
-        if state.get("pulls_error") and fields.get("state") == state["pulls_error"][0]:  # a list read of that state fails
+        anon = bool(state.get("visibility")) and not (os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"))  # no token: straight to GitHub, not the session's proxy
+        if anon and state["visibility"] == "private":  # GitHub answers an anonymous read of a private repo with 404
+            api_error(404, "Not Found")
+        if not anon and state.get("pulls_error") and fields.get("state") == state["pulls_error"][0]:  # a list read of that state fails
             if state["pulls_error"][1] == "server":
                 api_error(500, "pulls read broke")
             if state["pulls_error"][1] == "forbidden":
@@ -963,7 +966,7 @@ else:
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
                  cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
                  count_file=None, compares=None, repos=None, refs=(), tips=None, head_sha=None, head_ref=None,
-                 draft=False):
+                 draft=False, visibility=None):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
     `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
@@ -1014,6 +1017,11 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
     the delay never runs and the race make_fake_gh exists to remove comes right back. A missing
     tool is a raise, not a silent skip: a delay fixture that cannot delay is a defect in the
     fixture, not a fact to route around.
+
+    `visibility`, when given ("public" or "private"), models a read with no token. A call that carries GH_TOKEN
+    or GITHUB_TOKEN goes through the session's proxy, and answers as `pulls_error` says. A call with neither
+    goes straight to GitHub: a public repo's open list is read, and a private repo's answers 404. A case that
+    uses it sets its token, or unsets it, through its own environment.
     """
     os.makedirs(folder, exist_ok=True)
     # The answers live in a state file, and `ghfake.py` serves them the way the real tool does: `pulls/<n>`
@@ -1041,6 +1049,7 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "repos": None if repos is None else dict(repos),  # None: one repo, the top-level answers; a map: see the docstring
         "refs": list(refs),  # branch names the repo holds: the matching-refs read answers the ones under its prefix
         "tips": dict(tips or {}),  # branch name -> the sha of its tip; a branch not listed is at f * 40
+        "visibility": visibility,  # None: no token-less model; "public" or "private", see the docstring
     }
     if head_sha:  # the pull request's own head, when a case names a real commit (records-page-ready); its draft flag too
         state["pr"]["head"] = {"ref": head_ref or "feat", "sha": head_sha}
