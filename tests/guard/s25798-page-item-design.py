@@ -71,6 +71,7 @@ PD_FILE = "docs/design/item48/a.html"  # a design's file: inside the checkout's 
 def pd_item(designs=None, **over):
     """A decision that every other waiting-page rule passes. Option a carries the picture, option b has none."""
     item = {"id": PD_DOC, "kind": "decision", "status": "open", "repo": PD_REPO,
+            "recommended": "a", "why": "The full card shows the stock the owner asked about.",
             "title": "Which fill should the volume card show?",
             "context": "The volume card shows the stock level.",
             "options": [{"key": "a", "label": "Full card", "how": "The card shows the full stock.", "design": "m1"},
@@ -84,6 +85,7 @@ def pd_item(designs=None, **over):
 def pd_plain():
     """A decision with no picture. Its text says design, so a check that reads words would run the checker."""
     return with_stake({"id": PD_DOC, "kind": "decision", "status": "open", "repo": PD_REPO,
+                       "recommended": "a", "why": "A review first catches the design before the build.",
                        "title": "Which design review comes first?", "context": "The design review of the volume card is due.",
                        "options": [{"key": "a", "label": "Review first", "how": "A design review before the build."},
                                    {"key": "b", "label": "Build first", "how": "The build before any design review."}]},

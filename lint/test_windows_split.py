@@ -40,7 +40,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 from workflow_steps import CHECKS_SUITE_JOBS, gating_text, job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
-from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 CHECKS = os.environ.get("CHECKS_YML") or os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
 MIN_JOBS = 3
 
@@ -142,6 +141,7 @@ LINUX_SUITES = {
     "python3 hooks/test_ci_wake.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_feedback_inbox.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_waiting_export.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 hooks/test_page_link_check.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_daily_note.py": (None, None),
     "python3 hooks/test_nowindow.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_auto_mode_allow.py": (NO_MD_SCOPE_CONDITION, None),
@@ -307,6 +307,7 @@ MACOS_SUITES = {
     "python3 hooks/test_ci_wake.py": (MAC_OWN, None),
     "python3 hooks/test_feedback_inbox.py": (MAC_OWN, None),
     "python3 hooks/test_waiting_export.py": (MAC_OWN, None),
+    "python3 hooks/test_page_link_check.py": (MAC_OWN, None),
     "python3 hooks/test_daily_note.py": (MAC_OWN, None),
     "python3 hooks/test_stall_watch.py": (MAC_OWN, None),
     "python3 hooks/test_sim_boot_record.py": (MAC_OWN, None),
@@ -2682,11 +2683,12 @@ class ModTestStep(unittest.TestCase):
         copies = [c for c in run_commands(self.text) if INLINE_COPY.search(c)]
         self.assertEqual(copies, [])
 
-    def test_all_jobs_passed_stays_the_one_required_check_and_mods_adds_no_name(self):
-        """The owner removed the branch's required check, so main's stamp pins the one name. The mod step adds no name to that pin."""
+    def test_main_stamp_requires_no_check_and_mods_adds_no_name(self):
+        """Ruling own-merge-on-lint-pass: main's stamp pins merge.requiredChecks "none". The mod step adds no name
+        to that pin, so a name added there would show as a list."""
         with open(STAMP, encoding="utf-8") as f:
             required = json.load(f)["merge"]["requiredChecks"]
-        self.assertEqual(required, [REQUIRED_CHECK])
+        self.assertEqual(required, "none", 'main\'s stamp must pin requiredChecks "none" (ruling own-merge-on-lint-pass)')
 
 
 @unittest.skipUnless(shutil.which("bash") and shutil.which("node") and shutil.which("find"), "needs bash, node and find on PATH")
