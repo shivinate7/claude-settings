@@ -2,7 +2,7 @@
 """UserPromptSubmit hook: in a cloud session, reinstall the hooks when the local origin ref moved past the installed sha, and say so.
 
 A cloud session copies hooks at start, so a hook merged later stays stale for the whole session. A prompt reads no
-origin (owner, 2026-11-17 09:34 CST, decision stale-install-cost). It reads the install record that install.sh --cloud
+origin (decision stale-install-cost). It reads the install record that install.sh --cloud
 writes (<config dir>/.claude-settings-install.json: ref, sha, source, installer) and compares it with the local
 refs/remotes/origin/<record ref> of the record's source clone. A pin with no such ref reads local main, the commit
 install_from_main.sh pins to then. It acts on one trigger only: the local ref names a
