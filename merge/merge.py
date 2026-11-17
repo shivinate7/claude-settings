@@ -3861,9 +3861,9 @@ def fix_proven(root, host, base, n, info):
     """-> why pull request `n` is a fix that merges onto a red base with no reason flag (a phrase for the message), or None when it is not (decision no-merge-onto-red-main). Read from the facts base_facts left on the host (`base_facts`), never from its prose. All must hold:
     - exactly one red run, no cancelled run, no re-run in flight and no other red read beside it, and exactly one breaking merge B, named by its full sha;
     - the pull request's head holds the head the red run was read at, so the head's own run tested the breaking merge too;
-    - one of two routes. Path: the pull request changes a path that B changed (B against its first parent, each path whole, renames by both names), and the head's
-      own checks read green (Host.head_state, the one reader). Test file: the pull request changes a test file that a failing line of the red run's log names
-      (Host.failed_lines), the red run has red jobs, and each of them reads "pass" on the head (Host.check_state: a missing or pending row is no pass).
+    - one of two routes. Path: the pull request changes a path that B changed (B against its first parent, each path whole, renames by both names). Test file: the pull
+      request changes a test file that a failing line of the red run's log names (Host.failed_lines). Both routes need the red run to have red jobs, and each of them to
+      read "pass" on the head (Host.check_state: a missing or pending row is no pass); the path route also needs the head's own checks green (Host.head_state, the one reader).
     Any read that fails is not proven: unknown never reads clear, and a log that Host.failed_lines cannot account for gives no test file."""
     facts = getattr(host, "base_facts", None)
     if not facts or len(facts["blamed"]) != 1 or facts["red"] != 1 or facts["others"]:
@@ -3878,16 +3878,17 @@ def fix_proven(root, host, base, n, info):
         info = fetch_pr_head(root, info, base)  # the head's commits are local, and the head is the one gh named
         if not facts["head"] or git(root, "merge-base", "--is-ancestor", facts["head"], info["head"])[0]:
             return None
-        if blamed & changed and head_not_green(host.head_state(n, info["head"])) is None:
-            return "a path of the breaking merge (its own head is green)"
+        names = facts["red_jobs"][0]
+        same_check_passes = bool(names) and all(host.check_state(n, info["head"], name) == "pass" for name in names)
+        if blamed & changed and same_check_passes and head_not_green(host.head_state(n, info["head"])) is None:
+            return f"a path of the breaking merge (its own head is green, and its own check {', '.join(names)} is pass on its head)"
         try:
             parsed = [failing_line(t) for t in host.failed_lines(facts["red_ids"][0])]
             tests = {posixpath.normpath(p[0]) for p in parsed if p and p[0]}
         except UnreadJobs:
             return None
         hit = sorted(tests & changed)
-        names = facts["red_jobs"][0]
-        if hit and names and all(host.check_state(n, info["head"], name) == "pass" for name in names):
+        if hit and same_check_passes:
             return f"the failing test file {hit[0]} (its own check {', '.join(names)} is pass on its head)"
         return None
     except (Stop, subprocess.TimeoutExpired, OSError, KeyError, ValueError, IndexError, TypeError):
