@@ -727,6 +727,11 @@ def spo_removal_1():
                         "agent B's rm of agent A's file is refused", text="from A\n")
 
 
+def spo_removal_2():
+    return spo_run_case("rm2", "removal 2", "main_settings.json", lambda fx, p: "rm -f %s" % p,
+                        "agent B's rm -f of agent A's file is refused", text="from A\n")
+
+
 def spo_move_1():
     return spo_run_case("mv1", "move 1", "msg.txt",
                         lambda fx, p: "mv %s %s" % (p, os.path.join(fx["work"], "moved.txt")),
@@ -1093,7 +1098,7 @@ def spo_approved_mv_case():
 def spo_removed_case():
     """Agent A writes probe2.py. The file is removed outside the guard before any agent B step, so A's record is
     the only trace left. Agent B's Write of a new probe2.py at the same path is allowed. The record still names
-    A, so a rule that does not check the record against the file asks here: the case fails on that gap."""
+    A, so a rule that does not check the record against the file refuses B's write here: the case fails on that gap."""
     fx = spo_fixture("removed")
     probe = os.path.join(fx["scratch"], "probe2.py")
     problems = [spo_scope(fx, "removed", probe)] + spo_wrote(fx, "removed", SPO_WRITER, probe, PY_TEXT)
@@ -1151,6 +1156,7 @@ spo_register("scratchpad-owner: top-level 2 a call with no agent_id overwrites a
 spo_register("scratchpad-owner: removed 1 agent A's file removed outside the guard: B's new file at its path "
              "is allowed", spo_removed_case)
 spo_register("scratchpad-owner: removal 1 agent B's rm of agent A's file: refused", spo_removal_1)
+spo_register("scratchpad-owner: removal 2 agent B's rm -f of agent A's file: refused", spo_removal_2)
 spo_register("scratchpad-owner: move 1 agent B's mv of agent A's file: refused", spo_move_1)
 # The folder forms: agent A's files sit under sub/ and sub/deep/, and agent B's call names the folder or its files.
 for _tag, _label, _command_of in SPO_FOLDER_FORMS:
