@@ -524,6 +524,9 @@ class Homes:
     @staticmethod
     def _judge(layout, item_id, kind, root, rel, grant):
         """None when the home `rel` is good in the repo at `root`, else the reason text."""
+        if kind == "task" and OLD_NOTES_KEY in layout.kinds(root) and rel == layout.path(root, OLD_NOTES_KEY).strip("/"):
+            return ("%s [task]: %s is the frozen old notes file, which takes deletes only. A new note is a file in the "
+                    "notes folder, or name a todo or debt file or `step:<slug>`" % (item_id, rel))
         if not (grant and kind == "ruling" and rel in GRANT_ROOT_HOMES):
             homes = kind_homes(layout, root, kind)
             keys = ", ".join(HOME_KINDS[kind])

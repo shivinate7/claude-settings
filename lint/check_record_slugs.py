@@ -16,7 +16,8 @@ Also fails on the notes (decision notes-merge-union): the old notes file takes d
 whose count at HEAD is over its count at the merge base is refused, an in-place edit included. A note is a file in the
 note folder (lint/layout.json, kind notes) that holds one line `- <slug>: <text>`, its slug equal to its file name and
 not digits only (an old `note:<digits>` ref reads that way). An added note file whose name is over 32 characters, and an
-added, renamed or edited note file whose line is not in that form, is refused. The folder's README is not a note. A
+added, renamed or edited note file whose line is not in that form, or that sits in a subfolder of the note folder (a
+note is flat), is refused. The folder's README is not a note. A
 deleted note file passes.
 
     python3 lint/check_record_slugs.py [file ...]

@@ -7,6 +7,7 @@ A note is a finding that Claude is not likely to hit in normal work. The rule `r
 - File name: `<slug>.md`. The slug is `[a-z0-9-]`, at most 32 characters, and not digits only.
 - The file holds one line: `- <slug>: <text>`. The slug on the line equals the file name.
 - The text may hold an `Until:` marker.
+- Notes are flat: a note sits in this folder, never in a subfolder of it.
 - `README.md` is not a note.
 
 ## Old notes
