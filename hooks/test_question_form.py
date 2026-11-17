@@ -140,8 +140,13 @@ def parts(**over):
     return found
 
 
-def form_text(goal=GOAL, problem=PROBLEM, based=BASED, departs=DEPARTS):
-    return "\n".join(line for line in (goal, problem, *based, departs) if line)
+# The Waiting on line (tcj.WAITING_LINE, one home). A build without it gets a sentinel line, so each case that
+# needs it goes red by its own name instead of raising (the WIDE pattern below).
+WAITING = getattr(tcj, "WAITING_LINE", None) or "<WAITING_LINE missing from hooks/test_call_judge.py>"
+
+
+def form_text(goal=GOAL, problem=PROBLEM, based=BASED, departs=DEPARTS, waiting=WAITING):
+    return "\n".join(line for line in (goal, problem, *based, departs, waiting) if line)
 
 
 def page_item(tail="", options=None, lines=None, **over):
@@ -792,7 +797,8 @@ LINE_VARIANTS = [
 
 def case_line_order_and_prose():
     for name, lines, want in LINE_VARIANTS:
-        page(name, "set", entry_of(page_item(lines=lines)), want)
+        # The Waiting on line goes last on the page; the chat box carries no such line, so it gets none.
+        page(name, "set", entry_of(page_item(lines=lines + [WAITING])), want)
         box = tcj.good_box()
         box["questions"][0]["question"] = "\n".join(lines)
         chat(name, box, want)
@@ -1793,7 +1799,7 @@ def case_departs_line_forms_pass():
         dp_chat("a line form %r passes" % body, body, None)
         dp_page("a page line form %r passes" % body, body, None)
     # CRLF line endings: the same form lines, joined with CR LF. The line's \r is no part of either side.
-    crlf = "\r\n".join(line for line in (GOAL, PROBLEM, *BASED, DEPARTS) if line)
+    crlf = "\r\n".join(line for line in (GOAL, PROBLEM, *BASED, DEPARTS, WAITING) if line)
     box = chat_box()
     box["questions"][0]["question"] = crlf
     chat("a question with CRLF line endings and a valid Departs from line passes", box, None)
@@ -2543,6 +2549,7 @@ def ma144(repo=OTHER_REPO, checked=None, **over):
     """The incident item, judged on `repo` (None leaves the field out). `checked` sets checked_with (None leaves it
     out, "" sets it empty). `over` sets or replaces any other field."""
     item = copy.deepcopy(MA144)
+    item["context"] = item["context"] + "\n" + WAITING  # the incident item predates the Waiting on line
     if repo is not None:
         item["repo"] = repo
     if checked is not None:
@@ -3010,8 +3017,319 @@ def case_judged_mixed_writes_all_returned():
           "doc ids %r: the relative write p4 is read against the process cwd and dropped" % (ids,))
 
 
+# ------------------------------------------------------------------ a decision states its recommendation, why, and what waits
+#
+# Rule question-form (decision question-form, the page's card). An open decision set or update shows a
+# recommendation that names an option (`recommended`, else the old `pick`), a non-blank `why`, and a `Waiting on:`
+# line in `context`. A closed item, another kind, and an update that carries none of these fields pass.
+# The page draws the recommendation as visible text above the options, and never preselects one.
+
+WAIT_LINE_TEXT = "Waiting on: nothing stopped; the lane acts next."
+PLAIN_OPTIONS = [{k: v for k, v in option.items() if k != "widens"} for option in ITEM92["options"]]
+
+
+def rec_item(context=None, options=None, **over):
+    """A decision that passes the recommendation, why and Waiting on rules: page_item() with `recommended` a and no
+    legacy `pick`. `context` replaces the whole context; `options` replaces the options. `over` sets a field, and a
+    field set to None is left out, so a case drops one field and keeps the rest."""
+    item = page_item(options=options, lines=None if context is None else [context])
+    item.pop("pick", None)
+    item["recommended"] = "a"
+    for key, value in over.items():
+        if value is None:
+            item.pop(key, None)
+        else:
+            item[key] = value
+    return item
+
+
+def rec_page(name, op, entry, rule, fragments):
+    """A page write judged by item_hit and by the guard. Both give `rule`, and the matched text names one of
+    `fragments` (a word the refusal may carry, such as the pick's own name or the recommendation's)."""
+    for surface, got in (("item_hit", call("item_hit", op, entry)), ("guard", guard_hit(op, entry))):
+        ok = got[0] == rule and any(f in str(got[1]).lower() for f in fragments)
+        check("page %s: %s" % (surface, name), ok, "want %s naming one of %r, got %r" % (rule, fragments, got))
+
+
+def case_recommend_base_passes():
+    # Scope before subject: the base decision passes, and each case below removes one part of it.
+    page("a decision with a recommended key, a why and a Waiting on line passes", "set", entry_of(rec_item()), None)
+    page("a Waiting on line that says nothing is stopped, and who acts next, passes", "set",
+         entry_of(rec_item(context=form_text(waiting=WAIT_LINE_TEXT))), None)
+
+
+def case_recommend_missing_or_unknown_is_refused():
+    page("a set with no recommended and no pick is refused, naming the recommendation", "set",
+         entry_of(rec_item(recommended=None)), (FORM_RULE, "recommend"))
+    page("a set with a blank recommended is refused, naming the recommendation", "set",
+         entry_of(rec_item(recommended="")), (FORM_RULE, "recommend"))
+    page("a set whose recommended key names no option is refused, naming the recommendation", "set",
+         entry_of(rec_item(recommended="z")), (FORM_RULE, "recommend"))
+
+
+def case_legacy_pick_is_the_recommendation():
+    # The red is the refusal: a pick that names no option is read as the recommendation and refused.
+    # The control, green on the old code, is a pick that names an option: it is accepted as the recommendation.
+    page("a legacy pick that names an option, with no recommended, passes", "set",
+         entry_of(rec_item(recommended=None, pick="a")), None)
+    rec_page("a legacy pick that names no option is refused, as the recommendation", "set",
+             entry_of(rec_item(recommended=None, pick="z")), FORM_RULE, ("recommend", "pick"))
+
+
+def case_why_is_required():
+    page("a blank why is refused, naming why", "set", entry_of(rec_item(why="")), (FORM_RULE, "why"))
+    page("a why of spaces only is refused, naming why", "set", entry_of(rec_item(why="   ")), (FORM_RULE, "why"))
+    page("a decision with no why is refused, naming why", "set", entry_of(rec_item(why=None)), (FORM_RULE, "why"))
+
+
+def case_waiting_on_line_is_required():
+    page("a decision with no Waiting on line is refused, naming Waiting on", "set",
+         entry_of(rec_item(context=form_text(waiting=None))), (FORM_RULE, "Waiting on"))
+    page("a Waiting on line with no text after the colon is refused, naming Waiting on", "set",
+         entry_of(rec_item(context=form_text(waiting="Waiting on:"))), (FORM_RULE, "Waiting on"))
+    page("a Waiting on line of spaces only is refused, naming Waiting on", "set",
+         entry_of(rec_item(context=form_text(waiting="Waiting on:    "))), (FORM_RULE, "Waiting on"))
+    page("a Meanwhile line is no Waiting on line, and is refused, naming Waiting on", "set",
+         entry_of(rec_item(context=form_text(waiting=None) + "\nMeanwhile: the lane keeps its work.")),
+         (FORM_RULE, "Waiting on"))
+    page("Waiting on words in prose, not at a line start, are no Waiting on line", "set",
+         entry_of(rec_item(context=form_text(waiting=None) + "\nWE ARE WAITING ON YOU, nothing else.")),
+         (FORM_RULE, "Waiting on"))
+
+
+def case_update_judges_only_the_fields_it_carries():
+    page("an update that carries context with no Waiting on line is refused, naming Waiting on", "update",
+         entry_of({"kind": "decision", "context": form_text(waiting=None)}), (FORM_RULE, "Waiting on"))
+    page("an update that blanks why is refused, naming why", "update",
+         entry_of({"kind": "decision", "why": ""}), (FORM_RULE, "why"))
+    page("an update that carries options and a recommended key that names no option is refused", "update",
+         entry_of(tcj.with_frozen_fields({"kind": "decision", "options": copy.deepcopy(ITEM92["options"]),
+                                          "recommended": "z"})), (FORM_RULE, "recommend"))
+    page("an update that carries options and a recommended key that names an option passes", "update",
+         entry_of(tcj.with_frozen_fields({"kind": "decision", "options": copy.deepcopy(ITEM92["options"]),
+                                          "recommended": "a"})), None)
+    page("an update that carries a why with words in it passes", "update",
+         entry_of({"kind": "decision", "why": "A keeps the allow list to one form."}), None)
+
+
+def case_kindless_update_with_a_goal_line_needs_the_waiting_line():
+    # The guard cannot see the stored kind, so an update with no kind is a decision when its context carries a Goal
+    # line: that line is the decision form. A context with no Goal line is a task's, and passes.
+    page("a kindless update whose context has no Goal line (a task) passes", "update",
+         entry_of({"context": TASK_WHY}), None)
+    page("a kindless update whose context has a Goal line and a Waiting on line passes", "update",
+         entry_of({"context": form_text()}), None)
+    page("a kindless update whose context has a Goal line and no Waiting on line is refused, naming Waiting on",
+         "update", entry_of({"context": form_text(waiting=None)}), (FORM_RULE, "Waiting on"))
+    page("a kindless update with a Goal line and a blank Waiting on line is refused, naming Waiting on",
+         "update", entry_of({"context": form_text(waiting="Waiting on:")}), (FORM_RULE, "Waiting on"))
+
+
+def case_kindless_update_with_a_why_yours_line_is_a_task():
+    # A kindless update whose context holds a Why yours line is a task, so it passes even when a Goal line opens it.
+    # The mirror control: the same text with the Why yours line taken out has no task marker, and is a decision.
+    task = "Goal: g\nWhy yours: y (measured 2026-11-10, x)\nSteps: s"
+    page("a kindless update whose task context opens with a Goal line and holds a Why yours line passes", "update",
+         entry_of({"context": task}), None)
+    page("a kindless update whose task context opens with a lower-case goal: line passes", "update",
+         entry_of({"context": task.replace("Goal:", "goal:")}), None)
+    page("a kindless update whose task context opens with an indented Goal line passes", "update",
+         entry_of({"context": task.replace("Goal:", "  Goal:")}), None)
+    page("a kindless update with a Goal line and no Why yours line is refused, naming Problem", "update",
+         entry_of({"context": "Goal: g\nSteps: s"}), (FORM_RULE, "Problem"))
+    page("a kindless update with a Goal line, no Why yours line and no Waiting on line is refused, naming Waiting on",
+         "update", entry_of({"context": form_text(waiting=None)}), (FORM_RULE, "Waiting on"))
+
+
+def case_update_null_recommendation_is_refused():
+    # A null key names no option, so it is no recommendation. A null `recommended` beside a valid `pick` passes: the
+    # valid key is the recommendation the page draws.
+    page("an update with kind decision and a valid recommended key passes", "update",
+         entry_of({"kind": "decision", "recommended": "a"}), None)
+    page("an update with kind decision, recommended null and a valid pick passes", "update",
+         entry_of({"kind": "decision", "recommended": None, "pick": "a"}), None)
+    page("an update with kind decision and recommended null is refused, naming the recommendation", "update",
+         entry_of({"kind": "decision", "recommended": None}), (FORM_RULE, "recommend"))
+    page("an update with kind decision and pick null is refused, naming the recommendation", "update",
+         entry_of({"kind": "decision", "pick": None}), (FORM_RULE, "recommend"))
+    page("an update with kind decision and both keys null is refused, naming the recommendation", "update",
+         entry_of({"kind": "decision", "recommended": None, "pick": None}), (FORM_RULE, "recommend"))
+
+
+def case_waiting_on_line_is_the_pages_line():
+    # The page draws the first context line that starts `Waiting on:` at column 0, with text after the colon
+    # (skills/waiting-page/page.html, the waitline split). A bold, bulleted, lower-case or indented label is a line the
+    # page does not draw, so a set whose only such line is that form has no Waiting on line.
+    page("a plain Waiting on line at column 0, with text after the colon, passes", "set",
+         entry_of(rec_item(context=form_text(waiting=WAIT_LINE_TEXT))), None)
+    for label, line in (("bold label", "**Waiting on:** nothing stopped; the lane acts next."),
+                        ("bullet", "- Waiting on: nothing stopped; the lane acts next."),
+                        ("lower-case label", "waiting on: nothing stopped; the lane acts next."),
+                        ("indented label", "  Waiting on: nothing stopped; the lane acts next.")):
+        page("a Waiting on line in the %s form, which the page does not draw, is refused, naming Waiting on" % label,
+             "set", entry_of(rec_item(context=form_text(waiting=line))), (FORM_RULE, "Waiting on"))
+
+
+def case_str_replace_keeps_the_waiting_line():
+    context_replace("that removes the Waiting on line is refused, naming Waiting on",
+                    form_text(), form_text(waiting=None), (FORM_RULE, "Waiting on"))
+    context_replace("that leaves the Waiting on line with no text is refused, naming Waiting on",
+                    WAITING, "Waiting on:", (FORM_RULE, "Waiting on"))
+    context_replace("that swaps the Waiting on line for another valid line passes", WAITING, WAIT_LINE_TEXT, None)
+    context_replace("whose old_str holds no Waiting on line passes", "The lane merge-role-allow would do it.",
+                    "The lane would do it.", None)
+
+
+def case_recommended_list_is_the_multi_form():
+    # The list form holds the multi and ranked decisions: a list of distinct keys, each naming an option. The page
+    # marks such an item with its drawn `multi` or `ranked` flag, so these cases carry the flag.
+    page("a multi item whose recommended list names every option, in order, passes", "set",
+         entry_of(rec_item(options=copy.deepcopy(PLAIN_OPTIONS), multi=True, recommended=["a", "b"])), None)
+    page("a multi item whose recommended list is one key passes", "set",
+         entry_of(rec_item(options=copy.deepcopy(PLAIN_OPTIONS), multi=True, recommended=["b"])), None)
+    page("a ranked item whose recommended list is in rank order passes", "set",
+         entry_of(rec_item(options=copy.deepcopy(PLAIN_OPTIONS), ranked=True, recommended=["b", "a"])), None)
+    page("an empty recommended list on a multi item is refused, naming the recommendation", "set",
+         entry_of(rec_item(options=copy.deepcopy(PLAIN_OPTIONS), multi=True, recommended=[])), (FORM_RULE, "recommend"))
+    page("a recommended list that repeats a key is refused, naming the recommendation", "set",
+         entry_of(rec_item(options=copy.deepcopy(PLAIN_OPTIONS), multi=True, recommended=["a", "a"])),
+         (FORM_RULE, "recommend"))
+    page("a recommended list that names an option not there is refused, naming the recommendation", "set",
+         entry_of(rec_item(options=copy.deepcopy(PLAIN_OPTIONS), multi=True, recommended=["a", "z"])),
+         (FORM_RULE, "recommend"))
+
+
+def case_recommend_exemptions_pass():
+    no_form = form_text(waiting=None)
+    page("a closed decision with no recommendation, why or Waiting on line passes", "set",
+         entry_of(rec_item(status="closed", recommended=None, why=None, context=no_form)), None)
+    page("a note with no recommendation, why or Waiting on line passes", "set",
+         entry_of(rec_item(kind="note", recommended=None, why=None, context=no_form)), None)
+    page("a ruling with no recommendation, why or Waiting on line passes", "set",
+         entry_of(rec_item(kind="ruling", recommended=None, why=None, context=no_form)), None)
+    page("a task with no recommendation, why or Waiting on line passes", "set",
+         entry_of(task_item(STEPS)), None)
+    page("an update that carries only the title passes", "update",
+         entry_of({"title": "Let the batch runner merge each batch on its own?"}), None)
+    page("an update that carries only the status passes", "update", entry_of({"status": "open"}), None)
+
+
+def case_recommend_applies_to_a_port_and_a_set_without_kind():
+    page("a port decision with a recommendation, why and Waiting on line passes", "set",
+         entry_of(rec_item(port=True)), None)
+    page("a port decision with no Waiting on line is refused, naming Waiting on", "set",
+         entry_of(rec_item(port=True, context=form_text(waiting=None))), (FORM_RULE, "Waiting on"))
+    page("a set with no kind is judged as a decision, and is refused for no Waiting on line", "set",
+         entry_of(rec_item(kind=None, context=form_text(waiting=None))), (FORM_RULE, "Waiting on"))
+
+
+# The five real items on the owner's waiting page, each as its form lines: the same labelled lines, field names,
+# option count and recommendation shape, with placeholder text. The owner's words and session ids are not copied.
+# Each item's shape is one of the forms the rule must judge: a Meanwhile line, a prose paragraph before the Goal
+# line, a holds field, an option-level star, and a widening option.
+FIVE_FORMS = {
+    "one wait per ready PR (836 shape)": {
+        "lines": [GOAL, PROBLEM, BASED[1], THIRD, DEPARTS, "Meanwhile: the lane keeps its work and waits for no one."],
+        "options": [{"key": "a", "label": "One wait", "gain": "No new rule.", "lose": "An older PR can go unchecked."},
+                    {"key": "b", "label": "One wait per PR", "gain": "No PR goes unchecked.",
+                     "lose": "A new rule to write and test."}],
+        "recommended": "b", "why": "B leaves no ready PR without a check-in."},
+    "check-in tools (837 shape)": {
+        "lines": [GOAL, PROBLEM, BASED[1], THIRD, DEPARTS, "Meanwhile: the lane keeps option a as a limit."],
+        "options": [{"key": "a", "label": "Count four tools", "gain": "No case changes.",
+                     "lose": "A recurring cron counts as a one-time check-in.", "widens": True},
+                    {"key": "b", "label": "Count send_later", "gain": "The check matches the remedy text.",
+                     "lose": "Two tools are blocked at Stop."},
+                    {"key": "c", "label": "Read each call", "gain": "The rule text becomes true in code.",
+                     "lose": "A new rule and its tests."},
+                    {"key": "d", "label": "send_later for session waits", "gain": "A session wait is told apart.",
+                     "lose": "How often sessions wait this way is unmeasured."}],
+        "recommended": "c", "why": "C matches the rule text and blocks no measured session."},
+    "a granted lane flag (844 shape)": {
+        "lines": [GOAL, PROBLEM, BASED[1], THIRD, DEPARTS, "Meanwhile: the lane waits; nothing else runs on it."],
+        "options": [{"key": "a", "label": "Add a flag", "gain": "A check closes the path.",
+                     "lose": "The entry's command text changes.", "widens": True},
+                    {"key": "b", "label": "Prose only", "gain": "No entry edit.", "lose": "No check."},
+                    {"key": "c", "label": "Flag outside the command", "gain": "No entry edit.",
+                     "lose": "The receiver fails closed."}],
+        "recommended": "b", "why": "B changes no entry and widens nothing."},
+    "the records-only skip (857 shape)": {
+        "lines": ["In plain words: the skip is built narrower than the owner chose.", GOAL, PROBLEM, THIRD, DEPARTS,
+                  "Meanwhile: the pick stands and the work under it continues.",
+                  "WE ARE WAITING ON YOU, nothing else: choose Keep or Overrule."],
+        "options": [{"key": "a", "label": "Keep", "gain": "No guard change.", "lose": "A smaller saving."},
+                    {"key": "b", "label": "Overrule", "gain": "The full skip.",
+                     "lose": "A lane relaxes a pin.", "widens": True}],
+        "recommended": "a", "why": "A changes no guard, and the saving is not yet measured."},
+    "the push-skip reason line (878 shape)": {
+        "lines": ["Plain words: a push run is the CI run that starts when a commit lands on main.", GOAL, PROBLEM,
+                  BASED[0], THIRD, DEPARTS],
+        "options": [{"key": "a", "label": "Require the tip", "gain": "Most pushes skip.", "lose": "One more run."},
+                    {"key": "b", "label": "Print a reason line", "gain": "A reader sees why a run ran.",
+                     "lose": "Saves no minutes."},
+                    {"key": "c", "label": "Read the merge ref", "gain": "No ruling changes.", "lose": "Unproven."}],
+        "recommended": "b", "why": "B costs no ruling and removes the silent skip.",
+        "holds": "The lane waits until the owner answers."},
+}
+
+
+def five_form_item(name, waiting=True, status="open", **over):
+    """One of FIVE_FORMS as a page write: its lines, its options and its recommendation. `waiting` adds the Waiting
+    on line last, as a fixed shape gets it; the item's status is `status`."""
+    shape = FIVE_FORMS[name]
+    lines = shape["lines"] + ([WAITING] if waiting else [])
+    extra = {"holds": shape["holds"]} if "holds" in shape else {}
+    return rec_item(context="\n".join(lines), options=copy.deepcopy(shape["options"]), recommended=shape["recommended"],
+                    why=shape["why"], status=status, **dict(extra, **over))
+
+
+def case_five_real_forms():
+    for name in FIVE_FORMS:
+        page("%s: with its Waiting on line passes (scope)" % name, "set", entry_of(five_form_item(name)), None)
+        page("%s: open, with no Waiting on line, is refused naming Waiting on" % name, "set",
+             entry_of(five_form_item(name, waiting=False)), (FORM_RULE, "Waiting on"))
+        page("%s: closed, with no Waiting on line, passes" % name, "set",
+             entry_of(five_form_item(name, waiting=False, status="closed")), None)
+
+
+def case_five_real_forms_as_written():
+    # As written, two real items name no item-level recommendation: one stars an option, the other names none.
+    page("the granted-lane-flag shape, starred on option b only, with no item recommendation, is refused naming the "
+         "recommendation", "set",
+         entry_of(rec_item(context="\n".join(FIVE_FORMS["a granted lane flag (844 shape)"]["lines"] + [WAITING]),
+                           options=[dict(o, recommended=True) if o["key"] == "b" else dict(o)
+                                    for o in FIVE_FORMS["a granted lane flag (844 shape)"]["options"]],
+                           recommended=None)), (FORM_RULE, "recommend"))
+    page("the records-only shape with no item recommendation is refused naming the recommendation", "set",
+         entry_of(rec_item(context="\n".join(FIVE_FORMS["the records-only skip (857 shape)"]["lines"] + [WAITING]),
+                           options=copy.deepcopy(FIVE_FORMS["the records-only skip (857 shape)"]["options"]),
+                           recommended=None)), (FORM_RULE, "recommend"))
+
+
+def case_widens_reason_no_longer_leaves_recommended_out():
+    # The remedy for a decision where every option widens: add an option that does not widen, and recommend it.
+    text = getattr(question_form, "WIDENS_REASON", None)
+    if text is None:
+        check("widens reason: question_form.WIDENS_REASON is there", False, MISSING)
+        return
+    flat = re.sub(r"\s+", " ", text)
+    check("widens reason: question_form.WIDENS_REASON no longer says to leave recommended out",
+          "leave recommended out" not in flat.lower(), flat)
+    check("widens reason: question_form.WIDENS_REASON says to add an option that does not widen",
+          "does not widen" in flat.lower(), flat)
+
+
 def main():
-    for case in (case_item_92, case_item_51_stray_field, case_session_update_naming_dismissed_is_refused,
+    for case in (case_recommend_base_passes, case_recommend_missing_or_unknown_is_refused,
+                 case_legacy_pick_is_the_recommendation, case_why_is_required, case_waiting_on_line_is_required,
+                 case_update_judges_only_the_fields_it_carries, case_str_replace_keeps_the_waiting_line,
+                 case_kindless_update_with_a_goal_line_needs_the_waiting_line,
+                 case_kindless_update_with_a_why_yours_line_is_a_task, case_update_null_recommendation_is_refused,
+                 case_waiting_on_line_is_the_pages_line,
+                 case_recommended_list_is_the_multi_form, case_recommend_exemptions_pass,
+                 case_recommend_applies_to_a_port_and_a_set_without_kind, case_five_real_forms,
+                 case_five_real_forms_as_written, case_widens_reason_no_longer_leaves_recommended_out,
+                 case_item_92, case_item_51_stray_field, case_session_update_naming_dismissed_is_refused,
                  case_dismissed_refused_on_every_route, case_dismissed_refused_without_a_readable_field_list,
                  case_dismissed_reason_keeps_the_generic_remedy_for_other_fields,
                  case_item_stray_field_refused_from_a_record_branch_checkout,

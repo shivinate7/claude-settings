@@ -202,6 +202,9 @@ class FakeHost:
     def holds_head(self, head, other):  # no base holds a head this fake reads: a record's head is a past head only where a case says so
         return False
 
+    def holds_head_gh(self, head, other):  # the GitHub compare reads as holds_head does: no base holds a head this fake reads
+        return False
+
     def commit_read(self, sha):  # no commit has a parent: a walk from the live head ends at once, so a head this fake never had reads as no past head
         return [], None
 

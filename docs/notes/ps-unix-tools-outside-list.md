@@ -1,0 +1,1 @@
+- ps-unix-tools-outside-list: the check does not refuse a pipe to a Unix tool outside its list (`| bash`, `| sh`, `| base64`, `| nl`, `| rev`, `| column`, `| paste`), nor `docker \` + newline + `run -it x` (hooks/question_form.py PS_BASH_FORMS, PS_BASH_CONTINUATION). Decision: act-in-place
