@@ -329,7 +329,7 @@ def case_cli_no_tz_database():
 # word `override` becomes an override. It calls override.grant(session_id, prompt, now), which writes
 # <config dir>/state/override/<session_id>.json as {"kind": "once" or "timed", "until": a time}.
 # The keyword counts as the FIRST word of the prompt, in any case, after leading whitespace, or as a whole line
-# of the prompt (owner ruling, 2026-11-17: an override line inside a prose message counts; see OV_PROSE_GRANTS).
+# of the prompt (owner ruling, 2026-11-17 09:12 CST: an override line inside a prose message counts; see OV_PROSE_GRANTS).
 # A word spent inside a sentence, a notice, or text another agent wrote is an override the owner never gave. A
 # prompt that starts with the word is a one-act override and the rest is the reason, written
 # to guard.log. `override <n>[m|h]` and `override off` keep their meaning as the whole prompt. These
@@ -583,7 +583,7 @@ def case_override_not_the_first_word():
               "files %r; log %r" % (ov_pass_files(cfg), ov_log(cfg)))
 
 
-# OVERRIDE LINES IN PROSE (owner ruling, 2026-11-17: an override line inside a prose message counts). A line that is
+# OVERRIDE LINES IN PROSE (owner ruling, 2026-11-17 09:12 CST: an override line inside a prose message counts). A line that is
 # only `override`, or `override <n>[m|h]`, grants what that line grants as a whole prompt, wherever it sits in the
 # message. The other lines are prose: a question mark in one of them does not stop the grant. A reason line counts
 # the same way. (name, prompt, kind, how long the override lasts)
