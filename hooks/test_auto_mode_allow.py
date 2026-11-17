@@ -65,7 +65,8 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
 - One "Merge Tool Read Checks:" entry names each limit the read-only flags keep: `--reviewed`,
   `--review-record` and `--lane-lint` (read from merge/merge.py's argparse), "takes no lock", the PASS and
   ref-or-commit comment rules, and both tool names. Its Never covers names each act in READ_CHECKS_REFUSED.
-  No word in READ_CHECKS_DROPPED appears outside that sentence.
+  No word in READ_CHECKS_DROPPED appears outside that sentence. Outside it, the entry also names `--lane-lint`
+  run in the background through `verdict`, read from READ_CHECKS_BACKGROUND.
 AUTO_MODE_SETTINGS names another settings file to read (default: this repo's settings.json), so the
 same cases run against a copy with a clause removed and show red there.
 """
@@ -197,6 +198,12 @@ READ_CHECKS_LIMITS = (("takes no lock", r"\btakes no lock\b"),
 READ_CHECKS_REFUSED_FLAGS = ("--confirm", "--base-red-ok", "--undo-check-unknown-ok")
 READ_CHECKS_REFUSED = tuple((flag, "`%s`" % flag) for flag in READ_CHECKS_REFUSED_FLAGS) + (
     ("gh pr merge", r"`gh pr merge`"), ("any other flag that lifts a check", "any other flag that lifts a check"))
+# The sentence outside the Never covers clause that lets a lane run `--lane-lint` in the background: the word, and the
+# verdict wrapper in its short form and its full-path form (decision auto-mode-owner-acts).
+READ_CHECKS_BACKGROUND = (("background", r"(?i)\bbackground\b"),
+                          ("the verdict wrapper", r"`verdict merge --lane-lint(?![\w-])"),
+                          ("the verdict wrapper with full paths",
+                           r"`~/\.claude/bin/verdict ~/\.claude/bin/merge --lane-lint(?![\w-])"))
 # The Covers text names the session that started this one, and the no-act report it lets through.
 MESSAGE_TARGET = (("the session that started this one", "the session that started this one"),)
 MESSAGE_REPORT = (("asks for no act", "asks for no act"), ("pull request number", "pull request number"),
@@ -374,6 +381,12 @@ def bounds_text(entry):
     """The entry's text before its 'Never covers' sentence, or all of it when it has none."""
     found = never_covers_match(entry)
     return (entry or "")[:found.start()] if found else (entry or "")
+
+
+def outside_never_covers(entry):
+    """The entry's text with its 'Never covers' sentence removed, wherever that sentence sits."""
+    found = never_covers_match(entry)
+    return entry[:found.start()] + entry[found.end():] if found else (entry or "")
 
 
 def unnamed_terms(clause, terms):
@@ -851,8 +864,7 @@ class MergeToolReadChecksIsAllowed(unittest.TestCase):
     def test_drops_the_refusal_words(self):
         entry = allow_entry(MERGE_TOOL_READ)
         self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % MERGE_TOOL_READ)
-        found = never_covers_match(entry)
-        outside = entry[:found.start()] + entry[found.end():] if found else entry
+        outside = outside_never_covers(entry)
         for name, pattern in READ_CHECKS_DROPPED:
             with self.subTest(term=name):
                 self.assertNotRegex(outside, pattern, "the '%s' entry still has %s outside its Never covers sentence"
@@ -879,6 +891,16 @@ class MergeToolReadChecksIsAllowed(unittest.TestCase):
         for name, pattern in READ_CHECKS_REFUSED:
             with self.subTest(act=name):
                 self.assertRegex(clause, pattern, "Never covers does not name %r" % name)
+
+    def test_names_the_background_verdict_lane_lint_call(self):
+        entry = allow_entry(MERGE_TOOL_READ)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % MERGE_TOOL_READ)
+        self.assertIn("--lane-lint", merge_flag_names(), "merge/merge.py's argparse has no flag --lane-lint")
+        outside = outside_never_covers(entry)
+        for name, pattern in READ_CHECKS_BACKGROUND:
+            with self.subTest(term=name):
+                self.assertRegex(outside, pattern, "the '%s' entry does not name %s outside its Never covers sentence"
+                                 % (MERGE_TOOL_READ, name))
 
     def test_one_entry_starts_with_the_name(self):
         hits = [e for e in auto_mode().get("allow", []) if e.startswith(MERGE_TOOL_READ)]
