@@ -164,14 +164,18 @@ def token_start(text: str, index: int) -> bool:
     return index == 0 or (text[index - 1] in TOKEN_BOUNDARY and text[index - 2:index - 1] != "`")
 
 
-def quote_advance(text: str, index: int, quote: str):
+def quote_advance(text: str, index: int, quote: str, line_comments: bool = False):
     """Step the walk over `text[index]`: (width consumed, the quote open after it). An escaped
-    pair is one step of width 2. A contraction is the caller's to skip (`is_contraction`)."""
+    pair is one step of width 2. A contraction is the caller's to skip (`is_contraction`).
+    `line_comments` (PowerShell text only) opens state `#` at a token-start `#`; it ends at the
+    newline, so a quote inside the comment opens nothing past its line."""
     char = text[index]
     powershell = is_powershell(text)
     if quote == BLIND:
         return 1, BLIND
     if quote and powershell:
+        if quote == "#":
+            return 1, ("" if char == "\n" else quote)
         if quote == "<#":
             return (2, "") if text.startswith("#>", index) else (1, quote)
         if quote[0] == "@":
@@ -187,6 +191,8 @@ def quote_advance(text: str, index: int, quote: str):
     if powershell:
         if char == "`":
             return 2, ""
+        if line_comments and char == "#" and token_start(text, index):
+            return 1, "#"
         opener = token_start(text, index) and HERE_OPEN.match(text, index)
         if token_start(text, index) and text.startswith("<#", index):
             return 2, ("<#" if text.find("#>", index + 2) >= 0 else BLIND)
@@ -202,16 +208,18 @@ def quote_advance(text: str, index: int, quote: str):
     return 1, ""
 
 
-def walk_quotes(text: str):
+def walk_quotes(text: str, line_comments: bool = False):
     """Yield (index, char, quote open before it) over `text`, one step at a time. A contraction
     that bash never closes is text, as in `_split_reading`'s second reading. BLIND text yields as
-    unquoted."""
+    unquoted. With `line_comments`, a PowerShell `#` line comment yields as quote `#` through its
+    newline; the default reads no line comment, since `split_segments` already drops line comments
+    before this walk sees them."""
     quote, index = "", 0
     while index < len(text):
         if not quote and text[index] == "'" and is_contraction(text, index):
             width, after = 1, ""
         else:
-            width, after = quote_advance(text, index, quote)
+            width, after = quote_advance(text, index, quote, line_comments)
         yield index, text[index], ("" if quote == BLIND else quote)
         quote, index = after, index + width
 
@@ -1047,6 +1055,27 @@ def _feeds_data(header: str, scripts: bool) -> bool:
     return fed
 
 
+def own_heredoc_bodies(segment: str, raw: str, before: int):
+    """Return the bodies of the heredocs whose headers sit inside this segment, in order. A heredoc
+    of another command (`cat <<A && git commit -F - <<B`) is not the message.
+
+    `before` is the count of headers in the segments ahead of this one. Raw is walked as the
+    shell reads it (_split_heredocs): each header outside quotes and comments takes the next body
+    in turn, and a body line is never read for headers. This segment takes the bodies `before`
+    onward, one per header it holds, so two commits with the same text each take their own body.
+    Raw is walked twice, bash's reading and the contraction reading, as split_segments does, and
+    the bodies of both are judged: a lone `'` can hide a header from one reading, never both.
+    """
+    count = len(heredoc_heads(segment)[0])
+    if not count:
+        return []
+    texts = []
+    for contractions_are_text in (False, True):   # bash's reading, then the contraction reading
+        found = [body for _, body, _ in _split_heredocs(raw, contractions_are_text)[1]]
+        texts.extend(found[before:before + count])
+    return list(dict.fromkeys(texts))   # the readings often agree: judge each body once
+
+
 def strip_heredoc_bodies(cmd: str, shells_only: bool = False, per_body: bool = False) -> str:
     """Drop the body of every heredoc, and keep every header line. `shells_only` keeps a body
     only when a shell reads it, for a rule that judges shell lines. One body that runs keeps every body in
@@ -1303,6 +1332,10 @@ def pathspec_from_file_flag(arg: str) -> bool:
 # spaced form are read, because git takes either. This one stays a raw-text regex: it is outside
 # this fix's scope (the recorded debt named only `_run_dir`'s `cd`/`git -C` reading).
 GIT_WORK_TREE_RE = re.compile(r"--work-tree(?:=|\s+)(['\"]?)([^'\";&|\s]+)\1")
+# A git-dir entry that shows a replay in progress: its staged change is git's copy plus what the agent
+# resolved. A MERGE_MSG without MERGE_HEAD is a `cherry-pick -n` or `revert -n`. The one home: the builder-diff
+# read (hooks/guard.py) and the red-run commit read (hooks/guard_merge.py) both ask it.
+REPLAY_MARKS = ("CHERRY_PICK_HEAD", "REVERT_HEAD", "SQUASH_MSG", "MERGE_MSG", "rebase-merge", "rebase-apply")
 
 
 CD_WORDS = ("cd", "chdir", "pushd", "set-location", "push-location")
@@ -2061,12 +2094,15 @@ def _vetoed() -> bool:
         return True  # a veto that cannot be read is a veto: the refusal stands
 
 
-def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None, on_lift=None) -> None:
+def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None, on_lift=None,
+           continue_on_lift: bool = False):
     """Print a deny or an ask and exit, unless an owner override lifts it (decision
     owner-override). A lifted act prints nothing, so the normal permission flow runs. The
     veto runs before the override is taken, so a call that also holds a never-lifted act spends no override.
     spawn_role is set only on the Opus spawn refusal, the one refusal an Opus override may lift.
-    on_lift, when set, runs once when an override lifts the act, so a rule may keep state only for an act that lands."""
+    on_lift, when set, runs once when an override lifts the act, so a rule may keep state only for an act that lands.
+    continue_on_lift makes a lifted act return True instead of exiting, so the caller can judge the next rule of a
+    group (the lane start's rules); any other outcome exits as before."""
     vetoed = _vetoed()
     if not vetoed:
         try:  # an import or read failure is no override: the refusal stands
@@ -2081,6 +2117,8 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
             if lifted in override.LIFTS:
                 if on_lift:
                     on_lift()
+                if continue_on_lift:
+                    return True
                 sys.exit(0)
     record(tool, decision, rule, matched)
     try:  # the line the owner types to lift this refusal, or the words that none does; last in the reason

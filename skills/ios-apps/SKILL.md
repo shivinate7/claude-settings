@@ -134,6 +134,22 @@ clean. It checks only that a part is there: the system font first, a safe-area i
 folded first. It does not judge the look. The design reviewer gives each screen a verdict, `native` or
 `web-like` (skill `design-review`).
 
+## Test shapes
+
+Pick the shape by what the test proves. Extends decision `test-practices` (P1: assert the outcome the person meets; P5: no fixed sleep, no clock). Where each kind runs follows the "Fast checks" and "Slow tests" rows above and decision `swift-tests-at-milestones`.
+
+| What the test proves | Shape | Runs where |
+| --- | --- | --- |
+| A rule (a sum, a parse, a sort, a state change) | Swift Testing in the Kit, through `swift test`. No view, no simulator. | `make kit-test`, CI and Mac |
+| A screen looks right | Render test: build the view, render it to an image at each size and theme the app ships in, and check the image. It never launches the app. | `make kit-test`, CI and Mac |
+| A press, a gesture or a move between screens works | XCUITest smoke: one or two cases per screen. | `make ui-test`, Mac, once per batch |
+
+- Never test a rule through the UI, and never launch the app to see a layout. Each costs a simulator for what a faster shape proves.
+- A render test names every size the app ships in. A size left out is untested.
+- Every UI tap goes through one helper in the UI test target. The helper taps at the centre of the drawn shape's frame, never at a guessed offset. On the Duo, the helper anchors on the window, as in "Folding the iPhone Duo simulator".
+- A UI test waits on state: `waitForExistence`, or a predicate on an element's value. It never sleeps and never reads a clock (P5).
+- A bug a press or gesture lets through gets a smoke case on its screen. A bug a rule lets through gets a Kit test.
+
 ## A new app
 
 Run the starter from this skill's folder. It writes into an empty folder, or into a repo that has

@@ -21,14 +21,21 @@ A test must not fail on runner speed. CI runs a job only when its suites' files 
 - The ruling census suite stays on every OS: it tests macOS `/var` symlinks and Windows backslash and `normcase` paths.
 - Suites that touch paths, processes, shells, launchd, schtasks, symlinks or encoding run on every OS. When unsure, a suite stays on all OSes.
 - The macOS job runs only the suites that touch the OS. `install.sh` syntax and checkout detection run once, on `shell-macos`. Windows keeps its own Git Bash run.
-- `concurrency` cancels superseded runs on pull requests only. Push, nightly and manual runs finish.
-- Step names do not change: `lint/rule_audit.py` reads them.
+- macOS runs once per batch (R61, owner pick b, 2026-11-12 15:29 CST). A push to main starts no macOS runner: `shell-macos`, `checks-macos` and `checks-macos-b` skip it at job level, since a step-level skip still starts a runner. Since 2026-11-16 (owner, 01:33 CST: "turn off all mac runs for now") a pull request starts none either: a manual run and a daily that runs start them. `checks-macos` runs one mac-tagged slice of the guard suite (`GUARD_TESTS=macos-slice`, no shard) and `checks-macos-b` runs no guard step.
+- The daily run (owner, item 880, the ask to free runner slots, 11:53 CST Nov 15) skips when the newest completed daily is green and every push run since it was proven by `push-skip`, the newest at this head. It also skips on a day main did not move: no push run since a green daily at this head (owner pick on item 893, relayed 14:14 CST Nov 15). The `nightly-skip` job decides (`.github/scripts/nightly-skip.py`; rules in decision `push-skip-on-proven-tree`), and `scope` waits on it, so a skip reaches every job through `needs`. Nothing is cancelled: a cancelled run reads UNKNOWN and blocks merges. A failed read runs everything. The newest completed daily decides, so a skipped green daily never supersedes a red one.
+- CI has one daily schedule (owner, item 880, 11:53 CST Nov 15; `47 8 * * *`). It replaces the no-nightly ruling (owner, 22:19 CST Nov 12: 45 nightly runs since Sep 30 found nothing the push runs had not). A push to main runs the Linux fast jobs only (every ubuntu job except the mutation jobs, the default reading). The Windows jobs, the mutation jobs and the macOS jobs run in the daily, in a pull request and in a manual run (`workflow_dispatch` stays). The `nightly-skip` job is live again. The newest schedule run on main is the schedule group's verdict in the red-main check. A push run never clears a red daily, because it skips the Windows, mutation and macOS jobs; a green manual run, which runs every job, does. macOS on main runs daily.
+- Departs from: the no-nightly ruling above (owner, 22:19 CST Nov 12). It adds one daily schedule. The grant is the consultant's reading of item 880, relayed 12:06 CST Nov 15, not an owner-typed line.
+- `concurrency` cancels superseded runs on pull requests only. Push and manual runs finish.
+- Step names that `lint/rule_audit.py` reads do not change. The macOS guard step is the one rename: it is now "Guard fixture suite (macOS slice)", because its shard is gone, and no audit row cites it (`lint/rule_mechanisms.json`).
 - When a CI job nears its time cap, split the slowest suite's subject by family into its own job, and give the measured CI time before and after. This is a step of the `ci-hygiene` skill (owner, 2026-10-17 23:46 CDT).
 
 Reason: a slow Windows runner failed a PR on tests its change did not touch. Fixed sleeps cost time, and macOS CI minutes went to suites
 that do not touch the OS. A duplicate run costs minutes for no new verdict.
 
 Accepted risk: a defect in an OS-independent suite that shows only on macOS or Windows is not caught. Unmeasured.
+
+Accepted risk (R61): the full guard suite no longer runs on macOS at all. Every event that starts a macOS job (a manual run, or a daily that runs) runs the mac-tagged slice, and a push to main runs no macOS job. The daily runs the macOS slice on main once a day. A macOS-only guard defect outside the slice reaches main and shows at the next daily, up to a day later. Unmeasured. The slice's tag comes from the darwin arms in `hooks/` (`MACOS_REACH` in `hooks/test_guard.py`, held to the arms by an ast scan).
+Cost of `nightly-skip` (unmeasured): a runner on each push, pull request, manual run and the daily. It reads only on the daily. It makes at most a schedule runs read, push runs pages and a jobs read per push run since the green daily. A day main did not move needs no jobs read (see decision `push-skip-on-proven-tree`). It writes no file and sets no timer. The one timer is the daily cron.
 
 Kind: process
 Home: .github/workflows/checks.yml
