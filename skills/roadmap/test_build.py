@@ -271,6 +271,40 @@ class Stamps(Fixture):
         self.assertIn("window.ROADMAP_DB = null", page)
 
 
+class NotesHome(Fixture):
+    def test_notes_folder_is_a_home_beside_the_old_notes_file(self):
+        """The page reads the notes folder as a home, as it reads the old notes file. Control: the old file's panel
+        still homes on the old file."""
+        (self.repo / "docs" / "notes").mkdir(parents=True)
+        (self.repo / "docs" / "notes" / "wheel-speed-cap.md").write_text(
+            "- wheel-speed-cap: the spin rate is capped (hooks/guard.py)\n", encoding="utf-8")
+        (self.repo / "docs" / "debts").mkdir(parents=True)
+        (self.repo / "docs" / "debts" / "notes.md").write_text(
+            "# Notes\n\n- old-note: kept in the old file (hooks/guard.py)\n", encoding="utf-8")
+        page, _ = self.build_from_main()
+        panels = build_info(page)["panels"]
+        notes = [p for p in panels if p.get("home") == "docs/notes"]
+        self.assertEqual(len(notes), 1, "no panel reads the notes folder: %s" % [p.get("home") for p in panels])
+        self.assertFalse(notes[0]["read"].startswith("unknown"), notes[0])
+        self.assertEqual(self.panel(page, "Debt notes")["home"], "docs/debts/notes.md")
+
+    def test_checkout_with_no_notes_folder_reads_notes_as_empty(self):
+        """kind notes is optional: a checkout with no docs/notes reads the Notes home as empty, not unknown."""
+        page, _ = self.build_from_main()
+        self.assertFalse((self.repo / "docs" / "notes").exists())  # scope: the folder is absent in this checkout
+        notes = self.panel(page, "Notes")
+        self.assertFalse(notes["read"].startswith("unknown"), notes)
+        self.assertIn("empty", notes["read"], notes)
+
+    def test_missing_core_homes_still_read_unknown_without_a_notes_folder(self):
+        """Control: with no docs/notes, the core homes that are missing read unknown, as before."""
+        page, _ = self.build_from_main()
+        self.assertFalse((self.repo / "docs" / "notes").exists())  # scope: the folder is absent in this checkout
+        self.assertEqual(self.panel(page, "Debts")["read"], "unknown (no debts or docs/debts in this checkout)")
+        self.assertEqual(self.panel(page, "Debt notes")["read"],
+                         "unknown (no debts/notes.md or docs/debts/notes.md in this checkout)")
+
+
 class ConflictMarkers(Fixture):
     def build_tree(self):
         git(self.repo, "add", "-A")

@@ -705,7 +705,7 @@ def collect_records():
                 rows["Mandates"].append((rule, gist, "CLAUDE.md", "../CLAUDE.md"))
             else:
                 problems.append("CLAUDE.md: the rule %s has no text before its marker" % rule)
-    notes = layout.path(ROOT, "debt-notes")  # the notes tier: one line per unlikely finding, not a record
+    notes = layout.path(ROOT, "debt-notes")  # the notes tier: one file per unlikely finding in the notes folder, or one line in the old notes file; not a record
     for kind, folder in listed_folders():
         base = os.path.join(ROOT, *folder.split("/"))
         try:
