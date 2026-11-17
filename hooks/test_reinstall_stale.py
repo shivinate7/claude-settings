@@ -148,6 +148,14 @@ REFRESH_STUB = r'''#!/bin/sh
 printf '%s\n' "$*" >> "$STUB_REFRESH_COUNTER"
 '''
 
+# Stands in for a pin refresh that fails. It counts the run, then checks out the head it is given. A checkout that
+# tracked changes block exits 1 before the move; a checkout that gets past the move exits 1 after it.
+REFRESH_FAIL_STUB = r'''#!/bin/sh
+printf '%s\n' "$*" >> "$STUB_REFRESH_COUNTER"
+git checkout -q --detach "$1" || exit 1
+exit 1
+'''
+
 
 def settings_text(**changes):
     data = {"model": "sonnet-a", "effortLevel": "low", "permissions": {"allow": ["Bash(ls)"]}}
@@ -445,9 +453,9 @@ def refresh_runs(fx):
         return []
 
 
-def install_refresh(fx):
+def install_refresh(fx, text=REFRESH_STUB):
     """Puts the refresh stub where the record's source keeps merge/install_from_main.sh."""
-    write_file(os.path.join(fx.source, "merge", "install_from_main.sh"), REFRESH_STUB, mode=0o755)
+    write_file(os.path.join(fx.source, "merge", "install_from_main.sh"), text, mode=0o755)
 
 
 def detached(name, behind_by=0):
@@ -738,6 +746,32 @@ class StaleInstall(unittest.TestCase):
                          "want one failure line; stderr: %s" % run.tail())
         self.assertEqual(fx.installer_runs(), ["--cloud"], "want one installer run, with --cloud")
 
+    # A failed reinstall is not retried for the same head, and a later prompt on that head still reports the install as
+    # stale. A fixture installer that exits 1 stands in for a reinstall that cannot run (a held lock, a mirror that
+    # cannot refresh).
+
+    def test_failed_reinstall_runs_once_per_head_and_later_prompts_stay_stale(self):
+        fx, old, new = behind(self._testMethodName)
+        self.assertNotEqual(fx.origin_tip("main"), fx.record_sha(), "scope: origin is not ahead of the record")
+        fx.run_hook(stub_exit="1")
+        self.assertEqual(fx.installer_runs(), ["--cloud"], "scope: the first prompt did not run the installer once")
+        run = fx.run_hook(stub_exit="1")
+        self.assertEqual(fx.installer_runs(), ["--cloud"],
+                         "the failed reinstall ran %d times for one head, want once" % len(fx.installer_runs()))
+        self.assertTrue(run.lines, "the second prompt on the same head printed nothing: the stale install went silent")
+
+    def test_failed_reinstall_is_tried_again_when_a_new_head_arrives(self):
+        fx, old, new = behind(self._testMethodName)
+        fx.run_hook(stub_exit="1")
+        self.assertEqual(fx.installer_runs(), ["--cloud"], "scope: the first prompt did not run the installer once")
+        newer = fx.advance(HOOK_ONLY)
+        fx.git("-C", fx.source, "fetch", "-q", "origin")
+        self.assertEqual(fx.git("-C", fx.source, "rev-parse", "refs/remotes/origin/main").strip(), newer,
+                         "scope: the local origin/main ref did not move to the newer head")
+        fx.run_hook(stub_exit="1")
+        self.assertEqual(len(fx.installer_runs()), 2,
+                         "a new head ran the installer %d times in all, want 2" % len(fx.installer_runs()))
+
     # The local diff cannot run: the reinstall still happens, and the restart line says the check is unknown.
 
     def test_failed_local_diff_prints_restart_unknown_line(self):
@@ -898,6 +932,41 @@ class StaleInstall(unittest.TestCase):
         self.assertEqual(len(refresh_runs(fx)), 2, "a new head ran the pin refresh %d times in all, want 2"
                          % len(refresh_runs(fx)))
 
+    # A failed pin refresh marks its head as tried. A later prompt on that head reruns nothing, and it must not go silent.
+
+    def test_pin_move_blocked_by_tracked_changes_stays_stale_on_later_prompts(self):
+        fx, old = detached(self._testMethodName)
+        fx.advance({"CLAUDE.md": "# Rules v2\n"})
+        fx.git("-C", fx.source, "fetch", "-q", "origin")
+        write_file(os.path.join(fx.source, "CLAUDE.md"), "# local edit\n")
+        self.assertTrue(fx.git("-C", fx.source, "status", "--porcelain", "--untracked-files=no").strip(),
+                        "scope: the pin has no tracked change")
+        install_refresh(fx, REFRESH_FAIL_STUB)
+        fx.run_hook()
+        self.assertEqual(fx.git("-C", fx.source, "rev-parse", "HEAD").strip(), old,
+                         "scope: the pin moved despite its tracked change")
+        self.assertEqual(len(refresh_runs(fx)), 1,
+                         "scope: the first prompt ran the pin refresh %d times, want 1" % len(refresh_runs(fx)))
+        run = fx.run_hook()
+        self.assertTrue(run.lines, "the second prompt on the same head printed nothing: the failed pin move went silent")
+        self.assertEqual(len(refresh_runs(fx)), 1,
+                         "a later prompt reran the pin refresh: %d runs in all, want 1" % len(refresh_runs(fx)))
+
+    def test_installer_failure_after_the_pin_moved_stays_stale_on_later_prompts(self):
+        fx, old = detached(self._testMethodName)
+        new = fx.advance({"CLAUDE.md": "# Rules v2\n"})
+        fx.git("-C", fx.source, "fetch", "-q", "origin")
+        install_refresh(fx, REFRESH_FAIL_STUB)
+        fx.run_hook()
+        self.assertEqual(fx.git("-C", fx.source, "rev-parse", "HEAD").strip(), new,
+                         "scope: the pin did not move to the head before the installer failed")
+        self.assertEqual(len(refresh_runs(fx)), 1,
+                         "scope: the first prompt ran the pin refresh %d times, want 1" % len(refresh_runs(fx)))
+        run = fx.run_hook()
+        self.assertTrue(run.lines, "the second prompt on the same head printed nothing: the failed install went silent")
+        self.assertEqual(len(refresh_runs(fx)), 1,
+                         "a later prompt reran the pin refresh: %d runs in all, want 1" % len(refresh_runs(fx)))
+
     # A linked worktree as the live pin is kept: its refs read through the common config, so no verdict is unknown.
 
     def test_linked_pin_current_is_silent_with_no_read(self):
@@ -926,6 +995,33 @@ class StaleInstall(unittest.TestCase):
         self.assertEqual(unknown, [], "the behind linked pin reads as unknown: %r; stderr: %s"
                          % (unknown, run.tail()))
         self.assertTrue(run.lines, "the behind linked pin printed no verdict line")
+
+    # origin has no stable: the pin follows local main (merge/install_from_main.sh, pin_commit), so the check reads local
+    # main and gives a verdict. It reads no origin/main here, which holds the old commit.
+
+    def test_missing_origin_stable_reads_local_main_for_a_verdict(self):
+        fx, old = detached(self._testMethodName)
+        fx.write_record("stable", old)
+        new = fx.advance(HOOK_ONLY)
+        fx.git("-C", fx.source, "fetch", "-q", fx.origin, "+refs/heads/main:refs/heads/main")
+        self.assertNotIn("refs/heads/stable", fx.git("-C", fx.origin, "for-each-ref", "--format=%(refname)"),
+                         "scope: origin has a stable branch")
+        self.assertNotIn("refs/remotes/origin/stable", fx.git("-C", fx.source, "for-each-ref", "--format=%(refname)"),
+                         "scope: the source has a local origin/stable")
+        self.assertEqual(fx.git("-C", fx.source, "rev-parse", "refs/heads/main").strip(), new,
+                         "scope: local main did not move to the new commit")
+        self.assertEqual(fx.git("-C", fx.source, "rev-parse", "refs/remotes/origin/main").strip(), old,
+                         "scope: origin/main moved too, so local main is not the only new ref")
+        install_refresh(fx)
+        run = fx.run_hook()
+        unknown = [line for line in run.lines if "unknown" in line]
+        self.assertEqual(unknown, [], "the stable record reads as unknown with origin/stable absent: %r; stderr: %s"
+                         % (unknown, run.tail()))
+        self.assertEqual(refresh_runs(fx), [new],
+                         "the check did not act on local main's tip: pin refresh runs %r, want one at %s"
+                         % (refresh_runs(fx), new[:SHORT]))
+        self.assertIn(1, [commits_behind(line) for line in run.lines],
+                      "no line states the commits behind local main: %r" % run.lines)
 
     # The clone the global rules file points at: its own local origin/main ref, against its HEAD.
 
