@@ -8,7 +8,7 @@
  "blockedBy": [],
  "why": "The owner restated ruling R10 (decision guard-remedy-not-to-owner, his feedback fb-1544-5), relayed by the consultant at 09:20 CST Nov 17: after a hook refusal, post only the correction, never resend the whole reply. Triage 9 resent whole replies after report-shape refusals several times this session before this was relayed.",
  "source": "Consultant message to triage 9, 09:20 CST Nov 17 (relayed, not read by triage 9 in the owner's own message). Searched steps at 09:21 CST: no like step found. Filed by triage 9.",
- "note": "Doing, consultant, branch stop-refusal-correction-only (consultant relay; no PR read by triage 9 yet). Mistake it answers: triage 9 resent a full reply after a Stop-hook refusal at about 04:00 and 09:10 CST Nov 17. Guard idea, the consultant's to size: the report guard accepts a correction-only reply after a refusal. Whether it can be read mechanically is unmeasured.",
- "updatedAt": "2026-11-17T09:21:00-06:00",
+ "note": "Doing, consultant, branch stop-refusal-correction-only (consultant relay; no PR read by triage 9 yet). Mistake it answers: triage 9 resent a full reply after a Stop-hook refusal at about 04:00 and 09:10 CST Nov 17. Guard idea, the consultant's to size: the report guard accepts a correction-only reply after a refusal. Whether it can be read mechanically is unmeasured. Owner chat ruling relayed by the consultant 09:30 CST Nov 17 (time typed not in the relay): decision guard-remedy-not-to-owner line 178 is rewritten; every refusal ends with one shared line \"Post only the missing or corrected lines. Do not resend the reply.\" The consultant builds it. Whether sessions obey the line is unmeasured.",
+ "updatedAt": "2026-11-17T09:33:00-06:00",
  "order": 242
 }
