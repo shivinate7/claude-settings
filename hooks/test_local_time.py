@@ -329,7 +329,7 @@ def case_cli_no_tz_database():
 # word `override` becomes an override. It calls override.grant(session_id, prompt, now), which writes
 # <config dir>/state/override/<session_id>.json as {"kind": "once" or "timed", "until": a time}.
 # The keyword counts as the FIRST word of the prompt, in any case, after leading whitespace, or as a whole line
-# of the prompt (owner ruling, 2026-11-17 09:12 CST: an override line inside a prose message counts; see OV_PROSE_GRANTS).
+# of the prompt. An override line inside a prose message counts too; see OV_PROSE_GRANTS.
 # A word spent inside a sentence, a notice, or text another agent wrote is an override the owner never gave. A
 # prompt that starts with the word is a one-act override and the rest is the reason, written
 # to guard.log. `override <n>[m|h]` and `override off` keep their meaning as the whole prompt. These
@@ -585,7 +585,7 @@ def case_override_not_the_first_word():
               "files %r; log %r" % (ov_pass_files(cfg), ov_log(cfg)))
 
 
-# OVERRIDE LINES IN PROSE (owner ruling, 2026-11-17 09:12 CST: an override line inside a prose message counts). A line that is
+# OVERRIDE LINES IN PROSE. An override line inside a prose message counts. A line that is
 # only `override`, or `override <n>[m|h]`, grants what that line grants as a whole prompt, wherever it sits in the
 # message. The other lines are prose: a question mark in one of them does not stop the grant. A reason line counts
 # the same way. (name, prompt, kind, how long the override lasts)
@@ -709,14 +709,14 @@ def case_override_line_in_a_seed_brief_grants_nothing():
               "take returned %r" % (agent_lift,))
 
 
-# RULING CITES IN COMMENTS. A comment that cites the owner's ruling gives its date and time, so a reader can find the
+# RULING CITES IN COMMENTS. A comment that cites a ruling by the owner gives its date and time, so a reader can find the
 # ruling. The language's own tokenizer reads the comments, so the same words inside a string are no cite.
 RULING_CITE = re.compile(r"owner ruling\b")
 RULING_TIMED = re.compile(r"owner ruling, \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CST|CDT)")
 
 
 def untimed_ruling_cites(source):
-    """The line numbers of the comments in `source` that cite an owner ruling with no date and time after it."""
+    """The line numbers of the comments in `source` that cite a ruling with no date and time after it."""
     lines = []
     for tok in tokenize.generate_tokens(io.StringIO(source).readline):
         if tok.type == tokenize.COMMENT:
