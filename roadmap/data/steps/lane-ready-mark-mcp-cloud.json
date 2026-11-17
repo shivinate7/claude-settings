@@ -5,9 +5,10 @@
   "blockedBy": [],
   "id": "lane-ready-mark-mcp-cloud",
   "title": "In cloud a lane cannot mark its own PR ready: merge --ready points at the MCP call and guard merge-role-proof refuses it",
-  "status": "todo",
+  "status": "doing",
   "why": "Lane stable-refresh-mid-session (coordinator relay 11:16 CST Nov 17, lane words not read by me): `merge 3550 --ready --role lane --step stable-refresh-mid-session` passes the ready checks, then prints \"Mark it ready ... by MCP update_pull_request draft=false\" (route pr-ready-mcp-cloud); the MCP call is refused by guard merge-role-proof (\"Any other ready mark waits for the batch runner\"). The tool and the guard point at each other.",
   "source": "Coordinator message 11:16 CST Nov 17; asked to be filed as a debt with its decision (session-tiers; decision lane-may-mark-ready, named by the lane), not a fix lane. Related: steps lane-ready-mark-refused-on-replacement-head, merge-role-proof-follows-b, lane-merges-own-pr-code. Triage 10 (a standing session) marked #3618 ready by the same MCP call at 10:42 CST and it was allowed.",
-  "note": "Todo. Debt: a lane waits for runner 10 to mark its PR ready (cost so far: one lane, 3550). Debt record to write on main (docs/debts/<slug>.md) by a record-writer, pointing to decision lane-may-mark-ready; not yet written. Guard or check: yes if fixed (merge-role-proof or the merge tool text); review rounds apply. Not read by triage 10: the refusal text, the decision. Searched steps 11:2x CST: no step names pr-ready-mcp-cloud as a refusal conflict.",
-  "updatedAt": "2026-11-17T11:17:00-06:00"
+  "note": "Todo. Debt: a lane waits for runner 10 to mark its PR ready (cost so far: one lane, 3550). Debt record to write on main (docs/debts/<slug>.md) by a record-writer, pointing to decision lane-may-mark-ready; not yet written. Guard or check: yes if fixed (merge-role-proof or the merge tool text); review rounds apply. Not read by triage 10: the refusal text, the decision. Searched steps 11:2x CST: no step names pr-ready-mcp-cloud as a refusal conflict. 12:07 CST Nov 17 (triage 11): debt record written in draft PR #3622 (REST: open, draft, 3 files, head 464e4790cd6c; record-writer sonnet). Correction: no decision file named lane-may-mark-ready exists on main (only a guard test family); the debt cites draft-until-reviewed (ruling Q2). Status doing until #3622 merges.",
+  "updatedAt": "2026-11-17T12:07:04-06:00",
+  "pr": 3622
 }
