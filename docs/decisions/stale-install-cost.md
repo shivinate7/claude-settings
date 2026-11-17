@@ -1,35 +1,43 @@
-# The stale-install check reads origin on every cloud prompt
+# The stale-install check reads no origin on a cloud prompt
 
 ## Ruling
 
-Open: is one `git ls-remote` of origin per cloud prompt acceptable? Not ruled. Filed on waiting-page item 870, no owner answer yet.
+A cloud prompt makes no network call (owner, 2026-11-17 09:34 CST).
 
-The hook is `hooks/stale_install.py`, a UserPromptSubmit hook. It reinstalls the hooks when origin's tip moves past the installed sha. It starts a new process on every prompt. Rule `outcomes-mechanize-rules` (root CLAUDE.md) allows tracking reads on demand inside a process already running, never on every tool call. The three timer exceptions under owner ruling `stall-watch-exceptions-180a` are the stall watch, the CI wake and the daily job. This hook is none of the three, so no ruling covers it.
+The owner's words: "none of those are scenarios to guard against on what gets past the merge tool so that cheaper approach will work best" (09:34 CST; the event triggers, 09:30 CST). The install refreshes on three events: a merge notice from the merge tool, a session start or resume, and a move of the local `origin/<record ref>` ref that a prompt sees. No lookup of origin runs on any prompt, and no fallback timer asks origin on a clock.
+
+The hook is `hooks/stale_install.py`, a UserPromptSubmit hook. It compares the install record's sha with the record's source clone's own local ref. A trigger starts the recorded installer once, which fetches. The pin (a detached checkout that holds `merge/install_from_main.sh`) runs that script once per new head and prints how many commits it is behind. The clone the config dir's `CLAUDE.md` points at gets one line when it is behind, once per head. A missing local ref, record or source prints `install freshness unknown`, never "current". A linked worktree pin reads like a clone: git follows its common dir, so its verdict is real.
+
+Rule `outcomes-mechanize-rules` (root CLAUDE.md) allows tracking reads on demand inside a process already running, never on every tool call. The hook still starts one process per prompt, but its reads are local files and git objects. The three timer exceptions under owner ruling `stall-watch-exceptions-180a` do not cover it, and it needs none: it has no timer.
 
 Cost, as the hook's module docstring states it:
 
 - Python process starts: one per prompt, in every session, cloud or local. The `settings.json` command starts python before the hook checks for a cloud session. The note `stale-hook-python-every-prompt` (python starts in local sessions) names this gap.
-- Network reads: at most one `git ls-remote` per prompt, a child git process. It reads the recorded ref only. Bounded by `CLAUDE_SETTINGS_FETCH_TIMEOUT`, default 10 s. None outside a cloud session. The origin URL comes from the source clone's `.git/config`, with no git call.
-- Local git reads: none when the tip matches the record. A reinstall adds one installer run and a few local git reads in `restart_line`.
-- Files written by the hook: none. The installer writes the install record.
+- Network calls per prompt: 0. The installer a trigger starts fetches origin; the hook does not.
+- Local reads per cloud prompt: the install record, the last 256 KB of the session inbox, the config dir's `CLAUDE.md`, and at most 5 git reads in a clone (ref, merge-base per trigger, symbolic-ref, and the shared clone's ref and count). None outside a cloud session. A trigger adds one installer run and a few reads for the restart line.
+- Files written by the hook: the seen file, `.claude-settings-refresh-seen` in the config dir, only when a pin refresh or a clone flag acts on a new head. It keeps the last 20 heads. The installer writes the install record.
 - Timer: none. Long-lived process: none.
 - Frequency: every prompt.
 
-A cloud prompt with a current record costs one python start and one `git ls-remote`. Whether the reinstalls it saves are worth that is unmeasured.
+Whether the reinstalls it saves are worth one python start per prompt is unmeasured.
+
+Not built: nothing yet writes `main moved to <sha>; refresh` into a session inbox, so the merge-notice trigger is read but not sent. Session start and resume already run the installer's own refresh, so that trigger needs nothing here.
 
 Proof, in `hooks/test_reinstall_stale.py`:
 
-- Read counts: `hooks/test_reinstall_stale.py::StaleInstall::test_current_makes_one_ls_remote_and_no_install` (one read, no fetch or clone). `hooks/test_reinstall_stale.py::StaleInstall::test_second_turn_after_reinstall_is_silent` (the next prompt makes one read and no install). `hooks/test_reinstall_stale.py::StaleInstall::test_behind_origin_reinstalls_once_and_names_both_shas` (one read, one installer run). `hooks/test_reinstall_stale.py::StaleInstall::test_ls_remote_timeout_reports_unknown_and_installs_nothing` and `hooks/test_reinstall_stale.py::StaleInstall::test_ls_remote_failure_reports_unknown_and_installs_nothing` (one read, one unknown line, no install).
-- No git outside a cloud session: `hooks/test_reinstall_stale.py::StaleInstall::test_not_cloud_is_silent_with_no_git_call`.
-- Cost text: `hooks/test_reinstall_stale.py::HookFile::test_docstring_states_the_cost` checks that the docstring names process starts, network reads, the per-turn frequency, no timer and no long-lived process. It checks the words, not the numbers.
-- Not pinned (unmeasured): the python start count, since no case counts starts. The claim that the hook writes no file. The `git show` reads of a reinstall. The `git diff` read is pinned at one by `hooks/test_reinstall_stale.py::StaleInstall::test_failed_local_diff_prints_restart_unknown_line`.
+- No lookup on a prompt: `StaleInstall::test_prompt_with_no_trigger_reads_no_origin`, `test_hanging_origin_is_not_read_on_a_prompt`, `test_failing_origin_is_not_read_on_a_prompt`, `test_current_prompt_makes_no_network_read_and_no_install`, `test_second_turn_after_reinstall_is_silent` and `test_shared_check_reads_no_origin_on_a_prompt`.
+- The triggers: `test_merge_notice_triggers_the_refresh_with_no_read_of_origin` and `test_local_ref_move_triggers_the_refresh_with_no_lookup`.
+- Once per head, pin and shared clone: `test_behind_pin_refreshes_once_per_head`, `test_behind_pin_stale_line_names_its_commit_count`, `test_behind_shared_clone_is_flagged_with_its_commit_count`.
+- Linked pin: `test_linked_pin_current_is_silent_with_no_read` and `test_linked_pin_behind_gets_a_verdict_not_unknown`. A missing local ref is unknown: `test_unknown_ref_reports_unknown_without_a_read`.
+- No git outside a cloud session: `test_not_cloud_is_silent_with_no_git_call`.
+- Cost text: `HookFile::test_docstring_states_the_cost` checks that the docstring names process starts, network calls per prompt, the per-prompt frequency, no timer and no long-lived process. It checks the words, not the numbers.
+- Not pinned (unmeasured): the python start count, since no case counts starts. The claim that the hook writes no file but the seen file. The git read counts of a prompt with a trigger. The `git diff` read is pinned at one by `test_failed_local_diff_prints_restart_unknown_line`.
 
-Retry cost, debt `reinstall-no-backoff` (the hook reruns the installer on each prompt, with no backoff):
+Retry cost, debt `reinstall-no-backoff` (the hook reruns the installer on each prompt, with no backoff). A prompt now asks origin nothing, so the debt's origin read is gone; its installer retry remains:
 
-- Record behind the tip after a failed install. The installer writes the record only after a clean install, so the older record stays. Each prompt then runs one `git ls-remote` and one installer run. The debt holds the time.
-- Installer exits 0, but its files stay short of the tip. The record is rewritten at the short sha, and the hook prints "reinstall did not reach". The next prompt runs the same retry.
-- Failed first install. No record is written, so there is no retry and no read. The hook prints `install freshness unknown (no install record)` on each prompt until a record exists.
-- Pinned: one installer run inside one prompt, `hooks/test_reinstall_stale.py::StaleInstall::test_installer_exit_3_prints_one_failure_line_and_runs_once`. Not pinned: the retry across prompts (unmeasured).
+- A failed install, or an installer that exits 0 short of the target. The record stays behind the local ref, so each prompt runs the installer again. Unmeasured.
+- Failed first install. No record is written, so there is no retry. The hook prints `install freshness unknown (no install record)` on each prompt until a record exists.
+- Pinned: one installer run inside one prompt, `test_installer_exit_3_prints_one_failure_line_and_runs_once`. Not pinned: the retry across prompts (unmeasured).
 
 Kind: process
 Home: hooks/stale_install.py
