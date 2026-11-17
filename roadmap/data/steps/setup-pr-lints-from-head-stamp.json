@@ -1,0 +1,14 @@
+{
+  "id": "setup-pr-lints-from-head-stamp",
+  "title": "The merge tool lints a setup PR from its own head stamp.json when it says none, with no flag, and the change covers the merge deadline",
+  "priority": "now",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "phase": "now",
+  "owner": "consultant",
+  "blockedBy": [],
+  "why": "Owner answered page item 929 (setup-pr-lint-unknown) option b at 13:14 CST Nov 17, saved on the page; the coordinator read it and page_grant counted it (coordinator 13:18 CST). Goal: the five private-repo setup PRs (degen, q_max, home, ios-adblock, joyous) merge fast.",
+  "source": "Coordinator message 13:18 CST Nov 17; page item 929; answers/setup-pr-lint-unknown read by triage 11.",
+  "note": "Todo. Change the merge tool so a setup PR whose own head stamp.json says requiredChecks \"none\" lints and merges from that stamp, with no flag. It must cover both blocks: lane lint reads unknown on a repo with no CI, and the merge tool reads stamp.json from main, so it waits out the 65-minute deadline for all-jobs-passed. Prior work (triage 11, 13:20 CST): lint-unknown-needs-grant (todo; the flag needs a typed override) and lane-lint-unknown-on-ready-pr (doing, #3321; a ready PR reads unknown) are different questions; the builder checks them for overlap first. The consultant builds it (told 13:18 CST); runners 11 and 12 hold the five setup PRs until it lands (told). A merge tool change: test-author red case first (a setup PR whose head stamp says none lints from it; a PR whose head stamp is not none still reads main's), review rounds apply.",
+  "updatedAt": "2026-11-17T13:19:24-06:00"
+}
