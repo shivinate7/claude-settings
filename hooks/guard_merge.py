@@ -409,7 +409,7 @@ READY_PAGE_BEHIND_REASON = (
     "Rule (Git, guard-hooks-fail-closed): the records page on the head of this pull request could not be read, so it is "
     "unknown whether it is stale: %s. The merge tool the guard loaded is behind origin/main, and a tool that old can "
     "fail this read. A read that cannot run refuses the ready mark. "
-    "Remedy: bring the shared checkout to main (pull it), then retry. "
+    "Remedy: run merge/install_from_main.sh (the reinstall from main), then retry. "
     "(decision guard-hooks-fail-closed, a guard that cannot run its read refuses)"
 )
 
