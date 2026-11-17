@@ -27,7 +27,7 @@ import subprocess
 import sys
 import tempfile
 import time
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 try:
     from shared_names import config_dir  # the one home of the config dir
 except ImportError:  # a copy by need: this hook exits 0 in every case, and lands before its sibling in an install
