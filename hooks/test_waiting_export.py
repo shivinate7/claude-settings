@@ -278,16 +278,19 @@ def run_dir(label):
     return path
 
 
-def run_stop(label, cwd, records, stop_active=False, count_git=False, writer=SESSION, extra_env=None):
+def run_stop(label, cwd, records, stop_active=False, count_git=False, writer=SESSION, extra_env=None,
+             transcript_path=None):
     """One Stop of the guard in `cwd`, with the transcript `records`. `writer` is the session the transcript
-    names as the page writer (None: unknown). `extra_env` adds variables for this run. No inbox file is written."""
+    names as the page writer (None: unknown). `extra_env` adds variables for this run. `transcript_path` names a
+    file the guard reads instead of one written from `records`: a missing path is the unreadable state.
+    No inbox file is written."""
     folder = run_dir(label)
     records = with_writer(records, writer)
     cfg, home = os.path.join(folder, "cfg"), os.path.join(folder, "home")
     os.makedirs(cfg)
     os.makedirs(home)
     payload = {"hook_event_name": "Stop", "session_id": SESSION, "stop_hook_active": stop_active,
-               "cwd": cwd, "transcript_path": transcript(folder, records)}
+               "cwd": cwd, "transcript_path": transcript(folder, records) if transcript_path is None else transcript_path}
     if not os.path.exists(PROBE_PATH):
         write_file(PROBE_PATH, PROBE_SOURCE)
     env = dict(os.environ)
@@ -370,14 +373,15 @@ def case_s2_later_copy_commit_passes():
                                (at(21), {"roadmap/data/steps/x.json": "{}\n"})])
     check("S2 scope: the newest copy commit is the 20:00 one", newest_copy(root, FOLDER) == at(20),
           newest_copy(root, FOLDER))
-    p = run_stop("s2", root, [owner(at(18, 50))] + page_write(at(19)))
+    p = run_stop("s2", root, [owner(at(18, 50))] + page_write(at(19)) + [say(at(19, 2), "Page: " + PAGE_URL)])
     expect_pass("S2", p)
 
 
 def case_s3_same_export_after_the_write_passes():
     """S1 with one change: a later export_page.py run whose verdict is `same`."""
     root = base_repo("s3")
-    records = [owner(at(18, 50))] + page_write(at(19)) + export_run(at(19, 5), verdict="same")
+    records = ([owner(at(18, 50))] + page_write(at(19)) + export_run(at(19, 5), verdict="same")
+               + [say(at(19, 6), "Page: " + PAGE_URL)])
     expect_pass("S3", run_stop("s3", root, records))
 
 
@@ -401,7 +405,8 @@ def case_s3d_same_then_held_lines_clears_the_single_form():
     and is unchanged, and the held line is enforced at the republish, so the write is cleared as in S3."""
     root = base_repo("s3d")
     held = ["held item 292: The picture of option A shows nothing the focus names."]
-    records = [owner(at(18, 50))] + page_write(at(19)) + export_run(at(19, 5), verdict="same", held=held, exit_code=4)
+    records = ([owner(at(18, 50))] + page_write(at(19)) + export_run(at(19, 5), verdict="same", held=held, exit_code=4)
+               + [say(at(19, 6), "Page: " + PAGE_URL)])
     expect_pass("S3d", run_stop("s3d", root, records))
 
 
@@ -455,7 +460,8 @@ def case_s7a_no_roadmap_ref_passes_with_a_note():
     """No origin/roadmap ref at all: the check cannot tell whether the copy is current, so it passes and says so."""
     root = make_repo("s7a", registry())
     check("S7a scope: origin/roadmap is absent", not copy_readable(root, FOLDER), "the copy reads")
-    expect_note("S7a", run_stop("s7a", root, [owner(at(18, 50))] + page_write(at(19))))
+    expect_note("S7a", run_stop("s7a", root, [owner(at(18, 50))] + page_write(at(19))
+                                + [say(at(19, 2), "Page: " + PAGE_URL)]))
 
 
 def case_s7b_unreadable_roadmap_ref_passes_with_a_note():
@@ -463,7 +469,8 @@ def case_s7b_unreadable_roadmap_ref_passes_with_a_note():
     root = base_repo("s7b")
     torn_ref(root)
     check("S7b scope: the copy cannot be read", not copy_readable(root, FOLDER), "the copy reads")
-    expect_note("S7b", run_stop("s7b", root, [owner(at(18, 50))] + page_write(at(19))))
+    expect_note("S7b", run_stop("s7b", root, [owner(at(18, 50))] + page_write(at(19))
+                                + [say(at(19, 2), "Page: " + PAGE_URL)]))
 
 
 def case_s7c_no_commit_touched_the_copy_folder_blocks():
@@ -504,7 +511,8 @@ def case_s10b_commit_in_the_export_folder_passes():
                         extras=registry(page_export="waitcopy"))
     check("S10b scope: the export folder's newest commit is 20:00", newest_copy(root, "waitcopy") == at(20),
           newest_copy(root, "waitcopy"))
-    expect_pass("S10b", run_stop("s10b", root, [owner(at(18, 50))] + page_write(at(19))))
+    expect_pass("S10b", run_stop("s10b", root, [owner(at(18, 50))] + page_write(at(19))
+                                 + [say(at(19, 2), "Page: " + PAGE_URL)]))
 
 
 def case_s11_write_in_an_earlier_turn_still_blocks():
@@ -538,10 +546,11 @@ def case_s13b_update_verb_blocks():
 def case_s14_newest_write_after_the_copy_commit_blocks():
     """An older write, covered by the 17:00 copy commit, does not cover a newer write at 19:00."""
     root = base_repo("s14")
-    early = [owner(at(16))] + page_write(at(16, 30))
+    early = [owner(at(16))] + page_write(at(16, 30)) + [say(at(16, 31), "Page: " + PAGE_URL)]
     expect_pass("S14 control: the older write alone is covered by the 17:00 commit",
                 run_stop("s14-early", root, early))
-    expect_block("S14", run_stop("s14", root, early + page_write(at(19), tid="w2")), (SCRIPT,))
+    late = early + page_write(at(19), tid="w2") + [say(at(19, 2), "Page: " + PAGE_URL)]
+    expect_block("S14", run_stop("s14", root, late), (SCRIPT,))
 
 
 def case_s15_export_run_before_the_write_does_not_clear_it():
@@ -602,7 +611,8 @@ def case_n5_writer_delete_of_an_exported_collection_blocks():
 def case_n6_all_form_verdict_for_the_page_id_passes():
     """export_page.py --all prints `<id>: <verdict>` for each artifact. The waiting page's own line clears a write."""
     records = ([owner(at(18, 50))] + page_write(at(19), url=QUEUE_URL)
-               + export_run(at(19, 5), verdict=QUEUE_ID + ": same", command=EXPORT_ALL))
+               + export_run(at(19, 5), verdict=QUEUE_ID + ": same", command=EXPORT_ALL)
+               + [say(at(19, 6), "Page: " + QUEUE_URL)])
     expect_pass("N6", run_stop("n6", queue_repo("n6"), records))
 
 
@@ -617,13 +627,15 @@ def case_n6c_all_form_same_then_held_lines_clears_the_waiting_page():
     """N6 with one change: the `--all` form exits 4 and prints the waiting page's `same`, then its held line."""
     held = [QUEUE_ID + ": held item 292: The picture of option A shows nothing the focus names."]
     records = ([owner(at(18, 50))] + page_write(at(19), url=QUEUE_URL)
-               + export_run(at(19, 5), verdict=QUEUE_ID + ": same", command=EXPORT_ALL, held=held, exit_code=4))
+               + export_run(at(19, 5), verdict=QUEUE_ID + ": same", command=EXPORT_ALL, held=held, exit_code=4)
+               + [say(at(19, 6), "Page: " + QUEUE_URL)])
     expect_pass("N6c", run_stop("n6c", queue_repo("n6c"), records))
 
 
 def case_n7_powershell_run_with_same_passes():
     """The same verdict from a PowerShell run of export_page.py clears a write."""
-    records = [owner(at(18, 50))] + page_write(at(19)) + export_run(at(19, 5), verdict="same", name="PowerShell")
+    records = ([owner(at(18, 50))] + page_write(at(19)) + export_run(at(19, 5), verdict="same", name="PowerShell")
+               + [say(at(19, 6), "Page: " + PAGE_URL)])
     expect_pass("N7", run_stop("n7", base_repo("n7"), records))
 
 
@@ -747,7 +759,8 @@ def case_n16_writer_write_by_path_to_receipts_blocks():
 def case_n18_writer_receipts_write_then_a_same_export_passes():
     """The writer writes receipts/x, which blocks the Stop, and a later export run prints `same`: the export has landed
     since the write, so the Stop passes."""
-    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="receipts/x") + export_run(at(19, 5), verdict="same")
+    records = ([owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="receipts/x")
+               + export_run(at(19, 5), verdict="same") + [say(at(19, 7), "Page: " + PAGE_URL)])
     expect_pass("N18", run_stop("n18", base_repo("n18"), records))
 
 

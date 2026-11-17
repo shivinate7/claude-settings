@@ -131,6 +131,13 @@ a turn end in these cases:
     then makes one rev-parse and one is_waiting_page_url read per distinct url; one git log follows only
     when a write is to the waiting page. All inside the Stop process; no process or file of its own (rule
     outcomes-mechanize-rules). Test S6 proves it.
+  - page-link-check (page_link_check, roadmap step surface-page-link-in-chat; beside export_check, with its
+    fail-open rules and its no-second-block handling). It blocks a stop of the page writer's session when this
+    turn (the records after the last owner or peer message) holds a successful write of an exported collection
+    to the waiting page and the last reply names no claude.ai artifact URL, either form, whose id is the page's
+    id (layout.artifact_id, compared whole). The reason names `https://claude.ai/artifact/<id>`. A repo with no
+    waiting page passes. Cost: the transcript read at each Stop, and one is_waiting_page_url read per distinct
+    write url when the writer wrote. Cases: hooks/test_page_link_check.py.
 Repeats (decision owner-feedback-inbox, "Repeats"): on every Stop, `stop_hook_active` or not, the
 guard judges the well-formed, open items, except `[repo]` items (feedback for another repo), whose ids
 the turn state's `judged` list does not hold. A
@@ -249,6 +256,16 @@ EXPORT_REASON = (
     " \"Keep a copy in the repo\" says, commit and push the record branch, then stop. An export run whose"
     " verdict is `same` also clears this.")
 EXPORT_CITE = " (decision waiting-data-in-repo, roadmap step waiting-export-check)"
+FAIL_OPEN_LINK = "Feedback guard: page link not checked (%s)."
+# A claude.ai artifact URL in either form. The id is read whole (all its characters), so an id that only starts with
+# the page id is another id, and layout.artifact_id compares it.
+ARTIFACT_URL = re.compile(r"https?://(?:www\.)?claude\.ai/(?:code/)?artifact/[A-Za-z0-9_-]+")
+LINK_REASON = (
+    "Page link not printed: this turn wrote to the page, and the last reply names no link to it. End the"  # glossary-ok: the skill's own name, below
+    " last reply with the page link as one line, %s, then stop (waiting-page skill, section \"Print the page"  # glossary-ok: the skill's own name
+    " link\").")
+LINK_CITE = " (rule questions-go-to-owner, roadmap step surface-page-link-in-chat)"
+LINK_FORM = "https://claude.ai/artifact/%s"  # the form the reason names, with the page id from layout
 ONCE_HOME = "once:"  # the home prefix of a [note] that records a one-shot approval: `once:<act>`
 STANDING_HOMES = "a [ruling] item whose home is a tracked file, or a [page] item `page:<n>` with its send"
 GRANT_HOMES = ("a [ruling] item whose home is a tracked file, a [page] item `page:<n>` with its send, a"
@@ -1414,6 +1431,20 @@ def _cleared(exports, results, newest, page_id):
     return False
 
 
+def _is_page_writer(records, session_id, writes, exports=None):
+    """True when this session is the page writer: the newest meta/page get names `session_id` or the id the
+    remote env names (override.remote_session_id), bare or inside a label such as "Triage (session_x)"
+    (`_writer_names`). A writer named there decides alone. Only when none is named
+    does an interpreter run of export_page.py before the newest of `writes` make this session the writer.
+    `exports` is read from `records` when not given. The one home of the test, for the export and link checks."""
+    writer = _transcript.page_writer_id(records)
+    if writer:
+        return _writer_names(writer, (session_id, override.remote_session_id()))
+    if exports is None:
+        exports = _scan_transcript(records, ())[1]
+    return any(e[0] < max(w[0] for w in writes) for e in exports)
+
+
 def export_check(cwd, transcript_path, session_id):
     """(reason, note) of the export check (roadmap step waiting-export-check). `reason` is the block text
     when this session is the page writer and the transcript holds a successful ArtifactData write of an
@@ -1436,12 +1467,7 @@ def export_check(cwd, transcript_path, session_id):
     writes = [w for w in writes if w[1] in results and not results[w[1]][0]]
     if not writes:
         return None, None  # nothing is read from the repo before a write is found
-    writer = _transcript.page_writer_id(records)
-    if writer:
-        is_writer = _writer_names(writer, (session_id, override.remote_session_id()))
-    else:
-        is_writer = any(e[0] < max(w[0] for w in writes) for e in exports)
-    if not is_writer:
+    if not _is_page_writer(records, session_id, writes, exports):
         return None, None  # another session's writes are not this session's to export
     try:
         root = Homes(cwd)._cwd_root()
@@ -1466,6 +1492,112 @@ def export_check(cwd, transcript_path, session_id):
     return (None, None) if int(out or 0) >= newest else (EXPORT_REASON % (branch, folder), None)
 
 
+def _turn_text(rec):
+    """The text of a user record or queued owner message, or "" for any other record."""
+    text = _transcript.owner_text(rec)
+    if text is None and _transcript.is_incoming(rec):  # a peer message starts a turn too
+        content = (rec.get("message") or {}).get("content")
+        text = content if isinstance(content, str) else "\n".join(
+            b["text"] for b in content if isinstance(b, dict) and isinstance(b.get("text"), str))
+    return text or ""
+
+
+def _is_notice(rec):
+    """True for a message record whose text starts with a machine tag (MACHINE_TAGS): a system reminder, a task
+    notification, a hand-back or a framed peer message."""
+    return ((_transcript.owner_text(rec) is not None or _transcript.is_incoming(rec))
+            and _turn_text(rec).strip().startswith(tuple(MACHINE_TAGS)))
+
+
+def _turn_records(records):
+    """(turn, notices): the records after the last message that starts a turn, and the indexes in `turn` of the
+    notices after it. A turn starts at a message with text that is no notice (_is_notice): an owner message, a
+    queued owner message or an unframed peer message. A notice and a tool result start none."""
+    start = None
+    for i, rec in enumerate(records):
+        if (_transcript.owner_text(rec) is not None or _transcript.is_incoming(rec)) and not _is_notice(rec):
+            start = i
+    if start is None:
+        return [], []
+    turn = records[start + 1:]
+    return turn, [i for i, rec in enumerate(turn) if _is_notice(rec)]
+
+
+def _on_page(layout, root, url):
+    """True when `url` names the repo's page, by layout's one test."""
+    return layout.is_waiting_page_url(root, url)  # glossary-ok: layout's function name, a code name the glossary keeps
+
+
+def _page_url(layout, root):
+    """The repo's page URL, read through layout."""
+    return layout.waiting_page(root)  # glossary-ok: layout's function name, a code name the glossary keeps
+
+
+def _last_text(records):
+    """The text of the last non-sidechain assistant record that has text, "" when none does."""
+    for rec in reversed(records):
+        if rec.get("type") != "assistant" or rec.get("isSidechain"):
+            continue
+        content = (rec.get("message") or {}).get("content")
+        parts = [b["text"] for b in content if isinstance(b, dict) and b.get("type") == "text"
+                 and isinstance(b.get("text"), str)] if isinstance(content, list) else []
+        if parts:
+            return "\n".join(parts)
+    return ""
+
+
+def page_link_check(cwd, transcript_path, session_id, last_message=None):
+    """(reason, note) of the page link check (roadmap step surface-page-link-in-chat; skill waiting-page,
+    "Print the page link"). `reason` is the block text when this session is the page writer, this turn (the
+    records after the last owner or peer message) holds a successful ArtifactData write of an exported
+    collection to the repo's waiting page, and the last reply names no claude.ai artifact URL (either form) whose
+    id is the page's id, compared whole by layout.artifact_id. The last reply is `last_message`, the hook's own
+    field, else the last assistant text of the turn. A repo with no waiting page, a session that is not the
+    writer and a transcript that cannot be read pass with no note. A write to meta alone owes no link, and a write
+    is covered by a reply after it that names the link when a notice (a wake) comes after that reply. `note` is the systemMessage text only after a
+    page write was found and a read of the repo or the layout failed: never a block. Cost: the transcript read
+    at each Stop (shared with export_check's); a writer's page write adds one is_waiting_page_url read per distinct url."""
+    try:
+        records = _transcript.read_transcript(transcript_path)
+        import layout
+    except (OSError, TypeError, ValueError, ImportError):
+        return None, None
+    turn, notices = _turn_records(records)
+    # meta (a stamp such as `woke`) is no item, so it owes no link; export_check still counts it
+    owing = tuple(c for c in layout.WAITING_COLLECTIONS if c != "meta")
+    writes, _, results = _scan_transcript(turn, owing)
+    writes = [w for w in writes if w[1] in results and not results[w[1]][0]]
+    if not writes:
+        return None, None
+    if not _is_page_writer(records, session_id, writes):
+        return None, None
+    try:
+        root = Homes(cwd)._cwd_root()
+        if root is None:
+            return None, None
+        writes = [w for w in writes if _on_page(layout, root, w[2])]
+        if not writes:
+            return None, None
+        page_id = layout.artifact_id(_page_url(layout, root))
+
+        def names_page(text):
+            return any(_on_page(layout, root, m.group(0)) for m in ARTIFACT_URL.finditer(text))
+
+        # A write is covered when a reply after it names the link and a notice came after that reply: the owner
+        # got the link, and a later wake brings no new write.
+        at = {u.get("id"): i for i, rec in enumerate(turn) for u in _transcript.tool_uses(rec)}
+        linked = [i for i, rec in enumerate(turn) if names_page(_last_text([rec]))]
+        sealed = max(notices, default=-1)
+        if all(any(at.get(w[1], len(turn)) < i < sealed for i in linked) for w in writes):
+            return None, None
+        reply = last_message if isinstance(last_message, str) and last_message else _last_text(turn)
+        if names_page(reply):
+            return None, None
+    except layout.LayoutError as e:
+        return None, FAIL_OPEN_LINK % (" ".join(str(e).split()) or type(e).__name__)
+    return LINK_REASON % (LINK_FORM % page_id), None
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
@@ -1473,14 +1605,24 @@ def main():
             ex_reason, ex_note = export_check(hook.get("cwd"), hook.get("transcript_path"), hook.get("session_id"))
         except Exception as e:  # advisory: a crash passes, and says so
             ex_reason, ex_note = None, FAIL_OPEN_EXPORT % (" ".join(str(e).split()) or type(e).__name__)
+        try:
+            ln_reason, ln_note = page_link_check(hook.get("cwd"), hook.get("transcript_path"),
+                                                 hook.get("session_id"), hook.get("last_assistant_message"))
+        except Exception as e:  # advisory: a crash passes, and says so
+            ln_reason, ln_note = None, FAIL_OPEN_LINK % (" ".join(str(e).split()) or type(e).__name__)
         out = inbox_stop(hook)
-        if ex_reason and hook.get("stop_hook_active"):
-            ex_note = " ".join(filter(None, [ex_note, ex_reason]))  # no second block; the owner still reads it
+        notes = [n for n in (ex_note, ln_note) if n]
+        lead = (out["reason"] + " ") if out.get("reason") else ""
+        if (ex_reason or ln_reason) and hook.get("stop_hook_active"):
+            notes += [r for r in (ex_reason, ln_reason) if r]  # no second block; the owner still reads it
+        elif ex_reason and ln_reason:  # one site per case, so each names its own cite (the cite ratchet reads each)
+            out.update(decision="block", reason=lead + ex_reason + EXPORT_CITE + " " + ln_reason + LINK_CITE)
         elif ex_reason:
-            prior = out.get("reason")
-            out.update(decision="block", reason=(prior + " " if prior else "") + ex_reason + EXPORT_CITE)
-        if ex_note:
-            out["systemMessage"] = " ".join(filter(None, [out.get("systemMessage"), ex_note]))
+            out.update(decision="block", reason=lead + ex_reason + EXPORT_CITE)
+        elif ln_reason:
+            out.update(decision="block", reason=lead + ln_reason + LINK_CITE)
+        if notes:
+            out["systemMessage"] = " ".join(filter(None, [out.get("systemMessage")] + notes))
         if out:
             print(json.dumps(out))
     except Exception as e:  # advisory: a crash passes, and says so on stderr

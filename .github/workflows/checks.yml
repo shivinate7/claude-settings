@@ -786,6 +786,10 @@ jobs:
         if: ${{ (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_waiting_export.py
 
+      - name: Page link check suite
+        if: ${{ (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 hooks/test_page_link_check.py
+
       - name: Daily note fixture suite
         run: python3 hooks/test_daily_note.py
 
@@ -1648,6 +1652,10 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_waiting_export.py
 
+      - name: Page link check suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_page_link_check.py
+
       - name: Daily note fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_daily_note.py
@@ -2299,6 +2307,10 @@ jobs:
       - name: Waiting export check suite
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_waiting_export.py
+
+      - name: Page link check suite
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python hooks/test_page_link_check.py
 
       - name: Daily note fixture suite
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
