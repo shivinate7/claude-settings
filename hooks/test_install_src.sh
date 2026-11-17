@@ -1117,8 +1117,13 @@ retired_case3() {
   rm -rf "$h"
 }
 
+# A hand edit of a landed copy is not kept (decision copy-mode-overwrites-no-backup: an installer overwrites its own
+# old copy and keeps no backup). A cloud install lands each file as a link into its generation (decision
+# install-hooks-whole), so the edit goes into that generation. The next run, where main has retired the file, removes
+# the link, the edit goes with it, and nothing under the config dir keeps a copy outside the generation. The run names
+# the file it removed.
 retired_case4() {
-  name="retired4: a recorded copy the owner hand-edited is kept, and the next run names it"
+  name="retired4: a hand edit of a recorded hook that main retires is removed with no backup, and the next run names it"
   h=$(new_home); cfg="$h/.claude-cfg"; co="$work/retired4-checkout"
   retired_checkout "$co" retired4
   printf 'print("v1")\n' > "$co/hooks/edited_hook.py"
@@ -1127,12 +1132,14 @@ retired_case4() {
   printf 'print("mine")\n' > "$cfg/hooks/edited_hook.py"
   git -C "$co" rm -q hooks/edited_hook.py && git -C "$co" commit -q -m "retire edited_hook"
   out2=$(retired_run "$co" "$h" "$cfg" cloud); rc2=$?
-  got=$(cat "$cfg/hooks/edited_hook.py" 2>/dev/null)
+  kept=$(grep -rl --exclude-dir=installs 'print("mine")' "$cfg" 2>/dev/null)
 
   if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then
     bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
-  elif [ "$got" != 'print("mine")' ]; then
-    bad "$name" "edited_hook.py holds [$got] after the second run; the owner's edit was lost"
+  elif [ -e "$cfg/hooks/edited_hook.py" ] || [ -L "$cfg/hooks/edited_hook.py" ]; then
+    bad "$name" "edited_hook.py is still under hooks/ after the run that main retired it"
+  elif [ -n "$kept" ]; then
+    bad "$name" "the hand edit survives outside the generation, under: $kept"
   elif ! printf '%s\n' "$out2" | grep -q 'edited_hook.py'; then
     bad "$name" "the second run does not name edited_hook.py in its output"
   else
@@ -1228,25 +1235,32 @@ retired_case7() {
   rm -rf "$h"
 }
 
-# Cloud twin of retired7. Today cloud never removes, so this passes today: it guards the new removal.
+# Cloud twin of retired7. A cloud run removes a retired copy only after its switch, so a run whose copy fails removes none.
 retired_case7b() {
-  name="retired7b: a cloud run with a failed copy removes no retired copy"
+  name="retired7b: a cloud run whose staged copy fails removes no retired copy and exits non-zero"
   h=$(new_home); cfg="$h/.claude-cfg"; co="$work/retired7b-checkout"
   retired_checkout "$co" retired7b
   printf '#!/bin/sh\necho gone\n' > "$co/hooks/gone_copy.sh"
   retired_commit "$co" "ship gone_copy"
   out1=$(retired_run "$co" "$h" "$cfg" cloud); rc1=$?
   git -C "$co" rm -q hooks/gone_copy.sh && git -C "$co" commit -q -m "retire gone_copy"
-  # The next copy of keep_hook.sh fails: a folder named <dest>.cs-new makes its rename fail.
-  mkdir -p "$cfg/hooks/keep_hook.sh.cs-new"
-  out2=$(retired_run "$co" "$h" "$cfg" cloud); rc2=$?
+  # The copy of keep_hook.sh fails where the run stages it: a cp shim refuses that one destination, the stage
+  # installs/<id>.tmp/hooks/ (decision install-hooks-whole). The older copy mode copied it to its temp name
+  # hooks/keep_hook.sh.cs-new, so the shim refuses that name too. Either way the copy is the injected failure.
+  fake="$work/retired7b-bin"; mkdir -p "$fake"
+  real_cp=$(command -v cp)
+  printf '#!/bin/sh\ncase "$*" in *.tmp/hooks/keep_hook.sh*|*/hooks/keep_hook.sh.cs-new*) echo "cp: injected failure" >&2; exit 1;; esac\nexec %s "$@"\n' "$real_cp" > "$fake/cp"
+  chmod +x "$fake/cp"
+  out2=$( PATH="$fake:$PATH"; export PATH; retired_run "$co" "$h" "$cfg" cloud ); rc2=$?
 
   if [ $rc1 -ne 0 ]; then
     bad "$name" "run 1 exited $rc1: $out1"
+  elif ! printf '%s\n' "$out2" | grep -q 'injected failure'; then
+    bad "$name" "the injected copy failure did not happen, so the case proves nothing: $out2"
   elif [ $rc2 -eq 0 ]; then
-    bad "$name" "run 2 exited 0, so the injected landing failure did not happen: $out2"
+    bad "$name" "run 2 exited 0 although its copy of keep_hook.sh failed: $out2"
   elif [ ! -e "$cfg/hooks/gone_copy.sh" ]; then
-    bad "$name" "gone_copy.sh was removed by a run that failed"
+    bad "$name" "gone_copy.sh was removed by a run whose copy failed"
   else
     ok "$name"
   fi
@@ -2321,8 +2335,9 @@ skills_bak_setup() {
   mkdir -p "$co/skills/fresh-prose"
   printf 'v1\n' > "$co/skills/fresh-prose/SKILL.md"
 }
+# SKILLS_BAK_PATH, when set, is the PATH of this run: a case puts a shim folder first on it.
 skills_bak_run() {
-  out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" \
+  out=$(cd "$co" && env -i PATH="${SKILLS_BAK_PATH:-$PATH}" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" \
         bash ./install.sh --cloud 2>&1); rc=$?
 }
 
@@ -2339,18 +2354,36 @@ skills_bak1() {
   rm -rf "$h"
 }
 
+# A hand edit of a linked skill is backed up, and never kept in skills/ (decision copy-mode-overwrites-no-backup, its skill
+# paragraph: a skill backup goes to backups/skills/<name>.<time>, and a copy that is neither the recorded tree nor the
+# source is backed up). A cloud run links each skill through its generation (decision install-hooks-whole), so the edit
+# lands in the live generation's skills/<name>. The refresh backs that folder up, the new generation's skill is the
+# shipped one, and an unedited skill gets no backup. The one-time move of an older real copy is skills2.
 skills_bak2() {
-  name="skills_bak2: a hand-edited skill copy is backed up under backups/, not in skills/"
+  name="skills_bak2: a hand edit of a linked skill is backed up under backups/skills/, never kept in skills/; an unedited skill is not"
   skills_bak_setup skills_bak2
+  mkdir -p "$co/skills/plain-skill"
+  printf 'plain v1\n' > "$co/skills/plain-skill/SKILL.md"
   skills_bak_run
+  if [ $rc -ne 0 ]; then
+    bad "$name" "the first install exited $rc: $out"; rm -rf "$h"; return
+  fi
+  if [ ! -L "$cfg/skills/fresh-prose" ] || [ "$(cat "$cfg/skills/plain-skill/SKILL.md" 2>/dev/null)" != "plain v1" ]; then
+    bad "$name" "scope: the skills did not land as links through the generation, so no edit reaches one"; rm -rf "$h"; return
+  fi
   printf 'hand edit\n' > "$cfg/skills/fresh-prose/SKILL.md"
   skills_bak_run
   bak=$(ls -d "$cfg/backups/skills/"fresh-prose.* 2>/dev/null | head -n1)
+  held=$(ls "$cfg/backups/skills" 2>/dev/null)
+  edited=$(cat "$bak/SKILL.md" 2>/dev/null)
+  misplaced=$(find -L "$cfg/skills" -type f -exec grep -l 'hand edit' {} + 2>/dev/null)
   if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
-  elif [ -z "$bak" ]; then bad "$name" "no backup under $cfg/backups/skills; skills/ holds: $(ls "$cfg/skills")"
-  elif [ "$(cat "$bak/SKILL.md" 2>/dev/null)" != "hand edit" ]; then bad "$name" "backup lost the hand edit"
-  elif has_bak "$cfg/skills"; then bad "$name" "skills/ holds a .bak.* entry"
-  elif [ "$(cat "$cfg/skills/fresh-prose/SKILL.md")" != "v1" ]; then bad "$name" "skill was not refreshed"
+  elif [ -z "$bak" ]; then bad "$name" "no backup of the hand-edited skill under backups/skills/ after the refresh"
+  elif [ "$edited" != "hand edit" ]; then bad "$name" "the backup under $bak does not hold the hand edit"
+  elif [ "$held" != "${bak##*/}" ]; then bad "$name" "backups/skills holds more than the edited skill: $held"
+  elif has_bak "$cfg/skills"; then bad "$name" "skills/ holds a .bak.* entry: $(ls "$cfg/skills")"
+  elif [ -n "$misplaced" ]; then bad "$name" "the hand edit is under skills/, not only in backups/skills/: $misplaced"
+  elif [ "$(cat "$cfg/skills/fresh-prose/SKILL.md")" != "v1" ]; then bad "$name" "skills/fresh-prose is not the shipped content after the refresh"
   else ok "$name"; fi
   rm -rf "$h"
 }
@@ -2404,6 +2437,104 @@ skills_bak6() {
   skills_bak_run
   if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
   elif [ "$(cat "$cfg/skills/foo.bak.v2/SKILL.md" 2>/dev/null)" != "mine" ]; then bad "$name" "foo.bak.v2 was moved out of skills/"
+  else ok "$name"; fi
+  rm -rf "$h"
+}
+
+# ---- skills backups, runtime files: a __pycache__ written into the live generation is not a hand edit ----
+# A skill's script run through the live link writes __pycache__/*.pyc into the generation. Those files are not
+# edits, so an unedited skill that holds one is not backed up.
+skills_bak7() {
+  name="skills_bak7: a __pycache__ file written into the live generation's skill is not a hand edit, so an unedited skill is not backed up"
+  skills_bak_setup skills_bak7
+  skills_bak_run
+  if [ $rc -ne 0 ]; then bad "$name" "the first install exited $rc: $out"; rm -rf "$h"; return; fi
+  live="$cfg/.cs-current/skills/fresh-prose"
+  if [ ! -f "$live/SKILL.md" ]; then bad "$name" "scope: no live generation skill at $live"; rm -rf "$h"; return; fi
+  mkdir -p "$live/__pycache__" && printf 'bytecode\n' > "$live/__pycache__/x.cpython-311.pyc"
+  skills_bak_run
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
+  elif [ -n "$(ls "$cfg/backups/skills" 2>/dev/null)" ]; then bad "$name" "an unedited skill was backed up: $(ls "$cfg/backups/skills")"
+  elif has_bak "$cfg/skills"; then bad "$name" "skills/ holds a .bak.* entry: $(ls "$cfg/skills")"
+  elif [ "$(cat "$cfg/skills/fresh-prose/SKILL.md")" != "v1" ]; then bad "$name" "skill content wrong"
+  else ok "$name"; fi
+  rm -rf "$h"
+}
+
+# A hand edit of a skill file beside a __pycache__ file is still backed up: the runtime file does not hide the edit.
+skills_bak8() {
+  name="skills_bak8: a hand edit of a skill file beside a __pycache__ file is still backed up under backups/skills/"
+  skills_bak_setup skills_bak8
+  skills_bak_run
+  if [ $rc -ne 0 ]; then bad "$name" "the first install exited $rc: $out"; rm -rf "$h"; return; fi
+  live="$cfg/.cs-current/skills/fresh-prose"
+  if [ ! -f "$live/SKILL.md" ]; then bad "$name" "scope: no live generation skill at $live"; rm -rf "$h"; return; fi
+  mkdir -p "$live/__pycache__" && printf 'bytecode\n' > "$live/__pycache__/x.cpython-311.pyc"
+  printf 'hand edit\n' > "$cfg/skills/fresh-prose/SKILL.md"
+  skills_bak_run
+  bak=$(ls -d "$cfg/backups/skills/"fresh-prose.* 2>/dev/null | head -n1)
+  held=$(ls "$cfg/backups/skills" 2>/dev/null)
+  edited=$(cat "$bak/SKILL.md" 2>/dev/null)
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
+  elif [ -z "$bak" ]; then bad "$name" "no backup of the hand-edited skill under backups/skills/ after the refresh"
+  elif [ "$edited" != "hand edit" ]; then bad "$name" "the backup under $bak does not hold the hand edit"
+  elif [ "$held" != "${bak##*/}" ]; then bad "$name" "backups/skills holds more than the edited skill: $held"
+  elif has_bak "$cfg/skills"; then bad "$name" "skills/ holds a .bak.* entry: $(ls "$cfg/skills")"
+  elif [ "$(cat "$cfg/skills/fresh-prose/SKILL.md")" != "v1" ]; then bad "$name" "skills/fresh-prose is not the shipped content after the refresh"
+  else ok "$name"; fi
+  rm -rf "$h"
+}
+
+# A refresh whose switch fails after a hand-edited skill was backed up leaves that skill whole in the live generation:
+# the backup is a copy. A mv in its place would take the live folder out before the switch.
+skills_bak9() {
+  name="skills_bak9: a refresh that fails at the switch, after a hand-edited skill is backed up, leaves that skill whole in the live generation"
+  skills_bak_setup skills_bak9
+  printf 'helper\n' > "$co/skills/fresh-prose/helper.txt"
+  skills_bak_run
+  if [ $rc -ne 0 ]; then bad "$name" "the first install exited $rc: $out"; rm -rf "$h"; return; fi
+  live="$cfg/.cs-current/skills/fresh-prose"
+  if [ "$(cat "$live/SKILL.md" 2>/dev/null)" != "v1" ] || [ "$(cat "$live/helper.txt" 2>/dev/null)" != "helper" ]; then
+    bad "$name" "scope: the live generation's skill is not the shipped one"; rm -rf "$h"; return
+  fi
+  printf 'hand edit\n' > "$cfg/skills/fresh-prose/SKILL.md"
+  before_gen=$(readlink "$cfg/.cs-current")
+  fake="$work/skills_bak9-bin"; mkdir -p "$fake"
+  real_mv=$(command -v mv)
+  printf '#!/bin/sh\ncase "$*" in *.cs-current.cs-new*) echo "mv: injected failure" >&2; exit 1;; esac\nexec %s "$@"\n' "$real_mv" > "$fake/mv"
+  chmod +x "$fake/mv"
+  SKILLS_BAK_PATH="$fake:$PATH"; skills_bak_run; SKILLS_BAK_PATH=
+  bak=$(ls -d "$cfg/backups/skills/"fresh-prose.* 2>/dev/null | head -n1)
+  if ! printf '%s\n' "$out" | grep -q 'injected failure'; then bad "$name" "scope: the injected switch failure did not happen, so the case proves nothing: $out"
+  elif [ -z "$bak" ]; then bad "$name" "scope: no backup was made before the failure, so the failure was not after the backup"
+  elif [ $rc -eq 0 ]; then bad "$name" "install.sh exited 0 although the switch failed"
+  elif [ "$(readlink "$cfg/.cs-current")" != "$before_gen" ]; then bad "$name" "the live generation moved although the switch failed"
+  elif [ "$(cat "$live/SKILL.md" 2>/dev/null)" != "hand edit" ] || [ "$(cat "$live/helper.txt" 2>/dev/null)" != "helper" ]; then
+    bad "$name" "the hand-edited skill is not whole in the live generation after the failed refresh"
+  else ok "$name"; fi
+  rm -rf "$h"
+}
+
+# A failed backup fails the run: backups/skills is a file, so the hand-edited skill cannot be backed up. The run exits
+# non-zero, the live generation stays as it was, its new generation folder is removed, and the edit stays in the live skill.
+skills_bak10() {
+  name="skills_bak10: a refresh whose backup of a hand-edited skill fails exits non-zero, keeps the live generation, removes its new generation, and keeps the edit"
+  skills_bak_setup skills_bak10
+  skills_bak_run
+  if [ $rc -ne 0 ]; then bad "$name" "the first install exited $rc: $out"; rm -rf "$h"; return; fi
+  live="$cfg/.cs-current/skills/fresh-prose"
+  if [ ! -f "$live/SKILL.md" ]; then bad "$name" "scope: no live generation skill at $live"; rm -rf "$h"; return; fi
+  printf 'hand edit\n' > "$cfg/skills/fresh-prose/SKILL.md"
+  mkdir -p "$cfg/backups" && printf 'not a folder\n' > "$cfg/backups/skills"
+  before_gen=$(readlink "$cfg/.cs-current")
+  before_installs=$(ls -A "$cfg/installs")
+  skills_bak_run
+  if [ $rc -eq 0 ]; then bad "$name" "install.sh exited 0 although its backup failed: $out"
+  elif ! printf '%s\n' "$out" | grep -q 'could not back up'; then bad "$name" "the run did not fail at the backup: $(install_problems)"
+  elif [ "$(readlink "$cfg/.cs-current")" != "$before_gen" ]; then bad "$name" "the live generation moved although the backup failed"
+  elif [ "$(ls -A "$cfg/installs")" != "$before_installs" ]; then bad "$name" "a generation folder was left after the failed refresh: $(ls -A "$cfg/installs")"
+  elif [ "$(cat "$live/SKILL.md" 2>/dev/null)" != "hand edit" ] || [ "$(cat "$cfg/skills/fresh-prose/SKILL.md" 2>/dev/null)" != "hand edit" ]; then
+    bad "$name" "the hand edit is not in the live skill after the failed refresh"
   else ok "$name"; fi
   rm -rf "$h"
 }
@@ -3610,31 +3741,39 @@ make_guard_clone() {
   done
 }
 
-# The mv shim, in folder $1. install.sh lands each file with `mv -f "$t" "$dest"`. For a guard file the
-# shim does three things. Before the second guard landing of an install whose SWAP_PAUSE is set, it
-# logs "paused" to $SWAP_EVENTS and sleeps $SWAP_PAUSE seconds, once: install.sh retries a failed mv,
-# and the retry must not pause again. It runs the real mv. After the landing it logs
-# "landed <epoch seconds> <build>". When SWAP_INSTALL_LOG is set, each stamped guard file (guard.py,
-# guard_*.py) also logs "install.sh: landed id=<id>" to it; shared_names.py and git_reads.py carry no stamp
-# and are not logged. Before put_file's rename (its source ends in .cs-new) it logs
-# "premv <dest> <present|absent> <bytes of the new file>" to $SWAP_EVENTS, whatever the dest. Every other
-# mv passes straight through.
+# The mv and cp shims, in folder $1. Both source swap_common.sh, which holds the one stall, guard_pause.
+# A decision-install-hooks-whole install writes the guard set in two places, and the shims see both:
+#   - a stage copy into installs/<id>.tmp/hooks/guard.d/ (cp), logged "staged <name>" once it lands;
+#   - the landing of a guard file over hooks/guard*.py (mv, the per-file install of the older copy mode),
+#     logged "landed <epoch seconds> <build>", with "install.sh: landed id=<id>" to SWAP_INSTALL_LOG when
+#     the file is stamped (guard.py, guard_*.py); and the switch of .cs-current (mv), logged the same way
+#     with the id of the generation it names.
+# Before the second such write of one install whose SWAP_PAUSE is set, guard_pause logs "paused", sleeps
+# SWAP_PAUSE seconds and logs "resumed". Before put_file's or the switch's rename (its source ends in
+# .cs-new) the mv shim logs "premv <dest> <present|absent> <bytes of the new file>" to $SWAP_EVENTS.
+# Every other call passes straight through to the real tool.
 make_swap_bin() {
   mkdir -p "$1"
-  real_mv=$(command -v mv)
+  real_mv=$(command -v mv); real_cp=$(command -v cp)
+  cat > "$1/swap_common.sh" <<'EOF'
+# guard_pause: the one stall of an install. Once per events file, before the second guard write of an install.
+guard_pause() {
+  if [ -n "${SWAP_PAUSE:-}" ] && [ "$(grep -cE '^(landed|staged) ' "$SWAP_EVENTS")" = 1 ] && ! grep -q '^paused' "$SWAP_EVENTS"; then
+    printf 'paused\n' >> "$SWAP_EVENTS"; sleep "$SWAP_PAUSE"; printf 'resumed\n' >> "$SWAP_EVENTS"
+  fi
+}
+EOF
   cat > "$1/mv" <<EOF
 #!/bin/sh
+. "\$(dirname "\$0")/swap_common.sh"
 dest=""; src=""
 for a in "\$@"; do src="\$dest"; dest="\$a"; done
 case "\$src" in
   *.cs-new)
-    printf 'premv %s %s %s\n' "\$dest" "\$([ -f "\$dest" ] && echo present || echo absent)" "\$(wc -c < "\$src" | tr -d ' ')" >> "\$SWAP_EVENTS" ;;
+    printf 'premv %s %s %s\n' "\$dest" "\$([ -e "\$dest" ] || [ -L "\$dest" ] && echo present || echo absent)" "\$(wc -c < "\$src" | tr -d ' ')" >> "\$SWAP_EVENTS" ;;
 esac
 case "\$dest" in
-  */hooks/guard*.py)
-    if [ -n "\${SWAP_PAUSE:-}" ] && [ "\$(grep -c '^landed' "\$SWAP_EVENTS")" = 1 ] && ! grep -q '^paused' "\$SWAP_EVENTS"; then
-      printf 'paused\n' >> "\$SWAP_EVENTS"; sleep "\$SWAP_PAUSE"
-    fi ;;
+  */hooks/guard*.py) guard_pause ;;
 esac
 "$real_mv" "\$@" || exit \$?
 case "\$dest" in
@@ -3646,9 +3785,27 @@ case "\$dest" in
           printf '%s install.sh: landed id=%s\n' "\$(date +%Y-%m-%dT%H:%M:%S%z | sed 's/\(..\)\$/:\1/')" "\$(sed -n 's/^INSTALL_ID = "\([^"]*\)".*/\1/p' "\$dest" | head -n1)" >> "\$SWAP_INSTALL_LOG"
         fi ;;
     esac ;;
+  */.cs-current)
+    printf 'landed %s %s\n' "\$(date +%s)" "\$(sed -n 's/^# build //p' "\$dest/hooks/guard.py" | head -n1)" >> "\$SWAP_EVENTS"
+    if [ -n "\${SWAP_INSTALL_LOG:-}" ]; then
+      printf '%s install.sh: landed id=%s\n' "\$(date +%Y-%m-%dT%H:%M:%S%z | sed 's/\(..\)\$/:\1/')" "\$(basename "\$(readlink "\$dest")")" >> "\$SWAP_INSTALL_LOG"
+    fi ;;
 esac
 EOF
-  chmod +x "$1/mv"
+  cat > "$1/cp" <<EOF
+#!/bin/sh
+. "\$(dirname "\$0")/swap_common.sh"
+dest=""
+for a in "\$@"; do dest="\$a"; done
+case "\$dest" in
+  *.tmp/hooks/guard.d/*) guard_pause ;;
+esac
+"$real_cp" "\$@" || exit \$?
+case "\$dest" in
+  *.tmp/hooks/guard.d/*) printf 'staged %s\n' "\$(basename "\$dest")" >> "\$SWAP_EVENTS" ;;
+esac
+EOF
+  chmod +x "$1/mv" "$1/cp"
 }
 
 # One copy-mode install of clone $1 into config dir $2, logging guard landings to events file $3. $4,
@@ -3672,9 +3829,13 @@ guard_run() {
     python3 -B "$1/hooks/guard.py" < "$work/guard-payload.json" > "$2" 2>/dev/null
 }
 
-# ---- swap1sh: a copy-mode install stalled between two guard landings never makes the guard crash ----
+# ---- swap1sh: a cloud install stalled while it stages never shows a mixed live set, and the guard never crashes ----
+# Decision install-hooks-whole: a generation is staged whole, then one rename switches to it. So while install 2 is
+# stalled between two staged guard files, every live guard file still carries install 1's build, and a guard run
+# that loads the set in that window is an allow. The stall is the shim's guard_pause, the second guard write of
+# install 2: a staged copy (new layout) or a landing over hooks/guard*.py (the per-file layout of the older copy).
 swap1sh() {
-  name="swap1sh: a copy-mode install stalled between two guard landings never makes the guard crash, and after it the guard loads one new set"
+  name="swap1sh: a cloud install stalled while it stages its guard set never shows a mixed live set, and the guard never crashes"
   install_set_setup
   h=$(new_home); cfg="$h/.claude-cfg"; swap_bin="$work/swap1sh-bin"
   make_swap_bin "$swap_bin"
@@ -3687,14 +3848,27 @@ swap1sh() {
   id1=$(loaded_ids "$cfg")
   run_cloud "$work/swap1sh-two" "$cfg" "$ev2" "$pause" > "$work/swap1sh-run2" 2>&1 &
   p2=$!
-  # Bounded sampler: real guard runs while install 2 is alive, at most 300 of them.
-  loads=0; crashes=0; others=0; n=0; gout="$work/swap1sh-guard.out"
+  # Bounded sampler: real guard runs while install 2 is alive, at most 300 of them. While the stall is on
+  # (paused, not yet resumed), each pass also reads the build of every live guard file.
+  loads=0; crashes=0; others=0; n=0; window=0; mixed=0; mixed_seen=""; gout="$work/swap1sh-guard.out"
+  crash_where=""
   while kill -0 "$p2" 2>/dev/null && [ "$n" -lt 300 ]; do
     n=$((n + 1))
+    cur_before=$(readlink "$cfg/.cs-current" 2>/dev/null)
     guard_run "$cfg" "$gout"
+    cur_after=$(readlink "$cfg/.cs-current" 2>/dev/null)
     loads=$((loads + 1))
-    if grep -q 'guard-crash' "$gout"; then crashes=$((crashes + 1))
+    in_window=no
+    if grep -q '^paused' "$ev2" && ! grep -q '^resumed' "$ev2"; then in_window=yes; fi
+    if grep -q 'guard-crash' "$gout"; then
+      crashes=$((crashes + 1))
+      [ -n "$crash_where" ] || crash_where="first crash, stall window: $in_window, live generation changed during the run: $([ "$cur_before" = "$cur_after" ] && echo no || echo yes), guard.log: $(tail -n 1 "$cfg/guard.log" 2>/dev/null | cut -c1-240)"
     elif [ -s "$gout" ]; then others=$((others + 1)); fi
+    if [ "$in_window" = yes ]; then
+      window=$((window + 1))
+      live=$(sed -n 's/^# build //p' "$cfg"/hooks/guard*.py 2>/dev/null | sort -u | tr '\n' ' ')
+      if [ "$live" != "one " ]; then mixed=$((mixed + 1)); mixed_seen="$live"; fi
+    fi
   done
   wait "$p2"; rc2=$?
   stalled=$(grep -c '^paused' "$ev2")
@@ -3703,12 +3877,45 @@ swap1sh() {
   if [ "$rc1" -ne 0 ] || [ "$(printf '%s\n' "$id1" | grep -c .)" != 1 ]; then
     bad "$name" "setup: install 1 exit $rc1, loaded ids [$id1]"
   elif [ "$stalled" != 1 ]; then bad "$name" "precondition: the stall never fired, so the case proves nothing"
+  elif [ "$window" -lt 1 ]; then bad "$name" "precondition: no live-set sample was taken during the stall, so the case proves nothing"
+  elif [ "$mixed" -gt 0 ]; then bad "$name" "$mixed of $window live-set samples during the stall held mixed builds [$mixed_seen], want install 1's build only"
   elif [ "$rc2" -ne 0 ]; then bad "$name" "install 2 exit $rc2: $(cat "$work/swap1sh-run2")"
-  elif [ "$crashes" -gt 0 ]; then bad "$name" "$crashes of $loads guard runs during install 2 were guard-crash denies, while install 2 was stalled between guard landings"
+  elif [ "$crashes" -gt 0 ]; then bad "$name" "$crashes of $loads guard runs during install 2 were guard-crash denies; $crash_where"
   elif [ "$others" -gt 0 ]; then bad "$name" "$others of $loads guard runs during install 2 were a deny, not an allow"
   elif [ "$loads" -lt 3 ]; then bad "$name" "precondition: only $loads guard runs during install 2, so the window is not covered"
   elif [ "$(printf '%s\n' "$id2" | grep -c .)" != 1 ] || [ "$id2" = "$id1" ]; then
     bad "$name" "after install 2 the guard loads [$id2] (install 1: [$id1]), want one new id"
+  else ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+# ---- guardsw1: a guard whose file was read before a cloud switch, and that runs after it, judges the call ----
+# Decision install-hooks-whole: a process keeps to one generation. A guard started before a switch read the bytes of the
+# old guard.py. Its folder is then worked out from its path after the switch (hooks/guard.py: _HERE is the realpath of
+# __file__), so its modules come from the new set while its INSTALL_ID stays the old one, and it fails closed. This case
+# makes that order certain: the old bytes run at the flat path after install 2 has switched, so no timing window is needed.
+guardsw1() {
+  name="guardsw1: a guard whose file was read before a cloud switch, and that runs after it, judges the call without a guard-crash"
+  install_set_setup
+  h=$(new_home); cfg="$h/.claude-cfg"; swap_bin="$work/guardsw1-bin"
+  make_swap_bin "$swap_bin"
+  make_guard_clone "$work/guardsw1-one" one
+  make_guard_clone "$work/guardsw1-two" two
+  ev1="$work/guardsw1-ev1"; ev2="$work/guardsw1-ev2"; : > "$ev1"; : > "$ev2"
+  run_cloud "$work/guardsw1-one" "$cfg" "$ev1" > "$work/guardsw1-run1" 2>&1; rc1=$?
+  cp "$cfg/hooks/guard.py" "$work/guardsw1-old-guard.py"
+  run_cloud "$work/guardsw1-two" "$cfg" "$ev2" > "$work/guardsw1-run2" 2>&1; rc2=$?
+  now=$(sed -n 's/^# build //p' "$cfg/hooks/guard.py" | head -n1)
+  ( cd "$work" && env -u CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR="$cfg" HOME="$h" CLAUDE_GUARD_ROOT_PID="$$" PYTHONPATH= \
+      python3 -B -c 'import sys; g = {"__file__": sys.argv[2], "__name__": "__main__"}; exec(compile(open(sys.argv[1], encoding="utf-8").read(), sys.argv[2], "exec"), g)' \
+      "$work/guardsw1-old-guard.py" "$cfg/hooks/guard.py" < "$work/guard-payload.json" > "$work/guardsw1-out" 2>/dev/null )
+  out=$(head -c 200 "$work/guardsw1-out")
+
+  if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ]; then bad "$name" "setup: install exit $rc1 / $rc2: $(tail -n 3 "$work/guardsw1-run2")"
+  elif [ "$now" != two ]; then bad "$name" "precondition: after install 2 the flat guard.py is build [$now], not the new set, so the case proves nothing"
+  elif grep -q 'guard-crash' "$work/guardsw1-out"; then bad "$name" "the guard read before the switch was denied after it, as a guard-crash: $out"
+  elif [ -s "$work/guardsw1-out" ]; then bad "$name" "the guard read before the switch did not allow the call after it: $out"
   else ok "$name"
   fi
   rm -rf "$h"
@@ -3749,8 +3956,12 @@ landing_span_report() {
 }
 
 # ---- lock1sh: a second install waits for the first, or refuses with one clear line ----------------
+# ---- lock1sh: a second cloud install started while the first is stalled takes the lock after it, or refuses with one line ----
+# Decision install-hooks-whole: one install at a time, one lock file. Install A stalls while it stages (swap1sh's
+# seam). Install B starts only once A has paused, so B runs while A holds the lock. The lock file is there while A
+# is stalled and gone once both have ended. B lands no guard switch before A's end line, or prints one lock line.
 lock1sh() {
-  name="lock1sh: a second copy-mode install started while the first is stalled lands no guard file before the first exits, or exits with one lock line"
+  name="lock1sh: a second cloud install started while the first is stalled waits for the lock, and the lock is held through the stall and released after both"
   install_set_setup
   h=$(new_home); cfg="$h/.claude-cfg"; swap_bin="$work/lock1sh-bin"
   make_swap_bin "$swap_bin"
@@ -3759,8 +3970,14 @@ lock1sh() {
   evA="$work/lock1sh-evA"; evB="$work/lock1sh-evB"; : > "$evA"; : > "$evB"
   run_cloud "$work/lock1sh-one" "$cfg" "$evA" 6 "$cfg/claude-settings-install.log" > "$work/lock1sh-runA" 2>&1 &
   pA=$!
-  sleep 0.3
+  # Bounded poll until A has stalled, so B starts during A's stall. The stall is the shim's event, not a clock.
+  n=0
+  while ! grep -q '^paused' "$evA" 2>/dev/null && kill -0 "$pA" 2>/dev/null && [ "$n" -lt 3000 ]; do
+    n=$((n + 1))
+    sleep 0.05
+  done
   alive=no; kill -0 "$pA" 2>/dev/null && alive=yes
+  held=no; [ -e "$cfg/.claude-settings-install.lock" ] && held=yes
   run_cloud "$work/lock1sh-two" "$cfg" "$evB" "" "$cfg/claude-settings-install.log" > "$work/lock1sh-runB" 2>&1 &
   pB=$!
   # Bounded wait: both installs end, at most 3000 polls. The order comes from the install log, never from a
@@ -3784,6 +4001,7 @@ lock1sh() {
   if [ "$alive" != yes ]; then bad "$name" "precondition: install A had already exited when install B started, so the case proves nothing"
   elif [ "$(grep -c '^paused' "$evA")" -lt 1 ]; then
     bad "$name" "precondition: install A never stalled, so the case proves nothing; A events [$(tr '\n' ' ' < "$evA")], A output [$(tail -n 3 "$work/lock1sh-runA" | tr '\n' ' ')]"
+  elif [ "$held" != yes ]; then bad "$name" "install A is stalled but its lock file is not there: the lock is not held through the stall"
   elif [ "$order" != "start end " ] && [ "$order" != "start end start end " ]; then
     bad "$name" "install B took the install lock before install A ended, while A was stalled: install log order [$order], want A's start and end before B's start"
   elif [ -n "$bFirst" ] && [ "$order" != "start end start end " ]; then
@@ -3796,6 +4014,8 @@ lock1sh() {
     bad "$name" "install B landed no guard file and printed $lockLines lock line(s), want one clear line"
   elif [ "$rcA" -ne 0 ]; then bad "$name" "install A exit $rcA: $(cat "$work/lock1sh-runA")"
   elif [ -n "$bFirst" ] && [ "$rcB" -ne 0 ]; then bad "$name" "install B landed its guard files but exit $rcB"
+  elif [ -e "$cfg/.claude-settings-install.lock" ]; then
+    bad "$name" "the lock file is still there after both installs ended: the lock is not released"
   else
     builds=$(sed -n 's/^# build //p' "$cfg"/hooks/guard*.py | sort -u | wc -l | tr -d ' ')
     if [ "$builds" = 1 ]; then ok "$name"
@@ -3805,15 +4025,14 @@ lock1sh() {
   rm -rf "$h"
 }
 
-# ---- putfile_nogap1: put_file replaces a landed file by one rename over it, never by a delete -----
-# A guard hook reads a hook file at any moment, and a missing one fails closed. Install 2 replaces every file
-# install 1 landed in hooks/. The mv shim logs "premv <dest> <present|absent> <bytes>" just before each
-# put_file rename. Each file needs a premv line that found the old file present. That fails a delete before the
-# rename, and a rewrite in place, which has no rename at all. The new file's size at that moment must be the
-# landed file's size, so the file is whole before it takes the name. The guard files, shared_names.py and a
-# plain hook go through put_file.
+# ---- putfile_nogap1: a refresh keeps every landed hook name present through a stall, and renames none over its old file ----
+# Decision install-hooks-whole: a refresh links each landed name through .cs-current and never writes a link for a name
+# that already has one, so the only rename over a live name is the switch of .cs-current. Install 2 is stalled while it
+# stages (the shim's seam, swap1sh). A landed hook name must exist through the stall, and install 2 must not rename a
+# file over any name under hooks/. The mv shim logs "premv <dest>" for every rename over a live name, and the old
+# per-file layout logged one per hook.
 putfile_nogap1() {
-  name="putfile_nogap1: a copy-mode install replaces each landed hook file by one rename over the old file, never by a delete or a rewrite in place"
+  name="putfile_nogap1: a refresh keeps every landed hook name present through a stall, and renames no hook over its old file: the switch of .cs-current is the one rename"
   h=$(new_home); cfg="$h/.claude-cfg"; swap_bin="$work/putfile_nogap1-bin"
   make_swap_bin "$swap_bin"
   one="$work/putfile_nogap1-one"; two="$work/putfile_nogap1-two"
@@ -3824,27 +4043,29 @@ putfile_nogap1() {
   ev1="$work/putfile_nogap1-ev1"; ev2="$work/putfile_nogap1-ev2"; : > "$ev1"; : > "$ev2"
   run_cloud "$one" "$cfg" "$ev1" > "$work/putfile_nogap1-run1" 2>&1; rc1=$?
   names=$(ls "$two/hooks")
-  missing1=""; for f in $names; do [ -f "$cfg/hooks/$f" ] || missing1="$missing1 $f"; done
-  run_cloud "$two" "$cfg" "$ev2" > "$work/putfile_nogap1-run2" 2>&1; rc2=$?
-  why=""
-  for f in $names; do
-    d="$cfg/hooks/$f"
-    seen=$(awk -v d="$d" '$1 == "premv" && $2 == d { print $3 " " $4 }' "$ev2" | tail -n 1)
-    size=$(wc -c < "$d" 2>/dev/null | tr -d ' ')
-    case "$seen" in
-      "present $size") ;;
-      "") why="$why $f: no rename over it, so it was written in place;" ;;
-      absent*) why="$why $f: absent just before the rename;" ;;
-      *) why="$why $f: [$seen] before the rename, but the landed file is $size bytes;" ;;
-    esac
+  missing1=""; for f in $names; do [ -e "$cfg/hooks/$f" ] || missing1="$missing1 $f"; done
+  run_cloud "$two" "$cfg" "$ev2" 4 > "$work/putfile_nogap1-run2" 2>&1 &
+  p2=$!
+  # Bounded poll until install 2 is stalled, then read every landed name while it is held there.
+  n=0
+  while ! grep -q '^paused' "$ev2" 2>/dev/null && kill -0 "$p2" 2>/dev/null && [ "$n" -lt 3000 ]; do
+    n=$((n + 1))
+    sleep 0.05
   done
+  missing2=""; for f in $names; do [ -e "$cfg/hooks/$f" ] || missing2="$missing2 $f"; done
+  wait "$p2"; rc2=$?
+  over=$(awk -v p="$cfg/hooks/" '$1 == "premv" && index($2, p) == 1 { print $2 }' "$ev2" | sed "s|^$cfg/hooks/||" | tr '\n' ' ')
+  switches=$(awk -v d="$cfg/.cs-current" '$1 == "premv" && $2 == d && $3 == "present"' "$ev2" | wc -l | tr -d ' ')
   left=$(find "$cfg" -name '*.cs-new' | head -n 1)
   new_notify=$(cat "$cfg/hooks/notify.sh" 2>/dev/null)
 
   if [ "$rc1" -ne 0 ] || [ -n "$missing1" ] || [ -z "$names" ]; then
     bad "$name" "setup: install 1 exit $rc1, not landed:$missing1"
+  elif [ "$(grep -c '^paused' "$ev2")" -lt 1 ]; then bad "$name" "precondition: the stall never fired, so the case proves nothing"
   elif [ "$rc2" -ne 0 ]; then bad "$name" "install 2 exit $rc2: $(tail -n 3 "$work/putfile_nogap1-run2")"
-  elif [ -n "$why" ]; then bad "$name" "$why"
+  elif [ -n "$missing2" ]; then bad "$name" "landed hook name(s) missing while install 2 was stalled:$missing2"
+  elif [ -n "$over" ]; then bad "$name" "install 2 renamed over live hook file(s), one rename per file: $over"
+  elif [ "$switches" != 1 ]; then bad "$name" "install 2 renamed over .cs-current $switches time(s) while it was present, want the one switch"
   elif [ -n "$left" ]; then bad "$name" "a temp file is left behind: $left"
   elif [ "$new_notify" != "# plain hook two, longer" ]; then bad "$name" "install 2 did not land the new notify.sh, found [$new_notify]"
   else ok "$name"
@@ -6705,6 +6926,10 @@ run skills_bak3
 run skills_bak4
 run skills_bak5
 run skills_bak6
+run skills_bak7
+run skills_bak8
+run skills_bak9
+run skills_bak10
 run copymode_case1
 run backup_case1
 run backup_case2
@@ -6753,6 +6978,7 @@ run pinoff3
 run swap1sh
 run lock1sh
 run putfile_nogap1
+run guardsw1
 run putfile_prose1
 run installlog1
 run logoffset1

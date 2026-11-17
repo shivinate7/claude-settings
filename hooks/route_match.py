@@ -24,7 +24,7 @@ import os
 import re
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 
 from shared_names import install_root  # noqa: E402  stdlib only: the one home of the install root

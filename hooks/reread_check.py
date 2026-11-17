@@ -41,7 +41,7 @@ import re
 import sys
 
 try:
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
     import precompact_handoff as ph  # one home for the handoff and flag paths
 except Exception as e:
     ph = None

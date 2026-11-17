@@ -616,7 +616,23 @@ _FAMILY_MODULES = ("guard_branch_worktree", "guard_shared_tree", "guard_pointer"
 # last, so the replace of this one file switches the whole set: a load sees the old set or the new
 # set, never a mix, however long the install stalls between two files. No folder, or a repo copy
 # with no stamp, loads the modules beside this file.
-_SET_DIR = os.path.join(_HERE, "guard.d", str(globals().get("INSTALL_ID", "")))
+# _HERE is a realpath taken after this file was read, so a cloud generation switch in between puts it in
+# the new generation while this file's stamp is still the old one. A generation folder is named by its
+# install id (installs/<id>/hooks), so when the folder beside the realpath has no set for our stamp, the
+# set is in the sibling generation that stamp names, never the new generation's set (a mixed load).
+def _set_dir_for(here, install_id):
+    own = os.path.join(here, "guard.d", install_id)
+    if os.path.isdir(own):
+        return own
+    gens = os.path.dirname(os.path.dirname(here))
+    if os.path.basename(gens) == "installs":
+        stamped = os.path.join(gens, install_id, "hooks", "guard.d", install_id)
+        if os.path.isdir(stamped):
+            return stamped
+    return own
+
+
+_SET_DIR = _set_dir_for(_HERE, str(globals().get("INSTALL_ID", "")))
 if "INSTALL_ID" in globals() and os.path.isdir(_SET_DIR):
     sys.path.insert(0, _SET_DIR)
 _PLACEHOLDER = None

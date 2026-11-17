@@ -53,7 +53,7 @@ import re
 import sys
 from html.parser import HTMLParser
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 # The install's hooks/ folder. lint/ and skills/ sit beside it (decision install-hooks-whole). A stamped copy of
