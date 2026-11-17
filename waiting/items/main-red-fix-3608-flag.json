@@ -79,7 +79,7 @@
       "label": "Wait for a green re-run of main"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "Main is red and the merge tool refuses the fix PR #3608 without the reason flag. May one fix PR merge on a red main with that flag?",
-  "why": "The coordinator recommends a. It is the coordinator's pick, relayed, not owner-typed. The facts below are the coordinator's relay; triage read only run 44052915578 on REST."
+  "why": "Answered a in your own chat (the time you typed it is not in the relay), relayed word for word by the consultant at 09:18 CST Nov 17: \"a) allow this one merge of #3608 with --base-red-ok (recommended)\". It covers one use of the flag for #3608 only, no other PR. Filed by triage 9 at 09:19 CST; home: step rail-jump-test-race. Runner 10 is told by the consultant; the coordinator is told by triage."
 }
