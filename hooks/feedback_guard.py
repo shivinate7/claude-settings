@@ -148,8 +148,8 @@ source) of REPEAT_CUT
 characters: roadmap steps at the local ref (one `git grep`, never fetched), the layout's backlog files
 in the working tree, this inbox's blocks, and the blocks of the REPEAT_INBOXES newest other
 inboxes whose sidecar `<sid>.inbox.repo` (local_time.bind_repo) names a folder in this repo. Each item
-has its own candidate list: the judge drops the step, debt, todo or notes file the item's home names
-(every line of a todo or notes file) and the item's own owner-message block, told from another block
+has its own candidate list: the judge drops the step, debt, note file, todo or old notes file the item's home names
+(every line of a todo or old notes file) and the item's own owner-message block, told from another block
 stamped in the same minute (own_refs, inbox_refs). A later or earlier message of the same Stop, and the same text in
 another session's inbox, stay candidates. An item left with no candidate is not asked; no candidate
 for any item means no call. A hit appends ` repeats <ref>` to the item line (one rewrite of the inbox)
@@ -228,7 +228,8 @@ EXAMPLE_HOME = "noted"
 OPEN_KINDS = ("[ruling]", "[task]", "[standing]")
 # Layout keys (lint/layout.json, or a repo's extras file) whose paths may hold each kind's home.
 HOME_KINDS = {"ruling": ("decisions", "rules", "claude-md", "agents-md"),
-              "task": ("todo", "debts", "debt-notes")}
+              "task": ("todo", "debts", "debt-notes", "notes")}
+NOTES_README = "README.md"  # the notes folder's own file, never a note
 FAIL_OPEN = "Feedback guard: ruling and task homes not checked (%s)."
 FAIL_OPEN_SENDS = "Feedback guard: %s sends not checked (%s)."  # label: page or repo
 FAIL_OPEN_CLOSED = "Feedback guard: closed note homes not checked (%s)."
@@ -1155,23 +1156,24 @@ def line_candidates(path, prefix):
 
 def backlog_candidates(root):
     """[(ref, label, text)] from the layout's backlog files in the working tree: one per debt file
-    (its title and opening text), one per non-blank line of the todo and notes files. A missing or
-    unreadable file is skipped."""
+    (its title and opening text), one per note file (`note:<slug>`), one per non-blank line of the todo
+    file and the old notes file (`note:<line>`). A missing or unreadable file is skipped."""
     import layout  # lint/layout.py, the one home of where each kind lives
     out, known = [], layout.kinds(root)
     where = {key: os.path.join(root, *layout.path(root, key).split("/")) for key in HOME_KINDS["task"]
              if key in known}
-    for key, prefix in (("todo", "todo"), ("debts", "debt"), ("debt-notes", "note")):
+    for key, prefix in (("todo", "todo"), ("debts", "debt"), ("debt-notes", "note"), ("notes", "note")):
         try:
             if key not in where:
                 continue
             if os.path.isdir(where[key]):
                 for name in sorted(os.listdir(where[key])):
                     path = os.path.join(where[key], name)
-                    if name.endswith(".md") and path != where.get("debt-notes") and os.path.isfile(path):
+                    if (name.endswith(".md") and path != where.get("debt-notes") and os.path.isfile(path)
+                            and not (key == "notes" and name == NOTES_README)):
                         with open(path, encoding="utf-8", errors="replace") as f:
                             text = squash(f.read(4 * REPEAT_CUT).lstrip("# "))
-                        out.append(("debt:" + name[:-len(".md")], squash(text, 60), text))
+                        out.append((prefix + ":" + name[:-len(".md")], squash(text, 60), text))
             elif os.path.isfile(where[key]):
                 out += line_candidates(where[key], prefix)
         except OSError:
@@ -1266,7 +1268,10 @@ def own_refs(rest, root, own_block, found):
             if home == at.get("todo"):
                 own |= {r for r in found if r.startswith("todo:")}
             elif home == at.get("debt-notes"):
-                own |= {r for r in found if r.startswith("note:")}
+                # Only the old file's `note:<line>` refs: a note file is its own, distinct home.
+                own |= {r for r in found if re.fullmatch(r"note:\d+", r)}
+            elif name.endswith(".md") and name != NOTES_README and folder == at.get("notes"):
+                own.add("note:" + name[:-len(".md")])
             elif name.endswith(".md") and folder == at.get("debts"):
                 own.add("debt:" + name[:-len(".md")])
     except Exception as e:  # an unreadable home drops only the home's ref
