@@ -8,6 +8,17 @@ Modes:
 - --stop: At Stop, lists each open background job whose output file did not change for
   the quiet age, and blocks a Stop while a CI wait has no check-in.
 
+Planned pause (pause_seconds, one parse for --hook and --stop): the one `sleep` that has a command after it,
+  anywhere in a background command, is a known silent wait, so the quiet time starts after it. The length is
+  the sum of the operands (`sleep 5m 30s` is 330 s); an operand that expands (`sleep $X`) gives 600 s. The
+  hook adds the length to --quiet, and --stop adds it to the quiet age of that job. No allowance for: a
+  `sleep` with nothing after it or piped into the next command; a `sleep` in a loop; `sleep` as text (quotes,
+  `#` comments, heredoc bodies); two or more `sleep` commands (the guard refuses them); a fractional length;
+  a `sleep` that is not first and is under 25 s (the guard's SLEEP_LIMIT; the base quiet time covers it).
+  The command is read with the guard's tokenizer. This matches the one background pause that the `waiter`
+  guard allows (guard_stream.waiter_verdict). Cost: one parse per background call and per open job at Stop,
+  no new process, no file.
+
 Hook: stall_watch.py --hook
   PreToolUse hook. For a Bash call with run_in_background true, it returns updatedInput only
   (no permissionDecision), with this command, run by the harness shell:
@@ -669,6 +680,60 @@ def agent_export(call):
     return ""
 
 
+UNREADABLE_PAUSE = 600  # seconds given to a pause whose length the text does not give (`sleep $X`)
+PAUSE_UNIT = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
+PAUSE_OPERAND = re.compile(r"\d+[smhd]?")  # a whole number: a planned wait is one, `sleep 0.5; cmd` is a short gap
+
+
+def pause_seconds(command):
+    """Seconds of the planned wait in a background command: the one place the hook and `--stop` read it from.
+    The pause is the one `sleep` that has a command after it (not a pipe, which runs beside it), anywhere in
+    the command: the guard allows one such pause (guard_stream.waiter_verdict). It is silent by design, so the
+    quiet time starts after it. The length is the sum of the operands (`sleep 5m 30s` is 330 s); an operand
+    that expands (`sleep $X`) makes it UNREADABLE_PAUSE. Returns 0 for no pause:
+    - a `sleep` with nothing after it, in a loop (a poll, not a wait), or written as text (quotes, `#`
+      comments, heredoc bodies: the guard's tokenizer reads them as text);
+    - two or more `sleep` commands, which the guard refuses;
+    - a fractional length, a short gap that the base quiet time covers;
+    - a `sleep` that is not first and is under SLEEP_LIMIT, the guard's short-sleep bound: the base quiet
+      time covers it too. A first `sleep` of any length is a pause.
+    A command the tokenizer cannot read gives 0, the base quiet time."""
+    try:
+        from guard_core import basename, resolve_command, segment_tokens, split_segments, strip_heredoc_bodies
+        from guard_stream import LOOP_WORDS, SLEEP_LIMIT
+        ends = []
+        rows = [segment_tokens(seg) for seg in split_segments(strip_heredoc_bodies(command), ends)]
+    except Exception:  # a failed read leaves the base quiet time, the safe side
+        return 0
+    live = [(row, end) for row, end in zip(rows, ends) if row]
+    if any(re.match(r"[\w%-]*", row[0]).group().lower() in LOOP_WORDS for row, _ in live):
+        return 0
+    found = []  # (position in live, index of the command word) of each `sleep`
+    for at, (row, _) in enumerate(live):
+        index = resolve_command(row)
+        if index is not None and basename(row[index]).lower() == "sleep":
+            found.append((at, index))
+    if len(found) != 1:
+        return 0
+    at, index = found[0]
+    row, end = live[at]
+    if at == len(live) - 1 or end == "|":
+        return 0  # nothing runs after it, or the pipe's next command runs beside it
+    seconds, unreadable = 0.0, False
+    for word in row[index + 1:]:
+        if "$" in word or "`" in word:
+            unreadable = True
+        elif PAUSE_OPERAND.fullmatch(word):
+            seconds += float(word.rstrip("smhd")) * PAUSE_UNIT[word[-1] if word[-1] in "smhd" else ""]
+        elif re.fullmatch(r"\d+(\.\d+)?[smhd]?", word):
+            return 0
+        else:
+            break  # a redirect, `&` or a flag: the operands end here
+    if unreadable:
+        return UNREADABLE_PAUSE
+    return seconds if at == 0 or seconds >= SLEEP_LIMIT else 0
+
+
 def hook():
     # ponytail: posix only. The rewrite needs `&`, `$!` and `wait`, and Windows has no harness
     # shell that matches. Returning nothing leaves a Windows call unchanged, unmarked: a process
@@ -687,6 +752,9 @@ def hook():
     except Exception:
         return 0
     quiet = os.environ.get("STALL_WATCH_QUIET") or str(DEFAULT_QUIET)
+    pause = pause_seconds(original)
+    if pause:
+        quiet = "%g" % (pause + float(quiet))
     logs, unresolved = read_named_logs(original)  # a relative log in an unknown directory is not watched
     base = os.path.join(os.path.realpath(tempfile.gettempdir()), "stall-watch-%s" % uuid.uuid4().hex)
     log, beat = base + ".log", base + ".beat"  # the job makes the beat file, if a tool writes to it
@@ -756,7 +824,7 @@ def parse_time(text):
 
 def scan_jobs(transcript):
     """Return ({job id: (output path or None, until note or '', (named logs, cwd, unresolved logs),
-    start time or None, is an agent)}, previous Stop time or None) for every job with no terminal task notice and no TaskStop
+    start time or None, is an agent, seconds of its planned pause)}, previous Stop time or None) for every job with no terminal task notice and no TaskStop
     result. A job is a shell (toolUseResult backgroundTaskId) or a background agent (toolUseResult
     isAsync true, status async_launched, agentId; its path is the launch's outputFile). The
     note and the named logs come from the call that started the job, matched by tool_use_id. The
@@ -765,6 +833,7 @@ def scan_jobs(transcript):
     A Stop that a hook blocked is followed by a run with stop_hook_active true, where stop() prints
     nothing: the summary of that run lists nothing, so it is not a Stop."""
     jobs, done, stops, notes, job_call, logs, began, agents = {}, set(), set(), {}, {}, {}, {}, set()
+    pauses = {}
     prev_stop, blocked = None, False
     with open(transcript, "rb") as f:
         for line in f:
@@ -816,6 +885,7 @@ def scan_jobs(transcript):
                         if isinstance(cmd, str):
                             cwd = rec.get("cwd")
                             named, unresolved = read_named_logs(cmd)
+                            pauses[b.get("id")] = pause_seconds(cmd)
                             logs[b.get("id")] = (named, cwd if isinstance(cwd, str) else None, unresolved)
                 stops.update(b["id"] for b in content if isinstance(b, dict)
                              and b.get("type") == "tool_use" and b.get("name") == "TaskStop"
@@ -827,7 +897,7 @@ def scan_jobs(transcript):
                         if isinstance(b, dict) and b.get("type") == "tool_result" and isinstance(b.get("tool_use_id"), str) and b["tool_use_id"] in stops:
                             done.update(stopped_ids(b.get("content")))
     return ({k: (v, notes.get(job_call.get(k)) or "", logs.get(job_call.get(k)) or ((), None, ()), began.get(k),
-                k in agents)
+                k in agents, pauses.get(job_call.get(k), 0))
              for k, v in jobs.items() if k not in done}, prev_stop)
 
 
@@ -1112,7 +1182,7 @@ def stop():
         base = os.environ.get("STALL_WATCH_OUTPUT_BASE")
         rows, quiet_shells = [], {}  # quiet_shells: row index -> the output file of that shell job
         open_jobs, prev_stop = scan_jobs(call["transcript_path"])
-        for job, (path, note, (named, cwd, unresolved), began, agent) in open_jobs.items():
+        for job, (path, note, (named, cwd, unresolved), began, agent, pause) in open_jobs.items():
             until = " | until: " + note if note else ""
             real = path
             if path and base:
@@ -1147,8 +1217,9 @@ def stop():
             for mark in log_marks(watched, cwd).values():
                 if mark:  # a named log the job still writes keeps it off the list
                     idle = min(idle, now - mark[1])
-            if idle >= quiet:
-                if prev_stop is not None and now - idle + quiet <= prev_stop:
+            job_quiet = quiet + pause  # a planned pause is silent by design, as in the hook's watcher
+            if idle >= job_quiet:
+                if prev_stop is not None and now - idle + job_quiet <= prev_stop:
                     continue  # its stall crossed before the previous Stop, which listed it
                 miss = " (named log not watched, its directory is unknown: %s)" % ", ".join(unwatched) if unwatched else ""
                 quiet_shells[len(rows)] = real
