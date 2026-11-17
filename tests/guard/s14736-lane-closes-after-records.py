@@ -157,7 +157,7 @@ archive_refuse("a lane whose q_max default-branch read answers 403 names add_rep
 archive_refuse("a lane whose q_max compare of its branch answers 403 names add_repo for q_max, not claude-settings",
                role_path("archive-inc"), fake_gh_path(ARCHINC_COMPARE403),
                carries=(add_repo_pin(ARCH_REPO_QMAX),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_SETTINGS,) + OLD_READ_PIN)
-# The owner's ruling (page item 937 a, 14:20 CST Nov 17) drops its anonymous-read half. The guard reads a repo's open pull
+# The owner's ruling (page item 937 b, 14:20 CST Nov 17) drops its anonymous-read half. The guard reads a repo's open pull
 # requests with the session's token only, and a 403 or 404 on that read names add_repo for the repo, with access push, then
 # retry. No anonymous read runs. ANON_API stands in for the host an anonymous read reached (GITHUB_API_URL). It lists the
 # lane's own open pull request, so a guard that still read anonymously would refuse as open, and these cases would show it.
