@@ -13398,8 +13398,8 @@ class RedMainBrake(Env):
         B, runs, jobs = self.red_main_with_breaking_merge()
         sh(self.co, "git", "fetch", "-q", "origin")
         self.assertEqual(sh(self.co, "git", "diff", "--name-only", f"{B}^1", B), "lane-2650.txt", "scope: the breaking merge does not change lane-2650.txt alone")
-        self.fix_on_feat("Fix lane 2650", "lane-2650.txt")
-        rc, out, _ = self.go(runs, jobs, changed=[("lane-2650.txt", "modified", 1)])
+        head = self.fix_on_feat("Fix lane 2650", "lane-2650.txt")
+        rc, out, _ = self.go(runs, jobs, changed=[("lane-2650.txt", "modified", 1)], named_checks=[("checks", "pass", head)])
         self.assertEqual(rc, 0, "a fix that touches the breaking merge's path, with its own head green, is refused on a red main:\n" + out)
         self.merged(rc, out)
 
@@ -13408,16 +13408,38 @@ class RedMainBrake(Env):
         head = self.fix_on_feat("Fix lane 2650", "lane-2650.txt")
         for state in ("red: checks: fail", "pending: checks"):
             with self.subTest(head_state=state):
-                rc, out, before = self.go(runs, jobs, changed=[("lane-2650.txt", "modified", 1)], heads={head: state})
+                rc, out, before = self.go(runs, jobs, changed=[("lane-2650.txt", "modified", 1)], heads={head: state}, named_checks=[("checks", "pass", head)])
                 self.refused_by_red_main(rc, out, before)
 
-    def assert_touch_refused_on_red_main(self, name):
-        """A fix that changes `name` and no breaking path stays refused on a red main, with its own head green."""
+    def assert_path_fix_refused_when_its_red_check_is_not_pass(self, state):
+        """A fix to the breaking merge's path stays refused on a red main when the head's overall read is green and its red check `checks` reads `state`
+        on the head (a bucket), or when the head has no row for it (None; a passing row of another check stands beside it). The overall read is scripted
+        green on purpose: the case pins the per-check read on the path route, not the overall one (decision no-merge-onto-red-main)."""
         _, runs, jobs = self.red_main_with_breaking_merge()
-        self.fix_on_feat(f"Change {name}", name)
+        head = self.fix_on_feat("Fix lane 2650", "lane-2650.txt")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "diff", "--name-only", "origin/main", "origin/feat"), "lane-2650.txt", "scope: the fix does not change only the blamed path")
+        named = [("scope", "pass", head)] if state is None else [("checks", state, head)]
+        rc, out, before = self.go(runs, jobs, changed=[("lane-2650.txt", "modified", 1)], heads={head: "green"}, named_checks=named)
+        self.assertNotEqual(rc, 0, f"a fix to the breaking merge's path merged onto a red main while its own red check reads {state or 'no row'}:\n" + out)
+        self.refused_by_red_main(rc, out, before)
+
+    def test_a_fix_on_the_breaking_merges_path_stays_refused_on_a_red_main_when_its_red_check_is_pending(self):
+        self.assert_path_fix_refused_when_its_red_check_is_not_pass("pending")
+
+    def test_a_fix_on_the_breaking_merges_path_stays_refused_on_a_red_main_when_its_red_check_fails(self):
+        self.assert_path_fix_refused_when_its_red_check_is_not_pass("fail")
+
+    def test_a_fix_on_the_breaking_merges_path_stays_refused_on_a_red_main_when_its_red_check_has_no_row(self):
+        self.assert_path_fix_refused_when_its_red_check_is_not_pass(None)
+
+    def assert_touch_refused_on_red_main(self, name):
+        """A fix that changes `name` and no breaking path stays refused on a red main, with its own head green and its red check passing."""
+        _, runs, jobs = self.red_main_with_breaking_merge()
+        head = self.fix_on_feat(f"Change {name}", name)
         sh(self.co, "git", "fetch", "-q", "origin")
         self.assertEqual(sh(self.co, "git", "diff", "--name-only", "origin/main", "origin/feat"), name, f"scope: the fix does not change only {name}")
-        rc, out, before = self.go(runs, jobs, changed=[(name, "added", 1)])
+        rc, out, before = self.go(runs, jobs, changed=[(name, "added", 1)], named_checks=[("checks", "pass", head)])
         self.refused_by_red_main(rc, out, before)
 
     def test_a_change_to_an_unrelated_file_stays_refused_on_a_red_main(self):
@@ -13477,10 +13499,10 @@ class RedMainBrake(Env):
 
     def test_a_fix_by_a_blamed_path_whose_head_lacks_mains_red_tip_stays_refused_on_a_red_main(self):
         B, runs, jobs = self.red_main_with_breaking_merge()
-        self.fix_on_feat("Fix lane 2650", "lane-2650.txt", start=f"{B}^1")
+        head = self.fix_on_feat("Fix lane 2650", "lane-2650.txt", start=f"{B}^1")
         sh(self.co, "git", "fetch", "-q", "origin")
         self.assertNotIn(B, sh(self.co, "git", "rev-list", "origin/feat").split(), "scope: the head holds main's red tip")
-        rc, out, before = self.go(runs, jobs, changed=[("lane-2650.txt", "modified", 1)])
+        rc, out, before = self.go(runs, jobs, changed=[("lane-2650.txt", "modified", 1)], named_checks=[("checks", "pass", head)])
         self.refused_by_red_main(rc, out, before)
 
     def test_a_fix_to_the_failing_test_file_whose_head_lacks_mains_red_tip_stays_refused_on_a_red_main(self):
