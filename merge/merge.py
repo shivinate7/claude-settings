@@ -2936,9 +2936,23 @@ def parse_with(value, own):
         numbers[int(item)] = None
     return list(numbers)
 
+FETCH_LOCK_LOSS = "cannot lock ref"  # git's text when another fetch into the same checkout moved a ref between this fetch's read and its write
+FETCH_LOCK_PAUSE = 2  # seconds before the one retry of a fetch that lost the ref lock
+
+def git_fetch_retry_lock(root, *args):
+    """-> (code, output) of `git -C root fetch <args>`, run once more after FETCH_LOCK_PAUSE seconds when the first run failed with "cannot lock ref".
+    The one home of that retry: a fetch that two lints run at once into one checkout collides on a ref lock. Any other failure, and a second lock loss, return as they are.
+    Cost: at most one more `git fetch` start, and one pause, a run."""
+    c, out = git(root, "fetch", *args)
+    if c and FETCH_LOCK_LOSS in out:
+        time.sleep(FETCH_LOCK_PAUSE)
+        c, out = git(root, "fetch", *args)
+    return c, out
+
 def fetch_branch_heads(root):
-    """-> (code, output) of one `git fetch origin` of every branch head into origin/*: the one home of that fetch (cross_measure, merge_state)."""
-    return git(root, "fetch", "-q", "origin", "+refs/heads/*:refs/remotes/origin/*")
+    """-> (code, output) of one `git fetch origin` of every branch head into origin/*: the one home of that fetch (cross_measure, merge_state).
+    A ref-lock loss is retried once (git_fetch_retry_lock)."""
+    return git_fetch_retry_lock(root, "-q", "origin", "+refs/heads/*:refs/remotes/origin/*")
 
 def missing_commits(root, *shas):
     """-> the shas of `shas` that the checkout `root` does not hold as commits (`git rev-parse --verify`), in the order given."""
