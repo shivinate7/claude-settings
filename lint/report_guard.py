@@ -683,21 +683,36 @@ def bare_cite(text):
 # file extension or a known top dir, or a bare file name with a known extension, so "and/or" is no source.
 # The word is not part of a hyphen-joined name (a rule anchor such as answered-needs-source). A negator in the
 # same clause before it (a clause breaks at . ; : ! ? , or a dash) exempts it: not, n't, no, none, nothing,
-# nobody, never, cannot, yet to. A line that ends in `?` asks and claims nothing. The check targets a claim that the
-# owner or an item was answered, so four other uses of the word pass: a modal before it (a condition a plan proposes,
-# not a fact), the word "claim" before it (the line talks about a claim, it makes none), the guard's own printed name
-# ("the answered guard"), and a first-person subject
-# in its clause with an object after it (the session answered someone's questions, "I ... answered its four questions").
+# nobody, never, cannot, yet to. A line that ends in `?` asks and claims nothing. The check targets a claim whose
+# subject is the owner (he, she, they, you, the owner) or an item or a question being answered. Three uses pass:
+# "answered" as an adjective after a determiner and before a noun in a condition ("when an answered page item"),
+# or the guard's printed name ("the answered guard"); a first-person subject that answers someone else's questions (no owner word between the "I" and the
+# word, and no "for him"); and a modal clause or a "a claim that" clause with no owner, item or question in it.
 ANSWERED_RE = re.compile(r"(?<![\w-])answered(?![\w-])", re.I)
 ANSWERED_INBOX_RE = re.compile(r"\[question\]\s*(?:->|\u2192)\s*answered\b", re.I)
 ANSWERED_NEGATOR_RE = re.compile(r"\bnot\b|n['\u2019]t\b|\bno(?:ne|thing|body)?\b|\bnever\b|\bcannot\b|\byet\s+to\b", re.I)
 ANSWERED_MODAL_RE = re.compile(r"\b(?:should|would|could|might|may|will|must|shall)\b", re.I)
 ANSWERED_GUARD_NAME = "Answered guard"  # the name the refusal prints; a reply that names the guard claims nothing
-ANSWERED_GUARD_NAME_RE = re.compile(r"(?<![\w-])" + r"\s+".join(map(re.escape, ANSWERED_GUARD_NAME.split())) + r"\b", re.I)
-ANSWERED_CLAIM_NOUN_RE = re.compile(r"\bclaims?\b", re.I)  # "a claim that X were answered" talks about a claim, makes none
+_ANSWERED_DET = r"(?:the|this|that|these|those|an?|its|their|his|her|my|our|your|any|each|every|all|some|one|other)"
+# the printed name only at a line start or after a determiner or preposition, so "The owner answered guard questions" still claims
+ANSWERED_GUARD_NAME_RE = re.compile(
+    r"(?:^|(?<![\w-])(?:" + _ANSWERED_DET + r"|on|of|in|for|to|with|by|per|fix(?:ing)?)\s+)"
+    + r"\s+".join(map(re.escape, ANSWERED_GUARD_NAME.split())) + r"\b", re.I)
+# "answered" as an adjective in a rule or condition: a condition word in its clause, a determiner before it, a noun-like word after it
+ANSWERED_CONDITION_RE = re.compile(r"\b(?:when|whenever|if|unless|once|while|until|after|before|whichever|any\s+time|each\s+time|every\s+time)\b", re.I)
+ANSWERED_BEFORE_ADJ_RE = re.compile(r"(?<![\w-])" + _ANSWERED_DET + r"\s+$", re.I)
+ANSWERED_AFTER_FUNCTION_RE = re.compile(
+    r"\s+(?:in|on|at|by|for|to|with|from|of|as|and|or|but|so|it|that|the|a|an|its|their|his|her|my|our|your|them|him|"
+    r"too|also|again|already|yet|now|then|today|yesterday|once|after|before|when|while|if|because|since|until|is|was|"
+    r"were|are|be|been|has|have|had|here|there|not|all|both|this|these|those)\b", re.I)
+ANSWERED_NOUN_START_RE = re.compile(r"\s+[A-Za-z]")
+ANSWERED_CLAIM_NOUN_RE = re.compile(r"\b(?:an?|the|any|each|every|that|this|such)\s+claims?\b", re.I)  # "a claim that X were answered" talks about a claim
+# who answers: the owner, a pronoun for him, or the thing being answered
+ANSWERED_OWNER_SUBJECT_RE = re.compile(r"\b(?:owner|he|she|they|you|items?|questions?|asks?)\b", re.I)
 ANSWERED_FIRST_PERSON_RE = re.compile(r"\b(?:I|we)\b(?:['\u2019](?:ve|d|ll))?", re.I)
 ANSWERED_OBJECT_AFTER_RE = re.compile(
     r"\s+(?:(?:its|their|his|her|my|our|your|the|an?|all|both|some|any|each|every|it|them)\b|\d)", re.I)
+ANSWERED_FOR_OWNER_RE = re.compile(r"\bfor\s+(?:him|her|them|you|the\s+owner)\b", re.I)
 ANSWERED_CLAUSE_BREAK_RE = re.compile(r"[.;:!?,\u2014\u2013]|\s-{1,2}\s")
 ANSWERED_TOP_DIRS = {"docs", "hooks", "lint", "bin", "skills", "agents", "roadmap"}
 ANSWERED_FILE_RE = re.compile(
@@ -717,14 +732,25 @@ def _has_path(line):
 
 
 def _claims_answered(plain):
-    """True when `plain` holds the word as a claim: no negator or modal in its clause before it, and not a first-person act that takes an object."""
+    """True when `plain` holds the word as a claim that the owner, an item or a question was answered: it has no negator
+    in its clause, and it is no adjective, no modal or "a claim that" clause without an owner, item or question, and no
+    first-person act that takes an object and is not done for the owner."""
     for m in ANSWERED_RE.finditer(plain):
         before = plain[:m.start()]
+        after = plain[m.end():]
         clause = ANSWERED_CLAUSE_BREAK_RE.split(before)[-1]
-        if (ANSWERED_NEGATOR_RE.search(clause) or ANSWERED_MODAL_RE.search(clause)
-                or ANSWERED_CLAIM_NOUN_RE.search(clause)):
+        if ANSWERED_NEGATOR_RE.search(clause):
             continue
-        if ANSWERED_FIRST_PERSON_RE.search(clause) and ANSWERED_OBJECT_AFTER_RE.match(plain, m.end()):
+        if (ANSWERED_CONDITION_RE.search(clause) and ANSWERED_BEFORE_ADJ_RE.search(before)
+                and ANSWERED_NOUN_START_RE.match(after) and not ANSWERED_AFTER_FUNCTION_RE.match(after)):
+            continue
+        if ANSWERED_CLAIM_NOUN_RE.search(clause) or (
+                ANSWERED_MODAL_RE.search(clause) and not ANSWERED_OWNER_SUBJECT_RE.search(clause)):
+            continue
+        # first-person act on an object, with no owner word between the "I" and the word, and not done for the owner
+        rest = re.split(r"[.;:!?,\u2014\u2013]", after)[0]
+        if ANSWERED_OBJECT_AFTER_RE.match(after) and not ANSWERED_FOR_OWNER_RE.search(rest) and any(
+                not ANSWERED_OWNER_SUBJECT_RE.search(clause[f.end():]) for f in ANSWERED_FIRST_PERSON_RE.finditer(clause)):
             continue
         return True
     return False
