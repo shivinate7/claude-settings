@@ -165,6 +165,9 @@ CMK_MADE = os.path.join(CMK_CL, "made")        # a folder a mkdir in the same ca
 CMK_MADE_T = os.path.join(CMK_CLT, "made")     # the same folder, inside the triplet repo
 CMK_WT = os.path.join(CMKPUSH, "wt")           # the worktree that `worktree add ../wt` makes, from CMK_CL
 CMK_CLONE = os.path.join(CMK_CL, "cloned")     # the folder that a clone in the same call makes
+CMK_GONE_INNER = os.path.join(CMK_GONE, "inner")  # under the missing folder: the cd target of a mkdir that fails
+CMK_SUB_INNER = os.path.join(CMK_SUB, "inner")    # under an existing folder: the cd target of a mkdir that works
+CMK_INIT = os.path.join(CMK_CL, "inited")         # made by a git init in the same call: absent at check time
 
 
 def _cmk_commit(where, rel, text, msg):
@@ -261,7 +264,8 @@ def _build_conflict_markers_push():
     run(CMK_PAREN, "checkout", "-q", "topic")
     run(CMK_PAREN, "branch", "fixy", "fix(x)")             # the same commit, under a plain name
     os.makedirs(CMK_SUB)                                   # an empty folder: git does not track it
-    for gone in (CMK_GONE, os.path.join(CMK_CLT, "nope"), CMK_MADE, CMK_MADE_T, CMK_WT, CMK_CLONE):
+    for gone in (CMK_GONE, os.path.join(CMK_CLT, "nope"), CMK_MADE, CMK_MADE_T, CMK_WT, CMK_CLONE,
+                 CMK_GONE_INNER, CMK_SUB_INNER, CMK_INIT):
         if os.path.exists(gone):
             sys.exit("fixture setup failed in the conflict-markers fixtures: %r exists, so a cd to it does not fail"
                      % gone)
@@ -376,6 +380,13 @@ cmk_allow("a worktree add of ../wt, then ; cd into it and commit, in a cwd repo 
 cmk_allow("a clone into a folder, then ; cd into it and commit, in a cwd repo whose edit is clean",
           VCS + " clone " + slash(CMK_CL) + " " + slash(CMK_CLONE) + " ; cd " + slash(CMK_CLONE) + " ; "
           + VCS + " commit -m x", CMK_CL)
+# `git init` makes its folder, so the cd into it lands in a repository and the commit is judged there. The cwd repo
+# is clean, so the missing-cd rule is the only cause that could refuse this call.
+cmk_allow("a git init of a folder, then ; cd into it and commit, in a cwd repo whose edit is clean",
+          VCS + " init " + slash(CMK_INIT) + " ; cd " + slash(CMK_INIT) + " ; " + VCS + " commit -m x", CMK_CL)
+# The control: the init makes one folder and the cd goes to another, so that cd still fails and the commit is refused.
+cmk_refuse("a git init of one folder, then ; cd into another missing folder and commit, in a clean cwd repo",
+           VCS + " init " + slash(CMK_INIT) + " ; cd " + slash(CMK_GONE) + " ; " + VCS + " commit -m x", CMK_CL)
 cmk_allow("a cd into a missing folder, then || exit 1, then ; commit, in a cwd repo whose edit is clean",
           "cd " + slash(CMK_GONE) + " || exit 1 ; " + VCS + " commit -m x", CMK_CL)
 # A read-only git after a missing cd is no write, so it stays allowed.
@@ -385,6 +396,13 @@ cmk_allow("a cd into a missing folder, then ; status, in a cwd repo whose edit i
 cmk_refuse("a mkdir of a folder in the triplet repo, then ; cd into it, add -A and commit",
            "mkdir -p " + slash(CMK_MADE_T) + " ; cd " + slash(CMK_MADE_T) + " ; " + VCS + " add -A && "
            + VCS + " commit -m x", CMK_CLT)
+# A mkdir that fails leaves its folder missing. Without -p it fails when its parent is missing, so the cd into the
+# folder fails too, and the shell stays in the cwd repo. The cwd repo is clean, so the missing-cd rule is the cause.
+cmk_refuse("a mkdir without -p under a missing parent, then ; cd into it and commit, in a cwd repo whose edit is clean",
+           "mkdir " + slash(CMK_GONE_INNER) + " ; cd " + slash(CMK_GONE_INNER) + " ; " + VCS + " commit -m x", CMK_CL)
+# The control: the same call under a parent that exists, so the mkdir makes the folder and the cd works.
+cmk_allow("a mkdir without -p under an existing parent, then ; cd into it and commit, in a clean cwd repo",
+          "mkdir " + slash(CMK_SUB_INNER) + " ; cd " + slash(CMK_SUB_INNER) + " ; " + VCS + " commit -m x", CMK_CL)
 
 # A failed cd leaves the shell where it was, so the next command after `;`, a newline or `||` runs there. After
 # `&&` the chain stops. `--work-tree` names the folder an add reads: a missing one fails the add (exit 128), so
@@ -403,6 +421,13 @@ cmk_refuse("a cd into a missing folder, then || true, then ; add -A and commit, 
            "cd " + slash(CMK_GONE) + " || true ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
 cmk_refuse("a cd into a missing folder, then a newline, then add -A and commit, the triplet in the cwd repo",
            "cd " + slash(CMK_GONE) + "\n" + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+# Bash's `return` outside a function does not end the shell: it reports an error, and the next command runs. So after
+# `cd <missing> || return`, a git write after `;` runs in the cwd repo, as it does after a `;` alone.
+cmk_refuse("a cd into a missing folder, then || return, then ; add -A and commit, the triplet in the cwd repo",
+           "cd " + slash(CMK_GONE) + " || return ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+# The control: `exit` ends the shell, so the commit after it never runs. Only the word differs from the case above.
+cmk_allow("a cd into a missing folder, then || exit 1, then ; add -A and commit, the triplet in the cwd repo",
+          "cd " + slash(CMK_GONE) + " || exit 1 ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
 
 # `cd -` goes back to the folder before the last cd that worked. A failed cd leaves that folder alone, so the
 # commit lands in the triplet repo. The NOGIT form has no triplet to refuse, so this case starts in CMK_CLT.
