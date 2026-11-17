@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner pick A for R42 part 2 (per-lane merge). Rule M3, per lane: the head must merge cleanly with the base tip. Its own run must be green, or still pending under a lane-lint PASS that names its live head. The head need not hold the tip.
+Owner pick A for R42 part 2 (per-lane merge). Rule M3, per lane: the head must merge cleanly with the base tip. Its own run must be green, or still pending under a lane-lint PASS that names its live head. The head need not hold the tip. At merge time the tool does one merge of main into the head and keeps the green run (decision `lane-main-in-at-merge-time`).
 
 Owner ruling `own-merge-on-lint-pass` (owner, 2026-11-15 18:21 CST, typed "B for sure") added the pending case. Main's run after the merge is the check, and a red main reverts the blamed commit.
 
