@@ -1,0 +1,1504 @@
+{
+ "note": "Copy of page answers deleted at 13:2x CST Nov 17 by triage 11 (kept answers of closed items, named by stale_pages.py kept-answer lines). Source: waiting page RddcgXbB6SvTrFZHPmsvFx, collection answers.",
+ "answers": {
+  "act-mac-c107-card-probe": {
+   "at": "2026-11-14T01:42:37.164Z",
+   "done": true,
+   "item": "act-mac-c107-card-probe",
+   "n": 751,
+   "note": "weird none of these worked yet just typing saying some sessions does work? but anywyas fhe report of ur probe is : Probe for step c107 (an orchestrator starts its lanes with no click). Run on this Mac, in the desktop app Code tab, in Bypass permissions mode. My typing this message is my ask in words for the test sessions below.\n\nFacts so far: the docs name no setting for `mcp__ccd_session__start_session`. Candidate causes: (a) the tool is flagged `_meta[\"anthropic/requiresUserInteraction\"]` (docs: prompts on every call, even in Bypass, and allow rules and PreToolUse \"allow\" do not skip it); (b) the open \"desktop actions\" clause of Bypass; (c) the `kind` value.\n\nDo these in order. Stop at the first step where no card shows. Before each start, say \"probe N\" and after it say \"card: yes/no\" from what I tell you or what the call returned. Ask me one line only: \"Did a card show for probe N? y/n\".\n\n0. Record: `claude --version` and the app version. Find the tool's entry (ToolSearch \"select:mcp__ccd_session__start_session\", or list the app MCP tools) and say whether its description or metadata shows `requiresUserInteraction`.\n1. Probe 1, as is: start one session, kind `user_asked`, prompt \"Reply ok and stop.\" Ask me about the card.\n2. Probe 2, allow rule: add `\"mcp__ccd_session__start_session\"` to `permissions.allow` in `~/.claude/settings.local.json` (back up the file first). Start another session the same way. Ask me.\n3. Probe 3, hook: add a PreToolUse hook in `~/.claude/settings.local.json` with matcher `mcp__ccd_session__start_session` that prints `{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\"}}`. Start another. Ask me.\n4. Probe 4, a start call carrying `source_branch` and `branch_name`: check the new session is on that branch (the card has dropped it before).\n5. Restore `~/.claude/settings.local.json` from the backup. Never edit `~/.claude/settings.json`, `CLAUDE.md` or the claude-settings repo.\n\nReport (12 lines max): per probe, card yes/no and branch kept yes/no; the verdict, one of \"setting X removes the card\" (give the exact lines) or \"product limit: the tool always asks\" (cite step 0). If a setting works, the fix goes in the repo's settings.json through a draft PR by a lane, not by you. Send the report to the Coordinator session_013NEJL1gw6EdrSyvHkTUEx6.\nIf it is a product limit, the workaround stays as ruled: an orchestrator starts lanes as background Agent spawns with `isolation: 'worktree'` and uses start_session only on my words."
+  },
+  "act-type-2bk5-draft-pr-yes": {
+   "at": "2026-11-12T21:22:18.345Z",
+   "done": true,
+   "item": "act-type-2bk5-draft-pr-yes",
+   "n": 648,
+   "note": "i think ia lrdy did this? if not "
+  },
+  "act-type-redrun-flags-yes": {
+   "at": "2026-11-12T20:13:05.793Z",
+   "done": true,
+   "item": "act-type-redrun-flags-yes",
+   "n": 620,
+   "note": ""
+  },
+  "agent-push-main-deny": {
+   "at": "2026-11-13T06:50:40.341Z",
+   "choice": "a",
+   "item": "agent-push-main-deny",
+   "n": 672,
+   "note": ""
+  },
+  "answered-leaves-page": {
+   "at": "2026-11-10T15:06:48.914Z",
+   "choice": "none",
+   "item": "answered-leaves-page",
+   "n": 477,
+   "note": "relayed grants can just stay running "
+  },
+  "answers-guard-allows-delete": {
+   "at": "2026-11-12T21:46:25.248Z",
+   "choice": "a",
+   "item": "answers-guard-allows-delete",
+   "n": 635,
+   "note": ""
+  },
+  "answers-guard-rebuild": {
+   "at": "2026-11-13T16:57:51.672Z",
+   "choice": "none",
+   "item": "answers-guard-rebuild",
+   "label": "none of these",
+   "n": 636,
+   "note": "is this for scenarios where sometimes a decision gets labeled owner's pick when it was really a claude sesh? \"The audit found that two decision records credit you with my picks: the closed-front-window rule and the Clear Board refill.\" is an example of recent work from a repo that pulls in claude-settings "
+  },
+  "archive-guard-refused-70": {
+   "at": "2026-11-10T16:55:47.718Z",
+   "choice": "none",
+   "item": "archive-guard-refused-70",
+   "n": 486,
+   "note": "already addressing this "
+  },
+  "ask-phase-out-rule": {
+   "at": "2026-11-10T15:14:51.829Z",
+   "choice": "a",
+   "item": "ask-phase-out-rule",
+   "n": 480,
+   "note": "basically it should be read receipts in a sense like after you've replied and i see where it's going next, i can just mark read (or fold idc about the vocabulary) and it then goes away basically i've acknowledged it"
+  },
+  "automode-three-more": {
+   "at": "2026-11-09T00:39:13.913Z",
+   "choice": "a",
+   "item": "automode-three-more",
+   "n": 450,
+   "note": ""
+  },
+  "banchi-stale-drafts": {
+   "at": "2026-11-08T12:18:16.918Z",
+   "choice": "a",
+   "item": "banchi-stale-drafts",
+   "n": 385,
+   "note": ""
+  },
+  "batch-ci-merge-matcher": {
+   "at": "2026-11-09T19:09:33.088Z",
+   "choice": "a",
+   "item": "batch-ci-merge-matcher",
+   "n": 459,
+   "note": ""
+  },
+  "batch-flags-allow": {
+   "at": "2026-11-09T19:09:33.088Z",
+   "choice": "a",
+   "item": "batch-flags-allow",
+   "n": 458,
+   "note": ""
+  },
+  "batch-label-allow-text": {
+   "at": "2026-11-13T16:57:51.672Z",
+   "choice": "b",
+   "item": "batch-label-allow-text",
+   "label": "B: Widen the text to name the label",
+   "n": 618,
+   "note": ""
+  },
+  "bg-tail-lane-hooks": {
+   "at": "2026-11-10T20:04:02.088Z",
+   "choice": "a",
+   "item": "bg-tail-lane-hooks",
+   "n": 496,
+   "note": ""
+  },
+  "brief-rule-push-line": {
+   "at": "2026-11-13T06:50:40.341Z",
+   "choice": "a",
+   "item": "brief-rule-push-line",
+   "n": 673,
+   "note": ""
+  },
+  "builder-mutants": {
+   "at": "2026-11-08T23:19:23.230Z",
+   "choice": "a",
+   "item": "builder-mutants",
+   "n": 447,
+   "note": ""
+  },
+  "builder-probe-round-4": {
+   "at": "2026-11-08T12:08:10.433Z",
+   "choice": "a",
+   "item": "builder-probe-round-4",
+   "n": 396,
+   "note": ""
+  },
+  "builder-test-edit-scope": {
+   "at": "2026-11-08T18:16:52.345Z",
+   "choice": "a",
+   "item": "builder-test-edit-scope",
+   "n": 437,
+   "note": ""
+  },
+  "c108-no-repo-notice": {
+   "at": "2026-11-13T17:45:25.533Z",
+   "choice": "a",
+   "item": "c108-no-repo-notice",
+   "label": "A: Say it once per session",
+   "n": 8,
+   "note": "accepted pick"
+  },
+  "c157-agent-lock-builds": {
+   "at": "2026-11-13T17:45:25.533Z",
+   "choice": "a",
+   "item": "c157-agent-lock-builds",
+   "label": "A: As built: an agent lock does not keep them",
+   "n": 35,
+   "note": "accepted pick"
+  },
+  "c197-silent-tests": {
+   "at": "2026-11-13T17:45:25.533Z",
+   "choice": "a",
+   "item": "c197-silent-tests",
+   "label": "A: Close the six notes as a mistake in the report",
+   "n": 48,
+   "note": "accepted pick"
+  },
+  "cap-alarm-cleared-run": {
+   "at": "2026-11-12T17:59:44.968Z",
+   "choice": "a",
+   "item": "cap-alarm-cleared-run",
+   "n": 549,
+   "note": ""
+  },
+  "cap-string-one-line-fix": {
+   "at": "2026-11-10T15:06:48.914Z",
+   "choice": "a",
+   "item": "cap-string-one-line-fix",
+   "n": 473,
+   "note": ""
+  },
+  "ci-cancel-example-drop": {
+   "at": "2026-11-08T16:05:45.527Z",
+   "choice": "a",
+   "item": "ci-cancel-example-drop",
+   "n": 419,
+   "note": ""
+  },
+  "ci-cancel-go-in-lane": {
+   "at": "2026-11-08T16:19:52.426Z",
+   "done": true,
+   "item": "ci-cancel-go-in-lane",
+   "n": 427,
+   "note": ""
+  },
+  "ci-step-builder-spawn": {
+   "at": "2026-11-08T16:07:22.923Z",
+   "done": true,
+   "item": "ci-step-builder-spawn",
+   "n": 417,
+   "note": ""
+  },
+  "compact-resume-matcher": {
+   "at": "2026-11-10T01:22:41.162Z",
+   "choice": "a",
+   "item": "compact-resume-matcher",
+   "n": 466,
+   "note": ""
+  },
+  "coordinator-refuter-spawn": {
+   "at": "2026-11-09T19:09:33.088Z",
+   "choice": "a",
+   "item": "coordinator-refuter-spawn",
+   "n": 460,
+   "note": ""
+  },
+  "cross-machine-message-test": {
+   "at": "2026-11-06T22:50:29.891Z",
+   "item": "cross-machine-message-test",
+   "n": 273,
+   "note": "this wont work with diff accounts, but in general remote control works bc my phone and the laptops on any account work all the time"
+  },
+  "cs-1008-feedback-audit": {
+   "at": "2026-11-07T18:32:37.208Z",
+   "choice": "b",
+   "item": "cs-1008-feedback-audit",
+   "n": 334,
+   "note": ""
+  },
+  "cs-1106-one-home-plan": {
+   "at": "2026-11-07T18:31:03.813Z",
+   "choice": "none",
+   "item": "cs-1106-one-home-plan",
+   "n": 333,
+   "note": "bring me all 6 questions here for me to answer each idnvidiaully with you giving me the yes / no analysis per question"
+  },
+  "cs-1247-cloud-acts-grant": {
+   "at": "2026-11-07T18:32:37.208Z",
+   "choice": "none",
+   "item": "cs-1247-cloud-acts-grant",
+   "n": 335,
+   "note": "idk what 219a means i need to see what you're talking about and i need you to tell me just what's the prompt to add edits to claude.md to the allow rule in auto mode so that way you can do it "
+  },
+  "debt-notes-new-only": {
+   "at": "2026-11-16T01:13:07.051Z",
+   "choice": "a",
+   "item": "debt-notes-new-only",
+   "label": "A: Freeze the old file; new notes only get their own files",
+   "n": 904,
+   "note": "",
+   "optionId": "freeze-old-new-only"
+  },
+  "degen-179-ruling-words": {
+   "at": "2026-11-12T18:00:53.111Z",
+   "item": "degen-179-ruling-words",
+   "n": 469,
+   "note": "is this still neeeded"
+  },
+  "degen-428-native-run": {
+   "at": "2026-11-06T03:31:31.863Z",
+   "choice": "none",
+   "item": "degen-428-native-run",
+   "n": 264,
+   "note": "i can merge it on my mac"
+  },
+  "degen-509-base-red-lift": {
+   "at": "2026-11-08T12:09:31.232Z",
+   "choice": "none",
+   "item": "degen-509-base-red-lift",
+   "n": 404,
+   "note": "i can have a local degen coorixnator merge it— judt 509?"
+  },
+  "degen-509-lift-in-runner9": {
+   "at": "2026-11-08T16:07:22.923Z",
+   "done": true,
+   "item": "degen-509-lift-in-runner9",
+   "n": 415,
+   "note": ""
+  },
+  "degen-528-base-red-lift": {
+   "at": "2026-11-08T17:00:18.125Z",
+   "choice": "none",
+   "item": "degen-528-base-red-lift",
+   "n": 430,
+   "note": "i can have the degen orchestrator merge 528 (And other degen PRs if i'm told what they are)  if easier?"
+  },
+  "degen-ui-step-own-job": {
+   "at": "2026-11-05T13:49:11.413Z",
+   "choice": "a",
+   "item": "degen-ui-step-own-job",
+   "n": 241,
+   "note": ""
+  },
+  "drain-1616-slice": {
+   "at": "2026-11-13T17:45:25.533Z",
+   "choice": "a",
+   "item": "drain-1616-slice",
+   "label": "A: Wanted; carry the slice in a new lane (triage's pick)",
+   "n": 717,
+   "note": "",
+   "optionId": "keep"
+  },
+  "drain-2156-any-filter": {
+   "at": "2026-11-15T17:57:48.288Z",
+   "choice": "b",
+   "item": "drain-2156-any-filter",
+   "label": "B: Keep the widening",
+   "n": 716,
+   "note": "",
+   "optionId": "keep"
+  },
+  "drops-lines-body-everywhere": {
+   "at": "2026-11-08T12:11:17.457Z",
+   "choice": "a",
+   "item": "drops-lines-body-everywhere",
+   "n": 411,
+   "note": ""
+  },
+  "env-guard-reads-code": {
+   "at": "2026-11-08T12:08:10.433Z",
+   "choice": "a",
+   "item": "env-guard-reads-code",
+   "n": 399,
+   "note": ""
+  },
+  "env-heredoc-held": {
+   "at": "2026-11-09T00:39:13.913Z",
+   "choice": "a",
+   "item": "env-heredoc-held",
+   "n": 449,
+   "note": ""
+  },
+  "env-heredoc-net-negative": {
+   "at": "2026-11-09T19:09:33.088Z",
+   "choice": "a",
+   "item": "env-heredoc-net-negative",
+   "n": 455,
+   "note": "record the gap"
+  },
+  "export-scan-ip-closer": {
+   "at": "2026-11-09T20:58:34.119Z",
+   "choice": "a",
+   "item": "export-scan-ip-closer",
+   "n": 465,
+   "note": ""
+  },
+  "export-scan-net-negative": {
+   "at": "2026-11-09T19:09:33.088Z",
+   "choice": "a",
+   "item": "export-scan-net-negative",
+   "n": 456,
+   "note": ""
+  },
+  "express-quote-reader": {
+   "at": "2026-11-12T20:13:05.793Z",
+   "choice": "b",
+   "item": "express-quote-reader",
+   "n": 624,
+   "note": "for now at least"
+  },
+  "feedback-close-reads-content": {
+   "at": "2026-11-13T06:50:40.341Z",
+   "choice": "a",
+   "item": "feedback-close-reads-content",
+   "n": 653,
+   "note": "ask retrospective im not confident in a"
+  },
+  "findings-fix-check": {
+   "at": "2026-11-08T12:08:10.433Z",
+   "choice": "a",
+   "item": "findings-fix-check",
+   "n": 394,
+   "note": ""
+  },
+  "fix-check-chain-cap": {
+   "at": "2026-11-08T16:19:30.041Z",
+   "choice": "a",
+   "item": "fix-check-chain-cap",
+   "n": 426,
+   "note": ""
+  },
+  "fix-check-fail-carries": {
+   "at": "2026-11-12T20:13:05.793Z",
+   "choice": "b",
+   "item": "fix-check-fail-carries",
+   "n": 633,
+   "note": "is it even a good idea to give purely wording edits the full round checks"
+  },
+  "fix-check-model-all-prs": {
+   "at": "2026-11-08T21:04:02.088Z",
+   "choice": "a",
+   "item": "fix-check-model-all-prs",
+   "n": 444,
+   "note": ""
+  },
+  "fix-check-width-after-merge": {
+   "at": "2026-11-08T12:08:10.433Z",
+   "choice": "a",
+   "item": "fix-check-width-after-merge",
+   "n": 401,
+   "note": ""
+  },
+  "fix-checks-chain": {
+   "at": "2026-11-08T16:05:45.527Z",
+   "choice": "b",
+   "item": "fix-checks-chain",
+   "n": 418,
+   "note": "we can maybe allow a limit to chaining but allow it?"
+  },
+  "force-push-2207": {
+   "at": "2026-11-08T19:52:22.006Z",
+   "choice": "a",
+   "item": "force-push-2207",
+   "n": 443,
+   "note": ""
+  },
+  "fresh-review-after-fail": {
+   "at": "2026-11-10T16:50:53.043Z",
+   "choice": "none",
+   "item": "fresh-review-after-fail",
+   "n": 485,
+   "note": "shouldnt they all read done after they are fixed?"
+  },
+  "frozen-cp-source-record": {
+   "at": "2026-11-08T12:13:18.499Z",
+   "choice": "a",
+   "item": "frozen-cp-source-record",
+   "n": 408,
+   "note": ""
+  },
+  "git-after-cd-main-test-conflict": {
+   "at": "2026-11-16T19:28:29.306Z",
+   "choice": "none",
+   "item": "git-after-cd-main-test-conflict",
+   "label": "none of these",
+   "n": 912,
+   "note": "message consultant unbiased and ask it to judge off of my conversation with it on which outcome i'd want"
+  },
+  "git-c-per-segment": {
+   "at": "2026-11-12T20:13:05.793Z",
+   "choice": "a",
+   "item": "git-c-per-segment",
+   "n": 621,
+   "note": ""
+  },
+  "git-connector-add": {
+   "at": "2026-11-12T18:00:53.111Z",
+   "item": "git-connector-add",
+   "n": 558,
+   "note": "hasn't this long since been added? also github connector is git? is it? and is that the best route? i thougth we noted the github connector is just a little buggy?"
+  },
+  "glued-amp-opus-builder": {
+   "at": "2026-11-16T00:13:47.625Z",
+   "choice": "b",
+   "item": "glued-amp-opus-builder",
+   "label": "B: Keep Sonnet",
+   "n": 898,
+   "note": "",
+   "optionId": "keep-sonnet"
+  },
+  "grant-branch-delete-scope": {
+   "at": "2026-11-12T20:13:05.793Z",
+   "choice": "a",
+   "item": "grant-branch-delete-scope",
+   "n": 632,
+   "note": "any shivinate7, ssemwal-cdc, any repo that i'm github logged in to really"
+  },
+  "grant-catalogue-first-act": {
+   "at": "2026-11-10T15:06:48.914Z",
+   "choice": "none",
+   "item": "grant-catalogue-first-act",
+   "n": 479,
+   "note": "why does the order matter? "
+  },
+  "grant-plan-signoff": {
+   "at": "2026-11-04T00:21:00.756Z",
+   "choice": "a",
+   "item": "grant-plan-signoff",
+   "n": 152,
+   "note": ""
+  },
+  "grant-probe-headless-arm": {
+   "at": "2026-11-08T17:56:20.582Z",
+   "choice": "a",
+   "item": "grant-probe-headless-arm",
+   "n": 435,
+   "note": ""
+  },
+  "granted-round-fail-holds": {
+   "at": "2026-11-12T21:46:25.248Z",
+   "choice": "a",
+   "item": "granted-round-fail-holds",
+   "n": 625,
+   "note": "as long as its flagged to me and doesn't go to sleep idling quietlky"
+  },
+  "guard-fix-pass-round3": {
+   "at": "2026-11-08T12:08:10.433Z",
+   "choice": "a",
+   "item": "guard-fix-pass-round3",
+   "n": 402,
+   "note": ""
+  },
+  "guard-line-after-dash": {
+   "at": "2026-11-13T16:57:51.672Z",
+   "choice": "none",
+   "item": "guard-line-after-dash",
+   "label": "none of these",
+   "n": 629,
+   "note": "ask an independent blidn agent its opionon"
+  },
+  "guard-line-null-values": {
+   "at": "2026-11-12T21:46:25.248Z",
+   "choice": "a",
+   "item": "guard-line-null-values",
+   "n": 628,
+   "note": ""
+  },
+  "guard-round3-after-pass": {
+   "at": "2026-11-10T05:39:07.585Z",
+   "choice": "a",
+   "item": "guard-round3-after-pass",
+   "n": 471,
+   "note": "things like the net value test were onlymsupposed to be ambiguous scenarios where u cant finish/solve by the end of the rounds.."
+  },
+  "guard-rules-global-reask-2": {
+   "at": "2026-11-13T17:13:42.311Z",
+   "choice": "none",
+   "item": "guard-rules-global-reask-2",
+   "label": "none of these",
+   "n": 703,
+   "note": "i thought i literally sent questions about this one already ?"
+  },
+  "guard-rules-global-reask": {
+   "at": "2026-11-13T17:08:33.221Z",
+   "choice": "none",
+   "item": "guard-rules-global-reask",
+   "label": "none of these",
+   "n": 701,
+   "note": "why isn't everything from claude-settings installed atop each and all of my repos? i don't think there's much stuff unqiue to claude-settings isn't practically everything made here fro all my repos or some isn't?"
+  },
+  "guard-rules-stay-global": {
+   "at": "2026-11-13T17:03:26.838Z",
+   "choice": "none",
+   "item": "guard-rules-stay-global",
+   "label": "none of these",
+   "n": 606,
+   "note": "i thought hooks apply to all repos though and are installedi n all of them, so how would they not be on all the repos that call claude-settings, or am i misunderstanding? "
+  },
+  "held-1898-push-target": {
+   "at": "2026-11-08T12:11:17.457Z",
+   "choice": "a",
+   "item": "held-1898-push-target",
+   "n": 413,
+   "note": ""
+  },
+  "held-cull-family-11": {
+   "at": "2026-11-12T20:13:05.793Z",
+   "choice": "b",
+   "item": "held-cull-family-11",
+   "n": 630,
+   "note": ""
+  },
+  "hold-which-fixes-start": {
+   "at": "2026-11-08T12:11:17.457Z",
+   "choice": "a",
+   "item": "hold-which-fixes-start",
+   "n": 410,
+   "note": ""
+  },
+  "home-684-local-builds-done": {
+   "at": "2026-11-16T19:34:21.216Z",
+   "choice": "none",
+   "item": "home-684-local-builds-done",
+   "label": "none of these",
+   "n": 910,
+   "note": "what that wasn't my wish my wish was just hey i'm moving local for now, there was never a transition to local, it's always both\n"
+  },
+  "home-artifact-input-shapes": {
+   "at": "2026-11-08T18:28:51.418Z",
+   "done": true,
+   "item": "home-artifact-input-shapes",
+   "n": 440,
+   "note": "These are taken from real calls in Home transcripts, with values blanked. Each path keeps only its first segment, and <id> stands for the rest.\n\ndb_write. ops is a list. One entry holds op, path and data, plus ifVersion when the document already exists. There is no separate collection key: the collection is the first segment of path. Paths seen: items/<id>, receipts/<id>, groups/<id>, meta/<id>.\n{\"slug\": \"\", \"ops\": [{\"op\": \"set\", \"path\": \"receipts/<id>\", \"data\": {\"read\": \"\"}}]}\n{\"slug\": \"\", \"ops\": [{\"op\": \"update\", \"path\": \"receipts/<id>\", \"ifVersion\": 1, \"data\": {\"filed\": \"\"}}]}\n\nThe op values are set, merge, update and delete. data can hold {\"__delete__\": true} to remove a field.\n\ndb_str_replace. path is always items/<id> in the calls found. field names one top-level field, such as context.\n{\"slug\": \"\", \"path\": \"items/<id>\", \"field\": \"context\", \"old_str\": \"\", \"new_str\": \"\", \"ifVersion\": 2}\ndb_get. path is <collection>/<id>. Forms seen: answers/<id>, items/<id>, receipts/<id>, meta/<id> (for example meta/page).\n{\"slug\": \"\", \"path\": \"answers/<id>\"}\npublish_files. files is a list, not a map. Each entry is {as, path}; the schema also allows uri, which the client fills in.\n{\"files\": [{\"as\": \"index.html\", \"path\": \"<abs path>\"}], \"title\": \"\", \"icon\": \"\"}\n{\"slug\": \"\", \"base_version\": \"\", \"label\": \"\", \"files\": [{\"as\": \"\", \"path\": \"<abs path>\"}]}\n\nTwo other tools take a collection rather than a path: db_query (collection, where, limit, orderBy) and db_list (collection, limit). collection is a bare name such as items."
+  },
+  "home-artifact-tool-names": {
+   "at": "2026-11-08T18:22:25.565Z",
+   "done": true,
+   "item": "home-artifact-tool-names",
+   "n": 434,
+   "note": "31 {\"type\": \"tool_use\", \"name\": \"mcp__claude-artifacts__db_get\", \"input_keys\": [\"path\", \"slug\"]}\n24 {\"type\": \"tool_use\", \"name\": \"mcp__claude-artifacts__db_list\", \"input_keys\": [\"collection\", \"limit\", \"slug\"]}\n1 {\"type\": \"tool_use\", \"name\": \"mcp__claude-artifacts__db_query\", \"input_keys\": [\"collection\", \"limit\", \"orderBy\", \"slug\", \"where\"]}\n1 {\"type\": \"tool_use\", \"name\": \"mcp__claude-artifacts__db_query\", \"input_keys\": [\"collection\", \"limit\", \"slug\", \"where\"]}\n1 {\"type\": \"tool_use\", \"name\": \"mcp__claude-artifacts__db_query\", \"input_keys\": [\"collection\", \"slug\", \"where\"]}\n2 {\"type\": \"tool_use\", \"name\": \"mcp__claude-artifacts__db_str_replace\", \"input_keys\": [\"field\", \"ifVersion\", \"new_str\", \"old_str\", \"path\", \"slug\"]}\n1 {\"type\": \"tool_use\", \"name\": \"mcp__claude-artifacts__db_usage\", \"input_keys\": [\"slug\"]}\n30 {\"type\": \"tool_use\", \"name\": \"mcp__claude-artifacts__db_write\", \"input_keys\": [\"ops\", \"slug\"]}\n1 {\"type\": \"tool_use\", \"name\": \"mcp__claude-artifacts__declare_capabilities\", \"input_keys\": [\"base_version\", \"capabilities\", \"slug\"]}\n2 {\"type\": \"tool_use\", \"name\": \"mcp__claude-artifacts__describe_capabilities\", \"input_keys\": []}\n4 {\"type\": \"tool_use\", \"name\": \"mcp__claude-artifacts__get_artifact\", \"input_keys\": [\"slug\"]}\n2 {\"type\": \"tool_use\", \"name\": \"mcp__claude-artifacts__guide\", \"input_keys\": [\"topic\"]}\n1 {\"type\": \"tool_use\", \"name\": \"mcp__claude-artifacts__list_artifacts\", \"input_keys\": [\"limit\", \"query\"]}\n7 {\"type\": \"tool_use\", \"name\": \"mcp__claude-artifacts__publish_files\", \"input_keys\": [\"base_version\", \"files\", \"label\", \"slug\"]}\n2 {\"type\": \"tool_use\", \"name\": \"mcp__claude-artifacts__publish_files\", \"input_keys\": [\"files\", \"icon\", \"title\"]}\n1 {\"type\": \"tool_use\", \"name\": \"mcp__claude-artifacts__read_artifact\", \"input_keys\": [\"limit\", \"slug\"]}\n5 {\"type\": \"tool_use\", \"name\": \"mcp__claude-artifacts__read_comments\", \"input_keys\": [\"slug\"]}\n2 {\"type\": \"tool_use\", \"name\": \"mcp__claude-artifacts__watch\", \"input_keys\": [\"slug\"]}"
+  },
+  "lane-hold-end-trigger": {
+   "at": "2026-11-08T17:00:18.125Z",
+   "choice": "none",
+   "item": "lane-hold-end-trigger",
+   "n": 424,
+   "note": "as soon as we fix the underlying issue that caused piling up it immediately can be lifted "
+  },
+  "lane-lint-allow-reason": {
+   "at": "2026-11-09T19:09:33.088Z",
+   "choice": "a",
+   "item": "lane-lint-allow-reason",
+   "n": 457,
+   "note": ""
+  },
+  "lane-model-sonnet": {
+   "at": "2026-11-08T18:21:05.563Z",
+   "choice": "none",
+   "item": "lane-model-sonnet",
+   "n": 439,
+   "note": "set to sonnet temporarily, have that reach main, and then leave a debt to check in on this again later "
+  },
+  "lane-send-allow-mac": {
+   "at": "2026-11-06T22:47:26.176Z",
+   "item": "lane-send-allow-mac",
+   "n": 307,
+   "note": "Owner item 301 pick a (2026-11-06 15:24 CST): in settings.json, add \"mcp__claude-code-remote__send_message\" to permissions.allow, next to the other mcp__claude-code-remote__ entries. Change nothing else. Use EnterWorktree with name lane-send-allow, commit, push, and open a draft PR titled \"settings: allow send_message (item 301 a)\". Send the PR number and head to the claude-settings batch runner. Report the PR link.\n\nDraft PR is open. Now sending the number and head to the batch runner.\n\nDone\n\nBUILT: settings.json now allows mcp__claude-code-remote__send_message, placed after the archive_session entry. This is the only change. Draft PR: settings: allow send_message (item 301 a), head ce0e794c73d172718e4aebe54d9add930ef476fd, branch worktree-lane-send-allow.\n\nInput Needed\n\nI did not send the PR number and head to the batch runner. Neither the peer list nor the sessions list has a session by that name. The only other session in this repo is “Own Branch Lease Push settings.json”, and I did not guess that it is the runner.\n\nNext\n\nUnstarted: none.\n\nCorrection\n\nDrop the Input Needed line. Decision pr-review-record (each PR carries a review record, and the batch runner finds reviewed, green PRs itself) says nothing is sent to a batch runner. Nothing was sent, and nothing is needed.\nNext, Unstarted: none.\nDraft PR 1364 is open with the one-line allow-list change in settings.json. I did not send it to the batch runner: no session by that name exists on this computer.\nWhich session should get the PR number and head?\nI'll forward it\n\nI'll forward it\n\nNoted. Nothing more to do here.\n\nPR: shivinate7/claude-settings#1364 · settings: allow send_message…"
+  },
+  "late-handoff-checkpoint": {
+   "at": "2026-11-13T06:50:40.341Z",
+   "choice": "none",
+   "item": "late-handoff-checkpoint",
+   "n": 676,
+   "note": "is our setup script bad? i thought nudges to rewrite handoff trigger multiple times before compaction snd then theres snother trigger after compsction?"
+  },
+  "lock-break-ruling-rewrite": {
+   "at": "2026-11-08T16:05:45.527Z",
+   "choice": "a",
+   "item": "lock-break-ruling-rewrite",
+   "n": 421,
+   "note": ""
+  },
+  "mac-skip-gap-per-lane-merge": {
+   "at": "2026-11-16T19:34:50.815Z",
+   "choice": "none",
+   "item": "mac-skip-gap-per-lane-merge",
+   "label": "none of these",
+   "n": 909,
+   "note": "mac runs are off now, i think a lot of this artifact may be stale you should chat with consultant to look at this artifact and clear up any staleness for you"
+  },
+  "mailaudit-old-page-copy": {
+   "at": "2026-11-07T01:01:36.567Z",
+   "choice": "a",
+   "item": "mailaudit-old-page-copy",
+   "n": 323,
+   "note": ""
+  },
+  "mailbox-default": {
+   "at": "2026-11-12T17:59:44.968Z",
+   "choice": [
+    "a"
+   ],
+   "item": "mailbox-default",
+   "n": 556,
+   "note": "windows as well now that windows works -- we're just waiting on mac i believe"
+  },
+  "main-push-skip-how": {
+   "at": "2026-11-15T17:36:01.036Z",
+   "choice": "none",
+   "item": "main-push-skip-how",
+   "label": "none of these",
+   "n": 878,
+   "note": "i think merge needs current base may be the wrong itself like that ruling message consultant ask it to review how degens been merging so effectively snd to look through our discussions and then reevaluste this questions options"
+  },
+  "merge-ready-allow-rule-vs-test": {
+   "at": "2026-11-16T00:12:03.575Z",
+   "choice": "a",
+   "item": "merge-ready-allow-rule-vs-test",
+   "label": "A: Keep the allow rule and re-point the test",
+   "n": 900,
+   "note": "",
+   "optionId": "keep-rule-repoint-test"
+  },
+  "mixed-merge-test-author-scope": {
+   "at": "2026-11-08T16:05:45.527Z",
+   "choice": "a",
+   "item": "mixed-merge-test-author-scope",
+   "n": 420,
+   "note": ""
+  },
+  "model-call-api-key": {
+   "at": "2026-11-12T17:59:44.968Z",
+   "choice": "b",
+   "item": "model-call-api-key",
+   "n": 541,
+   "note": "we can make it a network secret and/or store the key somewhere that keeps it hidden but still callable im open to ideas if you're worried about key safety"
+  },
+  "mutate-harness-lane-run": {
+   "at": "2026-11-09T19:09:33.088Z",
+   "choice": "a",
+   "item": "mutate-harness-lane-run",
+   "n": 463,
+   "note": ""
+  },
+  "no-undo-check-scope": {
+   "at": "2026-11-04T00:16:06.254Z",
+   "choice": "a",
+   "item": "no-undo-check-scope",
+   "n": 167,
+   "note": ""
+  },
+  "note-edit-refreshes-seen": {
+   "at": "2026-11-12T17:59:44.968Z",
+   "choice": "none",
+   "item": "note-edit-refreshes-seen",
+   "n": 547,
+   "note": "who argued for option A? it doesn't sound better so trying to understand if i am naive or not"
+  },
+  "note-one-term-check": {
+   "at": "2026-11-12T17:59:44.968Z",
+   "choice": "a",
+   "item": "note-one-term-check",
+   "n": 533,
+   "note": ""
+  },
+  "notes-fix-guard-1-prompt": {
+   "at": "2026-11-08T12:13:31.885Z",
+   "done": true,
+   "item": "notes-fix-guard-1-prompt",
+   "n": 395,
+   "note": ""
+  },
+  "one-home-q1-retired-phrase": {
+   "at": "2026-11-07T18:34:32.126Z",
+   "choice": "a",
+   "item": "one-home-q1-retired-phrase",
+   "n": 337,
+   "note": ""
+  },
+  "one-home-q2-exception-word": {
+   "at": "2026-11-07T18:34:32.126Z",
+   "choice": "a",
+   "item": "one-home-q2-exception-word",
+   "n": 338,
+   "note": ""
+  },
+  "one-home-q3-parent-pin": {
+   "at": "2026-11-07T18:34:32.126Z",
+   "choice": "a",
+   "item": "one-home-q3-parent-pin",
+   "n": 339,
+   "note": "isnt there a better way than both of these optoins tho "
+  },
+  "one-home-q4-word-floor": {
+   "at": "2026-11-07T18:34:32.126Z",
+   "choice": "a",
+   "item": "one-home-q4-word-floor",
+   "n": 340,
+   "note": "i dont really understand this question"
+  },
+  "one-home-q6-paraphrase": {
+   "at": "2026-11-07T18:34:32.126Z",
+   "choice": "b",
+   "item": "one-home-q6-paraphrase",
+   "n": 341,
+   "note": "i need a semantic meaning pass on thi s"
+  },
+  "oq-borderline-band-bulk-ok": {
+   "at": "2026-11-04T01:10:47.358Z",
+   "choice": "b",
+   "item": "oq-borderline-band-bulk-ok",
+   "n": 198,
+   "note": "this threshold shoild be ocnfigurable not set in stone "
+  },
+  "oq-d017-review-style": {
+   "at": "2026-11-04T01:10:47.358Z",
+   "choice": "a",
+   "item": "oq-d017-review-style",
+   "n": 199,
+   "note": ""
+  },
+  "oq-filter-pill-what-if": {
+   "at": "2026-11-04T00:21:00.756Z",
+   "choice": "a",
+   "item": "oq-filter-pill-what-if",
+   "n": 194,
+   "note": ""
+  },
+  "oq-partly-replaced-entry": {
+   "at": "2026-11-04T00:21:00.756Z",
+   "choice": "a",
+   "item": "oq-partly-replaced-entry",
+   "n": 196,
+   "note": ""
+  },
+  "other-account-pages-to-git": {
+   "at": "2026-11-08T18:24:19.901Z",
+   "item": "other-account-pages-to-git",
+   "n": 438,
+   "note": "there are two personal accounts -- why should it stop immediately? shouldnt it jsut be acknowledged that each of the personal accounts wont have all the artifacts at the moemnt"
+  },
+  "outbox-clearing-route": {
+   "at": "2026-11-13T06:50:40.341Z",
+   "choice": "none",
+   "item": "outbox-clearing-route",
+   "n": 659,
+   "note": "either works -as claude settings u shudnt need an override for B, u can just add the repo to ur session environment snd thrn act"
+  },
+  "outbox-scope": {
+   "at": "2026-11-13T06:50:40.341Z",
+   "choice": "b",
+   "item": "outbox-scope",
+   "n": 658,
+   "note": "children need to and will learn to pur those gripes in their outbox"
+  },
+  "override-py-stray-edit": {
+   "at": "2026-11-12T17:59:44.968Z",
+   "done": true,
+   "item": "override-py-stray-edit",
+   "n": 551,
+   "note": ""
+  },
+  "owner-credit-guard": {
+   "at": "2026-11-13T17:08:33.221Z",
+   "choice": "b",
+   "item": "owner-credit-guard",
+   "label": "B: Build the credit guard and merge #2971",
+   "n": 699,
+   "note": "",
+   "optionId": "credit-guard-plus-2971"
+  },
+  "page-copies-public": {
+   "at": "2026-11-09T02:04:28.189Z",
+   "choice": "a",
+   "item": "page-copies-public",
+   "n": 451,
+   "note": "im open to making all repos private if that makes us happy"
+  },
+  "page-copies-read": {
+   "at": "2026-11-09T19:21:29.492Z",
+   "done": true,
+   "item": "page-copies-read",
+   "n": 453,
+   "note": ""
+  },
+  "page-feedback-outbox-route": {
+   "at": "2026-11-10T17:59:28.522Z",
+   "choice": "a",
+   "item": "page-feedback-outbox-route",
+   "n": 493,
+   "note": "eventually session mailbox though -- you should find there already is a lot in the repo's outboxes for the claude-settings triage though. propose a plan to aggregate all of those findings so that the outbox clears from the other repos, and then let me know later how you'd want that mechanized\n"
+  },
+  "past-ruling-stop-timeout": {
+   "at": "2026-11-08T23:19:23.230Z",
+   "choice": "a",
+   "item": "past-ruling-stop-timeout",
+   "n": 446,
+   "note": ""
+  },
+  "past-ruling-undated-hold": {
+   "at": "2026-11-08T21:04:02.088Z",
+   "choice": "a",
+   "item": "past-ruling-undated-hold",
+   "n": 445,
+   "note": ""
+  },
+  "pick-2662-unarchive-lane": {
+   "at": "2026-11-13T17:03:26.838Z",
+   "choice": "a",
+   "item": "pick-2662-unarchive-lane",
+   "label": "A: Unarchive the old lane (coordinator's pick)",
+   "n": 698,
+   "note": "accepted pick",
+   "optionId": "unarchive"
+  },
+  "pick-2845-final-review": {
+   "at": "2026-11-12T19:26:31.863Z",
+   "choice": "none",
+   "item": "pick-2845-final-review",
+   "n": 594,
+   "note": "is this still relevant? "
+  },
+  "pick-2932-trailer-commit": {
+   "at": "2026-11-13T17:03:26.838Z",
+   "choice": "a",
+   "item": "pick-2932-trailer-commit",
+   "label": "A: One trailer-only commit (coordinator's pick)",
+   "n": 695,
+   "note": "accepted pick",
+   "optionId": "trailer-commit"
+  },
+  "pick-2999-replace-3143": {
+   "at": "2026-11-13T17:03:26.838Z",
+   "choice": "a",
+   "item": "pick-2999-replace-3143",
+   "label": "A: New branch and PR #3143 (coordinator's pick)",
+   "n": 694,
+   "note": "accepted pick",
+   "optionId": "fresh-branch"
+  },
+  "pick-3020-unposted-fail-fix": {
+   "at": "2026-11-15T17:34:32.268Z",
+   "choice": "a",
+   "item": "pick-3020-unposted-fail-fix",
+   "label": "A: The posted fix-check PASS stands (recommended by the lane)",
+   "n": 866,
+   "note": "",
+   "optionId": "posted-pass-stands"
+  },
+  "pick-3143-after-2963": {
+   "at": "2026-11-13T17:03:26.838Z",
+   "choice": "a",
+   "item": "pick-3143-after-2963",
+   "label": "A: Wait for #2963, then retarget (coordinator's pick)",
+   "n": 696,
+   "note": "accepted pick",
+   "optionId": "wait-retarget"
+  },
+  "pick-alarm-skip-named-run": {
+   "at": "2026-11-12T19:12:46.711Z",
+   "choice": "a",
+   "item": "pick-alarm-skip-named-run",
+   "n": 608,
+   "note": "accepted pick"
+  },
+  "pick-brief-role-labels": {
+   "at": "2026-11-12T21:22:18.345Z",
+   "choice": "a",
+   "item": "pick-brief-role-labels",
+   "n": 591,
+   "note": "idk if refusing session id is correct either? message retrospective it has soem context on this "
+  },
+  "pick-check-briefs-too": {
+   "at": "2026-11-12T21:22:18.345Z",
+   "choice": "b",
+   "item": "pick-check-briefs-too",
+   "n": 644,
+   "note": ""
+  },
+  "pick-coord-1341-1359": {
+   "at": "2026-11-12T20:13:05.793Z",
+   "choice": "a",
+   "item": "pick-coord-1341-1359",
+   "n": 627,
+   "note": "accepted pick"
+  },
+  "pick-degen-note-own-triage": {
+   "at": "2026-11-13T17:45:25.533Z",
+   "choice": "a",
+   "item": "pick-degen-note-own-triage",
+   "label": "A: Degen's triage clears it (triage's pick)",
+   "n": 707,
+   "note": "accepted pick",
+   "optionId": "degen-triage"
+  },
+  "pick-draft-pr-now": {
+   "at": "2026-11-12T21:28:18.016Z",
+   "choice": "a",
+   "item": "pick-draft-pr-now",
+   "n": 598,
+   "note": ""
+  },
+  "pick-express-3020-3141-3071": {
+   "at": "2026-11-13T17:45:25.533Z",
+   "choice": "a",
+   "item": "pick-express-3020-3141-3071",
+   "label": "A: Express all three (coordinator's pick)",
+   "n": 705,
+   "note": "accepted pick",
+   "optionId": "express-three"
+  },
+  "pick-guard-writer-fix-pass": {
+   "at": "2026-11-10T15:06:48.914Z",
+   "choice": "a",
+   "item": "pick-guard-writer-fix-pass",
+   "n": 474,
+   "note": ""
+  },
+  "pick-joyous-tree-equal-skip": {
+   "at": "2026-11-13T18:11:30.646Z",
+   "choice": "a",
+   "item": "pick-joyous-tree-equal-skip",
+   "label": "A: Allow the tree-equal skip in joyous (recommended)",
+   "n": 729,
+   "note": "",
+   "optionId": "allow"
+  },
+  "pick-lane-mail-runner-only": {
+   "at": "2026-11-13T17:45:25.533Z",
+   "choice": "a",
+   "item": "pick-lane-mail-runner-only",
+   "label": "A: Lane mail sends only from a batch-runner session (coordinator's pick)",
+   "n": 709,
+   "note": "accepted pick",
+   "optionId": "runner-only"
+  },
+  "pick-mail-mac-hold-optout": {
+   "at": "2026-11-12T19:12:46.711Z",
+   "choice": "a",
+   "item": "pick-mail-mac-hold-optout",
+   "n": 609,
+   "note": "accepted pick"
+  },
+  "pick-mailbox-folder-wait": {
+   "at": "2026-11-13T17:45:25.533Z",
+   "choice": "a",
+   "item": "pick-mailbox-folder-wait",
+   "label": "A: Wait for the Mac measurement (triage's pick)",
+   "n": 706,
+   "note": "accepted pick",
+   "optionId": "wait-mac"
+  },
+  "pick-main-wake-via-pr": {
+   "at": "2026-11-12T19:26:31.863Z",
+   "choice": "a",
+   "item": "pick-main-wake-via-pr",
+   "n": 611,
+   "note": "accepted pick"
+  },
+  "pick-merge-under-batch-hold": {
+   "at": "2026-11-13T17:13:16.739Z",
+   "choice": "a",
+   "item": "pick-merge-under-batch-hold",
+   "label": "A: Hold it behind #3049 (coordinator's pick)",
+   "n": 702,
+   "note": "accepted pick",
+   "optionId": "hold-behind-3049"
+  },
+  "pick-old-prs-diff-close": {
+   "at": "2026-11-12T21:46:25.248Z",
+   "choice": "a",
+   "item": "pick-old-prs-diff-close",
+   "n": 605,
+   "note": ""
+  },
+  "pick-override-rows-one-lane": {
+   "at": "2026-11-12T21:26:23.599Z",
+   "choice": "a",
+   "item": "pick-override-rows-one-lane",
+   "n": 603,
+   "note": ""
+  },
+  "pick-page-checks-narrow": {
+   "at": "2026-11-12T21:26:23.599Z",
+   "choice": "b",
+   "item": "pick-page-checks-narrow",
+   "n": 616,
+   "note": ""
+  },
+  "pick-pr-closer-runner": {
+   "at": "2026-11-13T17:45:25.533Z",
+   "choice": "a",
+   "item": "pick-pr-closer-runner",
+   "label": "A: Batch runner 10 closes old PRs (coordinator's pick)",
+   "n": 711,
+   "note": "accepted pick",
+   "optionId": "runner-closes"
+  },
+  "pick-qmax-backlog-read": {
+   "at": "2026-11-12T21:28:18.016Z",
+   "choice": "a",
+   "item": "pick-qmax-backlog-read",
+   "n": 604,
+   "note": "i thought a lot of q_max prs were from sessions that had their work paused "
+  },
+  "pick-refusal-drafts-line": {
+   "at": "2026-11-12T19:26:31.863Z",
+   "choice": "a",
+   "item": "pick-refusal-drafts-line",
+   "n": 612,
+   "note": "accepted pick"
+  },
+  "pick-relabel-fb-2056-1": {
+   "at": "2026-11-14T06:19:47.028Z",
+   "choice": "c",
+   "item": "pick-relabel-fb-2056-1",
+   "label": "C: You, or a session you name, make the one edit (homed to step backlog-drain, or relabelled as not-a-grant). Coordinator recommends this.",
+   "n": 818,
+   "note": "",
+   "optionId": "owner-edits"
+  },
+  "pick-retire-missing-deps": {
+   "at": "2026-11-13T06:50:40.341Z",
+   "choice": "a",
+   "item": "pick-retire-missing-deps",
+   "n": 600,
+   "note": "accepted pick"
+  },
+  "pick-stable-missing-fallback": {
+   "at": "2026-11-12T19:12:46.711Z",
+   "choice": "a",
+   "item": "pick-stable-missing-fallback",
+   "n": 610,
+   "note": "accepted pick"
+  },
+  "pick-sweep-row-owners": {
+   "at": "2026-11-13T17:03:26.838Z",
+   "choice": "a",
+   "item": "pick-sweep-row-owners",
+   "label": "A: Split by row kind (coordinator's pick)",
+   "n": 697,
+   "note": "accepted pick",
+   "optionId": "split-owners"
+  },
+  "pick-tiny-job-floor": {
+   "at": "2026-11-12T21:26:23.599Z",
+   "choice": "a",
+   "item": "pick-tiny-job-floor",
+   "n": 587,
+   "note": ""
+  },
+  "pick-which-layer-asked-start": {
+   "at": "2026-11-14T06:19:47.028Z",
+   "choice": "none",
+   "item": "pick-which-layer-asked-start",
+   "label": "none of these",
+   "n": 809,
+   "note": "land the report i gave and fix it\nFix: the Claude desktop app shows an \"Allow Claude to start the session?\" card on every mcp__ccd_session__start_session call, even in Bypass mode, because our guard hook lists that tool.\n\nProven cause (owner test, 2026-11-14 00:04 CST):\n- The desktop app (Claude.app 5.11492.5) counts any PreToolUse hook whose matcher lists mcp__ccd_session__start_session as an \"ask\" rule. It does so even when the hook answers \"allow\". In app.asar .vite/build: createCanUseTool -> _e -> t.i$ (aDr) -> iDr returns true for any non-built-in PreToolUse hook whose matcher covers the tool. A regex-like matcher such as * counts too. A remote flag (3650263018) marks start_session \"always_ask\", which is what makes this check run.\n- settings.json, hooks.PreToolUse entry 0 (the guard.py hook), lists mcp__ccd_session__start_session in its matcher. That alone causes the card on every start.\n- Test: with start_session removed from every PreToolUse matcher, a fresh Bypass session started a session with no card. With it restored, the card came back.\n- Public bug: anthropics/claude-code#103832 (open). permissions.allow and allow hooks don't help; they make it worse.\n\nWhat the guard checks on start_session today (hooks/guard.py): SESSION_TOOL at line 2913. The model floor in floor_hit (~3072). The START_TOOLS checks (~4074): handoff-unread and related start rules. A load-brake skip (~4170). guard.log shows real denies on it: handoff-unread and agent-model-floor.\n\nTask:\n1. Remove mcp__ccd_session__start_session from the PreToolUse matcher in settings.json. A broader regex matcher would also trigger the card, so don't use one.\n2. Keep the start checks some other way that adds no PreToolUse hook on this tool. Pick and justify one: (a) the same checks fire on the session's next gated tool call (handoff-unread already does on Bash/Edit); (b) a PostToolUse audit on start_session that flags a bad start (wrong model, unread handoff) and tells the session to stop the new session; (c) drop the checks for start_session, with a debt record. Say which checks are lost, and the harm.\n3. Tests: a test that settings.json's PreToolUse matchers never list mcp__ccd_session__start_session or a regex covering it, with a comment naming the app behaviour and issue #103832. Show it red first on the current settings.json. Update the guard tests that expect start_session to be judged at PreToolUse.\n4. Record: a decision record for \"start_session is not gated at PreToolUse\", citing the owner test and the app code path. Update any rule or doc that says the guard gates start_session.\n"
+  },
+  "pr-backlog-code-conflict-merges": {
+   "at": "2026-11-15T19:33:05.313Z",
+   "choice": "a",
+   "item": "pr-backlog-code-conflict-merges",
+   "label": "A: Bring main into each draft and resolve the code conflicts by hand, #3188 first",
+   "n": 890,
+   "note": "",
+   "optionId": "merge-main-hand-resolve"
+  },
+  "press-row-reflow": {
+   "at": "2026-11-09T00:39:13.913Z",
+   "choice": "a",
+   "item": "press-row-reflow",
+   "n": 448,
+   "note": ""
+  },
+  "probe-grant-in-lane-chat": {
+   "at": "2026-11-08T16:07:22.923Z",
+   "done": true,
+   "item": "probe-grant-in-lane-chat",
+   "n": 414,
+   "note": ""
+  },
+  "qmax-1040-base-red": {
+   "at": "2026-11-07T01:01:36.567Z",
+   "choice": "a",
+   "item": "qmax-1040-base-red",
+   "n": 322,
+   "note": ""
+  },
+  "qmax-1040-d542-edit": {
+   "at": "2026-11-07T01:01:36.567Z",
+   "choice": "a",
+   "item": "qmax-1040-d542-edit",
+   "n": 321,
+   "note": ""
+  },
+  "qmax-browser-geom-diag": {
+   "at": "2026-11-07T18:06:56.073Z",
+   "item": "qmax-browser-geom-diag",
+   "n": 329,
+   "note": "why can't this done in the cloud especially now that i've added the environment variables?"
+  },
+  "qmax-ci1-red-base": {
+   "at": "2026-11-12T17:59:44.968Z",
+   "choice": "a",
+   "item": "qmax-ci1-red-base",
+   "n": 539,
+   "note": ""
+  },
+  "qmax-d757-retire": {
+   "at": "2026-11-08T19:20:21.073Z",
+   "choice": "b",
+   "item": "qmax-d757-retire",
+   "n": 441,
+   "note": ""
+  },
+  "qmax-local-postgres-mac": {
+   "at": "2026-11-08T18:29:41.920Z",
+   "choice": "a",
+   "item": "qmax-local-postgres-mac",
+   "n": 354,
+   "note": "whats the command?"
+  },
+  "qmax-neon-scope": {
+   "at": "2026-11-07T18:31:03.813Z",
+   "choice": "b",
+   "item": "qmax-neon-scope",
+   "n": 332,
+   "note": ""
+  },
+  "qmax-neon-wt-branches": {
+   "at": "2026-11-08T17:49:02.892Z",
+   "done": true,
+   "item": "qmax-neon-wt-branches",
+   "n": 361,
+   "note": "Done:\n\nOTHER: I deleted 113 branches whose names start with wt- from Q_NEON, the q_max Neon project. None failed.\nOTHER: I listed the branches again after the deletes. 0 wt- branches remain. The project now has 2 branches: production (the default branch) and live-backup-2026-10-02. I did not touch either one.\n\nNext: Any of this checkout’s 4 worktrees that used one of the deleted branches no longer has a working database. The worktree hook gives a new worktree its own branch when it is created."
+  },
+  "qmax-pastrates-bar-1440-pics": {
+   "at": "2026-11-08T17:05:08.897Z",
+   "choice": "none",
+   "item": "qmax-pastrates-bar-1440-pics",
+   "n": 428,
+   "note": "i thin q_max has a whole filter/pill reshuffle going on anyways at the moment so this entire thing can be parked and addressed at a q_max session that actually builds rather than resolving it now "
+  },
+  "qmax-pastrates-bar-1440": {
+   "at": "2026-11-08T16:20:56.475Z",
+   "choice": "none",
+   "item": "qmax-pastrates-bar-1440",
+   "n": 403,
+   "note": "send pciture mockup visuals pls"
+  },
+  "qmax-report-text-thousands": {
+   "at": "2026-11-06T22:53:19.766Z",
+   "choice": "none",
+   "item": "qmax-report-text-thousands",
+   "n": 252,
+   "note": "pick whichever is built for now and leave the question open/deferred"
+  },
+  "qmax-testers-branch": {
+   "at": "2026-11-08T21:12:25.349Z",
+   "done": true,
+   "item": "qmax-testers-branch",
+   "n": 442,
+   "note": "can you use the neon api in the q_max folder to create this neon branch db? \n\ncd ~\nnpx -y neonctl@latest branches create --project-id autumn-math-12676341 --name testers --parent production\n\nDone:\n\nOTHER: I made the Neon branch testers from production in project autumn-math-12676341. Branch id br-dawn-shape-a566s7hb, compute ep-billowing-wave-a5piab4s (us-east-2). I ran your neonctl command with the NEON_API_KEY from q_max’s .env. The key was loaded into that one process only, and nothing was printed.\n\nDeviations: I tried the Neon connector first. Its account can’t see this project (“project not found”), so I used the CLI instead.\n\nNext: To get the branch’s connection string, run neonctl connection-string testers --project-id autumn-math-12676341 with the same key.\n\nDone:\n\nOTHER: I made the Neon branch testers from production in project autumn-math-12676341. Branch id br-dawn-shape-a566s7hb, compute ep-billowing-wave-a5piab4s (us-east-2). I ran your neonctl command with the NEON_API_KEY from q_max’s .env. The key stayed inside that one process, and nothing secret was printed.\nOTHER: I logged your request in the feedback inbox as fb-1506-1 (question, answered).\n\nDeviations: I tried the Neon connector first. Its account can’t see this project (“project not found”), so I used the CLI.\n\nNext: If you need the branch’s connection string, I can get it with the same key and save it to a file you name, so the password stays out of chat."
+  },
+  "quoted-args-held-hole": {
+   "at": "2026-11-08T17:00:18.125Z",
+   "choice": "a",
+   "item": "quoted-args-held-hole",
+   "n": 429,
+   "note": ""
+  },
+  "ready-gate-jobs-no-runner": {
+   "at": "2026-11-16T16:52:57.484Z",
+   "choice": "a",
+   "item": "ready-gate-jobs-no-runner",
+   "label": "A: The ready gate ignores queued macOS jobs",
+   "n": 919,
+   "note": "",
+   "optionId": "gate-ignores-queued-macos"
+  },
+  "ready-lane-unreadable-record": {
+   "at": "2026-11-13T06:50:40.341Z",
+   "choice": "a",
+   "item": "ready-lane-unreadable-record",
+   "n": 667,
+   "note": "accepted pick"
+  },
+  "ready-merge-writes-records-page": {
+   "at": "2026-11-16T20:30:08.950Z",
+   "choice": "none",
+   "item": "ready-merge-writes-records-page",
+   "label": "none of these",
+   "n": 926,
+   "note": "whatever is faster -- ask consultant to decide off that outcome"
+  },
+  "records-page-merge-override": {
+   "at": "2026-11-12T21:22:18.345Z",
+   "choice": "a",
+   "item": "records-page-merge-override",
+   "n": 647,
+   "note": ""
+  },
+  "red-main-resume-on-green": {
+   "at": "2026-11-12T20:13:05.793Z",
+   "choice": "none",
+   "item": "red-main-resume-on-green",
+   "n": 622,
+   "note": "ask retrospective session to decide this since i spoke it on there though "
+  },
+  "refuter-row-scope": {
+   "at": "2026-11-10T15:06:48.914Z",
+   "choice": "a",
+   "item": "refuter-row-scope",
+   "n": 478,
+   "note": ""
+  },
+  "relative-write-no-record-agent": {
+   "at": "2026-11-08T16:05:45.527Z",
+   "choice": "none",
+   "item": "relative-write-no-record-agent",
+   "n": 416,
+   "note": "dont these both have large trade offs?\n"
+  },
+  "relative-write-spawn-home": {
+   "at": "2026-11-08T16:19:30.041Z",
+   "choice": "c",
+   "item": "relative-write-spawn-home",
+   "n": 425,
+   "note": ""
+  },
+  "relay-words-saved": {
+   "at": "2026-11-13T06:50:40.341Z",
+   "choice": "b",
+   "item": "relay-words-saved",
+   "n": 652,
+   "note": ""
+  },
+  "reply-form-tab-order": {
+   "at": "2026-11-09T19:09:33.088Z",
+   "choice": "a",
+   "item": "reply-form-tab-order",
+   "n": 454,
+   "note": ""
+  },
+  "report-base-own-branch": {
+   "at": "2026-11-12T21:22:18.345Z",
+   "choice": "a",
+   "item": "report-base-own-branch",
+   "n": 637,
+   "note": ""
+  },
+  "resume-any-finished-agent": {
+   "at": "2026-11-08T12:11:17.457Z",
+   "choice": "a",
+   "item": "resume-any-finished-agent",
+   "n": 409,
+   "note": ""
+  },
+  "retry-once-unsafe-methods": {
+   "at": "2026-11-13T06:50:40.341Z",
+   "choice": "c",
+   "item": "retry-once-unsafe-methods",
+   "n": 650,
+   "note": ""
+  },
+  "round3-after-r2-fail-only": {
+   "at": "2026-11-12T19:26:31.863Z",
+   "choice": "b",
+   "item": "round3-after-r2-fail-only",
+   "n": 613,
+   "note": "message retrospecitve -- this was long since already established"
+  },
+  "runner-merge-needs-head": {
+   "at": "2026-11-09T19:09:33.088Z",
+   "choice": "a",
+   "item": "runner-merge-needs-head",
+   "n": 461,
+   "note": ""
+  },
+  "scope-building": {
+   "at": "2026-11-12T17:59:44.968Z",
+   "choice": "a",
+   "item": "scope-building",
+   "n": 538,
+   "note": ""
+  },
+  "scope-git": {
+   "at": "2026-11-12T17:59:44.968Z",
+   "choice": "a",
+   "item": "scope-git",
+   "n": 535,
+   "note": ""
+  },
+  "scope-output": {
+   "at": "2026-11-12T17:59:44.968Z",
+   "choice": "a",
+   "item": "scope-output",
+   "n": 534,
+   "note": ""
+  },
+  "scope-verification": {
+   "at": "2026-11-12T17:59:44.968Z",
+   "choice": "a",
+   "item": "scope-verification",
+   "n": 536,
+   "note": ""
+  },
+  "shoot-touch-width": {
+   "at": "2026-11-08T16:20:56.475Z",
+   "choice": "c",
+   "item": "shoot-touch-width",
+   "n": 423,
+   "note": ""
+  },
+  "silent-sessions-handoff-211": {
+   "at": "2026-11-10T16:50:10.008Z",
+   "choice": "none",
+   "item": "silent-sessions-handoff-211",
+   "n": 487,
+   "note": "retry sending a message again first, then after that those that fail can be read workflow style in haiku xhigh not sonnet\n"
+  },
+  "sim-lease-load-measure": {
+   "at": "2026-11-12T17:59:44.968Z",
+   "choice": "a",
+   "item": "sim-lease-load-measure",
+   "n": 554,
+   "note": ""
+  },
+  "sim-reuse-takes-lease": {
+   "at": "2026-11-07T18:31:03.813Z",
+   "choice": "a",
+   "item": "sim-reuse-takes-lease",
+   "n": 336,
+   "note": ""
+  },
+  "sim-test-boot-frame-check": {
+   "at": "2026-11-08T18:00:51.125Z",
+   "choice": "a",
+   "item": "sim-test-boot-frame-check",
+   "n": 433,
+   "note": ""
+  },
+  "sim-wallpaper-auto-delete": {
+   "at": "2026-11-13T06:50:40.341Z",
+   "choice": "a",
+   "item": "sim-wallpaper-auto-delete",
+   "n": 674,
+   "note": ""
+  },
+  "slow-legs-daily-schedule": {
+   "at": "2026-11-15T20:14:33.187Z",
+   "choice": "none",
+   "item": "slow-legs-daily-schedule",
+   "label": "none of these",
+   "n": 893,
+   "note": "if they are already being checked by subagents to where its very unlikely something goes red then yes lets drop it and move it to only nights where work merged that day"
+  },
+  "sort281-round3-stack": {
+   "at": "2026-11-12T18:00:53.111Z",
+   "choice": "none",
+   "item": "sort281-round3-stack",
+   "n": 501,
+   "note": "is this still a real open question?"
+  },
+  "stale-drafts-read-rest": {
+   "at": "2026-11-15T19:33:05.313Z",
+   "choice": "b",
+   "item": "stale-drafts-read-rest",
+   "label": "B: Give build.py a sessions read from a named source",
+   "n": 889,
+   "note": "",
+   "optionId": "sessions-from-source"
+  },
+  "stall-log-kept": {
+   "at": "2026-11-08T12:09:31.232Z",
+   "choice": "a",
+   "item": "stall-log-kept",
+   "n": 405,
+   "note": ""
+  },
+  "ste-child-repos": {
+   "at": "2026-11-04T00:16:06.254Z",
+   "choice": "a",
+   "item": "ste-child-repos",
+   "n": 173,
+   "note": "more importantly why do those repos have their own claude md thst holds a lot of repetition?"
+  },
+  "stop-hook-merged-branch": {
+   "at": "2026-11-09T19:09:33.088Z",
+   "choice": [
+    "b"
+   ],
+   "item": "stop-hook-merged-branch",
+   "n": 464,
+   "note": ""
+  },
+  "stray-push-existing-branch": {
+   "at": "2026-11-08T17:41:44.430Z",
+   "choice": "a",
+   "item": "stray-push-existing-branch",
+   "n": 432,
+   "note": "shouldn't it stay quiet rergardless?"
+  },
+  "subagent-payload-probe": {
+   "at": "2026-11-08T12:11:17.457Z",
+   "choice": "a",
+   "item": "subagent-payload-probe",
+   "n": 412,
+   "note": ""
+  },
+  "taken-791-2-revert-first": {
+   "at": "2026-11-15T17:39:47.156Z",
+   "choice": "b",
+   "item": "taken-791-2-revert-first",
+   "label": "B: Overrule: the ruling reopens",
+   "n": 856,
+   "note": "",
+   "optionId": "overrule-taken-791-2-revert-first"
+  },
+  "taken-830-c-narrowed": {
+   "at": "2026-11-16T01:48:22.586Z",
+   "choice": "b",
+   "item": "taken-830-c-narrowed",
+   "label": "B: Overrule: the ruling reopens",
+   "n": 857,
+   "note": "",
+   "optionId": "overrule-taken-830-c-narrowed"
+  },
+  "uniform-answered-revisit": {
+   "at": "2026-11-12T21:46:25.248Z",
+   "choice": "a",
+   "item": "uniform-answered-revisit",
+   "n": 643,
+   "note": ""
+  },
+  "usage-brake": {
+   "at": "2026-11-12T17:59:44.968Z",
+   "choice": "a",
+   "item": "usage-brake",
+   "n": 540,
+   "note": ""
+  },
+  "ux-sink-badge-shift": {
+   "at": "2026-11-06T23:19:29.109Z",
+   "choice": "a",
+   "item": "ux-sink-badge-shift",
+   "n": 318,
+   "note": ""
+  },
+  "windows-run-per-lane": {
+   "at": "2026-11-08T12:08:10.433Z",
+   "choice": "a",
+   "item": "windows-run-per-lane",
+   "n": 400,
+   "note": ""
+  }
+ }
+}
