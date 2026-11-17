@@ -93,9 +93,12 @@ def per_job_problems(text):
         if not step:
             out.append(name + " has no ci-done-comment job step")
             continue
-        for part in ("failure()", "github.event_name == 'pull_request'", "!github.event.pull_request.draft"):
+        for part in ("failure()", "github.event_name == 'pull_request'"):
             if part not in step.group(1):
                 out.append(name + " step if lacks " + part)
+        # A draft run runs no job, so the draft term adds nothing, and the lane lint cannot read it (a repo changes to fit the tool).
+        if "github.event.pull_request.draft" in step.group(1):
+            out.append(name + " step if carries the draft term the lane lint cannot read")
         if step.group(2) != name:
             out.append(name + " step names job " + step.group(2))
     return out
@@ -114,12 +117,13 @@ class JobSteps(unittest.TestCase):
 
     def test_detector_goes_red(self):
         good = ("jobs:\n  a:\n    permissions:\n      contents: read\n      pull-requests: write\n    steps:\n"
-                "      - run: x\n      - name: Wake\n        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}\n"
+                "      - run: x\n      - name: Wake\n        if: ${{ failure() && github.event_name == 'pull_request' }}\n"
                 "        uses: $/actions/ci-done-comment\n        with:\n          job: a\n")
         self.assertEqual(per_job_problems(good), [])
         for name, bad in {"no step": good.split("      - name: Wake")[0],
                           "wrong name": good.replace("job: a", "job: b"),
                           "no failure": good.replace("failure() && ", ""),
+                          "draft term": good.replace("'pull_request' }}", "'pull_request' && !github.event.pull_request.draft }}"),
                           "no write": good.replace("pull-requests: write", "pull-requests: read")}.items():
             with self.subTest(name):
                 self.assertNotEqual(per_job_problems(bad), [], name)

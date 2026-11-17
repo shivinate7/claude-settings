@@ -173,7 +173,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: scope
@@ -673,7 +673,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks
@@ -874,7 +874,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-hooks
@@ -1014,7 +1014,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-rest
@@ -1112,7 +1112,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-merge-install
@@ -1146,7 +1146,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-install-checkout
@@ -1177,7 +1177,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-merge-git
@@ -1224,7 +1224,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-guard
@@ -1271,7 +1271,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-guard-2
@@ -1328,7 +1328,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-shoot
@@ -1372,7 +1372,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-waiting-page  # glossary-ok: the job's existing id
@@ -1424,7 +1424,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: pointer-windows
@@ -1489,7 +1489,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: shell-macos
@@ -1754,7 +1754,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-macos
@@ -1830,7 +1830,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-macos-b
@@ -1956,7 +1956,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-windows
@@ -2009,7 +2009,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-mutate-guard
@@ -2043,7 +2043,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-mutate-guard-b
@@ -2077,7 +2077,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-mutate-guard-c
@@ -2126,7 +2126,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: mutation-report
@@ -2175,7 +2175,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-windows-guard
@@ -2209,7 +2209,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-windows-guard-2
@@ -2243,7 +2243,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-windows-guard-3
@@ -2289,7 +2289,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-windows-merge
@@ -2325,7 +2325,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-windows-merge-2
@@ -2361,7 +2361,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-windows-merge-3
@@ -2397,7 +2397,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-windows-merge-4
@@ -2433,7 +2433,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-windows-merge-5
@@ -2471,7 +2471,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-windows-sweep
@@ -2623,7 +2623,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-windows-rest
@@ -2754,7 +2754,7 @@ jobs:
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
-        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        if: ${{ failure() && github.event_name == 'pull_request' }}
         uses: $/actions/ci-done-comment
         with:
           job: checks-windows-rest-2
