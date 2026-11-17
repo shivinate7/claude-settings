@@ -6488,7 +6488,10 @@ def idle_lanes(live, repo_dir=None):
     if not unread:
         held = len(holds) + len(handoff_held)
         count = f"{len(lanes) - len(handoff_held)} lanes to archive" + (f", {held} held" if held else "")
-        tail = "Run get_session on each lane line alone, then archive it; never archive a hold line." if holds or handoff_held else "Run get_session on each alone, then archive it."
+        if holds or handoff_held:
+            tail = "Run get_session on each lane line alone, then archive it; never archive a hold line."
+        else:
+            tail = "Run get_session on each lane in one message, then archive them in the next message."
         entries = [*entries, f"merge: {count}. {tail}"]
     say(*entries)
     return 1 if unread else 0
