@@ -1,0 +1,11 @@
+{
+  "title": "A session's message that hands its own finished PR to a batch runner for merging is refused",
+  "why": "Ruling own-everyone-merges (owner 12:58 CST Nov 16): each session merges its own PR with the merge tool. Sessions still hand their PRs to runners, which the owner asked about at 14:57 CST Nov 17.",
+  "note": "Filed by triage 11, 15:03 CST Nov 17 on the consultant's relay of the owner's ask. A guard step: a send_message from a lane or standing session to a batch runner that hands over its own finished PR to merge is refused, citing own-everyone-merges, and the remedy names the merge tool. Prior work: lane-ready-mark-mcp-cloud, mcp-merge-role. Lane: test-author first (red case: a hand-over message is refused; a message about a different PR is not), then builder, review (a guard verdict). Mistake named, harm: the owner's ruling is ignored and the queue grows. Not started.",
+  "order": 946,
+  "phase": "now",
+  "owner": "coordinator",
+  "lane": "",
+  "status": "ready",
+  "updatedAt": "2026-11-17T14:59:54-06:00"
+}

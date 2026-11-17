@@ -1,0 +1,11 @@
+{
+  "title": "A resumed or restarted standing session has a merge role, so it can merge its own PR",
+  "why": "Measured 15:00 CST Nov 17 in triage 11's container: no merge role record exists (~/.claude/state/merge-role.json absent), so merge --confirm refuses 'this session may not merge'. Recording it by hand was denied by the auto-mode classifier.",
+  "note": "Filed by triage 11, 15:03 CST Nov 17. Cause measured only in this container: the role record is a file in the container's own state folder, written by `merge --role standing`; this container has none. Not measured: whether earlier triage sessions merged, or whether any hook records the role at session start. Fix to find: a hook records the standing role for a session tagged cs-build:triage, coordinator or consultant at start and resume, with a test (red: a resumed standing session confirms a merge of its own green PR). Prior work: mcp-merge-role, merge-role-allow (done, Oct 29), own-everyone-merges. Owner decision needed on how: page item standing-merge-role-how. Not started.",
+  "order": 947,
+  "phase": "now",
+  "owner": "coordinator",
+  "lane": "",
+  "status": "ready",
+  "updatedAt": "2026-11-17T14:59:54-06:00"
+}
