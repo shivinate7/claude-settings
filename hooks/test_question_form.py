@@ -119,7 +119,7 @@ OLD_WIDENS_CARD = "uniform ruling (t18)"
 
 # Waiting item 92 as the writer sent it (Oct 30): a decision with a Goal line and no Problem line, no Based
 # on line, and a widening option 'b' not marked widens. It holds no personal data.
-ITEM92 = json.loads(r'''{"kind":"decision","title":"Let the batch runner merge each batch on its own?","context":"Goal: the batch runner merges each batch with no help from the coordinator or you. Today auto mode refuses the runner's `merge --role batch-runner` (03:04 CDT, main d545baf4): the cloud allow rules from #841 cover only `merge N --confirm`. The lane that would widen them was refused as a change to the sessions' own rules, so it needs your word. Asked in chat 03:05 CDT, no answer. Task home: docs/todo.md line fb-0303-1 (#845).","options":[{"gain":"No new form on the shared allow list.","how":"The coordinator merges each batch the runner builds.","key":"a","label":"Keep it as is","lose":"Each batch waits until the coordinator wakes."},{"gain":"The runner merges alone, so batches land sooner.","how":"Lane merge-role-allow adds `merge --role` to the auto-mode allow list, for the coordinator and batch-runner tiers only.","key":"b","label":"Allow merge --role","lose":"A second merge form on the shared allow list, against your one-form ruling (t18)."}],"pick":"a","why":"Your 16:54 CDT ruling (no owner step per merge) holds either way; a keeps the allow list to one form.","status":"open"}''')
+ITEM92 = json.loads(r'''{"n":928,"kind":"decision","title":"Let the batch runner merge each batch on its own?","context":"Goal: the batch runner merges each batch with no help from the coordinator or you. Today auto mode refuses the runner's `merge --role batch-runner` (03:04 CDT, main d545baf4): the cloud allow rules from #841 cover only `merge N --confirm`. The lane that would widen them was refused as a change to the sessions' own rules, so it needs your word. Asked in chat 03:05 CDT, no answer. Task home: docs/todo.md line fb-0303-1 (#845).","options":[{"gain":"No new form on the shared allow list.","how":"The coordinator merges each batch the runner builds.","key":"a","label":"Keep it as is","lose":"Each batch waits until the coordinator wakes."},{"gain":"The runner merges alone, so batches land sooner.","how":"Lane merge-role-allow adds `merge --role` to the auto-mode allow list, for the coordinator and batch-runner tiers only.","key":"b","label":"Allow merge --role","lose":"A second merge form on the shared allow list, against your one-form ruling (t18)."}],"pick":"a","why":"Your 16:54 CDT ruling (no owner step per merge) holds either way; a keeps the allow list to one form.","status":"open"}''')
 
 # The form lines of the rewrite. Item 92's subject, in the owner's terms; no web marker, no press verb.
 GOAL = "Goal: the batch runner merges each batch with no help from the coordinator or you."
@@ -168,7 +168,7 @@ TASK_WHY = "Why yours: a session on your computer was asked first and none could
 def task_item(steps, **over):
     """A waiting-page task with these steps and the Why yours line in `context`, so only the rule a case
     names judges it (task-names-check reads that line). `over` sets or replaces any field."""
-    item = {"kind": "task", "title": "Merge the batch", "status": "open", "steps": list(steps), "context": TASK_WHY}
+    item = {"n": 928, "kind": "task", "title": "Merge the batch", "status": "open", "steps": list(steps), "context": TASK_WHY}
     item.update(over)
     return item
 
@@ -1143,7 +1143,7 @@ GH_WHY = "Why yours: a session on your computer was asked first and none could r
 
 def gh_task(mac, ps, **over):
     """A task whose command is {powershell, mac}. `mac` is bash and `ps` its PowerShell 5.1-safe twin."""
-    task = {"kind": "task", "title": "Protect main on claude-settings", "status": "open",
+    task = {"n": 928, "kind": "task", "title": "Protect main on claude-settings", "status": "open",
             "steps": ["Open Terminal", "Paste the command below and run it"], "context": GH_WHY,
             "command": {"powershell": ps, "mac": mac}}
     task.update(over)
@@ -1684,7 +1684,7 @@ def case_departs_out_of_scope_passes():
     one = tcj.good_box(departs=None)
     one["questions"][0].update(question="Ship it?", options=[{"label": "Yes", "description": "go"}])
     chat("a one-option question with no Departs from line passes", one, None)
-    task = {"kind": "task", "title": "Merge the batch", "status": "open", "steps": ["Open Terminal"],
+    task = {"n": 928, "kind": "task", "title": "Merge the batch", "status": "open", "steps": ["Open Terminal"],
             "context": "Why yours: a session on your computer was asked first and none could reach the remote"}
     page("a task with a Why yours line and no Departs from line passes", "set", entry_of(task), None)
     page("a closed decision with no form lines and no Departs from line passes", "set",
@@ -1842,7 +1842,7 @@ PORT_BAD_LINES = [
 
 def port_task(departs):
     """A port task with a Why yours line, so only the port and departs checks can refuse it."""
-    return {"kind": "task", "port": True, "title": "Merge the batch", "status": "open",
+    return {"n": 928, "kind": "task", "port": True, "title": "Merge the batch", "status": "open",
             "context": "Why yours: a session on your computer was asked first and none could reach the remote\n"
                        + departs}
 
