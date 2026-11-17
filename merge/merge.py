@@ -333,6 +333,7 @@ UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not r
 ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may merge)"
 BUDGET_CITE = "(decision gh-api-budget, a bulk read stops below a tenth of the GitHub API budget)"
 LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a head that passes `merge --lane-lint`)"
+WORKFLOW_READ_CITE = "(decision private-repos-no-ci, the workflow files on the base set the wait, so a file the tool cannot read stops the merge)"
 # The paths a review record's `--guard no` refuses: the rule dirs, then the tool and the hooks, as folder prefixes. GUARD_FILES match a whole path.
 # It reads RULE_DIRS, never a copy.
 GUARD_PATHS = stale_cites.RULE_DIRS + ("merge/", "githooks/")
@@ -1824,7 +1825,7 @@ class Host:
         A red verdict also leaves `self.base_facts` for revert_proven, as data the prose cannot carry: `blamed` (the full head shas of the breaking merges), `red` (red runs judged),
         `others` (red entries without a run, cancelled runs and re-runs in flight beside the red), `head` (the head sha of the newest run read) and `red_heads` (the head sha of each red run judged). Every other verdict leaves it None."""
         self.base_facts = None  # a red verdict sets it below; any other verdict, and any stop, leaves it None
-        if self.required == "none":  # a repo with "none" runs no CI, so the base's runs are not read, whatever they hold (decision private-repos-no-ci, owner ruling, 11:20 CST Nov 16)
+        if self.required == "none":  # a repo with "none" runs no CI, so the base's runs are not read, whatever they hold (decision private-repos-no-ci)
             return "green", ""
         try:
             if os.path.dirname(ALARM_EVENTS) not in sys.path:
@@ -2017,7 +2018,7 @@ class Host:
         workflow is not green). A required check with no row yet reads pending.
         `sha` is a head the caller already read (the review list has it from the pull request list); with none, the pull request is read.
         A failed read, a network fault included, is "unknown (...)": the caller never reads it as green.
-        Under merge.requiredChecks "none" it reads no check and no run, and is green: a repo with "none" runs no CI (decision private-repos-no-ci, owner ruling, 11:20 CST Nov 16)."""
+        Under merge.requiredChecks "none" it reads no check and no run, and is green: a repo with "none" runs no CI (decision private-repos-no-ci)."""
         if self.required == "none":
             return "green"
         try:
@@ -2049,7 +2050,7 @@ class Host:
                 num = self.pr_number(n)  # a number: pr() of a number reads nothing more
                 info = self.pr(num)
                 if self.required == "none" or head_none_stamp(self.cwd or ".", info["head"], DEFAULT_CONFIG, base=info["base"]) is not None:
-                    return "green", ""  # no CI run is read: the base's stamp says none, or a setup head's own stamp does (decision private-repos-no-ci, owner rulings 929 b and 11:20 CST Nov 16)
+                    return "green", ""  # no CI run is read: the base's stamp says none, or a setup head's own stamp does (decision private-repos-no-ci)
                 got = self.checks(num, warn=False, sha=info["head"])
                 red, pending, _ = self.classify(got, [], self.ignore, info["branch"])
                 runs = self.runs(info["head"])
@@ -2720,7 +2721,7 @@ def base_job_caps(root, ref):
     for f in base_workflows(root, ref):
         c, text = git(root, "show", f"{ref}:{f}")
         if c:
-            raise Stop(f"cannot read {f} on {ref}: {text}")
+            raise Stop(f"cannot read {f} on {ref}: {text} {WORKFLOW_READ_CITE}")
         texts.append(text)
     return job_caps(texts)
 
@@ -2736,7 +2737,7 @@ def stamp_git(root, *a):
 
 def head_none_stamp(root, head, path, branch=None, base="main"):
     """-> the stamp object at commit `head` when that stamp sets merge.requiredChecks "none" and the PR changes requiredChecks against its merge-base with origin/`base` (the local `base` when that ref is missing), else None.
-    A setup PR's own stamp is the source of requiredChecks that main reads (decision private-repos-no-ci, owner ruling 929 b), and a "none" the PR left as the base had it is not a
+    A setup PR's own stamp is the source of requiredChecks that main reads (decision private-repos-no-ci), and a "none" the PR left as the base had it is not a
     change, so main's stamp decides. A stamp missing at the merge-base reads as the default, "protection". Any other head stamp, a missing file, a commit this checkout lacks (`branch`,
     when given, is fetched once for it), an unreadable file, and a merge-base or a base stamp that cannot be read read as None: the base's stamp decides then.
     Cost: one `git cat-file`, one `git show`, one or two `git merge-base`, one more `git show`, and one fetch when the head is not local."""
@@ -2773,7 +2774,6 @@ def load_config(root, base, path, cite="", head=None, branch=None):
     `head`: the PR's head sha, and `branch` its branch (to fetch the head from). When the stamp at that commit sets requiredChecks "none" and the PR changes that field against its merge-base
     (head_none_stamp), the head's stamp is read and checked in full, and gives requiredChecks and nothing else: every other field is the base's, so a setup PR that turns
     CI off merges under the setup it makes, and a PR never loosens its own gate (decision private-repos-no-ci)."""
-    ref = f"origin/{base}"
     c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
     if c:
         raise Stop(f"git fetch origin {base} failed: {out}{cite}")
