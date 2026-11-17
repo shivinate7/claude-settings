@@ -38,6 +38,7 @@ HOOKS = os.path.join(HERE, "..", "hooks")
 sys.path.insert(0, HERE)
 sys.path.insert(0, HOOKS)
 import report_guard as RG  # noqa: E402  the one home of the shared correction tail, CORRECTION_TAIL
+import test_report_guard as trg  # noqa: E402  the module setup and teardown of the guard suite (one home)
 import test_report_guard_remedy as trr  # noqa: E402  the refusal fixtures and the Stop runner (one home)
 import test_report_guard_stalled as trs  # noqa: E402  the triage hold's fixture and its held() expectation (one home)
 
@@ -56,11 +57,11 @@ def tells_correction_only(text):
 
 
 def setUpModule():
-    trr.setUpModule()  # the config isolation, the model stub and the run folder, as the remedy suite sets them
+    trg.setUpModule()  # the config isolation, the model stub and the run folder, as the guard suite sets them
 
 
 def tearDownModule():
-    trr.tearDownModule()
+    trg.tearDownModule()  # the repo fixtures stay: the remedy suite removes them at its own teardown
 
 
 class CorrectionTailTable(unittest.TestCase):
