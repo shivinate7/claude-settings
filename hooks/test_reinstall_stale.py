@@ -185,6 +185,24 @@ def read_text(path):
         return ""
 
 
+# A string that names the main branch as a word: "main", "refs/heads/main", "origin/main" or ":-main".
+# A word inside a longer name, such as install_from_main.sh or __main__, does not match.
+MAIN_REF = re.compile(r"(?<![\w.])(?:refs/heads/|origin/|:-)?main(?![\w.-])")
+
+
+def code_string_nodes(tree):
+    """The str constants of the code. A docstring is prose, so it is left out. The parse is ast's, so a comment
+    never reads as code."""
+    prose = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                prose.add(id(first.value))
+    return [node for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in prose]
+
+
 def write_file(path, text, mode=None):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="\n") as handle:
@@ -1053,11 +1071,18 @@ class StaleInstall(unittest.TestCase):
 class HookFile(unittest.TestCase):
     """Static reads of the hook source and of settings.json. The behaviour cases above prove the rest."""
 
-    def test_hook_source_has_no_literal_main_ref(self):
+    def test_hook_names_main_only_as_the_pin_fallback_constant(self):
         text = read_text(HOOK)
         self.assertTrue(text.strip(), "scope: %s has no text to read" % HOOK)
         for needle in ("refs/heads/main", ":-main"):
             self.assertNotIn(needle, text, "the hook names %r literally" % needle)
+        tree = ast.parse(text)
+        allowed = {id(node.value) for node in tree.body if isinstance(node, ast.Assign)
+                   and any(isinstance(target, ast.Name) and target.id == "PIN_FALLBACK_BRANCH" for target in node.targets)
+                   and isinstance(node.value, ast.Constant) and node.value.value == "main"}
+        named = [(node.lineno, node.value) for node in code_string_nodes(tree)
+                 if id(node) not in allowed and MAIN_REF.search(node.value)]
+        self.assertEqual(named, [], "the hook names main in code outside PIN_FALLBACK_BRANCH: %r" % named)
 
     def test_hook_is_wired_once_under_user_prompt_submit(self):
         with open(SETTINGS, encoding="utf-8") as handle:
