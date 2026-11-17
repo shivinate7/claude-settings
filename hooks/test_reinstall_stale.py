@@ -929,6 +929,20 @@ class StaleInstall(unittest.TestCase):
                              % (len(calls), calls))
         self.assertEqual(network_reads(fx), [], "a no-trigger prompt read origin: %r" % calls)
 
+    # The seen file keeps the last twenty heads. It starts with twenty-five older heads, so a reinstall on a new head
+    # both adds one and drops the oldest six. The expected list is written out here, not read from the hook.
+
+    def test_seen_file_keeps_the_last_twenty_heads(self):
+        fx, old, new = behind(self._testMethodName)
+        older = ["install:%040x" % number for number in range(1, 26)]
+        write_file(fx.seen_path, "".join(key + "\n" for key in older))
+        self.assertEqual(read_text(fx.seen_path).splitlines(), older,
+                         "scope: the seen file does not start with the 25 older heads")
+        fx.run_hook()
+        self.assertEqual(fx.installer_runs(), ["--cloud"], "scope: the new head did not run the installer once")
+        self.assertEqual(read_text(fx.seen_path).splitlines(), older[6:] + ["install:" + new],
+                         "the seen file does not hold the last 20 heads, newest last")
+
     # The installer's environment: the record's ref, and a hook input that no SessionStart entry fires on.
 
     def test_installer_gets_the_record_ref_even_when_the_hook_env_names_another(self):
