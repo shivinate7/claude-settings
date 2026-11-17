@@ -668,10 +668,10 @@ GLOSS_LEAD_RE = re.compile(r"[A-Za-z]{2,}\s+[A-Za-z]{2,}\s*(?:[,:—–=]|--|\s-
 # They use a stricter gloss than a record id: the separator form needs two real words after it (a word that starts
 # with a letter, so "(env -vC, want ask)" is no gloss), and the possessive form ("#2015's own rows") and the
 # "two words, then a colon" lead are no gloss. A `#N` passes right after "PR", "PRs", "pull request", "issue",
-# "commit" or "by" or "via", alone or as a list ("PRs #2015, #2016", "PR #2015 and #2016", "PR: #2015"); after
+# "commit" or "by" or "via", alone or as a list ("PRs #N, #M", "PR #N and #M", "PR: #N"); after
 # "in" only when a past participle comes first ("built in #1300", which the mistake guard asks for, but not
 # "rows in #1300"); and anywhere in a Done item, where `reports-done-format` makes the writer cite a PR as `#N`.
-# A `#N` glued to a word ("PR#2015") or to a hyphen ("#2015-check") is no PR ref and no gloss. After the separator,
+# A `#N` glued to a word ("PR#N") or to a hyphen ("#2015-check") is no PR ref and no gloss. After the separator,
 # a gloss starts with a noun, so a verb or a link word ("needs review", "is open") is no gloss.
 REF_ID_RE = re.compile(r"(?<![\w/.#:$&-])s\d{4,6}(?::\d+)?(?!\w|\.\w)|(?<![/.#:$&-])#\d{3,5}(?!\w|\.\w)")
 REF_GLOSS_AFTER_RE = re.compile(
