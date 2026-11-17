@@ -4509,6 +4509,7 @@ guard_set_lists_hold() {  # $1 the check's name, $2... the modules: each is in t
     listed_in "$REPO_ROOT/install.sh" '/^  for gf in .*question_form\.py/p' "install.sh copy loop" "$m"
     listed_in "$REPO_ROOT/install.ps1" '/^  for gf in .*question_form\.py/p' "install.ps1 copy loop" "$m"
     listed_in "$REPO_ROOT/install.ps1" '/^    foreach (\$shared in /p' "install.ps1 set loop" "$m"
+    # The guard-set case line is the one that sets `code guard sweep`; the shoot list also names question_form.py.
     listed_in "$REPO_ROOT/.github/scripts/ci-scope.sh" '/hooks\/question_form\.py|.*code guard sweep /p' "ci-scope.sh case" "$m"
   done
   if [ "$nmiss" -eq 0 ]; then ok "$name"; fi

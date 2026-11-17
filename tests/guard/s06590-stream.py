@@ -791,7 +791,7 @@ sh("detached-launch: (ci-job x | tail)&, a subshell backgrounded by a glued &, i
 sh("detached-launch: cmd 2>&1&, a redirect's & then a glued background &, is refused",
    "cmd 2>&1&", "deny", "detached-launch", cwd=NOGIT)
 # An unquoted URL with `&` in it reads as a glued `&`: bash backgrounds `curl x?a=1` and runs `b=2`. The
-# refusal is the cost owner ruling own-716-b-keep-2156-glued-amp accepted; its wrong-refusal rate is unmeasured.
+# refusal is the cost of reading that `&` as a job; how often it refuses a URL the user meant is unmeasured.
 # The quoted URLs keep their `&` in quotes, so they are allowed.
 sh("detached-launch: curl x?a=1&b=2, an unquoted URL with a glued &, is refused",
    "curl x?a=1&b=2", "deny", "detached-launch", cwd=NOGIT)

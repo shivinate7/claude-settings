@@ -213,11 +213,11 @@ def hu_copy_check(drop="reread_check.py"):
                   "spawn; the intact copy refuses the call for the unread handoff" % drop)
 
 
-def hu_fix_check(drop="reread_check.py"):
-    """install-hooks-whole, with the fix named (owner ruling own-896-897-glued-amp-b, 897 b): with `drop` missing beside
-    guard.py, a flagged call is refused as guard-crash, and the reason names the fix: run install.sh, then retry. That
-    text is the load-failure refusal (guard.py, _print_crash_refuse), which every missing part gets. No rule runs when the
-    load fails, so the handoff-unread reason never reaches this call."""
+def hu_fix_verifier(drop="reread_check.py"):
+    """install-hooks-whole: with `drop` missing beside guard.py, a flagged call is refused as guard-crash, and the
+    reason names the fix: run install.sh, then retry. That text is the load-failure refusal (guard.py,
+    _print_crash_refuse), which every missing part gets. No rule runs when the load fails, so the handoff-unread
+    reason never reaches this call."""
     cfg = os.path.join(ROOT, "hu-fix")
     hu_files(cfg, flag=True, handoff=True)
     dropped = _guard_copy("hu-fix-no-" + drop[:-3], drop)
@@ -232,7 +232,7 @@ def hu_fix_check(drop="reread_check.py"):
 
 
 LOG_CHECKS_EXTRA.append(("handoff-unread: install-hooks-whole: a missing reread_check's refusal names install.sh as the fix",
-                         hu_fix_check))
+                         hu_fix_verifier))
 
 
 def _hu_copy_run(folder, config, tool="Bash", tool_input=None):
