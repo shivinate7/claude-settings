@@ -193,6 +193,17 @@ lane's real branch. A title set after the start is not judged. `start_session` h
 start and none is judged.
 Kind of risk: likely.
 
+**The lane start in one pass.** A lane start is judged by its seven rules together (`lane-one-topic`,
+`brief-ids-in-roster`, `agent-model-floor`, `lane-effort-pin`, `lane-repo-tag`, `lane-start-settings`,
+`lane-title-slug`) and refused once: the reason opens with `N lane-start rules broken:` and lists each rule with its own
+remedy. One broken rule keeps its own refusal. An override names one rule and lifts only that one; the call then
+goes on to the rules still broken. `bin/lane-start <slug> <topic> <grant-line> <brief-file>` prints the start's fields
+from the constants in `hooks/shared_names.py` (`LANE_EFFORT`, `LANE_MODEL`, the tag prefixes, `LANE_BRIEF_MARKER`) and runs
+the same collected check before it prints, so the helper and the guard cannot differ; a session's handoff names the helper
+and carries no recipe. Outcome: a lane starts in one try, not four or five (the incident of 2026-11-15, two sessions
+each refused once per rule). Known gap: the helper judges the checkout's repo tag only when it reads the repo itself.
+Kind of risk: likely.
+
 **The step-up.** Guard rule `roles-third-round-steps-up` reads the `Round N of 3` marker in
 the brief. A line that starts with it counts. When the brief's first non-blank line starts with no marker, the
 leftmost marker on that line also counts if it is `Round N of 3`, such as "Builder, Round 3 of 3. Lane ...". A

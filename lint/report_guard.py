@@ -117,7 +117,8 @@ short keys, so it stays as the refusals and reply-judge counter files do.
 
 Hand-off cite (rule output-never-hand-off-doable-step): a "Why yours:" line, in prose above the report or in the Input
 Needed or Next item (plain, behind a list marker, or in bold), that gives a capability reason (can't, cannot, refuse,
-refused, unable to, denied, forbidden, no access, not allowed, not permitted, unavailable, 403, blocked, not available)
+refused, unable to, denied, forbidden, no access, lack access, don't have access, no permission to, not allowed,
+not permitted, unavailable, 403, blocked, not available)
 must cite `(route <id>)` for a route row whose outcome on this surface is refused or asks, a
 tool in backticks that hooks/refusal_note.py recorded for this session, or `(measured <date>, <check and result>)`. A
 line with a choice, login or safety-kept phrase needs no cite, and "blocked until" or "not available until" is a
@@ -134,12 +135,24 @@ that says refused or asks, a dated `(measured ...)`, or a tool the classifier re
 (a backtick span, an MCP tool name, a word such as returned or refused, an HTTP 4xx, a non-zero exit). A try is a call
 whose result has an error flag or an exit code above zero (an HTTP 4xx or 5xx counts only in an error result, or in an
 agent's relayed text); a later success of the same act, program, verb and target cancels it, and a --dry-run call is no
-try. A local merge is no try of pr-merge. A notice is no try. Not read: an act outside the table, a
+try. A local merge is no try of pr-merge. A notice is no try. An act outside the table is the probe check's (below). Not read: a
 subject that is not the writer's own, a question, a Why yours line (the hand-off guard's), a line or sentence that starts
 with Unvetted:, quoted or coded text, a conditional, a dependency (until, before) and a sentence that names a rule. One
 block, then the rewrite runs unchecked. A check that cannot run prints an UNKNOWN note to stderr and allows.
 Cost: a regex over the reply; on a claim, one pass over the transcript this hook already holds and one refusals file read;
 on a claim with a slug in parentheses, one read of the rule files per run; no file written, no timer, no log.
+
+Probe check (decision cant-claim-needs-probe, rule output-never-hand-off-doable-step): a prose sentence that says this session
+cannot do an act outside the table (the cannot-claim check's phrases, which also hold "have no access", "no access to" and
+"unable") passes only when the turn after the last incoming message holds a main-session tool call (a peer's ack of a send of
+the turn starts no turn; only the parent, by the id in the lane record, acks a send to @parent), or the sentence is in the past tense (could not) with no hand-off to the owner in it or in the next sentence, names its check (an
+exit code, a status form such as HTTP 500 or 500 error, or a backtick span or tool name beside a result word; a span alone
+names the object, and a bare word such as failed names none), says `unchecked` as a whole word or carries a route or measured
+cite. A claim whose object is a fact, a choice or a size (_clause.judged_object: "can't see why", "can't fix this in one
+line") is a judgement, not a claim. A table act
+keeps the cannot-claim verdict, and the one block joins any other reason. Not read, for this form only: a blockquote with no
+report label (an agent's report or a pasted refusal), a row that another writer's label opens ("Agent report:") and a Why yours line. One refusal line per sentence: a sentence that holds a table claim is listed under that reason alone. The remedy names no act. Cost: the cannot-claim
+check's regex and the turn's records already in hand; no file, no process, no timer, no log.
 
 Review-record check (incident: on Nov 7, 3 of 67 open PRs had a review record): in a lane (own get_session record tagged cs-build:lane, or with a parent), a reply line outside fences
 that holds `round <N>` or `reviewer` and a capital PASS or PASSED claims a PASS, in either order; an inline code span counts. A PASS a negation governs ("not PASS",
@@ -701,10 +714,10 @@ def _claims_answered(plain):
     return False
 
 
-def _prose_lines(text, questions=False):
-    """Each line of `text` that is the reply's own prose, as its body: no blockquote marker, outside fenced code, and not
+def _prose_rows(text, questions=False):
+    """(body, quoted) of each line of `text` that is the reply's own prose: no blockquote marker, outside fenced code, and not
     a line that ends in `?` (a question claims nothing), unless `questions` keeps those for a reader that judges a
-    sentence at a time. The one line reader of the answered and cannot-claim checks."""
+    sentence at a time. `quoted` is True when the line sat in a blockquote."""
     fence = ""
     for line in text.splitlines():
         body = QUOTE_PREFIX.sub("", line, count=1).strip()
@@ -714,7 +727,13 @@ def _prose_lines(text, questions=False):
             continue
         if fence or (not questions and body.rstrip("*_)\"' ").endswith("?")):
             continue
-        yield body
+        yield body, ">" in QUOTE_PREFIX.match(line).group()
+
+
+def _prose_lines(text, questions=False):
+    """Each line of `text` that is the reply's own prose, as its body (_prose_rows). The one line reader of the answered
+    and cannot-claim checks."""
+    return (body for body, _ in _prose_rows(text, questions))
 
 
 def answered_problem(text):
@@ -1267,11 +1286,11 @@ def question_problem(records, turn, text, hook):
             if any(writer in t and u.get("id") in delivered for u, t in zip(uses, sends)):
                 return "", ""
     page = layout.waiting_page(root) if root else "unknown"
-    here = None if page == "unknown" else page.rstrip("/")
+    here = None if page == "unknown" else page
     for u in uses:
         inp = u.get("input")
         if (str(u.get("name", "")).startswith(ARTIFACT_DATA) and isinstance(inp, dict) and items_write(inp)
-                and (here is None or str(inp.get("url", "")).rstrip("/") == here)):
+                and (here is None or layout.is_waiting_page_url(root, str(inp.get("url", ""))))):
             return "", ""
     if here is None:
         # No page: the question is asked in the reply or the box, so the box counts.
@@ -1686,10 +1705,11 @@ def _forms_re(forms):
     return r"\b(?:%s)\b" % "|".join(_clause.form_pattern(form) for form in forms)
 
 
-# The capability words both readers share: the three _clause.CANT_FORMS (the start of _clause.CANNOT_FORMS), refused,
-# denied, forbidden, no access, not allowed or permitted, unavailable, the 403 token, and blocked or not available.
+# The capability words both readers share: the three _clause.CANT_FORMS (the start of _clause.CANNOT_FORMS), the access and
+# permission forms (_clause.ACCESS_FORMS), refused, denied, forbidden, no access, not allowed or permitted, unavailable,
+# the 403 token, and blocked or not available.
 # "blocked until" and "not available until" wait on another act, so they are a dependency, not a capability.
-_CAPABILITY_CORE = _forms_re(_clause.CANT_FORMS) + (
+_CAPABILITY_CORE = _forms_re(_clause.CANT_FORMS + _clause.ACCESS_FORMS) + (
     r"|\brefuse[sd]?\b|\bdenied\b|\bforbidden\b|\bno access\b|\b(?:isn['’]t|not)\s+(?:allowed|permitted)\b"
     r"|\bunavailable\b|\b403\b|\bblocked\b(?!\s+until\b)|\bnot available\b(?!\s+until\b)")
 # The words only the hand-off cite reads: the two _clause.COULD_NOT_FORMS, the reject forms, and the 401 token.
@@ -1939,7 +1959,7 @@ _PR = r"(?:PRs?|pull[- ]requests?)"
 _PREPOSITION = "(?:%s)" % "|".join(_clause.PREPOSITIONS)  # the prepositions have one home, lint/_clause.py
 CANNOT_PR_RE = re.compile(r"\b" + _PR + r"\b", re.I)
 # Act -> the words that name it, read from the verb the phrase governs: each pattern is anchored at the start of the
-# window, so a later noun ("the merge commit") names no act. A claim of an act outside this table is no claim.
+# window, so a later noun ("the merge commit") names no act. A claim of an act outside this table is the probe form's (PROBE_ACT).
 CANNOT_ACTS = (
     ("pr-open", re.compile(r"^(?:open(?:ing)?|creat(?:e|ing)|mak(?:e|ing)|rais(?:e|ing)|fil(?:e|ing)|submit(?:ting)?)\b(?:\s+(?!(?:%s)(?![\w-]))\S+){0,4}?\s+%s\b" % (_PREPOSITION, _PR), re.I)),
     ("pr-merge", re.compile(r"^(?:be\s+)?merg(?:e|ed|ing)\b", re.I)),
@@ -2032,6 +2052,26 @@ def _gives_reason(head, tail, following):
 
 
 CANNOT_HEAD = "Cannot-claim guard (rule output-never-hand-off-doable-step): a line says an act cannot be done and "
+PROBE_ACT = ""  # the act of a claim whose verb names no table act: the probe form (cant-claim-needs-probe) reads it
+CANNOT_NO_PROBE = (
+    "Probe guard (cant-claim-needs-probe, rule output-never-hand-off-doable-step): a line says an act cannot be done and "
+    "this turn holds no tool call. Remedy: run one probe of the act, then say what it returned; or end the line with "
+    "`(route <id>)` for a route row that says refused or asks, or with `(measured <date>, <check and result>)`; or put "
+    "`unchecked` inside the sentence. Lines:")
+# A probe claim names its check by an exit code, a status form (_clause.STATUS_FORM_PATTERN: "HTTP 500", "500 error", not
+# ", 500 rows") or a backtick span or tool name beside a result word. A span alone names the object ("import `inbox.mbox`").
+PROBE_EXIT_RE = re.compile(r"\bexit(?:ed|s)?(?:\s+with)?(?:\s+(?:code|status))?\s+[1-9]\d*\b", re.I)
+PROBE_STATUS_RE = re.compile(_clause.STATUS_FORM_PATTERN, re.I)
+PROBE_NAMED_RE = re.compile(r"`[^`\n]+`|\bmcp__\w+")
+PROBE_RESULT_RE = re.compile(r"\b(?:%s|exited)\b" % "|".join(_clause.CHECK_WORDS), re.I)
+PROBE_BESIDE_WORDS = 3  # words that may sit between a span and its result word, in one clause
+PROBE_GAP_STOP_RE = re.compile(r"[;:.!?—–]")
+# A past claim ("could not") that hands the act to the owner, in its own sentence or the next, is a hand-off, not a report
+# of a failed try.
+PROBE_HAND_OFF_RE = re.compile(
+    r"\byou(?:['’]ll|['’]d| will| would| need| must| should| have to| can| could| may)\b|\bfor you to\b|\bover to you\b"
+    r"|\bhand(?:ing)?\s+(?:it\s+)?(?:off|over)\b|\bplease\s+(?:run|do|import|check|try)\b", re.I)
+UNCHECKED_RE = re.compile(r"(?<![\w-])unchecked(?![\w-])", re.I)
 CANNOT_NO_TRY = (
     CANNOT_HEAD + "this turn shows no failed try of it. A notice is no try. Remedy: run the act on one route; if it "
     "fails, name on the line what you ran and what it returned, or end the line with `(route <id>)` for a route row "
@@ -2084,15 +2124,18 @@ def _scan(parts):
 
 
 def _claim(body, mask, hit, floor, scan):
-    """(act, window, past) when the phrase `hit` claims this session cannot do a table act, else None. `body` and `mask` are one
+    """(act, window, past) when the phrase `hit` claims this session cannot do an act, else None. The act is a table act, or
+    PROBE_ACT (the empty string) when the phrase governs an act outside the table. `body` and `mask` are one
     sentence and `scan` its clauses (_scan); `floor` is where the previous phrase of the sentence ended, so words that
     condition it do not condition this one. The phrase's clause starts after the last separator (a comma, a dash, but, a
     stop) before it and ends at the first stop after it (a comma does not end it). Not a claim: a conditional or a negator
     just before the phrase, a subject that is not the writer's own (_clause.own_subject), a verb of telling or waiting
-    after it, a dependency (until, before, without your) in its clause, a verb that names no table act, a blocker of that
+    after it, a dependency (until, before, without your) in its clause, a judgement on an act outside the table (its object
+    is a fact, a choice or a size: _clause.judged_object), a blocker of that
     act (_blocker_res) in its own clause (a comma and, but or or starts another) or in the part after the next semicolon
     or joined to the clause (_joined_blocker), a sentence that names a rule, or a real rule or decision id in parentheses
-    in its clause (_names_rule_id, read last, so only a line that is otherwise a claim pays its file read)."""
+    in its clause (_names_rule_id, read last, so only a line that is otherwise a claim pays its file read). A blocker is a
+    table act's: an act outside the table has the no-grant blocker alone."""
     parts, starts, conjs = scan
     at = max(bisect.bisect_right(starts, hit.start()) - 1, 0)
     first = at
@@ -2119,9 +2162,9 @@ def _claim(body, mask, hit, floor, scan):
     if CANNOT_RULE_RE.search(_clause.veil(body[left:right], mask[left:right])):  # `rules.md` names no rule
         return None
     window = _clause.first_words(after)
-    act = _window_act(window, before + " " + after)
-    if not act:
-        return None
+    act = _window_act(window, before + " " + after) or PROBE_ACT  # no table act: the probe form reads it
+    if not act and _clause.judged_object(window, after):
+        return None  # "can't agree more", "can't see why", "can't fix this in one line": a judgement, not an act on a system
     state_re, reason_re = _blocker_res(act)[:2]
     clause_left = max((c.start + len(c.join) for c in conjs if c.lead_at >= left and c.start + len(c.join) <= hit.start()),
                       default=left)
@@ -2221,16 +2264,42 @@ def _strip_emphasis(text):
     return "".join(out), keep
 
 
-def cannot_lines(text):
-    """(sentence, act, window, past, prior, following, tail) for each phrase of the reply's prose that claims a table act
-    cannot be done; `tail` is the sentence after the phrase. The text is read a sentence at a time, with emphasis marks
-    removed (_strip_emphasis); the sentences returned keep them. A sentence that ends in `?` asks and claims nothing, one
-    that starts with Unvetted: (the past-ruling guard's form) is not read, and neither is a line that starts with it or a
-    Why yours line (the hand-off guard's). Every phrase of a sentence is judged."""
+# A row that another writer's label opens ("Agent report:", "Builder note:", "Report from the lane:"): its claim is that writer's.
+OTHER_WRITER_ROW_RE = re.compile(
+    r"^\W*(?:(?:agent|subagent|builder|reviewer|designer|refuter|explore|lane|peer|worker)\b[^:\n]{0,30}"
+    r"|report\s+(?:from|of)\b[^:\n]{0,40}):", re.I)
+
+
+def _read_quote(text_rows):
+    """[(body, probe_ok)] for the (body, quoted) rows of `text_rows` (_prose_rows): probe_ok is False for a blockquote that
+    holds no report label (LABEL_ORDER), and, in a quote that holds one, for each row another writer's label opens
+    (OTHER_WRITER_ROW_RE). A quote with a label is the writer's own report. Any other quote is an agent's report or a pasted
+    refusal, which states another party's claim."""
+    rows = list(text_rows)
+    ok, i = [True] * len(rows), 0
+    while i < len(rows):
+        j = i
+        while j < len(rows) and rows[j][1]:
+            j += 1
+        if j > i:
+            report = any(_report_label_end(body) for body, _ in rows[i:j])
+            ok[i:j] = [report and not OTHER_WRITER_ROW_RE.match(body) for body, _ in rows[i:j]]
+        i = max(j, i + 1)
+    return [(body, flag) for (body, _), flag in zip(rows, ok)]
+
+
+def _read_claims(text):
+    """(sentence, act, window, past, prior, following, tail) for each phrase of the reply's prose that claims this session
+    cannot do an act; `tail` is the sentence after the phrase. The act is a table act, or PROBE_ACT for an act outside the
+    table, kept only on a line the probe form reads (_read_quote, and no Why yours line, which the hand-off guard judges).
+    The text is read a sentence at a time, with emphasis marks removed (_strip_emphasis); the sentences returned keep them.
+    A sentence that ends in `?` asks and claims nothing, one that starts with Unvetted: (the past-ruling guard's form) is
+    not read, and neither is a line that starts with it or a Why yours line of a table act (the hand-off guard's). Every
+    phrase of a sentence is judged."""
     if not CANNOT_RE.search(CANNOT_EMPHASIS_RE.sub("", text)):
         return []
     found, hand_off = [], None
-    for raw in _prose_lines(text, questions=True):
+    for raw, probe_ok in _read_quote(_prose_rows(text, questions=True)):
         body, keep = _strip_emphasis(raw)
         if CANNOT_UNVETTED_RE.match(raw) or not CANNOT_RE.search(_mask(body)):
             continue
@@ -2238,6 +2307,7 @@ def cannot_lines(text):
             hand_off = {line for line in hand_off_lines(text) if CHOICE_RE.search(line) or CAPABILITY_SKIP_RE.search(line)}
         if raw in hand_off:
             continue
+        probe_ok = probe_ok and not WHY_YOURS_FORM_RE.match(raw)
         mask = _mask(body)
         flags = [char != blank for char, blank in zip(body, mask)]  # True where the mask hides a character
         spans = _clause.sentences(body, flags)
@@ -2254,12 +2324,17 @@ def cannot_lines(text):
             for hit in CANNOT_RE.finditer(shadow):
                 claim = _claim(piece, shadow, hit, floor, scan)
                 floor = hit.end()
-                if claim:
+                if claim and (claim[0] or probe_ok):
                     prior = raw[at(spans[k - 1][0]):keep[spans[k - 1][1]]].strip() if k else ""
                     following = raw[at(spans[k + 1][0]):keep[spans[k + 1][1]]].strip() if k + 1 < len(spans) else ""
                     tail = raw[keep[begin + hit.end()]:keep[stop]]
                     found.append((sentence, claim[0], claim[1], claim[2], prior, following, tail))
     return found
+
+
+def cannot_lines(text):
+    """The claims of `_read_claims` that name a table act: the cannot-claim check's, which the hand-off guard leaves to it."""
+    return [claim for claim in _read_claims(text) if claim[1]]
 
 
 def _pulls_act(token):
@@ -2560,20 +2635,30 @@ def cannot_problem(records, text, refused=()):
     (_cited), and it names its check (_names_check, or a reason when a failed try sits in the turn: _gives_reason). A
     sentence in the past tense (could not) whose failed try a later call of the same act and target cancelled reports a past
     failure and is let pass; a present claim (cannot) after that later success still blocks.
-    A sentence with no try is listed under the no-try reason, one with a try and no check under the no-check reason. The remedy names no act (git-remedy-never-names-target)."""
-    claims = cannot_lines(text)
+    A sentence with no try is listed under the no-try reason, one with a try and no check under the no-check reason. The remedy names no act (git-remedy-never-names-target).
+    The probe form (decision cant-claim-needs-probe): a sentence that claims an act outside the table (PROBE_ACT) is listed
+    under the probe reason when `records` hold no main-session tool call, unless it reports a failure (a past phrase:
+    could not), names its check (_names_probe_check), says `unchecked` as a whole word or carries a route or measured cite. The one refusal joins whichever reasons apply."""
+    claims = _read_claims(text)
     if not claims:
         return ""
-    if guard is None:
-        _load_guard()
-    if guard is None:  # a guard that cannot read cannot accuse
-        print("cannot-claim guard: UNKNOWN, the transcript parser did not load, so the claims went unchecked.",
-              file=sys.stderr)
-        return ""
-    recovered = set()
-    tries = failed_tries(records, refused, recovered)
+    table = [claim for claim in claims if claim[1]]
+    on_table = {claim[0] for claim in table}  # a sentence that holds a table claim is listed under that reason alone
+    probes = [] if _main_tool_calls(records) else list(dict.fromkeys(
+        claim[0] for claim in claims if not claim[1] and claim[0] not in on_table
+        and (not claim[3] or PROBE_HAND_OFF_RE.search(claim[0]) or PROBE_HAND_OFF_RE.search(claim[5]))
+        and not UNCHECKED_RE.search(claim[0])
+        and not _names_probe_check(claim[0]) and not _cited(claim[0], refused, PROBE_ACT)))
     no_try, no_check = [], []
-    for sentence, act, _, past, prior, following, tail in claims:
+    if table and guard is None:
+        _load_guard()
+        if guard is None:  # a guard that cannot read cannot accuse
+            print("cannot-claim guard: UNKNOWN, the transcript parser did not load, so the claims went unchecked.",
+                  file=sys.stderr)
+            table = []
+    recovered = set()
+    tries = failed_tries(records, refused, recovered) if table else {}
+    for sentence, act, _, past, prior, following, tail in table:
         backed = _backed(tries, act, sentence)
         if past and not tries.get(act) and act in recovered:  # every failed try of the act was later cancelled
             continue
@@ -2585,7 +2670,54 @@ def cannot_problem(records, text, refused=()):
                 and sentence not in no_check:
             no_check.append(sentence)
     return " ".join(head + "".join("\n- " + line for line in lines)
-                    for head, lines in ((CANNOT_NO_TRY, no_try), (CANNOT_NO_CHECK, no_check)) if lines)
+                    for head, lines in ((CANNOT_NO_TRY, no_try), (CANNOT_NO_CHECK, no_check), (CANNOT_NO_PROBE, probes))
+                    if lines)
+
+
+def _names_probe_check(sentence):
+    """True when the sentence of a probe claim names its check: an exit code (PROBE_EXIT_RE), a status form
+    (PROBE_STATUS_RE), or a backtick span or tool name (PROBE_NAMED_RE) beside a result word (PROBE_RESULT_RE): in the
+    same clause, with at most PROBE_BESIDE_WORDS words between. A word the claim phrase holds does not count, nor a bare
+    word of the writer (_clause.check_word_counts: "I ran `make build`" names no result). A span alone names the object
+    of the act, and a bare word names no call."""
+    text = _strip_emphasis(sentence)[0]
+    if PROBE_EXIT_RE.search(text) or PROBE_STATUS_RE.search(text):
+        return True
+    names = [m.span() for m in PROBE_NAMED_RE.finditer(text)]
+    phrases = [hit.span() for hit in CANNOT_RE.finditer(_mask(text))]
+    for word in PROBE_RESULT_RE.finditer(text):
+        at = word.start()
+        if any(a <= at < b for a, b in names + phrases) or not _clause.check_word_counts(text[:at], word.group()):
+            continue
+        for a, b in names:
+            gap = text[b:at] if b <= at else text[word.end():a]
+            if not PROBE_GAP_STOP_RE.search(gap) and len(gap.split()) <= PROBE_BESIDE_WORDS:
+                return True
+    return False
+
+
+def _turn_acks(records, hook):
+    """The ack map of last_incoming_index for the cannot-claim turn: each peer sender acks a send to its own session id.
+    Only the parent, whose id this session's lane record names (_own_lane_read), also acks a send to @parent. A send to
+    @parent that another peer answers is no ack, so that peer's message starts a turn. The lane record is read only when
+    the transcript holds a peer message and a send to a parent target."""
+    senders = {sender for sender in map(peer_sender, records) if sender}
+    acks = {sender: {sender} for sender in senders}
+    if not senders or not any(send_targets(use) & PARENT_TARGETS for rec in records if not rec.get("isSidechain")
+                              for use in tool_uses(rec)):
+        return acks
+    _hooks_on_path()
+    from override import remote_session_id
+    own_id = remote_session_id()
+    parent = _own_lane_read(hook.get("transcript_path"), own_id)[1] if own_id else None
+    if parent in senders:
+        acks[parent] = {parent} | PARENT_TARGETS
+    return acks
+
+
+def _main_tool_calls(records):
+    """True when `records` hold a tool call of the main session (a sidechain's calls are an agent's, not this turn's)."""
+    return any(True for rec in records if not rec.get("isSidechain") for _ in tool_uses(rec))
 
 
 # Review-record check: a lane's round PASS claim needs a review record for the PR's live head. See the module docstring.
@@ -3243,7 +3375,7 @@ def main():
         try:
             # A try backs a claim only in this turn: after the last message, a peer's included. A peer's reply to a send of
             # this turn is an ack and starts no turn, as in the question check.
-            acks = {sender: {sender} | PARENT_TARGETS for sender in map(peer_sender, records) if sender}
+            acks = _turn_acks(records, hook)
             idx = last_incoming_index(records, acks)
             ack_turn = records if idx is None else records[idx + 1:]
             cannot = cannot_problem(ack_turn, text, cannot_refused)
