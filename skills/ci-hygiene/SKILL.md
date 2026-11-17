@@ -159,12 +159,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    no Fix check line meets no merge-shape test, so the verifier's read is the check there. The lane never works around the refusal. A FAIL starts a
    new lane at round 1.
    **A lane that is only behind main is not named.** Only a conflict names a lane (owner, 2026-11-17 14:20 CST,
-   page item 925 `main-in-once-before-lint`, pick d; it replaces ruling `own-923-c-ready-lanes-bring-main-in`
-   for ready lanes). The merge tool does one merge of main into the head at merge time and keeps the green run
-   (decision `lane-main-in-at-merge-time`). That needs two lane-lint changes that are not on main yet: the lint
-   carries over a clean merge of main (PR 3481) and merges main into a head behind it (PR 3552). Until both are
-   on main, the lane does acts 1 and 4 above by hand at merge time. The push is a new head, so its run and lint
-   start again (unmeasured).
+   page item 925 `main-in-once-before-lint`, pick d). Once PR 3481 and PR 3552 are on main, the merge tool does one
+   main-in at merge time and keeps the green run (rule d, decision `merge-needs-current-base`). Until both are on
+   main, rule d is not in force and ruling `own-923-c-ready-lanes-bring-main-in` stands.
    Until the cutover, every repo except degen and home batches across sessions too (`git-integration-branch-merge`).
 9. **Wait without loops.** Wait for the CI-wake notice that follows `gh pr ready`. A push starts no
    notice. Run `merge <pr> --ready` first. When it exits 0 with the line "stays a draft (", in cloud mark ready by MCP `update_pull_request` `draft: false` (route

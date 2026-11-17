@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner pick A for R42 part 2 (per-lane merge). Rule M3, per lane: the head must merge cleanly with the base tip. Its own run must be green, or still pending under a lane-lint PASS that names its live head. The head need not hold the tip. At merge time the tool does one merge of main into the head and keeps the green run (decision `lane-main-in-at-merge-time`).
+Owner pick A for R42 part 2 (per-lane merge). Rule M3, per lane: the head must merge cleanly with the base tip. Its own run must be green, or still pending under a lane-lint PASS that names its live head. The head need not hold the tip.
 
 Owner ruling `own-merge-on-lint-pass` (owner, 2026-11-15 18:21 CST, typed "B for sure") added the pending case. Main's run after the merge is the check, and a red main reverts the blamed commit.
 
@@ -14,6 +14,13 @@ Owner ruling `own-merge-on-lint-pass` (owner, 2026-11-15 18:21 CST, typed "B for
 - The tool sends its PUT past a BLOCKED read only when a PASS lifted the pending run. BEHIND still refuses.
 - The batch's wait for the base to move, the heal merge commit and the small-move suite run are gone.
 
+Rule d (main comes in once, at merge time). Only a conflict names a lane for a main-in after a batch merge (skill `ci-hygiene` step 8). Once PR 3481 and PR 3552 are on main, at merge time the tool does one main-in and keeps the green run. It reads GitHub's merge state after its main-in push, so the BLOCKED or BEHIND row of decision `standing-merge-grant` does not clash. Until both are on main, rule d is not in force and ruling `own-923-c-ready-lanes-bring-main-in` stands (the coordinator's reading, not the owner's).
+
+- Based on (ruling): owner, 2026-11-17 14:20 CST, page item 925 `main-in-once-before-lint`, pick d, item closed 14:27 CST. His words: "Lanes bring main in only on conflict; the merge tool does one main-in at merge time and keeps the green run (needs #3481 and #3552 on main)."
+- Based on (ruling): owner, 2026-11-16 13:46 CST, page item 923 pick c, typed in the coordinator's chat, ruling `own-923-c-ready-lanes-bring-main-in`: ready lanes, or lanes one step from ready, bring main in after each merge. Pick d replaces it for ready lanes once it is in force. Ruling c was never filed to a record on main.
+- Open, not built: a grade by priority that would bring some PRs to main together (page item 924). No grade is defined, so nothing here tiers a lane.
+- Why d: pick c would push every ready lane after each merge. Each push is a new head, a new draft run, a new lint and a new record, and the lint runs one PR at a time (unmeasured). The outcome protected is a clean ready queue.
+
 Why: branch protection on `main` has `strict` false, so GitHub reports BEHIND only when `strict` is on (`main-branch-protection`). The tool's own reads are the gate.
 
 Residual risk: a clean merge can still break a suite, and a head can merge before its own run ends. Main's run after the merge finds it. A red main is then held under the red-main rule (`git-red-main-reverts`) until its revert merges with its tree proven.
@@ -21,6 +28,6 @@ Residual risk: a clean merge can still break a suite, and a head can merge befor
 Kind: process
 Home: merge/merge.py
 
-Cost: per merge, one read of the head's run and two `git merge-tree --write-tree` starts (unmeasured). A pending head adds one paged read of the repo's comments and the carry checks (unmeasured).
+Cost: per merge, one main-in push once rule d is in force (unmeasured), one read of the head's run and two `git merge-tree --write-tree` starts (unmeasured). A pending head adds one paged read of the repo's comments and the carry checks (unmeasured).
 
 Risk: likely. Lanes merge while main moves, so main often moves under a green or pending head.
