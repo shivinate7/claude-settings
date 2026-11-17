@@ -27,6 +27,7 @@ Each entry keeps `$defaults`, the classifier's built-in exceptions.
 | "Consultant Relayed Merge Yes" (`settings.json` `autoMode.allow`) | The same command and head form as "Relayed Merge Yes", by a session tagged `cs-build:batch-runner`, for the one pull request that a session tagged `cs-build:consultant` named when it relayed the owner's yes, directly or through a session tagged `cs-build:triage` that forwards what the consultant relayed, under every merge check | this record |
 | "Batch Runner Merge" (`settings.json` `autoMode.allow`) | `~/.claude/bin/merge <pr> --confirm --head <sha>` by a session tagged `cs-build:batch-runner`, for a pull request its coordinator named in a merge go, under the coordinator's standing grant and every merge check | this record |
 | "Merge Review Record" (`settings.json` `autoMode.allow`) | `merge <pr> --review-record` or `merge --review-record <pr>`, as `merge` or `~/.claude/bin/merge`, with only the record flags, by a session tagged `cs-build:lane`: it prints the review record and posts and merges nothing | this record |
+| "Main Installer" (`settings.json` `autoMode.allow`) | The install from main in one exact line: `cd` to the pinned main checkout, then `CLAUDE_SETTINGS_REF=main ~/.claude/bin/verdict bash merge/install_from_main.sh`. No other env var, ref, script, argument or chaining | this record |
 | "Session Installer" (`settings.json` `autoMode.allow`) | The session-start installer in three exact forms: `curl -fsSL <stable install.sh URL> \| CS_HOOK_INPUT="{}" bash -s -- --cloud`, and from a claude-settings checkout `bash install.sh` and `powershell -ExecutionPolicy Bypass -File .\install.ps1`. No env var, chaining, extra argument, other URL or ref | this record |
 | `mcp__claude-code-remote__add_repo` (`settings.json` `permissions.allow`) | Attach a GitHub repo to the session | this record |
 | `mcp__claude-code-remote__archive_session` (`settings.json` `permissions.allow`) | Archive a session in the owner's account | this record |
@@ -191,6 +192,16 @@ Other classifier refusals that day: unknown. The coordinator's transcript could 
 
 Kind: process
 Home: rule:parallelism-keep-going
+
+### Main Installer
+
+Owner, 2026-11-17 10:00 CST, typed in the chat of lane rebase-wave-1b: `(a) you add a permission rule for that command for sure`. Incident: the classifier refused `CLAUDE_SETTINGS_REF=main ~/.claude/bin/verdict bash merge/install_from_main.sh` in this lane at 15:59 CST on 2026-11-16, as Undermining Oversight. On 2026-11-17 lanes of five repos reported the same refusal in their own summaries. Finding: the refusal comes from the auto-mode classifier, which reads `autoMode.allow`, not `permissions.allow`. The owner's own deny rule `Edit(~/.claude/settings.json)` blocks a direct edit of the installed file, so the rule is an entry in this repo's `settings.json`, installed by the next refresh.
+
+Why the act is allowed: `merge/install_from_main.sh` moves only the pinned checkout `<clone>-live` and rewrites `~/.claude` from it, and a second run restores that state. The Session Installer entry never covers it (its Never covers names `CLAUDE_SETTINGS_REF` and `main`), so this entry is its own, for the one line the coordinator named.
+
+`hooks/test_auto_mode_allow.py` (`MainInstallerIsAllowed`) checks the one entry, its one quoted command, the owner and incident times, and each refused act. It went red on main's `settings.json` (five cases) and green on this change.
+
+Departs from: main, whose `settings.json` has no entry for this command.
 
 ### Session Installer
 
