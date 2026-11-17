@@ -1340,6 +1340,39 @@ spo_register("scratchpad-owner: folder rm walk link 4, agent B's rm -rf of a sym
              "holding agent A's file: refused",
              lambda: spo_root_link_case("folder-walk-link-4", "folder rm walk link 4", "rm -rf %s/", "deny",
                                         "agent B's rm -rf of the link with a trailing slash is refused"))
+# Rule scratchpad-owner, one call that runs another agent's file and also removes or moves a folder holding another
+# agent's file. The folder is judged before the run, so the call is refused, and the refusal names neither the folder
+# nor the files. Agent A's script sits at the top of its scratchpad, beside its folder `sub`, or inside that folder.
+# The control rows are the two halves alone: a run with no folder call is asked, and a folder removal with no run is
+# refused.
+SPO_RUN_FOLDER = SPO_FOLDER_SUB + ((SPO_WRITER, "probe.py", PY_TEXT),)
+SPO_RUN_FOLDER_IN = SPO_FOLDER_SUB + ((SPO_WRITER, "sub/probe.py", PY_TEXT),)
+SPO_RUN_FOLDER_FORMS = (
+    # (case tag, label, agent B's command for the scratchpad path s)
+    ("run-folder-1", "run and folder 1, agent B's python3 of agent A's script, then rm -rf of agent A's folder",
+     lambda s: "python3 %s && rm -rf %s" % (os.path.join(s, "probe.py"), os.path.join(s, "sub"))),
+    ("run-folder-2", "run and folder 2, agent B's python3 of agent A's script, then mv of agent A's folder",
+     lambda s: "python3 %s && mv %s %s" % (os.path.join(s, "probe.py"), os.path.join(s, "sub"),
+                                           os.path.join(s, "moved"))),
+)
+for _tag, _label, _command_of in SPO_RUN_FOLDER_FORMS:
+    spo_register("scratchpad-owner: %s: refused" % _label,
+                 lambda t=_tag, n=_label, c=_command_of: spo_folder_case(t, n, SPO_RUN_FOLDER, SPO_OTHER, c,
+                                                                         "%s is refused" % n))
+spo_register("scratchpad-owner: run and folder 3, agent B's python3 of agent A's script inside a folder, then rm -rf "
+             "of that folder: refused",
+             lambda: spo_folder_case("run-folder-3", "run and folder 3", SPO_RUN_FOLDER_IN, SPO_OTHER,
+                                     lambda s: "python3 %s && rm -rf %s" % (os.path.join(s, "sub", "probe.py"),
+                                                                           os.path.join(s, "sub")),
+                                     "agent B's run of A's script inside a folder, then rm -rf of it, is refused"))
+spo_register("scratchpad-owner: run and folder control 1, agent B's python3 of agent A's script alone: asked",
+             lambda: spo_folder_case("run-folder-ctl-1", "run and folder control 1", SPO_RUN_FOLDER, SPO_OTHER,
+                                     lambda s: "python3 %s" % os.path.join(s, "probe.py"),
+                                     "agent B's run of agent A's script with no folder call is asked", want="ask"))
+spo_register("scratchpad-owner: run and folder control 2, agent B's rm -rf of agent A's folder alone: refused",
+             lambda: spo_folder_case("run-folder-ctl-2", "run and folder control 2", SPO_RUN_FOLDER, SPO_OTHER,
+                                     lambda s: "rm -rf %s" % os.path.join(s, "sub"),
+                                     "agent B's rm -rf of agent A's folder with no run is refused"))
 spo_register("scratchpad-owner: cost 1 a call outside any scratchpad makes no helper realpath, open or "
              "gettempdir call", spo_cost_case)
 
