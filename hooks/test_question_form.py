@@ -2291,6 +2291,118 @@ def case_item_51_stray_field():
          entry_of(page_item(focus="#fill")), ("item-field-rendered", "focus"))
 
 
+# ------------------------------------------------------------------ n is a number (step item-n-must-be-number)
+
+# The page's own rule is `typeof it.n === "number" && isFinite(it.n)` (skills/waiting-page/page.html, problem()).
+# An item whose n fails it shows "This item has no number, so it cannot be answered". The guard refuses the write
+# under the rule item-field-rendered with the reason "item-n-number", and names the item id.
+N_RULE = "item-field-rendered"
+N_ITEM_ID = "item-n-case"
+
+
+def with_n(**over):
+    """The form item with n set to a value, or with no n when `absent` is passed."""
+    item = page_item()
+    if over.pop("absent", False):
+        item.pop("n", None)
+    else:
+        item["n"] = over.pop("n", 929)
+    item.update(over)
+    return item
+
+
+def case_item_n_text_is_refused():
+    for value in ("929", "", " 929", "9.29e2"):
+        page("a set whose n is the text %r is refused, naming the item" % value, "set",
+             entry_of(with_n(n=value), doc_id=N_ITEM_ID), (N_RULE, N_ITEM_ID))
+    page("an update whose n is the text \"929\" is refused, naming the item", "update",
+         entry_of({"n": "929"}, doc_id=N_ITEM_ID), (N_RULE, N_ITEM_ID))
+    page("a str_replace on the field n is refused, since it can only give text", "str_replace",
+         {"collection": "items", "doc_id": N_ITEM_ID, "field": "n", "old_str": "9", "new_str": "8"},
+         (N_RULE, N_ITEM_ID))
+
+
+def case_item_n_other_non_numbers_are_refused():
+    # The page's rule: a number that isfinite. A bool, a null, a list, an object, NaN and infinity all fail it.
+    for label, value in (("true", True), ("null", None), ("a list", [929]), ("an object", {"n": 929}),
+                         ("NaN", float("nan")), ("infinity", float("inf")), ("minus infinity", float("-inf")),
+                         ("an int too big for a float", 10 ** 400)):
+        page("a set whose n is %s is refused" % label, "set",
+             entry_of(with_n(n=value), doc_id=N_ITEM_ID), (N_RULE, N_ITEM_ID))
+    page("an update that removes n with the delete marker is refused", "update",
+         entry_of({"n": {"__delete__": True}}, doc_id=N_ITEM_ID), (N_RULE, N_ITEM_ID))
+
+
+def case_item_n_number_passes():
+    for label, value in (("929", 929), ("0", 0), ("a negative number", -3), ("a float, which the page accepts", 929.5)):
+        page("a set whose n is %s passes" % label, "set", entry_of(with_n(n=value), doc_id=N_ITEM_ID), None)
+    page("an update whose n is the number 929 passes", "update", entry_of({"n": 929}, doc_id=N_ITEM_ID), None)
+
+
+def case_item_n_absent():
+    page("a set with no n is refused: a new item needs a number", "set",
+         entry_of(with_n(absent=True), doc_id=N_ITEM_ID), (N_RULE, N_ITEM_ID))
+    page("an update that does not touch n passes", "update",
+         entry_of({"title": "A new title"}, doc_id=N_ITEM_ID), None)
+    page("an update of the form fields that does not touch n passes", "update",
+         entry_of({"kind": "decision", "context": form_text()}, doc_id=N_ITEM_ID), None)
+    page("a str_replace on another field is not judged for n", "str_replace",
+         {"collection": "items", "doc_id": N_ITEM_ID, "field": "title", "old_str": "a", "new_str": "b"}, None)
+
+
+def case_item_n_batch_and_file_path():
+    def write(op, data, doc_id):
+        return {"op": op, "collection": "items", "doc_id": doc_id, "data": data}
+
+    def batch(*writes):
+        return {"action": "batch", "url": PAGE_URL, "writes": list(writes)}
+
+    bad = batch(write("set", with_n(n=928), "good-one"), write("set", with_n(n="929"), "bad-one"),
+                write("update", {"title": "x"}, "fine-one"))
+    verdict("batch: one item with a text n refuses the call, naming that item",
+            guard.data_tool_hit(bad, PAGE_REPO), (N_RULE, "bad-one"))
+    verdict("batch: the same call through question_form.page_item_hit refuses the same item",
+            question_form.page_item_hit(bad, PAGE_REPO)[0], (N_RULE, "bad-one"))
+    ok = batch(write("set", with_n(n=928), "good-one"), write("set", with_n(n=929), "good-two"),
+               write("update", {"title": "x"}, "fine-one"))
+    verdict("batch: numbers on every set and an update with no n pass", guard.data_tool_hit(ok, PAGE_REPO), None)
+    # The file_path form: the data is read from the file, a relative path against the payload cwd.
+    folder = judged_folder()
+    write_json_file(os.path.join(folder, "n-text.json"), with_n(n="929"))
+    write_json_file(os.path.join(folder, "n-number.json"), with_n(n=929))
+    refused = {"collection": "items", "doc_id": N_ITEM_ID, "file_path": "n-text.json"}
+    passed = {"collection": "items", "doc_id": N_ITEM_ID, "file_path": "n-number.json"}
+    verdict("file_path: a file whose n is text is refused, read at the payload cwd",
+            call("item_hit", "set", refused, folder), (N_RULE, N_ITEM_ID))
+    verdict("file_path: a file whose n is a number passes", call("item_hit", "set", passed, folder), None)
+
+
+def case_item_n_text_inside_other_text_is_not_judged():
+    # Scanner-safe: the check reads the parsed n, never the text of the write. Text that looks like an n, and
+    # comment openers and a lone quote, beside a real number are plain text.
+    context = form_text(goal='Goal: keep "n": "929" and n: "929" as plain text, with //path, /* glob and # tags, and don\'t parse it.')
+    page("a real number n beside text that reads as a text n passes", "set",
+         entry_of(with_n(n=929, context=context), doc_id=N_ITEM_ID), None)
+    page("a text n beside text that reads as a number n is still refused", "set",
+         entry_of(with_n(n="929", context=form_text(goal='Goal: keep "n": 929 as plain text.')), doc_id=N_ITEM_ID),
+         (N_RULE, N_ITEM_ID))
+
+
+def case_item_n_reason_and_the_pages_own_rule():
+    reasons = getattr(question_form, "PAGE_REASONS", None) or {}
+    text = reasons.get("item-n-number") or ""
+    check("the n reason says n must be a number such as 929, not \"929\"",
+          "number such as 929" in text and '"929"' in text, repr(text)[:200])
+    check("the n reason cites the decision item-field-rendered", "decision item-field-rendered" in text, repr(text)[:200])
+    check("the n reason posts only the correction: it names no other rule's remedy",
+          not re.search(r"itemFields|Goal|Problem|__delete__", text), repr(text)[:200])
+    # The allow list points at the page's own rule: the page must still carry the predicate the guard follows.
+    with open(os.path.join(REPO, "skills", "waiting-page", "page.html"), encoding="utf-8") as f:
+        page_text = f.read()
+    check("the page's problem() still judges n by typeof number and isFinite",
+          'typeof it.n === "number" && isFinite(it.n)' in page_text, "page.html no longer carries the n rule")
+
+
 # ------------------------------------------------------------------ dismissed: the page's own Mark read
 
 def case_session_update_naming_dismissed_is_refused():
@@ -3329,7 +3441,10 @@ def main():
                  case_recommended_list_is_the_multi_form, case_recommend_exemptions_pass,
                  case_recommend_applies_to_a_port_and_a_set_without_kind, case_five_real_forms,
                  case_five_real_forms_as_written, case_widens_reason_no_longer_leaves_recommended_out,
-                 case_item_92, case_item_51_stray_field, case_session_update_naming_dismissed_is_refused,
+                 case_item_92, case_item_51_stray_field, case_item_n_text_is_refused,
+                 case_item_n_other_non_numbers_are_refused, case_item_n_number_passes, case_item_n_absent,
+                 case_item_n_batch_and_file_path, case_item_n_text_inside_other_text_is_not_judged,
+                 case_item_n_reason_and_the_pages_own_rule, case_session_update_naming_dismissed_is_refused,
                  case_dismissed_refused_on_every_route, case_dismissed_refused_without_a_readable_field_list,
                  case_dismissed_reason_keeps_the_generic_remedy_for_other_fields,
                  case_item_stray_field_refused_from_a_record_branch_checkout,
