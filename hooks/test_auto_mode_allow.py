@@ -1070,8 +1070,9 @@ class SessionInstallerIsAllowed(unittest.TestCase):
 
 
 MAIN_INSTALLER = "Main Installer:"
-MAIN_INSTALL_COMMAND = ("cd /root/claude-settings-main && CLAUDE_SETTINGS_REF=main "
-                        "~/.claude/bin/verdict bash /root/claude-settings-main/merge/install_from_main.sh")
+MAIN_INSTALL_BARE = ("CLAUDE_SETTINGS_REF=main ~/.claude/bin/verdict bash "
+                     "/root/claude-settings-main/merge/install_from_main.sh")
+MAIN_INSTALL_FORMS = (MAIN_INSTALL_BARE, "cd /root/claude-settings-main && " + MAIN_INSTALL_BARE)
 MAIN_INSTALLER_REFUSED = (("another env var", "environment variable"), ("another ref", "another ref than `main`"),
                           ("another repo or path", "another repo or path"), ("extra arguments", "extra argument"),
                           ("chaining", "chaining"), ("a fork", "fork"), ("permissions", "permission"),
@@ -1084,15 +1085,20 @@ class MainInstallerIsAllowed(unittest.TestCase):
         self.assertEqual(len(hits), 1, "need exactly one '%s' entry in autoMode.allow, found %d"
                          % (MAIN_INSTALLER, len(hits)))
 
-    def test_covers_quotes_the_one_command_and_the_script_exists(self):
+    def test_covers_quotes_both_forms_and_the_script_exists(self):
         covers = entry_part(self, MAIN_INSTALLER)
-        self.assertIn("`%s`" % MAIN_INSTALL_COMMAND, covers)
+        for form in MAIN_INSTALL_FORMS:
+            self.assertIn("`%s`" % form, covers)
         self.assertTrue(os.path.isfile(os.path.join(REPO_ROOT, "merge", "install_from_main.sh")),
                         "the entry quotes merge/install_from_main.sh, which is missing")
 
     def test_covers_quotes_no_other_command(self):
-        spans = [x for x in re.findall(r"`([^`]+)`", entry_part(self, MAIN_INSTALLER)) if "install" in x]
-        self.assertEqual(spans, [MAIN_INSTALL_COMMAND], "Covers text quotes a command other than the one ruled")
+        spans = [x for x in re.findall(r"`([^`]+)`", entry_part(self, MAIN_INSTALLER))
+                 if "install" in x or "&&" in x or "bash" in x]
+        self.assertEqual(sorted(spans), sorted(MAIN_INSTALL_FORMS), "Covers text quotes a command other than the two ruled")
+
+    def test_covers_says_nothing_follows_the_command(self):
+        self.assertIn("nothing after it", entry_part(self, MAIN_INSTALLER))
 
     def test_covers_names_the_owner_ruling(self):
         missing = unnamed_terms(entry_part(self, MAIN_INSTALLER), (("owner time", "10:00 CST"), ("incident time", "15:59 CST")))
