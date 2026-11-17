@@ -18,6 +18,7 @@ import contextlib
 import importlib.util
 import io
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -53,6 +54,28 @@ DEBT_README = "debts/README.md"  # the folder's README: it describes the markers
 DEBT_NOTES = "debts/notes.md"  # the folder's notes file: it is not a debt either
 README_FEEL_TEXT = "# Debts\n\nOne debt per file.\n\n- **Feel.** a marker shown as an example, not a debt\n"
 NOTES_FEEL_TEXT = "# Notes\n\n- **Feel.** a note that is not a debt\n"
+# One file per note: the frozen notes file takes deletes only, and each note is a file under the note folder.
+REPO = os.path.dirname(HERE)
+OLD_NOTES = "docs/debts/notes.md"  # the frozen notes file
+NOTE_DIR = "docs/notes"
+NOTE = NOTE_DIR + "/%s.md"  # a note file, named by its slug
+SLUG_MAX = "wheel-speed-cap-" + "abcdefghijklmnop"  # 32 characters: the longest slug a note file may have
+SLUG_LONG = SLUG_MAX + "q"  # 33 characters
+SLUG_LINE = re.compile(r"^- [a-z0-9-]+: ")  # a note line in the `- slug: text` form
+NOTE_TEXT = "- %s: the spin rate is capped at twelve degrees per frame (hooks/guard.py)\n"
+NEW_LINE = ("- wheel-speed-probe: a line added to the frozen file (hooks/guard.py) Fix: none — rare and "
+            "harmless. Until: 2026-11-30")
+# Real lines of the notes file as they stand: one with no `- slug:` form, one with a lone quote and a backslash.
+NO_SLUG_LINE = ("- AskUserQuestion gain/loss rule may refuse terse real choices: check it on real questions. "
+                "Decision: question-reviewer-agent-hook. Fix: none — rare and harmless. Until: 2026-11-19")
+ANSI_LINE = ("- ansi-c-escape-not-decoded: escapes inside $'...' such as \\x2f stay text, so a protected path spelled "
+             "with escapes passes frozen and cap checks (hooks/guard_frozen.py) Fix: none — rare and harmless. "
+             "Until: 2026-11-24")
+MISMATCH_TEXT = "- beta-note: the spin rate is capped at twelve degrees per frame (hooks/guard.py)\n"
+README_TEXT = "# Notes\n\nOne note per file: `<slug>.md`, holding one line `- <slug>: <text>`.\n"
+EDIT_OLD = "- edited-note: the first wording of the note (hooks/guard.py)\n"
+EDIT_NEW = "- edited-note: the second wording of the note (hooks/guard.py)\n"
+
 SECTIONS = "tests/guard"  # the section folder, as hooks/test_guard.py's SECTION_DIR names it
 
 
@@ -367,6 +390,281 @@ class RecordSlugsTests(unittest.TestCase):
         rc, out = self.lint()
         self.assertNotIn("UNKNOWN", out)
         self.assertEqual(rc, 0, out)
+
+    # One file per note. The frozen notes file takes deletes only; a note file under NOTE_DIR holds one line.
+
+    def roll_out(self):
+        self.put(".claude/layout-extras.json", '{"rolled-out": true, "kinds": {}}\n')
+
+    def frozen_base(self):
+        """Rolls the tree out and puts the checkout's own notes file in it as the base. Returns its lines."""
+        self.roll_out()
+        with open(os.path.join(REPO, *OLD_NOTES.split("/")), encoding="utf-8", newline="") as f:
+            lines = f.read().splitlines()
+        self.assertTrue(any(SLUG_LINE.match(line) for line in lines), "the notes file holds no slug line to pick")
+        self.put(OLD_NOTES, "\n".join(lines) + "\n")
+        return lines
+
+    def git_out(self, *args):
+        return subprocess.run(["git", "-C", self.tree, *args], capture_output=True, text=True, check=True).stdout
+
+    def remedy_names_note_folder(self, out):
+        """A refusal line names the note folder, and no line that names the folder also names the frozen file."""
+        lines = out.splitlines()
+        self.assertTrue(any(NOTE_DIR + "/" in line for line in lines), out)
+        self.assertFalse(any(NOTE_DIR + "/" in line and OLD_NOTES in line for line in lines), out)
+
+    def test_added_line_in_the_frozen_notes_file_is_refused(self):
+        lines = self.frozen_base()
+        self.commit_base()
+        self.put(OLD_NOTES, "\n".join(lines + [NEW_LINE]) + "\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.remedy_names_note_folder(out)
+
+    def test_deleted_line_in_the_frozen_notes_file_passes_beside_a_bad_note(self):
+        lines = self.frozen_base()
+        self.commit_base()
+        gone = [line for line in lines if SLUG_LINE.match(line)][0]
+        at = lines.index(gone)
+        self.put(OLD_NOTES, "\n".join(lines[:at] + lines[at + 1:]) + "\n")
+        self.put(NOTE % "no-slug-line", NO_SLUG_LINE + "\n")
+        self.commit_change()
+        numstat = self.git_out("diff", "--numstat", "origin/main", "HEAD", "--", OLD_NOTES)
+        self.assertTrue(numstat.strip(), "the frozen file is not in the diff")
+        self.assertEqual(numstat.split()[:2], ["0", "1"], numstat)  # one deleted line, nothing added
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [NOTE % "no-slug-line"], out)
+
+    def test_in_place_edit_of_a_frozen_note_line_is_refused(self):
+        lines = self.frozen_base()
+        self.commit_base()
+        dated = [line for line in lines if SLUG_LINE.match(line) and "Until: " in line]
+        self.assertTrue(dated, "the notes file holds no dated note line to edit")
+        edited = re.sub(r"Until: \S+$", "Until: 2030-01-01", dated[0])
+        self.assertNotEqual(edited, dated[0], "the picked line has no date to change")
+        at = lines.index(dated[0])
+        self.put(OLD_NOTES, "\n".join(lines[:at] + [edited] + lines[at + 1:]) + "\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.remedy_names_note_folder(out)
+
+    def test_two_old_lines_swapped_pass_beside_a_bad_note(self):
+        # Each added line's text is in the base already, so the swap passes; the bad note is the one named.
+        lines = self.frozen_base()
+        self.commit_base()
+        slugged = [line for line in lines if SLUG_LINE.match(line)]
+        self.assertGreaterEqual(len(slugged), 2, "the notes file holds two slug lines to swap")
+        a, b = lines.index(slugged[0]), lines.index(slugged[1])
+        swapped = list(lines)
+        swapped[a], swapped[b] = swapped[b], swapped[a]
+        self.put(OLD_NOTES, "\n".join(swapped) + "\n")
+        self.put(NOTE % "no-slug-line", NO_SLUG_LINE + "\n")
+        self.commit_change()
+        added = self.git_out("diff", "--numstat", "origin/main", "HEAD", "--", OLD_NOTES).split()[:1]
+        self.assertTrue(added and int(added[0]) > 0, "the swap adds no line: nothing is judged")
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [NOTE % "no-slug-line"], out)
+
+    def test_note_file_name_over_32_characters_is_refused_beside_a_32_character_one(self):
+        self.roll_out()
+        self.commit_base()
+        self.put(NOTE % SLUG_LONG, NOTE_TEXT % SLUG_LONG)
+        self.put(NOTE % SLUG_MAX, NOTE_TEXT % SLUG_MAX)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [NOTE % SLUG_LONG], out)
+
+    def test_note_file_without_a_slug_line_is_refused(self):
+        self.roll_out()
+        self.commit_base()
+        self.put(NOTE % "no-slug-line", NO_SLUG_LINE + "\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [NOTE % "no-slug-line"], out)
+
+    def test_note_file_whose_slug_differs_from_its_name_is_refused(self):
+        self.roll_out()
+        self.commit_base()
+        self.put(NOTE % "alpha-note", MISMATCH_TEXT)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [NOTE % "alpha-note"], out)
+
+    def test_readme_in_the_notes_folder_passes_beside_a_bad_note(self):
+        self.roll_out()
+        self.commit_base()
+        self.put(NOTE_DIR + "/README.md", README_TEXT)
+        self.put(NOTE % "alpha-note", MISMATCH_TEXT)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [NOTE % "alpha-note"], out)
+
+    def test_added_valid_note_file_passes_beside_a_bad_note(self):
+        self.roll_out()
+        self.commit_base()
+        self.put(NOTE % "ansi-c-escape-not-decoded", ANSI_LINE + "\n")
+        self.put(NOTE % "alpha-note", MISMATCH_TEXT)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [NOTE % "alpha-note"], out)
+
+    def test_deleted_and_edited_note_files_pass_beside_a_bad_note(self):
+        self.roll_out()
+        self.put(NOTE % "gone-note", NOTE_TEXT % "gone-note")
+        self.put(NOTE % "edited-note", EDIT_OLD)
+        self.commit_base()
+        self.delete(NOTE % "gone-note")
+        self.put(NOTE % "edited-note", EDIT_NEW)
+        self.put(NOTE % "no-slug-line", NO_SLUG_LINE + "\n")
+        self.commit_change()
+        statuses = self.git_out("diff", "--name-status", "origin/main", "HEAD").splitlines()
+        self.assertIn("D\t" + NOTE % "gone-note", statuses, statuses)  # scope: the delete is in the diff
+        self.assertIn("M\t" + NOTE % "edited-note", statuses, statuses)  # scope: the edit is in the diff
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [NOTE % "no-slug-line"], out)
+
+    # The frozen file's line test counts copies, splits on "\n" only, and reads every edited note file.
+    # Separators and BOMs are escapes in this source: a raw control character here would read as a line break.
+
+    def test_second_copy_of_a_frozen_line_is_refused(self):
+        # The frozen file takes deletes only: a second copy of a line its base holds once is a line the base lacks.
+        lines = self.frozen_base()
+        self.commit_base()
+        once = [line for line in lines if SLUG_LINE.match(line) and lines.count(line) == 1][0]
+        self.put(OLD_NOTES, "\n".join(lines + [once]) + "\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.remedy_names_note_folder(out)
+
+    def test_moved_frozen_line_passes(self):
+        # The same text in another place adds no text the base lacks.
+        lines = self.frozen_base()
+        self.commit_base()
+        moved = list(lines)
+        first = [line for line in lines if SLUG_LINE.match(line)][0]
+        moved.pop(moved.index(first))
+        moved.append(first)
+        self.put(OLD_NOTES, "\n".join(moved) + "\n")
+        self.commit_change()
+        numstat = self.git_out("diff", "--numstat", "origin/main", "HEAD", "--", OLD_NOTES).split()[:2]
+        self.assertEqual(numstat, ["1", "1"], numstat)  # scope: the line moved, one out and one in
+        self.assert_passes()
+
+    def assert_text_split_by_a_separator_is_refused(self, sep):
+        # The base holds one line, `- a: first<sep>second`. Its text before `sep` is not a line of the base, so a
+        # branch that adds `- a: first` adds a line.
+        lines = self.frozen_base()
+        base = lines + ["- a: first" + sep + "second"]
+        self.put(OLD_NOTES, "\n".join(base) + "\n")
+        self.commit_base()
+        self.put(OLD_NOTES, "\n".join(base + ["- a: first"]) + "\n")
+        self.commit_change()
+        numstat = self.git_out("diff", "--numstat", "origin/main", "HEAD", "--", OLD_NOTES).split()[:2]
+        self.assertEqual(numstat, ["1", "0"], numstat)  # scope: one line added, nothing else
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.remedy_names_note_folder(out)
+
+    def test_text_before_a_u2028_in_a_base_line_is_not_a_base_line(self):
+        self.assert_text_split_by_a_separator_is_refused(" ")
+
+    def test_text_before_a_formfeed_in_a_base_line_is_not_a_base_line(self):
+        self.assert_text_split_by_a_separator_is_refused("\x0c")
+
+    def test_base_lines_holding_u2028_formfeed_or_bom_left_unchanged_raise_no_finding(self):
+        lines = self.frozen_base()
+        extra = ["- a: first second", "- b: first\x0csecond", "﻿- c: first"]
+        self.put(OLD_NOTES, "\n".join(lines + extra) + "\n")
+        self.commit_base()
+        self.put(OLD_NOTES, "\n".join(lines[1:] + extra) + "\n")  # deletes the first real line; the three stay
+        self.commit_change()
+        numstat = self.git_out("diff", "--numstat", "origin/main", "HEAD", "--", OLD_NOTES).split()[:2]
+        self.assertEqual(numstat, ["0", "1"], numstat)  # scope: the file is in the diff, as a delete only
+        self.assert_passes()
+
+    def assert_note_file_with_a_separator_passes_the_form_check(self, sep):
+        self.roll_out()
+        self.commit_base()
+        self.put(NOTE % "spin-rate-cap", "- spin-rate-cap: the spin rate" + sep + "is capped (hooks/guard.py)\n")
+        self.commit_change()
+        self.assert_passes()
+
+    def test_note_file_whose_one_line_holds_u2028_passes_the_form_check(self):
+        self.assert_note_file_with_a_separator_passes_the_form_check(" ")
+
+    def test_note_file_whose_one_line_holds_formfeed_passes_the_form_check(self):
+        self.assert_note_file_with_a_separator_passes_the_form_check("\x0c")
+
+    def test_digits_only_note_slug_is_refused_and_the_remedy_names_the_folder(self):
+        # A digits-only slug collides with the old file's `note:<digits>` refs (hooks/feedback_guard.py).
+        self.roll_out()
+        self.commit_base()
+        self.put(NOTE % "1", "- 1: text\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [NOTE % "1"], out)
+        self.remedy_names_note_folder(out)
+        self.assertNotIn(OLD_NOTES, out)
+
+    def test_slug_with_digits_and_letters_passes(self):
+        self.roll_out()
+        self.commit_base()
+        self.put(NOTE % "2fa-note", "- 2fa-note: text (hooks/guard.py)\n")
+        self.commit_change()
+        self.assert_passes()
+
+    def lint_after_edit(self, text):
+        # The base holds EDIT_OLD in a note file; the branch writes `text` into the same file.
+        self.roll_out()
+        self.put(NOTE % "edited-note", EDIT_OLD)
+        self.commit_base()
+        self.put(NOTE % "edited-note", text)
+        self.commit_change()
+        statuses = self.git_out("diff", "--name-status", "origin/main", "HEAD").splitlines()
+        self.assertIn("M\t" + NOTE % "edited-note", statuses, statuses)  # scope: the edit is in the diff
+        return self.lint()
+
+    def test_edited_note_file_with_a_second_line_is_refused(self):
+        rc, out = self.lint_after_edit(EDIT_NEW + "- edited-note: a second line (hooks/guard.py)\n")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [NOTE % "edited-note"], out)
+
+    def test_edited_note_file_whose_slug_differs_from_its_name_is_refused(self):
+        rc, out = self.lint_after_edit(MISMATCH_TEXT)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [NOTE % "edited-note"], out)
+
+    def test_edited_note_file_without_a_slug_line_is_refused(self):
+        rc, out = self.lint_after_edit(NO_SLUG_LINE + "\n")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [NOTE % "edited-note"], out)
+
+    def test_valid_edit_of_a_note_file_passes(self):
+        rc, out = self.lint_after_edit(EDIT_NEW)
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("FAIL", out)
+
+    def test_edited_readme_in_the_notes_folder_passes(self):
+        # The folder's README is not a note, edited or not.
+        self.roll_out()
+        self.put(NOTE_DIR + "/README.md", README_TEXT)
+        self.commit_base()
+        self.put(NOTE_DIR + "/README.md", README_TEXT + "\nA second paragraph.\n")
+        self.commit_change()
+        self.assert_passes()
 
     # Section files. Git merges two branches' new section files clean, so the check reads the whole
     # tree. Each red names its cause alone.
