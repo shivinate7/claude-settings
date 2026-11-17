@@ -13433,17 +13433,28 @@ class RedMainBrake(Env):
     def test_a_fix_on_the_breaking_merges_path_stays_refused_on_a_red_main_when_its_red_check_has_no_row(self):
         self.assert_path_fix_refused_when_its_red_check_is_not_pass(None)
 
-    def assert_touch_refused_on_red_main(self, name):
-        """A fix that changes `name` and no breaking path stays refused on a red main, with its own head green and its red check passing."""
-        _, runs, jobs = self.red_main_with_breaking_merge()
+    def assert_touch_refused_on_red_main(self, name, log_names_test=False):
+        """A fix that changes `name` and no breaking path stays refused on a red main, with its own head green and its red check passing. With `log_names_test`,
+        the red job's log names the failing test file, so the test-file route reads it (red_main_with_flaky_test)."""
+        if log_names_test:
+            _, runs, jobs, logs = self.red_main_with_flaky_test()
+        else:
+            _, runs, jobs = self.red_main_with_breaking_merge()
+            logs = {}
         head = self.fix_on_feat(f"Change {name}", name)
         sh(self.co, "git", "fetch", "-q", "origin")
         self.assertEqual(sh(self.co, "git", "diff", "--name-only", "origin/main", "origin/feat"), name, f"scope: the fix does not change only {name}")
-        rc, out, before = self.go(runs, jobs, changed=[(name, "added", 1)], named_checks=[("checks", "pass", head)])
+        rc, out, before = self.go(runs, jobs, job_logs=logs, changed=[(name, "added", 1)], named_checks=[("checks", "pass", head)])
+        self.assertNotEqual(rc, 0, f"a change to {name} merged onto a red main:\n" + out)
         self.refused_by_red_main(rc, out, before)
+        if log_names_test:
+            self.assertIn(f"actions/jobs/{self.FLAKY_JOB}/logs", self.host.reads, "the refusal never read the red job's log, so the test-file route was not reached")
 
     def test_a_change_to_an_unrelated_file_stays_refused_on_a_red_main(self):
         self.assert_touch_refused_on_red_main("unrelated.txt")
+
+    def test_a_change_to_an_unrelated_file_stays_refused_on_a_red_main_when_the_log_names_the_failing_test_file(self):
+        self.assert_touch_refused_on_red_main("unrelated.txt", log_names_test=True)
 
     def test_a_change_to_a_file_whose_name_only_starts_like_the_breaking_path_stays_refused_on_a_red_main(self):
         self.assert_touch_refused_on_red_main("lane-2650.txt.orig")
