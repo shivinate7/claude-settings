@@ -5558,6 +5558,17 @@ class NoneRequiredChecks(ScopedRepo, Env):
         self.assertIn("deadlineMinutes", out)
         self.assertNotIn(MERGE_CALL, self.calls())
 
+    def test_a_head_stamp_that_is_not_none_does_not_replace_the_base_stamp(self):
+        # Owner ruling, page item 929 b (decision private-repos-no-ci): only a setup PR's own head stamp that says "none" counts. A head stamp
+        # that names other checks is not the config, so main's stamp decides, and it names checks.
+        put_base_config(self, complete_config())
+        self.on("feat", {".github/stamp.json": json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=["gate"])))})
+        head = sh(self.other, "git", "rev-parse", "feat")
+        self.assertEqual(json.loads(sh(self.other, "git", "show", f"{head}:.github/stamp.json"))["merge"]["requiredChecks"], ["gate"], "scope: the head's stamp does not name gate")
+        self.assertEqual(json.loads(sh(self.other, "git", "show", "origin/main:.github/stamp.json"))["merge"]["requiredChecks"], ["checks"], "scope: main's stamp does not name checks")
+        cfg = merge.load_config(self.co, "main", merge.DEFAULT_CONFIG, head=head, branch="feat")
+        self.assertEqual(cfg["merge"]["requiredChecks"], ["checks"], "a head stamp with requiredChecks ['gate'] replaced main's stamp")
+
     def test_a_blocked_pull_request_under_none_refuses_and_names_the_branch_protection(self):
         # GitHub reads the pull request BLOCKED: the base's branch protection still requires a check that this head does not report.
         # Under none the tool reads no protection, so the refusal must name the cause itself: the branch protection, and the setting
