@@ -350,6 +350,12 @@ class Fixture:
         self.git("-C", self.seed, "push", "-q", "origin", branch)
         return self.sha(self.seed, "HEAD")
 
+    def child_commit(self, rev):
+        """A commit on top of `rev`, written into the source's objects and held by no ref: the clone can read it, and
+        no fetch moves a ref to it."""
+        tree = self.sha(self.source, rev + "^{tree}")
+        return self.git("-C", self.source, "commit-tree", tree, "-p", rev, "-m", "unreffed").strip()
+
     def changed(self, old, new):
         return sorted(self.git("-C", self.seed, "diff", "--name-only", old, new).split())
 
@@ -839,6 +845,33 @@ class StaleInstall(unittest.TestCase):
         self.assertEqual(fx.installer_runs(), ["--cloud"], "scope: want one installer run, with --cloud")
         self.assertEqual(run.lines, [NOT_REACHED % (new[:SHORT], old[:SHORT])],
                          "want one line that the reinstall did not reach the tip; stderr: %s" % run.tail())
+
+    # The installer leaves the record past the target the hook read: origin moved on again before the installer ran. The
+    # record holds the target, so the reinstall reached it. The hook prints a reinstalled line and the restart line, and
+    # never "did not reach". The fixture writes the record sha itself, as the installer's record would hold it.
+
+    def test_record_past_the_target_reads_as_reinstalled(self):
+        fx, old, new = behind(self._testMethodName, changes={"CLAUDE.md": "# Rules v2\n"})
+        past = fx.child_commit(new)
+        self.assertEqual(fx.sha(fx.source, past + "^"), new, "scope: the commit past the target does not build on it")
+        self.assertEqual(fx.git("-C", fx.source, "rev-parse", "refs/remotes/origin/main").strip(), new,
+                         "scope: the local origin/main ref is not the target")
+        run = fx.run_hook(record_sha=past)
+        self.assertEqual(fx.record_sha(), past, "scope: the installer did not leave the record past the target")
+        self.assertEqual(fx.git("-C", fx.source, "rev-parse", "refs/remotes/origin/main").strip(), new,
+                         "scope: the installer moved the local origin/main ref")
+        self.assertFalse([line for line in run.lines if "did not reach" in line],
+                         "the record holds the target, yet the hook says the reinstall did not reach it: %r"
+                         % run.lines)
+        reinstalled = [line for line in run.lines if line.startswith(PREFIX + "reinstalled hooks at ")]
+        self.assertEqual(len(reinstalled), 1, "want one reinstalled line, got %r; stderr: %s"
+                         % (run.lines, run.tail()))
+        self.assertTrue(reinstalled[0].endswith("(was %s)" % old[:SHORT]),
+                        "the reinstalled line does not name the old sha: %r" % reinstalled[0])
+        restarts = [line for line in run.lines if line.startswith(RESTART)]
+        self.assertEqual(len(restarts), 1, "want one restart line, got %r" % restarts)
+        self.assertIn("CLAUDE.md", restarts[0], "the restart line does not name CLAUDE.md: %r" % restarts[0])
+        self.assertEqual(len(run.lines), 2, "output beyond the reinstalled and restart lines: %r" % run.lines)
 
     # The installer's environment: the record's ref, and a hook input that no SessionStart entry fires on.
 
