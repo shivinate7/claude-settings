@@ -59,8 +59,8 @@ HANG_GUARD = 300  # seconds a child may run: a hang guard for a stuck child, nev
 EXTRAS = {
     "kinds": {},
     "record-branch": RECORD_BRANCH,
-    "artifacts": [{"id": "fixture-page", "url": PAGE_URL, "role": "waiting-page",
-                   "account": "fixture", "export": EXPORT}],
+    "artifacts": [{"id": "fixture-page", "links": [{"account": "fixture", "url": PAGE_URL}],
+                   "role": "waiting-page", "export": EXPORT}],
 }
 ROADMAP_BRANCH = "roadmap"  # the record branch of the origin-only fixtures: held on origin, with no local branch
 CLAIM = "item 874 is already answered."
