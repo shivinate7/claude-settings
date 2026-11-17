@@ -1,0 +1,14 @@
+{
+ "id": "rail-jump-test-race",
+ "title": "The rail-jump page test (a rail jump after Send lands on its card) is a race: it reads the card top after the first scrollend, which can fire before the smooth scroll starts",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "owner": "consultant",
+ "blockedBy": [],
+ "why": "Consultant message to triage 9, 18:26 CST Nov 16 (relayed; agent read, cause unproven). Test skills/waiting-page/tests/page.test.mjs lines 6253-6270 reads the card top after the first scrollend. The Send step's instant window.scrollTo (page.html line 3219) can fire that scrollend before the smooth scrollIntoView in jump() (page.html line 2273) starts, which fits 'sits at 5186, band top 44'. Not reproduced in 13 local runs on main e58efd90ae. The test failed once on #3543's push run 43973911859 (attempt 1) and passed on re-run (attempt 2, 18:20 CST, read on REST by triage 9).",
+ "source": "Consultant message to triage 9, 18:26 CST Nov 16 (relayed, not read by triage 9 in the code). Filed by triage 9.",
+ "note": "Todo. Fix (consultant's): a test-author makes the test wait until the card top is stable, red then green. A fix lane runs on branch fix-rail-jump (coordinator relay 18:17 CST); a branch PR was not found by REST at 18:24 CST, so this step has no pr yet. Searched steps at 18:30 CST Nov 16: no like step found.",
+ "updatedAt": "2026-11-16T18:30:00-06:00",
+ "order": 238
+}
