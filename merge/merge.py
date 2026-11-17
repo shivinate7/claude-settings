@@ -5757,10 +5757,18 @@ def reviewed_ledger(h, live, verdicts, subsumed=None, notes=None, cfgrel=None):
         else:
             review_log, ahead, age = "none", entries[0]["ahead"], round(entries[0]["age_h"], 1)
         # A branch with no merge base (exit 1) has no `base...sha` diff: every path of its tip is what it changes. Any other failed read stays a stop.
+        # A shallow clone cuts history, so there exit 1 may be the cut, not a missing base: only a full clone (is_shallow False) may list the tip.
         code, names = git(root, "diff", "--name-only", f"{base}...{sha}")
+        cut = False
         if code and git(root, "merge-base", base, sha)[0] == 1:
-            code, names = git(root, "ls-tree", "-r", "--name-only", sha)
-        if code or ahead is None or age is None:
+            import git_reads  # hooks/git_reads.py, on sys.path from the top of this file
+            if git_reads.is_shallow(root) is False:
+                code, names = git(root, "ls-tree", "-r", "--name-only", sha)
+            else:
+                cut = True
+                whys.append(f"lost-work ledger row {pr}: git found no merge base with {h.base}, and this clone is shallow or could not say, so the cut may hide it {READ_CITE}")
+                read_ok = False
+        if not cut and (code or ahead is None or age is None):
             whys.append(f"lost-work ledger row {pr}: git could not read its commits ahead of {h.base}, its age or its files {READ_CITE}")
             read_ok = False
         word = mark[0] if mark and isinstance(pr, int) and mark[0] in LEDGER_VERDICTS and mark[1] == sha[:12] and not verdicts_why else ""
