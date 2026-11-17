@@ -1,11 +1,11 @@
 {
   "title": "The Answered list stops growing with closed one-liners",
   "why": "The page shows 217 Answered entries, about 212 closed items kept until Mark read; deleting answers cannot lower the count (render, 13:35 CST Nov 17).",
-  "note": "Filed by triage 11, 13:47 CST Nov 17. Owner pick on page item 938 (a leave, b page hides closed items after 1 day, c writer sets dismissed). Recommended b (consultant and triage). A b pick is a page change on main (skill waiting-page template).",
+  "note": "DROPPED 14:55 CST Nov 17: owner picked a on page item 938 (typed on the page 14:49 CST): leave it; the owner presses Mark read. No page change. Filed by triage 11.",
   "phase": "now",
   "owner": "triage",
   "lane": "",
-  "status": "ready",
+  "status": "dropped",
   "order": 941,
-  "updatedAt": "2026-11-17T13:41:32-06:00"
+  "updatedAt": "2026-11-17T14:51:33-06:00"
 }

@@ -1,15 +1,15 @@
 {
- "id": "glossary-step-statuses",
- "title": "GLOSSARY.md names the step statuses: blocked, folded, and no second name for todo",
- "status": "doing",
- "repo": "shivinate7/claude-settings",
- "phase": "next",
- "lane": "session_013NEJL475DP95wLmQcdZh57",
- "owner": "triage",
- "blockedBy": [],
- "why": "Owner 12:11 CST Nov 13, item 583 a: \"ensure this is above board how we operate our glossary\". GLOSSARY.md on main has no row for step statuses; the roadmap build knows blocked, queued and folded (PR #2825), and queued is listed like todo, which is two names for one thing.",
- "source": "page item 583 (pick-roadmap-status-names), owner note 12:11 CST Nov 13",
- "note": "Todo. A record-writer lane adds glossary rows for blocked and folded, and drops queued as an alias of todo (one name per thing, decision glossary-meets-owner-halfway). lint/check_glossary.py must pass.",
- "updatedAt": "2026-11-15T23:19:04-06:00",
- "pr": 3195
+  "id": "glossary-step-statuses",
+  "title": "GLOSSARY.md names the step statuses: blocked, folded, and no second name for todo",
+  "status": "ready",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "session_013NEJL475DP95wLmQcdZh57",
+  "owner": "coordinator",
+  "blockedBy": [],
+  "why": "Owner 12:11 CST Nov 13, item 583 a: \"ensure this is above board how we operate our glossary\". GLOSSARY.md on main has no row for step statuses; the roadmap build knows blocked, queued and folded (PR #2825), and queued is listed like todo, which is two names for one thing.",
+  "source": "page item 583 (pick-roadmap-status-names), owner note 12:11 CST Nov 13",
+  "note": "Owner picked c on page item 735 (typed on the page 14:49 CST Nov 17): fold 'queued' into 'blocked', each step naming the step it waits behind. Routed to the coordinator 14:55 CST. Scope: the 22 queued steps become blocked, each naming its blocker step; build.py and the glossary rows drop queued; the same lane adds the guard that the blocked-nag skips a blocker whose step is open and moving; draft PR #3195 is rewritten to drop queued. Lane: test-author first (red: a blocked step whose blocker is open and moving is not nagged), then builder, review. lint/check_glossary.py must pass. Not started.",
+  "updatedAt": "2026-11-17T14:51:33-06:00",
+  "pr": 3195
 }
