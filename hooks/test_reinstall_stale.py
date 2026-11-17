@@ -915,6 +915,20 @@ class StaleInstall(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(fx.config)), before,
                          "a no-trigger prompt wrote a file in the config dir")
 
+    # A no-trigger prompt makes at most four git reads, and none of them reaches origin. The worst one is the one the
+    # helper builds: the ancestry read of the local ref, then the shared clone's ref and its count.
+
+    def test_no_trigger_prompt_makes_at_most_four_git_calls_and_no_network_read(self):
+        fx, shared = no_trigger_worst(self._testMethodName)
+        self.assertNotEqual(fx.git("-C", fx.source, "rev-parse", "refs/remotes/origin/main").strip(), fx.record_sha(),
+                            "scope: the record is not ahead of the local origin/main ref")
+        fx.run_hook()
+        calls = fx.subcommands()
+        self.assertTrue(calls, "scope: the prompt made no git call, so the count proves nothing")
+        self.assertLessEqual(len(calls), 4, "a no-trigger prompt made %d git calls, want at most 4: %r"
+                             % (len(calls), calls))
+        self.assertEqual(network_reads(fx), [], "a no-trigger prompt read origin: %r" % calls)
+
     # The installer's environment: the record's ref, and a hook input that no SessionStart entry fires on.
 
     def test_installer_gets_the_record_ref_even_when_the_hook_env_names_another(self):
