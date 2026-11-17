@@ -13374,16 +13374,25 @@ class RedMainBrake(Env):
 
     # A fix that touches the blamed paths also merges onto a red main, when its own head is green (decision no-merge-onto-red-main, no batch merges
     # onto a red main). The blamed paths are the paths the breaking merge changed: lane 2650's merge changes lane-2650.txt alone.
-    def fix_on_feat(self, subject, name, start="origin/main"):
-        """One lane commit that appends `subject` as a line to `name`, on a fresh feat cut from `start`, so the diff is the fix alone. An append keeps the
-        lines the breaking merge wrote, so the silent-undo check reads no undo. The push is forced, as reland_after_revert does for its fresh branch. -> feat's head."""
+    def fix_on_feat(self, subject, name, start="origin/main", act="append", to=None):
+        """One lane commit on a fresh feat cut from `start`, so the diff is the fix alone. `act` is "append" (the default: `subject` becomes a line of `name`,
+        and an append keeps the lines the breaking merge wrote, so the silent-undo check reads no undo), "delete" (`name` is removed) or "rename" (`name`
+        moves to `to`). The push is forced, as reland_after_revert does for its fresh branch. -> feat's head."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", "feat", start)
         path = os.path.join(o, name)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "a") as f:
-            f.write(f"{subject}\n")
+        if act == "append":
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "a") as f:
+                f.write(f"{subject}\n")
+        elif act == "delete":
+            sh(o, "git", "rm", "-q", name)
+        elif act == "rename":
+            os.makedirs(os.path.dirname(os.path.join(o, to)), exist_ok=True)
+            sh(o, "git", "mv", name, to)
+        else:
+            raise ValueError(f"fix_on_feat has no act {act!r}")
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", subject); sh(o, "git", "push", "-q", "-f", "origin", "feat")
         return sh(o, "git", "rev-parse", "HEAD")
 
@@ -13533,6 +13542,29 @@ class RedMainBrake(Env):
         self.assertTrue(line, "the preview prints no main run line:\n" + out)
         self.assertIn(self.FLAKY_FILE, line, "the preview's main run line does not name the failing test file that the fix route reads: " + line)
         self.assertNotIn("--base-red-ok", line, "the preview asks for a reason flag on a fix that merges with none: " + line)
+
+    def assert_failing_test_file_weakened_refused(self, act, changed, scope, to=None):
+        """A head that `act`s on the failing test file, with its own check green and the red job's log naming the file, stays refused on a red main. Removing
+        or moving the failing test weakens it, and no fix does that (decision no-merge-onto-red-main). `changed` is the pull request's triples as pr_files
+        reads them. `scope` is the name-status lines of the head's diff against main, which the case asserts before it runs the merge."""
+        _, runs, jobs, logs = self.red_main_with_flaky_test()
+        head = self.fix_on_feat(f"{act.capitalize()} the flaky test", self.FLAKY_FILE, act=act, to=to)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "diff", "--name-status", "--no-renames", "origin/main", "origin/feat").split("\n"), scope,
+                         "scope: the head's diff against main is not the change the case names")
+        rc, out, before = self.go(runs, jobs, job_logs=logs, changed=changed, named_checks=[("checks", "pass", head)])
+        self.assertNotEqual(rc, 0, f"a head that {act}s the failing test file merged onto a red main with its own check green:\n" + out)
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn(f"actions/jobs/{self.FLAKY_JOB}/logs", self.host.reads, "the refusal never read the red job's log, so the test-file route was not reached")
+
+    def test_deleting_the_failing_test_file_stays_refused_on_a_red_main_when_its_own_check_is_green(self):
+        self.assert_failing_test_file_weakened_refused("delete", [(self.FLAKY_FILE, "removed", 0)], [f"D\t{self.FLAKY_FILE}"])
+
+    def test_renaming_the_failing_test_file_away_stays_refused_on_a_red_main_when_its_own_check_is_green(self):
+        moved = "tests/moved/test_flaky.py"
+        # the triples pr_files reads for a rename: the new path as renamed, and the old path as removed
+        self.assert_failing_test_file_weakened_refused("rename", [(moved, "renamed", 0), (self.FLAKY_FILE, "removed", 0)],
+                                                       [f"A\t{moved}", f"D\t{self.FLAKY_FILE}"], to=moved)
 
     def test_a_revert_merged_with_its_tree_proven_lifts_a_red_main(self):
         # class 1: the revert of the breaking merge is on main, its tree is the revert's and its checks are green: the red main lifts, with no flag
