@@ -1,15 +1,15 @@
 {
- "id": "archive-refusal-names-add-repo",
- "title": "The lane-archive refusal names the add_repo act when it cannot read a lane's repo",
- "status": "doing",
- "pr": 3136,
- "repo": "shivinate7/claude-settings",
- "phase": "next",
- "lane": "session_013NEJL12RbFvv4332eciB9j",
- "owner": "triage",
- "blockedBy": [],
- "why": "lane-closes-after-records refused three times tonight on lane session-mailbox-followups because this session could not read the lane's second repo; add_repo fixed it at 09:08 CST. The owner asked (09:12 CST) that the fix be mechanical.",
- "source": "retrospective 09:13 CST Nov 13, owner ask 09:12 CST",
- "note": "Fix: when the archive guard cannot read a lane repo, its refusal names the act 'add_repo <owner>/<repo> (read), then retry', with the repo from the lane's cs-repo tag. Red first: a fixture lane whose repo read fails gets that remedy. The gap itself (archive-guard-child-repo-read) is a debt for the lane to file on main.",
- "updatedAt": "2026-11-13T09:14:28-06:00"
+  "id": "archive-refusal-names-add-repo",
+  "title": "The lane-archive refusal names the add_repo act when it cannot read a lane's repo",
+  "status": "doing",
+  "pr": 3136,
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "session_013NEJL12RbFvv4332eciB9j",
+  "owner": "triage",
+  "blockedBy": [],
+  "why": "lane-closes-after-records refused three times tonight on lane session-mailbox-followups because this session could not read the lane's second repo; add_repo fixed it at 09:08 CST. The owner asked (09:12 CST) that the fix be mechanical.",
+  "source": "retrospective 09:13 CST Nov 13, owner ask 09:12 CST",
+  "note": "Fix: when the archive guard cannot read a lane repo, its refusal names the act 'add_repo <owner>/<repo> (read), then retry', with the repo from the lane's cs-repo tag. Red first: a fixture lane whose repo read fails gets that remedy. The gap itself (archive-guard-child-repo-read) is a debt for the lane to file on main. 13:14 CST Nov 17 (coordinator relay, filed by triage 11): hook lane-closes-after-records refused archive_session twice, \"the open pull requests of the lane's repo (shivinate7/mailaudit) could not be read\". Measured by the coordinator: add_repo access read attaches nothing for a public repo, so the guard's gh could not read its PRs; access push fixed it. So the planned remedy text must say access push, not (read), and the guard could read a public repo's open PRs anonymously over REST. The owner asked how to resolve this mechanically (13:10 CST); page item 937 asks which of three fixes. Do not build past the text change until it is answered.",
+  "updatedAt": "2026-11-17T13:11:11-06:00"
 }
