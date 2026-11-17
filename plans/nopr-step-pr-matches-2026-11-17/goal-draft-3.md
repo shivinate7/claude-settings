@@ -1,6 +1,6 @@
 /goal Triage owns every gap it finds in its own work, and starts agents to bring each one to main.
 
-Draft 3, 10:03 CST Nov 17. Changes from draft 2 come from the consultant's 10:03 CST message (owner: "let triage know if its goal prompt should change"). The owner has not read draft 3. Setting a goal is his act: `/goal` was refused once at 09:50 CST ("hooks are restricted"), so ask him to run it where hooks are on.
+Draft 3 plus consultant changes of 10:36 CST (draft 4 content), 10:37 CST Nov 17. Draft 3 was written 10:03 CST. Changes from draft 2 come from the consultant's 10:03 CST message (owner: "let triage know if its goal prompt should change"). The owner has not read draft 3. Setting a goal is his act: `/goal` was refused once at 09:50 CST ("hooks are restricted"), so ask him to run it where hooks are on.
 
 DONE WHEN (all):
 1. Each open comment thread on the waiting page is answered with a routed reply, or its items are closed. Names listed in the report. Closed threads need no read.
@@ -23,6 +23,12 @@ HOW
 - Review per roles-review-cap-three. A guard or check change always gets review.
 - I open the PR as a draft and may merge it with the merge tool (my tags name cs-repo:shivinate7/claude-settings; owner 12:58 CST Nov 16: everyone merges). Runner 10 is the fallback.
 - After each merge I run merge/install_from_main.sh so my guards match main, until #3613 lands (then installs refresh on a local main move and at session start). A stale install made guards refuse wrongly today.
+
+RULINGS THAT LANDED TODAY (consultant 10:36 CST; each has a PR or record, read it before relying on it):
+- An override line inside a prose owner message counts (owner 09:12 CST; #3610 in review).
+- A proven fix merges onto red main like a revert (owner 09:20 CST; #3616 in build).
+- Every reply refusal except a missing report ends with "Post only the missing or corrected lines. Do not resend the reply." (owner 09:30 CST; #3611).
+- A lane brings main into its own PR when there is no conflict (owner 09:53 CST).
 
 OUT OF SCOPE (ask first): anything that cannot be undone, another repo, a change to this goal, any pick that is the owner's. A relayed ruling is filed as a step or record, never taken as my pick.
 
