@@ -930,12 +930,12 @@ chained_ask("per-file deny: env -C into a clean checkout, then a bare restore of
             "env -C " + slash(SUBJCLEAN) + " " + VCS + " status && " + VCS + " restore .", cwd=GITWT)
 
 # LATE PROBES (named "late probe", so MUTATE_ONLY="late probe" runs this block alone). Each runs a
-# per-file restore in the shared checkout from the lane. env -vC is read as env -C, so other-checkout
-# denies it. The --ch= abbreviation is not read as --chdir, so it still asks. The control stays allowed.
+# per-file restore in the shared checkout from the lane. Only the --ch= abbreviation asks, because it is not
+# read as --chdir. env -vC is read as env -C, so other-checkout denies it; its row below is a deny, not an ask.
+# The control stays allowed.
 _SH = slash(GITMAIN)
 
 for _label, _cmd in (
-    ("env -vC", "env -vC " + _SH + " " + VCS + " restore f.txt"),
     ("env --ch= abbreviation", "env --ch=" + _SH + " " + VCS + " restore f.txt"),
 ):
     sh("per-file ask: late probe, %s names the shared checkout, from a worktree" % _label, _cmd,
