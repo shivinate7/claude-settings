@@ -1,0 +1,14 @@
+{
+ "id": "revert-has-no-pushing-role",
+ "title": "A revert of a red main has no role that can push it: the builder cannot edit tests, so a revert that spans code and tests is blocked",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "owner": "consultant",
+ "blockedBy": [],
+ "why": "Consultant message to triage 9, 18:22 CST Nov 16 (relayed, not read by triage 9): decision builders-cannot-edit-tests makes builder-diff refuse a builder's test edits, and rule git-red-main-reverts lets only the revert of the blamed commit merge on a red main, so no agent role can push a revert that touches both code and tests. Main was red at 18:10 CST on #3596's push run 43975053159 (private owner name in a template; fix on #3602's branch).",
+ "source": "Consultant messages to triage 9, 18:22 CST and 18:24 CST Nov 16 (relayed; checked by triage 9 only for the push-run states read on REST at 18:24 CST). Filed by triage 9.",
+ "note": "Todo. Name the role that may push a revert (or let a revert carry its test edits), as a guard or check change with review rounds. Note: the rail-jump test page.test.mjs:6253 failed once on #3543's push run 43973911859 (attempt 1) and passed on re-run (attempt 2, 18:20 CST), so it flakes; a fix lane runs on branch fix-rail-jump. Searched steps at 18:26 CST Nov 16: no like step found. No lane, no PR.",
+ "updatedAt": "2026-11-16T18:26:00-06:00",
+ "order": 237
+}
