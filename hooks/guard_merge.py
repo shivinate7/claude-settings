@@ -9,8 +9,12 @@ import io
 import json
 import os
 import re
+import ssl
 import subprocess
 import sys
+import time
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta, timezone
 
 from guard_core import (
@@ -2293,23 +2297,52 @@ def _head_landed(module, repo: str, row) -> bool:
     return _compare_status(module, module.Host(repo=repo), base, sha) in _CONTAINED
 
 
-_TOKEN_VARS = ("GH_TOKEN", "GITHUB_TOKEN")  # the variables gh reads its token from; a read with both unset goes to GitHub with no session proxy
+_ANON_API = "https://api.github.com"  # the host of the anonymous read; GITHUB_API_URL (the variable gh and Actions set) names another
+_ANON_TIMEOUT = 20  # seconds one anonymous page may take, cut to what the shared deadline has left
+
+
+def _anon_open_pulls(module, repo: str):
+    """The open pull request rows of `repo` read with no Authorization header, every page, or None when the read gives no
+    answer (a 403, a 404, a rate limit, a network error, a reply that is no list). The read is GET pulls?state=open as gh
+    would send it, through urllib: it honours HTTPS_PROXY, and trusts the CA file in REQUESTS_CA_BUNDLE or SSL_CERT_FILE.
+    No gh runs, because gh refuses to run with no login. The next page is asked for by number, never by the Link URL
+    (the Host.pages rule), and the read ends at the page whose Link has no rel=next."""
+    base = (os.environ.get("GITHUB_API_URL") or _ANON_API).rstrip("/")
+    cafile = os.environ.get("REQUESTS_CA_BUNDLE") or os.environ.get("SSL_CERT_FILE") or None
+    try:
+        context = ssl.create_default_context(cafile=cafile) if cafile else ssl.create_default_context()
+        deadline = getattr(module, "_READ_DEADLINE", None)
+        rows = []
+        for page in range(1, getattr(module, "PAGE_CEILING", 500) + 1):
+            left = _ANON_TIMEOUT if deadline is None else min(_ANON_TIMEOUT, deadline - time.monotonic())
+            if left <= 0:
+                return None
+            req = urllib.request.Request(
+                base + "/repos/" + repo + "/pulls?" + urllib.parse.urlencode({"state": "open", "per_page": 100, "page": page}),
+                headers={"Accept": "application/vnd.github+json", "User-Agent": "claude-settings-guard"})
+            with urllib.request.urlopen(req, timeout=left, context=context) as reply:
+                items = json.loads(reply.read().decode("utf-8"))
+                link = reply.headers.get("Link")
+            if not isinstance(items, list):
+                return None
+            rows += items
+            if not module.has_next_link(link):
+                return rows
+        return None  # more pages than the ceiling: no answer, and the token read says why
+    except Exception:  # any failure is no anonymous answer; the token read then answers or raises
+        return None
 
 
 def open_pull_rows(module, repo: str):
-    """The open pull request rows of `repo`, every page, through the merge tool's page reader `module`. The one home of
-    this read: rules lane-closes-after-records and lane-step-dup call it. It reads with GH_TOKEN and GITHUB_TOKEN unset
-    first, so a public repo the session has not attached is read (owner, page item 937 a, 13:11 CST Nov 17). That read
-    fails for a private repo, for a rate limit and for a gh with no other login; the read with the session's token then
-    answers, so an attached private repo still reads. A failed read raises. The caller holds the one shared deadline
-    over the read (a nested shared_deadline would reset it). Cost: one extra gh call, only when the anonymous read fails."""
-    saved = {k: os.environ.pop(k) for k in _TOKEN_VARS if k in os.environ}
-    try:
-        return module.Host(repo=repo).pages("pulls", fields={"state": "open"})
-    except (Exception, SystemExit):
-        pass
-    finally:
-        os.environ.update(saved)
+    """The open pull request rows of `repo`, every page. The one home of this read: rules lane-closes-after-records and
+    lane-step-dup call it. It reads with no token first (_anon_open_pulls), so a public repo the session has not attached is
+    read (owner, page item 937 a, 13:11 CST Nov 17). A 403 or a 404 (a private repo), a rate limit and a network error give no
+    anonymous answer; the read through the merge tool's page reader `module`, with the session's token, then answers, so an
+    attached private repo still reads. A failed token read raises. The caller holds the one shared deadline over the
+    read (a nested shared_deadline would reset it). Cost: one urllib call per page; one more gh call only when the anonymous read fails."""
+    rows = _anon_open_pulls(module, repo)
+    if rows is not None:
+        return rows
     return module.Host(repo=repo).pages("pulls", fields={"state": "open"})
 
 
