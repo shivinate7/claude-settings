@@ -4973,11 +4973,9 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         self.assert_allowed("- A test-author on the answered guard's false alarm: it refused my two lines that were "
                             "not claims you had answered anything.")
 
-    def test_an_red_item_named_as_the_claim_blocks(self):
-        # Catches: "item <n>" is read as the source of the answer, so a bare claim about the item it names passes.
-        out = self.verdict("Item 870 is answered.")
-        self.assertIsNotNone(out, "Item 870 is answered. passed: item 870 was read as a source for its own claim")
-        self.assertEqual(out.get("decision"), "block", out)
+    def test_an_green_item_number_is_a_source_and_passes(self):
+        # Catches: a fix that stops counting "item <n>" as a source, which decision answered-needs-source lists.
+        self.assert_allowed("Item 870 is answered.")
 
     def test_an_green_owner_claim_with_a_condition_word_still_blocks(self):
         # Catches: a fix that exempts every line with a condition word such as "once", not only a proposed condition.
