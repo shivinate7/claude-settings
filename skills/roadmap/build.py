@@ -85,11 +85,11 @@ unlaned's: the branch, bare or as lane/<id>, equals a live session step. On each
 from the pull's posted review log. A present key must be a JSON bool (`null` and text are not); absent means false. A
 pull row with a non-bool value is skipped, so the stale-draft, pair, unlaned and lanes-to-archive rows read unknown.
 
-The row "lanes to archive" (idle_lanes) lists each completed or review-ready lane session whose steps have all landed and
-that no open pull (on lane_head_refs) or open page item holds; `merge --idle-lanes` prints the same list. An idle lane
+The row "lanes to archive" (idle_lanes) lists each completed or review-ready lane session whose steps have all landed, or whose pull an open or
+merged pull replaced whatever its step status, and that no open pull (on lane_head_refs) or open page item holds; `merge --idle-lanes` prints the same list. An idle lane
 not to archive now reads `hold (<reason>; lane <session id>)` and is left out of the row's count. The reason is no
 cs-step tag, a step unproven on main, or a step whose `lane` is the session and that is still doing or active and not
-landed; the last clears when the step's status is set to todo or done.
+landed; the last clears when the step's status is set to todo or done. A lane whose pull an open or merged pull replaced reads none of these holds.
 A lane that waits (step not done, open pull, open item) prints no line. A lane tagged `cs-archive-ready:<slug>` whose
 `roadmap/outbox/<slug>-handoff.md` is not on the record branch carries a `HOLD: handoff <slug> is not on the record
 branch` flag (a bad slug, or a handoff read that fails, reads the lane unknown); the merge summary then reads
@@ -254,7 +254,7 @@ SCANNED = ("roadmap", "briefs", "plans", "handoffs")
 OUTPUT = "roadmap/roadmap.html"
 # The layout kinds whose homes the page reads, with the panel name each one gets.
 HOMES = (("decisions", "Decisions"), ("debts", "Debts"), ("debt-notes", "Debt notes"),
-         ("todo", "To-do"), ("plans", "Plans"), ("specs", "Specs"))
+         ("notes", "Notes"), ("todo", "To-do"), ("plans", "Plans"), ("specs", "Specs"))
 
 # A merge subject that names its pull request: GitHub's merge commit, or a squash title ending "(#N)".
 PR_SUBJECT = re.compile(r"^Merge pull request #(\d+)\b|\(#(\d+)\)\s*$")
@@ -524,6 +524,23 @@ def pull_landed_marks(repo, ref, steps, work, with_done=False):
     return {k: v for k, v in marks.items() if v}
 
 
+def superseded_marks(steps, work):
+    """{step: ["#N", ...]} from the landedPulls rows closed unmerged with a `replacedBy` pull number, matched by the row's branch (the step id or
+    lane/<id>) whatever the step's status: the replacing pull carries the step on, so the lane may be archived. The replacement must be an open
+    pull (work["pulls"]) or a merged landedPulls row; one closed unmerged, or in neither list, replaces nothing, so the lane waits. Only idle_lanes
+    reads these. The landed upkeep rows never do, because the work is not on main yet: a step set to done from one would read landed too soon."""
+    rows = (work or {}).get("landedPulls") or []
+    carried = {p["number"] for p in (work or {}).get("pulls") or []} | {r["number"] for r in rows if r.get("merged") is True}
+    marks = {}
+    for row in sorted(rows, key=lambda r: r["number"]):
+        if row.get("merged") is True or type(row.get("replacedBy")) is not int or row["replacedBy"] not in carried:
+            continue
+        for sid in steps or {}:
+            if row["branch"] in lane_head_refs(sid) and "#%d" % row["number"] not in marks.setdefault(sid, []):
+                marks[sid].append("#%d" % row["number"])
+    return {k: v for k, v in marks.items() if v}
+
+
 def add_marks(marks, more):
     """A new dict: `marks` with `more` ({step: [mark]}) merged in, each mark listed once per step."""
     out = {k: list(v) for k, v in marks.items()}
@@ -535,15 +552,17 @@ def add_marks(marks, more):
 
 
 def homes(repo):
-    """{kind: (path, why)}: each HOMES kind's folder in the checkout, or None and why it is unknown."""
+    """{kind: (path, why)}: each HOMES kind's folder in the checkout, or None and why it is unknown. A layout kind set
+    "optional" has no folder in a checkout that never wrote one: that is empty, so its why is None."""
     try:
         sys.path.insert(0, str(LINT))
         import layout
+        optional = {name for name, kind in layout.kinds(str(repo)).items() if kind.get("set") == "optional"}
         found = {}
         for kind, _ in HOMES:
             paths = layout.candidates(str(repo), kind)
             hit = next((p for p in paths if (repo / p).exists()), None)
-            found[kind] = (hit, None if hit else "no %s in this checkout" % " or ".join(paths))
+            found[kind] = (hit, None if hit or kind in optional else "no %s in this checkout" % " or ".join(paths))
         return found
     except Exception as err:  # the layout is a shared file; any fault in it makes every home unknown
         return {kind: (None, "the layout could not be read: %s" % err) for kind, _ in HOMES}
@@ -732,11 +751,12 @@ def live_work(path, steps, slug=None):
     Two more optional keys on a sessions row feed the joint line (idle_lanes): `idle_since` (ISO time with a zone, when
     the lane last did anything) and `unarchived_epoch` (JSON int, the lane's commits not yet archived). `laneSessions`
     keeps each as the file has it, and idle_lanes reads their type; a missing or wrong-typed one never makes the lane joint.
-    One more optional key, `landedPulls`: [{"number": int, "branch": str, "head"?: sha, "merged"?: bool}], the closed
-    pull requests of the last 14 days (head ref, head sha, GitHub's merged flag). The publisher (triage) fills it from
+    One more optional key, `landedPulls`: [{"number": int, "branch": str, "head"?: sha, "merged"?: bool, "replacedBy"?: int}], the closed
+    pull requests of the last 14 days (head ref, head sha, GitHub's merged flag, and for a pull closed as replaced the
+    number of the pull that replaced it, which superseded_marks reads). The publisher (triage) fills it from
     GitHub: a merged lane branch is gone from the open pulls and may leave no Step trailer on main. `landedPulls` holds
     the kept rows, which pull_landed_marks reads. A row that is not an object, whose number is not an int, whose
-    branch is not text or whose `merged` is present and not a JSON bool is counted in `skipped`; a value that is not a
+    branch is not text, whose `merged` is present and not a JSON bool or whose `replacedBy` is present and not an int is counted in `skipped`; a value that is not a
     list adds one skipped entry; an absent key adds nothing. Each skipped row makes staleWhy and pullWhy read unknown.
     A pulls row's optional `held` (the batch runner's hand-in or hold list names the pull) and `reviewLog` (the
     pull carries a posted review log) are JSON bools that triage fills; a present non-bool value skips the row.
@@ -788,7 +808,8 @@ def live_work(path, steps, slug=None):
     # `merged` is the JSON true or false the publisher read from GitHub; text such as "true" is a wrong shape, not a guess.
     landed_pulls = keep("landedPull", raw["landedPulls"], lambda r: type(r.get("number")) is int
                         and isinstance(r.get("branch"), str)
-                        and ("merged" not in r or isinstance(r["merged"], bool))) if "landedPulls" in raw else None
+                        and ("merged" not in r or isinstance(r["merged"], bool))
+                        and ("replacedBy" not in r or type(r["replacedBy"]) is int)) if "landedPulls" in raw else None
     landed_skipped = len(skipped) - before_landed
     for row in threads:
         sid = row.get("step") or None
@@ -897,7 +918,8 @@ def build_info(repo, source, why):
     for kind, name in HOMES:
         path, missing = found[kind]
         if path is None:
-            panels.append({"name": name, "kind": kind, "home": None, "read": "unknown (%s)" % missing})
+            panels.append({"name": name, "kind": kind, "home": None,
+                           "read": "unknown (%s)" % missing if missing else "empty (this checkout has no folder for it)"})
             continue
         read = head or "unknown (git could not name the commit)"
         if status is None:
@@ -1876,12 +1898,13 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
     `hold (<reason>; lane <session id>)` for a lane not to archive now: no cs-step tag, a step that is neither on the
     record branch nor named by a Step trailer on main (that reason ends `; also tagged <tags>` when the lane carries
     another repo's cs-repo tag), or a record-branch step whose `lane` is this session and that is still doing or active
-    and not landed (this hold clears when the step's status is set to todo or done). A lane that waits (step not done, open pull, open
+    and not landed (this hold clears when the step's status is set to todo or done; a lane whose pull an open or merged pull replaced has none of these holds). A lane that waits (step not done, open pull, open
     item) has no line. `unknown (<why>)` is only for a whole read that could not run.
 
     A session is listed only when it carries cs-build:lane and this repo's cs-repo tag, is not archived, has status
     bucket completed or review ready, and names at least one cs-step with every one of them landed (a Step trailer
-    on main, or status done; a step off the record branch counts only by its trailer). It is held back by an open pull on one of its steps' head refs (lane_head_refs) unless
+    on main, or status done; a step off the record branch counts only by its trailer), or has a pull that an open or merged pull replaced (superseded_marks),
+    whatever its step status. It is held back by an open pull on one of its steps' head refs (lane_head_refs) unless
     that pull is a draft whose head sha is already in the default branch, and by an open waiting-page item whose
     `lane` is one of its steps, or whose `owner` is the session itself (the item is the lane's own question); only
     status `closed` releases an item. When no live
@@ -1916,6 +1939,7 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
         return ["unknown (%s)" % marks_why]
     if work.get("pageItems") is None:
         return [work.get("itemsWhy") or "unknown (the page items could not be read)"]
+    marks = add_marks(marks, superseded_marks(steps, work))  # here, so the upkeep row and merge --idle-lanes list the same lanes
     ref = main_ref(repo, main_branch)
     landed_heads = {}
 
