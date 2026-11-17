@@ -7,8 +7,8 @@ Run it from the repository root:
     python3 hooks/test_reinstall_stale.py
 
 WHAT IT PROVES. In a cloud session a prompt makes no network call. The hook compares the record with the local
-origin/main (or the record's ref) tracking ref, and it acts only on a trigger: a merge notice in the session's
-inbox, or a local ref that moved past the record. It refreshes once per new head. A behind pin gets a stale line
+origin/main (or the record's ref) tracking ref, and it acts only on a trigger: a local ref that moved past the
+record. It refreshes once per new head. A behind pin gets a stale line
 that states its commit count. Each action reads the record, then either stays silent when the tip is the recorded
 sha, reinstalls once with the recorded installer, or prints one unknown line when the record or the local ref is
 missing. An installer that exits non-zero prints one failure line and is not retried. A restart line appears only
@@ -25,8 +25,8 @@ read through the worktree's common config, so a current pin is silent and a behi
 A behind pin gets one stale line that states its commit count, and the pin refresh (merge/install_from_main.sh) runs
 once per head. The clone the global rules file points at is read the same way, and a behind one gets a stale line
 that names it. No prompt reads origin (owner ruling, 2026-11-17 09:34 CST, decision stale-install-cost: no network
-lookup on prompts; the refresh triggers are the merge notice, session start and resume, and a local origin/main ref
-move, owner ruling 2026-11-17 09:32 CST).
+lookup on prompts; the refresh triggers are session start and resume, and a local origin/main ref move, owner ruling
+2026-11-17 09:32 CST).
 
 THE SEAM. Each fixture is a bare origin, a seed that pushes to it, and a source clone at the recorded sha,
 all under the run folder. HOME and CLAUDE_CONFIG_DIR point into the run folder, so the real ~/.claude is
@@ -53,8 +53,6 @@ REPO = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
-sys.path.insert(0, os.path.join(REPO, "hooks"))
-import local_time  # noqa: E402  the one home of the session inbox and its writer (hooks/local_time.py)
 
 ROOT = _test_temp.run_folder()
 HOOK = os.path.join(HERE, "stale_install.py")
@@ -62,8 +60,6 @@ SETTINGS = os.path.join(REPO, "settings.json")
 REAL_GIT = shutil.which("git") or "git"
 RECORD = ".claude-settings-install.json"
 PAYLOAD = json.dumps({"hook_event_name": "UserPromptSubmit", "session_id": "test-session", "prompt": "hi"})
-SESSION = "test-session"
-NOTICE_STAMP = "2026-11-17T09:40:00-06:00"
 # The git subcommands that reach origin. A prompt makes none of them.
 NETWORK = ("ls-remote", "fetch", "clone", "pull")
 HOOK_GUARD = 60  # seconds: stops a hook that never returns, so a broken build fails instead of hanging CI
@@ -504,23 +500,6 @@ def shared_behind(name, behind_by=0):
     return fx, shared, base
 
 
-def merge_notice(fx, sha):
-    """Mails the session the merge notice, "main moved to <sha>; refresh", through the one inbox writer. The inbox
-    lives under the config dir, which is pointed at the fixture for the write and then put back."""
-    saved = os.environ.get("CLAUDE_CONFIG_DIR")
-    os.environ["CLAUDE_CONFIG_DIR"] = fx.config
-    try:
-        inbox, _ = local_time.inbox_paths(SESSION)
-        err = local_time.save_message(inbox, NOTICE_STAMP, "main moved to %s; refresh" % sha)
-    finally:
-        if saved is None:
-            os.environ.pop("CLAUDE_CONFIG_DIR", None)
-        else:
-            os.environ["CLAUDE_CONFIG_DIR"] = saved
-    if err is not None:
-        raise RuntimeError("fixture: the merge notice was not saved: %s" % err)
-
-
 def network_reads(fx):
     """Each network read the last hook run made: a lookup or a fetch of origin."""
     return [name for name in fx.subcommands() if name in NETWORK]
@@ -582,7 +561,7 @@ class StaleInstall(unittest.TestCase):
         self.assertEqual(len(run.lines), 2, "output beyond the reinstall and restart lines: %r" % run.lines)
 
     # Owner ruling 2026-11-17 09:34 CST: a prompt reads no origin. A case that expects a lookup on a prompt is
-    # re-pointed to expect none. The refresh triggers are a merge notice, a local origin/main ref move, and session
+    # re-pointed to expect none. The refresh triggers are a local origin/main ref move, and session
     # start (the SessionStart fetch, which this hook does not run).
 
     # Behind origin, after a local fetch: one reinstall, no lookup, the recorded installer.
@@ -859,21 +838,8 @@ class StaleInstall(unittest.TestCase):
         self.assertFalse(pid_alive(grand), "the installer's child survived the timeout: the group was not signalled")
 
 
-    # The triggers: a merge notice in the session inbox, and a local origin/main ref move. Neither reads origin on the
-    # prompt itself; the refresh a trigger starts is the only network work.
-
-    def test_merge_notice_triggers_the_refresh_with_no_read_of_origin(self):
-        fx, old, new = behind(self._testMethodName, fetch=False)
-        self.assertEqual(fx.git("-C", fx.source, "rev-parse", "refs/remotes/origin/main").strip(), old,
-                         "scope: the local origin/main ref moved without a fetch")
-        merge_notice(fx, new)
-        run = fx.run_hook(ls_remote="fail")
-        self.assertEqual(fx.installer_runs(), ["--cloud"],
-                         "the merge notice did not refresh: installer runs %r, want one --cloud run"
-                         % fx.installer_runs())
-        self.assertEqual(run.lines, [REINSTALL % (new[:SHORT], old[:SHORT])],
-                         "want the reinstall line; stderr: %s" % run.tail())
-        self.assertEqual(fx.ls_remote_calls(), [], "the prompt looked up origin: %r" % fx.git_calls())
+    # The trigger: a local origin/main ref move. It reads no origin on the prompt itself; the refresh it starts is the
+    # only network work.
 
     def test_local_ref_move_triggers_the_refresh_with_no_lookup(self):
         fx, old, new = behind(self._testMethodName)
