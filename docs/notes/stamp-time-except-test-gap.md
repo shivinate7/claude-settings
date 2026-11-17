@@ -1,0 +1,1 @@
+- stamp-time-except-test-gap: the except in stamp_time is pinned only for TypeError (review note, lane repeat-mark-fixes, 10:40 CST Nov 13). Fix: none recorded.

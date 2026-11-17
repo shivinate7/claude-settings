@@ -1,0 +1,1 @@
+- repeat-mark-guarantee-wording: the decision wording says "guarantee" and claims more than the code holds (review note, lane repeat-mark-fixes, 10:40 CST Nov 13). Fix: none recorded.

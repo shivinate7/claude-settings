@@ -1,0 +1,1 @@
+- sim-lease-gaps-no-27-2-pin: step sim-lease-gaps never names the iOS 27.2 Duo pin from ruling ios-27-2-duo (Degen D13, 06:32 CST Nov 13). Fix: add the pin to the step's scope.
