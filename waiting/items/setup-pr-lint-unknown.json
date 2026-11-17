@@ -1,0 +1,75 @@
+{
+  "added": "2026-11-16T15:49:00-06:00",
+  "context": "Goal: the five private-repo setup pull requests (each sets stamp.json requiredChecks to \"none\") merge as fast as possible.\nProblem (rule): lane lint reads \"unknown\" on each setup PR, because those repos have no CI. Runner 12 found a second block at 15:52 CST: the merge tool reads stamp.json from main, not from the PR, so a setup PR is also merged under main's old required check (all-jobs-passed). It has 0 check runs and would wait out the 65-minute deadline. The flag --lint-unknown-ok clears the lint only, needs your typed word, and the coordinator ruled against it at 04:55 CST. Only you can grant a lifted check or merge in the GitHub UI. Scope is five repos (degen, q_max, home, ios-adblock, joyous), not seven: banchi and mailaudit are public and get no setup PR.\nBased on (read): runner 11's message at 15:48 CST and runner 12's at 15:52 CST, relayed by the coordinator; the text of PR #3590 (a private repo with no CI merges through the merge tool); the coordinator's 04:55 CST ruling against the flag.\nBased on (ruling): your 11:20 CST Nov 16 order that private runner jobs that cost money are dropped and the change is landed to the end.\nDeparts from: main merges only through the merge tool, and refuses --lint-unknown-ok as a check-lifting act \u2014 option d has you merge the five setup PRs by hand in the GitHub UI, a lets the flag clear the lint only, b makes the tool read the head's own stamp.json.\nSetup PRs so far, with their heads at 15:59 CST: home #735 8351a823 (coordinator, 16:31 CST; adds docs/debts/pr-gates-off-private-ci.md) (https://github.com/shivinate7/home/pull/735), degen #765 e6c33b943 (the coordinator's fix commit, 16:31 CST; it fixes what the first review found at the earlier commit 9e566635d. Runner 11 accepted its first fix check as the review. That is the coordinator's pick, not yours) (https://github.com/shivinate7/degen/pull/765), ios-adblock #177 941bc0648d2a (https://github.com/shivinate7/ios-adblock/pull/177), joyous #96 3adbc881fa01 (https://github.com/shivinate7/joyous/pull/96); q_max #1186 (https://github.com/shivinate7/q_max/pull/1186), draft, head cd2467f11603, review record passed at that head (runner 12, 16:36 CST, relayed). Runner 12 also reports the review records at the live heads of ios-adblock #177 (941bc0648d2a) and joyous #96 (3adbc881fa01) passed. All five are drafts. Joyous's ruleset needs no act from you: runner 12's REST read at 16:01 CST shows it disabled, so no required check blocks a merge there.\nAlso filed as notes: the pin-bump.yml approve loop ends red on dispatch in ios-adblock, and export-lists.yml no longer publishes (the app alerts at 5 days); both follow from your 11:20 CST billing ruling.\nWaiting on: you; the consultant is asked for a route that needs no flag, and runners 11 and 12 hold the PRs meanwhile.",
+  "home": "decision private-repos-no-ci (PR #3590, merged 15:43 CST Nov 16); the five setup PRs, one per private repo, with runners 11 and 12",
+  "id": "setup-pr-lint-unknown",
+  "kind": "decision",
+  "n": "929",
+  "options": [
+    {
+      "gain": "The lint no longer blocks.",
+      "how": "You type the grant for those five PRs; the runners add the flag and the reason line to each merge.",
+      "id": "grant-flag-seven-prs",
+      "key": "a",
+      "label": "Grant the flag --lint-unknown-ok for the five setup PRs only, with the reason line \"no CI by owner ruling 11:20 CST; setup PR that lands requiredChecks none\". This clears the lint only.",
+      "lose": "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo. It does not solve the merge deadline (0 check runs under the old required check), so the PRs still do not merge by the tool.",
+      "widens": true
+    },
+    {
+      "gain": "No check is lifted, and later private PRs lint and merge clean.",
+      "how": "The consultant builds the change as a guard or check change, red test first.",
+      "id": "tool-lints-from-head-stamp",
+      "key": "b",
+      "label": "Change the merge tool so a setup PR whose own head stamp.json says \"none\" lints and merges from that stamp, with no flag; the change must cover the merge deadline too",
+      "lose": "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo. The change needs a build, a review and a merge first (up to three review rounds), so the five wait. The consultant (15:59 CST, his word) advises against b: any PR could lower its own merge gate by editing its own stamp.json, which he calls a safety hole.",
+      "widens": true
+    },
+    {
+      "gain": "Fastest by the tool.",
+      "how": "The runner merges each setup PR with no flag and notes the unknown lint in its report.",
+      "id": "runner-reads-unknown-as-pass",
+      "key": "c",
+      "label": "A runner reads the unknown lint as a pass in this one case, on the coordinator's word only",
+      "lose": "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo. No session may grant that but you, and the coordinator's word is not a grant. It does not clear the merge deadline either.",
+      "widens": true
+    },
+    {
+      "gain": "Immediate, no flag and no change to the merge tool.",
+      "how": "You open each link and merge in the GitHub UI; the coordinator tells you when q_max's PR exists.",
+      "id": "owner-merges-five-by-hand",
+      "key": "d",
+      "label": "You merge the five setup PRs by hand in the GitHub UI (one click each, links in the context above)",
+      "lose": "Five clicks from you, and those repos' mains change without the merge tool's checks. Each PR is one stamp.json line plus a workflow made dispatch-only; a builder and a reviewer read it.",
+      "widens": false
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJL19M4Jwh49tAdowQXp)",
+  "recommended": "d",
+  "repo": "shivinate7/claude-settings",
+  "short": "How the private-repo setup PRs merge",
+  "shown": [
+    {
+      "id": "grant-flag-seven-prs",
+      "key": "a",
+      "label": "Grant the flag --lint-unknown-ok for the seven setup PRs only, with the reason line \"no CI by owner ruling 11:20 CST; setup PR that lands requiredChecks none\""
+    },
+    {
+      "id": "tool-lints-from-head-stamp",
+      "key": "b",
+      "label": "Change the merge tool so a setup PR whose own head stamp.json says \"none\" lints from that stamp, with no flag"
+    },
+    {
+      "id": "runner-reads-unknown-as-pass",
+      "key": "c",
+      "label": "A runner reads the unknown lint as a pass in this one case, on the coordinator's word only"
+    },
+    {
+      "id": "owner-merges-five-by-hand",
+      "key": "d",
+      "label": "You merge the five setup PRs by hand in the GitHub UI (one click each, links in the context above)"
+    }
+  ],
+  "status": "open",
+  "title": "How should the five private-repo setup pull requests merge, now that the merge tool also waits on main's old required check: you merge them by hand, or a change to the merge tool or a lifted check?",
+  "why": "The coordinator recommends d for speed (fewest steps), then b as the lasting fix (its words, not yours). The consultant, at 15:59 CST, also recommends d, plus removing joyous's required check in its ruleset (its words, not yours). He advises against b for that safety hole (his words, not yours)."
+}

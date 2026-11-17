@@ -28,7 +28,7 @@
       "lose": "A second lane for a small gain."
     }
   ],
-  "owner": "triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
+  "owner": "triage (session_013NEJL19M4Jwh49tAdowQXp)",
   "ref": "lane glossary-step-statuses, 12:17 CST Nov 13",
   "replied": "2026-11-16T13:40:45-06:00",
   "reply": "The consultant's read, 13:39 CST Nov 16 (relayed, not your answer): it also picks the third way, fold the queued steps into blocked, each naming what it waits behind. Why: one fewer status, and \"waits behind X\" says more than \"queued\". Risk it names: blocked steps show in the build's blocked list and may nag as if a blocker needs action, when they only wait their turn. Its guard: the blocker named is a step id, and the nag skips a blocker whose step is open and moving. So you and the consultant both lean to the third way. It is not option a or b, and it changes about 22 records, so I have not done it. Say \"fold into blocked\" and the lane does it (the nag guard comes with it). Item stays open.",

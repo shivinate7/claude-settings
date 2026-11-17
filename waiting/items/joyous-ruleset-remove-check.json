@@ -1,0 +1,17 @@
+{
+  "added": "2026-11-16T16:00:00-06:00",
+  "closed": "2026-11-16T22:02:00Z",
+  "context": "Goal: joyous merges with no required check, as the other private repos do, after your 11:20 CST Nov 16 order that private repos run no CI.\nWhy you: only the repository admin can change a ruleset, in the GitHub UI. The consultant (15:59 CST, relayed by the coordinator; I did not read the ruleset) says joyous's ruleset still requires a check and no session can remove it.\nHold: runner 12 says (15:52 CST, relayed, not read by me) that joyous's ruleset 24853807 was already set to enforcement disabled by REST at 15:50 CST. If its read holds, this task is moot; I am asking it for the read and will close this item or confirm it. Do not act until then.\nSteps: open https://github.com/shivinate7/joyous/settings/rules, open the ruleset that requires a status check on main, remove the required check, save, then press Done. This pairs with item 929, option d (you merge the five setup PRs by hand).",
+  "home": "decision private-repos-no-ci (PR #3590, merged 15:43 CST Nov 16); item 929 (the five setup PRs)",
+  "id": "joyous-ruleset-remove-check",
+  "kind": "task",
+  "n": "930",
+  "owner": "triage (session_013NEJL19M4Jwh49tAdowQXp)",
+  "replied": "2026-11-16T16:02:00-06:00",
+  "reply": "Closed as moot, 16:02 CST. Runner 12's REST read at 16:01 CST (relayed, not read by me): joyous's only ruleset, id 24853807, has enforcement \"disabled\", updated 12:50 CST. Its rules (deletion, non_fast_forward, pull_request, required_status_checks all-jobs-passed) do not apply while it is disabled, so no required check blocks a merge now. If anyone re-enables it, all-jobs-passed is required again and blocks merges; who disabled it is unknown. Classic protection on main reads required_status_checks null and enforce_admins true (the joyous builder, 15:50 CST, not re-read). Nothing is asked of you.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Remove joyous's required check in its ruleset",
+  "status": "closed",
+  "title": "Remove the required status check from joyous's main ruleset in the GitHub settings page",
+  "why": "The consultant's word, 15:59 CST: joyous's ruleset still requires a check. Unmeasured by me."
+}

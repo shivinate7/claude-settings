@@ -1,0 +1,61 @@
+{
+  "added": "2026-11-16T15:40:00-06:00",
+  "context": "Goal: a change to this page reaches you only the way you want, and the page stops waiting on questions you have already answered.\nProblem (rule): you ruled on 29 Oct that the page is rebuilt on main's newest code without being asked. Your goal for this session added a hold: the page writer republishes only fixes you asked for until you say how a page change is approved. Three page changes are queued behind merges (#3543 the recommendation and Waiting-on lines, #3469 the page link in chat, and the republish after them). Only you can lift or keep the hold, because it sets what shows on your own page.\nBased on (ruling): wp-republish-on-template (owner, 2026-10-29 14:47 CDT): the waiting page is rebuilt on main's newest code without being asked, in every repo.\nBased on (read): your goal for this session: republish only fixes you asked for until you answer.\nDeparts from: main republishes every merged page change and sends no message (ruling wp-republish-on-template) \u2014 b adds one line with a link after each republish, a holds every change for your yes.\nWaiting on: you; until you answer I republish only fixes you asked for.",
+  "home": "step page-recommend-and-waiting-on (draft PR #3543) and the page republish procedure, skills/waiting-page/reference/republish.md",
+  "id": "page-change-approval",
+  "kind": "decision",
+  "n": "928",
+  "options": [
+    {
+      "gain": "You see each change before it goes live.",
+      "how": "The writer republishes a merged page change only after you say yes to that change.",
+      "id": "hold-every-change",
+      "key": "a",
+      "label": "Keep the hold: every page change waits for your word before the page is republished",
+      "lose": "The page can lag merged changes for hours or days, and you answer one more question each time.",
+      "widens": false
+    },
+    {
+      "gain": "Your asks land fast, and you still hear about every change.",
+      "how": "The writer republishes after every merged page change, as on 29 Oct, and sends you one line with the link naming what changed.",
+      "id": "lift-hold-with-link",
+      "key": "b",
+      "label": "Lift the hold: republish every merged page change, and send you one line with a link saying what changed",
+      "lose": "A change you did not ask for can go live before you have looked at it.",
+      "widens": false
+    },
+    {
+      "gain": "The page always matches main.",
+      "how": "The writer republishes after every merged page change, as on 29 Oct, and sends nothing else.",
+      "id": "lift-hold-silent",
+      "key": "c",
+      "label": "Lift the hold with no message: republish every merged page change and say nothing",
+      "lose": "You may find a change only by looking at the page.",
+      "widens": false
+    }
+  ],
+  "owner": "triage (session_013NEJL19M4Jwh49tAdowQXp)",
+  "recommended": "b",
+  "repo": "shivinate7/claude-settings",
+  "short": "How a page change is approved",
+  "shown": [
+    {
+      "id": "hold-every-change",
+      "key": "a",
+      "label": "Keep the hold: every page change waits for your word before the page is republished"
+    },
+    {
+      "id": "lift-hold-with-link",
+      "key": "b",
+      "label": "Lift the hold: republish every merged page change, and send you one line with a link saying what changed"
+    },
+    {
+      "id": "lift-hold-silent",
+      "key": "c",
+      "label": "Lift the hold with no message: republish every merged page change and say nothing"
+    }
+  ],
+  "status": "open",
+  "title": "Since your hold on page changes you did not ask for, should the page go back to republishing every merged change, with a link line, or stay on hold?",
+  "why": "It goes back to your 29 Oct rule and keeps you told about each change, so the page stops lagging."
+}

@@ -1,0 +1,61 @@
+{
+  "added": "2026-11-16T18:28:00-06:00",
+  "context": "Goal: main goes green again so the queued pull requests can merge.\nProblem (rule): main has been red since #3596 merged, your red-main rule lets only its revert merge, and no session can push that revert, so it needs your hands.\nBased on (read): a template names the owner inside the private repo name, so a test fails (the consultant's and coordinator's reading, relayed; its fix already sits on #3602's branch). A revert of #3596 touches code and tests, and a builder cannot edit tests (decision builders-cannot-edit-tests).\nBased on (read): triage read the push runs of checks.yml on main by REST at 18:24 CST: #3596's run 43975053159 failure (finished 18:10 CST); #3543's run 43973911859 success on attempt 2 (18:20 CST); runs for #3598 and #3601 still in progress. The consultant's claim that #3543 also breaks main is withdrawn: its rail-jump test (page.test.mjs:6253) failed once and passed on re-run, so it flakes.\nBased on (ruling): git-red-main-reverts (only the blamed commit's revert merges on a red main).\nDeparts from: main \u2014 only the revert of the blamed commit may merge while main is red, and no role can push it; a has you press Revert on #3596 and merge it, which takes the #3596 change off main until it lands again.\nMeanwhile: #3469 and the queue behind it wait; #3602 stays open with the fix.\nWaiting on: you.",
+  "home": "rule git-red-main-reverts; step revert-has-no-pushing-role",
+  "id": "revert-3596-red-main",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "claude-settings PR #3596",
+      "url": "https://github.com/shivinate7/claude-settings/pull/3596"
+    }
+  ],
+  "n": 931,
+  "options": [
+    {
+      "gain": "Main goes green in minutes, and the queue behind #3469 can merge.",
+      "how": "Open the #3596 link, press Revert, then merge the revert pull request.",
+      "id": "owner-reverts-3596",
+      "key": "a",
+      "label": "You press Revert on #3596 in GitHub and merge the revert",
+      "links": [
+        {
+          "label": "claude-settings PR #3596",
+          "url": "https://github.com/shivinate7/claude-settings/pull/3596"
+        }
+      ],
+      "lose": "One merge by hand, and the #3596 change (a lane's own merge in auto mode) is off main until it lands again with #3602's fix.",
+      "widens": false
+    },
+    {
+      "gain": "The change stays on main, and the fix lands directly.",
+      "id": "wait-for-3602",
+      "key": "b",
+      "label": "Wait: let #3602 (the fix) merge first, with a typed word from you lifting the red-main rule for it",
+      "lose": "Lifts the red-main rule for one merge; the queue waits for #3602's own run, which is red on three jobs at 18:17 CST (coordinator, relayed).",
+      "widens": true
+    }
+  ],
+  "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ) 18:22 and 18:24 CST Nov 16; posted by triage (session_013NEJL19M4Jwh49tAdowQXp)",
+  "recommended": "a",
+  "ref": "PR #3596; PR #3602; rule git-red-main-reverts; step revert-has-no-pushing-role",
+  "replied": "2026-11-16T23:25:00-06:00",
+  "reply": "23:25 CST Nov 16. Withdrawn by the session that asked it (the consultant, confirmed by the coordinator at 23:24 CST; relayed, not your answer). Your Q4 g ruling already makes a revert an ordinary lane PR, so you need not revert by hand. The revert of #3596 is a lane PR on branch revert-3596, split by role so the builder-diff check passes: a test-author reverts the one test file and a builder reverts the other five files. Step revert-has-no-pushing-role stays open: the split is a workaround, not a fix. I file the PR number on the step when the coordinator sends it. Nothing needed from you.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Revert #3596 by hand?",
+  "shown": [
+    {
+      "id": "owner-reverts-3596",
+      "key": "a",
+      "label": "You press Revert on #3596 in GitHub and merge the revert"
+    },
+    {
+      "id": "wait-for-3602",
+      "key": "b",
+      "label": "Wait: let #3602 (the fix) merge first, with a typed word from you lifting the red-main rule for it"
+    }
+  ],
+  "status": "closed",
+  "title": "Main is red from one merge, #3596 (a private name in a template). May you press Revert on it and merge the revert, since no session can push it?",
+  "why": "The consultant recommends a: the revert is the only merge the red-main rule allows, and no agent role can push it. It is the consultant's ask, relayed, not owner-typed."
+}

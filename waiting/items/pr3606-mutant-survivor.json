@@ -1,0 +1,67 @@
+{
+  "added": "2026-11-16T21:09:44-06:00",
+  "context": "Goal: PR #3606 (the glued-& rebuild) passes its lane lint so it can be handed in.\nProblem (rule): lint fails on one job because one of 307 guard mutants survives, and the lane cannot run the likely one, since a hook refuses any command that names install.sh.\nBased on (read): the lane's word, relayed by the coordinator at 21:06 CST: the third mutant-test job (a mutant is a deliberate small break in the guard code that a test must catch) caught 306 of 307; the first two mutant-test jobs and every other lint check pass; the log does not name the survivor; the likeliest is the lane's new mutant \"handoff-unread: the guard-crash refusal drops its install.sh fix\". Triage read #3606 by REST at 21:10 CST: open, draft, and its latest commit matches the lane's.\nBased on (read): the PR body says that mutant is unproven in the lane and that the PR's own CI run proves it; the frozen-path hook's text says no override lifts its refusal (the coordinator's relay of it; triage did not read the hook).\nDeparts from: main \u2014 has no such mutant and the frozen-path hook refuses any command naming install.sh; #3606 adds the mutant, and a, b and c change only how its one survivor is named.\nMeanwhile: the lane tries c on its own; its other red test rows wait on a separate question to you about which old rule wins.\nWaiting on: you.",
+  "home": "PR #3606 (lane glued-amp-rebuild-2156); item 927",
+  "id": "pr3606-mutant-survivor",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "claude-settings PR #3606",
+      "url": "https://github.com/shivinate7/claude-settings/pull/3606"
+    }
+  ],
+  "n": 932,
+  "options": [
+    {
+      "gain": "A real name for the survivor, with no bypass; the lane then fixes the killing row.",
+      "id": "person-runs-mutant",
+      "key": "a",
+      "label": "You, or a session on your computer, run that mutant (or the third mutant-test job) and name the survivor",
+      "lose": "The lane waits on a person, so #3606 cannot be handed in until then.",
+      "widens": false
+    },
+    {
+      "gain": "Quick: the survivor is named in one run.",
+      "id": "owner-types-override",
+      "key": "b",
+      "label": "You type `override` for one run of that mutant, with a filter that avoids the file name",
+      "lose": "Routes round a refusal whose own text says no override lifts it, and your override may not take (unmeasured).",
+      "widens": true
+    },
+    {
+      "gain": "No bypass and no wait on a person.",
+      "id": "lane-finds-by-reading",
+      "key": "c",
+      "label": "The lane finds it by reading only: it lists the tests that cover each mutant's file and checks which mutant has none, then the next lint run proves it",
+      "lose": "Slower, and it may miss the survivor; the lint run then fails again.",
+      "widens": false
+    }
+  ],
+  "owner": "lane glued-amp-rebuild-2156 (session_013NEJL3C8YM2r4iexezbU7K) via the coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 21:06 CST Nov 16; posted by triage (session_013NEJL19M4Jwh49tAdowQXp)",
+  "recommended": "c",
+  "ref": "PR #3606; item 927; hooks/mutate_guard.py near line 3511",
+  "replied": "2026-11-16T21:21:56-06:00",
+  "reply": "21:21 CST Nov 16, from the coordinator (relayed, not your answer): the lane took option c and read the likely survivor, about 85% sure, not proven: the third mutant-test job's mutant 'check-tail lint: a redirect word between a pipe and its filter is skipped'; the install.sh mutant reads as caught. A test-author adds the missing test row and the lane reruns its lane lint. Nothing is needed from you now. This item stays open until that rerun passes, then I close it.",
+  "repo": "shivinate7/claude-settings",
+  "short": "#3606: name the one surviving mutant",
+  "shown": [
+    {
+      "id": "person-runs-mutant",
+      "key": "a",
+      "label": "You, or a session on your computer, run that mutant (or the third mutant-test job) and name the survivor"
+    },
+    {
+      "id": "owner-types-override",
+      "key": "b",
+      "label": "You type `override` for one run of that mutant, with a filter that avoids the file name"
+    },
+    {
+      "id": "lane-finds-by-reading",
+      "key": "c",
+      "label": "The lane finds it by reading only: it lists the tests that cover each mutant's file and checks which mutant has none, then the next lint run proves it"
+    }
+  ],
+  "status": "open",
+  "title": "PR #3606's lint has one surviving mutant it cannot name, because a hook refuses any command that names install.sh. Who finds it: a person, an override, or the lane by reading?",
+  "why": "The coordinator recommends c: it needs no bypass and no person, and the next lint run proves it. It is the coordinator's pick, relayed, not owner-typed."
+}

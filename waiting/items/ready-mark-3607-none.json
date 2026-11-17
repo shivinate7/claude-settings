@@ -1,0 +1,91 @@
+{
+  "added": "2026-11-17T01:43:54-06:00",
+  "context": "Goal: the red main lifts, so every queued merge can resume.\nProblem (goal): the revert of #3596 is the only merge allowed on a red main, and a guard refuses every session's ready mark on it, so only you can move it.\nBased on (read): the coordinator's relay at 01:41 CST of the consultant's 01:40 CST report: the guard that checks the records page before a ready mark refuses, saying that main's merge settings hold the value none for the required CI checks and that this value is not valid; any session's mark hits it.\nBased on (read): triage read at 01:43 CST: main's merge settings say no CI check is required (your Nov 16 ruling that private repos merge with no CI run, so this value is the valid one), and #3607 is open and still a draft. The refusing guard's own code was not found by triage (unmeasured), so the refusal looks like a false alarm.\nDeparts from: main refuses every session's ready mark while stamp.json holds the merge value none \u2014 a lets #3607's one mark through on your typed override and a lane later teaches the guard that value; c lets your own click in GitHub mark it; b leaves the refusal in place until that guard fix lands.\nMeanwhile: every other queued merge waits behind the red main.\nWaiting on: you.",
+  "home": "step revert-has-no-pushing-role; PR #3607",
+  "id": "ready-mark-3607-none",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "claude-settings PR #3607",
+      "url": "https://github.com/shivinate7/claude-settings/pull/3607"
+    }
+  ],
+  "n": 933,
+  "options": [
+    {
+      "gain": "The red main lifts at the next merge.",
+      "how": "Type your words in the session that marks #3607 ready (the consultant's), naming that one mark.",
+      "id": "owner-types-override-once",
+      "key": "a",
+      "label": "You type one `override` for the ready mark on #3607, then a lane fixes the guard",
+      "links": [
+        {
+          "label": "The consultant's session",
+          "url": "https://claude.ai/code/session_013NEJKz5AWFJhGvmCUoi6wQ"
+        },
+        {
+          "label": "claude-settings PR #3607",
+          "url": "https://github.com/shivinate7/claude-settings/pull/3607"
+        }
+      ],
+      "lose": "One guard check is bypassed once, and your override may not reach a guard that refuses a mark (unmeasured).",
+      "widens": false
+    },
+    {
+      "gain": "No guard is bypassed.",
+      "id": "wait-for-guard-fix",
+      "key": "b",
+      "label": "Wait: a lane fixes the guard first, with no bypass",
+      "links": [
+        {
+          "label": "claude-settings PR #3607",
+          "url": "https://github.com/shivinate7/claude-settings/pull/3607"
+        }
+      ],
+      "lose": "That lane's own ready mark hits the same guard, so it likely cannot land while main is red (unmeasured), and every queued merge keeps waiting.",
+      "widens": false
+    },
+    {
+      "gain": "No override and no guard change; the guard checks sessions, so a click in the web page likely skips it (unmeasured).",
+      "how": "Open the #3607 link and press the button that marks the pull request ready for review.",
+      "id": "owner-marks-ready-by-hand",
+      "key": "c",
+      "label": "You mark #3607 ready yourself in GitHub",
+      "links": [
+        {
+          "label": "claude-settings PR #3607",
+          "url": "https://github.com/shivinate7/claude-settings/pull/3607"
+        }
+      ],
+      "lose": "One click from you, and the guard's records-page check is not run for this mark.",
+      "widens": false
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 01:41 CST Nov 17, from the consultant (session_013NEJKz5AWFJhGvmCUoi6wQ); posted by triage (session_013NEJL19M4Jwh49tAdowQXp)",
+  "recommended": "a",
+  "ref": "PR #3607 (revert of #3596); decision private-repos-no-ci; step revert-has-no-pushing-role",
+  "replied": "2026-11-17T03:08:44-06:00",
+  "reply": "03:08 CST Nov 17. Moot: #3607, the revert of #3596, merged at 03:07:11 CST (read by triage on REST: closed, merged). How it was marked ready is not in the record I read; nothing is needed from you. The guard that refused the mark on the merge value none is still unfixed; step revert-has-no-pushing-role keeps the open work, and I will add the guard gap there if the coordinator confirms it.",
+  "repo": "shivinate7/claude-settings",
+  "short": "How #3607 gets marked ready",
+  "shown": [
+    {
+      "id": "owner-types-override-once",
+      "key": "a",
+      "label": "You type one `override` for the ready mark on #3607, then a lane fixes the guard"
+    },
+    {
+      "id": "wait-for-guard-fix",
+      "key": "b",
+      "label": "Wait: a lane fixes the guard first, with no bypass"
+    },
+    {
+      "id": "owner-marks-ready-by-hand",
+      "key": "c",
+      "label": "You mark #3607 ready yourself in GitHub"
+    }
+  ],
+  "status": "closed",
+  "title": "A guard refuses the ready mark on the revert of #3596, and that revert is the only merge that lifts the red main. How does #3607 get marked ready?",
+  "why": "The coordinator recommends a: one typed override, then a lane teaches the guard. It is the coordinator's pick, relayed, not owner-typed. Option c is triage's addition and is unmeasured."
+}
