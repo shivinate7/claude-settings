@@ -1163,7 +1163,16 @@ def stop():
     except Exception:  # guard-hooks-fail-closed: a failed check prints nothing and does not block
         pass
     if out:
-        print(json.dumps(out))
+        # Imported here: the --hook path runs on every tool call and needs none of report_guard.
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+        try:
+            import report_guard  # the one home of the Stop output and its correction line
+        except ImportError:  # a copy of this hook with no lint folder beside it: the job list prints, the block does not
+            note = {k: v for k, v in out.items() if k == "systemMessage"}
+            if note:
+                print(json.dumps(note))
+        else:
+            report_guard.emit_stop(out)
     return 0
 
 

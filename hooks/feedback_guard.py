@@ -175,6 +175,7 @@ if LINT not in sys.path:
 
 import _transcript  # noqa: E402  the one home of the transcript readers and the owner-record test
 import local_time  # noqa: E402  the one home of the inbox paths
+import report_guard  # noqa: E402  the one home of the Stop output and its correction line
 import override  # noqa: E402  the one home of the roadmap record ref and folder
 import ruling_home  # noqa: E402  the one home of "a branch's tree holds this file"
 import precompact_handoff  # noqa: E402  the one home of the handoff path
@@ -1618,8 +1619,7 @@ def main():
             out.update(decision="block", reason=lead + ln_reason + LINK_CITE)
         if notes:
             out["systemMessage"] = " ".join(filter(None, [out.get("systemMessage")] + notes))
-        if out:
-            print(json.dumps(out))
+        report_guard.emit_stop(out)
     except Exception as e:  # advisory: a crash passes, and says so on stderr
         print("feedback_guard: %s" % e, file=sys.stderr)
     return 0
