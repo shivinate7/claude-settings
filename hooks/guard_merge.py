@@ -2296,8 +2296,8 @@ def _head_landed(module, repo: str, row) -> bool:
 def open_pull_rows(module, repo: str):
     """The open pull request rows of `repo`, every page, read through the merge tool's page reader `module` with the
     session's token. The one home of this read: rules lane-closes-after-records and lane-step-dup call it. A repo the
-    session has not attached is not read; the refusal then names the add_repo access push (owner, page item 937 b,
-    14:20 CST Nov 17). A failed read raises. The caller holds the one shared deadline over the read (a nested
+    session has not attached is not read. On the archive caller's 403 or 404 the refusal names the add_repo access push
+    (owner, page item 937 b, 14:20 CST Nov 17); step_pr_hit keeps its own STEP_PR_READ_REASON. A failed read raises. The caller holds the one shared deadline over the read (a nested
     shared_deadline would reset it). Cost: one gh call per page."""
     return module.Host(repo=repo).pages("pulls", fields={"state": "open"})
 
