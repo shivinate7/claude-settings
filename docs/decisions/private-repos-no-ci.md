@@ -21,6 +21,7 @@ Ruling `own-all-jobs-passed-removed` (owner, 2026-11-15 19:08 CST) takes the req
 - `"none"` reads neither the ruleset nor the branch protection. GitHub's own merge call refuses a check that is still required, so that read would only copy a refusal.
 - `refuse_pinned_mismatch` compares a pinned list only. It has nothing to compare under `"none"`.
 - A head with no check and no workflow run reads green under `"none"` (`head_read`, `unseen`). Under the other values it reads pending, because GitHub has not made the run yet.
+- A setup PR's own head `stamp.json` gives `requiredChecks` and nothing else, and only when the head says `"none"` and the PR changes that field against its merge-base with the base (owner ruling, page item 929 b). Then the PR lints and merges with no flag. `load_config` reads the head's stamp and checks it in full (the deadline too), and takes `requiredChecks` from it. Every other field is the base's: `standingGrant`, `afterMerge`, `ignoreChecks`, `keepBranches`, `readyChecks`, `deleteBranch` and `method`. A stamp missing at the merge-base reads as `"protection"`, so a PR that adds the stamp with `"none"` changes it. A head that says anything else, or a `"none"` the PR left as the base had it, is judged on the base's stamp, so a PR never loosens its own gate. The guard's `head_read` reads the head's stamp by the same rule.
 - Under `"none"` a lane PR passes lane lint on its local steps alone. `lane_lint` reads no draft run of `lane-touched-tests`, and a failing local step still fails.
 
 ## What still reads red
@@ -31,8 +32,6 @@ Nothing. Under `"none"` the tool reads no CI run at all: no check row, no workfl
 - `base_state` reads no run of the base, so a red or pending run on main holds no merge.
 - A run left on the head from before the workflows were disabled holds nothing.
 - A pending required check on the base's branch protection is still GitHub's to refuse. The tool names that cause when GitHub reads the pull request BLOCKED.
-
-A setup PR whose own head `stamp.json` says `"none"` lints and merges from that stamp, with no flag (owner ruling, page item 929 b). `load_config` reads the head's stamp, checks it in full (the deadline too), and uses it in place of the base's. A head whose stamp says anything else is judged on the base's stamp, so a PR never loosens its own gate. The guard's `head_read` reads the head's stamp the same way.
 
 No check runs on a commit this tool pushes, so a claim under `"none"` merges in the same run, as a page heal does.
 

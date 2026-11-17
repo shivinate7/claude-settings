@@ -2048,7 +2048,7 @@ class Host:
             with shared_deadline(SH_TIMEOUT):
                 num = self.pr_number(n)  # a number: pr() of a number reads nothing more
                 info = self.pr(num)
-                if self.required == "none" or head_none_stamp(self.cwd or ".", info["head"], DEFAULT_CONFIG) is not None:
+                if self.required == "none" or head_none_stamp(self.cwd or ".", info["head"], DEFAULT_CONFIG, base=info["base"]) is not None:
                     return "green", ""  # no CI run is read: the base's stamp says none, or a setup head's own stamp does (decision private-repos-no-ci, owner rulings 929 b and 11:20 CST Nov 16)
                 got = self.checks(num, warn=False, sha=info["head"])
                 red, pending, _ = self.classify(got, [], self.ignore, info["branch"])
@@ -2734,10 +2734,12 @@ def stamp_git(root, *a):
         program = next((f for d in GIT_FOLDERS if (f := shutil.which("git", path=d))), "git")
     return sh([program, "-C", root, *a])
 
-def head_none_stamp(root, head, path, branch=None):
-    """-> the stamp object at commit `head` when that stamp sets merge.requiredChecks "none", else None. A setup PR's own stamp is the config main reads (decision
-    private-repos-no-ci, owner ruling 929 b). Any other stamp, a missing file, a commit this checkout lacks (`branch`, when given, is fetched once for it) and an
-    unreadable file read as None: the base's stamp decides then. Cost: one `git cat-file`, one `git show`, and one fetch when the head is not local."""
+def head_none_stamp(root, head, path, branch=None, base="main"):
+    """-> the stamp object at commit `head` when that stamp sets merge.requiredChecks "none" and the PR changes requiredChecks against its merge-base with origin/`base`, else None.
+    A setup PR's own stamp is the source of requiredChecks that main reads (decision private-repos-no-ci, owner ruling 929 b), and a "none" the PR left as the base had it is not a
+    change, so main's stamp decides. A stamp missing at the merge-base reads as the default, "protection". Any other head stamp, a missing file, a commit this checkout lacks (`branch`,
+    when given, is fetched once for it), an unreadable file, and a merge-base or a base stamp that cannot be read read as None: the base's stamp decides then.
+    Cost: one `git cat-file`, one `git show`, one `git merge-base`, one more `git show`, and one fetch when the head is not local."""
     if not head:
         return None
     try:
@@ -2745,24 +2747,45 @@ def head_none_stamp(root, head, path, branch=None):
             stamp_git(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")  # a failed fetch leaves the commit missing, which reads as no setup stamp
         c, text = stamp_git(root, "show", f"{head}:{path}")
         cfg = None if c else json.loads(text)
+        m = cfg.get("merge") if isinstance(cfg, dict) else None
+        if not (isinstance(m, dict) and m.get("requiredChecks") == "none"):
+            return None
+        c, mb = stamp_git(root, "merge-base", head, f"origin/{base}")
+        if c:
+            return None
+        c, text = stamp_git(root, "show", f"{mb.strip()}:{path}")
+        if c:  # no stamp at the merge-base: its requiredChecks is the default, so the PR changes it
+            return cfg
+        was = json.loads(text)
+        was_m = was.get("merge", {}) if isinstance(was, dict) else None
+        if not isinstance(was_m, dict):
+            return None
+        return None if was_m.get("requiredChecks", "protection") == "none" else cfg
     except (OSError, ValueError):  # no git to run, or a stamp that is not JSON
         return None
-    m = cfg.get("merge") if isinstance(cfg, dict) else None
-    return cfg if isinstance(m, dict) and m.get("requiredChecks") == "none" else None
 
 def load_config(root, base, path, cite="", head=None, branch=None):
     """The repo's config, read from the base branch on origin: never the local checkout, never the PR tree.
     No file: all defaults. A file with fields left out: defaults for those fields. A broken file stops.
     `cite` ends each stop's text: the caller's own decision cite, which `main` leaves out.
-    `head`: the PR's head sha, and `branch` its branch (to fetch the head from). When the stamp at that commit sets requiredChecks "none", that stamp is the config, read and checked in full, so a setup PR that turns
-    CI off merges under the setup it makes (decision private-repos-no-ci). Under any other value the base's stamp is the config, so a PR never loosens its own gate."""
+    `head`: the PR's head sha, and `branch` its branch (to fetch the head from). When the stamp at that commit sets requiredChecks "none" and the PR changes that field against its merge-base
+    (head_none_stamp), the head's stamp is read and checked in full, and gives requiredChecks and nothing else: every other field is the base's, so a setup PR that turns
+    CI off merges under the setup it makes, and a PR never loosens its own gate (decision private-repos-no-ci)."""
     ref = f"origin/{base}"
     c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
     if c:
         raise Stop(f"git fetch origin {base} failed: {out}{cite}")
-    setup = head_none_stamp(root, head, path, branch)
+    setup = head_none_stamp(root, head, path, branch, base)
     if setup is not None:
-        return parse_config(root, setup, head, f"the head {head[:9]}", path, cite)
+        parse_config(root, setup, head, f"the head {head[:9]}", path, cite, fill=False)
+    cfg = base_config(root, base, path, cite)
+    if setup is not None:
+        cfg["merge"]["requiredChecks"] = "none"
+    return cfg
+
+def base_config(root, base, path, cite):
+    """The stamp on origin/`base`, checked and filled with defaults (load_config's body when no head stamp counts)."""
+    ref = f"origin/{base}"
     c, listed = git(root, "ls-tree", "--name-only", ref, "--", path)
     if c:  # an unreadable base is not an absent file
         raise Stop(f"cannot read {ref} to look for {path}: {listed}{cite}")
@@ -2781,9 +2804,9 @@ def load_config(root, base, path, cite="", head=None, branch=None):
         raise Stop(f"cannot read the config {path} on {ref}: {e}{cite}")
     return parse_config(root, cfg, ref, ref, path, cite)
 
-def parse_config(root, cfg, ref, where, path, cite):
+def parse_config(root, cfg, ref, where, path, cite, fill=True):
     """Check the stamp object `cfg` and fill its defaults: the one home of that check, for the base's stamp and a setup head's. `ref` is the commit the workflow
-    caps are read at; `where` names it in each stop."""
+    caps are read at; `where` names it in each stop. `fill=False` only checks, for a head stamp that gives requiredChecks and nothing else."""
     m = cfg.setdefault("merge", {})
     unknown = sorted(set(m) - MERGE_FIELDS)
     if unknown:
@@ -2818,6 +2841,8 @@ def parse_config(root, cfg, ref, where, path, cite):
     if "defaultBranch" in cfg and not ne(cfg["defaultBranch"]):
         raise Stop(f"{path} on {where}: defaultBranch must be a non-empty string, not {cfg['defaultBranch']!r}.{cite}")
     ignore_checks(cfg)  # refuse a bad entry before the defaults notice, so the refusal is the only line
+    if not fill:
+        return cfg
     filled = [k for k in MERGE_DEFAULTS if k not in m]
     for k in filled:
         m[k] = MERGE_DEFAULTS[k]
