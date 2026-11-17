@@ -1,0 +1,11 @@
+{
+  "title": "A Stop hook block that keeps a session in hundreds of one-line tick turns is capped",
+  "why": "A Stop hook block held a session in hundreds of one-line tick turns, each costing a turn and tokens with nothing to do.",
+  "note": "Filed by triage 11, 14:45 CST Nov 17 on the consultant's ask (14:41 CST), from the coordinator's mistakes list; a search found no existing guard. Prior work: stop-block-cites (the Stop block's text). Read hooks/stall_watch.py --stop first. A guard step: after a set number of repeats of the same Stop block with no new work, the block lets the session stop and says why. The cap number is measured from the real incident, not guessed. Lane: test-author first (red case: N identical blocks in a row), then builder, review. Not started.",
+  "order": 945,
+  "phase": "now",
+  "owner": "coordinator",
+  "lane": "",
+  "status": "ready",
+  "updatedAt": "2026-11-17T14:41:02-06:00"
+}

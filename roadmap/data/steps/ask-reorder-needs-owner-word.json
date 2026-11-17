@@ -1,0 +1,11 @@
+{
+  "title": "A session that asks the batch runner to move a PR ahead of its queue is refused without an owner word",
+  "why": "The coordinator asked a runner to put a PR ahead of the queue with no owner word behind it; a reorder is the owner's call and the runner then trusts a peer's message.",
+  "note": "Filed by triage 11, 14:45 CST Nov 17 on the consultant's ask (14:41 CST), from the coordinator's mistakes list; a search of steps and open PRs found no existing guard. Prior work: priority-vs-merge-order (PR 3378). A guard step: a send_message to a runner that asks it to reorder or skip ahead of its queue is refused unless the message names an owner word with its time. Lane: test-author first (red case: a reorder ask with no owner word), then builder, review (a guard verdict). Mistake named, harm: the queue order changes with no owner word. Not started.",
+  "order": 944,
+  "phase": "now",
+  "owner": "coordinator",
+  "lane": "",
+  "status": "ready",
+  "updatedAt": "2026-11-17T14:41:02-06:00"
+}
