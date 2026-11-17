@@ -3,6 +3,7 @@
 
 Run: python3 actions/ci-alarm/test_clear_rule.py. Stdlib unittest. Each case builds its workflow text in memory; no file is read or written.
 """
+import json
 import os
 import sys
 import unittest
@@ -186,6 +187,168 @@ class ClearRuleScanner(unittest.TestCase):
         self.assert_read(text, want)
         self.assertFalse(clear_rule.clears(self.R, self.N, PUSH, text),
                          "a real || means the job may run in a push run, so it stays needed and its skip blocks the clear")
+
+    def test_a_pull_request_test_in_a_parenthesized_and_group_leaves_the_job_out(self):
+        # `(A && github.event_name == 'pull_request')` is a conjunct of the whole if:, so the job runs only in a pull_request run.
+        # Named failure: the group reads as one opaque conjunct, so the job stays needed and the push run's skip blocks the clear.
+        want = "(!cancelled() && github.event_name == 'pull_request') && github.head_ref != 'x'"
+        text = extra_workflow(f"if: {want}")
+        self.assert_read(text, want)
+        self.assertTrue(clear_rule.clears(self.R, self.N, PUSH, text),
+                        "a pull_request test inside a parenthesized && group is a conjunct of the whole, so the job is left out and the push run clears")
+
+    def test_an_or_inside_a_parenthesized_group_keeps_the_job_needed(self):
+        # `(A || github.event_name == 'pull_request')` may be true in a push run, so the job stays needed and its skip blocks the clear.
+        # Named failure: a fix that reads each event test inside a group as a conjunct, whatever the operator, leaves the job out.
+        want = "(!cancelled() || github.event_name == 'pull_request') && github.head_ref != 'x'"
+        text = extra_workflow(f"if: {want}")
+        self.assert_read(text, want)
+        self.assertFalse(clear_rule.clears(self.R, self.N, PUSH, text),
+                         "an || inside a parenthesized group may run in a push run, so the job stays needed and its skip blocks the clear")
+
+
+class ClearRuleNightly(unittest.TestCase):
+    """R61 part 3: how a skipped nightly is classified. Controls: each holds on the rule as it stands, since a job whose `!=`
+    if can run in the newer run is kept needed, and its skip there blocks the clear. They pin the classification the gate
+    relies on: a skipped nightly never supersedes a red one."""
+    MAC_IF = "if: ${{ github.event_name != 'push' }}"
+    SKIP_IF = "if: ${{ github.event_name == 'schedule' }}"
+
+    def test_a_skipped_nightly_behind_a_green_skip_does_not_clear_a_red_macos_nightly(self):
+        # The red nightly failed checks-macos. The newer scheduled run's gate read skip: its checks-macos and checks were skipped,
+        # and only the gate passed. Named failure: the skipped jobs read as passed, and the skipped run clears the red one.
+        r = [job("checks-macos", "failure"), job("nightly-skip", "success"), job("checks", "success")]
+        n = [job("nightly-skip", "success"), job("checks-macos", "skipped"), job("checks", "skipped")]
+        text = workflow(("nightly-skip", ["runs-on: ubuntu-latest", self.SKIP_IF, *STEPS]),
+                        ("checks", [RUNS_ON, *STEPS]),
+                        ("checks-macos", ["runs-on: macos-latest", self.MAC_IF, *STEPS]))
+        self.assertFalse(clear_rule.clears(r, n, "schedule", text),
+                         "a skipped nightly cleared a red macOS nightly: its skipped jobs must not read as passed")
+
+    def test_a_green_push_run_with_the_macos_job_skipped_does_not_clear_a_red_macos_nightly(self):
+        # The push run skips checks-macos at job level (its != 'push' if). That job may run in a PR or a schedule run, so it stays
+        # needed here, and its skip in the push run blocks the clear. Named failure: the push guard leaves the job out.
+        r = [job("checks-macos", "failure"), job("checks", "success")]
+        n = [job("checks", "success"), job("checks-macos", "skipped")]
+        text = workflow(("checks", [RUNS_ON, *STEPS]), ("checks-macos", ["runs-on: macos-latest", self.MAC_IF, *STEPS]))
+        self.assertFalse(clear_rule.clears(r, n, PUSH, text),
+                         "a green push run cleared a red macOS nightly: the != push job was left out, so its skip read as passed")
+
+    def test_a_push_run_whose_only_running_job_is_push_skip_does_not_clear_a_red_macos_nightly(self):
+        # The red nightly failed checks-macos. The newer push run's push-skip job said skip, so push-skip is the one job that ran,
+        # and it passed; checks-macos, checks and nightly-skip were skipped. The run reads green, but the red job did not pass.
+        # Named failure: the green push-skip job reads as a passed run, and the push run clears the red nightly.
+        push_skip_if = "if: ${{ github.event_name == 'push' }}"
+        r = [job("checks-macos", "failure"), job("checks", "success"), job("nightly-skip", "success")]
+        n = [job("push-skip", "success"), job("checks-macos", "skipped"), job("checks", "skipped"), job("nightly-skip", "skipped")]
+        text = workflow(("nightly-skip", ["runs-on: ubuntu-latest", self.SKIP_IF, *STEPS]),
+                        ("push-skip", ["runs-on: ubuntu-latest", push_skip_if, *STEPS]),
+                        ("checks", [RUNS_ON, *STEPS]),
+                        ("checks-macos", ["runs-on: macos-latest", self.MAC_IF, *STEPS]))
+        self.assertFalse(clear_rule.clears(r, n, PUSH, text),
+                         "a push run with only push-skip running cleared a red macOS nightly: the skipped red job read as passed")
+
+
+class DailyRedClear(unittest.TestCase):
+    """Owner page item 880 (11:53 CST Nov 15): a push starts no Windows or mutation job, since their job-level if is
+    `github.event_name != 'push'`, and the daily scheduled run runs them. A red daily is cleared only by a run that passed every such
+    job. A green dispatch run does. A Linux-only push run does not, and neither does a push run whose suite jobs were all skipped.
+    The rule is unchanged (clear_rule.py is the one home), so these cases hold on the rule as it stands and pin the new job shape."""
+    DAILY_IF = "if: ${{ github.event_name != 'push' }}"  # the job-level if of a Windows or mutation job from item 880
+    TEXT = workflow(("checks", [RUNS_ON, *STEPS]),
+                    ("checks-windows-merge-3", ["runs-on: windows-latest", DAILY_IF, *STEPS]),
+                    ("checks-mutate-guard", ["runs-on: ubuntu-latest", DAILY_IF, *STEPS]))
+    R = [job("checks", "success"), job("checks-windows-merge-3", "failure"), job("checks-mutate-guard", "success")]
+
+    def test_a_linux_only_green_push_run_does_not_clear_a_red_daily(self):
+        # Named failure: the != push Windows job is left out of the push run's need, so its skip there reads as passed.
+        n = [job("checks", "success"), job("checks-windows-merge-3", "skipped"), job("checks-mutate-guard", "skipped")]
+        self.assertFalse(clear_rule.clears(self.R, n, PUSH, self.TEXT),
+                         "a Linux-only green push run cleared a red daily: its skipped Windows job read as passed")
+
+    def test_a_linux_only_green_push_run_does_not_clear_a_red_mutation_job(self):
+        # Named failure: the != push mutation job is left out of the push run's need, so its skip there reads as passed.
+        r = [job("checks", "success"), job("checks-windows-merge-3", "success"), job("checks-mutate-guard", "failure")]
+        n = [job("checks", "success"), job("checks-windows-merge-3", "skipped"), job("checks-mutate-guard", "skipped")]
+        self.assertFalse(clear_rule.clears(r, n, PUSH, self.TEXT),
+                         "a Linux-only green push run cleared a red mutation job: its skipped mutation job read as passed")
+
+    def test_a_proven_push_run_with_every_suite_job_skipped_does_not_clear_a_red_daily(self):
+        # Named failure: push-skip and scope read as the verdict, and the skipped suite jobs read as passed.
+        n = [job("push-skip", "success"), job("scope", "skipped"), job("checks", "skipped"),
+             job("checks-windows-merge-3", "skipped"), job("checks-mutate-guard", "skipped")]
+        self.assertFalse(clear_rule.clears(self.R, n, PUSH, self.TEXT),
+                         "a proven push run with its suite jobs skipped cleared a red daily: skipped is no pass")
+
+    def test_a_green_push_run_that_skips_the_windows_and_mutation_jobs_does_not_clear_a_linux_red_daily(self):
+        # The red job is a Linux job, so step one (red_stays) finds nothing: the rule reads the workflow and decides. The Windows and
+        # mutation jobs are not red in the daily, and their != push guard keeps them needed, so the push run's skip of them blocks the clear.
+        # Named failure: a rule that leaves a != push job out of the need reads the skip as passed, and the Linux-only push run clears the daily.
+        r = [job("checks", "failure"), job("checks-windows-merge-3", "success"), job("checks-mutate-guard", "success")]
+        n = [job("checks", "success"), job("checks-windows-merge-3", "skipped"), job("checks-mutate-guard", "skipped")]
+        self.assertFalse(clear_rule.clears(r, n, PUSH, self.TEXT),
+                         "a Linux-only green push run cleared a red Linux job of the daily: its skipped != push jobs were left out of the need")
+
+    def test_a_green_dispatch_run_with_every_job_of_the_daily_clears_it(self):
+        # Control: a dispatch runs every job, so every job the daily needed passed in it, and the red daily is lifted.
+        n = [job("checks", "success"), job("checks-windows-merge-3", "success"), job("checks-mutate-guard", "success")]
+        self.assertTrue(clear_rule.clears(self.R, n, "workflow_dispatch", self.TEXT),
+                        "a green dispatch run with every job of the red daily passed did not clear it")
+
+
+class EmptyRun(unittest.TestCase):
+    """clear_rule.empty_without_evidence: a green run of the push group that ran no suite job and carries no evidence is no verdict."""
+    EMPTY = [job("push-skip", "success"), job("scope", "success"), job("checks", "skipped"), job("checks-macos", "skipped")]
+    EVIDENCE = [job("push-skip", "success"), job("scope", "skipped"), job("checks", "skipped"), job("checks-macos", "skipped")]
+
+    def test_a_push_run_with_every_suite_job_skipped_and_scope_run_is_empty(self):
+        self.assertTrue(clear_rule.empty_without_evidence(self.EMPTY, PUSH))
+
+    def test_a_push_run_whose_push_skip_succeeded_and_scope_was_skipped_carries_evidence(self):
+        self.assertFalse(clear_rule.empty_without_evidence(self.EVIDENCE, PUSH))
+
+    def test_a_dispatch_run_never_carries_evidence_even_with_jobs_shaped_like_it(self):
+        self.assertTrue(clear_rule.empty_without_evidence(self.EVIDENCE, "workflow_dispatch"))
+
+    def test_a_dispatch_run_with_no_suite_job_is_empty(self):
+        self.assertTrue(clear_rule.empty_without_evidence([job("scope", "success"), job("checks", "skipped")], "workflow_dispatch"))
+
+    def test_one_suite_job_that_succeeded_makes_the_run_not_empty(self):
+        self.assertFalse(clear_rule.empty_without_evidence([*self.EMPTY[:3], job("checks-macos", "success")], PUSH))
+
+    def test_a_matrix_job_that_succeeded_makes_the_run_not_empty(self):
+        self.assertFalse(clear_rule.empty_without_evidence([*self.EMPTY, job("checks-windows (shard 1)", "success")], PUSH))
+
+    def test_a_suite_job_that_was_cancelled_or_is_still_going_is_not_a_suite_that_ran(self):
+        self.assertTrue(clear_rule.empty_without_evidence([*self.EMPTY[:2], job("checks", "cancelled")], PUSH))
+        self.assertTrue(clear_rule.empty_without_evidence([*self.EMPTY[:2], {"name": "checks", "status": "in_progress", "conclusion": None}], PUSH))
+
+    def test_the_nightly_skip_job_is_bookkeeping_and_makes_no_suite_that_ran(self):
+        # nightly-skip has no job-level if, so it concludes success on every push run of checks.yml.
+        # Named failure: it reads as a suite job that succeeded, and an empty push run reads as a verdict.
+        shape = [job("nightly-skip", "success"), job("push-skip", "success"), job("scope", "success"), job("checks", "skipped")]
+        self.assertTrue(clear_rule.empty_without_evidence(shape, PUSH))
+
+    def test_a_push_skip_that_ran_with_scope_success_has_no_evidence(self):
+        self.assertTrue(clear_rule.empty_without_evidence([job("push-skip", "success"), job("scope", "success")], PUSH))
+
+    def test_a_scope_skipped_with_no_push_skip_job_has_no_evidence(self):
+        self.assertTrue(clear_rule.empty_without_evidence([job("scope", "skipped"), job("checks", "skipped")], PUSH))
+
+    def test_a_push_skip_that_failed_is_no_evidence(self):
+        self.assertTrue(clear_rule.empty_without_evidence([job("push-skip", "failure"), job("scope", "skipped")], PUSH))
+
+    def test_a_run_with_no_jobs_is_empty_without_evidence(self):
+        self.assertTrue(clear_rule.empty_without_evidence([], PUSH))
+
+    def test_the_bookkeeping_names_are_exact_not_prefixes(self):
+        self.assertFalse(clear_rule.empty_without_evidence([*self.EMPTY[:2], job("scope-check", "success")], PUSH))
+
+    def test_the_rule_judges_the_push_group_of_events_json_and_not_the_schedule(self):
+        with open(clear_rule.EVENTS_FILE, encoding="utf-8") as f:
+            events = json.load(f)
+        self.assertEqual(clear_rule.rule_events(), sorted(e for e, g in events.items() if g == events["push"]))
+        self.assertNotIn("schedule", clear_rule.rule_events())
 
 
 if __name__ == "__main__":

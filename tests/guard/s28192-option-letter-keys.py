@@ -48,7 +48,7 @@ def ol(name, expected, item, action="set", **extra):
 
 
 def ol_write(data, op="set"):
-    return {"op": op, "collection": "items", "doc_id": OL_DOC, "data": data}
+    return {"op": op, "collection": "items", "doc_id": OL_DOC, "data": with_shown(data)}
 
 
 # Keys by position: the page's letter for index i, lowercased.
@@ -58,13 +58,13 @@ ol("options keyed e2, a and c are denied", "deny", ol_item(options=ol_keyed("e2"
 ol("options keyed a and c are denied", "deny", ol_item(options=ol_keyed("a", "c")))
 ol("options keyed a and a are denied", "deny", ol_item(options=ol_keyed("a", "a")))
 ol("item 44's shape, keyed a and none, is denied", "deny", ol_item(options=ol_keyed("a", "none")))
-ol("options keyed none, b and c are denied", "deny", ol_item(options=ol_keyed("none", "b", "c")))
+ol("options keyed none, b and c are denied", "deny", ol_item(options=ol_keyed("none", "b", "c"), pick="b"))
 ol("options keyed A, b and c are denied, since the key is the lowercase letter", "deny",
-   ol_item(options=ol_keyed("A", "b", "c")))
+   ol_item(options=ol_keyed("A", "b", "c"), pick="b"))
 ol("keys b then a are denied", "deny", ol_item(options=ol_keyed("b", "a")))
-ol("a keyless option at index 0 is denied", "deny", ol_item(options=[OL_BASE[0], dict(OL_BASE[1], key="b")]))
+ol("a keyless option at index 0 is denied", "deny", ol_item(options=[OL_BASE[0], dict(OL_BASE[1], key="b")], pick="b"))
 ol("a keyless option at index 1 is denied", "deny", ol_item(options=[dict(OL_BASE[0], key="a"), OL_BASE[1]]))
-ol("an option whose key is null is denied", "deny", ol_item(options=ol_opt(0, key=None)))
+ol("an option whose key is null is denied", "deny", ol_item(options=ol_opt(0, key=None), pick="b"))
 ol("a multi item keyed a, b and c with a list pick is allowed", "allow", ol_item(multi=True, pick=["a", "c"]))
 ol("a multi item keyed e2, a and c with a list pick is denied", "deny",
    ol_item(multi=True, options=ol_keyed("e2", "a", "c"), pick=["a", "c"]))

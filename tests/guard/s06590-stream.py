@@ -223,6 +223,19 @@ sh("ln: a hard link over a directory name is not symbolic", "ln /opt/tool/x real
 # run_in_background, so the backgrounded cases use add(), the form the background-end section uses.
 TAIL_BG_UNTIL = "Lane lint in the background. until: the lint prints its verdict"
 
+# THE TIME LIMIT OF A BACKGROUND LANE LINT (rule check-timeout). The lint waits for a pushed head and then runs
+# one ci-job under LINT_SECONDS, so a call's limit must exceed both or the limit ends the run before its verdict.
+# The bound is read from the merge tool, never copied. The check-tail allow rows below set the limit too: they
+# pin check-tail, not the limit, so the limit is set only to let them pass.
+import guard_merge  # the one home of merge_module (hooks/guard_merge.py)
+MERGE_TOOL = guard_merge.merge_module()
+if MERGE_TOOL is None:
+    sys.exit("fixture setup failed: merge/merge.py does not load, so the lane-lint time limit has no bound")
+CHECK_TIMEOUT_MS = (MERGE_TOOL.LINT_SECONDS + MERGE_TOOL.PUSHED_HEAD_WAIT_MINUTES * 60) * 1000
+CHECK_TIMEOUT_RULE = "check-timeout"
+CHECK_TIMEOUT_LINT = "merge --lane-lint 3270 --touched-tests"  # the incident's run
+CHECK_TIMEOUT_LOW_MS = 590000  # the limit the incident run had, under the bound
+
 add("check-tail: the incident line, backgrounded, is refused", "deny",
     "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8")
@@ -257,23 +270,23 @@ add("verdict-pipe: the incident line through verdict piped to tail, backgrounded
     "verdict-pipe", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8")
 add("check-tail: the incident line through verdict with no pipe, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    cwd=NOGIT, run_in_background=True, timeout=CHECK_TIMEOUT_MS, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 1476 2>&1")
 add("verdict-pipe: a python3 verdict wrapper piped to tail, backgrounded, is refused", "deny",
     "verdict-pipe", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="python3 ~/.claude/bin/verdict merge --lane-lint 1476 | tail -3")
 add("check-tail: a python3 verdict wrapper with no pipe, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    cwd=NOGIT, run_in_background=True, timeout=CHECK_TIMEOUT_MS, description=TAIL_BG_UNTIL,
     command="python3 ~/.claude/bin/verdict merge --lane-lint 1476")
 add("check-tail: wait-pid piped to tail, backgrounded, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/wait-pid 1836 2>&1 | tail -3")
 add("check-tail: output kept in a file, then grep piped to tail, backgrounded, is allowed",
-    "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    "allow", cwd=NOGIT, run_in_background=True, timeout=CHECK_TIMEOUT_MS, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/merge --lane-lint 1476 > /tmp/x/lanelint.log 2>&1; echo \"rc=$?\"; "
             "grep -E '^(PASS|FAIL)' /tmp/x/lanelint.log | tail -15")
 add("check-tail: merge --lane-lint piped to tee, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    cwd=NOGIT, run_in_background=True, timeout=CHECK_TIMEOUT_MS, description=TAIL_BG_UNTIL,
     command="merge --lane-lint 1476 2>&1 | tee run.out")
 add("check-tail: a tee between the check and grep and tail, backgrounded, is refused", "deny",
     "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
@@ -285,7 +298,7 @@ add("check-tail: ci-job checks --lint through tee and head, backgrounded, is ref
     "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tee lint.log | head -20")
 add("check-tail: merge --lane-lint through tee with nothing after it, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    cwd=NOGIT, run_in_background=True, timeout=CHECK_TIMEOUT_MS, description=TAIL_BG_UNTIL,
     command="merge --lane-lint 7 2>&1 | tee lint.log")
 add("check-tail: grep naming the script, piped to tail, backgrounded, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
@@ -458,8 +471,9 @@ sh("check-tail: ci-job checks --lint piped to tail in the foreground is allowed"
    "~/.claude/bin/ci-job checks --lint 2>&1 | tail -20", "allow", cwd=NOGIT)
 sh("verdict-pipe: a verdict call piped to tail in the foreground is refused",
    "verdict merge --lane-lint 1476 | tail -3", "deny", "verdict-pipe", cwd=NOGIT)
-sh("check-tail: a verdict call with no pipe in the foreground is allowed",
-   "verdict merge --lane-lint 1476", "allow", cwd=NOGIT)
+add("check-tail: a verdict call with no pipe, backgrounded with the limit, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, timeout=CHECK_TIMEOUT_MS, description=TAIL_BG_UNTIL,
+    command="verdict merge --lane-lint 1476")
 # `merge --release-check` prints one verdict line per pull request, so tail or head cuts it like a lint verdict.
 # The lane-lint row is the control: its refusal is the one these rows must match.
 sh("check-tail: merge --lane-lint 5 piped to tail -2 in the foreground is refused (control)",
@@ -929,26 +943,33 @@ add("wait-until: the helper, then one command, is allowed under run_in_backgroun
 # from guard_stream, the one home of them. A form is tried with its optional `[...]` part and without it.
 WAIT_SAMPLES = {"PID": "12345", "SECS": "500", "TIME": WAIT_UNTIL_TIME, "T": WAIT_UNTIL_TIME}
 REMEDY_CONSTANTS = ("WAITER_REASON", "LIVE_STREAM_REASON", "PATTERN_POLLER_REASON")
+# A placeholder that is not an upper-case name: the check-timeout remedy names its run as `verdict <cmd>`.
+REMEDY_WORD_SAMPLES = {"<cmd>": CHECK_TIMEOUT_LINT}
 
 
 def remedy_forms(reason):
-    """The command forms a remedy names in backticks, each placeholder filled from WAIT_SAMPLES. A placeholder
-    with no sample is kept as `<NAME>`, so the check names it."""
+    """The command forms a remedy names in backticks, each placeholder filled from WAIT_SAMPLES or
+    REMEDY_WORD_SAMPLES. A placeholder with no sample is kept as `<NAME>`, so the check names it."""
     forms = []
     for span in re.findall(r"`([^`]+)`", reason):
         for form in (re.sub(r"[\[\]]", "", span), re.sub(r"\s*\[[^\]]*\]", "", span)):
-            words = [WAIT_SAMPLES.get(w, "<%s>" % w) if re.fullmatch(r"[A-Z][A-Z_]*", w) else w
-                     for w in form.split()]
+            words = [WAIT_SAMPLES.get(w, "<%s>" % w) if re.fullmatch(r"[A-Z][A-Z_]*", w)
+                     else REMEDY_WORD_SAMPLES.get(w, w) for w in form.split()]
             forms.append(" ".join(words))
     return list(dict.fromkeys(forms))
 
 
-def remedy_refusal(form):
-    """'' when the guard allows `form` in the foreground and under run_in_background, else what it refused."""
-    for background in (False, True):
+def remedy_refusal(form, limit=None):
+    """'' when the guard allows `form`, else what it refused. The foreground and the background are both tried,
+    unless a `limit` is given: the form is then judged under that time limit in the background only. A remedy that
+    says to run a lane lint in the background is judged there, since a foreground call is refused at any limit."""
+    for background in ((True,) if limit is not None else (False, True)):
         tool_input = {"command": form}
         if background:
             tool_input["run_in_background"] = True
+        if limit is not None:
+            tool_input["timeout"] = limit
+            tool_input["description"] = TAIL_BG_UNTIL
         got, reason = decide({"raw": None, "tool": "Bash", "cwd": NOGIT, "session": None,
                               "env_path": None, "tool_input": tool_input})
         if got != "allow":
@@ -956,11 +977,20 @@ def remedy_refusal(form):
     return ""
 
 
-def remedy_check(constant):
+def remedy_check(constant, trigger=None, limit=None):
     """A log check: the remedy named by `constant` names at least one command form, every form is a placeholder
-    the check can fill, and the guard allows every form."""
+    the check can fill, and the guard allows every form. `trigger` is (rule, tool_input) for a call that the rule
+    refuses: the guard must refuse it before the remedy is read, so a rule not yet built fails by its own cause.
+    `limit` judges every form under that time limit, in the background (see remedy_refusal)."""
     def check():
-        import guard_stream  # the one home of the waiter-family remedies (hooks/guard_stream.py)
+        import guard_stream  # the one home of the remedies (hooks/guard_stream.py)
+        if trigger is not None:
+            rule, tool_input = trigger
+            got, reason = decide({"raw": None, "tool": "Bash", "cwd": NOGIT, "session": None,
+                                  "env_path": None, "tool_input": dict(tool_input)})
+            if got != "deny" or rule not in reason:
+                return False, ("the guard does not refuse %s under run_in_background with rule %s, so no %s is "
+                               "printed to read" % (tool_input["command"], rule, constant))
         reason = getattr(guard_stream, constant, None)
         if not isinstance(reason, str):
             return False, "guard_stream has no %s to read the remedy from" % constant
@@ -970,7 +1000,7 @@ def remedy_check(constant):
         unfilled = [f for f in forms if "<" in f]
         if unfilled:
             return False, "%s names a placeholder the check cannot fill: %s" % (constant, unfilled[0])
-        refused = [m for m in (remedy_refusal(f) for f in forms) if m]
+        refused = [m for m in (remedy_refusal(f, limit) for f in forms) if m]
         if refused:
             return False, "%s names a form the guard refuses: %s" % (constant, refused[0])
         return True, "%s names %d command forms, and the guard allows each" % (constant, len(forms))
