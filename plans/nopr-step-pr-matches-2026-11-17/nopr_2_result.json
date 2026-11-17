@@ -1,0 +1,474 @@
+[
+ {
+  "slug": "aligned-check-agents-skills",
+  "pr": 3526,
+  "state": "open",
+  "headRef": "aligned-agents-skills-scope",
+  "confidence": "sure",
+  "reason": "title matches the step work"
+ },
+ {
+  "slug": "artifact-lane",
+  "pr": 1158,
+  "state": "merged",
+  "headRef": "artifact-lane",
+  "confidence": "sure",
+  "reason": "head is the slug; git is every artifact home"
+ },
+ {
+  "slug": "batch-build-log-kept",
+  "pr": 2820,
+  "state": "closed",
+  "headRef": "batch-build-log-kept-r2",
+  "confidence": "sure",
+  "reason": "head names slug; closed unmerged"
+ },
+ {
+  "slug": "brief-reads-owner-rulings",
+  "pr": 3262,
+  "state": "open",
+  "headRef": "brief-matches-rulings-tests",
+  "confidence": "sure",
+  "reason": "model-judged check reads brief against rulings; 2944 closed earlier try"
+ },
+ {
+  "slug": "c107",
+  "pr": 1339,
+  "state": "closed",
+  "headRef": "c107-probe-result",
+  "confidence": "unsure",
+  "reason": "only records Mac start probes; not clearly the no-click lane start work"
+ },
+ {
+  "slug": "child-claude-md-dedupe",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "only unrelated ios-apps PR matched"
+ },
+ {
+  "slug": "ci-defer-slow-legs",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no search hit"
+ },
+ {
+  "slug": "ci-split-checks-family",
+  "pr": 2980,
+  "state": "closed",
+  "headRef": "ci-split-checks-family",
+  "confidence": "sure",
+  "reason": "head names slug; closed unmerged; 3376 closed same work"
+ },
+ {
+  "slug": "combine-first-three",
+  "pr": 3301,
+  "state": "closed",
+  "headRef": "combine-first-three",
+  "confidence": "sure",
+  "reason": "head names slug; closed unmerged"
+ },
+ {
+  "slug": "consultant-tag-owner-facing",
+  "pr": 3310,
+  "state": "merged",
+  "headRef": "consultant-tag-owner-facing",
+  "confidence": "sure",
+  "reason": "head names slug"
+ },
+ {
+  "slug": "degen-harness-flake-archiver-stop",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no hit in claude-settings; work lives in degen repo"
+ },
+ {
+  "slug": "export-scan-key-followups",
+  "pr": 1827,
+  "state": "merged",
+  "headRef": "export-scan-key-followups",
+  "confidence": "sure",
+  "reason": "head names slug"
+ },
+ {
+  "slug": "fix-3224-own-count-closed",
+  "pr": 3308,
+  "state": "open",
+  "headRef": "relayed-grant-closed-item",
+  "confidence": "unsure",
+  "reason": "title about routed closed item count fits; body names no slug"
+ },
+ {
+  "slug": "gate-skipped-push-run",
+  "pr": 3297,
+  "state": "closed",
+  "headRef": "gate-skipped-push-run",
+  "confidence": "sure",
+  "reason": "head names slug; 3384 open follow-on"
+ },
+ {
+  "slug": "glossary-renames-in-code",
+  "pr": 2790,
+  "state": "open",
+  "headRef": "glossary-prose-renames",
+  "confidence": "unsure",
+  "reason": "renames in text, step says in code; may be sibling part"
+ },
+ {
+  "slug": "guard-input-scope",
+  "pr": 3556,
+  "state": "open",
+  "headRef": "lane/skip-guard-shards-no-input",
+  "confidence": "sure",
+  "reason": "title matches step work"
+ },
+ {
+  "slug": "handoff-audit-after-compact",
+  "pr": 3062,
+  "state": "merged",
+  "headRef": "handoff-audit-after-compact",
+  "confidence": "sure",
+  "reason": "head names slug"
+ },
+ {
+  "slug": "handoff-written-by-hook",
+  "pr": 3364,
+  "state": "closed",
+  "headRef": "handoff-written-by-hook",
+  "confidence": "sure",
+  "reason": "head names slug; closed unmerged"
+ },
+ {
+  "slug": "judge-flags-batch101",
+  "pr": 2743,
+  "state": "merged",
+  "headRef": "notes-dedup",
+  "confidence": "sure",
+  "reason": "title: back or cut flagged prose; body names slug"
+ },
+ {
+  "slug": "lane-lint-allow-words",
+  "pr": 3533,
+  "state": "open",
+  "headRef": "lane-lint-allow-words-r2",
+  "confidence": "unsure",
+  "reason": "head names slug but title is about Incident sentence"
+ },
+ {
+  "slug": "lane-pr-opens-as-draft",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no hit"
+ },
+ {
+  "slug": "lane-title-slug",
+  "pr": 3168,
+  "state": "merged",
+  "headRef": "lane-title-slug-build",
+  "confidence": "sure",
+  "reason": "title and head match"
+ },
+ {
+  "slug": "local-triage-tier-build",
+  "pr": 1378,
+  "state": "closed",
+  "headRef": "local-triage-tier-build",
+  "confidence": "sure",
+  "reason": "head names slug; closed unmerged"
+ },
+ {
+  "slug": "mailbox-all-messages",
+  "pr": 2890,
+  "state": "closed",
+  "headRef": "mailbox-all-messages",
+  "confidence": "sure",
+  "reason": "head names slug; closed unmerged"
+ },
+ {
+  "slug": "merge-lock-ttl-waits",
+  "pr": 3377,
+  "state": "merged",
+  "headRef": "merge-audit-fixes-2",
+  "confidence": "sure",
+  "reason": "title: merge-tool audit fixes (lock TTL)"
+ },
+ {
+  "slug": "merge-red-base-resume-on-merge",
+  "pr": 3312,
+  "state": "open",
+  "headRef": "merge-needs-base-revert-line",
+  "confidence": "sure",
+  "reason": "title: red main resumes when revert merges"
+ },
+ {
+  "slug": "merge-tool-beats-every-phase",
+  "pr": 3404,
+  "state": "merged",
+  "headRef": "stall-watch-false-stalls-4",
+  "confidence": "sure",
+  "reason": "title: merge.py beats in every phase; 3272,3403 closed earlier tries"
+ },
+ {
+  "slug": "mutate-stage-prints-progress",
+  "pr": 3539,
+  "state": "open",
+  "headRef": "lint-mutate-progress",
+  "confidence": "sure",
+  "reason": "title matches step work"
+ },
+ {
+  "slug": "notes-204-ponytail-drop",
+  "pr": 2822,
+  "state": "closed",
+  "headRef": "notes-tidy-r41",
+  "confidence": "sure",
+  "reason": "title: drop stale ponytail note and marketplace; closed unmerged"
+ },
+ {
+  "slug": "notes-fix-no-owner-line",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no related PR in search"
+ },
+ {
+  "slug": "open-asks-listed-at-wake",
+  "pr": 3578,
+  "state": "open",
+  "headRef": "revive-open-asks-at-wake",
+  "confidence": "sure",
+  "reason": "title: list asks with no reply at wake; earlier 2699/2268 closed or open carries"
+ },
+ {
+  "slug": "orchestrator-mixed-merge-refused",
+  "pr": 2950,
+  "state": "closed",
+  "headRef": "orchestrator-mixed-merge-refused",
+  "confidence": "sure",
+  "reason": "head names slug; closed unmerged (2471 earlier)"
+ },
+ {
+  "slug": "page-feedback-to-template",
+  "pr": 2965,
+  "state": "closed",
+  "headRef": "page-feedback-to-template",
+  "confidence": "sure",
+  "reason": "head names slug; closed unmerged"
+ },
+ {
+  "slug": "parked-line-id-guard",
+  "pr": 1170,
+  "state": "closed",
+  "headRef": "parked-line-id-guard",
+  "confidence": "sure",
+  "reason": "head names slug; closed unmerged"
+ },
+ {
+  "slug": "pointer-move-unseen",
+  "pr": 2458,
+  "state": "closed",
+  "headRef": "pointer-move-unseen",
+  "confidence": "unsure",
+  "reason": "head names slug but step updated today; may be an older try or re-filed"
+ },
+ {
+  "slug": "push-skip-proven-tree",
+  "pr": 3217,
+  "state": "closed",
+  "headRef": "push-skip-proven-tree",
+  "confidence": "sure",
+  "reason": "head names slug; closed unmerged"
+ },
+ {
+  "slug": "qmax-1011-carry",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "q_max work; no hit here"
+ },
+ {
+  "slug": "qmax-run-end-reason-live",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "q_max work; no hit here"
+ },
+ {
+  "slug": "r2-merge-checks-run-in-ci",
+  "pr": 3251,
+  "state": "merged",
+  "headRef": "r2-retire-run-in-ci-tests2",
+  "confidence": "unsure",
+  "reason": "moves Retire run to CI; may be one part of r2"
+ },
+ {
+  "slug": "r65-express-batch",
+  "pr": 3213,
+  "state": "merged",
+  "headRef": "express-batch-r65",
+  "confidence": "sure",
+  "reason": "title and head match"
+ },
+ {
+  "slug": "rec-and-waiting-line",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no hit"
+ },
+ {
+  "slug": "records-page-guard-derived-rows",
+  "pr": 3001,
+  "state": "closed",
+  "headRef": "records-page-guard-derived-rows",
+  "confidence": "sure",
+  "reason": "head names slug; closed unmerged"
+ },
+ {
+  "slug": "red-main-proven-fix",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "3478 is the opposite (revert-only check); no PR for proven fix"
+ },
+ {
+  "slug": "report-guard-spawn-model",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no related PR"
+ },
+ {
+  "slug": "retire-missing-deps-unknown",
+  "pr": 2883,
+  "state": "open",
+  "headRef": "debt-retire-red-on-birth-v2",
+  "confidence": "unsure",
+  "reason": "body names slug; title is about red-on-birth, step is installed packages"
+ },
+ {
+  "slug": "review-record-post-check",
+  "pr": 3235,
+  "state": "open",
+  "headRef": "review-record-readback",
+  "confidence": "sure",
+  "reason": "title: read the record back"
+ },
+ {
+  "slug": "reviewed-batch-line-reads",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "only loosely related open PRs"
+ },
+ {
+  "slug": "role-texts-match-rulings",
+  "pr": 3138,
+  "state": "merged",
+  "headRef": "worktree-role-texts-match-rulings",
+  "confidence": "sure",
+  "reason": "title matches"
+ },
+ {
+  "slug": "ruled-step-coordinator-queue",
+  "pr": 3053,
+  "state": "closed",
+  "headRef": "ruled-step-coordinator-queue",
+  "confidence": "sure",
+  "reason": "head names slug; closed unmerged"
+ },
+ {
+  "slug": "run-dir-unclosed-tail",
+  "pr": 2304,
+  "state": "closed",
+  "headRef": "run-dir-unclosed-tail",
+  "confidence": "sure",
+  "reason": "head names slug; 2968 later try also closed"
+ },
+ {
+  "slug": "shared-job-finder",
+  "pr": 3382,
+  "state": "merged",
+  "headRef": "where-else-judge",
+  "confidence": "unsure",
+  "reason": "prints where else a ruling applies; may be different from finder of duplicate jobs"
+ },
+ {
+  "slug": "spend-line-format",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "2662 is spend-log ruling record, not the format step"
+ },
+ {
+  "slug": "stale-flags-test-gaps",
+  "pr": 2711,
+  "state": "closed",
+  "headRef": "carry-stale-flags-impl",
+  "confidence": "unsure",
+  "reason": "STALE flag work, not clearly the test-gap step"
+ },
+ {
+  "slug": "stall-watch-agents",
+  "pr": 1682,
+  "state": "merged",
+  "headRef": "stall-watch-agents",
+  "confidence": "sure",
+  "reason": "head names slug"
+ },
+ {
+  "slug": "stamp-guard-send-message",
+  "pr": 2876,
+  "state": "closed",
+  "headRef": "stamp-guard-send-message",
+  "confidence": "sure",
+  "reason": "head names slug; closed unmerged"
+ },
+ {
+  "slug": "stop-refusal-correction-only",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no hit"
+ },
+ {
+  "slug": "tci-11-qmax-shards",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "q_max work; no hit here"
+ },
+ {
+  "slug": "waiting-export-receipts",
+  "pr": 1443,
+  "state": "closed",
+  "headRef": "waiting-export-receipts",
+  "confidence": "sure",
+  "reason": "head names slug; closed unmerged; 3468 later closed"
+ },
+ {
+  "slug": "widening-rule-guideline",
+  "pr": 3201,
+  "state": "open",
+  "headRef": "rebuild-2705",
+  "confidence": "sure",
+  "reason": "title identical to step; 2705, 1337 closed earlier"
+ }
+]
