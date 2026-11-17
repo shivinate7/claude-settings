@@ -1,0 +1,14 @@
+{
+ "id": "lane-report-plain-form",
+ "title": "The report guard refuses a lane report that cites a bare id, shows a UTC time, or states a contradiction instead of asking it",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "owner": "unassigned",
+ "blockedBy": [],
+ "why": "Owner feedback, 09:05 CST Nov 17, word for word through the consultant's relay (not read by triage 9 in the owner's own message): a lane report's Deviations line cited bare ids (#2015, s02747:941), unglossed jargon (rm-var, frozen-path), a UTC time (guard.log 20:34:33 UTC), and left a contradiction (two test rows for `env -vC`, one wanting ask and one wanting deny) as a statement, not a question. Rules in play: speak-cite-id-plus-gloss (every id gets a plain name), style-time-central-24h (times are US Central, never UTC), output-bring-decisions-as-question (a choice is a question with options).",
+ "source": "Consultant message to triage 9, 09:07 CST Nov 17 (relays the owner's 09:05 CST feedback). Filed by triage 9. Searched steps at 09:07 CST: item-cite-carries-name (page item numbers only), lane-report-reads-pr-checks (pass claims) and report-guard-all-spawns (model names) do not cover these three.",
+ "note": "Todo, no lane, no PR. Ask: the report guard catches in a lane report (a) a bare PR number, commit id or test-row id with no plain gloss on first use, (b) a UTC time, (c) a stated contradiction that is not brought as a question. It is a guard change, so it needs a named mistake and its harm (rule building-guard-needs-incident): the incident is the 09:05 CST feedback above. Open: whether (c) can be read mechanically without false alarms is unmeasured. Second ask, routed separately: find the session that sent the report (the builder of the lane that owns the `env -vC` rows) and have it re-ask the ask-or-deny pick as a question; the sender is not yet found.",
+ "updatedAt": "2026-11-17T09:07:20-06:00",
+ "order": 239
+}
