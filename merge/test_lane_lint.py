@@ -22,7 +22,7 @@ in a cloud session with the batch-runner role or with none; the shim's comment l
 start, and one mutate stub start where the run starts. Its times are unmeasured since the batch-build cases were removed.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
-import ast, atexit, contextlib, importlib.util, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
+import ast, atexit, contextlib, importlib.util, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, types, unittest, unittest.mock, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -34,6 +34,7 @@ import test_merge as tm  # noqa: E402  the git half's fixture and fakes; importi
 from test_merge import LANE_LINT_MARKER, NOT_OWNER, lint_comment  # noqa: E402  the lint comment's one form, in test_merge.py (decision lanes-run-no-full-ci-job)
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import merge  # noqa: E402
+import guard  # noqa: E402  the full-disk floor's constants: hooks/guard.py LOAD_FULL_DISK_SHARE and LOAD_FULL_DISK_GB
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
@@ -5605,6 +5606,111 @@ class ReplacedDocs(unittest.TestCase):
     def test_session_roles_does_not_say_combined_pull_request(self):
         self.assertFalse("combined pull request" in self.closes_bullet(),
                          "the session-tiers bullet that says a pull request closes as replaced still says combined pull request")
+
+
+GIB = 2 ** 30  # shutil.disk_usage counts bytes; the guard's floor counts GB of 2**30 bytes
+DISK_GIB = 926  # the drive the cases read, unless a case names another size
+REFUSE_GIB = 3.0  # free on DISK_GIB: under the floor of 5 GiB
+
+
+def full_floor_gib(total_gib):
+    """The guard's full floor on a drive of `total_gib` GiB: free space under min(LOAD_FULL_DISK_SHARE percent of the total, LOAD_FULL_DISK_GB) is full."""
+    return min(total_gib * guard.LOAD_FULL_DISK_SHARE / 100.0, guard.LOAD_FULL_DISK_GB)
+
+
+class LaneLintDiskFloor(LaneFixture):
+    """`merge --lane-lint` on a drive under the guard's full floor. The refusal comes before any worktree is made, in a cloud session and in a
+    local one, and it names the full sweep of the lane's checkout. The reading is shutil.disk_usage, the reader the guard and the janitor use."""
+
+    @contextlib.contextmanager
+    def disk_reading(self, free_gib=None, total_gib=DISK_GIB, error=None):
+        """Patch shutil.disk_usage for every path: `free_gib` free of `total_gib` GiB, or `error` raised on each read."""
+        if error is not None:
+            patch = unittest.mock.patch.object(shutil, "disk_usage", side_effect=error)
+        else:
+            usage = types.SimpleNamespace(total=int(total_gib * GIB), used=int((total_gib - free_gib) * GIB), free=int(free_gib * GIB))
+            patch = unittest.mock.patch.object(shutil, "disk_usage", return_value=usage)
+        with patch:
+            yield
+
+    @contextlib.contextmanager
+    def worktree_adds(self):
+        """Record each `git worktree add` that merge runs inside the block. -> the list, filled with each call's argv after `git`."""
+        adds = []
+        real = merge.git  # Env.setUp's wrapper: the spy chains on it
+        def git(cwd, *a, **k):
+            if a[:2] == ("worktree", "add"):
+                adds.append(a)
+            return real(cwd, *a, **k)
+        with unittest.mock.patch.object(merge, "git", git):
+            yield adds
+
+    def refusal_run(self, cloud, free_gib, total_gib=DISK_GIB):
+        """`merge 7 --lane-lint` with `free_gib` free on a `total_gib` drive, the lint stubbed to PASS. -> (rc, output, worktree adds)."""
+        self.assertLess(free_gib, full_floor_gib(total_gib), "the case reads %s GiB, not under the full floor; it proves nothing" % free_gib)
+        self.use_ci_job(PASSING, 0)
+        with self.disk_reading(free_gib=free_gib, total_gib=total_gib), self.worktree_adds() as adds:
+            rc, text = self.run_lane("--lane-lint", "7", cloud=cloud)
+        return rc, text, adds
+
+    def assert_refused_before_any_tree(self, rc, text, adds, free_gib, total_gib=DISK_GIB):
+        floor = full_floor_gib(total_gib)
+        self.assertEqual(rc, 1, "the lane lint went ahead with %s GiB free of %d GiB, under the full floor of %s GiB: %s"
+                         % (free_gib, total_gib, floor, text))
+        self.assertRegex(text, r"(?i)\bdisk\b", "the disk refusal does not name the disk: " + text)
+        self.assertEqual(adds, [], "the refused lane lint made a worktree before it refused: %r" % (adds,))
+        self.assertEqual(self.lint_calls(), [], "the refused lane lint ran the lint anyway: " + text)
+
+    def test_a_full_disk_refuses_a_cloud_lane_lint_before_any_worktree(self):
+        rc, text, adds = self.refusal_run(cloud=True, free_gib=REFUSE_GIB)
+        self.assert_refused_before_any_tree(rc, text, adds, REFUSE_GIB)
+
+    def test_a_full_disk_refuses_a_local_lane_lint_before_any_worktree(self):
+        rc, text, adds = self.refusal_run(cloud=False, free_gib=REFUSE_GIB)
+        self.assert_refused_before_any_tree(rc, text, adds, REFUSE_GIB)
+
+    def test_the_full_disk_refusal_names_the_full_sweep_of_this_checkout(self):
+        _, text, _ = self.refusal_run(cloud=True, free_gib=REFUSE_GIB)
+        match = re.search(r"sweep\.py --root (\S+) --confirm", text)
+        self.assertIsNotNone(match, "the disk refusal names no full sweep, `sweep.py --root <repo> --confirm`: " + text)
+        self.assertEqual(match.group(1), self.co, "the sweep the refusal names is for %s, not this checkout" % match.group(1))
+
+    def test_a_small_drive_refuses_under_its_five_percent_share(self):
+        """On a 40 GiB drive the floor is the 5% share, 2 GiB, which is the smaller term: 1.2 GiB free is full."""
+        rc, text, adds = self.refusal_run(cloud=True, free_gib=1.2, total_gib=40)
+        self.assert_refused_before_any_tree(rc, text, adds, 1.2, total_gib=40)
+
+    def test_fifty_gib_free_goes_ahead_in_a_cloud_and_a_local_session(self):  # the control
+        self.use_ci_job(PASSING, 0)
+        for cloud in (True, False):
+            with self.subTest(cloud=cloud), self.disk_reading(free_gib=50):
+                rc, out = self.lint_run("--lane-lint", "7", cloud=cloud)
+                self.assertEqual(rc, 0, "50 GiB free on a %d GiB drive was refused: %s" % (DISK_GIB, out))
+                self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_three_gib_free_on_a_small_drive_goes_ahead_because_the_share_is_the_smaller_term(self):  # the control of the share case
+        self.assertGreater(3.0, full_floor_gib(40), "the control reads under the full floor; it proves nothing")
+        self.use_ci_job(PASSING, 0)
+        with self.disk_reading(free_gib=3.0, total_gib=40):
+            rc, out = self.lint_run("--lane-lint", "7", cloud=True)
+        self.assertEqual(rc, 0, "3 GiB free on a 40 GiB drive was refused, though its floor is %s GiB: %s" % (full_floor_gib(40), out))
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def unknown_disk_run(self, cloud):
+        """The disk read fails. -> (rc, output) of the lane lint, which must go ahead and say so."""
+        self.use_ci_job(PASSING, 0)
+        with self.disk_reading(error=OSError("no disk reading")):
+            rc, out = self.lint_run("--lane-lint", "7", cloud=cloud)
+        self.assertEqual(rc, 0, "an unreadable disk refused the lane lint: " + out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assertRegex(out, r"(?i)disk[^\n]*unknown|unknown[^\n]*disk",
+                         "an unreadable disk printed no line that says disk and unknown: " + out)
+
+    def test_an_unreadable_disk_reads_unknown_in_a_cloud_session_and_goes_ahead(self):
+        self.unknown_disk_run(cloud=True)
+
+    def test_an_unreadable_disk_reads_unknown_in_a_local_session_and_goes_ahead(self):
+        self.unknown_disk_run(cloud=False)
 
 
 if __name__ == "__main__":
