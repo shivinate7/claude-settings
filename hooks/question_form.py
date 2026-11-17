@@ -1871,6 +1871,15 @@ N_REASON = ("An item's `n` is a number such as 929, not the text \"929\". The pa
             "(decision item-field-rendered, a waiting item names only fields the page can draw and read)")
 
 
+def n_reason(matched) -> str:
+    """The n refusal as posted: the write to fix first (the item id and what its n is, from `matched`), then the
+    correction. A batch holds up to 50 writes, so the reason must say which one."""
+    found = str(matched)
+    if found.endswith(N_MARK):
+        found = found[:-len(N_MARK)]
+    return "Fix this write: %s. %s" % (found, PAGE_REASONS["item-n-number"])
+
+
 def page_number(value) -> bool:
     """True when `value` passes the page's rule for n: a number that isFinite. A bool is no number in JSON."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):

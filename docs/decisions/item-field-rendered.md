@@ -22,7 +22,7 @@ A field on a waiting item is for the owner to read. A field the page does not dr
   - The page's own test is `typeof it.n === "number" && isFinite(it.n)` (`problem()` in `skills/waiting-page/page.html`); `page_number` follows it, and a case reads that line of the page.
   - A `set` with no `n`, a `set` or `update` whose `n` is text, a bool, null, a list, an object, NaN or infinity, and a `str_replace` on `n` are refused. An `update` that does not name `n` passes.
   - It reads the parsed value, never the text of the write. It reads each write in a batch and data read from `file_path`.
-  - The reason (`PAGE_REASONS["item-n-number"]`) names the item and says `n` is a number such as 929, not "929". It names no other rule's remedy.
+  - The posted reason (`n_reason` in `hooks/question_form.py`, which opens with the item id and the bad `n`, then `PAGE_REASONS["item-n-number"]`) names the item and says `n` is a number such as 929, not "929". It names no other rule's remedy.
   - Incident: 2026-11-17 09:43 CST, triage wrote items 928 and 929 with `n` as text. The page showed "This item has no number, so it cannot be answered", and the owner could not answer.
   - Cost: no new process and no file read. It runs in `item_hit`, inside the guard process that every `ArtifactData` call already starts.
   - Known limit: it sees the write, not the stored item. An update that leaves a stored text `n` alone passes.

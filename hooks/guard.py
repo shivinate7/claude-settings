@@ -7716,7 +7716,7 @@ def judge(payload) -> None:
             if str(matched).endswith(question_form.PAGE_ONLY_MARK):
                 refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-page-only"], matched)
             if str(matched).endswith(question_form.N_MARK):
-                refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-n-number"], matched)
+                refuse(tool, "deny", "item-field-rendered", question_form.n_reason(matched), matched)
             refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-rendered"], matched)
         if rule == "question-checked-with-repo":
             refuse(tool, "deny", "question-checked-with-repo", question_form.PAGE_REASONS["question-checked-with-repo"], matched)
