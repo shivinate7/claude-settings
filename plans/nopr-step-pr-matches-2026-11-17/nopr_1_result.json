@@ -1,0 +1,474 @@
+[
+ {
+  "slug": "agent-process-marker",
+  "pr": 2712,
+  "state": "merged",
+  "headRef": "agent-process-marker-carry",
+  "confidence": "sure",
+  "reason": "head agent-process-marker-carry; also 2783 merged carry, 2194 closed original"
+ },
+ {
+  "slug": "archive-push-gates-delete",
+  "pr": 3295,
+  "state": "merged",
+  "headRef": "lane/archive-push-gates-delete-2",
+  "confidence": "sure",
+  "reason": "head lane/archive-push-gates-delete-2; 1796 closed original"
+ },
+ {
+  "slug": "banchi-merge-text-820c",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR text names slug (title, head, body[0:600]); not searched past 600 body chars; banchi/mailaudit text steps may live in child repos"
+ },
+ {
+  "slug": "brake-same-everywhere",
+  "pr": 2977,
+  "state": "closed",
+  "headRef": "brake-same-everywhere",
+  "confidence": "sure",
+  "reason": "head names slug; closed unmerged"
+ },
+ {
+  "slug": "builder-model-pin",
+  "pr": 2722,
+  "state": "closed",
+  "headRef": "carry/builder-model-pin",
+  "confidence": "sure",
+  "reason": "head carry/builder-model-pin; title and body name step; closed unmerged"
+ },
+ {
+  "slug": "child-ci-once-per-batch",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR text names slug (title, head, body[0:600]); not searched past 600 body chars; banchi/mailaudit text steps may live in child repos"
+ },
+ {
+  "slug": "ci-debt-step-duplicates-guard-suite",
+  "pr": 3466,
+  "state": "open",
+  "headRef": "ci-debt-skip-shard-rerun",
+  "confidence": "unsure",
+  "reason": "open; title matches the work, slug not in head or body"
+ },
+ {
+  "slug": "ci-linux-windows-once",
+  "pr": 3042,
+  "state": "closed",
+  "headRef": "ci-linux-windows-once",
+  "confidence": "sure",
+  "reason": "head names slug; closed unmerged; 3004 open only cites it"
+ },
+ {
+  "slug": "cloud-hooks-stale-copy",
+  "pr": 3487,
+  "state": "merged",
+  "headRef": "cloud-hooks-stale-copy-v2",
+  "confidence": "sure",
+  "reason": "head cloud-hooks-stale-copy-v2 merged; 3020 closed original"
+ },
+ {
+  "slug": "compaction-audit-before-reply",
+  "pr": 3362,
+  "state": "merged",
+  "headRef": "compaction-audit-reply",
+  "confidence": "unsure",
+  "reason": "merged; head compaction-audit-reply, body names slug; step still doing"
+ },
+ {
+  "slug": "dead-pr-states-filled",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR text names slug (title, head, body[0:600]); not searched past 600 body chars; banchi/mailaudit text steps may live in child repos"
+ },
+ {
+  "slug": "export-scan-gaps",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR text names slug (title, head, body[0:600]); not searched past 600 body chars; banchi/mailaudit text steps may live in child repos"
+ },
+ {
+  "slug": "first-fix-check-net-value",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR text names slug (title, head, body[0:600]); not searched past 600 body chars; banchi/mailaudit text steps may live in child repos"
+ },
+ {
+  "slug": "fixed-number-limits-census",
+  "pr": 3575,
+  "state": "open",
+  "headRef": "h12-deadline-ask-census-3",
+  "confidence": "unsure",
+  "reason": "open PRs from census lane (3575, 3572); heads are sub-steps, not the slug"
+ },
+ {
+  "slug": "glossary-page-row",
+  "pr": 2660,
+  "state": "merged",
+  "headRef": "glossary-page-row",
+  "confidence": "sure",
+  "reason": "head names slug; merged"
+ },
+ {
+  "slug": "guard-false-alarm-cull",
+  "pr": 3056,
+  "state": "open",
+  "headRef": "cull-docs-notes",
+  "confidence": "sure",
+  "reason": "body says Step guard-false-alarm-cull; open; other cull PRs 3043 3037 open"
+ },
+ {
+  "slug": "handoff-agent-write",
+  "pr": 2856,
+  "state": "open",
+  "headRef": "handoff-agent-write-r3",
+  "confidence": "sure",
+  "reason": "head handoff-agent-write-r3; open"
+ },
+ {
+  "slug": "handoff-stale-guard",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR text names slug (title, head, body[0:600]); not searched past 600 body chars; banchi/mailaudit text steps may live in child repos"
+ },
+ {
+  "slug": "item-cite-carries-name",
+  "pr": 2997,
+  "state": "open",
+  "headRef": "item-cite-carries-name-2",
+  "confidence": "sure",
+  "reason": "head item-cite-carries-name-2; open; 2527 open too"
+ },
+ {
+  "slug": "lane-draft-pr-grant",
+  "pr": 3048,
+  "state": "merged",
+  "headRef": "lane-draft-pr-grant",
+  "confidence": "sure",
+  "reason": "head names slug; merged"
+ },
+ {
+  "slug": "lane-lint-windows-guard-slice",
+  "pr": 2773,
+  "state": "closed",
+  "headRef": "lane-lint-windows-guard-slice-h",
+  "confidence": "sure",
+  "reason": "head names slug; closed unmerged"
+ },
+ {
+  "slug": "lane-start-checks-open-pr",
+  "pr": 2983,
+  "state": "closed",
+  "headRef": "lane-start-checks-open-pr",
+  "confidence": "sure",
+  "reason": "head names slug; closed unmerged"
+ },
+ {
+  "slug": "local-autonomy-equals-cloud",
+  "pr": 3389,
+  "state": "merged",
+  "headRef": "local-tier-file",
+  "confidence": "unsure",
+  "reason": "merged; head local-tier-file; slug not in text; may be partial work"
+ },
+ {
+  "slug": "mailaudit-merge-text-820c",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR text names slug (title, head, body[0:600]); not searched past 600 body chars; banchi/mailaudit text steps may live in child repos"
+ },
+ {
+  "slug": "merge-lint-fix-no-round-3",
+  "pr": 3269,
+  "state": "merged",
+  "headRef": "merge-lint-fix-no-round-3",
+  "confidence": "sure",
+  "reason": "head names slug; merged"
+ },
+ {
+  "slug": "merge-reads-ruleset",
+  "pr": 2818,
+  "state": "merged",
+  "headRef": "lane-ruleset-read",
+  "confidence": "sure",
+  "reason": "body says Step merge-reads-ruleset; head lane-ruleset-read; merged"
+ },
+ {
+  "slug": "merge-text-matches-820c",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR text names slug (title, head, body[0:600]); not searched past 600 body chars; banchi/mailaudit text steps may live in child repos"
+ },
+ {
+  "slug": "msg-claims-vs-git",
+  "pr": 2877,
+  "state": "closed",
+  "headRef": "msg-claims-vs-git",
+  "confidence": "sure",
+  "reason": "head names slug; closed unmerged"
+ },
+ {
+  "slug": "notes-1796-fix-lines",
+  "pr": 2960,
+  "state": "closed",
+  "headRef": "notes-1796-fix-lines",
+  "confidence": "sure",
+  "reason": "head names slug; closed unmerged"
+ },
+ {
+  "slug": "notes-fix-large-3",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "only PR 1746 mentions slug as incident lane; not this step work"
+ },
+ {
+  "slug": "notes-scope-own-lines",
+  "pr": 2962,
+  "state": "open",
+  "headRef": "notes-scope-own-lines-2",
+  "confidence": "sure",
+  "reason": "head notes-scope-own-lines-2; open; 2289 closed original"
+ },
+ {
+  "slug": "opus-ask-grants-one-spawn",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR text names slug (title, head, body[0:600]); not searched past 600 body chars; banchi/mailaudit text steps may live in child repos"
+ },
+ {
+  "slug": "page-checks-reach-triage",
+  "pr": 2897,
+  "state": "closed",
+  "headRef": "page-checks-reach-triage-narrow",
+  "confidence": "sure",
+  "reason": "head page-checks-reach-triage-narrow; closed unmerged"
+ },
+ {
+  "slug": "page-usage-counters",
+  "pr": 2919,
+  "state": "open",
+  "headRef": "page-usage-counters-r2",
+  "confidence": "sure",
+  "reason": "head page-usage-counters-r2; open"
+ },
+ {
+  "slug": "plain-push-asks-source-fix",
+  "pr": 3083,
+  "state": "merged",
+  "headRef": "plain-push-asks-source-fix",
+  "confidence": "sure",
+  "reason": "head names slug; merged"
+ },
+ {
+  "slug": "process-held-end-to-end",
+  "pr": 2067,
+  "state": "closed",
+  "headRef": "unreviewed-notes-wording",
+  "confidence": "unsure",
+  "reason": "closed; body names lane process-held-end-to-end but PR is merge-gate wording fixes"
+ },
+ {
+  "slug": "qform-path-program-span",
+  "pr": 3228,
+  "state": "closed",
+  "headRef": "qform-powershell-blocks",
+  "confidence": "sure",
+  "reason": "body says rebuilt under step qform-path-program-span; closed unmerged"
+ },
+ {
+  "slug": "qmax-geometry-reds",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR text names slug (title, head, body[0:600]); not searched past 600 body chars; banchi/mailaudit text steps may live in child repos"
+ },
+ {
+  "slug": "r16-mistake-is-missing-guard",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR text names slug (title, head, body[0:600]); not searched past 600 body chars; banchi/mailaudit text steps may live in child repos"
+ },
+ {
+  "slug": "r5",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "only text mentions of R53 found; no PR for step r5"
+ },
+ {
+  "slug": "rebase-3285-guard-py-conflict",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR text names slug (title, head, body[0:600]); not searched past 600 body chars; banchi/mailaudit text steps may live in child repos"
+ },
+ {
+  "slug": "records-gloss-link-sweep",
+  "pr": 1590,
+  "state": "closed",
+  "headRef": "claude/records-gloss-rules",
+  "confidence": "unsure",
+  "reason": "four closed split PRs 1587-1590 under the step; none merged"
+ },
+ {
+  "slug": "red-gate-reads-suite-run",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR text names slug (title, head, body[0:600]); not searched past 600 body chars; banchi/mailaudit text steps may live in child repos"
+ },
+ {
+  "slug": "replay-block-failed-imports",
+  "pr": 2696,
+  "state": "open",
+  "headRef": "replay-block-failed-imports-4",
+  "confidence": "sure",
+  "reason": "head replay-block-failed-imports-4; open"
+ },
+ {
+  "slug": "retire-check-whole-suite",
+  "pr": 3251,
+  "state": "merged",
+  "headRef": "r2-retire-run-in-ci-tests2",
+  "confidence": "unsure",
+  "reason": "merged; head r2-retire-run-in-ci-tests2; title matches idea, slug not in text"
+ },
+ {
+  "slug": "review-record-merge-main-line",
+  "pr": 3007,
+  "state": "closed",
+  "headRef": "review-record-merge-main-line",
+  "confidence": "sure",
+  "reason": "head names slug; closed unmerged"
+ },
+ {
+  "slug": "review-record-usage-line",
+  "pr": 2940,
+  "state": "open",
+  "headRef": "review-record-fix-check-reads",
+  "confidence": "sure",
+  "reason": "body: Closes steps ... review-record-usage-line; open"
+ },
+ {
+  "slug": "rewrite-merge-decisions-for-lane-merge",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR text names slug (title, head, body[0:600]); not searched past 600 body chars; banchi/mailaudit text steps may live in child repos"
+ },
+ {
+  "slug": "rounds-rules-one-record",
+  "pr": 3311,
+  "state": "open",
+  "headRef": "r9-texts-follow-up",
+  "confidence": "sure",
+  "reason": "body: Step rounds-rules-one-record follow-up lane; open; 3309 also open"
+ },
+ {
+  "slug": "ruling-challenge-passes",
+  "pr": 2963,
+  "state": "open",
+  "headRef": "ruling-challenge-passes-5",
+  "confidence": "sure",
+  "reason": "head ruling-challenge-passes-5; open; 3143 open stacked"
+ },
+ {
+  "slug": "scratchpad-owner-follow-ups",
+  "pr": 2830,
+  "state": "merged",
+  "headRef": "scratchpad-owner-follow-ups-2",
+  "confidence": "sure",
+  "reason": "head scratchpad-owner-follow-ups-2; merged"
+ },
+ {
+  "slug": "sort281-merge-main-list",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR text names slug (title, head, body[0:600]); not searched past 600 body chars; banchi/mailaudit text steps may live in child repos"
+ },
+ {
+  "slug": "stale-draft-joint-pass",
+  "pr": 3142,
+  "state": "merged",
+  "headRef": "lane-stale-draft-joint-pass",
+  "confidence": "sure",
+  "reason": "head lane-stale-draft-joint-pass; merged"
+ },
+ {
+  "slug": "stale011-note-to-debt",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR text names slug (title, head, body[0:600]); not searched past 600 body chars; banchi/mailaudit text steps may live in child repos"
+ },
+ {
+  "slug": "stamp-check-page-and-roadmap",
+  "pr": 2038,
+  "state": "merged",
+  "headRef": "stamp-check-page-and-roadmap-r2",
+  "confidence": "sure",
+  "reason": "head stamp-check-page-and-roadmap-r2; merged"
+ },
+ {
+  "slug": "ste-lint-run-exit-codes",
+  "pr": 2262,
+  "state": "closed",
+  "headRef": "ste-lint-run-exit-codes",
+  "confidence": "sure",
+  "reason": "head names slug; closed unmerged; 3181 open follow-up"
+ },
+ {
+  "slug": "sweep-mutants-windows-skip",
+  "pr": 3303,
+  "state": "merged",
+  "headRef": "sweep-mutants-windows-skip",
+  "confidence": "sure",
+  "reason": "head names slug; merged"
+ },
+ {
+  "slug": "trial-brief-triage-by-role",
+  "pr": 2688,
+  "state": "closed",
+  "headRef": "trial-brief-triage-by-role",
+  "confidence": "sure",
+  "reason": "head names slug; closed unmerged"
+ },
+ {
+  "slug": "widening-question-not-asked",
+  "pr": 2929,
+  "state": "closed",
+  "headRef": "widening-question-not-asked-2",
+  "confidence": "sure",
+  "reason": "head widening-question-not-asked-2; closed unmerged"
+ }
+]

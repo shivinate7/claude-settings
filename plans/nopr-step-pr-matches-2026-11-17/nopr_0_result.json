@@ -1,0 +1,482 @@
+[
+ {
+  "slug": "agent-git-reset-refused",
+  "pr": 2880,
+  "state": "closed",
+  "headRef": "agent-git-reset-refused",
+  "confidence": "sure",
+  "reason": "head, title and body name the slug; closed unmerged"
+ },
+ {
+  "slug": "answer-finding-needs-step",
+  "pr": 3221,
+  "state": "closed",
+  "headRef": "lane/answer-finding-needs-step",
+  "confidence": "sure",
+  "reason": "head and title match; closed unmerged"
+ },
+ {
+  "slug": "backlog-drain",
+  "pr": null,
+  "state": "none",
+  "headRef": "",
+  "confidence": "none",
+  "reason": "only generic body mentions in 15 PRs"
+ },
+ {
+  "slug": "batch-freeze-lane-set-enforce",
+  "pr": 2378,
+  "state": "merged",
+  "headRef": "batch-freeze-lane-set-enforce",
+  "confidence": "sure",
+  "reason": "merged; --batch-build/--batch-drop; later 2882, 2909 closed"
+ },
+ {
+  "slug": "builder-bash-test-write",
+  "pr": 2954,
+  "state": "open",
+  "headRef": "worktree-builder-bash-test-write",
+  "confidence": "sure",
+  "reason": "head and body name the slug"
+ },
+ {
+  "slug": "checked-never-no-escape",
+  "pr": 3532,
+  "state": "open",
+  "headRef": "never-stamp-no-escape",
+  "confidence": "sure",
+  "reason": "refuses Checked never stamp; does the step work, slug not named"
+ },
+ {
+  "slug": "ci-checks-to-subagents-audit",
+  "pr": null,
+  "state": "none",
+  "headRef": "",
+  "confidence": "none",
+  "reason": "no PR found"
+ },
+ {
+  "slug": "ci-hygiene-upkeep",
+  "pr": null,
+  "state": "none",
+  "headRef": "",
+  "confidence": "none",
+  "reason": "ongoing upkeep step; no PR names it"
+ },
+ {
+  "slug": "claude-md-load-once",
+  "pr": 3173,
+  "state": "closed",
+  "headRef": "worktree-claude-md-load-once",
+  "confidence": "sure",
+  "reason": "head, title, body name slug; closed unmerged"
+ },
+ {
+  "slug": "compact-pct-override",
+  "pr": 3060,
+  "state": "merged",
+  "headRef": "compact-pct-override-r40",
+  "confidence": "sure",
+  "reason": "merged; 3055 closed earlier"
+ },
+ {
+  "slug": "dead-host-lock-form-off-linux",
+  "pr": 3303,
+  "state": "merged",
+  "headRef": "sweep-mutants-windows-skip",
+  "confidence": "unsure",
+  "reason": "bandaid that says the real measurement work is not done; not the step itself"
+ },
+ {
+  "slug": "drift-audit-lanes",
+  "pr": null,
+  "state": "none",
+  "headRef": "",
+  "confidence": "none",
+  "reason": "no PR found"
+ },
+ {
+  "slug": "findings-ride-in-lane",
+  "pr": 2070,
+  "state": "closed",
+  "headRef": "findings-ride-in-lane-tests",
+  "confidence": "sure",
+  "reason": "head and body name slug; closed unmerged"
+ },
+ {
+  "slug": "fix-check-records-carry",
+  "pr": null,
+  "state": "none",
+  "headRef": "",
+  "confidence": "none",
+  "reason": "only related fix-check PRs, none for this step"
+ },
+ {
+  "slug": "glossary-orchestrator-sweep",
+  "pr": null,
+  "state": "none",
+  "headRef": "",
+  "confidence": "none",
+  "reason": "no PR found"
+ },
+ {
+  "slug": "green-hook-skips-draft-run",
+  "pr": 2843,
+  "state": "closed",
+  "headRef": "green-hook-skips-draft-run",
+  "confidence": "sure",
+  "reason": "head matches; closed unmerged"
+ },
+ {
+  "slug": "hand-in-merges-main-first",
+  "pr": 3552,
+  "state": "open",
+  "headRef": "lane-lint-merges-main",
+  "confidence": "unsure",
+  "reason": "related (lane lint merges main), slug not named"
+ },
+ {
+  "slug": "handoff-lands-tracked-first",
+  "pr": 2917,
+  "state": "merged",
+  "headRef": "outbox-handoff-push-allow",
+  "confidence": "unsure",
+  "reason": "related handoff push allow; body names slug only in passing"
+ },
+ {
+  "slug": "ios-adblock-merge-text-820c",
+  "pr": 3504,
+  "state": "open",
+  "headRef": "five-repos-per-lane-text",
+  "confidence": "unsure",
+  "reason": "rewrites per-lane merge text for five repos per ruling 820; slug not named"
+ },
+ {
+  "slug": "judge-replay-page-cases",
+  "pr": null,
+  "state": "none",
+  "headRef": "",
+  "confidence": "none",
+  "reason": "replay PRs are other steps"
+ },
+ {
+  "slug": "lane-lint-once-fail-fast",
+  "pr": 2847,
+  "state": "closed",
+  "headRef": "lane-lint-once-fail-fast",
+  "confidence": "sure",
+  "reason": "head and body name slug; closed unmerged"
+ },
+ {
+  "slug": "lane-report-plain-form",
+  "pr": 3609,
+  "state": "open",
+  "headRef": "lane-report-plain-form",
+  "confidence": "sure",
+  "reason": "head and body name slug"
+ },
+ {
+  "slug": "lint-before-record-push",
+  "pr": 1755,
+  "state": "closed",
+  "headRef": "lint-before-record-push",
+  "confidence": "sure",
+  "reason": "head matches; closed unmerged"
+ },
+ {
+  "slug": "macos-runner-queue-wait",
+  "pr": 3586,
+  "state": "merged",
+  "headRef": "mac-jobs-off-pr-runs",
+  "confidence": "unsure",
+  "reason": "related macOS runner PR; slug not named"
+ },
+ {
+  "slug": "merge-flow-after-anthropic",
+  "pr": 3049,
+  "state": "merged",
+  "headRef": "lane-per-lane-merge",
+  "confidence": "unsure",
+  "reason": "design step; R42 acts 3-5 PRs name it in body (3049, 2993, 2889)"
+ },
+ {
+  "slug": "merge-reads-newest-check-run",
+  "pr": 3317,
+  "state": "merged",
+  "headRef": "worktree-merge-reads-newest-check-run",
+  "confidence": "sure",
+  "reason": "head and body name slug; merged"
+ },
+ {
+  "slug": "merge-stale-cites-to-ids",
+  "pr": 3377,
+  "state": "merged",
+  "headRef": "merge-audit-fixes-2",
+  "confidence": "sure",
+  "reason": "body names slug; merged; 3366 closed earlier"
+ },
+ {
+  "slug": "mixed-merge-resolver",
+  "pr": 1683,
+  "state": "closed",
+  "headRef": "mixed-merge-resolver",
+  "confidence": "sure",
+  "reason": "head matches; closed, body says replaced by #1521 (state not read)"
+ },
+ {
+  "slug": "no-ci-starter",
+  "pr": 2770,
+  "state": "closed",
+  "headRef": "no-ci-starter",
+  "confidence": "sure",
+  "reason": "head and body name slug; closed unmerged"
+ },
+ {
+  "slug": "notes-fix-large-2",
+  "pr": 1649,
+  "state": "merged",
+  "headRef": "pointer-head-own-detach",
+  "confidence": "unsure",
+  "reason": "slug only in body, weak"
+ },
+ {
+  "slug": "notes-name-their-fix",
+  "pr": 2799,
+  "state": "open",
+  "headRef": "notes-name-their-fix-stack",
+  "confidence": "sure",
+  "reason": "head, title, body name slug; 2735 open too"
+ },
+ {
+  "slug": "option-tradeoff-pushback",
+  "pr": 3239,
+  "state": "merged",
+  "headRef": "option-tradeoff-pushback",
+  "confidence": "sure",
+  "reason": "head and body match; merged; 2173 closed earlier"
+ },
+ {
+  "slug": "page-answered-not-closed",
+  "pr": null,
+  "state": "none",
+  "headRef": "",
+  "confidence": "none",
+  "reason": "3548 is a different check (answered claims in messages)"
+ },
+ {
+  "slug": "page-open-item-staleness",
+  "pr": null,
+  "state": "none",
+  "headRef": "",
+  "confidence": "none",
+  "reason": "no PR found"
+ },
+ {
+  "slug": "past-ruling-s1-block",
+  "pr": 2797,
+  "state": "open",
+  "headRef": "carry/past-ruling-s1-block",
+  "confidence": "sure",
+  "reason": "head and title match"
+ },
+ {
+  "slug": "process-args-heredoc-probe",
+  "pr": 3475,
+  "state": "open",
+  "headRef": "heredoc-text-guards",
+  "confidence": "sure",
+  "reason": "title names the step slug"
+ },
+ {
+  "slug": "pwsh-followups",
+  "pr": 2723,
+  "state": "open",
+  "headRef": "pwsh-followups-2",
+  "confidence": "sure",
+  "reason": "head matches; 1945 closed earlier"
+ },
+ {
+  "slug": "qmax-d369-failed-reason",
+  "pr": null,
+  "state": "none",
+  "headRef": "",
+  "confidence": "none",
+  "reason": "q_max repo step; no PR here"
+ },
+ {
+  "slug": "qmax-worktree-db-after-neon-purge",
+  "pr": null,
+  "state": "none",
+  "headRef": "",
+  "confidence": "none",
+  "reason": "q_max repo step; no PR here"
+ },
+ {
+  "slug": "r4",
+  "pr": null,
+  "state": "none",
+  "headRef": "",
+  "confidence": "none",
+  "reason": "q_max step; hits are generic R4 text"
+ },
+ {
+  "slug": "ready-records-push-keeps-record-head",
+  "pr": 3377,
+  "state": "merged",
+  "headRef": "merge-audit-fixes-2",
+  "confidence": "sure",
+  "reason": "body names slug; merged"
+ },
+ {
+  "slug": "record-vs-later-ruling-check",
+  "pr": 3559,
+  "state": "open",
+  "headRef": "ruling-overtakes-record-2",
+  "confidence": "unsure",
+  "reason": "same work, slug not named; 3507 closed earlier"
+ },
+ {
+  "slug": "red-chain-needs-revert-each",
+  "pr": 3336,
+  "state": "closed",
+  "headRef": "worktree-red-chain-needs-revert-each",
+  "confidence": "sure",
+  "reason": "head and body match; closed unmerged"
+ },
+ {
+  "slug": "refused-start-queues-turn",
+  "pr": 3085,
+  "state": "closed",
+  "headRef": "refused-start-queues-turn",
+  "confidence": "sure",
+  "reason": "head and body match; closed unmerged"
+ },
+ {
+  "slug": "resume-guard-workflow-agents",
+  "pr": 2771,
+  "state": "open",
+  "headRef": "resume-carry",
+  "confidence": "sure",
+  "reason": "body names slug; 2147 closed earlier"
+ },
+ {
+  "slug": "revert-then-resume-merges",
+  "pr": 3281,
+  "state": "closed",
+  "headRef": "red-main-resume-at-revert-2",
+  "confidence": "sure",
+  "reason": "body names slug; closed unmerged; 3267 closed too"
+ },
+ {
+  "slug": "review-record-provenance",
+  "pr": 1751,
+  "state": "closed",
+  "headRef": "review-record-provenance",
+  "confidence": "sure",
+  "reason": "head matches; closed unmerged"
+ },
+ {
+  "slug": "reviewer-probes-blocked",
+  "pr": null,
+  "state": "none",
+  "headRef": "",
+  "confidence": "none",
+  "reason": "no PR found"
+ },
+ {
+  "slug": "round1-sonnet-guard-table",
+  "pr": 3010,
+  "state": "merged",
+  "headRef": "lane/model-table-one-home",
+  "confidence": "sure",
+  "reason": "body says Closes steps ... round1-sonnet-guard-table; merged"
+ },
+ {
+  "slug": "ruleset-pr-bypass",
+  "pr": 2622,
+  "state": "merged",
+  "headRef": "main-protection-ruleset-text",
+  "confidence": "unsure",
+  "reason": "rewrites the ruleset record; slug in body only"
+ },
+ {
+  "slug": "scratch-rm-other-agent",
+  "pr": 3013,
+  "state": "merged",
+  "headRef": "scratch-rm-other-agent",
+  "confidence": "sure",
+  "reason": "head, title, body match; merged"
+ },
+ {
+  "slug": "sim-boot-screen-check",
+  "pr": 2887,
+  "state": "closed",
+  "headRef": "sim-boot-screen-check",
+  "confidence": "sure",
+  "reason": "head and body match; closed unmerged"
+ },
+ {
+  "slug": "stale-cites-tree-clean",
+  "pr": 2804,
+  "state": "open",
+  "headRef": "stale-cites-decisions",
+  "confidence": "sure",
+  "reason": "title names step; 2805 open, 2807 and 3165 closed"
+ },
+ {
+  "slug": "stale009-sweep",
+  "pr": 2687,
+  "state": "closed",
+  "headRef": "carry-dead-code-cite",
+  "confidence": "unsure",
+  "reason": "STALE009 work but slug not obviously named"
+ },
+ {
+  "slug": "stall-watch-quiet-lint",
+  "pr": 2795,
+  "state": "closed",
+  "headRef": "carry-stall-watch-quiet-lint-b",
+  "confidence": "sure",
+  "reason": "head and body match; closed unmerged; 2760 too"
+ },
+ {
+  "slug": "status-page-size-cap",
+  "pr": 3468,
+  "state": "merged",
+  "headRef": "export-holds-every-record",
+  "confidence": "sure",
+  "reason": "body names step status-page-size-cap; merged"
+ },
+ {
+  "slug": "subagent-handback-skipped",
+  "pr": 2946,
+  "state": "open",
+  "headRef": "subagent-handback-bypass-v2",
+  "confidence": "unsure",
+  "reason": "related SubagentHandback PRs; slug not named"
+ },
+ {
+  "slug": "timing-tests",
+  "pr": 2949,
+  "state": "open",
+  "headRef": "lane/timing-tests-hooks",
+  "confidence": "sure",
+  "reason": "four open lane/timing-tests-* PRs: 2949, 2952, 2958, 2959"
+ },
+ {
+  "slug": "wave-88-rebuilds",
+  "pr": null,
+  "state": "none",
+  "headRef": "",
+  "confidence": "none",
+  "reason": "no PR found"
+ },
+ {
+  "slug": "windows-sweep-lock-holder-flake",
+  "pr": 3497,
+  "state": "open",
+  "headRef": "lock-holder-pid-reuse",
+  "confidence": "sure",
+  "reason": "body names the flaky test and cause"
+ }
+]

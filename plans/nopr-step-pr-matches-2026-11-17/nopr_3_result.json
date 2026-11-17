@@ -1,0 +1,474 @@
+[
+ {
+  "slug": "all-jobs-passed-docs-only-red",
+  "pr": 3292,
+  "state": "merged",
+  "headRef": "all-jobs-passed-docs-only-red-2",
+  "confidence": "sure",
+  "reason": "head all-jobs-passed-docs-only-red-2, title fixes all-jobs-passed red"
+ },
+ {
+  "slug": "auto-merge-refused",
+  "pr": 3018,
+  "state": "closed",
+  "headRef": "auto-merge-refused-v3",
+  "confidence": "sure",
+  "reason": "v3 head names slug, closed unmerged; v2 #1763 also closed"
+ },
+ {
+  "slug": "batch-ci-merge-guard",
+  "pr": 3008,
+  "state": "open",
+  "headRef": "batch-ci-merge-guard-3",
+  "confidence": "sure",
+  "reason": "head batch-ci-merge-guard-3, open; earlier -/-2 closed"
+ },
+ {
+  "slug": "brief-says-owner-unread",
+  "pr": 2973,
+  "state": "closed",
+  "headRef": "brief-says-owner-unread",
+  "confidence": "sure",
+  "reason": "head equals slug, closed unmerged"
+ },
+ {
+  "slug": "c203",
+  "pr": 973,
+  "state": "merged",
+  "headRef": "c203-compact-figures",
+  "confidence": "unsure",
+  "reason": "merged c203-compact-figures is about compact threshold formula, not the settings.json dirty issue"
+ },
+ {
+  "slug": "ci-batch-mac-runner",
+  "pr": 3409,
+  "state": "open",
+  "headRef": "ci-batch-mac-runner-3",
+  "confidence": "sure",
+  "reason": "head ci-batch-mac-runner-3, open"
+ },
+ {
+  "slug": "ci-hygiene-refresh",
+  "pr": 1302,
+  "state": "merged",
+  "headRef": "ci-hygiene-refresh",
+  "confidence": "unsure",
+  "reason": "old merged PRs 1302 and 881 share head ci-hygiene-refresh; step still doing, may be a later round"
+ },
+ {
+  "slug": "claude-md-check-child-rollout",
+  "pr": 3506,
+  "state": "merged",
+  "headRef": "claude-md-check-child-rollout",
+  "confidence": "sure",
+  "reason": "head equals slug, merged; title is the fetch-depth remedy part"
+ },
+ {
+  "slug": "combine-tournament",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR title or head names the slug or the work"
+ },
+ {
+  "slug": "coordinator-scope-false-alarms",
+  "pr": 3334,
+  "state": "open",
+  "headRef": "lane/coord-scope-false-alarms",
+  "confidence": "sure",
+  "reason": "head lane/coord-scope-false-alarms, title matches, open"
+ },
+ {
+  "slug": "departs-first-sentence-only",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR title or head names the slug or the work"
+ },
+ {
+  "slug": "fetch-head-shared-race",
+  "pr": 3015,
+  "state": "closed",
+  "headRef": "fetch-head-shared-race",
+  "confidence": "sure",
+  "reason": "head and title match, closed unmerged"
+ },
+ {
+  "slug": "fix-check-posted-pass-stands",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR title or head names the slug or the work"
+ },
+ {
+  "slug": "glossary-one-page-row",
+  "pr": 2660,
+  "state": "merged",
+  "headRef": "glossary-page-row",
+  "confidence": "unsure",
+  "reason": "merged glossary-page-row adds page term; slug not named"
+ },
+ {
+  "slug": "glossary-same-local-cloud",
+  "pr": 2566,
+  "state": "merged",
+  "headRef": "glossary-roles-g1-g3",
+  "confidence": "unsure",
+  "reason": "merged glossary-roles-g1-g3 may be this work; slug not named"
+ },
+ {
+  "slug": "guard-run-slow-long-command",
+  "pr": 2930,
+  "state": "closed",
+  "headRef": "guard-run-slow-long-command",
+  "confidence": "sure",
+  "reason": "head equals slug, closed unmerged"
+ },
+ {
+  "slug": "handoff-keeps-owner-waits",
+  "pr": 2685,
+  "state": "closed",
+  "headRef": "handoff-keeps-owner-waits-2",
+  "confidence": "sure",
+  "reason": "head -2 (replaces #2251), closed unmerged"
+ },
+ {
+  "slug": "inbox-dup-heading-merge",
+  "pr": 3218,
+  "state": "closed",
+  "headRef": "lane/inbox-dup-heading-merge",
+  "confidence": "sure",
+  "reason": "head lane/inbox-dup-heading-merge, closed unmerged"
+ },
+ {
+  "slug": "judge-flags-batch102",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR title or head names the slug or the work"
+ },
+ {
+  "slug": "lane-lint-background-refused",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR title or head names the slug or the work"
+ },
+ {
+  "slug": "lane-reply-past-ruling",
+  "pr": 3099,
+  "state": "merged",
+  "headRef": "lane-reply-past-ruling",
+  "confidence": "sure",
+  "reason": "head equals slug, merged"
+ },
+ {
+  "slug": "lease-remedy-form",
+  "pr": 3580,
+  "state": "open",
+  "headRef": "lease-remedy-form-d",
+  "confidence": "sure",
+  "reason": "head lease-remedy-form-d, open; #2724 (-c) also open"
+ },
+ {
+  "slug": "macos-only-fail-passes-lane-lint",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR title or head names the slug or the work"
+ },
+ {
+  "slug": "merge-claim-only-head-skips-run",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR title or head names the slug or the work"
+ },
+ {
+  "slug": "merge-r3-reviewer-sonnet-only",
+  "pr": 3377,
+  "state": "merged",
+  "headRef": "merge-audit-fixes-2",
+  "confidence": "unsure",
+  "reason": "merge-audit-fixes-2 (merged) mentions round 3 Sonnet but does not name the slug or #3269"
+ },
+ {
+  "slug": "merge-skips-lint-on-green-ci",
+  "pr": 3025,
+  "state": "merged",
+  "headRef": "merge-skips-lint-on-green-ci-fix",
+  "confidence": "sure",
+  "reason": "head merge-skips-lint-on-green-ci-fix, merged"
+ },
+ {
+  "slug": "mistake-prose-files-guard",
+  "pr": 3220,
+  "state": "closed",
+  "headRef": "lane/r16-mistake-missing-guard",
+  "confidence": "sure",
+  "reason": "title names the step slug, closed unmerged"
+ },
+ {
+  "slug": "mutation-tests-for-cost",
+  "pr": 3133,
+  "state": "closed",
+  "headRef": "mutation-tests-for-cost",
+  "confidence": "sure",
+  "reason": "head equals slug, closed unmerged"
+ },
+ {
+  "slug": "notes-fix-large-1",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR title or head names the slug or the work"
+ },
+ {
+  "slug": "notes-keep-reverify",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR title or head names the slug or the work"
+ },
+ {
+  "slug": "operating-model-role-handoffs",
+  "pr": 3259,
+  "state": "merged",
+  "headRef": "role-text-agent-handoffs",
+  "confidence": "sure",
+  "reason": "title does the step work (role texts hand-offs to agents), merged"
+ },
+ {
+  "slug": "owner-credit-guard",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR title or head names the slug or the work"
+ },
+ {
+  "slug": "page-one-store-fixes",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR title or head names the slug or the work"
+ },
+ {
+  "slug": "past-ruling-on-send",
+  "pr": 3206,
+  "state": "open",
+  "headRef": "rebuild/past-ruling-on-send",
+  "confidence": "sure",
+  "reason": "rebuild/past-ruling-on-send open; #2740 carry/ also open, #1554 closed"
+ },
+ {
+  "slug": "pre-existing-uses-clause",
+  "pr": 2826,
+  "state": "closed",
+  "headRef": "carry-pre-existing-uses-clause",
+  "confidence": "sure",
+  "reason": "head carry-pre-existing-uses-clause, closed unmerged"
+ },
+ {
+  "slug": "push-skip-reads-why",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR title or head names the slug or the work"
+ },
+ {
+  "slug": "qmax-ci-batch-heads",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR title or head names the slug or the work"
+ },
+ {
+  "slug": "qmax-stale-rules-specs",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR title or head names the slug or the work"
+ },
+ {
+  "slug": "r31-builder-test-conflicts",
+  "pr": 3293,
+  "state": "merged",
+  "headRef": "r31-builder-test-conflicts",
+  "confidence": "sure",
+  "reason": "head equals slug, merged"
+ },
+ {
+  "slug": "ready-guard-accepts-none",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR title or head names the slug or the work"
+ },
+ {
+  "slug": "record-claim-cites-code",
+  "pr": 3182,
+  "state": "merged",
+  "headRef": "record-claim-cites-code-r2",
+  "confidence": "unsure",
+  "reason": "#3182 merged (-r2) and #1539 closed share the slug; step updated Nov 16 so unclear which is current"
+ },
+ {
+  "slug": "recovered-guard-label-first",
+  "pr": 3517,
+  "state": "open",
+  "headRef": "recovered-label-first",
+  "confidence": "unsure",
+  "reason": "open recovered-label-first looks like same work but title says refusal names carry forms"
+ },
+ {
+  "slug": "refusal-names-way-out",
+  "pr": 3077,
+  "state": "closed",
+  "headRef": "refusal-names-way-out",
+  "confidence": "sure",
+  "reason": "head equals slug, closed unmerged; #3078 remedies-all also closed"
+ },
+ {
+  "slug": "restart-plan-free-gate",
+  "pr": 2698,
+  "state": "merged",
+  "headRef": "restart-plan-free-gate",
+  "confidence": "sure",
+  "reason": "head equals slug, merged"
+ },
+ {
+  "slug": "retry-net-method-safe",
+  "pr": 2964,
+  "state": "merged",
+  "headRef": "retry-net-method-safe",
+  "confidence": "sure",
+  "reason": "head equals slug, merged"
+ },
+ {
+  "slug": "review-record-post-parses",
+  "pr": 1706,
+  "state": "closed",
+  "headRef": "record-post-parses-2",
+  "confidence": "unsure",
+  "reason": "only old closed record-post-parses PRs (#1671, #1706); step updated Nov 16"
+ },
+ {
+  "slug": "reviewed-head-push-ask",
+  "pr": 1725,
+  "state": "closed",
+  "headRef": "reviewed-head-push-ask",
+  "confidence": "sure",
+  "reason": "head equals slug, closed unmerged"
+ },
+ {
+  "slug": "rollup-skipped-reads-pending",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR title or head names the slug or the work"
+ },
+ {
+  "slug": "ruled-store-one-home",
+  "pr": 2992,
+  "state": "merged",
+  "headRef": "ruled-store-one-home",
+  "confidence": "sure",
+  "reason": "head equals slug, merged"
+ },
+ {
+  "slug": "runner-repos-in-parallel",
+  "pr": 1770,
+  "state": "merged",
+  "headRef": "runner-repos-in-parallel",
+  "confidence": "unsure",
+  "reason": "merged old PR with same head but title differs from step"
+ },
+ {
+  "slug": "shivpedia-count",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR title or head names the slug or the work"
+ },
+ {
+  "slug": "stack-check-scales-open-prs",
+  "pr": null,
+  "state": "none",
+  "headRef": null,
+  "confidence": "none",
+  "reason": "no PR title or head names the slug or the work"
+ },
+ {
+  "slug": "stale-row-reads-rest",
+  "pr": 3570,
+  "state": "open",
+  "headRef": "stale-drafts-read-rest-2",
+  "confidence": "sure",
+  "reason": "stale-drafts-read-rest-2 open, replaces #3531 closed"
+ },
+ {
+  "slug": "stall-watch-clock-pins",
+  "pr": 3012,
+  "state": "closed",
+  "headRef": "stall-watch-clock-pins-2",
+  "confidence": "sure",
+  "reason": "head -2, title matches, closed unmerged"
+ },
+ {
+  "slug": "standing-role-model-rows",
+  "pr": 3023,
+  "state": "merged",
+  "headRef": "lane/standing-role-model-rows",
+  "confidence": "sure",
+  "reason": "head lane/standing-role-model-rows, merged"
+ },
+ {
+  "slug": "stylisms-rules-table",
+  "pr": 3340,
+  "state": "merged",
+  "headRef": "stylisms-rules-table",
+  "confidence": "sure",
+  "reason": "head equals slug, merged"
+ },
+ {
+  "slug": "time-pinned-plan-refresh",
+  "pr": 2081,
+  "state": "closed",
+  "headRef": "lane/time-pinned-plan-refresh",
+  "confidence": "sure",
+  "reason": "head lane/time-pinned-plan-refresh, closed unmerged"
+ },
+ {
+  "slug": "watcher-builtin-hook-survey",
+  "pr": 1428,
+  "state": "merged",
+  "headRef": "watcher-builtin-hook-survey",
+  "confidence": "sure",
+  "reason": "head equals slug, merged"
+ },
+ {
+  "slug": "windows-fixture-git-timeout",
+  "pr": 3345,
+  "state": "merged",
+  "headRef": "windows-fixture-git-timeout",
+  "confidence": "sure",
+  "reason": "head equals slug, merged"
+ }
+]
