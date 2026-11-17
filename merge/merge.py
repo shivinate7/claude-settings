@@ -3320,6 +3320,24 @@ def refuse_incomplete_tree(wt, head, base, tree=None):
         raise UnknownStop("\n".join([f"the lint of {head[:9]} against {base} is unknown, not a pass: the lint worktree lacks {', '.join(missing)}, so no step ran.",
                                      "Run again. If it keeps happening, the lint worktree made for this head is incomplete. --lint-unknown-ok does not lift this. " + LANE_LINT_REMEDY]))
 
+SWEEP = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "janitor", "sweep.py"))  # the one home of the sweep, named in the disk refusal
+
+def refuse_full_disk(root):
+    """Refuse a lane lint on a drive under the guard's full disk floor, min(5% of the drive, 5 GiB) (decision machine-load-brake). A lint tree is a full
+    checkout, and a full disk fails it half made. The reader and the floor are the guard's (hooks/guard.py _read_disk, load_full), fed the disk reading
+    alone, so memory never refuses here. The floor holds in a cloud session too. An unreadable disk prints one line that says so and goes ahead."""
+    import guard as hook_guard  # here, not at the top: it loads the whole guard set, and only the lane lint and the review record need it
+    try:
+        free, total = hook_guard._read_disk()
+    except Exception:
+        print("merge: the free disk read as unknown, so the lane lint goes ahead", file=sys.stderr)
+        return
+    full = hook_guard.load_full({"disk_free_gb": free, "disk_total_gb": total})
+    if full:
+        raise Stop(f"the lane lint makes a full checkout, and the machine is full ({', '.join(full)}). Free space first: "
+                   f"`python3 {shlex.quote(SWEEP)} --root {shlex.quote(str(root))} --confirm` "
+                   "(decision machine-load-brake, the lane lint refuses at the full disk floor in a cloud session too).")
+
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_tests=False, mutate_run=True, pre_join=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
@@ -3344,7 +3362,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     an unknown (timeout, unloadable selector, unreadable diff) refuses unless `unknown_ok` gives a reason. The PASS line then also names the run and skipped counts.
     A hand-in of a pull request that is not an integration PR is refused while its body names an open replaced pull request (open_named); no override lifts it.
     On a batch integration PR, a PASS (after its lint comment) posts a pointer comment on each open lane its freeze block names, then closes it as replaced
-    (close_replaced); the same PASS reopens each closed lane the block has dropped when the tool closed it, and posts a pointer after the reopen (reopen_dropped)."""
+    (close_replaced); the same PASS reopens each closed lane the block has dropped when the tool closed it, and posts a pointer after the reopen (reopen_dropped).
+    Before any tree is made, refuse_full_disk refuses a drive under the guard's full disk floor, in a cloud session and a local one."""
+    refuse_full_disk(root)
     if target.isdigit():
         host = host or Host(cwd=root)
         n = int(target)

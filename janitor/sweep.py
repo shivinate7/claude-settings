@@ -3579,7 +3579,7 @@ def _sweep_roots(args, roots, restore_log_path, mode):
         if any(_removed_count(r["worktrees"]) + _removed_count(r["branches"]) for r in results):
             try:
                 free = min(shutil.disk_usage(r["root"]).free for r in results)
-                print("  free disk: %.1f GB" % (free / 1e9))
+                print("  free disk: %.1f GB" % (free / 2 ** 30))
             except (OSError, ValueError):
                 print("  free disk: unknown")
     if mode != "full":
