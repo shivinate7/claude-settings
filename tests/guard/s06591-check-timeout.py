@@ -1,11 +1,11 @@
 # section 6591
 FAMILY = "stream"  # the check-timeout rule belongs with check-tail in the stream family
 #
-# A background lane lint must set a time limit above its own bound (rule check-timeout). The limit is the `timeout`
+# A background lane lint with a time limit must set it above its bound (rule check-timeout). The limit is the `timeout`
 # of the Bash or PowerShell tool input, in milliseconds. CHECK_TIMEOUT_MS, the bound, and the trigger constants come
 # from the merge tool, read in section 6590. A foreground call that sets a limit can never reach the bound: its limit is
-# at most FOREGROUND_MAX_MS. A call that sets no limit gets the tool's default, which is under the bound too: 120000 ms
-# in the foreground, 1800000 ms in the background.
+# at most FOREGROUND_MAX_MS. A call that sets no limit is not judged: it runs under the tool's default, 120000 ms in the
+# foreground and 1800000 ms in the background (see THE NO LIMIT FORMS below).
 FOREGROUND_MAX_MS = 600000  # the Bash tool's foreground limit
 # The refusal names the limit to use and the background form. It never names the refused call's flag, bin/merge, or
 # its own limit: a refusal never names the forbidden target.
@@ -28,6 +28,14 @@ add("check-timeout: a PowerShell lane lint under run_in_background with a limit 
     CHECK_TIMEOUT_RULE, tool="PowerShell", cwd=NOGIT, run_in_background=True, timeout=CHECK_TIMEOUT_LOW_MS,
     description=TAIL_BG_UNTIL, carries=CHECK_TIMEOUT_REFUSED_CARRIES, lacks=CHECK_TIMEOUT_REFUSED_NAMES,
     command=CHECK_TIMEOUT_LINT)
+
+# THE NO LIMIT FORMS. Ruling own-896-897-glued-amp-b, option b, loosens the refusals main added since Nov 11. A lane
+# lint with no `timeout` is not refused, in the foreground or in the background: the call runs under the tool's
+# default. Each form is a call the rule does not judge.
+add("check-timeout: a lane lint in the foreground with no limit is allowed", "allow",
+    cwd=NOGIT, command=CHECK_TIMEOUT_LINT)
+add("check-timeout: a lane lint under run_in_background with no limit is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL, command=CHECK_TIMEOUT_LINT)
 
 # THE BOUND. The limit is read against CHECK_TIMEOUT_MS: one ms under is refused; at it, and one ms above, the run is
 # allowed; a verdict wrapper keeps the same limit.
