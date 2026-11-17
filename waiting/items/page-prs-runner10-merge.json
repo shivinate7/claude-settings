@@ -65,7 +65,7 @@
       "label": "No, hold all"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "May batch runner 10 merge the page-improvement PRs, starting with #3479?",
-  "why": "Option a is the exact act the classifier denied; the class yes in option b skips per-PR looks."
+  "why": "Closed by triage 9 at 03:16 CST Nov 17, on your /goal (15:33 CST Nov 16): close after the last page merge and the republish. Your answer b stands. The three page PRs your goal names merged, read on REST: #3449 15:29:35 CST Nov 16, #3543 16:50:50 CST Nov 16, #3469 03:09:07 CST Nov 17 (71f78cc38676). The page was republished from main at 03:15 CST (version 120). The other six PRs in option b (#3479, #3457, #3529, #3468, #3467, #3530) were not read by triage 9 in this pass: unknown."
 }

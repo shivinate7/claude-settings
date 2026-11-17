@@ -1,4 +1,3 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <meta charset="utf-8">
 <title>claude-settings Cockpit</title>
 <meta name="claude:viewport-fit-sides" content="cover">
@@ -193,6 +192,28 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .opt .pick { align-self: end; display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--gold-soft); color: var(--ink); font-size: 14px; }
 .opt .pick b { display: inline-flex; padding-top: 1px; color: var(--gold-ink); }
 .opt .nopick { align-self: end; }
+/* The Recommended line: one gold panel at card level, above the options, with the tokens of .pick. The option card keeps only the star, so the why has one home. */
+.recline { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; align-items: start; padding: 8px 12px; border-radius: 8px; background: var(--gold-soft); color: var(--ink); max-width: 70ch; }
+.recline > .spark { display: inline-flex; padding-top: 2px; color: var(--gold-ink); }
+.recline p { margin: 0; }
+.recline .rechead { font-size: 15px; }
+.recline .rechead > b { font-weight: 700; }
+.recline .rechead.single { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.recline .rechead .rn { font-weight: 600; }
+.recline .key { display: inline-block; max-width: none; vertical-align: 1px; border-color: var(--gold-ink); color: var(--gold-ink); background: transparent; }
+/* Inside a sentence the chip keeps the line's height, so the first line does not sit lower than the rest. */
+.recline .rechead.single .key { height: 20px; min-width: 22px; line-height: 17px; padding-inline: 4px; vertical-align: 2px; }
+.recline .rl { min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; font-weight: 600; }
+.recline ol { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 4px; }
+.recline li { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.recline ol.unordered li { grid-template-columns: auto minmax(0, 1fr); }
+.recline li .ord { font: 600 13px var(--mono); color: var(--gold-ink); min-width: 3ch; }
+.recline .recwhy { font-size: 14.5px; overflow-wrap: anywhere; }
+/* The Waiting on line: parsed out of the context, so the context clamp never hides it. Shaped like .stake, neutral. */
+.waitline { margin: 0; padding: 8px 12px; border-radius: 8px; background: var(--chip); font-size: 15px; overflow-wrap: anywhere; max-width: 70ch; }
+.waitline > b { font-weight: 700; }
+.opt .pick.star { justify-self: start; grid-template-columns: auto auto; align-items: center; padding: 4px 8px; }
+.opt .pick.star .ord { font: 600 13px var(--mono); color: var(--gold-ink); }
 /* A multi item: the options are checkboxes. The tick box is one fixed square, so a tick moves nothing. */
 .multihint { margin: 0; font-size: 14.5px; color: var(--muted); }
 .tick { flex: none; width: 26px; height: 26px; border-radius: 6px; border: 2px solid var(--faint); background: var(--surface); display: grid; place-items: center; font: 700 14px/1 var(--mono); color: var(--on-acc); }
@@ -1496,10 +1517,31 @@ function readyFits(it) {
   return [all + (it.ranked === true ? ", your order." : ", your choice."), "Ready to send: none of these, with your note."];
 }
 // The AI sparkle: a four-point star with two small ones. It takes the colour of its box.
-function sparkle() {
-  const b = h("b", { class: "spark", "aria-label": "Recommended", title: "Recommended" });
+// The star on an option card names itself; inside the Recommended line, which says the word, it is decoration.
+function sparkle(decor) {
+  const b = h("b", decor ? { class: "spark", "aria-hidden": "true" } : { class: "spark", "aria-label": "Recommended", title: "Recommended" });
   b.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M10 4c.7 4.6 2.9 6.8 7.5 7.5-4.6.7-6.8 2.9-7.5 7.5-.7-4.6-2.9-6.8-7.5-7.5C7.1 10.8 9.3 8.6 10 4z"/><path d="M19 2.5c.3 1.8 1 2.5 2.8 2.8-1.8.3-2.5 1-2.8 2.8-.3-1.8-1-2.5-2.8-2.8 1.8-.3 2.5-1 2.8-2.8z"/><path d="M19 15c.25 1.4.8 1.95 2.2 2.2-1.4.25-1.95.8-2.2 2.2-.25-1.4-.8-1.95-2.2-2.2 1.4-.25 1.95-.8 2.2-2.2z"/></svg>';
   return b;
+}
+// The Waiting on line is the first context line that starts "Waiting on:" with some text. It is drawn on its own, and the context drops it.
+function splitWait(ctx) {
+  const lines = String(ctx || "").split("\n"), i = lines.findIndex((l) => /^Waiting on:\s*\S/.test(l));
+  if (i < 0) return { ctx: ctx || "", wait: "" };
+  return { wait: lines[i].replace(/^Waiting on:\s*/, ""), ctx: lines.filter((_, j) => j !== i).join("\n") };
+}
+// The card-level Recommended line. It is a plain div: a tap on it picks nothing, and the page never preselects. Only the star on an option card picks.
+// It draws only for a recommendation that fits the item (pickKeys), and holds the why, which no option card prints.
+function recLine(it) {
+  const ks = pickKeys(it);
+  if (!ks) return null;
+  const full = (k) => String(((it.options || []).find((o) => o.key === k) || {}).label || letterOf(it, k)), ranked = it.ranked === true;
+  const chip = (k) => h("span", { class: "key" }, letterOf(it, k));
+  let head;
+  if (!isMulti(it)) head = h("p", { class: "rechead single", title: full(ks[0]) }, h("b", {}, "Recommended:"), " ", chip(ks[0]), " ", h("span", { class: "rn" }, full(ks[0])));
+  else head = [h("p", { class: "rechead" }, h("b", {}, ranked ? "Recommended, in order:" : "Recommended:")),
+    h("ol", { class: ranked ? "inorder" : "unordered", "aria-label": ranked ? "Recommended order" : "Recommended options" },
+      ks.map((k, i) => h("li", {}, ranked ? h("span", { class: "ord" }, ordinal(i + 1)) : null, chip(k), h("span", { class: "rl", title: full(k) }, full(k)))))];
+  return h("div", { class: "recline", id: "rec-" + it.id }, sparkle(true), h("div", {}, head, typeof it.why === "string" && it.why.trim() ? h("p", { class: "recwhy" }, it.why) : null));
 }
 const hasPics = (it) => !!it.look || (it.options || []).some((o) => o.design) || designsOf(it).some((d) => d.option);
 // An option names its picture with `design`, a slug of the item's `designs`. The picture sits at the top of the option card and a tap on it picks the option.
@@ -1565,7 +1607,7 @@ function optCard(it, o, chosen) {
       typeof o.note === "string" && o.note.trim() ? h("span", { class: "optnote" }, o.note) : null),
     hasOptLinks(it) ? (linksOf(o).length ? h("div", { class: "links", id: "k-" + sfx }, linksOf(o).map(linkEl)) : h("span", { class: "nolinks" })) : null,
     h("div", { class: "tr", id: "t-" + sfx }, o.widens === true ? h("p", { class: "stake due dwarn widens" }, glyph("due"), h("span", {}, "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo")) : null, h("div", { class: "gain" + (on("gain") ? " dif" : "") }, mark("gain"), h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain), tail("gain")), h("div", { class: "lose" + (on("lose") ? " dif" : "") }, mark("lose"), h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose), tail("lose"))),
-    pi >= 0 ? h("div", { class: "pick", id: "p-" + sfx }, sparkle(), !multi ? it.why : ranked ? ordinal(pi + 1) + "." + (pi === 0 ? " " + (it.why || "") : "") : pi === 0 ? it.why : "Also recommended.") : h("span", { class: "nopick" })];
+    pi >= 0 ? h("div", { class: "pick star", id: "p-" + sfx }, sparkle(), ranked ? h("span", { class: "ord" }, ordinal(pi + 1)) : null) : h("span", { class: "nopick" })];
   if (!ranked) return h("label", { class: "opt" + (sel ? " sel" : ""), for: id }, pic, input, h("span", { class: "head" }, ...headKids), ...body);
   const n = list.length;
   const mv = (dir) => {
@@ -1804,9 +1846,11 @@ function buildCard(it) {
     const left = Date.parse(it.by) - Date.now();
     card.append(h("p", { class: "stake due" }, glyph("due"), h("span", {}, left >= 0 ? "Answer by " + fmt(it.by) + ", " + span(left) + " from now." : "Answer was due " + fmt(it.by) + ", " + span(left) + " ago.")));
   }
+  const { ctx: ctxText, wait } = splitWait(it.context);
+  if (wait) card.append(h("p", { class: "waitline", id: "wait-" + it.id }, h("b", {}, "Waiting on:"), " " + wait));
   const thread = threadEl(it);
   if (thread) card.append(thread);
-  const more = !!state.more[it.id], ctxText = it.context || "";
+  const more = !!state.more[it.id];
   card.append(h("p", { class: "ctx" + (more || ctxText.length <= 220 ? "" : " clamp"), id: "ctx-" + it.id }, ctxText));
   if (ctxText.length > 220) card.append(h("button", { class: "morebtn", id: "b-more-" + it.id, type: "button", "aria-expanded": String(more), "aria-controls": "ctx-" + it.id, onclick: () => { state.more[it.id] = !more; repaint(it); } }, more ? "Less" : "More context"));
   if (it.ref) card.append(h("p", { class: "about" }, it.ref));
@@ -1820,6 +1864,8 @@ function buildCard(it) {
     // data-d names each option's pictures, so a pick keeps the frames already drawn (see syncOpts).
     const opts = h("div", { class: "opts" + (hasPics(it) ? " pics" : "") + (it.ranked === true ? " ranked" : "") + (hasOptLinks(it) ? " olinks" : ""), role: multi ? "group" : "radiogroup", "aria-label": "Options for No. " + it.n, "aria-describedby": multi ? "mh-" + it.id : null, "data-d": hasPics(it) ? (it.options || []).map((o) => o.key + ":" + optionDesigns(it, o).map((d) => d.slug + "@" + (d.focus || "") + "#" + (d.state || "")).join("+")).join() : null });
     (it.options || []).forEach((o) => opts.append(optCard(it, o, d.choice)));
+    const rec = recLine(it);
+    if (rec) put(rec);
     if (multi) put(h("p", { class: "multihint", id: "mh-" + it.id }, it.ranked === true ? "Tick any that apply, then order them, best first." : "Tick any that apply."));
     put(opts, ...((it.options || []).some((o) => marks(it, o).length) ? [h("p", { class: "difkey" }, ne(), h("span", {}, "marks what sets an option apart."))] : []), readyRow,
       h("div", { class: "alts" },
@@ -3855,5 +3901,3 @@ window.addEventListener("resize", () => {
 });
 })();
 </script>
-
-</body></html>
