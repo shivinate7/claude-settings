@@ -1,0 +1,1 @@
+- ruled-store-git-timeout: GIT_TIMEOUT is 30 s, but the hook timeout is 10 s, so a slow ruled-store read can outlast its hook (lane ruled-store-one-home, 16:30 CST Nov 12). Fix: none recorded.

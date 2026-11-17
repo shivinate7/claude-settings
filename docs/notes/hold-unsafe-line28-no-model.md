@@ -1,0 +1,1 @@
+- hold-unsafe-line28-no-model: decision hold-unsafe-after-round-3 line 28 lacks the model record. The comment at merge/merge.py line 264 should cite pr-review-record, and agent-model-cap near line 206 says "a fix check" (lane model-table-one-home, 17:57 CST Nov 12). Fix: none recorded.

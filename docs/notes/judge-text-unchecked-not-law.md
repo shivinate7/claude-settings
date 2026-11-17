@@ -1,0 +1,1 @@
+- judge-text-unchecked-not-law: the judge text (call_judge PAST_RULING_ITEM) never explains the words "(unchecked, not law)" (lane ruled-store-one-home, 16:30 CST Nov 12). Fix: none recorded.

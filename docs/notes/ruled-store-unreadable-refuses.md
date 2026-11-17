@@ -1,0 +1,1 @@
+- ruled-store-unreadable-refuses: a store-only read that cannot run (no git on PATH, a non-git folder) refuses a question that main passes (lane ruled-store-one-home, 16:30 CST Nov 12). Fix: none recorded.
