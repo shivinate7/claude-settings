@@ -13484,7 +13484,7 @@ class RedMainBrake(Env):
         rc, out, _ = self.go(runs, jobs, "--base-red-ok", "revert of the breaking merge", changed=[("lane-2650.txt", "removed", 0)])
         self.merged(rc, out)
 
-    # A fix to the failing test file merges onto a red main when its own check is green on its head (owner ruling 2026-11-17 09:20 CST, decision
+    # The cases check that a fix to the failing test file merges onto a red main when its own check is green on its head (decision
     # no-merge-onto-red-main). The red job's log names the failing test. The breaking merge changes lane-2650.txt alone, so the test file is no blamed
     # path, and only the log read and the per-check read can admit this fix.
     FLAKY_FILE = "tests/test_flaky.py"
