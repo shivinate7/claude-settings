@@ -177,6 +177,7 @@ FAMILIES = {
     "ci-wait-cap": "the CI-wait cap: a send_later whose message says it waits on CI (the word CI or checks, PR run or PR runs, workflow run or workflow runs, check run, pipeline, or GitHub Actions) is refused past the cap in cap_minutes(), by delay_minutes (a number or a digit string) or an at time (with or without an offset); a call that is not about CI, a CI call at the cap, and a copy whose data file moves the limit are judged against that cap",
     "workflow-args": "a Workflow call whose args is, or holds as an array or object value, a placeholder (an all-caps word with an underscore, or __X__) is refused, naming it and the fix; an absent, empty or real args passes, and so does a short all-caps word or a sentence with an env var name",
     "sections": "the section files: a set the loader refuses (no section file, two files with one number, a name whose number disagrees with its header, a log check appended after the LOG_CHECKS_EXTRA join) stops a run before any case",
+    "fg-bash-while-bg": "a foreground Bash call that can run long (a test, lint, merge, build or install, or a time limit over 60000 ms) is refused while this session's background command or agent runs; the run_in_background form, a quick read and a call with no background work pass",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
