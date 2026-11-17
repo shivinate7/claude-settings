@@ -70,7 +70,9 @@ REWRITE_CAP; no file written, no timer, no log.
 The answered-source check (rule `answered-needs-source`): on any turn, landed or not, it refuses each line of the last reply
 that holds the whole word "answered" (any case, outside fences and inline code spans, not hyphen-joined to another word)
 unless the same line cites a source: a URL, `#<n>`, a commit hash, a repo path, `item <n>`, `page:<n>`, an `fb-` id, a
-`session_` id or `HH:MM`. A negator, modal or "claim" in the same clause before the word exempts it, as does `[question] -> answered`, the guard's own name "Answered guard", and a first-person subject with an object after it. One
+`session_` id or `HH:MM`. A negator in the same clause before the word exempts it, as do `[question] -> answered`, the
+guard's own name "Answered guard", an adjective in a condition, a modal followed by a condition word, "a claim that" with
+no third-person owner after it, and the writer's own act on an object that names no person. One
 refusal per turn lists the lines and joins any other reason. A rewrite after a missing-report refusal is checked too. Risk
 kind and incident: decision answered-needs-source. Cost: regex over the reply, no file, no process.
 
@@ -683,11 +685,11 @@ def bare_cite(text):
 # file extension or a known top dir, or a bare file name with a known extension, so "and/or" is no source.
 # The word is not part of a hyphen-joined name (a rule anchor such as answered-needs-source). A negator in the
 # same clause before it (a clause breaks at . ; : ! ? , or a dash) exempts it: not, n't, no, none, nothing,
-# nobody, never, cannot, yet to. A line that ends in `?` asks and claims nothing. The check targets a claim whose
-# subject is the owner (he, she, they, you, the owner) or an item or a question being answered. Three uses pass:
-# "answered" as an adjective after a determiner and before a noun in a condition ("when an answered page item"),
-# or the guard's printed name ("the answered guard"); a first-person subject that answers someone else's questions (no owner word between the "I" and the
-# word, and no "for him"); and a modal clause or a "a claim that" clause with no owner, item or question in it.
+# nobody, never, cannot, yet to. A line that ends in `?` asks and claims nothing. Four uses pass: "answered" as an
+# adjective after a determiner and before a noun in a condition ("when an answered page item"); a modal clause with a
+# condition word after the modal ("should end once the items are answered"); "a claim that" with no third-person owner
+# after it; and the writer's own act ("I answered", "I sent ... and answered") on an object that names no person.
+# The guard's printed name ("the answered guard") is removed before the read.
 ANSWERED_RE = re.compile(r"(?<![\w-])answered(?![\w-])", re.I)
 ANSWERED_INBOX_RE = re.compile(r"\[question\]\s*(?:->|\u2192)\s*answered\b", re.I)
 ANSWERED_NEGATOR_RE = re.compile(r"\bnot\b|n['\u2019]t\b|\bno(?:ne|thing|body)?\b|\bnever\b|\bcannot\b|\byet\s+to\b", re.I)
@@ -706,13 +708,22 @@ ANSWERED_AFTER_FUNCTION_RE = re.compile(
     r"too|also|again|already|yet|now|then|today|yesterday|once|after|before|when|while|if|because|since|until|is|was|"
     r"were|are|be|been|has|have|had|here|there|not|all|both|this|these|those)\b", re.I)
 ANSWERED_NOUN_START_RE = re.compile(r"\s+[A-Za-z]")
-ANSWERED_CLAIM_NOUN_RE = re.compile(r"\b(?:an?|the|any|each|every|that|this|such)\s+claims?\b", re.I)  # "a claim that X were answered" talks about a claim
-# who answers: the owner, a pronoun for him, or the thing being answered
-ANSWERED_OWNER_SUBJECT_RE = re.compile(r"\b(?:owner|he|she|they|you|items?|questions?|asks?)\b", re.I)
+# "a claim that X were answered" talks about a claim, unless a named third-person owner follows "that"
+ANSWERED_CLAIM_NOUN_RE = re.compile(r"\ban?\s+claims?\s+that\b", re.I)
+ANSWERED_THIRD_OWNER_RE = re.compile(r"\b(?:owner|user|shivam|he|she|they)\b", re.I)
+# a person who could have answered: the owner by any name or pronoun
+ANSWERED_PERSON_RE = re.compile(r"\b(?:owner|user|shivam|he|him|she|her|they|them|you)\b", re.I)
+# a modal clause proposes a condition only with one of these words in it; a narrower list than ANSWERED_CONDITION_RE,
+# because "while" or "before" after a modal ("may have answered it while I slept") hedges a claim
+ANSWERED_MODAL_CONDITION_RE = re.compile(r"\b(?:when|whenever|once|after|if|until)\b", re.I)
 ANSWERED_FIRST_PERSON_RE = re.compile(r"\b(?:I|we)\b(?:['\u2019](?:ve|d|ll))?", re.I)
+_ANSWERED_ADVERB = r"(?:\w+ly|also|already|just|then|now|again|first|since)"
+# "I answered" or "we already answered": the first person, at most one adverb, then the word
+ANSWERED_I_BEFORE_RE = re.compile(r"\b(?:I|we)(?:['\u2019](?:ve|d))?\s+(?:" + _ANSWERED_ADVERB + r"\s+)?$", re.I)
+# "I sent ... and answered": a verb joined to a first-person subject by "and"
+ANSWERED_AND_BEFORE_RE = re.compile(r"\band\s+(?:" + _ANSWERED_ADVERB + r"\s+)?$", re.I)
 ANSWERED_OBJECT_AFTER_RE = re.compile(
     r"\s+(?:(?:its|their|his|her|my|our|your|the|an?|all|both|some|any|each|every|it|them)\b|\d)", re.I)
-ANSWERED_FOR_OWNER_RE = re.compile(r"\bfor\s+(?:him|her|them|you|the\s+owner)\b", re.I)
 ANSWERED_CLAUSE_BREAK_RE = re.compile(r"[.;:!?,\u2014\u2013]|\s-{1,2}\s")
 ANSWERED_TOP_DIRS = {"docs", "hooks", "lint", "bin", "skills", "agents", "roadmap"}
 ANSWERED_FILE_RE = re.compile(
@@ -731,10 +742,26 @@ def _has_path(line):
     return bool(ANSWERED_FILE_RE.search(line))
 
 
+def _first_person_act(clause, after):
+    """True when the writer answered something that is not the owner: "I" or "we" with at most an adverb before the
+    word, or "and" before it in a clause that a first-person word opens with no person after that word, and an object
+    after it that names no person."""
+    if not ANSWERED_OBJECT_AFTER_RE.match(after):
+        return False
+    if ANSWERED_PERSON_RE.search(ANSWERED_CLAUSE_BREAK_RE.split(after)[0]):
+        return False
+    if ANSWERED_I_BEFORE_RE.search(clause):
+        return True
+    opening = re.sub(r"^[\s*+-]+", "", clause)  # a list marker before the subject
+    first = ANSWERED_FIRST_PERSON_RE.match(opening)
+    rest = opening[first.end():] if first else ""
+    return bool(first and ANSWERED_AND_BEFORE_RE.search(clause) and not ANSWERED_PERSON_RE.search(rest))
+
+
 def _claims_answered(plain):
     """True when `plain` holds the word as a claim that the owner, an item or a question was answered: it has no negator
-    in its clause, and it is no adjective, no modal or "a claim that" clause without an owner, item or question, and no
-    first-person act that takes an object and is not done for the owner."""
+    in its clause, and it is no adjective in a condition, no modal followed by a condition word, no "a claim that" with
+    no third-person owner after it, and no first-person act on an object that names no person."""
     for m in ANSWERED_RE.finditer(plain):
         before = plain[:m.start()]
         after = plain[m.end():]
@@ -744,13 +771,13 @@ def _claims_answered(plain):
         if (ANSWERED_CONDITION_RE.search(clause) and ANSWERED_BEFORE_ADJ_RE.search(before)
                 and ANSWERED_NOUN_START_RE.match(after) and not ANSWERED_AFTER_FUNCTION_RE.match(after)):
             continue
-        if ANSWERED_CLAIM_NOUN_RE.search(clause) or (
-                ANSWERED_MODAL_RE.search(clause) and not ANSWERED_OWNER_SUBJECT_RE.search(clause)):
+        claim = ANSWERED_CLAIM_NOUN_RE.search(clause)
+        if claim and not ANSWERED_THIRD_OWNER_RE.search(clause[claim.end():]):
             continue
-        # first-person act on an object, with no owner word between the "I" and the word, and not done for the owner
-        rest = re.split(r"[.;:!?,\u2014\u2013]", after)[0]
-        if ANSWERED_OBJECT_AFTER_RE.match(after) and not ANSWERED_FOR_OWNER_RE.search(rest) and any(
-                not ANSWERED_OWNER_SUBJECT_RE.search(clause[f.end():]) for f in ANSWERED_FIRST_PERSON_RE.finditer(clause)):
+        modal = ANSWERED_MODAL_RE.search(clause)
+        if modal and ANSWERED_MODAL_CONDITION_RE.search(clause[modal.end():]):
+            continue
+        if _first_person_act(clause, after):
             continue
         return True
     return False
