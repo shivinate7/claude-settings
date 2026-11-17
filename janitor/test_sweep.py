@@ -834,8 +834,8 @@ class TempSweepTests(unittest.TestCase):
 # ----------------------------------------------------- the temp-folder step's wiring in sweep.main
 #
 # `sweep.main` calls the temp-folder step once per full run, after the simulator tier, with the
-# run's confirm flag. Off Windows the step must not run. Here the step is a recorder and every
-# tier that reads the real machine is stubbed, so no case touches a real temp
+# run's confirm flag, on every OS (owner ruling, 2026-11-17 13:30 CST). Here the step is a recorder
+# and every tier that reads the real machine is stubbed, so no case touches a real temp
 # folder, process, or run log. `reached` is the positive control: the run got past the simulator
 # tier, so an empty recording means the step did not run, not that the run ended early.
 
@@ -885,10 +885,12 @@ class TempSweepWiringTests(unittest.TestCase):
         self.assertEqual(seen, [False], "on Windows a preview run must call the temp step once, "
                                         "with confirm False; it saw %r" % (seen,))
 
-    def test_not_windows_never_runs_the_step(self):
+    # Owner ruling, 2026-11-17 13:30 CST: the janitor clears idle session scratch on Linux and Mac too.
+    def test_not_windows_runs_the_step_once_without_confirm(self):
         seen, reached = self.run_main(False)
         self.assertTrue(reached, "the run never reached the simulator tier, so this case proved nothing")
-        self.assertEqual(seen, [], "off Windows the temp step must not run; it saw %r" % (seen,))
+        self.assertEqual(seen, [False], "off Windows a preview run must call the temp step once, "
+                                        "with confirm False; it saw %r" % (seen,))
 
     def test_confirm_passes_true_to_the_step(self):
         seen, reached = self.run_main(True, "--confirm")
