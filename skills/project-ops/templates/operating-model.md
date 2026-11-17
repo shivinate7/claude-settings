@@ -26,7 +26,8 @@ A spawner is a session that starts its own agents. Each session role is a set of
   At each publish, triage builds the roadmap block from the head of the record branch, with `--block`
   and `--live`. The `--live` file carries a `sessions` key: each `list_sessions` row (every page) with
   `id`, `session_status` and `tags`. The roadmap build script reads it to list steps in progress with no live lane.
-  Each pull row carries `createdAt`, so the roadmap build script can list a stale draft. It also carries `held` (true when
+  Each pull row carries `createdAt`. Only the joint line (`stale_draft_pull`) in the roadmap build script reads it.
+  It also carries `held` (true when
   the batch runner's hand-in or hold list names the pull) and `reviewLog` (true when the pull has a posted review log),
   JSON bools, omitted when false or unknown. Each item row carries
   `lane` when the page item has one, so it can list an item whose lane is gone.
@@ -57,7 +58,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   It flags it only when the lane has sent no report or message since the last read (rulings R54 and R56 points 1 and 2). It writes each Opus grant on the step.
   It may run agents. It hands long reads to read-only agents: the whole-roadmap review, the proof for each close, and the reads for each outbox item. It writes the steps, the step closes and the page itself (rule `roles-orchestrator-never-builds`).
 - **Batch runner.** A standing session. It owns the integration batch until the cutover (claude-settings decision `all-repos-switch-together`); after it, it merges each lane PR alone, on its own green run (except a lane's own claude-settings PR, claude-settings ruling `own-lanes-merge-claude-settings-prs`). It also owns the CI waits, the merge
-  tool runs and archiving lanes. It runs the merge tool on a machine that can run it. After each merge it archives each lane that `merge --idle-lanes --live <file>` prints, for the coordinator (decision `session-tiers`, Archiving scope; ruling R46). The coordinator archives each other finished session it started.
+  tool runs and archiving lanes. It runs the merge tool on a machine that can run it. After each merge it archives each lane that `merge --idle-lanes --live <file>` prints, for the coordinator (decision `session-tiers`, Archiving scope; ruling R46). Whoever starts a session answers for archiving it. The coordinator archives each other finished session it started.
   In each wake it runs `merge --reviewed` once, with one `--root` per repo it owns (its `cs-repo:` tags), and
   opens or builds each batch the output names in that wake. It runs each `--confirm` in the foreground (see below). A foreground wait on one repo's CI held another repo's
   hand-offs for 1 h 16 min once (decision `session-tiers`, incident 2026-11-07). Batch steps are in skill `ci-hygiene`, step 8. The left-out list
@@ -205,7 +206,7 @@ parent, or miss a message while busy.
 - The git mailbox carries a message: `mail send`, with `mail wait` as the doorbell (skill `waiting-page`,
   `reference/routing-and-sessions.md`; decision `session-messages`).
 - Send non-urgent notes, findings and filing requests to the outbox: `roadmap/outbox/<session-slug>.md`
-  on the record branch. Each session keeps one file and rewrites it to hold only what is unfiled.
+  on the record branch. Each session keeps one file and rewrites it to hold only what is unfiled. A session's own handoff (`~/.claude/handoffs/<session_id>.md`) stays outside git. A lane's pushed handoff is a second file, `roadmap/outbox/<slug>-handoff.md`.
 - Triage reads the outbox at each wake, files each item, and removes what it filed. A `*-handoff.md` file is the exception: it stays as the reference for an archived session (ruling R46).
 - The session that owns a waiting item reads its answer. Nobody relays it. Skill `waiting-page`
   holds the protocol.

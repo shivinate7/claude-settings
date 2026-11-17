@@ -126,7 +126,7 @@ import tempfile
 import time
 import uuid
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import own_session  # the one home of the agent transcript folder
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)

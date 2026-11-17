@@ -13,7 +13,7 @@ TN_COMMAND = CMD_BOTH_SHELLS  # the {powershell, mac} command of the 14:47 rulin
 
 
 def tn_task(**over):
-    task = {"id": "stale-branch-deletes", "kind": "task", "status": "open", "title": "Delete the stale branches",
+    task = {"id": "stale-branch-deletes", "n": 928, "kind": "task", "status": "open", "title": "Delete the stale branches",
             "context": TN_CTX, "steps": TN_STEPS, "command": TN_COMMAND}
     task.update(over)
     return {k: v for k, v in task.items() if v is not None}
