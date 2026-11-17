@@ -511,6 +511,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `stale010-call-form-bypass` | `` `lint/x.py` `no_such()` `` matches no cite form, so STALE010 and STALE002 never read it. | [`docs/debts/stale010-call-form-bypass.md`](../docs/debts/stale010-call-form-bypass.md) |
 | `stale010-class-level-names` | `names_in` binds only module-level names and the defs directly in a module-level class. | [`docs/debts/stale010-class-level-names.md`](../docs/debts/stale010-class-level-names.md) |
 | `stale010-dotted-cite` | `PAIR_RES` reads only a plain name after the path. | [`docs/debts/stale010-dotted-cite.md`](../docs/debts/stale010-dotted-cite.md) |
+| `stall-clock-loop` | The guard allows a clock loop in a background command, `until [ $(date +%s) -gt N ]; do sleep 30; done; cmd`, and its remedy names the form. | [`docs/debts/stall-clock-loop.md`](../docs/debts/stall-clock-loop.md) |
 | `stamp-read-false-alarms` | The stamp rule counts three read-only shell calls as no evidence. | [`docs/debts/stamp-read-false-alarms.md`](../docs/debts/stamp-read-false-alarms.md) |
 | `stamp-shallow-depth-two` | `stamp.mjs --check` off the default branch needs `fetch-depth: 0`. | [`docs/debts/stamp-shallow-depth-two.md`](../docs/debts/stamp-shallow-depth-two.md) |
 | `stamp-shell-write-counts-read` | `_shell_reads` is a deny list of write forms, so an unlisted write counts as a read when its text holds a premise's Source token. | [`docs/debts/stamp-shell-write-counts-read.md`](../docs/debts/stamp-shell-write-counts-read.md) |
