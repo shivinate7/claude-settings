@@ -1072,7 +1072,8 @@ class SessionInstallerIsAllowed(unittest.TestCase):
 MAIN_INSTALLER = "Main Installer:"
 MAIN_INSTALL_BARE = ("CLAUDE_SETTINGS_REF=main ~/.claude/bin/verdict bash "
                      "/root/claude-settings-main/merge/install_from_main.sh")
-MAIN_INSTALL_FORMS = (MAIN_INSTALL_BARE, "cd /root/claude-settings-main && " + MAIN_INSTALL_BARE)
+# The cd is part of the act: the script takes its clone from the working directory.
+MAIN_INSTALL_FORMS = ("cd /root/claude-settings-main && " + MAIN_INSTALL_BARE,)
 MAIN_INSTALLER_REFUSED = (("another env var", "environment variable"), ("another ref", "another ref than `main`"),
                           ("another repo or path", "another repo or path"), ("extra arguments", "extra argument"),
                           ("chaining", "chaining"), ("a fork", "fork"), ("permissions", "permission"),
@@ -1097,8 +1098,11 @@ class MainInstallerIsAllowed(unittest.TestCase):
                  if "install" in x or "&&" in x or "bash" in x]
         self.assertEqual(sorted(spans), sorted(MAIN_INSTALL_FORMS), "Covers text quotes a command other than the two ruled")
 
-    def test_covers_says_nothing_follows_the_command(self):
-        self.assertIn("nothing after it", entry_part(self, MAIN_INSTALLER))
+    def test_covers_says_nothing_comes_before_or_after_the_command(self):
+        self.assertIn("nothing before it and nothing after it", entry_part(self, MAIN_INSTALLER))
+
+    def test_covers_says_the_cd_is_part_of_the_act(self):
+        self.assertIn("the script takes its clone from the working directory", entry_part(self, MAIN_INSTALLER))
 
     def test_covers_names_the_owner_ruling(self):
         missing = unnamed_terms(entry_part(self, MAIN_INSTALLER), (("owner time", "10:00 CST"), ("incident time", "15:59 CST")))
