@@ -1145,7 +1145,7 @@ REVIEW_GUARD_MARKER = "Guard or check: yes"  # the review record's line; see the
 GUARD_NO_LINE = "Guard or check: no"
 
 # A reviewer on Sonnet passes with the marker at a line start: on line 1 or later, on any round, with text after it on
-# its line, and as a whole brief. The row still reads its Haiku pin, so a Haiku reviewer with the marker passes too.
+# its line, and as a whole brief. A Haiku reviewer with the marker is refused at the step-up, below.
 role_model_allow("role-model: reviewer on sonnet with the guard marker on line 1 is allowed", "reviewer", "sonnet",
                  REVIEW_GUARD_MARKER + "\nCheck the guard diff.")
 role_model_allow("role-model: reviewer on sonnet with the guard marker on line 3 is allowed", "reviewer", "sonnet",
@@ -1160,8 +1160,12 @@ role_model_allow("role-model: reviewer on sonnet with the guard marker at the en
                  "reviewer", "sonnet", "Check the diff.\n" * 399 + REVIEW_GUARD_MARKER)
 role_model_allow("role-model: reviewer on sonnet as a Task with the guard marker is allowed", "reviewer", "sonnet",
                  REVIEW_GUARD_MARKER + "\nCheck the guard diff.", tool="Task")
-role_model_allow("role-model: reviewer on haiku with the guard marker is allowed (its own row)", "reviewer", "haiku",
-                 REVIEW_GUARD_MARKER + "\nCheck the guard diff.")
+# A guard-marked first-round reviewer below its `1 guard` row (sonnet) is refused at the step-up. The reason is a literal
+# here, never read from the guard, and it names the row's model.
+add("role-model: reviewer on haiku with the guard marker is denied at the step-up (its 1 guard row is sonnet)",
+    "deny", STEP_UP, tool="Agent", config=ROLE_REAL_CFG,
+    carries=("Reviewer round 1 on a guard or check change runs on Sonnet. Spawn it with model sonnet.",),
+    **role_input("reviewer", "haiku", REVIEW_GUARD_MARKER + "\nCheck the guard diff."))
 # A marker line may start with leading blanks: the brief table's line-start rows allow them, and a brief indents its
 # template line. The first-pass brief is the case, since only the marker lifts Sonnet there.
 role_model_allow("role-model: reviewer on sonnet on Round 1 with the guard marker after two spaces is allowed", "reviewer",
@@ -1325,6 +1329,58 @@ WINDOWS_CHECKERS.update(LB_CHECKS)
 # override: a one-act override claimed by a rename let two Windows racers win (run 40296652083), and no
 # Linux run shows it, so the claim cases run in the Windows slice.
 WINDOWS_CHECKERS.update({ov_parallel_check, ov_take_race_check, ov_late_reader_check})
+
+
+# --------------------------------------------------------------------------- prior work (rule spawn-searches-existing-builds)
+# A build spawn names the prior work it searched, on a line of its own: `Prior work: #N (state) | branch <name> | none
+# found`. A builder or test-author Agent spawn carries it here, and a lane start or a lane brief carries it in section 42910.
+# A reviewer and an Explore spawn are exempt, since they build nothing new. Each spawn below runs its role's model from the
+# role table, so only the Prior work line can refuse it. The constants below are read by section 42910 too.
+PW_RULE = "spawn-searches-existing-builds"
+PW_LINE = "Prior work:"
+PW_NONE = "Prior work: none found (searched origin/main hooks and lint, origin/roadmap steps, PR titles and branches)"
+PW_PR = "Prior work: #3285 (open) | branch lane-step-dup"
+PW_BUILD = "Round 1 of 3. Start the fix."
+add("prior-work: a builder spawn with no Prior work line is refused", "deny", PW_RULE, carries=PW_LINE,
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD))
+add("prior-work: a test-author spawn with no Prior work line is refused", "deny", PW_RULE, carries=PW_LINE,
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("test-author", "haiku", "Write the failing cases."))
+add("prior-work: a builder spawn whose Prior work line is empty is refused", "deny", PW_RULE, carries=PW_LINE,
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_LINE))
+add("prior-work: a builder spawn whose Prior work line names a pull request is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_PR))
+add("prior-work: a builder spawn whose Prior work line says none found is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_NONE))
+add("prior-work: a reviewer spawn with no Prior work line is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("reviewer", "sonnet", "Round 2 of 3. Review the diff."))
+add("prior-work: an Explore spawn with no Prior work line is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("Explore", "haiku", "Find where X is defined."))
+# A line inside a ``` fence is a quoted example and names no prior work. A fenced example beside a real line outside the
+# fence is allowed, since the real line counts.
+PW_FENCED = "```\n" + PW_PR + "\n```"
+add("prior-work: a builder spawn whose only Prior work line sits inside a fence is refused", "deny", PW_RULE, carries=PW_LINE,
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_FENCED))
+add("prior-work: a builder spawn with a fenced example and a real Prior work line outside the fence is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_FENCED + "\n" + PW_NONE))
+# The marker with its colon outside the bold, and the marker as a numbered list item: each names the prior work it searched.
+add("prior-work: a builder spawn whose Prior work line has its colon outside the bold is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n**Prior work**: none found"))
+add("prior-work: a builder spawn whose Prior work line is a numbered list item is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n1. Prior work: none found"))
+# An unfilled angle-bracket placeholder names no prior work: the brief template's own line, and a line of only brackets.
+# Real text beside a bracket still names it, and so does the bare words `none found`.
+PW_TEMPLATE = "Prior work: <#N|branch|none found>"
+PW_BRACKETS_ONLY = "Prior work: <...>"
+PW_REUSED = "Prior work: #3560 <reused>"
+PW_BARE_NONE = "Prior work: none found"
+add("prior-work: a builder spawn whose Prior work line is the brief template's placeholder is refused", "deny", PW_RULE,
+    carries=PW_LINE, config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_TEMPLATE))
+add("prior-work: a builder spawn whose Prior work line holds only angle brackets is refused", "deny", PW_RULE,
+    carries=PW_LINE, config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_BRACKETS_ONLY))
+add("prior-work: a builder spawn whose Prior work line is the bare words none found is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_BARE_NONE))
+add("prior-work: a builder spawn whose Prior work line names a number beside a bracket is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_REUSED))
 
 
 # --------------------------------------------------------------------------- the simulator boot rules

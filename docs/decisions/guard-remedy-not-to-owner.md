@@ -65,7 +65,7 @@ Text: `ANSWERED_REASON`, rule `answered-needs-source` (a claim of "answered" nee
 
 ### Recovered guard (any reply whose report shape holds)
 
-Text: two inline facts in `recovered_problem`. The two line forms below live here only.
+Text: two inline facts in `recovered_problem`. The two line forms below live here only. The refusal states each form with its `none` variant. It adds that a label counts where it starts an item in the report blockquote, also after a bullet and a Done-item tag.
 
 - If a compaction came before this report, and the report has no carry line since, add the missing line under Deviations, inside the report's blockquote:
   - `Recovered: <each fact, with its source: git, page or digest>`, or `Recovered: none`.
@@ -130,7 +130,7 @@ Text: `HAND_OFF_NO_CITE`, `HAND_OFF_NO_DATE`, two inline forms, and `HAND_OFF_TA
 Text: `refusal_reason`. Decision `refusals-reach-the-owner` (a refused tool reaches the owner).
 
 - Add an Input Needed line "allow `<tool_name>`?" for each tool. Put the tool's name in place of `<tool_name>`.
-- Add a line in the repo's debt notes file (`notes.md`) that names the tool.
+- Add one file in the repo's notes folder (`docs/notes/` here) that names the tool.
 - Or, if the refusal was right, write "`<tool_name>`: refusal was right" on one line, with the tool's full name in place of the placeholder.
 - A built-in tool, such as Edit or Bash, goes in backticks. An MCP tool goes by its full name.
 
@@ -168,9 +168,27 @@ Text: `HOLD_REASON`. Decision `session-tiers` (the duties of the triage session,
 
 ### Cite-gloss guard (landed turns)
 
-Text: inline, in the main check.
+Text: inline, in `plain_form_reasons`. Rule `speak-cite-id-plus-gloss` (an id carries a plain name on first use).
 
-- A record id appears with no short gloss after it. Write the id, then a few plain words that say what it is, like "D12, short titles for records".
+- An id appears with no short gloss: a record id like `D12`, a `#N` of 3 to 5 digits, or a session ref like `s02747:941`. Write the id, then a few plain words that say what it is, like "D12, short titles for records" or "#2015, check-tail filter".
+- For a `#N` or a session ref, two words that start with a letter must follow the id. "(env -vC, want ask)" is no gloss, and neither is "#2015's own rows".
+- A `#N` needs no gloss right after "PR", "PRs", "pull request", "issue", "commit", "by" or "via", or anywhere in the Done item, where a PR is cited as `#N`.
+- "in #N" passes only after a listed past participle, like "built in #1300", which the mistake guard asks for. "Rows in #1300" still needs a gloss. `PR_WORD_BEFORE_RE` holds the list.
+
+### Time guard (landed turns)
+
+Text: `PLAIN_TIME_REASON`. Rule `style-time-central-24h` (times are US Central, 24-hour, with the zone).
+
+- A clock time carries UTC, GMT or a trailing Z, like "20:34:33 UTC". Give the time in US Central on the 24-hour clock with CST or CDT, like "14:34 CST". Read it with `~/.claude/bin/now-central`.
+- Times in code spans, fences and URLs are not checked. "UTC-06:00", an offset, is no time.
+
+### Contradiction guard (landed turns)
+
+Text: `PLAIN_CONTRADICTION_REASON`. Rule `output-bring-decisions-as-question` (a choice for the owner is a question with options).
+
+- Deviations says "Contradiction:", "Contradiction —" (a dash), or "pick neither" or "choose neither" in any tense, like "picked neither" or "chose neither". Input Needed holds no question: no sentence ending in "?" and no pick with options.
+- "Contradiction: resolved", "Contradiction: settled", "Contradiction: none" and "No contradiction:" claim no open choice, so they pass. "Contradiction: none of" is still a claim.
+- Add the question to Input Needed, with options and a recommendation, or drop the Contradiction line from Deviations.
 
 ## Shared tails
 

@@ -14,11 +14,11 @@ never runs it. There is one path: the record branch's own worktree. Never write 
 1. Check out the record branch in its own worktree (`roadmap`; the repo's extras file may name another).
    Name the copy folder: take the path `python3 ~/.claude/lint/layout.py path <repo root> waiting-data` prints,
    and use that path inside the worktree.
-2. Fetch each of the five collections: `items`, `answers`, `groups`, `asks` and `meta`. Use
+2. Fetch each of the six collections: `items`, `answers`, `groups`, `asks`, `meta` and `receipts`. Use
    `ArtifactData list <collection>` with `out_dir` set to one new folder, and `query.limit` 1000.
    Follow `next_cursor` until it is empty. A list call that errors, or that ends with a cursor still
-   pending, stops the run: touch no `.complete` file and run no export. A missed cursor page deletes docs
-   from the copy. After the last page of a collection, touch `.complete` in its folder. An empty collection
+   pending, stops the run: touch no `.complete` file and run no export. A missed cursor page leaves its docs
+   stale in the copy. After the last page of a collection, touch `.complete` in its folder. An empty collection
    is an empty folder with that marker. Make the folder by hand if the tool wrote none.
 3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --fetched <folder> --out <copy folder> --page <file>`.
    `<file>` is the page that "Keep the page on main's code" step 1 already read. Its HTML lands in the copy as
@@ -55,13 +55,16 @@ timer, no watcher.
 ## Register and cite an artifact
 
 Each claude.ai artifact a repo holds is one entry in the `artifacts` key of its extras file
-(`python3 ~/.claude/lint/layout.py artifacts <repo root>` prints them). An entry has `id`, `url`, `role` and
-`account`. A role other than `waiting-page` also has `collections`, the collections to export. An empty list
-(`"collections": []`) makes a page-only entry: its page and files export, and no database does. `id` is a slug of
-32 characters or fewer. `account` is a plain label such as `work`, never an email. The role `waiting-page` marks
-the repo's waiting page. Its default collections are the five above, and its export folder is the waiting-data
-folder. Any other artifact exports to `artifacts/<id>/`. The old `waiting-page` key stays the fallback when no entry
-has that role.
+(`python3 ~/.claude/lint/layout.py artifacts <repo root>` prints them). An entry has `id`, `role`, `export` and
+`links`. `export` is the entry's git path under the record branch, or `false` for a page the repo holds and never
+exports. It is required, and the waiting page cannot be `false`. `links` is a list of `{account, url}`, one per
+account label, such as `work`, never an email. A session opens the link for its own account. When the entry has none,
+rebuild the page from git (`--rebuild`, or `--all`) and add the new link to `links`. An entry-level `url` or `account`
+is refused, with the remedy to move it into `links`. A role other than `waiting-page` also has `collections`,
+the collections to export. An empty list (`"collections": []`) makes a page-only entry: its page and files export, and
+no database does. `id` is a slug of 32 characters or fewer. The role `waiting-page` marks the repo's waiting page.
+Its default collections are the six above. `layout.waiting_page(root, account)` reads that account's link, else the
+first. When that entry has no link, the old `waiting-page` key is the fallback.
 
 A decision or a debt cites an artifact as `artifact:<id>`, never by its link. A link breaks when a page moves, and
 the registry then needs one edit. `python3 lint/check_artifact_cites.py` refuses a bare link and an unregistered id
@@ -84,8 +87,9 @@ the waiting page. A page that moves loses its read access, and the repo then hol
    It prints one line per artifact, `<id>: <verdict>`, with the verdicts of a single export, or
    `<id>: skipped - no export` for an entry held with `"export": false`, which needs no folder. When the session
    can read only one account's pages, pass `--account <label>` with its own account's label from the registry; without
-   it, each page the session cannot fetch prints `<id>: unknown`. An entry of another account prints
-   `<id>: skipped - account <its account>`, needs no folder and writes nothing. A label no entry holds, or an empty
+   it, each page the session cannot fetch prints `<id>: unknown`. An entry with no link for that label prints
+   `<id>: skipped - no link for account <label>; rebuild it from git and add the link`, needs no folder and writes
+   nothing. An entry with a link for the label exports, whatever its other links. A label no link holds, or an empty
    one, prints one `unknown` line, writes nothing and exits 2. The page and each
    text file are scanned like the docs; a find refuses that artifact only.
 4. Run `git add` on the export folder of each artifact whose line says `changed`. Then commit and push the record

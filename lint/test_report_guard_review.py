@@ -193,6 +193,12 @@ def record(head=LIVE, n=PR, rounds=ROUNDS, fix=None, guard="no", net="not owed")
     """A review record comment, in merge/merge.py's own form: Kind normal, Guard or check and Net value as given."""
     return merge_mod.review_body(n, head, "normal", guard, rounds, net, fix)
 
+def ruling_json(rid):
+    """The file of ruling `rid` on origin/roadmap: an open entry that the store's check_entry passes. The owner's line of the guard cases
+    names it. This suite repeats the entry's literal shape, since merge/test_merge.py is a 22k-line suite this file does not import."""
+    return json.dumps({"id": rid, "at": "2026-11-15T01:43:00-06:00", "ruling": "fixture: the owner's ruling", "source": "fixture",
+                       "status": "open", "supersedes_none": "fixture: the ruling names no guard rule"}) + "\n"
+
 
 # The incident (pull request 2189, comment 6726184510): a valid record at its live head, with a note line after its CI line.
 INCIDENT_PR, INCIDENT_HEAD = 2189, "d35865d42dae16eef06d9cc516c56f904c287fe1"
@@ -936,6 +942,67 @@ class ReviewRecordTests(unittest.TestCase):
         for n in (PR, PR + 1):
             self.assertIn("PR #%d" % n, refusal or "", "the stale record of PR #%d did not block its PASS claim: %r" % (n, refusal))
         self.assertLessEqual(elapsed, self.hook_budget(), "the fast check ran past the Stop hook budget: %.2f s" % elapsed)
+
+    def publish_roadmap(self, files):
+        """origin/roadmap in this repo holds `files` ({path: text}), as a fetch of the ruling store leaves it: the one read of the owner's line."""
+        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t",
+                   GIT_INDEX_FILE=os.path.join(self.run_dir, "roadmap.index"))
+
+        def git_in(*args, text=None):
+            # Bytes, not text mode: Windows text mode writes each LF as CRLF, and the blob would keep the CR.
+            r = subprocess.run(["git", "-C", self.repo, *args], input=None if text is None else text.encode("utf-8"),
+                               capture_output=True, env=env)
+            self.assertEqual(r.returncode, 0, r.stderr.decode("utf-8", "replace"))
+            return r.stdout.decode("utf-8").strip()
+
+        for path, body in files.items():
+            blob = git_in("hash-object", "-w", "--stdin", text=body)
+            git_in("update-index", "--add", "--cacheinfo", f"100644,{blob},{path}")
+        commit = git_in("commit-tree", git_in("write-tree"), "-m", "roadmap")
+        git_in("update-ref", "refs/remotes/origin/roadmap", commit)
+
+    def accepted_body(self, accepted=True, net="negative", n=PR, rid=None):
+        """A guard change's record on pull request `n` at LIVE: Guard or check yes, three FAIL rounds, Net value `net`. With `accepted`, the owner's
+        line citing `rid` (own-<n>-a unless named) sits directly before Net value, where the form puts it."""
+        body = record(head=LIVE, n=n, rounds=[(1, "reviewer", "sonnet", "FAIL"), (2, "reviewer", "sonnet", "FAIL"), (3, "reviewer", "sonnet", "FAIL")],
+                      guard="yes", net=net)
+        line = "Owner accepted: %s, 2026-11-15 01:50 CST\n" % (rid or "own-%d-a" % n)
+        return body.replace("Net value: %s\n" % net, line + "Net value: %s\n" % net) if accepted else body
+
+    def test_the_guard_and_merge_read_an_owner_accepted_hold_the_same_way(self):
+        # Catches: the Stop hook's review check and merge's live_review_state disagreeing on a held record the owner accepted. Both take the
+        # one read of the ruling, so a PASS claim passes exactly when merge reads the record done at the live head.
+        self.publish_roadmap({merge_mod.RULED_STORE_PATH.format(id="own-12-a"): ruling_json("own-12-a")})
+        for accepted, want in ((True, "done"), (False, "held")):
+            with self.subTest(accepted=accepted):
+                body = self.accepted_body(accepted=accepted)
+                rec = merge_mod.parse_review(body)
+                self.assertIsNotNone(rec, "parse_review refused the record, so its Owner accepted line is not read:\n" + body)
+                merge_state, why = merge_mod.live_review_state(merge_mod.Host(cwd=self.repo), rec, LIVE, "main")
+                self.assertEqual(merge_state, want, "fixture: merge reads the record as %s: %r" % (merge_state, why))
+                self.serve(comments=[body])
+                out = self.stop(self.lane_turn(report(CLAIM)))
+                if want == "done":
+                    self.assertIsNone(out, "the guard refuses a PASS claim that merge reads done: %r" % (out,))
+                else:
+                    self.assert_blocked(out)
+                    self.assertIn("PR #12", out["reason"], out)
+
+    def test_the_guard_and_merge_hold_an_owner_line_that_names_another_pull_request_or_a_slug(self):
+        # Catches: the Stop hook clearing a PASS claim on a held record whose owner line the scope bind refuses: a ruling of another pull request,
+        # or a bare slug. merge's live_review_state holds it, and the guard must hold it too.
+        self.publish_roadmap({merge_mod.RULED_STORE_PATH.format(id=rid): ruling_json(rid) for rid in ("own-3381-a", "r59")})
+        for n, rid in ((3400, "own-3381-a"), (3381, "r59")):
+            with self.subTest(pr=n, ruling=rid):
+                body = self.accepted_body(n=n, rid=rid)
+                rec = merge_mod.parse_review(body)
+                self.assertIsNotNone(rec, "parse_review refused the record, so its Owner accepted line is not read:\n" + body)
+                merge_state, why = merge_mod.live_review_state(merge_mod.Host(cwd=self.repo), rec, LIVE, "main")
+                self.assertEqual(merge_state, "held", "merge reads the record as %s, not held: %r" % (merge_state, why))
+                self.serve(prs={n: {"head": LIVE, "comments": [body]}})
+                out = self.stop(self.lane_turn(report("OTHER: round 2 PASS on PR #%d." % n)))
+                self.assert_blocked(out)
+                self.assertIn("PR #%d" % n, out["reason"], out)
 
 
 if __name__ == "__main__":

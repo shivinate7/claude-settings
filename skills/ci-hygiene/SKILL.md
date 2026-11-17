@@ -160,8 +160,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    new lane at round 1.
    Until the cutover, every repo except degen and home batches across sessions too (`git-integration-branch-merge`).
 9. **Wait without loops.** Wait for the CI-wake notice that follows `gh pr ready`. A push starts no
-   notice. In cloud, mark ready by MCP `update_pull_request` `draft: false` (route
-   pr-ready-mcp-cloud); the same CI-wake notice is meant to follow (decision `ci-wait-reads-run-status`; unmeasured in cloud), so
+   notice. Run `merge <pr> --ready` first. When it exits 0 with the line "stays a draft (", in cloud mark ready by MCP `update_pull_request` `draft: false` (route
+   pr-ready-mcp-cloud). Never mark before `--ready` has run. After the draft run of the pushed head shows, mark ready, then run `merge <pr> --confirm`. The tool's printed hint gives those last two steps (decision `records-index-at-merge`). The same CI-wake notice is meant to follow (decision `ci-wait-reads-run-status`; unmeasured in cloud), so
    also wait on the PR subscription and a check-in. Never run `gh run watch`. One watch made 131 API calls in one minute (decision
    `ci-wait-reads-run-status`, CI waits read the run status). Never poll with a sleep loop. Repeated
    `gh run view` or `gh pr checks` calls are a poll. To wait for any other condition, use the
@@ -182,7 +182,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     A workflow that also has `on: push` for all branches still runs on a draft branch.
     `gh pr create --draft` then `gh pr ready` fires two runs. Keep the draft state in the concurrency
     group (step 4). Otherwise the skipped draft run cancels an in-progress ready run.
-    Mark ready (`gh pr ready`, or in cloud MCP `update_pull_request`) only after the draft run shows in `gh run list`. A ready sent seconds after the
+    Run `merge <pr> --ready` first. When it exits 0 with the line "stays a draft (", mark ready by hand (`gh pr ready`, or in cloud MCP `update_pull_request`) and only after the draft run shows in `gh run list`. A ready sent seconds after the
     PR opens can give both runs `draft=false`. One then cancels the other. Its cancelled check runs
     can stop the merge, even for an admin (PR 381, Sonnet prompt judges).
     After `gh pr ready`, a run of only skipped jobs proves nothing. Wait for a run on the head that
@@ -205,19 +205,27 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     PR 293 (the Windows merge-test slice), is the case for it. A CI step's `if:` names only its own
     scope flag, or a non-PR event (step 19).
 17. **Slice tests on a slow platform.** On PRs, run a platform-specific test slice. Run the full suite
-    on main and nightly, except on macOS (R61): every macOS run takes the slice, and a push to main
+    in the daily run, except on macOS (R61): every macOS run takes the slice, and a push to main
     starts no macOS job (a job-level `github.event_name != 'push'`, since a step-level skip still starts
-    the runner). The nightly skips when main's head has a green push run and the newest completed
-    nightly is green (the `nightly-skip` job), and `scope` waits on that job, so nothing is cancelled.
+    the runner). Slow legs run daily (owner item 880, 11:53 CST Nov 15). A push runs the Linux fast jobs
+    only. The Windows and mutation jobs run in the one daily scheduled run, a pull request and a
+    manual run. The macOS jobs run on a manual run, and on a daily that runs, never on a pull request or a push (owner,
+    01:33 CST Nov 16: "turn off all mac runs for now"). The lane-touched-tests workflow has no macOS leg either. `all-jobs-passed` does not need them. When the newest completed daily is green and `push-skip` proved every push run since it, the
+    newest at this head, the daily skips (the `nightly-skip` job). `scope` waits on that job,
+    so nothing is cancelled.
 18. **Profile before you refactor test setup.** Compare setup time to test-body time. If the saving is
     under 20%, stop.
 19. **Run one scope job first.** Make it a cheap Linux job named `scope`. Every other job needs it.
-    A scope skip sits on the CI step that runs the suite or lint. The three macOS jobs also carry
-    the flag in a job-level `if:`, because a step-level skip still starts a runner and bills its setup
+    A scope skip sits on the CI step that runs the suite or lint. The three macOS jobs carry their
+    event guard (daily and dispatch only) and the flag in a job-level `if:`, because a step-level skip still starts a runner and bills its setup
     minutes (step 13), macOS most. Decision `same-check-kinds` (every repo runs the same check kinds)
-    and decision `main-branch-protection` (the required checks on main) hold the rule. Unless
-    `scope-skips` names it, the rollup fails a skipped job.
-    Apart from those three, a job-level `if:` holds only the draft guard. A job that runs only off pull
+    and decision `main-branch-protection` (the required checks on main) hold the rule. The rollup fails a
+    skipped job it needs, and it does not need the macOS jobs.
+    Apart from those three and the push-off jobs (the Windows and mutation jobs, whose job-level `if:` is
+    `github.event_name != 'push'` alone, with the draft guard on a shard), a job-level `if:` holds only the draft guard, or the records-only condition
+    `needs.scope.outputs.records_only_skip != 'true'`. That condition stands alone, or joins a shard's
+    draft guard as `(draft guard) && it`, or joins the guard of `ci-done`, or joins a push-off job's guard as `(push guard) && it`. A records-only run skips those
+    jobs. The rollup reads that all-skipped run as green on the output `true` alone. A job that runs only off pull
     requests, such as a push-only job, also skips at its CI steps. A job-level trigger guard would
     skip a needed job on every PR, and the rollup would fail on it. Each scoped CI step's `if:` names
     its scope flag and `|| github.event_name != 'pull_request'`, so push, nightly and dispatch runs
@@ -292,8 +300,11 @@ The seven opt-in templates of that decision:
   from a weekly schedule, never per PR. `open-issue: true` opens or updates one issue.
 - `ruling-kind`: fails a PR that adds or edits a record with no valid Kind line. The caller needs
   checkout at `fetch-depth: 0`. It fails closed when the base cannot be read.
-- `claude-md-cites`: fails a run when a unit of the caller's `CLAUDE.md` files or `.claude/**/*.md` copies
-  claude-settings record text instead of naming the record. The caller needs checkout first.
+- `claude-md-cites`: fails a run when a unit of the caller's rule files (`CLAUDE.md`, `.claude/**/*.md`,
+  `docs/rules/**/*.md`) copies claude-settings record text instead of naming the record. On a pull request it also
+  fails when a record and a rule unit that cites it change without each other (probe group `aligned`), unless
+  the PR body has `Rules checked: <record> — no change`. It reads the PR body from the event through env. The
+  caller needs checkout first, at `fetch-depth: 0`, and must not skip it on a docs-only change: records are `.md`.
 - `githooks/main-ref`: refuses a local move of main to a commit that origin lacks. Run
   `sh githooks/main-ref/install.sh` in each clone. `sh githooks/main-ref/install.sh --check` writes
   nothing and compares each armed copy to main; the shared pre-commit runs it and refuses a commit
@@ -343,8 +354,11 @@ n/a where an item says so. A no is a finding. A read that cannot run is unknown,
     `jobs:` in each workflow.
 11. Is there no `pull_request_target` that checks out the PR head? Run
     `grep -n "pull_request_target" .github/workflows/*.yml`. For each hit, read its `ref:`.
-12. Does every job-level `if:` hold only the draft guard, the guard of `ci-done`, or the scope flag and
-    event guard of a job that `scope-skips` names? Run `grep -n "^    if:" .github/workflows/*.yml`.
+12. Does every job-level `if:` hold only the draft guard, the guard of `ci-done`, the records-only
+    condition (alone, as `(draft guard) && it`, or in the guard of `ci-done`), the push-off guard of a
+    Windows or mutation job (`github.event_name != 'push'`, alone or with the draft guard and the
+    records-only condition), or the scope flag and event guard of a job that `scope-skips` names?
+    Run `grep -n "^    if:" .github/workflows/*.yml`.
     Any other scope flag or trigger guard at job level is a finding. It skips a needed job. A job that
     no rollup needs is judged by items 1 and 2 instead, so do not flag it here.
 13. If sessions wait on this repo's CI, is the last job `ci-done`, with `needs:` every other job and a

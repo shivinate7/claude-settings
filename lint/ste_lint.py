@@ -65,13 +65,6 @@ def _rule(code, name, severity, tags, summary, detail):
 
 
 _rule(
-    "STE001", "sentence-length", "error", "[5.1] [6.3]",
-    "The sentence is longer than 30 words.",
-    "A sentence holds 30 words at most. Counting follows [8.4]-[8.7]: a number\n"
-    "with its unit, an abbreviation, an identifier, quoted text, parenthesized\n"
-    "text, and a hyphenated word each count as one word.",
-)
-_rule(
     "STE003", "nominalization", "warning", "[3.7]",
     "An action is written as a noun.",
     "Keep the action in the verb. 'Perform a validation of the payload' becomes\n"
@@ -383,7 +376,6 @@ class Finding:
 
 DEFAULT_CONFIG = {
     "mode": "auto",
-    "max_words": 30,
     "disable": [],
     "enable": [],
     "fail_on": "error",
@@ -429,9 +421,9 @@ def load_config(start: str) -> dict:
                 data = tomllib.load(handle)
         data = data.get("ste", data) if isinstance(data, dict) else {}
         cfg.update({k: v for k, v in data.items() if k in DEFAULT_CONFIG})
-        for key in ("max_words_procedural", "max_words_descriptive"):  # removed keys: say so, never drop them silently
+        for key in ("max_words", "max_words_procedural", "max_words_descriptive"):  # removed keys: say so, never drop them silently
             if key in data:
-                sys.stderr.write("ste-lint: %s sets %s, which is removed and ignored. The budget is max_words.\n" % (found, key))
+                sys.stderr.write("ste-lint: %s sets %s, which is removed and ignored. The lint never refuses on word count.\n" % (found, key))
     except (OSError, ValueError) as exc:
         sys.stderr.write("ste-lint: cannot read %s: %s\n" % (found, exc))
     cfg["_path"] = found
@@ -523,8 +515,8 @@ def strip_placeholders(text: str) -> str:
 # A citation reads `D-nnn, title`. The mandate's rule: cite an entry by id
 # plus a short gloss, never a bare id. A tool such as `harness/decision-
 # refs.mjs` writes that gloss FROM the target entry's own title. The author
-# types one token. The gloss grows it to six words or more. STE001 counts
-# words in authored prose, and must not punish text nobody typed.
+# types one token. The gloss grows it to six words or more. Gloss text the
+# tool inserts is not linted by any rule and not counted by --stats.
 #
 # `harness/decision-refs.mjs`'s `glossSpanPattern` solved this for its own
 # checker. It pairs each id with the title of the entry THAT id names, read
@@ -688,7 +680,7 @@ def find_decisions_dir(config: dict) -> Optional[str]:
 
 def _degloss_for_mode(text: str) -> str:
     """Strip a collapsed citation-and-gloss span before a MODE heuristic reads
-    the text, so a generated title cannot pick a section's word budget.
+    the text, so a generated title cannot make a section procedural.
 
     `PROCEDURAL_HEADINGS` and `IMPERATIVE_STARTERS`, below, read raw heading
     or list-item text for a trigger word. A gloss inserts the target entry's
@@ -1025,8 +1017,8 @@ def _python_prose_paragraphs(text: str) -> List[Paragraph]:
     """Pull comments and docstrings out of Python source, as prose paragraphs.
 
     Consecutive-line comments join into one paragraph, the way a Markdown
-    paragraph joins lines, so a sentence spanning several comment lines is
-    still one sentence for the length rule. Unparsable source yields comments
+    paragraph joins lines, so a phrase or sentence across comment lines is
+    read whole. Unparsable source yields comments
     from as much of the file as `tokenize` managed, and no docstrings.
     """
     paragraphs: List[Paragraph] = []
@@ -1224,8 +1216,8 @@ class _UICopy:
                                     prefix, masker))
 
     def expr(self, lineno: int, col: int):
-        """An {expression} in a text node. It counts as one word for STE001, and a
-        phrase rule never matches across it."""
+        """An {expression} in a text node. It is one placeholder, so a phrase rule
+        never matches across it."""
         if not self.code:
             self.run.append(Segment(lineno, NUL, "prose", "descriptive", col, Masker("")))
 
@@ -1641,15 +1633,6 @@ class Linter:
     def check_sentence(self, seg: Block, offset: int, sentence: str,
                        mode: str) -> List[Finding]:
         out: List[Finding] = []
-        limit = self.config["max_words"]
-        words = count_words(sentence)
-        if words > limit:
-            self._add(out, seg, offset, "STE001",
-                      "The sentence holds %d words. The limit is %d."
-                      % (words, limit),
-                      "Split the sentence, or cut the words that carry no meaning.",
-                      strip_placeholders(sentence)[:120])
-
         if mode == "procedural":
             for match in re.finditer(r"[a-z\x00]\s+\b(if|when|unless)\b\s", sentence):
                 before = sentence[:match.start()].lower().split()
@@ -1713,8 +1696,8 @@ class Linter:
         findings: List[Finding] = []
         for paragraph in paragraphs:
             if paragraph.kind in ("heading", "table"):
-                # A heading counts as one word [8.7]. A table row is a label,
-                # not a sentence. Both still obey the word-level rules.
+                # A heading is a label, not a sentence. So is a table row.
+                # Both still obey the word-level rules.
                 for seg in paragraph.segments:
                     findings.extend(self.check_words(
                         Block([seg], paragraph.kind, paragraph.mode)))
@@ -2052,7 +2035,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable", default="", help="comma-separated rule codes to run alone")
     parser.add_argument("--exclude", default="", help="comma-separated glob patterns to skip")
     parser.add_argument("--decisions-dir", default=None,
-                        help="folder of D-nnn decision records, for gloss collapse in STE001 "
+                        help="folder of D-nnn decision records, for gloss collapse: gloss text the tool "
+                             "inserts is not linted by any rule and not counted by --stats "
                              "(default: the decisions folder of lint/layout.json; pass '' to turn "
                              "the collapse off)")
     parser.add_argument("--config-from", default=None, metavar="PATH",
