@@ -1,0 +1,1 @@
+- check-tail-filter-false-alarms: a named check piped into `| cat`, `| Out-Host`, `| Out-String`, `| Set-Content x`, `| Add-Content x` or `| tee x | wc -l` is refused (hooks/guard_stream.py). These are rare false alarms. Fix: none — follows the 07:16 any-filter ruling. Until: 2026-11-21. Decision: background-check-through-verdict

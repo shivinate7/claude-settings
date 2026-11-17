@@ -56,7 +56,7 @@ A redirect word is skipped, because the shell strips it before the interpreter r
 
 ## Known gaps
 
-Each gap is one line in `docs/debts/notes.md`, under this decision. The lines are `check-tail-pipe-at-line-end`, `check-tail-no-nested-read`, `check-tail-any-filter-false-alarms`, `check-tail-uv-flag-value` and `narrated-tail-no-uv`. No incident has shown any of them.
+Each gap is a note under this decision: one line in `docs/debts/notes.md`, or a file in `docs/notes/`. The notes are `check-tail-pipe-at-line-end`, `check-tail-no-nested-read`, `check-tail-filter-false-alarms`, `check-tail-uv-flag-value` and `narrated-tail-no-uv`. No incident has shown any of them.
 
 Why: a merge or lane verdict is the one line the orchestrator needs. A pipe into any filter after the run hides it, and the lane must run the check again.
 
