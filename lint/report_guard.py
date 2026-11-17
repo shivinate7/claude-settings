@@ -320,6 +320,23 @@ def owner_line(check, wrong):
     return check + ": " + wrong + " (" + REMEDY_CITE + ")."
 
 
+# The one shared line that ends every refusal of a reply but a missing report (owner, 2026-11-17 09:30 CST, decision
+# guard-remedy-not-to-owner). `emit_stop` is its only writer, so a new reply guard gets it with no work.
+CORRECTION_TAIL = "Post only the missing or corrected lines. Do not resend the reply."
+
+
+def emit_stop(payload, missing_report=False):
+    """The one emitter of the Stop hook's output. A block ends with CORRECTION_TAIL unless the reply is missing its
+    report, which asks for the report itself. A payload that is no block prints as it is. Every reply guard prints
+    through here, so none can forget the tail."""
+    if payload and payload.get("decision") == "block" and not missing_report:
+        reason = str(payload.get("reason") or "")
+        if CORRECTION_TAIL not in reason:
+            payload = dict(payload, reason=(reason + " " + CORRECTION_TAIL).strip())
+    if payload:
+        print(json.dumps(payload))
+
+
 # Wording that tells the session what to do. A refusal reaches the owner in chat, so it holds facts only.
 # `session_wording` is the one detector; the remedy suite imports it. A phrase here is matched case-insensitively.
 SESSION_PHRASES = (
@@ -349,7 +366,9 @@ _MODAL = re.compile(r"\b(?:must|should|need to|needs to|have to|has to|ought to)
 
 def session_wording(text):
     """The phrase in `text` that tells the session what to do, or '' when `text` holds facts only: a listed phrase,
-    a clause that opens with an order word, or a modal ("must", "should")."""
+    a clause that opens with an order word, or a modal ("must", "should"). CORRECTION_TAIL is the one ruled order
+    in a refusal, so it is read as no wording."""
+    text = text.replace(CORRECTION_TAIL, "")
     low = text.lower()
     for phrase in SESSION_PHRASES:
         if phrase in low:
@@ -3281,12 +3300,12 @@ def main():
         reasons = rewrite_problems(hook)
         reasons += rewrite_relay(hook)
         if hold and not reasons:
-            print(json.dumps({"decision": "block", "reason": hold_reason(hold)}))
+            emit_stop({"decision": "block", "reason": hold_reason(hold)})
             return
         if hold:
             reasons.insert(0, hold_reason(hold))
         if reasons:
-            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)"}))
+            emit_stop({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)"})
         return
     # A marker left by a rewrite that never ran must not reach a later turn: only the Stop
     # straight after a missing-report block may consume one.
@@ -3299,12 +3318,11 @@ def main():
     # The refusals file is read for them before pending_refusals settles it.
     route = refusal_route_flags(hook)
 
-    def finish(payload):
+    def finish(payload, missing_report=False):
         if route:
             payload = dict(payload or {})
             payload["systemMessage"] = " ".join(filter(None, [payload.get("systemMessage"), *route]))
-        if payload:
-            print(json.dumps(payload))
+        emit_stop(payload, missing_report)
 
     # The hand-off cite reads the refusals file before pending_refusals settles it away.
     reply = last_reply(hook)  # one read of the reply for the hand-off cite, the refusals and the report checks
@@ -3469,7 +3487,7 @@ def main():
         reason = " ".join(reasons) + " (rule reports-order-of-labels)"
         if not shape_ok:
             write_marker(hook, last_human_idx)
-        finish({"decision": "block", "reason": reason})
+        finish({"decision": "block", "reason": reason}, missing_report=not shape_ok)
     else:
         finish({"systemMessage": note} if note else None)
 
