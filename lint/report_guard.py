@@ -14,7 +14,8 @@ order"; the blockquote and no-fence rule lives in the `shiv-stylisms` output sty
 When stop_hook_active is set, the reply is already a rewrite, so the guard stays quiet, with one
 exception: a block that asked for the missing report leaves a marker file (local_time.report_marker_path,
 holding the index of the turn's human record). The next stop_hook_active Stop consumes it and checks
-the rewrite once for model names and the `Unstarted:` line only. A failure blocks with a correction.
+the rewrite once for model names, the `Unstarted:` line, an unsourced "answered" line, an unsourced recovered
+item and the plain-form faults (a bare id, a UTC time, a contradiction with no question). A failure blocks with a correction.
 Cost: one small file per missing-report block, written at that block, deleted at the next Stop with
 stop_hook_active; no process, timer or log. A correction block leaves no marker, so no loop follows.
 
@@ -29,7 +30,9 @@ that record, never in the reason.
 
 On the same landed turns it also blocks (one block, all reasons joined) when a Done item lacks
 BUILT, RECORDED, or OTHER or a PR or commit ref (`reports-done-format`), or when the reply holds
-a record id with no short gloss (`speak-cite-id-plus-gloss`), or when a builder, reviewer,
+an id with no short gloss (a record id, `#N` or a session ref; `speak-cite-id-plus-gloss`), or when a clock time says UTC or GMT
+(`style-time-central-24h`), or when Deviations says "Contradiction:" or "picks neither" and Input Needed asks no question
+(`output-bring-decisions-as-question`), or when a builder, reviewer,
 test-author or record-writer spawned since the last human message goes unnamed in Done, or a
 named "role model" pair matches no spawn of that role (`reports-done-names-models`), or when
 a turn that spawned a builder reports with no `Unstarted:` line (`reports-name-unstarted-items`).
@@ -661,12 +664,60 @@ GLOSS_BEFORE_RE = re.compile(r"[A-Za-z]{2,}[^\n(]{0,60}\(\s*$")
 GLOSS_LEAD_RE = re.compile(r"[A-Za-z]{2,}\s+[A-Za-z]{2,}\s*(?:[,:—–=]|--|\s-)\s*$")
 
 
+# Two more id forms need the same gloss: a `#N` (3 to 5 digits) and a session ref `s02747` or `s02747:941`.
+# They use a stricter gloss than a record id: the separator form needs two real words after it (a word that starts
+# with a letter, so "(env -vC, want ask)" is no gloss), and the possessive form ("#2015's own rows") and the
+# "two words, then a colon" lead are no gloss. A `#N` passes right after "PR", "PRs", "pull request", "issue",
+# "commit" or "by" or "via", alone or as a list ("PRs #N, #M", "PR #N and #M", "PR: #N"); after
+# "in" only when a past participle comes first ("built in #1300", which the mistake guard asks for, but not
+# "rows in #1300"); and anywhere in a Done item, where `reports-done-format` makes the writer cite a PR as `#N`.
+# A `#N` glued to a word ("PR#N") or to a hyphen ("#2015-check") is no PR ref and no gloss. After the separator,
+# a gloss starts with a noun, so a verb or a link word ("needs review", "is open") is no gloss.
+REF_ID_RE = re.compile(r"(?<![\w/.#:$&-])s\d{4,6}(?::\d+)?(?!\w|\.\w)|(?<![/.#:$&-])#\d{3,5}(?!\w|\.\w)")
+REF_GLOSS_AFTER_RE = re.compile(
+    r"""^["')\]]*\s*(?:[,:;(=—–]|\s-{1,2}\s)\s*\(?(?!(?:needs?|is|are|was|were|has|have|had|will|would|should|could|can|may|"""
+    r"""must|does|did|stays?|remains?|blocks?|fails?|passes?|looks?|seems?|still|not|now|also|and|or|but|then|so|which|"""
+    r"""that|because|since|while|when|if)\b)[A-Za-z][\w'-]*\s+[A-Za-z][\w'-]*""")
+_PR_LIST = r"(?:#\d{3,5}(?:,\s*and\s+|,\s*|\s+and\s+|\s*&\s*|\s*/\s*))*"
+PR_WORD_BEFORE_RE = re.compile(
+    r"\b(?:(?:PRs?|pull requests?|issues?|commits?)\s*:?\s+" + _PR_LIST + r"|(?:by|via)\s+|(?:built|added|fixed|landed|"
+    r"shipped|merged|made|written|recorded|done|closed|opened|filed|tracked|covered|handled|queued|raised|set|put|"
+    r"noted|logged|pinned|guarded|checked|caught|stopped|refused)\s+in\s+)$", re.I)
+
+
+def _done_spans(text):
+    """The (start, end) character spans of the lines in the reply's Done item."""
+    spans, inside, pos = [], False, 0
+    for line in text.splitlines(keepends=True):
+        m = LABEL_RE.match(QUOTE_PREFIX.sub("", line, count=1))
+        name = m.group(1).strip().rstrip(":").strip() if m else None
+        if name in LABEL_ORDER:
+            inside = name == "Done"
+        if inside:
+            spans.append((pos, pos + len(line)))
+        pos += len(line)
+    return spans
+
+
 def bare_cite(text):
-    """Return the first record id in `text` with no short gloss beside it, else ''."""
-    clean = CITE_SKIP_RE.sub(" ", text)
-    for m in CITE_ID_RE.finditer(clean):
+    """Return the first id in `text` (a record id, `#N` or a session ref) with no short gloss beside it, else ''."""
+    clean = CITE_SKIP_RE.sub(lambda m: " " * len(m.group(0)), text)
+    found = [(m.start(), m, False) for m in CITE_ID_RE.finditer(clean)]
+    done = _done_spans(clean)
+    for m in REF_ID_RE.finditer(clean):
+        if m.group(0).startswith("#") and (PR_WORD_BEFORE_RE.search(clean[max(0, m.start() - 120):m.start()])
+                                           or any(a <= m.start() < b for a, b in done)):
+            continue
+        found.append((m.start(), m, True))
+    for _, m, strict in sorted(found, key=lambda f: f[0]):
         after = clean[m.end():m.end() + 80]
         before = clean[max(0, m.start() - 80):m.start()]
+        if strict:
+            if REF_GLOSS_AFTER_RE.match(after):
+                continue
+            if GLOSS_BEFORE_RE.search(before) and after.lstrip().startswith(")"):
+                continue
+            return m.group(0)
         if GLOSS_AFTER_RE.match(after) or GLOSS_POSSESSIVE_RE.match(after):
             continue
         if GLOSS_BEFORE_RE.search(before) and after.lstrip().startswith(")"):
@@ -675,6 +726,73 @@ def bare_cite(text):
             continue
         return m.group(0)
     return ""
+
+
+# style-time-central-24h: a clock time in the reply is US Central (CST or CDT). A time that carries UTC, GMT or a
+# trailing Z is refused. A clock time is `H:MM` or `H:MM:SS`; "UTC-06:00" (an offset) is no time. Skipped text:
+# fenced code, inline code, URLs and markdown links, as in bare_cite.
+UTC_TIME_RE = re.compile(
+    r"(?<![\d:])\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:\s*(?:UTC|GMT|Z)\b)|\b(?:UTC|GMT)\s+\d{1,2}:\d{2}", re.I)
+
+
+def utc_time(text):
+    """Return the first UTC clock time in `text`, else ''."""
+    found = UTC_TIME_RE.search(CITE_SKIP_RE.sub(" ", text))
+    return found.group(0) if found else ""
+
+
+# output-bring-decisions-as-question: a Deviations item that says "Contradiction:" or "picks neither" holds a
+# choice the owner must make, so Input Needed asks it: a sentence ending in "?" or a pick with options. The
+# match is the existence of that question, not its subject. "Contradiction: resolved", "settled" or "none" and
+# "No contradiction:" claim no open choice, so they pass. "none of" still names a choice.
+CONTRADICTION_RE = re.compile(
+    r"(?<!\bno )\bcontradiction(?:\s*:|\s+(?:—|–|--?)(?=\s))(?!\s*(?:resolved|settled|none(?!\s+of))\b)"
+    r"|\b(?:pick|picks|picked|picking|choose|chooses|chose|chosen|choosing)\s+neither\b", re.I)
+
+
+def contradiction_problem(text):
+    """Return the first contradiction phrase in Deviations when Input Needed asks nothing, else ''."""
+    deviations = CITE_SKIP_RE.sub(" ", report_section(text, "Deviations"))
+    found = CONTRADICTION_RE.search(deviations)
+    if not found or asks_a_question(text) or offers_a_pick(text):
+        return ""
+    return found.group(0)
+
+
+PLAIN_TIME_REASON = owner_line(
+    "Time guard (rule style-time-central-24h)",
+    "%r is a UTC time; the house form is US Central, 24-hour clock, with the zone CST or CDT")
+PLAIN_CONTRADICTION_REASON = owner_line(
+    "Contradiction guard (rule output-bring-decisions-as-question)",
+    "Deviations says %r and Input Needed asks the owner no question: no sentence there ends in \"?\" and no "
+    "pick there offers options")
+
+
+def plain_form_reasons(text):
+    """The refusals for the plain-form faults of a report: a bare id (rule speak-cite-id-plus-gloss), a UTC time
+    and a contradiction with no Input Needed question. Each check fails open alone."""
+    reasons = []
+    try:
+        cite = bare_cite(text)
+        if cite:
+            reasons.append(owner_line("Cite-gloss guard (rule speak-cite-id-plus-gloss)",
+                                      "%r is an id with no short gloss; each id needs a few plain words that say "
+                                      "what it is, as in \"D12, short titles for records\"" % cite))
+    except Exception:
+        pass
+    try:
+        clock = utc_time(text)
+        if clock:
+            reasons.append(PLAIN_TIME_REASON % clock)
+    except Exception:
+        pass
+    try:
+        phrase = contradiction_problem(text) if report_shape_ok(text) else ""
+        if phrase:
+            reasons.append(PLAIN_CONTRADICTION_REASON % phrase)
+    except Exception:
+        pass
+    return reasons
 
 
 # answered-needs-source: a reply line that says "answered" names where the answer came from. The source
@@ -2939,6 +3057,7 @@ def rewrite_problems(hook):
         recovered = recovered_problem(records, text) if report_shape_ok(text) else ""
         if recovered:
             reasons.append(recovered)
+        reasons += plain_form_reasons(text)
         return reasons
     except Exception:
         return []
@@ -3459,10 +3578,7 @@ def main():
             reasons.append(recovered)
     except Exception:
         pass
-    cite = bare_cite(text)
-    if cite:
-        reasons.append(owner_line("Cite-gloss guard (rule speak-cite-id-plus-gloss)",
-                                  "%r is a record id with no short gloss" % cite))
+    reasons += plain_form_reasons(text)
     if refusal:
         reasons.append(refusal)
     if reasons:
