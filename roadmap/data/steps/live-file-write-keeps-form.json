@@ -1,0 +1,13 @@
+{
+  "repo": "shivinate7/claude-settings",
+  "phase": "later",
+  "owner": "consultant",
+  "blockedBy": [],
+  "id": "live-file-write-keeps-form",
+  "title": "A write to roadmap/live/live-work.json changes only the entries it adds, not the file layout",
+  "status": "todo",
+  "why": "Triage 10 re-wrote live-work.json with indent=2 and the diff came out 27,972 lines (pushed 4871aaf, restored eb5a9c2). The file is one compact line; a layout change hides the real change from review.",
+  "source": "Triage 10 own mistake, found 11:2x-11:4x CST Nov 17; consultant critique 11:45 CST asked for a step. Searched steps by words 11:50 CST: no like step.",
+  "note": "Todo. Mistake: a JSON dump with different layout. Guard or check: unknown; idea: a roadmap-checkout pre-commit or build.py check that the file diff of live-work.json is small or compact-form. No lane, no PR.",
+  "updatedAt": "2026-11-17T11:45:00-06:00"
+}

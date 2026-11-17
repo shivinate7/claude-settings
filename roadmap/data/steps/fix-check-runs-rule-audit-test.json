@@ -1,0 +1,13 @@
+{
+  "repo": "shivinate7/claude-settings",
+  "phase": "later",
+  "owner": "consultant",
+  "blockedBy": [],
+  "id": "fix-check-runs-rule-audit-test",
+  "title": "A fix check on a guard refusal change runs lint/test_rule_audit.py, not only lint/rule_audit.py",
+  "status": "todo",
+  "why": "On PR #3618 the first fix check ran lint/rule_audit.py (OK) but not lint/test_rule_audit.py; CI then failed on guard.py:7719 not resolved. Cost: one extra build and fix check.",
+  "source": "Triage 10 own mistake, found 11:2x-11:4x CST Nov 17; consultant critique 11:45 CST asked for a step. Searched steps by words 11:50 CST: no like step.",
+  "note": "Todo. Mistake: a fix-check brief that named one audit command. Guard or check: unknown; cheapest is a line in the reviewer and builder brief template for any hooks/guard.py refusal change (run lint/test_rule_audit.py and lint/check_red_run.py --base origin/main). No lane, no PR.",
+  "updatedAt": "2026-11-17T11:45:00-06:00"
+}
