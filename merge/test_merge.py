@@ -5467,7 +5467,7 @@ class NoneRequiredChecks(ScopedRepo, Env):
         self.assertEqual(host.head_state(7), "green")
 
     def test_a_red_check_row_on_the_head_reads_green_under_none(self):
-        # Owner ruling, 11:20 CST Nov 16 (decision private-repos-no-ci): under none the tool reads no CI run at all, so a failed check row holds nothing.
+        # Under none the tool reads no CI run at all (decision private-repos-no-ci), so a failed check row holds nothing.
         self.set(checks_seq=[[("checks", "fail", "https://x/y")]])
         host = self.none_host()
         self.assertTrue(host.checks(7, warn=False, sha=host.pr(7)["head"]), "scope: the head reads no check row")
@@ -5481,7 +5481,7 @@ class NoneRequiredChecks(ScopedRepo, Env):
         self.assertNotIn("branches/main/protection", self.calls(), "under requiredChecks none, the confirm read the base's branch protection")
 
     def test_a_pending_run_with_no_workflow_folder_does_not_hold_the_merge_under_none(self):
-        # Owner ruling, 11:20 CST Nov 16 (decision private-repos-no-ci): under none the tool reads no CI run at all, so a run still pending holds nothing.
+        # Under none the tool reads no CI run at all (decision private-repos-no-ci), so a run still pending holds nothing.
         self.set(checks_seq=[[]], runs_seq=[[("docs", "in_progress", "")]])
         host = self.none_host()
         self.assertTrue(host.run_state(host.pr(7)["head"])[1], "scope: the head's run does not read pending")
@@ -5491,7 +5491,7 @@ class NoneRequiredChecks(ScopedRepo, Env):
         self.assertEqual(self.paused, [], "the pending run waited before the merge")
 
     def test_an_old_red_run_on_the_head_does_not_refuse_the_merge_under_none(self):
-        # Owner ruling, 11:20 CST Nov 16 (decision private-repos-no-ci): under none the tool reads no CI run at all, so a red run left on the head
+        # Under none the tool reads no CI run at all (decision private-repos-no-ci), so a red run left on the head
         # from before its workflows were disabled holds nothing.
         self.set(checks_seq=[[]], runs_seq=[[("checks", "completed", "failure")]])
         host = self.none_host()
@@ -5508,7 +5508,7 @@ class NoneRequiredChecks(ScopedRepo, Env):
         self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_a_red_main_run_does_not_refuse_the_merge_under_none(self):
-        # Owner ruling, 11:20 CST Nov 16 (decision private-repos-no-ci): under none the tool reads no CI run at all, main's runs included.
+        # Under none the tool reads no CI run at all (decision private-repos-no-ci), main's runs included.
         push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})  # only a workflow file on main is judged
         self.set(checks_seq=[[]], base_runs=[main_run(901, "failure")], base_jobs={"901": [main_job("scope", "success"), main_job("checks", "failure", 20)]})
         rc, out = self.go(required="none")
@@ -5538,7 +5538,7 @@ class NoneRequiredChecks(ScopedRepo, Env):
         return rc, out.getvalue() + err.getvalue()
 
     def test_a_setup_pr_whose_head_stamp_says_none_merges_with_no_flag(self):
-        # Owner ruling, page item 929 b (decision private-repos-no-ci): a setup PR whose own head stamp says "none" lints and merges from that
+        # A setup PR (decision private-repos-no-ci) whose own head stamp says "none" lints and merges from that
         # stamp, with no flag. Main still pins protection, and that protection requires a check the head does not run.
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="protection"))))
         self.on("feat", {".github/stamp.json": json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="none")))})
@@ -5559,7 +5559,7 @@ class NoneRequiredChecks(ScopedRepo, Env):
         self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_a_head_stamp_that_is_not_none_does_not_replace_the_base_stamp(self):
-        # Owner ruling, page item 929 b (decision private-repos-no-ci): only a setup PR's own head stamp that says "none" counts. A head stamp
+        # Only a setup PR's own head stamp that says "none" counts (decision private-repos-no-ci). A head stamp
         # that names other checks is not the config, so main's stamp decides, and it names checks.
         put_base_config(self, complete_config())
         self.on("feat", {".github/stamp.json": json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=["gate"])))})
@@ -5596,7 +5596,7 @@ class NoneRequiredChecks(ScopedRepo, Env):
         self.assertEqual(cfg["merge"]["requiredChecks"], "none", "a setup head's none stamp did not set requiredChecks")
 
     def test_a_setup_head_none_stamp_keeps_each_field_of_main_merge_block(self):
-        # Owner ruling, page item 929 b (decision private-repos-no-ci: a PR never loosens its own gate). The head's stamp sets requiredChecks
+        # A PR never loosens its own gate (decision private-repos-no-ci). The head's stamp sets requiredChecks
         # only, so every other merge field is main's.
         head = self.head_setup_config({"requiredChecks": "none"})
         self.assertEqual(json.loads(sh(self.other, "git", "show", f"{head}:.github/stamp.json"))["merge"], {"requiredChecks": "none"}, "scope: the head's stamp sets more than requiredChecks")
@@ -5606,7 +5606,7 @@ class NoneRequiredChecks(ScopedRepo, Env):
         self.assert_base_fields(cfg["merge"], "head's none stamp")
 
     def test_a_setup_head_none_stamp_sets_no_base_field_of_its_own(self):
-        # Owner ruling, page item 929 b (decision private-repos-no-ci: a PR never loosens its own gate). The head sets values for the base's
+        # A PR never loosens its own gate (decision private-repos-no-ci). The head sets values for the base's
         # fields too, and none of them reaches the config: only requiredChecks comes from the head.
         head = self.head_setup_config({"requiredChecks": "none", "method": "rebase", "deleteBranch": True, "standingGrant": True,
                                        "afterMerge": ["make nothing"], "keepBranches": ["other"]})
@@ -5620,7 +5620,7 @@ class NoneRequiredChecks(ScopedRepo, Env):
         return json.loads(sh(self.other, "git", "show", f"{ref}:.github/stamp.json"))["merge"].get("requiredChecks")
 
     def test_a_none_head_stamp_the_pr_did_not_change_yields_to_main(self):
-        # Owner ruling, page item 929 b (decision private-repos-no-ci: a PR never loosens its own gate). The base said "none" when the PR was cut,
+        # A PR never loosens its own gate (decision private-repos-no-ci). The base said "none" when the PR was cut,
         # and the PR left it there. Main says "protection" now, so main's stamp decides.
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="none"))))
         self.on("feat", {"docs/notes.md": "a note\n"})  # the PR's own change: its stamp still says none
@@ -9790,7 +9790,7 @@ class RecordsRebuild(RecordsEnv):
         self.assert_healed_merge(out, main_tip, before)
 
     def test_under_none_a_red_head_does_not_refuse_the_heal_and_merge(self):
-        # Owner ruling, 11:20 CST Nov 16 (decision private-repos-no-ci): under none the tool reads no CI run at all, so a red run on the head holds no heal.
+        # Under none the tool reads no CI run at all (decision private-repos-no-ci), so a red run on the head holds no heal.
         self.set_required("none")
         self.drop_pending_record()
         self.on("feat", {"docs/records.md": page("ghost")})
@@ -15528,13 +15528,13 @@ class NoneLaneLint(ScopedRepo, CloudSession):
         self.assertEqual(self.host.posted, [], "an unknown lint posted a PASS comment")
 
     def test_a_setup_lane_head_whose_stamp_says_none_takes_the_lint_with_no_draft_run(self):
-        # Owner ruling, page item 929 b (decision private-repos-no-ci): a setup PR whose own head stamp says "none" lints from that stamp. Main still
+        # A setup PR (decision private-repos-no-ci) whose own head stamp says "none" lints from that stamp. Main still
         # pins protection, so the lint reads the base's stamp and would wait on a draft run of lane-touched-tests that this head never has.
         self.lane_head("protection", [])
         self.on("feat", {".github/stamp.json": json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="none")))})
         self.host.draft_rows = {self.head("feat"): []}
         self.assertFalse(merge.is_integration_pr(self.host.pr(7)), "precondition: pull request 7 is an integration PR, so the lane path does not run")
-        with self.local_lint_answers("pass") as calls:
+        with self.local_lint_answers("pass"):
             rc, text = self.lane_lint_run()
         self.assertEqual(check_run_reads(self.host.draft_reads), [], "the lane lint read the check runs of the head, so it read the base's stamp, not the head's: " + text)
         self.assertEqual(rc, 0, text)

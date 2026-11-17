@@ -450,7 +450,7 @@ add("merge-batch: a pinned merge.requiredChecks list is the required list, so a 
 add("merge-checks: the merge tool of the host reads a head with no check and no run as green when requiredChecks is none", "allow",
     silent=True, tool="mcp__github__merge_pull_request", cwd=STAMPNOCHECK, pullNumber=12, repo="x", owner="y",
     env_path=GHEMPTY + os.pathsep + PY_PATH)
-# Owner ruling, 11:20 CST Nov 16 (decision private-repos-no-ci): under none the tool reads no CI run at all, so a failed check row on the head holds nothing.
+# Under none the tool reads no CI run at all (decision private-repos-no-ci), so a failed check row on the head holds nothing.
 # The failed head is the one GHRED reports, which the deny case above refuses under a listed check.
 add("merge-checks: the merge tool of the host allows a failed head when requiredChecks is none, which reads no CI run", "allow",
     silent=True, tool="mcp__github__merge_pull_request", cwd=STAMPNOCHECK, pullNumber=12, repo="x", owner="y",
