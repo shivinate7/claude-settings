@@ -39,7 +39,8 @@ ci("a terminal step with the command on the item is allowed", "allow",
    ci_task(CI_TERMINAL, command=CMD_BOTH_SHELLS))
 ci("a decision that opens a file and runs its command is not judged", "allow",
    {"id": CI_DOC, "kind": "decision", "status": "open", "title": "Delete the stale branches?",
-    "context": OJ_FORM + "\n" + QD_LINE + "\nThe plan file lists them.",
+    "recommended": "b", "why": "Keeping them costs nothing yet.",
+    "context": OJ_FORM + "\n" + QD_LINE + "\n" + OJ_WAIT + "\nThe plan file lists them.",
     "options": [{"key": "a", "label": "Delete them",
                  "how": "Open plans/c152-stale-branch-deletes.md and run its command.", "gain": "g", "lose": "l"},
                 {"key": "b", "label": "Keep them", "how": "Do nothing yet.", "gain": "g", "lose": "l"}]})

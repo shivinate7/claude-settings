@@ -42,12 +42,26 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   the batch runner that merges (cs-build:batch-runner), and the pull request the relay names. Its
   Never covers names each act in RELAYED_MERGE_REFUSED, the reason flags, and a session not tagged
   cs-build:batch-runner (decision `auto-mode-owner-acts`).
+- One "Consultant Relayed Merge Yes:" entry quotes the same derived merge command with the head flag.
+  Its Covers text names the consultant that relays (cs-build:consultant), the triage session the relay
+  may pass through (cs-build:triage), the batch runner that merges (cs-build:batch-runner), and the pull
+  request the relay names. Its Never covers names each act in CONSULTANT_MERGE_REFUSED, the reason flags,
+  a head the relay did not name, a merge with no `--head`, a yes that started at triage with no consultant
+  relay, and a session not tagged cs-build:batch-runner (decision `auto-mode-owner-acts`).
+  Its Covers text says the merge tool refuses a live head that is not the relayed head and names the
+  only commits that may sit past it, scopes "reads no review record" to `relayed_head_holds` itself,
+  and says the merge tool does not check the head flag against the relay.
 - One "Batch Runner Merge:" entry quotes the same derived merge command with the head flag
   (`--head <sha>`) in its Covers text. Its Covers text names the coordinator that sends the merge go
   (cs-build:coordinator), the batch runner (cs-build:batch-runner), `merge go`, and the pull request
   the merge go names. Its Never covers names each act in BATCH_MERGE_REFUSED, the reason flags, a
   merge with no `--head`, and a merge go from a session not tagged cs-build:coordinator (decision
   `auto-mode-owner-acts`).
+- One "Merge Review Record:" entry quotes `merge <pr> --review-record` in both flag orders, names the
+  `merge` and `~/.claude/bin/merge` tools, and names each record flag read from merge/merge.py's argparse.
+  Its Covers text names the session tagged cs-build:lane and says it prints and posts nothing. Its Never
+  covers names each form in MERGE_REVIEW_REFUSED (decision `auto-mode-owner-acts`). A copy with its Never
+  covers clause removed goes red on the same cases.
 AUTO_MODE_SETTINGS names another settings file to read (default: this repo's settings.json), so the
 same cases run against a copy with a clause removed and show red there.
 """
@@ -55,6 +69,7 @@ import ast
 import json
 import os
 import re
+import shutil
 import sys
 import unittest
 
@@ -68,13 +83,18 @@ import guard_push_delete  # noqa: E402
 
 sys.path.insert(0, os.path.join(REPO_ROOT, "skills", "waiting-page"))
 import page_grant  # noqa: E402
+sys.path.insert(0, os.path.join(REPO_ROOT, "lint"))
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 
 LISTS = ("environment", "allow", "soft_deny", "hard_deny")
 ARCHIVE = "Archived Branch Delete:"
 OWNER_PR = "Owner PR Housekeeping:"
 RELAYED = "Relayed Grant:"
 RELAYED_MERGE = "Relayed Merge Yes:"
+CONSULTANT_MERGE = "Consultant Relayed Merge Yes:"
 BATCH_MERGE = "Batch Runner Merge:"
+MERGE_REVIEW_LOG = "Merge Review Record:"
+MERGE_TOOL_READ = "Merge Tool Read Checks:"
 MERGE_CLOUD_ALLOW = os.path.join(REPO_ROOT, "merge", "cloud_allow.json")
 OWNER_MESSAGE = "Owner Session Message:"
 PR_CLOSE = "gh api -X PATCH repos/shivinate7/joyous/pulls/54 -f state=closed"
@@ -132,6 +152,11 @@ RELAYED_MERGE_REFUSED = (("another pull request", "another pull request"),
                          ("review", "review"), ("admin", "admin"), ("force push", "force[- ]push"),
                          ("permissions", "permission"), ("settings", "setting"),
                          ("overrides", "override"), ("any other act", "any other act"))
+# The Consultant Relayed Merge Yes entry refuses the same acts as Relayed Merge Yes, except the coordinator-relay
+# clause, which names the consultant and the triage session instead.
+CONSULTANT_MERGE_REFUSED = tuple(item for item in RELAYED_MERGE_REFUSED if item[0] != "not tagged cs-build:coordinator") + (
+    ("a relay from a session not tagged consultant or triage",
+     r"a relay from a session not tagged `cs-build:consultant` or `cs-build:triage`"),)
 # Each act the Batch Runner Merge entry's "Never covers" sentence must name (decision `auto-mode-owner-acts`).
 BATCH_MERGE_REFUSED = (("not tagged cs-build:batch-runner", "not tagged `cs-build:batch-runner`"),
                        ("nobody named", "nobody named"),
@@ -144,6 +169,19 @@ REASON_FLAGS_REFUSED = (("--base-red-ok", "--base-red-ok"),
                         ("--undo-check-unknown-ok", "--undo-check-unknown-ok"))
 MERGE_GO_REFUSED = (("any other session", "any other session"),
                     ("not a coordinator", "not a coordinator"))
+# The Covers text of the "Merge Review Record:" entry quotes each tool name and each command order, and names each record flag.
+MERGE_TOOL_NAMES = (("merge", "`merge`"), ("~/.claude/bin/merge", r"`~/\.claude/bin/merge`"))
+MERGE_ORDERS = (("merge <pr> --review-record", r"`merge <pr> --review-record`"),
+                ("merge --review-record <pr>", r"`merge --review-record <pr>`"))
+MERGE_REVIEW_ONLY_READS = (("prints", r"\bprints\b"), ("posts nothing", "posts nothing"))
+# The flags the Covers text of the "Merge Review Record:" entry must never name, and its Never covers sentence must (decision `auto-mode-owner-acts`).
+MERGE_REVIEW_NEVER_FLAGS = ("--confirm", "--ready", "--base-red-ok", "--lint-unknown-ok", "--undo-check-unknown-ok")
+# Each act the "Merge Review Record:" Never covers sentence must name: the refused flags, the other merge forms,
+# and a session not tagged cs-build:lane (decision `auto-mode-owner-acts`).
+MERGE_REVIEW_REFUSED = tuple((flag, "`%s`" % flag) for flag in MERGE_REVIEW_NEVER_FLAGS) + (
+    ("gh pr merge", r"`gh pr merge`"), ("any push", r"\bany push\b"), ("force push", r"force[- ]push"),
+    ("any other merge form", "any other merge form"),
+    ("a session not tagged cs-build:lane", r"not tagged `cs-build:lane`"))
 # The Covers text names the session that started this one, and the no-act report it lets through.
 MESSAGE_TARGET = (("the session that started this one", "the session that started this one"),)
 MESSAGE_REPORT = (("asks for no act", "asks for no act"), ("pull request number", "pull request number"),
@@ -184,10 +222,47 @@ REFSPEC_REFUSED = tuple(item for item in LEASE_REFUSED if item[0] not in ("+refs
     ("a + before either ref", r"`\+` before either ref"),
     ("delete (an empty <src>)", r"a delete \(an empty <src>\)"))
 
+INSTALLER = "Session Installer:"
+# Each act the Session Installer "Never covers" sentence must name (decision `auto-mode-owner-acts`).
+INSTALLER_REFUSED = (("an env var before the command", "environment variable"),
+                     ("the checkout cloud form", r"bash install\.sh --cloud"),
+                     ("CLAUDE_SETTINGS_REF", "CLAUDE_SETTINGS_REF"),
+                     ("CLAUDE_SETTINGS_RAW", "CLAUDE_SETTINGS_RAW"),
+                     ("chaining", r"chain"), ("a second pipe", "second pipe"),
+                     ("extra arguments", "extra argument"), ("another URL", "another URL"),
+                     ("another ref", "another branch or ref"), ("main", r"`main`"),
+                     ("a fork", "fork"), ("another repo's install.sh", "another repo"),
+                     ("extra PowerShell flags", "PowerShell flag"), ("-NoProfile", "-NoProfile"),
+                     ("permissions", "permission"), ("overrides", "override"),
+                     ("any other act", "any other act"))
+INSTALLER_SCOPE = (("checkout of the repo", "checkout"), ("origin", "origin"),
+                   ("incident time", "20:12 CST"), ("owner ruling", "20:16 CST"))
+
+
+def installer_forms():
+    """The three installer forms, read from install.sh and install.ps1 themselves, never copied."""
+    sh = open(os.path.join(REPO_ROOT, "install.sh"), encoding="utf-8").read()
+    ps = open(os.path.join(REPO_ROOT, "install.ps1"), encoding="utf-8").read()
+    repo = re.search(r'^REPO="([^"]+)"', sh, re.M).group(1)
+    ref = re.search(r'^REF="\$\{CLAUDE_SETTINGS_REF:-([^}]+)\}"', sh, re.M).group(1)
+    hook = re.search(r"HOOK_CMD='i=\$\(cat\); (curl -\w+) '\"\$\{RAW\}\"'/install\.sh \| "
+                     r"(CS_HOOK_INPUT)=\"\$i\" (bash -s -- --cloud)'", sh)
+    win = re.search(r"Run once from the clone:\s+(powershell -ExecutionPolicy Bypass -File \.\\install\.ps1)", ps)
+    mac = re.search(r"Local \(from a clone\):\s+(bash install\.sh)\b", sh)
+    assert repo and ref and hook and win and mac, "installer forms moved: update the readers"
+    url = "https://raw.githubusercontent.com/%s/%s/install.sh" % (repo, ref)
+    return {"repo": repo, "url": url, "curl": "`%s %s | %s=\"{}\" %s`" % (hook.group(1), url, hook.group(2), hook.group(3)),
+            "cloud": "`%s --cloud`" % mac.group(1), "mac": "`%s`" % mac.group(1),
+            "win": "`%s`" % win.group(1)}
+
+
+def settings_path():
+    """The settings file the suite reads: AUTO_MODE_SETTINGS when set, else this repo's settings.json."""
+    return os.environ.get("AUTO_MODE_SETTINGS") or os.path.join(REPO_ROOT, "settings.json")
+
 
 def auto_mode():
-    path = os.environ.get("AUTO_MODE_SETTINGS") or os.path.join(REPO_ROOT, "settings.json")
-    with open(path, encoding="utf-8") as handle:
+    with open(settings_path(), encoding="utf-8") as handle:
         return json.load(handle).get("autoMode", {})
 
 
@@ -227,6 +302,29 @@ def head_flag():
              and node.args and isinstance(node.args[0], ast.Constant)
              and any(k.arg == "type" and isinstance(k.value, ast.Name) and k.value.id == "head_arg" for k in node.keywords)]
     return flags[0] if len(flags) == 1 else None
+
+
+def review_log_flags():
+    """The option strings of merge.py's argparse flags whose help starts 'with --review-record', sorted.
+    Read from the parser's own add_argument calls, so a renamed or new record flag moves the list with it."""
+    with open(MERGE_PY, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    flags = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "add_argument" and node.args
+                and isinstance(node.args[0], ast.Constant) and str(node.args[0].value).startswith("--")):
+            continue
+        for keyword in node.keywords:
+            if (keyword.arg == "help" and isinstance(keyword.value, ast.Constant)
+                    and str(keyword.value.value).startswith("with --review-record")):
+                flags.append(node.args[0].value)
+    return sorted(flags)
+
+
+def flag_list(covers):
+    """The flags a Covers text lists after 'only these flags besides it:', sorted, or None when it has no such list."""
+    found = re.search(r"only these flags besides it:(.*?)\.(?:\s|$)", covers)
+    return sorted(re.findall(r"`(--[\w-]+)", found.group(1))) if found else None
 
 
 def allow_entry(prefix):
@@ -270,6 +368,54 @@ def remedy_form():
     """The retry command the guard's remedy names, built from PUSH_REASON, or None when it names none."""
     found = re.search(r"Remedy: retry with (.+?)\.\s*$", guard_push_delete.PUSH_REASON)
     return "`git push %s origin <branch>`" % found.group(1) if found else None
+
+
+RUN = ""  # this run's folder, made in setUpModule and removed in tearDownModule
+
+
+def setUpModule():
+    global RUN
+    RUN = _test_temp.run_folder()
+
+
+def tearDownModule():
+    shutil.rmtree(RUN, ignore_errors=True)
+
+
+def last_line(traceback_text):
+    """The last line of a traceback: the assert message that names its cause."""
+    return traceback_text.strip().splitlines()[-1]
+
+
+def mutant_settings(clause):
+    """A copy of the settings file in this run's folder, with `clause` removed from the "Merge Review Record:" entry."""
+    with open(settings_path(), encoding="utf-8") as handle:
+        data = json.load(handle)
+    entry = allow_entry(MERGE_REVIEW_LOG)
+    data["autoMode"]["allow"] = [e.replace(clause, "") if e == entry else e for e in data["autoMode"]["allow"]]
+    path = os.path.join(RUN, "settings-without-clause.json")
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(data, handle)
+    return path
+
+
+def run_never_covers_cases(settings):
+    """Run each test_never_covers case of MergeReviewLogIsAllowed against one settings file, through AUTO_MODE_SETTINGS."""
+    names = [n for n in unittest.TestLoader().getTestCaseNames(MergeReviewLogIsAllowed) if n.startswith("test_never_covers")]
+    saved = os.environ.get("AUTO_MODE_SETTINGS")
+    os.environ["AUTO_MODE_SETTINGS"] = settings
+    try:
+        # Each case runs through TestCase.run, not a TestSuite: a suite fires this module's setUpModule and
+        # tearDownModule again, and the teardown would delete RUN under the mutant copy.
+        result = unittest.TestResult()
+        for name in names:
+            MergeReviewLogIsAllowed(name).run(result)
+    finally:
+        if saved is None:
+            os.environ.pop("AUTO_MODE_SETTINGS", None)
+        else:
+            os.environ["AUTO_MODE_SETTINGS"] = saved
+    return names, result
 
 
 class AutoModeKeepsTheBuiltInRules(unittest.TestCase):
@@ -410,6 +556,128 @@ class RelayedMergeYesIsAllowed(unittest.TestCase):
                       "Never covers does not name a merge with no `%s`" % flag)
 
 
+class ConsultantRelayedMergeYesIsAllowed(unittest.TestCase):
+    def consultant_merge_entry(self):
+        """The one Consultant Relayed Merge Yes entry, asserting first that there is exactly one."""
+        entry = allow_entry(CONSULTANT_MERGE)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % CONSULTANT_MERGE)
+        return entry
+
+    def test_one_entry_names_the_consultant_relayed_merge_yes(self):
+        self.assertIn("$defaults", auto_mode().get("allow", []), "autoMode.allow lost $defaults")
+        self.consultant_merge_entry()
+
+    def test_entry_quotes_the_merge_command(self):
+        entry = self.consultant_merge_entry()
+        command, flag = merge_command(), head_flag()
+        self.assertIsNotNone(command, "merge/cloud_allow.json must hold exactly one --confirm merge rule")
+        self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the relayed head")
+        self.assertIn("`%s %s <sha>`" % (command, flag), bounds_text(entry),
+                      "Covers text must quote the merge command with the head flag and <sha> for the relayed head")
+
+    def test_covers_names_the_consultant_tag(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("cs-build:consultant", bounds_text(entry),
+                      "Covers text must require a relay from a session tagged cs-build:consultant")
+
+    def test_covers_names_the_triage_tag(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("cs-build:triage", bounds_text(entry),
+                      "Covers text must allow the relay to pass through a session tagged cs-build:triage")
+
+    def test_covers_names_the_batch_runner_that_merges(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("cs-build:batch-runner", bounds_text(entry),
+                      "Covers text must name cs-build:batch-runner as the session that merges")
+
+    def test_covers_names_the_pull_request_the_relay_names(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("the pull request the relay names", bounds_text(entry),
+                      "Covers text must say the pull request the relay names")
+
+    def test_never_covers_names_a_batch_runner_not_tagged(self):
+        clause = never_covers(self.consultant_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Consultant Relayed Merge Yes entry")
+        self.assertIn("not tagged `cs-build:batch-runner`", clause,
+                      "Never covers does not name a session not tagged cs-build:batch-runner")
+
+    def test_never_covers_names_each_refused_act(self):
+        clause = never_covers(self.consultant_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Consultant Relayed Merge Yes entry")
+        missing = unnamed_terms(clause, CONSULTANT_MERGE_REFUSED)
+        self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+    def test_never_covers_names_the_reason_flags(self):
+        clause = never_covers(self.consultant_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Consultant Relayed Merge Yes entry")
+        missing = unnamed_terms(clause, REASON_FLAGS_REFUSED)
+        self.assertFalse(missing, "Never covers does not name the reason flags %r" % missing)
+
+    def test_never_covers_names_a_head_the_relay_did_not_name(self):
+        clause = never_covers(self.consultant_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Consultant Relayed Merge Yes entry")
+        self.assertIn("a head the relay did not name", clause,
+                      "Never covers does not name a head the relay did not name")
+
+    def test_never_covers_names_a_merge_with_no_head_flag(self):
+        clause = never_covers(self.consultant_merge_entry())
+        flag = head_flag()
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Consultant Relayed Merge Yes entry")
+        self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the relayed head")
+        self.assertIn("a merge with no `%s`" % flag, clause,
+                      "Never covers does not name a merge with no `%s`" % flag)
+
+    def test_yes_binds_to_the_head_the_consultant_relayed(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("the head the pull request had when the consultant relayed it", bounds_text(entry),
+                      "Covers text must bind the yes to the head the pull request had when the consultant relayed it")
+        self.assertNotRegex(entry, r"(?i)later head|review record names",
+                            "the entry must not allow a later head or lean on a review record")
+
+    def test_head_text_says_what_the_merge_tool_reads(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("relayed_head_holds", bounds_text(entry),
+                      "Covers text must name relayed_head_holds, the merge tool's relayed-head check")
+        self.assertIn("reads no review record", bounds_text(entry),
+                      "Covers text must say the merge tool reads no review record")
+        self.assertNotRegex(entry, r"(?i)with no record",
+                            "the entry must not say a head is allowed with no record")
+
+    def test_head_text_says_the_merge_tool_refuses_a_head_that_is_not_the_relayed_head(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("refuses a live head that is not the relayed head", bounds_text(entry),
+                      "Covers text must say the merge tool refuses a live head that is not the relayed head")
+
+    def test_head_text_names_the_only_commits_allowed_between_the_heads(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("except one that sits on it with only a Record-claim commit, its revert or a page-only commit between",
+                      bounds_text(entry),
+                      "Covers text must name the only commits a live head may carry past the relayed head")
+
+    def test_head_text_scopes_the_no_review_log_read_to_relayed_head_holds(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("`relayed_head_holds` itself reads no review record", bounds_text(entry),
+                      "Covers text must scope the no-review-record read to relayed_head_holds itself")
+
+    def test_head_text_says_the_merge_tool_does_not_check_the_head_against_the_relay(self):
+        entry = self.consultant_merge_entry()
+        flag = head_flag()
+        self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the relayed head")
+        self.assertIn("The merge tool does not check `%s` against the relay" % flag, bounds_text(entry),
+                      "Covers text must say the merge tool does not check `%s` against the relay" % flag)
+
+    def test_covers_says_triage_forwards_what_the_consultant_relayed(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("forwards what the consultant relayed", bounds_text(entry),
+                      "Covers text must say the triage session forwards what the consultant relayed")
+
+    def test_never_covers_names_a_yes_that_started_at_triage(self):
+        clause = never_covers(self.consultant_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Consultant Relayed Merge Yes entry")
+        self.assertIn("a yes that started at triage with no consultant relay", clause,
+                      "Never covers does not name a yes that started at triage with no consultant relay")
+
+
 class BatchRunnerMergeIsAllowed(unittest.TestCase):
     def batch_merge_entry(self):
         """The one Batch Runner Merge entry, asserting first that there is exactly one."""
@@ -472,6 +740,86 @@ class BatchRunnerMergeIsAllowed(unittest.TestCase):
         self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the head the CI ran on")
         self.assertIn("a merge with no `%s`" % flag, clause,
                       "Never covers does not name a merge with no `%s`" % flag)
+
+
+class MergeReviewLogIsAllowed(unittest.TestCase):
+    def test_one_entry_names_the_merge_review_log(self):
+        hits = [e for e in auto_mode().get("allow", []) if e.startswith(MERGE_REVIEW_LOG)]
+        self.assertEqual(len(hits), 1, "need exactly one '%s' entry in autoMode.allow, found %d"
+                         % (MERGE_REVIEW_LOG, len(hits)))
+
+    def test_allow_list_keeps_defaults_beside_the_entry(self):
+        self.assertIn("$defaults", auto_mode().get("allow", []), "autoMode.allow lost $defaults")
+
+    def test_record_flags_come_from_argparse(self):
+        self.assertTrue(review_log_flags(),
+                        "merge/merge.py's argparse names no flag whose help starts 'with --review-record'")
+
+    def test_covers_quotes_both_command_orders(self):
+        covers = entry_part(self, MERGE_REVIEW_LOG)
+        for name, pattern in MERGE_ORDERS:
+            with self.subTest(order=name):
+                self.assertRegex(covers, pattern, "Covers text does not quote `%s`" % name)
+
+    def test_covers_names_both_tool_names(self):
+        covers = entry_part(self, MERGE_REVIEW_LOG)
+        for name, pattern in MERGE_TOOL_NAMES:
+            with self.subTest(tool=name):
+                self.assertRegex(covers, pattern, "Covers text does not name the tool `%s`" % name)
+
+    def test_covers_names_each_record_flag(self):
+        covers = entry_part(self, MERGE_REVIEW_LOG)
+        flags = review_log_flags()
+        self.assertTrue(flags, "merge/merge.py's argparse names no record flag")
+        listed = flag_list(covers)
+        self.assertIsNotNone(listed, "Covers text has no 'only these flags besides it:' list")
+        extra = sorted(set(listed) - set(flags))
+        missing = sorted(set(flags) - set(listed))
+        self.assertEqual(listed, sorted(flags), "the flag list differs from merge/merge.py: extra %r, missing %r"
+                         % (extra, missing))
+        for flag in MERGE_REVIEW_NEVER_FLAGS:
+            with self.subTest(flag=flag):
+                self.assertNotRegex(covers, r"(?<![\w-])" + re.escape(flag) + r"(?![\w-])",
+                                    "Covers text names the refused flag %s" % flag)
+
+    def test_covers_says_it_prints_and_posts_nothing(self):
+        covers = entry_part(self, MERGE_REVIEW_LOG)
+        for name, pattern in MERGE_REVIEW_ONLY_READS:
+            with self.subTest(term=name):
+                self.assertRegex(covers, pattern, "Covers text does not say %r" % name)
+
+    def test_covers_names_the_lane_tag(self):
+        covers = entry_part(self, MERGE_REVIEW_LOG)
+        self.assertIn("`cs-build:lane`", covers, "Covers text must name the session tagged `cs-build:lane`")
+        tags = sorted(set(re.findall(r"cs-build:[\w-]+", covers)))
+        self.assertEqual(tags, ["cs-build:lane"], "Covers text names a cs-build tag other than cs-build:lane: %r" % tags)
+
+    def test_never_covers_names_each_refused_form(self):
+        clause = entry_part(self, MERGE_REVIEW_LOG, never=True)
+        for name, pattern in MERGE_REVIEW_REFUSED:
+            with self.subTest(act=name):
+                self.assertRegex(clause, "(?i)" + pattern, "Never covers does not name %r" % name)
+
+    def test_read_checks_entry_still_names_review_log(self):
+        hits = [e for e in auto_mode().get("allow", []) if e.startswith(MERGE_TOOL_READ)]
+        self.assertEqual(len(hits), 1, "need exactly one '%s' entry in autoMode.allow, found %d"
+                         % (MERGE_TOOL_READ, len(hits)))
+        self.assertIn("--review-record", hits[0], "the '%s' entry no longer names --review-record" % MERGE_TOOL_READ)
+
+    def test_copy_with_the_clause_removed_goes_red(self):
+        clause = entry_part(self, MERGE_REVIEW_LOG, never=True)
+        names, real = run_never_covers_cases(settings_path())
+        self.assertTrue(names, "no test_never_covers case to run against the settings copy")
+        if real.failures or real.errors:
+            self.fail("the settings file fails a Never covers case: %s"
+                      % last_line((real.failures + real.errors)[0][1]))
+        _, red = run_never_covers_cases(mutant_settings(clause))
+        causes = [tb for _, tb in red.failures + red.errors]
+        self.assertGreaterEqual(len(causes), len(names),
+                                "the copy without its Never covers clause kept some Never covers case green")
+        other = [tb for tb in causes if "need a 'Never covers' sentence" not in tb]
+        if other:
+            self.fail("a case went red on another cause than the removed clause: %s" % last_line(other[0]))
 
 
 class OwnerPrHousekeepingIsAllowed(unittest.TestCase):
@@ -676,6 +1024,96 @@ class OwnBranchLeaseRefspecPushIsAllowed(unittest.TestCase):
     def test_never_covers_names_each_refused_act(self):
         missing = unnamed_terms(entry_part(self, REFSPEC, never=True), REFSPEC_REFUSED)
         self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+
+class SessionInstallerIsAllowed(unittest.TestCase):
+    def test_one_entry_names_the_installer(self):
+        hits = [e for e in auto_mode().get("allow", []) if e.startswith(INSTALLER)]
+        self.assertEqual(len(hits), 1, "need exactly one '%s' entry in autoMode.allow, found %d"
+                         % (INSTALLER, len(hits)))
+
+    def test_covers_quotes_each_form_read_from_the_installers(self):
+        covers = entry_part(self, INSTALLER)
+        forms = installer_forms()
+        missing = [k for k in ("curl", "mac", "win") if forms[k] not in covers]
+        self.assertFalse(missing, "Covers text does not quote the installer form(s) %r" % missing)
+
+    def test_covers_does_not_quote_the_checkout_cloud_form(self):
+        self.assertNotIn(installer_forms()["cloud"], entry_part(self, INSTALLER),
+                         "the checkout form `bash install.sh --cloud` is not the ruled act")
+
+    def test_covers_quotes_exactly_the_three_installer_forms(self):
+        spans = [x for x in re.findall(r"`([^`]+)`", entry_part(self, INSTALLER)) if "install" in x]
+        forms = installer_forms()
+        self.assertEqual(sorted(spans), sorted(forms[k].strip("`") for k in ("curl", "mac", "win")),
+                         "Covers text quotes a command other than the three installer forms")
+
+    def test_no_other_entry_quotes_the_install_url(self):
+        self.assertIsNotNone(allow_entry(INSTALLER), "need the Session Installer entry")
+        url = installer_forms()["url"]
+        others = [e[:40] for e in auto_mode().get("allow", []) if url in e and not e.startswith(INSTALLER)]
+        self.assertFalse(others, "a second entry quotes the install URL: %r" % others)
+
+    def test_covers_binds_the_checkout_and_names_the_ruling(self):
+        missing = unnamed_terms(entry_part(self, INSTALLER), INSTALLER_SCOPE)
+        self.assertFalse(missing, "Covers text does not name %r" % missing)
+        self.assertIn(installer_forms()["repo"], entry_part(self, INSTALLER))
+
+    def test_entry_quotes_no_other_ref(self):
+        entry = allow_entry(INSTALLER)
+        self.assertIsNotNone(entry, "need the Session Installer entry")
+        self.assertNotRegex(entry, r"raw\.githubusercontent\.com/[^`\s]*/(?!stable/)[^/`\s]+/install\.sh")
+
+    def test_never_covers_names_each_refused_act(self):
+        missing = unnamed_terms(entry_part(self, INSTALLER, never=True), INSTALLER_REFUSED)
+        self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+
+MAIN_INSTALLER = "Main Installer:"
+MAIN_INSTALL_BARE = ("CLAUDE_SETTINGS_REF=main ~/.claude/bin/verdict bash "
+                     "/root/claude-settings-main/merge/install_from_main.sh")
+# The cd is part of the act: the script takes its clone from the working directory.
+MAIN_INSTALL_FORMS = ("cd /root/claude-settings-main && " + MAIN_INSTALL_BARE,)
+MAIN_INSTALLER_REFUSED = (("another env var", "environment variable"), ("another ref", "another ref than `main`"),
+                          ("another repo or path", "another repo or path"), ("extra arguments", "extra argument"),
+                          ("chaining", "chaining"), ("a fork", "fork"), ("permissions", "permission"),
+                          ("overrides", "override"), ("any other act", "any other act"))
+
+
+class MainInstallerIsAllowed(unittest.TestCase):
+    def test_one_entry_names_the_main_installer(self):
+        hits = [e for e in auto_mode().get("allow", []) if e.startswith(MAIN_INSTALLER)]
+        self.assertEqual(len(hits), 1, "need exactly one '%s' entry in autoMode.allow, found %d"
+                         % (MAIN_INSTALLER, len(hits)))
+
+    def test_covers_quotes_the_one_form_and_the_script_exists(self):
+        covers = entry_part(self, MAIN_INSTALLER)
+        for form in MAIN_INSTALL_FORMS:
+            self.assertIn("`%s`" % form, covers)
+        self.assertTrue(os.path.isfile(os.path.join(REPO_ROOT, "merge", "install_from_main.sh")),
+                        "the entry quotes merge/install_from_main.sh, which is missing")
+
+    def test_covers_quotes_no_other_command(self):
+        spans = [x for x in re.findall(r"`([^`]+)`", entry_part(self, MAIN_INSTALLER))
+                 if "install" in x or "&&" in x or "bash" in x]
+        self.assertEqual(sorted(spans), sorted(MAIN_INSTALL_FORMS), "Covers text quotes a command other than the one ruled")
+
+    def test_covers_says_nothing_comes_before_or_after_the_command(self):
+        self.assertIn("nothing before it and nothing after it", entry_part(self, MAIN_INSTALLER))
+
+    def test_covers_says_the_cd_is_part_of_the_act(self):
+        self.assertIn("the script takes its clone from the working directory", entry_part(self, MAIN_INSTALLER))
+
+    def test_covers_names_the_owner_ruling(self):
+        missing = unnamed_terms(entry_part(self, MAIN_INSTALLER), (("owner time", "10:00 CST"), ("incident time", "15:59 CST")))
+        self.assertFalse(missing, "Covers text does not name %r" % missing)
+
+    def test_never_covers_names_each_refused_act(self):
+        missing = unnamed_terms(entry_part(self, MAIN_INSTALLER, never=True), MAIN_INSTALLER_REFUSED)
+        self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+    def test_session_installer_still_never_covers_main(self):
+        self.assertIn("another branch or ref such as `main`", entry_part(self, INSTALLER, never=True))
 
 
 class NeverCoversSentence(unittest.TestCase):

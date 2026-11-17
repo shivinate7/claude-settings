@@ -9,7 +9,8 @@ One case reads the real agents/plan.md: its "Premises first" paragraph cites the
 The lane session row of docs/decisions/agent-model-cap.md must start its effort cell with medium.
 A drift between the guard's role lists and the role table fails the check (the guard's role_list_drift).
 An agent file's `model:` pin must equal its role's row in the role table. The role is the frontmatter `name:`,
-as the guard keys it. A file with no pin, or a name with no row, is not flagged by that rule.
+as the guard keys it. A name with no row is not flagged by that rule. Every agents/*.md file must carry a pin: a file with
+none inherits the session model (the agent-model-cap decision, incident two).
 Every agent file that can run Bash names TaskStop in its body, and its tools: allowlist lists it (debt
 agent-reports-with-live-watcher). The test reads each agents/*.md file, not a list of names.
 An agent body must not state the agent's own model in fixed text: a sentence with `your ... model` and a model name
@@ -69,6 +70,17 @@ def verdict(relpath, model=None, closed=True, text=None, relative=False, name="x
         return code, out.getvalue()
 
 
+def agent_file(role, *lines, body="body\n"):
+    """A fixture agents/<role>.md: closed frontmatter with the name, the remote withheld and the given lines, no pin."""
+    return "---\nname: %s\ndisallowedTools: mcp__claude-code-remote__*\n%s---\n%s" % (
+        role, "".join(line + "\n" for line in lines), body)
+
+
+# The two sizes a pin fixture runs at (test-fixtures reach the empty and the full-size state): no filler line, and a
+# file of 200 filler lines.
+SIZES = (("short", ()), ("full-size", tuple("note%03d: filler" % n for n in range(200))))
+
+
 class Haiku(unittest.TestCase):
     def test_listed_roles_may_set_haiku(self):
         for role in ROLES:
@@ -108,6 +120,11 @@ class PinEqualsRow(unittest.TestCase):
         table = C._guard.role_model_table(C.ROOT) or {}
         self.assertEqual(table.get(role), row, "the record's row for %r moved; re-point the cases that name it" % role)
 
+    def assertNoRow(self, role):
+        # The unlisted role must stay unlisted: a row for it would let the pin-equals-row rule flag it instead.
+        table = C._guard.role_model_table(C.ROOT) or {}
+        self.assertNotIn(role, table, "the record has a row for %r; re-point the cases that name it as unlisted" % role)
+
     def agent(self, role, model):
         return verdict("agents/%s.md" % role.lower(), model, name=role)
 
@@ -134,11 +151,52 @@ class PinEqualsRow(unittest.TestCase):
                 self.assertRow(role, row)
                 self.assertEqual(self.agent(role, model), (0, ""))
 
-    def test_file_with_no_model_pin_is_not_flagged(self):
-        for role in ("builder", "reviewer"):
-            with self.subTest(role=role):
-                self.assertRow(role, "sonnet" if role == "builder" else "haiku")
-                self.assertEqual(verdict("agents/%s.md" % role, name=role, pinned=False), (0, ""))
+    def pin_missing(self, role, text, what, pin_line=None):
+        """The fixture has no pin value (scope), and the check flags its file with a line that names the file and `model`.
+        `pin_line` is the fixture's own pin line. The scope then reads that line from the text, never from the reader under
+        test: a comment-only or null pin is what the reader must get right, so its value cannot be the scope."""
+        if pin_line is None:
+            keys, _, problem = agent_parts(text)
+            self.assertIsNone(problem, "fixture error: %s" % problem)
+            self.assertEqual(C.scalar(keys.get("model", "")), "", "fixture error: %s has a model: value" % what)
+        else:
+            self.assertIn(pin_line, C.frontmatter(text), "fixture error: the frontmatter has no %r line" % pin_line)
+        code, out = verdict("agents/%s.md" % role, text=text)
+        self.assertEqual(code, 1, "%s passes the check: %r" % (what, out))
+        self.assertTrue(names(out, "%s.md" % role, "model"), "no line names %s.md and its model pin: %r" % (role, out))
+
+    def test_agent_file_with_no_model_pin_is_flagged(self):
+        # Case 1. An agent file with no `model:` key inherits the session model, so every agent file must pin one.
+        for role in ("builder", "plan"):
+            for size, lines in SIZES:
+                with self.subTest(role=role, size=size):
+                    self.pin_missing(role, agent_file(role, *lines), "an agent file with no model: pin")
+
+    def test_empty_model_pin_is_flagged(self):
+        # An empty pin names no model, so the file inherits the session model as one with no pin does.
+        for line in ("model:", 'model: ""'):
+            with self.subTest(line=line):
+                self.pin_missing("builder", agent_file("builder", line), "an empty pin, %s" % line)
+
+    def test_decoy_model_lines_are_not_a_pin(self):
+        # Source-text cases (building-scanner-respects-strings): a comment line, an indented block-scalar line, a body line,
+        # a description with a lone quote and a comment opener, and a capitalised `Model:` key each name sonnet. None of
+        # them is the frontmatter pin, which is the lowercase `model:` key alone.
+        decoys = (("comment line", agent_file("builder", "# model: sonnet")),
+                  ("indented block-scalar line", agent_file("builder", "description: |", "  model: sonnet")),
+                  ("body line", agent_file("builder", body="model: sonnet\n")),
+                  ("description with a lone quote", agent_file("builder", "description: Don't pin # model: sonnet")),
+                  ("capitalised Model: key", agent_file("builder", "Model: sonnet")))
+        for label, text in decoys:
+            with self.subTest(label=label):
+                self.pin_missing("builder", text, "a decoy %s" % label)
+
+    def test_sonnet_pin_on_builder_passes(self):
+        # Case 2, the green control beside case 1: the same file with `model: sonnet` on the builder row passes.
+        self.assertRow("builder", "sonnet")
+        for size, lines in SIZES:
+            with self.subTest(size=size):
+                self.assertEqual(verdict("agents/builder.md", text=agent_file("builder", "model: sonnet", *lines)), (0, ""))
 
     def test_role_with_no_table_row_is_not_flagged(self):
         self.assertNotIn("some-role", C._guard.role_model_table(C.ROOT) or {})
@@ -164,6 +222,47 @@ class PinEqualsRow(unittest.TestCase):
                                  text="---\nname: reviewer\ndisallowedTools: mcp__claude-code-remote__*\n"
                                       "model: haiku  # sonnet is above the row\n---\nbody\n"),
                          (0, ""))
+
+    def test_pin_that_is_only_a_comment_is_no_pin(self):
+        # Case 1. `model: # sonnet` holds a comment and no value. It names no model, so the file inherits the session model,
+        # as one with no pin does. The builder row is sonnet, so a sonnet pin would pass the pin-equals-row rule there. The
+        # unlisted role has no row, so that rule never runs on it. Only the missing-pin rule can flag either file.
+        self.assertRow("builder", "sonnet")
+        self.assertNoRow("some-role")
+        for role in ("builder", "some-role"):
+            for size, lines in SIZES:
+                with self.subTest(role=role, size=size):
+                    self.pin_missing(role, agent_file(role, "model: # sonnet", *lines), "a comment-only pin",
+                                     pin_line="model: # sonnet")
+
+    def test_tilde_or_null_pin_on_unlisted_role_is_no_pin(self):
+        # Case 2. `~` and `null` are YAML's null: no value, so no pin. The unlisted role has no row, so only the missing-pin
+        # rule can flag the file.
+        self.assertNoRow("some-role")
+        for line in ("model: ~", "model: null"):
+            for size, lines in SIZES:
+                with self.subTest(line=line, size=size):
+                    self.pin_missing("some-role", agent_file("some-role", line, *lines), "a null pin, %s" % line,
+                                     pin_line=line)
+
+    def test_tilde_or_null_pin_on_a_row_role_is_flagged(self):
+        # Control: a role-table file with `~` or `null` already fails, as a pin that does not equal its row.
+        self.assertRow("builder", "sonnet")
+        for line in ("model: ~", "model: null"):
+            with self.subTest(line=line):
+                code, out = verdict("agents/builder.md", text=agent_file("builder", line))
+                self.assertEqual(code, 1, "%s on the builder row passes the check: %r" % (line, out))
+                self.assertTrue(names(out, "builder.md"), "no line names builder.md: %r" % out)
+
+    def test_sonnet_pin_with_a_trailing_comment_or_bare_passes(self):
+        # Case 3, the green controls beside case 1: a quoted pin with a trailing comment and a bare pin both name sonnet.
+        self.assertRow("builder", "sonnet")
+        self.assertNoRow("some-role")
+        for role in ("builder", "some-role"):
+            for line in ('model: "sonnet" # note', "model: sonnet"):
+                for size, lines in SIZES:
+                    with self.subTest(role=role, line=line, size=size):
+                        self.assertEqual(verdict("agents/%s.md" % role, text=agent_file(role, line, *lines)), (0, ""))
 
 
 # The kind is the backticked first cell of a table row, as hooks/test_precompact_handoff.py reads it.
@@ -239,6 +338,133 @@ class RoleListDrift(unittest.TestCase):
         self.assertEqual((code, out), (0, ""), "no drift from role_list_drift still fails the check: %r" % out)
 
 
+class RoundRowDrift(unittest.TestCase):
+    """The record's round rows and review rows are read by the guard and the merge tool (one home, decision agent-model-cap). A row
+    the guard cannot read is drift: the check fails and names that row. A readable row passes, and so does the real record
+    (test_main_with_no_args_passes_on_the_real_repo)."""
+    ROLE_ROWS = "| Point | Model | Effort |\n|---|---|---|\n| reviewer | haiku | xhigh |\n| builder | sonnet | high |\n"
+    ROUND_HEAD = "| Role | Round | Model | Effort |\n|---|---|---|---|\n"
+    POLICY_HEAD = ("| Kind | Guard or check | Rounds owed after a pass | Last round | Net value owed after a failed last round |\n"
+                   "|---|---|---|---|---|\n")
+    POLICY_ROW_OK = "| normal | no | 1 | 3 | no |"  # one well-formed review row; the merge suite's fixture states all six
+
+    def write_fixture(self, round_row, round_table=True, policy_row=POLICY_ROW_OK, policy_head=None):
+        """A pointer folder whose record holds the role rows, the round table with `round_row` (or no round table when
+        `round_table` is false), the lane row, and the review rows table with `policy_row` under `policy_head` (the shipped header
+        when None; none when `policy_row` is None). Returns the folder's root."""
+        root = tempfile.mkdtemp(dir=RUN_FOLDER)
+        os.makedirs(os.path.join(root, "agents"))
+        record = os.path.join(root, RECORD_RELPATH)
+        os.makedirs(os.path.dirname(record))
+        rounds = self.ROUND_HEAD + round_row + "\n" if round_table else ""
+        head = self.POLICY_HEAD if policy_head is None else policy_head
+        policy = "\n" + head + policy_row + "\n" if policy_row else ""
+        with open(record, "w", encoding="utf-8") as handle:
+            handle.write(self.ROLE_ROWS + "\n" + rounds + LANE_RECORD % "medium" + policy)
+        return root
+
+    def check_fixture(self, round_row, round_table=True, policy_row=POLICY_ROW_OK, policy_head=None):
+        """The check run over write_fixture's folder: (code, stdout). The role lists are patched out, so only the round rows
+        and the review rows can fail the check."""
+        root = self.write_fixture(round_row, round_table, policy_row, policy_head)
+        out = io.StringIO()
+        with mock.patch.object(C, "ROOT", root), contextlib.redirect_stdout(out), \
+                mock.patch.object(C._guard, "role_list_drift", lambda pointer_root: [], create=True):
+            code = C.main([])
+        return code, out.getvalue()
+
+    def assert_scope(self, root, rounds):
+        """Scope before verdict: the fixture holds the role table, and the guard reads its round table exactly when `rounds`."""
+        self.assertIsNotNone(C._guard.role_model_table(root), "the fixture holds no role table, so this case proves nothing")
+        self.assertEqual(C._guard.role_round_table(root) is not None, rounds,
+                         "the guard's round table read for this fixture is not %s, so this case proves nothing" % rounds)
+
+    def test_a_round_row_naming_a_model_the_guard_cannot_read_fails_the_check(self):
+        code, out = self.check_fixture("| reviewer | 2 | fable | high |")
+        self.assertEqual(code, 1, "a round row naming a model the guard cannot read passes the check: %r" % out)
+        self.assertTrue(names(out, "agent-model-cap.md", "fable"), "the check does not name the round row it flags: %r" % out)
+
+    def test_a_round_row_the_guard_reads_passes_the_check(self):
+        code, out = self.check_fixture("| reviewer | 2 | sonnet | high |")
+        self.assertEqual((code, out), (0, ""), "a readable round row fails the check: %r" % out)
+
+    def test_a_record_with_no_round_rows_table_fails_the_check(self):
+        # The record keeps its role table and lane row, and has no round table. The guard reads no round row from it, so the
+        # check must fail it, not pass it silently.
+        self.assert_scope(self.write_fixture("", round_table=False), rounds=False)
+        code, out = self.check_fixture("", round_table=False)
+        self.assertEqual(code, 1, "a record with no round rows table passes the check: %r" % out)
+        self.assertIn("agent-model-cap.md", out, "the check does not name the record it flags: %r" % out)
+
+    def test_a_round_table_with_no_rows_fails_the_check(self):
+        # The empty state of the round table: its header and separator, and no row. The guard reads no round row from it.
+        self.assert_scope(self.write_fixture(""), rounds=False)
+        code, out = self.check_fixture("")
+        self.assertEqual(code, 1, "a round table with no rows passes the check: %r" % out)
+        self.assertIn("agent-model-cap.md", out, "the check does not name the record it flags: %r" % out)
+
+    def test_the_real_record_round_table_holds_the_round_one_other_row(self):
+        # Control: the guard reads the real record's round table, with the reviewer's first-round other row, so the real repo's pass is a read.
+        self.assertIn(("reviewer", "1", "other"), C._guard.role_round_table(C.ROOT) or {})
+
+    def assert_policy_row_fails(self, policy_row, cause):
+        """The check fails the record whose review rows table holds `policy_row`, and names that row."""
+        code, out = self.check_fixture("| reviewer | 2 | sonnet | high |", policy_row=policy_row)
+        self.assertEqual(code, 1, "a review row with %s passes the check: %r" % (cause, out))
+        self.assertTrue(names(out, "agent-model-cap.md", policy_row), "the check does not name the review row it flags: %r" % out)
+
+    def test_a_review_row_with_a_kind_outside_the_review_kinds_fails_the_check(self):
+        self.assert_policy_row_fails("| normal-change | no | 1 | 3 | no |", "a kind outside the review kinds")
+
+    def test_a_review_row_with_a_guard_word_other_than_yes_or_no_fails_the_check(self):
+        self.assert_policy_row_fails("| normal | maybe | 1 | 3 | no |", "a Guard or check word other than yes or no")
+
+    def test_a_review_row_with_a_round_cell_that_is_not_a_number_fails_the_check(self):
+        self.assert_policy_row_fails("| normal | no | two | 3 | no |", "a round cell that is not a number")
+
+    def test_a_review_row_with_a_last_round_above_the_cap_fails_the_check(self):
+        self.assert_policy_row_fails("| normal | no | 1 | 4 | no |", "a last round above three")
+
+    def test_a_well_formed_review_row_passes_and_the_round_and_role_readers_read_the_record_as_before(self):
+        # Control: the review rows table changes neither reader, so the readers agree with and without it.
+        with_table = self.write_fixture("| reviewer | 2 | sonnet | high |")
+        without = self.write_fixture("| reviewer | 2 | sonnet | high |", policy_row=None)
+        self.assertEqual(C._guard.role_round_table(with_table), C._guard.role_round_table(without), "the review rows table changes the round rows")
+        self.assertEqual(C._guard.role_model_table(with_table), C._guard.role_model_table(without), "the review rows table changes the role rows")
+        self.assertEqual(self.check_fixture("| reviewer | 2 | sonnet | high |"), (0, ""), "a well-formed review row fails the check")
+
+    def test_a_renamed_review_rows_header_fails_the_check(self):
+        # The header names the five columns the guard reads. With it renamed, the guard reads no review row, so the check must fail the record.
+        renamed = self.POLICY_HEAD.replace("Rounds owed after a pass", "Rounds owed")
+        self.assertIn("| Rounds owed |", renamed, "fixture: the header was not renamed")
+        self.assertEqual(self.check_fixture("| reviewer | 2 | sonnet | high |"), (0, ""), "control: the shipped header fails the check")
+        code, out = self.check_fixture("| reviewer | 2 | sonnet | high |", policy_head=renamed)
+        self.assertEqual(code, 1, "a renamed review rows header passes the check: %r" % out)
+        self.assertIn("agent-model-cap.md", out, "the check does not name the record it flags: %r" % out)
+
+    def test_a_record_with_no_review_rows_table_fails_the_check(self):
+        # Control: the same record with its review rows table passes the check. With no table, the guard reads no review row.
+        self.assertEqual(self.check_fixture("| reviewer | 2 | sonnet | high |"), (0, ""), "control: a record with its review rows table fails the check")
+        code, out = self.check_fixture("| reviewer | 2 | sonnet | high |", policy_row=None)
+        self.assertEqual(code, 1, "a record with no review rows table passes the check: %r" % out)
+        self.assertIn("agent-model-cap.md", out, "the check does not name the record it flags: %r" % out)
+
+    def test_two_review_rows_with_the_same_kind_and_guard_fail_the_check(self):
+        # Control: one row for normal, Guard or check no passes the check. A second row for the same kind and Guard or check is a duplicate key.
+        self.assertEqual(self.check_fixture("| reviewer | 2 | sonnet | high |", policy_row="| normal | no | 1 | 3 | no |"), (0, ""),
+                         "control: one row for normal, Guard or check no fails the check")
+        rows = "| normal | no | 1 | 3 | no |\n| normal | no | 0 | 3 | no |"
+        code, out = self.check_fixture("| reviewer | 2 | sonnet | high |", policy_row=rows)
+        self.assertEqual(code, 1, "two review rows for one kind and Guard or check pass the check: %r" % out)
+        self.assertTrue(names(out, "agent-model-cap.md", "normal", "no"), "the check does not name the duplicate key: %r" % out)
+
+    def test_a_docs_only_review_row_with_guard_or_check_yes_fails_the_check(self):
+        # Control: a docs-only row with Guard or check no passes the check, so the refusal below comes from the yes on the row alone.
+        self.assertEqual(self.check_fixture("| reviewer | 2 | sonnet | high |", policy_row="| docs-only | no | 0 | 3 | no |"), (0, ""),
+                         "control: a docs-only row with Guard or check no fails the check")
+        self.assert_policy_row_fails("| docs-only | yes | 0 | 3 | no |", "a docs-only row with Guard or check yes")
+
+
 class RunFolder(unittest.TestCase):
     def test_first_request_sweeps_old_siblings_and_keeps_new_ones(self):
         # test-temp-standard: the first request of a run removes a sibling over a day old and keeps a newer one.
@@ -310,7 +536,7 @@ class TaskStopLine(unittest.TestCase):
                                     "%s can run Bash and has a tools: allowlist with no TaskStop, so it cannot follow the stop line" % name)
 
 
-# The self-model rules read an agent file's body. The fixtures are agents/fixture.md with a name and no model pin, so
+# The self-model rules read an agent file's body. The fixtures are agents/fixture.md with a name and a sonnet pin, so
 # the pin and floor rules stay quiet and only the body rules can fail.
 PHRASE_LINE = "You are powered by the model named in your system prompt."
 SLOT = "Under Done, the first line is `PASS, round 1 of 3, <model>`."
@@ -318,8 +544,8 @@ BARE_SLOT = "Under Done, the first line is PASS, FAIL, or PARTIAL, then the roun
 
 
 def agent_text(body, description=None):
-    """A fixture agent file: a frontmatter block with a name, an optional description, then the body."""
-    keys = ["name: fixture", "disallowedTools: mcp__claude-code-remote__*"] + (
+    """A fixture agent file: a frontmatter block with a name, a sonnet pin, an optional description, then the body."""
+    keys = ["name: fixture", "model: sonnet", "disallowedTools: mcp__claude-code-remote__*"] + (
         ["description: %s" % description] if description else [])
     return "---\n%s\n---\n%s" % ("\n".join(keys), body)
 
@@ -468,12 +694,47 @@ class RealAgentFiles(unittest.TestCase):
                 self.assertEqual(out.getvalue(), "", "agents/%s exits 0 but prints a finding" % name)
 
 
+class BuilderPinReal(unittest.TestCase):
+    # Case 3. The repo's own builder file must pin sonnet. A builder spawn with no model reads the file's pin, and with no
+    # pin it served the session model (the agent-model-cap decision, incident two).
+    def test_real_builder_file_pins_sonnet(self):
+        with open(os.path.join(ROOT, "agents", "builder.md"), encoding="utf-8-sig") as handle:
+            keys, _, problem = agent_parts(handle.read())
+        self.assertIsNone(problem, "agents/builder.md: %s" % problem)
+        self.assertIn("model", keys, "agents/builder.md has no model: pin, so a builder spawn with no model serves the session model")
+        self.assertEqual(C.scalar(keys["model"]), "sonnet", "agents/builder.md pins %r, not sonnet" % keys["model"])
+
+
+class PinControls(unittest.TestCase):
+    # Case 4. Skills carry no pin, so a skill with none still passes, and a skill named like a role is still a skill. Every
+    # other agent file pins already, so the full real-tree run is green once builder pins.
+    def test_skill_file_with_no_model_pin_passes(self):
+        for skill in ("deploy", "builder"):
+            with self.subTest(skill=skill):
+                text = "---\nname: %s\ndescription: A skill.\n---\nbody\n" % skill
+                keys, _, problem = agent_parts(text)
+                self.assertIsNone(problem, "fixture error: %s" % problem)
+                self.assertEqual(C.scalar(keys.get("model", "")), "", "fixture error: the skill fixture has a model: value")
+                self.assertEqual(verdict("skills/%s/SKILL.md" % skill, text=text), (0, ""))
+
+    def test_every_other_real_agent_file_pins_a_model(self):
+        folder = os.path.join(ROOT, "agents")
+        files = sorted(name for name in os.listdir(folder) if name.endswith(".md") and name != "builder.md")
+        self.assertTrue(files, "agents/ holds no agent file other than builder.md")
+        for name in files:
+            with self.subTest(agent=name):
+                with open(os.path.join(folder, name), encoding="utf-8-sig") as handle:
+                    keys, _, problem = agent_parts(handle.read())
+                self.assertIsNone(problem, "%s: %s" % (name, problem))
+                self.assertTrue(C.scalar(keys.get("model", "")), "agents/%s has no model: pin" % name)
+
+
 REMOTE = "mcp__claude-code-remote"
 
 
 def agent_with(*lines, body="body\n"):
-    """A fixture agent file, agents/fixture.md: a frontmatter block with a name and the given lines, then the body."""
-    return "---\n%s\n---\n%s" % ("\n".join(("name: fixture",) + lines), body)
+    """A fixture agent file, agents/fixture.md: a name, a sonnet pin, the given lines, then the body."""
+    return "---\n%s\n---\n%s" % ("\n".join(("name: fixture", "model: sonnet") + lines), body)
 
 
 def server_withheld(keys):

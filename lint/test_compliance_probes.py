@@ -33,6 +33,14 @@ RUN_FOLDER = _test_temp.run_folder()  # test-temp-standard (one run folder per t
 EXTRAS = layout.layout()["extras"]
 
 
+def load_probes():
+    """The probes module under test, loaded here so a case can patch check_glossary in this process."""
+    spec = importlib.util.spec_from_file_location("probes_under_test", PROBES)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def kind_path(name):
     return layout.layout()["kinds"][name]["path"]
 
@@ -422,6 +430,183 @@ class Ios(unittest.TestCase):
         repo = self.edit(self.gold(), ".github/workflows/ios.yml", "runs-on: macos-26", "runs-on: macos-latest")
         self.red(repo, "ci runner: gap - .github/workflows/ios.yml: macos-latest")
 
+    # The CI exemption form (skills/ios-apps): one JSON object at tools/ios-ci-exemption.json, with non-empty string `sdk` and
+    # `reason`. A valid form waives the app compile only: `ci checks` passes as `exempt: <sdk>` on a tree whose macOS job cannot
+    # compile the app. It never waives the macOS runner. A broken form grades both gap, and names the problem. A floating macOS
+    # image stays a gap.
+    EXEMPT_FORM = load_probes().IOS_CI_EXEMPTION  # the probe's one home of the path
+    VALID_FORM = {"sdk": "iOS 27.1", "reason": "Degen builds with the iOS 27 SDK"}
+    BROKEN_FORMS = (  # (the form's text, the keys its detail must name)
+        ('{"sdk": "iOS 27.1"}', ("reason",)),
+        ('{"reason": "Degen builds with the iOS 27 SDK"}', ("sdk",)),
+        ('{"sdk": "", "reason": "Degen builds with the iOS 27 SDK"}', ("sdk",)),
+        ('{"sdk": "iOS 27.1", "reason": ""}', ("reason",)),
+        ('{"sdk": 27.1, "reason": "Degen builds with the iOS 27 SDK"}', ("sdk",)),
+        ("{}", ("sdk", "reason")),
+        ('{"sdk": "iOS 27.1", "reason": "Degen builds with the iOS 27 SDK"', ()),  # cut short: invalid JSON
+        ('["iOS 27.1"]', ()),  # JSON, but no object
+        ("", ()),  # a 0-byte file
+    )
+
+    def put_form(self, repo, data, staged=True):
+        """`data` (bytes) at the form path. Staged: the author added it. Not staged: on disk only, so the form is untracked."""
+        full = os.path.join(repo.root, *self.EXEMPT_FORM.split("/"))
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "wb") as handle:
+            handle.write(data)
+        return repo.git("add", "-f", self.EXEMPT_FORM) if staged else repo
+
+    def with_form(self, repo, text, staged=True):
+        return self.put_form(repo, text.encode("utf-8"), staged)
+
+    def cannot_build(self, runner="ubuntu-latest"):
+        """The starter with its macOS job on `runner` and no compile step: a tree that cannot build the app on macos-26."""
+        repo = self.edit(self.gold(), self.FLOW, "runs-on: macos-26", "runs-on: " + runner)
+        return self.edit(repo, self.FLOW, "run: make app-build", "run: echo no compile")
+
+    def line(self, repo, item):
+        """The whole line of one item of the ios group, `<item>: <grade> - <detail>`. Scope first: the run must judge an iOS app."""
+        code, out = repo.run("ios")
+        self.assertFalse(out.startswith("ios: n/a"), out)
+        found = [raw.strip() for raw in out.splitlines() if raw.startswith("  %s:" % item)]
+        self.assertEqual(len(found), 1, "no single '%s' line in:\n%s" % (item, out))
+        return found[0]
+
+    def test_a_valid_exemption_form_waives_only_the_app_compile_on_a_tree_that_cannot_build(self):
+        bare = self.cannot_build()  # green control: without the form, both items are gaps
+        for item in ("ci runner", "ci checks"):
+            line = self.line(bare, item)
+            self.assertTrue(line.startswith(item + ": gap - "), line)
+        for sdk, reason in (("iOS 27.1", "Degen builds with the iOS 27 SDK"),
+                            ("iOS 27.0", "Needs the SDK, see https://example.com/issue #12"),  # `#` after a space, inside a JSON string
+                            ("iOS 27.1", "Degen builds with the iOS 27 SDK. " * 40)):  # a full-size reason
+            with self.subTest(sdk=sdk, reason_chars=len(reason)):
+                repo = self.with_form(self.cannot_build(), json.dumps({"sdk": sdk, "reason": reason}))
+                # The form waives the app compile: ci checks passes as exempt, its package tests and pull_request workflow still counted.
+                line = self.line(repo, "ci checks")
+                self.assertTrue(line.startswith("ci checks: pass - exempt: %s" % sdk), line)
+                # The form does not waive the macOS runner: this tree has no macOS workflow, so ci runner stays a gap.
+                line = self.line(repo, "ci runner")
+                self.assertTrue(line.startswith("ci runner: gap - no workflow runs on macOS"), line)
+
+    def test_a_valid_form_does_not_pass_a_tree_with_no_macos_workflow(self):
+        # The form waives the app compile, not the macOS runner. A macOS job on ubuntu-latest, or no workflow at all, is a gap.
+        removed = self.gold()
+        removed.git("rm", "-q", "-f", self.FLOW)
+        self.assertFalse(os.path.exists(os.path.join(removed.root, *self.FLOW.split("/"))))  # scope: no workflow file is left
+        for label, repo in (("the macOS job on ubuntu-latest", self.cannot_build()), ("no workflow file", removed)):
+            with self.subTest(tree=label):
+                line = self.line(self.with_form(repo, json.dumps(self.VALID_FORM)), "ci runner")
+                self.assertTrue(line.startswith("ci runner: gap - no workflow runs on macOS"), line)
+
+    def test_a_valid_form_does_not_waive_the_package_tests(self):
+        # The form waives the app compile and nothing else: a Kit package with no package-test step stays a gap.
+        repo = self.edit(self.gold(), self.FLOW, "run: make kit-test", "run: echo skipped")
+        line = self.line(self.with_form(repo, json.dumps(self.VALID_FORM)), "ci checks")
+        self.assertTrue(line.startswith("ci checks: gap - "), line)
+        self.assertIn("no workflow runs the package tests", line, line)
+
+    def test_a_valid_form_does_not_waive_the_pull_request_workflow(self):
+        # The form waives the app compile and nothing else: a tree with no pull_request workflow stays a gap.
+        repo = self.edit(self.gold(), self.FLOW, "  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]\n", "")
+        self.assertNotIn("  pull_request:", self.text(repo, self.FLOW))  # scope: the workflow no longer runs on pull requests
+        line = self.line(self.with_form(repo, json.dumps(self.VALID_FORM)), "ci checks")
+        self.assertTrue(line.startswith("ci checks: gap - "), line)
+        self.assertIn("no pull_request workflow", line, line)
+
+    def test_a_valid_form_waives_the_compile_on_a_pinned_tree_with_package_tests(self):
+        # Green control: a pinned macOS job that runs the package tests and skips the compile. The form passes ci checks as
+        # exempt, and ci runner stays on its pin.
+        repo = self.with_form(self.cannot_build("macos-26"), json.dumps(self.VALID_FORM))
+        self.assertEqual(self.grade(repo, "ci runner"), "pass", self.line(repo, "ci runner"))
+        line = self.line(repo, "ci checks")
+        self.assertTrue(line.startswith("ci checks: pass - exempt: iOS 27.1"), line)
+
+    def test_a_broken_exemption_form_grades_both_items_gap_and_names_the_problem(self):
+        for text, keys in self.BROKEN_FORMS:
+            repo = self.with_form(self.cannot_build(), text)
+            for item in ("ci runner", "ci checks"):
+                with self.subTest(form=text, item=item):
+                    line = self.line(repo, item)
+                    self.assertTrue(line.startswith(item + ": gap - "), line)
+                    detail = line.split(" - ", 1)[1]
+                    self.assertIn(self.EXEMPT_FORM, detail, line)
+                    for key in keys:
+                        self.assertIn(key, detail, line)
+
+    def test_a_broken_exemption_form_is_a_gap_on_a_tree_that_builds(self):
+        # A broken form grades both items gap with no condition on the tree: the plain reading of the form rule, which a builder may narrow.
+        repo = self.with_form(self.gold(), '{"sdk": "iOS 27.1"}')
+        for item in ("ci runner", "ci checks"):
+            with self.subTest(item=item):
+                line = self.line(repo, item)
+                self.assertTrue(line.startswith(item + ": gap - "), line)
+                self.assertIn(self.EXEMPT_FORM, line, line)
+
+    def test_a_valid_form_does_not_excuse_a_floating_macos_runner(self):
+        # Green control: a floating image is a gap on main too. A builder that returns `exempt` before this check turns it red.
+        repo = self.with_form(self.cannot_build("macos-latest"), json.dumps(self.VALID_FORM))
+        line = self.line(repo, "ci runner")
+        self.assertTrue(line.startswith("ci runner: gap - .github/workflows/ios.yml: macos-latest"), line)
+        self.assertNotIn("exempt", line, line)
+
+    def test_a_valid_form_on_a_tree_that_builds_leaves_it_in_shape(self):
+        # Green control: the form changes nothing on a tree that passes, so the starter tree still exits 0.
+        repo = self.with_form(self.gold(), json.dumps(self.VALID_FORM))
+        code, out = repo.run("ios")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.grade(repo, "ci runner"), "pass", out)
+
+    def test_an_untracked_exemption_form_is_no_form(self):
+        repo = self.with_form(self.cannot_build(), json.dumps(self.VALID_FORM), staged=False)
+        # Scope first: the form is on disk, and the index does not hold it.
+        self.assertTrue(os.path.isfile(os.path.join(repo.root, *self.EXEMPT_FORM.split("/"))))
+        indexed = subprocess.run(["git", "-C", repo.root, "ls-files"], capture_output=True, text=True, check=True).stdout.split("\n")
+        self.assertNotIn(self.EXEMPT_FORM, indexed)
+        for item in ("ci runner", "ci checks"):
+            with self.subTest(item=item):
+                line = self.line(repo, item)
+                self.assertTrue(line.startswith(item + ": gap - "), line)
+                self.assertIn(self.EXEMPT_FORM, line, "the gap does not name the form: " + line)
+                self.assertIn("untracked", line, "the gap does not say the form is untracked: " + line)
+
+    def test_a_form_path_that_is_a_directory_or_not_utf8_is_a_gap_naming_it(self):
+        directory = self.gold().write(self.EXEMPT_FORM + "/README.md", "not a form\n")
+        utf16 = self.put_form(self.gold(), json.dumps(self.VALID_FORM).encode("utf-16"))
+        # Scope first: the path is a directory, and the UTF-16 bytes do not decode as UTF-8.
+        self.assertTrue(os.path.isdir(os.path.join(directory.root, *self.EXEMPT_FORM.split("/"))))
+        with open(os.path.join(utf16.root, *self.EXEMPT_FORM.split("/")), "rb") as handle:
+            raw = handle.read()
+        with self.assertRaises(UnicodeDecodeError):
+            raw.decode("utf-8")
+        for label, repo in (("a directory", directory), ("UTF-16 text", utf16)):
+            for item in ("ci runner", "ci checks"):
+                with self.subTest(form=label, item=item):
+                    line = self.line(repo, item)
+                    self.assertTrue(line.startswith(item + ": gap - "), line)
+                    self.assertIn(self.EXEMPT_FORM, line, "the gap does not name the form: " + line)
+
+    def test_a_utf8_bom_before_a_valid_form_is_accepted(self):
+        bom = b"\xef\xbb\xbf"
+        forms = (json.dumps(self.VALID_FORM), json.dumps({"sdk": "iOS 27.1", "reason": "Degen builds with the iOS 27 SDK. " * 40}))
+        for form in forms:
+            with self.subTest(form_chars=len(form)):
+                repo = self.put_form(self.cannot_build("macos-26"), bom + form.encode("utf-8"))
+                # Scope first: the file opens with the BOM, and the rest is a JSON object.
+                with open(os.path.join(repo.root, *self.EXEMPT_FORM.split("/")), "rb") as handle:
+                    raw = handle.read()
+                self.assertTrue(raw.startswith(bom), "the fixture has no BOM")
+                self.assertIsInstance(json.loads(raw[len(bom):].decode("utf-8")), dict)
+                line = self.line(repo, "ci checks")
+                self.assertTrue(line.startswith("ci checks: pass - exempt: iOS 27.1"), line)
+
+    def test_ios_apps_skill_names_the_exemption_form_and_the_ios_26_5_sdk(self):
+        with open(os.path.join(os.path.dirname(HERE), "skills", "ios-apps", "SKILL.md"), encoding="utf-8") as handle:
+            rows = [row for row in handle.read().splitlines() if row.startswith("|") and self.EXEMPT_FORM in row]
+        self.assertTrue(rows, "no SKILL.md table row names the one CI exemption form")
+        for row in rows:
+            self.assertIn("26.5", row, "the SKILL.md row that names the form does not say the iOS 26.5 SDK")
+
     def test_swift_5_mode_is_red(self):
         repo = self.edit(self.gold(), "native/project.yml", 'SWIFT_VERSION: "6.0"', "SWIFT_VERSION: 5.0")
         self.red(repo, "swift 6: gap - native/project.yml: SWIFT_VERSION 5.0")
@@ -772,11 +957,7 @@ class Ios(unittest.TestCase):
 
     def grade(self, repo, item):
         """The grade of one item line of the ios group: pass, gap or partial."""
-        code, out = repo.run("ios")
-        for line in out.splitlines():
-            if line.strip().startswith(item + ":"):
-                return line.strip().split(": ", 1)[1].split(" - ", 1)[0]
-        self.fail("no '%s' line in:\n%s" % (item, out))
+        return self.line(repo, item).split(": ", 1)[1].split(" - ", 1)[0]
 
     def step(self, repo, command):
         """`repo` with `command` as one more step of the macOS job."""
@@ -1022,6 +1203,7 @@ class LaneCap(unittest.TestCase):
 
 
 PROBES_MD = os.path.join(os.path.dirname(HERE), "skills", "compliance-check", "probes.md")
+SKILL_MD = os.path.join(os.path.dirname(HERE), "skills", "compliance-check", "SKILL.md")
 
 
 class Playwright(unittest.TestCase):
@@ -1063,14 +1245,6 @@ class Playwright(unittest.TestCase):
     def test_no_playwright_is_na(self):
         code, out = Repo(self).write(self.WORKFLOW, "      - run: npm test\n").run("playwright")
         self.assertEqual((code, out.strip()), (0, "playwright: n/a - no Playwright install"))
-
-
-def load_probes():
-    """The probes module under test, loaded here so a case can patch check_glossary in this process."""
-    spec = importlib.util.spec_from_file_location("probes_under_test", PROBES)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def in_process(root, group="words", probes=None):
@@ -1330,6 +1504,123 @@ class Words(unittest.TestCase):
         self.assertIn("words", probes.GROUPS)
         self.assertIs(probes.GROUPS["words"], probes.probe_words)
 
+    # A change is read on what it adds, against the merge base with origin/main: the paths and the lines that its
+    # commits, its work tree and its untracked files add. A file already on origin/main is not read again.
+
+    @staticmethod
+    def anchored(word):
+        """A Python file whose line 2 names `word` in a rule anchor."""
+        return "VALUE = 1\n# Keep to rule:%s-cap.\n" % word.replace(" ", "-")
+
+    def based(self, *files):
+        """A child repo whose origin/main holds `files`, (path, text) pairs: the base that a change is read against."""
+        repo = Repo(self, origin=True)
+        for rel, text in files:
+            repo.write(rel, text)
+        return repo.publish()
+
+    def changed(self, repo, *files):
+        """`repo` with one commit that adds or edits `files`, so HEAD is ahead of origin/main."""
+        for rel, text in files:
+            repo.write(rel, text)
+        return repo.commit("change")
+
+    def test_a_retired_word_on_origin_main_and_untouched_is_not_read(self):
+        word = planted()
+        repo = self.based(("docs/%s_old.md" % word.replace(" ", "_"), "x\n"), ("src/cap.py", self.anchored(word)))
+        code, out = repo.run("words")
+        self.assertEqual((code, head(out), hits(out)), (0, "words: in shape", []), out)
+
+    def test_a_retired_word_added_after_the_base_is_read_on_its_path_and_line_only(self):
+        word = planted()
+        under = word.replace(" ", "_")
+        repo = self.based(("docs/%s_old.md" % under, "x\n"), ("src/app.py", "VALUE = 1\n"))
+        self.changed(repo, ("docs/%s_notes.md" % under, "x\n"), ("src/app.py", self.anchored(word)))
+        code, out = repo.run("words")
+        self.assertEqual(code, 1, out)
+        self.assertEqual(sorted(hits(out)), sorted([(word, "docs/%s_notes.md" % under, "-"), (word, "src/app.py", "2")]),
+                         out)
+
+    def test_an_old_line_with_a_retired_word_is_not_read_when_its_file_gets_a_clean_line(self):
+        word = planted()
+        repo = self.based(("src/cap.py", self.anchored(word)))
+        self.changed(repo, ("src/cap.py", self.anchored(word) + "NEW = 2\n"))
+        code, out = repo.run("words")
+        self.assertEqual((code, head(out), hits(out)), (0, "words: in shape", []), out)
+
+    def test_an_added_line_that_carries_glossary_ok_is_not_reported(self):
+        word = planted()
+        under = word.replace(" ", "_")
+        repo = self.based(("src/app.py", "VALUE = 1\n"))
+        self.changed(repo, ("src/app.py", "VALUE = 1\n%s_total = 2  # glossary-ok: the platform spells it so\n"
+                                          "%s_count = 3\n" % (under, under)))
+        code, out = repo.run("words")
+        self.assertEqual((code, head(out), hits(out)), (1, "words: out", [(word, "src/app.py", "3")]), out)
+
+    def test_without_origin_main_or_a_merge_base_the_whole_tree_is_read(self):
+        word = planted()
+        path = "docs/%s_notes.md" % word.replace(" ", "_")
+        for origin in (False, True):  # no origin at all, and an origin that holds no main
+            with self.subTest(origin=origin):
+                code, out = Repo(self, origin=origin).write(path).run("words")
+                self.assertEqual((code, hits(out)), (1, [(word, path, "-")]), out)
+        repo = self.based(("src/app.py", "VALUE = 1\n"))
+        repo.git("checkout", "-q", "--orphan", "lone")  # HEAD now shares no history with origin/main
+        code, out = repo.write(path).commit("lone").run("words")
+        self.assertEqual((code, hits(out)), (1, [(word, path, "-")]), out)
+
+    def test_a_subfolder_root_reads_the_change_from_the_repo_top(self):
+        word = planted()
+        under = word.replace(" ", "_")
+        repo = self.based(("sub/keep.md", "x\n"), ("docs/%s_old.md" % under, "x\n"), ("src/app.py", "VALUE = 1\n"))
+        self.changed(repo, ("docs/%s_new.md" % under, "x\n"))
+        with open(os.path.join(repo.root, "src", "app.py"), "w", encoding="utf-8") as handle:  # uncommitted, outside sub/
+            handle.write(self.anchored(word))
+        code, out = in_process(os.path.join(repo.root, "sub"))
+        self.assertNotIn("unread", out)
+        self.assertEqual((code, sorted(hits(out))),
+                         (1, sorted([(word, "docs/%s_new.md" % under, "-"), (word, "src/app.py", "2")])), out)
+
+    def test_untracked_non_utf8_text_is_unknown(self):
+        repo = self.based(("docs/a.md", "x\n"))
+        with open(os.path.join(repo.root, "docs", "latin.txt"), "wb") as handle:  # untracked, no NUL: text it cannot read
+            handle.write(b"caf\xe9\n")
+        code, out = repo.run("words")
+        self.assertEqual((code, head(out).startswith("words: unknown")), (2, True), out)
+
+    def test_untracked_binary_is_an_unread_note_not_unknown(self):
+        repo = self.based(("docs/a.md", "x\n"))
+        with open(os.path.join(repo.root, "docs", "pic.bin"), "wb") as handle:  # untracked, a NUL in its first bytes
+            handle.write(b"\x00\x01\xff")
+        code, out = repo.run("words")
+        self.assertEqual((code, head(out)), (0, "words: in shape"), out)
+        self.assertIn("unread: 1 files, docs/pic.bin", out)
+
+    def test_committed_non_utf8_text_is_not_unknown(self):
+        repo = self.based(("docs/a.md", "x\n"))
+        with open(os.path.join(repo.root, "docs", "latin.txt"), "wb") as handle:
+            handle.write(b"caf\xe9\n")
+        repo.git("add", "docs/latin.txt").commit("latin")
+        code, out = repo.run("words")
+        self.assertEqual((code, head(out)), (0, "words: in shape"), out)
+        self.assertIn("unread: 1 files, docs/latin.txt", out)
+
+    def test_the_deadline_counts_the_files_of_the_whole_tree(self):
+        probes = load_probes()
+        repo = Repo(self).write("a.md").write("b.md").write("c.md")
+        with mock.patch.object(probes, "WORDS_DEADLINE", -1):
+            code, out = in_process(repo.root, probes=probes)
+        self.assertEqual((code, "stopped at a.md, 0 of 3 read" in out), (2, True), out)
+
+    def test_the_deadline_counts_a_changed_file_once_though_it_has_a_path_unit_and_a_code_unit(self):
+        probes = load_probes()
+        under = planted().replace(" ", "_")
+        repo = self.based(("docs/a.md", "x\n"))
+        self.changed(repo, ("docs/%s_n.py" % under, "x = 1\n"))
+        with mock.patch.object(probes, "WORDS_DEADLINE", -1):
+            code, out = in_process(repo.root, probes=probes)
+        self.assertEqual((code, "stopped at docs/%s_n.py, 0 of 1 read" % under in out), (2, True), out)
+
 
 def minified_bundle(word, entries=6000, blobs=160, blob_size=125000):
     """One line of JSON, the shape of a minified data bundle: many small entries, a few long hex blobs, and `word` as
@@ -1508,8 +1799,446 @@ class Slugs(unittest.TestCase):
         self.assertEqual(len([r for r in rows.splitlines() if r.startswith("| slugs: ") and new in r]), 1, body)
         self.assertTrue(all(slug in notes and slug not in rows for slug in self.OLD[:3]), body)
 
+    def test_a_note_file_name_over_32_characters_is_out_of_shape(self):
+        # A note file is a slug too: the notes folder is read with the record folders.
+        repo, _ = self.child()
+        note = "%s/%s.md" % (layout.path(repo.root, "notes"), "n" * 33)
+        repo.branch("work").write(note).commit()
+        code, out = repo.run("slugs")
+        self.assertEqual(code, 1, out)
+        self.assertTrue(head(out).startswith("slugs: out"), out)
+        items = self.items(out)
+        self.assertEqual(len(items), 1, out)
+        self.assertIn(note, items[0])
+
+    def test_a_valid_note_file_and_the_notes_readme_read_in_shape(self):
+        repo, _ = self.child()
+        folder = layout.path(repo.root, "notes")
+        repo.branch("work").write("%s/%s.md" % (folder, "v" * 32)).write("%s/README.md" % folder).commit()
+        code, out = repo.run("slugs")
+        self.assertEqual((code, self.items(out)), (0, []), out)
+        self.assertTrue(head(out).startswith("slugs: in shape"), out)
+
     def test_registered_in_groups(self):
         self.assertIn("slugs", load_probes().GROUPS)
+
+
+class LiveHooks(unittest.TestCase):
+    """The hooks group: the clone's settings.json `.hooks` against the live $HOME/.claude/settings.json `.hooks`.
+    hooks.SessionStart is ignored on both sides, since a cloud install rewrites it (install.sh). The fixtures read this
+    checkout's settings.json at test time, so the hooks are the real full-size set and no case pastes them."""
+
+    SOURCE = os.path.join(os.path.dirname(HERE), "settings.json")
+    NEW_COMMAND = "python3 hooks/changed.py"
+    # The SessionStart entry a cloud install writes, shortened. Its command text is unique to this class.
+    REFRESH = {"matcher": "startup|resume",
+               "hooks": [{"type": "command", "command": "i=$(cat); bash -s -- --cloud", "timeout": 60}]}
+
+    def source(self):
+        """This checkout's settings.json as a new dict, so a case edits its own copy."""
+        with open(self.SOURCE, encoding="utf-8") as handle:
+            return json.load(handle)
+
+    @staticmethod
+    def text(doc):
+        return json.dumps(doc, indent=2)
+
+    @staticmethod
+    def other_event(doc):
+        """The first event other than SessionStart."""
+        return next(event for event in doc["hooks"] if event != "SessionStart")
+
+    @staticmethod
+    def escaped(text):
+        """`text` as the pretty-printed JSON writes it, so a command with quotes still finds its line."""
+        return json.dumps(text)[1:-1]
+
+    @staticmethod
+    def changed(out):
+        """The item lines that add or remove text, without their indent. The `---` and `+++` headers are not changes."""
+        return [line[2:] for line in out.splitlines()[1:]
+                if line[2:3] in ("+", "-") and not line.startswith(("  ---", "  +++"))]
+
+    def dangling_link(self, path):
+        """A symlink at `path` whose target does not exist. A case skips where this platform makes no symlinks."""
+        try:
+            os.symlink("missing.json", path)
+        except (OSError, NotImplementedError):
+            self.skipTest("no symlinks here")
+
+    def clone(self, text, dangling=False):
+        """A claude-settings clone whose settings.json holds `text`; with no settings.json when `text` is None.
+        `dangling`: the settings.json is a symlink to a file that is not there, and git tracks it."""
+        repo = Repo(self)
+        if dangling:
+            self.dangling_link(os.path.join(repo.root, "settings.json"))
+            return repo.git("add", "-f", "settings.json")
+        return repo.write("settings.json", text) if text is not None else repo.write("README.md")
+
+    def live(self, text, dangling=False):
+        """A HOME folder whose ~/.claude/settings.json holds `text`; with no file when `text` is None.
+        `dangling`: that file is a symlink to a file that is not there."""
+        home = tempfile.mkdtemp(prefix="home-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, home, True)
+        if text is not None or dangling:
+            os.makedirs(os.path.join(home, ".claude"))
+        self.settings_file(os.path.join(home, ".claude", "settings.json"), text, dangling)
+        return home
+
+    def config_dir(self, text):
+        """A CLAUDE_CONFIG_DIR folder whose settings.json holds `text`, as `live()` makes ~/.claude; no file when `text` is None."""
+        folder = tempfile.mkdtemp(prefix="cfg-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, folder, True)
+        self.settings_file(os.path.join(folder, "settings.json"), text)
+        return folder
+
+    def settings_file(self, path, text, dangling=False):
+        """Write `text` to `path`; leave no file when `text` is None. `dangling`: make `path` a link to a file that is not there."""
+        if dangling:
+            self.dangling_link(path)
+        elif text is not None:
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(text)
+
+    def probe(self, repo, home, config=None, cwd=None):
+        """(exit code, stdout, stderr) of the hooks group on `repo` with HOME at `home`. `config`: the CLAUDE_CONFIG_DIR the run
+        gets, `""` included. None strips the variable, so this process's own value cannot leak into a case that does not set it.
+        `cwd`: the folder the run starts in."""
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
+        if config is not None:
+            env["CLAUDE_CONFIG_DIR"] = config
+        env["HOME"] = env["USERPROFILE"] = home  # USERPROFILE is the home that expanduser reads on Windows
+        done = subprocess.run([sys.executable, PROBES, "hooks", repo.root], capture_output=True, text=True, env=env, cwd=cwd)
+        return done.returncode, done.stdout, done.stderr
+
+    def check(self, clone_text, live_text):
+        return self.probe(self.clone(clone_text), self.live(live_text))
+
+    def test_identical_hooks_are_in_shape(self):
+        clone, live = self.source(), self.source()
+        live.setdefault("permissions", {}).setdefault("allow", []).append("Bash(cloud-only:*)")  # outside .hooks: not read
+        reversed_keys = json.loads(self.text(live), object_pairs_hook=lambda pairs: dict(reversed(pairs)))
+        for name, doc in (("the same hooks", live), ("the same hooks, keys in reverse order", reversed_keys)):
+            with self.subTest(name):
+                code, out, err = self.check(self.text(clone), self.text(doc))
+                self.assertEqual(code, 0, err or out)
+                self.assertTrue(head(out).startswith("hooks: in shape"), err or out)
+
+    def test_a_session_start_only_difference_is_in_shape(self):
+        def without_session_start(doc):
+            doc["hooks"].pop("SessionStart")
+            return doc
+
+        rewritten = self.source()
+        rewritten["hooks"]["SessionStart"] = [entry for entry in rewritten["hooks"]["SessionStart"]
+                                              if "startup" not in entry.get("matcher", "")] + [self.REFRESH]
+        cases = (("live rewritten as a cloud install writes it", self.source(), rewritten),
+                 ("live without SessionStart", self.source(), without_session_start(self.source())),
+                 ("clone without SessionStart", without_session_start(self.source()), self.source()))
+        for name, clone, live in cases:
+            with self.subTest(name):
+                code, out, err = self.check(self.text(clone), self.text(live))
+                self.assertEqual(code, 0, err or out)
+                self.assertTrue(head(out).startswith("hooks: in shape"), err or out)
+
+    def test_a_changed_command_in_another_event_is_out(self):
+        clone, live = self.source(), self.source()
+        event = self.other_event(live)
+        old = live["hooks"][event][0]["hooks"][0]["command"]
+        live["hooks"][event][0]["hooks"][0]["command"] = self.NEW_COMMAND
+        code, out, err = self.check(self.text(clone), self.text(live))
+        self.assertEqual(code, 1, err or out)  # scope first: the verdict, then the lines it names
+        self.assertTrue(head(out).startswith("hooks: out"), err or out)
+        self.assertTrue(all(line.startswith("  ") for line in out.splitlines()[1:]), out)
+        changed = self.changed(out)
+        self.assertTrue(any(self.escaped(self.NEW_COMMAND) in line for line in changed), out)  # the live command
+        self.assertTrue(any(self.escaped(old) in line for line in changed), out)  # the clone's command
+        self.assertFalse(any('"SessionStart"' in line for line in out.splitlines()[1:]), out)
+
+    def test_a_hook_event_missing_live_is_out(self):
+        clone, live = self.source(), self.source()
+        event = self.other_event(live)
+        command = live["hooks"].pop(event)[0]["hooks"][0]["command"]
+        code, out, err = self.check(self.text(clone), self.text(live))
+        self.assertEqual(code, 1, err or out)
+        self.assertTrue(head(out).startswith("hooks: out"), err or out)
+        changed = self.changed(out)
+        self.assertTrue(any(('"%s"' % event) in line for line in changed), out)
+        self.assertTrue(any(self.escaped(command) in line for line in changed), out)
+
+    def test_an_extra_live_event_is_out(self):
+        clone, live = self.source(), self.source()
+        live["hooks"]["Notification"] = [{"hooks": [{"type": "command", "command": self.NEW_COMMAND}]}]
+        code, out, err = self.check(self.text(clone), self.text(live))
+        self.assertEqual(code, 1, err or out)
+        self.assertTrue(head(out).startswith("hooks: out"), err or out)
+        changed = self.changed(out)
+        self.assertTrue(any('"Notification"' in line for line in changed), out)
+        self.assertTrue(any(self.NEW_COMMAND in line for line in changed), out)
+
+    def test_a_session_start_difference_beside_a_real_change_is_out(self):
+        clone, live = self.source(), self.source()
+        live["hooks"]["SessionStart"] = [self.REFRESH]
+        live["hooks"][self.other_event(live)][0]["hooks"][0]["command"] = self.NEW_COMMAND
+        code, out, err = self.check(self.text(clone), self.text(live))
+        self.assertEqual(code, 1, err or out)
+        self.assertTrue(head(out).startswith("hooks: out"), err or out)
+        items = out.splitlines()[1:]
+        self.assertFalse(any('"SessionStart"' in line or self.REFRESH["hooks"][0]["command"] in line for line in items), out)
+        self.assertTrue(any(self.NEW_COMMAND in line for line in self.changed(out)), out)
+
+    def test_a_live_file_that_is_missing_is_unknown(self):
+        code, out, err = self.check(self.text(self.source()), None)
+        self.assertEqual(code, 2, err or out)
+        self.assertTrue(head(out).startswith("hooks: unknown - "), err or out)
+
+    def test_invalid_json_on_either_side_is_unknown(self):
+        good = self.text(self.source())
+        for side, clone, live in (("live", good, "{ not json"), ("clone", "{ not json", good)):
+            with self.subTest(side):
+                code, out, err = self.check(clone, live)
+                self.assertEqual(code, 2, err or out)
+                self.assertTrue(head(out).startswith("hooks: unknown - "), err or out)
+
+    def test_a_clone_settings_json_that_is_not_utf8_is_unknown(self):
+        text = self.text(self.source())
+        at = text.index('"command": "') + len('"command": "')
+        raw = text[:at].encode("utf-8") + b"\xff" + text[at:].encode("utf-8")  # inside a string: only the decode refuses it
+        repo = Repo(self)
+        with open(os.path.join(repo.root, "settings.json"), "wb") as handle:
+            handle.write(raw)
+        code, out, err = self.probe(repo, self.live(text))
+        self.assertEqual(code, 2, err or out)
+        self.assertTrue(head(out).startswith("hooks: unknown - "), err or out)
+        self.assertIn("UTF-8", head(out), err or out)  # the reason is the encoding, not a diff or a parse error
+        self.assertNotIn("trusts:", out, err or out)
+
+    def test_a_hooks_value_that_is_not_an_object_is_unknown(self):
+        for side in ("clone", "live"):
+            for value in ([], "none", None):
+                with self.subTest(side=side, value=value):
+                    doc = self.source()
+                    doc["hooks"] = value
+                    bad, good = self.text(doc), self.text(self.source())
+                    clone_text, live_text = (bad, good) if side == "clone" else (good, bad)
+                    code, out, err = self.check(clone_text, live_text)
+                    self.assertEqual(code, 2, err or out)
+                    self.assertTrue(head(out).startswith("hooks: unknown - "), err or out)
+                    self.assertIn("%s settings.json has no `hooks` object" % side, head(out), err or out)
+
+    def test_a_clone_without_settings_json_is_na(self):
+        code, out, err = self.probe(self.clone(None), self.live(self.text(self.source())))
+        self.assertEqual(code, 0, err or out)
+        self.assertTrue(head(out).startswith("hooks: n/a"), err or out)
+
+    def test_a_dangling_settings_json_link_is_unknown_not_na(self):
+        """A settings.json link to a file that is gone is a file the probe cannot read: unknown. Only a file that is not there is n/a."""
+        text = self.text(self.source())
+        for side in ("clone", "live"):
+            with self.subTest(side=side):
+                if side == "clone":
+                    repo, home = self.clone(None, dangling=True), self.live(text)
+                    path = os.path.join(repo.root, "settings.json")
+                else:
+                    repo, home = self.clone(text), self.live(None, dangling=True)
+                    path = os.path.join(home, ".claude", "settings.json")
+                self.assertTrue(os.path.islink(path) and not os.path.exists(path), path)  # scope first: a link to nothing
+                code, out, err = self.probe(repo, home)
+                self.assertEqual(code, 2, err or out)
+                self.assertTrue(head(out).startswith("hooks: unknown - "), err or out)
+                self.assertNotIn("trusts:", out, err or out)
+
+    def test_no_hooks_on_either_side_is_in_shape(self):
+        empty = self.text({"hooks": {}})
+        code, out, err = self.check(empty, empty)
+        self.assertEqual(code, 0, err or out)
+        self.assertTrue(head(out).startswith("hooks: in shape"), err or out)
+
+    def test_a_config_dir_settings_file_is_the_live_file_when_set(self):
+        """With CLAUDE_CONFIG_DIR set, the live file is <dir>/settings.json. The ~/.claude copy, equal to the clone, is not read."""
+        edited = self.source()
+        edited["hooks"][self.other_event(edited)][0]["hooks"][0]["command"] = self.NEW_COMMAND
+        home = self.live(self.text(self.source()))
+        cfg = self.config_dir(self.text(edited))
+        repo = self.clone(self.text(self.source()))
+        self.assertTrue(os.path.isfile(os.path.join(home, ".claude", "settings.json")))  # scope first: the home copy is there
+        code, out, err = self.probe(repo, home, config=cfg)
+        self.assertEqual(code, 1, err or out)
+        self.assertTrue(head(out).startswith("hooks: out"), err or out)
+        self.assertTrue(any(self.NEW_COMMAND in line for line in self.changed(out)), out)  # the <dir> copy is the one read
+        self.assertEqual(out.splitlines()[1], self.trusts(repo, os.path.join(cfg, "settings.json")), out)
+
+    def test_a_config_dir_settings_file_alone_decides_when_set(self):
+        """With CLAUDE_CONFIG_DIR set, a missing ~/.claude/settings.json is not read: <dir>/settings.json decides."""
+        text = self.text(self.source())
+        home = self.live(None)
+        cfg = self.config_dir(text)
+        repo = self.clone(text)
+        self.assertFalse(os.path.exists(os.path.join(home, ".claude", "settings.json")))  # scope first: no home copy
+        self.assertTrue(os.path.isfile(os.path.join(cfg, "settings.json")))
+        code, out, err = self.probe(repo, home, config=cfg)
+        self.assertEqual(code, 0, err or out)
+        self.assertTrue(head(out).startswith("hooks: in shape"), err or out)
+
+    def test_a_config_dir_without_settings_file_is_unknown_and_home_is_not_read(self):
+        """With CLAUDE_CONFIG_DIR set to a folder with no settings.json, the probe is unknown. It does not fall back to a good ~/.claude copy."""
+        text = self.text(self.source())
+        home = self.live(text)
+        cfg = self.config_dir(None)
+        repo = self.clone(text)
+        self.assertFalse(os.path.exists(os.path.join(cfg, "settings.json")))  # scope first: the folder is there, its file is not
+        self.assertTrue(os.path.isfile(os.path.join(home, ".claude", "settings.json")))
+        code, out, err = self.probe(repo, home, config=cfg)
+        self.assertEqual(code, 2, err or out)
+        self.assertTrue(head(out).startswith("hooks: unknown - "), err or out)
+        self.assertIn(repr(os.path.join(cfg, "settings.json")), head(out), err or out)  # the reason names the file it read
+        self.assertNotIn("trusts:", out, err or out)
+
+    def test_an_empty_config_dir_falls_back_to_home(self):
+        """CLAUDE_CONFIG_DIR set to an empty string is unset: the live file is ~/.claude/settings.json. The run starts in an
+        empty folder, so a relative read of `settings.json` finds no file and cannot pass for the fallback."""
+        edited = self.source()
+        edited["hooks"][self.other_event(edited)][0]["hooks"][0]["command"] = self.NEW_COMMAND
+        home = self.live(self.text(edited))  # the home copy holds the change, so a fallback to it shows in the diff
+        repo = self.clone(self.text(self.source()))
+        empty = tempfile.mkdtemp(prefix="cwd-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, empty, True)
+        self.assertEqual(os.listdir(empty), [])  # scope first: nothing relative to find
+        self.assertTrue(os.path.isfile(os.path.join(home, ".claude", "settings.json")))
+        code, out, err = self.probe(repo, home, config="", cwd=empty)
+        self.assertEqual(code, 1, err or out)
+        self.assertTrue(head(out).startswith("hooks: out"), err or out)
+        self.assertTrue(any(self.NEW_COMMAND in line for line in self.changed(out)), out)  # the home copy is the one read
+        self.assertEqual(out.splitlines()[1], self.trusts(repo), out)
+
+    def test_in_shape_trusts_line_names_the_live_file_read(self):
+        """The trusts line names the file the probe read: ~/.claude/settings.json when the variable is unset or empty,
+        and <dir>/settings.json when it is set."""
+        text = self.text(self.source())
+        cfg = self.config_dir(text)
+        for name, config, live in (("unset", None, "~/.claude/settings.json"),
+                                   ("empty", "", "~/.claude/settings.json"),
+                                   ("set", cfg, os.path.join(cfg, "settings.json"))):
+            with self.subTest(name):
+                repo = self.clone(text)
+                code, out, err = self.probe(repo, self.live(text), config=config)
+                self.assertEqual(code, 0, err or out)
+                self.assertEqual(out.splitlines(), ["hooks: in shape", self.trusts(repo, live)], out)
+
+    def trusts(self, repo, live="~/.claude/settings.json"):
+        """The line `hooks` prints right after the verdict for in shape and out: the clone is the side it trusts, and `live` is the file read."""
+        return "  trusts: clone (%s); live (%s) is the copy checked" % (os.path.join(repo.root, "settings.json"), live)
+
+    def test_in_shape_prints_the_trusts_line_right_after_the_verdict(self):
+        for name, doc in (("the same hooks", self.source()), ("no hooks on either side", {"hooks": {}})):
+            with self.subTest(name):
+                repo = self.clone(self.text(doc))
+                code, out, err = self.probe(repo, self.live(self.text(doc)))
+                self.assertEqual(code, 0, err or out)
+                self.assertEqual(head(out), "hooks: in shape", err or out)
+                self.assertEqual(out.splitlines(), ["hooks: in shape", self.trusts(repo)], out)
+
+    def test_out_prints_the_trusts_line_right_after_the_verdict_and_before_the_diff(self):
+        live = self.source()
+        event = self.other_event(live)
+        live["hooks"].pop(event)
+        repo = self.clone(self.text(self.source()))
+        code, out, err = self.probe(repo, self.live(self.text(live)))
+        self.assertEqual(code, 1, err or out)
+        self.assertEqual(head(out), "hooks: out", err or out)
+        lines = out.splitlines()
+        self.assertEqual(lines[1], self.trusts(repo), out)
+        self.assertTrue(lines[2:] and all(line.startswith("  ") for line in lines[2:]), out)
+        self.assertNotIn(self.trusts(repo), lines[2:], out)
+        self.assertTrue(any('"%s"' % event in line for line in self.changed(out)), out)
+
+    def test_unknown_and_na_print_no_trusts_line(self):
+        text = self.text(self.source())
+        cases = (("no clone settings.json", None, text, 0, "hooks: n/a"),
+                 ("live file missing", text, None, 2, "hooks: unknown - "),
+                 ("live file not JSON", text, "{ not json", 2, "hooks: unknown - "),
+                 ("clone file not JSON", "{ not json", text, 2, "hooks: unknown - "))
+        for name, clone_text, live_text, want_code, verdict in cases:
+            with self.subTest(name):
+                code, out, err = self.probe(self.clone(clone_text), self.live(live_text))
+                self.assertEqual(code, want_code, err or out)
+                self.assertTrue(head(out).startswith(verdict), err or out)
+                self.assertNotIn("trusts:", out, err or out)
+
+    def test_registered_in_groups(self):
+        self.assertIn("hooks", load_probes().GROUPS)
+
+    def test_probes_md_has_a_row_that_runs_the_hooks_group(self):
+        with open(PROBES_MD, encoding="utf-8") as handle:
+            rows = [line for line in handle.read().splitlines()
+                    if line.startswith("|") and "compliance_probes.py hooks" in line]
+        self.assertTrue(rows, "probes.md has no table row that runs `compliance_probes.py hooks`")
+
+    def hooks_arguments(self):
+        """The argument after `compliance_probes.py hooks` on each line of probes.md that runs the hooks group."""
+        with open(PROBES_MD, encoding="utf-8") as handle:
+            return re.findall(r"compliance_probes\.py hooks +([^\s`|]+)", handle.read())
+
+    def test_probes_md_runs_the_hooks_group_on_the_parent_clone(self):
+        """The probe reads the settings.json of the root it is given, so that root is the parent clone `$P`. A child root
+        has no clone settings.json: `.` is n/a, and n/a passes."""
+        args = self.hooks_arguments()
+        self.assertTrue(args, "probes.md has no command that runs `compliance_probes.py hooks`")  # scope first
+        for arg in args:
+            with self.subTest(arg=arg):
+                self.assertIn(arg, ("$P", '"$P"'), "probes.md runs the hooks probe on `%s`, not the parent clone `$P`" % arg)
+
+    def skill_text(self):
+        """SKILL.md as one run of words, so a line break cannot split a phrase."""
+        with open(SKILL_MD, encoding="utf-8") as handle:
+            return " ".join(handle.read().split())
+
+    def test_skill_parent_covered_check_names_the_hooks_probe(self):
+        text = self.skill_text()  # a boolean, not assertIn: a failure must not print the whole file
+        self.assertTrue("compliance_probes.py hooks" in text, "SKILL.md's parent-covered check does not name the hooks probe")
+
+    def test_skill_parent_covered_check_drops_the_same_hooks_block_comparison(self):
+        text = self.skill_text()
+        self.assertFalse("same `hooks` block" in text, "SKILL.md still compares the live hooks block with the parent's by hand")
+
+    # A claim that the probe never reads CLAUDE_CONFIG_DIR: the variable named after `never`, or `not read` right after it.
+    NEVER_READS = re.compile(r"\bnever\b[^.;]{0,40}CLAUDE_CONFIG_DIR|CLAUDE_CONFIG_DIR\W{0,3}(?:is )?not read\b")
+
+    def probes_md_hooks(self):
+        """The Hooks section of probes.md as one run of words."""
+        with open(PROBES_MD, encoding="utf-8") as handle:
+            text = handle.read()
+        start = text.find("\n## Hooks\n")
+        self.assertGreaterEqual(start, 0, "probes.md has no `## Hooks` section")  # scope first
+        end = text.find("\n## ", start + 1)
+        return " ".join(text[start:end if end > 0 else len(text)].split())
+
+    def test_probe_docstring_hooks_paragraph_does_not_say_config_dir_is_never_read(self):
+        doc = load_probes().__doc__ or ""
+        start, end = doc.find("\nhooks:"), doc.find("\nscorecard:")
+        self.assertTrue(start >= 0 and end > start, "the probe docstring has no `hooks:` paragraph before `scorecard:`")  # scope first
+        paragraph = " ".join(doc[start:end].split())
+        found = self.NEVER_READS.search(paragraph)
+        self.assertIsNone(found, "the docstring's hooks paragraph still says: %s" % (found and found.group(0)))
+        self.assertNotIn("always under the home folder", paragraph, "the hooks paragraph still says the live file is always under the home")
+
+    def test_probes_md_hooks_section_does_not_say_config_dir_is_never_read(self):
+        section = self.probes_md_hooks()
+        self.assertIn("compliance_probes.py hooks", section, "probes.md's Hooks section does not name the hooks probe")  # scope first
+        found = self.NEVER_READS.search(section)
+        self.assertIsNone(found, "probes.md's Hooks section still says: %s" % (found and found.group(0)))
+
+    def test_skill_names_the_hooks_probe_by_the_parent_placeholder(self):
+        text = self.skill_text()
+        self.assertTrue("<parent>/lint/compliance_probes.py hooks" in text,
+                        "SKILL.md does not name the hooks probe as `<parent>/lint/compliance_probes.py hooks`, as the rest of SKILL.md does")
+        self.assertFalse("$P/lint/compliance_probes.py" in text or "$PY" in text,
+                         "SKILL.md still names the hooks probe with $PY or $P, not <parent>")
+
+    def test_skill_does_not_say_config_dir_is_never_read(self):
+        text = self.skill_text()
+        found = self.NEVER_READS.search(text)
+        self.assertIsNone(found, "SKILL.md's parent-covered check still says: %s" % (found and found.group(0)))
 
 
 def live_anchors():
@@ -1822,7 +2551,7 @@ class Supersede(unittest.TestCase):
         self.assertRegex(items[0], r"^  departs, no exemption: (CLAUDE|AGENTS)\.md:1: " + re.escape(self.DEPARTS) + "$")
 
     def test_skill_md_names_supersede_among_the_groups_that_list_items(self):
-        with open(os.path.join(os.path.dirname(HERE), "skills", "compliance-check", "SKILL.md"), encoding="utf-8") as handle:
+        with open(SKILL_MD, encoding="utf-8") as handle:
             text = handle.read()
         found = re.search(r"([^.]*?)\blist each item under the\s+group line", text)
         self.assertIsNotNone(found, "SKILL.md no longer says which groups list each item")
@@ -2275,9 +3004,8 @@ def item_for(out, where):
     return next((line for line in out.splitlines()[1:] if pattern.search(line)), None)
 
 
-class Restates(unittest.TestCase):
-    """A unit that copies a run of record text is refused. A unit with under 12 shared words passes, a record citation
-    included."""
+class RestatesSteps:
+    """The steps the restates cases share: a child whose file holds units, and the two verdicts a case checks."""
 
     def child(self, *units, rel="CLAUDE.md"):
         """A child whose `rel` holds `units`, a blank line between each: each one is a unit of its own."""
@@ -2299,6 +3027,11 @@ class Restates(unittest.TestCase):
         self.assertEqual(head(out), "restates: in shape - %d file(s) read" % files,
                          "the unit was refused, or the file was not read: %s%s" % (out, err))
         self.assertEqual(code, 0, "the verdict is in shape but the exit is not 0: %s%s" % (out, err))
+
+
+class Restates(RestatesSteps, unittest.TestCase):
+    """A unit that copies a run of record text is refused. A unit with under 12 shared words passes, a record citation
+    included."""
 
     def test_a_copied_record_line_is_refused(self):
         self.assert_refused(self.child("- " + grant_line()), "CLAUDE.md:1")
@@ -2446,6 +3179,54 @@ class Restates(unittest.TestCase):
         self.assertNotIn("AGENTS.md", repo.run("restates")[1], "the item names the symlink AGENTS.md, not CLAUDE.md")
 
 
+class RestatesRuleFiles(RestatesSteps, unittest.TestCase):
+    """The restates group reads every rule file a child keeps: docs/rules, each rule file of the shared list, and the
+    .claude rule files. A rule file it cannot read makes the group unknown, never clear."""
+
+    def write_unreadable(self, repo, rel):
+        """`rel`, tracked, with bytes that are not UTF-8 text: a file the probe cannot read."""
+        full = os.path.join(repo.root, *rel.split("/"))
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "wb") as handle:
+            handle.write(b"\xff\xfe not UTF-8 text\n")
+        return repo.git("add", "-f", rel)
+
+    def test_a_clean_docs_rules_file_is_read_and_passes(self):
+        self.assert_passes(self.child("- Repo note: this repo keeps its own lane labels.", rel="docs/rules/merge.md"))
+
+    def test_a_copy_in_a_docs_rules_file_is_refused(self):
+        self.assert_refused(self.child("- " + grant_line(), rel="docs/rules/merge.md"), "docs/rules/merge.md:1")
+
+    def test_a_copy_in_a_nested_docs_rules_file_is_refused(self):
+        rel = "docs/rules/lanes/merge.md"
+        self.assert_refused(self.child("- " + grant_line(), rel=rel), rel + ":1")
+
+    def test_a_copy_in_each_shared_rule_file_is_refused(self):
+        others = [rel.replace(os.sep, "/") for rel in rule_audit.RULE_FILES if rel != "CLAUDE.md"]
+        self.assertTrue(others, "the shared rule list names no file but CLAUDE.md")
+        for rel in others:
+            with self.subTest(rel=rel):
+                self.assert_refused(self.child("- " + grant_line(), rel=rel), rel + ":1")
+
+    def test_a_copy_in_a_claude_rules_file_is_refused(self):  # green control: the old code already reads .claude/**/*.md
+        rel = kind_path("rules") + "/merge.md"
+        self.assert_refused(self.child("- " + grant_line(), rel=rel), rel + ":1")
+
+    def test_an_unreadable_docs_rules_file_is_unknown(self):
+        repo = self.write_unreadable(Repo(self), "docs/rules/bad.md")
+        code, out, err = repo.probe("restates")
+        self.assertIn("docs/rules/bad.md", out, "the group did not reach docs/rules/bad.md: %s%s" % (out, err))
+        self.assertEqual(code, 2, "an unreadable docs/rules file did not make the group unknown: %s%s" % (out, err))
+        self.assertTrue(head(out).startswith("restates: unknown"), out)
+
+    def test_an_unreadable_claude_rules_file_is_unknown(self):  # green control: the old code already reads .claude/**/*.md
+        rel = kind_path("rules") + "/bad.md"
+        repo = self.write_unreadable(Repo(self), rel)
+        code, out, err = repo.probe("restates")
+        self.assertIn(rel, out, "the group did not reach %s: %s%s" % (rel, out, err))
+        self.assertEqual(code, 2, "an unreadable .claude rule file did not make the group unknown: %s%s" % (out, err))
+
+
 class RestatesFixtures(unittest.TestCase):
     """Controls: the record text the restates cases read is there, in the shape they need."""
 
@@ -2496,6 +3277,688 @@ class XcodebuildRuns(unittest.TestCase):
         runs = self.runs('xcodebuild -scheme App -derivedDataPath "x test')
         self.assertEqual(len(runs), 1, runs)  # the scope first: one xcodebuild command
         self.assertIn("test", runs[0], runs)  # then its action: an unclosed quote is text, and `test` stays in the run
+
+
+# The aligned group (brief rules-decisions-aligned): a decision record and each rule unit that cites it move together in a
+# pull request, or the PR body says why not. Each case builds a child on origin/main, then one PR branch, and runs the
+# probe with that PR's env (BASE_SHA, HEAD_SHA, PR_BODY). The record and the citing units are fixture text written here.
+ALIGNED_ROUND = "hold-unsafe-after-round-3"  # the record slug a citing unit names in a code span
+ALIGNED_HOME = "roles-review-cap-three"  # the anchor that record's Home line names
+ALIGNED_RECORD = "docs/decisions/%s.md" % ALIGNED_ROUND
+ALIGNED_DASH = "—"  # the em dash of the `Rules checked:` form
+ALIGNED_LINE38 = "- Owner ruling: a passing round ends review."
+ALIGNED_LINE38_NEW = "- Owner ruling: a passing round ends review, and so does a passing fix check after it."
+ALIGNED_CITE = "- Review rounds: a change gets at most three review rounds. Decision `%s` holds the round rules." % ALIGNED_ROUND
+ALIGNED_ANCHOR = "- Review rounds: a change gets at most three review rounds. <!-- rule:%s -->" % ALIGNED_HOME
+ALIGNED_FILLER = ["- Repo note %d: this repo keeps its own lane labels." % n for n in range(1, 301)]
+ALIGNED_RULES_CHECKED = "Rules checked: %s %s no change" % (ALIGNED_ROUND, ALIGNED_DASH)
+
+
+def aligned_record(line38, home=ALIGNED_HOME):
+    """A record of 43 lines: line 38 is `line38`, and the Home line names the anchor that citing units use."""
+    lines = ["Fixture record line %d: text that no citing unit holds." % n for n in range(1, 38)]
+    lines.append(line38)
+    lines += ["Fixture record line %d: more text." % n for n in range(39, 42)]
+    lines += ["Kind: process", "Home: rule:%s" % home]
+    return "\n".join(lines) + "\n"
+
+
+def unit_file(unit, before=ALIGNED_FILLER[:37], after=ALIGNED_FILLER[37:40]):
+    """A rule file of `before` units, then `unit`, then `after`, a blank line between each. Returns (text, the unit's
+    first line number)."""
+    units = list(before) + [unit] + list(after)
+    line = sum(part.count("\n") + 1 for part in before) + len(before) + 1
+    return "\n\n".join(units) + "\n", line
+
+
+def commit_sha(root, rev):
+    return subprocess.run(["git", "-C", root, "rev-parse", rev], capture_output=True, text=True, check=True).stdout.strip()
+
+
+def pr_env(base, head_sha, body=None, drop=(), event=None):
+    """The environment of one PR's probe run: the base and head shas, PR_BODY when `body` is not None, and the event file
+    GITHUB_EVENT_PATH when `event` is given. The CI's own event file is never read: GITHUB_EVENT_PATH is removed first."""
+    env = dict(os.environ)
+    env.pop("GITHUB_EVENT_PATH", None)
+    env.update(BASE_SHA=base, HEAD_SHA=head_sha)
+    if body is None:
+        env.pop("PR_BODY", None)
+    else:
+        env["PR_BODY"] = body
+    if event is not None:
+        env["GITHUB_EVENT_PATH"] = event
+    for key in drop:
+        env.pop(key, None)
+    return env
+
+
+def run_aligned(root, env):
+    """(exit code, stdout, stderr) of `compliance_probes.py aligned <root>` run with `env`."""
+    done = subprocess.run([sys.executable, PROBES, "aligned", root], env=env, capture_output=True, text=True)
+    return done.returncode, done.stdout, done.stderr
+
+
+class AlignedSteps:
+    """The steps the aligned cases share: a child on origin/main that holds a record and its citing units, one PR branch
+    that changes some of them, and the probe run with that PR's env. Not `run`: that name is unittest's own."""
+
+    def pr(self, base, change, delete=()):
+        """A child on origin/main holding `base` ({path: text}), and a PR branch on it that writes `change` and removes
+        the paths in `delete`."""
+        repo = Repo(self, origin=True)
+        for rel, text in base.items():
+            repo.write(rel, text)
+        repo.publish()
+        repo.base_sha = commit_sha(repo.root, "HEAD")
+        repo.branch("pr")
+        for rel, text in change.items():
+            repo.write(rel, text)
+        for rel in delete:
+            repo.git("rm", "-q", "-f", rel)
+        return repo.commit("change")
+
+    def cited(self, unit=ALIGNED_CITE, rel="CLAUDE.md", line38=ALIGNED_LINE38):
+        """(base files, where): a base holding the record and one citing unit in `rel`, and the unit's `file:line`."""
+        text, line = unit_file(unit)
+        return {rel: text, ALIGNED_RECORD: aligned_record(line38)}, "%s:%d" % (rel, line)
+
+    def probe_pr(self, repo, body="", drop=(), base=None, event=None):
+        """(exit code, stdout, stderr) of the probe on the PR `repo` holds: its base, its head and its body. A body of ""
+        is a PR body that is present and empty; None leaves PR_BODY unset, so the probe reads the event file."""
+        return run_aligned(repo.root, pr_env(base or repo.base_sha, commit_sha(repo.root, "HEAD"), body, drop, event))
+
+    def assert_refused(self, repo, where, *names, **kw):
+        """The probe refuses the PR. It names the citing unit at `where` first, then exits 1, then names each of `names`."""
+        code, out, err = self.probe_pr(repo, **kw)
+        self.assertIsNotNone(item_for(out, where), "the citing unit at %s is not named: %s%s" % (where, out, err))
+        self.assertEqual(code, 1, "the refusal exits with the wrong code: %s%s" % (out, err))
+        for name in names:
+            self.assertIn(name, out, "the refusal does not name %s: %s" % (name, out))
+
+    def assert_clear(self, repo, **kw):
+        """The probe reads the PR and clears it: in shape, exit 0."""
+        code, out, err = self.probe_pr(repo, **kw)
+        self.assertTrue(head(out).startswith("aligned: in shape"), "the PR is refused or not read: %s%s" % (out, err))
+        self.assertEqual(code, 0, "the verdict is in shape but the exit is not 0: %s%s" % (out, err))
+
+
+class AlignedRecord(AlignedSteps, unittest.TestCase):
+    """Items 1, 2, 4 and 7: a record and the units that cite it move together, or the PR body says why not. The round-three
+    fixture is the record of item 4: line 38 changes, and the citing unit sits in CLAUDE.md."""
+
+    def test_round_three_record_change_without_its_citing_line_is_refused(self):
+        base, where = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_refused(repo, where, ALIGNED_ROUND, "Rules checked:")
+
+    def test_round_three_record_change_with_its_citing_line_changed_passes(self):  # green control
+        base, _ = self.cited()
+        changed, _ = unit_file(ALIGNED_CITE + " The rule covers a fix check too.")
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW), "CLAUDE.md": changed})
+        self.assert_clear(repo)
+
+    def test_round_three_record_change_with_a_rules_checked_line_passes(self):  # green control: the line sits among others
+        base, _ = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_clear(repo, body="Summary of the change.\n%s\nTests: run." % ALIGNED_RULES_CHECKED)
+
+    def test_a_rules_checked_line_for_another_record_does_not_clear(self):
+        base, where = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_refused(repo, where, ALIGNED_ROUND, body="Rules checked: other-record-slug %s no change" % ALIGNED_DASH)
+
+    def test_an_empty_pr_body_refuses_and_names_the_fix(self):  # an unset body is in AlignedBody
+        base, where = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_refused(repo, where, ALIGNED_ROUND, "Rules checked:", body="")
+
+    def test_a_citing_unit_change_without_its_record_is_refused(self):  # item 2, the reverse direction
+        base, where = self.cited()
+        changed, _ = unit_file(ALIGNED_CITE + " A second sentence.")
+        repo = self.pr(base, {"CLAUDE.md": changed})
+        self.assert_refused(repo, where, ALIGNED_ROUND, "Rules checked:")
+
+    def test_a_citing_unit_change_with_its_record_changed_passes(self):  # green control
+        base, _ = self.cited()
+        changed, _ = unit_file(ALIGNED_CITE + " A second sentence.")
+        repo = self.pr(base, {"CLAUDE.md": changed, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_clear(repo)
+
+    def test_a_citing_unit_change_with_a_rules_checked_line_passes(self):  # green control
+        base, _ = self.cited()
+        changed, _ = unit_file(ALIGNED_CITE + " A second sentence.")
+        repo = self.pr(base, {"CLAUDE.md": changed})
+        self.assert_clear(repo, body=ALIGNED_RULES_CHECKED)
+
+    def test_a_citing_anchor_alone_counts_as_a_citation(self):  # the second form: `<!-- rule:X -->` against a Home line
+        base, where = self.cited(unit=ALIGNED_ANCHOR)
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_refused(repo, where, ALIGNED_ROUND)
+
+    def test_a_citing_unit_at_the_end_of_a_long_file_is_refused_at_its_line(self):  # full size: 300 units before it
+        text, line = unit_file(ALIGNED_CITE, before=ALIGNED_FILLER, after=[])
+        base = {"CLAUDE.md": text, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38)}
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_refused(repo, "CLAUDE.md:%d" % line, ALIGNED_ROUND)
+
+
+class AlignedLocations(AlignedSteps, unittest.TestCase):
+    """Item 1: a citing unit counts in CLAUDE.md, in .claude/rules, in docs/rules and in each shared rule file."""
+
+    def test_a_record_change_is_refused_for_a_citing_unit_in_each_rule_location(self):
+        locations = ["CLAUDE.md", kind_path("rules") + "/review.md", "docs/rules/review.md"]
+        locations += [rel.replace(os.sep, "/") for rel in rule_audit.RULE_FILES if rel != "CLAUDE.md"]
+        for rel in dict.fromkeys(locations):
+            with self.subTest(rel=rel):
+                base, where = self.cited(rel=rel)
+                repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+                self.assert_refused(repo, where, ALIGNED_ROUND)
+
+
+class AlignedScanner(AlignedSteps, unittest.TestCase):
+    """Item 5: the citing scan respects code spans, comment openers, a span over several lines and a lone quote (rule
+    building-scanner-respects-strings). Each case cites the record in a unit that holds one trap."""
+
+    def scan_case(self, unit):
+        """(the PR, where): a base whose citing unit is `unit`, and a PR that changes the record only."""
+        text, line = unit_file(unit)
+        base = {"CLAUDE.md": text, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38)}
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        return repo, "CLAUDE.md:%d" % line
+
+    def test_comment_openers_inside_a_code_span_do_not_hide_the_citation(self):
+        for trap in ("git log # main", "curl //host", "/* open"):
+            with self.subTest(trap=trap):
+                repo, where = self.scan_case("- Run `%s` before the merge. Decision `%s` holds the round rules."
+                                             % (trap, ALIGNED_ROUND))
+                self.assert_refused(repo, where, ALIGNED_ROUND)
+
+    def test_a_comment_opener_at_a_line_start_does_not_split_a_citation(self):
+        # The second line starts with `#`, which reads as a heading. The unit still starts at its list item.
+        repo, where = self.scan_case("- Read `git log\n# main` and decision `%s` holds the round rules." % ALIGNED_ROUND)
+        self.assert_refused(repo, where, ALIGNED_ROUND)
+
+    def test_a_multi_line_code_span_with_a_comment_opener_keeps_its_citation(self):
+        for second in ("// b` and decision `%s` holds the round rules.", "/* b` and decision `%s` holds the round rules."):
+            with self.subTest(second=second):
+                repo, where = self.scan_case("- Sample `const s = 'a\n" + second % ALIGNED_ROUND)
+                self.assert_refused(repo, where, ALIGNED_ROUND)
+
+    def test_a_lone_quote_in_text_does_not_hide_the_citation(self):
+        for unit in ("- Don't merge a red pull request: decision `%s` holds the round rules." % ALIGNED_ROUND,
+                     "- JSX `<p>Don't</p>` is text, and decision `%s` holds the round rules." % ALIGNED_ROUND):
+            with self.subTest(unit=unit):
+                repo, where = self.scan_case(unit)
+                self.assert_refused(repo, where, ALIGNED_ROUND)
+
+    def test_comment_openers_with_no_citation_pass(self):  # green control: the traps alone cite nothing
+        repo, _ = self.scan_case("- Run `git log # main` and `curl //host` before the merge.")
+        self.assert_clear(repo)
+
+
+class AlignedCost(AlignedSteps, unittest.TestCase):
+    """Item 6: the aligned check reads one git diff, writes no file, and makes no other git call. Its one python start is
+    the CLI run that the other cases make."""
+
+    def test_one_git_diff_and_no_file_written(self):
+        probes = load_probes()
+        base, _ = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        env = pr_env(repo.base_sha, commit_sha(repo.root, "HEAD"), body="")
+        git_calls = []
+        real_run = probes._nowindow.run
+
+        def counting(argv, *args, **kwargs):
+            git_calls.append(list(argv))
+            return real_run(argv, *args, **kwargs)
+
+        before = listing(repo.root)
+        with mock.patch.dict(os.environ, clear=True):
+            os.environ.update(env)
+            with mock.patch.object(probes._nowindow, "run", side_effect=counting):
+                in_process(repo.root, group="aligned", probes=probes)
+        self.assertTrue(any("diff" in argv for argv in git_calls), "the probe made no git diff read: %r" % git_calls)
+        self.assertEqual(len(git_calls), 1, "the probe made %d git calls, not one: %r" % (len(git_calls), git_calls))
+        self.assertIn(repo.base_sha, " ".join(git_calls[0]), "the one git read does not name the PR base")
+        self.assertEqual(listing(repo.root), before, "the probe wrote a file or a folder")
+
+
+class AlignedEdges(AlignedSteps, unittest.TestCase):
+    """Item 7 and the contract: an unreadable diff or a missing sha is unknown, exit 2. An empty PR and this checkout are
+    clear."""
+
+    def test_a_missing_base_sha_is_unknown(self):
+        base, _ = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        code, out, err = run_aligned(repo.root, pr_env(repo.base_sha, commit_sha(repo.root, "HEAD"), drop=("BASE_SHA",)))
+        self.assertTrue(head(out).startswith("aligned: "), "the probe did not run: %s%s" % (out, err))
+        self.assertEqual(code, 2, "a missing BASE_SHA did not make the group unknown: %s%s" % (out, err))
+        self.assertTrue(head(out).startswith("aligned: unknown"), out)
+
+    def test_a_head_sha_unset_reads_the_checked_out_head(self):  # HEAD_SHA unset: the diff is base...HEAD, a refusal
+        base, where = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_refused(repo, where, ALIGNED_ROUND, drop=("HEAD_SHA",))
+
+    def test_an_unreadable_diff_names_the_full_depth_remedy(self):
+        base, _ = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        code, out, err = self.probe_pr(repo, base="1" * 40)
+        self.assertEqual(code, 2, out + err)
+        self.assertIn("fetch-depth: 0", out, "the unknown line does not name the fix for a shallow checkout: %s" % out)
+
+    def test_an_unreadable_base_sha_is_unknown(self):
+        base, _ = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        code, out, err = self.probe_pr(repo, base="1" * 40)
+        self.assertTrue(head(out).startswith("aligned: "), "the probe did not run: %s%s" % (out, err))
+        self.assertEqual(code, 2, "an unreadable base did not make the group unknown: %s%s" % (out, err))
+        self.assertTrue(head(out).startswith("aligned: unknown"), out)
+
+    def test_an_empty_pr_is_clear(self):  # green control: base is the head commit, so the diff is empty
+        base, _ = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_clear(repo, base=commit_sha(repo.root, "HEAD"))
+
+    def test_this_checkout_runs_the_group_and_is_clear_with_no_change(self):  # green control: the live full-size files
+        head_sha = commit_sha(CHECKOUT, "HEAD")
+        code, out, err = run_aligned(CHECKOUT, pr_env(head_sha, head_sha))
+        self.assertTrue(out.startswith("aligned: "), "the probe did not run on this checkout: %s%s" % (out, err))
+        self.assertNotIn("n/a", head(out), "a claude-settings checkout must run the group, not print n/a")
+        self.assertEqual(code, 0, "this checkout with no change is refused: %s%s" % (out, err))
+
+
+# A unit is one sentence, from the previous rule anchor to its own. The paragraph shapes below are built here, in the
+# shape of CLAUDE.md:13-38, so no case copies the live file.
+ALIGNED_OTHER = "other-decision"  # a second record that a sentence of the same paragraph cites
+ALIGNED_OTHER_RECORD = "docs/decisions/%s.md" % ALIGNED_OTHER
+ALIGNED_OTHER_CHECKED = "Rules checked: %s %s no change" % (ALIGNED_OTHER, ALIGNED_DASH)
+ALIGNED_PARA_BEFORE = ALIGNED_FILLER[:6]  # six units put a paragraph at line 13, where CLAUDE.md:13-38 starts
+ALIGNED_LEAD = "**Review.** Earlier sentence one holds its own rule. <!-- rule:alpha-one -->"
+ALIGNED_LEAD_EDITED = "**Review.** Earlier sentence one holds a changed rule. <!-- rule:alpha-one -->"
+ALIGNED_TAIL = "Closing sentence has no citation. <!-- rule:alpha-three -->"
+ALIGNED_CITE_LINE = "Decision `%s` holds the round rules. <!-- rule:%s -->" % (ALIGNED_ROUND, ALIGNED_HOME)
+ALIGNED_CITE_LINE_EDITED = ("Decision `%s` holds the round rules and a fix check. <!-- rule:%s -->"
+                            % (ALIGNED_ROUND, ALIGNED_HOME))
+# The driver runs the real CLI with listing refused for one path. This user is root, so chmod cannot lock a folder.
+ALIGNED_DRIVER = (
+    "import os, runpy, sys\n"
+    "locked, mode, probe, root = sys.argv[1:5]\n"
+    "def refuse(real):\n"
+    "    def wrapped(path='.', *args, **kwargs):\n"
+    "        if os.path.abspath(path) == locked:\n"
+    "            raise PermissionError(13, 'Permission denied', path)\n"
+    "        return real(path, *args, **kwargs)\n"
+    "    return wrapped\n"
+    "if mode == 'listdir':\n"
+    "    os.listdir = refuse(os.listdir)\n"
+    "else:\n"
+    "    os.scandir = refuse(os.scandir)\n"
+    "sys.argv = [probe, 'aligned', root]\n"
+    "runpy.run_path(probe, run_name='__main__')\n"
+)
+
+
+def other_record():
+    return aligned_record(ALIGNED_LINE38, home="other-home")
+
+
+def para_file(lines, before=ALIGNED_PARA_BEFORE):
+    """A rule file: `before` units, a blank line, then one paragraph of `lines`, one physical line each, no blank line
+    between. Returns (text, the paragraph's first line number)."""
+    return "\n\n".join(list(before)) + "\n\n" + "\n".join(lines) + "\n", 2 * len(before) + 1
+
+
+def para_base(lines):
+    """(base files, the paragraph's first line): CLAUDE.md with the paragraph, and both records it cites."""
+    text, first = para_file(lines)
+    return {"CLAUDE.md": text, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38), ALIGNED_OTHER_RECORD: other_record()}, first
+
+
+def short_paragraph():
+    """Four sentences: an earlier one that cites the other record, the cited sentence third, then a tail with no citation."""
+    return [ALIGNED_LEAD, "Earlier sentence two cites `%s` and stays as it is. <!-- rule:alpha-two -->" % ALIGNED_OTHER,
+            ALIGNED_CITE_LINE, ALIGNED_TAIL]
+
+
+def long_paragraph():
+    """The shape of CLAUDE.md:13-38: one paragraph of 26 physical lines, a bold lead, an anchor ending each sentence, and
+    the record cited in the last line. Sentence two cites the other record."""
+    lines = [ALIGNED_LEAD]
+    for n in range(1, 25):
+        if n == 2:
+            text = "Sentence two cites `%s` and keeps its wording." % ALIGNED_OTHER
+        else:
+            text = "Sentence %d keeps its own wording in the synthetic rule paragraph." % n
+        lines.append("%s <!-- rule:synth-%d -->" % (text, n))
+    lines.append(ALIGNED_CITE_LINE)
+    return lines
+
+
+class AlignedUnits(AlignedSteps, unittest.TestCase):
+    """Items (a), (b) and (c): a unit is one sentence, so an edit to an earlier sentence of the same paragraph does not
+    clear a cited record, a change to the cited sentence names that sentence's line, and that line demands only the records
+    that sentence cites."""
+
+    def test_an_earlier_sentence_edit_in_the_same_paragraph_does_not_clear_the_cited_record(self):
+        lines = short_paragraph()
+        base, first = para_base(lines)
+        edited, _ = para_file([ALIGNED_LEAD_EDITED] + lines[1:])
+        repo = self.pr(base, {"CLAUDE.md": edited, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_refused(repo, "CLAUDE.md:%d" % (first + 2), ALIGNED_ROUND, body=ALIGNED_OTHER_CHECKED)
+
+    def test_a_change_at_the_last_sentence_demands_only_the_records_that_sentence_cites(self):
+        lines = short_paragraph()
+        base, first = para_base(lines)
+        edited, _ = para_file(lines[:2] + [ALIGNED_CITE_LINE_EDITED] + lines[3:])
+        repo = self.pr(base, {"CLAUDE.md": edited})
+        code, out, err = self.probe_pr(repo)
+        cite = first + 2
+        self.assertIsNotNone(item_for(out, "CLAUDE.md:%d" % cite),
+                             "the refusal does not name the sentence's line %d: %s%s" % (cite, out, err))
+        self.assertIsNone(item_for(out, "CLAUDE.md:%d" % first),
+                          "the refusal names the paragraph's first line, not the sentence: %s" % out)
+        self.assertNotIn(ALIGNED_OTHER, out, "the refusal demands a record the changed sentence does not cite: %s" % out)
+        self.assertIn(ALIGNED_ROUND, out, "the refusal does not name the record the sentence cites: %s" % out)
+        self.assertEqual(code, 1, "the refusal exits with the wrong code: %s%s" % (out, err))
+
+    def test_a_real_shape_paragraph_with_an_earlier_edit_is_refused_at_its_sentence(self):
+        lines = long_paragraph()
+        base, first = para_base(lines)
+        cite = first + len(lines) - 1  # CLAUDE.md:38 in the live shape
+        edited_lines = list(lines)
+        edited_lines[5] = "Sentence 5 changed earlier in the same paragraph. <!-- rule:synth-5 -->"
+        edited, _ = para_file(edited_lines)
+        repo = self.pr(base, {"CLAUDE.md": edited, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_refused(repo, "CLAUDE.md:%d" % cite, ALIGNED_ROUND, body=ALIGNED_OTHER_CHECKED)
+
+
+class AlignedFolders(AlignedSteps, unittest.TestCase):
+    """Item (d): a folder the probe cannot read is unknown, exit 2 with a verdict line, never clear and never a traceback."""
+
+    def locked_run(self, repo, locked, mode):
+        """(exit code, stdout, stderr) of the real CLI on `repo`, with listing refused for the path `locked`."""
+        env = pr_env(repo.base_sha, commit_sha(repo.root, "HEAD"))
+        done = subprocess.run([sys.executable, "-c", ALIGNED_DRIVER, locked, mode, PROBES, repo.root], env=env,
+                              capture_output=True, text=True)
+        return done.returncode, done.stdout, done.stderr
+
+    def test_an_unreadable_folder_in_the_rule_walk_is_unknown(self):
+        text, _ = unit_file(ALIGNED_CITE)
+        base = {"docs/rules/locked/review.md": text, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38)}
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        locked = os.path.join(repo.root, "docs", "rules", "locked")
+        code, out, err = self.locked_run(repo, locked, "scandir")
+        self.assertTrue(out.startswith("aligned: "), "the probe did not run: %s%s" % (out, err))
+        self.assertEqual(code, 2, "an unreadable folder in the rule walk was read as clear: %s%s" % (out, err))
+        self.assertTrue(head(out).startswith("aligned: unknown"), out)
+
+    def test_an_unreadable_decisions_folder_is_unknown_with_a_verdict_not_a_traceback(self):
+        base, _ = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        locked = os.path.join(repo.root, "docs", "decisions")
+        code, out, err = self.locked_run(repo, locked, "listdir")
+        self.assertNotIn("Traceback", err, "an unreadable decisions folder raised a traceback, not a verdict: %s" % err)
+        self.assertTrue(head(out).startswith("aligned: unknown"), "no unknown verdict line: %s%s" % (out, err))
+        self.assertEqual(code, 2, "an unreadable decisions folder did not exit 2: %s%s" % (out, err))
+
+
+class AlignedDeleted(AlignedSteps, unittest.TestCase):
+    """Item (e): a PR that deletes a record still refuses the units that cite it, by its anchor or by its slug."""
+
+    def test_a_deleted_record_cited_only_by_its_anchor_is_refused(self):
+        base, where = self.cited(unit=ALIGNED_ANCHOR)
+        repo = self.pr(base, {}, delete=(ALIGNED_RECORD,))
+        self.assert_refused(repo, where, ALIGNED_ROUND)
+
+    def test_a_deleted_record_cited_only_by_its_slug_is_refused(self):  # green control: the slug form already counts it
+        base, where = self.cited()
+        repo = self.pr(base, {}, delete=(ALIGNED_RECORD,))
+        self.assert_refused(repo, where, ALIGNED_ROUND)
+
+
+# CLAUDE.md:38 holds five anchored sentences on one physical line of about 3000 characters. A sentence counts as
+# changed only when its text is new: the removed lines of the same diff hold the old text. Physical lines do not decide it.
+SAME_FILLER = "This sentence keeps its wording and runs on across the synthetic line, as the live file does. " * 6
+
+
+def same_line_sentences():
+    """Five anchored sentences on one physical line. Sentence two cites the other record, sentence three cites the record
+    under test, and sentences one, four and five cite nothing."""
+    return [
+        "**Lead.** Sentence one keeps its wording. %s<!-- rule:same-one -->" % SAME_FILLER,
+        "Sentence two cites `%s` and stays as it is. %s<!-- rule:same-two -->" % (ALIGNED_OTHER, SAME_FILLER),
+        "Sentence three: decision `%s` holds the round rules. %s<!-- rule:%s -->" % (ALIGNED_ROUND, SAME_FILLER, ALIGNED_HOME),
+        "Sentence four keeps its wording. %s<!-- rule:same-four -->" % SAME_FILLER,
+        "Sentence five closes the line. %s<!-- rule:same-five -->" % SAME_FILLER,
+    ]
+
+
+def with_sentence(sentences, index, old, new):
+    """`sentences` with the text `old` in sentence `index` replaced by `new`: a one-line edit of that sentence."""
+    edited = list(sentences)
+    assert old in edited[index], "the sentence %d holds no %r" % (index, old)
+    edited[index] = edited[index].replace(old, new, 1)
+    return edited
+
+
+class AlignedSameLine(AlignedSteps, unittest.TestCase):
+    """Sentences are units on one physical line. The unit of change is the sentence's text, not its line, and a moved
+    sentence with unchanged text is not a change."""
+
+    def same_line_base(self):
+        """(base files, the paragraph's line): the five sentences on one line of CLAUDE.md, and both records they cite."""
+        base, first = para_base([" ".join(same_line_sentences())])
+        return base, first
+
+    def test_a_record_change_is_refused_when_only_a_same_line_sibling_is_edited(self):
+        base, where = self.same_line_base()
+        sentences = with_sentence(same_line_sentences(), 3, "Sentence four keeps its wording.",
+                                  "Sentence four keeps its wording, edited.")
+        text, _ = para_file([" ".join(sentences)])
+        repo = self.pr(dict(base), {"CLAUDE.md": text, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_refused(repo, "CLAUDE.md:%d" % 13, ALIGNED_ROUND)
+
+    def test_a_one_character_edit_to_a_sibling_citing_nothing_demands_nothing(self):
+        base, _ = self.same_line_base()
+        sentences = with_sentence(same_line_sentences(), 3, "keeps", "keepz")
+        text, _ = para_file([" ".join(sentences)])
+        repo = self.pr(base, {"CLAUDE.md": text})
+        self.assert_clear(repo)
+
+    def test_a_one_character_edit_demands_only_the_records_its_sentence_cites(self):
+        base, _ = self.same_line_base()
+        sentences = with_sentence(same_line_sentences(), 1, "stays", "stayd")
+        text, _ = para_file([" ".join(sentences)])
+        repo = self.pr(base, {"CLAUDE.md": text})
+        code, out, err = self.probe_pr(repo)
+        self.assertIsNotNone(item_for(out, "CLAUDE.md:13"), "the refusal does not name the sentence's line: %s%s" % (out, err))
+        self.assertIn(ALIGNED_OTHER, out, "the refusal does not demand the record the edited sentence cites: %s" % out)
+        self.assertNotIn(ALIGNED_ROUND, out, "the refusal demands a record the edited sentence does not cite: %s" % out)
+        self.assertEqual(code, 1, "the refusal exits with the wrong code: %s%s" % (out, err))
+
+    def test_an_edited_citing_sentence_with_its_record_changed_passes_beside_unchanged_siblings(self):
+        base, _ = self.same_line_base()
+        sentences = with_sentence(same_line_sentences(), 2, "round rules.", "round rule.")
+        text, _ = para_file([" ".join(sentences)])
+        repo = self.pr(base, {"CLAUDE.md": text, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_clear(repo)
+
+    def test_a_sentence_moved_to_another_line_unchanged_is_not_a_change(self):
+        base, _ = para_base([ALIGNED_CITE_LINE, ALIGNED_TAIL])
+        text, _ = para_file([ALIGNED_TAIL, ALIGNED_CITE_LINE])
+        repo = self.pr(base, {"CLAUDE.md": text})
+        self.assert_clear(repo)
+
+
+class AlignedVendor(AlignedSteps, unittest.TestCase):
+    """A vendored or untracked CLAUDE.md that the probe cannot parse is not a rule file of this repo, so it does not make
+    the group unknown."""
+
+    def test_an_untracked_vendor_claude_md_with_an_unclosed_fence_does_not_fail_the_group(self):
+        base, where = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        for folder in (".venv/lib/pkg", "node_modules/pkg"):
+            with self.subTest(folder=folder):
+                path = os.path.join(repo.root, *folder.split("/"), "CLAUDE.md")
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write("```\n- an unclosed fence in a vendored file\n")
+                try:
+                    code, out, err = self.probe_pr(repo)
+                    self.assertNotEqual(code, 2, "a vendored CLAUDE.md made the group unknown: %s%s" % (out, err))
+                    self.assertIsNotNone(item_for(out, where), "the citing unit at %s is not named: %s%s" % (where, out, err))
+                    self.assertEqual(code, 1, "the refusal exits with the wrong code: %s%s" % (out, err))
+                finally:
+                    os.remove(path)
+
+
+# A sentence's text is judged against the file's base side, rebuilt from head and the hunks. Two shapes the removed-line
+# text alone gets wrong: a sentence that wraps, with only a sibling on its last line edited; a whole line deleted beside a
+# citing sentence.
+ALIGNED_GONE_LINE = "Sentence X keeps its own wording and is deleted. <!-- rule:gone-x -->"
+ALIGNED_WRAP_LINES = [
+    "**Review.** The citing sentence begins on this line and keeps going",
+    "across the second line, and it cites decision `%s`" % ALIGNED_ROUND,
+    "as the round rules say. <!-- rule:%s --> Sibling sentence on the last line keeps its wording. <!-- rule:wrap-sib -->"
+    % ALIGNED_HOME,
+]
+
+
+class AlignedWrapped(AlignedSteps, unittest.TestCase):
+    """An edit that touches a wrapped citing sentence's last line, or a deleted line beside a citing sentence, is no change
+    for that sentence. A record that did not change is not demanded."""
+
+    def test_a_sibling_edit_on_the_last_line_of_a_wrapped_citing_sentence_is_no_change_for_it(self):
+        base, _ = para_base(ALIGNED_WRAP_LINES)
+        edited = list(ALIGNED_WRAP_LINES)
+        edited[2] = edited[2].replace("keeps its wording.", "keeps its wording, edited.", 1)
+        text, _ = para_file(edited)
+        repo = self.pr(base, {"CLAUDE.md": text})
+        self.assert_clear(repo)
+
+    def test_a_whole_line_deleted_beside_a_citing_sentence_is_no_change_for_it(self):
+        base, _ = para_base([ALIGNED_GONE_LINE, ALIGNED_CITE_LINE, ALIGNED_TAIL])
+        text, _ = para_file([ALIGNED_CITE_LINE, ALIGNED_TAIL])
+        repo = self.pr(base, {"CLAUDE.md": text})
+        self.assert_clear(repo)
+
+
+# Step two runs one python line and reads no GitHub expression: the probe takes HEAD as the checked-out commit and the PR
+# body from the event file, so `bin/ci-job --lint` can run the step locally.
+ACTION_YML = os.path.join(os.path.dirname(HERE), "actions", "claude-md-cites", "action.yml")
+ALIGNED_STEP_RUN = re.compile(r'^python3 "\$\{\{ github\.action_path \}\}/\.\./\.\./lint/compliance_probes\.py" aligned '
+                              r'"\$GITHUB_WORKSPACE"$')
+
+
+def aligned_step(text):
+    """The blocks of the action's steps that run `aligned`, each as text from its `- name:` line."""
+    return [block for block in re.split(r"(?m)^    - name:", text)[1:]
+            if re.search(r"compliance_probes\.py[^\n]*\baligned\b", block)]
+
+
+class AlignedHead(AlignedSteps, unittest.TestCase):
+    """HEAD_SHA unset means the checked-out commit. The diff is still one git read, from base to HEAD."""
+
+    def test_head_unset_still_makes_one_git_call_on_base_to_head(self):
+        probes = load_probes()
+        base, _ = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        env = pr_env(repo.base_sha, commit_sha(repo.root, "HEAD"), ALIGNED_RULES_CHECKED, drop=("HEAD_SHA",))
+        git_calls = []
+        real_run = probes._nowindow.run
+
+        def counting(argv, *args, **kwargs):
+            git_calls.append(list(argv))
+            return real_run(argv, *args, **kwargs)
+
+        before = listing(repo.root)
+        with mock.patch.dict(os.environ, clear=True):
+            os.environ.update(env)
+            with mock.patch.object(probes._nowindow, "run", side_effect=counting):
+                code, out = in_process(repo.root, group="aligned", probes=probes)
+        self.assertTrue(any("diff" in argv for argv in git_calls), "the probe made no git diff read: %r" % git_calls)
+        self.assertEqual(len(git_calls), 1, "the probe made %d git calls, not one: %r" % (len(git_calls), git_calls))
+        self.assertIn("%s...HEAD" % repo.base_sha, " ".join(git_calls[0]), "the one git read is not base...HEAD: %r" % git_calls)
+        self.assertEqual(listing(repo.root), before, "the probe wrote a file or a folder")
+        self.assertEqual(code, 0, "a body that clears the gap did not clear it: %s" % out)
+
+
+class AlignedBody(AlignedSteps, unittest.TestCase):
+    """The PR body comes from env PR_BODY, else from the event file GITHUB_EVENT_PATH names. A gap with no body source is
+    unknown: the body is the only way to clear it, and without it the probe cannot tell a refusal from a clear."""
+
+    def scratch(self):
+        folder = tempfile.mkdtemp(prefix="aligned-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, folder, True)
+        return folder
+
+    def event(self, payload):
+        """The path of an event file that holds `payload`, a string."""
+        path = os.path.join(self.scratch(), "event.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+        return path
+
+    def gap(self):
+        """(the PR, where): a record change whose citing sentence is untouched, so the PR has a gap."""
+        base, where = self.cited()
+        return self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)}), where
+
+    def test_a_rules_checked_line_in_the_event_body_clears_the_gap(self):
+        repo, _ = self.gap()
+        event = self.event(json.dumps({"pull_request": {"body": ALIGNED_RULES_CHECKED}}))
+        self.assert_clear(repo, body=None, event=event)
+
+    def test_a_null_event_body_is_empty_and_clears_nothing(self):  # green control: a gap with an empty body is a refusal
+        repo, where = self.gap()
+        event = self.event(json.dumps({"pull_request": {"body": None}}))
+        self.assert_refused(repo, where, ALIGNED_ROUND, "Rules checked:", body=None, event=event)
+
+    def test_a_gap_with_no_body_source_is_unknown_never_a_refusal_or_a_clear(self):
+        repo, _ = self.gap()
+        sources = {
+            "no event file": None,
+            "an absent event file": os.path.join(self.scratch(), "absent.json"),
+            "a folder": self.scratch(),
+            "malformed JSON": self.event("{not json"),
+        }
+        for label, event in sources.items():
+            with self.subTest(source=label):
+                code, out, err = self.probe_pr(repo, body=None, event=event)
+                self.assertEqual(code, 2, "a gap with %s exits %d, not 2: %s%s" % (label, code, out, err))
+                self.assertTrue(head(out).startswith("aligned: unknown"), "no unknown verdict line: %s%s" % (out, err))
+
+    def test_no_gap_needs_no_body_source(self):  # green control: the citing sentence changed with its record
+        base, _ = self.cited()
+        changed, _ = unit_file(ALIGNED_CITE + " A second sentence.")
+        repo = self.pr(base, {"CLAUDE.md": changed, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_clear(repo, body=None)
+
+
+class ClaudeMdCitesAction(unittest.TestCase):
+    """Step two of the claude-md-cites action, read as text: one `python3` line, no export, no command substitution, and
+    an env that holds no PR body."""
+
+    def step(self):
+        with open(ACTION_YML, encoding="utf-8") as handle:
+            found = aligned_step(handle.read())
+        self.assertEqual(len(found), 1, "the action holds %d steps that run aligned, not one" % len(found))
+        return found[0]
+
+    def test_step_two_run_is_one_python_line(self):
+        runs = re.findall(r"(?m)^      run:(.*)$", self.step())
+        self.assertEqual(len(runs), 1, "step two has %d run lines, not one" % len(runs))
+        self.assertRegex(runs[0].strip(), ALIGNED_STEP_RUN, "step two's run is not the one python line: %r" % runs[0])
+
+    def test_step_two_has_no_export(self):
+        self.assertNotIn("export", self.step(), "step two still exports a variable")
+
+    def test_step_two_has_no_command_substitution(self):
+        self.assertNotIn("$(", self.step(), "step two still runs a command substitution")
+
+    def test_step_two_env_holds_no_pull_request_body(self):
+        self.assertNotIn("github.event.pull_request.body", self.step(), "step two's env reads the PR body from the event")
 
 
 def tearDownModule():
