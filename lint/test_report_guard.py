@@ -4973,6 +4973,12 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         self.assert_allowed("- A test-author on the answered guard's false alarm: it refused my two lines that were "
                             "not claims you had answered anything.")
 
+    def test_an_red_builder_fixing_the_guard_passes(self):
+        # Catches: a fix that flags the guard's own name, "the answered guard", or the word after "claim", so a line
+        # that describes the guard and its claim check is blocked as a claim that the owner or an item was answered.
+        self.assert_allowed("A Sonnet builder is fixing the answered guard so it flags only a claim that you or an item "
+                            "were answered, not other uses of the word.")
+
     def test_an_green_item_number_is_a_source_and_passes(self):
         # Catches: a fix that stops counting "item <n>" as a source, which decision answered-needs-source lists.
         self.assert_allowed("Item 870 is answered.")
