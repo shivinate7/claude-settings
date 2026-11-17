@@ -15865,17 +15865,18 @@ def shell_views(text):
 
 def settings_branches(text):
     """-> (head, cloud, local) of install.sh's settings.json step, comments blank. head runs from the TARGET_JSON line to the
-    `cloud_settings() {` line. cloud is that function, to its closing `}` at a line start. local runs from there to the first
-    `retire_and_record` call at a line start. That span also holds the cloud-gated generation call, which names no rules file."""
+    `cloud_settings() {` line. cloud is that function, to its closing `}` at a line start. local runs from there to the `fi` that
+    closes the local link block, after its `log "linked ..."` line. That span also holds cloud-gated lines, and none names the rules file."""
     code, masked = shell_views(text)
     start = code.index('TARGET_JSON="$CLAUDE_DIR/settings.json"')
     found = []
-    for pattern in (r"^cloud_settings\(\) \{$", r"^\}$", r"^  retire_and_record$"):
-        m = re.compile(pattern, re.M).search(masked, found[-1].end() if found else start)
+    for pattern, view in ((r"^cloud_settings\(\) \{$", masked), (r"^\}$", masked),
+                          (r'^    log "linked \$TARGET_JSON -> \$SRC/settings\.json"$', code), (r"^fi$", masked)):
+        m = re.compile(pattern, re.M).search(view, found[-1].end() if found else start)
         assert m, f"install.sh's settings step has no line matching {pattern!r}"
         found.append(m)
-    opener, close, retire = found
-    return code[start:opener.start()], code[opener.start():close.end()], code[close.end():retire.end()]
+    opener, close, linked, end = found
+    return code[start:opener.start()], code[opener.start():close.end()], code[close.end():end.end()]
 
 def assert_local_branch_names_no_rules_file(test, text):
     """Fails with one cause, "the local path names the rules file", when the local branch of install.sh's settings step mentions it."""
@@ -15885,7 +15886,7 @@ def assert_local_branch_names_no_rules_file(test, text):
 class ShellScan(unittest.TestCase):
     """settings_branches on small scripts: comment openers in strings, a multi-line string and a lone quote must not move a branch edge."""
     NAME = "merge/cloud_allow.json"
-    SCRIPT = 'TARGET_JSON="$CLAUDE_DIR/settings.json"\n%s\ncloud_settings() {\n%s\n}\n%s\n  retire_and_record\necho after\n'
+    SCRIPT = 'TARGET_JSON="$CLAUDE_DIR/settings.json"\n%s\ncloud_settings() {\n%s\n}\n%s\n    log "linked $TARGET_JSON -> $SRC/settings.json"\n  fi\nfi\necho after\n'
 
     def branches(self, head="", cloud="", local=""):
         return settings_branches(self.SCRIPT % (head, cloud, local))
@@ -16022,8 +16023,9 @@ class CloudAllow(unittest.TestCase):
     def test_install_sh_names_the_rules_file_nowhere_in_its_local_branch(self):
         with open(os.path.join(REPO_ROOT, "install.sh"), encoding="utf-8") as f:
             text = f.read()
-        self.assertIn('done < "$SRC/landed-dirs.txt"', settings_branches(text)[2],
-                      "the local branch does not hold the landing loop")  # scope before subject: the span starts after the function
+        local = settings_branches(text)[2]
+        self.assertIn('done < "$SRC/landed-dirs.txt"', local, "the local branch does not hold the landing loop")  # scope before subject
+        self.assertIn('ln -sfn "$SRC/settings.json"', local, "the local branch does not reach the link block")
         assert_local_branch_names_no_rules_file(self, text)
 
     def test_the_repo_settings_json_has_no_merge_allow_rule(self):
