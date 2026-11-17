@@ -1,0 +1,15 @@
+{
+  "priority": "next",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "owner": "triage",
+  "blockedBy": [],
+  "id": "idle-lanes-superseded",
+  "title": "A lane whose PR was replaced by an open or merged PR is listed as ready to archive",
+  "status": "done",
+  "pr": 3600,
+  "why": "Decision session-tiers (archiving scope): each lane whose PR was replaced is archived. Consultant built it (PR #3600).",
+  "source": "Coordinator relay 10:28 CST Nov 17; PR #3600 body, REST read by triage 10. No step existed for this PR (gap type 2); filed by triage 10.",
+  "note": "Done. PR #3600 merged 10:26:46 CST Nov 17 as 26a4268b5200 by shivinate7 (REST, triage 10, 10:28 CST; head f3ed72b5fb1b, 9 commits, plain merge). superseded_marks in skills/roadmap/build.py marks a step replaced only when its closed pull replacedBy names an open pull or a merged landedPulls row; idle_lanes adds those marks, so merge --idle-lanes and the roadmap upkeep row read one home. Reviews: round 1 FAIL, round 2 PASS, fix check PASS (sonnet, per PR body). Pace (coordinator): 1,128 min from first commit 15:38:42 CST Nov 16; lanes about 50, most at once not recounted since 26; idle unknown; brake n/a (cloud).",
+  "updatedAt": "2026-11-17T10:28:00-06:00"
+}
