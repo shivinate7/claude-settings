@@ -1155,6 +1155,53 @@ class SessionInstallerIsAllowed(unittest.TestCase):
         self.assertFalse(missing, "Never covers does not name %r" % missing)
 
 
+MAIN_INSTALLER = "Main Installer:"
+MAIN_INSTALL_BARE = ("CLAUDE_SETTINGS_REF=main ~/.claude/bin/verdict bash "
+                     "/root/claude-settings-main/merge/install_from_main.sh")
+# The cd is part of the act: the script takes its clone from the working directory.
+MAIN_INSTALL_FORMS = ("cd /root/claude-settings-main && " + MAIN_INSTALL_BARE,)
+MAIN_INSTALLER_REFUSED = (("another env var", "environment variable"), ("another ref", "another ref than `main`"),
+                          ("another repo or path", "another repo or path"), ("extra arguments", "extra argument"),
+                          ("chaining", "chaining"), ("a fork", "fork"), ("permissions", "permission"),
+                          ("overrides", "override"), ("any other act", "any other act"))
+
+
+class MainInstallerIsAllowed(unittest.TestCase):
+    def test_one_entry_names_the_main_installer(self):
+        hits = [e for e in auto_mode().get("allow", []) if e.startswith(MAIN_INSTALLER)]
+        self.assertEqual(len(hits), 1, "need exactly one '%s' entry in autoMode.allow, found %d"
+                         % (MAIN_INSTALLER, len(hits)))
+
+    def test_covers_quotes_the_one_form_and_the_script_exists(self):
+        covers = entry_part(self, MAIN_INSTALLER)
+        for form in MAIN_INSTALL_FORMS:
+            self.assertIn("`%s`" % form, covers)
+        self.assertTrue(os.path.isfile(os.path.join(REPO_ROOT, "merge", "install_from_main.sh")),
+                        "the entry quotes merge/install_from_main.sh, which is missing")
+
+    def test_covers_quotes_no_other_command(self):
+        spans = [x for x in re.findall(r"`([^`]+)`", entry_part(self, MAIN_INSTALLER))
+                 if "install" in x or "&&" in x or "bash" in x]
+        self.assertEqual(sorted(spans), sorted(MAIN_INSTALL_FORMS), "Covers text quotes a command other than the one ruled")
+
+    def test_covers_says_nothing_comes_before_or_after_the_command(self):
+        self.assertIn("nothing before it and nothing after it", entry_part(self, MAIN_INSTALLER))
+
+    def test_covers_says_the_cd_is_part_of_the_act(self):
+        self.assertIn("the script takes its clone from the working directory", entry_part(self, MAIN_INSTALLER))
+
+    def test_covers_names_the_owner_ruling(self):
+        missing = unnamed_terms(entry_part(self, MAIN_INSTALLER), (("owner time", "10:00 CST"), ("incident time", "15:59 CST")))
+        self.assertFalse(missing, "Covers text does not name %r" % missing)
+
+    def test_never_covers_names_each_refused_act(self):
+        missing = unnamed_terms(entry_part(self, MAIN_INSTALLER, never=True), MAIN_INSTALLER_REFUSED)
+        self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+    def test_session_installer_still_never_covers_main(self):
+        self.assertIn("another branch or ref such as `main`", entry_part(self, INSTALLER, never=True))
+
+
 class NeverCoversSentence(unittest.TestCase):
     def test_finds_the_clause_in_any_case(self):
         self.assertEqual(never_covers("Ok. never covers a merge."), "never covers a merge")

@@ -27,7 +27,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import check_record_slugs as records  # noqa: E402  the one home of the record markers and the changed-files read
 import check_silent_undo as undo  # noqa: E402  the one home of the PR body's key-line reading
 import layout  # noqa: E402  the one home of where the debts folder is

@@ -72,6 +72,13 @@ WINDOW=${SIM_TEST_WINDOW:-30}
 CRASH_DIR=${SIM_TEST_CRASH_DIR:-$HOME/Library/Logs/DiagnosticReports}
 STATE_DIR=${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state
 LOCK=$STATE_DIR/sim-test.lock
+# This script's real folder, links followed, so a sibling it calls later is of the install it started in (decision install-hooks-whole).
+self=$0
+while [ -L "$self" ]; do
+  to=$(readlink "$self") || break
+  case "$to" in /*) self=$to ;; *) self=$(dirname "$self")/$to ;; esac
+done
+self_dir=$(cd "$(dirname "$self")" && pwd -P)
 usage() {
   echo "usage: sim-test [--device duo|pro] [--hold [--for S] [-- CMD ARGS...] | XCODEBUILD_ARGS...]; $1" >&2
   exit 2
@@ -123,7 +130,7 @@ recorded=
 record_boot() {
   [ -n "$recorded" ] && return 0
   recorded=1
-  python3 "$(dirname "$0")/../hooks/sim_boot_record.py" --record "$booted_by_me" >/dev/null 2>&1 || true
+  python3 "$self_dir/../hooks/sim_boot_record.py" --record "$booted_by_me" >/dev/null 2>&1 || true
 }
 
 # noise_off: wait for the device this run booted to finish booting, then disable each label of bin/sim-noise-services on
@@ -131,7 +138,7 @@ record_boot() {
 # caller runs it as a background child and waits, so INT and TERM act at once (see stop_child).
 noise_off() {
   local label list
-  list="$(dirname "$0")/sim-noise-services"
+  list="$self_dir/sim-noise-services"
   [ -f "$list" ] || return 0
   xcrun simctl bootstatus "$booted_by_me" >/dev/null 2>&1 </dev/null || true
   while IFS= read -r label || [ -n "$label" ]; do
@@ -149,7 +156,7 @@ cleanup() {
   trap '' INT TERM HUP QUIT
   if [ -n "$child" ] && kill -0 "$child" 2>/dev/null; then stop_child; fi
   if [ -n "$booted_by_me" ]; then record_boot; xcrun simctl shutdown "$booted_by_me"; fi
-  [ -n "$have_lease" ] && "$(dirname "$0")/sim-lease" give --pid $$
+  [ -n "$have_lease" ] && "$self_dir/sim-lease" give --pid $$
   if [ -n "$have_lock" ]; then rm -f "$LOCK/pid" "$LOCK/take.out"; rmdir "$LOCK" 2>/dev/null; fi
 }
 trap cleanup EXIT
@@ -233,7 +240,7 @@ if [ -z "$udid" ]; then
   have_lease=1 # set first: an INT or TERM during the take still gives the place back
   # The take runs in the background and this shell waits on it, so a TERM or INT runs the trap at once, not when the
   # take returns (up to SIM_LEASE_WAIT). The cleanup stops the take as the child. Its output goes to a file in the lock.
-  "$(dirname "$0")/sim-lease" take --device "$role" --udid --pid $$ > "$LOCK/take.out" &
+  "$self_dir/sim-lease" take --device "$role" --udid --pid $$ > "$LOCK/take.out" &
   child=$!
   wait "$child"; rc=$?
   child=
@@ -247,7 +254,7 @@ if [ -z "$udid" ]; then
   # cap checks again under the lock before the boot. A device that is now reusable is used, and the lease goes back.
   scan
   if [ -n "$udid" ]; then
-    "$(dirname "$0")/sim-lease" give --pid $$
+    "$self_dir/sim-lease" give --pid $$
     have_lease=
   else
     udid=$granted

@@ -696,6 +696,9 @@ jobs:
       - name: Stale install suite
         run: python3 hooks/test_reinstall_stale.py
 
+      - name: Cloud whole refresh suite
+        run: python3 hooks/test_refresh_whole.py
+
       - name: Shared names suite
         run: python3 hooks/test_shared_names.py
 
@@ -1050,6 +1053,14 @@ jobs:
       - name: Idle-lanes reader fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_idle_lanes.py
+
+      - name: Lost-work rows fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 merge/test_lost_work.py
+
+      - name: Local holds_head fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 merge/test_holds_head.py
 
       - name: Combine-train tool fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
