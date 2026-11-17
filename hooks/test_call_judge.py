@@ -1394,6 +1394,44 @@ def case_widening_rule_names_the_mark():
     check("widening key: WIDENING_RULE contains WIDENS_KEY", bool(rule) and bool(key) and key in rule, cause)
 
 
+def widening_sentences(prompt):
+    """The lowercase sentences of a judged prompt's widening slot. [] when the slot is absent."""
+    region = widening_region(prompt, "PAGE_PROMPT") or ""
+    return [s for s in re.split(r"[.\n]", region.lower()) if s.strip()]
+
+
+def widening_pin(sentences, *groups):
+    """True when one sentence holds at least one word from each group."""
+    return any(all(any(w in s for w in group) for group in groups) for s in sentences)
+
+
+# Owner ruling 2026-11-17 14:19 CST (decision uniform-over-variants): a change to the shared tool that every repo gets
+# alike is not widening, so the judge never flags it. Widening is a form, allow entry or exception made so that one
+# repo's differing form passes. The judge reads both in its widening slot, so the cases read that slot.
+def case_widening_rule_spares_a_tool_wide_change_with_no_repo_named():
+    r = run_hook(page_input("set", good_page_item()), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    sentences = widening_sentences(prompt)
+    check("widening slot: the judged prompt carries the widening slot after the question-format prompt",
+          bool(sentences), prompt[:200])
+    check("widening: a sentence never flags a tool-wide change with no repo named as its reason",
+          widening_pin(sentences, ("never flag", "not flag", "not widen"), ("tool-wide", "every repo", "alike"),
+                       ("no repo", "names no", "repo named", "without a repo")),
+          sentences or prompt[:200])
+
+
+def case_widening_rule_says_widening_is_a_form_that_passes_one_repos_variant():
+    r = run_hook(page_input("set", good_page_item()), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    sentences = widening_sentences(prompt)
+    check("widening slot: the judged prompt carries the widening slot after the question-format prompt",
+          bool(sentences), prompt[:200])
+    check("widening: a sentence says widening is a form, allow entry or exception made so that one repo's differing form passes",
+          widening_pin(sentences, ("widen",), ("form", "allow", "exception"), ("differ", "variant"),
+                       ("pass", "accept", "through")),
+          sentences or prompt[:200])
+
+
 def case_fail_open():
     for label, inp, kwargs in (
         ("a model failure on a spawn", spawn_input("builder", model="sonnet"), {"model_fail": True}),
@@ -1825,6 +1863,8 @@ def main():
                  case_widening_set_holds_rule_once, case_widening_batch_holds_rule_once,
                  case_widening_absent_without_options, case_widening_refusal_names_the_option,
                  case_widening_fair_option_passes_code_path, case_widening_rule_names_the_mark,
+                 case_widening_rule_spares_a_tool_wide_change_with_no_repo_named,
+                 case_widening_rule_says_widening_is_a_form_that_passes_one_repos_variant,
                  case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
