@@ -37,7 +37,7 @@ from guard_push_delete import (
 #
 # 1. merge-checks: a merge made outside the merge tool is
 #    refused while the head has a check or a workflow run pending or red, or when that read could not run, or while another ready PR on the
-#    base has CI running and its head does not hold this one (`Host.batch_running`; owner ruling own-896-897-glued-amp-b).
+#    base has CI running and its head does not hold this one (`Host.batch_running`).
 #    The merge tool (merge/merge.py) runs its own `gh pr merge` as a subprocess, so no hook
 #    sees it; it has already read the head green. The read below is the tool's own `Host.head_read`, one home.
 # 2. cite-by-id (CLAUDE.md `git-cite-by-id`): a commit message or PR body that cites a record by

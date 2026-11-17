@@ -552,7 +552,7 @@ CHECK_TAIL_REASON = (
 # runs one ci-job under the merge tool's lint bound. A call whose `timeout` is shorter ends before the verdict.
 # The bound is read from the merge tool, never copied. The tool caps a foreground limit below the bound,
 # so a foreground lane lint that sets a limit is refused at any limit. A call that sets no `timeout` is not
-# judged (owner ruling own-896-897-glued-amp-b). An unloadable merge tool gives an unknown bound: nothing is refused.
+# judged: no limit means no bound to compare. An unloadable merge tool gives an unknown bound: nothing is refused.
 
 
 def check_timeout_bound_ms():
