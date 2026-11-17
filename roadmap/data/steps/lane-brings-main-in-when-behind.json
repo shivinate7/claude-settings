@@ -1,0 +1,14 @@
+{
+ "id": "lane-brings-main-in-when-behind",
+ "title": "A lane whose PR goes behind main or dirty brings main in itself when there is no conflict",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "consultant",
+ "blockedBy": [],
+ "why": "Owner ask, word for word, 09:53 CST Nov 17, relayed by the consultant at 09:54 CST (not read by triage 9 in his own message): \"Those sessions should've brought in main on their own then to update no? I understand maybe it mechanically could'nt be done and that's what you're solving right now, but can you at least then message coordinator ot message the other sessions to just gently update their checkouts manually if there's no conflict? Am i making sense here\". The consultant sent the manual part to the coordinator. This step is the lasting part: a lane whose PR goes dirty or behind main brings main in itself when there is no conflict.",
+ "source": "Consultant message to triage 9, 09:54 CST Nov 17. Searched steps by words at 09:54 CST: hand-in-merges-main-first (a lane merges main before it hands a PR in; narrower, no PR), lane-lint-merges-main (#3552, lane lint merges main for the caller) and merge-main-head-check (proves a hand-off head holds main) are related; none says a lane keeps itself current while its PR waits. Filed by triage 9.",
+ "note": "Todo, consultant to size. The manual part (the coordinator asks the other sessions to update their checkouts when there is no conflict) is with the coordinator. Open: whether this is a hook that runs inside a lane that is already running, or a line in the lane brief; unmeasured. A timer is not allowed (rule outcomes-mechanize-rules). Whether #3552 already covers part of it was not read by triage 9.",
+ "updatedAt": "2026-11-17T09:54:30-06:00",
+ "order": 244
+}
