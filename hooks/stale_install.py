@@ -56,7 +56,9 @@ SHORT = 7
 # Seconds for one local git read.
 GIT_TIMEOUT = 10
 # Seconds for one installer run. CLAUDE_SETTINGS_REINSTALL_TIMEOUT replaces it. The hook's own limit in settings.json
-# is 120. One turn can also spend up to 50 on local git reads and TERM_GRACE on a stop. The default leaves room.
+# is 120. A turn also makes up to 8 local git reads of up to GIT_TIMEOUT each, and a stop takes TERM_GRACE. A git read
+# takes milliseconds unless git hangs. The default leaves room for a typical turn. Hung reads on all 8 would pass the
+# hook's limit, and the harness would end the advisory hook.
 INSTALL_TIMEOUT = 60
 # Seconds the installer gets to run its EXIT trap after SIGTERM, before SIGKILL.
 TERM_GRACE = 5
@@ -237,11 +239,12 @@ def reinstall_lines(record, target):
     if failure:
         return [PREFIX + failure]
     now, _ = load_record()
-    if now is None or now["sha"] != target:
+    if now is None or not covered(record["source"], target, now["sha"]):
         return [PREFIX + "reinstall did not reach %s (record at %s)"
                 % (target[:SHORT], now["sha"][:SHORT] if now else "none")]
-    lines = [PREFIX + "reinstalled hooks at %s (was %s)" % (target[:SHORT], record["sha"][:SHORT])]
-    restart = restart_line(record["source"], record["sha"], target)
+    installed = now["sha"]
+    lines = [PREFIX + "reinstalled hooks at %s (was %s)" % (installed[:SHORT], record["sha"][:SHORT])]
+    restart = restart_line(record["source"], record["sha"], installed)
     if restart:
         lines.append(restart)
     return lines

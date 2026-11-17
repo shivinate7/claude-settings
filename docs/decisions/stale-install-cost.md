@@ -14,7 +14,7 @@ Cost, as the hook's module docstring states it:
 
 - Python process starts: one per prompt, in every session, cloud or local. The `settings.json` command starts python before the hook checks for a cloud session. The note `stale-hook-python-every-prompt` (python starts in local sessions) names this gap.
 - Network calls per prompt: 0. The installer a trigger starts fetches origin; the hook does not.
-- Local reads per cloud prompt: the install record, the config dir's `CLAUDE.md`, and git reads in a clone. At most 4 with no trigger (the ref, merge-base, and the shared clone's ref and count). At most 8 on a trigger prompt: those four, symbolic-ref, then two counts for a pin, or one diff and two `settings.json` reads for a reinstall. A pin with no origin ref adds one read of local main. None outside a cloud session. A trigger adds one installer run. Counted from the code; no case pins the counts.
+- Local reads per cloud prompt: the install record, the config dir's `CLAUDE.md`, and git reads in a clone. At most 4 with no trigger (the ref, merge-base, and the shared clone's ref and count). At most 8 on a trigger prompt: those four, symbolic-ref, then two counts for a pin, or one diff and two `settings.json` reads for a reinstall. A pin with no origin ref adds one read of local main. None outside a cloud session. A trigger adds one installer run. Counted from the code. Cases pin the no-trigger bound and the trigger counts (see Proof).
 - Files written by the hook: the seen file, `.claude-settings-refresh-seen` in the config dir, only when a reinstall, a pin refresh or a clone flag acts on a new head. It keeps the last 20 heads. The installer writes the install record.
 - Timer: none. Long-lived process: none.
 - Frequency: every prompt.
@@ -31,9 +31,10 @@ Proof, in `hooks/test_reinstall_stale.py`:
 - Linked pin: `test_linked_pin_current_is_silent_with_no_read` and `test_linked_pin_behind_gets_a_verdict_not_unknown`. A missing local ref is unknown: `test_unknown_ref_reports_unknown_without_a_read`.
 - No git outside a cloud session: `test_not_cloud_is_silent_with_no_git_call`.
 - Cost text: `HookFile::test_docstring_states_the_cost` checks that the docstring names process starts, network calls per prompt, the per-prompt frequency, no timer and no long-lived process. It checks the words, not the numbers.
-- Not pinned (unmeasured): the python start count, since no case counts starts. The claim that the hook writes no file but the seen file. The git read counts of a prompt with a trigger. The `git diff` read is pinned at one by `test_failed_local_diff_prints_restart_unknown_line`.
+- Cost cases: `test_no_trigger_prompt_writes_no_seen_file`, `test_no_trigger_prompt_makes_at_most_four_git_calls_and_no_network_read` and `test_seen_file_keeps_the_last_twenty_heads`. A record past the target counts as reached: `test_record_past_the_target_reads_as_reinstalled`. A record ahead of the local ref is silent: `test_record_ahead_of_the_local_ref_is_silent_with_no_install`.
+- Not pinned (unmeasured): the python start count, since no case counts starts. The git read count of a prompt with a trigger. The `git diff` read is pinned at one by `test_failed_local_diff_prints_restart_unknown_line`.
 
-Retry cost, debt `reinstall-no-backoff` (the hook reruns the installer on each prompt, with no backoff). A reinstall and a pin refresh now run once per head, so a failed run is not retried on later prompts for that head:
+Retry cost. A reinstall and a pin refresh run once per head, so a failed run is not retried on later prompts for that head:
 
 - A failed install, an installer that exits 0 short of the target, or a blocked pin move. The head is marked tried before the run. Each later prompt on that head prints `install still stale` and runs nothing. A new head runs once again.
 - Failed first install. No record is written, so there is no retry. The hook prints `install freshness unknown (no install record)` on each prompt until a record exists.
