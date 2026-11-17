@@ -1,0 +1,14 @@
+{
+ "id": "red-main-proven-fix",
+ "title": "A red main takes a proven fix as well as a revert, and the merge tool checks the proof",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "consultant",
+ "blockedBy": [],
+ "why": "Owner chat ruling, word for word, relayed by the consultant at 09:20 CST Nov 17 (the time he typed it is not in the relay): \"a) Allow a proven fix as well as a revert, and have the merge tool check the proof. Gain: no question and no 6-hour hold for the next flaky test. Lose: a fix that passes its own run but breaks something else lands on main without anyone asking you. (Recommended) approved\". It changes rule git-red-main-reverts, which lets only the revert of the blamed commit merge on a red main.",
+ "source": "Consultant message to triage 9, 09:20 CST Nov 17 (relayed, not read by triage 9 in the owner's own message). Searched steps at 09:21 CST: red-main-owner-two-picks, revert-merge-lifts-red-main and red-main-same-sha are different steps. Filed by triage 9.",
+ "note": "Doing, consultant, branch red-main-proven-fix (consultant relay; no PR read by triage 9 yet). Home of the ruling: decision no-merge-onto-red-main and rule git-red-main-reverts, rewritten in place (the consultant's word). Per the owner's output-answer-has-a-home rule the home record lands before the work it governs merges. Open: what counts as proof, and how the merge tool checks it, is not in the relay; unmeasured. Item 934 (one flag use for #3608) was answered earlier and is a separate, narrower answer.",
+ "updatedAt": "2026-11-17T09:21:00-06:00",
+ "order": 241
+}
