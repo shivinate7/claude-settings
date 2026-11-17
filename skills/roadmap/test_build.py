@@ -5,7 +5,10 @@ Each case builds a throwaway git repo: `main` holds the record homes, `roadmap` 
 import ast
 import contextlib
 import datetime
+import email.message
 import hashlib
+import http.client
+import importlib.util
 import inspect
 import io
 import json
@@ -17,6 +20,8 @@ import sys
 import shutil
 import tempfile
 import unittest
+import urllib.error
+import urllib.parse
 from unittest import mock
 
 sys.dont_write_bytecode = True
@@ -36,8 +41,10 @@ RUN_FOLDER = None
 STEP = {"title": "t", "status": "todo", "phase": "cleanup", "order": 1, "note": "n", "updatedAt": "2026-10-26T00:00:00Z"}
 CONFLICT = "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> 1234567 (other)\n"
 GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+TOKEN_VARS = ("GH_TOKEN", "GITHUB_TOKEN")  # the GitHub read's token variables: no fixture's build child gets them
 _NO_LANE = object()  # item(): the default, which leaves the row's lane key out
 _ABSENT = object()  # commit_step(): a field set to this is left out of the step file
+_OWN_REPO = object()  # rest_draft(): the head repo is the base repo of the case
 # get_session's status_bucket as list_sessions returns it: the SESSION_STATUS_BUCKET_* enum names, measured on real rows.
 BUCKET_COMPLETED = "SESSION_STATUS_BUCKET_COMPLETED"
 BUCKET_REVIEW_READY = "SESSION_STATUS_BUCKET_REVIEW_READY"
@@ -100,6 +107,11 @@ def run_build(*argv):
     return code, out + err
 
 
+def fixture_env():
+    """The environment a fixture's build child runs with: the caller's, minus the GitHub token variables."""
+    return {k: v for k, v in os.environ.items() if k not in TOKEN_VARS}
+
+
 def build_info(page):
     found = re.search(r"window\.ROADMAP_BUILD = (.*?);\n</script>", page, re.S)
     return json.loads(found.group(1).replace("<\\/", "</"))
@@ -118,6 +130,30 @@ def session_row(sid, status, *tags, status_bucket=None):
     if status_bucket is not None:
         row["status_bucket"] = status_bucket
     return row
+
+
+def headers_of(pairs=None):
+    """A response's headers as urlopen gives them: an email Message, so a name reads in any case."""
+    message = email.message.Message()
+    for key, value in (pairs or {}).items():
+        message[key] = value
+    return message
+
+
+def http_error(code, pairs=None):
+    """The HTTPError that the rest_get seam raises on a non-2xx reply: headers as a Message, an empty body."""
+    return urllib.error.HTTPError("https://api.github.com/repos/owner/fixture/pulls", code, "error %d" % code,
+                                  headers_of(pairs), io.BytesIO(b""))
+
+
+def request_url(call):
+    """The URL that a mocked rest_get call received, positional or by keyword."""
+    return call.args[0] if call.args else call.kwargs["url"]
+
+
+def request_token(call):
+    """The token that a mocked rest_get call received, positional or by keyword."""
+    return call.args[1] if len(call.args) > 1 else call.kwargs.get("token")
 
 
 def make_repo(root, steps=None, meta=None):
@@ -174,6 +210,16 @@ class Fixture(unittest.TestCase):
         self.data = self.repo / "roadmap" / "data"
         self.out = pathlib.Path(self.tmp.name) / "page.html"
         self.live = pathlib.Path(self.tmp.name) / "live.json"
+        # The one home of the GitHub read's environment and seam: no case reads a caller's token or the network.
+        # A case that needs a read sets a token and serves pages through serve_pulls (UpkeepFixture).
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        for key in TOKEN_VARS:
+            os.environ.pop(key, None)
+        seam = mock.patch.object(build, "rest_get", create=True, return_value=([], headers_of()))
+        self.rest_get = seam.start()
+        self.addCleanup(seam.stop)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -269,6 +315,40 @@ class Stamps(Fixture):
         page = self.out.read_text(encoding="utf-8")
         self.assertTrue(self.panels(page)["Steps"]["read"].startswith("unknown"))
         self.assertIn("window.ROADMAP_DB = null", page)
+
+
+class NotesHome(Fixture):
+    def test_notes_folder_is_a_home_beside_the_old_notes_file(self):
+        """The page reads the notes folder as a home, as it reads the old notes file. Control: the old file's panel
+        still homes on the old file."""
+        (self.repo / "docs" / "notes").mkdir(parents=True)
+        (self.repo / "docs" / "notes" / "wheel-speed-cap.md").write_text(
+            "- wheel-speed-cap: the spin rate is capped (hooks/guard.py)\n", encoding="utf-8")
+        (self.repo / "docs" / "debts").mkdir(parents=True)
+        (self.repo / "docs" / "debts" / "notes.md").write_text(
+            "# Notes\n\n- old-note: kept in the old file (hooks/guard.py)\n", encoding="utf-8")
+        page, _ = self.build_from_main()
+        panels = build_info(page)["panels"]
+        notes = [p for p in panels if p.get("home") == "docs/notes"]
+        self.assertEqual(len(notes), 1, "no panel reads the notes folder: %s" % [p.get("home") for p in panels])
+        self.assertFalse(notes[0]["read"].startswith("unknown"), notes[0])
+        self.assertEqual(self.panel(page, "Debt notes")["home"], "docs/debts/notes.md")
+
+    def test_checkout_with_no_notes_folder_reads_notes_as_empty(self):
+        """kind notes is optional: a checkout with no docs/notes reads the Notes home as empty, not unknown."""
+        page, _ = self.build_from_main()
+        self.assertFalse((self.repo / "docs" / "notes").exists())  # scope: the folder is absent in this checkout
+        notes = self.panel(page, "Notes")
+        self.assertFalse(notes["read"].startswith("unknown"), notes)
+        self.assertIn("empty", notes["read"], notes)
+
+    def test_missing_core_homes_still_read_unknown_without_a_notes_folder(self):
+        """Control: with no docs/notes, the core homes that are missing read unknown, as before."""
+        page, _ = self.build_from_main()
+        self.assertFalse((self.repo / "docs" / "notes").exists())  # scope: the folder is absent in this checkout
+        self.assertEqual(self.panel(page, "Debts")["read"], "unknown (no debts or docs/debts in this checkout)")
+        self.assertEqual(self.panel(page, "Debt notes")["read"],
+                         "unknown (no debts/notes.md or docs/debts/notes.md in this checkout)")
 
 
 class ConflictMarkers(Fixture):
@@ -569,10 +649,13 @@ class UpkeepFixture(Fixture):
 
     SLUG = "owner/fixture"
     REPO = "cs-repo:" + SLUG
+    # git's empty tree: every repo holds it, so a commit or ref on it needs no file of its own.
+    EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
     def setUp(self):
         super().setUp()
         self.use_origin(self.SLUG)
+        self.origin_set = set()  # branches whose refs/remotes/origin/ ref a case set, dropped or broke
 
     def commit_step(self, sid, **fields):
         """Write a step on the record branch and commit it, where a build from main reads it. A field set to _ABSENT is left out."""
@@ -600,6 +683,36 @@ class UpkeepFixture(Fixture):
     def out_with_live(self, expect=(0, None)):
         _, out = self.build_from_main("--live", str(self.live), expect=expect)
         return out
+
+    # argparse's refusal of a flag the build does not know: exit 2, with this text in the output.
+    NO_SOURCE_FLAG = "unrecognized arguments"
+
+    def source_out(self, source, live=True):
+        """(code, output) of a build from main that names the sessions source `source`. None names no flag, so the
+        default run. A build that raises fails the case with a named cause. A build that predates the flag refuses it
+        (exit 2, NO_SOURCE_FLAG), so the run repeats without the flag: the case's asserts then fail on the old
+        behaviour, not on the refusal. Only test_the_build_accepts_the_sessions_source_flag carries the refusal, the
+        way SINCE_FALLBACK's case carries the missing constant."""
+        self.on_main()
+        argv = ["--repo", str(self.repo), "--out", str(self.out)]
+        if live:
+            argv += ["--live", str(self.live)]
+        flag = [] if source is None else ["--sessions-source", source]
+        try:
+            code, out = run_build(*argv, *flag)
+            if code == 2 and flag and self.NO_SOURCE_FLAG in out:
+                code, out = run_build(*argv)
+        except Exception as err:
+            self.fail("the build raised %s instead of reading the row as one unknown entry" % type(err).__name__)
+        return code, out
+
+    def register_source(self, name, reader):
+        """A context that registers `reader` as the sessions source `name` in build.SESSION_SOURCES. A build without
+        the registry gets the name as a module attribute instead, so the case runs and fails on its own assert, not on
+        an AttributeError (SINCE_FALLBACK's reason)."""
+        if hasattr(build, "SESSION_SOURCES"):
+            return mock.patch.dict(build.SESSION_SOURCES, {name: reader})
+        return mock.patch.object(build, "SESSION_SOURCES", {name: reader}, create=True)
 
     def summary_counts(self, out):
         """{row label: count} in the order the upkeep line prints them. Fails when the output has no upkeep line."""
@@ -638,13 +751,113 @@ class UpkeepFixture(Fixture):
             row["createdAt"] = created
         return row
 
-    def pull_row(self, number, branch, head=None, merged=None):
-        """One landedPulls row. head and merged are left out when None, so a case can send a row with neither."""
+    def rest_draft(self, number, branch, updated_min=780, title=None, created_min=None, draft=True, head_repo=_OWN_REPO):
+        """A pulls row as GitHub's list call returns it, the shape the REST read takes. updated_min and created_min
+        are minutes before now. The default 780 (13 h) is stale; created_min is left out when None. head.repo is the
+        head repo as GitHub gives it: the base repo's full name by default, another full name for a fork's pull, and
+        null (head_repo=None) for a head repo GitHub no longer has, such as a deleted fork."""
+        full_name = self.SLUG if head_repo is _OWN_REPO else head_repo
+        row = {"number": number, "title": title or "lane " + branch, "draft": draft,
+               "head": {"ref": branch, "repo": None if full_name is None else {"full_name": full_name}},
+               "updated_at": iso_ago(updated_min)}
+        if created_min is not None:
+            row["created_at"] = iso_ago(created_min)
+        return row
+
+    def fresh_rows(self, first, count):
+        """`count` open drafts updated an hour ago, numbered from `first`. None of them is stale."""
+        return [self.rest_draft(n, "fresh-%d" % n, 60) for n in range(first, first + count)]
+
+    def mark(self, number, **flags):
+        """A live pulls row that carries only the marks (held, reviewLog) for the pull `number`."""
+        return dict({"number": number, "title": "lane %d" % number}, **flags)
+
+    def live_pull(self, number, branch, title=None):
+        """The live pulls row the publisher writes for an open pull, with no marks: held and reviewLog read as unset."""
+        return {"number": number, "title": title or "lane " + branch, "branch": branch}
+
+    def origin_commit(self, branch, when):
+        """Point refs/remotes/origin/<branch> at a new commit dated `when` (ISO, with its zone): the branch's newest commit."""
+        sha = git(self.repo, "commit-tree", self.EMPTY_TREE, "-m", "lane " + branch,
+                  env={"GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}).strip()
+        self.set_origin(branch, sha)
+
+    def set_origin(self, branch, target):
+        """Point refs/remotes/origin/<branch> at the object `target`."""
+        git(self.repo, "update-ref", "refs/remotes/origin/" + branch, target)
+        self.origin_set.add(branch)
+
+    def drop_origin(self, branch):
+        """Leave refs/remotes/origin/<branch> out, so the branch has no ref."""
+        git(self.repo, "update-ref", "-d", "refs/remotes/origin/" + branch)
+        self.origin_set.add(branch)
+
+    def break_origin(self, branch):
+        """Write refs/remotes/origin/<branch> to name an object git does not hold, so reading it fails."""
+        ref = self.repo / ".git" / "refs" / "remotes" / "origin" / branch
+        ref.parent.mkdir(parents=True, exist_ok=True)
+        ref.write_text("1" * 40 + "\n", encoding="utf-8")
+        self.origin_set.add(branch)
+
+    def stale_draft_branches(self, item):
+        """The head branches of the rows in one served page that the build reads as stale drafts: a draft whose
+        updated_at is over 12 h before now. A page that is not a list of rows gives none."""
+        body = item[0] if isinstance(item, tuple) else item
+        if not isinstance(body, list):
+            return []
+        cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=12)
+        out = []
+        for row in body:
+            if not (isinstance(row, dict) and row.get("draft") is True and isinstance(row.get("head"), dict)):
+                continue
+            ref, at = row["head"].get("ref"), row.get("updated_at")
+            if not isinstance(ref, str) or not isinstance(at, str):
+                continue
+            try:
+                when = datetime.datetime.fromisoformat(at.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if when.tzinfo is not None and when < cutoff:
+                out.append(ref)
+        return out
+
+    def serve_pulls(self, *pages, token="test-token"):
+        """Serve the rest_get seam: page N is pages[N-1], and a page past the list is empty. A page is a list of
+        pulls rows, a (body, headers) pair, or an exception to raise. The seam, as the build reads it, returns
+        (body, headers) on a 200, raises urllib.error.HTTPError on a non-2xx and raises ValueError on a body that is
+        not JSON. token sets GH_TOKEN for the read; None leaves the environment as the case set it. Each stale draft
+        branch served here gets a commit 13 h old, so the build's commit read finds one, unless the case has already
+        set that branch's origin ref (origin_commit, set_origin, drop_origin, break_origin)."""
+        if token is not None:
+            os.environ["GH_TOKEN"] = token
+        for item in pages:
+            for branch in self.stale_draft_branches(item):
+                if branch not in self.origin_set:
+                    self.origin_commit(branch, iso_ago(780))
+
+        def reply(url, token):
+            number = int(urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("page", ["1"])[0])
+            item = pages[number - 1] if number <= len(pages) else []
+            if isinstance(item, BaseException):
+                raise item
+            return item if isinstance(item, tuple) else (item, headers_of())
+
+        self.rest_get.side_effect = reply
+
+    def requested_pages(self):
+        """The page numbers that the REST read asked for, in the order it asked."""
+        return [int(urllib.parse.parse_qs(urllib.parse.urlparse(request_url(c)).query)["page"][0])
+                for c in self.rest_get.call_args_list]
+
+    def pull_row(self, number, branch, head=None, merged=None, **fields):
+        """One landedPulls row. head and merged are left out when None, so a case can send a row with neither. `fields`
+        add keys, such as replacedBy."""
         row = {"number": number, "branch": branch}
         if head is not None:
             row["head"] = head
         if merged is not None:
             row["merged"] = merged
+        row.update(fields)
         return row
 
     def created_before(self, minutes, read_ago=5):
@@ -3000,19 +3213,23 @@ class WaitOnClosedPull(UpkeepFixture):
 
 class ReadyAndDraftRows(UpkeepFixture):
     """Two upkeep rows (spec part B). `ready todo steps` lists each todo step whose note has the sentence `Ready.`,
-    with no live-phase filter. `draft PRs over 12 h with no live lane` lists each draft pull created more than
-    12 h before the live read, when no live session names its step, and the runner's list does not name it (`held`
-    true) and no review log is posted (`reviewLog` true). An entry reads `#<number> (<branch or title>)`,
-    or `unknown (#<number> has no createdAt)` when its createdAt is missing or not an ISO time with a zone. A held
-    draft reads no entry at all, so its missing createdAt is not an unknown entry. A `held` or `reviewLog` that is
-    not a JSON bool makes the pull row skipped, which reads the row unknown."""
+    with no live-phase filter. `draft PRs over 12 h with no live lane` lists each draft pull whose updated_at, read
+    from GitHub's REST pulls list (every page), is more than 12 h before the build run. A draft is skipped when a live
+    session names its step, or when the live file's pulls row for its number has `held` true or `reviewLog` true.
+    Those marks and sessions are read only when the live file is fresh. An entry reads `#<number> (<branch or title>)`.
+    A REST row with no usable updated_at, or a read that cannot finish, reads the row as one `unknown (...)` entry.
+    A live file that is stale or has no sessions list reads one `unknown (sessions not read: ...; REST read: ...)`
+    entry. A `held` or `reviewLog` that is not a JSON bool makes the live pull row skipped, which reads the row unknown.
+    The cases for the REST read itself are in StaleDraftRestRead."""
 
     READY = "ready todo steps"
     DRAFT = "draft PRs over 12 h with no live lane"
 
     def test_replay_lists_the_ready_step_and_the_stale_draft(self):
+        # The Nov 1 replay, read from REST: the draft was last updated 12 h 21 m before the build run.
         self.commit_replay_step()
-        self.publish(sessions=[], pulls=[self.replay_pull()])
+        self.serve_pulls([self.rest_draft(999, self.REPLAY, 741, self.REPLAY_TITLE)])
+        self.publish(sessions=[], pulls=[self.live_pull(999, self.REPLAY, self.REPLAY_TITLE)])
         _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
         self.assertEqual(self.row(out, self.READY), (1, self.REPLAY))
         self.assertEqual(self.row(out, self.DRAFT), (1, "#999 (%s)" % self.REPLAY))
@@ -3042,131 +3259,972 @@ class ReadyAndDraftRows(UpkeepFixture):
         count, detail = self.row(out, self.READY)
         self.assertEqual((count, self.entries(detail)), (2, ["r-ready", "t-todo"]), "ready reads as todo in this row")
 
-    def test_draft_under_twelve_hours_before_the_read_is_not_listed(self):
-        # The read is 45 min old. A draft 11 h 30 m before it is 12 h 15 m before now, so a check against the
-        # wall clock would list it. lone-draft is the control: 13 h before the read.
-        self.publish(sessions=[], read_at=iso_ago(45), pulls=[
-            self.draft(1000, "late-eleven", self.created_before(690, read_ago=45)),
-            self.draft(1001, "lone-draft", self.created_before(780, read_ago=45))])
+    def test_draft_updated_eleven_and_a_half_hours_before_now_is_not_listed(self):
+        # updated_at is aged from the build run. 11 h 30 m is under 12 h, so late-eleven is not listed.
+        # lone-draft is the control: 13 h before now.
+        self.serve_pulls([self.rest_draft(1000, "late-eleven", 690), self.rest_draft(1001, "lone-draft", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "lone-draft")])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1001 (lone-draft)"]))
 
     def test_draft_with_a_live_lane_is_not_listed(self):
         # c1 is doing, so the pair line stays quiet. Its live session carries this repo's tag and the step's tag.
         self.commit_step("c1", status="doing")
+        self.serve_pulls([self.rest_draft(1001, "c1", 780), self.rest_draft(1002, "lone-draft", 780)])
         self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", self.REPO, "cs-step:c1")],
-                     pulls=[self.draft(1001, "c1", self.created_before(780)),
-                            self.draft(1002, "lone-draft", self.created_before(780))])
+                     pulls=[self.live_pull(1001, "c1"), self.live_pull(1002, "lone-draft")])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1002 (lone-draft)"]))
 
     def test_draft_whose_only_lane_has_ended_is_listed_as_stale(self):
-        # c1's only lane is completed, so c1 holds no live lane and its draft is stale. c2's lane is running: its draft stays unlisted.
+        # c1's only lane is completed, so c1 holds no live lane and its draft is stale. c2's lane is running:
+        # its draft stays unlisted. The live pulls list still names both pulls, as the publisher writes it, so
+        # the stalled-step row does not read c1 as stalled; the draft row reads REST and ignores them.
         self.commit_step("c1", status="doing")
         self.commit_step("c2", status="doing", order=2)
+        self.serve_pulls([self.rest_draft(1001, "c1", 780), self.rest_draft(1002, "c2", 780)])
         self.publish(sessions=[
             session_row("session_done", "SESSION_STATUS_IDLE", self.REPO, "cs-build:lane", "cs-step:c1",
                         status_bucket=BUCKET_COMPLETED),
             session_row("session_run", "SESSION_STATUS_RUNNING", self.REPO, "cs-build:lane", "cs-step:c2",
                         status_bucket=BUCKET_WORKING)],
-            pulls=[self.draft(1001, "c1", self.created_before(780)), self.draft(1002, "c2", self.created_before(780))])
+            pulls=[dict(self.mark(1001), branch="c1"), dict(self.mark(1002), branch="c2")])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1001 (c1)"]))
 
     def test_draft_on_a_lane_branch_with_a_live_step_is_not_listed(self):
-        # The head ref lane/c1 is the lane of step c1, as c1 is. Its live session carries the step's tag.
-        # lone-draft is the control: no live step, so it stays listed.
+        # The head ref lane/c1 is the lane of step c1, as c1 is. lone-draft is the control: no live step.
         self.commit_step("c1", status="doing")
+        self.serve_pulls([self.rest_draft(1001, "lane/c1", 780), self.rest_draft(1002, "lone-draft", 780)])
         self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", self.REPO, "cs-step:c1")],
-                     pulls=[self.draft(1001, "lane/c1", self.created_before(780)),
-                            self.draft(1002, "lone-draft", self.created_before(780))])
+                     pulls=[self.live_pull(1001, "lane/c1"), self.live_pull(1002, "lone-draft")])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1002 (lone-draft)"]))
 
     def test_draft_whose_title_holds_a_live_step_id_is_still_listed(self):
         # Only the draft's branch can lane it. The title "Follow-up for c91" holds the live step c91 and stays listed.
         # c91 is the control: its branch is the step, so it is laned.
+        self.serve_pulls([self.rest_draft(1001, "c91-cleanup", 780, title="Follow-up for c91"),
+                          self.rest_draft(1002, "c91", 780)])
         self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", self.REPO, "cs-step:c91")],
-                     pulls=[self.draft(1001, "c91-cleanup", self.created_before(780), "Follow-up for c91"),
-                            self.draft(1002, "c91", self.created_before(780))])
+                     pulls=[self.live_pull(1001, "c91-cleanup", "Follow-up for c91"), self.live_pull(1002, "c91")])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1001 (c91-cleanup)"]))
 
     def test_empty_step_tag_names_no_draft(self):
         # An empty step id names nothing, so the title "a: b" does not lane this draft.
+        self.serve_pulls([self.rest_draft(1001, "lone-draft", 780, title="a: b")])
         self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", self.REPO, "cs-step:")],
-                     pulls=[self.draft(1001, "lone-draft", self.created_before(780), "a: b")])
+                     pulls=[self.live_pull(1001, "lone-draft", "a: b")])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1001 (lone-draft)"]))
 
-    def test_draft_without_a_usable_created_at_reads_its_entry_unknown(self):
-        bad = {"missing": None, "no zone": "2026-11-02T01:14:22", "not a time": "yesterday"}
-        for name, created in bad.items():
+    def test_draft_without_a_usable_updated_at_reads_the_row_unknown(self):
+        # A REST row with no usable updated_at is never a partial list: the row reads one unknown entry, and the
+        # control lone-draft is not listed beside it.
+        bad = {"missing": _ABSENT, "no zone": "2026-11-02T01:14:22", "not a time": "yesterday"}
+        for name, updated in bad.items():
             with self.subTest(name):
-                self.publish(sessions=[], pulls=[self.draft(998, "no-date", created),
-                                                 self.draft(1000, "lone-draft", self.created_before(780))])
+                row = self.rest_draft(998, "no-date", 780)
+                if updated is _ABSENT:
+                    del row["updated_at"]
+                else:
+                    row["updated_at"] = updated
+                self.serve_pulls([row, self.rest_draft(1000, "lone-draft", 780)])
+                self.publish(sessions=[])
                 count, detail = self.row(self.out_with_live(), self.DRAFT)
-                self.assertEqual((count, self.entries(detail)),
-                                 (2, ["#1000 (lone-draft)", "unknown (#998 has no createdAt)"]))
+                self.assertEqual(count, 1, "the row was %r" % (detail,))
+                self.assertTrue(detail.startswith("unknown (") and "updated" in detail, detail)
+                self.assertNotIn("(lone-draft)", detail)
 
     def test_draft_with_a_posted_review_log_is_not_listed(self):
         # The #2818 shape: lane lane-ruleset-read, not the step id, and no live session names merge-reads-ruleset.
-        # reviewLog true is the only mark. lone-draft is the control.
+        # reviewLog true on the live row for number 1001 is the only mark. lone-draft is the control.
         self.commit_step("merge-reads-ruleset", status="doing")
-        self.publish(sessions=[], pulls=[
-            dict(self.draft(1001, "lane-ruleset-read", self.created_before(780)), reviewLog=True),
-            self.draft(1002, "lone-draft", self.created_before(780))])
+        self.serve_pulls([self.rest_draft(1001, "lane-ruleset-read", 780), self.rest_draft(1002, "lone-draft", 780)])
+        self.publish(sessions=[], pulls=[self.mark(1001, reviewLog=True), self.live_pull(1002, "lone-draft")])
         count, detail = self.row(self.out_with_live(expect=(0, 1)), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1002 (lone-draft)"]),
                          "a draft whose review log is posted is not listed")
 
     def test_draft_the_runner_holds_is_not_listed_without_a_review_log(self):
-        # The same shape as the #2818 case, with held true and no review log. lone-draft is the control.
+        # The same shape as the #2818 case, with held true on the live row for number 1001 and no review log.
         self.commit_step("merge-reads-ruleset", status="doing")
-        self.publish(sessions=[], pulls=[
-            dict(self.draft(1001, "lane-ruleset-read", self.created_before(780)), held=True),
-            self.draft(1002, "lone-draft", self.created_before(780))])
+        self.serve_pulls([self.rest_draft(1001, "lane-ruleset-read", 780), self.rest_draft(1002, "lone-draft", 780)])
+        self.publish(sessions=[], pulls=[self.mark(1001, held=True), self.live_pull(1002, "lone-draft")])
         count, detail = self.row(self.out_with_live(expect=(0, 1)), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1002 (lone-draft)"]),
                          "a draft the runner's list names (held true) is not listed")
 
-    def test_orphan_draft_and_false_flags_are_still_listed(self):
-        # The false alarm control: no key, no lane, over 12 h, so listed. held false and reviewLog false name nothing.
-        self.publish(sessions=[], pulls=[
-            self.draft(1001, "orphan-draft", self.created_before(780)),
-            dict(self.draft(1002, "held-false", self.created_before(780)), held=False),
-            dict(self.draft(1003, "review-false", self.created_before(780)), reviewLog=False)])
+    def test_orphan_draft_reads_unknown_and_false_flags_are_still_listed(self):
+        # #1001 has no live pulls row, so its held and reviewLog marks are unread: the row reads it unknown, not listed.
+        # held false and reviewLog false name nothing, so #1002 and #1003 are listed. Three entries: one unknown, two listed.
+        self.serve_pulls([self.rest_draft(1001, "orphan-draft", 780), self.rest_draft(1002, "held-false", 780),
+                          self.rest_draft(1003, "review-false", 780)])
+        self.publish(sessions=[], pulls=[self.mark(1002, held=False), self.mark(1003, reviewLog=False)])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
-        self.assertEqual((count, self.entries(detail)),
-                         (3, ["#1001 (orphan-draft)", "#1002 (held-false)", "#1003 (review-false)"]),
-                         "a draft with no mark, or with held or reviewLog false, is listed")
+        self.assertEqual(count, 3, "the row was %r" % (detail,))
+        self.assertRegex(detail, r"unknown \([^)]*#1001", "the draft with no live row is not read unknown")
+        self.assertIn("#1002 (held-false)", detail)
+        self.assertIn("#1003 (review-false)", detail)
 
     def test_non_bool_held_or_review_log_skips_the_pull_row(self):
-        # A JSON string or number is a wrong shape. The pull row is skipped, so the row reads unknown and lists nothing.
+        # A JSON string or number is a wrong shape. The live pulls row is skipped, so the live file reads unknown,
+        # and the row reads one unknown entry that names the skipped row and the REST drafts it read.
         for key in ("held", "reviewLog"):
             for value in ("yes", 1):
                 with self.subTest(key=key, value=value):
-                    self.publish(sessions=[], pulls=[
-                        dict(self.draft(1001, "lone-draft", self.created_before(780)), **{key: value}),
-                        self.draft(1002, "other-draft", self.created_before(780))])
+                    self.serve_pulls([self.rest_draft(1001, "lone-draft", 780),
+                                      self.rest_draft(1002, "other-draft", 780)])
+                    self.publish(sessions=[], pulls=[dict(self.mark(1001), **{key: value})])
                     count, detail = self.row(self.out_with_live(), self.DRAFT)
-                    self.assertEqual((count, detail), (1, "unknown (1 pull rows skipped)"),
-                                     "a %s that is not a JSON bool skips its pull row" % key)
+                    self.assertEqual(count, 1, "a %s that is not a JSON bool reads the row as one entry" % key)
+                    self.assertTrue(detail.startswith("unknown (sessions not read: "), detail)
+                    self.assertIn("1 pull rows skipped", detail)
+                    self.assertRegex(detail, r"REST read: 2 stale-looking drafts?\b")
+                    self.assertNotIn("#1001", detail, "an unusable live file named a draft's number")
 
-    def test_held_draft_with_no_created_at_is_not_an_unknown_entry(self):
-        # held skips the pull before the createdAt check, so only the control lone-draft is listed.
-        self.publish(sessions=[], pulls=[
-            dict(self.draft(998, "held-no-date", None), held=True),
-            self.draft(1000, "lone-draft", self.created_before(780))])
+    def test_held_draft_with_no_updated_at_still_reads_the_row_unknown(self):
+        # held does not exempt a REST row from the shape check: the row reads one unknown entry, and the control
+        # lone-draft is not listed beside it.
+        held = self.rest_draft(998, "held-no-date", 780)
+        del held["updated_at"]
+        self.serve_pulls([held, self.rest_draft(1000, "lone-draft", 780)])
+        self.publish(sessions=[], pulls=[self.mark(998, held=True)])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
-        self.assertEqual((count, self.entries(detail)), (1, ["#1000 (lone-draft)"]),
-                         "a held draft with no createdAt reads no unknown entry")
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown ("), detail)
+        self.assertNotIn("(lone-draft)", detail)
 
-    def test_no_live_file_reads_the_draft_row_unknown(self):
+    def test_no_live_file_reads_the_draft_row_unknown_and_still_reads_rest(self):
+        # With no --live file the sessions are unknown, but the REST read still runs and its stale draft is named.
+        self.serve_pulls([self.rest_draft(1001, "lone-draft", 780)])
         _, out = self.build_from_main()
         count, detail = self.row(out, self.DRAFT)
-        self.assertEqual(count, 1)
-        self.assertTrue(detail.startswith("unknown (") and "--live" in detail, detail)
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown (sessions not read: ") and "--live" in detail, detail)
+        self.assertRegex(detail, r"REST read: 1 stale-looking drafts?\b")
+        self.assertNotIn("#1001", detail, "an unusable live file named a draft's number")
+
+
+class StaleDraftRestRead(UpkeepFixture):
+    """The draft row reads GitHub's REST pulls list itself, not the live file's pulls (design `stale-drafts-read-rest`).
+    Pages are 100 rows, read in order until a page is short, and the read stops at 20 pages. A stale draft's updated_at
+    is over 12 h before the build run. A read that cannot finish reads the row as one `unknown (<why>)` entry, never a
+    partial list and never a clear row: no token, an HTTP or rate-limit error, a body that is not a list or not JSON, a
+    row of the wrong shape, a read past the 20-page cap, a page that fails midway, or a rate-limit count of 0 before the
+    last page. The live file still gives the sessions and the held and reviewLog marks. Those are read only when the
+    live file is fresh; otherwise the row is one `unknown (sessions not read: ...; REST read: ...)` entry.
+
+    Each stale draft's newest branch commit is read too, one git log per stale draft. A commit under 12 h old lists
+    nothing, so the commit can only suppress a listing. A branch whose commit cannot be read (no ref, a ref on no
+    commit, a git failure, a time that does not parse) reads `unknown (#N branch X has no commit time)`, never a listing."""
+
+    DRAFT = ReadyAndDraftRows.DRAFT
+
+    def stale_first_page(self):
+        """A full page 1 (100 rows): stale #1001, then 99 fresh drafts."""
+        return [self.rest_draft(1001, "old-1001", 780)] + self.fresh_rows(1002, 99)
+
+    def test_each_page_asks_the_open_pulls_list_of_this_repo_at_one_hundred_a_page(self):
+        self.serve_pulls(self.stale_first_page(), [self.rest_draft(2001, "old-2001", 780)])
+        self.publish(sessions=[])
+        self.out_with_live()
+        self.assertEqual(len(self.rest_get.call_args_list), 2, "the read did not make one call per page")
+        for call in self.rest_get.call_args_list:
+            parts = urllib.parse.urlparse(request_url(call))
+            query = urllib.parse.parse_qs(parts.query)
+            self.assertEqual(parts.netloc, "api.github.com")
+            self.assertEqual(parts.path, "/repos/owner/fixture/pulls")
+            self.assertEqual((query["state"], query["per_page"]), (["open"], ["100"]))
+
+    def test_pages_of_one_hundred_then_fewer_are_both_read(self):
+        self.serve_pulls(self.stale_first_page(), [self.rest_draft(2001, "old-2001", 780)] + self.fresh_rows(2002, 1))
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "old-1001"), self.live_pull(2001, "old-2001")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual(self.requested_pages(), [1, 2], "a full page 1 did not lead to a read of page 2")
+        self.assertEqual((count, self.entries(detail)), (2, ["#1001 (old-1001)", "#2001 (old-2001)"]))
+
+    def test_exactly_one_hundred_rows_reads_an_empty_second_page(self):
+        self.serve_pulls(self.stale_first_page(), [])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "old-1001")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual(self.requested_pages(), [1, 2], "a full page 1 did not lead to a read of page 2")
+        self.assertEqual((count, self.entries(detail)), (1, ["#1001 (old-1001)"]))
+
+    def test_two_hundred_fifty_rows_are_all_read(self):
+        # More than the live file's 200 rows: the stale drafts on page 1 and on page 3 are both listed.
+        self.serve_pulls(self.stale_first_page(), self.fresh_rows(1101, 100),
+                         [self.rest_draft(3001, "old-3001", 780)] + self.fresh_rows(3002, 49))
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "old-1001"), self.live_pull(3001, "old-3001")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual(self.requested_pages(), [1, 2, 3])
+        self.assertEqual((count, self.entries(detail)), (2, ["#1001 (old-1001)", "#3001 (old-3001)"]))
+
+    def test_twenty_full_pages_then_a_short_one_is_the_last_page_read(self):
+        # The cap is 20 pages. Page 20 is read, and it is short, so the read ends there and lists its draft.
+        pages = [self.fresh_rows(100 * i + 1, 100) for i in range(19)]
+        pages.append([self.rest_draft(2000, "old-2000", 780)] + self.fresh_rows(2001, 4))
+        self.serve_pulls(*pages)
+        self.publish(sessions=[], pulls=[self.live_pull(2000, "old-2000")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual(self.requested_pages(), list(range(1, 21)))
+        self.assertEqual((count, self.entries(detail)), (1, ["#2000 (old-2000)"]))
+
+    def test_past_twenty_pages_reads_one_unknown_entry_and_asks_for_no_page_twenty_one(self):
+        pages = [self.stale_first_page()] + [self.fresh_rows(10000 + 100 * i, 100) for i in range(1, 20)]
+        self.serve_pulls(*pages)
+        self.publish(sessions=[])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertLessEqual(max(self.requested_pages() or [0]), 20, "the read asked for a page past the 20-page cap")
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown ("), detail)
+        self.assertNotIn("#1001", detail, "a read past the cap listed part of the drafts")
+
+    def test_a_page_that_fails_midway_reads_one_unknown_entry_not_a_partial_list(self):
+        self.serve_pulls(self.stale_first_page(), http_error(500))
+        self.publish(sessions=[])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown ("), detail)
+        self.assertNotIn("#1001", detail, "page 1's stale draft was listed beside a failed page 2")
+
+    def test_forbidden_and_rate_limited_replies_read_one_unknown_entry_naming_the_rate_limit(self):
+        replies = {"403 with the count at zero": http_error(403, {"X-RateLimit-Remaining": "0"}),
+                   "429 with a retry delay": http_error(429, {"Retry-After": "60"})}
+        for name, reply in replies.items():
+            with self.subTest(name):
+                self.serve_pulls(self.stale_first_page(), reply)
+                self.publish(sessions=[])
+                count, detail = self.row(self.out_with_live(), self.DRAFT)
+                self.assertEqual(count, 1, "the row was %r" % (detail,))
+                self.assertTrue(detail.startswith("unknown ("), detail)
+                self.assertIn("rate limit", detail.lower(), "the reason does not name the rate limit")
+                self.assertNotIn("#1001", detail)
+
+    def test_rate_limit_at_zero_before_the_last_page_reads_one_unknown_entry(self):
+        # Page 1 is full and says the count is at 0, so the read must stop there. Page 2 would list #2001 if read.
+        self.serve_pulls((self.stale_first_page(), headers_of({"X-RateLimit-Remaining": "0"})),
+                         [self.rest_draft(2001, "old-2001", 780)])
+        self.publish(sessions=[])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown ("), detail)
+        self.assertNotIn("#1001", detail, "page 1's stale draft was listed with the count at 0")
+        self.assertNotIn("#2001", detail, "a page after the count reached 0 was listed")
+
+    def test_rate_limit_at_zero_on_the_last_page_reads_clear(self):
+        # The count is 0 on page 2, which is short, so page 2 is the last page and the read is whole.
+        self.serve_pulls((self.stale_first_page(), headers_of({"X-RateLimit-Remaining": "5"})),
+                         ([self.rest_draft(2001, "old-2001", 780)], headers_of({"X-RateLimit-Remaining": "0"})))
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "old-1001"), self.live_pull(2001, "old-2001")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual(self.requested_pages(), [1, 2])
+        self.assertEqual((count, self.entries(detail)), (2, ["#1001 (old-1001)", "#2001 (old-2001)"]))
+
+    def test_a_draft_is_aged_by_updated_at_not_created_at(self):
+        self.serve_pulls([self.rest_draft(1001, "created-long-ago", 60, created_min=20 * 60),
+                          self.rest_draft(1002, "updated-long-ago", 780, created_min=60)])
+        self.publish(sessions=[], pulls=[self.live_pull(1002, "updated-long-ago")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (1, ["#1002 (updated-long-ago)"]))
+
+    def test_a_draft_is_aged_from_the_build_run_not_from_the_live_read(self):
+        # The live file was read 45 min ago. 12 h 15 m before now is 11 h 30 m before that read, so an age taken from
+        # the read would not list it. young-draft, 11 h 30 m before now, is not listed.
+        self.serve_pulls([self.rest_draft(1001, "aged-from-now", 735), self.rest_draft(1002, "young-draft", 690)])
+        self.publish(read_at=iso_ago(45), sessions=[], pulls=[self.live_pull(1001, "aged-from-now")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (1, ["#1001 (aged-from-now)"]))
+
+    def test_a_pull_that_is_not_a_draft_is_not_listed(self):
+        self.serve_pulls([self.rest_draft(1001, "open-not-draft", 780, draft=False),
+                          self.rest_draft(1002, "draft-stale", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1002, "draft-stale")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (1, ["#1002 (draft-stale)"]))
+
+    def test_the_row_reads_rest_not_the_live_pulls_list(self):
+        # The live pulls list holds a stale draft, #1001, that REST does not return: the row does not list it. REST's
+        # #1002 has no live pulls row, so its held and reviewLog marks are unread and the row reads it unknown.
+        live = dict(self.mark(1001), draft=True, createdAt=iso_ago(780), branch="live-only")
+        self.serve_pulls([self.rest_draft(1002, "rest-draft", 780)])
+        self.publish(sessions=[], pulls=[live])
+        count, detail = self.row_or_named_crash()
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown ("), detail)
+        self.assertIn("#1002", detail)
+        self.assertNotIn("live-only", detail, "the live pulls list fed the row")
+
+    def test_a_fresh_live_file_and_a_clean_rest_read_reads_no_entry(self):
+        # The control: a whole read with no stale draft reads the row clear, with no line at all.
+        self.serve_pulls([self.rest_draft(1001, "fresh-draft", 60)])
+        self.publish(sessions=[])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, detail), (0, ""))
+
+    def test_a_row_of_the_wrong_shape_reads_one_unknown_entry_not_a_partial_list(self):
+        wrong = {
+            "number is text": {"number": "1002"},
+            "draft is text": {"draft": "true"},
+            "draft is null": {"draft": None},
+            "head.ref is not text": {"head": {"ref": 5}},
+            "head is missing": {"head": _ABSENT},
+            "updated_at is not a time": {"updated_at": "yesterday"},
+            "updated_at has no zone": {"updated_at": "2026-11-02T01:14:22"},
+            "updated_at is null": {"updated_at": None},
+        }
+        for name, change in wrong.items():
+            with self.subTest(name):
+                row = self.rest_draft(1002, "bad-row", 780)
+                for key, value in change.items():
+                    if value is _ABSENT:
+                        del row[key]
+                    else:
+                        row[key] = value
+                self.serve_pulls([self.rest_draft(1001, "old-1001", 780), row])
+                self.publish(sessions=[])
+                count, detail = self.row(self.out_with_live(), self.DRAFT)
+                self.assertEqual(count, 1, "the row did not read one entry")
+                self.assertTrue(detail.startswith("unknown ("), detail)
+                self.assertNotIn("#1001", detail)
+
+    def test_a_body_that_is_not_a_list_or_not_json_reads_one_unknown_entry(self):
+        replies = {"an object, not a list": ({"message": "Not Found"}, headers_of()),
+                   "not JSON": ValueError("Expecting value: line 1 column 1 (char 0)")}
+        for name, reply in replies.items():
+            with self.subTest(name):
+                self.serve_pulls(reply)
+                self.publish(sessions=[])
+                count, detail = self.row(self.out_with_live(), self.DRAFT)
+                self.assertEqual(count, 1, "the row was %r" % (detail,))
+                self.assertTrue(detail.startswith("unknown ("), detail)
+
+    def test_no_token_reads_one_unknown_entry_that_names_the_token(self):
+        self.serve_pulls([self.rest_draft(1001, "old-1001", 780)], token=None)
+        self.publish(sessions=[])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown (") and "token" in detail.lower(), detail)
+        self.assertNotIn("#1001", detail)
+
+    def test_the_token_is_gh_token_else_github_token(self):
+        cases = {"GITHUB_TOKEN only": ({"GITHUB_TOKEN": "from-github"}, "from-github"),
+                 "both set": ({"GH_TOKEN": "first", "GITHUB_TOKEN": "second"}, "first")}
+        for name, (env, want) in cases.items():
+            with self.subTest(name):
+                for key in ("GH_TOKEN", "GITHUB_TOKEN"):
+                    os.environ.pop(key, None)
+                os.environ.update(env)
+                self.rest_get.reset_mock()
+                self.serve_pulls([self.rest_draft(1001, "old-1001", 780)], token=None)
+                self.publish(sessions=[])
+                self.out_with_live()
+                tokens = {request_token(c) for c in self.rest_get.call_args_list}
+                self.assertEqual(tokens, {want}, "the read did not send the token that the design names")
+
+    def test_one_build_reads_one_call_per_hundred_open_pulls_plus_one(self):
+        # The cost the design states: floor(N / 100) + 1 calls for N open pulls, since a full page is followed by the
+        # page that ends the read. N = 0 reads one empty page. N = 100 reads a full page, then an empty one.
+        for total in (0, 99, 100, 250):
+            with self.subTest(open_pulls=total):
+                rows = [self.rest_draft(n, "fresh-%d" % n, 60) for n in range(1, total + 1)]
+                self.rest_get.reset_mock()
+                self.serve_pulls(*[rows[i:i + 100] for i in range(0, total, 100)])
+                self.publish(sessions=[])
+                self.out_with_live()
+                self.assertEqual(len(self.rest_get.call_args_list), total // 100 + 1)
+
+    def test_a_stale_live_file_reads_one_unknown_entry_that_names_the_rest_read(self):
+        self.serve_pulls(self.stale_first_page())
+        self.publish(read_at=iso_ago(90), sessions=[])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown (sessions not read: "), detail)
+        self.assertIn("the live file was read", detail)
+        self.assertRegex(detail, r"REST read: 1 stale-looking drafts?\b")
+        self.assertNotIn("#1001", detail, "an unusable live file named a draft's number")
+
+    def test_a_stale_live_file_with_no_stale_drafts_still_reads_one_unknown_entry(self):
+        # Never an empty row: a clean REST read under a stale live file is unknown, not clear.
+        self.serve_pulls(self.fresh_rows(1001, 2))
+        self.publish(read_at=iso_ago(90), sessions=[])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual(count, 1, "a stale live file read the row clear")
+        self.assertTrue(detail.startswith("unknown (sessions not read: "), detail)
+        self.assertRegex(detail, r"REST read: 0 stale-looking")
+
+    def test_a_live_file_with_no_sessions_list_reads_one_unknown_entry(self):
+        self.serve_pulls([self.rest_draft(1001, "old-1001", 780)])
+        self.publish()
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown (sessions not read: ") and "no sessions list" in detail, detail)
+        self.assertRegex(detail, r"REST read: 1 stale-looking drafts?\b")
+        self.assertNotIn("#1001", detail, "an unusable live file named a draft's number")
+
+    def test_a_mark_is_matched_to_its_draft_by_number_not_by_branch(self):
+        # The live row for #1005 names the same branch as stale draft #1001, and it is held. #1001 is still listed.
+        self.serve_pulls([self.rest_draft(1001, "shared-branch", 780)])
+        self.publish(sessions=[], pulls=[dict(self.mark(1005), branch="shared-branch", held=True),
+                                         self.live_pull(1001, "shared-branch")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (1, ["#1001 (shared-branch)"]))
+
+    def row_or_named_crash(self, live=True):
+        """The DRAFT row's (count, detail) from one build. A build that raises fails the case with a named cause."""
+        try:
+            if live:
+                out = self.out_with_live()
+            else:
+                _, out = self.build_from_main()
+        except Exception as err:
+            self.fail("the build raised %s instead of reading the row as one unknown entry" % type(err).__name__)
+        return self.row(out, self.DRAFT)
+
+    def test_a_transport_error_mid_read_reads_one_unknown_entry_and_does_not_crash(self):
+        # http.client raises these from inside the read, past HTTPError and OSError. Each ends as one unknown entry,
+        # never a raised exception and never a partial list: page 1's stale #1001 is not listed.
+        failures = {"IncompleteRead": http.client.IncompleteRead(b"partial body"),
+                    "BadStatusLine": http.client.BadStatusLine("garbage"),
+                    "HTTPException": http.client.HTTPException("transport failed")}
+        for name, failure in failures.items():
+            with self.subTest(name):
+                self.serve_pulls(self.stale_first_page(), failure)
+                self.publish(sessions=[])
+                count, detail = self.row_or_named_crash()
+                self.assertEqual(count, 1, "the row was %r" % (detail,))
+                self.assertTrue(detail.startswith("unknown ("), detail)
+                self.assertNotIn("#1001", detail)
+
+    def test_a_stale_draft_with_no_live_pulls_row_reads_unknown_and_is_not_listed(self):
+        # The live file is fresh but has no pulls row for #1001, so its held and reviewLog marks are unread. The draft
+        # is not listed: the row reads one unknown entry.
+        self.serve_pulls([self.rest_draft(1001, "old-1001", 780)])
+        self.publish(sessions=[], pulls=[])
+        count, detail = self.row_or_named_crash()
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown ("), detail)
+        self.assertIn("#1001", detail)
+
+    def test_an_unusable_live_file_names_a_count_of_stale_drafts_not_their_numbers(self):
+        # The sessions are unknown, so the unknown entry counts the stale-looking REST drafts and names none of them:
+        # no number and no branch. fresh-1003 is not stale and is not counted.
+        self.serve_pulls([self.rest_draft(1001, "old-1001", 780), self.rest_draft(1002, "old-1002", 780),
+                          self.rest_draft(1003, "fresh-1003", 60)])
+        for name, stale_live in (("live file read 90 minutes ago", True), ("no live file", False)):
+            with self.subTest(name):
+                if stale_live:
+                    self.publish(read_at=iso_ago(90), sessions=[])
+                count, detail = self.row_or_named_crash(live=stale_live)
+                self.assertEqual(count, 1, "the row was %r" % (detail,))
+                self.assertRegex(detail, r"REST read: 2 stale-looking drafts?\b", detail)
+                for named in ("#1001", "#1002", "old-1001", "old-1002"):
+                    self.assertNotIn(named, detail, "the unusable read named a draft: %s" % named)
+
+    def commit_time(self, branch):
+        """The newest commit time of the fixture's refs/remotes/origin/<branch>, as an aware datetime (git's own read)."""
+        return datetime.datetime.fromisoformat(git(self.repo, "log", "-1", "--format=%cI", "refs/remotes/origin/" + branch).strip())
+
+    @staticmethod
+    def iso_time(text):
+        """An ISO time with its zone, as an aware datetime: the form iso_ago and zoned_ago write."""
+        return datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+    def zoned_ago(self, minutes):
+        """An ISO time `minutes` before now, written in the -06:00 zone rather than UTC."""
+        zone = datetime.timezone(datetime.timedelta(hours=-6))
+        return (datetime.datetime.now(zone) - datetime.timedelta(minutes=minutes)).isoformat(timespec="seconds")
+
+    def unknown_no_commit(self, number, branch):
+        return "unknown (#%d branch %s has no commit time)" % (number, branch)
+
+    def test_a_stale_draft_whose_branch_has_a_commit_under_twelve_hours_old_is_not_listed(self):
+        when = iso_ago(60)
+        self.origin_commit("pushed-today", when)
+        self.serve_pulls([self.rest_draft(1001, "pushed-today", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "pushed-today")])
+        self.assertEqual(self.commit_time("pushed-today"), self.iso_time(when),
+                         "the fixture's branch commit is not the 1 h old commit the case set")
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, detail), (0, ""), "a commit 1 h old did not suppress the stale draft: %r" % (detail,))
+
+    def test_the_twelve_hour_line_for_the_branch_commit_holds_in_any_zone(self):
+        cases = {"11 h 30 m old, in the -06:00 zone": (self.zoned_ago(690), []),
+                 "12 h 30 m old, in UTC": (iso_ago(750), ["#1001 (aged-commit)"])}
+        for name, (when, listed) in cases.items():
+            with self.subTest(name):
+                self.origin_commit("aged-commit", when)
+                self.serve_pulls([self.rest_draft(1001, "aged-commit", 780)])
+                self.publish(sessions=[], pulls=[self.live_pull(1001, "aged-commit")])
+                self.assertEqual(self.commit_time("aged-commit"), self.iso_time(when),
+                                 "the fixture's branch commit is not the one the case set")
+                count, detail = self.row(self.out_with_live(), self.DRAFT)
+                self.assertEqual((count, self.entries(detail)), (len(listed), listed),
+                                 "a branch commit %s was not read against 12 h" % name)
+
+    def test_a_recent_commit_suppresses_an_old_one_lists_and_a_fresh_draft_is_never_added(self):
+        self.origin_commit("fresh-draft-old-commit", iso_ago(780))
+        self.origin_commit("stale-old-commit", iso_ago(780))
+        self.origin_commit("stale-recent-commit", iso_ago(60))
+        self.serve_pulls([self.rest_draft(1001, "fresh-draft-old-commit", 60),
+                          self.rest_draft(1002, "stale-old-commit", 780),
+                          self.rest_draft(1003, "stale-recent-commit", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1002, "stale-old-commit"),
+                                         self.live_pull(1003, "stale-recent-commit")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (1, ["#1002 (stale-old-commit)"]),
+                         "a recent branch commit did not suppress #1003, or a fresh draft was listed")
+
+    def test_a_stale_draft_whose_branch_has_no_ref_reads_one_unknown_entry(self):
+        self.drop_origin("no-ref")
+        self.serve_pulls([self.rest_draft(1001, "no-ref", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "no-ref")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, detail), (1, self.unknown_no_commit(1001, "no-ref")),
+                         "a draft whose branch has no ref was not read as one unknown entry")
+
+    def test_a_branch_ref_on_a_tree_holds_no_commit_and_reads_the_same_unknown_entry(self):
+        self.set_origin("tree-ref", self.EMPTY_TREE)
+        self.serve_pulls([self.rest_draft(1001, "tree-ref", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "tree-ref")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, detail), (1, self.unknown_no_commit(1001, "tree-ref")),
+                         "a branch ref that holds no commit was not read as one unknown entry")
+
+    def test_a_branch_ref_git_cannot_read_reads_the_same_unknown_entry(self):
+        self.break_origin("broken-ref")
+        self.serve_pulls([self.rest_draft(1001, "broken-ref", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "broken-ref")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, detail), (1, self.unknown_no_commit(1001, "broken-ref")),
+                         "a branch ref git cannot read was not read as one unknown entry")
+
+    def test_a_commit_time_that_does_not_parse_reads_the_same_unknown_entry(self):
+        # Git's %cI is always ISO, so a real repo cannot show this. The one git read's reply is swapped for text that is
+        # not a time. The read goes through build.git, the one home of git reads.
+        self.serve_pulls([self.rest_draft(1001, "garbled-time", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "garbled-time")])
+        real_git = build.git
+
+        def garbled(repo, *args, stdin=None):
+            if args[:1] == ("log",) and "refs/remotes/origin/garbled-time" in args:
+                return "not a time\n"
+            return real_git(repo, *args, stdin=stdin)
+
+        with mock.patch.object(build, "git", garbled):
+            count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, detail), (1, self.unknown_no_commit(1001, "garbled-time")),
+                         "a commit time that does not parse was not read as one unknown entry")
+
+    def test_an_unknown_draft_and_a_listed_one_both_show_in_the_row(self):
+        self.drop_origin("no-ref-beside")
+        self.serve_pulls([self.rest_draft(1001, "no-ref-beside", 780), self.rest_draft(1002, "old-beside", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "no-ref-beside"), self.live_pull(1002, "old-beside")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        expected = sorted(["#1002 (old-beside)", self.unknown_no_commit(1001, "no-ref-beside")])
+        self.assertEqual((count, self.entries(detail)), (2, expected),
+                         "the unknown entry and the listed draft were not both in the row")
+
+    def test_each_stale_draft_gets_one_branch_commit_read_and_a_fresh_draft_gets_none(self):
+        trace = pathlib.Path(self.tmp.name) / "git-trace.txt"
+        self.serve_pulls([self.rest_draft(1001, "cost-a", 780), self.rest_draft(1002, "cost-b", 780),
+                          self.rest_draft(1003, "cost-fresh", 60)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "cost-a"), self.live_pull(1002, "cost-b")])
+        with mock.patch.dict(os.environ, {"GIT_TRACE": str(trace)}):
+            count, detail = self.row(self.out_with_live(), self.DRAFT)
+        reads = {}
+        for line in (trace.read_text(encoding="utf-8") if trace.exists() else "").splitlines():
+            found = re.search(r" log .*refs/remotes/origin/(\S+)", line)
+            if found:
+                reads[found.group(1)] = reads.get(found.group(1), 0) + 1
+        self.assertEqual(reads, {"cost-a": 1, "cost-b": 1},
+                         "the build did not read one branch commit per stale draft, or read a fresh draft's commit")
+        self.assertEqual((count, self.entries(detail)), (2, ["#1001 (cost-a)", "#1002 (cost-b)"]))
+        self.assertEqual(len(self.rest_get.call_args_list), 1, "the branch commit read made a REST call")
+
+    def test_a_stale_draft_whose_branch_commit_is_after_the_build_reads_one_unknown_entry(self):
+        # A commit an hour after the build is no proof of recency, so it reads the draft unknown, never fresh and silent.
+        self.origin_commit("future-branch", iso_ago(-60))
+        self.serve_pulls([self.rest_draft(1001, "future-branch", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "future-branch")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual(count, 1, "a commit after the build read the stale draft as no entry at all: %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown (#1001"), "the entry is not an unknown for #1001: %r" % (detail,))
+        self.assertIn("future-branch", detail, "the unknown entry does not name the branch")
+        self.assertNotIn("#1001 (future-branch)", detail, "a commit after the build listed the draft as stale")
+
+    def test_a_fork_pull_whose_head_branch_shares_an_origin_name_reads_unknown_not_the_origin_commit(self):
+        # Pull 1001 is a fork's pull whose head ref is `main`, and origin's own main has a commit an hour old. The fork
+        # reads unknown, so the origin commit cannot suppress it. #1002 is this repo's own stale branch, still listed.
+        self.origin_commit("main", iso_ago(60))
+        self.origin_commit("feature", iso_ago(780))
+        self.serve_pulls([self.rest_draft(1001, "main", 780, head_repo="someone/fixture"),
+                          self.rest_draft(1002, "feature", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "main"), self.live_pull(1002, "feature")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        entries = self.entries(detail)
+        self.assertEqual(count, 2, "the fork pull was silent: the origin commit suppressed it (%r)" % (detail,))
+        self.assertIn("#1002 (feature)", entries, "this repo's own stale draft was not listed")
+        unknown = [entry for entry in entries if entry.startswith("unknown (#1001")]
+        self.assertEqual(len(unknown), 1, "the fork pull did not read as one unknown entry: %r" % (entries,))
+        self.assertNotIn("#1001 (main)", entries, "the fork pull was listed on the origin commit's name")
+
+    def test_a_fork_pull_reads_unknown_even_when_its_branch_commit_is_old(self):
+        self.origin_commit("topic", iso_ago(780))
+        self.serve_pulls([self.rest_draft(1001, "topic", 780, head_repo="someone/fixture")])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "topic")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual(count, 1, "the fork pull did not read as one entry: %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown (#1001"), "a fork pull with an old commit was not read unknown: %r" % (detail,))
+        self.assertNotIn("#1001 (topic)", detail, "a fork pull was listed on its branch commit")
+
+    def test_a_pull_whose_head_repo_is_gone_reads_unknown(self):
+        # head.repo is null when the fork was deleted: the head is not this repo, so the commit read does not apply.
+        self.origin_commit("gone", iso_ago(780))
+        self.serve_pulls([self.rest_draft(1001, "gone", 780, head_repo=None)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "gone")])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual(count, 1, "a pull with a null head repo did not read as one entry: %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown (#1001"), "a pull with a null head repo was not read unknown: %r" % (detail,))
+        self.assertNotIn("#1001 (gone)", detail, "a pull with a null head repo was listed on its branch commit")
+
+
+class StaleDraftTable(UpkeepFixture):
+    """The two helpers the stale-draft row reads, pinned on their own: build.branch_commit_times (the commit read, one
+    `git log -1` per branch) and build.draft_table (one row per draft pull: number, branch, lane, commit, verdict). A case
+    passes an explicit `now` and reads no clock, and the origin refs come from the UpkeepFixture helpers."""
+
+    NOW = datetime.datetime(2026, 11, 16, 12, 0, tzinfo=datetime.timezone.utc)
+
+    def ago(self, hours):
+        return self.NOW - datetime.timedelta(hours=hours)
+
+    def iso(self, hours):
+        """The ago() time as the Z-suffixed ISO text a commit is dated with."""
+        return self.ago(hours).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    @staticmethod
+    def utc(text):
+        return datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+    def pull(self, number, branch, updated_h=13, draft=True):
+        """A draft pull row as open_pulls_rest returns it: updated_at is an aware datetime `updated_h` hours before NOW."""
+        return {"number": number, "title": "lane " + branch, "branch": branch, "draft": draft, "updated_at": self.ago(updated_h)}
+
+    def test_branch_commit_times_gives_each_branch_its_commit_as_an_aware_time(self):
+        self.origin_commit("utc-branch", "2026-11-01T10:00:00Z")
+        self.origin_commit("central-branch", "2026-11-02T10:00:00-06:00")
+        times, why = build.branch_commit_times(self.repo, ["utc-branch", "central-branch"])
+        self.assertIsNone(why, "a read with a checkout named gave a why: %r" % (why,))
+        self.assertEqual(set(times), {"utc-branch", "central-branch"}, "the times do not hold both branches")
+        self.assertEqual(times["utc-branch"], self.utc("2026-11-01T10:00:00Z"), "the UTC commit time is wrong")
+        self.assertEqual(times["central-branch"], self.utc("2026-11-02T16:00:00Z"), "the -06:00 commit time is wrong")
+        for name, at in times.items():
+            self.assertIsNotNone(at.tzinfo, "the time of %s is naive" % name)
+
+    def test_a_branch_whose_time_cannot_be_read_is_left_out_and_the_others_stay(self):
+        self.origin_commit("good", "2026-11-01T10:00:00Z")
+        self.drop_origin("no-ref")
+        self.set_origin("tree-ref", self.EMPTY_TREE)
+        self.break_origin("broken-ref")
+        times, why = build.branch_commit_times(self.repo, ["good", "no-ref", "tree-ref", "broken-ref"])
+        self.assertIsNone(why, "a read with a checkout named gave a why: %r" % (why,))
+        self.assertEqual(times, {"good": self.utc("2026-11-01T10:00:00Z")},
+                         "a branch with no readable commit time was kept, or the good branch was dropped")
+
+    def test_a_time_that_is_not_iso_with_a_zone_is_left_out(self):
+        self.origin_commit("good", "2026-11-01T10:00:00Z")
+        replies = {"refs/remotes/origin/garbled": "not a time\n", "refs/remotes/origin/naive": "2026-11-01T10:00:00\n"}
+        real_git = build.git
+
+        def fake(repo, *args, stdin=None):
+            if args[:1] == ("log",) and args[-1] in replies:
+                return replies[args[-1]]
+            return real_git(repo, *args, stdin=stdin)
+
+        with mock.patch.object(build, "git", fake):
+            times, why = build.branch_commit_times(self.repo, ["good", "garbled", "naive"])
+        self.assertEqual(times, {"good": self.utc("2026-11-01T10:00:00Z")},
+                         "a time that is not ISO with a zone was kept, or the good branch was dropped")
+
+    def test_one_git_log_per_distinct_branch_and_no_network(self):
+        self.origin_commit("first", "2026-11-01T10:00:00Z")
+        self.origin_commit("second", "2026-11-01T11:00:00Z")
+        trace = pathlib.Path(self.tmp.name) / "git-trace.txt"
+        with mock.patch.dict(os.environ, {"GIT_TRACE": str(trace)}):
+            build.branch_commit_times(self.repo, ["first", "second", "first"])
+        reads = {}
+        for line in (trace.read_text(encoding="utf-8") if trace.exists() else "").splitlines():
+            found = re.search(r" log .*refs/remotes/origin/(\S+)", line)
+            if found:
+                reads[found.group(1)] = reads.get(found.group(1), 0) + 1
+        self.assertEqual(reads, {"first": 1, "second": 1}, "the read was not one git log per distinct branch")
+        self.assertEqual(len(self.rest_get.call_args_list), 0, "the commit read made a REST call")
+
+    def test_no_checkout_named_reads_no_time_and_says_why(self):
+        times, why = build.branch_commit_times(None, ["any-branch"])
+        self.assertEqual(times, {}, "a read with no checkout gave times")
+        self.assertTrue(why, "a read with no checkout gave no why")
+
+    def test_an_empty_branch_list_reads_nothing_and_gives_no_why(self):
+        self.assertEqual(build.branch_commit_times(self.repo, []), ({}, None))
+
+    def test_the_table_has_one_row_per_draft_pull_with_exactly_the_five_fields(self):
+        rows = [self.pull(1, "draft-one"), self.pull(2, "not-a-draft", draft=False), self.pull(3, "draft-three", updated_h=1)]
+        table = build.draft_table(rows, self.NOW, {"liveRows": {}}, {}, None, {})
+        self.assertEqual([row["number"] for row in table], [1, 3], "the table is not one row per draft pull")
+        for row in table:
+            self.assertEqual(set(row), {"number", "branch", "lane", "commit", "verdict"},
+                             "a table row does not have exactly the five fields")
+        self.assertEqual([row["branch"] for row in table], ["draft-one", "draft-three"])
+
+    def test_verdict_is_stale_only_when_the_draft_and_its_commit_are_both_over_twelve_hours(self):
+        # (draft updated_at h ago, commit h ago or None, verdict, commit the row carries)
+        cases = {"stale draft, commit 13 h old": (13, 13, "stale", self.ago(13)),
+                 "stale draft, commit 1 h old": (13, 1, "fresh", self.ago(1)),
+                 "stale draft, no commit time": (13, None, "unknown", None),
+                 "fresh draft, commit 13 h old": (1, 13, "fresh", None)}
+        for name, (updated_h, commit_h, verdict, commit) in cases.items():
+            with self.subTest(name):
+                times = {} if commit_h is None else {"b": self.ago(commit_h)}
+                table = build.draft_table([self.pull(1, "b", updated_h=updated_h)], self.NOW, {"liveRows": {}},
+                                          {1: {"number": 1}}, None, times)
+                self.assertEqual(len(table), 1, "the draft has no table row")
+                self.assertEqual(table[0]["verdict"], verdict, "the verdict for %s is wrong" % name)
+                self.assertEqual(table[0]["commit"], commit, "the commit for %s is not the one the rule names" % name)
+
+    def test_lane_is_live_then_held_then_none_and_unknown_when_no_mark_is_read(self):
+        rows = [self.pull(n, branch) for n, branch in ((1, "live-br"), (2, "held-br"), (3, "review-br"),
+                                                       (4, "plain-br"), (5, "no-row-br"))]
+        lanes = {"liveRows": {"s-live": ["live-br"]}}
+        marks = {1: {"number": 1, "held": True}, 2: {"number": 2, "held": True}, 3: {"number": 3, "reviewLog": True},
+                 4: {"number": 4}}
+        table = build.draft_table(rows, self.NOW, lanes, marks, None, {})
+        self.assertEqual(self.lanes_by_number(table), {1: "live", 2: "held", 3: "held", 4: "none", 5: "unknown"},
+                         "a live lane, a held or review-logged pull, a clean pull and an unmarked pull got the wrong lanes")
+        table = build.draft_table(rows, self.NOW, lanes, marks, "the live file was read 90 minutes ago", {})
+        self.assertEqual(self.lanes_by_number(table), {1: "live", 2: "unknown", 3: "unknown", 4: "unknown", 5: "unknown"},
+                         "unread marks did not make every non-live lane unknown")
+
+    @staticmethod
+    def lanes_by_number(table):
+        return {row["number"]: row["lane"] for row in table}
+
+    def test_a_commit_dated_after_the_build_reads_the_draft_unknown_never_fresh(self):
+        # ago(-1) is one hour after NOW: a commit from the future proves nothing about the draft's age.
+        table = build.draft_table([self.pull(1, "future-commit")], self.NOW, {"liveRows": {}}, {1: {"number": 1}}, None,
+                                  {"future-commit": self.ago(-1)})
+        self.assertEqual(len(table), 1, "the draft has no table row")
+        self.assertEqual(table[0]["verdict"], "unknown",
+                         "a commit an hour after the build read the stale draft fresh, so it was silent")
+
+    def test_the_stale_draft_entries_are_the_table_rows_formatted(self):
+        # Four drafts, all stale by updated_at: a stale commit (listed), a recent commit (fresh), no commit (unknown),
+        # and a held one (silent). stale_drafts must print exactly the rows the table marks as shown.
+        self.origin_commit("old-commit", self.iso(13))
+        self.origin_commit("recent-commit", self.iso(1))
+        self.drop_origin("no-commit")
+        self.origin_commit("held-one", self.iso(13))
+        rows = [self.pull(1, "old-commit"), self.pull(2, "recent-commit"), self.pull(3, "no-commit"),
+                self.pull(4, "held-one")]
+        # The live pulls rows carry the marks: #1 to #3 have a row with no marks, #4 is held.
+        work = {"liveRows": {}, "pulls": [{"number": 1}, {"number": 2}, {"number": 3}, {"number": 4, "held": True}],
+                "staleWhy": None, "pullWhy": None}
+        entries = build.stale_drafts(work, (rows, None), self.NOW, repo=self.repo)
+        times, _ = build.branch_commit_times(self.repo, [row["branch"] for row in rows])
+        marks = {p["number"]: p for p in work["pulls"]}
+        expected = []
+        for row in build.draft_table(rows, self.NOW, work, marks, None, times):
+            if row["verdict"] == "fresh" or row["lane"] in ("live", "held"):
+                continue
+            if row["verdict"] == "unknown":
+                expected.append("unknown (#%d branch %s has no commit time)" % (row["number"], row["branch"]))
+            else:
+                expected.append("#%d (%s)" % (row["number"], row["branch"]))
+        self.assertEqual(expected, ["#1 (old-commit)", "unknown (#3 branch no-commit has no commit time)"],
+                         "the table rows the case expects are not the two it names")
+        self.assertEqual(entries, expected, "the stale-draft entries are not the table's rows formatted")
+
+
+class SessionsSource(UpkeepFixture):
+    """The stale-draft row takes its sessions from a named source: `--sessions-source NAME`, default `live-file`. The
+    registry build.SESSION_SOURCES maps a name to a reader that returns (liveRows-style rows, None) or (None, why). A name
+    the registry does not hold reads the row `unknown (sessions source NAME is not wired)`. A reader that raises or returns
+    a bad shape reads the row unknown. A reader's rows replace the live file's sessions for the lane check, and that check
+    no longer needs a fresh live file. held and reviewLog still come from the live pulls rows, so a stale draft with no
+    live row reads unknown."""
+
+    DRAFT = ReadyAndDraftRows.DRAFT
+    UNWIRED = "unknown (sessions source %s is not wired)"
+
+    def test_the_build_accepts_the_sessions_source_flag(self):
+        # The one case that carries the flag's red: a build that predates the flag refuses it with exit 2.
+        self.on_main()
+        code, out = run_build("--repo", str(self.repo), "--out", str(self.out), "--sessions-source", "live-file")
+        self.assertNotEqual(code, 2, "the build refused --sessions-source: %s" % out.strip().splitlines()[-1])
+
+    def test_no_flag_and_the_live_file_name_read_the_same_row(self):
+        # The control: the default run lists the stale draft, and the explicit live-file name reads the same row.
+        self.serve_pulls([self.rest_draft(1001, "c1", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "c1")])
+        _, bare = self.source_out(None)
+        self.assertEqual(self.row(bare, self.DRAFT), (1, "#1001 (c1)"), "the default run lost the stale draft")
+        _, named = self.source_out("live-file")
+        self.assertEqual(self.row(named, self.DRAFT), self.row(bare, self.DRAFT), "live-file reads differently from no flag")
+
+    def test_the_default_run_never_calls_a_registered_reader(self):
+        reader = mock.Mock(return_value=({"session-a": ["c1"]}, None))
+        self.serve_pulls([self.rest_draft(1001, "c1", 780)])
+        with self.register_source("fake", reader):
+            _, out = self.source_out(None, live=False)
+        self.assertFalse(reader.called, "the default run read a registered sessions source")
+        count, detail = self.row(out, self.DRAFT)
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown (sessions not read: ") and "--live" in detail, detail)
+        self.assertNotIn("#1001", detail)
+
+    def test_an_unwired_name_reads_one_unknown_entry_that_names_it(self):
+        reader = mock.Mock(return_value=({"session-a": ["c1"]}, None))
+        self.serve_pulls([self.rest_draft(1001, "c1", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "c1")])
+        with self.register_source("fake", reader):
+            _, out = self.source_out("nope")
+        self.assertFalse(reader.called, "a name the registry does not hold read a registered source")
+        self.assertEqual(self.row(out, self.DRAFT), (1, self.UNWIRED % "nope"))
+
+    def test_an_unwired_name_never_reads_clear_when_no_draft_is_stale(self):
+        self.serve_pulls(self.fresh_rows(1001, 2))
+        self.publish(sessions=[])
+        _, out = self.source_out("nope")
+        self.assertEqual(self.row(out, self.DRAFT), (1, self.UNWIRED % "nope"),
+                         "a clean read under an unwired name read the row clear")
+
+    def test_a_reader_that_raises_reads_one_unknown_entry_and_does_not_crash(self):
+        reader = mock.Mock(side_effect=RuntimeError("the session list is down"))
+        self.serve_pulls([self.rest_draft(1001, "c1", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "c1")])
+        with self.register_source("fake", reader):
+            _, out = self.source_out("fake")
+        self.assertTrue(reader.called, "the named reader was not called")
+        count, detail = self.row(out, self.DRAFT)
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown ("), detail)
+        self.assertNotIn("#1001", detail, "a raising reader let the stale draft through")
+
+    def test_a_reader_with_a_bad_shape_reads_one_unknown_entry(self):
+        bad = {"not a tuple": 7,
+               "a tuple of three": ({"session-a": ["c1"]}, None, None),
+               "a tuple of one": ({"session-a": ["c1"]},),
+               "rows is a list": (["c1"], None),
+               "a session's steps are not a list": ({"session-a": "c1"}, None),
+               "a step id is not text": ({"session-a": [7]}, None),
+               "a session key is not text": ({7: ["c1"]}, None),
+               "neither rows nor why": (None, None)}
+        self.serve_pulls([self.rest_draft(1001, "c1", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "c1")])
+        for name, value in bad.items():
+            with self.subTest(name):
+                reader = mock.Mock(return_value=value)
+                with self.register_source("fake", reader):
+                    _, out = self.source_out("fake")
+                self.assertTrue(reader.called, "the named reader was not called")
+                count, detail = self.row(out, self.DRAFT)
+                self.assertEqual(count, 1, "the row was %r" % (detail,))
+                self.assertTrue(detail.startswith("unknown ("), detail)
+                self.assertNotIn("#1001", detail, "a bad shape let the stale draft through")
+
+    def test_a_reader_that_gives_a_why_reads_that_why_in_the_unknown_entry(self):
+        reader = mock.Mock(return_value=(None, "the session list timed out"))
+        self.serve_pulls([self.rest_draft(1001, "c1", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "c1")])
+        with self.register_source("fake", reader):
+            _, out = self.source_out("fake")
+        self.assertTrue(reader.called, "the named reader was not called")
+        count, detail = self.row(out, self.DRAFT)
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown (") and "the session list timed out" in detail, detail)
+        self.assertNotIn("#1001", detail)
+
+    def test_reader_rows_hold_a_draft_whatever_the_live_file_is(self):
+        # The lane check needs no fresh live file: no file, a file read 90 minutes ago, and an unreadable file all hold c1.
+        reader = mock.Mock(return_value=({"session-a": ["c1"]}, None))
+        self.serve_pulls([self.rest_draft(1001, "c1", 780)])
+        # Each state: how the live file is set up, and whether the build gets a --live argument at all.
+        states = {"no --live file": (lambda: None, False),
+                  "a live file read 90 minutes ago": (lambda: self.publish(read_at=iso_ago(90), sessions=[]), True),
+                  "an unreadable live file": (lambda: self.write_live("{not json"), True)}
+        for name, (write, live) in states.items():
+            with self.subTest(name):
+                reader.reset_mock()
+                write()
+                with self.register_source("fake", reader):
+                    _, out = self.source_out("fake", live=live)
+                self.assertTrue(reader.called, "the named reader was not called")
+                self.assertEqual(self.row(out, self.DRAFT), (0, ""), "a held draft was listed or read unknown")
+
+    def test_reader_rows_replace_the_live_files_sessions(self):
+        # The live file's session holds c1, but the reader's rows hold only c2. #1001 (c1) is listed; #1002 (c2) is held.
+        reader = mock.Mock(return_value=({"session-b": ["c2"]}, None))
+        self.serve_pulls([self.rest_draft(1001, "c1", 780), self.rest_draft(1002, "c2", 780)])
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")],
+                     pulls=[self.live_pull(1001, "c1"), self.live_pull(1002, "c2")])
+        with self.register_source("fake", reader):
+            _, out = self.source_out("fake")
+        self.assertTrue(reader.called, "the named reader was not called")
+        count, detail = self.row(out, self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (1, ["#1001 (c1)"]),
+                         "the live file's session still held #1001 beside the reader's rows")
+
+    def test_a_reader_without_a_live_row_leaves_a_stale_draft_unknown_not_listed(self):
+        # No --live file: the reader holds c1, so #1001 is skipped. #1002 has no live pulls row, so its marks are unread.
+        reader = mock.Mock(return_value=({"session-a": ["c1"]}, None))
+        self.serve_pulls([self.rest_draft(1001, "c1", 780), self.rest_draft(1002, "lone", 780)])
+        with self.register_source("fake", reader):
+            _, out = self.source_out("fake", live=False)
+        self.assertTrue(reader.called, "the named reader was not called")
+        count, detail = self.row(out, self.DRAFT)
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown (#1002 "), detail)
+        self.assertNotIn("#1001", detail, "the draft the reader holds was named")
+
+    def test_a_fresh_live_file_with_no_sessions_list_still_feeds_a_registered_reader(self):
+        # The reader holds c1, and #1002's live row is held. The file has no sessions list, and #1003 is listed.
+        reader = mock.Mock(return_value=({"session-a": ["c1"]}, None))
+        self.serve_pulls([self.rest_draft(1001, "c1", 780), self.rest_draft(1002, "held-draft", 780),
+                          self.rest_draft(1003, "lone", 780)])
+        self.publish(pulls=[self.live_pull(1001, "c1"), dict(self.mark(1002), branch="held-draft", held=True),
+                            self.live_pull(1003, "lone")])
+        with self.register_source("fake", reader):
+            _, out = self.source_out("fake")
+        self.assertTrue(reader.called, "the named reader was not called")
+        count, detail = self.row(out, self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (1, ["#1003 (lone)"]))
+
+    def test_an_empty_reader_read_is_known_and_lists_the_drafts_with_live_rows(self):
+        reader = mock.Mock(return_value=({}, None))
+        self.serve_pulls([self.rest_draft(1001, "c1", 780), self.rest_draft(1002, "lone", 780)])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "c1"), self.live_pull(1002, "lone")])
+        with self.register_source("fake", reader):
+            _, out = self.source_out("fake")
+        self.assertTrue(reader.called, "the named reader was not called")
+        count, detail = self.row(out, self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (2, ["#1001 (c1)", "#1002 (lone)"]),
+                         "an empty read was read unknown, not known")
+
+    def test_a_full_page_of_drafts_splits_by_a_full_size_reader_read(self):
+        # One hundred stale drafts on one full page. The reader holds the even steps' sessions: fifty held, fifty listed.
+        drafts = [self.rest_draft(1000 + n, "step-%03d" % n, 780) for n in range(100)]
+        rows = {"session-%03d" % n: ["step-%03d" % n] for n in range(0, 100, 2)}
+        reader = mock.Mock(return_value=(rows, None))
+        self.serve_pulls(drafts)
+        self.publish(sessions=[], pulls=[self.live_pull(1000 + n, "step-%03d" % n) for n in range(1, 100, 2)])
+        with self.register_source("fake", reader):
+            _, out = self.source_out("fake")
+        self.assertTrue(reader.called, "the named reader was not called")
+        count, detail = self.row(out, self.DRAFT)
+        expected = sorted("#%d (step-%03d)" % (1000 + n, n) for n in range(1, 100, 2))
+        self.assertEqual((count, self.entries(detail)), (50, expected))
 
 
 class DoneWithoutCheck(UpkeepFixture):
@@ -4642,6 +5700,28 @@ class IdleLanes(UpkeepFixture):
         self.assertEqual(count, 1, "an unreadable main reads the lanes row as %r" % (entries,))
         self.assertTrue(entries and entries[0].startswith("unknown ("), entries)
 
+    def test_upkeep_row_lists_a_superseded_lane_as_merge_idle_lanes_does(self):
+        # The control is session_a, done and idle, which both list. session_s is on c4, todo with no Step trailer on main,
+        # so only its closed pull's replacedBy (#8, merged) lists it. The upkeep row must list it too. Its work is not on
+        # main, so the landed rows must not name c4: they read marks from the merged rows only.
+        self.land({"c1": {"status": "done", "order": 1}, "c4": {"status": "todo", "order": 4}})
+        head = self.off_main()
+        self.publish(sessions=[self.idle_lane("session_a", "c1"), self.idle_lane("session_s", "c4")],
+                     landed=[self.pull_row(7, "lane/c4", head=head, merged=False, replacedBy=8),
+                             self.pull_row(8, "batch-7", head=head, merged=True)])
+        reported = self.reported()
+        self.assertIn("session_s", self.ids(reported),
+                      "scope: merge --idle-lanes does not list the superseded lane: %r" % (reported,))
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        entries = self.entries(self.row(out, self.ROW)[1])
+        self.assertIn("session_s", self.ids(entries),
+                      "the lanes-to-archive row does not list the superseded lane that merge --idle-lanes lists:\n%s" % out)
+        self.assertEqual(self.ids(entries), self.ids(reported),
+                         "the lanes-to-archive row and merge --idle-lanes list different lanes: %r" % (entries,))
+        closing = self.entries(self.row(out, "landed, waiting for triage to close")[1])
+        self.assertFalse([e for e in closing if e.startswith("c4 (")],
+                         "the landed row names c4, whose work is not on main: %r" % (closing,))
+
     def test_archived_rows_with_no_bucket_do_not_read_a_live_lane_unknown(self):
         # Green on the old code: a live row with an enum bucket makes the no-bucket check false, so the archived row
         # with no bucket changes nothing. The live lane is judged normally. session_a is the control.
@@ -5372,6 +6452,66 @@ class SharedTagNames(unittest.TestCase):
                     "CS-REPO:shivinate7/claude-settings", "cs-repo:claude-settings", None, 7):
             with self.subTest(tag=tag):
                 self.assertFalse(build.repo_tag_names(tag, slug))
+
+
+def load_built_index():
+    """tests/built_index.py as a module: the page fixture's script, loaded by path because tests/ is not a package."""
+    spec = importlib.util.spec_from_file_location("built_index", HERE / "tests" / "built_index.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class BuiltIndexEnv(unittest.TestCase):
+    """The page fixture's build child (tests/built_index.py) gets no GitHub token, as Fixture.setUp gives its cases none."""
+
+    def build_children(self, caller):
+        """[(argv, env, url)], one per build child that built_index.main() starts under the caller's variables. env is
+        the environment the child runs with; url is the origin of the fixture repo it reads."""
+        built = load_built_index()
+        seen = []
+
+        def fake_run(argv, **kw):
+            # A child given no env inherits this process's environment, so the copy is taken at the call. The origin is
+            # read with test_build.git, not the hooks' git helper: that one shares the module this case patches.
+            env = dict(kw["env"]) if kw.get("env") is not None else dict(os.environ)
+            repo = argv[argv.index("--repo") + 1]
+            seen.append((list(argv), env, git(repo, "remote", "get-url", "origin").strip()))
+            pathlib.Path(argv[argv.index("--out") + 1]).write_text("<html></html>", encoding="utf-8")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with mock.patch.dict(os.environ), mock.patch.object(built._nowindow, "run", side_effect=fake_run), \
+                mock.patch.object(sys, "argv", ["built_index.py"]), \
+                mock.patch.object(sys, "stdout", io.TextIOWrapper(io.BytesIO(), encoding="utf-8")):
+            for key in TOKEN_VARS:
+                os.environ.pop(key, None)
+            os.environ.update(caller)
+            built.main()
+        return seen
+
+    def test_one_build_child_runs_build_py_on_a_repo_with_a_github_name(self):
+        # The control: the fixture repo names the GitHub repo that a token would reach, so the leak below is real.
+        seen = self.build_children({"GH_TOKEN": "dummy"})
+        self.assertEqual(len(seen), 1, "built_index.py starts %d build children, not one" % len(seen))
+        argv, _, url = seen[0]
+        self.assertEqual(os.path.basename(argv[1]), "build.py", "the build child is not build.py: %r" % (argv,))
+        self.assertIn(load_built_index().GITHUB, url, "the fixture repo's origin names no GitHub repo, so no read would reach GitHub")
+
+    def test_the_build_child_gets_no_github_token(self):
+        for caller in ({}, {"GH_TOKEN": "dummy"}, {"GITHUB_TOKEN": "dummy"}, {"GH_TOKEN": "dummy", "GITHUB_TOKEN": "dummy"}):
+            with self.subTest(caller=sorted(caller)):
+                seen = self.build_children(caller)
+                self.assertEqual(len(seen), 1, "built_index.py starts %d build children, not one" % len(seen))
+                env = seen[0][1]
+                self.assertEqual([k for k in TOKEN_VARS if k in env], [],
+                                 "the build child runs with a GitHub token, so the page build reads GitHub's open pulls")
+
+    def test_the_build_child_keeps_the_other_caller_variables(self):
+        # The control for the strip: a fix that hands the child an empty environment fails here, not in the token cases.
+        with mock.patch.dict(os.environ, {"ROADMAP_FIXTURE_KEEP": "kept"}):
+            seen = self.build_children({"GH_TOKEN": "dummy"})
+        self.assertEqual(len(seen), 1, "built_index.py starts %d build children, not one" % len(seen))
+        self.assertEqual(seen[0][1].get("ROADMAP_FIXTURE_KEEP"), "kept", "the build child lost the caller's other variables")
 
 
 if __name__ == "__main__":

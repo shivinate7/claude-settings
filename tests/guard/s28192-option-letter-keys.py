@@ -35,7 +35,7 @@ def ol_opt(index, **over):
 
 
 def ol_item(**over):
-    item = {"id": OL_DOC, "kind": "decision", "status": "open", "title": "Which CI job runs the stamp check?",
+    item = {"id": OL_DOC, "n": 928, "kind": "decision", "status": "open", "title": "Which CI job runs the stamp check?",
             "context": OL_CTX, "options": ol_keyed("a", "b", "c"), "pick": "a",
             "why": "The lint job already holds the other format checks."}
     item.update(over)

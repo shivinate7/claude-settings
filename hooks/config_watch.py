@@ -74,7 +74,7 @@ import re
 import sys
 from datetime import datetime, timezone
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 

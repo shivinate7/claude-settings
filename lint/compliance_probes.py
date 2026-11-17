@@ -122,7 +122,7 @@ import re
 import sys
 import time
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
 import layout  # noqa: E402  the one home of every kind's path
@@ -1260,7 +1260,7 @@ def glossary_uncommitted(root, name):
 def probe_slugs(root):
     try:
         import check_record_slugs  # the one home of the slug rule and of how the added files are read
-        dirs = check_record_slugs.record_dirs(root)
+        dirs = check_record_slugs.record_dirs(root) + (check_record_slugs.note_dir(root),)  # a note file is a slug too
         new = check_record_slugs.added(root)
         every = check_record_slugs.tracked(root)
     except ImportError as err:
