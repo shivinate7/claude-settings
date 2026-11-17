@@ -62,6 +62,9 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   Its Covers text names the session tagged cs-build:lane and says it prints and posts nothing. Its Never
   covers names each form in MERGE_REVIEW_REFUSED (decision `auto-mode-owner-acts`). A copy with its Never
   covers clause removed goes red on the same cases.
+- One "Merge Batch Label:" entry quotes `merge --batch-label <pr>`. Its Covers text names the target check the
+  tool holds (an open pull request whose head branch starts with `batch-`) and says a refusal writes nothing. Its
+  Never covers names each act in BATCH_LABEL_REFUSED (decision `auto-mode-owner-acts`).
 AUTO_MODE_SETTINGS names another settings file to read (default: this repo's settings.json), so the
 same cases run against a copy with a clause removed and show red there.
 """
@@ -182,6 +185,22 @@ MERGE_REVIEW_REFUSED = tuple((flag, "`%s`" % flag) for flag in MERGE_REVIEW_NEVE
     ("gh pr merge", r"`gh pr merge`"), ("any push", r"\bany push\b"), ("force push", r"force[- ]push"),
     ("any other merge form", "any other merge form"),
     ("a session not tagged cs-build:lane", r"not tagged `cs-build:lane`"))
+BATCH_LABEL = "Merge Batch Label:"
+BATCH_LABEL_COMMAND = "`merge --batch-label <pr>`"
+# The target check the tool holds, named in the Covers text: an open pull request whose head branch starts with `batch-`.
+BATCH_LABEL_TARGET = (("refuses a pull request that is not open", r"refuses a pull request that is not open"),
+                      ("head branch starts with batch-", r"head branch does not start with `batch-`"),
+                      ("a refusal writes nothing", r"writes nothing"))
+# Each act the "Merge Batch Label:" Never covers sentence must name (decision `auto-mode-owner-acts`). The lift flags
+# come from REASON_FLAGS_REFUSED, with the merge flag and the ready flag added.
+BATCH_LABEL_REFUSED = REASON_FLAGS_REFUSED + (
+    ("--confirm", r"`--confirm`"), ("--ready", r"`--ready`"),
+    ("any other flag that merges or lifts a check", "any other flag that merges or lifts a check"),
+    ("a label other than batch", r"a label other than `batch`"),
+    ("a pull request that is not a batch's integration pull request",
+     "a pull request that is not a batch's integration pull request"),
+    ("any other merge form", "any other merge form"), ("gh pr merge", r"`gh pr merge`"),
+    ("any push", r"\bany push\b"))
 # The Covers text names the session that started this one, and the no-act report it lets through.
 MESSAGE_TARGET = (("the session that started this one", "the session that started this one"),)
 MESSAGE_REPORT = (("asks for no act", "asks for no act"), ("pull request number", "pull request number"),
@@ -820,6 +839,33 @@ class MergeReviewLogIsAllowed(unittest.TestCase):
         other = [tb for tb in causes if "need a 'Never covers' sentence" not in tb]
         if other:
             self.fail("a case went red on another cause than the removed clause: %s" % last_line(other[0]))
+
+
+class MergeBatchLabelIsAllowed(unittest.TestCase):
+    def test_one_entry_names_the_batch_label(self):
+        hits = [e for e in auto_mode().get("allow", []) if e.startswith(BATCH_LABEL)]
+        self.assertEqual(len(hits), 1, "need exactly one '%s' entry in autoMode.allow, found %d"
+                         % (BATCH_LABEL, len(hits)))
+
+    def test_entry_quotes_the_batch_label_command(self):
+        covers = entry_part(self, BATCH_LABEL)
+        self.assertIn(BATCH_LABEL_COMMAND, covers, "Covers text does not quote %s" % BATCH_LABEL_COMMAND)
+
+    def test_covers_names_the_batch_label(self):
+        covers = entry_part(self, BATCH_LABEL)
+        self.assertIn("adds the `batch` label", covers, "Covers text does not say it adds the `batch` label")
+
+    def test_covers_states_the_target_check(self):
+        covers = entry_part(self, BATCH_LABEL)
+        for name, pattern in BATCH_LABEL_TARGET:
+            with self.subTest(term=name):
+                self.assertRegex(covers, pattern, "Covers text does not state the target check: %s" % name)
+
+    def test_never_covers_names_each_refused_act(self):
+        clause = entry_part(self, BATCH_LABEL, never=True)
+        for name, pattern in BATCH_LABEL_REFUSED:
+            with self.subTest(act=name):
+                self.assertRegex(clause, "(?i)" + pattern, "Never covers does not name %r" % name)
 
 
 class OwnerPrHousekeepingIsAllowed(unittest.TestCase):
