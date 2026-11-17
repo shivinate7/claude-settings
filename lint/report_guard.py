@@ -325,8 +325,8 @@ def owner_line(check, wrong):
     return check + ": " + wrong + " (" + REMEDY_CITE + ")."
 
 
-# The one shared line that ends every refusal of a reply but a missing report (owner, 2026-11-17 09:30 CST, decision
-# guard-remedy-not-to-owner). `emit_stop` is its only writer, so a new reply guard gets it with no work.
+# The one shared line that ends every refusal of a reply but a missing report. `emit_stop` is its only writer, so a
+# new reply guard gets it with no work.
 CORRECTION_TAIL = "Post only the missing or corrected lines. Do not resend the reply."
 
 
