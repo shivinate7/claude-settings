@@ -1,0 +1,1 @@
+- commit-claim-matches-diff: commit 3e2676d said "now a symlink" for an AGENTS.md that already was one. Guard candidate: a commit message that claims a file change should match the diff (coordinator, lane child-gap-ios-adblock, 21:43 CST Nov 12). Fix: none recorded.

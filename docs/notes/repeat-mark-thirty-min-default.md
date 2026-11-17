@@ -1,0 +1,1 @@
+- repeat-mark-thirty-min-default: the decision wording reads the 30 min same-inbox skip as an owner number. It is the step's default (review note, lane repeat-mark-fixes, 10:40 CST Nov 13). Fix: none recorded.

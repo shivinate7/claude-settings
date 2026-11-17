@@ -1,0 +1,1 @@
+- guessed-path-in-send: the coordinator sent the retrospective a command with a guessed script path (hooks/protect.py; the real path is skills/project-ops/scripts/protect.py). It was fixed one minute later. Guard candidate: a message that names a script path should check that the path exists (coordinator, 21:43 CST Nov 12). Fix: none recorded.

@@ -1,0 +1,1 @@
+- glossary-no-ruled-store: GLOSSARY.md has no row for "ruled store" or "entry" (lane ruled-store-one-home, 16:30 CST Nov 12). Fix: none recorded.

@@ -1,0 +1,1 @@
+- smallbase-needs-pipx: SmallBaseMove.test_the_suites_a_doc_hits_come_from_the_checks_jobs fails on any host without pipx (bin/ci-job --lint --plan exits 2, "tool missing: pipx"). It passes with a stand-in pipx (Windows helper, batch-build-log-kept-r2 at c730fe6f, 13:48 CST Nov 12). Fix: none recorded.

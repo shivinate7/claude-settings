@@ -1,0 +1,1 @@
+- merge-usage-says-sonnet: the merge tool's usage text says every record model must be sonnet, but round-1 reviewers run haiku (agents/reviewer.md) (coordinator, lane agent-worktree-add-in-tool-dir, 21:50 CST Nov 12). Fix: none recorded.

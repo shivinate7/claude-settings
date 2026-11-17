@@ -1,0 +1,1 @@
+- question-departs-quoted-none: hooks/question_form.py NO_CHANGE refused a change that adds a push-target line, because the word "none" sat inside a quoted literal on the change side. Workaround: rewording (triage, 19:57 CST Nov 12). Fix: none recorded.

@@ -1,0 +1,1 @@
+- relay-test-pins-no-store-cost: the past-ruling relay test pins only the no-store cost of two git starts (lane ruled-store-one-home, 16:30 CST Nov 12). Fix: none recorded.

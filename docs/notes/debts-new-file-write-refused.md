@@ -1,0 +1,1 @@
+- debts-new-file-write-refused: a subagent's new-file Write under docs/debts was refused, so PR #2748's debts stayed as notes. The refusing guard is not named. Possible false alarm (lane fan-prose-unmapped-5, 16:13 CST Nov 12). Fix: none recorded.

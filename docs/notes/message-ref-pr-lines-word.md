@@ -1,0 +1,1 @@
+- message-ref-pr-lines-word: a refused message gets resent, so the same refusal repeats. Debt or note not yet decided (lane fan-prose-unmapped-5 via coordinator, 16:13 CST Nov 12). Fix: none recorded.
