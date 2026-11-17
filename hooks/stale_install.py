@@ -4,7 +4,8 @@
 A cloud session copies hooks at start, so a hook merged later stays stale for the whole session. A prompt reads no
 origin (owner, 2026-11-17 09:34 CST, decision stale-install-cost). It reads the install record that install.sh --cloud
 writes (<config dir>/.claude-settings-install.json: ref, sha, source, installer) and compares it with the local
-refs/remotes/origin/<record ref> of the record's source clone. It acts on one trigger only: the local ref names a
+refs/remotes/origin/<record ref> of the record's source clone. A pin with no such ref reads local main, the commit
+install_from_main.sh pins to then. It acts on one trigger only: the local ref names a
 commit the record's sha does not cover (a session start, a resume or a fetch moved it). A commit the record's sha
 already contains is no trigger. With no trigger a prompt prints nothing and runs no installer.
 A record, a source or a local ref that cannot be read prints one "install freshness unknown (reason)" line and
@@ -13,26 +14,30 @@ installs nothing. Unknown is never reported as current.
   the record again. A record now at the target prints one line naming both 7-character shas. A record still at another
   sha prints "reinstall did not reach <target> (record at <sha>)", never "reinstalled". A second line follows when a
   changed path needs a new session to read it again: CLAUDE.md, output-styles/, and the settings.json keys model and
-  effortLevel. An installer that exits non-zero prints "reinstall failed (exit N)" and is not retried that turn. An
+  effortLevel. An installer that exits non-zero prints "reinstall failed (exit N)" and is not retried for that head. An
   installer past its timeout gets SIGTERM, so install.sh's EXIT trap releases its lock, then SIGKILL after a short
   wait; it prints "reinstall failed (timed out after N s)".
 - source on a detached HEAD, the live pin, that holds merge/install_from_main.sh: runs it once per new head and prints
-  one line that states how many commits the pin is behind the local ref, counted from local objects.
+  one line that states how many commits the pin is behind the ref it read, counted from local objects.
+  A refresh runs once per head, whatever its outcome. A later prompt on a head the record still does not cover prints
+  "install still stale", and runs nothing.
 - the clone the config dir's CLAUDE.md points at (an @path line), when its HEAD is behind its own local origin ref:
   one line that names the clone and its commits behind, once per new head.
-Once per head: the file <config dir>/.claude-settings-refresh-seen holds the last 20 heads a pin refresh or a clone
-flag acted on.
+Once per head: the file <config dir>/.claude-settings-refresh-seen holds the last 20 heads a reinstall, a pin refresh
+or a clone flag acted on.
 The ref comes only from the record: the installer gets it as CLAUDE_SETTINGS_REF, replacing any value in the hook's
-environment. The hook names no branch of its own. The installer also gets a CS_HOOK_INPUT whose source no SessionStart
+environment. The hook names no branch of its own, bar the pin's fallback (PIN_FALLBACK_BRANCH). The installer also gets a CS_HOOK_INPUT whose source no SessionStart
 entry fires on, so install.sh runs no startup entry for a reinstall in a running session.
 
 Cost: one python process start per prompt. Network calls per prompt: 0. Local reads per prompt in a cloud session:
-the install record, the config dir's CLAUDE.md, and at most 5 local git reads (rev-parse of the ref, one
-merge-base on a trigger, symbolic-ref, rev-parse and rev-list of the shared clone). None
-outside a cloud session. A trigger adds one installer run (the installer fetches; this hook does not) and, to find the
-restart line, a few more local git reads. Files written by this hook: the seen file, only when a pin refresh or a
-clone flag acts on a new head. No timer, no long-lived process.
+the install record, the config dir's CLAUDE.md, and local git reads in a clone: at most 4 on a prompt with no trigger
+(rev-parse of the ref, merge-base, and rev-parse and rev-list of the shared clone) and at most 8 on a trigger prompt
+(those four, symbolic-ref, then rev-list twice for a pin, or diff and two show reads of settings.json for a reinstall;
+a pin with no origin ref adds one rev-parse of local main). None outside a cloud session. A trigger adds one installer
+run (the installer fetches; this hook does not). Files written by this hook: the seen file, only when a reinstall, a
+pin refresh or a clone flag acts on a new head. No timer, no long-lived process.
 """
+import functools
 import json
 import os
 import re
@@ -63,6 +68,8 @@ RESTART_PATHS = ("CLAUDE.md", "output-styles/")
 RESTART_SETTINGS_KEYS = ("model", "effortLevel")
 PREFIX = "claude-settings: "
 PIN_SCRIPT = os.path.join("merge", "install_from_main.sh")
+# The one branch the hook names: install_from_main.sh pins to local main when origin has no ref for the record's ref.
+PIN_FALLBACK_BRANCH = "main"
 SHARED_LINE = re.compile(r"@(.+)/CLAUDE\.md")
 
 
@@ -240,11 +247,31 @@ def reinstall_lines(record, target):
     return lines
 
 
-def pin_lines(record, head, seen):
-    """The one line for a pin refresh toward the local ref `head`. The pin's merge/install_from_main.sh runs once per
-    head, and the line states the commits the pin was behind, counted from local objects."""
-    source, local_ref = record["source"], "refs/remotes/origin/" + record["ref"]
-    where = "origin/" + record["ref"]
+def followed_ref(record):
+    """(rev, name, sha) for the ref the check reads in the record's source: the local origin/<record ref>, else, for
+    the pin only, local main, which install_from_main.sh pins to when origin has no such ref. (None, None, None) when
+    neither can be read."""
+    source = record["source"]
+    rev = "refs/remotes/origin/" + record["ref"]
+    sha = local_sha(source, rev)
+    if sha is None and is_pin(source):
+        rev = "refs/heads/" + PIN_FALLBACK_BRANCH
+        sha = local_sha(source, rev)
+        return (rev, "local " + PIN_FALLBACK_BRANCH, sha) if sha else (None, None, None)
+    return (rev, "origin/" + record["ref"], sha) if sha else (None, None, None)
+
+
+def stale_line(record, target, name):
+    """The line for a prompt on a head whose refresh already ran, and the record still does not cover it."""
+    return PREFIX + "install still stale: record at %s, %s at %s; the refresh for that head ran and did not finish" \
+        % (record["sha"][:SHORT], name, target[:SHORT])
+
+
+def pin_lines(record, head, seen, local_ref, where):
+    """The one line for a pin refresh toward `head`, the tip of `local_ref` (shown as `where`). The pin's
+    merge/install_from_main.sh runs once per head, and the line states the commits the pin was behind, counted from
+    local objects."""
+    source = record["source"]
     before = commits_behind(source, "HEAD", local_ref)
     add_seen(seen, "pin:" + head)
     # install_from_main.sh finds its clone from the folder it runs in, and takes no argument; the head goes on its command
@@ -292,6 +319,7 @@ def shared_lines(record, seen):
             % (clone, plural(behind), record["ref"], tip[:SHORT])]
 
 
+@functools.lru_cache(maxsize=None)
 def is_pin(source):
     """True when the source is a detached checkout that holds the pin's refresh script."""
     if not os.path.isfile(os.path.join(source, PIN_SCRIPT)):
@@ -308,17 +336,21 @@ def check():
     if record is None:
         return [unknown(reason)]
     source = record["source"]
-    head = local_sha(source, "refs/remotes/origin/" + record["ref"])
+    local_ref, name, head = followed_ref(record)
     if head is None:
         return [unknown("no local origin/%s in %s" % (record["ref"], source))]
     seen = load_seen()
     lines = []
-    target = None if covered(source, head, record["sha"]) else head
-    if target is not None:
-        if not is_pin(source):
-            lines += reinstall_lines(record, target)
-        elif "pin:" + target not in seen:
-            lines += pin_lines(record, target, seen)
+    if not covered(source, head, record["sha"]):
+        # A head's refresh runs once, whatever its outcome. A later prompt on that head reports the record as stale.
+        key = ("pin:" if is_pin(source) else "install:") + head
+        if key in seen:
+            lines.append(stale_line(record, head, name))
+        elif key.startswith("pin:"):
+            lines += pin_lines(record, head, seen, local_ref, name)
+        else:
+            add_seen(seen, key)
+            lines += reinstall_lines(record, head)
     return lines + shared_lines(record, seen)
 
 
