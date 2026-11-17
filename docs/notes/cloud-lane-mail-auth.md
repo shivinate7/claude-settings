@@ -1,0 +1,1 @@
+- cloud-lane-mail-auth: a cloud lane cannot read mail addressed to it. `mail take --addr cloud/<session>` gives "mail unknown: auth", because the GitHub scope covers claude-settings only (lane sim-noise-and-wallpaper, 21:18 CST Nov 12). Fix: none recorded.

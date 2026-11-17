@@ -1,0 +1,1 @@
+- request-budget-spec-flaky: design-check (11) at tests/request-budget.spec.ts:414 (GET /pipeline/match/sweep) failed, then went green on one re-run of run 43362555957 (banchi, 22:30 CST Nov 12). Fix: none recorded.
