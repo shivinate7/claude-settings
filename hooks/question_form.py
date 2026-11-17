@@ -125,7 +125,12 @@ FORM_REASON = ("A question to the owner states the form, in this order: a line \
                "premise>\" where kind is one of %s. Each option states its gain and its loss."
                % (", ".join(OWNER_STAKES), ", ".join(PREMISE_KINDS)))
 PAGE_FORM_REASON = FORM_REASON + (" On the page the lines go in `context`, and each option has a "
-                                  "non-empty `gain` and `lose`.")
+                                  "non-empty `gain` and `lose`. An open decision also names the option you "
+                                  "recommend in `recommended` (a key of `options`, a list of keys on a multi or "
+                                  "ranked item), gives the one-line reason in `why`, and holds in `context` a "
+                                  "line that starts `Waiting on:` at column 0, plain text: \"Waiting on: <what "
+                                  "is stopped until his answer>; <who acts next>\" (\"nothing stopped\" when "
+                                  "nothing is).")
 CHAT_FORM_REASON = FORM_REASON + (" In the question box the lines go in the question text, and each "
                                   "option's description holds \"Gain: <text>\" and \"Lose: <text>\".")
 STAKE_REASON = ("A decision is the owner's only when he can judge it. Write the Problem line as "
@@ -335,7 +340,8 @@ WIDENS_TEXT = "Goes against your ruling: a repo changes to fit a shared tool, ne
 WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts: the owner ruled that "
                  "a repo changes to fit a shared tool, never the tool to fit a repo. Make `recommended` (or `pick`, "
                  "its old name, where the item still uses it) an option where the repo changes to match the "
-                 "shared format, or leave recommended out.")
+                 "shared format. When every option widens, add an option that does not widen and "
+                 "recommend that one.")
 CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool accepts: the owner ruled that a "
                       "repo changes to fit a shared tool, never the tool to fit a repo. Recommend an option "
                       "where the repo changes to match the shared format, and give the widening option no "
@@ -1003,6 +1009,13 @@ def decision_form_hit(op: str, data):
     if op == "set":
         if data.get("kind") not in (None, "decision"):
             return PASS
+    elif data.get("kind") is None:
+        # The guard cannot see the stored kind. A Why yours line is the task marker, so a context that holds one is
+        # a task's and passes, even when a Goal line opens it. Otherwise an update with no kind is a decision when
+        # its context carries the decision form's Goal line; a context with no Goal line is a task's, and passes.
+        context = str(data.get("context") or "")
+        if WHY_YOURS_LINE.search(context) or not GOAL_LINE.search(context):
+            return PASS
     elif data.get("kind") != "decision":
         return PASS
     judged_context = op == "set" or "context" in data
@@ -1020,11 +1033,76 @@ def decision_form_hit(op: str, data):
         miss = departs_hit(str(data.get("context") or ""))
         if miss:
             return DEPARTS_RULE, miss
+    miss = recommendation_miss(op, data)
+    if miss:
+        return FORM_RULE, miss
+    if judged_context and not waiting_filled(str(data.get("context") or "")):
+        return FORM_RULE, "no Waiting on line, or one with no text after the colon"
     return PASS
 
 
 def _filled(value) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+# The Waiting on line: plain text at column 0, case-sensitive, with text after the colon. It mirrors the page's
+# split in skills/waiting-page/page.html (`/^Waiting on:\s*\S/`, tested on each line, the function that reads the
+# context): the two patterns must stay the same, so a line the rule accepts is a line the page draws. It is
+# matched per line, as the page does, so `\s*` never reaches the next line. The rule does not check line order.
+WAITING_LINE = re.compile(r"^Waiting on:\s*\S")
+
+
+def waiting_filled(text) -> bool:
+    """True when `text` holds a Waiting on line the page draws."""
+    return any(WAITING_LINE.match(line) for line in str(text or "").split("\n"))
+
+
+def _key_shape_miss(value, keys, multi):
+    """Why `value` is no recommendation of this kind of item, else "". `keys` is the option keys, or None when
+    the write carries no options (an update): then only the shape is judged. `multi` is True, False, or None
+    when the write does not say (an update that carries neither flag): then either shape is accepted."""
+    if isinstance(value, list):
+        if multi is False:
+            return "recommended is a list, but this item picks one option"
+        if (not value or any(not isinstance(k, str) or not k.strip() for k in value)
+                or len(set(value)) != len(value)):
+            return "recommended is an empty list, or one that repeats a key"
+        if keys is not None and any(k not in keys for k in value):
+            return "recommended names an option the item does not have"
+        return ""
+    if multi is True:
+        return "recommended is one key, but this item takes a list"
+    if not _filled(value):
+        return "no recommendation: recommended is blank"
+    if keys is not None and value not in keys:
+        return "recommended names an option the item does not have"
+    return ""
+
+
+def recommendation_miss(op: str, data) -> str:
+    """The miss when this decision write shows no visible recommendation, else "". A set must carry a valid
+    recommendation (`recommended`, else its old name `pick`, as the page's recOf reads them) and a non-blank
+    `why`. An update is judged only for the fields it carries: the guard cannot see the stored item."""
+    full = op == "set"
+    # A null `recommended` or `pick` is absent: it names no option. A write that carries only nulls is refused.
+    carried = [f for f in RECOMMENDED_FIELDS if data.get(f) is not None]
+    touched = any(f in data for f in RECOMMENDED_FIELDS)
+    options = data.get("options")
+    keys = ({o.get("key") for o in options if isinstance(o, dict) and isinstance(o.get("key"), str)}
+            if isinstance(options, list) else None)
+    if full or touched:
+        if not carried:
+            return "no recommendation: name the recommended option's key in `recommended`"
+        if full and keys is None:
+            return "no recommendation: the item has no options to recommend"
+        flags = [data.get(f) for f in ("multi", "ranked") if f in data]
+        multi = (any(v is True for v in flags)) if (full or flags) else None
+        miss = _key_shape_miss(data.get(carried[0]), keys, multi)
+        if miss:
+            return miss
+    if (full or "why" in data) and not _filled(data.get("why")):
+        return "no why: write the one-line reason for the recommendation in `why`"
+    return ""
 
 
 def form_str_replace_hit(entry):
@@ -1052,6 +1130,9 @@ def form_str_replace_hit(entry):
         miss = departs_hit(new)
         if miss:
             return DEPARTS_RULE, "context edit that leaves no valid Departs from line (%s)" % miss
+    # The same for the Waiting on line: an edit may swap it for another with text, never drop or blank it.
+    if waiting_filled(old) and not waiting_filled(new):
+        return FORM_RULE, "context edit that removes the Waiting on line, or leaves it with no text"
     return PASS
 
 

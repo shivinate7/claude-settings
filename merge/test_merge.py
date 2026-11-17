@@ -3941,7 +3941,7 @@ class GhHalf(Env):
                 self.at_pause.append((s, self.now, cur[1] if cur else None))
             if pause:
                 pause()
-        return merge.Host(required if required == "protection" else list(required), "main", minute=minute, now=lambda: self.now, pause=tick, ignore=ignore)
+        return merge.Host(required if required in ("protection", "none") else list(required), "main", minute=minute, now=lambda: self.now, pause=tick, ignore=ignore)
 
     def go(self, **kw):
         return self.run_merge("7", "--confirm", host=self.gh_host(**kw))
@@ -5445,6 +5445,60 @@ class GhHalf(Env):
 OLD_RUN, NEW_RUN, CI_RUN = 41368432206, 41368432483, 41368432300
 MID_RUN = 41368432350  # a run of the same workflow between OLD_RUN and NEW_RUN
 
+class NoneRequiredChecks(Env):
+    """merge.requiredChecks "none": the base names no required check, so the head reads from the checks and runs it has. Each case
+    runs through the fake gh, as GhHalf does. Borrows GhHalf's helpers, as SilentWait does, so GhHalf's tests do not run twice."""
+    set, calls, gh_host, go = GhHalf.set, GhHalf.calls, GhHalf.gh_host, GhHalf.go
+
+    def setUp(self):  # the fake-gh setup of GhHalf.setUp, without its tests
+        Env.setUp(self)
+        gh_case_setup(self)
+
+    def none_host(self):
+        return self.gh_host(required="none")
+
+    def test_a_head_with_no_check_and_no_run_reads_green(self):
+        self.set(checks_seq=[[]])
+        host = self.none_host()
+        head = host.pr(7)["head"]
+        self.assertEqual((host.checks(7, warn=False, sha=head), host.runs(head)), ({}, []), "the fixture's head holds a check or a run")
+        self.assertEqual(host.head_state(7), "green")
+
+    def test_a_red_check_row_on_the_head_still_reads_red(self):
+        self.set(checks_seq=[[("checks", "fail", "https://x/y")]])
+        state = self.none_host().head_state(7)
+        self.assertTrue(state.startswith("red: checks: fail"), state)
+
+    def test_confirm_does_not_stop_on_required_checks_when_none_is_set(self):
+        self.set(checks_seq=[[]])
+        rc, out = self.run_merge("7", "--confirm", host=self.none_host())
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls())
+        self.assertNotIn("branches/main/protection", self.calls(), "under requiredChecks none, the confirm read the base's branch protection")
+
+    def test_a_pending_run_with_no_workflow_folder_refuses_at_once_under_none(self):
+        # The base has no workflow folder, so the run's file cannot be read. A run whose file cannot be read holds the head.
+        self.set(checks_seq=[[]], runs_seq=[[("docs", "in_progress", "")]])
+        rc, out = self.go(required="none")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("a check is pending: workflow docs", out)
+        self.assertEqual(self.paused, [], "the pending run waited before it refused")
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_blocked_pull_request_under_none_refuses_and_names_the_branch_protection(self):
+        # GitHub reads the pull request BLOCKED: the base's branch protection still requires a check that this head does not report.
+        # Under none the tool reads no protection, so the refusal must name the cause itself: the branch protection, and the setting
+        # that names no check.
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="none"))))
+        self.set(contexts=["gate"], pr_raw={"mergeable_state": "blocked"})  # the protection requires gate; the head reports only checks
+        host = self.none_host()
+        self.assertEqual(host.pr(7)["merge_state"], "BLOCKED", "scope: the pull request does not read BLOCKED")
+        rc, out = self.run_merge("7", "--confirm", host=host)
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn(MERGE_CALL, self.calls(), "the merge call was sent for a BLOCKED pull request")
+        self.assertRegex(out, "branch protection", "the refusal does not name the branch protection as the cause:\n" + out)
+        self.assertIn("requiredChecks", out, "the refusal does not name the setting that reads no check:\n" + out)
+
 def job_link(run, job):
     """A check run's details_url as GitHub writes it: the id of the run is in the link."""
     return f"https://github.com/o/r/actions/runs/{run}/job/{job}"
@@ -6705,6 +6759,11 @@ class ConfigFile(Env):
                 put_base_config(self, self.config_text(fields))
                 rc, out = self.run_merge("7")
                 self.assertEqual(rc, 0, out)
+
+    def test_requiredChecks_none_is_accepted_at_preview(self):
+        put_base_config(self, self.config_text({"requiredChecks": "none"}))
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
 
     def test_ready_checks_is_a_merge_field(self):  # decision: merge.readyChecks names the ready checks of the draft step
         self.assertIn("readyChecks", merge.MERGE_FIELDS)
@@ -9417,12 +9476,256 @@ class RecordsRebuild(RecordsEnv):
       stops before the mark-ready call. If the mark-ready call fails, one line tells the reader to mark it ready, the
       push stays, and the exit is 0. A ready confirm then finds the page current, pushes nothing, and merges the sha the
       draft step pushed.
+    - Under merge.requiredChecks "none" (decision private-repos-no-ci) a ready confirm heals the page itself, in one run and with no
+      wait: a page-only commit on the head, or main merged in first when main gained a record, then the merge of that head. A base that
+      moves after the heal's push refuses and keeps the pushed commit. The refusals above stay for a named list and for "protection".
 
     Ruling: records-index-at-merge (confirm on a draft is the records page step)
     """
     def setUp(self):
         super().setUp()
         self.use_fake_records()
+
+    def set_required(self, required):
+        """Commit the base's config with merge.requiredChecks `required`, and give the fake host the same value: production sets the host's
+        value from this config (root_host), so a case states it once and both places read it."""
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=required))))
+        self.assertEqual(json.loads(self.show("main", ".github/stamp.json"))["merge"]["requiredChecks"], required, "fixture: the base does not name " + repr(required))
+        self.host.required = required
+
+    def drop_pending_record(self):
+        """The head holds no pending record, so a confirm claims no number and the page is its only change to make."""
+        self.drop("feat", "docs/decisions/second.md", "drop the pending decision")
+
+    def main_gains_a_record_under_none(self):
+        """Under none: the head's own page is current, and main gains a record the head lacks. -> (main's tip, the head) before the run."""
+        self.set_required("none")
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})  # current for the head's own debts: none
+        self.on("main", {"debts/gap-one.md": DEBT_TEXT}, "untooled push")  # a record the head lacks
+        return self.head("main"), self.head()
+
+    def merge_and_page_pushed_on(self):
+        """Push onto the head what `merge --ready` pushes on a head that lacks the base tip: the base merged in, then the page rebuilt on
+        that merge. The merge goes up from the other clone; the page is built in the tool's own checkout (tool_page). -> the page commit."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "merge", "-q", "--no-ff", "--no-edit", "origin/main")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        merged = sh(o, "git", "rev-parse", "HEAD")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        page_sha = self.tool_page(merged)
+        sh(self.co, "git", "push", "-q", "origin", f"{page_sha}:refs/heads/feat")
+        return page_sha
+
+    def base_merge_pushed_on(self, source, edit=None):
+        """Push onto the head a merge of `source` (a ref of the second clone), as a person makes one. `edit` ({path: text}) is written into the merge
+        before it is committed, so the merge's tree may differ from git's clean merge. -> the merge sha."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "merge", "-q", "--no-ff", "--no-commit", source)
+        for path, text in (edit or {}).items():
+            put_lf(os.path.join(o, path), text)
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "Merge " + source); sh(o, "git", "push", "-q", "origin", "feat")
+        return sh(o, "git", "rev-parse", "HEAD")
+
+    def clean_merge_tree(self, first, second):
+        """-> the tree id of git's clean merge of two commits, or None when they conflict."""
+        r = subprocess.run(["git", "merge-tree", "--write-tree", "--no-messages", first, second], cwd=self.co, capture_output=True, text=True)
+        return r.stdout.split()[0] if r.returncode == 0 else None
+
+    def assert_merge_shape(self, live, first, second, clean):
+        """Scope before subject (P7): `live` is a merge of `first` then `second`. Its tree is git's clean merge of the two when `clean`, and is not when not."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "rev-list", "--parents", "-n", "1", live).split()[1:], [first, second],
+                         "fixture: the head is not a merge of the relayed head and the second parent")
+        merged = self.clean_merge_tree(first, second)
+        self.assertIsNotNone(merged, "fixture: git cannot merge the two parents cleanly")
+        tree = sh(self.co, "git", "rev-parse", f"{live}^{{tree}}")
+        if clean:
+            self.assertEqual(tree, merged, "fixture: the merge's tree is not git's clean merge")
+        else:
+            self.assertNotEqual(tree, merged, "fixture: the merge's tree is git's clean merge, so the edit did not change it")
+
+    def assert_healed_merge(self, out, main_tip, head):
+        """The one confirm merged the head: the merge's second parent holds the base tip and the head the run started from, main's page is
+        current, and the run claimed no number and waited on no check."""
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        healed = self.rev("origin/main^2")  # deleteBranch removes feat, so the merge's second parent is the pushed head
+        ancestors = sh(self.co, "git", "rev-list", healed).split()
+        self.assertIn(main_tip, ancestors, "the merged head does not hold the base tip that the heal merged in")
+        self.assertIn(head, ancestors, "the merged head does not hold the head the run started from")
+        self.assertEqual(self.show("main", merge.RECORDS_PAGE), page("gap-one").strip(), "main's page is not current after the merge")
+        self.assertEqual(self.claims(), 0, "claimed a number for a page heal")
+        self.assertEqual(self.host.waits, [], "the one confirm waited on a check")
+
+    def test_under_none_a_stale_own_page_heals_in_one_confirm_and_merges(self):
+        self.set_required("none")
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page("ghost")})  # a page that names a debt nobody has
+        before = self.head()
+        rc, out = self.run_merge_once("7", "--confirm")  # one run: the case pins the single confirm, not the two-step claim stop
+        self.assertEqual(rc, 0, "under none a stale own page did not heal in one confirm:\n" + out)
+        healed = self.rev("origin/main^2")  # deleteBranch removes feat, so the merge's second parent is the page commit
+        self.assert_page_scope(healed, before)
+        self.assertEqual(self.show("main", merge.RECORDS_PAGE), page().strip())
+        self.assertEqual(self.claims(), 0, "claimed a number for a page-only heal")
+        self.assertEqual(self.host.waits, [], "the one confirm waited on a check")
+        self.assertTrue(getattr(self.host, "merged", False), out)
+
+    def test_under_none_a_base_that_gained_a_record_merges_main_in_and_heals_in_one_confirm(self):
+        main_tip, before = self.main_gains_a_record_under_none()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "under none a base that gained a record did not merge in one confirm:\n" + out)
+        self.assert_healed_merge(out, main_tip, before)
+
+    def test_under_none_a_stale_own_page_and_a_base_that_gained_a_record_heal_in_one_confirm(self):
+        # Both heals at once: the head's own page is stale, and main gained a record. The refusal for the own page must not stand in the way.
+        self.set_required("none")
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page("ghost")})  # a page that names a debt nobody has
+        before = self.head()
+        self.on("main", {"debts/gap-one.md": DEBT_TEXT}, "untooled push")
+        main_tip = self.head("main")
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "under none a stale own page and a base that gained a record did not heal in one confirm:\n" + out)
+        self.assert_healed_merge(out, main_tip, before)
+
+    def test_under_none_a_relayed_head_merges_across_the_merge_and_page_commits(self):
+        # The heal's commits are already on the head, as `merge --ready` pushes them. The relayed yes names the head before them, so the
+        # check must read a merge commit of the base as part of the relayed head (a head that moved in one run would pass it trivially).
+        self.set_required("none")
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})
+        before = self.head()  # the head the relayed yes names
+        self.on("main", {"debts/gap-one.md": DEBT_TEXT}, "untooled push")
+        main_tip = self.head("main")
+        pushed = self.merge_and_page_pushed_on()
+        self.assertNotEqual(self.head(), before, "scope: the live head did not move off the relayed head")
+        self.assertEqual(self.show("feat", merge.RECORDS_PAGE), page("gap-one").strip(), "scope: the pushed page is not current")
+        rc, out = self.run_merge_once("7", "--confirm", "--head", before)
+        self.assertEqual(rc, 0, "under none a relayed head did not merge across the merge and page commits:\n" + out)
+        self.assertEqual(self.rev("origin/main^2"), pushed, "the merge did not take the head that was pushed")
+        self.assert_healed_merge(out, main_tip, before)
+
+    def test_under_none_a_red_head_refuses_before_any_push(self):
+        # A control: base already reads the head's own checks before it rebuilds or pushes anything, and the heal must keep that order.
+        self.set_required("none")
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page("ghost")})
+        self.host.state = "red: checks: fail"  # the head's own run failed
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assert_refused_untouched(rc, out, refs_before)
+        self.assertIn("not green", out)
+
+    def test_under_none_a_base_that_moves_after_the_heal_push_refuses_and_keeps_the_page_commit(self):
+        self.set_required("none")
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page("ghost")})
+        before = self.head()
+        self.host.on_claim = lambda: self.on("main", {"debts/rival-gap.md": DEBT_TEXT.replace("Gap one", "Rival gap")}, "untooled push")
+        rc, out = self.run_merge_once("7", "--confirm")
+        pushed = self.head()
+        self.assertNotEqual(pushed, before, "under none the stale page was not pushed, so there was no pushed commit to keep:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertFalse(getattr(self.host, "merged", False), out)
+        self.assertIn("stale", out.lower())
+        self.assert_page_scope(pushed, before)  # the page commit stays on the head: no revert commit sits on it
+
+    def test_a_named_required_list_still_refuses_a_stale_page_on_a_ready_pr(self):
+        # A control: under a named list the ready refusal holds, as today, before any push.
+        self.set_required(["checks"])
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page("ghost")})
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assert_refused_on_ready(rc, out, refs_before)
+
+    def test_a_named_required_list_still_refuses_a_base_that_gained_a_record(self):
+        # A control: under a named list a base that gained a record is refused before any push, as today. Nothing heals it.
+        self.set_required(["checks"])
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})
+        self.on("main", {"debts/gap-one.md": DEBT_TEXT}, "untooled push")
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assert_refused_untouched(rc, out, refs_before)
+        self.assertIn("stale", out.lower())
+
+    def test_a_named_list_refuses_a_relayed_yes_with_a_base_merge_on_top(self):
+        # Under a named list no heal runs, so a merge of main on the relayed head is not the tool's own commit: the yes does not cover it.
+        self.set_required(["checks"])
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})  # current for the head's own debts, so only the relayed yes can refuse the merge
+        relayed = self.head()
+        self.main_moves()
+        main_tip = self.head("main")
+        live = self.base_merge_pushed_on("origin/main")
+        self.assert_merge_shape(live, relayed, main_tip, clean=True)
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
+        self.assertFalse(getattr(self.host, "merged", False), "a named list merged a relayed yes with a base merge on top:\n" + out)
+        self.assertIn("so that yes does not cover it", out, "a named list let a relayed yes cover a base merge on top:\n" + out)
+        self.assertEqual(self.refs(), refs_before, "a named list pushed on a relayed yes with a base merge on top")
+        self.assertEqual(rc, 1, out)
+
+    def test_under_none_a_merge_of_a_commit_main_never_got_refuses_the_relayed_yes(self):
+        # The tree is git's clean merge, so only the second parent tells this merge apart: a base merge's second parent is on main.
+        self.set_required("none")
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})  # current for the head's own debts, so only the relayed yes can refuse the merge
+        relayed = self.head()
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "side", "origin/main")
+        put_lf(os.path.join(o, "side.txt"), "a commit off main that main never got\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "side work")
+        side = sh(o, "git", "rev-parse", "HEAD")
+        live = self.base_merge_pushed_on("side")
+        self.assert_merge_shape(live, relayed, side, clean=True)
+        self.assertNotIn(side, sh(self.co, "git", "rev-list", "origin/main").split(), "fixture: the second parent is on main")
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
+        self.assertFalse(getattr(self.host, "merged", False), "under none a merge of a commit main never got carried a relayed yes:\n" + out)
+        self.assertIn("so that yes does not cover it", out, "under none a relayed yes covered a merge whose second parent is not on main:\n" + out)
+        self.assertEqual(self.refs(), refs_before, "under none a merge of a commit main never got was pushed over on a relayed yes")
+        self.assertEqual(rc, 1, out)
+
+    def test_under_none_an_edited_base_merge_refuses_the_relayed_yes(self):
+        # The second parent is on main, so only the tree tells this merge apart: an edit the relayed yes did not see is not git's clean merge.
+        self.set_required("none")
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})  # current for the head's own debts, so only the relayed yes can refuse the merge
+        relayed = self.head()
+        self.main_moves()
+        main_tip = self.head("main")
+        live = self.base_merge_pushed_on("origin/main", edit={"edited.txt": "a line the relayed yes never saw\n"})
+        self.assert_merge_shape(live, relayed, main_tip, clean=False)
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm", "--head", relayed)
+        self.assertFalse(getattr(self.host, "merged", False), "under none an edited base merge carried a relayed yes to a merge:\n" + out)
+        self.assertIn("so that yes does not cover it", out, "under none a relayed yes covered an edited base merge:\n" + out)
+        self.assertEqual(self.refs(), refs_before, "under none an edited base merge was pushed over on a relayed yes")
+        self.assertEqual(rc, 1, out)
+
+    def test_under_none_a_stale_page_on_a_blocked_head_refuses_before_the_heal_pushes(self):
+        self.set_required("none")
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page("ghost")})  # a page that names a debt nobody has
+        self.assertEqual(self.show("feat", merge.RECORDS_PAGE), page("ghost").strip(), "scope: the head's page is not the stale page")
+        read = self.host.pr
+        self.host.pr = lambda n: dict(read(n), merge_state="BLOCKED")  # GitHub reads the head BLOCKED, so the heal's commit would not merge
+        self.assertEqual(self.host.pr(7)["merge_state"], "BLOCKED", "scope: the pull request does not read BLOCKED")
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(self.refs(), refs_before, "the heal pushed onto a BLOCKED head:\n" + out)
+        self.assertEqual(rc, 1, "a BLOCKED head with a stale page did not refuse:\n" + out)
+        self.assertIn("reads BLOCKED", out, "the refusal does not say the head reads BLOCKED:\n" + out)
+        self.assertIn(merge.HEAL_BLOCKED, out, "the refusal does not carry the heal's BLOCKED text:\n" + out)
+        self.assertEqual(self.host.waits, [], "the BLOCKED refusal waited on a check")
+        self.assertFalse(getattr(self.host, "merged", False), out)
 
     def test_a_pr_that_adds_a_debt_gets_the_page_in_the_claim_commit(self):
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
@@ -13453,10 +13756,12 @@ class ProtectionHost(merge.Host):
         return github_read(args, [], self.contexts)
 
 class MergeChecksFromProtection(unittest.TestCase):
-    """c189 part 1: main's own stamp.json pins the one required check, and a pinned list that disagrees with a non-empty branch protection is refused."""
-    def test_main_stamp_pins_required_checks_to_all_jobs_passed(self):
+    """c189 part 1: main's own stamp.json pins no required check (merge.requiredChecks "none"), and a pinned list that disagrees with a non-empty branch protection is refused."""
+    def test_main_stamp_pins_required_checks_to_none(self):
+        """Ruling own-merge-on-lint-pass: a PR whose lane lint passed merges without waiting for its own
+        CI run, so main's stamp pins requiredChecks "none"."""
         with open(os.path.join(HERE, "..", ".github", "stamp.json"), encoding="utf-8") as f:
-            self.assertEqual(json.load(f)["merge"]["requiredChecks"], [REQUIRED_CHECK])
+            self.assertEqual(json.load(f)["merge"]["requiredChecks"], "none", 'main\'s stamp must pin requiredChecks "none" (ruling own-merge-on-lint-pass)')
 
     def test_a_pinned_list_that_disagrees_with_protection_is_refused_naming_both_sets(self):  # #746: pinned gates*, protection held checks*
         host = ProtectionHost(["gates", "gates-guard"], ["checks", "checks-guard"])
@@ -14820,7 +15125,8 @@ class LaneOwnMerge(CloudSession):
     """Ruling own-lanes-merge-claude-settings-prs (owner, 11:12 CST Nov 15, 2026; the merge act only): a cloud lane session may run
     `merge <pr> --confirm --head <sha>` on its OWN ready pull request. Its role file is {"session", "role": "lane", "step": <slug>}, and
     its own pull request is one whose head ref is lane_head_refs(<slug>): the bare slug or lane/<slug>. The fixture's own pull request
-    is branch `feat`, so the step is `feat`. Every other merge check stays, and a lane never runs --ready (the batch runner marks ready)."""
+    is branch `feat`, so the step is `feat`. Every other merge check stays. A lane marks its own draft ready once, in the role form (ruling Q2,
+    decision draft-until-reviewed, owner, 12:58 CST Nov 16, 2026), and the other ready marks stay with the batch runner."""
 
     def setUp(self):
         super().setUp()
@@ -14858,24 +15164,38 @@ class LaneOwnMerge(CloudSession):
         self.assertNotIn("--confirm", err)
         self.assertNotIn("Traceback", err)
 
-    def test_a_lane_cannot_mark_its_own_draft_ready(self):
+    def test_a_lane_marks_its_own_draft_ready_with_the_role_form(self):
+        """Ruling Q2 (decision draft-until-reviewed, owner, 12:58 CST Nov 16, 2026): a lane marks its own PR ready once. The role and its step ride in the same call."""
         self.assert_role_file()
         self.host.draft = True
-        rc, out, err = self.run_main("7", "--ready")
-        self.assertEqual(self.host.readies, [], "a lane's --ready marked its own draft ready: " + out + err)
-        self.assertNotEqual(rc, 0, "a lane's --ready on its own draft exited 0: " + out + err)
+        rc, out, err = self.run_main("--role", "lane", "--step", "feat", "7", "--ready")
+        self.assertEqual(rc, 0, "a lane's role-form --ready on its own draft was refused: " + out + err)
+        self.assertEqual(self.host.readies, [7], "a lane's role-form --ready did not mark its own draft ready: " + out + err)
+        self.assertFalse(getattr(self.host, "merged", False), "a lane's ready mark merged its pull request")
         self.assertNotIn("Traceback", err)
 
-    def assert_refused_outside_claude_settings(self, repo):
+    def test_the_role_form_of_ready_writes_the_lane_role_and_marks_the_draft(self):
+        """The call names the role, so the call itself writes the role file. The case removes the file first, then reads it back (P7)."""
+        os.remove(self.role_file)
+        self.host.draft = True
+        rc, out, err = self.run_main("--role", "lane", "--step", "feat", "7", "--ready")
+        self.assertTrue(os.path.exists(self.role_file), "the role form of --ready did not write the lane role: " + out + err)
+        self.assert_role_file()
+        self.assertEqual(rc, 0, "the role form of --ready was refused: " + out + err)
+        self.assertEqual(self.host.readies, [7], "the role form of --ready did not mark the draft ready: " + out + err)
+        self.assertNotIn("Traceback", err)
+
+    def assert_refused_outside_claude_settings(self, repo, argv=None):
         """Ruling own-lanes-merge-claude-settings-prs covers claude-settings only: a lane's own ready pull request in `repo` is refused.
-        The refusal names neither flag nor the other repo."""
+        The refusal names neither flag nor the other repo. `argv` is the call; the default is the confirm form."""
         self.assert_role_file()
         self.host.repo = repo
         refs = self.refs()
-        rc, out, err = self.run_main("7", "--confirm", "--head", self.head())
-        self.assertEqual(rc, 1, "a lane merged its own ready pull request in " + repo + ": " + out + err)
-        self.assertFalse(getattr(self.host, "merged", False), "a lane's confirm merged a pull request in " + repo)
-        self.assertEqual(self.refs(), refs, "a lane's refused confirm in " + repo + " pushed")
+        rc, out, err = self.run_main(*(argv or ("7", "--confirm", "--head", self.head())))
+        self.assertEqual(rc, 1, "a lane merged or marked ready its own pull request in " + repo + ": " + out + err)
+        self.assertFalse(getattr(self.host, "merged", False), "a lane's call merged a pull request in " + repo)
+        self.assertEqual(self.host.readies, [], "a lane's call marked a pull request ready in " + repo)
+        self.assertEqual(self.refs(), refs, "a lane's refused call in " + repo + " pushed")
         self.assertNotIn("--confirm", err)
         self.assertNotIn("--ready", err)
         self.assertNotIn(repo, err)
@@ -14887,12 +15207,16 @@ class LaneOwnMerge(CloudSession):
     def test_a_lane_is_refused_its_own_ready_pull_request_in_another_owners_claude_settings(self):
         self.assert_refused_outside_claude_settings("someone/claude-settings")
 
+    def test_a_lane_is_refused_the_role_form_of_its_own_draft_ready_mark_in_another_repo(self):
+        self.host.draft = True
+        self.assert_refused_outside_claude_settings("shivinate7/other-repo", argv=("--role", "lane", "--step", "feat", "7", "--ready"))
+
 
 class LaneRefusals(CloudSession):
     """Pins for ruling own-lanes-merge-claude-settings-prs: a lane's confirm is refused on another lane's pull request, on a near-miss
     step, on its own draft (the draft step would mark it ready), on a red check, and with no step in its role file. Each refusal
     names neither --confirm nor --ready. These are green on the old code too, since it refuses every lane; LaneOwnMerge holds the red
-    for the lane's own pull request."""
+    for the lane's own pull request. The role-form ready case below is red on the old code: the old parser refuses that form first."""
 
     def setUp(self):
         super().setUp()
@@ -14917,6 +15241,13 @@ class LaneRefusals(CloudSession):
         self.push_branch("lane/other")
         self.host.branch = "lane/other"
         self.assert_refused_quietly("7", "--confirm", "--head", self.head("lane/other"))
+
+    def test_a_lane_cannot_mark_another_lanes_pull_request_ready_in_the_role_form(self):
+        self.push_branch("lane/other")
+        self.host.branch = "lane/other"
+        self.host.draft = True
+        self.assert_refused_quietly("--role", "lane", "--step", "feat", "7", "--ready")
+        self.assertEqual(self.host.readies, [], "a lane marked another lane's draft ready")
 
     def test_a_near_miss_step_does_not_match_the_pull_request_branch(self):
         self.put_role("lane", step="fea")  # lane_head_refs("fea") is fea and lane/fea; the pull request's branch is feat
@@ -14966,6 +15297,84 @@ def role_tuple_in_source(text, name):
         if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
             return set(ast.literal_eval(node.value))
     return None
+
+
+class NoneLaneLint(CloudSession):
+    """`merge --lane-lint <pr>` under merge.requiredChecks "none" (decision private-repos-no-ci: a repo with no CI names no check). The config is
+    written to origin's main, so the lint reads "none" as a run in production does. A lane head with no check run has no touched job, so the
+    lint reads no draft run and the local lint decides. A case scripts the head's check runs (FakeHost.draft_rows, read by the real judge) and the
+    local lint's answer (merge.ci_job_run, LINT_STATES)."""
+
+    def lane_head(self, required, rows):
+        """Write the base's config with requiredChecks `required`, then script the lane head's check runs as `rows` ([] is a head with no check run).
+        -> the head's sha, read after the base's merge into the lane (head_takes_base)."""
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=required))))
+        head = self.head("feat")
+        self.host.draft_rows = {head: rows}
+        return head
+
+    @contextlib.contextmanager
+    def local_lint_answers(self, state):
+        """merge.ci_job_run answers the local lint with LINT_STATES[state]. The lint tree lives in this run's folder. Yields each call's arguments."""
+        calls = []
+
+        def answer(wt, *args, **kw):
+            calls.append(args)
+            return LINT_STATES[state]
+        with unittest.mock.patch.object(merge, "ci_job_run", side_effect=answer), \
+                unittest.mock.patch.object(tempfile, "tempdir", self.run_dir):
+            yield calls
+
+    def lane_lint_run(self):
+        """`merge --lane-lint 7` as a local run, with CLAUDE_CODE_REMOTE unset. -> (rc, stdout and stderr together)."""
+        rc, out, err = self.run_main("--lane-lint", "7", CLAUDE_CODE_REMOTE=None)
+        return rc, out + err
+
+    def test_a_lane_head_with_no_check_run_under_none_takes_the_lint_and_posts_its_pass(self):
+        head = self.lane_head("none", [])
+        self.assertFalse(merge.is_integration_pr(self.host.pr(7)), "precondition: pull request 7 is an integration PR, so the lane path does not run")
+        with self.local_lint_answers("pass") as calls:
+            rc, text = self.lane_lint_run()
+        self.assertEqual(check_run_reads(self.host.draft_reads), [], "under requiredChecks none, the lane lint read the check runs of the head for a touched job")
+        self.assertEqual(len(calls), 1, "the local lint ran %d times, want once: %s" % (len(calls), text))
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(len([line for line in text.splitlines() if line.startswith("PASS:")]), 1, text)
+        self.assertEqual(self.host.posted, [(7, lint_body(head))], "the lane lint did not post its PASS comment on #7 at the head")
+
+    def test_a_lane_head_whose_touched_job_passed_under_none_takes_the_lint_and_posts_its_pass(self):  # control: green on the old code
+        head = self.lane_head("none", [draft_row("touched")])
+        with self.local_lint_answers("pass") as calls:
+            rc, text = self.lane_lint_run()
+        self.assertEqual(len(calls), 1, "the local lint ran %d times, want once: %s" % (len(calls), text))
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(self.host.posted, [(7, lint_body(head))], "the lane lint did not post its PASS comment on #7 at the head")
+
+    def test_a_lane_head_with_no_check_run_under_a_named_check_list_still_stops_unknown_on_the_touched_job(self):  # control: green on the old code
+        self.lane_head(["checks"], [])
+        rc, text = self.lane_lint_run()
+        self.assertEqual(rc, 1, text)
+        self.assertIn("is unknown, not a pass", text, "a named check list let a head with no touched job through without the unknown refusal: " + text)
+        self.assertIn("no `touched` job", text, "the unknown refusal does not name the missing touched job: " + text)
+        self.assertEqual(self.host.posted, [], "an unknown lint posted a PASS comment")
+
+    def test_a_failing_lint_step_under_none_with_no_check_run_still_fails_and_names_the_step(self):
+        self.lane_head("none", [])
+        with self.local_lint_answers("fail") as calls:
+            rc, text = self.lane_lint_run()
+        self.assertEqual(len(calls), 1, "under requiredChecks none, a head with no check run never reached its local steps, so the failing step did not FAIL: " + text)
+        self.assertEqual(rc, 1, text)
+        self.assertIn("FAIL: lint-marker", text, text)
+        self.assertEqual(len([line for line in text.splitlines() if line.startswith("PASS:")]), 0, text)
+        self.assertEqual(self.host.posted, [], "a failing lint posted a PASS comment")
+
+    def test_a_failing_lint_step_under_none_with_a_passing_touched_job_still_fails_and_names_the_step(self):  # control: green on the old code
+        self.lane_head("none", [draft_row("touched")])
+        with self.local_lint_answers("fail") as calls:
+            rc, text = self.lane_lint_run()
+        self.assertEqual(len(calls), 1, "the local lint ran %d times, want once: %s" % (len(calls), text))
+        self.assertEqual(rc, 1, text)
+        self.assertIn("FAIL: lint-marker", text, text)
+        self.assertEqual(self.host.posted, [], "a failing lint posted a PASS comment")
 
 
 class GuardRoleNamesMatch(unittest.TestCase):

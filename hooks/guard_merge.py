@@ -24,7 +24,7 @@ from guard_pointer import (
     pointer_checkout,
 )
 from guard_push_delete import (
-    ARCHIVE_COPY_SUFFIX, ARCHIVE_PREFIX, DEFAULT_BRANCH_FALLBACK, push_calls, push_destinations, push_refspecs,
+    ARCHIVE_COPY_SUFFIX, ARCHIVE_PREFIX, DEFAULT_BRANCH_FALLBACK, push_calls, push_destinations, push_is_plain, push_refspecs,
     push_target,
 )
 
@@ -263,11 +263,14 @@ def uses_merge_tool(where: str) -> bool:
 
 
 def pinned_required(where: str):
-    """The repo's pinned `merge.requiredChecks` list, when it is a non-empty list of names; else None,
-    and the batch read takes the names from the branch protection."""
+    """The repo's pinned `merge.requiredChecks`: the string "none", or a non-empty list of names; else None,
+    and the batch read takes the names from the branch protection. "none" is the merge tool's value for a repo
+    that requires no check (decision private-repos-no-ci), so a head with no check and no run reads green here too."""
     for config in _merge_configs(where) if where else ():
         merge = config["merge"]
         names = merge.get("requiredChecks") if isinstance(merge, dict) else None
+        if names == "none":
+            return names
         if isinstance(names, list) and names and all(isinstance(k, str) and k for k in names):
             return names
     return None
@@ -1864,18 +1867,21 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int, local_se
 
 
 LANE_READY_REASON = (
-    "merge-role-proof: this session's own record is a claude-settings lane's, and the batch runner marks a pull request ready, not a lane. "
-    "Leave the draft as it is. The batch runner finds it (list_sessions, tag cs-build:batch-runner, same cs-repo). "
+    "merge-role-proof: this session's own record is a claude-settings lane's. A lane marks only its own pull request ready, once, "
+    "through the merge tool: the tool's role flag with its own step, then the pull request number and the ready flag, on a pull request whose head is that step's branch. "
+    "Any other ready mark waits for the batch runner (list_sessions, tag cs-build:batch-runner, same cs-repo). "
     "(decision session-tiers, a session's role decides which merge acts it may run)"  # glossary-ok: session-tiers is the decision's file name
 )
 
 
 def lane_ready_hit(stripped: str, transcript: str) -> str:
     """Return a label when a cloud session whose own newest get_session record carries cs-build:lane and a cs-repo tag naming LANE_MERGE_REPO runs the
-    merge tool's ready mark, else ''. A batch runner, a lane of another repo or with no cs-repo tag, a session with another or no cs-build tag, and a
+    merge tool's ready mark, else ''. A call is let through only when it names the lane role and a --step that is a cs-step tag of that record, and the pull
+    request it names has a head that is one of lane_head_refs of that step (_lane_ready_own_pr). A batch runner, a lane of another repo or with no cs-repo tag, a session with another or no cs-build tag, and a
     session with no readable record are not judged here: the repo proof
     (repo_proof_hit) still judges each. A script a wrapper hands on is read as a top-level call is (_nested_segments); one nested deeper
-    than MERGE_NEST_DEPTH that holds the flag counts as a call. Cost: one parse per merge-tool segment, and one transcript read when a ready flag is found."""
+    than MERGE_NEST_DEPTH that holds the flag counts as a call. Cost: one parse per merge-tool segment, one transcript read when a ready flag is found,
+    and one pull request read when the call names the lane role."""
     if not is_cloud() or "--ready" not in stripped:   # the cheap filter: a call with no ready flag reads no transcript
         return ""
     for segment, too_deep in _nested_segments(stripped):
@@ -1889,9 +1895,35 @@ def lane_ready_hit(stripped: str, transcript: str) -> str:
                 called = True   # an unreadable merge-tool segment fails closed, as the other clauses do
         if not called:
             continue
-        if _own_record_is_lane(transcript):
+        if _own_record_is_lane(transcript) and (too_deep or not _lane_ready_own_pr(segment, transcript)):
             return "merge --ready from a lane"
     return ""
+
+
+def _lane_ready_own_pr(segment: str, transcript: str) -> bool:
+    """True when the merge-tool call in `segment` is a lane's ready mark of its own pull request: the lane role with a step that is a cs-step tag of the own
+    record, the ready flag without --confirm, a pull request number, and a head on that number in LANE_MERGE_REPO that is one of lane_head_refs of the step.
+    The read is the merge tool's own Host, so the guard and the tool read a head alike. Any failure is False: an unread pull request is refused."""
+    try:
+        bare = merge_tool_args(strip_redirections(segment))
+        if bare is None:
+            return False
+        flags = _merge_flags(_command_words(bare))
+        if flags.role != ROLE_WITH_STEP or not flags.step or not flags.ready or flags.confirm or not str(flags.pr or "").isdigit():
+            return False
+        from override import remote_session_id
+        own_id = remote_session_id()
+        tags = _own_get_session_tags(transcript, own_id) if own_id and transcript else None
+        if tags is None or STEP_TAG + flags.step not in tags:
+            return False
+        module = merge_module()
+        if module is None:
+            return False
+        with module.shared_deadline(MERGE_READ_TIMEOUT):
+            info = module.Host(repo=LANE_MERGE_REPO).pr(int(flags.pr))
+        return info["branch"] in lane_head_refs(flags.step)
+    except Exception:
+        return False
 
 
 def _own_record_is_lane(transcript: str) -> bool:
@@ -1918,15 +1950,38 @@ def lane_mcp_ready_hit(tool: str, tool_input, transcript: str) -> str:
 # ---- the record branch's one writer: only the triage session pushes to it (rule roadmap-one-writer)
 RECORD_WRITER_TIER = "triage"
 DEFAULT_RECORD_BRANCH = "roadmap"
-RECORD_REASON = (
-    "roadmap-one-writer: the repo's record branch has one writer, the triage session, and this session's own "
-    "record does not prove it is triage. Send the step change to the triage session (list_sessions, tag "
-    "cs-build:triage, same cs-repo). If this session is triage: run get_session (no argument) alone in its "
+RECORD_CITE = (
     "own turn, then retry. Before this session asks the owner to push a commit, run `git fetch origin <record "
     "branch>`, then `git merge-base --is-ancestor <commit> origin/<record branch>`: exit 0 means the commit is "
     "already there, so ask the owner only when it is not. "
     "(decision session-tiers, the triage session is the only writer of the record branch)"  # glossary-ok: session-tiers is the decision's file name
 )
+RECORD_REASON = (
+    "roadmap-one-writer: the repo's record branch has one writer, the triage session, and this session's own "
+    "record does not prove it is triage. Send the step change to the triage session (list_sessions, tag "
+    "cs-build:triage, same cs-repo). A lane may push only its own roadmap/outbox/<slug>-handoff.md, as plain commits that "
+    "each add or change that file alone, with no force, lease or tags. If the lane's push was refused for that "
+    "form: fetch the record branch's origin tip (a single-branch clone widens its fetch refspec first), then rebase "
+    "the commits onto that tip, with no merge commit, since a pull's merge commit is refused. Make each commit in its "
+    "own call first, then retry the handoff push in a later call: a push chained after a commit is read before that "
+    "commit exists. If this session is triage: run get_session (no argument) alone in its "
+    + RECORD_CITE
+)
+
+
+def _own_proved_tags(transcript: str):
+    """The tags of the own newest get_session record when no set_session_tags call follows it, else None.
+    Fails closed: no cloud id (a local session), no transcript or any read error is None."""
+    try:
+        from override import remote_session_id
+        own_id = remote_session_id()
+        if own_id and transcript:
+            tags, tagged_after = _own_session_read(transcript, own_id)
+            if tags is not None and not tagged_after:
+                return tags
+    except Exception:
+        pass
+    return None
 
 
 def _own_role_proved(transcript: str, role: str, session_id: str = "", root=None) -> bool:
@@ -2010,12 +2065,73 @@ def _push_calls(segment: str, script: str, cwd: str):
                     yield from _push_calls(part, each, inner_cwd)
 
 
+HANDOFF_SLUG =re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")  # no `/` and no `.`, so a slug is one plain file-name part
+HANDOFF_PATH = re.compile(r"roadmap/outbox/(" + HANDOFF_SLUG.pattern + r")-handoff\.md")
+
+
+def _lane_handoff_holds(args, where: str, overrides, root: str, destination, tags) -> bool:
+    """True when a lane's push of `args` to the record branch sends only commits that each change one path
+    against their parent, that path is roadmap/outbox/<slug>-handoff.md in every commit, the change is an add
+    or a modify, and the slug is the lane's own: a slug of one of its cs-step tags, else its checkout's branch
+    with a leading `lane/` cut. The range is the commits from the record branch's origin tip to the pushed
+    source, read per commit, so a file added in one commit and removed in a later one is seen. Fails closed:
+    a force, a lease of any form, `--force-if-includes`, a `+` refspec, a delete, a mirror, `--tags`,
+    `--follow-tags`, an unnamed remote or source, no origin tip, an unreadable range, a merge or root commit,
+    a rename, a delete or an empty range is False. Cost: two git processes, `rev-list --parents` for the
+    range and one `diff-tree --stdin` for every commit's paths (a `symbolic-ref` follows only when no cs-step
+    tag names the slug)."""
+    named = push_refspecs(args)  # None for a mirror, `--all`, a delete or a tags-only push
+    if named is None or not named[0] or destination is None or not push_is_plain(args):
+        return False
+    remote, specs = named
+    if len(specs) > 1:
+        return False
+    source = specs[0].partition(":")[0] if specs else "HEAD"
+    if not source or source.startswith("-"):
+        return False
+    walk = _git(root, "rev-list", "--parents", "refs/remotes/" + remote + "/" + destination + ".." + source, "--")
+    if walk is None or walk.returncode != 0:
+        return False
+    commits = []
+    for line in walk.stdout.splitlines():
+        fields = line.split()
+        if len(fields) != 2:  # a root commit (1 field) or a merge (3 or more) hides its paths from diff-tree
+            return False
+        commits.append(fields[0])
+    if not commits:
+        return False
+    done = _git(root, "diff-tree", "--stdin", "--no-commit-id", "--no-renames", "-r", "--name-status",
+                stdin="\n".join(commits) + "\n")
+    if done is None or done.returncode != 0:
+        return False
+    changes = [line.split("\t") for line in done.stdout.splitlines() if line.strip()]
+    if not changes or any(len(change) != 2 or change[0] not in ("A", "M") for change in changes):
+        return False
+    slugs = set()
+    for change in changes:
+        found = HANDOFF_PATH.fullmatch(change[1])
+        if not found:
+            return False
+        slugs.add(found.group(1))
+    if len(slugs) != 1:  # every commit names the one own handoff path
+        return False
+    slug = slugs.pop()
+    if slug in [str(t)[len(ARCHIVE_STEP_PREFIX):].strip() for t in tags if str(t).startswith(ARCHIVE_STEP_PREFIX)]:
+        return True
+    branch = _git(root, "symbolic-ref", "-q", "--short", "HEAD")
+    if branch is None or branch.returncode != 0:
+        return False
+    return branch.stdout.strip() in lane_head_refs(slug)
+
+
 def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb, session_id: str = "") -> str:
     """Return the matched push when a segment pushes to the checkout's record branch, or to the default
-    name `roadmap`, and the own record does not prove the triage tier, else ''. `record_branch_of(root)`
-    reads the checkout's branch (lint/layout.py); a read error means the default. `read_verb(subcommand,
-    args)` is guard.py's own test for a dry run, which moves nothing. The proof is read only after a push
-    reaches the branch. `session_id` is the hook payload's id, which a local session's role file is read for."""
+    name `roadmap`, and the own record proves neither the triage role nor a lane's own handoff push, else ''.
+    `record_branch_of(root)` reads the checkout's branch (lint/layout.py); a read error means the default.
+    `read_verb(subcommand, args)` is guard.py's own test for a dry run, which moves nothing. The proof is
+    read only after a push reaches the branch. `session_id` is the hook payload's id, which a local session's
+    role file is read for. Triage is allowed with no diff read. A lane is allowed only for its own handoff
+    file (`_lane_handoff_holds`), which reads the pushed range's paths in two git processes."""
     for segment in split_segments(stripped):
         for args, where, overrides in _push_calls(segment, stripped, cwd):
             if read_verb("push", args):
@@ -2026,9 +2142,16 @@ def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of
                 record = record_branch_of(root)
             except Exception:
                 record = DEFAULT_RECORD_BRANCH
-            if {record, DEFAULT_RECORD_BRANCH} & set(push_destinations(args, where, overrides)) and (
-                    not _own_role_proved(transcript, RECORD_WRITER_TIER, session_id, root)):  # glossary-ok: RECORD_WRITER_TIER is the existing name
-                return "git push to the record branch"
+            destinations = push_destinations(args, where, overrides)
+            if not {record, DEFAULT_RECORD_BRANCH} & set(destinations):
+                continue
+            if _own_role_proved(transcript, RECORD_WRITER_TIER, session_id, root):  # glossary-ok: RECORD_WRITER_TIER is the existing name
+                continue
+            tags = _own_proved_tags(transcript)
+            if (tags is not None and LANE_TAG in tags and len(destinations) == 1 and root
+                    and _lane_handoff_holds(args, where, overrides, root, destinations[0], tags)):
+                continue
+            return "git push to the record branch"
     return ""
 
 

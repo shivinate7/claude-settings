@@ -97,6 +97,9 @@ STEP_TAG = "cs-step:"
 TOPIC_TAG = "cs-topic:"
 BUILD_TAG = "cs-build:"
 LANE_TAG = BUILD_TAG + "lane"
+# A lane that wrote its handoff carries ARCHIVE_READY_TAG plus the handoff's slug; the lanes-to-archive list checks that
+# roadmap/outbox/<slug>-handoff.md is on the record branch before the lane is archived.
+ARCHIVE_READY_TAG = "cs-archive-ready:"
 # The consultant is owner-facing: its questions go to the owner, never to a parent, so it carries no lane duty even
 # when its record names a parent id.
 CONSULTANT_TAG = BUILD_TAG + "consultant"

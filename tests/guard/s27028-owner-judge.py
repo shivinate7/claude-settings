@@ -27,9 +27,9 @@ OJ_OPTIONS = [
 
 
 def oj_ctx(goal=OJ_GOAL, problem=OJ_STAKE, based=(OJ_BASED,), tail=OJ_CTX, departs=QD_LINE):
-    """The context of a decision: the form lines, the Departs from line, then the prose. A line passed as None or
-    empty is left out."""
-    return "\n".join(line for line in (goal, problem, *based, departs, tail) if line)
+    """The context of a decision: the form lines, the Departs from line, the Waiting on line, then the prose. A line
+    passed as None or empty is left out."""
+    return "\n".join(line for line in (goal, problem, *based, departs, OJ_WAIT, tail) if line)
 
 
 OJ_GOOD = oj_ctx()
