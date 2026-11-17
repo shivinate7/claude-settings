@@ -207,20 +207,6 @@ for _name, _command, _lacks in (
     sh("gh-write-cloud: %s is refused in a cloud session" % _name, _command, "deny", GH_WRITE_RULE,
        cwd=NOGIT, env=GH_WRITE_CLOUD, carries=GH_WRITE_REMEDY, lacks=(_lacks,))
 
-
-# Reads and the merge tool stay allowed in a cloud session.
-for _command in (
-    "gh pr view 12", "gh pr list", "gh pr diff 12", "gh pr checks 12", "gh pr status",
-    "gh issue view 3", "gh issue list", "gh auth status",
-    "gh api repos/x/y/pulls/1", "gh api repos/x/y/pulls/1 -q .body",
-    "gh api -X GET search/code -f q=foo", "gh api -X get search/code -f q=foo",
-    "gh api -XGET search/code -f q=foo", "gh api --method=GET search/code -f q=foo",
-    "gh api --method get search/code -f q=foo",
-    "merge 12 --confirm", "~/.claude/bin/merge 12 --confirm",
-):
-    sh("gh-write-cloud: %s is allowed in a cloud session" % _command, _command, "allow", cwd=NOGIT,
-       env=GH_WRITE_CLOUD)
-
 # Reads and the merge tool stay allowed in a cloud session.
 for _command in (
     "gh pr view 12", "gh pr list", "gh pr diff 12", "gh pr checks 12", "gh pr status",
