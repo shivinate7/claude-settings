@@ -27,7 +27,7 @@ import os
 import re
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
 for folder in ("lint", "hooks", "merge"):
     sys.path.insert(0, os.path.join(ROOT, folder))

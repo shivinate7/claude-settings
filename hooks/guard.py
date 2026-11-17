@@ -113,6 +113,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   check-tail           deny. A named check piped into tail or head. (background-check-through-verdict)
   check-timeout        deny. A `merge --lane-lint` run in the foreground, or in the background under a
                        time limit below its bound. (background-check-through-verdict)
+  fg-bash-while-bg     deny. A foreground call that can run long (a test, lint, merge, build or install, or a time
+                       limit over 60000 ms), while this session has a background command or agent running, read from
+                       the transcript. A call from an agent, a missing transcript and a failed read allow.
+                       (fg-bash-while-bg)
   playwright-browsers-path, playwright-install
                        deny. (playwright-browsers-path, playwright-install-once)
   rm-var-unguarded     deny. A recursive delete under an unguarded variable.
@@ -609,7 +613,23 @@ _FAMILY_MODULES = ("guard_branch_worktree", "guard_shared_tree", "guard_pointer"
 # last, so the replace of this one file switches the whole set: a load sees the old set or the new
 # set, never a mix, however long the install stalls between two files. No folder, or a repo copy
 # with no stamp, loads the modules beside this file.
-_SET_DIR = os.path.join(_HERE, "guard.d", str(globals().get("INSTALL_ID", "")))
+# _HERE is a realpath taken after this file was read, so a cloud generation switch in between puts it in
+# the new generation while this file's stamp is still the old one. A generation folder is named by its
+# install id (installs/<id>/hooks), so when the folder beside the realpath has no set for our stamp, the
+# set is in the sibling generation that stamp names, never the new generation's set (a mixed load).
+def _set_dir_for(here, install_id):
+    own = os.path.join(here, "guard.d", install_id)
+    if os.path.isdir(own):
+        return own
+    gens = os.path.dirname(os.path.dirname(here))
+    if os.path.basename(gens) == "installs":
+        stamped = os.path.join(gens, install_id, "hooks", "guard.d", install_id)
+        if os.path.isdir(stamped):
+            return stamped
+    return own
+
+
+_SET_DIR = _set_dir_for(_HERE, str(globals().get("INSTALL_ID", "")))
 if "INSTALL_ID" in globals() and os.path.isdir(_SET_DIR):
     sys.path.insert(0, _SET_DIR)
 _PLACEHOLDER = None
@@ -703,9 +723,10 @@ while True:
         from guard_argv import PROCESS_ARGS_REASON, process_args_hit
         _loading = "guard_stream"
         from guard_stream import (
-            BACKGROUND_END_REASON, CHECK_TAIL_REASON, CHECK_TIMEOUT_TEMPLATE, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
+            BACKGROUND_END_REASON, CHECK_TAIL_REASON, CHECK_TIMEOUT_TEMPLATE, FG_BACKGROUND_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
             NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, UV_VALUE_FLAGS, VERDICT_PIPE_REASON, WAITER_REASON,
-            background_end_hit, check_tail_hit, check_timeout_hit, check_timeout_limit_text, live_stream_hit, ln_descends_hit,
+            background_end_hit, background_work_running, check_tail_hit, check_timeout_hit, check_timeout_limit_text, fg_long_hit,
+            live_stream_hit, ln_descends_hit,
             loop_condition_polls_a_pattern, narrated_tail_hit, verdict_pipe_hit, waiter_verdict,
         )
         _loading = "guard_rm_var"
@@ -5252,6 +5273,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = check_tail_hit(stripped, background)
     if matched:
         refuse(tool, "deny", "check-tail", CHECK_TAIL_REASON, matched)
+    # The long foreground call is read first, so a foreground lane lint under background work gets this refusal and
+    # its rerun then meets check-timeout's limit. Only a call that can run long reads the transcript.
+    if not background and not agent:
+        matched = fg_long_hit(split_segments(stripped), timeout_ms)
+        if matched and background_work_running(transcript):
+            refuse(tool, "deny", "fg-bash-while-bg", FG_BACKGROUND_REASON, matched)
     matched = check_timeout_hit(stripped, background, timeout_ms)
     if matched:
         refuse(tool, "deny", "check-timeout", CHECK_TIMEOUT_TEMPLATE % check_timeout_limit_text(), matched)
