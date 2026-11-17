@@ -1,0 +1,14 @@
+{
+  "id": "owner-act-names-actor",
+  "title": "A page option that hands an act to the owner must say whether a session can do it and with which tool, or the question guard refuses it",
+  "priority": "later",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "phase": "later",
+  "owner": "triage",
+  "blockedBy": [],
+  "why": "Runner 11's ask (13:23 CST Nov 17), relayed by the coordinator 13:22 CST. Incident: page item 929 option d said the owner merges the five setup PRs by hand. Runner 11 waited about 21 hours for an act the owner told it at 13:20 CST it could do itself with the GitHub MCP plain merge. A goal's done test hung on the wrongly assigned act and the Stop hook looped about 70 turns. The coordinator carried option d as recommended, so the mistake was its too. Rule: output-never-hand-off-doable-step.",
+  "source": "Coordinator message 13:22 CST Nov 17; runner 11's word, not read by triage.",
+  "note": "Todo. Guard: an option that hands an act to the owner must say whether a session can do it and with which tool; hooks/question_form.py refuses the write otherwise. Prior work (triage 11, 13:25 CST): task-names-check-line-not-truth (done) and why-yours-acting-session (todo) cover a page task's Why-yours line, not a decision option, so the fix extends that home, not a second guard. Red case first: an option whose how says the owner does an act by hand with no named actor check is refused; one that names the tool a session lacks, with its cite, passes. A guard change: test-author, builder, review rounds apply.",
+  "updatedAt": "2026-11-17T13:22:36-06:00"
+}
