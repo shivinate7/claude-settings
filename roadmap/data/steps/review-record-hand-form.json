@@ -1,0 +1,14 @@
+{
+ "id": "review-record-hand-form",
+ "title": "A PR comment that opens with the review-record marker but did not come from the merge tool's review-record command is refused at post time",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Consultant, 17:40 CST Nov 17 (message to triage 11): he posted hand-written review-record comments that parse_review rejects, and typed a 40-hex fix-check sha made up from a 10-character prefix. He corrected it. Harm: a hand form reads as a real record, so a review round or fix check that never ran looks passed. Guard asked for: a PR comment that starts with the review-record marker and does not come from `merge N --review-record` is refused at post time, or flagged when parse_review returns None.",
+ "source": "consultant, 17:40 CST Nov 17, relayed in a message to triage 11; no diff read",
+ "note": "Two extra notes from the same message, unmeasured by triage. (1) Guard merge-confirm-repo refused a merge loop of the form `for a in ...; merge $1 --confirm` right after get_session but allowed a plain `merge 3558 --confirm`; the consultant thinks this may be a false alarm. (2) The merge tool's prose judge marked decision stall-watch line 33 as unbacked. Neither has its own step yet; the coordinator decides.",
+ "updatedAt": "2026-11-17T17:39:20-06:00"
+}
