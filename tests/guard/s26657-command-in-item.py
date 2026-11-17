@@ -15,7 +15,7 @@ CMD_BOTH_SHELLS = {"powershell": "git push origin --delete old-a", "mac": "git p
 
 def ci_task(steps, **over):
     # The Why yours line keeps each case on the command rule; task-names-check reads it (TN_WHY).
-    task = {"id": CI_DOC, "kind": "task", "status": "open", "title": "Delete the stale branches",
+    task = {"id": CI_DOC, "n": 928, "kind": "task", "status": "open", "title": "Delete the stale branches",
             "steps": steps, "context": TN_WHY}
     task.update(over)
     return {k: v for k, v in task.items() if v is not None}
@@ -38,8 +38,9 @@ ci("a file opened and its command run in one step is denied", "deny",
 ci("a terminal step with the command on the item is allowed", "allow",
    ci_task(CI_TERMINAL, command=CMD_BOTH_SHELLS))
 ci("a decision that opens a file and runs its command is not judged", "allow",
-   {"id": CI_DOC, "kind": "decision", "status": "open", "title": "Delete the stale branches?",
-    "context": OJ_FORM + "\n" + QD_LINE + "\nThe plan file lists them.",
+   {"id": CI_DOC, "n": 928, "kind": "decision", "status": "open", "title": "Delete the stale branches?",
+    "recommended": "b", "why": "Keeping them costs nothing yet.",
+    "context": OJ_FORM + "\n" + QD_LINE + "\n" + OJ_WAIT + "\nThe plan file lists them.",
     "options": [{"key": "a", "label": "Delete them",
                  "how": "Open plans/c152-stale-branch-deletes.md and run its command.", "gain": "g", "lose": "l"},
                 {"key": "b", "label": "Keep them", "how": "Do nothing yet.", "gain": "g", "lose": "l"}]})

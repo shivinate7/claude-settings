@@ -63,7 +63,7 @@ def none_item(**over):
                 "lose": "Nobody reads it first."},
                {"key": "b", "label": "Hold it", "gain": "A reviewer reads it first.",
                 "lose": "The change lands a day later."}]
-    return tcj.good_page_item(options=options, **over)
+    return tcj.good_page_item(options=options, **dict({"recommended": "b"}, **over))
 
 
 def write_json(path, data):
@@ -189,7 +189,7 @@ def narrowed_item(*keys):
     labels = ("Ship it", "Hold it", "Wait a day")
     options = [{"key": k, "label": labels[i], "gain": "The change lands on a plain day.",
                 "lose": "Nobody reads it first."} for i, k in enumerate(keys)]
-    return tcj.good_page_item(options=options)
+    return tcj.good_page_item(options=options, recommended=keys[1])  # the second key: a key the options hold
 
 
 def check_scope(name, call, cwd, cwd_page, on_page):
