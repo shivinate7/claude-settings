@@ -5812,6 +5812,23 @@ const placeRel = (page, it, edge, offset) => page.evaluate(([id, e, o]) => {
 const settleAt = async (page, it, edge, offset) => { await frameWait(page, 3); await placeRel(page, it, edge, offset); await frameWait(page, 3); await placeRel(page, it, edge, offset); };
 const cardMap = (page) => page.evaluate(() => Object.fromEntries([...document.querySelectorAll("article.card")].map((c) => { const r = c.getBoundingClientRect(); return [c.id, { id: c.id, top: r.top, bottom: r.bottom, h: r.height, receipt: !!c.querySelector(":scope > .receipt") }]; })));
 const bandOf = (page) => page.evaluate(() => ({ top: document.querySelector(".hdr").getBoundingClientRect().bottom, bottom: document.getElementById("bar").getBoundingClientRect().top }));
+// The band a rail jump lands a card in: its top from 1px above the band's top edge to 120px below it.
+const landedIn = (top, band) => top >= band.top - 1 && top <= band.top + 120;
+// A card's top once it sits in the band and holds still for three frames in a row. The first scrollend is no signal: the Send's own scroll can
+// end after a test sets its listener. A top outside the band does not end the wait, even when still, so a small scroll before the jump's own
+// smooth one does not pass as rest. Frames, not a timer, capped at 300. A jump that never lands returns its last top, and the assert names it.
+async function topAfterJump(page, it) {
+  let last = null, same = 0, top = null;
+  for (let f = 0; f < 300; f++) {
+    await frameWait(page, 1);
+    top = await card(page, it).evaluate((e) => Math.round(e.getBoundingClientRect().top));
+    if (!landedIn(top, await bandOf(page))) { last = null; same = 0; continue; }
+    same = top === last ? same + 1 : 0;
+    last = top;
+    if (same >= 2) break;
+  }
+  return top;
+}
 // The anchor the rule picks for these sent cards, read before Send.
 const anchorOf = (page, sent) => page.evaluate((ids) => {
   const bt = document.querySelector(".hdr").getBoundingClientRect().bottom;
@@ -6257,13 +6274,11 @@ test("a rail jump after Send lands on its card", async (t) => {
   await choose(page, items[0], "a"); await choose(page, items[1], "a");
   await send(page);
   await page.locator("#item-q0 .receipt").waitFor();
-  await page.evaluate(() => { window.__ended = false; window.addEventListener("scrollend", () => { window.__ended = true; }, { once: true }); }); // registered before the jump
   await page.click("#c-q9");
-  await page.waitForFunction(() => window.__ended).catch(() => {}); // the jump's scroll end; a jump that never scrolls leaves the band assert to name it
   // The card lands inside the band, just under the header's bottom edge.
+  const top = await topAfterJump(page, items[9]);
   const band = await bandOf(page);
-  const top = await card(page, items[9]).evaluate((e) => Math.round(e.getBoundingClientRect().top));
-  assert.ok(top >= band.top - 1 && top <= band.top + 120, `the jump missed its card; it sits at ${top}, band top ${band.top}`);
+  assert.ok(landedIn(top, band), `the jump missed its card; it sits at ${top}, band top ${band.top}`);
 });
 
 test("a receipt wholly below the screen drops its height without moving the page", async (t) => {
