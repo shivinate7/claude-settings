@@ -14,8 +14,9 @@ writes, so a session cannot grant itself an override. It is valid only while now
          It reaches agents. The owner picks the length, so there is no cap.
   `override off` ends any override at once. `override`, `override <n>[m|h]` and `override off` mean
   that only as the whole prompt: a word after the length or after `off` is ambiguous, so it grants
-  nothing on this route (an intended "off" must never become a grant). A later line starting with the word grants
-  nothing.
+  nothing on this route (an intended "off" must never become a grant). On this keyword route, a later line starting
+  with the word grants nothing. The plain ask below reads a later line with the whole word like any prompt, so
+  `thanks` then `override 15m` on the next line grants 15m on a judge yes.
   A plain ask (`yes override that`, `override that for 15 minutes please`) writes the same file when a model judges the
   prompt to be the owner's own present request to override a refusal (grant_override_ask, call_judge.override_ask). Cost:
   one model call, only for an owner prompt that holds the whole word `override` outside backtick code spans and
@@ -153,7 +154,8 @@ OPUS_ROLES = ("builder", "reviewer", "test-author", "record-writer", "claude-cod
 # The roles a plain ask or its scope read can name: OPUS_ROLES less `claude`, which in prose addresses the assistant.
 ASK_ROLES = tuple(role for role in OPUS_ROLES if role != "claude")
 LOG_REASON_MAX = 300
-SESSION_ID = re.compile(r"[\w.-]{1,128}")  # the id names a file: no separator, no leading dot
+ID_CHAR = r"[\w.-]"  # the characters of a session id, for a reader that finds one inside other text
+SESSION_ID = re.compile(ID_CHAR + "{1,128}")  # the id names a file: no separator, no leading dot
 LIFTED = "override"  # the log decision of a lifted act
 UNREAD = "override-unread"  # the log decision when an override file cannot be read
 OPUS_LIFTED = "opus-override"  # the log decision of an Opus spawn an Opus override lifted
