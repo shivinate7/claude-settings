@@ -4958,6 +4958,31 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         first = 'Answered, the owner wrote "no.'
         self.assert_blocked(first + '\nHe then said "yes" later.', first)
 
+    def test_an_red_session_answering_its_questions_passes(self):
+        # Catches: a session that answered another session's questions reads as an owner's answer, so the line is blocked.
+        self.assert_allowed("I sent triage 9 my comments on its draft goal and answered its four questions:")
+
+    def test_an_red_proposed_end_condition_passes(self):
+        # Catches: "answered" in a should-clause, a condition a goal proposes and nobody has met, is read as a claim.
+        self.assert_allowed("- The goal should end once the 20 open comment threads are answered or closed, "
+                            "without reading the other 55.")
+
+    def test_an_red_guard_name_and_negated_claim_pass(self):
+        # Catches: the guard's own name, "the answered guard", is read as a claim, because the first use of the
+        # word has no negator in its clause.
+        self.assert_allowed("- A test-author on the answered guard's false alarm: it refused my two lines that were "
+                            "not claims you had answered anything.")
+
+    def test_an_red_item_named_as_the_claim_blocks(self):
+        # Catches: "item <n>" is read as the source of the answer, so a bare claim about the item it names passes.
+        out = self.verdict("Item 870 is answered.")
+        self.assertIsNotNone(out, "Item 870 is answered. passed: item 870 was read as a source for its own claim")
+        self.assertEqual(out.get("decision"), "block", out)
+
+    def test_an_green_owner_claim_with_a_condition_word_still_blocks(self):
+        # Catches: a fix that exempts every line with a condition word such as "once", not only a proposed condition.
+        self.assert_blocked("The owner answered it once the call ended.", "The owner answered it once the call ended.")
+
     def test_an_red_fence_marker_mid_line_opens_no_fence(self):
         # Catches: a ``` inside a line, and not at its start, opens a fence that hides the lines after it.
         self.assert_blocked("Typed ``` in the middle, then answered.\nThe next line answered too.",
