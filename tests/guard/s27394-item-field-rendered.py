@@ -25,7 +25,7 @@ IF_VALUE = {"port": False, "stands": True, "rank": 3, "multi": True, "ranked": T
             "status": "open", "options": [{"key": "a", "label": "Keep the blue"}], "pick": "a",
             "steps": ["Open the page."], "links": [{"label": "Page", "url": "https://example.com/p"}],
             "command": CMD_BOTH_SHELLS, "lastAnswer": IF_LAST}
-IF_OWN = '["id", "kind", "status", "title", "context", "zzCustom"]'   # a block of a page of its own
+IF_OWN = '["id", "kind", "status", "title", "context", "options", "recommended", "why", "shown", "zzCustom"]'  # a block of a page of its own; the decision fields are drawn
 os.makedirs(os.path.join(ROOT, "ifr"), exist_ok=True)
 
 
@@ -144,7 +144,7 @@ add("item field: a read is not judged", "allow", tool="ArtifactData", cwd=PQ_REP
 
 # The guard reads the block of the page it is handed, so no copy of the list sits in the guard. The
 # block spans lines here, as a hand-edited page may.
-IF_PRETTY = if_page("pretty", if_block('[\n  "id",\n  "kind",\n  "status",\n  "title",\n  "context",\n  "zzCustom"\n]'))
+IF_PRETTY = if_page("pretty", if_block('[\n  "id",\n  "kind",\n  "status",\n  "title",\n  "context",\n  "options",\n  "recommended",\n  "why",\n  "shown",\n  "zzCustom"\n]'))
 ifr_seam("a page of its own lists zzCustom, so a set that carries it is allowed", "allow", IF_PRETTY,
          if_item(zzCustom="x"))
 ifr_seam("a page of its own omits reply, so a set that carries it is denied", "deny", IF_PRETTY,

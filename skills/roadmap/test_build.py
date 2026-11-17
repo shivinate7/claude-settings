@@ -271,6 +271,40 @@ class Stamps(Fixture):
         self.assertIn("window.ROADMAP_DB = null", page)
 
 
+class NotesHome(Fixture):
+    def test_notes_folder_is_a_home_beside_the_old_notes_file(self):
+        """The page reads the notes folder as a home, as it reads the old notes file. Control: the old file's panel
+        still homes on the old file."""
+        (self.repo / "docs" / "notes").mkdir(parents=True)
+        (self.repo / "docs" / "notes" / "wheel-speed-cap.md").write_text(
+            "- wheel-speed-cap: the spin rate is capped (hooks/guard.py)\n", encoding="utf-8")
+        (self.repo / "docs" / "debts").mkdir(parents=True)
+        (self.repo / "docs" / "debts" / "notes.md").write_text(
+            "# Notes\n\n- old-note: kept in the old file (hooks/guard.py)\n", encoding="utf-8")
+        page, _ = self.build_from_main()
+        panels = build_info(page)["panels"]
+        notes = [p for p in panels if p.get("home") == "docs/notes"]
+        self.assertEqual(len(notes), 1, "no panel reads the notes folder: %s" % [p.get("home") for p in panels])
+        self.assertFalse(notes[0]["read"].startswith("unknown"), notes[0])
+        self.assertEqual(self.panel(page, "Debt notes")["home"], "docs/debts/notes.md")
+
+    def test_checkout_with_no_notes_folder_reads_notes_as_empty(self):
+        """kind notes is optional: a checkout with no docs/notes reads the Notes home as empty, not unknown."""
+        page, _ = self.build_from_main()
+        self.assertFalse((self.repo / "docs" / "notes").exists())  # scope: the folder is absent in this checkout
+        notes = self.panel(page, "Notes")
+        self.assertFalse(notes["read"].startswith("unknown"), notes)
+        self.assertIn("empty", notes["read"], notes)
+
+    def test_missing_core_homes_still_read_unknown_without_a_notes_folder(self):
+        """Control: with no docs/notes, the core homes that are missing read unknown, as before."""
+        page, _ = self.build_from_main()
+        self.assertFalse((self.repo / "docs" / "notes").exists())  # scope: the folder is absent in this checkout
+        self.assertEqual(self.panel(page, "Debts")["read"], "unknown (no debts or docs/debts in this checkout)")
+        self.assertEqual(self.panel(page, "Debt notes")["read"],
+                         "unknown (no debts/notes.md or docs/debts/notes.md in this checkout)")
+
+
 class ConflictMarkers(Fixture):
     def build_tree(self):
         git(self.repo, "add", "-A")
@@ -638,13 +672,15 @@ class UpkeepFixture(Fixture):
             row["createdAt"] = created
         return row
 
-    def pull_row(self, number, branch, head=None, merged=None):
-        """One landedPulls row. head and merged are left out when None, so a case can send a row with neither."""
+    def pull_row(self, number, branch, head=None, merged=None, **fields):
+        """One landedPulls row. head and merged are left out when None, so a case can send a row with neither. `fields`
+        add keys, such as replacedBy."""
         row = {"number": number, "branch": branch}
         if head is not None:
             row["head"] = head
         if merged is not None:
             row["merged"] = merged
+        row.update(fields)
         return row
 
     def created_before(self, minutes, read_ago=5):
@@ -4082,21 +4118,21 @@ class IdleLanes(UpkeepFixture):
     JOINT = "joint (close #%d; archive archive/%s; archive lane %s)"
 
     def lane(self, sid, step, bucket=BUCKET_COMPLETED, status="SESSION_STATUS_IDLE", idle_since=_ABSENT,
-             unarchived=_ABSENT):
-        """A sessions row for a lane of this repo that names `step`, with its get_session bucket. idle_since and
-        unarchived (the row's unarchived_epoch) are left out unless given."""
-        row = session_row(sid, status, "cs-build:lane", "cs-step:" + step, self.REPO, status_bucket=bucket)
+             unarchived=_ABSENT, tags=()):
+        """A sessions row for a lane of this repo that names `step`, with its get_session bucket and any extra tags.
+        idle_since and unarchived (the row's unarchived_epoch) are left out unless given."""
+        row = session_row(sid, status, "cs-build:lane", "cs-step:" + step, self.REPO, *tags, status_bucket=bucket)
         if idle_since is not _ABSENT:
             row["idle_since"] = idle_since
         if unarchived is not _ABSENT:
             row["unarchived_epoch"] = unarchived
         return row
 
-    def idle_lane(self, sid, step, idle_since=None, unarchived=0):
+    def idle_lane(self, sid, step, idle_since=None, unarchived=0, tags=()):
         """A completed lane on `step` idle 13 h at the live read, with no unarchived commit, unless the case gives
-        idle_since (_ABSENT leaves it out) or unarchived."""
+        idle_since (_ABSENT leaves it out), unarchived or extra tags."""
         since = self.created_before(13 * 60) if idle_since is None else idle_since
-        return self.lane(sid, step, idle_since=since, unarchived=unarchived)
+        return self.lane(sid, step, idle_since=since, unarchived=unarchived, tags=tags)
 
     def stale_pull(self, number, branch, title=None, hours=13, **fields):
         """An open draft pull on `branch`, created `hours` before the live read, with its head off main (the record
@@ -4135,6 +4171,15 @@ class IdleLanes(UpkeepFixture):
             self.write_step(sid, dict(STEP, **fields))
         git(self.repo, "add", "-A")
         git(self.repo, "commit", "-q", "-m", "steps " + ", ".join(sorted(steps)))
+
+    def commit_handoff(self, slug):
+        """The lane's handoff file on the record branch, at the path the archive-ready check reads. Leaves HEAD on roadmap."""
+        git(self.repo, "checkout", "-q", "roadmap")
+        path = self.repo / (build.IDLE_HANDOFF % slug)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# %s\n" % slug, encoding="utf-8")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "handoff " + slug)
 
     def trailer_on_main(self, sid):
         """A commit on main whose last paragraph is `Step: <sid>`, so the step reads as merged there. Leaves HEAD on
@@ -4633,6 +4678,28 @@ class IdleLanes(UpkeepFixture):
         self.assertEqual(count, 1, "an unreadable main reads the lanes row as %r" % (entries,))
         self.assertTrue(entries and entries[0].startswith("unknown ("), entries)
 
+    def test_upkeep_row_lists_a_superseded_lane_as_merge_idle_lanes_does(self):
+        # The control is session_a, done and idle, which both list. session_s is on c4, todo with no Step trailer on main,
+        # so only its closed pull's replacedBy (#8, merged) lists it. The upkeep row must list it too. Its work is not on
+        # main, so the landed rows must not name c4: they read marks from the merged rows only.
+        self.land({"c1": {"status": "done", "order": 1}, "c4": {"status": "todo", "order": 4}})
+        head = self.off_main()
+        self.publish(sessions=[self.idle_lane("session_a", "c1"), self.idle_lane("session_s", "c4")],
+                     landed=[self.pull_row(7, "lane/c4", head=head, merged=False, replacedBy=8),
+                             self.pull_row(8, "batch-7", head=head, merged=True)])
+        reported = self.reported()
+        self.assertIn("session_s", self.ids(reported),
+                      "scope: merge --idle-lanes does not list the superseded lane: %r" % (reported,))
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        entries = self.entries(self.row(out, self.ROW)[1])
+        self.assertIn("session_s", self.ids(entries),
+                      "the lanes-to-archive row does not list the superseded lane that merge --idle-lanes lists:\n%s" % out)
+        self.assertEqual(self.ids(entries), self.ids(reported),
+                         "the lanes-to-archive row and merge --idle-lanes list different lanes: %r" % (entries,))
+        closing = self.entries(self.row(out, "landed, waiting for triage to close")[1])
+        self.assertFalse([e for e in closing if e.startswith("c4 (")],
+                         "the landed row names c4, whose work is not on main: %r" % (closing,))
+
     def test_archived_rows_with_no_bucket_do_not_read_a_live_lane_unknown(self):
         # Green on the old code: a live row with an enum bucket makes the no-bucket check false, so the archived row
         # with no bucket changes nothing. The live lane is judged normally. session_a is the control.
@@ -4684,6 +4751,62 @@ class IdleLanes(UpkeepFixture):
                          "the completed lane on the landed step is listed beside the done one: %r" % (entries,))
         self.assertEqual(self.ids(build.idle_lanes_report(self.repo, str(self.live))), ["session_a", "session_b"],
                          "the merge tool's read lists the same lanes")
+
+    def test_page_row_carries_hold_for_a_tagged_lane_whose_handoff_is_not_on_the_record_branch(self):
+        # The untagged lane is the control: its entry reads as it does today. The tagged lane's handoff is not on the
+        # record branch, so its entry carries the HOLD flag that merge --idle-lanes prints.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_t", "c1", tags=("cs-archive-ready:alpha",)),
+                               self.lane("session_u", "c2")])
+        _, entries = self.archive()
+        self.assertEqual(self.ids(entries), ["session_t", "session_u"], entries)
+        self.assertIn("session_u (c2; topic -)", entries)
+        held = [entry for entry in entries if entry.startswith("session_t ")]
+        self.assertEqual(len(held), 1, entries)
+        self.assertIn("HOLD: handoff alpha is not on the record branch", held[0])
+
+    JOINT_PAIR = {"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}}
+
+    def publish_joint_pair(self, tag):
+        """session_t on c1 carrying `tag`, and the untagged control session_u on c2, each held only by a stale draft.
+        A case lands JOINT_PAIR first."""
+        self.publish(sessions=[self.idle_lane("session_t", "c1", tags=(tag,)), self.idle_lane("session_u", "c2")],
+                     pulls=[self.stale_pull(101, "lane/c1"), self.stale_pull(102, "lane/c2")])
+
+    def test_joint_lane_tagged_archive_ready_with_no_handoff_on_the_record_branch_is_held(self):
+        # The control joint line reads as it does with no tag. The tagged lane's joint line takes the same HOLD flag a
+        # plain lane's entry takes when its handoff is not on the record branch.
+        self.land(self.JOINT_PAIR)
+        self.publish_joint_pair("cs-archive-ready:alpha")
+        self.assertEqual(self.reported(), sorted([
+            self.JOINT % (101, "lane/c1", "session_t") + " HOLD: handoff alpha is not on the record branch",
+            self.JOINT % (102, "lane/c2", "session_u")]),
+            "a joint lane tagged cs-archive-ready with no handoff on the record branch lost its HOLD flag")
+
+    def test_joint_lane_tagged_archive_ready_with_its_handoff_on_the_record_branch_keeps_the_plain_joint_line(self):
+        # The handoff is on the record branch, so the check passes and the joint line reads as it does with no tag.
+        self.land(self.JOINT_PAIR)
+        self.commit_handoff("alpha")
+        listed = subprocess.run(["git", "-C", str(self.repo), "ls-tree", "-r", "--name-only", "roadmap"],
+                                capture_output=True, text=True).stdout.splitlines()
+        self.assertIn(build.IDLE_HANDOFF % "alpha", listed, "scope: the handoff is not on the record branch")
+        self.publish_joint_pair("cs-archive-ready:alpha")
+        self.assertEqual(self.reported(), sorted([
+            self.JOINT % (101, "lane/c1", "session_t"),
+            self.JOINT % (102, "lane/c2", "session_u")]),
+            "a joint lane whose handoff is on the record branch did not keep the plain joint line")
+
+    def test_joint_lane_tagged_archive_ready_with_a_bad_slug_reads_unknown_not_joint(self):
+        # Each slug is one a plain lane reads unknown: empty, a `/`, `..`, a line break. Each reads session_t unknown,
+        # not its joint line; the untagged control joint line still prints.
+        self.land(self.JOINT_PAIR)
+        for slug in ("", "a/b", "..", "a\nb"):
+            with self.subTest(slug=slug):
+                self.publish_joint_pair("cs-archive-ready:" + slug)
+                self.assertEqual(self.reported(), sorted([
+                    "unknown (archive slug %r is not a plain name; lane session_t)" % slug,
+                    self.JOINT % (102, "lane/c2", "session_u")]),
+                    "a joint lane tagged cs-archive-ready with slug %r printed its joint line, not unknown" % slug)
 
     def test_completed_lane_with_a_doing_step_under_it_is_held_not_archived(self):
         # c1 is the lane's own step, landed. c2 is still doing and names this lane, so nothing else owns it: the lane reads
