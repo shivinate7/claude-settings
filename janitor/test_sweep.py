@@ -7380,7 +7380,7 @@ class RunLogTests(unittest.TestCase):
                 "branch old-merged was not created")
         require(os.path.isdir(self.wt), "the detached worktree was not created")
 
-    def _main(self, argv, report=None, run_log=None):
+    def _main(self, argv, report=None, run_log=None, free=4242, stdout=None):
         real_report = sweep.print_sweep_report
 
         def tee(results, confirm, out=None):  # the report's `out=sys.stdout` default is bound at import
@@ -7388,9 +7388,9 @@ class RunLogTests(unittest.TestCase):
 
         with mock.patch.dict(os.environ, {"JANITOR_RUN_LOG": run_log or self.log}), _machine_quiet(), \
                 mock.patch.object(shutil, "disk_usage",
-                                  return_value=types.SimpleNamespace(total=1, used=1, free=4242)), \
+                                  return_value=types.SimpleNamespace(total=1, used=1, free=free)), \
                 mock.patch.object(sweep, "print_sweep_report", tee), \
-                contextlib.redirect_stdout(io.StringIO()):
+                contextlib.redirect_stdout(stdout if stdout is not None else io.StringIO()):
             return sweep.main(argv + ["--restore-log", self.restore])
 
     def _write_run_lines(self, roots):
@@ -7416,6 +7416,16 @@ class RunLogTests(unittest.TestCase):
         self.assertEqual(len(headers), 1, "the report has no single section for %s: %r" % (root, text))
         index = headers[0] + 1
         return lines[index] if index < len(lines) else ""
+
+    def test_the_free_disk_line_divides_by_two_to_the_thirty_not_a_billion(self):
+        """--confirm prints the least free space of the roots it changed, in GB of 2**30 bytes: 5 GiB free reads 5.0, not 5.4 (1e9 bytes)."""
+        _age_admin_files(self.wt, 7200)  # the worktree is quiet, so this run removes it and the line prints
+        out = io.StringIO()
+        self._main([self.busy, self.idle, "--confirm"], free=5 * 2 ** 30, stdout=out)
+        lines = [line for line in out.getvalue().splitlines() if "free disk:" in line]
+        self.assertEqual(len(lines), 1, "the --confirm run that removed a worktree printed no free disk line: %r" % out.getvalue())
+        self.assertRegex(lines[0], r"free disk: 5\.0\b",
+                         "the free disk line divides bytes by 1e9, not 2**30: %r" % lines[0])
 
     def test_confirm_appends_one_line_per_repository_with_the_four_fields(self):
         _age_admin_files(self.wt, 7200)  # quiet for 2 hours: the strict idle rule allows the reap
