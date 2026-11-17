@@ -90,9 +90,9 @@ GitHub, so the publisher reads them just before the build and passes one file:
   the pull, `reviewLog` when the pull has a posted review log. The stale-draft row skips a draft with either
   true. A present key must be a JSON bool (`null` counts as non-bool); a pull row with a non-bool value is skipped, so the
   stale-draft, pair, unlaned and lanes-to-archive rows read unknown. `branches`: lane branches with no open pull request.
-- `landedPulls` (optional, beside the keys above): `[{"number", "branch", "head"?, "merged"?}]`, the repo's pull
+- `landedPulls` (optional, beside the keys above): `[{"number", "branch", "head"?, "merged"?, "replacedBy"?}]`, the repo's pull
   requests closed in the last 14 days whose base is the default branch, each with its head ref (`branch`), head sha
-  (`head`) and GitHub's `merged` flag. Triage's live-file brief must fill it; see "A merge marks a step".
+  (`head`), GitHub's `merged` flag and, for a pull closed as replaced, `replacedBy` (the replacing pull's number). Triage's live-file brief must fill it; see "A merge marks a step".
 - `sessions`: `list_sessions`, every page, each row copied as it comes with only these fields.
   `status_bucket` is the bucket list_sessions returns (`SESSION_STATUS_BUCKET_WORKING`, `_BLOCKED`, `_REVIEW_READY`, `_COMPLETED`, `_FAILED`);
   it is optional, and a row without it reads as not completed. The upkeep list reads the rows for steps
@@ -131,6 +131,14 @@ pull readings `unknown (<n> landedPulls rows skipped)`. The publisher (triage) m
 GitHub. It lists the closed pull requests of the last 14 days whose base is the default branch, each with its head
 ref, head sha and merged flag. That filter makes `merged: true` mean merged into main. A merge
 that drops the `Step:` trailer, or a lane that closes its pull unmerged, then still reads right.
+
+A row may also carry `replacedBy`, the number of the pull that replaced it. Triage writes it on a closed row whose `merged`
+is false and whose newest tool pointer comment on that pull (first line `<!-- replaced-pointer -->`) reads `Replaced by #N`, as
+`merge` posts when it closes a lane as replaced (decision `pr-ledger`). A pull closed by hand, or whose newest pointer reads
+`Dropped from the batch`, gets no `replacedBy`. A row whose `replacedBy` is present and not an int is skipped, like a bad
+`merged`. `merge --idle-lanes` (`superseded_marks` in `build.py`) lists a lane whose closed unmerged row has `replacedBy`, whatever
+the step's status, because the replacing pull carries the step on (decision `session-tiers`, Archiving scope). The landed
+upkeep rows ignore it: the work is not on main.
 
 ## Refusals
 
@@ -278,14 +286,15 @@ After each build the roadmap build script prints the upkeep list for the triage 
   - its `status_bucket` is `SESSION_STATUS_BUCKET_COMPLETED` or `SESSION_STATUS_BUCKET_REVIEW_READY`. A lane that is blocked, failed, working or
     has no bucket is never listed;
   - it has at least one `cs-step:` tag, and each step it names has landed. A step has landed when a
-    `Step:` trailer is on main, a `landedPulls` row proves it, or its status is `done`. A step off the record branch has landed only by its trailer;
+    `Step:` trailer is on main, a `landedPulls` row proves it, or its status is `done`. A step off the record branch has landed only by its trailer.
+    A lane whose pull an open or merged pull replaced (a closed unmerged `landedPulls` row with `replacedBy`) is listed whatever its step status;
   - no open pull holds it. A pull holds a lane when its `branch` is a step slug or `lane/<slug>`. A
     draft pull whose `head` sha is already in the default branch (`git merge-base --is-ancestor`)
     releases the lane. A ready pull always holds it. A failed git read reads as not landed;
   - no open page item holds it. An item holds a lane when its `lane` is one of the lane's steps and
     its `status` is not `closed`. An item whose `owner` is the lane's own session id holds the lane the same way.
     The page writes `open` and `closed` only, so only `closed` releases a lane;
-  - no step is still doing under it (its `lane` field names the session, status `doing` or `active`, not landed on main). A lane that passes the other tests reads a hold line instead.
+  - no step is still doing under it (its `lane` field names the session, status `doing` or `active`, not landed on main), unless an open or merged pull replaced the lane's pull. A lane that passes the other tests reads a hold line instead.
 
   A lane whose only holders are stale drafts reads `joint (close #<n> ...; archive archive/<branch> ...; archive lane
   <session id>)`, and the row counts it. A stale draft meets every test in this list. It is over 12 h old at `readAt`,

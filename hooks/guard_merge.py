@@ -9,8 +9,12 @@ import io
 import json
 import os
 import re
+import ssl
 import subprocess
 import sys
+import time
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta, timezone
 
 from guard_core import (
@@ -2181,11 +2185,10 @@ ARCHIVE_TAGS_REASON = (
     "the target's record is a lane with no cs-step tag or no cs-repo tag, so the guard cannot find its "
     "records pull request. Fix the lane's tags, run get_session on the target alone, then retry. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
-# A template: %s is the lane's cs-repo repos, comma-separated.
+# A template: {remedy} is archive_read_remedy's wording.
 ARCHIVE_READ_REASON = (
-    "the open pull requests of the lane's repo (%s) could not be read, so the guard cannot tell whether its "  # glossary-ok: session-tiers is the decision's file name
-    "records have landed. If the repo is not attached to this session, attach it read-only with `add_repo` "
-    "(access read), then retry; if gh itself failed, retry when it answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
+    "the open pull requests of the lane's repo could not be read, so the guard cannot tell whether its "  # glossary-ok: session-tiers is the decision's file name
+    "records have landed. {remedy} (decision session-tiers, a lane closes only after its records pull request has landed)"  # glossary-ok: session-tiers is the decision's file name
 )
 ARCHIVE_NO_PR_REASON = (
     "a branch of the lane is ahead of its repo's default branch and has no pull request that covers it, so closing "
@@ -2195,10 +2198,56 @@ ARCHIVE_NO_PR_REASON = (
 )
 # A template, as ARCHIVE_READ_REASON.
 ARCHIVE_BRANCH_READ_REASON = (
-    "the lane's branches or their pull requests (repo %s) could not be read, so the guard cannot tell whether any work of "  # glossary-ok: session-tiers is the decision's file name
-    "the lane is stranded. If a repo of the lane is not attached to this session, attach it read-only with `add_repo` "
-    "(access read), then retry; if gh itself failed, retry when it answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
+    "the lane's branches or their pull requests could not be read, so the guard cannot tell whether any work of "  # glossary-ok: session-tiers is the decision's file name
+    "the lane is stranded. {remedy} (decision session-tiers, a lane closes only after its records pull request has landed)"  # glossary-ok: session-tiers is the decision's file name
 )
+
+
+_ATTACH_STATUSES = (403, 404)  # the answers of a repo this session cannot read: 403 for an unattached repo (measured), 404 for one gh cannot find
+
+
+def archive_read_remedy(repo, status) -> str:
+    """The remedy of an unreadable archive read. Only a 403 or 404 on the read of `repo` names its add_repo act; every other
+    failure (a 500, a timeout, no gh, text that is not JSON, a shape the read does not know) says to retry. The one home of the wording."""
+    if repo and status in _ATTACH_STATUSES:
+        return "This session cannot read that repo until it is attached: add_repo " + repo + " access push, then retry."
+    return "Retry once gh answers."
+
+
+_HTTP_TAIL = re.compile(r"\bHTTP (\d{3})\)?\s*\Z")  # the end of a failed `gh api` reply: "gh: <message> (HTTP 403)"
+
+
+def _http_status(out: str):
+    """The HTTP status that a failed gh reply ends with, or None."""
+    match = _HTTP_TAIL.search(out)
+    return int(match.group(1)) if match else None
+
+
+class _GhReadFailed(RuntimeError):
+    """A gh read failed. `status` is the HTTP status gh printed, None when the read failed another way (a reply that is no JSON, a shape the read does not know)."""
+
+    def __init__(self, message: str, status=None):
+        super().__init__(message)
+        self.status = status
+
+
+class _ArchiveReadFailed(Exception):
+    """A gh read of the branch arm failed in `repo` with HTTP `status` (None when it has none), so archive_hit can word the remedy."""
+
+    def __init__(self, repo: str, status=None):
+        super().__init__(repo)
+        self.repo, self.status = repo, status
+
+
+def _read_status(module, exc):
+    """The HTTP status of a failed read, or None. A network error (NetStop, a rate limit included) has none: it is no answer about the repo."""
+    if isinstance(exc, (_ArchiveReadFailed, _GhReadFailed)):
+        return exc.status
+    if module is not None and isinstance(exc, module.Stop) and not isinstance(exc, module.NetStop):
+        return _http_status(str(exc))  # Host.pages raises a Stop whose message ends with the failed reply
+    return None
+
+
 ARCHIVE_STRANDED_MATCH = "archive of a lane with a branch that has no pull request"
 _REPO_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 # A source URL on github.com (https, ssh or scp form, an optional www., any case, an optional path after owner/name): `repo`
@@ -2213,14 +2262,14 @@ _CONTAINED = ("behind", "identical")  # a compare of base...head where the head 
 
 
 def _read_json(host, rel: str, what: str):
-    """The parsed JSON of one REST read of `host`; a failed read or a reply that is not JSON raises RuntimeError."""
+    """The parsed JSON of one REST read of `host`; a failed read or a reply that is not JSON raises _GhReadFailed."""
     code, out = host.api(rel)
     try:
         if code:
             raise ValueError(out)
         return json.loads(out)
     except ValueError as e:
-        raise RuntimeError("the " + what + " read failed: " + str(e))
+        raise _GhReadFailed("the " + what + " read failed: " + str(e), _http_status(out) if code else None)
 
 
 def _compare_status(module, host, base: str, head: str, missing_ok: bool = False):
@@ -2234,7 +2283,7 @@ def _compare_status(module, host, base: str, head: str, missing_ok: bool = False
             raise ValueError(out)
         return str(json.loads(out)["status"])
     except (ValueError, KeyError, TypeError) as e:
-        raise RuntimeError("the compare read failed: " + str(e))
+        raise _GhReadFailed("the compare read failed: " + str(e), _http_status(out) if code else None)
 
 
 def _head_landed(module, repo: str, row) -> bool:
@@ -2248,10 +2297,52 @@ def _head_landed(module, repo: str, row) -> bool:
     return _compare_status(module, module.Host(repo=repo), base, sha) in _CONTAINED
 
 
+_ANON_API = "https://api.github.com"  # the host of the anonymous read; GITHUB_API_URL (the variable gh and Actions set) names another
+_ANON_TIMEOUT = 20  # seconds one anonymous page may take, cut to what the shared deadline has left
+
+
+def _anon_open_pulls(module, repo: str):
+    """The open pull request rows of `repo` read with no Authorization header, every page, or None when the read gives no
+    answer (a 403, a 404, a rate limit, a network error, a reply that is no list). The read is GET pulls?state=open as gh
+    would send it, through urllib: it honours HTTPS_PROXY, and trusts the CA file in REQUESTS_CA_BUNDLE or SSL_CERT_FILE.
+    No gh runs, because gh refuses to run with no login. The next page is asked for by number, never by the Link URL
+    (the Host.pages rule), and the read ends at the page whose Link has no rel=next."""
+    base = (os.environ.get("GITHUB_API_URL") or _ANON_API).rstrip("/")
+    cafile = os.environ.get("REQUESTS_CA_BUNDLE") or os.environ.get("SSL_CERT_FILE") or None
+    try:
+        context = ssl.create_default_context(cafile=cafile) if cafile else ssl.create_default_context()
+        deadline = getattr(module, "_READ_DEADLINE", None)
+        rows = []
+        for page in range(1, getattr(module, "PAGE_CEILING", 500) + 1):
+            left = _ANON_TIMEOUT if deadline is None else min(_ANON_TIMEOUT, deadline - time.monotonic())
+            if left <= 0:
+                return None
+            req = urllib.request.Request(
+                base + "/repos/" + repo + "/pulls?" + urllib.parse.urlencode({"state": "open", "per_page": 100, "page": page}),
+                headers={"Accept": "application/vnd.github+json", "User-Agent": "claude-settings-guard"})
+            with urllib.request.urlopen(req, timeout=left, context=context) as reply:
+                items = json.loads(reply.read().decode("utf-8"))
+                link = reply.headers.get("Link")
+            if not isinstance(items, list):
+                return None
+            rows += items
+            if not module.has_next_link(link):
+                return rows
+        return None  # more pages than the ceiling: no answer, and the token read says why
+    except Exception:  # any failure is no anonymous answer; the token read then answers or raises
+        return None
+
+
 def open_pull_rows(module, repo: str):
-    """The open pull request rows of `repo`, every page, through the merge tool's page reader `module`. The one home of
-    this read: rules lane-closes-after-records and lane-step-dup call it. A failed read raises. The caller holds the
-    one shared deadline over the read (a nested shared_deadline would reset it)."""
+    """The open pull request rows of `repo`, every page. The one home of this read: rules lane-closes-after-records and
+    lane-step-dup call it. It reads with no token first (_anon_open_pulls), so a public repo the session has not attached is
+    read (owner, page item 937 a, 13:11 CST Nov 17). A 403 or a 404 (a private repo), a rate limit and a network error give no
+    anonymous answer; the read through the merge tool's page reader `module`, with the session's token, then answers, so an
+    attached private repo still reads. A failed token read raises. The caller holds the one shared deadline over the
+    read (a nested shared_deadline would reset it). Cost: one urllib call per page; one more gh call only when the anonymous read fails."""
+    rows = _anon_open_pulls(module, repo)
+    if rows is not None:
+        return rows
     return module.Host(repo=repo).pages("pulls", fields={"state": "open"})
 
 
@@ -2332,7 +2423,7 @@ def _stranded_branch(module, ccrs, tag_repos, slugs, open_rows) -> bool:
     branch field, an empty list or map, or only null values names none. A branch field that is not a map, and a
     value that is neither null nor a string, are shapes the read does not know, so they raise. A 404 on the compare
     means the branch is not in that repo, so it is skipped in that repo. Any other failed read raises, and
-    archive_hit refuses on it. The caller holds one shared deadline over all the reads here (a nested
+    archive_hit refuses on it, naming the repo whose read failed (_ArchiveReadFailed). The caller holds one shared deadline over all the reads here (a nested
     shared_deadline would reset it). `open_rows` is each repo's open pull request list, already read. Every pull
     request read of a repo is judged together, so a replacement on another branch of the lane is in hand."""
     branches, repos = [], list(tag_repos)
@@ -2350,40 +2441,44 @@ def _stranded_branch(module, ccrs, tag_repos, slugs, open_rows) -> bool:
     branches = list(dict.fromkeys(branches))
     defaults = {}
     for repo in repos:
-        host = module.Host(repo=repo)
-        owner = repo.split("/")[0]
-        pool = [row for row in open_rows.get(repo, []) if _on_lane_form(str(row["head"]["ref"]), slugs)]
-        pending = []  # (branch, tip or None, rows) of each branch ahead of the default: judged once every row is read
+        try:
+            host = module.Host(repo=repo)
+            owner = repo.split("/")[0]
+            pool = [row for row in open_rows.get(repo, []) if _on_lane_form(str(row["head"]["ref"]), slugs)]
+            pending = []  # (branch, tip or None, rows) of each branch ahead of the default: judged once every row is read
 
-        def ahead(branch):
-            """True when `branch` is not the default or an archive copy, and its compare with the default reads ahead."""
-            if repo not in defaults:
-                defaults[repo] = str(_read_json(host, "", "repo")["default_branch"])
-            if branch.startswith("archive/") or branch == defaults[repo]:
-                return False
-            return _compare_status(module, host, defaults[repo], branch, missing_ok=True) in _AHEAD
+            def ahead(branch):
+                """True when `branch` is not the default or an archive copy, and its compare with the default reads ahead."""
+                if repo not in defaults:
+                    defaults[repo] = str(_read_json(host, "", "repo")["default_branch"])
+                if branch.startswith("archive/") or branch == defaults[repo]:
+                    return False
+                return _compare_status(module, host, defaults[repo], branch, missing_ok=True) in _AHEAD
 
-        for branch in branches:
-            if ahead(branch):
-                rows = host.pages("pulls", fields={"state": "all", "head": owner + ":" + branch})
-                pool += rows
-                pending.append((branch, None, rows))
-        seen = set(branches)
-        for slug in slugs:
-            for form in lane_head_refs(slug):
-                for ref in host.pages("git/matching-refs/heads/" + form):
-                    name = str(ref["ref"])[len("refs/heads/"):]
-                    if name in seen or not _on_lane_form(name, [slug]):
-                        continue
-                    seen.add(name)
-                    # The branch exists (the refs read just listed it), so an open pull request covers it before any
-                    # default-branch read; its tip is on the row already in hand.
-                    rows = host.pages("pulls", fields={"state": "all", "head": owner + ":" + name})
+            for branch in branches:
+                if ahead(branch):
+                    rows = host.pages("pulls", fields={"state": "all", "head": owner + ":" + branch})
                     pool += rows
-                    if not _is_open(rows) and ahead(name):
-                        pending.append((name, str(ref["object"]["sha"]), rows))
-        if any(not _covered(module, host, branch, tip, rows, pool) for branch, tip, rows in pending):
-            return True
+                    pending.append((branch, None, rows))
+            seen = set(branches)
+            for slug in slugs:
+                for form in lane_head_refs(slug):
+                    for ref in host.pages("git/matching-refs/heads/" + form):
+                        name = str(ref["ref"])[len("refs/heads/"):]
+                        if name in seen or not _on_lane_form(name, [slug]):
+                            continue
+                        seen.add(name)
+                        # The branch exists (the refs read just listed it), so an open pull request covers it before any
+                        # default-branch read; its tip is on the row already in hand.
+                        rows = host.pages("pulls", fields={"state": "all", "head": owner + ":" + name})
+                        pool += rows
+                        if not _is_open(rows) and ahead(name):
+                            pending.append((name, str(ref["object"]["sha"]), rows))
+            if any(not _covered(module, host, branch, tip, rows, pool) for branch, tip, rows in pending):
+                return True
+        except (Exception, SystemExit) as exc:
+            raise _ArchiveReadFailed(repo, _read_status(module, exc)) from exc
+
     return False
 
 
@@ -2448,6 +2543,8 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
         return "archive of a lane with no step or repo tag", ARCHIVE_TAGS_REASON
     lanes = [c for c in ccrs if isinstance(c, dict) and isinstance(c.get("tags"), list) and ARCHIVE_LANE_TAG in c["tags"]]
     reading_branches = False  # picks the reason a failed read refuses with
+    reading = None  # the repo whose read is under way, the one an unreadable read's remedy may name
+    module = None
     try:  # cost, all under one shared MERGE_READ_TIMEOUT: one paged gh REST read per cs-repo tag (one in practice), through
         # the merge tool's page reader; one compare read per open draft of the lane; per repo, one matching-refs read per
         # slug form (a paged read); and, for each branch the records name, one repo read per repo, one compare read per
@@ -2460,6 +2557,7 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
         open_rows = {}
         with module.shared_deadline(MERGE_READ_TIMEOUT):
             for repo in repos:
+                reading = repo
                 rows = open_rows[repo] = open_pull_rows(module, repo)
                 for row in rows:
                     ref = str(row["head"]["ref"])
@@ -2468,12 +2566,15 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
                         continue
                     if slug:
                         return "archive of lane " + slug + " with open pull request " + str(row.get("number", "?")), ARCHIVE_OPEN_REASON
-            reading_branches = True
+            reading_branches, reading = True, None
             stranded = _stranded_branch(module, lanes, repos, slugs, open_rows)
-    except (Exception, SystemExit):
+    except (Exception, SystemExit) as exc:
+        if isinstance(exc, _ArchiveReadFailed):
+            reading = exc.repo
+        remedy = archive_read_remedy(reading, _read_status(module, exc))
         if reading_branches:
-            return "archive with an unreadable branch read", ARCHIVE_BRANCH_READ_REASON % ", ".join(repos)
-        return "archive with an unreadable pull request list", ARCHIVE_READ_REASON % ", ".join(repos)
+            return "archive with an unreadable branch read", ARCHIVE_BRANCH_READ_REASON.format(remedy=remedy)
+        return "archive with an unreadable pull request list", ARCHIVE_READ_REASON.format(remedy=remedy)
     if stranded:
         return ARCHIVE_STRANDED_MATCH, ARCHIVE_NO_PR_REASON
     return None
