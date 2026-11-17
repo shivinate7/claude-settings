@@ -2,14 +2,14 @@
  "id": "pr-3577-triage-slice-a-records",
  "title": "Debt: a step note can cite a PR whose title names another step",
  "priority": "next",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "owner": "triage",
  "blockedBy": [],
  "pr": 3577,
- "updatedAt": "2026-11-16T02:53:53-06:00",
+ "updatedAt": "2026-11-17T09:34:00-06:00",
  "why": "[02:53 CST Nov 16, triage] Step for open PR #3577 (branch triage-slice-a-records), filed so the step carries its pr field (goal item 3). Triage searched step files by PR number and branch first and found none. Status and review state live on the PR, not here.",
  "source": "triage 8, goal item 3",
- "note": "Open draft PR #3577. Merge and review are the batch runner's and the lane's; this step records the PR only."
+ "note": "Done. PR #3577 merged 09:30:51 CST Nov 17 as 2ed68c919 by shivinate7 (REST, triage 9, 09:33 CST; head c7662fd709bb, base 71f78cc38676). It moved one debt record, triage-pr-step-unverified, to main. The held part stays held: 48 slice A notes and 7 numbered notes wait on draft #3569 (freeze notes.md); four drafts are unknown. The coordinator holds the notes slice."
 }
