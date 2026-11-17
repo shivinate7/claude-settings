@@ -5169,6 +5169,35 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         first = 'Answered, the owner wrote "no.'
         self.assert_blocked(first + '\nHe then said "yes" later.', first)
 
+    def test_an_red_session_answering_its_questions_passes(self):
+        # Catches: a session that answered another session's questions reads as an owner's answer, so the line is blocked.
+        self.assert_allowed("I sent triage 9 my comments on its draft goal and answered its four questions:")
+
+    def test_an_red_proposed_end_condition_passes(self):
+        # Catches: "answered" in a should-clause, a condition a goal proposes and nobody has met, is read as a claim.
+        self.assert_allowed("- The goal should end once the 20 open comment threads are answered or closed, "
+                            "without reading the other 55.")
+
+    def test_an_red_guard_name_and_negated_claim_pass(self):
+        # Catches: the guard's own name, "the answered guard", is read as a claim, because the first use of the
+        # word has no negator in its clause.
+        self.assert_allowed("- A test-author on the answered guard's false alarm: it refused my two lines that were "
+                            "not claims you had answered anything.")
+
+    def test_an_red_builder_fixing_the_guard_passes(self):
+        # Catches: a fix that flags the guard's own name, "the answered guard", or the word after "claim", so a line
+        # that describes the guard and its claim check is blocked as a claim that the owner or an item was answered.
+        self.assert_allowed("A Sonnet builder is fixing the answered guard so it flags only a claim that you or an item "
+                            "were answered, not other uses of the word.")
+
+    def test_an_green_item_number_is_a_source_and_passes(self):
+        # Catches: a fix that stops counting "item <n>" as a source, which decision answered-needs-source lists.
+        self.assert_allowed("Item 870 is answered.")
+
+    def test_an_green_owner_claim_with_a_condition_word_still_blocks(self):
+        # Catches: a fix that exempts every line with a condition word such as "once", not only a proposed condition.
+        self.assert_blocked("The owner answered it once the call ended.", "The owner answered it once the call ended.")
+
     def test_an_red_fence_marker_mid_line_opens_no_fence(self):
         # Catches: a ``` inside a line, and not at its start, opens a fence that hides the lines after it.
         self.assert_blocked("Typed ``` in the middle, then answered.\nThe next line answered too.",
@@ -5219,7 +5248,163 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         self.assertIn("inline code span", refusal,
                       "the refusal text does not name the inline code span route: %r" % refusal)
 
+    def test_an_red_owner_answer_claims_block_under_the_new_exemptions(self):
+        # Red on the guard's newer exemptions: a first-person clause, "claim", a modal and its own printed name.
+        # Each row claims that the owner or an item was answered and cites no source, so each must block.
+        rows = [
+            # Catches: a first-person clause ("I think") exempts an unsourced owner answer.
+            "I think the owner answered it.",
+            # Catches: a first-person clause ("I believe") exempts an unsourced answer by another person.
+            "I believe they answered it.",
+            # Catches: a first-person clause ("I was told") exempts an unsourced owner answer.
+            "I was told the owner answered it.",
+            # Catches: a first-person act with an object exempts a claim that Claude answered for the owner.
+            "I answered the item for him.",
+            # Catches: the word "claim" in the clause exempts an answer that is stated as a claim.
+            "We claim he answered.",
+            # Catches: the word "claims" in the clause exempts an unsourced owner answer.
+            "Claude claims the owner answered it.",
+            # Catches: a modal in the clause exempts a past answer stated as fact.
+            "The owner must have answered it already.",
+            # Catches: a modal in the clause exempts an unsourced answer, though a later clause closes the item.
+            "The owner should have answered it, so the item is closed.",
+            # Catches: the guard's printed name exempts a line that claims the owner answered questions.
+            "The owner answered guard questions.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_an_red_answered_as_a_modifier_passes(self):
+        # Must pass: "answered" here modifies "page item", so the line claims nothing. A rule about a future item.
+        # Catches: an adjective "answered" before a noun is read as a claim, so a rule about a page item is refused.
+        self.assert_allowed("- When an answered page item isn't on main, check open PRs first, then start a builder.")
+
+    def test_an_red_first_person_clause_naming_the_owner_blocks(self):
+        # Red on the first-person exemption: the owner is named as "the user" or by name, and neither is in the
+        # owner-word list, so the clause before the word is read as Claude's own act.
+        rows = [
+            # Catches: a first-person clause ("I believe") exempts an unsourced owner answer naming "the user".
+            "I believe the user answered them.",
+            # Catches: a first-person clause exempts an unsourced owner answer that names the owner by his first name.
+            "I wrote the brief and Shivam answered all four.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_an_red_modal_claim_of_a_past_answer_blocks(self):
+        # Red on the modal exemption: a modal in the clause exempts a claim with no owner word before the word. Each row
+        # states an answer as fact and cites no source.
+        rows = [
+            # Catches: a modal exempts an answer stated as fact, with "It" as the subject.
+            "It may be answered already.",
+            # Catches: a modal exempts an answer stated as fact, with "The decision" as the subject.
+            "The decision must have been answered already.",
+            # Catches: a modal and a first-person verb exempt an answer stated as fact.
+            "I would say it was answered.",
+            # Catches: a modal exempts an answer whose owner is named after the word, outside the clause.
+            "That would have been answered by the owner.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_an_red_claim_noun_before_an_owner_answer_blocks(self):
+        # Red on the "claim" exemption: "that claim" in the clause exempts the whole clause, so an owner answer stated
+        # after it in the same clause passes.
+        line = "That claim is stale because the owner answered the item."
+        self.assert_blocked(line, line)
+
+    def test_an_red_proposed_condition_on_items_or_questions_passes(self):
+        # Red on the owner-word list: "items" or "question" in a should-clause reads a proposed stop or end condition as
+        # an owner's answer. A goal or a rule that names the condition claims nothing.
+        rows = [
+            # Catches: "items" in a should-clause makes a proposed end condition read as an owner answer.
+            "The goal should end once the open items are answered.",
+            # Catches: "question" in a should-clause makes a proposed stop condition read as an owner answer.
+            "A lane should stop after the question is answered.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_red_writer_at_the_start_of_a_longer_word_blocks(self):
+        # Red on the writer's word boundary: "I" or "we" at the start of a longer word ("Items", "Issue", "Wednesday's",
+        # "Weekly") reads as Claude's own act, so an "and" before the word lets an unsourced owner answer pass.
+        rows = [
+            # Catches: "I" at the start of "Items" reads as the writer, so an unsourced answer passes.
+            "Items were sent and answered it.",
+            # Catches: "I" at the start of "Issue" reads as the writer, so an unsourced answer passes.
+            "Issue 4 was opened and answered the same day.",
+            # Catches: "We" at the start of "Wednesday's" reads as the writer, so an unsourced answer passes.
+            "Wednesday's questions were sent and answered the same day.",
+            # Catches: "We" at the start of "Weekly" reads as the writer, so an unsourced answer passes.
+            "Weekly questions were sent and answered the same day.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_an_red_only_before_the_answered_verb_passes(self):
+        # Red on the adverb list: "only" is not in ADVERBS, and the -ly pattern needs three letters before "ly", so
+        # "only" is no adverb. A first-person act with "only" before the verb then reads as an owner claim.
+        rows = [
+            # Catches: "only" after "I" drops the first-person act, so Claude's own answer is refused.
+            "I only answered it.",
+            # Catches: "only" after "We" drops the first-person act, so Claude's own answer is refused.
+            "We only answered the questions.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_red_duly_before_the_answered_verb_passes(self):
+        # Red on the adverb list: "duly" has two letters before "ly", and the -ly pattern needs three, so "duly" is no
+        # adverb. A first-person act with "duly" before the verb then reads as an owner claim.
+        # Catches: "duly" after "I" drops the first-person act, so Claude's own answer is refused.
+        self.assert_allowed("I duly answered it.")
+
+    def test_an_red_joint_subject_with_and_i_or_we_blocks(self):
+        # Red on the joint subject: a person word, then "and I" or "and we", reads as the writer's own act, so an unsourced
+        # owner answer passes. The first-person act checks the object and the words after the verb for a person, never the
+        # words before the writer. The reason must name the check, so a block from another guard cannot satisfy a row.
+        rows = [
+            # Catches: "Shivam and I still" passes as the writer's own act, with "still" read as the adverb.
+            "Shivam and I still answered the questions.",
+            # Catches: "Shivam and I" passes as the writer's own act, with a page item as the object.
+            "Shivam and I answered the page items.",
+            # Catches: "The owner and I" passes as the writer's own act, with a count before the object noun.
+            "The owner and I answered the four questions.",
+            # Catches: "The owner and we ourselves" passes as the writer's own act, with "we ourselves" read as the writer.
+            "The owner and we ourselves answered the items.",
+            # Catches: "Shivam and I myself" passes as the writer's own act, with "I myself" read as the writer.
+            "Shivam and I myself answered the questions.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line, "answered-needs-source")
+
     # Green: these pass before the verdict exists too. Each guards against a false alarm.
+
+    def test_an_green_first_person_answer_passes_beside_the_red_rows(self):
+        # Control for the red tests above, green on the same commit. A whole-word writer with "and", a listed adverb
+        # and an -ly adverb still pass, so a fix that drops one of those paths goes red here, not only in the red rows.
+        rows = [
+            # Catches: a whole-word "We" before "and" stops passing when the writer's word boundary is checked.
+            "We sent it and answered it.",
+            # Catches: a first-person act with "and" stops passing when the writer's word boundary is checked.
+            "I sent the brief and answered it.",
+            # Catches: a listed adverb before the verb stops passing when the adverb slot changes.
+            "I already answered it.",
+            # Catches: an -ly adverb stops passing when the -ly pattern is swapped for a fixed list.
+            "I quickly answered it.",
+            # Catches: a first-person act with no adverb stops passing in the same fix.
+            "I answered it.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
 
     def test_an_green_each_source_cites_the_word(self):
         rows = [
