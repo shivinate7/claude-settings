@@ -143,7 +143,7 @@ jobs:
         with: {node-version: 22, cache: npm}
       - run: npm ci
   all-jobs-passed:
-    # The one required check. Lists every other job. Its draft guard keeps a draft run skipped.
+    # Lists every other job. Its draft guard keeps a draft run skipped.
     needs: [static, shards]
     if: ${{ always() && !github.event.pull_request.draft }}
     runs-on: ubuntu-latest

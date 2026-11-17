@@ -176,7 +176,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 11. **No CI on a draft.** Run the PR workflow on `opened`, `synchronize`, `reopened` and
     `ready_for_review`. Skip every job while the PR is a draft. The rollup job skips too. Its `if:`
     is `always() && !github.event.pull_request.draft`. A fan-in job with `if: always()` needs its own
-    draft guard, or it fails on a draft. Read "Before you skip a required job". Decision
+    draft guard, or it fails on a draft. Read "Before you skip a job". Decision
     `draft-until-reviewed` (every PR opens as a draft) holds the rule. A draft cannot merge, so it
     needs no check. Only the integration PR goes ready, once (step 8).
     A workflow that also has `on: push` for all branches still runs on a draft branch.
@@ -219,7 +219,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     A scope skip sits on the CI step that runs the suite or lint. The three macOS jobs carry their
     event guard (daily and dispatch only) and the flag in a job-level `if:`, because a step-level skip still starts a runner and bills its setup
     minutes (step 13), macOS most. Decision `same-check-kinds` (every repo runs the same check kinds)
-    and decision `main-branch-protection` (the required checks on main) hold the rule. The rollup fails a
+    and decision `main-branch-protection` (the branch protection on main) hold the rule. The rollup fails a
     skipped job it needs, and it does not need the macOS jobs.
     Apart from those three and the push-off jobs (the Windows and mutation jobs, whose job-level `if:` is
     `github.event_name != 'push'` alone, with the draft guard on a shard), a job-level `if:` holds only the draft guard, or the records-only condition
@@ -254,7 +254,7 @@ Fork PRs run code you did not write. Apply these to a public repo. See `snippets
 - Keep one CI run per batch (step 8). Free minutes do not remove queue time. Each run costs `gh`
   calls on the shared token.
 
-## Before you skip a required job
+## Before you skip a job
 
 Branch protection requires no status check (ruling `own-all-jobs-passed-removed`, 2026-11-15 19:08 CST).
 Decision `same-check-kinds` (every repo runs the same check kinds) sets the rule for the rollup. The
@@ -265,11 +265,11 @@ still runs and passes (step 19).
 The rollup skips on a draft, and a draft cannot merge (step 11). Read the protection rule first:
 `snippets.md`, section 3b.
 
-The required check names live in the branch protection. `merge.requiredChecks` in
+The branch protection names no required check. `merge.requiredChecks` in
 `.github/stamp.json` says `"protection"`, so `merge` reads them from there. A repo that pins a list
 in `stamp.json` instead must keep it equal to the protection. `merge` refuses a disagreement. A
 rename edits the protection. A PUT on the protection API replaces the whole rule. It drops any field
-you leave out (decision `main-branch-protection`, the required checks on main).
+you leave out (decision `main-branch-protection`, the branch protection on main).
 
 ## Docs
 
