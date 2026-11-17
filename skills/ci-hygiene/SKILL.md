@@ -119,8 +119,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    gets no fix lane until the owner decides.
    Until the cutover, no merge to main while a batch's run is in progress. The owner is included. Decision
    `no-merge-during-batch-ci` (no merge while a batch runs) holds the rule. A merge needs a green
-   run on the current base (decision `merge-needs-current-base`). A head that lacks the base tip is
-   refused, except a small move.
+   run, or a lane-lint PASS on a pending one, and a clean merge with the base tip (decision
+   `merge-needs-current-base`). The head need not hold the tip.
    Ready express lanes share one express batch, ahead of every other lane (decision `express-batch`).
    "No conflicts" does not prove the lanes work together. A green integration run does not prove that
    no line was lost either. Run `lint/check_silent_undo.py` before the merge. First run `git fetch origin <base>`. Then pass `--upstream origin/<base>`, the PR's base branch, `--head <head SHA>`, the PR's head commit, and `--strict`, as CI does. Without `--strict`, a local run exits 0 on UNKNOWN, so a skipped check reads as clean.
@@ -158,6 +158,12 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    PASS fix verifier, a merge whose second parent is not on main. The first fix verifier on a log with
    no Fix check line meets no merge-shape test, so the verifier's read is the check there. The lane never works around the refusal. A FAIL starts a
    new lane at round 1.
+   **A lane that is only behind main is not named.** Only a conflict names a lane (owner, 2026-11-17 14:20 CST,
+   page item 925 `main-in-once-before-lint`, pick d). Once #3481 (carry the lane lint across a clean merge of main)
+   and #3552 (lane lint merges main into a lane head behind it and pushes the merge on a pass) are on main, the merge
+   tool does one main-in at merge time and keeps the green run (rule d, decision `merge-needs-current-base`).
+   Coordinator's reading, not the owner's: until both are on main, rule d is not in force and ruling
+   `own-923-c-ready-lanes-bring-main-in` stands.
    Until the cutover, every repo except degen and home batches across sessions too (`git-integration-branch-merge`).
 9. **Wait without loops.** Wait for the CI-wake notice that follows `gh pr ready`. A push starts no
    notice. Run `merge <pr> --ready` first. When it exits 0 with the line "stays a draft (", in cloud mark ready by MCP `update_pull_request` `draft: false` (route

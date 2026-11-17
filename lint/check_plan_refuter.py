@@ -28,7 +28,7 @@ layout could not be read, hooks/ could not be imported (so REFUTER_ROLE is unrea
 import os
 import re
 import sys
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 import layout  # noqa: E402  the one home of the plans kind (lint/layout.py)
 sys.path.append(os.path.join(HERE, "..", "hooks"))  # appended, so no hooks module shadows a lint one
