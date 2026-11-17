@@ -1824,6 +1824,8 @@ class Host:
         A red verdict also leaves `self.base_facts` for revert_proven, as data the prose cannot carry: `blamed` (the full head shas of the breaking merges), `red` (red runs judged),
         `others` (red entries without a run, cancelled runs and re-runs in flight beside the red), `head` (the head sha of the newest run read) and `red_heads` (the head sha of each red run judged). Every other verdict leaves it None."""
         self.base_facts = None  # a red verdict sets it below; any other verdict, and any stop, leaves it None
+        if self.required == "none":  # a repo with "none" runs no CI, so the base's runs are not read, whatever they hold (decision private-repos-no-ci, owner ruling, 11:20 CST Nov 16)
+            return "green", ""
         try:
             if os.path.dirname(ALARM_EVENTS) not in sys.path:
                 sys.path.insert(0, os.path.dirname(ALARM_EVENTS))
@@ -2014,7 +2016,10 @@ class Host:
         unless `required_only` shows its workflow has no required job (so a failed run is refused, an ignored workflow does not block, and a pending run of the required
         workflow is not green). A required check with no row yet reads pending.
         `sha` is a head the caller already read (the review list has it from the pull request list); with none, the pull request is read.
-        A failed read, a network fault included, is "unknown (...)": the caller never reads it as green."""
+        A failed read, a network fault included, is "unknown (...)": the caller never reads it as green.
+        Under merge.requiredChecks "none" it reads no check and no run, and is green: a repo with "none" runs no CI (decision private-repos-no-ci, owner ruling, 11:20 CST Nov 16)."""
+        if self.required == "none":
+            return "green"
         try:
             sha = sha or self.pr(n)["head"]
             got = self.checks(n, warn=False, sha=sha)
@@ -2033,7 +2038,7 @@ class Host:
         -> (verdict, detail): green, pending, red, or unknown when any read could not run. The guard's
         home for "has this head settled", so it shares classify and runs with the wait.
         No check and no run reads as pending, not green: right after a push GitHub has not created
-        them yet (the checks read settles for the same reason). `nothing_is_green` is for a repo with no workflows; merge.requiredChecks "none" is that repo too.
+        them yet (the checks read settles for the same reason). `nothing_is_green` is for a repo with no workflows. Under merge.requiredChecks "none", on the base or on a setup head's own stamp, it reads no run at all: green.
         Another ready PR's running CI holds no merge (per-lane merge), and the branch protection feeds no verdict here, so neither is read.
         Its `gh` calls (the pull request, the check runs, the commit statuses, the workflow runs; a branch name adds the open pull request list;
         a head whose check runs link more than one run adds one more workflow runs read) share one deadline (SH_TIMEOUT, the guard's one budget for this whole
@@ -2043,11 +2048,13 @@ class Host:
             with shared_deadline(SH_TIMEOUT):
                 num = self.pr_number(n)  # a number: pr() of a number reads nothing more
                 info = self.pr(num)
+                if self.required == "none" or head_none_stamp(self.cwd or ".", info["head"], DEFAULT_CONFIG) is not None:
+                    return "green", ""  # no CI run is read: the base's stamp says none, or a setup head's own stamp does (decision private-repos-no-ci, owner rulings 929 b and 11:20 CST Nov 16)
                 got = self.checks(num, warn=False, sha=info["head"])
                 red, pending, _ = self.classify(got, [], self.ignore, info["branch"])
                 runs = self.runs(info["head"])
                 red, pending = self.settle(red, pending, *self.judge_runs(runs))
-                unseen = not got and not runs and not nothing_is_green and self.required != "none"
+                unseen = not got and not runs and not nothing_is_green
         except subprocess.TimeoutExpired:  # its text names the resolved program path
             return "unknown", "a gh call timed out"
         except Exception as e:  # Stop, a missing gh, malformed JSON: all unread
@@ -2717,14 +2724,45 @@ def base_job_caps(root, ref):
         texts.append(text)
     return job_caps(texts)
 
-def load_config(root, base, path, cite=""):
+GIT_FOLDERS = ("/usr/bin", "/usr/local/bin", "/opt/homebrew/bin", r"C:\Program Files\Git\cmd")  # where a git install puts it, for a PATH that lacks it
+
+def stamp_git(root, *a):
+    """One git call for the head-stamp read (head_none_stamp). The guard runs this read under the PATH the hook gets, and a CI toolcache or a hook PATH can hold no git, so
+    a git missing from PATH is looked for in GIT_FOLDERS before the read gives up. -> (code, output), as `git` does; a git found nowhere raises OSError."""
+    program = resolve_program("git")
+    if program == "git":  # resolve_program names the bare word when PATH holds no git
+        program = next((f for d in GIT_FOLDERS if (f := shutil.which("git", path=d))), "git")
+    return sh([program, "-C", root, *a])
+
+def head_none_stamp(root, head, path, branch=None):
+    """-> the stamp object at commit `head` when that stamp sets merge.requiredChecks "none", else None. A setup PR's own stamp is the config main reads (decision
+    private-repos-no-ci, owner ruling 929 b). Any other stamp, a missing file, a commit this checkout lacks (`branch`, when given, is fetched once for it) and an
+    unreadable file read as None: the base's stamp decides then. Cost: one `git cat-file`, one `git show`, and one fetch when the head is not local."""
+    if not head:
+        return None
+    try:
+        if branch and stamp_git(root, "cat-file", "-e", f"{head}^{{commit}}")[0]:
+            stamp_git(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")  # a failed fetch leaves the commit missing, which reads as no setup stamp
+        c, text = stamp_git(root, "show", f"{head}:{path}")
+        cfg = None if c else json.loads(text)
+    except (OSError, ValueError):  # no git to run, or a stamp that is not JSON
+        return None
+    m = cfg.get("merge") if isinstance(cfg, dict) else None
+    return cfg if isinstance(m, dict) and m.get("requiredChecks") == "none" else None
+
+def load_config(root, base, path, cite="", head=None, branch=None):
     """The repo's config, read from the base branch on origin: never the local checkout, never the PR tree.
     No file: all defaults. A file with fields left out: defaults for those fields. A broken file stops.
-    `cite` ends each stop's text: the caller's own decision cite, which `main` leaves out."""
+    `cite` ends each stop's text: the caller's own decision cite, which `main` leaves out.
+    `head`: the PR's head sha, and `branch` its branch (to fetch the head from). When the stamp at that commit sets requiredChecks "none", that stamp is the config, read and checked in full, so a setup PR that turns
+    CI off merges under the setup it makes (decision private-repos-no-ci). Under any other value the base's stamp is the config, so a PR never loosens its own gate."""
     ref = f"origin/{base}"
     c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
     if c:
         raise Stop(f"git fetch origin {base} failed: {out}{cite}")
+    setup = head_none_stamp(root, head, path, branch)
+    if setup is not None:
+        return parse_config(root, setup, head, f"the head {head[:9]}", path, cite)
     c, listed = git(root, "ls-tree", "--name-only", ref, "--", path)
     if c:  # an unreadable base is not an absent file
         raise Stop(f"cannot read {ref} to look for {path}: {listed}{cite}")
@@ -2741,15 +2779,20 @@ def load_config(root, base, path, cite=""):
             raise ValueError("not an object")
     except ValueError as e:
         raise Stop(f"cannot read the config {path} on {ref}: {e}{cite}")
+    return parse_config(root, cfg, ref, ref, path, cite)
+
+def parse_config(root, cfg, ref, where, path, cite):
+    """Check the stamp object `cfg` and fill its defaults: the one home of that check, for the base's stamp and a setup head's. `ref` is the commit the workflow
+    caps are read at; `where` names it in each stop."""
     m = cfg.setdefault("merge", {})
     unknown = sorted(set(m) - MERGE_FIELDS)
     if unknown:
-        raise Stop(f"{path} on {ref} has an unknown field in the merge block: {', '.join(unknown)}{cite}")
+        raise Stop(f"{path} on {where} has an unknown field in the merge block: {', '.join(unknown)}{cite}")
     if not isinstance(m.get("ignoreChecks", []), list):
-        raise Stop(f"{path} on {ref}: merge.ignoreChecks must be a list, not {m['ignoreChecks']!r}.{cite}")
+        raise Stop(f"{path} on {where}: merge.ignoreChecks must be a list, not {m['ignoreChecks']!r}.{cite}")
     dm = m.get("deadlineMinutes", MERGE_DEFAULTS["deadlineMinutes"])
     if not isinstance(dm, int) or isinstance(dm, bool) or not 1 <= dm <= 360:  # 360: GitHub's longest job run
-        raise Stop(f"{path} on {ref}: merge.deadlineMinutes must be a whole number from 1 to 360, not {dm!r}.{cite}")
+        raise Stop(f"{path} on {where}: merge.deadlineMinutes must be a whole number from 1 to 360, not {dm!r}.{cite}")
     caps = base_job_caps(root, ref)
     floor = min(max(caps.values(), default=0) + 5, 360)  # clamped: 360 is the most a deadline may be
     if caps and dm < floor:  # the wait must outlast the slowest job's cap, or a job still within its cap reads as a deadline miss
@@ -2771,9 +2814,9 @@ def load_config(root, base, path, cite=""):
                   (isinstance(m.get("keepBranches", []), list) and all(map(plain_name, m.get("keepBranches", []))), "keepBranches"),
                   (rc in ("protection", "none") or isinstance(rc, list) and rc and all(map(ne, rc)), "requiredChecks")):
         if not ok:
-            raise Stop(f"{path} on {ref}: merge.{k} is not valid: {m[k]!r}.{cite}")
+            raise Stop(f"{path} on {where}: merge.{k} is not valid: {m[k]!r}.{cite}")
     if "defaultBranch" in cfg and not ne(cfg["defaultBranch"]):
-        raise Stop(f"{path} on {ref}: defaultBranch must be a non-empty string, not {cfg['defaultBranch']!r}.{cite}")
+        raise Stop(f"{path} on {where}: defaultBranch must be a non-empty string, not {cfg['defaultBranch']!r}.{cite}")
     ignore_checks(cfg)  # refuse a bad entry before the defaults notice, so the refusal is the only line
     filled = [k for k in MERGE_DEFAULTS if k not in m]
     for k in filled:
@@ -2782,7 +2825,7 @@ def load_config(root, base, path, cite=""):
         cfg["defaultBranch"] = host_default_branch(root)
         filled.insert(0, "defaultBranch")
     if filled:
-        say(f"merge: {path} on {ref} leaves out {', '.join(filled)}. Using the defaults for those.")
+        say(f"merge: {path} on {where} leaves out {', '.join(filled)}. Using the defaults for those.")
     return cfg
 
 def refuse_bad_pr(info):
@@ -3380,13 +3423,13 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             cross_fails, reports, stop = cross_measure(root, head, int(target), info["body"], host, with_prs, base, fetched, why is None, is_integration_pr(info))
             fails += cross_fails
             # one check-runs read: the draft's Windows and macOS runs, which this Linux lint never runs. A batch integration PR has no draft run of its own
-            # (a lane's run is the proof), so it reads none. A base with merge.requiredChecks "none" runs no CI job, so no lane has a draft run to read
+            # (a lane's run is the proof), so it reads none. A base with merge.requiredChecks "none", or a setup head whose own stamp says it, runs no CI job, so no lane has a draft run to read
             # and the local lint steps below are the whole proof (decision private-repos-no-ci).
             if is_integration_pr(info):
                 no_draft_run = True
             else:
                 with contextlib.redirect_stdout(io.StringIO()):  # load_config says its defaults; only requiredChecks is read here
-                    no_draft_run = load_config(root, base, DEFAULT_CONFIG, " " + LANE_LINT_CITE)["merge"].get("requiredChecks") == "none"
+                    no_draft_run = load_config(root, base, DEFAULT_CONFIG, " " + LANE_LINT_CITE, head=head)["merge"].get("requiredChecks") == "none"
             draft, draft_lines = ("pass", []) if no_draft_run else host.draft_run_state(head)
             if draft == "fail":
                 fails.append(f"its draft run of lane-touched-tests failed on {head[:9]}: " + "; ".join(draft_lines))
@@ -4554,7 +4597,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
     host.use_memo = False  # a merge under the lock reads each state fresh (Host.use_memo)
     host.before_wait = getattr(lock, "extend_for", None)  # a rate wait extends the lock first (standing-merge-grant), so the fixed TTL need not cover it
     tmp = wt = claim_sha = heal_sha = None  # heal_sha: the page commit a requiredChecks "none" run pushed and then merges. Never claim_sha: a failed run reverts a claim, never a heal
-    heal = m.get("requiredChecks") == "none" and base == cfg["defaultBranch"]  # no check gates the merge, so a stale records page heals in this run (page item 926 a, 14:32 CST; decision records-index-at-merge)
+    no_ci = m.get("requiredChecks") == "none"  # a repo with "none" runs no CI, so confirm reads no run of the head (Host.base_state reads none of the base) (decision private-repos-no-ci)
+    heal = no_ci and base == cfg["defaultBranch"]  # no check gates the merge, so a stale records page heals in this run (page item 926 a, 14:32 CST; decision records-index-at-merge)
     judge = None  # the prose judge's plan, built under the lock and run after it is released
     where_else = None  # the where-else judge's plan, built and run the same way
     try:
@@ -4595,7 +4639,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         pushed = False  # true once this run pushed a commit: the run stops there, and the next confirm reads that commit's checks
         with timed_phase("head-checks"):
             say("merge: checking the head's checks and runs ...")  # before the read, which can block
-            state = host.head_state(n, info["head"])  # a resumed claim is the head: the claim commit's own checks are read, never the head under it
+            state = "green" if no_ci else host.head_state(n, info["head"])  # a resumed claim is the head: the claim commit's own checks are read, never the head under it. Under none no run is read, whatever host answers
             not_green = head_not_green(state)
             if not_green and state.startswith("pending: ") and lint_proof and lint_proof(info):
                 say(f"merge: the head's run is still pending ({state[len('pending: '):]}), and a lane-lint PASS names {info['head'][:9]}, so the run does not hold the merge "
@@ -4638,6 +4682,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 push_branch(wt, branch)
                 pushed = True
                 say(f"merge: {trailer or 'the records page'} pushed to {branch} at {claim_sha[:9]}.")
+                if no_ci:  # no run starts on the pushed commit, so there is no second step to wait for: the merge call names it once GitHub shows it
+                    wait_healed_head(host, n, claim_sha, branch)
             elif not resumed:
                 say("merge: nothing to claim.")
         sha = heal_sha or claim_sha or info["head"]
@@ -4728,7 +4774,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
 
             with timed_phase("prove"):
                 prove(fail)
-            if pushed:  # the first step of two: the pushed commit's own checks start now, and the merge call waits for the next confirm
+            if pushed and not no_ci:  # the first step of two: the pushed commit's own checks start now, and the merge call waits for the next confirm
                 say(f"merge: the claim is pushed to {branch} at {claim_sha[:9]}. Nothing was merged. Run --confirm again when the new head is green. {CLAIM_STEP_CITE}")
                 return 0
             try:  # the PR's own paths. --no-renames: a moved file names both paths. -z: git does not quote a non-ASCII name. Any failure of this read leaves the list unknown and never holds the merge
@@ -6742,7 +6788,7 @@ def main(argv, host=None, lock=None, hosts=None):
         if a.confirm and a.head and not relayed_head_holds(root, info["branch"], a.head, info["head"], info["base"], lambda: heals_stale_page(root, info["base"], a.config)):  # a relayed yes binds to the head at relay time (decision auto-mode-owner-acts): refused before the lock, a claim or any write
             raise Stop(HEAD_MOVED.format(n=a.pr))
         if not (a.reviewed and host):  # a test host brings its own checks, so --reviewed reads no config for it
-            cfg = load_config(root, h.base if a.reviewed else info["base"], a.config)
+            cfg = load_config(root, h.base if a.reviewed else info["base"], a.config, head=None if a.reviewed else info["head"], branch=None if a.reviewed else info["branch"])
         if a.reviewed:
             if not host:
                 h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore_checks(cfg)
