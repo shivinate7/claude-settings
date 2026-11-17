@@ -70,7 +70,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
 except ImportError:  # a hook loads this file; a missing helper never stops that hook
@@ -675,7 +675,7 @@ def revived_notes(cwd, upstream, head):
     note that starts with `- ` but has no `- <slug>:` form is keyed by its whole stripped line, so it is counted and replayed
     the same way, and an edit of its text is a new note. The refusal names the whole line. The texts are read one commit at a time, so
     at most two are held at once."""
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
     import layout  # lazy, as retire_excuses loads check_debt_retire
     try:
         paths = layout.candidates(cwd, "debt-notes")
@@ -773,7 +773,7 @@ def generated_page(cwd, head, paths, upstream="origin/main", tool=None):
     upstream. When upstream has none, `tool` is the generator: the merge tool passes its own, the one that rebuilt the
     page. A standalone run passes none. A generator that is missing, fails, or reports a problem makes the page a finding (fail closed).
     A change to the generator itself thus needs a trailer. The generator runs only when `paths`, the paths with a finding, holds its page."""
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
     import hook_catalog as gen
     if gen.RECORDS_PAGE not in paths:
         return gen.RECORDS_PAGE, False
@@ -807,7 +807,7 @@ def retire_excuses(cwd, upstream, head, pr_body, run_state, paths):
     if run_state is None:
         return {}
     try:
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
         import check_debt_retire  # lazy: it imports this module at its top
         got = check_debt_retire.retired(cwd, upstream, head, pr_body, run_state, isolate=True, paths=paths)
     except Exception:  # ImportError, its Unknown, any failed read: a finding stays

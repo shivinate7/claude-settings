@@ -33,6 +33,9 @@ from guard_env import _quoted_words, _substitutions, script_spots
 CONFIG_FROZEN_FILES = (
     os.path.normcase("settings.json"),
     os.path.normcase("CLAUDE.md"),
+    # The link itself (decision install-hooks-whole): the DIRS entry below covers what is under it, and
+    # only this exact name covers a write to the name when the link is absent.
+    os.path.normcase(".cs-current"),
 )
 # This tuple is a literal on purpose, not a read of landed-dirs.txt at the repo root (the
 # manifest install.sh and install.ps1 both read). A frozen-path list read from a file shrinks
@@ -64,6 +67,11 @@ CONFIG_FROZEN_DIRS = (
     # included. The two shapes that hide the path from PreToolUse, `python3 -c` and a script file,
     # are not covered here and `config_watch.py` reports a lost baseline as unknown, never clear.
     os.path.normcase("state"),
+    # `installs` holds each cloud install generation and `.cs-current` is the link that names the live one
+    # (decision install-hooks-whole). Every landed hook, guard module and skill resolves into the live
+    # generation, so a write there is a write to a hook by its real path, outside the `hooks` entry above.
+    os.path.normcase("installs"),
+    os.path.normcase(".cs-current"),
 )
 # skills/ is NOT frozen whole: a person's own skills under ~/.claude/skills stay writable.
 # Only the skills this repo ships are frozen, one name per entry, because a skill's frontmatter
