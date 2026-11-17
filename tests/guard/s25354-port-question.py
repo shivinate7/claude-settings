@@ -28,6 +28,10 @@ OJ_FORM = "\n".join((OJ_GOAL, OJ_STAKE, OJ_BASED))
 # The Departs from line a question carries (rule question-departs, its cases in that section). A port item
 # carries it too, so the port rule's own no-line cases build their item without it (pq_item's default).
 QD_LINE = "Departs from: lint/stamp.py:run_stamp — the stamp check moves to the lint job"
+# The Waiting on line a decision carries after its Departs from line (rule question-form). with_stake adds it.
+OJ_WAIT = "Waiting on: nothing stopped; the lane acts next."
+PQ_OPTIONS = [{"key": "a", "label": "Keep the port as it is", "gain": "No change.", "lose": "The gap stays."},
+              {"key": "b", "label": "Port it", "gain": "The screen matches.", "lose": "A new change to review."}]
 
 
 def with_stake(item, departs=True):
@@ -35,17 +39,39 @@ def with_stake(item, departs=True):
     is False, and a gain and a lose on each option that lacks one. An item with no context, or no options,
     stays as it is."""
     if isinstance(item.get("context"), str):
-        lines = [OJ_FORM] + ([QD_LINE] if departs else [])
+        lines = [OJ_FORM] + ([QD_LINE] if departs else []) + [OJ_WAIT]
         item["context"] = "\n".join(lines) + "\n" + item["context"]
     if isinstance(item.get("options"), list):
         item["options"] = [dict({"gain": "g", "lose": "l"}, **o) if isinstance(o, dict) else o
                            for o in item["options"]]
-    return item
+    return with_shown(item)
+
+
+def with_shown(data):
+    """A copy of a waiting-page write's data with the fields a session's write carries when it writes options: `shown`,
+    the options as first shown (key, id, label), and an id on each option that has none (opt-<n>, n its 1-based
+    position). Data with no options list is returned as it is. The fill's one home is hooks/test_call_judge.py
+    (with_frozen_fields). A section cannot import it, since that import makes and sweeps a run folder, so this copy
+    holds the same fill for the guard's sections."""
+    if not isinstance(data, dict) or not isinstance(data.get("options"), list):
+        return data
+    filled = []
+    for i, option in enumerate(data["options"]):
+        if isinstance(option, dict):
+            option = dict(option)
+            option.setdefault("id", "opt-%d" % (i + 1))
+        filled.append(option)
+    found = dict(data, options=filled)
+    found["shown"] = [{"key": o.get("key"), "id": o.get("id"), "label": o.get("label")}
+                      for o in filled if isinstance(o, dict)]
+    return found
 
 
 def pq_item(departs=False, **over):
     item = {"id": "suspense-cards", "kind": "decision", "status": "open", "title": PQ_TITLE,
             "context": PQ_CTX, "holds": PQ_HOLDS}
+    if item.get("kind") == "decision":
+        item.update({"options": [dict(o) for o in PQ_OPTIONS], "recommended": "a", "why": "A keeps the port as it is."})
     item.update(over)
     return with_stake({k: v for k, v in item.items() if v is not None}, departs=departs)
 
@@ -80,7 +106,7 @@ for _body in ("Departs from: none", "Departs from: the approval flow — adds a 
 pq("a port found by its words, with no port flag, and Departs from none is denied", "deny",
    pq_item(context=PQ_CTX + "\nDeparts from: none", holds=None))
 pq("an update that marks a port with Departs from none is denied", "deny",
-   {"port": True, "kind": "decision", "context": OJ_FORM + "\n" + PQ_CTX + "\nDeparts from: none"},
+   {"port": True, "kind": "decision", "context": OJ_FORM + "\n" + PQ_CTX + "\nDeparts from: none\n" + OJ_WAIT},
    action="update")
 pq("a task about a port with Departs from none is denied", "deny",
    pq_item(kind="task", context=PQ_CTX + "\nDeparts from: none", holds=None))

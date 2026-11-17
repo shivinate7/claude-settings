@@ -20,6 +20,7 @@ def pl_opt(label, how, key="a", **more):
 
 def pl_item(**over):
     item = {"id": WP_DOC, "kind": "decision", "status": "open", "title": "Merge home#374 yourself or wait?",
+            "recommended": "b", "why": "Leaving it open costs nothing yet.",
             "context": "The home pull request is ready for review.", "options": [PL_BAD_OPT, PL_KEEP_OPT]}
     item.update(over)
     return with_stake({k: v for k, v in item.items() if v is not None})
@@ -38,7 +39,7 @@ def wp_write(name, expected, rule, item, action="set", doc_id=WP_DOC, **extra):
     An item of None sends no `data`, as a str_replace does."""
     kw = dict(action=action, collection="items", doc_id=doc_id)
     if item is not None:
-        kw["data"] = item
+        kw["data"] = with_shown(item)
     kw.update(extra)
     add(name, expected, rule if expected == "deny" else None, tool="ArtifactData", cwd=PQ_REPO,
         **{"url": PQ_URL, **kw})

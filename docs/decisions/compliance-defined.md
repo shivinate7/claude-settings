@@ -35,7 +35,7 @@ Skill `compliance-check` runs probe group `supersede`: `python3 lint/compliance_
 
 Risk kind: named incident, per `building-guard-needs-incident`: banchi `CLAUDE.md` line 350 above. Landed 2026-10-31.
 
-Cost: one python start for each run of the skill, on demand. It reads files and writes none. It starts no timer and no long-lived process.
+Cost: one python start for each run of the skill, on demand (unmeasured). It reads files and writes none. It starts no timer and no long-lived process.
 
 Done check (roadmap step `parent-rules-supersede`): a fixture child repo with a departure paragraph and no exemption is flagged. The same paragraph with the rule named as a known exemption is not. The first case is red on main and green on the fix.
 

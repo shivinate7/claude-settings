@@ -11,6 +11,8 @@ Two cases have a winner, and arm B wins both. The other four are ties.
 Both of arm A's losses come from one cause: a new prose sentence over the 30-word lint limit. Each
 fix is one sentence split. The work itself is right in all 16 runs.
 
+Note: the lint has since dropped the 30-word cap (R37, no fixed word cap).
+
 A null result does not confirm skip (plan, section Trial). It means that the trial found no large effect.
 
 ## Primary measure: accept as is
