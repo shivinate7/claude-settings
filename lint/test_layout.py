@@ -101,6 +101,7 @@ class LayoutFile(Tree):
         kinds = self.layout.kinds()
         want = {"claude-md": "CLAUDE.md", "agents-md": "AGENTS.md", "rules": ".claude/rules",
                 "decisions": "docs/decisions", "debts": "docs/debts", "debt-notes": "docs/debts/notes.md",
+                "notes": "docs/notes",
                 "plans": "docs/plans", "specs": "docs/specs", "records-index": "docs/records.md",
                 "todo": "docs/todo.md", "map": "docs/map", "scorecard": "docs/health/compliance.md", "design": "docs/design", "tokens": "tokens/tokens.json", "shots": "shots",
                 "waiting-data": "waiting"}
@@ -111,6 +112,21 @@ class LayoutFile(Tree):
         kinds = self.layout.kinds()
         self.assertIn("waiting-data", kinds, "no waiting-data kind in the layout")  # scope: the layout
         self.assertEqual(kinds["waiting-data"].get("set"), "waiting", "waiting-data is not set waiting")
+
+    def test_notes_is_a_folder_kind_outside_the_record_dirs(self):
+        # One file per note: each note is a file under this folder. No record reader reads the folder.
+        kinds = self.layout.kinds()
+        self.assertIn("notes", kinds, "the layout has no notes kind")  # scope: the layout
+        self.assertEqual(kinds["notes"]["path"], "docs/notes")
+        self.assertFalse(kinds["notes"]["path"].endswith(".md"), "notes is a file, not a folder")
+        self.assertFalse(kinds["notes"].get("record"), "notes is a record kind")
+        self.assertFalse(kinds["notes"].get("listed"), "notes is a listed kind")
+        self.assertEqual(self.layout.path(self.tree, "notes"), "docs/notes")  # a repo that has not rolled out
+        self.roll_out()
+        records = self.layout.folders(self.tree, "record")
+        self.assertNotIn("docs/notes", records)
+        self.assertFalse(any("docs/notes".startswith(folder + "/") for folder in records), records)
+        self.assertEqual(self.layout.path(self.tree, "debt-notes"), "docs/debts/notes.md")  # the frozen file keeps its place
 
     def test_rolled_out_repo_reads_docs(self):
         self.roll_out()
