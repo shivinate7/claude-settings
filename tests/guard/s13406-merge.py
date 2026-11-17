@@ -208,8 +208,7 @@ for _name, _command, _lacks in (
        cwd=NOGIT, env=GH_WRITE_CLOUD, carries=GH_WRITE_REMEDY, lacks=(_lacks,))
 
 
-# Reads stay allowed in a cloud session. A merge --confirm is judged by merge-confirm-repo, which needs a record that
-# names the repo, so its allow is pinned in s29942 with that record (the same names, one home).
+# Reads and the merge tool stay allowed in a cloud session.
 for _command in (
     "gh pr view 12", "gh pr list", "gh pr diff 12", "gh pr checks 12", "gh pr status",
     "gh issue view 3", "gh issue list", "gh auth status",
@@ -217,6 +216,7 @@ for _command in (
     "gh api -X GET search/code -f q=foo", "gh api -X get search/code -f q=foo",
     "gh api -XGET search/code -f q=foo", "gh api --method=GET search/code -f q=foo",
     "gh api --method get search/code -f q=foo",
+    "merge 12 --confirm", "~/.claude/bin/merge 12 --confirm",
 ):
     sh("gh-write-cloud: %s is allowed in a cloud session" % _command, _command, "allow", cwd=NOGIT,
        env=GH_WRITE_CLOUD)
