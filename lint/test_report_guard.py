@@ -5069,6 +5069,55 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         # Catches: an adjective "answered" before a noun is read as a claim, so a rule about a page item is refused.
         self.assert_allowed("- When an answered page item isn't on main, check open PRs first, then start a builder.")
 
+    def test_an_red_first_person_clause_naming_the_owner_blocks(self):
+        # Red on the first-person exemption: the owner is named as "the user" or by name, and neither is in the
+        # owner-word list, so the clause before the word is read as Claude's own act.
+        rows = [
+            # Catches: a first-person clause ("I believe") exempts an unsourced owner answer naming "the user".
+            "I believe the user answered them.",
+            # Catches: a first-person clause exempts an unsourced owner answer that names the owner by his first name.
+            "I wrote the brief and Shivam answered all four.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_an_red_modal_claim_of_a_past_answer_blocks(self):
+        # Red on the modal exemption: a modal in the clause exempts a claim with no owner word before the word. Each row
+        # states an answer as fact and cites no source.
+        rows = [
+            # Catches: a modal exempts an answer stated as fact, with "It" as the subject.
+            "It may be answered already.",
+            # Catches: a modal exempts an answer stated as fact, with "The decision" as the subject.
+            "The decision must have been answered already.",
+            # Catches: a modal and a first-person verb exempt an answer stated as fact.
+            "I would say it was answered.",
+            # Catches: a modal exempts an answer whose owner is named after the word, outside the clause.
+            "That would have been answered by the owner.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_an_red_claim_noun_before_an_owner_answer_blocks(self):
+        # Red on the "claim" exemption: "that claim" in the clause exempts the whole clause, so an owner answer stated
+        # after it in the same clause passes.
+        line = "That claim is stale because the owner answered the item."
+        self.assert_blocked(line, line)
+
+    def test_an_red_proposed_condition_on_items_or_questions_passes(self):
+        # Red on the owner-word list: "items" or "question" in a should-clause reads a proposed stop or end condition as
+        # an owner's answer. A goal or a rule that names the condition claims nothing.
+        rows = [
+            # Catches: "items" in a should-clause makes a proposed end condition read as an owner answer.
+            "The goal should end once the open items are answered.",
+            # Catches: "question" in a should-clause makes a proposed stop condition read as an owner answer.
+            "A lane should stop after the question is answered.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
     # Green: these pass before the verdict exists too. Each guards against a false alarm.
 
     def test_an_green_each_source_cites_the_word(self):
