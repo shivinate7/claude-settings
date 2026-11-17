@@ -722,9 +722,10 @@ ANSWERED_PERSON_RE = re.compile(r"\b(?:owner|user|shivam|he|him|she|her|they|the
 # because "while" or "before" after a modal ("may have answered it while I slept") hedges a claim
 ANSWERED_MODAL_CONDITION_RE = re.compile(r"\b(?:when|whenever|once|after|if|until)\b", re.I)
 # the writer's subject words come from _clause, the one home of them
-_ANSWERED_WRITER = _clause.WRITER_PATTERN + r"(?:['\u2019](?:ve|d|ll))?"
+_ANSWERED_WRITER = _clause.WRITER_PATTERN + r"(?:['\u2019](?:ve|d|ll))?(?!\w)"
 ANSWERED_FIRST_PERSON_RE = re.compile(r"\b" + _ANSWERED_WRITER, re.I)
-_ANSWERED_ADVERB = r"(?:%s|already|then|again|first|since)" % _clause.ADVERB_PATTERN
+# "only" is no -ly adverb to _clause (its pattern needs three letters before "ly"), so it is listed here
+_ANSWERED_ADVERB = r"(?:%s|already|then|again|first|since|only)" % _clause.ADVERB_PATTERN
 # "I answered" or "we already answered": the first person, at most one adverb, then the word
 ANSWERED_I_BEFORE_RE = re.compile(r"\b" + _ANSWERED_WRITER + r"\s+(?:" + _ANSWERED_ADVERB + r"\s+)?$", re.I)
 # "I sent ... and answered": a verb joined to a first-person subject by "and"
