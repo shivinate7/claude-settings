@@ -2735,11 +2735,11 @@ def stamp_git(root, *a):
     return sh([program, "-C", root, *a])
 
 def head_none_stamp(root, head, path, branch=None, base="main"):
-    """-> the stamp object at commit `head` when that stamp sets merge.requiredChecks "none" and the PR changes requiredChecks against its merge-base with origin/`base`, else None.
+    """-> the stamp object at commit `head` when that stamp sets merge.requiredChecks "none" and the PR changes requiredChecks against its merge-base with origin/`base` (the local `base` when that ref is missing), else None.
     A setup PR's own stamp is the source of requiredChecks that main reads (decision private-repos-no-ci, owner ruling 929 b), and a "none" the PR left as the base had it is not a
     change, so main's stamp decides. A stamp missing at the merge-base reads as the default, "protection". Any other head stamp, a missing file, a commit this checkout lacks (`branch`,
     when given, is fetched once for it), an unreadable file, and a merge-base or a base stamp that cannot be read read as None: the base's stamp decides then.
-    Cost: one `git cat-file`, one `git show`, one `git merge-base`, one more `git show`, and one fetch when the head is not local."""
+    Cost: one `git cat-file`, one `git show`, one or two `git merge-base`, one more `git show`, and one fetch when the head is not local."""
     if not head:
         return None
     try:
@@ -2751,6 +2751,8 @@ def head_none_stamp(root, head, path, branch=None, base="main"):
         if not (isinstance(m, dict) and m.get("requiredChecks") == "none"):
             return None
         c, mb = stamp_git(root, "merge-base", head, f"origin/{base}")
+        if c:  # a checkout with no origin/<base> ref (the guard's own may be one): the local branch of that name
+            c, mb = stamp_git(root, "merge-base", head, base)
         if c:
             return None
         c, text = stamp_git(root, "show", f"{mb.strip()}:{path}")
