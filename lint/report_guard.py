@@ -70,7 +70,7 @@ REWRITE_CAP; no file written, no timer, no log.
 The answered-source check (rule `answered-needs-source`): on any turn, landed or not, it refuses each line of the last reply
 that holds the whole word "answered" (any case, outside fences and inline code spans, not hyphen-joined to another word)
 unless the same line cites a source: a URL, `#<n>`, a commit hash, a repo path, `item <n>`, `page:<n>`, an `fb-` id, a
-`session_` id or `HH:MM`. A negator in the same clause before the word exempts it, as does `[question] -> answered`. One
+`session_` id or `HH:MM`. A negator, modal or "claim" in the same clause before the word exempts it, as does `[question] -> answered`, the guard's own name "Answered guard", and a first-person subject with an object after it. One
 refusal per turn lists the lines and joins any other reason. A rewrite after a missing-report refusal is checked too. Risk
 kind and incident: decision answered-needs-source. Cost: regex over the reply, no file, no process.
 
@@ -683,10 +683,21 @@ def bare_cite(text):
 # file extension or a known top dir, or a bare file name with a known extension, so "and/or" is no source.
 # The word is not part of a hyphen-joined name (a rule anchor such as answered-needs-source). A negator in the
 # same clause before it (a clause breaks at . ; : ! ? , or a dash) exempts it: not, n't, no, none, nothing,
-# nobody, never, cannot, yet to. A line that ends in `?` asks and claims nothing.
+# nobody, never, cannot, yet to. A line that ends in `?` asks and claims nothing. The check targets a claim that the
+# owner or an item was answered, so four other uses of the word pass: a modal before it (a condition a plan proposes,
+# not a fact), the word "claim" before it (the line talks about a claim, it makes none), the guard's own printed name
+# ("the answered guard"), and a first-person subject
+# in its clause with an object after it (the session answered someone's questions, "I ... answered its four questions").
 ANSWERED_RE = re.compile(r"(?<![\w-])answered(?![\w-])", re.I)
 ANSWERED_INBOX_RE = re.compile(r"\[question\]\s*(?:->|\u2192)\s*answered\b", re.I)
 ANSWERED_NEGATOR_RE = re.compile(r"\bnot\b|n['\u2019]t\b|\bno(?:ne|thing|body)?\b|\bnever\b|\bcannot\b|\byet\s+to\b", re.I)
+ANSWERED_MODAL_RE = re.compile(r"\b(?:should|would|could|might|may|will|must|shall)\b", re.I)
+ANSWERED_GUARD_NAME = "Answered guard"  # the name the refusal prints; a reply that names the guard claims nothing
+ANSWERED_GUARD_NAME_RE = re.compile(r"(?<![\w-])" + r"\s+".join(map(re.escape, ANSWERED_GUARD_NAME.split())) + r"\b", re.I)
+ANSWERED_CLAIM_NOUN_RE = re.compile(r"\bclaims?\b", re.I)  # "a claim that X were answered" talks about a claim, makes none
+ANSWERED_FIRST_PERSON_RE = re.compile(r"\b(?:I|we)\b(?:['\u2019](?:ve|d|ll))?", re.I)
+ANSWERED_OBJECT_AFTER_RE = re.compile(
+    r"\s+(?:(?:its|their|his|her|my|our|your|the|an?|all|both|some|any|each|every|it|them)\b|\d)", re.I)
 ANSWERED_CLAUSE_BREAK_RE = re.compile(r"[.;:!?,\u2014\u2013]|\s-{1,2}\s")
 ANSWERED_TOP_DIRS = {"docs", "hooks", "lint", "bin", "skills", "agents", "roadmap"}
 ANSWERED_FILE_RE = re.compile(
@@ -694,7 +705,7 @@ ANSWERED_FILE_RE = re.compile(
 ANSWERED_SOURCE_RE = re.compile(
     r"https?://\S+|\bitem\s+\d+|\bpage:\d+|\bfb-\w+|\bsession_\w+|\b\d{1,2}:\d{2}\b", re.I)
 ANSWERED_REASON = owner_line(
-    "Answered guard (rule answered-needs-source)",
+    ANSWERED_GUARD_NAME + " (rule answered-needs-source)",
     "each line below says \"answered\" and cites no source; a mention of the word in an inline code span is no claim") + " Lines: "
 
 
@@ -706,11 +717,16 @@ def _has_path(line):
 
 
 def _claims_answered(plain):
-    """True when `plain` holds the word with no negator in its clause before it."""
+    """True when `plain` holds the word as a claim: no negator or modal in its clause before it, and not a first-person act that takes an object."""
     for m in ANSWERED_RE.finditer(plain):
-        clause = ANSWERED_CLAUSE_BREAK_RE.split(plain[:m.start()])[-1]
-        if not ANSWERED_NEGATOR_RE.search(clause):
-            return True
+        before = plain[:m.start()]
+        clause = ANSWERED_CLAUSE_BREAK_RE.split(before)[-1]
+        if (ANSWERED_NEGATOR_RE.search(clause) or ANSWERED_MODAL_RE.search(clause)
+                or ANSWERED_CLAIM_NOUN_RE.search(clause)):
+            continue
+        if ANSWERED_FIRST_PERSON_RE.search(clause) and ANSWERED_OBJECT_AFTER_RE.match(plain, m.end()):
+            continue
+        return True
     return False
 
 
@@ -742,7 +758,7 @@ def answered_problem(text):
         return ""
     bad = []
     for body in _prose_lines(text):
-        plain = ANSWERED_INBOX_RE.sub(" ", CODE_SPAN.sub(" ", body))
+        plain = ANSWERED_GUARD_NAME_RE.sub(" ", ANSWERED_INBOX_RE.sub(" ", CODE_SPAN.sub(" ", body)))
         if not _claims_answered(plain):
             continue
         kept = CODE_SPAN.sub(lambda m: m.group(2), body)
