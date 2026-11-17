@@ -340,7 +340,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `merge-reinstalls-from-main` | The links in `~/.claude` point at one pinned checkout. | [`docs/decisions/merge-reinstalls-from-main.md`](../docs/decisions/merge-reinstalls-from-main.md) |
 | `one-browser-setup-no-apt` | Roadmap step c78 (one shared browser-test setup), 2026-10-26: one composite action installs the browser-test setup for every repo, so a CI fix lands once. | [`docs/decisions/one-browser-setup-no-apt.md`](../docs/decisions/one-browser-setup-no-apt.md) |
 | `outbox-ruling-home-check` | When triage reports status, a check lists each owner ruling in the outbox. | [`docs/decisions/outbox-ruling-home-check.md`](../docs/decisions/outbox-ruling-home-check.md) |
-| `owner-override` | The owner starts a prompt with the word `override`. | [`docs/decisions/owner-override.md`](../docs/decisions/owner-override.md) |
+| `owner-override` | The owner starts a prompt with the word `override`, or puts it alone on a line of a prose prompt. | [`docs/decisions/owner-override.md`](../docs/decisions/owner-override.md) |
 | `plain-diff-mod-limits` | The plain-diff mod (`mods/plain-diff`, command `/plain-diff`) sends a diff to `$.model.complete` only for a file that passes the secret filter. | [`docs/decisions/plain-diff-mod-limits.md`](../docs/decisions/plain-diff-mod-limits.md) |
 | `plan-needs-refuter` | Ruling: coordinator, 2026-11-06 12:37 CST, pick a. | [`docs/decisions/plan-needs-refuter.md`](../docs/decisions/plan-needs-refuter.md) |
 | `pointer-edit` | The guard refuses a Write, Edit, MultiEdit or NotebookEdit whose target is one of the pointer checkout's own files. | [`docs/decisions/pointer-edit.md`](../docs/decisions/pointer-edit.md) |
