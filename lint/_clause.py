@@ -27,7 +27,7 @@ ADVERBS = ("even", "yet", "currently", "actually", "really", "still", "also", "j
            "unfortunately")
 # Any other adverb in -ly ("temporarily", "honestly") is read as an adverb where the grammar allows one: between a subject
 # and its verb, after not, and before the act.
-ADVERB_PATTERN = "(?:%s|[a-z]{3,}ly)" % "|".join(ADVERBS)
+ADVERB_PATTERN = "(?:%s|[a-z]{2,}ly)" % "|".join(ADVERBS)
 CONDITIONALS = ("if", "unless", "whether", "would")
 REASON_LINKS = ("because",)
 DETERMINERS = ("a", "an", "the", "this", "that", "these", "those", "its", "their", "his", "her", "our", "my", "your")

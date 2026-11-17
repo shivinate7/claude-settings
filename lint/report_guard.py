@@ -724,12 +724,13 @@ ANSWERED_MODAL_CONDITION_RE = re.compile(r"\b(?:when|whenever|once|after|if|unti
 # the writer's subject words come from _clause, the one home of them
 _ANSWERED_WRITER = _clause.WRITER_PATTERN + r"(?:['\u2019](?:ve|d|ll))?(?!\w)"
 ANSWERED_FIRST_PERSON_RE = re.compile(r"\b" + _ANSWERED_WRITER, re.I)
-# "only" is no -ly adverb to _clause (its pattern needs three letters before "ly"), so it is listed here
-_ANSWERED_ADVERB = r"(?:%s|already|then|again|first|since|only)" % _clause.ADVERB_PATTERN
+_ANSWERED_ADVERB = r"(?:%s|already|then|again|first|since)" % _clause.ADVERB_PATTERN
 # "I answered" or "we already answered": the first person, at most one adverb, then the word
 ANSWERED_I_BEFORE_RE = re.compile(r"\b" + _ANSWERED_WRITER + r"\s+(?:" + _ANSWERED_ADVERB + r"\s+)?$", re.I)
 # "I sent ... and answered": a verb joined to a first-person subject by "and"
 ANSWERED_AND_BEFORE_RE = re.compile(r"\band\s+(?:" + _ANSWERED_ADVERB + r"\s+)?$", re.I)
+# a person word and "and" right before the writer's word: a joint subject
+ANSWERED_JOINT_BEFORE_RE = re.compile(ANSWERED_PERSON_RE.pattern + r"\s+and\s+$", re.I)
 ANSWERED_OBJECT_AFTER_RE = re.compile(
     r"\s+(?:(?:its|their|his|her|my|our|your|the|an?|all|both|some|any|each|every|it|them)\b|\d)", re.I)
 ANSWERED_CLAUSE_BREAK_RE = re.compile(r"[.;:!?,\u2014\u2013]|\s-{1,2}\s")
@@ -758,8 +759,10 @@ def _first_person_act(clause, after):
         return False
     if ANSWERED_PERSON_RE.search(ANSWERED_CLAUSE_BREAK_RE.split(after)[0]):
         return False
-    if ANSWERED_I_BEFORE_RE.search(clause):
-        return True
+    writer = ANSWERED_I_BEFORE_RE.search(clause)
+    if writer:
+        # "Shivam and I answered" is a joint act: the person before "and" shares the verb, so it is not the writer's alone
+        return not ANSWERED_JOINT_BEFORE_RE.search(clause[:writer.start()])
     opening = re.sub(r"^[\s*+-]+", "", clause)  # a list marker before the subject
     first = ANSWERED_FIRST_PERSON_RE.match(opening)
     rest = opening[first.end():] if first else ""
