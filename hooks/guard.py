@@ -619,9 +619,9 @@ def _set_dir_for(here, install_id):
         return own
     gens = os.path.dirname(os.path.dirname(here))
     if os.path.basename(gens) == "installs":
-        named = os.path.join(gens, install_id, "hooks", "guard.d", install_id)
-        if os.path.isdir(named):
-            return named
+        stamped = os.path.join(gens, install_id, "hooks", "guard.d", install_id)
+        if os.path.isdir(stamped):
+            return stamped
     return own
 
 
