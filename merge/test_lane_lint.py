@@ -5622,14 +5622,26 @@ class LaneLintDiskFloor(LaneFixture):
     """`merge --lane-lint` on a drive under the guard's full floor. The refusal comes before any worktree is made, in a cloud session and in a
     local one, and it names the full sweep of the lane's checkout. The reading is shutil.disk_usage, the reader the guard and the janitor use."""
 
+    @staticmethod
+    def under(path, folder):
+        """True when `path`, resolved, is `folder` or lies inside it."""
+        base = os.path.realpath(folder)
+        return os.path.commonpath([os.path.realpath(path), base]) == base
+
     @contextlib.contextmanager
-    def disk_reading(self, free_gib=None, total_gib=DISK_GIB, error=None):
-        """Patch shutil.disk_usage for every path: `free_gib` free of `total_gib` GiB, or `error` raised on each read."""
+    def disk_reading(self, free_gib=None, total_gib=DISK_GIB, error=None, tmp=None):
+        """Patch shutil.disk_usage for every path: `free_gib` free of `total_gib` GiB, or `error` raised on each read. `tmp` = (folder, free_gib)
+        gives a path under `folder` its own reading, the drive the temp folder sits on; every other path reads `free_gib`."""
+        def usage(free):
+            return types.SimpleNamespace(total=int(total_gib * GIB), used=int((total_gib - free) * GIB), free=int(free * GIB))
+        def reading(path):
+            if tmp is not None and self.under(path, tmp[0]):
+                return usage(tmp[1])
+            return usage(free_gib)
         if error is not None:
             patch = unittest.mock.patch.object(shutil, "disk_usage", side_effect=error)
         else:
-            usage = types.SimpleNamespace(total=int(total_gib * GIB), used=int((total_gib - free_gib) * GIB), free=int(free_gib * GIB))
-            patch = unittest.mock.patch.object(shutil, "disk_usage", return_value=usage)
+            patch = unittest.mock.patch.object(shutil, "disk_usage", side_effect=reading)
         with patch:
             yield
 
@@ -5711,6 +5723,43 @@ class LaneLintDiskFloor(LaneFixture):
 
     def test_an_unreadable_disk_reads_unknown_in_a_local_session_and_goes_ahead(self):
         self.unknown_disk_run(cloud=False)
+
+    def test_memory_at_ninety_nine_percent_with_ample_disk_goes_ahead(self):  # the control: the floor reads the disk alone
+        """The lane lint refuses on the disk only. The guard's whole-load reading (read_load, which reads memory too) would refuse 99% memory,
+        so this control is red on a lane lint that takes that reading."""
+        self.use_ci_job(PASSING, 0)
+        with self.disk_reading(free_gib=50), unittest.mock.patch.object(guard, "_read_memory", return_value=99.0):
+            reading = guard.read_load()
+            self.assertEqual(reading.get("memory_pct"), 99.0, "the memory reading is not the 99%% this control sets: %r" % (reading,))
+            self.assertTrue(guard.load_full(reading), "the whole-load check does not refuse 99%% memory, so this control proves nothing: %r" % (reading,))
+            for cloud in (True, False):
+                with self.subTest(cloud=cloud):
+                    rc, out = self.lint_run("--lane-lint", "7", cloud=cloud)
+                    self.assertEqual(rc, 0, "99% memory with 50 GiB free on the disk refused the lane lint: " + out)
+                    self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_a_full_temp_drive_refuses_a_cloud_lane_lint_while_home_has_room(self):
+        """The lint tree lands under the temp folder (add_worktree's mkdtemp). That drive is full and home's drive has room, so the lane lint
+        must refuse before it makes the tree. Red on the head, which reads home's drive alone."""
+        temp = tempfile.mkdtemp(prefix="full-temp-", dir=RUN_FOLDER)
+        self.use_ci_job(PASSING, 0)
+        with unittest.mock.patch.object(tempfile, "tempdir", temp), unittest.mock.patch.dict(os.environ, {"TMPDIR": temp}), \
+                self.disk_reading(free_gib=50, tmp=(temp, REFUSE_GIB)), self.worktree_adds() as adds:
+            self.assertEqual(os.path.realpath(tempfile.gettempdir()), os.path.realpath(temp),
+                             "the lint tree would not land under the temp folder: %s" % tempfile.gettempdir())
+            self.assertFalse(self.under(os.path.expanduser("~"), temp), "home sits under the full temp folder, so home reads full too")
+            home_free, home_total = guard._read_disk()
+            self.assertEqual(guard.load_full({"disk_free_gb": home_free, "disk_total_gb": home_total}), [],
+                             "home's drive reads %.1f GB free, under its floor, so this case does not isolate the temp drive" % home_free)
+            temp_usage = shutil.disk_usage(temp)
+            self.assertNotEqual(guard.load_full({"disk_free_gb": temp_usage.free / GIB, "disk_total_gb": temp_usage.total / GIB}), [],
+                                "the temp drive reads %.1f GB free, not under its floor, so this case proves nothing" % (temp_usage.free / GIB))
+            rc, text = self.run_lane("--lane-lint", "7", cloud=True)
+        self.assertEqual(rc, 1, "the lane lint read home's drive alone, which had 50 GiB free, and went ahead while the temp folder's drive "
+                                "held %s GiB, under its floor: %s" % (REFUSE_GIB, text))
+        self.assertRegex(text, r"(?i)\bdisk\b", "the refusal does not name the disk: " + text)
+        self.assertEqual(adds, [], "the lane lint made a tree under the full temp folder before it refused: %r" % (adds,))
+        self.assertEqual(self.lint_calls(), [], "the refused lane lint ran the lint anyway: " + text)
 
 
 if __name__ == "__main__":
