@@ -4648,8 +4648,6 @@ class UICopyRoundTwoTests(unittest.TestCase):
                                              "launch</button>;\n"), ["STE011"])
 
     def test_114_many_generics_lint_in_linear_time(self):
-        import time
-
         def build(generics):
             lines = []
             for i in range(generics):
@@ -4658,27 +4656,42 @@ class UICopyRoundTwoTests(unittest.TestCase):
             lines.append("const y = <p>In order to go.</p>;")
             return "\n".join(lines) + "\n"
 
-        def cpu_seconds(text):
-            # The least of five runs: load adds CPU time to a run, it never takes CPU time away.
-            best = None
-            for _ in range(5):
-                started = time.process_time()
-                self.check("a.tsx", text)
-                took = time.process_time() - started
-                best = took if best is None else min(best, took)
-            return best
+        def check_counted(text):
+            # Steps are the line events the trace sees in lint/ste_lint.py while the check runs. No clock is
+            # read, so machine load cannot move the count.
+            linter_file = ste_lint._jsx_copy.__code__.co_filename
+            steps = [0]
+
+            def count_line(frame, event, arg):
+                if event == "line":
+                    steps[0] += 1
+                return count_line
+
+            def trace_call(frame, event, arg):
+                return count_line if frame.f_code.co_filename == linter_file else None
+
+            previous = sys.gettrace()
+            sys.settrace(trace_call)
+            try:
+                codes = self.check("a.tsx", text)
+            finally:
+                sys.settrace(previous)
+            return codes, steps[0]
 
         small, large = build(600), build(2400)
         self.assertGreaterEqual(small.count("\n"), 4800)
-        self.assertEqual(self.check("a.tsx", small), ["STE011"])
-        self.assertEqual(self.check("a.tsx", large), ["STE011"])
-        t_small, t_large = cpu_seconds(small), cpu_seconds(large)
-        # Four times the lines take about four times as long. A scan to the end of the file for each
-        # generic takes about thirteen times as long. The floor stops a very fast small run from
-        # making the ratio noise.
-        # The 8x bound catches a Python-speed scan only: a C-speed scan (str.find) gives about 4.3x and passes.
-        ratio = t_large / max(t_small, 0.01)
-        self.assertLess(ratio, 8, "4x the lines took %.1fx the time: the check is not linear" % ratio)
+        small_codes, small_steps = check_counted(small)
+        large_codes, large_steps = check_counted(large)
+        self.assertEqual(small_codes, ["STE011"])
+        self.assertEqual(large_codes, ["STE011"])
+        # Scope first: the trace must have seen at least one step per input line, or the ratio below proves nothing.
+        self.assertGreaterEqual(small_steps, small.count("\n"),
+                                "the trace counted fewer steps than input lines: it missed lint/ste_lint.py")
+        # Four times the lines take about four times the steps. A Python scan to the end of the file for each
+        # generic makes the steps grow as the square, which the 8x bound catches. A str.find scan to the end
+        # adds one step per generic, so this count does not see it. The bound is for Python-level scans only.
+        ratio = large_steps / small_steps
+        self.assertLess(ratio, 8, "4x the lines took %.1fx the steps: the check is not linear" % ratio)
 
 
 class TurnReaderTests(unittest.TestCase):
