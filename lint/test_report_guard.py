@@ -891,6 +891,131 @@ class DoneFormatAndCiteTests(unittest.TestCase):
         self.assertEqual(run_guard(REPORT_GUARD, hook).stdout.strip(), "")
 
 
+class PlainFormTests(unittest.TestCase):
+    """A bare id, a UTC time and a contradiction with no Input Needed question, in report_guard.py's Stop hook,
+    for landed turns only (rules speak-cite-id-plus-gloss, style-time-central-24h, output-bring-decisions-as-question)."""
+
+    DONE = "> **Done** BUILT guard, PR #226\n"
+    SAMPLE = (
+        "Refusal: a guard refused the rm-var run as frozen-path (guard.log 20:34:33 UTC). "
+        "Contradiction: #2015's own rows contradict each other: s02747:941 (env -vC, want ask) against :943 "
+        "(env -vC, want deny). The builder reports both and picks neither.")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
+        self.addCleanup(self.tmp.cleanup)
+
+    def verdict(self, reply):
+        run = landed_run(self.tmp.name, reply)
+        self.assertEqual(run.returncode, 0)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def report(self, deviations, needed="none"):
+        return (self.DONE + "> **Deviations** " + deviations + "\n> **Input Needed** " + needed
+                + "\n> **Next** none")
+
+    def assert_blocked(self, reply, *needles):
+        out = self.verdict(reply)
+        self.assertIsNotNone(out, "no block for: " + reply)
+        self.assertEqual(out.get("decision"), "block")
+        for needle in needles:
+            self.assertIn(needle, out["reason"])
+
+    def assert_allowed(self, reply):
+        self.assertIsNone(self.verdict(reply), "a false block for: " + reply)
+
+    def assert_no_contradiction_block(self, reply):
+        # Pick guard and question-departs can block a bare question. This case asks only that the contradiction
+        # check does not block it.
+        out = self.verdict(reply)
+        if out is not None:
+            self.assertNotIn("output-bring-decisions-as-question", out["reason"], "a contradiction with a question: " + reply)
+
+    def test_pf_red_sample_trips_all_three(self):
+        self.assert_blocked(self.report(self.SAMPLE), "'#2015'", "style-time-central-24h",
+                            "output-bring-decisions-as-question", "speak-cite-id-plus-gloss")
+
+    def test_pf_red_bare_ids_block(self):
+        rows = [
+            ("Tracked as #2015 for now.", "'#2015'"),
+            ("#2015's own rows disagree.", "'#2015'"),                       # "own rows" is no gloss
+            ("See s02747:941 for the refusal.", "'s02747:941'"),
+            ("Row s02747:941 (env -vC, want ask) is wrong.", "'s02747:941'"),  # a command is no gloss
+            ("The rows contradict each other: s02747:941 differs.", "'s02747:941'"),
+        ]
+        for prose, needle in rows:
+            with self.subTest(prose=prose):
+                self.assert_blocked(prose + "\n\n" + self.DONE + "> **Next** none", needle)
+
+    def test_pf_allowed_glossed_ids(self):
+        rows = [
+            "#2015, check-tail filter, is open.",
+            "Row s02747:941, the env -vC refusal, is wrong.",
+            "The check-tail filter (#2015) is open.",
+            "Merged PR #2015 and pull request #2016.",
+            "See tests/guard/s43500-lane-start-pass.py and `#2015` and sha d1234567.",
+        ]
+        for prose in rows:
+            with self.subTest(prose=prose):
+                self.assert_allowed(prose + "\n\n" + self.DONE + "> **Next** none")
+
+    def test_pf_allowed_pr_ref_in_done_item(self):
+        # reports-done-format makes the writer cite a PR as #N, so a Done item may hold a bare #N.
+        self.assert_allowed("> **Done**\n> - BUILT the guard, #226\n> - OTHER swept branches, #227\n> **Next** none")
+
+    def test_pf_red_hash_id_in_deviations_blocks_with_done_present(self):
+        # The Done-item exemption must not leak to the Deviations item.
+        self.assert_blocked(self.DONE + "> **Deviations** #2015 broke\n> **Next** none", "'#2015'")
+
+    def test_pf_red_utc_time_blocks(self):
+        rows = [
+            ("The guard refused it at 20:34:33 UTC.", "20:34:33 UTC"),
+            ("It ran at 20:34 UTC.", "20:34 UTC"),
+            ("It ran at 20:34 GMT.", "20:34 GMT"),
+            ("Logged 2026-11-17T20:34:33Z by the hook.", "20:34:33Z"),
+            ("It ran at UTC 20:34.", "UTC 20:34"),
+        ]
+        for prose, needle in rows:
+            with self.subTest(prose=prose):
+                self.assert_blocked(prose + "\n\n" + self.DONE + "> **Next** none", needle, "style-time-central-24h")
+
+    def test_pf_allowed_central_times_and_offsets(self):
+        rows = [
+            "It ran at 14:34 CST and again at 15:10 CDT.",
+            "Local time: 2026-11-17 09:10 CST (UTC-06:00).",      # an offset is no time
+            "The log line `20:34:33 UTC` shows it.",
+            "```\n20:34:33 UTC refused\n```",
+            "Never show UTC to the owner.",
+        ]
+        for prose in rows:
+            with self.subTest(prose=prose):
+                self.assert_allowed(prose + "\n\n" + self.DONE + "> **Next** none")
+
+    def test_pf_red_contradiction_without_question_blocks(self):
+        rows = [
+            "Contradiction: the two rows disagree.",
+            "The builder reports both rows and picks neither.",
+            "The builder picked neither row.",
+        ]
+        for deviations in rows:
+            with self.subTest(deviations=deviations):
+                self.assert_blocked(self.report(deviations), "output-bring-decisions-as-question")
+
+    def test_pf_allowed_contradiction_with_a_question(self):
+        rows = [
+            "Which row stands, the ask or the deny?",
+            "Pick one:\n> A: ask (my pick)\n> B: deny",
+        ]
+        for needed in rows:
+            with self.subTest(needed=needed):
+                self.assert_no_contradiction_block(self.report("Contradiction: the two rows disagree.", needed))
+
+    def test_pf_allowed_no_contradiction_words(self):
+        self.assert_allowed(self.report("none"))
+        # The word outside Deviations is no claim.
+        self.assert_allowed("Contradiction: noted in prose above.\n\n" + self.report("none"))
+
+
 class DoneNamesModelsTests(unittest.TestCase):
     """reports-done-names-models, in report_guard.py's Stop hook."""
 
