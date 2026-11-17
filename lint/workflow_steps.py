@@ -171,7 +171,7 @@ def disables(key, value):
     `if:` that is always false. The value loses its inline comment first. hooks/guard.py's WORKFLOW_DISABLE_STEP is the
     one home of the disabling forms, so it decides; the import is lazy because guard.py is large and bin/ci-job loads
     this file."""
-    hooks = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks")
+    hooks = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks")
     if hooks not in sys.path:
         sys.path.insert(0, hooks)
     import guard
