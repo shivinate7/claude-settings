@@ -15,4 +15,4 @@ The old notes file, `docs/debts/notes.md`, takes deletes only. An old note is on
 
 ## Check
 
-`lint/check_record_slugs.py` refuses a line of the old notes file that the merge base holds fewer times: a new line, an edited line or a second copy. A moved or deleted line passes. It refuses a note file whose name is over 32 characters. It also refuses an added or edited note file in any of three cases: no `- <slug>:` line, a slug that differs from its file name, or a digits-only slug. A deleted note file passes.
+`lint/check_record_slugs.py` refuses a line of the old notes file that the merge base holds fewer times: a new line, an edited line or a second copy. A moved or deleted line passes. It refuses a note file whose name is over 32 characters. It also refuses an added, edited or renamed note file in any of four cases: no `- <slug>: <text>` line, a slug that differs from its file name, a digits-only slug, or a place in a folder of the notes folder. A deleted note file passes.

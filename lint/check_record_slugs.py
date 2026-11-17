@@ -141,7 +141,7 @@ def unchecked_feel_debts(root, moved):
     return out
 
 
-NOTE_LINE = re.compile(r"^- ([a-z0-9-]+): ")  # the one line a note file holds: `- <slug>: <text>`
+NOTE_LINE = re.compile(r"^- ([a-z0-9-]+): +\S")  # the one line a note file holds: `- <slug>: <text>`, text not empty
 DIGITS = re.compile(r"[0-9]+")  # a digits-only slug reads as an old `note:<digits>` ref (hooks/feedback_guard.py)
 NOTE_README = "README.md"  # the note folder's own description: not a note
 CLIP = 60  # characters of a refused line that a message shows
@@ -166,10 +166,14 @@ def merge_base(root):
 
 
 def bad_note_form(root, files, folder):
-    """[(file, why)] for the note files among `files` whose text at HEAD is not one `- <slug>: <text>` line with the
-    slug equal to the file name, or whose slug is digits only. Raises Unknown when git cannot show a file."""
+    """[(file, why)] for the note files among `files` that sit in a folder of the note folder, whose text at HEAD is not
+    one `- <slug>: <text>` line with the slug equal to the file name, or whose slug is digits only. Raises Unknown when
+    git cannot show a file."""
     out = []
     for f in note_files(files, folder):
+        if "/" in f[len(folder):]:
+            out.append((f, "nested"))
+            continue
         lines = [l for l in show(root, "HEAD", f) if l.strip()]
         slug = NOTE_LINE.match(lines[0]) if len(lines) == 1 else None
         name = os.path.basename(f)[:-3]
@@ -264,7 +268,9 @@ def main(args):
     for f in bad:
         print("check_record_slugs: FAIL: slug over %d characters: %s" % (MAX, f))
     for f, why in bad_form:
-        if why == "digits":
+        if why == "nested":
+            print("check_record_slugs: FAIL: a note file sits directly in %s, not in a folder of it: %s" % (folder, f))
+        elif why == "digits":
             print("check_record_slugs: FAIL: a note slug is more than digits, so it is not read as an old note number: %s"
                   % f)
         else:

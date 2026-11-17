@@ -226,7 +226,8 @@ EXAMPLE_HOME = "noted"
 OPEN_KINDS = ("[ruling]", "[task]", "[standing]")
 # Layout keys (lint/layout.json, or a repo's extras file) whose paths may hold each kind's home.
 HOME_KINDS = {"ruling": ("decisions", "rules", "claude-md", "agents-md"),
-              "task": ("todo", "debts", "debt-notes", "notes")}
+              "task": ("todo", "debts", "notes")}
+OLD_NOTES_KEY = "debt-notes"  # the frozen notes file: read for backlog lines and own-home drops, never a task home
 NOTES_README = "README.md"  # the notes folder's own file, never a note
 FAIL_OPEN = "Feedback guard: ruling and task homes not checked (%s)."
 FAIL_OPEN_SENDS = "Feedback guard: %s sends not checked (%s)."  # label: page or repo
@@ -1158,16 +1159,16 @@ def backlog_candidates(root):
     file and the old notes file (`note:<line>`). A missing or unreadable file is skipped."""
     import layout  # lint/layout.py, the one home of where each kind lives
     out, known = [], layout.kinds(root)
-    where = {key: os.path.join(root, *layout.path(root, key).split("/")) for key in HOME_KINDS["task"]
-             if key in known}
-    for key, prefix in (("todo", "todo"), ("debts", "debt"), ("debt-notes", "note"), ("notes", "note")):
+    where = {key: os.path.join(root, *layout.path(root, key).split("/"))
+             for key in HOME_KINDS["task"] + (OLD_NOTES_KEY,) if key in known}
+    for key, prefix in (("todo", "todo"), ("debts", "debt"), (OLD_NOTES_KEY, "note"), ("notes", "note")):
         try:
             if key not in where:
                 continue
             if os.path.isdir(where[key]):
                 for name in sorted(os.listdir(where[key])):
                     path = os.path.join(where[key], name)
-                    if (name.endswith(".md") and path != where.get("debt-notes") and os.path.isfile(path)
+                    if (name.endswith(".md") and path != where.get(OLD_NOTES_KEY) and os.path.isfile(path)
                             and not (key == "notes" and name == NOTES_README)):
                         with open(path, encoding="utf-8", errors="replace") as f:
                             text = squash(f.read(4 * REPEAT_CUT).lstrip("# "))
@@ -1262,10 +1263,11 @@ def own_refs(rest, root, own_block, found):
             home = posixpath.normpath(home_path(rest).replace("\\", "/")).strip("/")
             folder, _, name = home.rpartition("/")
             known = layout.kinds(root)
-            at = {key: layout.path(root, key).strip("/") for key in HOME_KINDS["task"] if key in known}
+            at = {key: layout.path(root, key).strip("/") for key in HOME_KINDS["task"] + (OLD_NOTES_KEY,)
+                  if key in known}
             if home == at.get("todo"):
                 own |= {r for r in found if r.startswith("todo:")}
-            elif home == at.get("debt-notes"):
+            elif home == at.get(OLD_NOTES_KEY):
                 # Only the old file's `note:<line>` refs: a note file is its own, distinct home.
                 own |= {r for r in found if re.fullmatch(r"note:\d+", r)}
             elif name.endswith(".md") and name != NOTES_README and folder == at.get("notes"):
