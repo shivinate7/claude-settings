@@ -29,7 +29,9 @@ that record, never in the reason.
 
 On the same landed turns it also blocks (one block, all reasons joined) when a Done item lacks
 BUILT, RECORDED, or OTHER or a PR or commit ref (`reports-done-format`), or when the reply holds
-a record id with no short gloss (`speak-cite-id-plus-gloss`), or when a builder, reviewer,
+an id with no short gloss (a record id, `#N` or a session ref; `speak-cite-id-plus-gloss`), or when a clock time says UTC or GMT
+(`style-time-central-24h`), or when Deviations says "Contradiction:" or "picks neither" and Input Needed asks no question
+(`output-bring-decisions-as-question`), or when a builder, reviewer,
 test-author or record-writer spawned since the last human message goes unnamed in Done, or a
 named "role model" pair matches no spawn of that role (`reports-done-names-models`), or when
 a turn that spawned a builder reports with no `Unstarted:` line (`reports-name-unstarted-items`).
@@ -661,12 +663,50 @@ GLOSS_BEFORE_RE = re.compile(r"[A-Za-z]{2,}[^\n(]{0,60}\(\s*$")
 GLOSS_LEAD_RE = re.compile(r"[A-Za-z]{2,}\s+[A-Za-z]{2,}\s*(?:[,:—–=]|--|\s-)\s*$")
 
 
+# Two more id forms need the same gloss: a `#N` (3 to 5 digits) and a session ref `s02747` or `s02747:941`.
+# They use a stricter gloss than a record id: the separator form needs two real words after it (a word that starts
+# with a letter, so "(env -vC, want ask)" is no gloss), and the possessive form ("#2015's own rows") and the
+# "two words, then a colon" lead are no gloss. A `#N` passes after "PR", "PRs", "pull request" or "issue", and
+# anywhere in a Done item, where `reports-done-format` makes the writer cite a PR as `#N`.
+REF_ID_RE = re.compile(r"(?<![\w/.#:$&-])(?:#\d{3,5}|s\d{4,6}(?::\d+)?)(?![\w-]|\.\w)")
+REF_GLOSS_AFTER_RE = re.compile(
+    r"""^["')\]]*\s*(?:[,:;(=—–-]|\s-{1,2}\s)\s*\(?[A-Za-z][\w'-]*\s+[A-Za-z][\w'-]*""")
+PR_WORD_BEFORE_RE = re.compile(r"(?:\bPRs?|\bpull requests?|\bissues?)\s*$", re.I)
+
+
+def _done_spans(text):
+    """The (start, end) character spans of the lines in the reply's Done item."""
+    spans, inside, pos = [], False, 0
+    for line in text.splitlines(keepends=True):
+        m = LABEL_RE.match(QUOTE_PREFIX.sub("", line, count=1))
+        name = m.group(1).strip().rstrip(":").strip() if m else None
+        if name in LABEL_ORDER:
+            inside = name == "Done"
+        if inside:
+            spans.append((pos, pos + len(line)))
+        pos += len(line)
+    return spans
+
+
 def bare_cite(text):
-    """Return the first record id in `text` with no short gloss beside it, else ''."""
-    clean = CITE_SKIP_RE.sub(" ", text)
-    for m in CITE_ID_RE.finditer(clean):
+    """Return the first id in `text` (a record id, `#N` or a session ref) with no short gloss beside it, else ''."""
+    clean = CITE_SKIP_RE.sub(lambda m: " " * len(m.group(0)), text)
+    found = [(m.start(), m, False) for m in CITE_ID_RE.finditer(clean)]
+    done = _done_spans(clean)
+    for m in REF_ID_RE.finditer(clean):
+        if m.group(0).startswith("#") and (PR_WORD_BEFORE_RE.search(clean[max(0, m.start() - 20):m.start()])
+                                           or any(a <= m.start() < b for a, b in done)):
+            continue
+        found.append((m.start(), m, True))
+    for _, m, strict in sorted(found, key=lambda f: f[0]):
         after = clean[m.end():m.end() + 80]
         before = clean[max(0, m.start() - 80):m.start()]
+        if strict:
+            if REF_GLOSS_AFTER_RE.match(after):
+                continue
+            if GLOSS_BEFORE_RE.search(before) and after.lstrip().startswith(")"):
+                continue
+            return m.group(0)
         if GLOSS_AFTER_RE.match(after) or GLOSS_POSSESSIVE_RE.match(after):
             continue
         if GLOSS_BEFORE_RE.search(before) and after.lstrip().startswith(")"):
@@ -675,6 +715,70 @@ def bare_cite(text):
             continue
         return m.group(0)
     return ""
+
+
+# style-time-central-24h: a clock time in the reply is US Central (CST or CDT). A time that carries UTC, GMT or a
+# trailing Z is refused. A clock time is `H:MM` or `H:MM:SS`; "UTC-06:00" (an offset) is no time. Skipped text:
+# fenced code, inline code, URLs and markdown links, as in bare_cite.
+UTC_TIME_RE = re.compile(
+    r"(?<![\d:])\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:\s*(?:UTC|GMT)\b|Z\b)|\b(?:UTC|GMT)\s+\d{1,2}:\d{2}")
+
+
+def utc_time(text):
+    """Return the first UTC clock time in `text`, else ''."""
+    found = UTC_TIME_RE.search(CITE_SKIP_RE.sub(" ", text))
+    return found.group(0) if found else ""
+
+
+# output-bring-decisions-as-question: a Deviations item that says "Contradiction:" or "picks neither" holds a
+# choice the owner must make, so Input Needed asks it: a sentence ending in "?" or a pick with options. The
+# match is the existence of that question, not its subject.
+CONTRADICTION_RE = re.compile(r"\bcontradiction\s*:|\b(?:pick|picks|picked|picking)\s+neither\b", re.I)
+
+
+def contradiction_problem(text):
+    """Return the first contradiction phrase in Deviations when Input Needed asks nothing, else ''."""
+    deviations = CITE_SKIP_RE.sub(" ", report_section(text, "Deviations"))
+    found = CONTRADICTION_RE.search(deviations)
+    if not found or asks_a_question(text) or offers_a_pick(text):
+        return ""
+    return found.group(0)
+
+
+PLAIN_TIME_REASON = owner_line(
+    "Time guard (rule style-time-central-24h)",
+    "%r is a UTC time; the house form is US Central, 24-hour clock, with the zone CST or CDT")
+PLAIN_CONTRADICTION_REASON = owner_line(
+    "Contradiction guard (rule output-bring-decisions-as-question)",
+    "Deviations says %r and Input Needed asks the owner no matching question; a choice the owner must make "
+    "goes to Input Needed as a question with options")
+
+
+def plain_form_reasons(text):
+    """The refusals for the plain-form faults of a report: a bare id (rule speak-cite-id-plus-gloss), a UTC time
+    and a contradiction with no Input Needed question. Each check fails open alone."""
+    reasons = []
+    try:
+        cite = bare_cite(text)
+        if cite:
+            reasons.append(owner_line("Cite-gloss guard (rule speak-cite-id-plus-gloss)",
+                                      "%r is an id with no short gloss; each id needs a few plain words that say "
+                                      "what it is, as in \"D12, short titles for records\"" % cite))
+    except Exception:
+        pass
+    try:
+        clock = utc_time(text)
+        if clock:
+            reasons.append(PLAIN_TIME_REASON % clock)
+    except Exception:
+        pass
+    try:
+        phrase = contradiction_problem(text) if report_shape_ok(text) else ""
+        if phrase:
+            reasons.append(PLAIN_CONTRADICTION_REASON % phrase)
+    except Exception:
+        pass
+    return reasons
 
 
 # answered-needs-source: a reply line that says "answered" names where the answer came from. The source
@@ -3459,10 +3563,7 @@ def main():
             reasons.append(recovered)
     except Exception:
         pass
-    cite = bare_cite(text)
-    if cite:
-        reasons.append(owner_line("Cite-gloss guard (rule speak-cite-id-plus-gloss)",
-                                  "%r is a record id with no short gloss" % cite))
+    reasons += plain_form_reasons(text)
     if refusal:
         reasons.append(refusal)
     if reasons:
