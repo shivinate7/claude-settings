@@ -10,9 +10,13 @@ Rule option-letters-frozen refuses a set or update of an open decision on this r
 `options` when:
   - it carries no `shown`;
   - an option has no non-empty string `id`, or two options share one;
-  - an option at position i < len(shown) differs from shown[i] in key, id or label (a reorder, a relabel, a changed id);
+  - an option at position i < len(shown) differs from shown[i] in key or id (a reorder, a changed id), or its label is
+    not a non-empty string;
   - there are fewer options than shown; or
   - the options and shown differ in length, so an option appended on an update is shown on the same write (ruling R60).
+A reworded label passes when the option's key and id still equal shown[i]'s: the letter keeps its meaning (owner,
+Nov 15 2026, evening CST: the freeze is for options that flip-flop between the chat and the page, not for their wording).
+`shown` keeps the labels as first shown, so a reword is the options' label differing from shown's.
 A first set with options must carry shown equal to its own options (key, id and label). An update that appends options
 carries shown extended by them.
 A note on an option, with key, id and label unchanged, passes. Tasks, notes, closed items and writes with no options pass,
@@ -26,9 +30,9 @@ Three layers, one file:
 The wire cases point GUARD_ITEM_FIELDS_PAGE at a fixture page whose itemFields list is the real one plus `shown`, so
 item-field-rendered does not refuse the field before the freeze rule judges it. The page itself is judged by its own case.
 
-Red on the current head: when hooks/question_form.py has no frozen_letters_hit, frozen() reads "no refusal", so each
-refusal case fails on its own assertion (an allow, or an empty verdict), never on a crash or an import error. Each pass
-case is a control and stays green there.
+When hooks/question_form.py has no frozen_letters_hit, frozen() reads "no refusal", so each refusal case fails on its
+own assertion (an allow, or an empty verdict), never on a crash or an import error. Each refusal's fragment names the
+option's letter or the field, never the label, so one message shape serves a reword that still fails.
 
 Standard library only, no test runner. Run from the repository root:
 
@@ -68,11 +72,18 @@ OPTIONS = [RED, BLUE]
 # letter, so option_letter_hit reads the swap as valid.
 SWAPPED = [dict(BLUE, key="a"), dict(RED, key="b")]
 NOTED = [dict(RED, note="Now means the red that shipped in 2026."), BLUE]
+# Option a reworded, key and id held. `shown` stays as first shown (shown_of(OPTIONS)), so the label differs from it.
+REWORDED = [dict(RED, label="Crimson"), BLUE]
 
 
 def shown_of(options):
     """The `shown` list a write carries: each option's key, id and label, in order."""
     return [{"key": o["key"], "id": o["id"], "label": o["label"]} for o in options]
+
+
+def full_size():
+    """The full size: 26 options keyed a to z, each with its own id."""
+    return [opt(chr(97 + i), "Choice %02d" % (i + 1), "choice-%02d" % (i + 1)) for i in range(26)]
 
 
 def decision(options, shown=ABSENT, **over):
@@ -151,9 +162,75 @@ def case_fn_two_labels_swapped_is_refused():
             frozen("update", decision(labels_swapped, shown=shown_of(OPTIONS))), "option a")
 
 
-def case_fn_relabel_is_refused():
-    refuses("fn: one option relabelled at a shown position is refused",
-            frozen("update", decision([dict(RED, label="Crimson"), BLUE], shown=shown_of(OPTIONS))), "option a")
+def case_fn_swap_in_another_case_or_padding_is_refused():
+    """The label comparison trims and case-folds, so a swap that only changes case or padding is still a swap."""
+    cased = [dict(RED, label="BLUE"), dict(BLUE, label="red")]
+    refuses("fn: two labels swapped in another case, keys and ids kept, is refused",
+            frozen("update", decision(cased, shown=shown_of(OPTIONS))), "option a")
+    padded = [dict(RED, label=" Blue "), dict(BLUE, label="Red")]
+    refuses("fn: a label padded with spaces that equals another shown label is refused",
+            frozen("update", decision(padded, shown=shown_of(OPTIONS))), "option a")
+
+
+def case_fn_reword_passes():
+    """Case 1: a reworded label passes when the key and id at every position still equal the shown entry's."""
+    passes("fn: option a reworded, key and id held at every position, passes",
+           frozen("update", decision(REWORDED, shown=shown_of(OPTIONS))))
+    both = [dict(RED, label="Crimson"), dict(BLUE, label="Navy")]
+    passes("fn: every option reworded, key and id held, passes", frozen("update", decision(both, shown=shown_of(OPTIONS))))
+    full = full_size()
+    last = full[:-1] + [dict(full[-1], label="Choice 26, reworded")]
+    passes("fn: 26 options with option z reworded, key and id held, pass",
+           frozen("update", decision(last, shown=shown_of(full))))
+
+
+def case_fn_reword_with_a_reorder_is_refused():
+    """Case 2: a reword beside a reorder is refused. The reorder shows as a changed id (keys follow positions) or as a
+    changed key (keys follow the options); the second keeps every id, so a rule that read ids alone would pass it."""
+    ids_moved = [dict(BLUE, key="a", label="Navy"), dict(RED, key="b")]
+    refuses("fn: option a reworded and options a and b swapped, keys by position, is refused",
+            frozen("update", decision(ids_moved, shown=shown_of(OPTIONS))), "option a")
+    keys_moved = [dict(RED, key="b", label="Crimson"), dict(BLUE, key="a")]
+    refuses("fn: option a reworded and its key moved to b, id held, is refused",
+            frozen("update", decision(keys_moved, shown=shown_of(OPTIONS))), "option a")
+
+
+def case_fn_reword_with_a_changed_id_is_refused():
+    """Case 3: the reword alone passes (case_fn_reword_passes), so the changed id is the one cause of the refusal."""
+    refuses("fn: option a reworded and its id changed is refused",
+            frozen("update", decision([dict(RED, label="Crimson", id="crimson"), BLUE], shown=shown_of(OPTIONS))),
+            "option a")
+
+
+def case_fn_reworded_label_must_be_a_non_empty_string():
+    """Case 4: a label stays a non-empty string. The fragment is the option's letter: the one cause is that option."""
+    for name, bad in (("empty", ""), ("None", None), ("a number", 7), ("a list", ["Red"])):
+        refuses("fn: option a reworded to a label that is %s is refused" % name,
+                frozen("update", decision([dict(RED, label=bad), BLUE], shown=shown_of(OPTIONS))), "option a")
+    no_label = {k: v for k, v in RED.items() if k != "label"}
+    refuses("fn: option a with no label is refused",
+            frozen("update", decision([no_label, BLUE], shown=shown_of(OPTIONS))), "option a")
+    refuses("fn: option b reworded to an empty label is refused",
+            frozen("update", decision([RED, dict(BLUE, label="")], shown=shown_of(OPTIONS))), "option b")
+
+
+def case_fn_reword_with_an_append():
+    """Case 5: a reword of option a beside an appended option c passes when shown is extended by c. Shown keeps the
+    first labels. Left short, the write is refused for its shown list, as an append with no reword is."""
+    appended = REWORDED + [GREEN]
+    passes("fn: option a reworded while option c is appended, shown extended, passes",
+           frozen("update", decision(appended, shown=shown_of(OPTIONS + [GREEN]))))
+    refuses("fn: the same reword and append with shown left short is refused",
+            frozen("update", decision(appended, shown=shown_of(OPTIONS))), "shown")
+
+
+def case_fn_lone_letter_id_is_refused():
+    """An id that is a lone letter would read as a key. The reworded write, whose shown keeps the first id, is refused too."""
+    lone = [dict(RED, id="r"), BLUE]
+    refuses("fn: an option whose id is a lone letter is refused", frozen("set", decision(lone, shown=shown_of(lone))),
+            "lone letter")
+    refuses("fn: a reworded option whose id is a lone letter is refused",
+            frozen("update", decision([dict(RED, label="Crimson", id="r"), BLUE], shown=shown_of(OPTIONS))), "lone letter")
 
 
 def case_fn_changed_id_is_refused():
@@ -194,7 +271,7 @@ def case_fn_empty_and_full_size():
     """The empty state (an update that empties the options) is refused, and the full size (26 options, keys a to z) passes."""
     refuses("fn: an update that empties the options is refused",
             frozen("update", decision([], shown=shown_of(OPTIONS))), "option a")
-    full = [opt(chr(97 + i), "Choice %02d" % (i + 1), "choice-%02d" % (i + 1)) for i in range(26)]
+    full = full_size()
     passes("fn: 26 options keyed a to z, each matching its shown entry, pass",
            frozen("set", decision(full, shown=shown_of(full))))
 
@@ -246,6 +323,11 @@ def case_wire_note_is_allowed():
                     set_call(decision(NOTED, shown=shown_of(OPTIONS)), action="update"), plain_chat())
 
 
+def case_wire_reword_is_allowed():
+    tql.wire_allows("wire: a reworded label, key and id held, is allowed",
+                    set_call(decision(REWORDED, shown=shown_of(OPTIONS)), action="update"), plain_chat())
+
+
 def case_wire_reason_names_no_target():
     decision_word, reason = tql.guard_hook("frozen-wire-target", set_call(decision(SWAPPED, shown=shown_of(OPTIONS))),
                                            plain_chat())
@@ -271,13 +353,16 @@ def case_fn_options_that_is_not_a_list_is_refused():
     refuses("fn: an open decision whose options is not a list is refused", frozen("update", data), "options")
 
 
-CASES = (case_fn_options_that_is_not_a_list_is_refused, case_fn_no_shown_is_refused, case_fn_item_646_swap_is_refused, case_fn_control_letter_rule_reads_the_swap_as_valid,
-         case_fn_two_labels_swapped_is_refused, case_fn_relabel_is_refused, case_fn_changed_id_is_refused,
-         case_fn_fewer_options_is_refused, case_fn_append_must_extend_shown, case_fn_first_set_must_equal_its_shown,
-         case_fn_option_id_rules,
+CASES = (case_fn_options_that_is_not_a_list_is_refused, case_fn_no_shown_is_refused, case_fn_item_646_swap_is_refused,
+         case_fn_control_letter_rule_reads_the_swap_as_valid, case_fn_two_labels_swapped_is_refused,
+         case_fn_swap_in_another_case_or_padding_is_refused, case_fn_reword_passes,
+         case_fn_reword_with_a_reorder_is_refused, case_fn_reword_with_a_changed_id_is_refused,
+         case_fn_reworded_label_must_be_a_non_empty_string, case_fn_reword_with_an_append,
+         case_fn_changed_id_is_refused, case_fn_fewer_options_is_refused, case_fn_append_must_extend_shown,
+         case_fn_first_set_must_equal_its_shown, case_fn_option_id_rules, case_fn_lone_letter_id_is_refused,
          case_fn_empty_and_full_size, case_fn_passes, case_fn_other_artifact_passes,
          case_wire_swap_is_refused, case_wire_no_shown_update_is_refused, case_wire_matching_set_is_allowed,
-         case_wire_note_is_allowed, case_wire_reason_names_no_target, case_page_lists_shown)
+         case_wire_note_is_allowed, case_wire_reword_is_allowed, case_wire_reason_names_no_target, case_page_lists_shown)
 
 
 def fields_page():
