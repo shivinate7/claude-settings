@@ -13169,86 +13169,43 @@ class RedMainBrake(Env):
         self.assertEqual(len(parts), 2, "the refusal has no way text after its detail")
         self.assertIn("Drops-lines", parts[1], "the revert route's way text does not name the Drops-lines trailer")
 
-    def pr_head_after(self, *steps, drops=""):
-        """Push feat, the PR head, on top of its own head. Each step is a sha to revert, "HEAD" to revert the commit before it, or "fix" to add a file.
-        `drops` is a trailer line for the head commit's message: the silent-undo check's escape for a commit that deletes a file on purpose.
-        -> feat's new head."""
+    def pr_head_after(self, *steps, drops="", from_main=False):
+        """Push feat, the PR head, on top of its own head, or on main's head when `from_main` (then the head's net diff against main is the steps alone,
+        and the push is forced, since feat's own history is not kept). Each step is a sha to revert, "HEAD" to revert the commit before it, or "fix" to
+        add a file. A merge commit reverts with `-m 1`; a pair (sha, n) reverts it with `-m n`. `drops` is a trailer line for the head commit's message:
+        the silent-undo check's escape for a commit that deletes a file on purpose. -> feat's new head."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
-        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/main" if from_main else "origin/feat")
         for step in steps:
             if step == "fix":
                 put(os.path.join(o, "fix.txt"), "fix\n")
                 sh(o, "git", "add", "-A")
                 sh(o, "git", "commit", "-q", "-m", "Fix the lane")
             else:
-                sh(o, "git", "revert", "--no-edit", step)
+                sha, n = step if isinstance(step, tuple) else (step, 1)
+                is_merge = len(sh(o, "git", "rev-list", "--parents", "-n", "1", sha).split()) > 2
+                sh(o, "git", "revert", "--no-edit", *(["-m", str(n)] if is_merge else []), sha)
         if drops:
             sh(o, "git", "commit", "--amend", "-q", "-m", f"{sh(o, 'git', 'log', '-1', '--format=%B')}\n\n{drops}")
-        sh(o, "git", "push", "-q", "origin", "feat")
+        sh(o, "git", "push", "-q", *(["-f"] if from_main else []), "origin", "feat")
         return sh(o, "git", "rev-parse", "HEAD")
-
-    def test_a_revert_pr_with_its_drops_line_is_not_refused_on_a_red_main_beyond_the_red_main_itself(self):
-        # the PR head reverts main's own lane commit and carries the silent-undo escape for the file it deletes; under --base-red-ok the run merges
-        push_base(self, {"lane.txt": "lane work\n"})
-        self.pr_head_after(self.main_head(), drops="Drops-lines: lane.txt -- revert of the breaking merge")
-        runs = [self.merge_run(903, "failure", 2650, run_attempt=2), self.merge_run(902, "success", 2649)]
-        rc, out, _ = self.go(runs, self.page_jobs(runs), "--base-red-ok", "revert of the breaking merge")
-        self.assertNotIn("silently undoes", out, "the silent-undo check refuses the revert PR, and --base-red-ok does not lift that finding")
-        self.merged(rc, out)
-
-    def reland_after_revert(self, drops=""):
-        """Main reverts the lane's commit, `base files`, which adds lane.txt. A fresh branch from main then reverts that revert and adds a fix: the
-        re-land. It restores lane.txt, which the silent-undo check names as a whole file restored. The re-land is pushed over feat by force, since it
-        is a fresh branch and not feat's history. `drops` is a Drops-lines line for the head commit: the escape for the file the re-land restores."""
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin")
-        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
-        sh(o, "git", "revert", "--no-edit", "HEAD")
-        sh(o, "git", "push", "-q", "origin", "main")
-        revert = sh(o, "git", "rev-parse", "HEAD")
-        sh(o, "git", "checkout", "-q", "-B", "feat", revert)
-        sh(o, "git", "revert", "--no-edit", revert)
-        put(os.path.join(o, "fix.txt"), "fix\n")
-        sh(o, "git", "add", "-A")
-        sh(o, "git", "commit", "-q", "-m", "Fix the lane")
-        if drops:
-            sh(o, "git", "commit", "--amend", "-q", "-m", f"{sh(o, 'git', 'log', '-1', '--format=%B')}\n\n{drops}")
-        sh(o, "git", "push", "-q", "-f", "origin", "feat")
-
-    def test_a_reland_with_a_drops_line_for_the_file_it_restores_is_not_refused_under_base_red_ok(self):
-        # the re-land restores lane.txt, which the silent-undo check names: its Drops-lines line excuses that file, and --base-red-ok lifts only red main
-        push_base(self, {"lane.txt": "lane work\n"})
-        self.reland_after_revert(drops="Drops-lines: lane.txt -- the re-land restores the lane's file")
-        runs = [self.merge_run(903, "failure", 2650, run_attempt=2), self.merge_run(902, "success", 2649)]
-        rc, out, _ = self.go(runs, self.page_jobs(runs), "--base-red-ok", "re-land the lane with its fix")
-        self.assertNotIn("silently undoes", out, "the silent-undo check refuses the re-land, though its Drops-lines line excuses the file it restores")
-        self.merged(rc, out)
-
-    def test_a_reland_without_a_drops_line_for_the_file_it_restores_is_refused_by_the_silent_undo_check(self):
-        push_base(self, {"lane.txt": "lane work\n"})
-        self.reland_after_revert()
-        runs = [self.merge_run(903, "failure", 2650, run_attempt=2), self.merge_run(902, "success", 2649)]
-        rc, out, before = self.go(runs, self.page_jobs(runs), "--base-red-ok", "re-land the lane with its fix")
-        self.refused(rc, out, before)
-        self.assertIn("silently undoes", out, "the silent-undo check does not refuse a re-land that restores lane.txt with no Drops-lines line")
-        self.assertIn("lane.txt: whole file restored", out, "the silent-undo check does not name the restored file as a whole file restored")
-
-    def main_head(self):
-        """Main's head, as the other clone reads it after a fetch: the commit the PR head reverts."""
-        sh(self.other, "git", "fetch", "-q", "origin")
-        return sh(self.other, "git", "rev-parse", "origin/main")
 
     # The revert lift (brief revert-merge-lifts-red-main; decision no-merge-onto-red-main). Main is red at the breaking merge B, pull request #2650,
     # red again on its re-run. A revert of B lands as pull request #2651: main's head M is a merge commit whose second parent R is the revert, so the
     # tree of M is the tree of R. The commits are real git; the runs and the pull requests are the fake's, keyed by those commits.
-    def land_breaking_merge(self, pr=2650):
-        """Lane pull request #pr lands on main as a merge commit. The runs a case scripts say whether it breaks the checks. -> its sha."""
+    def land_breaking_merge(self, pr=2650, files=1, main_moves=False):
+        """Lane pull request #pr lands on main as a merge commit. The runs a case scripts say whether it breaks the checks. `files` is how many files the lane
+        adds (`lane-<pr>.txt` for one, `lane-<pr>-NN.txt` for more). `main_moves` lands one commit on main after the lane branches, so the merge's first
+        parent is that commit and not the lane's base: a `-m 2` revert then differs from a `-m 1` one. -> its sha."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", f"lane-{pr}", "origin/main")
-        put(os.path.join(o, f"lane-{pr}.txt"), f"lane {pr}\n")
+        for name in ([f"lane-{pr}.txt"] if files == 1 else [f"lane-{pr}-{i:02d}.txt" for i in range(files)]):
+            put(os.path.join(o, name), f"lane {pr}\n")
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", f"Lane {pr}"); sh(o, "git", "push", "-q", "origin", f"lane-{pr}")
+        if main_moves:
+            self.commit_on_main("Main moves on", "moved.txt")
         sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
         sh(o, "git", "merge", "-q", "--no-ff", "-m", f"Merge pull request #{pr} from o/lane-{pr}", f"lane-{pr}")
         sh(o, "git", "push", "-q", "origin", "main")
@@ -13698,6 +13655,289 @@ class RedMainBrake(Env):
         self.assertNotEqual(rc, 0, "a head titled as a revert lifted the red main: the merge went through")
         self.refused_by_red_main(rc, out, before)
         self.assertIn("run 903", out)
+
+    # The narrowed lift (decision no-merge-onto-red-main): under --base-red-ok, a red base that names a
+    # breaking merge lifts only for the pull request whose net diff against main undoes exactly that merge commit, the tree `git revert -m 1 <sha>` gives.
+    # Each case has a real breaking merge, so the check reads a commit. Scope first: each case asserts the head's tree before its subject runs.
+    DROPS_LANE = "Drops-lines: lane-2650.txt -- the revert of the breaking merge deletes the lane's file"
+
+    def assert_head_scope(self, head, breaking, exact):
+        """Scope first: main is `breaking`, and the head's tree is the first parent's tree exactly when the head is the exact undo of `breaking`."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "rev-parse", "origin/main"), breaking, "the fixture's main head is not the breaking merge")
+        same = sh(self.co, "git", "rev-parse", f"{head}^{{tree}}") == sh(self.co, "git", "rev-parse", f"{breaking}^1^{{tree}}")
+        self.assertEqual(same, exact, "the fixture's pull request head is not the case the test names: only the exact undo has the first parent's tree")
+
+    def red_base_with_reason_flag(self, breaking, reason):
+        """Main red at `breaking`, its parent green, and the merge run with the reason flag. -> (rc, out, before) as `go` gives them."""
+        runs, jobs = self.breaking_page(breaking, sh(self.other, "git", "rev-parse", f"{breaking}^1"))
+        return self.go(runs, jobs, "--base-red-ok", reason)
+
+    def assert_flag_names_only_the_revert(self, out):
+        """Every sentence that names --base-red-ok also names the revert PR: the revert route is the one remedy the refusal gives for the lift."""
+        for sentence in re.split(r"(?<=\.)\s+", out):
+            if "--base-red-ok" in sentence:
+                self.assertRegex(sentence, r"(?i)revert", f"a sentence names --base-red-ok but not the revert PR, a lift for a pull request that is not the revert: {sentence[:160]!r}")
+
+    def assert_refused_as_not_the_revert(self, out, breaking):
+        """The refusal says the pull request is not the revert of the breaking merge, and does not read the check as unknown: the check did read the revert."""
+        self.assertRegex(out, rf"(?i)not (the|a) revert of[^\n]*{breaking[:9]}", "the refusal does not say the pull request is not the revert of the breaking merge")
+        self.assertNotIn("UNKNOWN", out, "the refusal reads the revert check as UNKNOWN, though the check read the revert and found it is not one")
+        self.assert_flag_names_only_the_revert(out)
+
+    def test_a_pull_request_that_undoes_exactly_the_named_breaking_merge_lifts_a_red_main(self):
+        # green control: the exact undo of the breaking merge, with the silent-undo escape for the file it deletes, lifts the red base under the reason flag
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        head = self.pr_head_after(B, drops=self.DROPS_LANE, from_main=True)
+        self.assert_head_scope(head, B, exact=True)
+        runs, jobs = self.breaking_page(B, A)
+        rc, out, _ = self.go(runs, jobs, "--base-red-ok", "revert of the breaking merge")
+        self.assertNotIn("silently undoes", out, "the silent-undo check refuses the exact revert, and --base-red-ok does not lift that finding")
+        self.merged(rc, out)
+
+    def test_a_lift_by_the_exact_undo_is_recorded_with_its_reason(self):
+        # green control: the lift is recorded with its reason through record_lift, the call the merge's commit message is built from
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        head = self.pr_head_after(B, drops=self.DROPS_LANE, from_main=True)
+        self.assert_head_scope(head, B, exact=True)
+        runs, jobs = self.breaking_page(B, A)
+        with unittest.mock.patch.object(merge, "record_lift", wraps=merge.record_lift) as lifted:
+            rc, out, _ = self.go(runs, jobs, "--base-red-ok", "revert of the breaking merge")
+        self.merged(rc, out)
+        lifted.assert_any_call(unittest.mock.ANY, merge.RED_FLAG, "revert of the breaking merge")
+        self.assertIn("--base-red-ok, reason: revert of the breaking merge", out)
+
+    def test_the_exact_undo_of_a_merge_of_forty_files_lifts_a_red_main(self):
+        # full size: a breaking merge that adds forty files is undone exactly, with a Drops-lines line for each file the revert deletes
+        B = self.land_breaking_merge(files=40)
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        drops = "\n".join(f"Drops-lines: lane-2650-{i:02d}.txt -- the revert of the breaking merge deletes the lane's file" for i in range(40))
+        head = self.pr_head_after(B, drops=drops, from_main=True)
+        self.assert_head_scope(head, B, exact=True)
+        runs, jobs = self.breaking_page(B, A)
+        rc, out, _ = self.go(runs, jobs, "--base-red-ok", "revert of the breaking merge")
+        self.assertNotIn("silently undoes", out, "the silent-undo check refuses the exact revert of forty files, though each file has its Drops-lines line")
+        self.merged(rc, out)
+
+    def test_a_pull_request_that_is_not_the_revert_of_the_breaking_merge_is_refused_under_the_reason_flag(self):
+        # the head edits a file and undoes nothing: the reason flag does not lift a red base for it, and the refusal says why
+        B = self.land_breaking_merge()
+        head = self.pr_head_after("fix", from_main=True)
+        self.assert_head_scope(head, B, exact=False)
+        rc, out, before = self.red_base_with_reason_flag(B, "this batch carries the fix")
+        self.assertFalse(getattr(self.host, "merged", False), "the reason flag lifted a red base for a pull request that is not the revert of the breaking merge")
+        self.refused_by_red_main(rc, out, before)
+        self.assert_refused_as_not_the_revert(out, B)
+
+    def test_an_empty_pull_request_is_not_the_revert_of_the_breaking_merge_and_is_refused_under_the_reason_flag(self):
+        # empty state: the head is main's own head, so its net diff against main is nothing, which undoes nothing
+        B = self.land_breaking_merge()
+        head = self.pr_head_after(from_main=True)
+        self.assert_head_scope(head, B, exact=False)
+        rc, out, before = self.red_base_with_reason_flag(B, "this batch carries the fix")
+        self.assertFalse(getattr(self.host, "merged", False), "the reason flag lifted a red base for an empty pull request")
+        self.refused_by_red_main(rc, out, before)
+        self.assert_flag_names_only_the_revert(out)
+
+    def test_a_revert_of_the_breaking_merge_that_changes_other_files_is_refused_under_the_reason_flag(self):
+        # exact undo only: the revert with one more file is no revert of the breaking merge, so the reason flag does not lift it
+        B = self.land_breaking_merge()
+        head = self.pr_head_after("fix", B, drops=self.DROPS_LANE, from_main=True)
+        self.assert_head_scope(head, B, exact=False)
+        rc, out, before = self.red_base_with_reason_flag(B, "revert of the breaking merge")
+        self.assertFalse(getattr(self.host, "merged", False), "the reason flag lifted a red base for a revert that also changes another file")
+        self.refused_by_red_main(rc, out, before)
+        self.assert_flag_names_only_the_revert(out)
+
+    def test_a_revert_with_m_2_of_the_breaking_merge_is_refused_under_the_reason_flag(self):
+        # a merge-commit revert takes `-m 1`: the `-m 2` revert undoes the lane's side of the merge, which is no undo of the breaking merge
+        B = self.land_breaking_merge(main_moves=True)
+        head = self.pr_head_after((B, 2), drops="Drops-lines: moved.txt -- the -m 2 revert deletes main's own file", from_main=True)
+        self.assert_head_scope(head, B, exact=False)
+        rc, out, before = self.red_base_with_reason_flag(B, "revert of the breaking merge")
+        self.assertFalse(getattr(self.host, "merged", False), "the reason flag lifted a red base for a -m 2 revert, which is no undo of the breaking merge")
+        self.refused_by_red_main(rc, out, before)
+        self.assert_flag_names_only_the_revert(out)
+
+    def test_a_revert_of_a_different_commit_is_refused_under_the_reason_flag(self):
+        # a revert of another commit of main, not of the breaking merge, lifts nothing, though the revert itself is a clean revert
+        B = self.land_breaking_merge(main_moves=True)
+        other = sh(self.other, "git", "rev-parse", f"{B}^1")
+        head = self.pr_head_after(other, drops="Drops-lines: moved.txt -- the revert of main's own commit deletes its file", from_main=True)
+        self.assert_head_scope(head, B, exact=False)
+        rc, out, before = self.red_base_with_reason_flag(B, "revert of the breaking merge")
+        self.assertFalse(getattr(self.host, "merged", False), "the reason flag lifted a red base for a revert of another commit")
+        self.refused_by_red_main(rc, out, before)
+        self.assert_flag_names_only_the_revert(out)
+
+    def test_a_reland_of_the_breaking_merge_with_a_drops_line_is_refused_under_the_reason_flag(self):
+        # R3: a revert of the revert names the revert's sha, not the breaking merge's, so the reason flag does not lift it, though its Drops-lines line
+        # excuses the file it restores
+        B = self.land_breaking_merge()
+        head = self.pr_head_after(B, "HEAD", drops="Drops-lines: lane-2650.txt -- the re-land restores the lane's file", from_main=True)
+        self.assert_head_scope(head, B, exact=False)
+        rc, out, before = self.red_base_with_reason_flag(B, "re-land the lane with its fix")
+        self.assertFalse(getattr(self.host, "merged", False), "the reason flag lifted a red base for a re-land of the breaking merge")
+        self.refused_by_red_main(rc, out, before)
+        self.assert_flag_names_only_the_revert(out)
+
+    def test_a_reland_of_the_breaking_merge_without_a_drops_line_is_refused_by_the_red_main_check(self):
+        # R3, the same re-land with no Drops-lines line: the red-main check refuses it first, so the silent-undo check is not reached under the reason flag
+        B = self.land_breaking_merge()
+        head = self.pr_head_after(B, "HEAD", from_main=True)
+        self.assert_head_scope(head, B, exact=False)
+        rc, out, before = self.red_base_with_reason_flag(B, "re-land the lane with its fix")
+        self.assertFalse(getattr(self.host, "merged", False), "the reason flag lifted a red base for a re-land of the breaking merge")
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn(B[:9], out, "the refusal does not name the breaking merge the re-land does not undo")
+
+    def test_a_breaking_merge_sha_that_cannot_be_resolved_refuses_as_unknown(self):
+        # the breaking merge's commit is not in the clone: the check cannot read it, which is UNKNOWN, and UNKNOWN refuses even under the reason flag
+        unresolved = "e" * 40
+        self.assertNotEqual(merge.git(self.co, "cat-file", "-e", f"{unresolved}^{{commit}}")[0], 0, "the fixture's sha resolves, so the case reads no unresolved sha")
+        head = self.pr_head_after("fix", from_main=True)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "rev-parse", f"{head}^"), sh(self.co, "git", "rev-parse", "origin/main"), "the fixture's head is not one commit on main")
+        runs, jobs = self.breaking_page(unresolved, "d" * 40)
+        rc, out, before = self.go(runs, jobs, "--base-red-ok", "this batch carries the fix")
+        self.assertFalse(getattr(self.host, "merged", False), "the reason flag lifted a red base whose breaking merge cannot be read")
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("UNKNOWN", out, "the refusal does not read the unresolved breaking merge as UNKNOWN")
+        self.assertIn(unresolved[:9], out, "the refusal does not name the breaking merge it could not read")
+
+    def stub_git_call(self, match, failure, reply=None):
+        """Patch merge.sh: the one git call that `match(args)` picks fails, as a git error or a timeout `failure` says, or answers `reply` (rc, text).
+        Every other call runs as it does. -> (the patch, the calls it took)."""
+        real_sh, seen = merge.sh, []
+        def stub(args, *a, **k):
+            if "git" in args and match(args):
+                seen.append(args)
+                if failure == "timeout":
+                    raise subprocess.TimeoutExpired(args, 1)
+                return reply or (128, "fatal: the stubbed git call failed (test stub)")
+            return real_sh(args, *a, **k)
+        return unittest.mock.patch.object(merge, "sh", stub), seen
+
+    def assert_revert_check_unknown(self, call, failure, reply=None):
+        """The revert check's one git call `call(B, head)` picks fails. The reason flag lifts nothing: the refusal reads UNKNOWN, never as a no."""
+        B = self.land_breaking_merge()
+        head = self.pr_head_after(B, drops=self.DROPS_LANE, from_main=True)
+        self.assert_head_scope(head, B, exact=True)
+        patch, seen = self.stub_git_call(call(B, head), failure, reply)
+        with patch:
+            rc, out, before = self.red_base_with_reason_flag(B, "revert of the breaking merge")
+        self.assertTrue(seen, "the stub took no call of the revert check, so it failed no read the case names")
+        self.assertFalse(getattr(self.host, "merged", False), f"the reason flag lifted a red base when the revert check could not read ({failure})")
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("UNKNOWN", out, "the refusal does not read the unreadable revert check as UNKNOWN")
+        self.assertNotIn("not the revert of the breaking merge", out, "the unreadable read is reported as a no, which is a stop that names no unknown")
+
+    def test_a_revert_check_whose_breaking_sha_does_not_resolve_is_unknown(self):
+        # the revert check's first read, rev-parse of the breaking sha, fails: the other reads run, and the refusal is UNKNOWN
+        self.assert_revert_check_unknown(lambda B, head: lambda args: f"{B[:9]}^{{commit}}" in args, "git error")
+
+    def test_a_revert_check_whose_merge_tree_errors_is_unknown(self):
+        # only the merge-tree call of the revert tree fails, by a git error
+        self.assert_revert_check_unknown(lambda B, head: lambda args: "merge-tree" in args and f"--merge-base={B}" in args, "git error")
+
+    def test_a_revert_check_whose_merge_tree_times_out_is_unknown(self):
+        # only the merge-tree call of the revert tree times out
+        self.assert_revert_check_unknown(lambda B, head: lambda args: "merge-tree" in args and f"--merge-base={B}" in args, "timeout")
+
+    def test_a_revert_check_whose_diff_errors_is_unknown(self):
+        # only the diff of the head against the revert tree fails, by a git error
+        self.assert_revert_check_unknown(lambda B, head: lambda args: "diff" in args and "--quiet" in args and head in args, "git error")
+
+    def test_a_revert_check_whose_diff_times_out_is_unknown(self):
+        # only the diff of the head against the revert tree times out
+        self.assert_revert_check_unknown(lambda B, head: lambda args: "diff" in args and "--quiet" in args and head in args, "timeout")
+
+    def test_a_merge_tree_that_fails_with_no_conflict_line_is_unknown_not_a_no(self):
+        # rc 1 is a conflict only when merge-tree names one; a failure that names no conflict is no proof either way, so it is UNKNOWN
+        self.assert_revert_check_unknown(lambda B, head: lambda args: "merge-tree" in args and f"--merge-base={B}" in args, "git error",
+                                         reply=(1, "fatal: 9a6ce0ef988cdd08ebf4a0a99224663c96fb4bf9 not something we can merge"))
+
+    def test_a_merge_tree_that_conflicts_is_a_no_and_refuses_as_not_the_revert(self):
+        # control: rc 1 with a CONFLICT line is the revert that does not apply, so the pull request is no revert, and the stop is a no, not UNKNOWN
+        B = self.land_breaking_merge()
+        head = self.pr_head_after(B, drops=self.DROPS_LANE, from_main=True)
+        self.assert_head_scope(head, B, exact=True)
+        patch, seen = self.stub_git_call(lambda args: "merge-tree" in args and f"--merge-base={B}" in args, "git error",
+                                         reply=(1, "0" * 40 + "\nCONFLICT (content): Merge conflict in lane-2650.txt"))
+        with patch:
+            rc, out, before = self.red_base_with_reason_flag(B, "revert of the breaking merge")
+        self.assertTrue(seen, "the stub took no merge-tree call of the revert check")
+        self.assertFalse(getattr(self.host, "merged", False), "the reason flag lifted a red base for a revert that conflicts")
+        self.refused_by_red_main(rc, out, before)
+        self.assertNotIn("UNKNOWN", out, "a conflict is read as UNKNOWN, though merge-tree named the conflict")
+        self.assert_refused_as_not_the_revert(out, B)
+
+    def revert_merged_main_red(self):
+        """The breaking merge B lands and its revert lands as pull request #2651, so main's head M merges the revert R as its second parent. Main stays
+        red: a red run sits on M, above the revert. -> (B, A, R, M, runs, jobs), the page as `go` takes it."""
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        top = [(main_run(904, "failure", sha=M, message="Merge pull request #2651 from o/revert-2651"), [main_job("scope", "success"), main_job("checks", "failure", 20)])]
+        runs, jobs = self.breaking_page(B, A, top=top)
+        return B, A, R, M, runs, jobs
+
+    def test_an_empty_pull_request_after_the_revert_merged_is_refused_under_the_reason_flag(self):
+        # main is still red after the revert merged; an empty head, whose tree is main's, undoes nothing, so the reason flag lifts nothing for it
+        B, A, R, M, runs, jobs = self.revert_merged_main_red()
+        head = self.pr_head_after(from_main=True)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "rev-parse", f"{head}^{{tree}}"), sh(self.co, "git", "rev-parse", "origin/main^{tree}"),
+                         "the fixture's head is not empty: its tree is not main's")
+        rc, out, before = self.go(runs, jobs, "--base-red-ok", "this batch carries the fix", pulls={2651: self.revert_pull(2651, R)})
+        self.assertFalse(getattr(self.host, "merged", False), "the reason flag lifted a red main for an empty head, which is no revert of the breaking merge")
+        self.refused_by_red_main(rc, out, before)
+        self.assert_refused_as_not_the_revert(out, B)
+
+    def test_a_fix_pull_request_after_the_revert_merged_is_refused_under_the_reason_flag(self):
+        # control: main is still red after the revert merged, and the head is a real fix, not the revert: the reason flag lifts nothing for it
+        B, A, R, M, runs, jobs = self.revert_merged_main_red()
+        head = self.pr_head_after("fix", from_main=True)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertNotEqual(sh(self.co, "git", "rev-parse", f"{head}^{{tree}}"), sh(self.co, "git", "rev-parse", "origin/main^{tree}"),
+                            "the fixture's head is empty: it adds no file to main")
+        rc, out, before = self.go(runs, jobs, "--base-red-ok", "this batch carries the fix", pulls={2651: self.revert_pull(2651, R)})
+        self.assertFalse(getattr(self.host, "merged", False), "the reason flag lifted a red main for a fix that is not the revert of the breaking merge")
+        self.refused_by_red_main(rc, out, before)
+        self.assert_refused_as_not_the_revert(out, B)
+
+
+    def assert_exact_undo_in_other(self, head, breaking):
+        """Scope first, read in the other clone, which holds every commit of the fixture: main is `breaking`, and the head's tree is the first parent's
+        tree, so the head is the exact undo. The test clone is not fetched here, so what it holds is what the run starts with."""
+        sh(self.other, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.other, "git", "rev-parse", "origin/main"), breaking, "the fixture's main head is not the breaking merge")
+        self.assertEqual(sh(self.other, "git", "rev-parse", f"{head}^{{tree}}"), sh(self.other, "git", "rev-parse", f"{breaking}^1^{{tree}}"),
+                         "the fixture's pull request head is not the exact undo of the breaking merge")
+
+    def test_a_revert_lift_reads_a_pull_request_head_the_test_clone_lacks(self):
+        # red_base fetches the pull request head before the revert check: the test clone has neither the head nor the breaking merge before the run
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        head = self.pr_head_after(B, drops=self.DROPS_LANE, from_main=True)
+        self.assert_exact_undo_in_other(head, B)
+        self.assertNotEqual(merge.git(self.co, "cat-file", "-e", f"{head}^{{commit}}")[0], 0, "the test clone holds the pull request head before the run, so the run fetches nothing")
+        runs, jobs = self.breaking_page(B, A)
+        rc, out, _ = self.go(runs, jobs, "--base-red-ok", "revert of the breaking merge")
+        self.merged(rc, out)
+        self.assertEqual(merge.git(self.co, "cat-file", "-e", f"{head}^{{commit}}")[0], 0, "the pull request head is not in the clone after the lift, so the revert check did not read it")
+
+    def test_a_revert_check_whose_diff_against_the_base_errors_is_unknown(self):
+        # only the second diff, of the head against origin/main (the empty check), fails by a git error: the exact revert reaches it, and it refuses
+        self.assert_revert_check_unknown(lambda B, head: lambda args: "diff" in args and "--quiet" in args and head in args and "origin/main" in args, "git error")
+
+    def test_a_revert_check_whose_diff_against_the_base_times_out_is_unknown(self):
+        # only the second diff, of the head against origin/main, times out: the exact revert reaches it, and it refuses
+        self.assert_revert_check_unknown(lambda B, head: lambda args: "diff" in args and "--quiet" in args and head in args and "origin/main" in args, "timeout")
+
 
 class PinnedMismatchStopsMain(Env):
     """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
