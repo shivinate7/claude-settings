@@ -1,0 +1,11 @@
+{
+  "title": "The stable-branch and stable-fallback-warn decisions carry a Facts line, so the new facts check passes them",
+  "why": "PR 3525 measured on main: 9 State: lines, 3 name a checkable fact, 2 of those wrong (stable-branch, stable-fallback-warn). The new facts check flags them until each carries a correct Facts: line (coordinator relay 16:38 CST Nov 17, from the archived lane state-line-live-facts-check).",
+  "note": "Filed by triage 11, 16:42 CST Nov 17 on the coordinator's ask. Prior work: step state-line-vs-live-facts-check (done, PR 3525), decision facts-line-checks-state (form of the Facts: line: claims `pr N open|merged` and `ref NAME present|absent`, one line directly under State:). A record-writer lane: for each of the two decision records read the live PR and branch state from REST first, fix the State prose if it is wrong, add one correct Facts: line, run lint/compliance_probes.py facts group and the other record checks. Docs only; one fresh reviewer read since it files a fact about live state. Not started.",
+  "phase": "now",
+  "owner": "coordinator",
+  "lane": "",
+  "status": "ready",
+  "order": 949,
+  "updatedAt": "2026-11-17T16:39:01-06:00"
+}
