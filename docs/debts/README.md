@@ -19,9 +19,9 @@ after an optional leading `- `:
 - `**Device check.**` names `simulator` or `device`, then an ISO time with a zone. It records a device trial
   (same decision). A session adds it after the fix has landed.
 
-An owner ruling a debt holds goes under an H2 `## Ruling` in its file. No hook reads that section for a question now. A ruling under any other heading, or in `notes.md`, is not read either. Put such a ruling in a debt, or in its decision.
+An owner ruling a debt holds goes under an H2 `## Ruling` in its file. No hook reads that section for a question now. A ruling under any other heading, or in a note (`docs/notes/`, or the old `notes.md`), is not read either. Put such a ruling in a debt, or in its decision.
 
-A finding becomes a debt only when Claude is likely to hit it in normal work. Any other finding is one line in `notes.md`, with no red test and no decision edit (owner ruling 2026-10-17 11:56 CDT).
+A finding becomes a debt only when Claude is likely to hit it in normal work. Any other finding is one file in `docs/notes/`, named by its slug, with no red test and no decision edit (owner ruling 2026-10-17 11:56 CDT; one file per note, waiting-page item 904, pick a, 2026-11-15 19:13 CST). The old `notes.md` takes deletes only.
 
 ## Closing a debt
 
