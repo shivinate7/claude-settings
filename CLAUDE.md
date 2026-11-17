@@ -26,6 +26,8 @@ It moved here from shivinate7/advisor on Oct 26 (owner, step c51), with that rep
 
 A lane brief names a standing session by role or lane slug, never by session id (owner 00:19 CST Nov 14, item 819 b; ruling R22 point 3). The lane looks the id up here. Triage rewrites a line when a role changes hands.
 
+- A standing session reads any child repo itself: call `mcp__claude-code-remote__add_repo` with owner, repo and access `read` (measured 13:27 CST Nov 17 by triage 11: it attached the private repos home, degen, q_max, ios-adblock and joyous, and the GitHub MCP then read their PRs). A public repo (banchi, mailaudit) attached with `read` gives the session nothing and the guard's gh cannot read it; use access `push` there (coordinator, measured 11:4x CST Nov 17). Never write "no access to repo X" or report a merge there as unread before trying `add_repo` (owner 13:2x CST Nov 17, relayed in chat; step standing-sessions-add-repo).
+
 - Coordinator: "Claude settings coordinator onboarding", session_013NEJL1gw6EdrSyvHkTUEx6, since 2026-11-11 22:38 CST.
 - Triage: "cs triage: claude-settings (11)", session_013NEJKzyLYRTQKeLpis8JKJ, since 2026-11-17 11:53 CST (triage 10, session_013NEJL47sat9QYoF4t8sYck, archived 11:50 CST at the owner's request).
 - Consultant: session_013NEJKz5AWFJhGvmCUoi6wQ, the owner's voice (ruling own-consultant-speaks-for-owner, 20:24 CST Nov 14).
