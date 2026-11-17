@@ -8,7 +8,8 @@ the Departs-from and Recovered refusals named only what was missing, so the sess
 The table is the refusal fixtures of lint/test_report_guard_remedy.py (its FIXTURES tuple, one home). Each runs through
 report_guard as the Stop hook, through that suite's refusal_for(). The printed reason must tell the session to post only
 the missing or corrected line and not to resend the reply, and it must carry the one shared correction tail,
-report_guard.CORRECTION_TAIL. A refusal that builds its own text fails the second assert.
+report_guard.CORRECTION_TAIL. A refusal that builds its own text fails the second assert. A missing report asks for the
+report itself, so it is left out of the table and gets no tail (owner, 2026-11-17 09:30 CST). Its own case pins that.
 
 Not run one by one: the Unvetted "the check failed" text (only an exception reaches it), and the departs and hand-off
 misses the remedy suite does not fixture. Each of those reaches the Stop join, where the reasons are joined, so the
@@ -37,6 +38,8 @@ POST_ONLY = re.compile(r"\bpost only\b", re.IGNORECASE)
 MISSING_OR_CORRECTED = re.compile(r"\b(?:missing|corrected|correction)\b", re.IGNORECASE)
 NO_RESEND = re.compile(r"\b(?:never|do not|don't)\s+(?:re-?send|send|write|repeat|post)\b[^.;]*?\b(?:reply|report)\b",
                        re.IGNORECASE)
+# Refusals that carry the tail. A missing report gets none: it asks for the report (owner, 2026-11-17 09:30 CST).
+TABLE = tuple(name for name in trr.FIXTURES if name != "missing_report")
 
 
 def tells_correction_only(text):
@@ -59,7 +62,7 @@ class CorrectionTailTable(unittest.TestCase):
 
     def test_every_stop_refusal_of_a_reply_says_post_only_the_correction(self):
         tail = getattr(RG, "CORRECTION_TAIL", "")
-        for name in trr.FIXTURES:
+        for name in TABLE:
             with self.subTest(refusal=name):
                 reason, _ = self.helper.refusal_for(name)  # asserts the refusal fires
                 self.assertTrue(tells_correction_only(reason),
@@ -68,6 +71,14 @@ class CorrectionTailTable(unittest.TestCase):
                 self.assertTrue(tail, "report_guard holds no shared CORRECTION_TAIL constant")
                 self.assertIn(tail, reason,
                               "refusal %s builds its text without the shared CORRECTION_TAIL: %r" % (name, reason))
+
+    def test_missing_report_refusal_has_no_correction_tail(self):
+        tail = getattr(RG, "CORRECTION_TAIL", "")
+        self.assertTrue(tail, "report_guard holds no shared CORRECTION_TAIL constant")
+        reason, _ = self.helper.refusal_for("missing_report")  # asserts the refusal fires
+        self.assertNotIn(tail, reason,
+                         "the missing-report refusal carries the correction tail, but it asks for the report itself: %r"
+                         % reason)
 
 
 class CorrectionTailControls(unittest.TestCase):
