@@ -140,6 +140,14 @@ jobs:
       lint_plan_refuter: ${{ steps.scope.outputs.lint_plan_refuter }}
       lint_ruling_kind: ${{ steps.scope.outputs.lint_ruling_kind }}
       lint_comment_narration: ${{ steps.scope.outputs.lint_comment_narration }}
+      doc_decisions: ${{ steps.scope.outputs.doc_decisions }}
+      doc_rules: ${{ steps.scope.outputs.doc_rules }}
+      doc_skills: ${{ steps.scope.outputs.doc_skills }}
+      doc_agents: ${{ steps.scope.outputs.doc_agents }}
+      doc_glossary: ${{ steps.scope.outputs.doc_glossary }}
+      doc_map: ${{ steps.scope.outputs.doc_map }}
+      doc_other: ${{ steps.scope.outputs.doc_other }}
+      doc_any: ${{ steps.scope.outputs.doc_any }}
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -230,6 +238,7 @@ jobs:
         run: python3 lint/test_report_guard_refusal.py
 
       - name: Stop-hook guard fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_report_guard.py
 
       - name: Stop-hook triage hold suite
@@ -261,6 +270,7 @@ jobs:
         run: python3 lint/test_clause.py
 
       - name: Stop-hook cannot-claim suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_rules == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_report_guard_cannot.py
 
       - name: Stop-hook landing fixture suite
@@ -268,9 +278,11 @@ jobs:
         run: python3 lint/test_report_guard_landing.py
 
       - name: Stop-hook owner-safe reason suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_report_guard_remedy.py
 
       - name: Stop-hook review-record fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_rules == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_report_guard_review.py
 
       - name: STE auto-fix fixture suite
@@ -282,9 +294,11 @@ jobs:
         run: python3 lint/test_ruling_census.py
 
       - name: Rule audit fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_rules == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_rule_audit.py
 
       - name: Stale prose check fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_stale_cites.py
 
       - name: Ruled store fixture suite
@@ -292,6 +306,7 @@ jobs:
         run: python3 lint/test_ruled_store.py
 
       - name: Route judge measure fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_rules == 'true' || needs.scope.outputs.doc_other == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_prove_route_judge.py
 
       - name: Guard log report fixture suite
@@ -311,6 +326,7 @@ jobs:
         run: python3 lint/test_wait_until.py
 
       - name: Now-central helper fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_now_central.py
 
       - name: sim-lease fixture suite
@@ -333,6 +349,7 @@ jobs:
         run: python3 lint/test_ci_job.py
 
       - name: Rule mechanization audit
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_rules == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/rule_audit.py
 
       - name: Windows split guard
@@ -380,9 +397,11 @@ jobs:
         run: python3 lint/test_rm_shim.py
 
       - name: Landed-directory check fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_skills == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_check_landed_dirs.py
 
       - name: Settings matcher fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_settings_matcher.py
 
       - name: Start check wiring suite
@@ -403,6 +422,7 @@ jobs:
         run: python3 lint/test_check_record_slugs.py
 
       - name: Cost line pin fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_check_cost_pins.py
 
       - name: Red-run trailer fixture suite
@@ -424,9 +444,11 @@ jobs:
         run: python3 lint/test_check_mod_versions.py
 
       - name: Hook catalog fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_hook_catalog.py
 
       - name: Hook catalog check
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/hook_catalog.py --check
 
       - name: Hook stub check
@@ -438,9 +460,11 @@ jobs:
         run: python3 lint/check_hook_dup_names.py
 
       - name: Record slug length
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/check_record_slugs.py
 
       - name: Cost line pins
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/check_cost_pins.py
 
       # Pull requests only: the range is base..HEAD, and a push has no base. The checkout is full-depth (fetch-depth 0).
@@ -475,6 +499,7 @@ jobs:
         run: python3 lint/test_repo_colour.py
 
       - name: Retired repo fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_retired_repos.py
 
       - name: Artifact cite fixture suite
@@ -482,6 +507,7 @@ jobs:
         run: python3 lint/test_check_artifact_cites.py
 
       - name: Artifact cite check
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_other == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/check_artifact_cites.py --steps list
 
       - name: Layout readers hold no record path
@@ -501,21 +527,26 @@ jobs:
         run: python3 lint/test_check_ios_mockup.py
 
       - name: Compliance probes fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_compliance_probes.py
 
       - name: CLAUDE.md size fixture suite
         run: python3 lint/test_check_claude_md_size.py
 
       - name: CLAUDE.md size (warns, never fails)
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_rules == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/check_claude_md_size.py
 
       - name: Glossary fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_check_glossary.py
 
       - name: Glossary homes and avoided names
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/check_glossary.py
 
       - name: Retired names, one word per meaning
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_retired_names.py
       # No scope condition: the suite reads the skill's .md templates, and a .md-only change must run it too.
       - name: Mod version bump
@@ -538,6 +569,7 @@ jobs:
         uses: $/actions/claude-md-cites
 
       - name: Silent undo fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_check_silent_undo.py
 
       - name: Debt retire fixture suite
@@ -583,15 +615,19 @@ jobs:
         run: python3 lint/check_unknown_reads_contract.py
 
       - name: Landed-directory manifest agreement
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/check_landed_dirs.py
 
       - name: Agent and skill model floor
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/check_agent_models.py
 
       - name: Agent and skill model floor fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_check_agent_models.py
 
       - name: Agent push form fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_agent_push_form.py
 
       - name: Skill model rows check
@@ -605,18 +641,21 @@ jobs:
         run: python3 lint/check_python_floor.py
 
       - name: Python 3.9 floor fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_check_python_floor.py
 
       - name: No-window spawn check
         run: python3 lint/test_no_window_spawn.py
 
       - name: STE lint
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         uses: $/actions/ste-lint
         with:
           scope: ${{ inputs.full_ste_audit && 'all' || 'changed' }}
           fail: ${{ !inputs.full_ste_audit }}
 
       - name: STE lint action fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 actions/ste-lint/test_action.py
 
       - name: Playwright setup action suite
@@ -684,7 +723,9 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Steps below read no .md file; `code` is false for a docs-only pull request (ci-scope.sh).
+      # A step below that has a scope condition and reads no .md file skips a docs-only pull request (`code` is false,
+      # ci-scope.sh) and a records-only push. A step that reads a .md file also runs when its doc groups change, and on a
+      # records-only push, because the records page is a .md file.
       - name: Config watch fixture suite
         if: ${{ (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_config_watch.py
@@ -727,6 +768,7 @@ jobs:
         run: python3 hooks/test_prose_judge.py
 
       - name: SendMessage state fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || github.event_name != 'pull_request' }}
         run: python3 hooks/test_sendmessage_state.py
 
       - name: Refusal note fixture suite
@@ -746,6 +788,7 @@ jobs:
         run: python3 hooks/test_call_judge.py
 
       - name: Question form fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 hooks/test_question_form.py
 
       - name: Question form option-key gap suite
@@ -765,9 +808,11 @@ jobs:
         run: python3 hooks/test_rm_prompt_answer.py
 
       - name: Agent brief fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_agents == 'true' || github.event_name != 'pull_request' }}
         run: python3 hooks/test_agent_brief.py
 
       - name: Blind brief fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true' || needs.scope.outputs.doc_agents == 'true' || github.event_name != 'pull_request' }}
         run: python3 hooks/test_blind_brief.py
 
       - name: Local time line fixture suite
@@ -801,6 +846,7 @@ jobs:
         run: python3 hooks/test_mail.py
 
       - name: Git mailbox wait suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_skills == 'true' || github.event_name != 'pull_request' }}
         run: python3 hooks/test_mail_wait.py
 
       - name: No-window helper fixture suite
@@ -914,6 +960,7 @@ jobs:
           python3 hooks/test_mutate_ci.py
 
       - name: Map check
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_map == 'true' || needs.scope.outputs.doc_other == 'true' || github.event_name != 'pull_request' }}
         run: bash .github/scripts/map-check.sh
 
       - name: Waiting page staleness fixture suite
@@ -937,6 +984,7 @@ jobs:
         if: ${{ (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/waiting-page/test_question_source.py
       - name: Waiting page park relay prose suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true' || needs.scope.outputs.doc_other == 'true' || github.event_name != 'pull_request' }}
         run: python3 skills/waiting-page/test_skill_park_relay.py
 
       - name: Roadmap builder fixture suite
@@ -947,6 +995,7 @@ jobs:
         run: python3 skills/roadmap/test_derived_status.py
 
       - name: project-ops skill scaffold suite
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true' || github.event_name != 'pull_request' }}
         run: python3 skills/project-ops/tests/test_scaffold.py
 
       - name: project-ops brief tool suite
@@ -956,7 +1005,7 @@ jobs:
         run: python3 skills/project-ops/tests/test_runner_state.py
 
       - name: ios-apps skill starter suite
-        if: ${{ (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true' || github.event_name != 'pull_request' }}
         run: python3 skills/ios-apps/tests/test_new_app.py
 
       - name: PowerShell syntax check, install.ps1

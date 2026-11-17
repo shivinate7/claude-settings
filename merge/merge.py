@@ -4042,9 +4042,9 @@ RULING_ID = re.compile(r"[a-z0-9-]+")
 EXPRESS_PATHS_SHOWN = 8
 
 def flags_on(flags, *skip):
-    """-> the sorted names of ci-scope.sh's flags that are on, less `skip` and the lint_* flags. A lint flag on is not a job turned on:
-    --express relies on the PR's own CI lint steps, which run every lint."""
-    return sorted(k for k, v in flags.items() if k not in skip and not k.startswith("lint_") and v != "false")
+    """-> the sorted names of ci-scope.sh's flags that are on, less `skip`, the lint_* flags and the doc_* flags. A lint or doc flag on is
+    not a job turned on: --express relies on the PR's own CI lint steps, which run every lint, and on the doc steps, which read a prose change."""
+    return sorted(k for k, v in flags.items() if k not in skip and not k.startswith(("lint_", "doc_")) and v != "false")
 
 def express_refusal(root, wt, base_ref, info):
     """--express: -> why this PR may not take the express path, else None. It needs a `Ruling: <id>` line in the body whose entry is on
@@ -4068,9 +4068,13 @@ def express_refusal(root, wt, base_ref, info):
     jobs = re.search(r'^JOBS="([^"]*)"', script, re.M)
     every = re.search(r'^ALL="([^"]*)"', script, re.M)
     lints = re.search(r'^LINTS="([^"]*)"', script, re.M)
-    if c or c2 or not jobs or not every or ("$LINTS" in every.group(1) and not lints):
-        return f"unknown: {base_ref}'s {CI_SCOPE} cannot be read, so whether the diff is prose-only is unproven"
-    names = every.group(1).replace("$JOBS", jobs.group(1)).replace("$LINTS", lints.group(1) if lints else "").split()
+    docs = re.search(r'^DOCS="([^"]*)"', script, re.M)
+    lacks = [w for w, m in (("LINTS", lints), ("DOCS", docs)) if every and "$" + w in every.group(1) and not m]
+    if c or c2 or not jobs or not every or lacks:
+        return (f"unknown: {base_ref}'s {CI_SCOPE} cannot be read" + (f" (ALL names ${', $'.join(lacks)}, and the script has no {'=, '.join(lacks)}= line)" if lacks else "")
+                + ", so whether the diff is prose-only is unproven")
+    names = (every.group(1).replace("$JOBS", jobs.group(1)).replace("$LINTS", lints.group(1) if lints else "")
+             .replace("$DOCS", docs.group(1) if docs else "").split())
     fd, copy = tempfile.mkstemp(prefix="merge-express-", suffix=".sh")
     os.close(fd)
     fd, out_file = tempfile.mkstemp(prefix="merge-express-scope-")
