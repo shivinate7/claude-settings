@@ -5718,13 +5718,13 @@ def reviewed_ledger(h, live, verdicts, subsumed=None, notes=None, cfgrel=None):
     pull request in two states is one row, its states joined by a comma. The keys are LEDGER_FIELDS. step is the step whose head ref the ref names,
     else the verdicts file's step; group is that step (the plan's step group). review_log is the newest review log's state, or `none`. age_h is the hours
     since the head commit, and commits_not_on_main its commits the base lacks, both from local git; files are the paths it changes against its merge base
-    (`git diff --name-only BASE...HEAD`). subsumed_by is read_subsumed's list for the pull request, empty with no `subsumed` file. A pull request row is
+    (`git diff --name-only BASE...HEAD`), or every path of its tip when `git merge-base` exits 1 (no merge base). subsumed_by is read_subsumed's list for the pull request, empty with no `subsumed` file. A pull request row is
     sorted when `verdicts` (read_verdicts) gives it a verdict in LEDGER_VERDICTS at the first 12 characters of its live head, and its verdict then names
     that word; a branch row has no verdict row to match, so it is unsorted. count_line is `unsorted: N` over every row, or LEDGER_UNKNOWN when any read
     stopped: the verdicts file, the subsumed file, the lost-work rows (an unknown row, such as a failed branch fetch), the fetch of the pull request
     heads, or a git read of a row. A count over rows a read left out would read as clear. ok is False when a read stopped. `notes`, when a list is given,
     gains the why line of each stopped read. Cost: reviewed_read's gh calls and lost_work_rows' reads, then git only: one fetch of the pull request
-    heads, and three git reads per row; no gh call, no new file."""
+    heads, and three git reads per row (a fourth and fifth only on a failed diff); no gh call, no new file."""
     facts, found, whys = {}, [], []
     _lines, pulls = reviewed_read(h, cfgrel, facts)
     rows, read_ok = lost_work_rows(h, pulls, facts, live, found)
@@ -5756,7 +5756,10 @@ def reviewed_ledger(h, live, verdicts, subsumed=None, notes=None, cfgrel=None):
             age = round(max(0.0, (h.now() - int(when)) / 3600), 1) if not code and when.isdigit() else None
         else:
             review_log, ahead, age = "none", entries[0]["ahead"], round(entries[0]["age_h"], 1)
+        # A branch with no merge base (exit 1) has no `base...sha` diff: every path of its tip is what it changes. Any other failed read stays a stop.
         code, names = git(root, "diff", "--name-only", f"{base}...{sha}")
+        if code and git(root, "merge-base", base, sha)[0] == 1:
+            code, names = git(root, "ls-tree", "-r", "--name-only", sha)
         if code or ahead is None or age is None:
             whys.append(f"lost-work ledger row {pr}: git could not read its commits ahead of {h.base}, its age or its files {READ_CITE}")
             read_ok = False
