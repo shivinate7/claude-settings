@@ -5447,7 +5447,7 @@ class GhHalf(Env):
 OLD_RUN, NEW_RUN, CI_RUN = 41368432206, 41368432483, 41368432300
 MID_RUN = 41368432350  # a run of the same workflow between OLD_RUN and NEW_RUN
 
-class NoneRequiredChecks(Env):
+class NoneRequiredChecks(ScopedRepo, Env):
     """merge.requiredChecks "none": the base names no required check, so the head reads from the checks and runs it has. Each case
     runs through the fake gh, as GhHalf does. Borrows GhHalf's helpers, as SilentWait does, so GhHalf's tests do not run twice."""
     set, calls, gh_host, go = GhHalf.set, GhHalf.calls, GhHalf.gh_host, GhHalf.go
@@ -5466,10 +5466,12 @@ class NoneRequiredChecks(Env):
         self.assertEqual((host.checks(7, warn=False, sha=head), host.runs(head)), ({}, []), "the fixture's head holds a check or a run")
         self.assertEqual(host.head_state(7), "green")
 
-    def test_a_red_check_row_on_the_head_still_reads_red(self):
+    def test_a_red_check_row_on_the_head_reads_green_under_none(self):
+        # Owner ruling, 11:20 CST Nov 16 (decision private-repos-no-ci): under none the tool reads no CI run at all, so a failed check row holds nothing.
         self.set(checks_seq=[[("checks", "fail", "https://x/y")]])
-        state = self.none_host().head_state(7)
-        self.assertTrue(state.startswith("red: checks: fail"), state)
+        host = self.none_host()
+        self.assertTrue(host.checks(7, warn=False, sha=host.pr(7)["head"]), "scope: the head reads no check row")
+        self.assertEqual(host.head_state(7), "green")
 
     def test_confirm_does_not_stop_on_required_checks_when_none_is_set(self):
         self.set(checks_seq=[[]])
@@ -5478,13 +5480,82 @@ class NoneRequiredChecks(Env):
         self.assertIn(MERGE_CALL, self.calls())
         self.assertNotIn("branches/main/protection", self.calls(), "under requiredChecks none, the confirm read the base's branch protection")
 
-    def test_a_pending_run_with_no_workflow_folder_refuses_at_once_under_none(self):
-        # The base has no workflow folder, so the run's file cannot be read. A run whose file cannot be read holds the head.
+    def test_a_pending_run_with_no_workflow_folder_does_not_hold_the_merge_under_none(self):
+        # Owner ruling, 11:20 CST Nov 16 (decision private-repos-no-ci): under none the tool reads no CI run at all, so a run still pending holds nothing.
         self.set(checks_seq=[[]], runs_seq=[[("docs", "in_progress", "")]])
+        host = self.none_host()
+        self.assertTrue(host.run_state(host.pr(7)["head"])[1], "scope: the head's run does not read pending")
         rc, out = self.go(required="none")
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls())
+        self.assertEqual(self.paused, [], "the pending run waited before the merge")
+
+    def test_an_old_red_run_on_the_head_does_not_refuse_the_merge_under_none(self):
+        # Owner ruling, 11:20 CST Nov 16 (decision private-repos-no-ci): under none the tool reads no CI run at all, so a red run left on the head
+        # from before its workflows were disabled holds nothing.
+        self.set(checks_seq=[[]], runs_seq=[[("checks", "completed", "failure")]])
+        host = self.none_host()
+        self.assertTrue(host.run_state(host.pr(7)["head"])[0], "scope: the head's run does not read red")
+        rc, out = self.go(required="none")
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls())
+
+    def test_an_old_red_run_on_the_head_still_refuses_under_a_listed_check(self):  # control: green on the old code
+        self.set(checks_seq=[[("checks", "pass", "")]], runs_seq=[[("checks", "completed", "failure")]])
+        rc, out = self.go(required=["checks"])
         self.assertEqual(rc, 1, out)
-        self.assertIn("a check is pending: workflow docs", out)
-        self.assertEqual(self.paused, [], "the pending run waited before it refused")
+        self.assertIn("not green", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_red_main_run_does_not_refuse_the_merge_under_none(self):
+        # Owner ruling, 11:20 CST Nov 16 (decision private-repos-no-ci): under none the tool reads no CI run at all, main's runs included.
+        push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})  # only a workflow file on main is judged
+        self.set(checks_seq=[[]], base_runs=[main_run(901, "failure")], base_jobs={"901": [main_job("scope", "success"), main_job("checks", "failure", 20)]})
+        rc, out = self.go(required="none")
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls())
+
+    def test_a_red_main_run_still_refuses_the_merge_under_a_listed_check(self):  # control: green on the old code
+        push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})
+        self.set(base_runs=[main_run(901, "failure")], base_jobs={"901": [main_job("scope", "success"), main_job("checks", "failure", 20)]})
+        rc, out = self.go(required=["checks"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("latest completed run is red", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def run_main_with_gh_host(self, *args, required="protection"):
+        """merge.main with no host argument, so main reads the required checks from the config of the base, as in production. The gh host of
+        this case stands in for the Host main builds. -> (rc, stdout and stderr together)."""
+        host = self.gh_host(required=required)
+        out, err = io.StringIO(), io.StringIO()
+        cwd = os.getcwd()
+        os.chdir(self.co)
+        try:
+            with unittest.mock.patch.object(merge, "Host", lambda **kw: host), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = merge.main(list(args), lock=self.lock)
+        finally:
+            os.chdir(cwd)
+        return rc, out.getvalue() + err.getvalue()
+
+    def test_a_setup_pr_whose_head_stamp_says_none_merges_with_no_flag(self):
+        # Owner ruling, page item 929 b (decision private-repos-no-ci): a setup PR whose own head stamp says "none" lints and merges from that
+        # stamp, with no flag. Main still pins protection, and that protection requires a check the head does not run.
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="protection"))))
+        self.on("feat", {".github/stamp.json": json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="none")))})
+        self.set(contexts=["checks"], checks_seq=[[]])
+        self.assertEqual(self.gh_host(required="protection").required_names(), ["checks"], "scope: main's protection does not require checks")
+        rc, out = self.run_main_with_gh_host("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls())
+
+    def test_a_setup_pr_whose_head_stamp_sets_a_bad_deadline_is_refused(self):
+        # The head's stamp is the one main reads, so its deadline is validated too: the only reader of merge.deadlineMinutes is the config check.
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="protection"))))
+        self.on("feat", {".github/stamp.json": json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="none", deadlineMinutes=0)))})
+        self.set(contexts=["checks"], checks_seq=[[]])
+        rc, out = self.run_main_with_gh_host("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("deadlineMinutes", out)
         self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_a_blocked_pull_request_under_none_refuses_and_names_the_branch_protection(self):
@@ -9612,16 +9683,15 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.rev("origin/main^2"), pushed, "the merge did not take the head that was pushed")
         self.assert_healed_merge(out, main_tip, before)
 
-    def test_under_none_a_red_head_refuses_before_any_push(self):
-        # A control: base already reads the head's own checks before it rebuilds or pushes anything, and the heal must keep that order.
+    def test_under_none_a_red_head_does_not_refuse_the_heal_and_merge(self):
+        # Owner ruling, 11:20 CST Nov 16 (decision private-repos-no-ci): under none the tool reads no CI run at all, so a red run on the head holds no heal.
         self.set_required("none")
         self.drop_pending_record()
         self.on("feat", {"docs/records.md": page("ghost")})
-        self.host.state = "red: checks: fail"  # the head's own run failed
-        refs_before = self.refs()
-        rc, out = self.run_merge_once("7", "--confirm")
-        self.assert_refused_untouched(rc, out, refs_before)
-        self.assertIn("not green", out)
+        self.host.state = "red: checks: fail"  # an old run on the head, which none does not read
+        rc, out = self.run_merge_once("7", "--confirm")  # one run: the case pins the single confirm, as the heal case above does
+        self.assertEqual(rc, 0, "under none a red run on the head refused the heal and merge:\n" + out)
+        self.assertNotIn("not green", out)
 
     def test_under_none_a_base_that_moves_after_the_heal_push_refuses_and_keeps_the_page_commit(self):
         self.set_required("none")
@@ -15293,7 +15363,7 @@ def role_tuple_in_source(text, name):
     return None
 
 
-class NoneLaneLint(CloudSession):
+class NoneLaneLint(ScopedRepo, CloudSession):
     """`merge --lane-lint <pr>` under merge.requiredChecks "none" (decision private-repos-no-ci: a repo with no CI names no check). The config is
     written to origin's main, so the lint reads "none" as a run in production does. A lane head with no check run has no touched job, so the
     lint reads no draft run and the local lint decides. A case scripts the head's check runs (FakeHost.draft_rows, read by the real judge) and the
@@ -15350,6 +15420,18 @@ class NoneLaneLint(CloudSession):
         self.assertIn("is unknown, not a pass", text, "a named check list let a head with no touched job through without the unknown refusal: " + text)
         self.assertIn("no `touched` job", text, "the unknown refusal does not name the missing touched job: " + text)
         self.assertEqual(self.host.posted, [], "an unknown lint posted a PASS comment")
+
+    def test_a_setup_lane_head_whose_stamp_says_none_takes_the_lint_with_no_draft_run(self):
+        # Owner ruling, page item 929 b (decision private-repos-no-ci): a setup PR whose own head stamp says "none" lints from that stamp. Main still
+        # pins protection, so the lint reads the base's stamp and would wait on a draft run of lane-touched-tests that this head never has.
+        self.lane_head("protection", [])
+        self.on("feat", {".github/stamp.json": json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="none")))})
+        self.host.draft_rows = {self.head("feat"): []}
+        self.assertFalse(merge.is_integration_pr(self.host.pr(7)), "precondition: pull request 7 is an integration PR, so the lane path does not run")
+        with self.local_lint_answers("pass") as calls:
+            rc, text = self.lane_lint_run()
+        self.assertEqual(check_run_reads(self.host.draft_reads), [], "the lane lint read the check runs of the head, so it read the base's stamp, not the head's: " + text)
+        self.assertEqual(rc, 0, text)
 
     def test_a_failing_lint_step_under_none_with_no_check_run_still_fails_and_names_the_step(self):
         self.lane_head("none", [])
