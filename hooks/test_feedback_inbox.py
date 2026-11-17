@@ -95,7 +95,8 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     or closed, names a path: relative to the repo of the payload's cwd, or absolute. The file sits
     under a home of its kind in lint/layout.json, read through lint/layout.py: ruling under the
     keys decisions, rules, claude-md or agents-md; task under todo, debts or
-    debt-notes. Some branch's tree in that file's repo holds it. Else the reason names the id. The
+    notes, the notes folder. The frozen debt-notes file is refused. Some branch's tree in that
+    file's repo holds it. Else the reason names the id. The
     handoff never counts for these two kinds. A repo with no home of the kind gets a reason that
     names the layout keys, todo first for a task.
   - Step homes. A task item, open or closed, may instead name `step:<slug>`: it passes when
@@ -2121,7 +2122,7 @@ def grant_repo():
 def step_repo(debts=True):
     """A repo whose step file sits on a lane branch only: some branch's tree holds it, main's does not. With
     `debts` it tracks a debt, so the repo has a task home of its own, and a task's refusal then comes from its
-    step home. Without it, the repo has no todo, debts or debt-notes home at all."""
+    step home. Without it, the repo has no todo, debts or notes home at all."""
     key = "steps" if debts else "steps-bare"
 
     def build():
@@ -2464,9 +2465,9 @@ def expect_step_on_lane_only(name, root):
 
 
 def case_task_open_step_home_passes():
-    """An open task whose home is `step:<slug>` passes when the step file is a blob on a lane branch. Red
-    today: a task's home is read as a path under todo, debts or debt-notes, so the step home is refused as
-    not a tracked task home. The step is on a lane branch only, so the pass proves the branch read."""
+    """An open task whose home is `step:<slug>` passes when the step file is a blob on a lane branch. The step
+    home is read before the task paths under todo, debts or notes. The step is on a lane branch only, so the
+    pass proves the branch read."""
     repo = step_repo()
     expect_step_on_lane_only("task step home", repo)
     p = homed(new_cfg(), "task-step", ("- fb-0958-7 [task] -> step:%s" % STEP_SLUG,), cwd=repo)
@@ -2537,7 +2538,7 @@ def case_closed_note_backtick_step_home_passes():
 
 
 def case_task_step_home_without_a_task_layout_passes():
-    """A task whose home is `step:<slug>` passes in a repo with no todo, debts or debt-notes home, when the step
+    """A task whose home is `step:<slug>` passes in a repo with no todo, debts or notes home, when the step
     file is a blob on a lane branch. Green control: the step file is read before the layout's task homes."""
     repo = step_repo(debts=False)
     expect_step_on_lane_only("bare task step home", repo)
