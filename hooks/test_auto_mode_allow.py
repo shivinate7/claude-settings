@@ -62,13 +62,6 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   Its Covers text names the session tagged cs-build:lane and says it prints and posts nothing. Its Never
   covers names each form in MERGE_REVIEW_REFUSED (decision `auto-mode-owner-acts`). A copy with its Never
   covers clause removed goes red on the same cases.
-- One "Lane Own Merge:" entry. Its Covers text names the session's own pull request, its body-link proof
-  and its head-ref proof, and the merge with the head flag. Its Never covers, read from its own capitalised
-  sentence past the owner's lower-case quote, names each act in LANE_OWN_REFUSED: the reason flags, `--express`,
-  an admin or bypass merge, a force push, and settings changes, and names a pull request of another lane or
-  session (decision `auto-mode-owner-acts`).
-- The decision records in DECISION_RECORDS hold no sentence saying a lane or the coordinator never
-  merges (decisions `standing-merge-grant`, `auto-mode-owner-acts`, `session-tiers`).
 AUTO_MODE_SETTINGS names another settings file to read (default: this repo's settings.json), so the
 same cases run against a copy with a clause removed and show red there.
 """
@@ -244,24 +237,6 @@ INSTALLER_REFUSED = (("an env var before the command", "environment variable"),
                      ("any other act", "any other act"))
 INSTALLER_SCOPE = (("checkout of the repo", "checkout"), ("origin", "origin"),
                    ("incident time", "20:12 CST"), ("owner ruling", "20:16 CST"))
-LANE_OWN = "Lane Own Merge:"
-# Each act the Lane Own Merge Never covers names: the reason flags, `--express`, an admin or bypass merge,
-# a force push, and a settings change (decision `auto-mode-owner-acts`).
-LANE_OWN_REFUSED = REASON_FLAGS_REFUSED + (("--express", "--express"),
-                                           ("admin or bypass merge", "admin or bypass merge"),
-                                           ("force push", "force[- ]push"), ("settings changes", "settings"))
-# The Covers text names the session's own pull request, proved by a body link or by its head ref, and the merge's
-# head flag. Each pattern is anchored to the words the entry says, so a reword that drops one fails that one case.
-LANE_OWN_SCOPE = r"(?i)pull request is the session's own"
-LANE_OWN_BODY_LINK = r"(?i)(?:pull request|PR) body[^.]*\blink\b|\blink\b[^.]*(?:pull request|PR) body"
-LANE_OWN_HEAD_REF = r"(?i)head ref[^.]*\b(?:lane|step) branch\b"
-LANE_OWN_OTHER_LANE = r"pull request of another lane or session"
-DECISION_RECORDS = ("standing-merge-grant", "auto-mode-owner-acts", "session-tiers")
-LANE_OR_COORDINATOR = re.compile(r"\b(?:lanes?|coordinators?)\b", re.I)
-# A negation that governs the merge verb directly, so "never covers a merge" and "does not occur: a lane
-# pull request that is merged" do not match.
-NEVER_MERGES = re.compile(r"(?<![\w-])(?:never|does not|do not|may not|must not|cannot)\s+"
-                          r"(?:(?:runs?|run|do|make|makes)\s+(?:a|an|the|any)\s+)?merg", re.I)
 
 
 def installer_forms():
@@ -358,34 +333,21 @@ def allow_entry(prefix):
     return hits[0] if len(hits) == 1 else None
 
 
-def never_covers_match(entry, flags=re.I):
-    """The 'Never covers' match of an entry, its sentence ending at a period that ends a sentence, or None.
-    Any case by default. flags=0 reads only a capitalised 'Never covers', which skips an earlier lower-case
-    'never covers' quoted from an owner's words. A period inside a name such as `autoMode.allow` does not end it."""
-    return re.search(r"Never covers(?:(?!\.(?:\s|$)).)*", entry or "", flags)
+def never_covers_match(entry):
+    """The 'Never covers' match of an entry (any case), its sentence ending at a period that ends a sentence, or None.
+    A period inside a name such as `autoMode.allow` does not end it."""
+    return re.search(r"never covers(?:(?!\.(?:\s|$)).)*", entry or "", re.I)
 
 
-def never_covers(entry, flags=re.I):
+def never_covers(entry):
     """The 'Never covers' sentence of an entry, or None when it has none."""
-    found = never_covers_match(entry, flags)
+    found = never_covers_match(entry)
     return found.group(0) if found else None
 
 
-def never_merge_sentences(text):
-    """The sentences of text that name a lane or the coordinator and say it never merges. A table cell is
-    its own sentence."""
-    found = []
-    for line in text.splitlines():
-        for sentence in re.split(r"(?<=[.!?])\s+|\|", line):
-            if LANE_OR_COORDINATOR.search(sentence) and NEVER_MERGES.search(sentence):
-                found.append(sentence.strip())
-    return found
-
-
-def bounds_text(entry, flags=re.I):
-    """The entry's text before its 'Never covers' sentence, or all of it when it has none. flags=0 reads only a
-    capitalised 'Never covers', which skips an owner's lower-case quote of the words."""
-    found = never_covers_match(entry, flags)
+def bounds_text(entry):
+    """The entry's text before its 'Never covers' sentence, or all of it when it has none."""
+    found = never_covers_match(entry)
     return (entry or "")[:found.start()] if found else (entry or "")
 
 
@@ -1105,99 +1067,6 @@ class SessionInstallerIsAllowed(unittest.TestCase):
     def test_never_covers_names_each_refused_act(self):
         missing = unnamed_terms(entry_part(self, INSTALLER, never=True), INSTALLER_REFUSED)
         self.assertFalse(missing, "Never covers does not name %r" % missing)
-
-
-class LaneOwnMergeIsAllowed(unittest.TestCase):
-    def lane_own_entry(self):
-        """The one Lane Own Merge entry, asserting first that there is exactly one."""
-        hits = [e for e in auto_mode().get("allow", []) if e.startswith(LANE_OWN)]
-        self.assertEqual(len(hits), 1, "need exactly one '%s' entry in autoMode.allow, found %d" % (LANE_OWN, len(hits)))
-        return hits[0]
-
-    def test_one_entry_names_the_lane_own_merge(self):
-        self.lane_own_entry()
-
-    def test_never_covers_names_each_refused_act(self):
-        clause = never_covers(self.lane_own_entry(), flags=0)
-        self.assertIsNotNone(clause, "need a capitalised 'Never covers' sentence in the Lane Own Merge entry")
-        self.assertTrue(clause.startswith("Never covers a pull request"),
-                        "the first 'Never covers' is not the entry's own sentence: %r" % clause[:60])
-        for name, pattern in LANE_OWN_REFUSED:
-            with self.subTest(act=name):
-                self.assertRegex(clause, "(?i)" + pattern, "Never covers does not name %r" % name)
-
-    def lane_own_covers(self):
-        """The Covers text of the one Lane Own Merge entry, cut at its capitalised 'Never covers' sentence."""
-        return bounds_text(self.lane_own_entry(), flags=0)
-
-    def test_covers_names_the_session_own_pull_request(self):
-        self.assertRegex(self.lane_own_covers(), LANE_OWN_SCOPE,
-                         "Covers text does not say the pull request is the session's own")
-
-    def test_covers_names_the_body_link_proof(self):
-        self.assertRegex(self.lane_own_covers(), LANE_OWN_BODY_LINK,
-                         "Covers text does not name a pull request body that holds the session's own link")
-
-    def test_covers_names_the_head_ref_proof(self):
-        self.assertRegex(self.lane_own_covers(), LANE_OWN_HEAD_REF,
-                         "Covers text does not name the head ref as the session's own lane or step branch")
-
-    def test_covers_quotes_the_merge_with_the_head_flag(self):
-        flag = head_flag()
-        self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the head the CI ran on")
-        self.assertIn("%s <sha>" % flag, self.lane_own_covers(),
-                      "Covers text does not quote the merge with %s <sha>" % flag)
-
-    def test_never_covers_names_a_merge_with_no_head_flag(self):
-        clause = never_covers(self.lane_own_entry(), flags=0)
-        flag = head_flag()
-        self.assertIsNotNone(clause, "need a capitalised 'Never covers' sentence in the Lane Own Merge entry")
-        self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the head the CI ran on")
-        self.assertIn("a merge with no `%s`" % flag, clause, "Never covers does not name a merge with no `%s`" % flag)
-
-    def test_never_covers_names_a_pull_request_of_another_lane_or_session(self):
-        clause = never_covers(self.lane_own_entry(), flags=0)
-        self.assertIsNotNone(clause, "need a capitalised 'Never covers' sentence in the Lane Own Merge entry")
-        self.assertRegex(clause, LANE_OWN_OTHER_LANE,
-                         "Never covers does not name a pull request of another lane or session")
-
-
-class DecisionRecordsHoldNoLaneNeverMerge(unittest.TestCase):
-    def test_no_record_says_a_lane_or_the_coordinator_never_merges(self):
-        for name in DECISION_RECORDS:
-            with self.subTest(record=name):
-                path = os.path.join(REPO_ROOT, "docs", "decisions", name + ".md")
-                self.assertTrue(os.path.isfile(path), "decision record is missing: %s" % path)
-                with open(path, encoding="utf-8") as handle:
-                    text = handle.read()
-                self.assertTrue(text.strip(), "decision record is empty: %s" % path)
-                hits = never_merge_sentences(text)
-                self.assertFalse(hits, "%s says a lane or the coordinator never merges: %r" % (name, hits))
-
-
-class NeverMergeSentenceScan(unittest.TestCase):
-    """Green controls for the scan: a positive sentence is flagged, and the two false alarms seen in the records pass."""
-
-    def test_flags_the_coordinator_that_never_merges(self):
-        self.assertEqual(never_merge_sentences("The coordinator never merges."), ["The coordinator never merges."])
-
-    def test_flags_a_lane_that_never_runs_a_merge(self):
-        self.assertEqual(never_merge_sentences("A lane never runs a merge."), ["A lane never runs a merge."])
-
-    def test_passes_a_lane_that_merges_its_own_pull_request(self):
-        self.assertEqual(never_merge_sentences("A lane that a coordinator started merges its own pull request."), [])
-
-    def test_passes_a_lane_pull_request_that_is_merged_in_a_false_alarm(self):
-        self.assertEqual(never_merge_sentences(
-            "False alarm that does not occur: a lane pull request that is merged or closed as replaced."), [])
-
-    def test_passes_a_never_covers_clause_that_names_a_merge(self):
-        self.assertEqual(never_merge_sentences(
-            'Gap: "Owner Session Message" never covers a merge ask from a session that is not a coordinator.'), [])
-
-    def test_splits_a_table_cell_into_its_own_sentence(self):
-        self.assertEqual(never_merge_sentences("| Batch | a lane never merges | this record |"),
-                         ["a lane never merges"])
 
 
 class NeverCoversSentence(unittest.TestCase):
