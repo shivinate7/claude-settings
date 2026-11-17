@@ -24,9 +24,8 @@ THE PIN AND THE SHARED CLONE. The live pin is a detached checkout, a linked work
 read through the worktree's common config, so a current pin is silent and a behind pin gets a verdict, never unknown.
 A behind pin gets one stale line that states its commit count, and the pin refresh (merge/install_from_main.sh) runs
 once per head. The clone the global rules file points at is read the same way, and a behind one gets a stale line
-that names it. No prompt reads origin (owner ruling, 2026-11-17 09:34 CST, decision stale-install-cost: no network
-lookup on prompts; the refresh triggers are session start and resume, and a local origin/main ref move, owner ruling
-2026-11-17 09:32 CST).
+that names it. No prompt reads origin: decision stale-install-cost, no network lookup on prompts. The refresh
+triggers are session start, a resume, and a local origin/main ref move.
 
 THE SEAM. Each fixture is a bare origin, a seed that pushes to it, and a source clone at the recorded sha,
 all under the run folder. HOME and CLAUDE_CONFIG_DIR point into the run folder, so the real ~/.claude is
@@ -568,9 +567,8 @@ class StaleInstall(unittest.TestCase):
             self.assertIn(name, restarts[0], "restart line does not name %r: %r" % (name, restarts[0]))
         self.assertEqual(len(run.lines), 2, "output beyond the reinstall and restart lines: %r" % run.lines)
 
-    # Owner ruling 2026-11-17 09:34 CST: a prompt reads no origin. A case that expects a lookup on a prompt is
-    # re-pointed to expect none. The refresh triggers are a local origin/main ref move, and session
-    # start (the SessionStart fetch, which this hook does not run).
+    # A prompt reads no origin (decision stale-install-cost). The refresh triggers are a local origin/main ref
+    # move, and session start, whose SessionStart fetch this hook does not run.
 
     # Behind origin, after a local fetch: one reinstall, no lookup, the recorded installer.
 
