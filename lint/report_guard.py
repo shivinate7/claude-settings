@@ -694,7 +694,8 @@ ANSWERED_RE = re.compile(r"(?<![\w-])answered(?![\w-])", re.I)
 ANSWERED_INBOX_RE = re.compile(r"\[question\]\s*(?:->|\u2192)\s*answered\b", re.I)
 ANSWERED_NEGATOR_RE = re.compile(r"\bnot\b|n['\u2019]t\b|\bno(?:ne|thing|body)?\b|\bnever\b|\bcannot\b|\byet\s+to\b", re.I)
 ANSWERED_MODAL_RE = re.compile(r"\b(?:should|would|could|might|may|will|must|shall)\b", re.I)
-ANSWERED_GUARD_NAME = "Answered guard"  # the name the refusal prints; a reply that names the guard claims nothing
+ANSWERED_CHECK = "Answered guard (rule answered-needs-source)"  # the check name the refusal prints
+ANSWERED_GUARD_NAME = ANSWERED_CHECK.split(" (")[0]  # a reply that names the guard claims nothing
 _ANSWERED_DET = r"(?:the|this|that|these|those|an?|its|their|his|her|my|our|your|any|each|every|all|some|one|other)"
 # the printed name only at a line start or after a determiner or preposition, so "The owner answered guard questions" still claims
 ANSWERED_GUARD_NAME_RE = re.compile(
@@ -703,10 +704,14 @@ ANSWERED_GUARD_NAME_RE = re.compile(
 # "answered" as an adjective in a rule or condition: a condition word in its clause, a determiner before it, a noun-like word after it
 ANSWERED_CONDITION_RE = re.compile(r"\b(?:when|whenever|if|unless|once|while|until|after|before|whichever|any\s+time|each\s+time|every\s+time)\b", re.I)
 ANSWERED_BEFORE_ADJ_RE = re.compile(r"(?<![\w-])" + _ANSWERED_DET + r"\s+$", re.I)
-ANSWERED_AFTER_FUNCTION_RE = re.compile(
-    r"\s+(?:in|on|at|by|for|to|with|from|of|as|and|or|but|so|it|that|the|a|an|its|their|his|her|my|our|your|them|him|"
-    r"too|also|again|already|yet|now|then|today|yesterday|once|after|before|when|while|if|because|since|until|is|was|"
-    r"were|are|be|been|has|have|had|here|there|not|all|both|this|these|those)\b", re.I)
+# the words that follow "answered" when it is a verb, not an adjective before a noun
+ANSWERED_FUNCTION_WORDS = (
+    "in", "on", "at", "by", "for", "to", "with", "from", "of", "as", "and", "or", "but", "so", "it", "that", "the", "a",
+    "an", "its", "their", "his", "her", "my", "our", "your", "them", "him", "too", "also", "again", "already", "yet",
+    "now", "then", "today", "yesterday", "once", "after", "before", "when", "while", "if", "because", "since", "until",
+    "is", "was", "were", "are", "be", "been", "has", "have", "had", "here", "there", "not", "all", "both", "this",
+    "these", "those")
+ANSWERED_AFTER_FUNCTION_RE = re.compile(r"\s+(?:" + "|".join(ANSWERED_FUNCTION_WORDS) + r")\b", re.I)
 ANSWERED_NOUN_START_RE = re.compile(r"\s+[A-Za-z]")
 # "a claim that X were answered" talks about a claim, unless a named third-person owner follows "that"
 ANSWERED_CLAIM_NOUN_RE = re.compile(r"\ban?\s+claims?\s+that\b", re.I)
@@ -716,10 +721,12 @@ ANSWERED_PERSON_RE = re.compile(r"\b(?:owner|user|shivam|he|him|she|her|they|the
 # a modal clause proposes a condition only with one of these words in it; a narrower list than ANSWERED_CONDITION_RE,
 # because "while" or "before" after a modal ("may have answered it while I slept") hedges a claim
 ANSWERED_MODAL_CONDITION_RE = re.compile(r"\b(?:when|whenever|once|after|if|until)\b", re.I)
-ANSWERED_FIRST_PERSON_RE = re.compile(r"\b(?:I|we)\b(?:['\u2019](?:ve|d|ll))?", re.I)
-_ANSWERED_ADVERB = r"(?:\w+ly|also|already|just|then|now|again|first|since)"
+# the writer's subject words come from _clause, the one home of them
+_ANSWERED_WRITER = _clause.WRITER_PATTERN + r"(?:['\u2019](?:ve|d|ll))?"
+ANSWERED_FIRST_PERSON_RE = re.compile(r"\b" + _ANSWERED_WRITER, re.I)
+_ANSWERED_ADVERB = r"(?:%s|already|then|again|first|since)" % _clause.ADVERB_PATTERN
 # "I answered" or "we already answered": the first person, at most one adverb, then the word
-ANSWERED_I_BEFORE_RE = re.compile(r"\b(?:I|we)(?:['\u2019](?:ve|d))?\s+(?:" + _ANSWERED_ADVERB + r"\s+)?$", re.I)
+ANSWERED_I_BEFORE_RE = re.compile(r"\b" + _ANSWERED_WRITER + r"\s+(?:" + _ANSWERED_ADVERB + r"\s+)?$", re.I)
 # "I sent ... and answered": a verb joined to a first-person subject by "and"
 ANSWERED_AND_BEFORE_RE = re.compile(r"\band\s+(?:" + _ANSWERED_ADVERB + r"\s+)?$", re.I)
 ANSWERED_OBJECT_AFTER_RE = re.compile(
@@ -731,7 +738,7 @@ ANSWERED_FILE_RE = re.compile(
 ANSWERED_SOURCE_RE = re.compile(
     r"https?://\S+|\bitem\s+\d+|\bpage:\d+|\bfb-\w+|\bsession_\w+|\b\d{1,2}:\d{2}\b", re.I)
 ANSWERED_REASON = owner_line(
-    ANSWERED_GUARD_NAME + " (rule answered-needs-source)",
+    ANSWERED_CHECK,
     "each line below says \"answered\" and cites no source; a mention of the word in an inline code span is no claim") + " Lines: "
 
 
