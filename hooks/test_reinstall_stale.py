@@ -873,6 +873,20 @@ class StaleInstall(unittest.TestCase):
         self.assertIn("CLAUDE.md", restarts[0], "the restart line does not name CLAUDE.md: %r" % restarts[0])
         self.assertEqual(len(run.lines), 2, "output beyond the reinstalled and restart lines: %r" % run.lines)
 
+    # The record holds a commit the local origin ref has not reached. The record covers the ref by ancestry, so the
+    # prompt is silent and runs no installer.
+
+    def test_record_ahead_of_the_local_ref_is_silent_with_no_install(self):
+        fx = current(self._testMethodName)
+        ahead = fx.child_commit(fx.base)
+        fx.write_record("main", ahead)
+        self.assertEqual(fx.sha(fx.source, ahead + "^"), fx.base, "scope: the record does not build on the local ref")
+        self.assertNotEqual(fx.git("-C", fx.source, "rev-parse", "refs/remotes/origin/main").strip(), ahead,
+                            "scope: the record is not ahead of the local origin/main ref")
+        run = fx.run_hook()
+        self.assertEqual(run.lines, [], "a record ahead of the local ref printed %r, want silence" % run.lines)
+        self.assertEqual(fx.installer_runs(), [], "a record ahead of the local ref ran the installer")
+
     # The installer's environment: the record's ref, and a hook input that no SessionStart entry fires on.
 
     def test_installer_gets_the_record_ref_even_when_the_hook_env_names_another(self):
