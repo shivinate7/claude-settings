@@ -704,10 +704,6 @@ sh("frozen shell: an iex of a Set-Content onto the config settings denies "
 sh("frozen data: a quoted commit message naming a cat-write onto the config settings allows "
    "[new allow: red on main, passes on d7fb2f1]",
    VCS + ' commit -m "note: cat > ' + CFG_SETTINGS + ' is refused"', "allow", cwd=NOGIT)
-
-sh("frozen shell: a heredoc body naming a cat-write onto the config settings, fed to python, denies "
-   "[review round 1, the orchestrator's F5 call: flipped from allow, an interpreter body stays in view]",
-   "python hooks/guard.py <<'DOC'\ncat > " + CFG_SETTINGS + "\nDOC", "deny", "frozen-path", cwd=NOGIT)
 sh("frozen data: a heredoc body naming a cat-write onto the config settings, fed to python, allows "
    "[step agent-model-cap-string-false-alarm: a false-alarm fix, interpreter string data that writes no file "
    "is not the act; incident 2026-11-02 01:16 CST]",

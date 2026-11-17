@@ -897,12 +897,6 @@ for _cd in ("sl", "chdir", "Push-Location"):
        % _cd, _cd + " " + slash(GITMAIN) + "; " + VCS + " restore f.txt",
        "deny", "other-checkout", tool="PowerShell", cwd=GITWT)
 
-# 5. env's own chdir flags. main does not read them and asks, so ask is pinned.
-sh("per-file ask: env -C into the shared checkout, then restore f.txt, from a worktree",
-   "env -C " + slash(GITMAIN) + " " + VCS + " restore f.txt", "ask", "shared-tree", cwd=GITWT)
-sh("per-file ask: env --chdir into the shared checkout, then restore f.txt, from a worktree",
-   "env --chdir=" + slash(GITMAIN) + " " + VCS + " restore f.txt", "ask", "shared-tree",
-   cwd=GITWT)
 # 5. env's own chdir flags. The guard reads env -C and env --chdir as the run folder, the folder git
 # then runs in, so other-checkout denies each one as it denies a git -C into the shared checkout.
 sh("per-file ask: env -C into the shared checkout, then restore f.txt, from a worktree, denies by other-checkout",

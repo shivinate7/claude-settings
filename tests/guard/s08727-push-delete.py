@@ -839,28 +839,6 @@ sh("push: stray branch, the ask names the explicit form HEAD:<branch>", VCS + " 
    PUSH_STRAY_RULE, cwd=PUSHSTRAY, carries=("HEAD:<branch>",), lacks=("HEAD:mylocal", "HEAD:lane/x"))
 
 
-# ASK, rule push-agent-branch. A non-forced push whose destination is an agent-worktree name asks, with or
-# without -u. push-stray-branch stays silent on a branch with no upstream, so this rule carries that case. The
-# names are agent-<hex>, claude/agent-<hex> and worktree-agent-<hex>, with 8 or more hex characters after the
-# prefix. PUSHAGENT sits on its claude/agent- branch, with no upstream.
-push_case("agent branch, HEAD asks", "origin HEAD", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
-push_case("agent branch, -u HEAD asks", "-u origin HEAD", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
-push_case("agent branch, @ asks", "origin @", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
-push_case("agent branch, the current name as a colon-less refspec asks", "origin claude/agent-a22bb0ed47825117b",
-          "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
-
-push_case("agent worktree, worktree-agent-<hex>, -u HEAD asks", "-u origin HEAD", "ask",
-          cwd=PUSHAGENTWT, rule=PUSH_AGENT_RULE)
-push_case("agent worktree, agent-<hex>, -u HEAD asks", "-u origin HEAD", "ask",
-          cwd=PUSHAGENTBARE, rule=PUSH_AGENT_RULE)
-# An explicit agent destination from a branch with no upstream (PUSHFEAT, `feat`).
-push_case("explicit agent destination from a branch with no upstream asks",
-          "origin HEAD:claude/agent-a22bb0ed47825117b", "ask", rule=PUSH_AGENT_RULE)
-
-# The exact shape: eight hex characters after the prefix ask.
-push_case("agent-12345678, -u HEAD asks (8 hex is the exact shape)", "-u origin HEAD", "ask",
-          cwd=PUSHAGENTEIGHT, rule=PUSH_AGENT_RULE)
-
 # DENY, rule push-agent-branch. A non-forced push whose destination is an agent-worktree name is refused, with or
 # without -u. push-stray-branch stays silent on a branch with no upstream, so this rule carries that case. The
 # names are agent-<hex>, claude/agent-<hex> and worktree-agent-<hex>, with 8 or more hex characters after the
@@ -1041,9 +1019,6 @@ push_case("main, a full ref to refs/heads/main asks", "origin x:refs/heads/main"
 push_case("master, a push to master asks", "origin master", "ask", rule=PUSH_MAIN_RULE)
 push_case("main, a second refspec that reaches main asks", "origin HEAD:push-guard-asks HEAD:main", "ask",
           rule=PUSH_MAIN_RULE)
-
-push_case("main, --all reaches main and asks", "--all origin", "ask", rule=PUSH_MAIN_RULE)
-push_case("main, --branches reaches main and asks", "--branches origin", "ask", rule=PUSH_MAIN_RULE)
 # On a lane checkout with local main equal to origin/main, --all and --branches are silent: neither push writes main.
 # The refusal and allow rows are in the section below.
 all_allowed("lane checkout, --all with local main equal to origin/main is silent", "--all origin", cwd=PUSHFEAT)
@@ -1096,15 +1071,11 @@ sh("main, git -C into a repo with no remote is silent, from a repo with a networ
 push_case("local origin, main then HEAD on a branch tracking another name asks stray", "origin main HEAD", "ask",
           cwd=PUSHLOCALSTRAY, rule=PUSH_STRAY_RULE)
 
-push_case("local origin, main then the agent name asks the agent rule", "origin main claude/agent-deadbeef01",
-          "ask", cwd=PUSHLOCAL, rule=PUSH_AGENT_RULE)
 agent_refused("push: local origin, main then the agent name asks the agent rule",
               VCS + " push origin main claude/agent-deadbeef01", cwd=PUSHLOCAL)
 push_case("local origin, HEAD on a branch tracking another name asks stray (control)", "origin HEAD", "ask",
           cwd=PUSHLOCALSTRAY, rule=PUSH_STRAY_RULE)
 
-push_case("local origin, the agent name alone asks the agent rule (control)", "origin claude/agent-deadbeef01",
-          "ask", cwd=PUSHLOCAL, rule=PUSH_AGENT_RULE)
 agent_refused("push: local origin, the agent name alone asks the agent rule (control)",
               VCS + " push origin claude/agent-deadbeef01", cwd=PUSHLOCAL)
 # On a network origin, a main refspec before an agent name is refused by the agent rule, not asked as push-main.
@@ -1112,9 +1083,6 @@ agent_refused("push: local origin, the agent name alone asks the agent rule (con
 # push, so the refusal holds from any checkout. A main refspec before a lane name still asks push-main, and so does
 # `origin main HEAD`.
 push_case("network origin, main then HEAD asks push-main", "origin main HEAD", "ask", rule=PUSH_MAIN_RULE)
-
-push_case("network origin, main then the agent name asks push-main", "origin main claude/agent-deadbeef01", "ask",
-          rule=PUSH_MAIN_RULE)
 push_case("network origin, main then a lane name asks push-main", "origin main HEAD:lane-x", "ask",
           rule=PUSH_MAIN_RULE)
 sh("push: network origin, main then the agent name asks the agent rule",
@@ -1163,8 +1131,6 @@ push_case("main tracking origin/main, network origin, HEAD asks push-main", "ori
 push_case("main tracking origin/main, local origin, --all is silent", "origin --all", "allow", cwd=PUSHLOCALMAIN,
           silent=True)
 
-push_case("main tracking origin/main, network origin, --all asks push-main", "origin --all", "ask", cwd=PUSHMAINUP,
-          rule=PUSH_MAIN_RULE)
 all_allowed("main tracking origin/main, network origin, --all is silent, local main equal", "origin --all",
             cwd=PUSHMAINUP)
 

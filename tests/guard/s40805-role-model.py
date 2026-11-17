@@ -1075,9 +1075,6 @@ role_model_allow("role-model: fix check: the same reviewer spawn as a Task on so
                  FIX_MARKER + ". Re-run the cases.", tool="Task")
 workflow_allow("role-model: fix check: Workflow reviewer on sonnet with the marker on line one is allowed",
                _step_flow("'%s. Re-run the cases.'" % FIX_MARKER, "agentType: 'reviewer', model: 'sonnet'"))
-
-role_model_allow("role-model: fix check: reviewer on haiku with the marker is allowed, at its own row", "reviewer",
-                 "haiku", FIX_MARKER + ". Re-run the cases.")
 # A fix verifier runs Sonnet, set per spawn, so Haiku is refused. The step-up judges it before the role row, and its
 # refusal names Sonnet and not Opus.
 add("role-model: fix verifier: reviewer on haiku with the marker is denied under roles-third-round-steps-up, names Sonnet",

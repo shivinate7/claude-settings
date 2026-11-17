@@ -69,11 +69,6 @@ def oj_replace(name, expected, field, old, new, rule=OJ_RULE):
        new_str=new)
 
 
-
-def pr2015_oj_write(data, op="set", collection="items"):
-    return {"op": op, "collection": collection, "doc_id": OJ_DOC, "data": data}
-
-
 def oj_write(data, op="set", collection="items"):
     return {"op": op, "collection": collection, "doc_id": OJ_DOC, "data": with_shown(data)}
 
@@ -86,8 +81,6 @@ def oj_batch(name, expected, writes, **extra):
 oj("item 34's shape (a CI job choice with options, a pick, a why and no form lines) is denied", "deny",
    oj_item())
 
-oj("the refusal names the three lines, the five stakes and stands: true", "deny", pr2015_oj_item(),
-   carries=("Goal", "Problem", "Based on", "stands: true", *OJ_KINDS))
 oj("the refusal names the three lines and the five stakes", "deny", oj_item(),
    carries=("Goal", "Problem", "Based on", *OJ_KINDS))
 # Wrong-field class: the words are there, the lines are not.
@@ -164,8 +157,6 @@ oj("a decision with the form is allowed", "allow", oj_item(context=OJ_GOOD))
 
 
 # Stood-pick class: the session's own pick stands, so the stake needs no kind.
-oj("a stood pick with `Problem:` and no stake is allowed", "allow",
-   pr2015_oj_item(stands=True, context=oj_ctx(problem="Problem: which job runs the check, and why it needs your word")))
 oj("a stood pick with a stake is allowed", "allow", pr2015_oj_item(stands=True, context=OJ_GOOD))
 
 oj("a port with a Departs from line and the form is allowed", "allow",
@@ -184,9 +175,6 @@ oj("an update that carries kind decision and context with no form lines is denie
 oj("an update that carries kind decision and a context with the form is allowed", "allow",
    {"kind": "decision", "context": OJ_GOOD}, action="update")
 
-oj("an update that carries kind decision, a stood pick and `Problem:` with no stake is allowed", "allow",
-   {"kind": "decision", "context": oj_ctx(problem="Problem: which job runs the check"), "stands": True},
-   action="update")
 oj("an update that carries kind decision and a bare Problem line with no stake is denied", "deny",
    {"kind": "decision", "context": oj_ctx(problem="Problem: which job runs the check")},
    action="update", rule=OJ_PROBLEM_RULES)
@@ -247,8 +235,6 @@ oj_batch("with a str_replace that drops the Problem line is denied", "deny",
 oj_batch("of decisions that each carry the form is allowed", "allow",
          [oj_write(oj_item(context=OJ_GOOD)), oj_write(oj_item(id="second", context=OJ_GOOD))])
 
-oj_batch("with a stood pick that writes `Problem:` with no stake is allowed", "allow",
-         [pr2015_oj_write(pr2015_oj_item(stands=True, context=oj_ctx(problem="Problem: which job runs the check")))])
 oj_batch("with a closed decision and no form lines is allowed", "allow",
          [oj_write(oj_item(status="closed", context=OJ_ANSWERED))])
 oj_batch("with a closed decision, then an open one with no form lines, is denied", "deny",

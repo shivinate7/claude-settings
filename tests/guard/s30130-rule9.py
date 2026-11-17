@@ -199,10 +199,6 @@ LOG_CHECKS_EXTRA.append((
 # `model sonnet` and `source_url`, the lane's two required inputs. An Agent or Task spawn, a start_session, and a
 # create_session with no lane tag keep the no-model remedy, so a builder cannot drop it for everyone.
 LANE_FLOOR_LACKS = ("name no model", "let the default apply")
-
-add("floor lane: a lane start on the remedy's inputs, model sonnet, source_url, the repo tag and /effort medium, "
-    "is allowed", "allow", tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
-    model="sonnet", source_url=LANE_SOURCE_URL)
 add("floor lane: a lane create_session on haiku is denied with the lane remedy, not the no-model one", "deny",
     "agent-model-floor", tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="haiku", source_url=LANE_SOURCE_URL, carries="model sonnet", lacks=LANE_FLOOR_LACKS)
