@@ -522,7 +522,36 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=N
     return _write_opus(session_id, path, at, length, _file_role(roles), said)
 
 
+# One prose line that is the whole keyword form (owner ruling, 2026-11-17: an override line inside a prose message
+# counts): `override`, `override <n>[m|h]`, `override off`, or `override: <reason>`.
+FENCED = re.compile(r"```.*?```|```.*", re.S)
+KEYWORD_LINE = re.compile(r"override(?:\s*:\s*(\S.*)|\s+(off|\d+[mh]?))?", re.I)
+
+
+def _keyword_line(prompt):
+    """The prompt text a prose line grants: the first whole line that is a keyword form, after fenced and pasted or
+    machine blocks are stripped, as an `override ...` string for the one grant path. None for no such line.
+    A mention inside a sentence is no whole line, so it never grants."""
+    if not isinstance(prompt, str):
+        return None
+    for line in FENCED.sub("\n", BLOCKS.sub("\n", prompt)).splitlines():
+        if KEYWORD_LINE.fullmatch(line.strip()):
+            return line.strip()
+    return None
+
+
 def grant(session_id, prompt, at, defer=True):
+    """Write, replace or remove the session's override for one owner prompt. A keyword line inside a prose message
+    counts (_keyword_line) when the first-word form of the prompt grants nothing."""
+    got = _grant_first_word(session_id, prompt, at, defer)
+    if got is None:
+        line = _keyword_line(prompt)
+        if line is not None and line != (prompt.strip() if isinstance(prompt, str) else None):
+            return _grant_first_word(session_id, line, at, False)
+    return got
+
+
+def _grant_first_word(session_id, prompt, at, defer=True):
     """Write, replace or remove the session's override for one owner prompt. Returns (kind, until) for a
     new override, ("off", None) when `override off` removed one, the _grant_opus result for the Opus word,
     else None: the prompt is not a word. With `defer`, a first word `override` whose rest is no whole keyword form and
