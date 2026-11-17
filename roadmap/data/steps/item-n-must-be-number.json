@@ -1,15 +1,15 @@
 {
   "id": "item-n-must-be-number",
   "title": "A page item write whose n is text is refused, so the page never shows \"This item has no number\"",
-  "status": "review",
+  "status": "doing",
   "repo": "shivinate7/claude-settings",
   "phase": "now",
   "owner": "triage",
   "blockedBy": [],
   "why": "Owner report, 09:43 CST Nov 17 (typed in triage 9 chat): item 929 showed \"This item has no number, so it cannot be answered. Ask the session to fix this item.\" Cause read by triage 9 at 09:43 CST: items 928 and 929 were written with n as text (\"929\"), and the page needs a number (page.html problem(), typeof it.n === number). Triage 9 wrote both. Data fixed at 09:44 CST (items 928 v2, 929 v9). The owner believes a draft PR with the fix exists: triage searched PRs by words at 09:44 CST and found none for this; unmeasured beyond that search.",
   "source": "Owner chat 09:43 CST Nov 17; triage 9 read of page.html and the item docs. Searched steps by words and PRs by search at 09:44 CST: no like step or PR found.",
-  "note": "Review done, CI rerunning. PR #3618 head f5c26236e. Round 1 FAIL (refusal did not name the item), fixed in 9811f9a7a, fix check PASS. CI then failed lint/test_rule_audit.py (guard.py:7719 not resolved: the audit cannot read a percent-format join); builder changed n_reason to n_lead, red then green, pushed f5c26236e; second fix check PASS (451 inputs, text identical, refused set unchanged). Guard or check: yes; net-value test not needed (verdict and refused set unchanged). Mistake: the first fix check did not run lint/test_rule_audit.py; the brief for any guard-refusal change should name it. Added note docs/notes/item-n-page-url-gate.md. Merge only after checks-guard, checks-mutate-guard and all-jobs-passed are green on f5c26236e, through the merge tool; then merge/install_from_main.sh. One-time check-in set for about 11:35 CST.",
-  "updatedAt": "2026-11-17T11:09:00-06:00",
+  "note": "Doing: replacement PR. #3618 (head f5c26236e) is red in job checks on one step, lint/check_red_run.py: commits 11bc492, 446e1c0 and fd95210 have no Red-run trailer (pushed commits cannot be amended; the check's remedy is a new branch and a replacement PR). Everything else on that run was green or still running (checks-guard, checks-mutate-guard, -c success). Review is done on this tree (round 1 FAIL fixed; two fix checks PASS). A builder is making branch item-n-must-be-number-2 from current main with trailers, opening a draft replacement PR; I then mark it ready, close #3618 and set pr. Mistakes: (1) first fix check skipped lint/test_rule_audit.py; (2) the first builder's red commits had no Red-run trailer. The builder brief for a test commit should name the trailer. Merge only on green, through the merge tool, then merge/install_from_main.sh. Added note docs/notes/item-n-page-url-gate.md.",
+  "updatedAt": "2026-11-17T11:36:00-06:00",
   "order": 243,
   "pr": 3618
 }
