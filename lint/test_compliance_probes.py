@@ -1637,18 +1637,24 @@ def minified_bundle(word, entries=6000, blobs=160, blob_size=125000):
 
 
 # The words group's cost is its CPU time, and a loaded host stretches wall time, not CPU time. So a case caps a child's
-# CPU seconds with the kernel's limit and reads what the limit did. BACKSTOP only ends a hang that burns no CPU.
+# CPU seconds with the kernel's limit and reads what the limit did. The limit is set on POSIX only (CI runs this suite
+# on ubuntu only); on Windows only the wall limit applies. The limit is per process: a grandchild, such as the git the
+# probe runs, has its own CPU_CAP, so the CPU of the whole tree is not capped. That is a known limit.
 CPU_CAP = 30  # seconds of CPU per child: the linear probe takes about 4 s, the quadratic one minutes
-BACKSTOP = 900  # wall seconds
+BACKSTOP = 900  # wall seconds, for a case that expects no stall
+# Wall seconds for the giant line. The CPU cap cannot see a stall that burns no CPU, so wall time must. A sleep of 5 ms
+# per name (12,000 names) takes 60 s or more, so the bound stays under 60 s. It stays far above the linear probe under
+# load, and below WORDS_DEADLINE, so the probe's own deadline never ends the run first.
+WALL_BOUND = 55
 
 
-def capped_run(argv):
-    """The child's CompletedProcess, or None when it reached BACKSTOP. On POSIX the kernel stops it past CPU_CAP
-    seconds of CPU (see killed_by_cap); on Windows only BACKSTOP applies."""
+def capped_run(argv, wall=BACKSTOP):
+    """The child's CompletedProcess, or None when it reached `wall` seconds. On POSIX the kernel stops it past CPU_CAP
+    seconds of CPU (see killed_by_cap); on Windows only `wall` applies."""
     def cap():
         resource.setrlimit(resource.RLIMIT_CPU, (CPU_CAP, CPU_CAP))
     try:
-        return subprocess.run(argv, capture_output=True, text=True, timeout=BACKSTOP, preexec_fn=cap if resource else None)
+        return subprocess.run(argv, capture_output=True, text=True, timeout=wall, preexec_fn=cap if resource else None)
     except subprocess.TimeoutExpired:
         return None
 
@@ -1668,17 +1674,17 @@ class WordsSpeed(unittest.TestCase):
     def test_a_giant_single_line_file_does_not_stall_the_probe(self):
         word = planted(one_word=True)
         repo = Repo(self).write("src/app.py", "def main():\n    return 1\n").write(self.REL, minified_bundle(word))
-        done = capped_run([sys.executable, PROBES, "words", repo.root])
+        done = capped_run([sys.executable, PROBES, "words", repo.root], wall=WALL_BOUND)
         if done is None:
-            self.fail("the words group neither finished nor reached its CPU cap on %s (a 20 MB line, 12,000 names)" % self.REL)
+            self.fail("the words group did not finish %s (a 20 MB line, 12,000 names) in %d s of wall time" % (self.REL, WALL_BOUND))
         if killed_by_cap(done.returncode):
             self.fail("the words group used more than %d s of CPU on %s (a 20 MB line, 12,000 names)" % (CPU_CAP, self.REL))
         out = done.stdout
         reported = (word, self.REL, "1") in hits(out)
-        stopped = done.returncode == 2 and head(out).startswith("words: unknown")
-        declared = any(self.REL in line for line in out.splitlines() if not ITEM.match(line))  # a note line such as `unread:`
-        # Reading the file, stopping with an unknown, or saying it was skipped: never "in shape" with the word unread.
-        self.assertTrue(reported or stopped or declared, "the file was skipped and the group read it as clear:\n" + out)
+        # A note line such as `unread:`. Never the head: a deadline stop writes the file's name there, and that is no pass.
+        declared = any(self.REL in line for line in out.splitlines()[1:] if not ITEM.match(line))
+        # Reading the file, or saying it was skipped: never "in shape" with the word unread, and never a stop.
+        self.assertTrue(reported or declared, "the words group neither reported the planted word nor declared %s skipped:\n%s" % (self.REL, out))
         if reported:
             self.assertEqual((done.returncode, head(out)), (1, "words: out"), out)
 
