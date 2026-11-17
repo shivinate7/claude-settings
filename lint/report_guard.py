@@ -743,9 +743,10 @@ def utc_time(text):
 
 # output-bring-decisions-as-question: a Deviations item that says "Contradiction:" or "picks neither" holds a
 # choice the owner must make, so Input Needed asks it: a sentence ending in "?" or a pick with options. The
-# match is the existence of that question, not its subject.
+# match is the existence of that question, not its subject. "Contradiction: resolved", "settled" or "none" and
+# "No contradiction:" claim no open choice, so they pass. "none of" still names a choice.
 CONTRADICTION_RE = re.compile(
-    r"\bcontradiction(?:\s*:|\s+(?:—|–|--?)(?=\s))(?!\s*(?:resolved|settled)\b)"
+    r"(?<!\bno )\bcontradiction(?:\s*:|\s+(?:—|–|--?)(?=\s))(?!\s*(?:resolved|settled|none(?!\s+of))\b)"
     r"|\b(?:pick|picks|picked|picking|choose|chooses|chose|chosen|choosing)\s+neither\b", re.I)
 
 
@@ -763,8 +764,8 @@ PLAIN_TIME_REASON = owner_line(
     "%r is a UTC time; the house form is US Central, 24-hour clock, with the zone CST or CDT")
 PLAIN_CONTRADICTION_REASON = owner_line(
     "Contradiction guard (rule output-bring-decisions-as-question)",
-    "Deviations says %r and Input Needed asks the owner no matching question; a choice the owner must make "
-    "goes to Input Needed as a question with options")
+    "Deviations says %r and Input Needed asks the owner no question: no sentence there ends in \"?\" and no "
+    "pick there offers options")
 
 
 def plain_form_reasons(text):
