@@ -4,10 +4,11 @@
 
 Question: where does a Stop refusal's remedy live when the owner sees the refusal in chat? Ruling: coordinator, 2026-11-07 12:26 CST, option 1a, answering owner ask `ask-mw6pwif5wv` (a past-ruling refusal that reached the owner).
 
-- Each refusal from `lint/report_guard.py` (the Stop hook that checks each reply) opens with one owner line: one plain sentence that names the check and cites this record, `guard-remedy-not-to-owner`.
+- Each refusal from `lint/report_guard.py` (the Stop hook that checks each reply) opens with one owner line, except a notes fix (R14; not built; step `notes-fix-no-owner-line`): one plain sentence that names the check and cites this record, `guard-remedy-not-to-owner`.
 - The steps live under that check's heading in `## Steps per check`.
 - No verdict changes. Only the text moves.
 - Scope: Stop refusals only. `hooks/question_form.py` keeps its own text, `DEPARTS_REASON` included. A Stop refusal shows only the miss that `departs_hit` names.
+- R14, the owner's ruling on notes fixes (2026-11-10 16:22 CST, "fixed my notes question: yes"): a Stop refusal about a session's own notes (feedback log, handoff) is fixed with no line to the owner, since the reply did not change. guard.log still records it. Not built yet. Step `notes-fix-no-owner-line` builds it. Its builder first confirms that a Stop can end with no text.
 
 ## Incident, risk and cost
 
@@ -64,7 +65,7 @@ Text: `ANSWERED_REASON`, rule `answered-needs-source` (a claim of "answered" nee
 
 ### Recovered guard (any reply whose report shape holds)
 
-Text: two inline facts in `recovered_problem`. The two line forms below live here only.
+Text: two inline facts in `recovered_problem`. The two line forms below live here only. The refusal states each form with its `none` variant. It adds that a label counts where it starts an item in the report blockquote, also after a bullet and a Done-item tag.
 
 - If a compaction came before this report, and the report has no carry line since, add the missing line under Deviations, inside the report's blockquote:
   - `Recovered: <each fact, with its source: git, page or digest>`, or `Recovered: none`.
@@ -129,7 +130,7 @@ Text: `HAND_OFF_NO_CITE`, `HAND_OFF_NO_DATE`, two inline forms, and `HAND_OFF_TA
 Text: `refusal_reason`. Decision `refusals-reach-the-owner` (a refused tool reaches the owner).
 
 - Add an Input Needed line "allow `<tool_name>`?" for each tool. Put the tool's name in place of `<tool_name>`.
-- Add a line in the repo's debt notes file (`notes.md`) that names the tool.
+- Add one file in the repo's notes folder (`docs/notes/` here) that names the tool.
 - Or, if the refusal was right, write "`<tool_name>`: refusal was right" on one line, with the tool's full name in place of the placeholder.
 - A built-in tool, such as Edit or Bash, goes in backticks. An MCP tool goes by its full name.
 
@@ -173,8 +174,8 @@ Text: inline, in the main check.
 
 ## Shared tails
 
-- Every refusal opens with the owner line from `owner_line()`, which cites this record, and ends with ` (rule reports-order-of-labels)`. That rule says the report's four labels go in order: Done, Deviations, Input Needed, Next. On the rewrite after a refusal, a triage hold alone has no tail.
-- Correction rule, no text in any refusal: after any refusal but a missing report, post only the corrected lines, as a short correction. Never send the report again. The owner has read the report before a refusal lands, so a resent report doubles it. A missing report asks for the report itself, and its reply carries every other fix too.
+- Every refusal, except a notes fix (R14; not built; step `notes-fix-no-owner-line`), opens with the owner line from `owner_line()`, which cites this record, and ends with ` (rule reports-order-of-labels)`. That rule says the report's four labels go in order: Done, Deviations, Input Needed, Next. On the rewrite after a refusal, a triage hold alone has no tail.
+- Correction rule, no text in any refusal: after any refusal but a missing report, post only the corrected lines, as a short correction, and post none for a fix to a session's own notes (not built; step `notes-fix-no-owner-line`; see the ruling). Never send the report again. The owner has read the report before a refusal lands, so a resent report doubles it. A missing report asks for the report itself, and its reply carries every other fix too.
 - The system message notes (`NO_PAGE_NOTE`, the hand-off guard's UNKNOWN lines and the route flags) and the stderr lines are not refusals. They never stop a reply, and they fall outside this record.
 
 Kind: process
