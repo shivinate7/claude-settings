@@ -2377,6 +2377,22 @@ def case_item_n_batch_and_file_path():
     verdict("file_path: a file whose n is a number passes", call("item_hit", "set", passed, folder), None)
 
 
+def case_item_n_posted_text_names_the_item():
+    # The text Claude sees is the printed reason, not the log line: in a batch it must say which write to fix.
+    def write(op, data, doc_id):
+        return {"op": op, "collection": "items", "doc_id": doc_id, "data": data}
+
+    bad = {"action": "batch", "url": PAGE_URL,
+           "writes": [write("set", with_n(n=928), "good-one"), write("set", with_n(n="929"), "bad-one"),
+                      write("update", {"title": "x"}, "fine-one")]}
+    said = printed_reason(bad)
+    check("batch: the posted n refusal names the bad item", "bad-one" in said, repr(said)[:300])
+    check("batch: the posted n refusal names no good item",
+          not re.search(r"good-one|fine-one", said), repr(said)[:300])
+    check("batch: the posted n refusal still carries the correction",
+          "number such as 929" in said, repr(said)[:300])
+
+
 def case_item_n_text_inside_other_text_is_not_judged():
     # Scanner-safe: the check reads the parsed n, never the text of the write. Text that looks like an n, and
     # comment openers and a lone quote, beside a real number are plain text.
@@ -3443,7 +3459,8 @@ def main():
                  case_five_real_forms_as_written, case_widens_reason_no_longer_leaves_recommended_out,
                  case_item_92, case_item_51_stray_field, case_item_n_text_is_refused,
                  case_item_n_other_non_numbers_are_refused, case_item_n_number_passes, case_item_n_absent,
-                 case_item_n_batch_and_file_path, case_item_n_text_inside_other_text_is_not_judged,
+                 case_item_n_batch_and_file_path, case_item_n_posted_text_names_the_item,
+                 case_item_n_text_inside_other_text_is_not_judged,
                  case_item_n_reason_and_the_pages_own_rule, case_session_update_naming_dismissed_is_refused,
                  case_dismissed_refused_on_every_route, case_dismissed_refused_without_a_readable_field_list,
                  case_dismissed_reason_keeps_the_generic_remedy_for_other_fields,
