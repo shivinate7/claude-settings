@@ -158,6 +158,7 @@ class FakeHost:
         self.changed, self.files_error = [("README.md", "modified", 0)], None  # changed: the (path, status, additions) triples pr_files reports; files_error: raised by pr_files instead
         self.changed_files = None  # the changed_files count pr reports; None is the length of changed. The count check is the real Host's, so this fake does not check it
         self.draft_rows, self.draft_reads = None, []  # draft_rows: {sha: check-run rows} a case scripts for the draft's touched-tests read; None reads a pass. draft_reads: each read path
+        self.named_checks = []  # (name, state, head) rows of the check runs a head holds, state a gh bucket (pass, fail, pending); check_state reads them
 
     def pr_files(self, n, changed=None):  # the (path, status, additions) triples of the pull request, as Host.pr_files reports them
         if self.files_error:
@@ -198,6 +199,10 @@ class FakeHost:
 
     def head_state(self, n, sha=None):  # the real Host.head_state takes the head's sha too
         return self.state
+
+    def check_state(self, n, sha, name):  # the fake of the per-check read: the state of check `name` on head `sha`, or None when that check has no row there
+        rows = [state for row_name, state, head in self.named_checks if row_name == name and head == sha]
+        return rows[-1] if rows else None
 
     def holds_head(self, head, other):  # no base holds a head this fake reads: a record's head is a past head only where a case says so
         return False
@@ -12104,10 +12109,12 @@ class MainRunsHost(FakeHost, merge.Host):
     `runs_fail` / `jobs_fail`: that read fails with this text. `jobs_fail_of`: run id -> the text its jobs read fails with.
     `texts`: head sha -> the workflow file's text on that head (a head not in it reads as NO_IF_WORKFLOW). `text_fail`: every file read fails with this text.
     `pulls`: {number: REST row} of the pull requests the page holds (None: the own one only). `heads`: head sha -> the checks state head_state reads for it.
-    `changed`: the (path, status, additions) triples of the own pull request's diff (pr_files reads them); None keeps FakeHost's README.md."""
+    `changed`: the (path, status, additions) triples of the own pull request's diff (pr_files reads them); None keeps FakeHost's README.md.
+    `named_checks`: the (name, state, head) rows check_state reads. `job_logs`: job id -> the text `actions/jobs/N/logs` returns; a job with none is a 404."""
     base_state = getattr(merge.Host, "base_state", None)
 
-    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None, jobs_fail_of=None, texts=None, text_fail=None, pulls=None, heads=None, changed=None):
+    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None, jobs_fail_of=None, texts=None, text_fail=None, pulls=None, heads=None, changed=None,
+                 named_checks=None, job_logs=None):
         FakeHost.__init__(self, root, other)
         self.ignore, self.cwd, self.warned = {}, root, set()
         self.main_runs, self.jobs, self.runs_fail, self.jobs_fail, self.reads = main_runs, jobs, runs_fail, jobs_fail, []
@@ -12116,6 +12123,7 @@ class MainRunsHost(FakeHost, merge.Host):
         self.pulls, self.head_states = pulls, heads or {}
         if changed is not None:
             self.changed = list(changed)
+        self.named_checks, self.job_logs = list(named_checks or []), dict(job_logs or {})
 
     def file_at_head(self, rel, extra, fields):
         """`contents/<path>` read at a head: the ref is a field or a query. Raw when the Accept header asks for raw, else the JSON reply with base64 content."""
@@ -12132,6 +12140,9 @@ class MainRunsHost(FakeHost, merge.Host):
         self.reads.append(rel)
         if rel.startswith("contents/"):
             return self.file_at_head(rel, extra, fields or {})
+        m = re.fullmatch(r"actions/jobs/(\d+)/logs", rel)
+        if m:  # a job's log text; a job with no log scripted is a 404, which the reader takes as unknown
+            return (0, self.job_logs[int(m.group(1))]) if int(m.group(1)) in self.job_logs else (1, "HTTP 404: Not Found")
         assert (rel, method, fields.get("branch")) == ("actions/runs", "GET", "main"), (rel, fields)
         if self.runs_fail:
             return 1, self.runs_fail
@@ -13363,13 +13374,16 @@ class RedMainBrake(Env):
 
     # A fix that touches the blamed paths also merges onto a red main, when its own head is green (decision no-merge-onto-red-main, no batch merges
     # onto a red main). The blamed paths are the paths the breaking merge changed: lane 2650's merge changes lane-2650.txt alone.
-    def fix_on_feat(self, subject, name):
-        """One lane commit that changes `name` alone, on a fresh feat cut from origin/main, so the diff is the fix alone and the head holds the breaking
-        merge. The push is forced, as reland_after_revert does for its fresh branch. -> feat's head."""
+    def fix_on_feat(self, subject, name, start="origin/main"):
+        """One lane commit that appends `subject` as a line to `name`, on a fresh feat cut from `start`, so the diff is the fix alone. An append keeps the
+        lines the breaking merge wrote, so the silent-undo check reads no undo. The push is forced, as reland_after_revert does for its fresh branch. -> feat's head."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
-        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/main")
-        put(os.path.join(o, name), f"{subject}\n")
+        sh(o, "git", "checkout", "-q", "-B", "feat", start)
+        path = os.path.join(o, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a") as f:
+            f.write(f"{subject}\n")
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", subject); sh(o, "git", "push", "-q", "-f", "origin", "feat")
         return sh(o, "git", "rev-parse", "HEAD")
 
@@ -13427,6 +13441,65 @@ class RedMainBrake(Env):
         self.assertIn(f"This reverts commit {B}", sh(self.co, "git", "log", "-1", "--format=%B", "origin/feat"), "scope: the head is not the revert of the breaking merge")
         rc, out, _ = self.go(runs, jobs, "--base-red-ok", "revert of the breaking merge", changed=[("lane-2650.txt", "removed", 0)])
         self.merged(rc, out)
+
+    # A fix to the failing test file merges onto a red main when its own check is green on its head (owner ruling 2026-11-17 09:20 CST, decision
+    # no-merge-onto-red-main). The red job's log names the failing test. The breaking merge changes lane-2650.txt alone, so the test file is no blamed
+    # path, and only the log read and the per-check read can admit this fix.
+    FLAKY_FILE = "tests/test_flaky.py"
+    FLAKY_JOB = 9903  # the id of the breaking run's red job; its log is served by that id
+    FLAKY_LOG = "FAILED tests/test_flaky.py::FlakyTest::test_once - AssertionError: 1 != 0\n"
+
+    def red_main_with_flaky_test(self):
+        """The breaking merge's red run, as red_main_with_breaking_merge leaves it. The flaky test file is on main before the breaking merge, so the merge
+        does not change it, and the red job's log names a failing test in it. -> (B, runs, jobs, job_logs) as `go` takes them."""
+        self.commit_on_main("Add the flaky test", self.FLAKY_FILE)
+        B, runs, jobs = self.red_main_with_breaking_merge()
+        jobs = {**jobs, 903: [main_job("scope", "success"), {**main_job("checks", "failure", 20), "id": self.FLAKY_JOB}]}  # 903: breaking_page's red run
+        return B, runs, jobs, {self.FLAKY_JOB: self.FLAKY_LOG}
+
+    def test_a_fix_to_the_failing_test_file_merges_onto_a_red_main_when_its_own_check_is_green(self):
+        B, runs, jobs, logs = self.red_main_with_flaky_test()
+        head = self.fix_on_feat("Fix the flaky test", self.FLAKY_FILE)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "diff", "--name-only", f"{B}^1", B), "lane-2650.txt", "scope: the breaking merge does not change lane-2650.txt alone")
+        self.assertEqual(sh(self.co, "git", "diff", "--name-only", "origin/main", "origin/feat"), self.FLAKY_FILE, "scope: the fix does not change only the failing test file")
+        rc, out, _ = self.go(runs, jobs, job_logs=logs, named_checks=[("checks", "pass", head)], changed=[(self.FLAKY_FILE, "modified", 1)])
+        self.assertEqual(rc, 0, "a fix to the failing test file, with its own check green on its head, is refused on a red main:\n" + out)
+        self.merged(rc, out)
+
+    def test_a_fix_to_the_failing_test_file_whose_check_never_ran_on_its_head_stays_refused_on_a_red_main(self):
+        _, runs, jobs, logs = self.red_main_with_flaky_test()
+        head = self.fix_on_feat("Fix the flaky test", self.FLAKY_FILE)
+        # the head's overall read is green (the fake's default), and only the named check has no row on the head
+        rc, out, before = self.go(runs, jobs, job_logs=logs, named_checks=[("scope", "pass", head)], changed=[(self.FLAKY_FILE, "modified", 1)])
+        self.assertIsNone(self.host.check_state(7, head, "checks"), "scope: the fixture gives the failing check a row on the head")
+        self.refused_by_red_main(rc, out, before)
+
+    def test_a_fix_by_a_blamed_path_whose_head_lacks_mains_red_tip_stays_refused_on_a_red_main(self):
+        B, runs, jobs = self.red_main_with_breaking_merge()
+        self.fix_on_feat("Fix lane 2650", "lane-2650.txt", start=f"{B}^1")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertNotIn(B, sh(self.co, "git", "rev-list", "origin/feat").split(), "scope: the head holds main's red tip")
+        rc, out, before = self.go(runs, jobs, changed=[("lane-2650.txt", "modified", 1)])
+        self.refused_by_red_main(rc, out, before)
+
+    def test_a_fix_to_the_failing_test_file_whose_head_lacks_mains_red_tip_stays_refused_on_a_red_main(self):
+        B, runs, jobs, logs = self.red_main_with_flaky_test()
+        head = self.fix_on_feat("Fix the flaky test", self.FLAKY_FILE, start=f"{B}^1")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertNotIn(B, sh(self.co, "git", "rev-list", "origin/feat").split(), "scope: the head holds main's red tip")
+        rc, out, before = self.go(runs, jobs, job_logs=logs, named_checks=[("checks", "pass", head)], changed=[(self.FLAKY_FILE, "modified", 1)])
+        self.refused_by_red_main(rc, out, before)
+
+    def test_the_preview_of_a_fix_to_the_failing_test_file_names_that_file_as_its_route(self):
+        _, runs, jobs, logs = self.red_main_with_flaky_test()
+        head = self.fix_on_feat("Fix the flaky test", self.FLAKY_FILE)
+        _rc, out, _ = self.go(runs, jobs, confirm=False, job_logs=logs, named_checks=[("checks", "pass", head)], changed=[(self.FLAKY_FILE, "modified", 1)])
+        self.assertFalse(getattr(self.host, "merged", False), "a preview merged the pull request:\n" + out)
+        line = printed(out, "main run:")
+        self.assertTrue(line, "the preview prints no main run line:\n" + out)
+        self.assertIn(self.FLAKY_FILE, line, "the preview's main run line does not name the failing test file that the fix route reads: " + line)
+        self.assertNotIn("--base-red-ok", line, "the preview asks for a reason flag on a fix that merges with none: " + line)
 
     def test_a_revert_merged_with_its_tree_proven_lifts_a_red_main(self):
         # class 1: the revert of the breaking merge is on main, its tree is the revert's and its checks are green: the red main lifts, with no flag
