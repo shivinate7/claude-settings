@@ -14,11 +14,17 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import unittest
 from unittest import mock
+
+try:
+    import resource  # POSIX only: the kernel's CPU limit for a child process (capped_run)
+except ImportError:  # Windows has no resource module: capped_run then keeps only its backstop
+    resource = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROBES = os.path.abspath(os.environ.get("PROBES_UNDER_TEST") or os.path.join(HERE, "compliance_probes.py"))
@@ -1630,21 +1636,43 @@ def minified_bundle(word, entries=6000, blobs=160, blob_size=125000):
     return '{"boxes":[%s],"blobs":[%s],"%s_note":1}' % (entry, ",".join([blob] * blobs), word)
 
 
+# The words group's cost is its CPU time, and a loaded host stretches wall time, not CPU time. So a case caps a child's
+# CPU seconds with the kernel's limit and reads what the limit did. BACKSTOP only ends a hang that burns no CPU.
+CPU_CAP = 30  # seconds of CPU per child: the linear probe takes about 4 s, the quadratic one minutes
+BACKSTOP = 900  # wall seconds
+
+
+def capped_run(argv):
+    """The child's CompletedProcess, or None when it reached BACKSTOP. On POSIX the kernel stops it past CPU_CAP
+    seconds of CPU (see killed_by_cap); on Windows only BACKSTOP applies."""
+    def cap():
+        resource.setrlimit(resource.RLIMIT_CPU, (CPU_CAP, CPU_CAP))
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, timeout=BACKSTOP, preexec_fn=cap if resource else None)
+    except subprocess.TimeoutExpired:
+        return None
+
+
+def killed_by_cap(returncode):
+    """True when the kernel stopped the child at its CPU limit: SIGXCPU, or SIGKILL at the hard limit."""
+    return resource is not None and returncode in (-signal.SIGXCPU, -signal.SIGKILL)
+
+
 class WordsSpeed(unittest.TestCase):
     """The words group on a repo that holds one giant single-line data file, as banchi holds three of 36 to 42 MB under
     demo-assets/mirror/bundle/. check_glossary.code_problems checks the opt-out marker in its `hit()` for every name,
     and scans the whole line each time, so a one-line file costs its length times its names: minutes with no output."""
 
-    BOUND = 30  # seconds, generous: the fixture takes minutes on the quadratic scan and a few seconds once it is linear
     REL = "data/bundle.json"
 
     def test_a_giant_single_line_file_does_not_stall_the_probe(self):
         word = planted(one_word=True)
         repo = Repo(self).write("src/app.py", "def main():\n    return 1\n").write(self.REL, minified_bundle(word))
-        try:
-            done = subprocess.run([sys.executable, PROBES, "words", repo.root], capture_output=True, text=True, timeout=self.BOUND)
-        except subprocess.TimeoutExpired:
-            self.fail("the words group did not finish %s (a 20 MB line, 12,000 names) in %d s" % (self.REL, self.BOUND))
+        done = capped_run([sys.executable, PROBES, "words", repo.root])
+        if done is None:
+            self.fail("the words group neither finished nor reached its CPU cap on %s (a 20 MB line, 12,000 names)" % self.REL)
+        if killed_by_cap(done.returncode):
+            self.fail("the words group used more than %d s of CPU on %s (a 20 MB line, 12,000 names)" % (CPU_CAP, self.REL))
         out = done.stdout
         reported = (word, self.REL, "1") in hits(out)
         stopped = done.returncode == 2 and head(out).startswith("words: unknown")
@@ -1677,19 +1705,26 @@ class WordsSpeed(unittest.TestCase):
     def test_a_deadline_also_stops_the_probe_inside_one_giant_file(self):
         # Banchi's chunks hold about 100 times the names per byte of the fixture above, so a probe that fixes the line scan and
         # checks its deadline only between files still runs minutes inside one file. The stop must come from inside it.
+        # The child's clock moves 0.01 s per read, so the 0.5 s deadline passes after about 50 names on any host.
         repo = Repo(self).write("src/app.py", "def main():\n    return 1\n").write(self.REL, minified_bundle(planted(one_word=True)))
-        script = ("import importlib.util, sys\n"
+        script = ("import importlib.util, sys, types\n"
                   "spec = importlib.util.spec_from_file_location('probes_in_child', %r)\n"
                   "probes = importlib.util.module_from_spec(spec)\n"
                   "spec.loader.exec_module(probes)\n"
+                  "reads = [0]\n"
+                  "def monotonic():\n"
+                  "    reads[0] += 1\n"
+                  "    return reads[0] / 100\n"
+                  "probes.time = types.SimpleNamespace(monotonic=monotonic)\n"
                   "probes.WORDS_DEADLINE = 0.5\n"
                   "sys.exit(probes.main(['words', %r]))\n") % (PROBES, repo.root)
-        try:
-            done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=20)
-        except subprocess.TimeoutExpired:
-            self.fail("a deadline of 0.5 s did not stop the words group inside %s within 20 s" % self.REL)
-        self.assertEqual(done.returncode, 2, done.stdout)
-        self.assertRegex(head(done.stdout), r"^words: unknown - stopped at %s, \d+ of 2 read$" % re.escape(self.REL))
+        done = capped_run([sys.executable, "-c", script])
+        if done is None:
+            self.fail("the words group neither stopped at its deadline nor reached its CPU cap on %s" % self.REL)
+        if killed_by_cap(done.returncode):
+            self.fail("the words group used more than %d s of CPU, and its deadline did not stop it inside %s" % (CPU_CAP, self.REL))
+        self.assertEqual(done.returncode, 2, "the deadline did not end the words group with an unknown:\n" + done.stdout)
+        self.assertRegex(head(done.stdout), r"^words: unknown - stopped at %s, \d+ of 2 read$" % re.escape(self.REL), done.stdout)
 
     def test_the_default_deadline_leaves_a_normal_repo_alone(self):
         code, out = Repo(self).write("src/a.py", "def f():\n    return 1\n").run("words")
