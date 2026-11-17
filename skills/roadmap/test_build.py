@@ -4082,21 +4082,21 @@ class IdleLanes(UpkeepFixture):
     JOINT = "joint (close #%d; archive archive/%s; archive lane %s)"
 
     def lane(self, sid, step, bucket=BUCKET_COMPLETED, status="SESSION_STATUS_IDLE", idle_since=_ABSENT,
-             unarchived=_ABSENT):
-        """A sessions row for a lane of this repo that names `step`, with its get_session bucket. idle_since and
-        unarchived (the row's unarchived_epoch) are left out unless given."""
-        row = session_row(sid, status, "cs-build:lane", "cs-step:" + step, self.REPO, status_bucket=bucket)
+             unarchived=_ABSENT, tags=()):
+        """A sessions row for a lane of this repo that names `step`, with its get_session bucket and any extra tags.
+        idle_since and unarchived (the row's unarchived_epoch) are left out unless given."""
+        row = session_row(sid, status, "cs-build:lane", "cs-step:" + step, self.REPO, *tags, status_bucket=bucket)
         if idle_since is not _ABSENT:
             row["idle_since"] = idle_since
         if unarchived is not _ABSENT:
             row["unarchived_epoch"] = unarchived
         return row
 
-    def idle_lane(self, sid, step, idle_since=None, unarchived=0):
+    def idle_lane(self, sid, step, idle_since=None, unarchived=0, tags=()):
         """A completed lane on `step` idle 13 h at the live read, with no unarchived commit, unless the case gives
-        idle_since (_ABSENT leaves it out) or unarchived."""
+        idle_since (_ABSENT leaves it out), unarchived or extra tags."""
         since = self.created_before(13 * 60) if idle_since is None else idle_since
-        return self.lane(sid, step, idle_since=since, unarchived=unarchived)
+        return self.lane(sid, step, idle_since=since, unarchived=unarchived, tags=tags)
 
     def stale_pull(self, number, branch, title=None, hours=13, **fields):
         """An open draft pull on `branch`, created `hours` before the live read, with its head off main (the record
@@ -4135,6 +4135,15 @@ class IdleLanes(UpkeepFixture):
             self.write_step(sid, dict(STEP, **fields))
         git(self.repo, "add", "-A")
         git(self.repo, "commit", "-q", "-m", "steps " + ", ".join(sorted(steps)))
+
+    def commit_handoff(self, slug):
+        """The lane's handoff file on the record branch, at the path the archive-ready check reads. Leaves HEAD on roadmap."""
+        git(self.repo, "checkout", "-q", "roadmap")
+        path = self.repo / (build.IDLE_HANDOFF % slug)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# %s\n" % slug, encoding="utf-8")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "handoff " + slug)
 
     def trailer_on_main(self, sid):
         """A commit on main whose last paragraph is `Step: <sid>`, so the step reads as merged there. Leaves HEAD on
@@ -4684,6 +4693,62 @@ class IdleLanes(UpkeepFixture):
                          "the completed lane on the landed step is listed beside the done one: %r" % (entries,))
         self.assertEqual(self.ids(build.idle_lanes_report(self.repo, str(self.live))), ["session_a", "session_b"],
                          "the merge tool's read lists the same lanes")
+
+    def test_page_row_carries_hold_for_a_tagged_lane_whose_handoff_is_not_on_the_record_branch(self):
+        # The untagged lane is the control: its entry reads as it does today. The tagged lane's handoff is not on the
+        # record branch, so its entry carries the HOLD flag that merge --idle-lanes prints.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_t", "c1", tags=("cs-archive-ready:alpha",)),
+                               self.lane("session_u", "c2")])
+        _, entries = self.archive()
+        self.assertEqual(self.ids(entries), ["session_t", "session_u"], entries)
+        self.assertIn("session_u (c2; topic -)", entries)
+        held = [entry for entry in entries if entry.startswith("session_t ")]
+        self.assertEqual(len(held), 1, entries)
+        self.assertIn("HOLD: handoff alpha is not on the record branch", held[0])
+
+    JOINT_PAIR = {"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}}
+
+    def publish_joint_pair(self, tag):
+        """session_t on c1 carrying `tag`, and the untagged control session_u on c2, each held only by a stale draft.
+        A case lands JOINT_PAIR first."""
+        self.publish(sessions=[self.idle_lane("session_t", "c1", tags=(tag,)), self.idle_lane("session_u", "c2")],
+                     pulls=[self.stale_pull(101, "lane/c1"), self.stale_pull(102, "lane/c2")])
+
+    def test_joint_lane_tagged_archive_ready_with_no_handoff_on_the_record_branch_is_held(self):
+        # The control joint line reads as it does with no tag. The tagged lane's joint line takes the same HOLD flag a
+        # plain lane's entry takes when its handoff is not on the record branch.
+        self.land(self.JOINT_PAIR)
+        self.publish_joint_pair("cs-archive-ready:alpha")
+        self.assertEqual(self.reported(), sorted([
+            self.JOINT % (101, "lane/c1", "session_t") + " HOLD: handoff alpha is not on the record branch",
+            self.JOINT % (102, "lane/c2", "session_u")]),
+            "a joint lane tagged cs-archive-ready with no handoff on the record branch lost its HOLD flag")
+
+    def test_joint_lane_tagged_archive_ready_with_its_handoff_on_the_record_branch_keeps_the_plain_joint_line(self):
+        # The handoff is on the record branch, so the check passes and the joint line reads as it does with no tag.
+        self.land(self.JOINT_PAIR)
+        self.commit_handoff("alpha")
+        listed = subprocess.run(["git", "-C", str(self.repo), "ls-tree", "-r", "--name-only", "roadmap"],
+                                capture_output=True, text=True).stdout.splitlines()
+        self.assertIn(build.IDLE_HANDOFF % "alpha", listed, "scope: the handoff is not on the record branch")
+        self.publish_joint_pair("cs-archive-ready:alpha")
+        self.assertEqual(self.reported(), sorted([
+            self.JOINT % (101, "lane/c1", "session_t"),
+            self.JOINT % (102, "lane/c2", "session_u")]),
+            "a joint lane whose handoff is on the record branch did not keep the plain joint line")
+
+    def test_joint_lane_tagged_archive_ready_with_a_bad_slug_reads_unknown_not_joint(self):
+        # Each slug is one a plain lane reads unknown: empty, a `/`, `..`, a line break. Each reads session_t unknown,
+        # not its joint line; the untagged control joint line still prints.
+        self.land(self.JOINT_PAIR)
+        for slug in ("", "a/b", "..", "a\nb"):
+            with self.subTest(slug=slug):
+                self.publish_joint_pair("cs-archive-ready:" + slug)
+                self.assertEqual(self.reported(), sorted([
+                    "unknown (archive slug %r is not a plain name; lane session_t)" % slug,
+                    self.JOINT % (102, "lane/c2", "session_u")]),
+                    "a joint lane tagged cs-archive-ready with slug %r printed its joint line, not unknown" % slug)
 
     def test_completed_lane_with_a_doing_step_under_it_is_held_not_archived(self):
         # c1 is the lane's own step, landed. c2 is still doing and names this lane, so nothing else owns it: the lane reads
