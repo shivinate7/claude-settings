@@ -5148,10 +5148,36 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
             with self.subTest(line=line):
                 self.assert_allowed(line)
 
+    def test_an_red_duly_before_the_answered_verb_passes(self):
+        # Red on the adverb list: "duly" has two letters before "ly", and the -ly pattern needs three, so "duly" is no
+        # adverb. A first-person act with "duly" before the verb then reads as an owner claim.
+        # Catches: "duly" after "I" drops the first-person act, so Claude's own answer is refused.
+        self.assert_allowed("I duly answered it.")
+
+    def test_an_red_joint_subject_with_and_i_or_we_blocks(self):
+        # Red on the joint subject: a person word, then "and I" or "and we", reads as the writer's own act, so an unsourced
+        # owner answer passes. The first-person act checks the object and the words after the verb for a person, never the
+        # words before the writer. The reason must name the check, so a block from another guard cannot satisfy a row.
+        rows = [
+            # Catches: "Shivam and I still" passes as the writer's own act, with "still" read as the adverb.
+            "Shivam and I still answered the questions.",
+            # Catches: "Shivam and I" passes as the writer's own act, with a page item as the object.
+            "Shivam and I answered the page items.",
+            # Catches: "The owner and I" passes as the writer's own act, with a count before the object noun.
+            "The owner and I answered the four questions.",
+            # Catches: "The owner and we ourselves" passes as the writer's own act, with "we ourselves" read as the writer.
+            "The owner and we ourselves answered the items.",
+            # Catches: "Shivam and I myself" passes as the writer's own act, with "I myself" read as the writer.
+            "Shivam and I myself answered the questions.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line, "answered-needs-source")
+
     # Green: these pass before the verdict exists too. Each guards against a false alarm.
 
     def test_an_green_first_person_answer_passes_beside_the_red_rows(self):
-        # Control for the two red tests above, green on the same commit. A whole-word writer with "and", a listed adverb
+        # Control for the red tests above, green on the same commit. A whole-word writer with "and", a listed adverb
         # and an -ly adverb still pass, so a fix that drops one of those paths goes red here, not only in the red rows.
         rows = [
             # Catches: a whole-word "We" before "and" stops passing when the writer's word boundary is checked.
