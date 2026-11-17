@@ -4212,6 +4212,23 @@ def case_notes_folder_absent_still_reads_the_old_notes_file():
           candidate_ref_of(prompt, OLD_NOTE_PHRASE) == NOTE_REF, prompt[-300:])
 
 
+def case_task_homes_drop_the_frozen_notes_file_and_keep_the_notes_folder():
+    """One file per note (decision notes-merge-union): the frozen notes file is no home for a task. Scope first: the
+    frozen file is on disk, so the home read has it to drop. Controls: the notes folder is still a task home, and a
+    notes-folder file still reads as `note:<slug>` in the backlog."""
+    import layout  # lint/layout.py, the one home of where each kind lives
+    root = backlog_repo("task-homes-frozen-notes", notes=[(NOTE_FILE_SLUG, NOTE_FILE_TEXT)])
+    frozen = "docs/debts/notes.md"
+    check("task homes scope: the frozen notes file is on disk", os.path.isfile(os.path.join(root, *frozen.split("/"))),
+          root)
+    mod = guard_module()
+    homes = mod.kind_homes(layout, root, "task")
+    check("task homes: the frozen notes file is no task home", frozen not in homes, homes)
+    check("task homes control: the notes folder is still a task home", "docs/notes" in homes, homes)
+    refs = [ref for ref, label, text in mod.backlog_candidates(root)]
+    check("task homes control: a notes-folder file still reads as note:<slug>", NOTE_FILE_REF in refs, refs)
+
+
 def case_one_shot_grant_passes_with_its_home_and_blocks_without_one():
     """A one-shot approval ("go ahead and merge PR 12") is a grant. A note homed to `once:<act>` passes it.
     The same words with no home still block (debt one-shot-grant-label)."""
@@ -4945,6 +4962,7 @@ CASES = (
     case_repeat_note_file_is_a_backlog_candidate_under_its_own_ref,
     case_repeat_note_file_is_never_a_candidate_for_its_own_item,
     case_notes_folder_absent_still_reads_the_old_notes_file,
+    case_task_homes_drop_the_frozen_notes_file_and_keep_the_notes_folder,
     case_one_shot_grant_passes_with_its_home_and_blocks_without_one,
     case_guard_ruling_home_is_judged_in_the_repo_the_session_worked_in,
     case_step_path_is_derived_from_override_step_dir,
