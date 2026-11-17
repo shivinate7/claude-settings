@@ -26,6 +26,7 @@ import hashlib
 import io
 import json
 import os
+import shlex
 import shutil
 import signal
 import socket
@@ -622,7 +623,7 @@ class TempSweepTests(unittest.TestCase):
             temp_set_age(folder, folder_hours)
         return folder
 
-    def run_step(self, *flags, temp=None):
+    def run_step(self, *flags, temp=None, count_ps=False):
         env = dict(os.environ)
         # TMPDIR is the fixture: the POSIX root is read from it, so no case reaches the real /tmp/claude-<uid>.
         env.update(LOCALAPPDATA=self.localappdata, TEMP=os.path.join(self.localappdata, "Temp"),
@@ -630,8 +631,30 @@ class TempSweepTests(unittest.TestCase):
                    USERPROFILE=self.home, CLAUDE_CONFIG_DIR=self.cfg, TMPDIR=self.tmpdir)
         if temp is not None:
             env.update(TEMP=temp, TMP=temp)
+        if count_ps:
+            env["PATH"] = os.pathsep.join(filter(None, [self.ps_shim(), env.get("PATH")]))
         return subprocess.run([sys.executable, TEMP_SWEEP_PATH, *flags], cwd=self.base, env=env,
                               capture_output=True, text=True, timeout=60)
+
+    def ps_shim(self):
+        """A folder with a `ps` that logs each call's argv to self.ps_log, then runs the real `ps`. Prepended to PATH, it counts the
+        `ps` process starts the step makes. Returns the folder."""
+        folder = os.path.join(self.base, "ps-shim")
+        self.ps_log = os.path.join(self.base, "ps-calls.log")
+        real = shutil.which("ps")
+        run_real = 'exec %s "$@"' % shlex.quote(real) if real else "exit 1"
+        script = os.path.join(folder, "ps")
+        write(script, "#!/bin/sh\nprintf '%%s\\n' \"$*\" >> %s\n%s\n" % (shlex.quote(self.ps_log), run_real))
+        os.chmod(script, 0o755)
+        return folder
+
+    def ps_lstart_calls(self):
+        """The `ps -o lstart=` calls the step started. Each one is the liveness read of a session record."""
+        try:
+            with open(self.ps_log, encoding="utf-8") as handle:
+                return [line for line in handle if "lstart" in line]
+        except FileNotFoundError:
+            return []
 
     def check_removed(self, folder, reason, proc):
         self.assertFalse(os.path.exists(folder),
@@ -829,6 +852,107 @@ class TempSweepTests(unittest.TestCase):
         self.check_kept(kept, "TEMP is set: LOCALAPPDATA\\Temp\\claude is not the root, so it must be "
                               "kept", proc)
         self.check_exit(proc)
+
+
+    def write_three_session_records(self):
+        """Three session records: this test process (live) and two whose processes have ended (dead)."""
+        self.write_session_record(temp_session_id(41), os.getpid(), this_process_start_ms())
+        self.write_session_record(temp_session_id(42), temp_dead_pid(), 0)
+        self.write_session_record(temp_session_id(43), temp_dead_pid(), 0)
+
+    # A session record's liveness read starts one `ps` on POSIX. The zero case has no idle folder, so the step has no session to judge
+    # and must start no `ps`. The candidate case is the green control beside it: it removes its idle folder and starts at most one `ps`
+    # per record.
+    @unittest.skipUnless(hasattr(os, "getuid"), "the liveness read starts `ps` on POSIX only")
+    def test_no_idle_folder_starts_no_ps_for_the_session_records(self):
+        fresh = self.make_session(temp_session_id(40), transcript_hours=TEMP_FRESH_HOURS)
+        self.write_three_session_records()
+        shim = self.ps_shim()
+        self.assertEqual(shutil.which("ps", path=os.pathsep.join([shim, os.environ.get("PATH", "")])),
+                         os.path.join(shim, "ps"), "scope: the shim must be the `ps` a child process finds first")
+        proc = self.run_step("--confirm", count_ps=True)
+        self.check_exit(proc)
+        self.check_kept(fresh, "a session whose transcript changed 1 hour ago must be kept", proc)
+        calls = self.ps_lstart_calls()
+        self.assertEqual(calls, [], "with no idle folder the step must start no `ps` for the session records; "
+                                    "it started %d: %r" % (len(calls), calls))
+
+    @unittest.skipUnless(hasattr(os, "getuid"), "the liveness read starts `ps` on POSIX only")
+    def test_one_idle_candidate_starts_at_most_one_ps_per_session_record(self):
+        idle = self.make_session(temp_session_id(44), transcript_hours=TEMP_IDLE_HOURS,
+                                 folder_hours=TEMP_IDLE_HOURS)
+        self.write_three_session_records()
+        self.assertTrue(os.path.isdir(idle), "scope: the idle session folder must exist before the step runs")
+        proc = self.run_step("--confirm", count_ps=True)
+        self.check_removed(idle, "positive control: an idle 25-hour session must be removed in this run", proc)
+        self.check_exit(proc)
+        calls = self.ps_lstart_calls()
+        self.assertLessEqual(len(calls), 3, "with one idle candidate the step may start at most one `ps` per "
+                                            "session record (3 records); it started %d: %r" % (len(calls), calls))
+
+
+# ------------------------------------------------ the POSIX scratch root, read from $TMPDIR and from the fixed /tmp
+#
+# Claude Code keeps its POSIX session scratch at `<base>/claude-<uid>`. The step reads `<base>` from $TMPDIR. On a Mac the same
+# scratch also lives at `/tmp/claude-<uid>`, which $TMPDIR does not reach. The fixed base is the module attribute
+# `temp_sweep.FIXED_TMP_DIR`, which the builder adds. These cases patch it to a fixture, so no case reaches the real /tmp. The walk runs
+# in-process, and each case reads only the session ids it yields. Nothing is removed.
+
+@unittest.skipUnless(hasattr(os, "getuid"), "the POSIX claude root exists only where os.getuid does")
+class ScratchRootsTests(unittest.TestCase):
+    def setUp(self):
+        self.base = tempfile.mkdtemp(dir=_test_temp.run_folder(), prefix="scratch_roots_")
+        self.addCleanup(shutil.rmtree, self.base, True)
+        self.cfg = os.path.join(self.base, "cfg")
+        self.tmpdir = os.path.join(self.base, "tmp")  # $TMPDIR
+        self.fixed = os.path.join(self.base, "fixed-tmp")  # stands in for /tmp
+        self.temp = os.path.join(self.base, "Temp")
+        for folder in (self.cfg, self.tmpdir, self.fixed, self.temp):
+            os.makedirs(folder)
+        uid = "claude-%d" % os.getuid()
+        self.tmp_root = os.path.join(self.tmpdir, uid)
+        self.fixed_root = os.path.join(self.fixed, uid)
+        env = {"TMPDIR": self.tmpdir, "TEMP": self.temp, "TMP": self.temp, "LOCALAPPDATA": self.base,
+               "CLAUDE_CONFIG_DIR": self.cfg}
+        patches = (mock.patch.dict(os.environ, env),
+                   mock.patch.object(tempfile, "tempdir", self.tmpdir),
+                   mock.patch.object(sweep.temp_sweep, "FIXED_TMP_DIR", self.fixed, create=True))
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def make_idle(self, root, session):
+        """A session folder under ROOT whose transcript is idle 25 hours, so the walk yields it."""
+        folder = os.path.join(root, TEMP_SWEEP_PROJECT, session)
+        write(os.path.join(folder, "nested", "scratch.txt"), "temp")
+        transcript = os.path.join(self.cfg, "projects", TEMP_SWEEP_PROJECT, session + ".jsonl")
+        write(transcript, '{"type": "user"}\n')
+        temp_set_age(transcript, TEMP_IDLE_HOURS)
+        return folder
+
+    def found_ids(self):
+        """The session ids the walk yields, and the errors it reports."""
+        errors = []
+        found = {session for session, _folder in sweep.temp_sweep.idle_sessions(errors)}
+        return found, errors
+
+    def test_an_idle_folder_under_tmpdir_is_found(self):
+        folder = self.make_idle(self.tmp_root, temp_session_id(50))
+        self.assertTrue(os.path.isdir(folder), "scope: the $TMPDIR session folder must exist before the walk")
+        found, errors = self.found_ids()
+        self.assertIn(temp_session_id(50), found,
+                      "positive control: an idle folder under $TMPDIR/claude-<uid> must be found; errors: %r" % errors)
+
+    def test_an_idle_folder_under_the_fixed_tmp_base_is_found(self):
+        self.make_idle(self.tmp_root, temp_session_id(51))
+        folder = self.make_idle(self.fixed_root, temp_session_id(52))
+        self.assertTrue(os.path.isdir(folder), "scope: the fixed-base session folder must exist before the walk")
+        found, errors = self.found_ids()
+        self.assertIn(temp_session_id(51), found,
+                      "positive control: an idle folder under $TMPDIR/claude-<uid> must be found; errors: %r" % errors)
+        self.assertIn(temp_session_id(52), found,
+                      "the walk does not read the fixed /tmp base: its idle folder %s was not found; errors: %r"
+                      % (folder, errors))
 
 
 # ----------------------------------------------------- the temp-folder step's wiring in sweep.main
