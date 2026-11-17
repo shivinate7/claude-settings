@@ -24811,6 +24811,85 @@ class AuditPrs(Env):
         self.assertIn("review: round 1 PASS (reviewer)", line, "the line does not name the newest record's round and verdict: " + line)
 
 
+def reaped_child_pid():
+    """A pid whose process has run to its end, so no live process holds it."""
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait(timeout=60)
+    return child.pid
+
+
+class StaleMergeTrees(unittest.TestCase):
+    """merge.add_worktree sweeps the merge-wt-* trees a dead merge run left in the temp folder. A tree goes, with its git
+    registration, when its lock reason names `merge tool, pid N` and N is dead. A tree whose pid is alive stays, and so
+    does a locked tree whose reason names no merge pid. The temp folder is this test's own fixture, so no case reaches the
+    real temp folder."""
+
+    def setUp(self):
+        work = os.path.realpath(tempfile.mkdtemp(dir=run_folder()))
+        self.addCleanup(shutil.rmtree, work, True)
+        self.repo = os.path.join(work, "repo")
+        self.tmpdir = os.path.join(work, "tmp")
+        os.makedirs(self.repo)
+        os.makedirs(self.tmpdir)
+        sh(self.repo, "git", "init", "-q", "-b", "main")
+        sh(self.repo, "git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
+           "commit", "-q", "--allow-empty", "-m", "base")
+        self.head = sh(self.repo, "git", "rev-parse", "HEAD")
+        patch = unittest.mock.patch.object(tempfile, "tempdir", self.tmpdir)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def make_tree(self, name, reason):
+        """A merge-wt-<name> folder with a locked worktree in it, as the merge tool makes one. -> (folder, worktree)."""
+        tmp = os.path.join(self.tmpdir, "merge-wt-" + name)
+        wt = os.path.join(tmp, "tree")
+        os.makedirs(tmp)
+        sh(self.repo, "git", "worktree", "add", "-q", "--detach", "--lock", "--reason", reason, wt, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        return tmp, wt
+
+    def locked_trees(self):
+        """Each registered worktree's real path -> its lock reason, or None when it is not locked."""
+        trees, path = {}, None
+        for line in sh(self.repo, "git", "worktree", "list", "--porcelain").splitlines():
+            if line.startswith("worktree "):
+                path = os.path.realpath(line[len("worktree "):])
+                trees[path] = None
+            elif line == "locked" or line.startswith("locked "):
+                trees[path] = line[len("locked"):].strip()
+        return trees
+
+    def test_a_tree_whose_merge_pid_is_dead_goes_and_a_live_one_stays(self):
+        dead = reaped_child_pid()
+        stale_tmp, stale_wt = self.make_tree("stale", "merge tool, pid %d" % dead)
+        live_tmp, live_wt = self.make_tree("live", "merge tool, pid %d" % os.getpid())
+        before = self.locked_trees()
+        self.assertEqual(before.get(os.path.realpath(stale_wt)), "merge tool, pid %d" % dead,
+                         "scope: the dead tree must be locked with its merge reason before add_worktree runs")
+        self.assertEqual(before.get(os.path.realpath(live_wt)), "merge tool, pid %d" % os.getpid(),
+                         "scope: the live tree must be locked with its merge reason before add_worktree runs")
+
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+
+        self.assertFalse(os.path.exists(stale_tmp),
+                         "a merge-wt tree whose merge pid %d is dead must be removed when add_worktree starts" % dead)
+        self.assertNotIn(os.path.realpath(stale_wt), self.locked_trees(),
+                         "the dead tree's git registration must go with its folder")
+        self.assertTrue(os.path.isdir(live_tmp), "a merge-wt tree whose merge pid is alive must stay")
+        self.assertIn(os.path.realpath(live_wt), self.locked_trees(), "the live tree must stay registered")
+        self.assertTrue(os.path.isdir(tmp), "add_worktree must return the tree it made")
+
+    def test_a_locked_tree_whose_reason_names_no_merge_pid_stays(self):
+        dead = reaped_child_pid()
+        stale_tmp, _ = self.make_tree("stale", "merge tool, pid %d" % dead)
+        other_tmp, _ = self.make_tree("other", "someone else's tree")
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        self.assertFalse(os.path.exists(stale_tmp), "control: the dead merge tree must be removed in this run")
+        self.assertTrue(os.path.isdir(other_tmp), "a merge-wt tree whose lock reason names no merge pid must stay")
+
+
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
         # A run that holds the lock in its merge call for a minute, for a signal to reach. It prints READY once it holds the lock.
