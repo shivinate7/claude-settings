@@ -11,7 +11,7 @@ The step is `janitor/temp_sweep.py`. The machine-wide janitor sweep (`the-janito
 1. The transcript decides. Idle means that the transcript `projects/<project>/<session id>.jsonl` changed more than 24 hours ago. The folder's own mtime does not count.
 2. When unsure, keep. No transcript, an unreadable one, or one dated in the future means keep. So does a live session process, an unreadable sessions folder or session reader, or a link in the path.
 3. Reach. Only a direct child of `<Temp>\claude\<project>\` (Windows) or of `<tempdir>/claude-<uid>/<project>/` (Linux and Mac) is removed. A path elsewhere in Temp is never touched, and neither is `claude-<uid>-old`. The sweep deadline stops the step.
-4. Cost. Process starts: none on Windows. On Linux and Mac, one `ps` per session record that has a pid and a start time, to read the session's start (`hooks/git_reads.py`, `session_is_live`). Files removed: the idle session folders. How often: each full sweep run inside its deadline, on every OS. Cost test: none names the `ps` count.
+4. Cost. Process starts: none on Windows. On Linux and Mac, one `ps` per session record that has a pid and a start time, to read the session's start (`hooks/git_reads.py`, `session_is_live`). Files removed: the idle session folders. How often: each full sweep run inside its deadline, on every OS. The step reads the live sessions only after it finds a first idle folder: a run with no idle folder starts no `ps`, and a run with one starts at most one `ps` per record. Cost tests: `TempSweepTests.test_no_idle_folder_starts_no_ps_for_the_session_records` and `TempSweepTests.test_one_idle_candidate_starts_at_most_one_ps_per_session_record` count the `ps` starts with a `ps` shim.
 
 Kind: process
 Home: janitor/temp_sweep.py

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Removes a session's temp folder, `<Temp>/claude/<project>/<session id>/` (Windows) or
-`<tempdir>/claude-<uid>/<project>/<session id>/` (POSIX), once the session's transcript has been idle
+`<base>/claude-<uid>/<project>/<session id>/` (POSIX), once the session's transcript has been idle
 over 24 hours. When a read cannot tell, it keeps.
 
 Spec: docs/decisions/windows-temp-sweep.md.
@@ -10,8 +10,9 @@ folder's own mtime. No transcript, an unreadable one, or a future mtime means ke
 process is live (`<config dir>/sessions/*.json`) keeps its folder, and so does any folder when the
 sessions folder or the session reader (hooks/guard_core.py) cannot be read. The step touches only
 direct children of `<root>/<project>/`; a link is never followed or removed. `<Temp>` is TEMP, else
-LOCALAPPDATA/Temp. `<tempdir>` is tempfile.gettempdir(), and the POSIX root is its child
-`claude-<uid>` by exact name, so `claude-<uid>-old` is never reached.
+LOCALAPPDATA/Temp. `<base>` is tempfile.gettempdir() and the fixed `/tmp` (a Mac's $TMPDIR is not
+`/tmp`, yet Claude Code also keeps scratch there). The POSIX root is the base's child `claude-<uid>`
+by exact name, so `claude-<uid>-old` is never reached. One folder reached by two bases counts once.
 
 The step runs on every OS; a root that does not exist is skipped. The checks run this suite with
 fixture folders.
@@ -31,6 +32,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 from shared_names import config_dir  # noqa: E402  the one home of the config dir, no guard module
 
 IDLE_SECONDS = 24 * 3600
+FIXED_TMP_DIR = "/tmp"  # read at call time, so a case can point it at a fixture
+FIXED_TMP_ENV = "JANITOR_FIXED_TMP_DIR"  # a child process cannot patch the global; this redirects it
 past_deadline = lambda: False  # noqa: E731  (the machine-wide sweep sets its own clock check)
 
 
@@ -46,18 +49,26 @@ def temp_claude_root():
     return os.path.join(temp, "claude") if temp else None
 
 
-def posix_claude_root():
-    """Claude Code's session scratch on POSIX, or None where os.getuid does not exist."""
+def posix_claude_roots():
+    """Claude Code's session scratch on POSIX: `claude-<uid>` under the temp folder and under the
+    fixed /tmp. Empty where os.getuid does not exist."""
     if not hasattr(os, "getuid"):
-        return None
-    return os.path.join(tempfile.gettempdir(), "claude-%d" % os.getuid())
+        return []
+    name = "claude-%d" % os.getuid()
+    fixed = os.environ.get(FIXED_TMP_ENV) or FIXED_TMP_DIR
+    return [os.path.join(base, name) for base in (tempfile.gettempdir(), fixed)]
 
 
 def claude_roots():
-    """Each root that holds `<project>/<session id>/` folders, with no repeat."""
-    roots = []
-    for root in (temp_claude_root(), posix_claude_root()):
-        if root and root not in roots and not _is_link(root) and os.path.isdir(root):
+    """Each root that holds `<project>/<session id>/` folders. A root two paths reach (a Mac's
+    /tmp is /private/tmp) counts once, by its real path."""
+    roots, seen = [], set()
+    for root in [temp_claude_root(), *posix_claude_roots()]:
+        if not root or _is_link(root) or not os.path.isdir(root):
+            continue
+        real = os.path.realpath(root)
+        if real not in seen:
+            seen.add(real)
             roots.append(root)
     return roots
 
@@ -98,21 +109,28 @@ def live_session_ids():
 
 def idle_sessions(errors, now=None):
     """Yield (session id, folder) for each session folder whose transcript is idle over 24 hours
-    and whose session is not live. A read that fails adds a message to ERRORS and keeps."""
+    and whose session is not live. A read that fails adds a message to ERRORS and keeps. The live
+    sessions are read once, when the first idle folder is found: with no idle folder the step
+    starts no `ps`."""
     now = time.time() if now is None else now
     roots = claude_roots()
     if not roots:
         return
-    live = live_session_ids()
-    if live is None:
-        errors.append("could not read the live sessions; nothing removed")
-        return
     transcripts = os.path.join(config_dir(), "projects")
+    live = None  # not read yet
     for root in roots:
-        yield from _idle_in_root(root, live, transcripts, now, errors)
+        for session, folder in _idle_in_root(root, transcripts, now, errors):
+            if live is None:
+                live = live_session_ids()
+                if live is None:
+                    errors.append("could not read the live sessions; nothing removed")
+                    return
+            if session not in live:
+                yield session, folder
 
 
-def _idle_in_root(root, live, transcripts, now, errors):
+def _idle_in_root(root, transcripts, now, errors):
+    """Yield (session id, folder) for each session folder under ROOT whose transcript is idle."""
     try:
         projects = sorted(os.listdir(root))
     except OSError as exc:
@@ -129,7 +147,7 @@ def _idle_in_root(root, live, transcripts, now, errors):
             continue
         for session in sessions:
             folder = os.path.join(project_dir, session)
-            if _is_link(folder) or not os.path.isdir(folder) or session in live:
+            if _is_link(folder) or not os.path.isdir(folder):
                 continue
             try:
                 age = now - os.stat(os.path.join(transcripts, project, session + ".jsonl")).st_mtime
