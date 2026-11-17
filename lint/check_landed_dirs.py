@@ -22,7 +22,7 @@ import os
 import re
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 
 MANIFEST_PATH = os.path.join(REPO_ROOT, "landed-dirs.txt")
@@ -36,6 +36,8 @@ GUARD_GLOB = os.path.join(REPO_ROOT, "hooks", "guard*.py")
 # drifts from the reason it excuses is itself a failure, not a silent pass.
 KNOWN_GUARD_ONLY_EXTRAS = {
     "state": "holds the baseline `hooks/config_watch.py` restores a reverted file from",
+    "installs": "holds each cloud install generation and `.cs-current` is the link that names the live one",
+    ".cs-current": "holds each cloud install generation and `.cs-current` is the link that names the live one",
 }
 
 # landed-dirs.txt names this dir, but CONFIG_FROZEN_DIRS deliberately leaves it out: it is

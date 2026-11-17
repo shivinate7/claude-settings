@@ -28,7 +28,7 @@ from datetime import datetime, timedelta, timezone
 
 # One home for the placeholder: hooks/guard_core.py. lint/ and hooks/ land side by side, in the
 # repo and under ~/.claude, so the hop holds in both places (lint/report_guard.py does the same).
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks"))
 from guard_core import LOG_CUT_MARK, SESSION_LOG_PLACEHOLDER, is_cloud  # noqa: E402
 
 COUNTED = ("deny", "ask", "noted")
@@ -221,7 +221,7 @@ def main(argv):
         return 0
     ids = None
     if args.all_rules:
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # `python -I` leaves the script folder off the path
+        sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # `python -I` leaves the script folder off the path
         import rule_audit
         ids = rule_audit.emitted_rule_ids()
     try:
