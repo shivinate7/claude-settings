@@ -4713,12 +4713,16 @@ print("\n".join(sorted(found)))
 PY
 }
 
+# A name counts only as a whole name. Splitting the line at each character a file name cannot hold
+# leaves the names as tokens, so shared_names.py does not list names.py.
+line_has_name() {  # $1 a line, $2 a file name: true when the name is a whole token of the line
+  printf '%s\n' "$1" | tr -c '[:alnum:]_.-' '\n' | grep -Fx -- "$2" >/dev/null
+}
+
 listed_in() {  # $1 file, $2 sed address of the one list line, $3 label, $4 module
   lines=$(sed -n "$2" "$1")
   if [ "$(printf '%s\n' "$lines" | grep -c .)" -ne 1 ]; then bad "$name" "$4: $3 is not one list line"; nmiss=$((nmiss + 1)); return; fi
-  # A name counts only as a whole name. Splitting the line at each character a file name cannot hold
-  # leaves the names as tokens, so shared_names.py does not list names.py.
-  if ! printf '%s\n' "$lines" | tr -c '[:alnum:]_.-' '\n' | grep -Fx -- "$4" >/dev/null; then
+  if ! line_has_name "$lines" "$4"; then
     bad "$name" "$4 is not in $3"; nmiss=$((nmiss + 1))
   fi
 }
@@ -4803,6 +4807,36 @@ guardset8() {
     return
   fi
   guard_set_lists_hold "$name" $mods
+}
+
+# guardset9: a guard-set module that reads a file beside itself needs that file in the set too. guard.py puts
+# guard.d/<id>/ first on sys.path, so the module loads the set's copy, and the file beside it is the set's copy.
+# A file no list copies is missing there, so the module's read fails (ruling own-896-897-glued-amp-b, the CI-wait
+# cap). The pairs are hand-kept: a new sidecar read needs its pair here. A read through `..` is not beside the
+# module and is not listed. A pair counts only when its module is in the install.sh copy loop, so a module the
+# set does not ship is not asked of.
+GUARDSET_SIDECARS="ci_wait_cap.py:ci_wait_cap.json route_match.py:route_rows.json precompact_handoff.py:precompact_handoff_prompt.md"
+
+in_copy_loop() {  # $1 a file name: true when the install.sh copy loop names it
+  line_has_name "$(sed -n '/^  for gf in .*question_form\.py/p' "$REPO_ROOT/install.sh")" "$1"
+}
+
+guardset9() {
+  name="guardset9: each guard-set module that reads a file beside itself has that file in each guard-set list: install.sh, the install.ps1 copy and set loops, and ci-scope.sh"
+  sidecars=""; bad_scope=""
+  for pair in $GUARDSET_SIDECARS; do
+    sc_mod=${pair%%:*}; sc_file=${pair#*:}
+    in_copy_loop "$sc_mod" || continue
+    if [ ! -f "$REPO_ROOT/hooks/$sc_file" ] || ! grep -Fq -- "$sc_file" "$REPO_ROOT/hooks/$sc_mod"; then
+      bad_scope="$bad_scope $sc_mod does not read $sc_file beside itself, or the file is missing;"
+    fi
+    sidecars="$sidecars $sc_file"
+  done
+  if [ -n "$bad_scope" ]; then
+    bad "$name" "$bad_scope"
+    return
+  fi
+  guard_set_lists_hold "$name" $sidecars
 }
 
 guardset2() {
@@ -6992,6 +7026,7 @@ run guardset5
 run guardset6
 run guardset7
 run guardset8
+run guardset9
 run win_sh1
 run win_sh2
 run win_sh3
