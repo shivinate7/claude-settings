@@ -901,7 +901,7 @@ class TempSweepTests(unittest.TestCase):
 @unittest.skipUnless(hasattr(os, "getuid"), "the POSIX claude root exists only where os.getuid does")
 class ScratchRootsTests(unittest.TestCase):
     def setUp(self):
-        self.base = tempfile.mkdtemp(dir=_test_temp.run_folder(), prefix="scratch_roots_")
+        self.base = _test_temp.run_folder()
         self.addCleanup(shutil.rmtree, self.base, True)
         self.cfg = os.path.join(self.base, "cfg")
         self.tmpdir = os.path.join(self.base, "tmp")  # $TMPDIR
