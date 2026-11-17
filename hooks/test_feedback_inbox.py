@@ -4043,16 +4043,19 @@ NOTE_FILE_REF = "note:" + NOTE_FILE_SLUG
 NOTES_README_TEXT = "# Notes\n\nOne note per file.\n"
 
 
-def backlog_repo(name, notes=()):
-    """A rolled-out repo whose backlog holds each candidate kind, untracked: the todo file, the notes file and
-    two debts. `notes` (slug, text) pairs add one note file each to the notes folder. A case names one of
-    them as its item's home."""
+def backlog_repo(name, notes=(), commit=False):
+    """A rolled-out repo whose backlog holds each candidate kind: the todo file, the notes file and two debts,
+    untracked unless `commit`. `notes` (slug, text) pairs add one note file each to the notes folder. A case names
+    one of them as its item's home. `commit` puts the whole backlog on main, so a home read finds each file tracked."""
     root = repeat_repo(name, debt=True)
     write_file(os.path.join(root, "docs", "todo.md"), BACKLOG_TODO)
     write_file(os.path.join(root, "docs", "debts", "notes.md"), BACKLOG_NOTES)
     write_file(os.path.join(root, "docs", "debts", SECOND_DEBT_SLUG + ".md"), SECOND_DEBT_TEXT)
     for slug, text in notes:
         write_file(os.path.join(root, "docs", "notes", slug + ".md"), text)
+    if commit:
+        git(root, "add", "-A")
+        git(root, "commit", "-q", "-m", "backlog")
     return root
 
 
@@ -4213,17 +4216,24 @@ def case_notes_folder_absent_still_reads_the_old_notes_file():
 
 
 def case_task_homes_drop_the_frozen_notes_file_and_keep_the_notes_folder():
-    """One file per note (decision notes-merge-union): the frozen notes file is no home for a task. Scope first: the
-    frozen file is on disk, so the home read has it to drop. Controls: the notes folder is still a task home, and a
-    notes-folder file still reads as `note:<slug>` in the backlog."""
+    """One file per note (decision notes-merge-union): the frozen notes file is refused as a task home, and a file in
+    the notes folder is accepted. Scope first: git tracks both files, so a refusal can only be the home rule, never an
+    untracked file. Subject: `_judge` refuses the frozen path. Controls: the same call accepts a note file, the notes
+    folder is still a task home, and a notes-folder file still reads as `note:<slug>` in the backlog."""
     import layout  # lint/layout.py, the one home of where each kind lives
-    root = backlog_repo("task-homes-frozen-notes", notes=[(NOTE_FILE_SLUG, NOTE_FILE_TEXT)])
+    root = backlog_repo("task-homes-frozen-notes", notes=[(NOTE_FILE_SLUG, NOTE_FILE_TEXT)], commit=True)
     frozen = "docs/debts/notes.md"
+    note = "docs/notes/%s.md" % NOTE_FILE_SLUG
     check("task homes scope: the frozen notes file is on disk", os.path.isfile(os.path.join(root, *frozen.split("/"))),
           root)
     mod = guard_module()
+    check("task homes scope: git tracks the frozen notes file", mod.ruling_home.value_resolves(frozen, root), frozen)
+    check("task homes scope: git tracks the note file", mod.ruling_home.value_resolves(note, root), note)
+    refused = mod.Homes._judge(layout, "fb-1", "task", root, frozen, False)
+    check("task homes: the frozen notes file is refused as a task home", refused is not None, refused)
+    accepted = mod.Homes._judge(layout, "fb-1", "task", root, note, False)
+    check("task homes control: a note file is accepted as a task home", accepted is None, accepted)
     homes = mod.kind_homes(layout, root, "task")
-    check("task homes: the frozen notes file is no task home", frozen not in homes, homes)
     check("task homes control: the notes folder is still a task home", "docs/notes" in homes, homes)
     refs = [ref for ref, label, text in mod.backlog_candidates(root)]
     check("task homes control: a notes-folder file still reads as note:<slug>", NOTE_FILE_REF in refs, refs)
