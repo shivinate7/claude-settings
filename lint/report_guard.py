@@ -666,12 +666,13 @@ GLOSS_LEAD_RE = re.compile(r"[A-Za-z]{2,}\s+[A-Za-z]{2,}\s*(?:[,:—–=]|--|\s-
 # Two more id forms need the same gloss: a `#N` (3 to 5 digits) and a session ref `s02747` or `s02747:941`.
 # They use a stricter gloss than a record id: the separator form needs two real words after it (a word that starts
 # with a letter, so "(env -vC, want ask)" is no gloss), and the possessive form ("#2015's own rows") and the
-# "two words, then a colon" lead are no gloss. A `#N` passes after "PR", "PRs", "pull request" or "issue", and
-# anywhere in a Done item, where `reports-done-format` makes the writer cite a PR as `#N`.
+# "two words, then a colon" lead are no gloss. A `#N` passes right after "PR", "PRs", "pull request", "issue",
+# "commit", "in", "by" or "via" (a ref such as "built in #1300", which the mistake guard asks for), and anywhere in a
+# Done item, where `reports-done-format` makes the writer cite a PR as `#N`.
 REF_ID_RE = re.compile(r"(?<![\w/.#:$&-])(?:#\d{3,5}|s\d{4,6}(?::\d+)?)(?![\w-]|\.\w)")
 REF_GLOSS_AFTER_RE = re.compile(
     r"""^["')\]]*\s*(?:[,:;(=—–-]|\s-{1,2}\s)\s*\(?[A-Za-z][\w'-]*\s+[A-Za-z][\w'-]*""")
-PR_WORD_BEFORE_RE = re.compile(r"(?:\bPRs?|\bpull requests?|\bissues?)\s*$", re.I)
+PR_WORD_BEFORE_RE = re.compile(r"\b(?:PRs?|pull requests?|issues?|commits?|in|by|via)\s*$", re.I)
 
 
 def _done_spans(text):

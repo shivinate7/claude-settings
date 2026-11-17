@@ -172,7 +172,7 @@ Text: inline, in `plain_form_reasons`. Rule `speak-cite-id-plus-gloss` (an id ca
 
 - An id appears with no short gloss: a record id like `D12`, a `#N` of 3 to 5 digits, or a session ref like `s02747:941`. Write the id, then a few plain words that say what it is, like "D12, short titles for records" or "#2015, check-tail filter".
 - For a `#N` or a session ref, two words that start with a letter must follow the id. "(env -vC, want ask)" is no gloss, and neither is "#2015's own rows".
-- A `#N` needs no gloss after "PR", "PRs", "pull request" or "issue", or anywhere in the Done item, where a PR is cited as `#N`.
+- A `#N` needs no gloss right after "PR", "PRs", "pull request", "issue", "commit", "in", "by" or "via" (a ref like "built in #1300", which the mistake guard asks for), or anywhere in the Done item, where a PR is cited as `#N`.
 
 ### Time guard (landed turns)
 
