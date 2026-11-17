@@ -1,0 +1,1 @@
+- red-job-not-in-glossary: the term "red job" is not in GLOSSARY.md (reviewer note, lane red-job-wakes-runner, 13:11 CST Nov 12). Fix: none recorded.

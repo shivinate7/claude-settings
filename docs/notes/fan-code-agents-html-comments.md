@@ -1,0 +1,1 @@
+- fan-code-agents-html-comments: Claude Code docs say block-level HTML comments in CLAUDE.md are stripped. The loader's handling of them in agents/*.md is unmeasured (note, fan-code-agents, 13:31 CST Nov 12). Fix: none recorded.

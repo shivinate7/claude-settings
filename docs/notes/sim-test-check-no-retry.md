@@ -1,0 +1,1 @@
+- sim-test-check-no-retry: the sim boot check has no retry, per decision sim-boot-is-verified. Mac runs are unmeasured. It becomes a question only if a Mac run shows a healthy cold boot failing (lane sim-boot-screen-check, 13:36 CST Nov 12). Fix: none recorded.
