@@ -354,10 +354,10 @@ HIDE_DRIVER = ("import runpy, sys\n"
                "runpy.run_path(hook, run_name='__main__')\n")
 
 
-def ov_type(cfg, prompt, session=OV_SESSION, hide=(), transcript=None, remote=None):
+def ov_type(cfg, prompt, session=OV_SESSION, hide=(), transcript=None, remote=None, extra=None):
     """The owner types `prompt`. Returns the finished child, or None when it timed out. `hide` names modules the child
     cannot import. `transcript` is the payload's transcript_path (no key when None); `remote` is the child's
-    CLAUDE_CODE_REMOTE_SESSION_ID (unset when None)."""
+    CLAUDE_CODE_REMOTE_SESSION_ID (unset when None); `extra` holds more keys of the payload, such as `source`."""
     env = dict(os.environ)
     for name in ("PYTHONUTF8", "PYTHONIOENCODING"):
         env.pop(name, None)
@@ -373,6 +373,8 @@ def ov_type(cfg, prompt, session=OV_SESSION, hide=(), transcript=None, remote=No
     payload = {"hook_event_name": "UserPromptSubmit", "session_id": session, "prompt": prompt, "cwd": HERE}
     if transcript is not None:
         payload["transcript_path"] = transcript
+    if extra:
+        payload.update(extra)
     payload = json.dumps(payload)
     command = [sys.executable, MODULE_PATH]
     if hide:
@@ -633,6 +635,42 @@ def case_override_prose_mention_grants_nothing():
               "rc=%s stderr %r" % (proc and proc.returncode, proc and proc.stderr.strip()[-120:]))
         check("override: prose control, %s: grants nothing" % name, not ov_pass_files(cfg),
               "files %r; got %r" % (ov_pass_files(cfg), ov_pass(cfg)))
+
+
+# AN OVERRIDE LINE IN PROSE, BY THE PAYLOAD'S SOURCE (decision owner-override). The line route grants only for a prompt the
+# owner typed: `source` absent, null or `user`. A line that a loop wakeup, a system record or an agent sends is text the
+# owner never typed, so it grants nothing. The control is the owner's own `user` source, which grants the same line.
+OV_PROSE_LINE = "The build is still red.\noverride 2h\nTell me when it is green."
+OV_PROSE_SOURCES_REFUSED = ("loop_wakeup", "system", "agent")
+
+
+def case_override_line_in_prose_by_source():
+    for source in OV_PROSE_SOURCES_REFUSED:
+        cfg = ov_cfg()
+        proc = ov_type(cfg, OV_PROSE_LINE, extra={"source": source})
+        check("override: prose line, source %s: the hook exits 0" % source, proc is not None and proc.returncode == 0,
+              "rc=%s stderr %r" % (proc and proc.returncode, proc and proc.stderr.strip()[-120:]))
+        check("override: prose line, source %s: grants no override" % source, not ov_pass_files(cfg),
+              "files %r; got %r" % (ov_pass_files(cfg), ov_pass(cfg)))
+    cfg = ov_cfg()
+    proc = ov_type(cfg, OV_PROSE_LINE, extra={"source": "user"})
+    check("override: prose line, source user (control): the hook exits 0", proc is not None and proc.returncode == 0,
+          "rc=%s stderr %r" % (proc and proc.returncode, proc and proc.stderr.strip()[-120:]))
+    check("override: prose line, source user (control): grants a 2-hour override",
+          ends_after(ov_pass(cfg), "timed", timedelta(hours=2)),
+          "got %r; files %r" % (ov_pass(cfg), ov_pass_files(cfg)))
+
+
+def case_override_line_in_prose_after_a_notice():
+    # A notice at the start of the prompt is text a tool wrote. The payload carries the owner's `user` source, so only the
+    # notice gate can refuse the override line that follows it.
+    cfg = ov_cfg()
+    prompt = "<system-reminder>\nThe build is red in CI.\n</system-reminder>\n" + OV_PROSE_LINE
+    proc = ov_type(cfg, prompt, extra={"source": "user"})
+    check("override: prose line after a notice, source user: the hook exits 0", proc is not None and proc.returncode == 0,
+          "rc=%s stderr %r" % (proc and proc.returncode, proc and proc.stderr.strip()[-120:]))
+    check("override: prose line after a notice, source user: grants no override", not ov_pass_files(cfg),
+          "files %r; got %r" % (ov_pass_files(cfg), ov_pass(cfg)))
 
 
 # A LINE IN A SEED BRIEF (decision owner-override). A cloud session's first owner turn is the seed brief its coordinator
@@ -2861,6 +2899,8 @@ def main():
         case_override_not_the_first_word()
         case_override_line_in_prose()
         case_override_prose_mention_grants_nothing()
+        case_override_line_in_prose_by_source()
+        case_override_line_in_prose_after_a_notice()
         case_override_line_in_a_seed_brief_grants_nothing()
         case_ruling_cites_carry_their_time()
         case_override_corrupt_file_replaced()
