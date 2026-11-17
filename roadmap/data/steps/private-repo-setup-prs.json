@@ -1,0 +1,14 @@
+{
+  "id": "private-repo-setup-prs",
+  "title": "The five private-repo setup PRs merge (stamp.json requiredChecks none): home, degen, q_max, ios-adblock, joyous",
+  "priority": "now",
+  "status": "doing",
+  "repo": "shivinate7/claude-settings",
+  "phase": "now",
+  "owner": "runner 11",
+  "blockedBy": [],
+  "why": "Decision private-repos-no-ci (PR #3590, merged 15:43 CST Nov 16): private repos get no CI, so each gets a setup PR that sets stamp.json requiredChecks to none. Page item 929 asked how they merge; the owner chose option b (step setup-pr-lints-from-head-stamp) and, in chat to runner 11 at 13:20 CST Nov 17, said it may merge them itself with the GitHub MCP plain merge.",
+  "source": "Coordinator message 13:23 CST Nov 17 (verified by REST by the coordinator; triage 11 cannot read these repos, so unverified here). No step existed for these PRs (gap type 2); filed by triage 11.",
+  "note": "Doing. Merged by runner 11 via the GitHub MCP, plain merge, under the owner's chat word to it at 13:20 CST Nov 17: home #735 at 13:21:15 CST (merge commit f00251c4bc50) and degen #765 at 13:21:21 CST (ee5914cdb4a5). Left: the setup PRs of q_max, ios-adblock and joyous (runners 11 and 12 hold them until setup-pr-lints-from-head-stamp lands, or merge them the same way; not asked here). Also: main's push run 44146923371 on c75db968d47b finished success (coordinator). Pace (coordinator): first commit to merge not read; lanes about 50, most at once not recounted since 26 at 06:04 CST Nov 15; idle unknown; brake n/a (cloud).",
+  "updatedAt": "2026-11-17T13:23:57-06:00"
+}
