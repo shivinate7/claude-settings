@@ -5118,7 +5118,56 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
             with self.subTest(line=line):
                 self.assert_allowed(line)
 
+    def test_an_red_writer_at_the_start_of_a_longer_word_blocks(self):
+        # Red on the writer's word boundary: "I" or "we" at the start of a longer word ("Items", "Issue", "Wednesday's",
+        # "Weekly") reads as Claude's own act, so an "and" before the word lets an unsourced owner answer pass.
+        rows = [
+            # Catches: "I" at the start of "Items" reads as the writer, so an unsourced answer passes.
+            "Items were sent and answered it.",
+            # Catches: "I" at the start of "Issue" reads as the writer, so an unsourced answer passes.
+            "Issue 4 was opened and answered the same day.",
+            # Catches: "We" at the start of "Wednesday's" reads as the writer, so an unsourced answer passes.
+            "Wednesday's questions were sent and answered the same day.",
+            # Catches: "We" at the start of "Weekly" reads as the writer, so an unsourced answer passes.
+            "Weekly questions were sent and answered the same day.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_an_red_only_before_the_answered_verb_passes(self):
+        # Red on the adverb list: "only" is not in ADVERBS, and the -ly pattern needs three letters before "ly", so
+        # "only" is no adverb. A first-person act with "only" before the verb then reads as an owner claim.
+        rows = [
+            # Catches: "only" after "I" drops the first-person act, so Claude's own answer is refused.
+            "I only answered it.",
+            # Catches: "only" after "We" drops the first-person act, so Claude's own answer is refused.
+            "We only answered the questions.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
     # Green: these pass before the verdict exists too. Each guards against a false alarm.
+
+    def test_an_green_first_person_answer_passes_beside_the_red_rows(self):
+        # Control for the two red tests above, green on the same commit. A whole-word writer with "and", a listed adverb
+        # and an -ly adverb still pass, so a fix that drops one of those paths goes red here, not only in the red rows.
+        rows = [
+            # Catches: a whole-word "We" before "and" stops passing when the writer's word boundary is checked.
+            "We sent it and answered it.",
+            # Catches: a first-person act with "and" stops passing when the writer's word boundary is checked.
+            "I sent the brief and answered it.",
+            # Catches: a listed adverb before the verb stops passing when the adverb slot changes.
+            "I already answered it.",
+            # Catches: an -ly adverb stops passing when the -ly pattern is swapped for a fixed list.
+            "I quickly answered it.",
+            # Catches: a first-person act with no adverb stops passing in the same fix.
+            "I answered it.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
 
     def test_an_green_each_source_cites_the_word(self):
         rows = [
