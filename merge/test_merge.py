@@ -24839,9 +24839,9 @@ class StaleMergeTrees(unittest.TestCase):
         patch.start()
         self.addCleanup(patch.stop)
 
-    def make_tree(self, name, reason):
-        """A merge-wt-<name> folder with a locked worktree in it, as the merge tool makes one. -> (folder, worktree)."""
-        tmp = os.path.join(self.tmpdir, "merge-wt-" + name)
+    def make_tree(self, name, reason, root=None):
+        """A merge-wt-<name> folder with a locked worktree in it, as the merge tool makes one, under ROOT (default the temp folder). -> (folder, worktree)."""
+        tmp = os.path.join(root or self.tmpdir, "merge-wt-" + name)
         wt = os.path.join(tmp, "tree")
         os.makedirs(tmp)
         sh(self.repo, "git", "worktree", "add", "-q", "--detach", "--lock", "--reason", reason, wt, self.head)
@@ -24888,6 +24888,21 @@ class StaleMergeTrees(unittest.TestCase):
         self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
         self.assertFalse(os.path.exists(stale_tmp), "control: the dead merge tree must be removed in this run")
         self.assertTrue(os.path.isdir(other_tmp), "a merge-wt tree whose lock reason names no merge pid must stay")
+
+    def test_a_dead_merge_tree_outside_the_temp_folder_stays(self):
+        """The sweep reaches only a merge-wt folder that is a direct child of the temp folder. A dead-locked one elsewhere stays."""
+        dead = reaped_child_pid()
+        stale_tmp, _ = self.make_tree("stale", "merge tool, pid %d" % dead)
+        outside = os.path.join(os.path.dirname(self.tmpdir), "outside")
+        os.makedirs(outside)
+        far_tmp, far_wt = self.make_tree("far", "merge tool, pid %d" % dead, root=outside)
+        self.assertEqual(self.locked_trees().get(os.path.realpath(far_wt)), "merge tool, pid %d" % dead,
+                         "scope: the dead tree outside the temp folder must be locked with its merge reason before add_worktree runs")
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        self.assertFalse(os.path.exists(stale_tmp), "control: the dead merge tree inside the temp folder must be removed in this run")
+        self.assertTrue(os.path.isdir(far_tmp), "a dead-locked merge-wt tree outside the temp folder must stay")
+        self.assertIn(os.path.realpath(far_wt), self.locked_trees(), "the dead-locked tree outside the temp folder must stay registered")
 
 
 if __name__ == "__main__":
