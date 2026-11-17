@@ -535,8 +535,9 @@ def tearDownModule():
 # `janitor/temp_sweep.py` removes a session's temp folder, `<LOCALAPPDATA>\Temp\claude\<project>\
 # <session id>\`, once the session's transcript, `<CLAUDE_CONFIG_DIR>\projects\<project>\
 # <session id>.jsonl`, has been idle 24 hours. No transcript found means keep. The step runs as a
-# real process. Each case points LOCALAPPDATA, TEMP, TMP, HOME, USERPROFILE and CLAUDE_CONFIG_DIR
-# at fixture folders, so no case can reach the real temp folder or the real ~/.claude. Without
+# real process. Each case points LOCALAPPDATA, TEMP, TMP, HOME, USERPROFILE, CLAUDE_CONFIG_DIR and
+# TMPDIR at fixture folders, so no case can reach the real temp folder, the real ~/.claude or the
+# POSIX root `<TMPDIR>/claude-<uid>`, where Claude Code keeps its session scratch. Without
 # --confirm the step removes nothing. Each keep case carries a positive control: an idle session
 # that the same run must remove, so a keep verdict cannot pass over a step that never ran.
 
@@ -600,7 +601,9 @@ class TempSweepTests(unittest.TestCase):
         self.cfg = os.path.join(self.base, "cfg")
         self.projects = os.path.join(self.cfg, "projects")
         self.home = os.path.join(self.base, "home")
-        for folder in (self.temp_root, self.projects, self.home):
+        self.tmpdir = os.path.join(self.base, "tmp")
+        self.posix_root = os.path.join(self.tmpdir, "claude-%d" % os.getuid()) if hasattr(os, "getuid") else None
+        for folder in (self.temp_root, self.projects, self.home, self.tmpdir):
             os.makedirs(folder)
 
     def tearDown(self):
@@ -621,9 +624,10 @@ class TempSweepTests(unittest.TestCase):
 
     def run_step(self, *flags, temp=None):
         env = dict(os.environ)
+        # TMPDIR is the fixture: the POSIX root is read from it, so no case reaches the real /tmp/claude-<uid>.
         env.update(LOCALAPPDATA=self.localappdata, TEMP=os.path.join(self.localappdata, "Temp"),
                    TMP=os.path.join(self.localappdata, "Temp"), HOME=self.home,
-                   USERPROFILE=self.home, CLAUDE_CONFIG_DIR=self.cfg)
+                   USERPROFILE=self.home, CLAUDE_CONFIG_DIR=self.cfg, TMPDIR=self.tmpdir)
         if temp is not None:
             env.update(TEMP=temp, TMP=temp)
         return subprocess.run([sys.executable, TEMP_SWEEP_PATH, *flags], cwd=self.base, env=env,
@@ -713,6 +717,55 @@ class TempSweepTests(unittest.TestCase):
         proc = self.run_step("--confirm")
         self.check_removed(folder, "the transcript decides: an idle 25-hour transcript removes its "
                                    "folder, whatever the folder's own mtime says", proc)
+        self.check_exit(proc)
+
+    # On POSIX the same step also sweeps `<TMPDIR>/claude-<uid>/<project>/<session id>/`, with the same
+    # transcript rule. Each keep case here carries a positive control, as the Windows keep cases do.
+    @unittest.skipUnless(hasattr(os, "getuid"), "the POSIX claude root exists only where os.getuid does")
+    def test_posix_root_idle_25_hours_removes_the_session_folder(self):
+        folder = self.make_session(temp_session_id(30), transcript_hours=TEMP_IDLE_HOURS,
+                                   folder_hours=TEMP_IDLE_HOURS, root=self.posix_root)
+        self.assertTrue(os.path.isdir(folder), "scope: the POSIX session folder must exist before the step runs")
+        proc = self.run_step("--confirm")
+        self.check_removed(folder, "a session under <TMPDIR>/claude-<uid> whose transcript was idle 25 hours "
+                                   "must be removed", proc)
+        self.check_exit(proc)
+
+    @unittest.skipUnless(hasattr(os, "getuid"), "the POSIX claude root exists only where os.getuid does")
+    def test_posix_root_transcript_idle_1_hour_keeps_the_session_folder(self):
+        control = self.make_session(temp_session_id(31), transcript_hours=TEMP_IDLE_HOURS, root=self.posix_root)
+        kept = self.make_session(temp_session_id(32), transcript_hours=TEMP_FRESH_HOURS, root=self.posix_root)
+        proc = self.run_step("--confirm")
+        self.check_removed(control, "positive control: an idle 25-hour session under <TMPDIR>/claude-<uid> "
+                                    "must be removed in this run", proc)
+        self.check_kept(kept, "a session under <TMPDIR>/claude-<uid> whose transcript changed 1 hour ago "
+                              "must be kept", proc)
+        self.check_exit(proc)
+
+    @unittest.skipUnless(hasattr(os, "getuid"), "the POSIX claude root exists only where os.getuid does")
+    def test_posix_root_live_session_keeps_its_idle_folder(self):
+        live_id, control_id = temp_session_id(33), temp_session_id(34)
+        live = self.make_session(live_id, transcript_hours=TEMP_IDLE_HOURS, folder_hours=TEMP_IDLE_HOURS,
+                                 root=self.posix_root)
+        control = self.make_session(control_id, transcript_hours=TEMP_IDLE_HOURS, root=self.posix_root)
+        self.write_session_record(live_id, os.getpid(), this_process_start_ms())
+        proc = self.run_step("--confirm")
+        self.check_removed(control, "positive control: an idle 25-hour session under <TMPDIR>/claude-<uid> "
+                                    "must be removed in this run", proc)
+        self.check_kept(live, "a session under <TMPDIR>/claude-<uid> whose pid is live must be kept", proc)
+        self.check_exit(proc)
+
+    @unittest.skipUnless(hasattr(os, "getuid"), "the POSIX claude root exists only where os.getuid does")
+    def test_posix_root_sibling_with_a_longer_name_is_never_touched(self):
+        control = self.make_session(temp_session_id(35), transcript_hours=TEMP_IDLE_HOURS, root=self.posix_root)
+        # `claude-<uid>-old` shares the prefix `claude-<uid>`, so a plain startswith test would reach it.
+        sibling = self.make_session(temp_session_id(36), transcript_hours=TEMP_IDLE_HOURS,
+                                    folder_hours=TEMP_IDLE_HOURS,
+                                    root=os.path.join(self.tmpdir, "claude-%d-old" % os.getuid()))
+        proc = self.run_step("--confirm")
+        self.check_removed(control, "positive control: an idle 25-hour session under <TMPDIR>/claude-<uid> "
+                                    "must be removed in this run", proc)
+        self.check_kept(sibling, "a folder under <TMPDIR>/claude-<uid>-old is outside the POSIX claude root", proc)
         self.check_exit(proc)
 
     def write_session_record(self, session, pid, started_ms):
