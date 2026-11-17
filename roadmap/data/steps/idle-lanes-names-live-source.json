@@ -1,0 +1,11 @@
+{
+  "title": "The stale-live-file refusal of `merge --idle-lanes` names where the fresh file is",
+  "why": "Runner 11 got \"live file read 2292 minutes ago; read it again\" and read an old local copy. Nothing in the refusal says the fresh file is origin/roadmap:roadmap/live/live.json, so each runner asked the coordinator and triage.",
+  "note": "Filed by triage 11, 14:25 CST Nov 17 on the coordinator's ask (14:10 CST). Prior work: merge-runs-idle-lanes (the --idle-lanes mode), live-file-write-keeps-form (the file's form). A guard step: its refusal text must name the source and the refresh route (the page writer publishes roadmap/live/live.json on the roadmap branch; fetch origin roadmap first). Lane: test-author first, then builder, review (a check's verdict text). The remedy must not name a forbidden target. Not started.",
+  "phase": "now",
+  "owner": "coordinator",
+  "lane": "",
+  "status": "ready",
+  "order": 943,
+  "updatedAt": "2026-11-17T14:11:06-06:00"
+}
