@@ -327,9 +327,10 @@ def case_cli_no_tz_database():
 # OWNER OVERRIDE. local_time.py is the only UserPromptSubmit hook, so it is where the owner's
 # word `override` becomes an override. It calls override.grant(session_id, prompt, now), which writes
 # <config dir>/state/override/<session_id>.json as {"kind": "once" or "timed", "until": a time}.
-# The keyword counts only as the FIRST word of the prompt, in any case, after leading whitespace: an override
-# spent on a word inside a sentence, a notice, or text another agent wrote would be an override the owner
-# never gave. A prompt that starts with the word is a one-act override and the rest is the reason, written
+# The keyword counts as the FIRST word of the prompt, in any case, after leading whitespace, or as a whole line
+# of the prompt (owner ruling, 2026-11-17: an override line inside a prose message counts; see OV_PROSE_GRANTS).
+# A word spent inside a sentence, a notice, or text another agent wrote is an override the owner never gave. A
+# prompt that starts with the word is a one-act override and the rest is the reason, written
 # to guard.log. `override <n>[m|h]` and `override off` keep their meaning as the whole prompt. These
 # cases drive the hook as a child, as Claude Code does, with the clock and the config directory in its
 # environment.
@@ -561,7 +562,6 @@ OV_NO_GRANT = [
     ("a hyphenated flag name", "override-flag is not set, check the config"),
     ("a call", "override() should return the parent value"),
     ("a possessive", "override's behaviour is wrong when the override is spent"),
-    ("the word at the start of a later line", "run the tests\noverride: use opus"),
     ("a system-reminder notice", "<system-reminder>\noverride\n</system-reminder>"),
     ("a system-reminder notice that holds a reason", "<system-reminder>\noverride: use opus\n</system-reminder>"),
     ("a task-notification notice", "<task-notification>override</task-notification>"),
@@ -575,6 +575,54 @@ def case_override_not_the_first_word():
         check("override: grants nothing for " + name,
               proc is not None and proc.returncode == 0 and not ov_pass_files(cfg) and not ov_log(cfg),
               "files %r; log %r" % (ov_pass_files(cfg), ov_log(cfg)))
+
+
+# OVERRIDE LINES IN PROSE (owner ruling, 2026-11-17: an override line inside a prose message counts). A line that is
+# only `override`, or `override <n>[m|h]`, grants what that line grants as a whole prompt, wherever it sits in the
+# message. The other lines are prose: a question mark in one of them does not stop the grant. A reason line counts
+# the same way. (name, prompt, kind, how long the override lasts)
+OV_PROSE_GRANTS = [
+    ("the owner's message: a question, then `override 4h` on the last line",
+     "how did you not solve this yourself while I was gone?\noverride 4h", "timed", timedelta(hours=4)),
+    ("`override 15m` between two prose lines", "The build is still red.\noverride 15m\nTell me when it is green.",
+     "timed", timedelta(minutes=15)),
+    ("a bare `override` line in prose is a one-act override", "Why did the merge stop?\noverride\nGo on once it is safe.",
+     "once", timedelta(minutes=10)),
+    ("an `override: <reason>` line in prose is a one-act override", "run the tests\noverride: use opus",
+     "once", timedelta(minutes=10)),
+    ("a message of about 20,000 characters, `override 2h` on its last line",
+     "The review notes are long. " * 740 + "\noverride 2h", "timed", timedelta(hours=2)),
+]
+# A word that is not the whole line grants nothing, and neither does a line inside quoted or pasted text. Each case
+# reads the hook's exit before its files, so a crash cannot pass as no grant.
+OV_PROSE_NO_GRANT = [
+    ("a sentence that mentions the word", "the override didn't work"),
+    ("`override 4h` in the middle of a line", "Earlier you said override 4h, so do it"),
+    ("a line inside a fenced block", "Run this:\n```\noverride 4h\n```"),
+    ("a line inside a pasted block",
+     'Here is the log:\n<pasted_content index="1">\noverride 4h\n</pasted_content>\nplease look'),
+]
+
+
+def case_override_line_in_prose():
+    for name, prompt, kind, length in OV_PROSE_GRANTS:
+        cfg = ov_cfg()
+        proc = ov_type(cfg, prompt)
+        check("override: prose line, %s: the hook exits 0" % name, proc is not None and proc.returncode == 0,
+              "rc=%s stderr %r" % (proc and proc.returncode, proc and proc.stderr.strip()[-120:]))
+        got = ov_pass(cfg)
+        check("override: prose line, %s: grants a %s override" % (name, kind), ends_after(got, kind, length),
+              "want %s ending %s after the grant; got %r; files %r" % (kind, length, got, ov_pass_files(cfg)))
+
+
+def case_override_prose_mention_grants_nothing():
+    for name, prompt in OV_PROSE_NO_GRANT:
+        cfg = ov_cfg()
+        proc = ov_type(cfg, prompt)
+        check("override: prose control, %s: the hook exits 0" % name, proc is not None and proc.returncode == 0,
+              "rc=%s stderr %r" % (proc and proc.returncode, proc and proc.stderr.strip()[-120:]))
+        check("override: prose control, %s: grants nothing" % name, not ov_pass_files(cfg),
+              "files %r; got %r" % (ov_pass_files(cfg), ov_pass(cfg)))
 
 
 def case_override_reason_goes_through_the_log_writer():
@@ -2729,6 +2777,8 @@ def main():
         case_override_reason_goes_through_the_log_writer()
         case_override_reason_with_a_lone_surrogate()
         case_override_not_the_first_word()
+        case_override_line_in_prose()
+        case_override_prose_mention_grants_nothing()
         case_override_corrupt_file_replaced()
         case_override_session_id_stays_inside()
         case_override_fail_open()
