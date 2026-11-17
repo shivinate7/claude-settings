@@ -1167,10 +1167,8 @@ def stop():
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
         try:
             import report_guard  # the one home of the Stop output and its correction line
-        except ImportError:  # a copy of this hook with no lint folder beside it: the job list prints, the block does not
-            note = {k: v for k, v in out.items() if k == "systemMessage"}
-            if note:
-                print(json.dumps(note))
+        except Exception:  # no lint folder beside this hook, or a broken report_guard: the block still prints, without the correction tail
+            print(json.dumps(out))
         else:
             report_guard.emit_stop(out)
     return 0
