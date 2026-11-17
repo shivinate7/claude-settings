@@ -14,7 +14,7 @@ Owner ruling `own-merge-on-lint-pass` (owner, 2026-11-15 18:21 CST, typed "B for
 - The tool sends its PUT past a BLOCKED read only when a PASS lifted the pending run. BEHIND still refuses.
 - The batch's wait for the base to move, the heal merge commit and the small-move suite run are gone.
 
-Rule d (main comes in once, at merge time). Lanes bring main in only on conflict (skill `ci-hygiene` step 8). Once #3481 (carry the lane lint across a clean merge of main) and #3552 (lane lint merges main into a lane head behind it and pushes the merge on a pass) are on main, at merge time the tool does one main-in and keeps the green run.
+Rule d (main comes in once, at merge time). Lanes bring main in only on conflict; the merge tool does one main-in at merge time and keeps the green run (needs #3481 and #3552 on main). Skill `ci-hygiene` step 8 holds the same rule.
 
 Coordinator's reading, not the owner's: until both are on main, rule d is not in force and ruling `own-923-c-ready-lanes-bring-main-in` stands.
 
