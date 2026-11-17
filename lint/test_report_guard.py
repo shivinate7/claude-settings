@@ -1022,6 +1022,16 @@ class PlainFormTests(unittest.TestCase):
         # The word outside Deviations is no claim.
         self.assert_allowed("Contradiction: noted in prose above.\n\n" + self.report("none"))
 
+    def test_pf_allowed_contradiction_none_found(self):
+        # A Deviations line that says there is no contradiction claims none, so Input Needed owes no question.
+        rows = [
+            "Contradiction: none found.",
+            "No contradiction: rows agree.",
+        ]
+        for deviations in rows:
+            with self.subTest(deviations=deviations):
+                self.assert_allowed(self.report(deviations))
+
     def test_pf_red_bare_id_forms_block(self):
         # PR#N and lane#N are ids with no gloss, and so is a #N with a hyphen after it. "Rows in #N" blocks too:
         # "in" passes only for a built-in ref. "needs review" after the id says nothing about it.
