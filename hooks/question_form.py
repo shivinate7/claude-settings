@@ -1871,13 +1871,14 @@ N_REASON = ("An item's `n` is a number such as 929, not the text \"929\". The pa
             "(decision item-field-rendered, a waiting item names only fields the page can draw and read)")
 
 
-def n_reason(matched) -> str:
-    """The n refusal as posted: the write to fix first (the item id and what its n is, from `matched`), then the
-    correction. A batch holds up to 50 writes, so the reason must say which one."""
+def n_lead(matched) -> str:
+    """The write to fix first, ahead of the n correction: the item id and what its n is, from `matched`. A batch holds
+    up to 50 writes, so the posted reason must say which one. guard.py joins it to PAGE_REASONS["item-n-number"], so
+    the refusal audit still reads that subscript at the call."""
     found = str(matched)
     if found.endswith(N_MARK):
         found = found[:-len(N_MARK)]
-    return "Fix this write: %s. %s" % (found, PAGE_REASONS["item-n-number"])
+    return "Fix this write: %s. " % found
 
 
 def page_number(value) -> bool:
