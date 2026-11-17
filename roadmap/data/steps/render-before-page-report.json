@@ -1,0 +1,11 @@
+{
+  "title": "A session renders the waiting page headless with the saved data before it says what the page shows",
+  "why": "Triage 11 told the owner \"I have not seen the rendered page\" with a headless browser installed; he was angry (13:2x CST Nov 17). A report on the page with no render is a guess.",
+  "note": "Filed by triage 11, 13:47 CST Nov 17. Prior work: fix-check-render-first, reviewer-render-refused, review-record-from-render (none cover a page report). Part 1: a line in skill waiting-page: render the page headless with a stand-in db fed from the saved items and answers before reporting what it shows (consultant 13:40 CST: land now). Part 2: a check that flags a report saying it has not seen or cannot see the page when no render ran that turn (consultant: queue). Triage owns part 1; the stand-in harness is in the triage 11 scratchpad (mk.py, shot.js) and should move to a tracked home. Guard for building-mistake-names-its-guard.",
+  "phase": "now",
+  "owner": "triage",
+  "lane": "",
+  "status": "ready",
+  "order": 940,
+  "updatedAt": "2026-11-17T13:41:32-06:00"
+}
