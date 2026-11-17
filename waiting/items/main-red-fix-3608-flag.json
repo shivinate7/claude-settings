@@ -1,0 +1,85 @@
+{
+  "added": "2026-11-17T05:13:48-06:00",
+  "context": "Goal: main goes green fast without breaking the red-main rule.\nProblem (rule): main is red, and the merge tool refuses the fix PR #3608 because the rule lets only the revert of the blamed commit merge on a red main, so only you can allow an exception.\nBased on (read): runner 10's verbatim tool text at 05:12 CST, relayed by the coordinator: \"No batch merges onto a red main. Open a revert PR for the breaking merge named above ... and merge it with the reason flag --base-red-ok \"<reason>\". ... Or, if this batch carries the fix, or the unknown read has a known cause, run again with the reason flag --base-red-ok \"<reason>\".\" Triage read on REST at 04:13 CST: main's run 44052915578 on 71f78cc38676 (#3469's merge) ended failure at attempt 2.\nBased on (notes): the coordinator's relay: run 44052915578 failed twice on job checks-waiting-page; #3608 is a test-file-only fix, its run is green, it is clean at head 43a2dbcef591 (REST, coordinator 05:10 CST, not read by triage); the consultant said at 03:54 CST that #3469 touches neither page.html nor page.test.mjs (the coordinator did not verify it) and at 04:14 CST that the case passed 10 of 10.\nDeparts from: main \u2014 CLAUDE.md git-red-main-reverts lets only the revert of the blamed commit merge on a red main \u2014 a lets one fix PR, #3608, merge on red main with one use of the flag; b opens an exact revert of #3469 and merges it with the flag; c waits for a green re-run of main.\nMeanwhile: the coordinator holds #3608, #3577 and #3569, and every later merge waits behind the red main.\nWaiting on: you.",
+  "holds": "Main is red, and #3608, #3577, #3569 and every later merge wait.",
+  "home": "step rail-jump-test-race; PR #3608",
+  "id": "main-red-fix-3608-flag",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "claude-settings PR #3608",
+      "url": "https://github.com/shivinate7/claude-settings/pull/3608"
+    }
+  ],
+  "n": 934,
+  "options": [
+    {
+      "gain": "Main goes green soonest, and the queue resumes.",
+      "how": "Tell the coordinator, or type it in runner 10's chat, naming #3608 and that one use.",
+      "id": "allow-flag-for-3608",
+      "key": "a",
+      "label": "Allow one use of the reason flag for #3608 only",
+      "links": [
+        {
+          "label": "claude-settings PR #3608",
+          "url": "https://github.com/shivinate7/claude-settings/pull/3608"
+        }
+      ],
+      "lose": "One exception to the red-main rule, for a fix and not a revert.",
+      "widens": false
+    },
+    {
+      "gain": "It stays inside the red-main rule.",
+      "id": "revert-3469-with-flag",
+      "key": "b",
+      "label": "Runner 10 opens an exact revert of #3469 and merges it with the flag, as your ruling that a revert merges as an ordinary PR with the reason flag allows",
+      "links": [
+        {
+          "label": "claude-settings PR #3469",
+          "url": "https://github.com/shivinate7/claude-settings/pull/3469"
+        }
+      ],
+      "lose": "It reverts work the consultant says is not the cause, so the race stays; it costs another full CI cycle (the #3608 run took about 31 minutes, 1 run); and #3469 must land again.",
+      "widens": false
+    },
+    {
+      "gain": "No flag is used.",
+      "id": "wait-for-green-rerun",
+      "key": "c",
+      "label": "Wait for a green re-run of main",
+      "links": [
+        {
+          "label": "The failed main run",
+          "url": "https://github.com/shivinate7/claude-settings/actions/runs/44052915578"
+        }
+      ],
+      "lose": "Main failed twice, so every merge stays held and may wait a long time.",
+      "widens": false
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 05:13 CST Nov 17, relayed from runner 10 (session_013NEJL2f1YCYsvLdpFqtWP3); posted by triage (session_013NEJL19M4Jwh49tAdowQXp)",
+  "recommended": "a",
+  "ref": "PR #3608; step rail-jump-test-race; decision no-merge-onto-red-main",
+  "repo": "shivinate7/claude-settings",
+  "short": "#3608 on red main: one flag use?",
+  "shown": [
+    {
+      "id": "allow-flag-for-3608",
+      "key": "a",
+      "label": "Allow one use of the reason flag for #3608 only"
+    },
+    {
+      "id": "revert-3469-with-flag",
+      "key": "b",
+      "label": "Runner 10 opens an exact revert of #3469 and merges it with the flag, as your ruling that a revert merges as an ordinary PR with the reason flag allows"
+    },
+    {
+      "id": "wait-for-green-rerun",
+      "key": "c",
+      "label": "Wait for a green re-run of main"
+    }
+  ],
+  "status": "open",
+  "title": "Main is red and the merge tool refuses the fix PR #3608 without the reason flag. May one fix PR merge on a red main with that flag?",
+  "why": "The coordinator recommends a. It is the coordinator's pick, relayed, not owner-typed. The facts below are the coordinator's relay; triage read only run 44052915578 on REST."
+}
