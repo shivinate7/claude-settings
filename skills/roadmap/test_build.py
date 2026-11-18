@@ -3820,10 +3820,10 @@ class StaleDraftRestRead(UpkeepFixture):
         self.publish(sessions=[], pulls=[self.live_pull(1001, "garbled-time")])
         real_git = build.git
 
-        def garbled(repo, *args, stdin=None):
+        def garbled(repo, *args, stdin=None, err=None):
             if args[:1] == ("log",) and "refs/remotes/origin/garbled-time" in args:
                 return "not a time\n"
-            return real_git(repo, *args, stdin=stdin)
+            return real_git(repo, *args, stdin=stdin, err=err)
 
         with mock.patch.object(build, "git", garbled):
             count, detail = self.row(self.out_with_live(), self.DRAFT)
@@ -4903,11 +4903,11 @@ class MockupFiles(UpkeepFixture):
         type read passes its refs on stdin. Empty output means the path is absent, and None means the read failed."""
         real = build.git
 
-        def read(repo, *args, stdin=None):
+        def read(repo, *args, stdin=None, err=None):
             named = any("refs/remotes/origin/" in arg for arg in args) or "refs/remotes/origin/" in (stdin or "")
             if args and named and (verbs is None or args[0] in verbs):
                 return None
-            return real(repo, *args, stdin=stdin)
+            return real(repo, *args, stdin=stdin, err=err)
         return mock.patch.object(build, "git", read)
 
     def check_starts(self, expect=(1,)):
