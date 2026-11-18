@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Scores each review layer's recall against the incident fixture and prints one JSON report.
 
-  python3 lint/review_layer_recall.py --fixture <fixture.json> [--findings <verdicts.json>]
+  python3 lint/review_layer_recall.py --fixture <fixture.json> [--findings <findings.json>] [--line]
 
-The report shape is in the docstring of lint/test_review_layer_recall.py. A verdicts file is a
+The report shape is in the docstring of lint/test_review_layer_recall.py. A findings file is a
 JSON list of {"pr", "layer", "verdict"} rows. A layer's recall is "measured" only when every
 incident whose answer key names the layer has a PASS or FAIL row of that layer; a layer with no
 incidents, a missing row, or a row whose verdict is anything else reads "unknown", never 0.
 A row for one layer never counts for another. A file that is not a list of objects exits 2.
-(The flag keeps the name --findings: the test file names it.)
+--line prints one text line of per-layer recall instead of the JSON report (the push-to-main CI step reads it).
 Cost is always "unknown": the review record stores no cost. Reads two local files, no network.
 """
 import argparse
@@ -47,21 +47,33 @@ def report(fixture, rows):
     }
 
 
+def line(result):
+    """One text line: the incident and control counts, then each layer as caught/of or unknown/of."""
+    layers = "; ".join(
+        "%s %s" % (name, ("%d/%d" % (rec["caught"], rec["of"])) if rec["status"] == "measured"
+                   else "unknown/%d" % rec["of"])
+        for name, rec in ((n, v["recall"]) for n, v in result["layers"].items()))
+    return "review-layer recall (%d incidents, %d controls): %s" % (
+        result["n"]["incidents"], result["n"]["controls"], layers)
+
+
 def main(argv):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--fixture", required=True)
-    parser.add_argument("--findings", dest="verdicts")
+    parser.add_argument("--findings", dest="findings")
+    parser.add_argument("--line", action="store_true")
     args = parser.parse_args(argv)
     try:
         fixture = load(args.fixture)
-        rows = load(args.verdicts) if args.verdicts else []
+        rows = load(args.findings) if args.findings else []
     except (OSError, ValueError) as exc:
         print("review_layer_recall: cannot read input: %s" % exc, file=sys.stderr)
         return 2
     if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
-        print("review_layer_recall: cannot read input: verdicts are not a list of objects", file=sys.stderr)
+        print("review_layer_recall: cannot read input: findings are not a list of objects", file=sys.stderr)
         return 2
-    print(json.dumps(report(fixture, rows), indent=2))
+    result = report(fixture, rows)
+    print(line(result) if args.line else json.dumps(result, indent=2))
     return 0
 
 
