@@ -214,6 +214,7 @@
                           posts nothing; any session may run it. An unreadable build or a missing --live exits 1: unknown, never empty.
                           A session in the live file's keepSessions ([{id, reason}]) prints a `hold (kept: ...)` line, never a lane line, and is not counted among the
                           lanes to archive; a keepSessions that is not a list of rows with an id reads unknown (exit 1), as does an int unarchived_epoch below 0.
+                          Each `unknown (` line ends with "Fix what it names, then read the live file again." unless it already says to read it again.
   merge <pr> --ready      a lane's one act on its own draft: the draft step of --confirm (on the default branch, merge origin/<base> into
                           the head when the head lacks its tip and the merge is clean; rebuild the records page; run the repo's ready checks: the ci-job
                           steps on that final tree, the debt-close lint and the open-PR clash on the pre-merge head; one plain push of the merge commit and
@@ -348,6 +349,10 @@ def run_id(run):
     return m.group(1) if m else run
 
 IDLE_CITE = "(decision session-tiers, the batch runner reads the lanes to archive from the output of each merge)"
+# The one home of the fix an `unknown (` line of `merge --idle-lanes` names. It deliberately omits the command's name, so the owed line after a
+# merge stays the one line that names it. A line that already says to read the live file again keeps its own text.
+IDLE_UNKNOWN_FIX = " Fix what it names, then read the live file again."
+IDLE_FIX_NAMED = re.compile(r"merge --idle-lanes|read (?:it|the live file|the file) again")
 UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not run is reported as unknown, never as clear)"
 # The two role cites name no tier: a lane must not learn which tier may claim a merge.
 ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may merge)"
@@ -6790,7 +6795,7 @@ def idle_lanes(live, repo_dir=None):
     Exit 1 with no summary when the
     live file is not named or the roadmap build cannot be loaded or run, so an unread list never reads as an empty one.
     `live` is the file's path, or the live file already parsed (a dict, as idle_lanes_after_merge passes it). A kept session (keepSessions)
-    prints a `hold (kept: ...)` line. `repo_dir` is the -C checkout (None: the one the process stands in)."""
+    prints a `hold (kept: ...)` line. Each `unknown (` line ends with IDLE_UNKNOWN_FIX unless it already says to read the live file again. `repo_dir` is the -C checkout (None: the one the process stands in)."""
     if not live:
         print("merge: --idle-lanes needs --live FILE, the publisher's live-work file. No list was made.", file=sys.stderr)
         return 1
@@ -6821,6 +6826,8 @@ def idle_lanes(live, repo_dir=None):
         else:
             tail = "Run get_session on each lane in one message, then archive them in the next message."
         entries = [*entries, f"merge: {count}. {tail}"]
+    # No unknown line ends bare: each names what to fix and to read the live file again (owner, 2026-11-18 11:49 CST). The checks above read the raw entries.
+    entries = [x + IDLE_UNKNOWN_FIX if x.startswith("unknown (") and not IDLE_FIX_NAMED.search(x) else x for x in entries]
     say(*entries)
     return 1 if unread else 0
 
