@@ -18142,6 +18142,22 @@ class ReviewFixBase(ReviewEnv):
                 rc, out, err = self.review_with_base(base, self.record_host(older, newest))
                 self.assert_refused(rc, out, err)
 
+    def test_a_base_naming_an_older_record_head_that_has_its_own_record_is_taken_in(self):
+        # the newest record has another Head, and the fix check names a head an older record reviewed: the fix diff starts there, so it is taken in
+        older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        newest = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        host = self.record_host(older, newest)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, host)
+        self.assertEqual(rc, 0, "a fix check naming an older record's head, which has its own review record, was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (self.EARLIER_HEAD, *REVIEW_FIX_PASS[1:]), "the printed record does not name the fix check from the older head")
+
+    def test_a_base_naming_a_head_no_record_reviewed_is_refused_beside_an_older_record_head(self):
+        # control for the case above: the same two records, and a head that no record reviewed, is still refused
+        older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        newest = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        rc, out, err = self.review_with_base(self.OTHER_HEAD, self.record_host(older, newest))
+        self.assert_refused(rc, out, err)
+
     def test_a_newest_earlier_record_with_a_passing_fix_line_accepts_its_head_as_the_base(self):
         # owner, page item 741: the newest record's fix check passed, so a further fix check from its head is accepted; the new head is a plain commit
         fixed = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, fix=(fix_verifier_line(head=self.EARLIER_HEAD),))
