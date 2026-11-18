@@ -1,0 +1,1 @@
+- rr-step-blob-lost-green: a lost or unreadable step blob reads as "not done", so `check` stays green for the stale-open rule. Older than the ruling-ref rule. Decision: ruled-store-one-home. Fix: none until seen.

@@ -1,0 +1,1 @@
+- wait-matcher-two-homes: the wait matcher lives twice, in skills/roadmap/build.py (#2560, check end) and roadmap/build.py on the roadmap branch (branch dead-pr-waits-place, placement end); they must share one phrase list (rule building-one-home-per-capability) once #2560's widened list settles.

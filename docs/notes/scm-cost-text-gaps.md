@@ -1,0 +1,1 @@
+- scm-cost-text-gaps: (#2410 stack-cross-measure) the cost text omits the rev-parse --verify per picked PR, the two merge-base --is-ancestor reads and the shallow probe; the origin fetch also runs when the only picked PR is a stack pair.

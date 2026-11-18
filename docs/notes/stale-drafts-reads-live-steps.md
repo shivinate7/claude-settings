@@ -1,0 +1,1 @@
+- stale-drafts-reads-live-steps: (#2533) stale_drafts in skills/roadmap/build.py reads only liveSteps, so the draft rows that the lane-field test makes live were not built. The stale-draft upkeep row can miss a live lane's draft or list it wrongly.

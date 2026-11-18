@@ -1,0 +1,1 @@
+- confirm-reads-no-review: confirm() in merge/merge.py (lines 3526-3777) reads no review record; the refusal sits in --release-check and --reviewed; unknown whether the batch runner always runs --release-check first.

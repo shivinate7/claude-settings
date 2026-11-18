@@ -1,0 +1,1 @@
+- export-scan-limit-11: cache-md5-key and tls-http2-key are refused, as on main. Fix: none until a real incident. Decision: waiting-data-in-repo.

@@ -1,0 +1,1 @@
+- ask-notes-gain-grant-word: (#2559 ask-phase-out) docs/design/ask-phase-out-notes.md:22 reads "Gain: the owner's grant". The Gain is the owner's own Mark read, not a grant (GLOSSARY.md:51, grant = leave to do an act). Reword at the next edit of that file. Low, doc only.

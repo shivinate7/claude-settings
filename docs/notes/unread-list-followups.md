@@ -1,0 +1,1 @@
+- unread-list-followups: (1) `--unread=<dir>` runs batch mode like `--parked`; (2) skills/waiting-page SKILL.md omits the four file names the check reads; (3) an unread answer is re-sent at the next wake. Fix: say each in SKILL.md, or change (3) if a re-send is noise.

@@ -1,0 +1,1 @@
+- red-fix-earlier-notes: (#2431) one parsed line accounts for a whole failed job; rollup exempt even when cancelled; rollup matched by exact name.

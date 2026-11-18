@@ -1,0 +1,1 @@
+- iosx-method-repeat: (#2493 ios-ship-export-method round 3) a repeated --method is accepted, last wins. The decision's "Linux runner" detail is owner-filed.

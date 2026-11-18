@@ -1,0 +1,1 @@
+- run-cancel-forms-unpinned: no test pins the `gh run cancel <id>` form or the placeholder `gh api -X POST repos/shivinate7/<repo>/actions/runs/<id>/cancel` form of entry Own CI Run Cancel; dropping one only narrows the entry. Decision: auto-mode-owner-acts.

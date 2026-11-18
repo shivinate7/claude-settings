@@ -1,0 +1,1 @@
+- pick-claim-quoted-word-no-item: a quoted word between the pick and `on item N` reads as a claim with no item.

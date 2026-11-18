@@ -1,0 +1,1 @@
+- blind-brief-no-branch-slot: (debt) skills/design-explore/blind-brief.md has no branch slot, and hooks/blind_brief.py refuses a Branch: header, so a design-explore designer pushes nothing until the orchestrator names a branch. Fix: add a branch slot to the blind brief and let blind_brief.py accept it.

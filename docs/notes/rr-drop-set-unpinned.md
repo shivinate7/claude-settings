@@ -1,0 +1,1 @@
+- rr-drop-set-unpinned: no case pins the drop of a path from the recent set (a deleted or renamed-away path, then an old entry pure-renamed into it); a no-drop mutant reads the same. A false alarm only. Decision: ruled-store-one-home.
