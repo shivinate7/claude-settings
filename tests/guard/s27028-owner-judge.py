@@ -37,8 +37,9 @@ OJ_GOOD = oj_ctx()
 
 
 def pr2015_oj_item(**over):
-    """Item 34's shape: a decision about which CI job runs a check, with options, a pick and a why, and no form lines."""
-    item = {"id": OJ_DOC, "kind": "decision", "status": "open", "title": "Which CI job runs the stamp check?",
+    """Item 34's shape: a decision about which CI job runs a check, with options, a pick and a why, and no form lines.
+    It carries n, so the n rule (item_n_hit) passes it and question-form is the rule that judges it."""
+    item = {"id": OJ_DOC, "n": 928, "kind": "decision", "status": "open", "title": "Which CI job runs the stamp check?",
             "context": OJ_CTX, "options": OJ_OPTIONS, "pick": "a",
             "why": "The lint job already holds the other format checks."}
     item.update(over)
