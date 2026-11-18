@@ -44,6 +44,8 @@ import re
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+import git_reads  # noqa: E402  the one home of the shallow probe (hooks/git_reads.py)
+import local_time  # noqa: E402  the one home of the Central clock (hooks/local_time.py)
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
 import _guard_sections  # noqa: E402  the one home of the guard test's section header and faults
@@ -244,9 +246,10 @@ DEBT_SEEN_LINE = re.compile(r"^(?:- )?Seen:")
 
 
 def today():
-    """Today's date. FIXED_TODAY (an ISO date) replaces the clock, so a suite pins it. Raises ValueError on a bad value."""
+    """Today's date in US Central (hooks/local_time.py, the one home of the Central clock; decision local-time-central).
+    FIXED_TODAY (an ISO date) replaces the clock, so a suite pins it. Raises ValueError on a bad value."""
     pinned = os.environ.get("FIXED_TODAY")
-    return datetime.date.fromisoformat(pinned) if pinned else datetime.date.today()
+    return datetime.date.fromisoformat(pinned) if pinned else local_time.central_parts(local_time.clock())[0].date()
 
 
 def parse_seen(text):
@@ -367,7 +370,7 @@ def next_debt(root):
 
 def debt_flow(root, start, end):
     """(opened slugs, closed slugs): the debt files added and deleted from the parent of `start` (the empty tree when
-    `start` has no parent) to `end`, so `start` itself counts. The count is net: a debt that `start` adds and a later
+    `start` is a root commit of a full clone) to `end`, so `start` itself counts. The count is net: a debt that `start` adds and a later
     commit deletes is in neither list. One git diff with renames off, one rev-parse that START is a commit, one for its
     parent, and a hash-object only when it has none. The folder's README and notes file are no debts. Raises Unknown
     when git cannot say, and when `start` names no commit (never read as a root commit)."""
@@ -377,6 +380,8 @@ def debt_flow(root, start, end):
         raise Unknown("%s names no commit" % start)
     parent = run("rev-parse", "--verify", "--quiet", start + "^")
     if parent.returncode:
+        if git_reads.is_shallow(root) is not False:  # a shallow boundary commit has no parent: its window is unknown
+            raise Unknown("%s has no parent in a clone that may be shallow" % start)
         parent = run("hash-object", "-t", "tree", "--stdin", input="")
         if parent.returncode:
             raise Unknown("git hash-object failed: %s" % parent.stderr.strip())
