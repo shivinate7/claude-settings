@@ -1196,6 +1196,16 @@ add("role-model: reviewer on haiku with the guard marker is denied at the step-u
     "deny", STEP_UP, tool="Agent", config=ROLE_GUARD_SONNET_CFG,
     carries=("Reviewer round 1 on a guard or check change runs on Sonnet. Spawn it with model sonnet.",),
     **role_input("reviewer", "haiku", REVIEW_GUARD_MARKER + "\nCheck the guard diff."))
+# A blank model and no model pass the role row (the reviewer's pin reads haiku, and no row sits above it), so only this
+# step-up refuses them on the sonnet row. Dropping its blank-model leg lets both through. The green control for the same
+# leg on a haiku row is rule9's GUARD_RECORD_CFG cases (floor step-up, blank and no model), which hold with or without it.
+GUARD_STEP_UP_SONNET = "Reviewer round 1 on a guard or check change runs on Sonnet. Spawn it with model sonnet."
+add("role-model: round 1 reviewer with the guard marker and a blank model is denied at the step-up (its 1 guard row is sonnet)",
+    "deny", STEP_UP, tool="Agent", config=ROLE_GUARD_SONNET_CFG, env=UNSET_DEFAULT, carries=(GUARD_STEP_UP_SONNET,),
+    **role_input("reviewer", "  ", REVIEW_GUARD_MARKER + "\nCheck the guard diff."))
+add("role-model: round 1 reviewer with the guard marker and no model field is denied at the step-up (its 1 guard row is sonnet)",
+    "deny", STEP_UP, tool="Agent", config=ROLE_GUARD_SONNET_CFG, env=UNSET_DEFAULT, carries=(GUARD_STEP_UP_SONNET,),
+    **role_input("reviewer", None, REVIEW_GUARD_MARKER + "\nCheck the guard diff."))
 # A marker line may start with leading blanks: the brief table's line-start rows allow them, and a brief indents its
 # template line. The first-pass brief is the case, since only the marker lifts Sonnet there.
 guard_row_allow("role-model: reviewer on sonnet on Round 1 with the guard marker after two spaces is allowed", "reviewer",
