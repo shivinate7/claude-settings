@@ -81,7 +81,8 @@ GitHub, so the publisher reads them just before the build and passes one file:
      "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "held"?, "reviewLog"?, "head"?, "url"?, "checks"?}],
      "branches": [{"name", "updatedAt"?}],
      "sessions": [{"id", "session_status", "tags", "status_bucket"?}],
-     "items": [{"n", "status", "home", "lane"?}]}
+     "items": [{"n", "status", "home", "lane"?}],
+     "ledger"?: {"readAt": "<ISO time>", "rows": [{"number", "act", "owner", "ageHours", "red", "blockedOn"}]}}
 
 - `threads`: `list_threads`, every page. Leave out resolved threads. `state` is the thread state as
   listed. Add `step` only when the thread's brief names it.
@@ -107,6 +108,16 @@ GitHub, so the publisher reads them just before the build and passes one file:
   page row has none. `owner` is the session that reads the answer, also optional. The build keeps each
   exactly when its key is present. The upkeep list reads the items for page rulings and for lanes to archive,
   and the red line reads `lane` for stalled items. A live file with no `items` list still renders Live work.
+- `ledger`: each open pull request's next act. Triage's publish step runs one more command, `merge --reviewed --json`
+  (decision pr-ledger), just before the build and puts its whole output under this key, with no hand merge of rows.
+  The build (`live_ledger`) joins the rows to `pulls` by number and bakes `act`, `owner`, `ageHours` and `red` on each
+  pull. The Status tab then lists red pulls first, shows each pull's act, owner and age, and heads the list with a count
+  for each owner and the time the acts were read. A pull with no row reads `act unknown`, never blank. A `ledger` that is
+  missing, has no `rows` list, or whose `readAt` is not an ISO time, is over `STALE_LIVE_MINUTES` old or is in the future
+  makes every act read `act unknown`, and the list head says why once; no other key of the file changes that. A draft
+  whose act is `lane round 1` reads `no live lane` (owner coordinator, never red) when the `sessions` list is read and no
+  live lane holds its branch, and `lane unknown` (owner unknown) when there is no `sessions` list. The key is optional:
+  a file without it still renders Live work, with every act unknown.
 - An entry with the wrong shape is counted on the page and in the upkeep list, never dropped. A
   `step` that names no open step goes in the upkeep list.
 - With no `--live`, no `pulls` list, or a `readAt` that is not an ISO time, the
@@ -373,6 +384,8 @@ The red line, the stalled lines and the ready lines read the live file and steps
 already reads. They add no process, file, timer or log. The publisher's `createdAt` per pull row comes from the
 GitHub list call it already makes. The stale-draft row makes its own REST calls (N // 100 + 1 per build run) and one local
 `git log` per stale-looking draft. It writes no file, starts no timer and keeps no log.
+The `ledger` costs the publisher one `merge --reviewed --json` run per publish (its gh calls are in decision pr-ledger, Cost); the build
+reads the live file a second time for it and adds no GitHub read, process, file, timer or log.
 The `landedPulls` rows cost the publisher one more GitHub list call (closed pulls) per publish. The closed-pull wait row runs
 one `git merge-base` per closed unmerged PR that an open step waits on, once per build. A closed row no open step
 waits on runs no git for this row. It writes no file. The landed rows add their own `git merge-base` per distinct head of an unmerged

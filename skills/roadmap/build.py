@@ -942,6 +942,88 @@ def live_age_minutes(read):
     return int((datetime.datetime.now(datetime.timezone.utc) - at).total_seconds() // 60)
 
 
+LEDGER_ACT_UNKNOWN = "act unknown"  # a pull request whose act the build cannot read: never blank, never "none"
+LEDGER_NO_LIVE_LANE = "no live lane"  # a round-1 draft that no live lane holds; the coordinator owns it
+LEDGER_LANE_UNKNOWN = "lane unknown"  # the same draft when the sessions list is unread, so no lane hold can be told
+
+
+def ledger_shape_why(row):
+    """Why a ledger row is unusable, or None: {number: int, act: text, owner: text, ageHours: number, red: bool, blockedOn: int or null}."""
+    if not isinstance(row, dict):
+        return "not an object"
+    num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)
+    if type(row.get("number")) is not int:
+        return "number is not an int"
+    if not (isinstance(row.get("act"), str) and row["act"].strip() and isinstance(row.get("owner"), str) and row["owner"].strip()):
+        return "act or owner is not text"
+    if not num(row.get("ageHours")) or not isinstance(row.get("red"), bool):
+        return "ageHours is not a number or red is not a bool"
+    if row.get("blockedOn") is not None and type(row["blockedOn"]) is not int:
+        return "blockedOn is not an int or null"
+    return None
+
+
+def ledger_read(raw):
+    """(rows by pull number, readAt text, why or None, skipped row names) of the live file's `ledger` value: `merge --reviewed --json`
+    whole, {readAt, rows}. The reason is the ledger's own: it is missing, not an object, has no rows list, or its readAt is not an
+    ISO time with a zone, is over STALE_LIVE_MINUTES old, or is in the future. It reads no other key of the live file, so a
+    skipped landedPulls row cannot blank the acts. A row with the wrong shape is left out and named in the skipped list; the first
+    row for a number wins."""
+    skipped = []
+    if not isinstance(raw, dict):
+        return {}, None, "unknown (the live file has no ledger: the acts were not read)", skipped
+    at = raw.get("readAt")
+    if zoned_time(at) is None:
+        return {}, None, "unknown (the ledger's readAt is not an ISO time with a zone: %r)" % (at,), skipped
+    minutes = live_age_minutes(at)
+    if not isinstance(raw.get("rows"), list):
+        return {}, at, "unknown (the ledger has no rows list)", skipped
+    if minutes > STALE_LIVE_MINUTES:
+        return {}, at, "unknown (the ledger was read %d minutes ago, past the %d-minute limit)" % (minutes, STALE_LIVE_MINUTES), skipped
+    if minutes < -FUTURE_MINUTES:
+        return {}, at, "unknown (the ledger's readAt is in the future)", skipped
+    rows = {}
+    for n, row in enumerate(raw["rows"]):
+        if ledger_shape_why(row):
+            skipped.append("ledger row %d" % (n + 1))
+        else:
+            rows.setdefault(row["number"], row)
+    return rows, at, None, skipped
+
+
+def live_ledger(path, work):
+    """Bake each open pull's next act into `work` (live_work's result), from the live file's `ledger` key (step status-tab-lists-coord-prs).
+
+    Every row of work["pulls"] gains `act`, `owner`, `ageHours` and `red`; `work` gains `ledgerAt` (the ledger's readAt, when it is a
+    time) and `ledgerWhy` (None, or why every act reads unknown: said once, for the list head, never on a row). A pull with no ledger
+    row reads act `act unknown`, owner None. A draft whose ledger act is `lane round 1` is the parked mark: with the sessions list read,
+    no live lane holding its branch (live_lane_holds) reads act `no live lane`, owner `coordinator`, never red; with the sessions list
+    unread it reads act `lane unknown`, owner `unknown`. A ledger row with the wrong shape is added to `skipped`. A live file that gave
+    no pulls list (work has no `pulls`) is left alone. The ledger comes from `merge --reviewed --json`; this reads the live file again
+    and nothing else: no GitHub read, no process."""
+    if "pulls" not in work:
+        return work
+    try:
+        raw = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raw = {}
+    rows, at, why, skipped = ledger_read(raw.get("ledger") if isinstance(raw, dict) else None)
+    work["ledgerAt"], work["ledgerWhy"] = at if zoned_time(at) else None, why
+    work["skipped"] = list(work.get("skipped") or []) + skipped
+    for pull in work["pulls"]:
+        row = rows.get(pull["number"])
+        if row is None:
+            pull.update(act=LEDGER_ACT_UNKNOWN, owner=None, ageHours=None, red=False)
+            continue
+        pull.update(act=row["act"], owner=row["owner"], ageHours=row["ageHours"], red=row["red"])
+        if pull.get("draft") is True and row["act"] == "lane round 1":
+            if work.get("laneSessions") is None:
+                pull.update(act=LEDGER_LANE_UNKNOWN, owner="unknown")
+            elif not live_lane_holds(work, pull.get("branch")):
+                pull.update(act=LEDGER_NO_LIVE_LANE, owner="coordinator", red=False)
+    return work
+
+
 def build_info(repo, source, why):
     """window.ROADMAP_BUILD: the build time and, per panel, the home it read and the commit it read at."""
     if source is None:
@@ -1066,7 +1148,7 @@ def main(argv=None):
     slug, found = github_slug(repo, extra), homes(repo)
     info["records"] = records(repo, found, slug, args.main_branch)
     info["health"] = health(repo, extra, where, slug, args.main_branch)
-    info["live"] = live_work(args.live, data["steps"] if data else None, slug)
+    info["live"] = live_ledger(args.live, live_work(args.live, data["steps"] if data else None, slug))
     marks = add_marks(marks, pull_landed_marks(repo, ref, data["steps"] if data else None, info["live"]))
     info["landed"] = marks
     info["stalled"] = (stalled(data["steps"], marks, info["live"]) if data else
