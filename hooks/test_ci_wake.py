@@ -307,6 +307,11 @@ def rest(path, full, args, fx):
             return 1
         sys.stdout.write(json.dumps(rest_pr(hits[0])) + "\n")
         return 0
+    if len(parts) == 6 and parts[5] == "files":
+        hits = [p for p in mine if str(p["number"]) == parts[4]]
+        names = hits[0].get("files", []) if hits else []
+        sys.stdout.write(json.dumps([{"filename": n, "status": "added"} for n in names]) + "\n")
+        return 0
     query = {}
     for i, a in enumerate(args):
         if a in ("-f", "-F") and i + 1 < len(args) and "=" in args[i + 1]:
@@ -370,6 +375,9 @@ def main(args):
         if fx.get("workflow_list") == "garbage":
             sys.stdout.write("<html>not json</html>\n")
             return 0
+        if fx.get("workflow_list") == "empty_stderr":
+            sys.stderr.write("warning: the workflow answer is not complete\n")
+            return 0   # exit 0 and 0 bytes on stdout, with a message on stderr: not a repo with no workflow
         if fx.get("workflow_list") == "empty":
             return 0   # gh 2.89.0 prints 0 bytes and exits 0 for a repo with no workflow, not "[]"
         # gh lists the active workflows unless --all; the fixture's repo field is not gh's, so it is dropped
@@ -571,7 +579,7 @@ PUSH_FORMS = [
 
 FAILS = []
 COUNT = [0]
-LINE = re.compile(r"^CI (green|red|cancelled|unknown) on (\S+?): ?(.*)$")
+LINE = re.compile(r"^CI (green|red|cancelled|unknown|none) on (\S+?): ?(.*)$")
 
 
 def check(label, ok, detail=""):
@@ -719,12 +727,13 @@ def expect_silent(label, res):
 
 
 def expect_closing_line(label, res):
-    """A repo with no active workflow wakes once: exit 2, and one CI line on the head sha7. The line reaches the
-    transcript only through that exit-2 wake. Its verdict word is not checked here: the Stop cases read whether
-    the line closes the CI wait."""
+    """A repo with no active workflow wakes once: exit 2, and one CI line on the head sha7. The line reads
+    `CI none on <sha7>: no active workflow`, never green: a green line would say CI passed. The line reaches
+    the transcript only through that exit-2 wake, and the Stop cases read whether a none line closes the wait."""
     v = verdict_of(res)
-    check("%s: exit 2, one CI line on sha7 (the wake line)" % label,
-          res.rc == 2 and not res.hung and v is not None and v[1] == SHA7, why(res))
+    check("%s: exit 2, one CI none line on sha7 (the wake line)" % label,
+          res.rc == 2 and not res.hung and v is not None and v[0] == "none" and v[1] == SHA7
+          and "no active workflow" in v[2], why(res))
 
 
 def expect_no_watch(label, res):
@@ -1664,6 +1673,30 @@ def case_empty_workflow_list_is_no_workflows():
               count(res, "run", "list") == 0 and count(res, "run", "view") == 0, why(res))
 
 
+def case_workflow_list_with_stderr_is_unknown():
+    """An answer with exit 0, 0 bytes on stdout and a message on stderr is not the answer of a repo with no
+    workflow. It is unknown, so the watch runs and the one line is the red verdict. A none line beside it
+    would make two lines, and verdict_of would fail it."""
+    fx = fixture([pr(214, repo=REPO_APP)], [in_repo(RED, REPO_APP)], cwd_repo=REPO_APP,
+                 workflow_list="empty_stderr")
+    res = run_hook(bash("gh pr ready 214 --repo " + REPO_APP), fx, extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+    label = "workflow list exit 0, empty stdout, message on stderr"
+    expect_verdict(label, res, "red", names_in=["unit", "e2e"])
+    expect_watch(label, res, ["902"])
+
+
+def case_pr_adding_a_workflow_file_is_not_no_ci():
+    """A PR whose own diff adds a .github/workflows file has CI on its head, though the default branch has no
+    active workflow. The watch runs and reads that head's red run. The PR's file list is the fixture's `files`
+    key, answered for the REST route repos/O/R/pulls/N/files."""
+    p = dict(pr(214, repo=REPO_APP), files=[".github/workflows/ci.yml"])
+    fx = fixture([p], [in_repo(RED, REPO_APP)], cwd_repo=REPO_APP, workflows=[])
+    res = run_hook(bash("gh pr ready 214 --repo " + REPO_APP), fx, extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+    label = "PR adds a workflow file, no active workflow on the default branch"
+    expect_verdict(label, res, "red", names_in=["unit", "e2e"])
+    expect_watch(label, res, ["902"])
+
+
 # Selector forms that leave the repo out of the hook's own parse. The PR lives in REPO_APP, and the folder
 # is REPO_HOME, which has no workflow. Each form must give the PR's verdict, and every gh call after the
 # pr view must name REPO_APP with -R, taken from the PR's own url field.
@@ -2314,6 +2347,8 @@ def main():
     case_workflows_but_no_run_on_head_still_says_no_run_yet()
     case_failed_workflow_read_is_not_no_workflows()
     case_empty_workflow_list_is_no_workflows()
+    case_workflow_list_with_stderr_is_unknown()
+    case_pr_adding_a_workflow_file_is_not_no_ci()
 
     # Selector forms that leave the repo blank, and the folder without workflows.
     case_url_selector_pins_pr_repo_on_later_calls()
