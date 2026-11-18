@@ -559,4 +559,4 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `shared-merge-tool` | Plan: the shared merge tool | [`docs/plans/shared-merge-tool.md`](../docs/plans/shared-merge-tool.md) |
 | `stylisms-rules-table` | Plan: shiv-stylisms rules table | [`docs/plans/stylisms-rules-table.md`](../docs/plans/stylisms-rules-table.md) |
 | `test-ci-standard` | Plan: how good tests and CI are made, how far the repos are, and how to close the gap | [`docs/plans/test-ci-standard.md`](../docs/plans/test-ci-standard.md) |
-| `time-pinned-tests` | Time-pinned tests: per-repo list | [`docs/plans/time-pinned-tests.md`](../docs/plans/time-pinned-tests.md) |
+| `time-pinned-tests-go` | Time-pinned tests go: the plan | [`docs/plans/time-pinned-tests-go.md`](../docs/plans/time-pinned-tests-go.md) |
