@@ -197,6 +197,12 @@ if command -v python3 >/dev/null 2>&1; then
   if [ -f "$ro_script" ]; then
     ro_lines=$(python3 "$ro_script" roster-lines "$toplevel" 2>/dev/null)
     [ -n "$ro_lines" ] && printf '%s\n' "$ro_lines"
+    # The standing merge role (decision session-tiers): a cloud session whose id is a coordinator, triage or consultant row of
+    # that roster gets state/merge-role.json, so `merge <pr> --confirm` needs no hand step; the file is removed when the roster
+    # no longer names it. A local read of the same ref, never a fetch; one more python start, in a cloud session only.
+    if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
+      python3 "$ro_script" merge-role "$toplevel" >/dev/null 2>&1
+    fi
   fi
 fi
 

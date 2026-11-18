@@ -1,0 +1,1 @@
+- gh-write-repo-flag-release: (#2462 gh-write-repo-flag-gap round 3) the cloud guard does not judge `gh release|repo|run -R o/r` writes (same as main).

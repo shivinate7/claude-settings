@@ -1,0 +1,1 @@
+- scm-stray-edits: (#2410) a stray spacing edit on `WAIT_LINE =` in test_lane_lint.py; a duplicate `host = host or Host()` in lane_lint (harmless).

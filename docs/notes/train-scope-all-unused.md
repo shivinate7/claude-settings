@@ -1,0 +1,1 @@
+- train-scope-all-unused: `merge/merge.py` clash scope `all` is used by no command; the pre-ready run uses `ready` (`PRE_READY_CLASH_SCOPE`) and lane lint uses scope `lane` plus `--with`. Decision: session-tiers.

@@ -1,0 +1,1 @@
+- silent-write-gh-repo-flag-first: (debt) hooks/guard.py:782 reads the raw `rest[:2]`, not gh_call_of, so the silent-write check misses `gh pr -R o/r merge 12 >/dev/null` but sees `gh pr merge 12 -R o/r >/dev/null`. Claude can write either form by mistake. Pre-existing, not in #2462's diff. Fix: read the call through gh_call_of.

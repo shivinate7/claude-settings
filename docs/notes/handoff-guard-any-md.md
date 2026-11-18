@@ -1,0 +1,1 @@
+- handoff-guard-any-md: guard.py judges any dot-free X.md in handoffs/, not only session ids.

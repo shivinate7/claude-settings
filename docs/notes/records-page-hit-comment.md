@@ -1,0 +1,1 @@
+- records-page-hit-comment: guard_merge.py records_page_hit's comment says "Any read that fails is no hit", but the two new reads fail closed. Fix: say "Any other read".

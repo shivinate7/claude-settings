@@ -1,0 +1,1 @@
+- merge-resolve-drops-lines: triage resolved a main-merge conflict in #2552 at 12:58 by folding main's run_cli input_bytes path into the lane's helper and left no Drops-lines trailer; the silent-undo check caught it at lane lint. Gap: no step tells a conflict resolver to add the trailer in the same commit. Under decision silent-undo-check.

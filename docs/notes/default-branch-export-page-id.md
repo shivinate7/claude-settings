@@ -1,0 +1,1 @@
+- default-branch-export-page-id: hooks/feedback_guard.py export_check on a checkout with no extras gets page_id "", so an --all export never clears through "<id>: same"; one Stop is blocked, then stop_hook_active ends it.

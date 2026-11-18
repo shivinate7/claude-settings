@@ -1,0 +1,1 @@
+- mtmc-dash-docstring: (#1447) the dash regex needs a space only before the dash; the docstring says both sides.

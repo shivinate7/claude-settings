@@ -1,0 +1,1 @@
+- same-tree-push-record: From step same-pr-tree-equal-record: a non-merge push whose tree equals the record head's tree still owes a fresh review under decision pr-review-record; one hit (#1706). Becomes a debt on a real recurrence.
