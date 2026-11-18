@@ -182,7 +182,8 @@ const span = (ms) => { const hrs = Math.round(Math.abs(ms) / 36e5); if (hrs < 1)
 const RED_GLY = '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6.5" fill="currentColor"/><path d="M7 3.4v4.4" stroke="var(--surface)" stroke-width="1.9" stroke-linecap="round"/><circle cx="7" cy="10.3" r="1.1" fill="var(--surface)"/></svg>';
 
 /* Sample pulls in REST order. act/owner/ageHours/red are the shape of one ledger row (pr_next_act in merge/merge.py), joined by number.
-   act null: no ledger row. lane: "held" (a live lane holds the branch) or "none" (no live lane), read only for a "lane round 1" draft with no record. */
+   act null: no ledger row. lane: "held" (a live lane holds the branch) or "none" (no live lane), read only for a "lane round 1" draft: the build then
+   replaces that act (see built below). */
 const PULLS = [
   { n: 2962, draft: true, title: "Sample: draft that no lane is working on", branch: "sample-orphan-draft", checks: "", act: "lane round 1", owner: "lane", age: 20, red: false, lane: "none" },
   { n: 2960, title: "Sample: show the next act on the Status tab", branch: "sample-status-tab-act", checks: "green", act: "lane round 2", owner: "lane", age: 5, red: false },
@@ -202,8 +203,15 @@ function staleWhy() {
   const ago = NOW - Date.parse(ACTS_READ.stale);
   return `read ${span(ago)} ago, past the ${STALE_LIVE_MINUTES}-minute limit`;
 }
-/* The row's owner after the lane join (plan item e): a round-1 draft no live lane holds goes to the coordinator, and is never red. */
-const shownOwner = (p, s) => (s !== "lanes" && p.lane === "none" ? "coordinator" : p.owner);
+/* The row's act and owner after the lane join (plan item e), as live_ledger bakes them. With no lane hold readable (#s=lanes) a round-1 draft reads
+   "lane unknown", owner unknown. With the holds read, a round-1 draft no live lane holds reads "no live lane", owner coordinator, and is never red. */
+const LANE_WHY = "the live file has no sessions list";
+const built = (p, s) => {
+  if (!p.lane) return p;
+  if (s === "lanes") return { ...p, act: "lane unknown", owner: "unknown" };
+  return p.lane === "none" ? { ...p, act: "no live lane", owner: "coordinator" } : p;
+};
+const shownOwner = (p, s) => built(p, s).owner;
 
 function actLine(p, s, firstRed, labels) {
   if (s === "stale") {
@@ -213,13 +221,12 @@ function actLine(p, s, firstRed, labels) {
     return `<span class="act"${lab}><span class="unk"${P.why === "row" ? pick : ""}>${RING} act unknown<span class="why">: ${esc(staleWhy())}</span></span></span>`;
   }
   if (p.act == null) return `<span class="act"${labels.unk ? ' data-new="act unknown, one row"' : ""}><span class="unk">${RING} act unknown: no ledger row for this pull request</span></span>`;
-  const parts = [`<b>${esc(p.act)}</b>`];
+  const b = built(p, s), lane = b.act === "lane unknown";
+  const parts = [lane ? `<span class="unk" title="${esc(LANE_WHY)}">${RING} lane unknown</span>` : `<b>${esc(b.act)}</b>`];
   let lab = "";
-  if (p.lane) {
-    if (s === "lanes") { parts.push(`<span class="unk" title="The build had no sessions list.">${RING} lane unknown</span>`); lab = "lane unknown"; }
-    else if (p.lane === "none") { parts.push("no live lane"); lab = "no live lane, owner coordinator"; }
-  }
-  parts.push("owner " + esc(shownOwner(p, s)), "waited " + span(p.age * 36e5));
+  if (lane) lab = "lane unknown";
+  else if (b.act === "no live lane") lab = "no live lane, owner coordinator";
+  parts.push("owner " + esc(b.owner), "waited " + span(p.age * 36e5));
   const mark = p.red
     ? (P.red === "mark" ? `<span class="tag ic redm" role="img" aria-label="Red: ${esc(p.why)}" title="Red: ${esc(p.why)}">${RED_GLY}</span>` : `<span class="tag redw" title="${esc(p.why)}">red</span>`)
     : "";
@@ -253,7 +260,7 @@ function prList(s) {
   const asof = stale ? `<span class="asof unk" data-new="old acts read time">${RING} acts read <span class="num">${at}</span></span>` : `<span class="asof" data-new="acts read time">acts read <span class="num">${at}</span></span>`;
   const why = stale
     ? `<p class="asof unk prwhy"${P.why === "head" ? ' id="pick-why"' : ""}>Every act is unknown: the acts were ${esc(staleWhy())}.</p>`
-    : s === "lanes" ? `<p class="asof unk prwhy prlane">Lane holds unknown: the build had no sessions list, so a draft reads "lane unknown".</p>` : "";
+    : s === "lanes" ? `<p class="asof unk prwhy prlane">Lane holds unknown: ${esc(LANE_WHY)}.</p>` : "";
   return `<h4 class="prh"><span>Open pull requests</span>${cts}${asof}</h4>${why}<ul>${lis}</ul>`;
 }
 

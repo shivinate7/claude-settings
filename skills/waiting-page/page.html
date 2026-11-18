@@ -3689,7 +3689,7 @@ function prActs(w, pulls, day, span) {
   }
   const at = w.ledgerAt ? day(w.ledgerAt) : "";
   const why = !known ? `<p class="asof unk prwhy">Every act is unknown: ${esc(unwrap(w.ledgerWhy))}.</p>`
-    : rows.some((p) => p.act === "lane unknown") ? `<p class="asof unk prwhy">Lane holds unknown: ${esc(laneWhy)}, so a draft reads "lane unknown".</p>` : "";
+    : rows.some((p) => p.act === "lane unknown") ? `<p class="asof unk prwhy">Lane holds unknown: ${esc(laneWhy)}.</p>` : "";
   return {
     head: `<h4 class="prh"><span>Open pull requests</span>${cts}</h4>${why}`,
     asof: !at ? "" : known ? `acts read <span class="num">${esc(at)}</span>` : `<span class="unk">${ring} acts read <span class="num">${esc(at)}</span></span>`,  // no time: the list head's reason says it

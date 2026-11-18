@@ -768,6 +768,12 @@ def health(repo, extra, where, slug, branch):
             {"name": "Session board", "home": None, "read": BOARD_WHY}]
 
 
+def session_row_ok(row):
+    """The shape a sessions row must have to be read: a string id and session_status, and tags absent or a list. One home for live_work's keep and live_ledger's lane reason."""
+    return (isinstance(row.get("id"), str) and isinstance(row.get("session_status"), str)
+            and (row.get("tags") is None or isinstance(row["tags"], list)))
+
+
 def live_work(path, steps, slug=None):
     """window.ROADMAP_BUILD.live: the publisher's threads, pull requests and branches, or why unknown.
 
@@ -884,9 +890,7 @@ def live_work(path, steps, slug=None):
         why.append("unknown (the repo's GitHub name could not be read)")
     else:
         before = len(skipped)
-        sessions = keep("session", raw["sessions"], lambda r: isinstance(r.get("id"), str)
-                        and isinstance(r.get("session_status"), str)
-                        and (r.get("tags") is None or isinstance(r["tags"], list)))
+        sessions = keep("session", raw["sessions"], session_row_ok)
         # list_sessions is account-wide and step ids repeat across repos, so a session counts only with this repo's tag.
         # GitHub names ignore case, so the slug compare does too.
         ours = lambda t: repo_tag_names(t, slug)
@@ -1026,8 +1030,7 @@ def live_ledger(path, work):
     sessions = raw.get("sessions") if isinstance(raw, dict) else None
     if not isinstance(sessions, list):
         list_why = LANE_WHY_NO_LIST
-    elif not all(isinstance(r, dict) and isinstance(r.get("id"), str) and isinstance(r.get("session_status"), str)
-                 and (r.get("tags") is None or isinstance(r["tags"], list)) for r in sessions):
+    elif not all(isinstance(r, dict) and session_row_ok(r) for r in sessions):
         list_why = LANE_WHY_SKIPPED
     elif work.get("laneSessions") is None:  # glossary-ok: the key live_work returns, the name its readers use
         list_why = LANE_WHY_NO_NAME
