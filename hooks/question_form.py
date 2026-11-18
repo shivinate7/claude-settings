@@ -2109,9 +2109,11 @@ UNVETTED_LINE = re.compile(r"^[ \t>*+-]*Unvetted:[ \t]*\S", re.I | re.M)
 UNREADABLE = "unreadable"
 CLOSED_ITEMS = "closed page items"
 INDEX_CAP, STEP_TOP, STEP_GIT_TIMEOUT, RULED_TOP = 800, 30, 10, 8
+RULING_EXTRA_CAP = 1200  # the most a record's ruling section adds past INDEX_CAP, as owner ruling sentences
 RULING_HEADING = re.compile(r"^##[ \t]+The ruling[ \t]*$", re.I | re.M)
 RULING_WORDS = re.compile(r"ruling|owner|shiv", re.I)
 SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+DATE_STAMP = re.compile(r"\b20\d\d-\d\d-\d\d(?: \d\d:\d\d)?")
 WORD = re.compile(r"[a-z]{4,}")
 STOPWORDS = frozenset(("that", "this", "with", "from", "have", "will", "should", "would", "could", "there", "their",
                        "about", "which", "when", "what", "were", "been", "into", "than", "then", "them", "they",
@@ -2131,19 +2133,44 @@ def _words(text) -> set:
 
 
 def _ruling_text(body) -> str:
-    """The whole `## The ruling` section (to the next `## `), else the body after the title line, white space
-    collapsed and capped."""
+    """The `## The ruling` section (to the next `## `), else the body after the title line, white space
+    collapsed and cut at INDEX_CAP. A longer section also gets its owner ruling sentences from past the cut
+    (see _owner_sentences), so a ruling late in a long section still reaches the judge."""
     match = RULING_HEADING.search(body)
     if match:
         section = body[match.end():]
         nxt = re.search(r"^##[ \t]", section, re.M)
         text = " ".join((section[:nxt.start()] if nxt else section).split())
         if text:
-            return text[:INDEX_CAP]
+            extra = _owner_sentences(text)
+            return text[:INDEX_CAP] + (" " + extra if extra else "")
     lines = body.splitlines()
     if lines and lines[0].startswith("#"):
         lines = lines[1:]
     return " ".join(" ".join(lines).split())[:INDEX_CAP]
+
+
+def _owner_sentences(text) -> str:
+    """The sentences of `text` that end past INDEX_CAP and carry a ruling word (RULING_WORDS), joined with a space in
+    their order, at most RULING_EXTRA_CAP characters in all, the space before them included. When they do not all
+    fit, the newest date stamp wins (a later ruling sits late in a long section), then document order; a sentence
+    that does not fit is skipped. "" when none."""
+    if len(text) <= INDEX_CAP:
+        return ""
+    found, pos = [], 0
+    for sentence in SENTENCE_SPLIT.split(text):
+        end = pos + len(sentence)
+        pos = end + 1
+        if end > INDEX_CAP and RULING_WORDS.search(sentence):
+            stamps = DATE_STAMP.findall(sentence)
+            found.append((len(found), max(stamps) if stamps else "", sentence))
+    picked, size = [], 1
+    for index, _stamp, sentence in sorted(found, key=lambda item: item[1], reverse=True):  # stable: ties keep order
+        cost = len(sentence) + bool(picked)
+        if size + cost <= RULING_EXTRA_CAP:
+            size += cost
+            picked.append((index, sentence))
+    return " ".join(sentence for _index, sentence in sorted(picked))
 
 
 def _record_index(root, folder, unknown, label, seen):
