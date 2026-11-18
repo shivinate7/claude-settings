@@ -1,0 +1,14 @@
+{
+ "id": "child-pointer-swaps-may-start",
+ "title": "Pointer swaps and shared prose lint may start in q_max, ios-adblock and joyous, with no job added",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Owner, 19:31 CST Nov 17, in runner 12's chat (relayed by runner 12 to triage 11, 19:32 CST): the hold 'workflow edits wait' (relayed 11:20 CST Nov 16) lifts for pointer swaps and shared prose lint in q_max, ios-adblock and joyous, as long as no job is added. Other rulings in the same message: the parked PRs ios-adblock 169, 168 and 163, banchi 1003 and 1084, mailaudit 319, 244, 241, 240, 239, 238 and 144, and q_max 1185 (page item 920) stay open for the owner's local sessions, so no page item for them; joyous 89 merges after a check finds no issue.",
+ "source": "runner 12 message to triage 11, 19:32 CST Nov 17; owner words not read first-hand",
+ "note": "No written home for the 'workflow edits wait' hold was found by grep in the roadmap checkout; asked runner 12 for the record that holds it so the lifted scope can be written there. Related, not filed as items: coordinator relayed that joyous 89 (major SDK bump) needs the owner; the owner already ruled it merges after a check. q_max 1159 holds 3 open owner questions; runner 12 to name them.",
+ "updatedAt": "2026-11-17T19:35:03-06:00"
+}
