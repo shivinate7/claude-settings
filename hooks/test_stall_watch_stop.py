@@ -3185,6 +3185,20 @@ def CI100_a_workflow_or_an_unreadable_answer_leaves_the_wait_open():
     return problems
 
 
+@case
+def CI101_a_none_line_closes_the_wait():
+    """CI101. the wake line of a repo with no active workflow reads `CI none on <sha7>: no active workflow`. A
+    later none line closes the CI wait, as a green line does, and the Stop prints nothing. Control: an unknown
+    line leaves the wait open, and the Stop blocks with the PR named"""
+    command = "gh pr ready -R %s %s" % (NO_CI_REPO, CI_PR)
+    line = "CI none on %s: no active workflow" % CI_SHA
+    _, out, _, _ = stop_in_process(transcript([prompt("merge when green"), ready(command=command), prompt(line)]))
+    problems = expect(out.strip() == "", f"subject: the none line did not close the wait, the Stop blocked: {out[:200]!r}")
+    _, out, _, _ = stop_in_process(transcript([prompt("merge when green"), ready(command=command),
+                                               prompt("CI unknown on %s: no run yet" % CI_SHA)]))
+    return problems + ["control: " + p for p in block_problems(out)]
+
+
 def paused_job(job_id, command):
     """A Bash call started with run_in_background that runs `command`, and its result."""
     cid = "toolu_" + job_id
