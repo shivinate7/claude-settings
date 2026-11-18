@@ -1,0 +1,14 @@
+{
+ "id": "ci-queue-measure",
+ "title": "Measure CI queue wait: demand exceeds the concurrent-job cap",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "batch runner 10",
+ "blockedBy": [],
+ "why": "Batch runner 10 measured at 14:53 CST Nov 18: job queue wait median 21.7 min, p90 38.2, max 69.0, over 9 checks runs.",
+ "source": "batch runner 10 relay (stamped 15:01 CST, read at 14:59 CST)",
+ "note": "Proposal sent to the consultant at 14:59 CST: land PR 3216, ask the owner about runner capacity, measure the draft-run share. Not re-measured by triage (sample of 9 runs).",
+ "updatedAt": "2026-11-18T15:00:01-06:00"
+}
