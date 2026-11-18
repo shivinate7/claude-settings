@@ -267,13 +267,14 @@ class Scope(unittest.TestCase):
         got = run(["README.md", "decisions/some-record.md"])
         self.assertFlags(got, want_false=ALL)
 
-    def test_merge_change_turns_the_merge_job_on(self):
+    def test_merge_change_turns_no_windows_merge_job_on(self):
+        # merge/merge.py is not a Windows-only path (R62/R63), so no Windows merge shard starts on the pull request.
         got = run(["merge/merge.py"])
-        self.assertFlags(got, want_true=["checks_windows_merge", "code"])
+        self.assertFlags(got, want_true=["code"], want_false=["checks_windows_merge"])
 
     def test_guard_change_turns_the_guard_suites_on(self):
         got = run(["hooks/guard.py"])
-        self.assertFlags(got, want_true=["checks_windows", "checks_macos", "guard", "sweep", "code"])
+        self.assertFlags(got, want_true=["checks_macos", "guard", "sweep", "code"], want_false=["checks_windows"])
         # The selector's test
         # and mutation test also turn `guard` on. Named failure: the guard suite runs in no job.
         for p in ("hooks/test_guard.py", "hooks/mutate_guard.py"):
@@ -307,8 +308,10 @@ class Scope(unittest.TestCase):
             self.assertFlags(run(["README.md"], event=ev), want_true=ALL)
 
     # Map gaps found in review: each path is read by a suite in another job.
-    def test_merge_tool_change_turns_on_the_suites_that_load_it(self):
-        self.assertFlags(run(["merge/merge.py"]), want_true=["checks_windows", "checks_macos", "guard", "checks_windows_merge"])
+    def test_merge_tool_change_turns_on_the_non_windows_suites_that_load_it(self):
+        # The Windows suites that load it start on a Windows-only path only (R62/R63), so they stay off for this one.
+        self.assertFlags(run(["merge/merge.py"]), want_true=["checks_macos", "guard"],
+                         want_false=["checks_windows", "checks_windows_merge"])
 
     def test_layout_change_turns_on_the_guard_and_merge_suites(self):
         for path in ("lint/layout.json", "lint/layout.py"):
@@ -326,8 +329,9 @@ class Scope(unittest.TestCase):
     def test_silent_undo_checker_change_turns_on_the_merge_job(self):
         self.assertFlags(run(["lint/check_silent_undo.py"]), want_true=["checks_windows_merge"])
 
-    def test_session_start_change_turns_on_the_unknown_read_contract_job(self):
-        self.assertFlags(run(["hooks/session_start.sh"]), want_true=["checks_windows_rest"])
+    def test_session_start_change_turns_off_the_windows_rest_job(self):
+        # hooks/session_start.sh is not a Windows-only path (R62/R63), so the Windows rest job does not start for it.
+        self.assertFlags(run(["hooks/session_start.sh"]), want_false=["checks_windows_rest"])
 
     def test_a_new_file_in_a_landed_dir_turns_on_the_install_suite(self):
         for p in ("agents/new.md", "skills/new/SKILL.md", "output-styles/new.md", "lint/new.py"):
@@ -340,8 +344,9 @@ class Scope(unittest.TestCase):
         self.assertFlags(run(["skills/old/SKILL.md"], existing=["skills/old/SKILL.md"]), want_false=ALL)
 
     def test_a_new_file_in_hooks_or_janitor_turns_on_the_install_suite(self):
-        for p in ("hooks/new.py", "janitor/new.py"):
-            self.assertFlags(run([p]), want_true=["checks_windows", "shell_macos"])
+        # hooks/new.py is not a Windows-only path (R62/R63): it starts the shell job alone.
+        self.assertFlags(run(["hooks/new.py"]), want_true=["shell_macos"], want_false=["checks_windows"])
+        self.assertFlags(run(["janitor/new.py"]), want_true=["checks_windows", "shell_macos"])
 
     def test_the_landed_dirs_come_from_landed_dirs_txt(self):
         # A made-up dir in the scratch repo's landed-dirs.txt: the script reads the file, it does not copy the list.
@@ -388,16 +393,16 @@ class Scope(unittest.TestCase):
 
     def test_guard_sibling_new_file_sets_the_same_flags_as_guard_py(self):
         want = run(["hooks/guard.py"])
-        self.assertFlags(want, want_true=["checks_windows", "checks_windows_rest", "checks_macos", "code", "guard", "sweep"],
-                         want_false=["checks_windows_merge", "pointer_windows"])
+        self.assertFlags(want, want_true=["checks_macos", "code", "guard", "sweep"],
+                         want_false=["checks_windows", "checks_windows_rest", "checks_windows_merge", "pointer_windows"])
         for p in self.GUARD_SIBLINGS:
             with self.subTest(path=p):
                 self.assertEqual(run([p]), want)
 
     def test_guard_sibling_edit_sets_the_same_flags_as_guard_py(self):
         want = run(["hooks/guard.py"], existing=["hooks/guard.py"])
-        self.assertFlags(want, want_true=["checks_windows", "checks_windows_rest", "checks_macos", "code", "guard", "sweep"],
-                         want_false=["checks_windows_merge", "shell_macos", "pointer_windows"])
+        self.assertFlags(want, want_true=["checks_macos", "code", "guard", "sweep"],
+                         want_false=["checks_windows", "checks_windows_rest", "checks_windows_merge", "shell_macos", "pointer_windows"])
         for p in self.GUARD_SIBLINGS:
             with self.subTest(path=p):
                 self.assertEqual(run([p], existing=[p]), want)
@@ -417,18 +422,17 @@ class Scope(unittest.TestCase):
         self.assertEqual(run(["hooks/git_reads.py"], existing=["hooks/git_reads.py"]),
                          run(["hooks/guard.py"], existing=["hooks/guard.py"]))
 
-    # Control: the guard test file keeps today's flags. A family rule must not catch it.
+    # Control: the guard test file keeps its flags that are not Windows ones (R62/R63). A family rule must not catch it.
     def test_guard_test_file_keeps_its_current_flags(self):
         p = "hooks/guard_test_x.py"
-        self.assertEqual(self.true_set(run([p])),
-                         {"checks_windows", "checks_windows_rest", "checks_macos", "shell_macos", "code", "guard"})
-        self.assertEqual(self.true_set(run([p], existing=[p])), {"checks_windows_rest", "checks_macos", "code", "guard"})
+        self.assertEqual(self.true_set(run([p])), {"checks_macos", "shell_macos", "code", "guard"})
+        self.assertEqual(self.true_set(run([p], existing=[p])), {"checks_macos", "code", "guard"})
 
-    # Control: the guard selector test keeps today's flags.
+    # Control: the guard selector test keeps its flags that are not Windows ones (R62/R63).
     def test_test_guard_keeps_its_current_flags(self):
         p = "hooks/test_guard.py"
-        self.assertEqual(self.true_set(run([p])), {"checks_windows", "checks_macos", "shell_macos", "code", "guard"})
-        self.assertEqual(self.true_set(run([p], existing=[p])), {"checks_windows", "checks_macos", "code", "guard"})
+        self.assertEqual(self.true_set(run([p])), {"checks_macos", "shell_macos", "code", "guard"})
+        self.assertEqual(self.true_set(run([p], existing=[p])), {"checks_macos", "code", "guard"})
 
     # A section file of the guard suite is a part of hooks/test_guard.py, so it sets that suite's flags. It is not
     # under hooks/, so the new-file rule that adds shell_macos for hooks/ does not reach it.
@@ -436,7 +440,7 @@ class Scope(unittest.TestCase):
 
     def test_guard_section_file_sets_the_flags_of_test_guard_not_shell_macos(self):
         want = self.true_set(run(["hooks/test_guard.py"], existing=["hooks/test_guard.py"]))
-        self.assertEqual(want, {"checks_windows", "checks_macos", "code", "guard"})
+        self.assertEqual(want, {"checks_macos", "code", "guard"})
         self.assertEqual(self.true_set(run([self.SECTION_FILE])), want,
                          "a new section file sets flags other than hooks/test_guard.py's")
         self.assertEqual(self.true_set(run([self.SECTION_FILE], existing=[self.SECTION_FILE])), want,
@@ -481,7 +485,7 @@ class Scope(unittest.TestCase):
     # and the mod-tests.sh step runs that test. The lint/* rule sets `code` only, so a diff naming only the lint
     # file would skip its test.
     def test_a_scanner_trap_lint_change_sets_the_mods_flag(self):
-        self.assertFlags(run(["lint/test_scanner_traps.mjs"]), want_true=["mods", "code"] + self.MOD_JOBS)
+        self.assertFlags(run(["lint/test_scanner_traps.mjs"]), want_true=["mods", "code", "checks_macos"], want_false=["checks_windows"])
 
     # Each arm that turns `mods` on starts both mod jobs, as a new file and as an edit. An edit leaves every
     # other job flag off, so the set is exact. A new file under lint/ or skills/ is in a landed dir, which adds
@@ -489,18 +493,21 @@ class Scope(unittest.TestCase):
     # `.gitignore` is an arm too: skills/plain-english-map/tests/typescript-home.test.mjs reads it, so a .gitignore-only
     # pull request must run the CI step. It keeps `code`, which its lint suites read. The mods/ arm is not here: its
     # Windows job is gone (test_a_mods_only_diff_sets_the_mod_jobs_code_and_no_other_flag).
-    MOD_ARMS = ["lint/test_scanner_traps.mjs", "skills/plain-english-map/README.md", ".gitignore"]
+    # Each arm's value: whether it starts checks_windows. A lint test file is not a Windows-only path (R62/R63), so it starts the
+    # CI step and the macOS job alone.
+    MOD_ARMS = {"lint/test_scanner_traps.mjs": False, "skills/plain-english-map/README.md": True, ".gitignore": True}
 
-    def test_each_mods_arm_starts_the_windows_and_macos_jobs(self):
-        for p in self.MOD_ARMS:
+    def test_each_mods_arm_starts_its_own_mod_jobs(self):
+        for p, windows in self.MOD_ARMS.items():
+            jobs = ["checks_macos"] + (["checks_windows"] if windows else [])
             with self.subTest(path=p, edit=True):
                 code_arm = p.startswith("lint/") or p == ".gitignore"
-                want = {"mods", "checks_windows", "checks_macos"} | ({"code"} if code_arm else set())
+                want = {"mods", "checks_macos"} | ({"checks_windows"} if windows else set()) | ({"code"} if code_arm else set())
                 self.assertEqual(self.true_set(run([p], existing=[p])), want,
-                                 msg=f"{p}: the mods arm must start the CI step and both mod jobs, and keep code")
+                                 msg=f"{p}: the mods arm must start the CI step and its mod jobs, and keep code")
             with self.subTest(path=p, edit=False):
-                self.assertFlags(run([p]), want_true=["mods"] + self.MOD_JOBS,
-                                 want_false=["checks_windows_merge", "checks_windows_rest", "pointer_windows"])
+                off = ["checks_windows_merge", "checks_windows_rest", "pointer_windows"] + ([] if windows else ["checks_windows"])
+                self.assertFlags(run([p]), want_true=["mods"] + jobs, want_false=off)
 
     # Any path under the map skill turns `mods` on, .md files included, as a new file or an edit.
     # The checks job runs the skill's tests only when `mods` is on. Those tests read SKILL.md and
