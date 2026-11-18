@@ -1,0 +1,14 @@
+{
+ "id": "page-artifacts-section-newest-first",
+ "title": "Question: which 'artifacts' section of the page should sort newest to oldest, and does an earlier step already claim it",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Owner 14:40 CST Nov 18, in session chat: 'why is the artifacts sections not sub sorted by newest to oldest? isn't that part of the work this artifact had done to it?'",
+ "source": "owner session chat 2026-11-18T14:42:50-06:00",
+ "note": "Triage 11 could not find a section named Artifacts in skills/waiting-page/page.html (it has newest-first order on tiers, Answered, rulings, asks). Asked the owner which section. Do not build until named.",
+ "updatedAt": "2026-11-18T14:42:50-06:00"
+}

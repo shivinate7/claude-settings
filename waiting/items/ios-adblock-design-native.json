@@ -1,6 +1,7 @@
 {
   "added": "2026-11-17T19:49:45-06:00",
   "checked_with": "session_013NEJL1gw6EdrSyvHkTUEx6",
+  "closed": "2026-11-18T14:42:33-06:00",
   "context": "Goal: close the open gaps in the ios-adblock compliance scorecard (your 19:38 CST pick: add the shoot file and a token file).\nProblem (goal): the screenshot tool needs a web address and page routes, and ios-adblock has no web pages (the extension has no popup or options page; the iPhone screens are native SwiftUI), so your pick cannot be built as written and you choose how.\nBased on (read): bin/shoot lines 61-62 need baseUrl and routes; ios-adblock has no .html, .css or .scss; the iPhone UI is ios/App/AdBlockApp.swift (ios-adblock lane, relayed by the coordinator 19:49 CST; not read by triage).\nBased on (ruling): uniform-over-variants (owner, 2026-10-27 12:51 CDT), which rules out teaching the Design check about native repos.\nDeparts from: main has no shoot file and no token file in ios-adblock \u2014 a change adds both, as dead placeholders or as working files from simulator screenshots.\nWaiting on: nothing stopped; the lane built nothing and waits for this pick.",
   "home": "ios-adblock lane (session_013NEJKzK1Tenht43Uyj5RDE); your 19:38 CST pick on the Design item",
   "id": "ios-adblock-design-native",
@@ -27,6 +28,8 @@
   "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
   "recommended": "b",
   "ref": "coordinator message 19:49 CST Nov 17, relaying the ios-adblock lane (session_013NEJKzK1Tenht43Uyj5RDE)",
+  "replied": "2026-11-18T14:42:33-06:00",
+  "reply": "Closed on your pick b (14:41 CST): a Mac lane adds simulator screenshots and working shoot and token files for ios-adblock. Routed to the coordinator to start that lane.",
   "repo": "shivinate7/ios-adblock",
   "short": "ios-adblock Design files for a native app",
   "shown": [
@@ -41,7 +44,7 @@
       "label": "A Mac lane adds simulator screenshots and working files (recommended)"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "The ios-adblock Design check wants web-page files, but the app is native SwiftUI: which way should the files be made?",
   "why": "b makes files that work; a makes dead files only to turn a check green. Recommended by the ios-adblock lane, not owner-typed."
 }

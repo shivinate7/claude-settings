@@ -1,7 +1,7 @@
 {
  "id": "guard-stages-observe",
  "title": "Guard stages off, observe and enforce, with a let-through after two blocks in a session",
- "status": "blocked",
+ "status": "todo",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Owner, 19:45 CST Nov 17 (relayed by the consultant): review the Claude Code team blogs https://claude.dev/blog/how-the-claude-code-team-thinks-about-verification/ and https://claude.dev/blog/solving-code-review-at-anthropic/ and land their findings. Triage read both through a page summary, not word for word. Finding: Verification blog: a commit gate with off, observe and enforce modes logs would-be blocks before enforcing and lets a commit through after two blocks so Claude does not get stuck.",
  "source": "owner words 19:45 CST Nov 17 via the consultant; blogs read through a page summary",
- "note": "Conflicts with two of the owner's rules: the cost rule (watching must cost less than what it watches) and the lift-only-on-typed-override habit. So it waits on an owner pick on the page, in question form; nothing is built before it. Proof: the page item and its answer.",
- "updatedAt": "2026-11-17T19:50:53-06:00"
+ "note": "Conflicts with two of the owner's rules: the cost rule (watching must cost less than what it watches) and the lift-only-on-typed-override habit. So it waits on an owner pick on the page, in question form; nothing is built before it. Proof: the page item and its answer. Owner 14:41 CST Nov 18 (page item 948, answered d): guards keep blocking; triage reads the guard log at each roadmap review (on demand, no timer) and files each false alarm as a debt or a guard fix. First act: measure where a cloud container writes the guard log (guard_log_report.py reads n/a in the cloud).",
+ "updatedAt": "2026-11-18T14:42:50-06:00"
 }

@@ -1,0 +1,14 @@
+{
+ "id": "page-unread-items-open-by-default",
+ "title": "The waiting page draws an item the owner has not marked read unfolded by default, not folded",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Owner 14:41 CST Nov 18, in session chat.",
+ "source": "owner session chat 2026-11-18T14:42:50-06:00",
+ "note": "Today the Answered section draws each card folded to its top row (skill waiting-page, Answered). Wanted: an item not yet marked read opens on load; a marked-read item folds. Needs a designer first (screen change), then a builder on skills/waiting-page/page.html. Prior-work search first. Departs from: folded answered cards.",
+ "updatedAt": "2026-11-18T14:42:50-06:00"
+}

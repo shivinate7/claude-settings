@@ -1,5 +1,6 @@
 {
   "added": "2026-11-17T19:51:18-06:00",
+  "closed": "2026-11-18T14:42:33-06:00",
   "context": "Goal: guards that block only real mistakes, so a refusal is never a false alarm you have to type override past.\nProblem (rule): today every guard blocks from the day it ships, so a false alarm shows up only after it has cost a session, and the team's verification article uses a log-only stage first; this changes how guards ship, so it is your call.\nBased on (read): the verification article (https://claude.dev/blog/how-the-claude-code-team-thinks-about-verification/): a gate with off, observe and enforce modes, and a let-through after two blocks in a session (triage read it through a page summary, not word for word).\nBased on (ruling): outcomes-mechanize-rules in CLAUDE.md: watching must cost less than what it watches, and a log needs a named reader.\nDeparts from: main \u2014 every guard blocks from the day it ships \u2014 b adds a log-only stage for new guards.\nWaiting on: nothing stopped; step guard-stages-observe is blocked until you pick.",
   "home": "step guard-stages-observe",
   "id": "guard-stages-observe",
@@ -47,8 +48,8 @@
   "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
   "recommended": "d",
   "ref": "owner chat 19:45 CST Nov 17 (relayed by the consultant): review the two blogs and land their findings",
-  "replied": "2026-11-18T02:10:00Z",
-  "reply": "Read at 20:10 CST Nov 17 by triage 11; still open. Your idea is now option d: guards keep blocking, and the guard log is read on a schedule. Each refusal is already written to the guard log (lint/guard_log_report.py reads it), so the new part is a named reader, which is triage at each roadmap review. One gap: in a cloud session that report reads n/a, so I have not measured where a cloud container's log lives. Pick d, or another option.",
+  "replied": "2026-11-18T14:42:33-06:00",
+  "reply": "Closed on your pick d (14:41 CST): guards keep blocking, and triage reads the guard log at each roadmap review and files each false alarm as a debt or a guard fix. First act, on step guard-stages-observe: find where a cloud container writes the guard log, since the report reads n/a in the cloud (unmeasured today).",
   "repo": "shivinate7/claude-settings",
   "short": "New guards: observe before they block?",
   "shown": [
@@ -73,7 +74,7 @@
       "label": "Keep guards blocking, and read the guard log on a schedule (recommended)"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "Should a new guard first run in a log-only stage before it blocks, as the Claude Code team does?",
   "why": "d is your idea: guards keep blocking, and a named reader checks the log, which fits the rule that a log needs a reader and costs no new process; b holds a new guard back. Recommended by triage, not owner-typed."
 }
