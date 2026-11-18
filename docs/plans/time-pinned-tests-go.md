@@ -7,6 +7,8 @@ the step that ends the time-pinned tests and with them the stopgap job caps.
 This file holds the lanes, the finder, and the per-repo record (counts and files as of 2026-11-02),
 which sits at the end.
 
+Status: Part 1 built the finder and ran it. Part 2 is the five lanes below.
+
 Written 2026-11-18 08:47 CST. Base: `origin/main` at commit `6e6b498a35`. "Measured today" means
 the finder ran on that base on this date.
 
@@ -16,9 +18,9 @@ the finder ran on that base on this date.
 - Decision `test-practices`, rule P5 (the same owner ruling, 13:00 CST Nov 7): a timed test is
   allowed only when it is needed. A hang guard sits well above the measured run. A date or a
   time-zone offset is a real clock too, so inject the clock.
-- Decision `test-practices`, rule P6 (owner goal v6, 20:01 CST Nov 17): a flake is a defect report.
+- Decision `test-practices`, rule P6 (owner, 2026-11-17 20:01 CST, consultant goal v6): a flake is a defect report.
   An unfixable flaky test is deleted with its reason, never given a wider limit, a sleep or a retry.
-  A deletion keeps the P9 proof or a debt.
+  A deletion keeps the proof P9 asks for.
 - Decision `test-practices`, rule P9: delete or loosen a test only with proof that coverage holds.
   Each removed case gets a mutant that goes red.
 - Decision `ci-job-caps` (CI job caps): the caps are stopgaps until the time-pinned tests are gone.
