@@ -31,6 +31,8 @@ import tempfile
 import threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 RUNNER = os.path.join(os.path.dirname(HERE), "hooks", "test_guard.py")
 SECTIONS = "tests/guard"
 RANK = {"allow": 0, "ask": 1, "deny": 2}
@@ -43,7 +45,7 @@ class Unknown(Exception):
 
 
 def git(args, repo, binary=False):
-    done = subprocess.run(["git", *args], cwd=repo, capture_output=True)
+    done = _nowindow.run(["git", *args], cwd=repo, capture_output=True)
     if done.returncode:
         raise Unknown("git %s failed: %s" % (args[0], done.stderr.decode("utf-8", "replace").strip()[:200]))
     return done.stdout if binary else done.stdout.decode("utf-8", "replace")
@@ -74,8 +76,8 @@ def list_cases(repo, ref, scratch, label):
     env = {k: v for k, v in os.environ.items() if not k.startswith(("GUARD_", "MUTATE_ONLY"))}
     env.update(GUARD_LIST=path, GUARD_SECTION_DIR=folder)
     try:
-        done = subprocess.run([sys.executable, RUNNER], cwd=repo, env=env, capture_output=True, text=True,
-                              timeout=LIST_SECONDS)
+        done = _nowindow.run([sys.executable, RUNNER], cwd=repo, env=env, capture_output=True, text=True,
+                             timeout=LIST_SECONDS)
     except subprocess.TimeoutExpired:
         raise Unknown("the %s list did not end in %d s" % (label, LIST_SECONDS))
     if done.returncode or not os.path.isfile(path):

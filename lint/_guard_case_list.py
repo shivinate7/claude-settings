@@ -10,8 +10,12 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import time
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 # The fields that make the payload a case sends to the guard, and the environment it runs in.
 KEY_FIELDS = ("tool", "raw", "cwd", "env_path", "session", "config", "transcript", "agent_id", "agent_type",
@@ -32,7 +36,7 @@ def _parents():
     if os.name == "nt":
         return None
     try:
-        done = subprocess.run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True, timeout=30)
+        done = _nowindow.run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True, timeout=30)
         if done.returncode == 0:
             return {int(a): int(b) for a, b in (ln.split() for ln in done.stdout.splitlines() if ln.strip())}
     except (OSError, ValueError, subprocess.SubprocessError):
