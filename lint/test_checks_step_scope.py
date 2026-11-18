@@ -82,7 +82,6 @@ NO_MD = [
     'Stall watch fixture suite',
     'Stall watch stop suite',
     'Simulator boot-record fixture suite',
-    'Session start notice suite',
     'Start check suite',
     'Directory before a segment suite',
     'Refusal settle fixture suite',
@@ -190,6 +189,7 @@ DOC_STEPS = {
     'SendMessage state fixture suite': ("decisions",),
     'Stop-hook owner-safe reason suite': ("decisions",),
     'Settings matcher fixture suite': ("decisions",),
+    'Session start notice suite': ("decisions",),  # its test class SessionStartRolePickTests reads docs/decisions/session-tiers.md
     'Stop-hook review-record fixture suite': ("rules",),
     'CLAUDE.md size (warns, never fails)': ("rules",),
     'Landed-directory manifest agreement': ("skills",),
