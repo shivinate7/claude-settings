@@ -48,6 +48,8 @@ sys.path.insert(0, HERE)
 import guard  # noqa: E402  the one reader of agent frontmatter keys (guard.frontmatter_keys), not a copy of it here
 import guard_core  # noqa: E402  the one home of the refuter role's name (REFUTER_ROLE), read below and never typed here
 from tool_lists_test import tokens, unread_list  # noqa: E402  the one reader of tool lists (hooks/tool_lists_test.py)
+sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # appended: a module already in sys.modules wins
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 
 CWD = "/tmp/agent-brief-test"
 MISSING = object()  # payload() leaves agent_type out of the JSON when this is passed
@@ -110,13 +112,13 @@ INJECT_ERROR = (  # runs the hook with json.loads and json.dumps raising, to for
 CASES = []
 
 
-def payload(agent_type=MISSING):
+def payload(agent_type=MISSING, cwd=CWD):
     """One SubagentStart payload, shaped as the docs: session_id, transcript_path, cwd,
     permission_mode, hook_event_name, agent_id, agent_type. `agent_type` MISSING drops the key."""
     body = {
         "session_id": "abc123",
-        "transcript_path": CWD + "/transcript.jsonl",
-        "cwd": CWD,
+        "transcript_path": cwd + "/transcript.jsonl",
+        "cwd": cwd,
         "permission_mode": "default",
         "hook_event_name": "SubagentStart",
         "agent_id": "a1b2c3",
@@ -168,6 +170,36 @@ def context_for(stdin_text):
     if rc != 0:
         return None, "exit %d: %s" % (rc, err.strip()[:120])
     return context_of(out)
+
+
+RUN_FOLDER = None  # made on the first request of the run, so an import leaks no folder (test-temp-standard)
+
+
+def repo_tree(extras=None, stamp=None):
+    """A repo-shaped folder in this run's folder: its layout extras file when `extras` is text, its .github/stamp.json
+    when `stamp` is a dict. The hook reads both through the payload's cwd. main() removes the run folder."""
+    global RUN_FOLDER
+    if RUN_FOLDER is None:
+        RUN_FOLDER = _test_temp.run_folder()
+    root = tempfile.mkdtemp(prefix="brief-tree-", dir=RUN_FOLDER)
+    if extras is not None:
+        write_under(root, ".claude/layout-extras.json", extras)
+    if stamp is not None:
+        write_under(root, ".github/stamp.json", json.dumps(stamp))
+    return root
+
+
+def write_under(root, rel, text):
+    """Write `text` to `rel` under `root`, making its folders."""
+    path = os.path.join(root, *rel.split("/"))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+
+def brief_in(root, agent_type="builder"):
+    """Run the hook with `root` as the payload's cwd. Return (additionalContext, None), or (None, problem)."""
+    return context_for(payload(agent_type, cwd=root))
 
 
 def has_line(text, *parts):
@@ -542,16 +574,7 @@ CITE_STAMP = {
 
 def brief_for_stamp(stamp):
     """Run the hook in a repo whose .github/stamp.json holds `stamp`. Return (text, problem)."""
-    root = tempfile.mkdtemp(prefix="agent-brief-cite-")
-    try:
-        os.makedirs(os.path.join(root, ".github"))
-        with open(os.path.join(root, ".github", "stamp.json"), "w", encoding="utf-8") as fh:
-            json.dump(stamp, fh)
-        body = json.loads(payload("builder"))
-        body["cwd"] = root
-        return context_for(json.dumps(body))
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
+    return brief_in(repo_tree(stamp=stamp))
 
 
 def cite_form_check():
@@ -997,6 +1020,14 @@ add("source control: an empty list keeps the builder's scope line through the sa
 
 
 def main():
+    try:
+        return run_cases()
+    finally:
+        if RUN_FOLDER is not None:
+            shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
+
+
+def run_cases():
     failed = 0
     for case in CASES:
         note = dispatch(case)
