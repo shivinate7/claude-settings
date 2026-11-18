@@ -155,10 +155,13 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
             handle.write("@%s/CLAUDE.md\n" % pointer.replace("\\", "/"))
 
     def hook_launch(self, remote=None, fetch_timeout="30", session_cwd=None, source=None, compact=False,
-                    remote_session_id=None, path_dir=None, trace_file=None, ref=None, session_id=SESSION, role=None):
+                    remote_session_id=None, path_dir=None, trace_file=None, ref=None, session_id=SESSION, role=None,
+                    home=None):
         """The hook's argv, environment, stdin payload and cwd, as the harness starts it. The arguments are run_hook's,
         and run_hook and the cut-off runs both start here, so the environment is built in one place.
-        session_id: the payload's session_id, or None to send none. role: the launcher's CS_SESSION_ROLE, or None to unset it."""
+        session_id: the payload's session_id, or None to send none. role: the launcher's CS_SESSION_ROLE, or None to unset it.
+        home: a fresh HOME folder, or None for the case's config dir. With a home, CLAUDE_CONFIG_DIR is unset, so the hook
+        and the merge tool both read <home>/.claude, as in a cloud container."""
         where = self.primary if session_cwd is None else session_cwd
         # Forward slashes: the hook reads "cwd" with sed, and a doubled backslash is not a path.
         body = {"cwd": where.replace("\\", "/")}
@@ -186,10 +189,15 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
             env["CLAUDE_CODE_REMOTE"] = remote
         if remote_session_id is not None:
             env["CLAUDE_CODE_REMOTE_SESSION_ID"] = remote_session_id
+        if home is not None:
+            env.pop("CLAUDE_CONFIG_DIR", None)
+            env["HOME"] = home
+            env["USERPROFILE"] = home  # os.path.expanduser reads this on Windows
         return sh_argv(path_dir, HOOK), env, payload, where
 
     def run_hook(self, remote=None, fetch_timeout="30", session_cwd=None, source=None, compact=False,
-                 remote_session_id=None, path_dir=None, trace_file=None, ref=None, session_id=SESSION, role=None):
+                 remote_session_id=None, path_dir=None, trace_file=None, ref=None, session_id=SESSION, role=None,
+                 home=None):
         """The hook's stdout lines. Its stderr lands in self.last_stderr.
 
         remote: the CLAUDE_CODE_REMOTE value, or None to unset it as a non-cloud runner does.
@@ -201,11 +209,13 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         trace_file: a file git appends its own trace to (GIT_TRACE), or None for no trace.
         ref: the CLAUDE_SETTINGS_REF value, or None to unset it (the recovery is off unless a case turns it on).
         session_id: the payload's session_id, or None to send none. role: the launcher's CS_SESSION_ROLE, or None.
+        home: a fresh HOME folder for the run, or None to keep the case's config dir (see hook_launch).
         """
         argv, env, payload, where = self.hook_launch(remote=remote, fetch_timeout=fetch_timeout,
                                                      session_cwd=session_cwd, source=source, compact=compact,
                                                      remote_session_id=remote_session_id, path_dir=path_dir,
-                                                     trace_file=trace_file, ref=ref, session_id=session_id, role=role)
+                                                     trace_file=trace_file, ref=ref, session_id=session_id, role=role,
+                                                     home=home)
         answer = subprocess.run(argv, input=payload, capture_output=True, text=True, env=env, cwd=where,
                                 timeout=120)
         self.last_stderr = answer.stderr
@@ -947,6 +957,45 @@ class SessionStartRosterTests(SessionStartAgentWorktreeNoticeTests):
         lines = self.run_hook(path_dir=shims)
         self.assertTrue(self.block_lines(lines), "the roster block is not printed, so the network check proves nothing")
         self.assertFalse(os.path.exists(marker), "the roster read started gh or curl")
+
+    # The standing merge role a cloud start writes (decision session-tiers). The record id is session_<x> and the env value is
+    # cse_<x>. The file is the one main's reader reads (merge/merge.py read_merge_record): <config dir>/state/merge-role.json,
+    # {"session": <the env value>, "role": "standing"}. Here the config dir is <home>/.claude, in a fresh HOME with no
+    # CLAUDE_CONFIG_DIR, as a cloud container starts.
+    MERGE_SELF_ID = "session_01MergeRoleSelfEe0007"
+    MERGE_SELF_ENV = "cse_01MergeRoleSelfEe0007"
+
+    def start_fresh_cloud(self, row_role):
+        """The cloud start as MERGE_SELF_ID, whose roster row is `row_role`, the only row, in a fresh HOME. Returns (stdout
+        lines, home). The row is the roster block's source, so its line is checked by each case before the file is."""
+        self.put_record(roster_record([roster_row(row_role, "merge role fixture", self.MERGE_SELF_ID)]))
+        home = os.path.join(self.root, "fresh-home")
+        os.makedirs(home)
+        lines = self.run_hook(remote="true", remote_session_id=self.MERGE_SELF_ENV, home=home)
+        self.assertEqual(self.last_stderr, "", "the hook printed on stderr: %r" % self.last_stderr)
+        return lines, home
+
+    def test_a_standing_row_on_a_cloud_start_writes_the_merge_role_file(self):
+        lines, home = self.start_fresh_cloud("Coordinator")
+        # Control: the hook read this session's row, so an absent file below is a gap in the hook, not a start that never ran.
+        self.assertTrue([line for line in lines if self.MERGE_SELF_ID in line],
+                        "scope: the roster block names no row for this session: %r" % lines)
+        path = os.path.join(home, ".claude", "state", "merge-role.json")
+        self.assertTrue(os.path.isfile(path), "the cloud start wrote no merge role file at %s" % path)
+        with open(path, encoding="utf-8") as handle:
+            record = json.load(handle)
+        self.assertIsInstance(record, dict, "the merge role file holds no JSON object: %r" % (record,))
+        self.assertEqual(record.get("session"), self.MERGE_SELF_ENV,
+                         "the merge role file names session %r, not this session's env value" % record.get("session"))
+        self.assertEqual(record.get("role"), "standing", "the merge role file holds role %r, not standing" % record.get("role"))
+
+    def test_a_batch_runner_row_on_a_cloud_start_writes_no_merge_role_file(self):
+        lines, home = self.start_fresh_cloud("Batch runner")
+        # Control: the hook read this session's row, so the file's absence comes from the batch runner role, not a missed read.
+        self.assertTrue([line for line in lines if self.MERGE_SELF_ID in line],
+                        "scope: the roster block names no row for this session: %r" % lines)
+        path = os.path.join(home, ".claude", "state", "merge-role.json")
+        self.assertFalse(os.path.exists(path), "the cloud start wrote a merge role file for a batch runner row: %s" % path)
 
 
 class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
