@@ -1,0 +1,58 @@
+{
+  "added": "2026-11-18T14:50:59-06:00",
+  "context": "Goal: no lane leaves the shared checkout /home/user/claude-settings (the pointer checkout, the copy every session reads) off its recorded head.\nProblem (rule): a lane's shell stood in that checkout and committed a merge on its detached head (from its old head to a new merge commit, on no branch, nothing pushed); the guard rule other-checkout (writes land only in your own checkout) refused the lane's `git switch -C main origin/main` from its worktree, so undoing it needs your override, a tool the lane's rules reserve for you, or no undo at all.\nBased on (read): the lane's refusal text, relayed verbatim by the coordinator at 14:50 CST; the guard that stops a move of the shared checkout off main (rule pointer-head) never ran (not read by triage).\nBased on (ruling): decision recovery-independent-of-state allows a move back to main with no override, but it does not cover a move made from inside a worktree, which other-checkout refuses first.\nDeparts from: main \u2014 no session can move the shared checkout's head from a worktree \u2014 options b and c let one move through; a changes nothing.\nWaiting on: only the lane's pointer checkout; the lane's real work is in its worktree; the coordinator relays your answer to the lane. Unverified: whether this commit moves the guard's head for other sessions (the coordinator says its own guard reads a different copy of the rules than the shared checkout; triage did not measure this).",
+  "home": "step pointer-checkout-refuses-git-writes; lane ci-cancel-on-close-v2",
+  "kind": "decision",
+  "n": 974,
+  "options": [
+    {
+      "gain": "No guard is let through and nothing more can go wrong.",
+      "how": "No act. The stray merge commit stays on no branch in that checkout; the container ends with the session.",
+      "id": "leave-it",
+      "key": "a",
+      "label": "Leave it: the lane works in its own worktree and nothing is pushed (recommended)",
+      "lose": "The shared checkout keeps a head that is not the recorded one until its container ends."
+    },
+    {
+      "gain": "The head is back on main with no override.",
+      "how": "The lane leaves its worktree with ExitWorktree (action keep), runs the switch from the pointer checkout, and reports the result.",
+      "id": "exit-worktree-then-switch",
+      "key": "b",
+      "label": "The lane calls ExitWorktree (keep), then runs `git switch -C main origin/main` in the shared checkout",
+      "lose": "The lane uses a tool its own rules reserve for a user ask, and the guard that stops a move off main has never run on this case."
+    },
+    {
+      "gain": "The head is back on main by a path the guards name.",
+      "how": "You type `override` (one act, not `override 15m`); the lane runs that one command.",
+      "id": "override-once",
+      "key": "c",
+      "label": "Type `override` for one act so the lane's worktree session runs `git -C /home/user/claude-settings switch -C main origin/main`",
+      "lose": "One guard (other-checkout) is let through, on a head move whose harm is unverified."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), for lane ci-cancel-on-close-v2",
+  "recommended": "a",
+  "ref": "coordinator message 14:50 CST Nov 18, relaying lane ci-cancel-on-close-v2 (verbatim result 14:49 CST)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Shared checkout head moved: undo?",
+  "shown": [
+    {
+      "id": "leave-it",
+      "key": "a",
+      "label": "Leave it: the lane works in its own worktree and nothing is pushed (recommended)"
+    },
+    {
+      "id": "exit-worktree-then-switch",
+      "key": "b",
+      "label": "The lane calls ExitWorktree (keep), then runs `git switch -C main origin/main` in the shared checkout"
+    },
+    {
+      "id": "override-once",
+      "key": "c",
+      "label": "Type `override` for one act so the lane's worktree session runs `git -C /home/user/claude-settings switch -C main origin/main`"
+    }
+  ],
+  "status": "open",
+  "title": "A lane's merge moved the shared checkout's head to a commit on no branch: undo it, or leave it?",
+  "why": "a costs nothing and the harm is unverified; b and c undo a head move that may not matter. Recommended by the coordinator, not owner-typed."
+}
