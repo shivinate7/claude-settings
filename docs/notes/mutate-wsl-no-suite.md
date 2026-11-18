@@ -1,0 +1,1 @@
+- mutate-wsl-no-suite: guard_wsl has no suite under --changed. Fix: map hooks/guard_wsl.py to its test_guard.py family.

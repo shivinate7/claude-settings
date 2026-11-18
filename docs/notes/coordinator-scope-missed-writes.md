@@ -1,0 +1,1 @@
+- coordinator-scope-missed-writes: add: the `gh api -X PUT repos/o/r/contents/<path>` write is not read for coordinators.

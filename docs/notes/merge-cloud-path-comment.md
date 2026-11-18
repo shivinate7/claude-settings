@@ -1,0 +1,1 @@
+- merge-cloud-path-comment: merge/test_merge.py:12858's comment "merge is not on a cloud PATH" turns false. The lane folds it into its next push-guard follow-up PR.

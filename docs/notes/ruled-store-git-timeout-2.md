@@ -1,0 +1,1 @@
+- ruled-store-git-timeout-2: GIT_TIMEOUT is 30 s but the hook timeout is 10 s (ruled store reads).

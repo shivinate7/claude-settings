@@ -1,0 +1,1 @@
+- silent-undo-restore-edges: by design: a restore inside a docstring or block comment counts; the trailing-comment form (`timeout = 30 # s`) is not matched; a non-UTF-8 path absent at head reads Unknown and exits 0 outside CI.

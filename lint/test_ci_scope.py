@@ -33,6 +33,7 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lin
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies the script under test into a scratch tree; rm_tree removes the run folder
 from workflow_steps import job_block, job_workflow, step_blocks, step_key  # noqa: E402  the one home of the step parser
+import test_windows_split as split  # noqa: E402  the one home of the checks.yml reader and the `if:` evaluator (eval_with)
 SCRIPT = os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
 JOB_FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows"]
 STEP_FLAGS = ["code", "guard", "sweep", "mods", "shoot"]
@@ -59,11 +60,17 @@ def git(cwd, *a):
     return subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
+GUARD_INPUTS_REL = ".github/guard-inputs.txt"  # the one list of guard inputs (ci-scope.sh's windows_guard reads it)
+REAL_GUARD_INPUTS = "real"  # run()'s guard_inputs default: the repo's own list is copied into the base when the repo has one
+
+
 def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref="", green=None,
-        green_sibling=False, green_head=None, contents=None, facts=None, merged=None, moves=None):
+        green_sibling=False, green_head=None, contents=None, facts=None, merged=None, moves=None, guard_inputs=REAL_GUARD_INPUTS):
     """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit. `head_ref` is HEAD_REF,
     empty when not given, so no HEAD_REF of the caller's environment reaches the script. `moves` maps an old path to its new
     one, or to None for a delete: the old path is in the base, and a move keeps the content, so git sees a rename.
+    `guard_inputs` is the text of .github/guard-inputs.txt in the base: the repo's own list by default (none when the repo has
+    no list yet), a text in its place, or None for no list at all (the gate's unreadable case).
     `green` (a list of paths) is the pull request's earlier head, committed before the head commit, so the whole diff against
     the base holds it too. `green_sibling` puts that earlier head on a branch off the base instead: a commit HEAD does not
     descend from. GREEN_HEAD is the earlier head's sha (empty when there is none) unless `green_head` gives another value.
@@ -88,6 +95,13 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
         with open(os.path.join(HERE, "..", "landed-dirs.txt")) as f:
             real = f.read()
         open(os.path.join(d, "landed-dirs.txt"), "w").write(real if landed is None else chr(10).join(landed) + chr(10))
+        # The base holds the guard inputs list the same way: the repo's own, `guard_inputs` in its place, or none.
+        if guard_inputs == REAL_GUARD_INPUTS:
+            guard_inputs = open(os.path.join(HERE, "..", GUARD_INPUTS_REL)).read() if os.path.isfile(
+                os.path.join(HERE, "..", GUARD_INPUTS_REL)) else None
+        if guard_inputs is not None:
+            os.makedirs(os.path.join(d, ".github"), exist_ok=True)
+            open(os.path.join(d, GUARD_INPUTS_REL), "w").write(guard_inputs)
         for p in list(existing) + list(moves):  # in the base commit, so the head commit modifies, moves or deletes them
             os.makedirs(os.path.dirname(os.path.join(d, p)), exist_ok=True)
             open(os.path.join(d, p), "w").write("old\n")
@@ -541,7 +555,7 @@ class Scope(unittest.TestCase):
     # `code` and `shoot` and no other flag in true_set (checks_guard is outside ALL; the cases below pin it).
     # An unrelated code change leaves `shoot` off.
     def test_shoot_edit_turns_on_only_the_shoot_suite(self):
-        for p in ("bin/shoot", "lint/test_shoot.mjs", "testing/skip-locally-fail-in-ci.mjs", ".github/shoot/package-lock.json",
+        for p in ("bin/shoot", "lint/test_shoot.mjs", "testing/skip-locally-fail-in-ci.mjs", "testing/page_session_role_sort.test.mjs", ".github/shoot/package-lock.json",
                   "actions/playwright-setup/action.yml"):
             with self.subTest(path=p):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"code", "shoot"})
@@ -1543,6 +1557,156 @@ class MutationReport(unittest.TestCase):
         self.assertEqual(batch["mutation_report"], "true", f"a pull request from batch-11: {batch}")
         push = run(["README.md"], event="push")
         self.assertEqual(push["mutation_report"], "true", f"a push: {push}")
+
+
+# The guard-inputs gate. The three Windows guard shards (checks-windows-guard, -2, -3) run only when a diff touches a guard input:
+# windows_guard in ci-scope.sh, read from .github/guard-inputs.txt. The gate is read from checks.yml's own step condition, so each
+# case states what the workflow does with the scope outputs, not the value of one output. Cost: parses checks.yml once per call.
+GUARD_SHARDS = ("checks-windows-guard", "checks-windows-guard-2", "checks-windows-guard-3")
+# Flags the old script sets true for SNAPSHOT_DIFFS, each run() with its default arguments. windows_guard is left out of the
+# comparison: it is the one output the gate adds. Recorded on the script before the gate existed.
+SNAPSHOT_DIFFS = [
+    (["docs/x.md"], {}, ["doc_any", "doc_other"]),
+    (["README.md"], {}, ["doc_any", "doc_glossary"]),
+    (["docs/records.md"], {"green": ["hooks/guard.py"]},
+     ["doc_any", "doc_other", "lint_comment_narration", "lint_plan_refuter", "lint_red_run", "records_only_skip"]),
+    (["hooks/guard.py"], {}, ["checks_guard", "checks_macos", "checks_windows", "checks_windows_rest", "checks_windows_rest_2",
+                              "checks_windows_sweep", "code", "guard", "lint_comment_narration", "lint_plan_refuter",
+                              "lint_red_run", "shell_macos", "shoot", "sweep"]),
+    (["lint/test_x.py"], {}, ["checks_guard", "checks_windows", "code", "guard", "lint_comment_narration", "lint_red_run",
+                              "shell_macos"]),
+    (["install.ps1"], {}, ["code", "lint_comment_narration", "lint_red_run", "pointer_windows"]),
+    (["settings.json"], {}, ["checks_guard", "checks_macos", "checks_windows", "checks_windows_merge", "checks_windows_rest",
+                             "checks_windows_rest_2", "checks_windows_sweep", "code", "guard", "lint_comment_narration",
+                             "lint_red_run", "sweep"]),
+    (["merge/merge.py"], {}, ["checks_guard", "checks_macos", "checks_windows", "checks_windows_merge", "code", "guard",
+                              "lint_comment_narration", "lint_red_run"]),
+    (["agents/builder.md"], {"existing": ["agents/builder.md"]}, ["doc_agents", "doc_any"]),
+    (["docs/decisions/agent-model-cap.md"], {"existing": ["docs/decisions/agent-model-cap.md"]},
+     ["doc_any", "doc_decisions", "lint_ruling_kind"]),
+    (["skills/impeccable/SKILL.md"], {"existing": ["skills/impeccable/SKILL.md"]}, ["doc_any", "doc_skills"]),
+]
+
+
+def guard_shards_run(got, event="pull_request"):
+    """-> {job: bool}: whether each Windows guard shard's full-suite step runs for the outputs `got` (run()'s dict) on `event`.
+    Only the step's own `if:` is read. The job-level if keys on the event alone, so it does not carry the gate. Each shard must
+    hold exactly one full guard step: a renamed job or step fails here, and never reads as a shard that is off."""
+    jobs = split.windows_jobs(open(split.CHECKS, encoding="utf-8").read())
+    out = {}
+    for name in GUARD_SHARDS:
+        steps = [st for st in jobs.get(name, {"steps": []})["steps"] if split.key(st) == split.GUARD_CMD]
+        assert len(steps) == 1, f"{name} holds {len(steps)} full guard steps, want 1"
+        out[name] = steps[0].get("if") is None or split.eval_with(steps[0]["if"], event, got)
+    return out
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class WindowsGuardShards(unittest.TestCase):
+    """The guard-inputs gate: the Windows guard shards run when a diff touches a guard input, and stay off for any other diff."""
+
+    # Named failure: a diff that touches a guard input runs no guard shard, so the guard suite goes unrun on it. The two
+    # .md cases are modified files: a new file under a landed dir turns code on whatever its type.
+    def test_each_guard_input_turns_the_guard_shards_on(self):
+        cases = [
+            (["hooks/guard.py"], {}),
+            (["hooks/probe_new.py"], {}),
+            (["agents/builder.md"], {"existing": ["agents/builder.md"]}),
+            (["docs/decisions/agent-model-cap.md"], {"existing": ["docs/decisions/agent-model-cap.md"]}),
+            (["skills/impeccable/SKILL.md"], {"existing": ["skills/impeccable/SKILL.md"]}),
+            (["settings.json"], {}),
+            (["tests/guard/s00442-misc.py"], {}),
+            ([".github/guard-inputs.txt"], {}),
+            ([".github/scripts/ci-scope.sh"], {}),
+            ([".github/workflows/checks.yml"], {}),
+        ]
+        for paths, kw in cases:
+            with self.subTest(paths=paths, kw=kw):
+                shards = guard_shards_run(run(paths, **kw))
+                self.assertEqual(set(shards.values()), {True}, f"a guard shard is off for the guard input {paths}: {shards}")
+
+    # Named failure: a diff with no guard input runs the guard shards anyway, so every code change pays for the guard suite.
+    def test_a_diff_with_no_guard_input_keeps_the_guard_shards_off(self):
+        for paths in (["actions/stamp/stamp.mjs"], ["githooks/main-ref/hook.sh"], ["install.ps1"], ["unlisted/new-file.txt"]):
+            with self.subTest(paths=paths):
+                shards = guard_shards_run(run(paths))
+                self.assertEqual(set(shards.values()), {False}, f"a guard shard runs for {paths}, which names no guard input: {shards}")
+
+    def test_a_docs_only_diff_keeps_the_guard_shards_off(self):
+        for paths in (["docs/x.md"], ["README.md"], ["docs/plans/p.md"]):
+            with self.subTest(paths=paths):
+                shards = guard_shards_run(run(paths))
+                self.assertEqual(set(shards.values()), {False}, f"a guard shard runs for the docs-only diff {paths}: {shards}")
+
+    # The case table's fail-safe arm names these two all-on, but the windows_guard pass reads only the three gate paths it
+    # names itself. Named failure: a change to the attributes file or the green-head reader leaves the guard shards off.
+    def test_a_gitattributes_or_green_head_change_turns_the_guard_shards_on(self):
+        for paths in ([".gitattributes"], [".github/scripts/green-head.sh"]):
+            with self.subTest(paths=paths):
+                shards = guard_shards_run(run(paths))
+                self.assertEqual(set(shards.values()), {True}, f"a guard shard is off for the fail-safe path {paths}: {shards}")
+
+    # git quotes a name with non-ASCII bytes unless -z is given, so `"hooks/caf\303\251.py"` must still match hooks/*.
+    # Named failure: a path with a non-ASCII name matches no glob, so the guard shards stay off for a guard input.
+    def test_a_non_ascii_guard_input_name_turns_the_guard_shards_on(self):
+        shards = guard_shards_run(run(["hooks/café.py"]))
+        self.assertEqual(set(shards.values()), {True}, f"a guard shard is off for the non-ASCII guard input hooks/café.py: {shards}")
+
+    # An added file under a landed dir turns the shards on. The landed-dir pass reads the added names newline-separated, so git's
+    # quoted non-ASCII name matches no landed dir. The ASCII file is the control; the two runs must differ on windows_guard alone.
+    # Named failure: a non-ASCII file added under bin/ leaves the guard shards off.
+    def test_an_added_non_ascii_file_under_a_landed_dir_turns_the_guard_shards_on(self):
+        plain = run(["bin/plain.sh"])
+        cafe = run(["bin/café.sh"])
+        with self.subTest("control: the ASCII name"):
+            self.assertEqual(set(guard_shards_run(plain).values()), {True}, f"a guard shard is off for bin/plain.sh: {plain}")
+        with self.subTest("windows_guard for the non-ASCII name"):
+            self.assertEqual(cafe.get("windows_guard"), "true", f"windows_guard is off for the added bin/café.sh: {cafe}")
+        with self.subTest("the other flags, against the ASCII name"):
+            def without_windows_guard(got):
+                return {n: v for n, v in got.items() if n != "windows_guard"}
+            self.assertEqual(without_windows_guard(cafe), without_windows_guard(plain),
+                             "bin/café.sh and bin/plain.sh differ on a flag other than windows_guard")
+
+    # The gate reads the flags on push, schedule and dispatch too: those events run everything, so the shards run.
+    def test_push_schedule_and_dispatch_turn_the_guard_shards_on_for_a_docs_only_diff(self):
+        for event in ("push", "schedule", "workflow_dispatch"):
+            with self.subTest(event=event):
+                shards = guard_shards_run(run(["docs/x.md"], event=event), event=event)
+                self.assertEqual(set(shards.values()), {True}, f"a guard shard is off on {event}: {shards}")
+
+    def test_an_unreadable_diff_turns_the_guard_shards_on(self):
+        shards = guard_shards_run(run(["docs/x.md"], base="0" * 40))
+        self.assertEqual(set(shards.values()), {True}, f"a guard shard is off for an unreadable diff: {shards}")
+
+    def test_an_empty_diff_turns_the_guard_shards_on(self):
+        shards = guard_shards_run(run([]))
+        self.assertEqual(set(shards.values()), {True}, f"a guard shard is off for an empty diff: {shards}")
+
+    # No list in the base: the list is unreadable. The gate fails safe, and the shards run for a docs-only diff.
+    def test_an_unreadable_guard_list_turns_the_guard_shards_on(self):
+        shards = guard_shards_run(run(["docs/x.md"], guard_inputs=None))
+        self.assertEqual(set(shards.values()), {True}, f"a guard shard is off when the guard list is unreadable: {shards}")
+
+    # A list with no glob in it (comments only) reads as empty, and the gate fails safe the same way.
+    def test_an_empty_guard_list_turns_the_guard_shards_on(self):
+        shards = guard_shards_run(run(["docs/x.md"], guard_inputs="# comments only\n\n"))
+        self.assertEqual(set(shards.values()), {True}, f"a guard shard is off when the guard list has no glob: {shards}")
+
+    # A records-only push after a green head turns every flag off, the shards with them.
+    def test_a_records_only_push_turns_the_guard_shards_off(self):
+        got = run(["docs/records.md"], green=["hooks/guard.py"])
+        self.assertEqual(got.get("records_only_skip"), "true", f"the records-only shortcut did not apply: {got}")
+        shards = guard_shards_run(got)
+        self.assertEqual(set(shards.values()), {False}, f"a guard shard runs after a records-only push: {shards}")
+
+    # The gate adds one output and changes no other: each sample diff keeps the flags the pre-gate script set.
+    def test_every_other_flag_keeps_its_value_for_the_sample_diffs(self):
+        for paths, kw, want in SNAPSHOT_DIFFS:
+            with self.subTest(paths=paths, kw=kw):
+                got = run(paths, **kw)
+                have = sorted(n for n, v in got.items() if v == "true" and n != "windows_guard")
+                self.assertEqual(have, sorted(want), f"a flag changed for {paths}: {got}")
 
 
 if __name__ == "__main__":

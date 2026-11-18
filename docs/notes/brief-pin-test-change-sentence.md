@@ -1,0 +1,1 @@
+- brief-pin-test-change-sentence: (#2538) the sentence "builder reports the test change it needs..." is pinned by no case.

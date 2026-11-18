@@ -1,0 +1,1 @@
+- scratchpad-owner-cp-mv-dest: Debt scratchpad-owner-cp-mv-dest: name the sequence "a refused overwrite, then a write the guard cannot see (cp, touch, dd of=, curl -o)", so A's run passes where main asked. Round 3 (reviewer sonnet), comment 6802189443.
