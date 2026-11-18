@@ -318,8 +318,8 @@ cmk_refuse("a cd into a missing relative folder, then ; add -A and commit, with 
            "cd nope ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
 cmk_allow("a cd into a missing folder, then && add -A and commit, with a triplet tracked in the cwd repo",
           "cd " + slash(CMK_GONE) + " && " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
-# A `;` after a cd to a missing folder runs the commit in the cwd repo. A git write after a missing cd target is
-# refused, even when that repo is clean (ruling own-476-c-refuse-cd-missing-folder, owner, 2026-11-16 13:36 CST).
+# A `;` after a cd to a missing folder still runs the git write in the cwd repo, because a failed cd leaves the shell
+# there. The guard refuses that write even when the cwd repo is clean, since the command did not name that repo.
 cmk_refuse("a cd into a missing folder, then ; add -A and commit, in a cwd repo whose edit is clean",
            "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CL)
 # The control for it: the same call, with the cd to a folder that exists. Only the cd target differs, so this
