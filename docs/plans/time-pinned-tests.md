@@ -8,14 +8,14 @@ Working plan for roadmap step time-pinned-tests-go (tests that pass or fail on c
 
 - sleep: a real wait in a test.
 - elapsed-assert: an assert that reads a clock.
-- test-cap: a per-test or per-suite time limit.
+- test-cap: a per-test or per-suite time limit. A hang guard that decision test-practices P5 allows.
 - wait-cap: a fixed bound on a wait for a condition or a child process. Most are hang guards, which can stay. Each repo's lane judges each one.
 
 Each count is a candidate, not a verdict. A sample read found a false alarm in elapsed-assert: a timestamp checked for its value, not for speed (degen `tests/server/test_fetch_counter.py`). The repo lane decides each one.
 
 ## Counts
 
-Each row comes from `python3 lint/find_time_pinned.py <clone> --json`, run on a shallow clone of the repo's default branch at the commit shown, on 2026-11-02. Re-run that command to check a number.
+Each row comes from `python3 lint/find_time_pinned.py <clone> --json`, run on a shallow clone of the repo's default branch at the commit shown, on 2026-11-02. Re-run that command to check a number. The claude-settings row is this repo's main, not a clone: `python3 lint/find_time_pinned.py . | tail -1` on 2026-11-13, at the commit shown.
 
 | Repo | Commit | sleep | elapsed-assert | test-cap | wait-cap | Total | Files | Unread | Target (sleep, elapsed, cap) |
 |---|---|---|---|---|---|---|---|---|---|
@@ -25,9 +25,10 @@ Each row comes from `python3 lint/find_time_pinned.py <clone> --json`, run on a 
 | joyous | `de35e993` | 1 | 1 | 38 | 1 | 41 | 2 | 0 | 0, 0, 0, each wait-cap judged |
 | mailaudit | `9efe1bb0` | 140 | 1 | 0 | 178 | 319 | 30 | 0 | 0, 0, 0, each wait-cap judged |
 | ios-adblock | `4d265329` | 1 | 0 | 0 | 0 | 1 | 1 | 0 | 0, 0, 0, each wait-cap judged |
+| claude-settings | `fccff95e` | 32 | 8 | 0 (hang guards) | 346 (hang guards; allowed only if each cap sits well above the run, P5) | 386 | 98 | 1 | 0, 0, no target for hang guards |
 
 - home: not scanned. Its lane is held.
-- claude-settings: step c95 (make the timing and load asserts robust) fixed this repo's guard, install lock, stall watch, SendMessage and janitor timing cases by hand. It left 12 notes in `docs/debts/notes.md`. It built no finder and scanned no other repo. On main at 55b27ac2 the finder lists 238 here (sleep 56, elapsed-assert 8, test-cap 0, wait-cap 174, in 51 files, 1 unread). That list goes to a later claude-settings lane.
+- claude-settings: step c95 (make the timing and load asserts robust) fixed this repo's guard, install lock, stall watch, SendMessage and janitor timing cases by hand. It left 12 notes in `docs/debts/notes.md`. It built no finder and scanned no other repo. On main at `fccff95e` (2026-11-13) the finder lists 386 here (sleep 32, elapsed-assert 8, test-cap 0, wait-cap 346, in 98 files, 1 unread: `merge/test_merge.py`, over 1 MB). Its test-cap and wait-cap are hang guards, allowed by P5 when each cap sits well above the run; the lane checks that. That list goes to a later claude-settings lane. Pending: finder keep marker, PR 2975.
 
 ## Files
 

@@ -49,7 +49,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 # A caller that already put hooks/ on the path (report_guard puts a stamped guard.d copy first) keeps its order: this
 # module adds hooks/ last, and only when _nowindow is not importable yet, as a script run from lint/ needs.
 try:

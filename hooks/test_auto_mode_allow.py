@@ -42,6 +42,15 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   the batch runner that merges (cs-build:batch-runner), and the pull request the relay names. Its
   Never covers names each act in RELAYED_MERGE_REFUSED, the reason flags, and a session not tagged
   cs-build:batch-runner (decision `auto-mode-owner-acts`).
+- One "Consultant Relayed Merge Yes:" entry quotes the same derived merge command with the head flag.
+  Its Covers text names the consultant that relays (cs-build:consultant), the triage session the relay
+  may pass through (cs-build:triage), the batch runner that merges (cs-build:batch-runner), and the pull
+  request the relay names. Its Never covers names each act in CONSULTANT_MERGE_REFUSED, the reason flags,
+  a head the relay did not name, a merge with no `--head`, a yes that started at triage with no consultant
+  relay, and a session not tagged cs-build:batch-runner (decision `auto-mode-owner-acts`).
+  Its Covers text says the merge tool refuses a live head that is not the relayed head and names the
+  only commits that may sit past it, scopes "reads no review record" to `relayed_head_holds` itself,
+  and says the merge tool does not check the head flag against the relay.
 - One "Batch Runner Merge:" entry quotes the same derived merge command with the head flag
   (`--head <sha>`) in its Covers text. Its Covers text names the coordinator that sends the merge go
   (cs-build:coordinator), the batch runner (cs-build:batch-runner), `merge go`, and the pull request
@@ -53,6 +62,11 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   Its Covers text names the session tagged cs-build:lane and says it prints and posts nothing. Its Never
   covers names each form in MERGE_REVIEW_REFUSED (decision `auto-mode-owner-acts`). A copy with its Never
   covers clause removed goes red on the same cases.
+- One "Merge Tool Read Checks:" entry names each limit the read-only flags keep: `--reviewed`,
+  `--review-record` and `--lane-lint` (read from merge/merge.py's argparse), "takes no lock", the PASS and
+  ref-or-commit comment rules, and both tool names. Its Never covers names each act in READ_CHECKS_REFUSED.
+  No word in READ_CHECKS_DROPPED appears outside that sentence. Outside it, the entry also names `--lane-lint`
+  run in the background through `verdict`, read from READ_CHECKS_BACKGROUND.
 AUTO_MODE_SETTINGS names another settings file to read (default: this repo's settings.json), so the
 same cases run against a copy with a clause removed and show red there.
 """
@@ -82,6 +96,7 @@ ARCHIVE = "Archived Branch Delete:"
 OWNER_PR = "Owner PR Housekeeping:"
 RELAYED = "Relayed Grant:"
 RELAYED_MERGE = "Relayed Merge Yes:"
+CONSULTANT_MERGE = "Consultant Relayed Merge Yes:"
 BATCH_MERGE = "Batch Runner Merge:"
 MERGE_REVIEW_LOG = "Merge Review Record:"
 MERGE_TOOL_READ = "Merge Tool Read Checks:"
@@ -142,6 +157,11 @@ RELAYED_MERGE_REFUSED = (("another pull request", "another pull request"),
                          ("review", "review"), ("admin", "admin"), ("force push", "force[- ]push"),
                          ("permissions", "permission"), ("settings", "setting"),
                          ("overrides", "override"), ("any other act", "any other act"))
+# The Consultant Relayed Merge Yes entry refuses the same acts as Relayed Merge Yes, except the coordinator-relay
+# clause, which names the consultant and the triage session instead.
+CONSULTANT_MERGE_REFUSED = tuple(item for item in RELAYED_MERGE_REFUSED if item[0] != "not tagged cs-build:coordinator") + (
+    ("a relay from a session not tagged consultant or triage",
+     r"a relay from a session not tagged `cs-build:consultant` or `cs-build:triage`"),)
 # Each act the Batch Runner Merge entry's "Never covers" sentence must name (decision `auto-mode-owner-acts`).
 BATCH_MERGE_REFUSED = (("not tagged cs-build:batch-runner", "not tagged `cs-build:batch-runner`"),
                        ("nobody named", "nobody named"),
@@ -167,6 +187,23 @@ MERGE_REVIEW_REFUSED = tuple((flag, "`%s`" % flag) for flag in MERGE_REVIEW_NEVE
     ("gh pr merge", r"`gh pr merge`"), ("any push", r"\bany push\b"), ("force push", r"force[- ]push"),
     ("any other merge form", "any other merge form"),
     ("a session not tagged cs-build:lane", r"not tagged `cs-build:lane`"))
+# The "Merge Tool Read Checks:" entry. READ_CHECKS_DROPPED holds the refusal words the entry must not carry, so a
+# classifier reading it sees no refusal name. The other constants are what the entry still names.
+READ_CHECKS_DROPPED = (("the Incident sentence", r"(?i)\bincident:"), ("the refusal name", r"(?i)merge without review"),
+                       ("the word refused", r"(?i)\brefused\b"), ("the word refusal", r"(?i)\brefusals?\b"))
+READ_CHECKS_FLAGS = ("--reviewed", "--review-record", "--lane-lint")
+READ_CHECKS_LIMITS = (("takes no lock", r"\btakes no lock\b"),
+                      ("a PASS posts one comment", r"\bPASS\b[^.]*\bposts one\b[^.]*\bcomment\b"),
+                      ("a ref or commit posts nothing", r"(?i)\bref or commit\b[^.]*\bposts nothing\b"))
+READ_CHECKS_REFUSED_FLAGS = ("--confirm", "--base-red-ok", "--undo-check-unknown-ok")
+READ_CHECKS_REFUSED = tuple((flag, "`%s`" % flag) for flag in READ_CHECKS_REFUSED_FLAGS) + (
+    ("gh pr merge", r"`gh pr merge`"), ("any other flag that lifts a check", "any other flag that lifts a check"))
+# The sentence outside the Never covers clause that lets a lane run `--lane-lint` in the background: the word, and the
+# verdict wrapper in its short form and its full-path form (decision auto-mode-owner-acts).
+READ_CHECKS_BACKGROUND = (("background", r"(?i)\bbackground\b"),
+                          ("the verdict wrapper", r"`verdict merge --lane-lint(?![\w-])"),
+                          ("the verdict wrapper with full paths",
+                           r"`~/\.claude/bin/verdict ~/\.claude/bin/merge --lane-lint(?![\w-])"))
 # The Covers text names the session that started this one, and the no-act report it lets through.
 MESSAGE_TARGET = (("the session that started this one", "the session that started this one"),)
 MESSAGE_REPORT = (("asks for no act", "asks for no act"), ("pull request number", "pull request number"),
@@ -312,6 +349,16 @@ def flag_list(covers):
     return sorted(re.findall(r"`(--[\w-]+)", found.group(1))) if found else None
 
 
+def merge_flag_names():
+    """Every option string merge/merge.py's argparse adds, as a set. Read from the parser's own add_argument calls."""
+    with open(MERGE_PY, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    return {node.args[0].value for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "add_argument" and node.args
+            and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)
+            and node.args[0].value.startswith("--")}
+
+
 def allow_entry(prefix):
     """The one autoMode.allow entry starting with prefix, or None when there is not exactly one."""
     hits = [e for e in auto_mode().get("allow", []) if e.startswith(prefix)]
@@ -334,6 +381,12 @@ def bounds_text(entry):
     """The entry's text before its 'Never covers' sentence, or all of it when it has none."""
     found = never_covers_match(entry)
     return (entry or "")[:found.start()] if found else (entry or "")
+
+
+def outside_never_covers(entry):
+    """The entry's text with its 'Never covers' sentence removed, wherever that sentence sits."""
+    found = never_covers_match(entry)
+    return entry[:found.start()] + entry[found.end():] if found else (entry or "")
 
 
 def unnamed_terms(clause, terms):
@@ -541,6 +594,128 @@ class RelayedMergeYesIsAllowed(unittest.TestCase):
                       "Never covers does not name a merge with no `%s`" % flag)
 
 
+class ConsultantRelayedMergeYesIsAllowed(unittest.TestCase):
+    def consultant_merge_entry(self):
+        """The one Consultant Relayed Merge Yes entry, asserting first that there is exactly one."""
+        entry = allow_entry(CONSULTANT_MERGE)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % CONSULTANT_MERGE)
+        return entry
+
+    def test_one_entry_names_the_consultant_relayed_merge_yes(self):
+        self.assertIn("$defaults", auto_mode().get("allow", []), "autoMode.allow lost $defaults")
+        self.consultant_merge_entry()
+
+    def test_entry_quotes_the_merge_command(self):
+        entry = self.consultant_merge_entry()
+        command, flag = merge_command(), head_flag()
+        self.assertIsNotNone(command, "merge/cloud_allow.json must hold exactly one --confirm merge rule")
+        self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the relayed head")
+        self.assertIn("`%s %s <sha>`" % (command, flag), bounds_text(entry),
+                      "Covers text must quote the merge command with the head flag and <sha> for the relayed head")
+
+    def test_covers_names_the_consultant_tag(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("cs-build:consultant", bounds_text(entry),
+                      "Covers text must require a relay from a session tagged cs-build:consultant")
+
+    def test_covers_names_the_triage_tag(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("cs-build:triage", bounds_text(entry),
+                      "Covers text must allow the relay to pass through a session tagged cs-build:triage")
+
+    def test_covers_names_the_batch_runner_that_merges(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("cs-build:batch-runner", bounds_text(entry),
+                      "Covers text must name cs-build:batch-runner as the session that merges")
+
+    def test_covers_names_the_pull_request_the_relay_names(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("the pull request the relay names", bounds_text(entry),
+                      "Covers text must say the pull request the relay names")
+
+    def test_never_covers_names_a_batch_runner_not_tagged(self):
+        clause = never_covers(self.consultant_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Consultant Relayed Merge Yes entry")
+        self.assertIn("not tagged `cs-build:batch-runner`", clause,
+                      "Never covers does not name a session not tagged cs-build:batch-runner")
+
+    def test_never_covers_names_each_refused_act(self):
+        clause = never_covers(self.consultant_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Consultant Relayed Merge Yes entry")
+        missing = unnamed_terms(clause, CONSULTANT_MERGE_REFUSED)
+        self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+    def test_never_covers_names_the_reason_flags(self):
+        clause = never_covers(self.consultant_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Consultant Relayed Merge Yes entry")
+        missing = unnamed_terms(clause, REASON_FLAGS_REFUSED)
+        self.assertFalse(missing, "Never covers does not name the reason flags %r" % missing)
+
+    def test_never_covers_names_a_head_the_relay_did_not_name(self):
+        clause = never_covers(self.consultant_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Consultant Relayed Merge Yes entry")
+        self.assertIn("a head the relay did not name", clause,
+                      "Never covers does not name a head the relay did not name")
+
+    def test_never_covers_names_a_merge_with_no_head_flag(self):
+        clause = never_covers(self.consultant_merge_entry())
+        flag = head_flag()
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Consultant Relayed Merge Yes entry")
+        self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the relayed head")
+        self.assertIn("a merge with no `%s`" % flag, clause,
+                      "Never covers does not name a merge with no `%s`" % flag)
+
+    def test_yes_binds_to_the_head_the_consultant_relayed(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("the head the pull request had when the consultant relayed it", bounds_text(entry),
+                      "Covers text must bind the yes to the head the pull request had when the consultant relayed it")
+        self.assertNotRegex(entry, r"(?i)later head|review record names",
+                            "the entry must not allow a later head or lean on a review record")
+
+    def test_head_text_says_what_the_merge_tool_reads(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("relayed_head_holds", bounds_text(entry),
+                      "Covers text must name relayed_head_holds, the merge tool's relayed-head check")
+        self.assertIn("reads no review record", bounds_text(entry),
+                      "Covers text must say the merge tool reads no review record")
+        self.assertNotRegex(entry, r"(?i)with no record",
+                            "the entry must not say a head is allowed with no record")
+
+    def test_head_text_says_the_merge_tool_refuses_a_head_that_is_not_the_relayed_head(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("refuses a live head that is not the relayed head", bounds_text(entry),
+                      "Covers text must say the merge tool refuses a live head that is not the relayed head")
+
+    def test_head_text_names_the_only_commits_allowed_between_the_heads(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("except one that sits on it with only a Record-claim commit, its revert or a page-only commit between",
+                      bounds_text(entry),
+                      "Covers text must name the only commits a live head may carry past the relayed head")
+
+    def test_head_text_scopes_the_no_review_log_read_to_relayed_head_holds(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("`relayed_head_holds` itself reads no review record", bounds_text(entry),
+                      "Covers text must scope the no-review-record read to relayed_head_holds itself")
+
+    def test_head_text_says_the_merge_tool_does_not_check_the_head_against_the_relay(self):
+        entry = self.consultant_merge_entry()
+        flag = head_flag()
+        self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the relayed head")
+        self.assertIn("The merge tool does not check `%s` against the relay" % flag, bounds_text(entry),
+                      "Covers text must say the merge tool does not check `%s` against the relay" % flag)
+
+    def test_covers_says_triage_forwards_what_the_consultant_relayed(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("forwards what the consultant relayed", bounds_text(entry),
+                      "Covers text must say the triage session forwards what the consultant relayed")
+
+    def test_never_covers_names_a_yes_that_started_at_triage(self):
+        clause = never_covers(self.consultant_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Consultant Relayed Merge Yes entry")
+        self.assertIn("a yes that started at triage with no consultant relay", clause,
+                      "Never covers does not name a yes that started at triage with no consultant relay")
+
+
 class BatchRunnerMergeIsAllowed(unittest.TestCase):
     def batch_merge_entry(self):
         """The one Batch Runner Merge entry, asserting first that there is exactly one."""
@@ -683,6 +858,54 @@ class MergeReviewLogIsAllowed(unittest.TestCase):
         other = [tb for tb in causes if "need a 'Never covers' sentence" not in tb]
         if other:
             self.fail("a case went red on another cause than the removed clause: %s" % last_line(other[0]))
+
+
+class MergeToolReadChecksIsAllowed(unittest.TestCase):
+    def test_drops_the_refusal_words(self):
+        entry = allow_entry(MERGE_TOOL_READ)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % MERGE_TOOL_READ)
+        outside = outside_never_covers(entry)
+        for name, pattern in READ_CHECKS_DROPPED:
+            with self.subTest(term=name):
+                self.assertNotRegex(outside, pattern, "the '%s' entry still has %s outside its Never covers sentence"
+                                    % (MERGE_TOOL_READ, name))
+
+    def test_still_names_each_remaining_limit(self):
+        covers = entry_part(self, MERGE_TOOL_READ)
+        clause = entry_part(self, MERGE_TOOL_READ, never=True)
+        names = merge_flag_names()
+        for flag in READ_CHECKS_FLAGS:
+            with self.subTest(flag=flag):
+                self.assertIn(flag, names, "merge/merge.py's argparse has no flag %s" % flag)
+                self.assertRegex(covers, r"(?<![\w-])%s(?![\w-])" % re.escape(flag),
+                                 "Covers text does not name the flag %s" % flag)
+        for name, pattern in MERGE_TOOL_NAMES:
+            with self.subTest(tool=name):
+                self.assertRegex(covers, pattern, "Covers text does not name the tool `%s`" % name)
+        for name, pattern in READ_CHECKS_LIMITS:
+            with self.subTest(limit=name):
+                self.assertRegex(covers, pattern, "Covers text does not say %r" % name)
+        for flag in READ_CHECKS_REFUSED_FLAGS:
+            with self.subTest(flag=flag):
+                self.assertIn(flag, names, "merge/merge.py's argparse has no flag %s" % flag)
+        for name, pattern in READ_CHECKS_REFUSED:
+            with self.subTest(act=name):
+                self.assertRegex(clause, pattern, "Never covers does not name %r" % name)
+
+    def test_names_the_background_verdict_lane_lint_call(self):
+        entry = allow_entry(MERGE_TOOL_READ)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % MERGE_TOOL_READ)
+        self.assertIn("--lane-lint", merge_flag_names(), "merge/merge.py's argparse has no flag --lane-lint")
+        outside = outside_never_covers(entry)
+        for name, pattern in READ_CHECKS_BACKGROUND:
+            with self.subTest(term=name):
+                self.assertRegex(outside, pattern, "the '%s' entry does not name %s outside its Never covers sentence"
+                                 % (MERGE_TOOL_READ, name))
+
+    def test_one_entry_starts_with_the_name(self):
+        hits = [e for e in auto_mode().get("allow", []) if e.startswith(MERGE_TOOL_READ)]
+        self.assertEqual(len(hits), 1, "need exactly one '%s' entry in autoMode.allow, found %d"
+                         % (MERGE_TOOL_READ, len(hits)))
 
 
 class OwnerPrHousekeepingIsAllowed(unittest.TestCase):
@@ -930,6 +1153,53 @@ class SessionInstallerIsAllowed(unittest.TestCase):
     def test_never_covers_names_each_refused_act(self):
         missing = unnamed_terms(entry_part(self, INSTALLER, never=True), INSTALLER_REFUSED)
         self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+
+MAIN_INSTALLER = "Main Installer:"
+MAIN_INSTALL_BARE = ("CLAUDE_SETTINGS_REF=main ~/.claude/bin/verdict bash "
+                     "/root/claude-settings-main/merge/install_from_main.sh")
+# The cd is part of the act: the script takes its clone from the working directory.
+MAIN_INSTALL_FORMS = ("cd /root/claude-settings-main && " + MAIN_INSTALL_BARE,)
+MAIN_INSTALLER_REFUSED = (("another env var", "environment variable"), ("another ref", "another ref than `main`"),
+                          ("another repo or path", "another repo or path"), ("extra arguments", "extra argument"),
+                          ("chaining", "chaining"), ("a fork", "fork"), ("permissions", "permission"),
+                          ("overrides", "override"), ("any other act", "any other act"))
+
+
+class MainInstallerIsAllowed(unittest.TestCase):
+    def test_one_entry_names_the_main_installer(self):
+        hits = [e for e in auto_mode().get("allow", []) if e.startswith(MAIN_INSTALLER)]
+        self.assertEqual(len(hits), 1, "need exactly one '%s' entry in autoMode.allow, found %d"
+                         % (MAIN_INSTALLER, len(hits)))
+
+    def test_covers_quotes_the_one_form_and_the_script_exists(self):
+        covers = entry_part(self, MAIN_INSTALLER)
+        for form in MAIN_INSTALL_FORMS:
+            self.assertIn("`%s`" % form, covers)
+        self.assertTrue(os.path.isfile(os.path.join(REPO_ROOT, "merge", "install_from_main.sh")),
+                        "the entry quotes merge/install_from_main.sh, which is missing")
+
+    def test_covers_quotes_no_other_command(self):
+        spans = [x for x in re.findall(r"`([^`]+)`", entry_part(self, MAIN_INSTALLER))
+                 if "install" in x or "&&" in x or "bash" in x]
+        self.assertEqual(sorted(spans), sorted(MAIN_INSTALL_FORMS), "Covers text quotes a command other than the one ruled")
+
+    def test_covers_says_nothing_comes_before_or_after_the_command(self):
+        self.assertIn("nothing before it and nothing after it", entry_part(self, MAIN_INSTALLER))
+
+    def test_covers_says_the_cd_is_part_of_the_act(self):
+        self.assertIn("the script takes its clone from the working directory", entry_part(self, MAIN_INSTALLER))
+
+    def test_covers_names_the_owner_ruling(self):
+        missing = unnamed_terms(entry_part(self, MAIN_INSTALLER), (("owner time", "10:00 CST"), ("incident time", "15:59 CST")))
+        self.assertFalse(missing, "Covers text does not name %r" % missing)
+
+    def test_never_covers_names_each_refused_act(self):
+        missing = unnamed_terms(entry_part(self, MAIN_INSTALLER, never=True), MAIN_INSTALLER_REFUSED)
+        self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+    def test_session_installer_still_never_covers_main(self):
+        self.assertIn("another branch or ref such as `main`", entry_part(self, INSTALLER, never=True))
 
 
 class NeverCoversSentence(unittest.TestCase):
