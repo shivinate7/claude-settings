@@ -10,8 +10,9 @@
       "how": "Runner 11 publishes the blocks once, as a one-off.",
       "id": "runner-11-publishes",
       "key": "a",
-      "label": "Runner 11 publishes the three blocks it built (recommended by the coordinator)",
-      "lose": "A session beyond ruling c126 writes three private pages."
+      "label": "Runner 11 publishes the three blocks it built",
+      "lose": "A session beyond ruling c126 (each repo's own orchestrator writes its page) writes three private pages.",
+      "note": "Now means: runner 11 was archived at 15:14 CST (with nothing left to merge), so this option needs it unarchived first; the rebuild line it left is `python3 ~/.claude/skills/roadmap/build.py --repo /home/user/<repo> --record-branch roadmap --block --out <file>` after a `git fetch origin` in each repo."
     },
     {
       "gain": "The pages are published now, by the session with the page tooling.",
@@ -19,10 +20,10 @@
       "id": "triage-publishes",
       "key": "b",
       "label": "Triage 11 publishes the three blocks",
-      "lose": "Triage 11 goes beyond ruling c126 and writes three pages it does not own."
+      "lose": "Triage 11 goes beyond ruling c126 (each repo's own orchestrator writes its page) and writes three pages it does not own."
     },
     {
-      "gain": "Matches ruling c126 exactly.",
+      "gain": "Matches ruling c126 (each repo's own orchestrator writes its page) exactly.",
       "how": "Each repo gets its own orchestrator, which writes its own page.",
       "id": "start-orchestrators",
       "key": "c",
@@ -31,17 +32,17 @@
     }
   ],
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), written by triage 11 (session_013NEJKzyLYRTQKeLpis8JKJ)",
-  "recommended": "a",
+  "recommended": "b",
   "ref": "coordinator relay 11:41 CST Nov 18; step roadmap-blank-pages",
-  "replied": "2026-11-18T12:02:00-06:00",
-  "reply": "Runner 11 answered at 12:01 CST. Yes, the blocks were built from each repo's roadmap branch in git at 03:17 CST, and a live check at 12:00 CST shows all three branch tips unchanged, so nothing needs rebuilding: the publish writes git as it stands, and no git export of the other accounts' artifacts is needed first. Not a chicken-and-egg problem. One more fact: only banchi names a page (a waiting-page artifact); q_max and joyous name none, so for those two a page may first have to be made, which is part of the choice. Whether any of the three pages holds question items is not read yet; runner 11 can read banchi's database if you want.",
+  "replied": "2026-11-18T15:15:21-06:00",
+  "reply": "15:15 CST update: runner 11 was archived at 15:14 CST by the coordinator, on your 15:02 CST word to it ('you can message coordinator to archive you if there's nothing remaining then'). Option a now needs it unarchived, so it carries a note and is no longer recommended. I recommend b, with the rebuild line runner 11 left (on option a). Say if you want a or c instead.",
   "repo": "shivinate7/claude-settings",
   "short": "Publisher of three repo roadmap pages",
   "shown": [
     {
       "id": "runner-11-publishes",
       "key": "a",
-      "label": "Runner 11 publishes the three blocks it built (recommended by the coordinator)"
+      "label": "Runner 11 publishes the three blocks it built"
     },
     {
       "id": "triage-publishes",
@@ -56,5 +57,5 @@
   ],
   "status": "open",
   "title": "Who publishes the roadmap blocks for the banchi, q_max and joyous pages?",
-  "why": "a publishes now with the session that holds the files, and it is a one-off; b and c cost a session beyond c126 or three new sessions. The coordinator also recommends a and put the same question to you in chat."
+  "why": "Runner 11 is archived (15:14 CST), so b, triage publishing the three blocks once, is the one that needs no session brought back; a needs an unarchive and c needs three new sessions. Recommended by triage, not owner-typed; it still goes past ruling c126 (each repo's own orchestrator writes its page)."
 }
