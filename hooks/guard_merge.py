@@ -2210,6 +2210,7 @@ def archive_read_remedy(repo, status) -> str:
     """The remedy of an unreadable archive read. Only a 403 or 404 on the read of `repo` names its add_repo act; every other
     failure (a 500, a timeout, no gh, text that is not JSON, a shape the read does not know) says to retry. The one home of the wording."""
     if repo and status in _ATTACH_STATUSES:
+        # Push access, not read: a lane that archives must push an archive/ branch, so a read-only attach would only move the refusal.
         return "This session cannot read that repo until it is attached: add_repo " + repo + " access push, then retry."
     return "Retry once gh answers."
 
