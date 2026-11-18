@@ -1076,6 +1076,41 @@ add("cwd layout: a cwd with no extras file gets the legacy old notes path, not t
 add("cwd layout: a cwd whose layout does not read gets no note line", "custom", fn=unreadable_layout_check)
 
 
+# NOTE RULES UNREAD: a check_record_slugs that will not import. The hook fails open for the note rules alone: the brief
+# still goes out with its scope and no note line, and one stderr line says the rules were not read.
+BROKEN_NOTE_LIST = "import sys\nsys.modules['check_record_slugs'] = None\n"  # an import of the name raises ImportError
+
+
+def note_rules_unread_check():
+    """A check_record_slugs that will not import: the hook exits 0, prints the brief with its scope and no note line,
+    and its one stderr line starts `agent_brief: note rules not read`."""
+    if not os.path.exists(HOOK):
+        return "the hook file is missing: %s" % HOOK
+    result = run_hook_after(BROKEN_NOTE_LIST, payload("builder"))
+    if result.returncode != 0:
+        return "exit %d when check_record_slugs will not import, want 0: %s" % (result.returncode,
+                                                                                 last_stderr_line(result))
+    text, problem = context_of(result.stdout)
+    if problem:
+        return "the brief did not go out when check_record_slugs will not import: %s" % problem
+    scope = scope_check("builder")(text)  # scope before the subject
+    if scope:
+        return scope
+    lines = note_lines(text)
+    if lines:
+        return "a brief whose note rules did not read holds %d note line(s), want none: %r" % (len(lines), lines[0][:90])
+    err = result.stderr.strip().splitlines() if result.stderr.strip() else []
+    if len(err) != 1:
+        return "want one stderr line, got %d" % len(err)
+    if not err[0].startswith("agent_brief: note rules not read"):
+        return "stderr line is %r, want it to start 'agent_brief: note rules not read'" % err[0][:120]
+    return None
+
+
+add("note rules unread: a check_record_slugs that will not import leaves the brief out with no note line",
+    "custom", fn=note_rules_unread_check)
+
+
 def main():
     try:
         return run_cases()
