@@ -5308,16 +5308,16 @@ def round_three_refusal(a, earlier):
 def older_start_record(earlier, base, rounds):
     """-> the newest parsed record in `earlier` (oldest first, None for an unparseable one) that names `base` as its Head, when `base` may start a fix
     check although it is not the newest record's Head (decision pr-review-record, the --fix-check order), else None. It is None when no record names
-    `base`; when a later record is unparseable or holds a FAIL Fix check that started at `base`; or when `rounds` (the new record's) do not carry every
-    round line of the named record. The caller has already refused an unparseable newest record. Reads no host."""
+    `base`; when a later record is unparseable, does not read done (a failed round of another head counts), or holds a FAIL Fix check from any head;
+    or when `rounds` (the new record's) do not carry every round line of every record that names `base`. The caller has already refused an
+    unparseable newest record. Reads no host."""
     named = [i for i, e in enumerate(earlier) if e and e["head"] == base]
     if not named:
         return None
     i = named[-1]
-    rec = earlier[i]
-    if any(e is None or (e["fix"] and e["fix"][0] == base and e["fix"][3] == "FAIL") for e in earlier[i + 1:]):
+    if any(e is None or (e["fix"] and e["fix"][3] == "FAIL") or review_state(e, e["head"])[0] != "done" for e in earlier[i + 1:]):
         return None
-    return rec if all(r in rounds for r in rec["rounds"]) else None
+    return earlier[i] if all(r in rounds for j in named for r in earlier[j]["rounds"]) else None
 
 def pr_had_head(h, head, live, base):
     """True when `head` is a head the pull request had before its live head `live`: a commit on `live`'s first-parent line (a push, or a clean merge of
