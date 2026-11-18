@@ -46,7 +46,7 @@ Check for:
 - Front-end copy (optional): When a diff changes user-visible text (JSX, HTML, aria-label, title,
   placeholder, alt, label in .tsx, .jsx, .html, .vue files), flag each unnecessary word or phrase
   and each phrase replaceable with one word. Give file:line, current text, and shorter text.
-  Judgment, not blocking.
+  Judgment, not blocking. Tag each one Nit.
 - Silent failure: flag an empty catch, a bare `except:`, `set +e`, or `|| true` with no log,
   when the caller needs to know the failure happened. Skip a documented fail-open, one with a
   recorded decision, such as hooks/guard.py's docstring.
@@ -61,15 +61,26 @@ Check for:
 - Tests: check each new or changed test against the practices in decision `test-practices`. If the red run is missing or in doubt, make a mutant on a scratch copy outside every repository and see the named case go red (P10). Make the copy without `.git`, such as with `git archive`, never a plain `cp -r`, and with no `.git` above it. Flag a proxy assert, a clock in an assert, a missing scope assert, or a delete with no mutant. A check or guard is tested on the cases its rule allows, not only the ones it refuses (P11).
 - Live-state tests: flag a new or changed test that pushes main by path or URL, such as the bare's path, then reads that clone's `origin/main`. That push can move the clone's tracking ref. Flag a read of `origin/main` or `main_tip()` of the repo under review, and a `git fetch` or `ls-remote` on its real origin. Other reads of a fixture clone's own refs are fine. Flag a test that leaves a caller environment variable its code reads, such as `GH_REPO`, neither set nor stripped.
 - Code claims in a record: read each cited code symbol against the claim it backs. A cite proves the name exists, not that the claim is true.
-- Do not flag a finding the diff did not add, except design-review findings on the changed pages.
-  Do not flag a style problem a linter catches. Do not flag a nitpick a senior engineer would skip.
+- Do not flag a style problem a linter catches. A nitpick a senior engineer would skip is not a finding. Any other nitpick is a Nit.
 - A refused act is reported to the orchestrator, never re-spelled to get past the guard (for example a command word built from pieces).
+
+Findings. Write each finding as one line:
+`F<n> [Important|Nit|Pre-existing] <defect class>: file:lines, what, proof`
+
+- The defect class is the name before the colon of a Check for bullet above, or `other`.
+- Important: the diff adds a defect. An open Important finding blocks. The verdict is FAIL.
+- Nit: a small point. It never blocks. The orchestrator files an unfixed Nit as a note (rule `roles-findings-are-debts-or-notes`: a note is a finding Claude is unlikely to hit).
+- Pre-existing: a defect that main already has, which the diff did not add. It never blocks. It names a run on main's tip that shows it. Roadmap step `pre-existing-needs-main-run` adds the guard that asks for that run. Step `pe-guard-false-alarms` cuts its false alarms. Both are in progress, not built.
+- A design-review finding on a changed page may be flagged whether or not the diff added it.
+- The verdict is PASS when no Important finding is open.
+- Round 1 numbers its findings from F1. A later round numbers its new findings after the highest earlier id, so each id names one finding on the PR. The round's brief names the PR's review logs, which hold the earlier findings.
+- Round 2 and up read the delta, `git diff <Reviewed head>..<head>`, plus unchanged callers of changed symbols. After a merge from main, read the delta the way a fix verifier does, as the paragraph titled Fix check below says. Cite each earlier finding by id as fixed or open. Raise no earlier finding as new. An open Important finding still blocks.
+- Two reads cover the whole diff against main: the net-value test, and the fresh full review (record `pr-review-record`). Record `hold-unsafe-after-round-3` holds that carve-out.
 
 If the repo has screens, the orchestrator runs design-review beside round 1, on the first built head. Any change to a screen file after round 1 gets a second design read by the design reviewer (decision `design-agents`). In a code review round, you do not recheck design findings. When your brief asks for the house checklist, mark each changed screen pass or fail per rule id in `~/.claude/docs/design/checklist.md`. The house design values are in `~/.claude/docs/design/tokens.md`.
 
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next.
-Under Done, the first line is PASS, FAIL, or PARTIAL, then the round and the model, such as `FAIL, round 2 of 3, <model>`. Name the model from the line in your system prompt that reads "You are powered by the model named …", its exact model ID, never from this file, the brief or the frontmatter. Then list each finding with file, line
-range, what is wrong, and what proves it. Then list the checks run with their outcome. Drop a
+Under Done, the first line is PASS, FAIL, or PARTIAL, then the round and the model, such as `FAIL, round 2 of 3, <model>`. Name the model from the line in your system prompt that reads "You are powered by the model named …", its exact model ID, never from this file, the brief or the frontmatter. Then list each finding as one F line (see Findings). Then list the checks run with their outcome. Drop a
 label that does not apply. Write plainly (rule output-write-in-ste). Start with the point. No
 preamble. Report in under 25 lines unless the brief names another cap.
 

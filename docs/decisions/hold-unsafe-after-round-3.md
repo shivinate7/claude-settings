@@ -15,6 +15,11 @@ Owner, 2026-10-15 12:00 CDT. The owner's words:
   - A fix verifier PASS ends review after any round, a failed round 1, 2, 3 or 4 too. A negative net value still holds the change.
   - The net-value test runs only for an unclear case that cannot finish: a guard or check change that reaches round 3.
   - The merge tool already reads this way (`review_state` in `merge/merge.py`). Decision `pr-review-record` holds the form, the done rules and the owner's round 4 grant, and its changed-head route is unchanged.
+  - Round 2 and up read the delta, `git diff <reviewed head>..<head>`, not the whole diff.
+  - Two reads stay whole-diff against main: the net-value test, and the fresh full review in record `pr-review-record`.
+  - The owner's relayed words, 19:45 CST Nov 17 (`land their findings`), sit in roadmap step `repeated-findings-count`, which counts findings a later round repeats.
+  - That step counted 1 of 22 findings named in round 2 or 3 as a strict repeat, at 20:36 CST Nov 17. It is a floor, not a rate.
+  - Its follow-up, an id per finding, is the Findings rule in `agents/reviewer.md`.
   - Not decided: whether round 1 runs Sonnet for every logic change. Deferred, as the owner said.
 - The judgment is semantic.
 - The owner's grant can allow work on a held change. A merge still needs zero or positive net value. The one exception is a loss the owner accepted in a ruling that the tool's `Owner accepted` line on the record cites, for that PR and that head only.

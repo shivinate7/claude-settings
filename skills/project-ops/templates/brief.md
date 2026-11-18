@@ -54,5 +54,6 @@ Agent spawn brief head
 A spawn brief's first line holds a marker alone.
 Markers: `Guard or check: yes`, `Fix check`, `Round 2 of 3`, `Round 3 of 3` and `Audit:`.
 A marker counts only alone at a line start of a real brief.
+Reviewed head: <40-hex Head of the newest review log on the PR, or `none` in round 1>. Round 2 and up read the delta from it.
 
 None for product code or docs.
