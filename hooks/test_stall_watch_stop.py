@@ -3057,13 +3057,16 @@ def pr_body(repo, number=CI_PR):
 
 
 def ci_wake_gh(answers, pr_repo):
-    """A stand-in for ci_wake.gh. The PR lives in pr_repo, so its REST read answers that PR. `workflow list`
-    answers by the repo its -R names, from answers, each answer (rc, stdout, stderr) as gh returns it. Every
-    other call answers an empty run list. Return (gh, calls): calls collects the args of each call."""
+    """A stand-in for ci_wake.gh. The PR lives in pr_repo, so its REST read answers that PR. The PR's file list
+    (repos/O/R/pulls/N/files) answers no files. `workflow list` answers by the repo its -R names, from answers,
+    each answer (rc, stdout, stderr) as gh returns it. Every other call answers an empty run list. Return
+    (gh, calls): calls collects the args of each call."""
     calls = []
 
     def gh(args, cwd, timeout=None):
         calls.append(list(args))
+        if args[:1] == ["api"] and args[1:2] and args[1].endswith("/files"):
+            return 0, "[]\n", ""
         if args[:1] == ["api"]:
             return 0, json.dumps(pr_body(pr_repo)), ""
         if args[:2] == ["workflow", "list"]:
