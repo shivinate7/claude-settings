@@ -13,7 +13,7 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from test_windows_split import (CHECKS, RECORDS_ONLY_CONDITION, CONDITIONED_JOBS, SPLIT_CONDITIONED_JOBS, UNCONDITIONED_JOBS, all_jobs, eval_if,  # noqa: E402  the one home of the checks.yml reader
+from test_windows_split import (CHECKS, RECORDS_ONLY_CONDITION, CONDITIONED_JOBS, SLOW_LEG_JOBS, SPLIT_CONDITIONED_JOBS, UNCONDITIONED_JOBS, all_jobs, eval_if,  # noqa: E402  the one home of the checks.yml reader
                                 condition_problem, job_if_without_records, scope_named_steps)
 from all_jobs_passed_rules import needs_of  # noqa: E402  the one home of the needs reader
 from workflow_steps import job_block  # noqa: E402  the one home of the job parser
@@ -69,12 +69,16 @@ class WindowsRestSplit(unittest.TestCase):
         for name in HELD_SHARDS:
             self.assertIn(name, self.jobs, f"{name} is missing: the Windows full shards are held, not dropped")
 
-    def test_each_held_windows_full_shard_runs_on_a_ready_pull_request(self):
+    def test_each_held_windows_full_shard_runs_on_a_ready_pull_request_unless_slow(self):
+        # A slow leg is daily only, so it starts on no ready pull request whatever its flags. Every other held shard starts on one.
         for name in HELD_SHARDS:
             expr = self.jobs.get(name, {}).get("if")
             self.assertIsNotNone(expr, f"{name} has no job-level if, so it cannot be held to a ready pull request")
-            self.assertTrue(eval_if(job_if_without_records(expr), "pull_request", "true", draft=False),
-                            f"{name} does not run on a ready pull request: if {expr}")
+            ready = eval_if(job_if_without_records(expr), "pull_request", "true", draft=False)
+            if name in SLOW_LEG_JOBS:
+                self.assertFalse(ready, f"{name} is a slow leg and runs on a ready pull request: if {expr}")
+            else:
+                self.assertTrue(ready, f"{name} does not run on a ready pull request: if {expr}")
 
     def test_a_draft_pull_request_runs_no_held_windows_full_shard(self):
         for name in HELD_SHARDS:
