@@ -3422,6 +3422,61 @@ def refuse_incomplete_tree(wt, head, base, tree=None):
         raise UnknownStop("\n".join([f"the lint of {head[:9]} against {base} is unknown, not a pass: the lint worktree lacks {', '.join(missing)}, so no step ran.",
                                      "Run again. If it keeps happening, the lint worktree made for this head is incomplete. --lint-unknown-ok does not lift this. " + LANE_LINT_REMEDY]))
 
+MAIN_JUDGES_FILE = re.compile(r"lint/[^/]+\.py|hooks/test_[^/]+\.py")  # the checks and the check suites: the files that decide a lane's lint
+
+def copies_in(wt, commit, paths, head, base):
+    """-> {path: bytes} for each of `paths` that `commit` holds, read in the lint worktree `wt`. One ls-tree of lint/ and hooks/ and one cat-file --batch, so no path
+    is an argument of a git call. A read that fails is an UnknownStop, never a pass on the lane's copy of a check."""
+    def unknown(why):
+        return UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: a changed check's copy in {commit[:9]} could not be read: {why} {LANE_LINT_CITE}")
+    c, listed = git(wt, "ls-tree", "-r", "--name-only", "-z", commit, "--", "lint", "hooks")
+    if c:
+        raise unknown(listed)
+    held = [p for p in paths if p in set(listed.split("\0"))]
+    if not held:
+        return {}
+    c, out = sh(["git", "-C", wt, "cat-file", "--batch"], input="".join(f"{commit}:{p}\n" for p in held).encode(), raw=True)
+    if c:
+        raise unknown(f"git cat-file --batch exited {c}")
+    blobs, at = {}, 0
+    for p in held:
+        end = out.index(b"\n", at)
+        header = out[at:end].split()
+        if len(header) != 3 or header[1] != b"blob":
+            raise unknown(f"git cat-file --batch gave {out[at:end]!r} for {p}")
+        size = int(header[2])
+        blobs[p] = out[end + 1:end + 1 + size]
+        at = end + 1 + size + 1
+    return blobs
+
+def lay_copies(wt, copies):
+    for rel, blob in copies.items():
+        path = os.path.join(wt, *rel.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(blob)
+
+def put_main_copies(wt, base_tip, head, base):
+    """Lay the base tip's copy of each lint/*.py and hooks/test_*.py file the head changes over the lint worktree `wt`, so each step runs main's check
+    on the lane's change, not the lane's own copy of the check (a lane that loosens a check and its suite together would pass its own lint). HEAD stays the
+    merge commit, so a diff of the base against HEAD still shows the lane's change to those files, which picks their suites. A file the base tip lacks (a new
+    check) keeps the lane's copy, and a file the head deletes comes back. -> the paths laid, for restore_lane_copies."""
+    c, changed = git(wt, "diff", "--no-renames", "--name-only", "-z", f"{base_tip}...{head}")
+    if c:
+        raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the files the head changes could not be listed to read main's copy of its checks: {changed} {LANE_LINT_CITE}")
+    judged = [p for p in changed.split("\0") if MAIN_JUDGES_FILE.fullmatch(p)]
+    laid = copies_in(wt, base_tip, judged, head, base) if judged else {}
+    lay_copies(wt, laid)
+    return list(laid)
+
+def restore_lane_copies(wt, merge_commit, laid, head, base):
+    """Put back the merge commit's copy of each path put_main_copies laid, so the touched tests and the mutation test run the lane's files, as the merge holds them."""
+    held = copies_in(wt, merge_commit, laid, head, base)
+    lay_copies(wt, held)
+    for rel in laid:
+        if rel not in held:  # a path the merge lacks: the lane deleted a file main holds
+            os.remove(os.path.join(wt, *rel.split("/")))
+
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_tests=False, mutate_run=True, pre_join=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
@@ -3429,6 +3484,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     Then every head, a ref or commit too, is merged into origin/<base> with merge_reason: a conflict is a FAIL that names the base, and an unknown is a Stop.
     Once those pass, the merged tree is made a commit (`git commit-tree`, first parent the base tip, second the head) and the lint worktree checks it out, so every step
     and the touched tests read the files of the merge, not the head's older copy, and a diff of the base against HEAD or the work tree shows only the lane's own changes.
+    Then main's copy of each lint/*.py and hooks/test_*.py file the head changes is laid over the work tree (put_main_copies), so a check the lane loosened is judged by main's copy (decision guard-guards-mistakes-only).
     The first parent is the base tip that merge_reason merged, never a later read of origin/<base>. ci-job gets the head as CI_JOB_HEAD_SHA, so its
     `github.event.pull_request.head.sha` is the pushed head, not the merge commit. A commit-tree or checkout that fails is an UnknownStop, which no flag lifts.
     Then cross_measure checks a PR's head against the lane's other open PRs and `with_prs`: an unknown there is a Stop too.
@@ -3508,8 +3564,10 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         if c2:
             raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the merge of the head with {base} could not be made the lint worktree's HEAD: {out} {LANE_LINT_CITE}")
         refuse_incomplete_tree(wt, head, base, merge_commit)
+        laid = put_main_copies(wt, merged[1], head, base)
         state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes, head_sha=head,
                                                  pr_body=(info.get("body") or "") if target.isdigit() else None)  # a ref or commit has no PR body
+        restore_lane_copies(wt, merge_commit, laid, head, base)  # only the ci-job steps judge by main's copy; the touched tests and the mutation test run the lane's
         if state == "pass" and touched_tests:
             touched = run_touched_tests(wt, base, head)
         mutate, mutate_fails, skipped = "", [], False
