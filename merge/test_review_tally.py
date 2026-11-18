@@ -6,14 +6,14 @@ file and starts no timer, so its whole cost is that read (rule outcomes-mechaniz
 review marker is its first line. The record form is decision pr-review-record; parse_review in merge/merge.py reads it.
 
 Readings the cases pin:
-- A pull request counts from its first record with a `Round 1:` line. A record before that one, with no such line, is skipped.
+- A pull request counts from its first record with a first-round line. A record before that one, with no such line, is skipped.
 - A record whose PR line names another pull request does not count on the thread it is posted on: it neither starts that thread's
   pull request nor sets its split side (own_records reads the PR line the same way).
-- Round 1 counts once per pull request, from that first record. A later record reprints round 1, so it is not counted again.
+- The first round counts once per pull request, from that first record. A later record reprints the first round, so it is not counted again.
 - Round N above 1 counts once, from the first record of that pull request that holds a Round N line. A record posted after a round
-  reprints the earlier rounds, and a round 2 line sits only in a record that opens at round 1. So the first Round 1 record alone
-  would leave round 2 and round 3 empty. The first later record and the newest one give the same line.
-- A round 1 FAIL reads as round 2 PASS, round 2 FAIL, or none (no record of the pull request holds a round 2 line).
+  reprints the earlier rounds, and a second-round line sits only in a record that opens at the first round. So the first record of
+  the first round alone would leave the second and third rounds empty. The first later record and the newest one give the same line.
+- A first-round FAIL reads as second-round PASS, second-round FAIL, or none (no record of the pull request holds a second-round line).
 - A design-reviewer line is no round. It counts in no table, and it neither starts a pull request nor sets its split side.
 - A record that parse_review refuses counts as unknown. It drops nothing: a later record that reprints its rounds still counts them.
 - --split sorts each pull request by the created time of the record it starts at: before the split, or after it. A record created at
@@ -21,12 +21,12 @@ Readings the cases pin:
   away from the split instant.
 - A failed comment read prints `unknown` and exits non-zero. It never prints a count (rule verification-report-unknown-reads).
 Left open, and not pinned: where a record whose PR line names another pull request counts (the cases assert only its own thread),
-and whether an unparseable record with no Round 1 line counts as unknown.
+and whether an unparseable record with no first-round line counts as unknown.
 
 Printed contract, which the builder matches and parse_tally reads:
     before the split                          a section header: `before the split`, `after the split`, or `all`
-    round 1, haiku: PASS 37, FAIL 146         one line per round and model in each section
-    round 1 FAIL, then round 2: PASS 1, FAIL 0, none 0
+    round N, haiku: PASS 37, FAIL 146         one line per round and model in each section
+    first-round FAIL, then second round: PASS 1, FAIL 0, none 0
     unknown: 0
 
 Each case calls merge.main with the GitHub half faked by test_merge's PullsHost. The first assert of each case checks the exit code, so
@@ -57,7 +57,7 @@ SONNET_R2_FAIL = "Round 2: reviewer, sonnet, FAIL"
 OPUS_R3_PASS = "Round 3: reviewer, opus, PASS"
 DESIGN_R1_FAIL = "Round 1: design-reviewer, opus, FAIL"  # the design reviewer runs opus, and no reviewer line in these cases does
 DESIGN_R1_PASS = "Round 1: design-reviewer, opus, PASS"
-FIX_CHECK = f"Fix check: {tm.REVIEW_OLD_HEAD}, reviewer, sonnet, PASS"
+FIX_VERIFIER = f"Fix check: {tm.REVIEW_OLD_HEAD}, reviewer, sonnet, PASS"
 UNPARSEABLE = "Round 1: reviewer, haiku, MAYBE"  # a verdict parse_review refuses
 
 ROUND_LINE = re.compile(r"round (\d+), (\S+): PASS (\d+), FAIL (\d+)")
@@ -90,7 +90,7 @@ def rounds(out, section, n, model):
 
 
 def follow(out, section):
-    """-> (PASS, FAIL, none) printed for the round 1 FAILs of `section`: how round 2 went."""
+    """-> (PASS, FAIL, none) printed for the first-round FAILs of `section`: how the second round went."""
     return parse_tally(out).get(section, EMPTY)["follow"]
 
 
@@ -100,7 +100,7 @@ def unknown(out, section):
 
 
 def round_one_total(out, section):
-    """-> the round 1 PASS and FAIL of every model in `section`, summed."""
+    """-> the first-round PASS and FAIL of every model in `section`, summed."""
     return sum(p + f for (n, _), (p, f) in parse_tally(out).get(section, EMPTY)["rounds"].items() if n == 1)
 
 
@@ -181,7 +181,7 @@ class RoundCounts(TallyCase):
 
     def test_a_first_record_with_no_round_one_line_is_skipped_and_the_next_one_counts(self):
         comments = [
-            comment(1, 7, record(7, fix=(FIX_CHECK,)), EARLY),
+            comment(1, 7, record(7, fix=(FIX_VERIFIER,)), EARLY),
             comment(2, 7, record(7, SONNET_FAIL), LATER),
         ]
         out = self.tally(comments, "--split", SPLIT)
@@ -316,7 +316,7 @@ class EdgeStates(TallyCase):
         self.assertEqual(unknown(out, SECTION_AFTER), 0, f"an empty read printed an unknown after the split: {out}")
 
     def test_the_full_one_off_counts_are_read_whole(self):
-        # Round 1 of the one-off count (Nov 14-18): Haiku 37 PASS of 183 records, Sonnet 61 PASS of 141. Past one page of 100 comments.
+        # The first round of the one-off count (Nov 14-18): Haiku 37 PASS of 183 records, Sonnet 61 PASS of 141. Past one page of 100 comments.
         haiku = [comment(i, i, record(i, HAIKU_PASS if i <= 37 else HAIKU_FAIL), EARLY) for i in range(1, 184)]
         sonnet = [comment(i, i, record(i, SONNET_PASS if i - 183 <= 61 else SONNET_FAIL), EARLY) for i in range(184, 325)]
         out = self.tally(haiku + sonnet, "--split", SPLIT)
@@ -330,7 +330,7 @@ class FixtureControls(unittest.TestCase):
     not on its own fixture."""
 
     def test_control_the_records_the_cases_count_parse_and_the_refused_one_does_not(self):
-        for body in (record(7, HAIKU_FAIL, SONNET_R2_PASS), record(7, HAIKU_FAIL), record(7, fix=(FIX_CHECK,)),
+        for body in (record(7, HAIKU_FAIL, SONNET_R2_PASS), record(7, HAIKU_FAIL), record(7, fix=(FIX_VERIFIER,)),
                      record(7, HAIKU_FAIL, SONNET_R2_FAIL, OPUS_R3_PASS), record(7, DESIGN_R1_FAIL),
                      record(7, SONNET_FAIL, DESIGN_R1_PASS)):
             self.assertIsNotNone(merge.parse_review(body), f"fixture: a record the cases count does not parse:\n{body}")
