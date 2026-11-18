@@ -41,14 +41,16 @@ def _parents():
 
 
 _TABLE = [None]  # the last read of the process table
+_FROZEN = [False]  # True while one listing runs: the table is read once for it, and not again for a pid it lacks
 
 
 def pid_class(pid):
     """own: a descendant of this process (a process the section started). live: another running process. gone: no such
     process. any: the class cannot be read here (no `ps`, or Windows), so the pid reads as one class. The table is read
-    again when it lacks the pid, since a section starts its processes while it loads."""
+    again when it lacks the pid, since a section starts its processes while it loads. One listing reads it once
+    (write_listing), so a pid that is gone costs no `ps`."""
     table = _TABLE[0]
-    if table is None or pid not in table:
+    if not _FROZEN[0] and (table is None or pid not in table):
         table = _TABLE[0] = _parents()
     if table is None:
         return "any"
@@ -69,16 +71,27 @@ def _clock_word(match):
     return "<CLOCK>" if abs(seconds - time.time()) < CLOCK_WINDOW else match.group(0)
 
 
+_WORDS = {}  # (run_folders, temp folder) -> the replacement pairs, longest folder first
+
+
+def _folder_words(run_folders):
+    """The (folder, word) pairs normalise replaces. Each realpath is read once for a run, not once per call."""
+    key = (tuple(run_folders), tempfile.gettempdir())
+    if key not in _WORDS:
+        words = list(zip(run_folders, ("<ROOT>", "<TEMP_ROOT>")))
+        words.append((key[1], "<TMP>"))
+        words += [(os.path.realpath(folder), word) for folder, word in words]
+        # A backslash spelling of the path too, as the JSON of the payload holds it (doubled) and as a name holds it (single).
+        words += [(folder.replace("/", back), word) for folder, word in words for back in ("\\", "\\\\")]
+        # The longest folder first: the run's root sits inside the folder of all roots, which sits inside the temp folder.
+        _WORDS[key] = sorted(set(words), key=lambda pair: -len(pair[0]))
+    return _WORDS[key]
+
+
 def normalise(text, run_folders):
     """text with each run folder, the system temp folder and the clock values replaced by fixed words.
     run_folders is the run's root folder first, then the folder that holds every run's root."""
-    words = list(zip(run_folders, ("<ROOT>", "<TEMP_ROOT>")))
-    words.append((tempfile.gettempdir(), "<TMP>"))
-    words += [(os.path.realpath(folder), word) for folder, word in words]
-    # A backslash spelling of the path too, as the JSON of the payload holds it (doubled) and as a name holds it (single).
-    words += [(folder.replace("/", back), word) for folder, word in words for back in ("\\", "\\\\")]
-    # The longest folder first: the run's root sits inside the folder of all roots, which sits inside the temp folder.
-    for folder, word in sorted(set(words), key=lambda pair: -len(pair[0])):
+    for folder, word in _folder_words(run_folders):
         text = text.replace(folder, word)
     text = CLOCK_VALUE.sub(_clock_word, text)
     text = MEMORY_ADDRESS.sub("<ADDR>", text)
@@ -96,7 +109,11 @@ def case_key(case, run_folders):
 def write_listing(path, cases, run_folders):
     """Write one row {name, tool, expected, key} for each case to path, as JSON. A name that holds a run value reads
     normalised too, so it is the same in every run. A key is never shared by two verdicts. -> the row count."""
-    keys = [case_key(c, run_folders) for c in cases]
+    _TABLE[0], _FROZEN[0] = _parents(), True
+    try:
+        keys = [case_key(c, run_folders) for c in cases]
+    finally:
+        _FROZEN[0] = False
     # One key must not stand for two verdicts: a payload that two cases hold with another verdict each (a case whose
     # state is no part of its payload, such as a process a section starts) gets its verdict in the key. Cases that
     # share a payload and a verdict share a key, which the comparison reads as one.

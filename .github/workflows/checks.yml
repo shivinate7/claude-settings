@@ -323,7 +323,6 @@ jobs:
         run: python3 lint/test_prove_route_judge.py
 
       - name: Guard cases from base fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_check_guard_cases_from_base.py
 
       # Pull requests only: the range is the merge base with the base branch and HEAD, and a push has no base. The step reads
