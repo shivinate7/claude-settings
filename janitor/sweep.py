@@ -69,7 +69,7 @@ import uuid
 from collections import Counter
 from datetime import datetime, timezone
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
 import git_reads  # noqa: E402  (the preview cache patches the reads where they live; no guard module loads)

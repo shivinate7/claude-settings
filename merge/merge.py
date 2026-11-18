@@ -302,7 +302,7 @@ STAMP_CITE = "(decision one-shared-record-stamp, the claim runs only on the defa
 RECORDS_CITE = "(decision records-index-at-merge, only the merge tool rebuilds the records page, before the branch goes ready)"
 UNDO_CITE = "(decision silent-undo-check-design, a branch that silently undoes earlier work does not merge)"
 DEBT_CITE = "(decision debt-close-runs-retire, a debt closes only when its Retire check passes on the head)"
-RED_CITE = "(rule git-red-main-reverts, a red main takes only the revert of the blamed commit)"
+RED_CITE = "(rule git-red-main-reverts, a red main takes only the revert of the blamed commit or a fix)"
 CANCELLED_NO_RED = "was cancelled with no red job"  # base_state words an unknown cancelled run with it; red_base reads it back to give the cancelled run its own headline
 RERUN_REMEDY = "gh run rerun"  # base_state names it for a cancelled run on the base's head; red_base reads it back to name the remedy in its way out
 RERUN_IN_FLIGHT = "is a re-run still going"  # base_state words an unknown re-run with it; red_base reads it back to give the re-run its own headline
@@ -333,6 +333,8 @@ UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not r
 ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may merge)"
 BUDGET_CITE = "(decision gh-api-budget, a bulk read stops below a tenth of the GitHub API budget)"
 LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a head that passes `merge --lane-lint`)"
+WORKFLOW_READ_CITE = "(decision private-repos-no-ci, the workflow files on the base set the wait, so a file the tool cannot read stops the merge)"
+HEAD_STAMP_CITE = "(decision private-repos-no-ci, a setup PR's own stamp that turns CI off is read and checked in full, so a broken one stops the merge)"
 # The paths a review record's `--guard no` refuses: the rule dirs, then the tool and the hooks, as folder prefixes. GUARD_FILES match a whole path.
 # It reads RULE_DIRS, never a copy.
 GUARD_PATHS = stale_cites.RULE_DIRS + ("merge/", "githooks/")
@@ -1822,8 +1824,10 @@ class Host:
         One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A newest-first walk of the push group's
         green runs costs one jobs read each, down to the first that is not empty (the newest, when it ran a suite). A failed read is unknown.
         A red verdict also leaves `self.base_facts` for revert_proven, as data the prose cannot carry: `blamed` (the full head shas of the breaking merges), `red` (red runs judged),
-        `others` (red entries without a run, cancelled runs and re-runs in flight beside the red), `head` (the head sha of the newest run read) and `red_heads` (the head sha of each red run judged). Every other verdict leaves it None."""
+        `others` (red entries without a run, cancelled runs and re-runs in flight beside the red), `head` (the head sha of the newest run read) and `red_heads` (the head sha of each red run judged), `red_ids` (the id of each red run judged) and `red_jobs` (per red run, the names of its red jobs; empty for a run that ended red with no red job). Every other verdict leaves it None."""
         self.base_facts = None  # a red verdict sets it below; any other verdict, and any stop, leaves it None
+        if self.required == "none":  # a repo with "none" runs no CI, so the base's runs are not read, whatever they hold (decision private-repos-no-ci)
+            return "green", ""
         try:
             if os.path.dirname(ALARM_EVENTS) not in sys.path:
                 sys.path.insert(0, os.path.dirname(ALARM_EVENTS))
@@ -1835,6 +1839,7 @@ class Host:
                     and r["event"] in self.BASE_EVENTS and r["name"] not in self.ignore and r["path"].split("@")[0] in flows]
             red, unknown, read = [], [], {}
             red_runs = []  # the runs behind `red`, one per file and group: each starts its own walk to the breaking run
+            red_names = {}  # run id -> the names of that run's red jobs, which fix_proven reads back from a fix's head
             cancelled = []  # the cancelled runs with no red job that no run cleared: unknown alone, and named beside a red verdict, with their re-run when they are on the base's head
             base_head = next((r.get("head_sha") for r in json.loads(out)["workflow_runs"] if r["event"] in self.BASE_EVENTS), None)  # the newest run on the page starts at the base's head
 
@@ -1905,6 +1910,7 @@ class Host:
                     if not cleared(r):
                         red.append(f"{where}: " + "; ".join(jobs))
                         red_runs.append(r)
+                        red_names[r["id"]] = sorted(k for k, rows in steps.items() if any(b not in ("pass", "skipping", "pending") for b, _ in rows))
                 elif any(b.startswith("timed out") for rows in got.values() for b, _ in rows):
                     continue
                 elif r["conclusion"] == "cancelled":
@@ -1914,6 +1920,7 @@ class Host:
                 else:
                     red.append(f"{where} ended {r['conclusion']} with no red job")
                     red_runs.append(r)
+                    red_names[r["id"]] = []
             # One walk per red group (red_runs holds one run per file and group): a red nightly or a red run of another file never hides the
             # push run that broke the base. The head group (push, dispatch) goes first, so its breaking merge or re-run leads the detail red_base reads.
             order = sorted(red_runs, key=lambda r: (self.BASE_EVENTS[r["event"]] != self.BASE_EVENTS["push"], age[r["id"]]))
@@ -1923,7 +1930,7 @@ class Host:
             return "unknown", " ".join(str(e).split())
         if red:
             self.base_facts = {"blamed": blamed, "red": len(red_runs), "others": len(red) - len(red_runs) + len(cancelled) + len(unknown), "head": base_head,
-                               "red_heads": [r.get("head_sha") for r in red_runs]}
+                               "red_heads": [r.get("head_sha") for r in red_runs], "red_ids": [r["id"] for r in red_runs], "red_jobs": [red_names[r["id"]] for r in red_runs]}
             return "red", " | ".join(red + blame + cancelled)
         return ("unknown", " | ".join(unknown + cancelled)) if unknown or cancelled else ("green", "")
 
@@ -2014,7 +2021,10 @@ class Host:
         unless `required_only` shows its workflow has no required job (so a failed run is refused, an ignored workflow does not block, and a pending run of the required
         workflow is not green). A required check with no row yet reads pending.
         `sha` is a head the caller already read (the review list has it from the pull request list); with none, the pull request is read.
-        A failed read, a network fault included, is "unknown (...)": the caller never reads it as green."""
+        A failed read, a network fault included, is "unknown (...)": the caller never reads it as green.
+        Under merge.requiredChecks "none" it reads no check and no run, and is green: a repo with "none" runs no CI (decision private-repos-no-ci)."""
+        if self.required == "none":
+            return "green"
         try:
             sha = sha or self.pr(n)["head"]
             got = self.checks(n, warn=False, sha=sha)
@@ -2028,12 +2038,26 @@ class Host:
         s = "red: " + "; ".join(red) if red else "pending: " + ", ".join(held) if held else "green"
         return s + (" (ignored: " + "; ".join(ignored) + ")" if ignored else "")
 
+    def check_state(self, n, sha, name):
+        """-> the state of the one check `name` on head `sha`: "pass", "fail", "pending", or None when the head has no row for it that ran (absent, or skipped
+        only). The per-check read fix_proven uses for the failing check of the base's run: head_state is green when every row is, and a check that never runs on pull
+        request heads has no row, which head_state cannot tell from a pass. A cancel beside a pass or pending row of the name is dropped, as classify drops it. A failed read is a Stop."""
+        rows = self.checks(n, warn=False, sha=sha).get(name) or []
+        rows = [b for b, _ in rows]
+        if any(b in ("pass", "pending") for b in rows):
+            rows = [b for b in rows if b != "cancel"]
+        if any(b not in ("pass", "skipping", "pending") for b in rows):
+            return "fail"
+        if "pending" in rows:
+            return "pending"
+        return "pass" if "pass" in rows else None
+
     def head_read(self, n, nothing_is_green=False):
         """One read, no wait, of every check and workflow run on the head, required or not.
         -> (verdict, detail): green, pending, red, or unknown when any read could not run. The guard's
         home for "has this head settled", so it shares classify and runs with the wait.
         No check and no run reads as pending, not green: right after a push GitHub has not created
-        them yet (the checks read settles for the same reason). `nothing_is_green` is for a repo with no workflows; merge.requiredChecks "none" is that repo too.
+        them yet (the checks read settles for the same reason). `nothing_is_green` is for a repo with no workflows. Under merge.requiredChecks "none", on the base or on a setup head's own stamp, it reads no run at all: green.
         Another ready PR's running CI holds no merge (per-lane merge), and the branch protection feeds no verdict here, so neither is read.
         Its `gh` calls (the pull request, the check runs, the commit statuses, the workflow runs; a branch name adds the open pull request list;
         a head whose check runs link more than one run adds one more workflow runs read) share one deadline (SH_TIMEOUT, the guard's one budget for this whole
@@ -2043,11 +2067,13 @@ class Host:
             with shared_deadline(SH_TIMEOUT):
                 num = self.pr_number(n)  # a number: pr() of a number reads nothing more
                 info = self.pr(num)
+                if self.required == "none" or head_none_stamp(self.cwd or ".", info["head"], DEFAULT_CONFIG, base=info["base"]) is not None:
+                    return "green", ""  # no CI run is read: the base's stamp says none, or a setup head's own stamp does (decision private-repos-no-ci)
                 got = self.checks(num, warn=False, sha=info["head"])
                 red, pending, _ = self.classify(got, [], self.ignore, info["branch"])
                 runs = self.runs(info["head"])
                 red, pending = self.settle(red, pending, *self.judge_runs(runs))
-                unseen = not got and not runs and not nothing_is_green and self.required != "none"
+                unseen = not got and not runs and not nothing_is_green
         except subprocess.TimeoutExpired:  # its text names the resolved program path
             return "unknown", "a gh call timed out"
         except Exception as e:  # Stop, a missing gh, malformed JSON: all unread
@@ -2713,18 +2739,73 @@ def base_job_caps(root, ref):
     for f in base_workflows(root, ref):
         c, text = git(root, "show", f"{ref}:{f}")
         if c:
-            raise Stop(f"cannot read {f} on {ref}: {text}")
+            raise Stop(f"cannot read {f} on {ref}: {text} {WORKFLOW_READ_CITE}")
         texts.append(text)
     return job_caps(texts)
 
-def load_config(root, base, path, cite=""):
+GIT_FOLDERS = ("/usr/bin", "/usr/local/bin", "/opt/homebrew/bin", r"C:\Program Files\Git\cmd")  # where a git install puts it, for a PATH that lacks it
+
+def stamp_git(root, *a):
+    """One git call for the head-stamp read (head_none_stamp). The guard runs this read under the PATH the hook gets, and a CI toolcache or a hook PATH can hold no git, so
+    a git missing from PATH is looked for in GIT_FOLDERS before the read gives up. -> (code, output), as `git` does; a git found nowhere raises OSError."""
+    program = resolve_program("git")
+    if program == "git":  # resolve_program names the bare word when PATH holds no git
+        program = next((f for d in GIT_FOLDERS if (f := shutil.which("git", path=d))), "git")
+    return sh([program, "-C", root, *a])
+
+def head_none_stamp(root, head, path, branch=None, base="main"):
+    """-> the stamp object at commit `head` when that stamp sets merge.requiredChecks "none" and the PR changes requiredChecks against its merge-base with origin/`base` (the local `base` when that ref is missing), else None.
+    A setup PR's own stamp is the source of requiredChecks that main reads (decision private-repos-no-ci), and a "none" the PR left as the base had it is not a
+    change, so main's stamp decides. A stamp missing at the merge-base reads as the default, "protection". Any other head stamp, a missing file, a commit this checkout lacks (`branch`,
+    when given, is fetched once for it), an unreadable file, and a merge-base or a base stamp that cannot be read read as None: the base's stamp decides then.
+    Cost: one `git cat-file`, one `git show`, one or two `git merge-base`, one more `git show`, and one fetch when the head is not local."""
+    if not head:
+        return None
+    try:
+        if branch and stamp_git(root, "cat-file", "-e", f"{head}^{{commit}}")[0]:
+            stamp_git(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")  # a failed fetch leaves the commit missing, which reads as no setup stamp
+        c, text = stamp_git(root, "show", f"{head}:{path}")
+        cfg = None if c else json.loads(text)
+        m = cfg.get("merge") if isinstance(cfg, dict) else None
+        if not (isinstance(m, dict) and m.get("requiredChecks") == "none"):
+            return None
+        c, mb = stamp_git(root, "merge-base", head, f"origin/{base}")
+        if c:  # a checkout with no origin/<base> ref (the guard's own may be one): the local branch of that name
+            c, mb = stamp_git(root, "merge-base", head, base)
+        if c:
+            return None
+        c, text = stamp_git(root, "show", f"{mb.strip()}:{path}")
+        if c:  # no stamp at the merge-base: its requiredChecks is the default, so the PR changes it
+            return cfg
+        was = json.loads(text)
+        was_m = was.get("merge", {}) if isinstance(was, dict) else None
+        if not isinstance(was_m, dict):
+            return None
+        return None if was_m.get("requiredChecks", "protection") == "none" else cfg
+    except (OSError, ValueError):  # no git to run, or a stamp that is not JSON
+        return None
+
+def load_config(root, base, path, cite="", head=None, branch=None):
     """The repo's config, read from the base branch on origin: never the local checkout, never the PR tree.
     No file: all defaults. A file with fields left out: defaults for those fields. A broken file stops.
-    `cite` ends each stop's text: the caller's own decision cite, which `main` leaves out."""
-    ref = f"origin/{base}"
+    `cite` ends each stop's text: the caller's own decision cite, which `main` leaves out.
+    `head`: the PR's head sha, and `branch` its branch (to fetch the head from). When the stamp at that commit sets requiredChecks "none" and the PR changes that field against its merge-base
+    (head_none_stamp), the head's stamp is read and checked in full, and gives requiredChecks and nothing else: every other field is the base's, so a setup PR that turns
+    CI off merges under the setup it makes, and a PR never loosens its own gate (decision private-repos-no-ci)."""
     c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
     if c:
         raise Stop(f"git fetch origin {base} failed: {out}{cite}")
+    setup = head_none_stamp(root, head, path, branch, base)
+    if setup is not None:
+        parse_config(root, setup, head, f"the head {head[:9]}", path, cite + " " + HEAD_STAMP_CITE, fill=False)
+    cfg = base_config(root, base, path, cite)
+    if setup is not None:
+        cfg["merge"]["requiredChecks"] = "none"
+    return cfg
+
+def base_config(root, base, path, cite):
+    """The stamp on origin/`base`, checked and filled with defaults (load_config's body when no head stamp counts)."""
+    ref = f"origin/{base}"
     c, listed = git(root, "ls-tree", "--name-only", ref, "--", path)
     if c:  # an unreadable base is not an absent file
         raise Stop(f"cannot read {ref} to look for {path}: {listed}{cite}")
@@ -2741,15 +2822,20 @@ def load_config(root, base, path, cite=""):
             raise ValueError("not an object")
     except ValueError as e:
         raise Stop(f"cannot read the config {path} on {ref}: {e}{cite}")
+    return parse_config(root, cfg, ref, ref, path, cite)
+
+def parse_config(root, cfg, ref, where, path, cite, fill=True):
+    """Check the stamp object `cfg` and fill its defaults: the one home of that check, for the base's stamp and a setup head's. `ref` is the commit the workflow
+    caps are read at; `where` names it in each stop. `fill=False` only checks, for a head stamp that gives requiredChecks and nothing else."""
     m = cfg.setdefault("merge", {})
     unknown = sorted(set(m) - MERGE_FIELDS)
     if unknown:
-        raise Stop(f"{path} on {ref} has an unknown field in the merge block: {', '.join(unknown)}{cite}")
+        raise Stop(f"{path} on {where} has an unknown field in the merge block: {', '.join(unknown)}{cite}")
     if not isinstance(m.get("ignoreChecks", []), list):
-        raise Stop(f"{path} on {ref}: merge.ignoreChecks must be a list, not {m['ignoreChecks']!r}.{cite}")
+        raise Stop(f"{path} on {where}: merge.ignoreChecks must be a list, not {m['ignoreChecks']!r}.{cite}")
     dm = m.get("deadlineMinutes", MERGE_DEFAULTS["deadlineMinutes"])
     if not isinstance(dm, int) or isinstance(dm, bool) or not 1 <= dm <= 360:  # 360: GitHub's longest job run
-        raise Stop(f"{path} on {ref}: merge.deadlineMinutes must be a whole number from 1 to 360, not {dm!r}.{cite}")
+        raise Stop(f"{path} on {where}: merge.deadlineMinutes must be a whole number from 1 to 360, not {dm!r}.{cite}")
     caps = base_job_caps(root, ref)
     floor = min(max(caps.values(), default=0) + 5, 360)  # clamped: 360 is the most a deadline may be
     if caps and dm < floor:  # the wait must outlast the slowest job's cap, or a job still within its cap reads as a deadline miss
@@ -2771,10 +2857,12 @@ def load_config(root, base, path, cite=""):
                   (isinstance(m.get("keepBranches", []), list) and all(map(plain_name, m.get("keepBranches", []))), "keepBranches"),
                   (rc in ("protection", "none") or isinstance(rc, list) and rc and all(map(ne, rc)), "requiredChecks")):
         if not ok:
-            raise Stop(f"{path} on {ref}: merge.{k} is not valid: {m[k]!r}.{cite}")
+            raise Stop(f"{path} on {where}: merge.{k} is not valid: {m[k]!r}.{cite}")
     if "defaultBranch" in cfg and not ne(cfg["defaultBranch"]):
-        raise Stop(f"{path} on {ref}: defaultBranch must be a non-empty string, not {cfg['defaultBranch']!r}.{cite}")
+        raise Stop(f"{path} on {where}: defaultBranch must be a non-empty string, not {cfg['defaultBranch']!r}.{cite}")
     ignore_checks(cfg)  # refuse a bad entry before the defaults notice, so the refusal is the only line
+    if not fill:
+        return cfg
     filled = [k for k in MERGE_DEFAULTS if k not in m]
     for k in filled:
         m[k] = MERGE_DEFAULTS[k]
@@ -2782,7 +2870,7 @@ def load_config(root, base, path, cite=""):
         cfg["defaultBranch"] = host_default_branch(root)
         filled.insert(0, "defaultBranch")
     if filled:
-        say(f"merge: {path} on {ref} leaves out {', '.join(filled)}. Using the defaults for those.")
+        say(f"merge: {path} on {where} leaves out {', '.join(filled)}. Using the defaults for those.")
     return cfg
 
 def refuse_bad_pr(info):
@@ -2942,9 +3030,23 @@ def parse_with(value, own):
         numbers[int(item)] = None
     return list(numbers)
 
+FETCH_LOCK_LOSS = "cannot lock ref"  # git's text when another fetch into the same checkout moved a ref between this fetch's read and its write
+FETCH_LOCK_PAUSE = 2  # seconds before the one retry of a fetch that lost the ref lock
+
+def git_fetch_retry_lock(root, *args):
+    """-> (code, output) of `git -C root fetch <args>`, run once more after FETCH_LOCK_PAUSE seconds when the first run failed with "cannot lock ref".
+    The one home of that retry: a fetch that two lints run at once into one checkout collides on a ref lock. Any other failure, and a second lock loss, return as they are.
+    Cost: at most one more `git fetch` start, and one pause, a run."""
+    c, out = git(root, "fetch", *args)
+    if c and FETCH_LOCK_LOSS in out:
+        time.sleep(FETCH_LOCK_PAUSE)
+        c, out = git(root, "fetch", *args)
+    return c, out
+
 def fetch_branch_heads(root):
-    """-> (code, output) of one `git fetch origin` of every branch head into origin/*: the one home of that fetch (cross_measure, merge_state)."""
-    return git(root, "fetch", "-q", "origin", "+refs/heads/*:refs/remotes/origin/*")
+    """-> (code, output) of one `git fetch origin` of every branch head into origin/*: the one home of that fetch (cross_measure, merge_state).
+    A ref-lock loss is retried once (git_fetch_retry_lock)."""
+    return git_fetch_retry_lock(root, "-q", "origin", "+refs/heads/*:refs/remotes/origin/*")
 
 def missing_commits(root, *shas):
     """-> the shas of `shas` that the checkout `root` does not hold as commits (`git rev-parse --verify`), in the order given."""
@@ -3403,13 +3505,13 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             cross_fails, reports, stop = cross_measure(root, head, int(target), info["body"], host, with_prs, base, fetched, why is None, is_integration_pr(info))
             fails += cross_fails
             # one check-runs read: the draft's Windows and macOS runs, which this Linux lint never runs. A batch integration PR has no draft run of its own
-            # (a lane's run is the proof), so it reads none. A base with merge.requiredChecks "none" runs no CI job, so no lane has a draft run to read
+            # (a lane's run is the proof), so it reads none. A base with merge.requiredChecks "none", or a setup head whose own stamp says it, runs no CI job, so no lane has a draft run to read
             # and the local lint steps below are the whole proof (decision private-repos-no-ci).
             if is_integration_pr(info):
                 no_draft_run = True
             else:
                 with contextlib.redirect_stdout(io.StringIO()):  # load_config says its defaults; only requiredChecks is read here
-                    no_draft_run = load_config(root, base, DEFAULT_CONFIG, " " + LANE_LINT_CITE)["merge"].get("requiredChecks") == "none"
+                    no_draft_run = load_config(root, base, DEFAULT_CONFIG, " " + LANE_LINT_CITE, head=head)["merge"].get("requiredChecks") == "none"
             draft, draft_lines = ("pass", []) if no_draft_run else host.draft_run_state(head)
             if draft == "fail":
                 fails.append(f"its draft run of lane-touched-tests failed on {head[:9]}: " + "; ".join(draft_lines))
@@ -3940,6 +4042,45 @@ def revert_proven(root, host, base):
     except (Stop, subprocess.TimeoutExpired, OSError, KeyError, ValueError, IndexError, TypeError):
         return False
 
+def fix_proven(root, host, base, n, info):
+    """-> why pull request `n` is a fix that merges onto a red base with no reason flag (a phrase for the message), or None when it is not (decision no-merge-onto-red-main). Read from the facts base_facts left on the host (`base_facts`), never from its prose. All must hold:
+    - exactly one red run, no cancelled run, no re-run in flight and no other red read beside it, and exactly one breaking merge B, named by its full sha;
+    - the pull request's head holds the head the red run was read at, so the head's own run tested the breaking merge too;
+    - one of two routes. Path: the pull request changes a path that B changed (B against its first parent, each path whole, renames by both names). Test file: the pull
+      request changes a test file that a failing line of the red run's log names (Host.failed_lines) and keeps it: a file the head deletes or renames away is no fix. Both routes need the red run to have red jobs, and each of them to
+      read "pass" on the head (Host.check_state: a missing or pending row is no pass); the path route also needs the head's own checks green (Host.head_state, the one reader).
+    Any read that fails is not proven: unknown never reads clear, and a log that Host.failed_lines cannot account for gives no test file."""
+    facts = getattr(host, "base_facts", None)
+    if not facts or len(facts["blamed"]) != 1 or facts["red"] != 1 or facts["others"]:
+        return None
+    sha = facts["blamed"][0]
+    try:
+        c, out = git(root, "diff", "--name-only", "--no-renames", "-z", f"{sha}^1", sha)
+        if c:
+            return None
+        blamed = {p for p in out.split("\0") if p}
+        files = host.pr_files(n, info.get("changed_files"))
+        changed = {posixpath.normpath(p) for p, _, _ in files}
+        kept = {posixpath.normpath(p) for p, status, _ in files if status != "removed"}  # a test file the head deletes or renames away is no fix of it
+        info = fetch_pr_head(root, info, base)  # the head's commits are local, and the head is the one gh named
+        if not facts["head"] or git(root, "merge-base", "--is-ancestor", facts["head"], info["head"])[0]:
+            return None
+        names = facts["red_jobs"][0]
+        same_check_passes = bool(names) and all(host.check_state(n, info["head"], name) == "pass" for name in names)
+        if blamed & changed and same_check_passes and head_not_green(host.head_state(n, info["head"])) is None:
+            return f"a path of the breaking merge (its own head is green, and its own check {', '.join(names)} is pass on its head)"
+        try:
+            parsed = [failing_line(t) for t in host.failed_lines(facts["red_ids"][0])]
+            tests = {posixpath.normpath(p[0]) for p in parsed if p and p[0]}
+        except UnreadJobs:
+            return None
+        hit = sorted(tests & kept)
+        if hit and same_check_passes:
+            return f"the failing test file {hit[0]} (its own check {', '.join(names)} is pass on its head)"
+        return None
+    except (Stop, subprocess.TimeoutExpired, OSError, KeyError, ValueError, IndexError, TypeError):
+        return None
+
 def base_verdict(root, host, base):
     """host.base_state over the workflow files on origin/<base>, with a red lifted to green when revert_proven says the revert of the breaking merge landed on the base with its
     tree proven and no red run on it or above it. The one place both the preview and red_base read, so they print one verdict. A failed read of the workflow files is unknown."""
@@ -3952,9 +4093,10 @@ def base_verdict(root, host, base):
         return "green", ""
     return verdict, detail
 
-def red_base(root, host, base, red_ok=""):
+def red_base(root, host, base, red_ok="", pr=None):
     """The red-main check (decision no-merge-onto-red-main): refuse while the base's latest completed run has a red job, or cannot be read.
     --base-red-ok "<reason>" is a reason flag, as --undo-check-unknown-ok is, and Claude may type it with a reason: the way out for the batch that carries the fix (a revert PR of the breaking merge among them), or for an unknown read whose cause the reason names. A lift is logged and returns its reason, for record_lift.
+    `pr` is (number, info) of the pull request being merged: a fix that changes a path of the breaking merge or the failing test file, with its own proof green and its head holding the red tip, merges with no flag (fix_proven).
     Once that revert is merged with its tree proven, base_verdict reads the base green (revert_proven), so no flag is needed after it, for later merges too, until a run on the
     revert or above it is red; a revert whose tree is not proven leaves the base red until its own run on the base is green."""
     verdict, detail = base_verdict(root, host, base)
@@ -3968,6 +4110,10 @@ def red_base(root, host, base, red_ok=""):
     if red_ok.strip():
         say(f"merge: {what}. {RED_FLAG}, reason: {red_ok.strip()}")
         return red_ok.strip()
+    proof = fix_proven(root, host, base, pr[0], pr[1]) if verdict == "red" and pr else None
+    if proof:  # a fix for the red merges on its own proof: no flag, so no reason to carry
+        say(f"merge: {base}'s latest completed run is red: {detail}. #{pr[0]} changes {proof}, and its head holds {base}'s red tip, so it merges onto the red {base} (decision no-merge-onto-red-main)")
+        return
     first_red = FIRST_RED_RERUN.search(detail) if verdict == "red" else None
     broke = verdict == "red" and BREAKING_MERGE in detail
     carries = f"if this batch carries the fix, or the unknown read has a known cause, run again with the reason flag {RED_FLAG} \"<reason>\"."
@@ -4004,9 +4150,9 @@ RULING_ID = re.compile(r"[a-z0-9-]+")
 EXPRESS_PATHS_SHOWN = 8
 
 def flags_on(flags, *skip):
-    """-> the sorted names of ci-scope.sh's flags that are on, less `skip` and the lint_* flags. A lint flag on is not a job turned on:
-    --express relies on the PR's own CI lint steps, which run every lint."""
-    return sorted(k for k, v in flags.items() if k not in skip and not k.startswith("lint_") and v != "false")
+    """-> the sorted names of ci-scope.sh's flags that are on, less `skip`, the lint_* flags and the doc_* flags. A lint or doc flag on is
+    not a job turned on: --express relies on the PR's own CI lint steps, which run every lint, and on the doc steps, which read a prose change."""
+    return sorted(k for k, v in flags.items() if k not in skip and not k.startswith(("lint_", "doc_")) and v != "false")
 
 def express_refusal(root, wt, base_ref, info):
     """--express: -> why this PR may not take the express path, else None. It needs a `Ruling: <id>` line in the body whose entry is on
@@ -4030,9 +4176,13 @@ def express_refusal(root, wt, base_ref, info):
     jobs = re.search(r'^JOBS="([^"]*)"', script, re.M)
     every = re.search(r'^ALL="([^"]*)"', script, re.M)
     lints = re.search(r'^LINTS="([^"]*)"', script, re.M)
-    if c or c2 or not jobs or not every or ("$LINTS" in every.group(1) and not lints):
-        return f"unknown: {base_ref}'s {CI_SCOPE} cannot be read, so whether the diff is prose-only is unproven"
-    names = every.group(1).replace("$JOBS", jobs.group(1)).replace("$LINTS", lints.group(1) if lints else "").split()
+    docs = re.search(r'^DOCS="([^"]*)"', script, re.M)
+    lacks = [w for w, m in (("LINTS", lints), ("DOCS", docs)) if every and "$" + w in every.group(1) and not m]
+    if c or c2 or not jobs or not every or lacks:
+        return (f"unknown: {base_ref}'s {CI_SCOPE} cannot be read" + (f" (ALL names ${', $'.join(lacks)}, and the script has no {'=, '.join(lacks)}= line)" if lacks else "")
+                + ", so whether the diff is prose-only is unproven")
+    names = (every.group(1).replace("$JOBS", jobs.group(1)).replace("$LINTS", lints.group(1) if lints else "")
+             .replace("$DOCS", docs.group(1) if docs else "").split())
     fd, copy = tempfile.mkstemp(prefix="merge-express-", suffix=".sh")
     os.close(fd)
     fd, out_file = tempfile.mkstemp(prefix="merge-express-scope-")
@@ -4103,10 +4253,13 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     m = cfg.get("merge", {})
     held = lock.read(base)
     verdict, detail = base_verdict(root, host, base)  # the red-main check's read
+    proof = fix_proven(root, host, base, n, info) if verdict == "red" else None
     say(f"merge: PREVIEW for #{n} ({info['branch']} at {info['head'][:9]}). Nothing was pressed.",
         "  lock:   " + (holder_text(base, held, lock.now()) if held and held[1] > lock.now() else "free"),
         f"  head checks: {host.head_state(n)}",
-        f"  {base} run: {verdict}" + (f": {detail}. --confirm refuses it unless --base-red-ok \"<reason>\" is given." if verdict != "green" else ""),
+        f"  {base} run: {verdict}" + ("" if verdict == "green" else f": {detail}. --confirm merges it onto the red {base}: it is a fix that changes {proof}, and its head holds {base}'s red tip."
+                                     if proof
+                                     else f": {detail}. --confirm refuses it unless --base-red-ok \"<reason>\" is given."),
         "  base:   " + (current or f"holds {base}'s tip"),
         "  claim:  " + (f"already claimed ({resumed}); " + ((f"run `merge {n} --confirm` on the draft first: it runs the ready checks (" + ", ".join(m["readyChecks"]) + "), then refuses this head, so mark it ready by hand after they pass (route pr-ready-mcp-cloud in cloud)"
                          if m.get("readyChecks") else "--confirm on the draft refuses this head, so mark it ready by hand (route pr-ready-mcp-cloud in cloud)") if info["draft"] else "a run resumes at the wait")
@@ -4577,7 +4730,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
     host.use_memo = False  # a merge under the lock reads each state fresh (Host.use_memo)
     host.before_wait = getattr(lock, "extend_for", None)  # a rate wait extends the lock first (standing-merge-grant), so the fixed TTL need not cover it
     tmp = wt = claim_sha = heal_sha = None  # heal_sha: the page commit a requiredChecks "none" run pushed and then merges. Never claim_sha: a failed run reverts a claim, never a heal
-    heal = m.get("requiredChecks") == "none" and base == cfg["defaultBranch"]  # no check gates the merge, so a stale records page heals in this run (page item 926 a, 14:32 CST; decision records-index-at-merge)
+    no_ci = m.get("requiredChecks") == "none"  # a repo with "none" runs no CI, so confirm reads no run of the head (Host.base_state reads none of the base) (decision private-repos-no-ci)
+    heal = no_ci and base == cfg["defaultBranch"]  # no check gates the merge, so a stale records page heals in this run (page item 926 a, 14:32 CST; decision records-index-at-merge)
     judge = None  # the prose judge's plan, built under the lock and run after it is released
     where_else = None  # the where-else judge's plan, built and run the same way
     try:
@@ -4594,7 +4748,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             return draft_step(root, cfg, n, host, info)
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
         with timed_phase("main-run"):
-            record_lift(lifts, RED_FLAG, red_base(root, host, base, red_ok))
+            record_lift(lifts, RED_FLAG, red_base(root, host, base, red_ok, (n, info)))
         if express:  # the worktree opens early: the classifier reads the head's diff
             tmp, wt = open_worktree(root, info, base)
             no_express = express_refusal(root, wt, base_ref, info)
@@ -4618,7 +4772,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         pushed = False  # true once this run pushed a commit: the run stops there, and the next confirm reads that commit's checks
         with timed_phase("head-checks"):
             say("merge: checking the head's checks and runs ...")  # before the read, which can block
-            state = host.head_state(n, info["head"])  # a resumed claim is the head: the claim commit's own checks are read, never the head under it
+            state = "green" if no_ci else host.head_state(n, info["head"])  # a resumed claim is the head: the claim commit's own checks are read, never the head under it. Under none no run is read, whatever host answers
             not_green = head_not_green(state)
             if not_green and state.startswith("pending: ") and lint_proof and lint_proof(info):
                 say(f"merge: the head's run is still pending ({state[len('pending: '):]}), and a lane-lint PASS names {info['head'][:9]}, so the run does not hold the merge "
@@ -4661,6 +4815,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 push_branch(wt, branch)
                 pushed = True
                 say(f"merge: {trailer or 'the records page'} pushed to {branch} at {claim_sha[:9]}.")
+                if no_ci:  # no run starts on the pushed commit, so there is no second step to wait for: the merge call names it once GitHub shows it
+                    wait_healed_head(host, n, claim_sha, branch)
             elif not resumed:
                 say("merge: nothing to claim.")
         sha = heal_sha or claim_sha or info["head"]
@@ -4751,7 +4907,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
 
             with timed_phase("prove"):
                 prove(fail)
-            if pushed:  # the first step of two: the pushed commit's own checks start now, and the merge call waits for the next confirm
+            if pushed and not no_ci:  # the first step of two: the pushed commit's own checks start now, and the merge call waits for the next confirm
                 say(f"merge: the claim is pushed to {branch} at {claim_sha[:9]}. Nothing was merged. Run --confirm again when the new head is green. {CLAIM_STEP_CITE}")
                 return 0
             try:  # the PR's own paths. --no-renames: a moved file names both paths. -z: git does not quote a non-ASCII name. Any failure of this read leaves the list unknown and never holds the merge
@@ -6447,7 +6603,10 @@ def idle_lanes(live, repo_dir=None):
     if not unread:
         held = len(holds) + len(handoff_held)
         count = f"{len(lanes) - len(handoff_held)} lanes to archive" + (f", {held} held" if held else "")
-        tail = "Run get_session on each lane line alone, then archive it; never archive a hold line." if holds or handoff_held else "Run get_session on each alone, then archive it."
+        if holds or handoff_held:
+            tail = "Run get_session on each lane line alone, then archive it; never archive a hold line."
+        else:
+            tail = "Run get_session on each lane in one message, then archive them in the next message."
         entries = [*entries, f"merge: {count}. {tail}"]
     say(*entries)
     return 1 if unread else 0
@@ -6765,7 +6924,7 @@ def main(argv, host=None, lock=None, hosts=None):
         if a.confirm and a.head and not relayed_head_holds(root, info["branch"], a.head, info["head"], info["base"], lambda: heals_stale_page(root, info["base"], a.config)):  # a relayed yes binds to the head at relay time (decision auto-mode-owner-acts): refused before the lock, a claim or any write
             raise Stop(HEAD_MOVED.format(n=a.pr))
         if not (a.reviewed and host):  # a test host brings its own checks, so --reviewed reads no config for it
-            cfg = load_config(root, h.base if a.reviewed else info["base"], a.config)
+            cfg = load_config(root, h.base if a.reviewed else info["base"], a.config, head=None if a.reviewed else info["head"], branch=None if a.reviewed else info["branch"])
         if a.reviewed:
             if not host:
                 h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore_checks(cfg)

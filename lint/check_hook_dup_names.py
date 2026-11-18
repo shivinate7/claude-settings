@@ -102,7 +102,7 @@ def scan(root):
 
 
 def main(argv):
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    root = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     args = list(argv)
     while args:
         a = args.pop(0)
