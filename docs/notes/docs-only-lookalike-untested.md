@@ -1,0 +1,1 @@
+- docs-only-lookalike-untested: (#2452 docs-only-record-checks-diff round 3) no test for a docs-prefix look-alike path such as docs-old/x.md; a startswith("docs") mutant survives. The code is right today.

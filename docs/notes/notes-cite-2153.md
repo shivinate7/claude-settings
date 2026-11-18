@@ -1,0 +1,1 @@
+- notes-cite-2153: three lines in docs/debts/notes.md cite "PR #2153", the closed predecessor; they should cite #2258.

@@ -69,7 +69,7 @@ import uuid
 from collections import Counter
 from datetime import datetime, timezone
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
 import git_reads  # noqa: E402  (the preview cache patches the reads where they live; no guard module loads)
@@ -2087,10 +2087,11 @@ def _on_windows():
 
 
 def temp_tier(confirm):
-    """The Windows temp-folder step: removes the temp folder of a session idle over 24 hours (preview
-    without CONFIRM). Windows only. It stops at the sweep deadline. Returns the number of
-    failures: folders it could not remove or folders it could not read."""
-    if temp_sweep is None or not _on_windows():
+    """The session temp-folder step: removes the temp folder of a session idle over 24 hours (preview
+    without CONFIRM), under the Windows temp root and the POSIX `claude-<uid>` root. Every OS. It
+    stops at the sweep deadline. Returns the number of failures: folders it could not remove or
+    folders it could not read."""
+    if temp_sweep is None:
         return 0
     print("")
     print("== session temp folders ==")
@@ -3579,7 +3580,7 @@ def _sweep_roots(args, roots, restore_log_path, mode):
         if any(_removed_count(r["worktrees"]) + _removed_count(r["branches"]) for r in results):
             try:
                 free = min(shutil.disk_usage(r["root"]).free for r in results)
-                print("  free disk: %.1f GB" % (free / 1e9))
+                print("  free disk: %.1f GB" % (free / 2 ** 30))
             except (OSError, ValueError):
                 print("  free disk: unknown")
     if mode != "full":

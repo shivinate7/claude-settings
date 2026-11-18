@@ -1,0 +1,1 @@
+- touches-rollup-cancelled-doc: the docs do not say the rollup job is exempt even when cancelled. Fix: one sentence in the `merge --touches` docs.

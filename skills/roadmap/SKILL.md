@@ -28,7 +28,10 @@ the whole old read-only page. Nothing publishes it.
 - **On the record branch.** The checkout stands on the record branch: the roadmap build script reads the working
   tree. Build after each edit to `roadmap/data/`.
 - **Anywhere else.** The roadmap build script reads the record branch through the repo history, `origin/<branch>`
-  first. Fetch the branch first, because the roadmap block is as old as the fetch.
+  first. The build asks `origin` on every run and fetches the branch itself, even on a single-branch checkout, so a
+  later build sees what origin gained. If origin has it and it cannot be read, the build exits non-zero and writes
+  nothing. Offline, a GitHub-origin checkout with no local record exits 1 and writes no block (fail closed); with a
+  local record it reads that copy and warns on stderr. The block is as old as that read.
 - `--block` needs `--out`, on either path.
 
 The record homes (decisions, debts, debt notes, notes, plans, specs) come from the checkout, at the paths
@@ -83,12 +86,12 @@ GitHub, so the publisher reads them just before the build and passes one file:
 - `threads`: `list_threads`, every page. Leave out resolved threads. `state` is the thread state as
   listed. Add `step` only when the thread's brief names it.
 - `pulls`: the repo's open pull requests. `createdAt` is GitHub's `created_at` for the pull. It is
-  optional. A missing or unreadable `createdAt` is not a wrong shape. The stale-draft row lists it as
-  unknown. `head` is the pull's head commit sha, also optional: the lanes-to-archive row reads it to
+  optional. A missing or unreadable `createdAt` is not a wrong shape. Only the joint line reads it; the
+  stale-draft row reads GitHub itself. `head` is the pull's head commit sha, also optional: the lanes-to-archive row reads it to
   release a lane whose draft pull is already in the default branch. `held` and `reviewLog` are optional JSON
   bools (absent means false) that triage fills: `held` is true when the batch runner's hand-in or hold list names
   the pull, `reviewLog` when the pull has a posted review log. The stale-draft row skips a draft with either
-  true. A present key must be a JSON bool (`null` counts as non-bool); a pull row with a non-bool value is skipped, so the
+  true, matched by pull number. A present key must be a JSON bool (`null` counts as non-bool); a pull row with a non-bool value is skipped, so the
   stale-draft, pair, unlaned and lanes-to-archive rows read unknown. `branches`: lane branches with no open pull request.
 - `landedPulls` (optional, beside the keys above): `[{"number", "branch", "head"?, "merged"?, "replacedBy"?}]`, the repo's pull
   requests closed in the last 14 days whose base is the default branch, each with its head ref (`branch`), head sha
@@ -251,11 +254,36 @@ After each build the roadmap build script prints the upkeep list for the triage 
 - `todo` steps whose note has the sentence `Ready.`, in the row `ready todo steps`. A live phase is not
   needed. Each entry is the step id;
 - draft pull requests over 12 hours old with no live lane, in the row `draft PRs over 12 h with no live
-  lane`. A pull's age is `createdAt` against the live file's `readAt`. A pull has a live lane when a
-  live session step equals its branch exactly (the in-progress row also counts a `lane/<id>` branch). An ended
-  session holds no draft. A draft whose `held` or `reviewLog` is true is skipped. Each entry is `#N (<branch or
-  title>)`. A draft with no readable `createdAt` reads `unknown (#N has no createdAt)`. With no usable
-  live file the row reads one `unknown (<why>)` entry;
+  lane`. The build reads GitHub's REST open-PR list itself (draft, `updated_at`, head ref; token from `GH_TOKEN`,
+  else `GITHUB_TOKEN`), not the live file's `pulls`. A pull's age is `updated_at` against the build run. Cost: N // 100
+  + 1 REST calls per build run for N open pulls (floor, not ceil; at most 20 pages), with no file, timer or log. The
+  sessions, `held` and `reviewLog` still come from a fresh live file: a pull has a live lane when a live
+  session step equals its branch exactly (the in-progress row also counts a `lane/<id>` branch). An ended
+  session holds no draft. A draft whose live pull row (matched by number) has `held` or `reviewLog` true is skipped.
+  The build also reads each stale-looking draft's newest branch commit time, once, from the checkout's
+  `refs/remotes/origin/<branch>` (`git log -1`; no network, no REST call). A commit under 12 hours old drops the draft
+  from the row, so the commit only suppresses an entry and never adds one; a fresh REST draft gets no read. A draft
+  whose commit time cannot be used reads `unknown (#N branch X has no commit time)`. That covers these cases:
+  no ref, a ref on no commit, a git failure, a time that does not parse, and a commit dated after the build run
+  (a skewed clock, never fresh). It also covers a pull whose head repo is not this repo: a fork, whose head ref can
+  equal an origin branch name, or a deleted fork, whose head repo is null. The REST pulls row's `head.repo.full_name`
+  must equal the base repo's name. A live lane, `held` or `reviewLog` still skips the draft first. The live
+  file is still needed for lane, `held` and `reviewLog`. Cost: one `git log` per stale-looking draft, no file, timer or log.
+  A stale draft with no live pull row has unread `held` and `reviewLog`, so it reads
+  `unknown (#N has no live pulls row, so held and reviewLog are unread)`, never listed. Each other entry is
+  `#N (<branch or title>)`. When the sessions cannot be read, the row is one
+  `unknown (sessions not read: <why>; REST read: N stale-looking drafts)`, a count with no number or branch, never a
+  clear row. When the REST read cannot finish whole (no token or GitHub name, an HTTP error, a transport error cut
+  short, a rate limit, a reply that is not a JSON list, a row of the wrong shape, over 20 pages) the row is one
+  `unknown (<why>)` entry. `--sessions-source NAME` (default `live-file`) names where this row reads the live
+  sessions. `live-file` is the behaviour above. A name in `SESSION_SOURCES` (`build.py`) replaces the live file's
+  sessions for the lane check: its reader is called with no arguments and returns `(rows, None)` or `(None, why)`,
+  rows being `{session id: [step id, ...]}`, so the live file need not be fresh for sessions. `held` and
+  `reviewLog` still come from the live file's pulls rows, so a stale draft with no usable live row reads
+  `unknown (#N ...)`. A name the registry does not hold reads `unknown (sessions source NAME is not wired)`. A
+  reader that gives a why, raises or returns a bad shape reads the one `unknown (sessions not read: ...)` entry.
+  The registry holds only `live-file` until the owner names a source (owner page item 894), so no token or
+  network source is wired, and the cost line above is unchanged: no new REST read;
 - page rulings not on their step: each closed waiting-page item whose `home` is a step that is not
   done, where none of that step's `note`, `why` or `ask` cites the item. The `home` is trimmed, an
   optional leading `step ` (in any case) is dropped, and the rest must equal the step id exactly. A cite
@@ -341,9 +369,10 @@ reads. The stale-step row adds one more `list_sessions` walk inside that publish
 fields per session in the file. The page-ruling row adds one `ArtifactData list items` read (every
 page) to the same publish. The roadmap build script adds no git process, file, timer or log for either row. The
 dated-claim row reads the notes already loaded and adds nothing.
-The red line, the stalled lines, the ready lines and the two stale-ready rows read the live file and steps build.py
+The red line, the stalled lines and the ready lines read the live file and steps build.py
 already reads. They add no process, file, timer or log. The publisher's `createdAt` per pull row comes from the
-GitHub list call it already makes.
+GitHub list call it already makes. The stale-draft row makes its own REST calls (N // 100 + 1 per build run) and one local
+`git log` per stale-looking draft. It writes no file, starts no timer and keeps no log.
 The `landedPulls` rows cost the publisher one more GitHub list call (closed pulls) per publish. The closed-pull wait row runs
 one `git merge-base` per closed unmerged PR that an open step waits on, once per build. A closed row no open step
 waits on runs no git for this row. It writes no file. The landed rows add their own `git merge-base` per distinct head of an unmerged

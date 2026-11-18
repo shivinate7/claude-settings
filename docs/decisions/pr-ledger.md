@@ -23,7 +23,7 @@ Later coordinator rulings, Nov 7:
 - Coordinator, 2026-11-07 13:20 CST: a gap gets fixed, not filed as a note.
 - Coordinator, 2026-11-07 13:41 CST: part 3 is split. 3a is the ready-steps change on branch `ready-steps-next-act`: ready and stalled steps get one next act in `build.py`, plus a ready count. 3b comes after part 1 merges: `build.py` shows a PR's next act from `merge --reviewed --json`.
 - Coordinator, 2026-11-07 13:53 CST: a draft with no record reads `lane round 1`. An integration PR labelled `batch` reads `batch run`.
-- Coordinator, 2026-11-07 13:54 CST: `merge --lane-lint <pr> --integration` sets the `batch` label after a PASS only.
+- Coordinator, 2026-11-10 01:07 CST, replacing the 2026-11-07 13:54 CST line that had `merge --lane-lint <pr> --integration` set the `batch` label after a PASS: `merge --lane-lint` stays read-only, so the `batch` label write moves out of part 1. Part 4 builds it as its own write, with its target check. Not built here (PR #2845 leaves the label setter for part 4).
 - Coordinator, 2026-11-07 14:40 CST: a lane whose status bucket is completed or failed is not live. Every other bucket stays live, `review_ready` included; an idle session status is live.
 - Coordinator, 2026-11-07 15:10 CST: design times use the delivery time, 12:33 CST.
 - Owner, 2026-11-10 14:07 CST, relayed by the coordinator at 14:08 CST: "i agree on letting it survive a clean merge where batch ci sees the problem rather than asecond review i agree it shd be mechanical tooo". The rule is in decision pr-review-record, The review a changed head owes.
@@ -58,14 +58,14 @@ One ledger. Home: `merge/merge.py`. It extends `merge --reviewed`. It adds no to
 
 Each open PR gets exactly one next act. The tool reads it from GitHub alone. The first match wins:
 
-- Done review log for the live head: `batch`. A clean merge of main keeps a record for the live head (decision pr-review-record, The review a changed head owes). Not built.
+- Done review log for the live head, with a lane-lint PASS at that head: `batch`. Without the PASS: `lane lint`, owner the lane (coordinator pick, 12:01 CST Nov 12). A PR whose lane lint was skipped because its CI is green reads `batch`. A clean merge of main keeps a record for the live head (decision pr-review-record, The review a changed head owes). Not built.
 - Review record open: `lane round n`, n the next round owed. A failed fix check: `lane round 1`.
 - Review log stale, newest record has no Fix check line: fix check.
 - Review log stale, newest record has a PASS Fix check, and the live head is a conflicted merge of main into the fixed head: one more fix verifier (decision pr-review-record). Its prior record must be a PASS that `review_state` accepts. Not built.
 - Review log stale, in any other case: the fresh full review at the live head, as decision pr-review-record (The review a changed head owes) sets it.
-- Label `held`, `parked` or `replaced`, with a `Waits on: debt:<slug>` or `Waits on: page:<item id>` comment line: `waits on` that debt or item.
+- Label `held`, `parked` or `replaced`, with a `Waits on: debt:<slug>` or `Waits on: page:<item id>` comment line: `waits on` that debt or item. With no valid `Waits on:` line, the label holds nothing: no next act, shown red, even on a draft (lane pick, 12:13 CST Nov 12). This check runs after the stacked rule.
 - Label `batch` on an integration PR: `batch run`. It counts against the batch limit, aged from the label's last `labeled` event. Until the cutover only; after it, no integration PR exists and this rule goes.
-- Based on, or stacked on, #N: blocked on #N.
+- The PR's base ref names an open PR's head branch (#N): blocked on #N. A `Based on #N` body line does not stack (coordinator pick, 12:01 CST Nov 12, from review round 1).
 - Draft with no record: `lane round 1`.
 - None of these: no next act, shown red.
 
@@ -73,13 +73,13 @@ The first match wins, in this order. A held or unparseable record matches no rec
 
 The ledger reads no pull request's CI state. A batch line is a done record for the live head. `merge --lane-lint` checks the join, and the integration PR's CI run checks the merge. Until the cutover; after it, the lane PR's own run checks the merge. Its CI-side reads are main's runs, judged per workflow, for the main-red hold.
 
-Each next act has an age limit, in one constant, `PR_STATE_AGE_HOURS` in merge/merge.py. Every limit is unmeasured (coordinator pick A, 12:33 CST Nov 7); the coordinator measures the real ages after the label rollout. Batch is 24 h, a first guess at one batch cycle. Blocked on #N has no limit of its own and is red while #N is red. A next act over its limit is red.
+Only the two batch acts have an age limit, in one constant, `PR_STATE_AGE_HOURS` in merge/merge.py. Batch and batch run are 24 h, an unmeasured first guess at one batch cycle (coordinator pick A, 12:33 CST Nov 7). Every other act has no limit: lane round 1 to 4, fix check, fresh full review, lane lint, `waits on` and blocked on #N. Owner pick a on item 572 (ruling `own-572-a-ledger-by-age-only`, 23:10 CST Nov 15) retired the 72 h numbers of the lane acts: a stalled review is flagged only by an age measured from the review records. Step `pr-ledger-round-ages` holds that measure. A hold still goes red when it has no page item or debt, and blocked on #N is red while #N is red. A batch act over its limit is red.
 
 A main-red hold shows on each batch line it holds.
 
 The tool prints two numbers. Each one's target is 0:
 
-- Longest wait from a done review record to now.
+- Longest wait from a done review record to now. It counts the acts `batch` and `lane lint`.
 - Count of open PRs with no next act.
 
 Readers:

@@ -1,0 +1,1 @@
+- rr-rename-before-cutoff: a rename in a commit dated before the cutoff, on top of a recent add, is skipped by the date filter, so the renamed entry escapes. Same class as the back-dated tip. Decision: ruled-store-one-home.

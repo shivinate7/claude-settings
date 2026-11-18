@@ -1,0 +1,1 @@
+- silent-undo-restore-undocumented: the top docstring of lint/check_silent_undo.py and docs/decisions/silent-undo-check-design.md do not say that a later restore in the same file clears a merge's lost line. Fix: add the sentence.

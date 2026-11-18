@@ -41,9 +41,10 @@ sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
-# The correction step's words (decision guard-remedy-not-to-owner, shared tails). A refusal holds none of them; the
-# record holds both. Lower case, to match a lowered reason or record.
-CORRECTION_STEP = ("post only the corrected lines", "never send the report again")
+# The shared correction tail (decision guard-remedy-not-to-owner). Each reply refusal but
+# a missing report ends with it. Read with getattr, so a build without it fails on the assert that names it, not on
+# the import.
+CORRECTION_TAIL = getattr(RG, "CORRECTION_TAIL", "")
 RUN_FOLDER = _test_temp.run_folder()  # the new cases take their temp folders from it, never from the system temp dir
 
 # Isolation. Every spawned guard inherits this process's environment (env=None, or a copy
@@ -273,11 +274,13 @@ def run_config_report(hook, env=None):
 
 # The one home of the landing-turn drive: one human message, one Bash call (a git write unless the
 # caller names another command), then the reply, run through main() as the Stop hook.
-def landed_run(folder, reply, command="git commit -m x"):
+def landed_run(folder, reply, command="git commit -m x", cwd=None):
     records = [human("do the task"), tool_use_msg("Bash", {"command": command}), tool_result_msg(),
                assistant_text(reply)]
     path = write_transcript(records, folder)
     hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
+    if cwd is not None:  # the repo the hook reads its waiting page from (the Pick guard)
+        hook["cwd"] = cwd
     return run_guard(REPORT_GUARD, hook)
 
 
@@ -891,6 +894,196 @@ class DoneFormatAndCiteTests(unittest.TestCase):
         self.assertEqual(run_guard(REPORT_GUARD, hook).stdout.strip(), "")
 
 
+class PlainFormTests(unittest.TestCase):
+    """A bare id, a UTC time and a contradiction with no Input Needed question, in report_guard.py's Stop hook,
+    for landed turns only (rules speak-cite-id-plus-gloss, style-time-central-24h, output-bring-decisions-as-question)."""
+
+    DONE = "> **Done** BUILT guard, PR #226\n"
+    SAMPLE = (
+        "Refusal: a guard refused the rm-var run as frozen-path (guard.log 20:34:33 UTC). "
+        "Contradiction: #2015's own rows contradict each other: s02747:941 (env -vC, want ask) against :943 "
+        "(env -vC, want deny). The builder reports both and picks neither.")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
+        self.addCleanup(self.tmp.cleanup)
+        # A repo with no waiting page. The Pick guard reads the page from the hook's cwd, so a question case names
+        # this repo, never the checkout the tests run in.
+        self.bare = os.path.join(self.tmp.name, "bare")
+        os.makedirs(os.path.join(self.bare, ".git"))
+
+    def verdict(self, reply, cwd=None):
+        run = landed_run(self.tmp.name, reply, cwd=cwd)
+        self.assertEqual(run.returncode, 0)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def report(self, deviations, needed="none"):
+        return (self.DONE + "> **Deviations** " + deviations + "\n> **Input Needed** " + needed
+                + "\n> **Next** none")
+
+    def assert_blocked(self, reply, *needles):
+        out = self.verdict(reply)
+        self.assertIsNotNone(out, "no block for: " + reply)
+        self.assertEqual(out.get("decision"), "block")
+        for needle in needles:
+            self.assertIn(needle, out["reason"])
+
+    def assert_allowed(self, reply, cwd=None):
+        self.assertIsNone(self.verdict(reply, cwd), "a false block for: " + reply)
+
+    def assert_no_block(self, reply, cwd=None):
+        # A systemMessage note is no block. Only a decision stops the reply.
+        out = self.verdict(reply, cwd) or {}
+        self.assertNotIn("decision", out, "a block for: %s: %s" % (reply, out.get("reason")))
+
+    def test_pf_red_sample_trips_all_three(self):
+        self.assert_blocked(self.report(self.SAMPLE), "'#2015'", "style-time-central-24h",
+                            "output-bring-decisions-as-question", "speak-cite-id-plus-gloss")
+
+    def test_pf_red_bare_ids_block(self):
+        rows = [
+            ("Tracked as #2015 for now.", "'#2015'"),
+            ("#2015's own rows disagree.", "'#2015'"),                       # "own rows" is no gloss
+            ("See s02747:941 for the refusal.", "'s02747:941'"),
+            ("Row s02747:941 (env -vC, want ask) is wrong.", "'s02747:941'"),  # a command is no gloss
+            ("The rows contradict each other: s02747:941 differs.", "'s02747:941'"),
+        ]
+        for prose, needle in rows:
+            with self.subTest(prose=prose):
+                self.assert_blocked(prose + "\n\n" + self.DONE + "> **Next** none", needle)
+
+    def test_pf_allowed_glossed_ids(self):
+        rows = [
+            "#2015, check-tail filter, is open.",
+            "Row s02747:941, the env -vC refusal, is wrong.",
+            "The check-tail filter (#2015) is open.",
+            "Merged PR #2015 and pull request #2016.",
+            "See tests/guard/s43500-lane-start-pass.py and `#2015` and sha d1234567.",
+        ]
+        for prose in rows:
+            with self.subTest(prose=prose):
+                self.assert_allowed(prose + "\n\n" + self.DONE + "> **Next** none")
+
+    def test_pf_allowed_pr_ref_in_done_item(self):
+        # reports-done-format makes the writer cite a PR as #N, so a Done item may hold a bare #N.
+        self.assert_allowed("> **Done**\n> - BUILT the guard, #226\n> - OTHER swept branches, #227\n> **Next** none")
+
+    def test_pf_red_hash_id_in_deviations_blocks_with_done_present(self):
+        # The Done-item exemption must not leak to the Deviations item.
+        self.assert_blocked(self.DONE + "> **Deviations** #2015 broke\n> **Next** none", "'#2015'")
+
+    def test_pf_red_utc_time_blocks(self):
+        rows = [
+            ("The guard refused it at 20:34:33 UTC.", "20:34:33 UTC"),
+            ("It ran at 20:34 UTC.", "20:34 UTC"),
+            ("It ran at 20:34 GMT.", "20:34 GMT"),
+            ("Logged 2026-11-17T20:34:33Z by the hook.", "20:34:33Z"),
+            ("It ran at UTC 20:34.", "UTC 20:34"),
+        ]
+        for prose, needle in rows:
+            with self.subTest(prose=prose):
+                self.assert_blocked(prose + "\n\n" + self.DONE + "> **Next** none", needle, "style-time-central-24h")
+
+    def test_pf_allowed_central_times_and_offsets(self):
+        rows = [
+            "It ran at 14:34 CST and again at 15:10 CDT.",
+            "Local time: 2026-11-17 09:10 CST (UTC-06:00).",      # an offset is no time
+            "The log line `20:34:33 UTC` shows it.",
+            "```\n20:34:33 UTC refused\n```",
+            "Never show UTC to the owner.",
+        ]
+        for prose in rows:
+            with self.subTest(prose=prose):
+                self.assert_allowed(prose + "\n\n" + self.DONE + "> **Next** none")
+
+    def test_pf_red_contradiction_without_question_blocks(self):
+        rows = [
+            "Contradiction: the two rows disagree.",
+            "The builder reports both rows and picks neither.",
+            "The builder picked neither row.",
+        ]
+        for deviations in rows:
+            with self.subTest(deviations=deviations):
+                self.assert_blocked(self.report(deviations), "output-bring-decisions-as-question")
+
+    def test_pf_allowed_contradiction_with_a_question(self):
+        # A contradiction with an Input Needed question passes with no block at all. The run names a repo with no
+        # waiting page, so the Pick guard can only note the question, never block it.
+        rows = [
+            "Which row stands, the ask or the deny?",
+            "Pick one:\n> A: ask (my pick)\n> B: deny\n> Departs from: main keeps both rows as written — the owner "
+            "picks which one stands",
+        ]
+        for needed in rows:
+            with self.subTest(needed=needed):
+                self.assert_no_block(self.report("Contradiction: the two rows disagree.", needed), self.bare)
+
+    def test_pf_allowed_no_contradiction_words(self):
+        self.assert_allowed(self.report("none"))
+        # The word outside Deviations is no claim.
+        self.assert_allowed("Contradiction: noted in prose above.\n\n" + self.report("none"))
+
+    def test_pf_allowed_contradiction_none_found(self):
+        # A Deviations line that says there is no contradiction claims none, so Input Needed owes no question.
+        rows = [
+            "Contradiction: none found.",
+            "No contradiction: rows agree.",
+        ]
+        for deviations in rows:
+            with self.subTest(deviations=deviations):
+                self.assert_allowed(self.report(deviations))
+
+    def test_pf_red_bare_id_forms_block(self):
+        # PR#N and lane#N are ids with no gloss, and so is a #N with a hyphen after it. "Rows in #N" blocks too:
+        # "in" passes only for a built-in ref. "needs review" after the id says nothing about it.
+        rows = [
+            "PR#2015 is open.",
+            "lane#2015 is open.",
+            "#2015-check-tail filter is open.",
+            "Rows in #2015 disagree.",
+            "Blocked on #2015, needs review.",
+        ]
+        for prose in rows:
+            with self.subTest(prose=prose):
+                self.assert_blocked(prose + "\n\n" + self.DONE + "> **Next** none", "2015", "speak-cite-id-plus-gloss")
+
+    def test_pf_red_utc_forms_block(self):
+        rows = ["Logged 20:34 Z.", "It ran at 20:34 utc."]
+        for prose in rows:
+            with self.subTest(prose=prose):
+                self.assert_blocked(prose + "\n\n" + self.DONE + "> **Next** none", "20:34", "style-time-central-24h")
+
+    def test_pf_red_contradiction_forms_block(self):
+        rows = [
+            "Contradiction - the two rows disagree.",
+            "Contradiction — the two rows disagree.",
+            "The builder chose neither row.",
+            "Choose neither row.",
+        ]
+        for deviations in rows:
+            with self.subTest(deviations=deviations):
+                self.assert_blocked(self.report(deviations), "output-bring-decisions-as-question")
+
+    def test_pf_allowed_pr_ref_lists_and_labels(self):
+        # A #N after PR or PRs, or in a list of PR numbers, names a PR. A colon after PR is no break in that.
+        rows = [
+            "Merged PRs #2015, #2016.",
+            "Merged PR #2015 and #2016.",
+            "PR: #2015 merged.",
+        ]
+        for prose in rows:
+            with self.subTest(prose=prose):
+                self.assert_allowed(prose + "\n\n" + self.DONE + "> **Next** none")
+
+    def test_pf_allowed_resolved_contradiction(self):
+        # A contradiction whose choice is already made leaves no owner question to ask.
+        self.assert_allowed(self.report("Contradiction: resolved to ask per the rule."))
+
+    def test_pf_allowed_lone_quote_in_code_before_gloss(self):
+        # A lone quote inside a code span does not end the span, so the gloss after the span still counts.
+        self.assert_allowed("D12 `<75 x's>`, short titles for records is set.\n\n" + self.DONE + "> **Next** none")
+
+
 class DoneNamesModelsTests(unittest.TestCase):
     """reports-done-names-models, in report_guard.py's Stop hook."""
 
@@ -1293,21 +1486,22 @@ class NoResendTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
 
-    def test_nr_red_each_refusal_holds_no_correction_tail(self):
+    def test_nr_each_refusal_carries_the_correction_tail(self):
         rows = [
-            # Catches: the label-word refusal carries the correction tail.
+            # Catches: the label-word refusal lacks the correction tail.
             ("label words", "> **Done** fixed it in abc123\n> **Next** none", ()),
-            # Catches: the model-name refusal carries the correction tail.
+            # Catches: the model-name refusal lacks the correction tail.
             ("model names", "> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none",
              (self.BUILDER,)),
-            # Catches: the Unstarted refusal carries the correction tail.
+            # Catches: the Unstarted refusal lacks the correction tail.
             ("Unstarted line", "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** merge",
              (self.BUILDER,)),
-            # Catches: the cite-gloss refusal carries the correction tail.
+            # Catches: the cite-gloss refusal lacks the correction tail.
             ("cite gloss", "Per D12.\n\n> **Done** BUILT guard, PR #5\n> **Next** none", ()),
-            # Catches: a joined refusal carries the correction tail.
+            # Catches: a joined refusal lacks the correction tail.
             ("label words and cite gloss", "Per D12.\n\n> **Done** fixed it\n> **Next** none", ()),
         ]
+        self.assertTrue(CORRECTION_TAIL, "report_guard holds no shared CORRECTION_TAIL constant")
         for name, reply, spawns in rows:
             with self.subTest(refusal=name):
                 out = self.verdict(reply, spawns)
@@ -1315,22 +1509,23 @@ class NoResendTests(unittest.TestCase):
                 reason = out["reason"].lower()
                 self.assertIn("decision guard-remedy-not-to-owner", reason)
                 self.assertNotIn("send the report now", reason)
-                for phrase in CORRECTION_STEP:
-                    self.assertNotIn(phrase, reason, "the refusal carries the correction tail: %r" % phrase)
+                self.assertIn(CORRECTION_TAIL, out["reason"], "the refusal lacks the shared correction tail")
                 self.assertEqual(reason.count("rule reports-order-of-labels"), 1)
                 self.assertIn("rule reports-order-of-labels", reason)
 
     def test_nr_missing_report_block_keeps_the_reply(self):
         out = self.verdict("All done.")
         self.assertIn("does not end with the report", out["reason"])
-        self.assertNotIn("post only the corrected lines", out["reason"].lower())
+        self.assertTrue(CORRECTION_TAIL, "report_guard holds no shared CORRECTION_TAIL constant")
+        self.assertNotIn(CORRECTION_TAIL, out["reason"], "a missing-report block carries the correction tail")
 
     def test_nr_missing_report_with_bare_cite_never_forbids_the_report(self):
-        # Catches: the block asks for the report and also says never send it.
+        # Catches: the block asks for the report and also carries the correction tail, which bars a resend.
         out = self.verdict("Per D12.\n\nAll done.")
         self.assertIn("'D12'", out["reason"])
         self.assertIn("does not end with the report", out["reason"])
-        self.assertNotIn("never send the report again", out["reason"].lower())
+        self.assertTrue(CORRECTION_TAIL, "report_guard holds no shared CORRECTION_TAIL constant")
+        self.assertNotIn(CORRECTION_TAIL, out["reason"], "a missing-report block carries the correction tail")
 
     def test_nr_correction_only_follow_up_passes(self):
         # The follow-up holds only the corrected lines, with no report. It runs as a rewrite.
@@ -1341,7 +1536,7 @@ class NoResendTests(unittest.TestCase):
 
 
 class RewriteAfterMissingReportTests(unittest.TestCase):
-    """The rewrite after a missing-report block is checked once for model names and the Unstarted line."""
+    """The rewrite after a missing-report block is checked once for model names, the Unstarted line and the plain-form faults."""
 
     BUILDER = {"subagent_type": "builder", "prompt": "build it"}
     GOOD = "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none"
@@ -1396,6 +1591,25 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.missing_report_block()
         self.assertIsNone(self.stop(self.GOOD, True))
         self.assertIsNone(self.stop(self.GOOD, True))
+
+    def test_rw_red_rewrite_runs_the_plain_form_checks(self):
+        # The rewrite is the report the owner reads, so the plain-form checks apply to it as they do to a first report.
+        contradiction = ("> **Done** BUILT the guard, PR #5 (builder sonnet)\n"
+                         "> **Deviations** Contradiction: the two rows disagree.\n"
+                         "> **Input Needed** none\n> **Next** Unstarted: none")
+        rows = [
+            ("Tracked as #2015 for now.\n\n" + self.GOOD, "2015", "speak-cite-id-plus-gloss"),
+            ("Logged 20:34 Z.\n\n" + self.GOOD, "20:34", "style-time-central-24h"),
+            (contradiction, "Contradiction", "output-bring-decisions-as-question"),
+        ]
+        for reply, needle, rule in rows:
+            with self.subTest(reply=reply):
+                self.missing_report_block()
+                out = self.stop(reply, True)
+                self.assertIsNotNone(out, "the rewrite passed with no block: " + reply)
+                self.assertEqual(out["decision"], "block")
+                self.assertIn(needle, out["reason"])
+                self.assertIn(rule, out["reason"])
 
     def earlier_round_records(self, reply):
         """A turn whose reviewer ran before the owner's second message, on its file pin (haiku), and whose
@@ -4437,18 +4651,50 @@ class UICopyRoundTwoTests(unittest.TestCase):
                                              "launch</button>;\n"), ["STE011"])
 
     def test_114_many_generics_lint_in_linear_time(self):
-        import time
-        lines = []
-        for i in range(600):
-            lines.append("const f%d = <T extends X>(a: T): T => a;" % i)
-            lines.extend(["const v%d_%d = %d;" % (i, j, j) for j in range(7)])
-        lines.append("const y = <p>In order to go.</p>;")
-        text = "\n".join(lines) + "\n"
-        self.assertGreaterEqual(len(lines), 4800)
-        started = time.monotonic()
-        codes = self.check("a.tsx", text)
-        self.assertLess(time.monotonic() - started, 2.0)
-        self.assertEqual(codes, ["STE011"])
+        def build(generics):
+            lines = []
+            for i in range(generics):
+                lines.append("const f%d = <T extends X>(a: T): T => a;" % i)
+                lines.extend(["const v%d_%d = %d;" % (i, j, j) for j in range(7)])
+            lines.append("const y = <p>In order to go.</p>;")
+            return "\n".join(lines) + "\n"
+
+        def check_counted(text):
+            # Steps are the line events the trace sees in lint/ste_lint.py while the check runs. No clock is
+            # read, so machine load cannot move the count.
+            linter_file = ste_lint._jsx_copy.__code__.co_filename
+            steps = [0]
+
+            def count_line(frame, event, arg):
+                if event == "line":
+                    steps[0] += 1
+                return count_line
+
+            def trace_call(frame, event, arg):
+                return count_line if frame.f_code.co_filename == linter_file else None
+
+            previous = sys.gettrace()
+            sys.settrace(trace_call)
+            try:
+                codes = self.check("a.tsx", text)
+            finally:
+                sys.settrace(previous)
+            return codes, steps[0]
+
+        small, large = build(600), build(2400)
+        self.assertGreaterEqual(small.count("\n"), 4800)
+        small_codes, small_steps = check_counted(small)
+        large_codes, large_steps = check_counted(large)
+        self.assertEqual(small_codes, ["STE011"])
+        self.assertEqual(large_codes, ["STE011"])
+        # Scope first: the trace must have seen at least one step per input line, or the ratio below proves nothing.
+        self.assertGreaterEqual(small_steps, small.count("\n"),
+                                "the trace counted fewer steps than input lines: it missed lint/ste_lint.py")
+        # Four times the lines take about four times the steps. A Python scan to the end of the file for each
+        # generic makes the steps grow as the square, which the 8x bound catches. A str.find scan to the end
+        # adds one step per generic, so this count does not see it. The bound is for Python-level scans only.
+        ratio = large_steps / small_steps
+        self.assertLess(ratio, 8, "4x the lines took %.1fx the steps: the check is not linear" % ratio)
 
 
 class TurnReaderTests(unittest.TestCase):
@@ -4958,6 +5204,35 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         first = 'Answered, the owner wrote "no.'
         self.assert_blocked(first + '\nHe then said "yes" later.', first)
 
+    def test_an_red_session_answering_its_questions_passes(self):
+        # Catches: a session that answered another session's questions reads as an owner's answer, so the line is blocked.
+        self.assert_allowed("I sent triage 9 my comments on its draft goal and answered its four questions:")
+
+    def test_an_red_proposed_end_condition_passes(self):
+        # Catches: "answered" in a should-clause, a condition a goal proposes and nobody has met, is read as a claim.
+        self.assert_allowed("- The goal should end once the 20 open comment threads are answered or closed, "
+                            "without reading the other 55.")
+
+    def test_an_red_guard_name_and_negated_claim_pass(self):
+        # Catches: the guard's own name, "the answered guard", is read as a claim, because the first use of the
+        # word has no negator in its clause.
+        self.assert_allowed("- A test-author on the answered guard's false alarm: it refused my two lines that were "
+                            "not claims you had answered anything.")
+
+    def test_an_red_builder_fixing_the_guard_passes(self):
+        # Catches: a fix that flags the guard's own name, "the answered guard", or the word after "claim", so a line
+        # that describes the guard and its claim check is blocked as a claim that the owner or an item was answered.
+        self.assert_allowed("A Sonnet builder is fixing the answered guard so it flags only a claim that you or an item "
+                            "were answered, not other uses of the word.")
+
+    def test_an_green_item_number_is_a_source_and_passes(self):
+        # Catches: a fix that stops counting "item <n>" as a source, which decision answered-needs-source lists.
+        self.assert_allowed("Item 870 is answered.")
+
+    def test_an_green_owner_claim_with_a_condition_word_still_blocks(self):
+        # Catches: a fix that exempts every line with a condition word such as "once", not only a proposed condition.
+        self.assert_blocked("The owner answered it once the call ended.", "The owner answered it once the call ended.")
+
     def test_an_red_fence_marker_mid_line_opens_no_fence(self):
         # Catches: a ``` inside a line, and not at its start, opens a fence that hides the lines after it.
         self.assert_blocked("Typed ``` in the middle, then answered.\nThe next line answered too.",
@@ -5008,7 +5283,163 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         self.assertIn("inline code span", refusal,
                       "the refusal text does not name the inline code span route: %r" % refusal)
 
+    def test_an_red_owner_answer_claims_block_under_the_new_exemptions(self):
+        # Red on the guard's newer exemptions: a first-person clause, "claim", a modal and its own printed name.
+        # Each row claims that the owner or an item was answered and cites no source, so each must block.
+        rows = [
+            # Catches: a first-person clause ("I think") exempts an unsourced owner answer.
+            "I think the owner answered it.",
+            # Catches: a first-person clause ("I believe") exempts an unsourced answer by another person.
+            "I believe they answered it.",
+            # Catches: a first-person clause ("I was told") exempts an unsourced owner answer.
+            "I was told the owner answered it.",
+            # Catches: a first-person act with an object exempts a claim that Claude answered for the owner.
+            "I answered the item for him.",
+            # Catches: the word "claim" in the clause exempts an answer that is stated as a claim.
+            "We claim he answered.",
+            # Catches: the word "claims" in the clause exempts an unsourced owner answer.
+            "Claude claims the owner answered it.",
+            # Catches: a modal in the clause exempts a past answer stated as fact.
+            "The owner must have answered it already.",
+            # Catches: a modal in the clause exempts an unsourced answer, though a later clause closes the item.
+            "The owner should have answered it, so the item is closed.",
+            # Catches: the guard's printed name exempts a line that claims the owner answered questions.
+            "The owner answered guard questions.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_an_red_answered_as_a_modifier_passes(self):
+        # Must pass: "answered" here modifies "page item", so the line claims nothing. A rule about a future item.
+        # Catches: an adjective "answered" before a noun is read as a claim, so a rule about a page item is refused.
+        self.assert_allowed("- When an answered page item isn't on main, check open PRs first, then start a builder.")
+
+    def test_an_red_first_person_clause_naming_the_owner_blocks(self):
+        # Red on the first-person exemption: the owner is named as "the user" or by name, and neither is in the
+        # owner-word list, so the clause before the word is read as Claude's own act.
+        rows = [
+            # Catches: a first-person clause ("I believe") exempts an unsourced owner answer naming "the user".
+            "I believe the user answered them.",
+            # Catches: a first-person clause exempts an unsourced owner answer that names the owner by his first name.
+            "I wrote the brief and Shivam answered all four.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_an_red_modal_claim_of_a_past_answer_blocks(self):
+        # Red on the modal exemption: a modal in the clause exempts a claim with no owner word before the word. Each row
+        # states an answer as fact and cites no source.
+        rows = [
+            # Catches: a modal exempts an answer stated as fact, with "It" as the subject.
+            "It may be answered already.",
+            # Catches: a modal exempts an answer stated as fact, with "The decision" as the subject.
+            "The decision must have been answered already.",
+            # Catches: a modal and a first-person verb exempt an answer stated as fact.
+            "I would say it was answered.",
+            # Catches: a modal exempts an answer whose owner is named after the word, outside the clause.
+            "That would have been answered by the owner.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_an_red_claim_noun_before_an_owner_answer_blocks(self):
+        # Red on the "claim" exemption: "that claim" in the clause exempts the whole clause, so an owner answer stated
+        # after it in the same clause passes.
+        line = "That claim is stale because the owner answered the item."
+        self.assert_blocked(line, line)
+
+    def test_an_red_proposed_condition_on_items_or_questions_passes(self):
+        # Red on the owner-word list: "items" or "question" in a should-clause reads a proposed stop or end condition as
+        # an owner's answer. A goal or a rule that names the condition claims nothing.
+        rows = [
+            # Catches: "items" in a should-clause makes a proposed end condition read as an owner answer.
+            "The goal should end once the open items are answered.",
+            # Catches: "question" in a should-clause makes a proposed stop condition read as an owner answer.
+            "A lane should stop after the question is answered.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_red_writer_at_the_start_of_a_longer_word_blocks(self):
+        # Red on the writer's word boundary: "I" or "we" at the start of a longer word ("Items", "Issue", "Wednesday's",
+        # "Weekly") reads as Claude's own act, so an "and" before the word lets an unsourced owner answer pass.
+        rows = [
+            # Catches: "I" at the start of "Items" reads as the writer, so an unsourced answer passes.
+            "Items were sent and answered it.",
+            # Catches: "I" at the start of "Issue" reads as the writer, so an unsourced answer passes.
+            "Issue 4 was opened and answered the same day.",
+            # Catches: "We" at the start of "Wednesday's" reads as the writer, so an unsourced answer passes.
+            "Wednesday's questions were sent and answered the same day.",
+            # Catches: "We" at the start of "Weekly" reads as the writer, so an unsourced answer passes.
+            "Weekly questions were sent and answered the same day.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_an_red_only_before_the_answered_verb_passes(self):
+        # Red on the adverb list: "only" is not in ADVERBS, and the -ly pattern needs three letters before "ly", so
+        # "only" is no adverb. A first-person act with "only" before the verb then reads as an owner claim.
+        rows = [
+            # Catches: "only" after "I" drops the first-person act, so Claude's own answer is refused.
+            "I only answered it.",
+            # Catches: "only" after "We" drops the first-person act, so Claude's own answer is refused.
+            "We only answered the questions.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_red_duly_before_the_answered_verb_passes(self):
+        # Red on the adverb list: "duly" has two letters before "ly", and the -ly pattern needs three, so "duly" is no
+        # adverb. A first-person act with "duly" before the verb then reads as an owner claim.
+        # Catches: "duly" after "I" drops the first-person act, so Claude's own answer is refused.
+        self.assert_allowed("I duly answered it.")
+
+    def test_an_red_joint_subject_with_and_i_or_we_blocks(self):
+        # Red on the joint subject: a person word, then "and I" or "and we", reads as the writer's own act, so an unsourced
+        # owner answer passes. The first-person act checks the object and the words after the verb for a person, never the
+        # words before the writer. The reason must name the check, so a block from another guard cannot satisfy a row.
+        rows = [
+            # Catches: "Shivam and I still" passes as the writer's own act, with "still" read as the adverb.
+            "Shivam and I still answered the questions.",
+            # Catches: "Shivam and I" passes as the writer's own act, with a page item as the object.
+            "Shivam and I answered the page items.",
+            # Catches: "The owner and I" passes as the writer's own act, with a count before the object noun.
+            "The owner and I answered the four questions.",
+            # Catches: "The owner and we ourselves" passes as the writer's own act, with "we ourselves" read as the writer.
+            "The owner and we ourselves answered the items.",
+            # Catches: "Shivam and I myself" passes as the writer's own act, with "I myself" read as the writer.
+            "Shivam and I myself answered the questions.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line, "answered-needs-source")
+
     # Green: these pass before the verdict exists too. Each guards against a false alarm.
+
+    def test_an_green_first_person_answer_passes_beside_the_red_rows(self):
+        # Control for the red tests above, green on the same commit. A whole-word writer with "and", a listed adverb
+        # and an -ly adverb still pass, so a fix that drops one of those paths goes red here, not only in the red rows.
+        rows = [
+            # Catches: a whole-word "We" before "and" stops passing when the writer's word boundary is checked.
+            "We sent it and answered it.",
+            # Catches: a first-person act with "and" stops passing when the writer's word boundary is checked.
+            "I sent the brief and answered it.",
+            # Catches: a listed adverb before the verb stops passing when the adverb slot changes.
+            "I already answered it.",
+            # Catches: an -ly adverb stops passing when the -ly pattern is swapped for a fixed list.
+            "I quickly answered it.",
+            # Catches: a first-person act with no adverb stops passing in the same fix.
+            "I answered it.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
 
     def test_an_green_each_source_cites_the_word(self):
         rows = [
@@ -5582,8 +6013,9 @@ class PendingRefusalTests(unittest.TestCase):
                 order = RG.session_wording(reason)
                 checks = (
                     ("the block does not say when a refused tool clears", "clears when" in reason),
+                    # The shared correction tail says "Post only", which is no clearing claim, so it is stripped first.
                     ("the block says 'only' about clearing, which is false: other forms clear a tool too",
-                     not re.search(r"\bonly\b", reason, re.I)),
+                     not re.search(r"\bonly\b", reason.replace(CORRECTION_TAIL, ""), re.I)),
                     ("the block does not give the Input Needed clearing form", "under Input Needed" in reason),
                     ("the block does not give the phrase clearing form `<tool_name>`: refusal was right",
                      "`<tool_name>`: refusal was right" in reason),

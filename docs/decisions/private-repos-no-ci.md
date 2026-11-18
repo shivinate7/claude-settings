@@ -21,11 +21,19 @@ Ruling `own-all-jobs-passed-removed` (owner, 2026-11-15 19:08 CST) takes the req
 - `"none"` reads neither the ruleset nor the branch protection. GitHub's own merge call refuses a check that is still required, so that read would only copy a refusal.
 - `refuse_pinned_mismatch` compares a pinned list only. It has nothing to compare under `"none"`.
 - A head with no check and no workflow run reads green under `"none"` (`head_read`, `unseen`). Under the other values it reads pending, because GitHub has not made the run yet.
+- A setup PR's own head `stamp.json` gives `requiredChecks` and nothing else, and only when the head says `"none"` and the PR changes that field against its merge-base with the base (owner ruling, page item 929 b). Then the PR lints and merges with no flag. `load_config` reads the head's stamp and checks it in full (the deadline too), and takes `requiredChecks` from it. Every other field is the base's: `standingGrant`, `afterMerge`, `ignoreChecks`, `keepBranches`, `readyChecks`, `deleteBranch` and `method`. A stamp missing at the merge-base reads as `"protection"`, so a PR that adds the stamp with `"none"` changes it. A head that says anything else, or a `"none"` the PR left as the base had it, is judged on the base's stamp, so a PR never loosens its own gate. The guard's `head_read` reads the head's stamp by the same rule.
 - Under `"none"` a lane PR passes lane lint on its local steps alone. `lane_lint` reads no draft run of `lane-touched-tests`, and a failing local step still fails.
 
 ## What still reads red
 
-Under `"none"` a check row or a workflow run that does appear and is red still reads red, required or not. A pending check with no required job stays dropped by `required_only`, as today. No run appears once a repo disables its workflows, so the tool adds no hold for a pending one. That last rule is the consultant's pick, not an owner ruling.
+Nothing. Under `"none"` the tool reads no CI run at all: no check row, no workflow run, finished, red or pending, on the head or on main. Owner ruling, 11:20 CST, Nov 16, 2026: a repo with `"none"` runs no CI.
+
+- `head_state` and `head_read` read no check and no run, and return green. `confirm` skips the head read too.
+- `base_state` reads no run of the base, so a red or pending run on main holds no merge.
+- A run left on the head from before the workflows were disabled holds nothing.
+- A pending required check on the base's branch protection is still GitHub's to refuse. The tool names that cause when GitHub reads the pull request BLOCKED.
+
+No check runs on a commit this tool pushes, so a claim under `"none"` merges in the same run, as a page heal does.
 
 Kind: build
 Plan: docs/decisions/private-repos-no-ci.md#the-value (all)

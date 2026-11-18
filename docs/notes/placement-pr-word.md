@@ -1,0 +1,1 @@
+- placement-pr-word: the placement regex takes a wait phrase directly before #N only; "waits on PR #12" is not caught. Folds into wait-matcher-two-homes.

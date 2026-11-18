@@ -14,6 +14,14 @@ Owner ruling `own-merge-on-lint-pass` (owner, 2026-11-15 18:21 CST, typed "B for
 - The tool sends its PUT past a BLOCKED read only when a PASS lifted the pending run. BEHIND still refuses.
 - The batch's wait for the base to move, the heal merge commit and the small-move suite run are gone.
 
+Rule d. Lanes bring main in only on conflict; the merge tool does one main-in at merge time and keeps the green run (needs #3481 and #3552 on main). Skill `ci-hygiene` step 8 holds the same rule.
+
+Coordinator's reading, not the owner's: until both are on main, rule d is not in force and ruling `own-923-c-ready-lanes-bring-main-in` stands.
+
+- Based on (ruling): owner, 2026-11-17 14:20 CST, page item 925 `main-in-once-before-lint`, pick d, item closed 14:27 CST. His words: "Lanes bring main in only on conflict; the merge tool does one main-in at merge time and keeps the green run (needs #3481 and #3552 on main)."
+- Based on (ruling): owner, 2026-11-16 13:46 CST, page item 923 pick c, typed in the coordinator's chat, ruling `own-923-c-ready-lanes-bring-main-in`: ready lanes, or lanes one step from ready, bring main in after each merge. Ruling c was never filed to a record on main.
+- Closed, nothing to build: no grade by priority for lane PRs (page item 924, option c, no grade; the consultant closed it at 09:57 CST, 2026-11-17). Nothing tiers a lane. A lane brings main in only as this record says: under ruling `own-923-c-ready-lanes-bring-main-in` until rule d is in force.
+
 Why: branch protection on `main` has `strict` false, so GitHub reports BEHIND only when `strict` is on (`main-branch-protection`). The tool's own reads are the gate.
 
 Residual risk: a clean merge can still break a suite, and a head can merge before its own run ends. Main's run after the merge finds it. A red main is then held under the red-main rule (`git-red-main-reverts`) until its revert merges with its tree proven.

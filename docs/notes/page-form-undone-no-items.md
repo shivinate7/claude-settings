@@ -1,0 +1,1 @@
+- page-form-undone-no-items: (#2556 round 3) feedback_guard.py:939 exempts any text that starts "Undone on the waiting page" with no "Items:", even with owner prose after it; only the owner typing that exact phrase reaches it. The "Ask X is withdrawn" form has no test.

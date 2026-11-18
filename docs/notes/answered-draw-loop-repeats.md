@@ -1,0 +1,1 @@
+- answered-draw-loop-repeats: `answeredEl` repeats `renderList`'s plan-to-DOM loop; one drawing helper would be the single home. Step answered-sections-by-repo.

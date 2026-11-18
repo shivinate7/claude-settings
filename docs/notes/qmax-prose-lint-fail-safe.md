@@ -1,0 +1,1 @@
+- qmax-prose-lint-fail-safe: From child-cites-qmax's reviewer: the plain-prose lint's run.sh exits 0 on an unread diff (q_max's FAIL SAFE comment says red); the `restates` probe skips headings and code spans.

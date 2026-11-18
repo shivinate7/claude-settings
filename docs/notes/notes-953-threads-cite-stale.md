@@ -1,0 +1,1 @@
+- notes-953-threads-cite-stale: (#2534) docs/debts/notes.md:953 (page-ruling-doc-gaps) still cites "no threads or pulls list".

@@ -1,0 +1,1 @@
+- brief-path-one-home: `brief_path_of` imports stall_watch, while guard_merge uses own_session.agent_transcript_path. Fix: one home, own_session.

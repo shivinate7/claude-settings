@@ -1,0 +1,1 @@
+- fix-verifier-after-main-merge: #2563 needed a second fix verifier after a main merge forced code edits; merge --review-record refuses --fix-check when the newest record already has a Fix check line, so it was recorded as a new-lane round 1 (comment 6805259149). Under decision pr-review-record.
