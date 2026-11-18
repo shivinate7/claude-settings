@@ -15,7 +15,12 @@
 #     doc_decisions (docs/decisions/), doc_rules (CLAUDE.md, .claude/CLAUDE.md, output-styles/), doc_skills (skills/), doc_agents (agents/*.md),
 #     doc_glossary (GLOSSARY.md, README.md), doc_map (docs/map/), doc_other (the rest of docs/, and mods/<mod>/README.md),
 #     doc_any (every .md path, so a path in no group sets this flag only). A deleted or moved .md path counts through its old name (--no-renames).
-#   checks_windows_rest_2 repeats checks_windows_rest's value (R62). No job reads it: checks-windows-rest-2 runs every step on a ready pull_request, so the output is kept only for the tests that derive it.
+#   checks_windows_rest_2 repeats checks_windows_rest's value (R62). The checks-windows-rest-2 job reads it.
+#   Windows-only paths (R62, R63, goal v11 F1 and F2): a pull request starts a Windows job only when its own flag is set. A path in the list
+#   WINDOWS_ONLY_GLOBS (below, emitted as the output windows_only_globs) sets the whole Windows set: checks_windows, checks_windows_merge,
+#   checks_windows_rest, checks_windows_rest_2, checks_windows_sweep and pointer_windows. hooks/test_install_windows.sh keeps checks_windows.
+#   No other arm for hooks/, merge/merge.py, settings.json, install.sh or the catch-all sets the Windows set. A new file under a landed dir other than hooks/ sets checks_windows.
+#   The daily run on main runs the whole Windows set and the slow legs (the Windows guard shards and the guard mutation shards), which run on no pull request.
 #   windows_guard (the checks-windows-guard shards): a path that matches a glob of .github/guard-inputs.txt, an added file under a landed dir, or a change to this script, the workflow or that list; read in its own pass over the diff, so a .md input counts, and a path the table names nowhere does not set it.
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event; false on a records-only skip.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
@@ -29,8 +34,10 @@ JOBS="checks_windows checks_windows_merge checks_windows_rest checks_windows_swe
 LINTS="lint_red_run lint_plan_refuter lint_ruling_kind lint_comment_narration"
 DOCS="doc_decisions doc_rules doc_skills doc_agents doc_glossary doc_map doc_other doc_any"
 ALL="$JOBS checks_guard code mods guard sweep shoot $LINTS $DOCS"
+# ALL without the Windows set: a path the table names nowhere starts no Windows job (R62, R63).
+ALL_NO_WINDOWS="shell_macos checks_macos checks_guard code mods guard sweep shoot $LINTS $DOCS"
 # The Windows-only list: the one list of globs that set the Windows set (W M R Z P in the loop below). Space-separated; `*` also matches `/`.
-WINDOWS_ONLY_GLOBS="*.ps1"
+WINDOWS_ONLY_GLOBS="*.ps1 bin/*.cmd"
 range=""
 [ "${EVENT:-}" = pull_request ] && [ -n "${BASE_SHA:-}" ] && range="$BASE_SHA...HEAD"
 on=" "
@@ -45,18 +52,20 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       .github/scripts/ci-scope.sh|.github/scripts/green-head.sh|.github/workflows/checks.yml|.gitattributes) on="$on $ALL " ;;
       # Guard and its installers' inputs: test_guard, the janitor suites and config_watch run guard.py.
       # guard_<family>.py modules are guard.py; guard_test_* is not (it falls to hooks/* below).
-      hooks/guard_test_*) on="$on $R $Z $X code guard " ;;
-      hooks/guard.py|hooks/guard_*.py|hooks/shared_names.py|hooks/git_reads.py|hooks/question_form.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/mutate_shared.py) on="$on $W $R $Z $X code guard sweep " ;;
+      hooks/guard_test_*) on="$on $X code guard " ;;
+      hooks/guard.py|hooks/guard_*.py|hooks/shared_names.py|hooks/git_reads.py|hooks/question_form.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/mutate_shared.py) on="$on $X code guard sweep " ;;
       # settings.json: the same jobs, plus merge/test_merge.py (CloudAllow reads it).
-      settings.json) on="$on $M $W $R $Z $X code guard sweep " ;;
+      settings.json) on="$on $X code guard sweep " ;;
       landed-dirs.txt) on="$on $W $R $Z $X $S code guard " ;;
       # tests/guard/*: section files of hooks/test_guard.py, so the same flags (not under hooks/, so no shell_macos).
-      hooks/test_guard.py|hooks/mutate_guard.py|tests/guard/*) on="$on $W $X code guard " ;;
+      hooks/test_guard.py|hooks/mutate_guard.py|tests/guard/*) on="$on $X code guard " ;;
       # install.sh and session_start.sh: the checkout-detection suite and test_guard read them.
-      hooks/test_install_src.sh|hooks/test_install_windows.sh) on="$on $W $X $S code guard " ;;
+      hooks/test_install_src.sh) on="$on $X $S code guard " ;;
+      # The Windows install suite is a Windows-only path: it keeps the Windows job.
+      hooks/test_install_windows.sh) on="$on $W $X $S code guard " ;;
       # install.sh: also read by merge/test_merge.py (CloudAllow reads its settings step).
-      install.sh) on="$on $M $W $X $S code guard " ;;
-      hooks/session_start.sh) on="$on $W $R $Z $X $S code guard " ;;
+      install.sh) on="$on $X $S code guard " ;;
+      hooks/session_start.sh) on="$on $X $S code guard " ;;
       hooks/test_mutate_shared.py|hooks/test_mutate_report.py|hooks/test_mutate_js.py|hooks/test_mutate_replay.py|hooks/test_mutate_ci.py|hooks/mutate_js.mjs) on="$on code guard " ;;
       # Hook modules and suites that run on the rest and macOS jobs.
       # guard_log_report.py: decision_watch imports it at run time, as it does _transcript.py.
@@ -64,7 +73,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       hooks/*|lint/_transcript.py|lint/_clause.py|lint/test_clause.py|lint/guard_log_report.py|lint/ste_lint.py|lint/ui_suffixes.py|lint/report_guard.py|lint/ruling_census.py|lint/test_report_guard.py|lint/test_report_guard_route.py|lint/test_report_guard_stamped.py|lint/test_report_guard_landing.py|lint/test_report_guard_remedy.py|lint/test_report_guard_refusal.py|lint/test_report_guard_handoff.py|lint/test_report_guard_cannot.py|lint/test_report_guard_review.py|lint/test_ruling_census.py|lint/check_unknown_reads_contract.py)
         on="$on $R $Z $X code guard "; case "$f" in lint/_transcript.py|lint/guard_log_report.py) on="$on $M " ;; esac ;;
       # bin/claude-janitor: test_install_src reads it.
-      bin/claude-janitor) on="$on $W $S $R $Z $X code guard sweep " ;;
+      bin/claude-janitor) on="$on $S $X code guard sweep " ;;
       janitor/*) on="$on $R $Z $X code sweep " ;;
       bin/verdict|bin/verdict.cmd|lint/test_verdict.py) on="$on $R $Z $X code " ;;
       # The fixture copy helpers: suites in every job copy the repo's modules through them.
@@ -88,7 +97,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       actions/playwright-setup/*|.github/shoot/*) on="$on code shoot checks_guard " ;;
       # merge.py: guard.py loads it. layout.json: guard.py reads it; layout.py: ste_lint.py and hook_catalog.py (merge.py) import it.
       # check_silent_undo.py: merge.py imports it.
-      merge/merge.py) on="$on $M $W $X code guard " ;;
+      merge/merge.py) on="$on $X code guard " ;;
       lint/layout.json|lint/layout.py) on="$on $M $R $Z $W $X code guard " ;;
       lint/check_silent_undo.py) on="$on $M code " ;;
       merge/*|bin/merge|bin/merge.cmd|.github/stamp.json) on="$on $M $S code " ;;
@@ -99,7 +108,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       mods/*) on="$on $X mods "; case "$f" in *.md) ;; *) on="$on code " ;; esac ;;
       install.ps1|install.test.ps1|install-no-gap.test.ps1|install-bin-eol.test.ps1|install-set.test.ps1) on="$on $P code " ;;
       # decision-watch.test.mjs imports lint/test_scanner_traps.mjs, so the mod-tests.sh step runs it too.
-      lint/test_scanner_traps.mjs) on="$on $W $X mods code " ;;
+      lint/test_scanner_traps.mjs) on="$on $X mods code " ;;
       # .gitignore: skills/plain-english-map/tests/typescript-home.test.mjs reads it, so it runs the mod step. `code` stays for the lints.
       .gitignore) on="$on $W $X mods code " ;;
       # bin/rm: the shim imports hooks/guard_rm_var.py (hooks/* above); it runs on posix jobs.
@@ -110,7 +119,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       skills/plain-english-map/*.md) on="$on $W $X mods " ;;
       # Docs: nothing runs on them but the lints in `checks`. (hooks/*.md, the precompact prompt, matches hooks/* above.)
       *.md) ;;
-      *) on="$on $ALL " ;;
+      *) on="$on $ALL_NO_WINDOWS " ;;
     esac
     # A path in the Windows-only list sets the whole Windows set. This is another case, so the flags each path sets above stay as they are.
     for g in "${win_globs[@]}"; do
@@ -204,13 +213,15 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
   else
     if added=$(git diff --name-only --diff-filter=A --no-renames "$range" 2>/dev/null); then
       whole_read=1
-      grep -Eq "^($dirs)/" <<< "$added" && on="$on $W $S code guard windows_guard "
+      grep -Eq "^($dirs)/" <<< "$added" && on="$on $S code guard windows_guard "
       # windows_guard alone reads the added names NUL-separated: the newline form quotes a non-ASCII name, which matches no
       # landed dir. A failed read turns the flag on.
       if added_z=$(set -o pipefail; git diff --name-only --diff-filter=A --no-renames -z "$range" 2>/dev/null | tr '\0' '\n'); then
         grep -Eq "^($dirs)/" <<< "$added_z" && on="$on windows_guard "
+        # The Windows job reads the same names, minus hooks/: hooks/ is not a Windows-only path (R62, R63).
+        grep -Eq "^($dirs)/" <<< "$(grep -v '^hooks/' <<< "$added_z")" && on="$on $W "
       else
-        on="$on windows_guard "
+        on="$on $W windows_guard "
       fi
     else
       on="$on $ALL windows_guard "
