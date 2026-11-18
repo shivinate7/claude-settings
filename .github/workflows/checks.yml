@@ -374,7 +374,6 @@ jobs:
         run: python3 lint/test_all_jobs_passed.py
 
       - name: Cancel-on-close workflow and script fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_cancel_on_close.py
 
       - name: Scope detector fixture suite
