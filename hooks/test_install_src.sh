@@ -5450,6 +5450,157 @@ caseK15() {
   fi
 }
 
+# roadmap_fixture DIR TAG: commits one change, named TAG, on a branch off the fixture's main and pushes it as the fixture's
+# roadmap branch. Main does not move. The install's roadmap fetch brings this branch into refs/remotes/origin/roadmap.
+roadmap_fixture() {
+  git -C "$1/src" checkout -q -b "rm-$2"
+  printf 'roadmap %s\n' "$2" > "$1/src/ROADMAP-$2.txt"
+  git -C "$1/src" add -A
+  git -C "$1/src" -c user.email=t@example.com -c user.name=t commit -q -m "roadmap $2"
+  git -C "$1/src" push -q "$1/bare.git" HEAD:refs/heads/roadmap
+  git -C "$1/src" checkout -q main
+}
+# make_git_log_stub BIN LOG: a git in BIN that appends its arguments to LOG, then runs the real git. Every git call the install
+# makes through PATH passes through it, so a case counts the fetches of a run by their arguments.
+make_git_log_stub() {
+  mkdir -p "$1"
+  mgl_git=$(command -v git)
+  cat > "$1/git" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >> "$2"
+exec "$mgl_git" "\$@"
+EOF
+  chmod +x "$1/git"
+}
+# fetches_of LOG REF: the number of fetch calls in LOG whose arguments name REF (0 when LOG is absent).
+fetches_of() { fo_n=$(grep -c " fetch .*$2" "$1" 2>/dev/null); printf '%s\n' "${fo_n:-0}"; }
+
+# ---- caseK16: a cloud refresh fetches origin's roadmap branch once, beside the stable fetch, into refs/remotes/origin/roadmap ----
+caseK16() {
+  name="caseK16: a cloud refresh fetches origin's roadmap branch once, beside the stable fetch, into refs/remotes/origin/roadmap"
+  fx="$work/k16-fx"; h="$work/k16-home"; scratch="$work/k16-scratch"; bin="$work/k16-bin"; co="$h/claude-settings"; log="$work/k16-git.log"
+  mkdir -p "$h" "$scratch"
+  stable_fixture "$fx" k16
+  roadmap_fixture "$fx" k16
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  make_git_log_stub "$bin" "$log"
+  cloud_install "$h" "$scratch" "$bin" stable
+  if [ $rc -ne 0 ] || [ ! -d "$co/.git" ]; then
+    bad "$name" "setup: the fresh install failed (exit $rc): $(install_problems)"
+    return
+  fi
+  # The empty state: no roadmap ref before the refresh, whatever the fresh install made.
+  git -C "$co" update-ref -d refs/remotes/origin/roadmap 2>/dev/null || :
+  advance_stable_fixture "$fx" k16s2
+  rf_want=$(git -C "$fx/bare.git" rev-parse refs/heads/roadmap)
+  : > "$log"
+  cloud_install "$h" "$scratch" "$bin" stable
+  rf_stable=$(fetches_of "$log" stable); rf_road=$(fetches_of "$log" roadmap)
+  rf_now=$(git -C "$co" rev-parse -q --verify refs/remotes/origin/roadmap 2>/dev/null)
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc on the refresh: $(install_problems)"
+  elif [ "$rf_stable" -lt 1 ]; then
+    bad "$name" "scope: the refresh made no stable fetch, so the roadmap fetch cannot be judged beside it"
+  elif [ "$rf_road" -ne 1 ]; then
+    bad "$name" "the refresh made $rf_road roadmap fetch(es), want one"
+  elif [ "$rf_now" != "$rf_want" ]; then
+    bad "$name" "refs/remotes/origin/roadmap is ${rf_now:-absent}, want origin's roadmap $rf_want"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK17: a refresh whose roadmap fetch fails exits 0, keeps the old roadmap ref, and logs one WARN line naming roadmap ----
+caseK17() {
+  name="caseK17: a refresh whose roadmap fetch fails exits 0, keeps the old roadmap ref, and logs one WARN line naming roadmap"
+  fx="$work/k17-fx"; h="$work/k17-home"; scratch="$work/k17-scratch"; bin="$work/k17-bin"; co="$h/claude-settings"
+  mkdir -p "$h" "$scratch"
+  stable_fixture "$fx" k17
+  roadmap_fixture "$fx" k17
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin" stable
+  if [ $rc -ne 0 ] || [ ! -d "$co/.git" ]; then
+    bad "$name" "setup: the fresh install failed (exit $rc): $(install_problems)"
+    return
+  fi
+  # The old ref is a commit the checkout holds. Origin's roadmap branch is then removed, so the refresh's fetch is refused.
+  rf_old=$(git -C "$co" rev-parse HEAD)
+  git -C "$co" update-ref refs/remotes/origin/roadmap "$rf_old"
+  git -C "$fx/bare.git" update-ref -d refs/heads/roadmap
+  cloud_install "$h" "$scratch" "$bin" stable
+  rf_warns=$(printf '%s\n' "$out" | grep -c 'WARN.*roadmap')
+  rf_now=$(git -C "$co" rev-parse -q --verify refs/remotes/origin/roadmap 2>/dev/null)
+  if [ $rc -ne 0 ]; then
+    bad "$name" "a failed roadmap fetch failed the install: exit $rc: $(install_problems)"
+  elif [ "$rf_warns" -ne 1 ]; then
+    bad "$name" "want one WARN line naming roadmap, got $rf_warns: $(install_problems)"
+  elif [ "$rf_now" != "$rf_old" ]; then
+    bad "$name" "the failed fetch left refs/remotes/origin/roadmap at ${rf_now:-absent}, want the old $rf_old kept"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK18: a cloud start in a session's own detached checkout fetches origin's roadmap once, beside the stable fetch ----
+caseK18() {
+  name="caseK18: a cloud start in a session's own detached checkout fetches origin's roadmap once, beside the stable fetch"
+  fx="$work/k18-fx"; h="$work/k18-home"; scratch="$work/k18-scratch"; bin="$work/k18-bin"; co="$work/k18-co"; log="$work/k18-git.log"
+  mkdir -p "$h" "$scratch"
+  stable_fixture "$fx" k18
+  roadmap_fixture "$fx" k18
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  make_git_log_stub "$bin" "$log"
+  # A session's own checkout: a clone, origin the GitHub URL, detached at origin's stable, as a cloud session starts it.
+  git clone -q "$fx/bare.git" "$co"
+  git -C "$co" config remote.origin.url https://github.com/shivinate7/claude-settings.git
+  git -C "$co" checkout -q --detach "$(git -C "$fx/bare.git" rev-parse refs/heads/stable)"
+  git -C "$co" update-ref -d refs/remotes/origin/roadmap 2>/dev/null || :
+  rf_want=$(git -C "$fx/bare.git" rev-parse refs/heads/roadmap)
+  cloud_install "$h" "$co" "$bin" stable
+  rf_stable=$(fetches_of "$log" stable); rf_road=$(fetches_of "$log" roadmap)
+  rf_now=$(git -C "$co" rev-parse -q --verify refs/remotes/origin/roadmap 2>/dev/null)
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc in the checkout: $(install_problems)"
+  elif [ "$rf_stable" -lt 1 ]; then
+    bad "$name" "scope: the start made no stable fetch, so the roadmap fetch cannot be judged beside it"
+  elif [ "$rf_road" -ne 1 ]; then
+    bad "$name" "the start made $rf_road roadmap fetch(es) in the checkout, want one"
+  elif [ "$rf_now" != "$rf_want" ]; then
+    bad "$name" "refs/remotes/origin/roadmap in the checkout is ${rf_now:-absent}, want origin's roadmap $rf_want"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK19: a local install never fetches origin's roadmap branch, and makes no refs/remotes/origin/roadmap ----
+caseK19() {
+  name="caseK19: a local install never fetches origin's roadmap branch, and makes no refs/remotes/origin/roadmap"
+  fx="$work/k19-fx"; h="$work/k19-home"; co="$work/k19-co"; cfg="$work/k19-cfg"; bin="$work/k19-bin"; log="$work/k19-git.log"
+  mkdir -p "$h" "$bin"
+  stable_fixture "$fx" k19
+  roadmap_fixture "$fx" k19
+  write_redirect "$h" "$fx/bare.git"
+  local_stable_clone "$co" "$fx"
+  # The clone of origin fetched every branch, roadmap included. Remove that ref, so only the install can make it.
+  git -C "$co" update-ref -d refs/remotes/origin/roadmap 2>/dev/null || :
+  make_git_log_stub "$bin" "$log"
+  out=$(cd "$co" && env -i PATH="$bin:$work/npm-stub:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" bash ./install.sh 2>&1); rc=$?
+  rf_road=$(fetches_of "$log" roadmap)
+  rf_now=$(git -C "$co" rev-parse -q --verify refs/remotes/origin/roadmap 2>/dev/null)
+  if [ ! -s "$log" ]; then
+    bad "$name" "scope: the local install ran no git call, so the roadmap check proves nothing (exit $rc: $(install_problems))"
+  elif [ "$rf_road" -ne 0 ]; then
+    bad "$name" "the local install made $rf_road roadmap fetch(es), want none"
+  elif [ -n "$rf_now" ]; then
+    bad "$name" "the local install made refs/remotes/origin/roadmap at $rf_now"
+  else
+    ok "$name"
+  fi
+}
+
 # ---- caseR1: a cloud install writes the install record: ref, sha, source and installer ----
 # hooks/stale_install.py reads this record each turn. With CLAUDE_SETTINGS_REF=main it names main. With a
 # non-default ref it names that branch, whose tip differs from main's (the fixture moves main on), so a sha
@@ -6784,6 +6935,10 @@ run caseK12
 run caseK13
 run caseK14
 run caseK15
+run caseK16
+run caseK17
+run caseK18
+run caseK19
 run caseP1
 run caseP2
 run caseP3
