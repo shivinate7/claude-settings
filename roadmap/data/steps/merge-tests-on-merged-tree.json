@@ -1,0 +1,14 @@
+{
+ "id": "merge-tests-on-merged-tree",
+ "title": "The merge tool re-runs a PR's changed tests on main plus the PR before --confirm",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "consultant",
+ "blockedBy": [],
+ "why": "Consultant relay 16:07 CST Nov 18 (not read by triage against the repo).",
+ "source": "consultant relay 16:07 CST Nov 18",
+ "note": "Incident: PR 3669 merged on a head proven before PR 3668 landed, and main broke at 3c28ec86f8 (a deleted scope_taint call). The fix for main is PR 3675. Fix for the cause: the merge tool re-runs the PR's changed tests on main plus the PR before --confirm. Prior-work search first.",
+ "updatedAt": "2026-11-18T16:07:52-06:00"
+}

@@ -1,0 +1,14 @@
+{
+ "id": "ruling-scope-guard-path",
+ "title": "ruling_for_guard ignores the new ruling scope",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "consultant",
+ "blockedBy": [],
+ "why": "Consultant relay 16:07 CST Nov 18 (not read by triage against the repo).",
+ "source": "consultant relay 16:07 CST Nov 18",
+ "note": "ruling_for_guard in lint/ruled_store.py ignores the new ruling scope (PR 3671). Prior-work search first.",
+ "updatedAt": "2026-11-18T16:07:52-06:00"
+}

@@ -1,0 +1,14 @@
+{
+ "id": "mcp-read-budget",
+ "title": "Measure agents hit the GitHub rate limit through MCP reads",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "consultant",
+ "blockedBy": [],
+ "why": "Consultant relay 16:07 CST Nov 18 (not read by triage against the repo).",
+ "source": "consultant relay 16:07 CST Nov 18",
+ "note": "Incident: at 15:09 CST batch runner 10's measure agents hit the GitHub rate limit through MCP reads, which decision gh-api-budget does not cover. Fix: a read-cap line in measure-agent briefs, plus an on-demand X-RateLimit read inside the agent; no per-call counter (rule outcomes-mechanize-rules). Prior-work search first.",
+ "updatedAt": "2026-11-18T16:07:52-06:00"
+}
