@@ -859,6 +859,7 @@ class LintMode(unittest.TestCase):
         # so no action name is copied here.
         ci_job = load_ci_job()
         want, name, inside = [], None, False
+        failure_only = False
         with open(CHECKS, encoding="utf-8") as f:
             for line in f:
                 if re.match(r"^  [\w-]+:\s*$", line):
@@ -868,11 +869,16 @@ class LintMode(unittest.TestCase):
                 m = re.match(r"^      - name: (.*?)\s*$", line)
                 if m:
                     name = m.group(1)
+                    failure_only = False
+                if re.match(r"^        if: .*failure\(\)", line):
+                    failure_only = True  # the red-job wake step runs only after a failed job: a lint run reads it `not run` (decision ci-wait-reads-run-status)
                 m = re.match(r"^        run: (python3 (?:lint|actions)/\S+\.py\b.*|bin/ste-changed\b.*|"
                              r"pipx run [\w.-]+==[\w.]+ [^|&;]*)$", line)
                 if m and "mutate" not in m.group(1):
                     want.append(name)
                 m = re.match(r"^        uses: (\S+)(?: #.*)?\s*$", line)
+                if failure_only:
+                    m = None  # a failure()-only step is no lint step
                 if m and (ci_job.KNOWN_ACTION.fullmatch(m.group(1)) or ci_job.LOCAL_ACTION.fullmatch(m.group(1))):
                     want.append(name)  # a known action, or this repo's own local action: ci-job plans each as a lint step
         self.assertGreater(len(want), 20)
@@ -1041,6 +1047,15 @@ class NotRunLines(Job):
         self.assertEqual(by_step(lines), {"Checkout": "not run", "Setup node": "not run", "Python lint": "PASS",
                                           "Make lint-py": "not run", "Make gen-check": "not run"}, out)
         self.assertIn("summary: ran 1 of 5 steps", lines, out)
+
+    def test_a_failure_only_step_is_not_run_and_never_unknown(self):
+        # The red-job wake step (`if: failure()`, a local action) runs only after a red job. A green local lint run
+        # never reaches it, so it reads `not run`, not `unknown` (decision ci-wait-reads-run-status).
+        wake = step("Wake the batch runner (red job)", uses="$/actions/ci-done-comment",
+                    **{"if": "${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}"})
+        rc, lines, out = self.run_job(self.DEGEN[2], wake, args=("--lint",))
+        self.assertEqual(by_step(lines)["Wake the batch runner (red job)"], "not run", out)
+        self.assertEqual(rc, 0, out)
 
     def test_plan_under_lint_prints_the_same_not_run_lines_with_would_run_counts(self):
         code, lines, out = plan_lint(self.root, workflow(*self.DEGEN))

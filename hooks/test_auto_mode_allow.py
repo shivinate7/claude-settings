@@ -25,8 +25,11 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   limits the already granted act to messages that ask.
 - One "Relayed Grant:" entry quotes page_grant.py's COMMAND and COUNTED_LINE, read from the
   checker itself, and its Never covers names each act in RELAYED_REFUSED (decision
-  relayed-grant-read-from-page). Its Covers text names the one settings change: a label that names
-  `settings.json` and the entry by its exact title or key, one entry per grant. Its "Never covers wins"
+  relayed-grant-read-from-page) and the closed-item clause in RELAYED_CLOSED and its order in
+  RELAYED_CLOSED_ORDER (ruling own-753-a: a routed close counts, as page_grant rule 4 in ruling
+  own-748-b-rule-4). Its Covers text names the
+  one settings change: a label that names `settings.json` and the entry by its exact title or key,
+  one entry per grant. Its "Never covers wins"
   sentence follows the Never covers sentence and settles any clash with Covers.
 - One "Own Branch Lease Push:" entry quotes the lease push with a named sha and the guard remedy's
   command form, read from PUSH_REASON. Its Covers text names the 9 lease-push refusals, requires
@@ -62,6 +65,11 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   Its Covers text names the session tagged cs-build:lane and says it prints and posts nothing. Its Never
   covers names each form in MERGE_REVIEW_REFUSED (decision `auto-mode-owner-acts`). A copy with its Never
   covers clause removed goes red on the same cases.
+- One "Merge Tool Read Checks:" entry names each limit the read-only flags keep: `--reviewed`,
+  `--review-record` and `--lane-lint` (read from merge/merge.py's argparse), "takes no lock", the PASS and
+  ref-or-commit comment rules, and both tool names. Its Never covers names each act in READ_CHECKS_REFUSED.
+  No word in READ_CHECKS_DROPPED appears outside that sentence. Outside it, the entry also names `--lane-lint`
+  run in the background through `verdict`, read from READ_CHECKS_BACKGROUND.
 AUTO_MODE_SETTINGS names another settings file to read (default: this repo's settings.json), so the
 same cases run against a copy with a clause removed and show red there.
 """
@@ -131,7 +139,6 @@ RELAYED_REFUSED = (("peer session's message", "peer session's message"), ("page 
                    ("answer for another item", "an answer for another item"), ("choice none", "choice none"),
                    ("task answer", "any task answer"), ("time with no zone", "time has no zone"),
                    ("older than added", "an answer older than the item's added"),
-                   ("closed item", "a closed item"), ("arbiter overturn only", r"except an arbiter overturn"),
                    ("permissions", "permissions"), ("overrides", "overrides"),
                    ("settings change without file and entry",
                     "a settings change whose label does not name the file and entry"),
@@ -140,6 +147,23 @@ RELAYED_REFUSED = (("peer session's message", "peer session's message"), ("page 
                    ("an autoMode.allow entry the label does not name",
                     r"an autoMode\.allow entry the label does not name"),
                    ("no counted line", "no `counted` line in this session"))
+# The closed-item clause of the Relayed Grant entry (ruling own-753-a). A closed item counts only as a routed
+# close, which page_grant.routed_close reads (rule 4, ruling own-748-b-rule-4): status closed, a non-blank
+# `lane` and `home`, no arbiter, `lastAnswer.at` equal to the answer's `at`, and --as-lane equal to `lane` (the
+# receiver's own lane, ruling own-844-a). An arbiter overturn counts too. A closed item that is neither stays refused.
+# These tokens are the clause the entry's Never covers must name.
+RELAYED_CLOSED = (("closed item", "a closed item"), ("routed close", "routed close"),
+                  ("lane", "`lane`"), ("home", "`home`"), ("lastAnswer.at", r"`lastAnswer\.at`"),
+                  ("--as-lane", "--as-lane"), ("arbiter overturn", "arbiter overturn"))
+# The order of that clause, which the tokens above do not fix: a closed item is neither a routed close (it keeps
+# `lane`, `home` and the answer whose time matches `lastAnswer.at`) nor an arbiter overturn. Words may be added
+# inside the parenthesis. A reversed clause or an either/or clause refuses a routed close, the opposite of the ruling.
+RELAYED_CLOSED_ORDER = r"closed item that is neither a routed close.*lane.*home.*lastAnswer\.at.*nor an arbiter overturn"
+# --as-lane sits inside the routed-close parenthesis, after `lastAnswer.at` and before "nor an arbiter overturn",
+# and it must be equal to that `lane`: the check that page_grant.routed_close runs with the receiver's own lane
+# (ruling own-844-a). "for any lane" would let a routed close from another lane through.
+RELAYED_CLOSED_AS_LANE_ORDER = (r"closed item that is neither a routed close.*lane.*home.*lastAnswer\.at"
+                                r".*--as-lane.*equal to that `lane`.*nor an arbiter overturn")
 # Each term the Relayed Grant entry's Covers text names for its one settings change.
 RELAYED_SETTINGS_COVERS = (("one settings change", "one settings change"),
                            ("label names the settings file and entry", r"label.*?settings file.*?entry"),
@@ -182,6 +206,23 @@ MERGE_REVIEW_REFUSED = tuple((flag, "`%s`" % flag) for flag in MERGE_REVIEW_NEVE
     ("gh pr merge", r"`gh pr merge`"), ("any push", r"\bany push\b"), ("force push", r"force[- ]push"),
     ("any other merge form", "any other merge form"),
     ("a session not tagged cs-build:lane", r"not tagged `cs-build:lane`"))
+# The "Merge Tool Read Checks:" entry. READ_CHECKS_DROPPED holds the refusal words the entry must not carry, so a
+# classifier reading it sees no refusal name. The other constants are what the entry still names.
+READ_CHECKS_DROPPED = (("the Incident sentence", r"(?i)\bincident:"), ("the refusal name", r"(?i)merge without review"),
+                       ("the word refused", r"(?i)\brefused\b"), ("the word refusal", r"(?i)\brefusals?\b"))
+READ_CHECKS_FLAGS = ("--reviewed", "--review-record", "--lane-lint")
+READ_CHECKS_LIMITS = (("takes no lock", r"\btakes no lock\b"),
+                      ("a PASS posts one comment", r"\bPASS\b[^.]*\bposts one\b[^.]*\bcomment\b"),
+                      ("a ref or commit posts nothing", r"(?i)\bref or commit\b[^.]*\bposts nothing\b"))
+READ_CHECKS_REFUSED_FLAGS = ("--confirm", "--base-red-ok", "--undo-check-unknown-ok")
+READ_CHECKS_REFUSED = tuple((flag, "`%s`" % flag) for flag in READ_CHECKS_REFUSED_FLAGS) + (
+    ("gh pr merge", r"`gh pr merge`"), ("any other flag that lifts a check", "any other flag that lifts a check"))
+# The sentence outside the Never covers clause that lets a lane run `--lane-lint` in the background: the word, and the
+# verdict wrapper in its short form and its full-path form (decision auto-mode-owner-acts).
+READ_CHECKS_BACKGROUND = (("background", r"(?i)\bbackground\b"),
+                          ("the verdict wrapper", r"`verdict merge --lane-lint(?![\w-])"),
+                          ("the verdict wrapper with full paths",
+                           r"`~/\.claude/bin/verdict ~/\.claude/bin/merge --lane-lint(?![\w-])"))
 # The Covers text names the session that started this one, and the no-act report it lets through.
 MESSAGE_TARGET = (("the session that started this one", "the session that started this one"),)
 MESSAGE_REPORT = (("asks for no act", "asks for no act"), ("pull request number", "pull request number"),
@@ -327,6 +368,16 @@ def flag_list(covers):
     return sorted(re.findall(r"`(--[\w-]+)", found.group(1))) if found else None
 
 
+def merge_flag_names():
+    """Every option string merge/merge.py's argparse adds, as a set. Read from the parser's own add_argument calls."""
+    with open(MERGE_PY, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    return {node.args[0].value for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "add_argument" and node.args
+            and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)
+            and node.args[0].value.startswith("--")}
+
+
 def allow_entry(prefix):
     """The one autoMode.allow entry starting with prefix, or None when there is not exactly one."""
     hits = [e for e in auto_mode().get("allow", []) if e.startswith(prefix)]
@@ -349,6 +400,12 @@ def bounds_text(entry):
     """The entry's text before its 'Never covers' sentence, or all of it when it has none."""
     found = never_covers_match(entry)
     return (entry or "")[:found.start()] if found else (entry or "")
+
+
+def outside_never_covers(entry):
+    """The entry's text with its 'Never covers' sentence removed, wherever that sentence sits."""
+    found = never_covers_match(entry)
+    return entry[:found.start()] + entry[found.end():] if found else (entry or "")
 
 
 def unnamed_terms(clause, terms):
@@ -465,6 +522,27 @@ class RelayedGrantIsAllowed(unittest.TestCase):
         for name, pattern in RELAYED_REFUSED:
             with self.subTest(act=name):
                 self.assertRegex(clause, "(?i)" + pattern, "Never covers does not name %r" % name)
+
+    def test_never_covers_names_the_routed_close_clause(self):
+        clause = never_covers(allow_entry(RELAYED))
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Grant entry")
+        for name, pattern in RELAYED_CLOSED:
+            with self.subTest(term=name):
+                self.assertRegex(clause, "(?i)" + pattern, "Never covers does not name %r" % name)
+
+    def test_never_covers_keeps_the_closed_item_clause_order(self):
+        clause = never_covers(allow_entry(RELAYED))
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Grant entry")
+        self.assertRegex(clause, "(?i)" + RELAYED_CLOSED_ORDER,
+                         "Never covers does not say a closed item is neither a routed close nor an arbiter overturn, "
+                         "in that order")
+
+    def test_never_covers_puts_as_lane_inside_the_routed_close(self):
+        clause = never_covers(allow_entry(RELAYED))
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Grant entry")
+        self.assertRegex(clause, "(?i)" + RELAYED_CLOSED_AS_LANE_ORDER,
+                         "Never covers does not say the check ran with --as-lane equal to that `lane`, inside the "
+                         "routed close, after lastAnswer.at and before nor an arbiter overturn")
 
     def test_never_covers_wins_over_covers(self):
         entry = allow_entry(RELAYED)
@@ -820,6 +898,54 @@ class MergeReviewLogIsAllowed(unittest.TestCase):
         other = [tb for tb in causes if "need a 'Never covers' sentence" not in tb]
         if other:
             self.fail("a case went red on another cause than the removed clause: %s" % last_line(other[0]))
+
+
+class MergeToolReadChecksIsAllowed(unittest.TestCase):
+    def test_drops_the_refusal_words(self):
+        entry = allow_entry(MERGE_TOOL_READ)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % MERGE_TOOL_READ)
+        outside = outside_never_covers(entry)
+        for name, pattern in READ_CHECKS_DROPPED:
+            with self.subTest(term=name):
+                self.assertNotRegex(outside, pattern, "the '%s' entry still has %s outside its Never covers sentence"
+                                    % (MERGE_TOOL_READ, name))
+
+    def test_still_names_each_remaining_limit(self):
+        covers = entry_part(self, MERGE_TOOL_READ)
+        clause = entry_part(self, MERGE_TOOL_READ, never=True)
+        names = merge_flag_names()
+        for flag in READ_CHECKS_FLAGS:
+            with self.subTest(flag=flag):
+                self.assertIn(flag, names, "merge/merge.py's argparse has no flag %s" % flag)
+                self.assertRegex(covers, r"(?<![\w-])%s(?![\w-])" % re.escape(flag),
+                                 "Covers text does not name the flag %s" % flag)
+        for name, pattern in MERGE_TOOL_NAMES:
+            with self.subTest(tool=name):
+                self.assertRegex(covers, pattern, "Covers text does not name the tool `%s`" % name)
+        for name, pattern in READ_CHECKS_LIMITS:
+            with self.subTest(limit=name):
+                self.assertRegex(covers, pattern, "Covers text does not say %r" % name)
+        for flag in READ_CHECKS_REFUSED_FLAGS:
+            with self.subTest(flag=flag):
+                self.assertIn(flag, names, "merge/merge.py's argparse has no flag %s" % flag)
+        for name, pattern in READ_CHECKS_REFUSED:
+            with self.subTest(act=name):
+                self.assertRegex(clause, pattern, "Never covers does not name %r" % name)
+
+    def test_names_the_background_verdict_lane_lint_call(self):
+        entry = allow_entry(MERGE_TOOL_READ)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % MERGE_TOOL_READ)
+        self.assertIn("--lane-lint", merge_flag_names(), "merge/merge.py's argparse has no flag --lane-lint")
+        outside = outside_never_covers(entry)
+        for name, pattern in READ_CHECKS_BACKGROUND:
+            with self.subTest(term=name):
+                self.assertRegex(outside, pattern, "the '%s' entry does not name %s outside its Never covers sentence"
+                                 % (MERGE_TOOL_READ, name))
+
+    def test_one_entry_starts_with_the_name(self):
+        hits = [e for e in auto_mode().get("allow", []) if e.startswith(MERGE_TOOL_READ)]
+        self.assertEqual(len(hits), 1, "need exactly one '%s' entry in autoMode.allow, found %d"
+                         % (MERGE_TOOL_READ, len(hits)))
 
 
 class OwnerPrHousekeepingIsAllowed(unittest.TestCase):
