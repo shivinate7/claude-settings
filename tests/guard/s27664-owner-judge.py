@@ -5,13 +5,72 @@ FAMILY = "owner-judge"   # the family the cases after this section have always r
 # --------------------------------------------------------------------------- the runner
 
 
+# ---- The Prior work line a build spawn carries (rule spawn-searches-existing-builds). A build spawn that names no
+# prior work is refused, and most cases here probe another rule, so decide() adds the default line to each build spawn
+# that names none. A case that names this rule keeps its spawn as written: its absent or empty line is what it tests.
+# A spawn whose text mentions prior work at all is also kept as written, so a near-miss line (`**Prior work**: ...`)
+# reaches the guard unchanged, and the guard's reader decides it.
+# The lane reading is the guard's own (shared_names.is_lane_create_session), so the default follows the guard exactly.
+from shared_names import LANE_GRANT_MARKER, is_lane_create_session  # noqa: E402  the one reading of the lane tag and the Grant line
+from guard import BRIEF_CLAIM_ROLES, SPAWN_TOOLS, role_key  # noqa: E402  the guard's own spawn tools, build roles and role reader
+from guard_merge import BRIEF_TOOL, PRIOR_WORK_LINE, _BRIEF_MARKER_LINE  # noqa: E402  the guard's own lane brief tool, lane brief line and marker word
+
+PRIOR_WORK_RULE = "spawn-searches-existing-builds"
+PRIOR_WORK_DEFAULT = "Prior work: none found"
+PRIOR_WORK_WORDS = re.compile(re.escape(PRIOR_WORK_LINE.rstrip(":")), re.IGNORECASE)
+
+
+def _is_build_spawn(tool, tool_input):
+    """True for a builder or test-author Agent or Task spawn, a lane start, and a lane brief (its first line after
+    any Grant line). Each reading is the guard's: its spawn tools, its role reader, its build roles, its lane tag and
+    its lane brief line."""
+    if tool in SPAWN_TOOLS:
+        return role_key(tool_input.get("subagent_type")) in BRIEF_CLAIM_ROLES
+    if is_lane_create_session(tool, tool_input):
+        return True
+    if tool == BRIEF_TOOL:
+        lines = [line.strip() for line in str(tool_input.get("message") or "").splitlines() if line.strip()]
+        if lines and lines[0].startswith(LANE_GRANT_MARKER):
+            lines = lines[1:]
+        return bool(lines) and _BRIEF_MARKER_LINE.match(lines[0]) is not None
+    return False
+
+
+def _with_default_line(text):
+    """The brief text with PRIOR_WORK_DEFAULT on a line of its own, at the end. When the last line is a command, the
+    default goes above it: brief-claim-has-probe reads the line right under a command as that command's result, so a
+    default line under a trailing probe would make the probe pass. A closing fence stays last, so the line is outside it."""
+    lines = text.split("\n") if text else []
+    last = next((i for i in range(len(lines) - 1, -1, -1) if lines[i].strip()), None)
+    probe = lines[last].strip() if last is not None else ""
+    is_command = (probe.startswith("`") and not probe.startswith("```")) or probe.startswith(("$ ", "> "))
+    lines.insert(last if is_command else len(lines), PRIOR_WORK_DEFAULT)
+    return "\n".join(lines)
+
+
+def with_prior_work(tool, tool_input, rule=None):
+    """The tool input a case judges. A build spawn that never mentions prior work gets the default line (see
+    _with_default_line). A case that names this rule, a spawn that mentions prior work, and every other call keep
+    their input as written. Returns a copy when it changes one."""
+    if (rule or "").startswith(PRIOR_WORK_RULE) or not _is_build_spawn(tool, tool_input):
+        return tool_input
+    key = "message" if tool == BRIEF_TOOL else "prompt"
+    text = tool_input.get(key)
+    if isinstance(text, str) and PRIOR_WORK_WORDS.search(text):
+        return tool_input
+    named = dict(tool_input)
+    named[key] = _with_default_line(text if isinstance(text, str) else "")
+    return named
+
+
 def decide(case):
     """Return (decision, reason) for one case."""
     materialize_for(case)
     if case["raw"] is not None:
         payload = case["raw"]
     else:
-        body = {"tool_name": case["tool"], "tool_input": dict(case["tool_input"])}
+        body = {"tool_name": case["tool"],
+                "tool_input": with_prior_work(case["tool"], dict(case["tool_input"]), case.get("rule"))}
         if case.get("event"):
             body = {"hook_event_name": case["event"]}
             if case.get("stop_active"):
@@ -42,6 +101,9 @@ def decide(case):
     # environment only when the payload carries none. A real session id in the runner's own
     # environment would leak into every case, so it is dropped here and each case names its own.
     env.pop("CLAUDE_CODE_SESSION_ID", None)
+    # The launcher's role variable (rule (c) of the local confirm reads it): a run from a `claude-role` session would otherwise
+    # hand every case the launcher's role. A case that sets it names it through `env`.
+    env.pop("CS_SESSION_ROLE", None)
     # The runner's own lane id (CLAUDE_CODE_REMOTE_SESSION_ID) would bind every case to a lane, so it is
     # dropped here too. A step-grant case sets its own through `env`.
     env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)

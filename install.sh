@@ -6,21 +6,23 @@
 #
 # What it does:
 #   ~/.claude/CLAUDE.md      -> one-line pointer: @<repo>/CLAUDE.md
-#   ~/.claude/agents/*.md    -> role definitions (builder, reviewer): local symlinks, cloud copies
-#   ~/.claude/lint/*         -> STE linter and report guard: local symlinks, cloud copies
-#   ~/.claude/hooks/*        -> PreToolUse guard + session-start line: local symlinks, cloud copies
-#   ~/.claude/skills/<name>  -> one whole-directory symlink per shipped skill, local; cloud copies
+#   ~/.claude/agents/*.md    -> role definitions (builder, reviewer): local symlinks into the repo
+#   ~/.claude/lint/*         -> STE linter and report guard: local symlinks into the repo
+#   ~/.claude/hooks/*        -> PreToolUse guard + session-start line: local symlinks into the repo
+#   ~/.claude/skills/<name>  -> one whole-directory symlink per shipped skill, local
 #   ~/.claude/settings.json  -> local: symlink to <repo>/settings.json
 #                               cloud: generated copy of settings.json plus a SessionStart hook
 #                                      that re-runs this script, so every new cloud session pulls
 #                                      the latest files from GitHub.
+#   Cloud: every name above is a link through ~/.claude/.cs-current to the whole copied set of this run,
+#   ~/.claude/installs/<id> (see "cloud: one generation per run" below).
 set -u
 
 # install.ps1 is the Windows installer. Write nothing first.
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) echo "install.sh does not run on Windows. Use install.ps1: powershell -ExecutionPolicy Bypass -File ./install.ps1"; exit 0;; esac
 
 REPO="shivinate7/claude-settings"
-REF="${CLAUDE_SETTINGS_REF:-main}"
+REF="${CLAUDE_SETTINGS_REF:-stable}"   # stable: the branch sessions install from. CLAUDE_SETTINGS_REF=main is the recovery.
 RAW="https://raw.githubusercontent.com/${REPO}/${REF}"
 TARBALL="https://github.com/${REPO}/archive/refs/heads/${REF}.tar.gz"
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
@@ -89,6 +91,31 @@ checkout_at() {
   printf '%s' "$top"
 }
 
+# True when DIR sits under a temp folder, or has a "scratchpad" component, by its physical path. A clone
+# there is a session's scratch copy: taking it as the source would point ~/.claude at a folder that is
+# swept away. CLAUDE_SETTINGS_TEMP_ROOTS (space-separated) replaces the production list when set; the
+# scratchpad rule holds either way. Each root is tried as written and by its physical path (macOS /tmp is
+# a link to /private/tmp).
+under_temp() {
+  ut_p=$(cd "$1" 2>/dev/null && pwd -P) || return 1
+  case "/$ut_p/" in */scratchpad/*) return 0 ;; esac
+  if [ -n "${CLAUDE_SETTINGS_TEMP_ROOTS:-}" ]; then
+    ut_roots="$CLAUDE_SETTINGS_TEMP_ROOTS"
+  else
+    ut_roots="${TMPDIR:-} /tmp /var/tmp /private/tmp /private/var/folders"
+  fi
+  for ut_r in $ut_roots; do
+    ut_r="${ut_r%/}"
+    [ -n "$ut_r" ] || continue
+    ut_c=$(cd "$ut_r" 2>/dev/null && pwd -P) || ut_c=""
+    case "$ut_p" in "$ut_r"/*) return 0 ;; esac
+    if [ -n "$ut_c" ]; then
+      case "$ut_p" in "$ut_c"/*) return 0 ;; esac
+    fi
+  done
+  return 1
+}
+
 # The directory an existing ~/.claude/CLAUDE.md already points at, if any: parsed the
 # same way settings.json's refresh hook and hooks/session_start.sh's divergence check
 # read it (the "@<path>/CLAUDE.md" line, "~/" expanded against $HOME). A person's clone
@@ -149,7 +176,9 @@ if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fi
 
-if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/CLAUDE.md" ] && [ -f "$SCRIPT_DIR/settings.json" ]; then
+# Cloud: a clone under a temp folder is a scratch copy, so it is not the source; the search below goes on.
+if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/CLAUDE.md" ] && [ -f "$SCRIPT_DIR/settings.json" ] \
+   && { [ "$CLOUD" != 1 ] || ! under_temp "$SCRIPT_DIR"; }; then
   SRC="$SCRIPT_DIR"
 else
   # No file to locate ourselves by (e.g. piped: curl | bash). Look for an existing git
@@ -167,9 +196,11 @@ else
   PTR_DIR=$(pointer_dir) || PTR_DIR=""
   for cand in "$PTR_DIR" "${CLAUDE_PROJECT_DIR:-}" "$PWD"; do
     [ -n "$cand" ] || continue
+    under_temp "$cand" && continue
     t=$(checkout_at "$cand") || continue
     # Cloud: the live pin is never the source and never moved; its clone is the source instead.
     if [ "$CLOUD" = 1 ] && pin_clone=$(live_pin_clone "$t"); then
+      under_temp "$pin_clone" && continue
       t=$(checkout_at "$pin_clone") || continue
     fi
     SRC="$t"; break
@@ -187,19 +218,20 @@ else
       [ -d "$root" ] || continue
       for child in "$root"/*; do
         [ -d "$child/.git" ] || continue
+        under_temp "$child" && continue
         t=$(checkout_at "$child") && { SRC="$t"; break 2; }
       done
     done
   fi
   if [ -z "$SRC" ]; then
-    t=$(checkout_at "$HOME/claude-settings") && SRC="$t"
+    under_temp "$HOME/claude-settings" || { t=$(checkout_at "$HOME/claude-settings") && SRC="$t"; }
   fi
 
   [ -n "$SRC" ] && log "found existing checkout of $REPO at $SRC; using it as source"
 fi
 
 # Cloud, a run of the pin's own install.sh (merge/install_from_main.sh runs it there): the pin stays the source,
-# at the local main the merge set. Only that script moves the pin, so both cloud blocks below skip this source,
+# at the commit the merge set. Only that script moves the pin, so both cloud blocks below skip this source,
 # and the pin_off_main refusal below still checks it.
 FROM_LIVE_PIN=0
 if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$SRC" = "$SCRIPT_DIR" ] && live_pin_clone "$SRC" >/dev/null; then
@@ -207,9 +239,26 @@ if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$SRC" = "$SCRIPT_DIR" ] && live_pin_c
   log "the source $SRC is the live pin; the cloud steps leave it as it is"
 fi
 
-# True when the pinned checkout $1 is not detached at the clone's local main commit.
+# The commit the pinned checkout of the clone $1 belongs at: origin's $REF (stable) as last fetched, which
+# merge/install_from_main.sh keeps current. A clone that holds no origin/$REF, and CLAUDE_SETTINGS_REF=main (the
+# recovery), pin the clone's local main as before. Prints nothing when there is no such commit.
+pin_commit() {
+  pc=""
+  [ "$REF" = main ] || pc=$(git -C "$1" rev-parse --verify -q "refs/remotes/origin/$REF^{commit}")
+  [ -n "$pc" ] || pc=$(git -C "$1" rev-parse --verify -q refs/heads/main)
+  printf '%s' "$pc"
+}
+# The words for pin_commit's answer in a message.
+pin_what() {
+  if [ "$REF" != main ] && git -C "$1" rev-parse --verify -q "refs/remotes/origin/$REF^{commit}" >/dev/null; then
+    printf 'origin/%s' "$REF"
+  else
+    printf 'local main'
+  fi
+}
+# True when the pinned checkout $1 is not detached at the commit pin_commit names.
 pin_off_main() {
-  main_commit=$(git -C "$1" rev-parse --verify -q refs/heads/main)
+  main_commit=$(pin_commit "$1")
   git -C "$1" symbolic-ref -q HEAD >/dev/null || [ -z "$main_commit" ] \
     || [ "$(git -C "$1" rev-parse HEAD)" != "$main_commit" ]
 }
@@ -217,7 +266,7 @@ pin_off_main() {
 # An install from a linked worktree would point the global config at a temp
 # checkout. Refuse before any write, whether the source came from the script or from the cwd.
 # Decision merge-reinstalls-from-main: the pinned checkout <clone>-live is the one linked
-# worktree allowed, and only on a detached HEAD at the clone's local main commit. <clone>-live
+# worktree allowed, and only on a detached HEAD at the commit pin_commit names (origin's stable). <clone>-live
 # may be a link to such a worktree (merge/install_from_main.sh moves it), so paths compare resolved.
 if [ -n "$SRC" ] && is_linked_worktree "$SRC"; then
   m=$(clone_of "$SRC")
@@ -226,18 +275,15 @@ if [ -n "$SRC" ] && is_linked_worktree "$SRC"; then
     exit 1
   fi
   if pin_off_main "$SRC"; then
-    log "ERROR: the pinned checkout $SRC is not detached at local main; run merge/install_from_main.sh from the clone $m to move it."
+    log "ERROR: the pinned checkout $SRC is not detached at $(pin_what "$SRC"); run merge/install_from_main.sh from the clone $m to move it."
     exit 1
   fi
 fi
 
-# put_file SRC DEST: build the file at "DEST.cs-new" in DEST's folder, then rename it over DEST, so
-# DEST is never absent or half-written (a guard hook reads it at any moment). In guard.py and
-# guard_*.py only, the whole placeholder line gets this run's id, the same stamp install.ps1 and its
-# post-merge hook write, so hooks/guard.py can tell a half-installed set from a whole one. No other
-# line is touched. STAMP_PLACEHOLDER is the same literal as $StampPlaceholder in install.ps1 (sh
-# cannot share that code); an optional CR before the line end is kept. A failure leaves DEST as it
-# was, is printed, and makes the run exit 1; the caller must not count the file as landed.
+# The id of this run, and the stamp it puts in the guard files: stage_file (cloud) replaces the whole placeholder
+# line in guard.py and guard_*.py with it, the same stamp install.ps1 and its post-merge hook write, so
+# hooks/guard.py can tell a half-installed set from a whole one. STAMP_PLACEHOLDER is the same literal as
+# $StampPlaceholder in install.ps1 (sh cannot share that code); an optional CR before the line end is kept.
 INSTALL_ID_VALUE="$(date +%Y%m%d%H%M%S)$$"
 STAMP_PLACEHOLDER='# INSTALL_ID = "uninstalled"'
 STAMP_CR="$(printf '\r')"
@@ -250,18 +296,6 @@ mv_retry() {
     if [ "$n" -ge 25 ]; then printf '%s\n' "$mv_err" >&2; return 1; fi
     n=$((n + 1)); sleep 0.1
   done
-}
-put_file() {
-  t="$2.cs-new"
-  case "$1" in
-    */guard.py|*/guard_*.py)
-      sed "s/^$STAMP_PLACEHOLDER\($STAMP_CR\{0,1\}\)\$/INSTALL_ID = \"$INSTALL_ID_VALUE\"\1/" "$1" > "$t" ;;
-    *) cp "$1" "$t" ;;
-  esac && mv_retry "$t" "$2" && return 0
-  rm -f "$t"
-  log "could not replace $2; left as it was"
-  INSTALL_FAILED=1
-  return 1
 }
 
 # ---- one install at a time, one start line and one end line in the install log --------------------
@@ -312,16 +346,20 @@ take_install_lock() {
 take_install_lock
 
 # Local install from a clone that has a branch named main: the links point at the pinned
-# checkout <clone>-live, a worktree on a detached HEAD at main's commit, never at the clone,
-# whose branch changes. Made here when missing; only merge/install_from_main.sh moves it. Cloud
+# checkout <clone>-live, a worktree on a detached HEAD at origin's stable commit (local main when the clone
+# holds no origin/stable), never at the clone, whose branch changes. Made here when missing; only merge/install_from_main.sh moves it. Cloud
 # mode and a clone with no main branch stay unpinned.
 if [ "$CLOUD" != 1 ] && [ -n "$SRC" ] && [ -e "$SRC/.git" ] && ! is_linked_worktree "$SRC"; then
-  if main_commit=$(git -C "$SRC" rev-parse --verify -q refs/heads/main); then
+  if main_commit=$(pin_commit "$SRC") && [ -n "$main_commit" ]; then
+    # The one WARN for the fallback: pin_commit runs inside $(...) several times, so it cannot say this itself.
+    if [ "$(pin_what "$SRC")" = "local main" ] && [ "$REF" != main ]; then
+      log "WARN: $SRC holds no origin/$REF, so the pinned checkout follows local main"
+    fi
     PIN="$SRC-live"
     if [ ! -e "$PIN" ]; then
       err=$(git -C "$SRC" worktree add -q --detach --lock --reason "claude-settings live pin" "$PIN" "$main_commit" 2>&1) \
         || { log "ERROR: cannot make the pinned checkout $PIN: $err; fix that and run the installer again."; exit 1; }
-      log "made the pinned checkout $PIN at main"
+      log "made the pinned checkout $PIN at $(pin_what "$SRC")"
     else
       pin_common=$(canon "$(common_dir "$PIN")")
       if [ -z "$pin_common" ] || [ "$pin_common" != "$(canon "$(common_dir "$SRC")")" ]; then
@@ -329,7 +367,7 @@ if [ "$CLOUD" != 1 ] && [ -n "$SRC" ] && [ -e "$SRC/.git" ] && ! is_linked_workt
         exit 1
       fi
       if pin_off_main "$PIN"; then
-        log "ERROR: the pinned checkout $PIN is not detached at local main; run merge/install_from_main.sh from the clone $SRC to move it."
+        log "ERROR: the pinned checkout $PIN is not detached at $(pin_what "$SRC"); run merge/install_from_main.sh from the clone $SRC to move it."
         exit 1
       fi
       # Lock an unlocked pin, so the janitor sweep never removes it; a locked one stays as it is.
@@ -415,6 +453,15 @@ if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ "$(git -C
   mirror_refresh "$SRC"
 fi
 
+# Origin has no $REF branch (stable): the rest of the run installs from main, with one WARN line naming $REF.
+# CLAUDE_SETTINGS_REF=main never reaches this, so the recovery path stays silent.
+fall_back_to_main() {
+  log "WARN: origin has no $REF branch, so this install takes main"
+  REF=main
+  RAW="https://raw.githubusercontent.com/${REPO}/main"
+  TARBALL="https://github.com/${REPO}/archive/refs/heads/main.tar.gz"
+}
+
 # clone_mirror DEST: clone $REF depth 1 into a sibling folder, then swap it in at DEST, so a failed clone leaves the old
 # copy. Marks DEST as a mirror this script made. Returns 1 and leaves DEST as it was on any failure, with the reason in
 # CLONE_MIRROR_WHY. The temp name is the same for every DEST, so one find sweeps a killed run's leftovers.
@@ -425,7 +472,11 @@ clone_mirror() {
   # no run still owns it; a newer one may belong to a run in parallel.
   find "$HOME" -maxdepth 1 -name 'claude-settings.clone.*' -mmin +5 -exec rm -rf {} + 2>/dev/null
   rm -rf "$clone_tmp"
-  if cloud_git clone -q --depth 1 --branch "$REF" "https://github.com/$REPO.git" "$clone_tmp" \
+  # An origin with no stable branch is cloned at main, and the rest of the run follows main (fall_back_to_main).
+  if { cloud_git clone -q --depth 1 --branch "$REF" "https://github.com/$REPO.git" "$clone_tmp" \
+       || { [ "$REF" != main ] && rm -rf "$clone_tmp" \
+            && cloud_git clone -q --depth 1 --branch main "https://github.com/$REPO.git" "$clone_tmp" \
+            && fall_back_to_main; }; } \
      && git -C "$clone_tmp" checkout -q -B main \
      && git -C "$clone_tmp" config claude-settings.cloudMirror true \
      && clone_sha=$(git -C "$clone_tmp" rev-parse main) \
@@ -489,6 +540,13 @@ if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ -e "$SRC/
     own_how=
     own_head=$(git -C "$SRC" rev-parse -q --verify HEAD 2>/dev/null)
     own_ref=$(git -C "$SRC" rev-parse -q --verify "refs/remotes/origin/$REF" 2>/dev/null)
+    # The checkout holds no origin/$REF and origin cannot give one (no stable branch, or no origin): the run follows main
+    # from here, as it did before stable existed, so a clean checkout at origin/main stays the source.
+    if [ -z "$own_ref" ] && [ "$REF" != main ] \
+       && ! cloud_git -C "$SRC" fetch -q origin "+refs/heads/$REF:refs/remotes/origin/$REF" 2>/dev/null; then
+      fall_back_to_main
+    fi
+    own_ref=$(git -C "$SRC" rev-parse -q --verify "refs/remotes/origin/$REF" 2>/dev/null)
     if [ -z "$(git -C "$SRC" status --porcelain 2>/dev/null)" ] && [ -n "$own_ref" ] \
        && git -C "$SRC" merge-base --is-ancestor "$own_ref" "$own_head" 2>/dev/null; then
       if [ -z "$(git -C "$SRC" config --get remote.origin.url 2>/dev/null)" ]; then
@@ -540,7 +598,9 @@ if [ -z "$SRC" ]; then
   SRC="$HOME/claude-settings"
   mkdir -p "$SRC"
   tmp="$SRC/.tarball.tmp.tar.gz"
-  if curl -fsSL "$TARBALL" -o "$tmp" && tar -xzf "$tmp" --strip-components=1 -C "$SRC"; then
+  if { curl -fsSL "$TARBALL" -o "$tmp" \
+       || { [ "$REF" != main ] && fall_back_to_main && curl -fsSL "$TARBALL" -o "$tmp"; }; } \
+     && tar -xzf "$tmp" --strip-components=1 -C "$SRC"; then
     rm -f "$tmp"
   else
     rm -f "$tmp"
@@ -602,8 +662,9 @@ shipped() {
   return 1
 }
 
-# A folder whose landing failed removes nothing this run.
-land_failed() { FAILED_SUBS="$FAILED_SUBS $1 "; }
+# A folder whose landing failed removes nothing this run. A cloud run also exits 1 and writes no install
+# record, so the stale-copy check retries the landing; a local run keeps its exit code.
+land_failed() { FAILED_SUBS="$FAILED_SUBS $1 "; [ "$CLOUD" = 1 ] && INSTALL_FAILED=1; return 0; }
 
 # note_landed SUB NAME SRC: record what this run landed at the destination: a link to SRC, a regular file,
 # or (skills only) a folder copy. Anything else there, such as a person's own folder at a file name, is not ours.
@@ -740,92 +801,49 @@ fi
 printf '%s\n' "$POINTER" > "$TARGET_MD"
 log "wrote $TARGET_MD -> $POINTER"
 
-# land_guard_set SRC_HOOKS DEST_HOOKS: copy mode, the guard files (install-hooks-whole).
-# A guard run sees the old set or the new set, never a mix. Step 1 writes every guard file, stamped
-# with this run's id, and shared_names.py, git_reads.py, question_form.py, own_session.py and precompact_handoff.py, which the guard imports, into DEST_HOOKS/guard.d/<id>/,
-# where no guard reads it yet. Step 2 replaces
-# DEST_HOOKS/guard.py: the one landing that switches, because a stamped guard.py loads guard.d/<its
-# id>/ (see the comment above INSTALL_ID in hooks/guard.py). Step 3 lands the flat guard_*.py, kept
-# beside it for tools that read them by path. The folder of the set before this one stays until the
-# next install; older ones go. A step 1 failure removes the new folder and lands nothing: the old
-# set stays whole and the run exits 1.
-land_guard_set() {
-  gdir="$2/guard.d/$INSTALL_ID_VALUE"
-  prev_id=$(sed -n 's/^INSTALL_ID = "\([^"]*\)".*/\1/p' "$2/guard.py" 2>/dev/null | head -n1)
-  mkdir -p "$gdir" || { log "could not make $gdir; the guard files stay as they were"; INSTALL_FAILED=1; return 1; }
-  for gf in "$1"/guard.py "$1"/guard_*.py "$1"/shared_names.py "$1"/git_reads.py "$1"/question_form.py "$1"/own_session.py "$1"/precompact_handoff.py; do
-    [ -f "$gf" ] || continue
-    put_file "$gf" "$gdir/$(basename "$gf")" || { rm -rf "$gdir"; log "the guard files stay as they were"; return 1; }
-  done
-  [ -f "$1/guard.py" ] && { put_file "$1/guard.py" "$2/guard.py" || { rm -rf "$gdir"; return 1; }; }
-  for gf in "$1"/guard_*.py; do [ -f "$gf" ] && put_file "$gf" "$2/$(basename "$gf")"; done
-  for gd in "$2"/guard.d/*; do
-    [ -d "$gd" ] || continue
-    case "$(basename "$gd")" in "$INSTALL_ID_VALUE"|"$prev_id") ;; *) rm -rf "$gd" ;; esac
-  done
-  return 0
-}
-
 # ---- ~/.claude/agents and ~/.claude/lint --------------------------------------------------------
 # agents/: one file per role (builder, reviewer). lint/: the STE linter and the report guard.
-# Local: per-file symlink. Cloud: copy.
+# Local: per-file symlink. Cloud: stage_dir copies into the generation and gen_link links.
 #
 # Both modes land only files git lists under "$SRC/$sub" (shipped, see above), and record each one in
 # the install manifest. A later run removes a recorded entry main no longer ships (retire_and_record,
 # after every folder landed), so "$DEST_DIR" does not keep the union of every file that has ever
 # existed. Nothing here prunes by looking at a dangling link: a link or copy is removed only when the
 # manifest recorded it and it still matches its record, so a person's own file or link is never touched.
-# A failed link or copy, or a failed guard set, marks the folder, and nothing under it is removed this run.
+# A failed link or copy marks the folder, and nothing under it is removed this run.
 land_dir() {
   sub="$1"
   DEST_DIR="$CLAUDE_DIR/$sub"
   mkdir -p "$DEST_DIR" || land_failed "$sub"
   LANDED=""
-  GUARD_SET=0; GUARD_OK=0
-  if [ "$CLOUD" = 1 ] && [ "$sub" = hooks ]; then
-    GUARD_SET=1
-    if land_guard_set "$SRC/hooks" "$DEST_DIR"; then GUARD_OK=1; else land_failed "$sub"; fi
-  fi
   for f in "$SRC/$sub"/*; do
     [ -f "$f" ] || continue
     # A file git does not list (retired, or ignored) is not landed.
     shipped "$sub/$(basename "$f")" || continue
-    # The guard files landed above, as one set.
-    case "$(basename "$f")" in
-      guard.py|guard_*.py)
-        if [ "$GUARD_SET" = 1 ]; then
-          [ "$GUARD_OK" = 1 ] || continue
-          LANDED="$LANDED $(basename "$f")"; note_landed "$sub" "$(basename "$f")" "$f"; continue
-        fi ;;
-    esac
     DEST="$DEST_DIR/$(basename "$f")"
     # A person's own folder at a file name is never replaced or removed: a failed landing for this folder.
     # (A first local run backs it up below, as it does any file of the person's.)
-    if [ -d "$DEST" ] && [ ! -L "$DEST" ] && ! { [ "$CLOUD" != 1 ] && [ "$FIRST_LOCAL_RUN" = 1 ]; }; then
+    if [ -d "$DEST" ] && [ ! -L "$DEST" ] && [ "$FIRST_LOCAL_RUN" != 1 ]; then
       log "kept $DEST: a folder of yours sits where the file $sub/$(basename "$f") lands; nothing under $sub is removed this run"
       land_failed "$sub"; continue
     fi
-    if [ "$CLOUD" = 1 ]; then
-      put_file "$f" "$DEST" || { land_failed "$sub"; continue; }
-    else
-      if [ -L "$DEST" ] && [ "$(readlink "$DEST")" = "$f" ]; then
-        LANDED="$LANDED $(basename "$f")"; note_landed "$sub" "$(basename "$f")" "$f"; continue
-      fi
-      # A real file at DEST (not a symlink): on the first local install ever, it is a
-      # person's own file, backed up. After that, a real file here is this same
-      # installer's own earlier copy (`ln -sfn` fell back to copying it on a
-      # no-symlink-rights machine): replace it, no backup (D: copy-mode-overwrites-no-backup).
-      if [ -e "$DEST" ] && [ ! -L "$DEST" ]; then
-        if [ "$FIRST_LOCAL_RUN" = 1 ]; then
-          BAK="$DEST.bak.$(date +%Y%m%d%H%M%S)"
-          mv "$DEST" "$BAK"
-          log "existing $DEST moved to $BAK"
-        else
-          rm -f "$DEST"
-        fi
-      fi
-      ln -sfn "$f" "$DEST" || { land_failed "$sub"; continue; }
+    if [ -L "$DEST" ] && [ "$(readlink "$DEST")" = "$f" ]; then
+      LANDED="$LANDED $(basename "$f")"; note_landed "$sub" "$(basename "$f")" "$f"; continue
     fi
+    # A real file at DEST (not a symlink): on the first local install ever, it is a
+    # person's own file, backed up. After that, a real file here is this same
+    # installer's own earlier copy (`ln -sfn` fell back to copying it on a
+    # no-symlink-rights machine): replace it, no backup (D: copy-mode-overwrites-no-backup).
+    if [ -e "$DEST" ] && [ ! -L "$DEST" ]; then
+      if [ "$FIRST_LOCAL_RUN" = 1 ]; then
+        BAK="$DEST.bak.$(date +%Y%m%d%H%M%S)"
+        mv "$DEST" "$BAK"
+        log "existing $DEST moved to $BAK"
+      else
+        rm -f "$DEST"
+      fi
+    fi
+    ln -sfn "$f" "$DEST" || { land_failed "$sub"; continue; }
     LANDED="$LANDED $(basename "$f")"
     note_landed "$sub" "$(basename "$f")" "$f"
   done
@@ -836,14 +854,16 @@ land_dir() {
 # one more skill, and cloud runs install at every resume and merge. They go to
 # "$CLAUDE_DIR/backups/skills/<name>.<time>". A backup is moved there, never deleted.
 SKILL_BAK_DIR="$CLAUDE_DIR/backups/skills"
-# What a cloud run last copied into skills/<name>, as a tree hash, kept outside skills/.
+# What an older cloud run last copied into skills/<name>, as a tree hash, kept outside skills/: gen_skill_copy reads it.
 SKILL_COPY_DIR="$CLAUDE_DIR/backups/skill-copies"
 
 # Print a hash of a directory tree: every file path and every file content.
 # It covers file names and contents only, so a mode, empty-folder or symlink-only change is replaced with no backup.
+# __pycache__ folders and *.pyc files are runtime files a script writes when it runs through the live link, not
+# part of the skill, so they stay out of the hash.
 tree_hash() {
   [ -d "$1" ] || return 1
-  ( cd "$1" && find . -type f | LC_ALL=C sort | while IFS= read -r f; do
+  ( cd "$1" && find . -name __pycache__ -type d -prune -o -type f ! -name '*.pyc' -print | LC_ALL=C sort | while IFS= read -r f; do
       printf '%s ' "$f"; sha256_of < "$f"
     done ) | sha256_of
 }
@@ -852,12 +872,19 @@ sha256_of() {
 }
 
 # Move $1 to the skill backup folder as $2.<time>. A name that is taken gets the pid added.
+# With a third argument "copy" the folder is copied, not moved: it is the live generation's own skill, which a
+# running session still reads, so it must stay whole until the switch.
 backup_skill() {
   mkdir -p "$SKILL_BAK_DIR"
   BAK="$SKILL_BAK_DIR/$2.$(date +%Y%m%d%H%M%S)"
   [ ! -e "$BAK" ] || BAK="$BAK.$$"
-  mv "$1" "$BAK"
-  log "existing $1 moved to $BAK"
+  if [ "${3:-}" = copy ]; then
+    cp -r "$1" "$BAK" || { log "could not back up $1 to $BAK"; return 1; }
+    log "existing $1 copied to $BAK"
+  else
+    mv "$1" "$BAK"
+    log "existing $1 moved to $BAK"
+  fi
 }
 
 # An older installer left skills/<name>.bak.<time> folders. Move each out of skills/.
@@ -894,53 +921,373 @@ land_skills_dir() {
     # A folder with no file git lists (retired, or only ignored files) is not landed.
     shipped "skills/$name" || continue
     DEST="$DEST_DIR/$name"
-    if [ "$CLOUD" = 1 ]; then
-      # Our own earlier copy is replaced with no backup. It is ours when its tree hash is the
-      # one recorded at the last copy (the source may have changed since), or when it equals
-      # the source. Anything else is a hand edit or a person's skill: back it up.
-      if [ -e "$DEST" ] || [ -L "$DEST" ]; then
-        have=$(tree_hash "$DEST"); rec=$(cat "$SKILL_COPY_DIR/$name" 2>/dev/null)
-        if [ -n "$have" ] && { [ "$have" = "$rec" ] || [ "$have" = "$(tree_hash "$d")" ]; }; then
-          rm -rf "$DEST"
-        else
-          backup_skill "$DEST" "$name"
-        fi
-      fi
-      cp -r "$d" "$DEST" || { land_failed skills; continue; }
-      mkdir -p "$SKILL_COPY_DIR"
-      tree_hash "$DEST" > "$SKILL_COPY_DIR/$name"
-    else
-      if [ -L "$DEST" ] && [ "$(readlink "$DEST")" = "$d" ]; then
-        LANDED="$LANDED $name"; note_landed skills "$name" "$d"; continue
-      fi
-      # A real directory at DEST (not a symlink): on the first local install ever, it is a
-      # person's own hand-made skill, backed up. After that, a real directory here is this
-      # same installer's own earlier copy, from a no-symlink-rights machine where `ln -sfn`
-      # fell back to copying it: replace it, no backup (D: copy-mode-overwrites-no-backup).
-      if [ -e "$DEST" ] && [ ! -L "$DEST" ]; then
-        if [ "$FIRST_LOCAL_RUN" = 1 ]; then
-          backup_skill "$DEST" "$name"
-        else
-          rm -rf "$DEST"
-        fi
-      fi
-      ln -sfn "$d" "$DEST" || { land_failed skills; continue; }
+    if [ -L "$DEST" ] && [ "$(readlink "$DEST")" = "$d" ]; then
+      LANDED="$LANDED $name"; note_landed skills "$name" "$d"; continue
     fi
+    # A real directory at DEST (not a symlink): on the first local install ever, it is a
+    # person's own hand-made skill, backed up. After that, a real directory here is this
+    # same installer's own earlier copy, from a no-symlink-rights machine where `ln -sfn`
+    # fell back to copying it: replace it, no backup (D: copy-mode-overwrites-no-backup).
+    if [ -e "$DEST" ] && [ ! -L "$DEST" ]; then
+      if [ "$FIRST_LOCAL_RUN" = 1 ]; then
+        backup_skill "$DEST" "$name"
+      else
+        rm -rf "$DEST"
+      fi
+    fi
+    ln -sfn "$d" "$DEST" || { land_failed skills; continue; }
     LANDED="$LANDED $name"
     note_landed skills "$name" "$d"
   done
   [ -n "$LANDED" ] && log "skills in $DEST_DIR:$LANDED"
 }
+# ---- cloud: one generation per run (decision install-hooks-whole) ------------------------------------
+# A cloud run stages the whole shipped set, plus the generated settings.json, in one folder:
+# $CLAUDE_DIR/installs/<id>.tmp, renamed to installs/<id> when it is whole. Each landed file, each skill folder
+# and settings.json is then a link through $CLAUDE_DIR/.cs-current, and one rename of that link switches the
+# install to the new folder. The link targets name no generation, so a refresh makes links only for new names.
+# A copy that fails removes the stage and leaves the old generation whole: the run exits 1 and writes no record.
+# A generation retired more than an hour ago (its mtime, touched at the switch) is removed after a good switch,
+# never the current one.
+GEN_ROOT="$CLAUDE_DIR/installs"
+GEN_CUR="$CLAUDE_DIR/.cs-current"
+GEN_STAGE="$GEN_ROOT/$INSTALL_ID_VALUE.tmp"
+GEN_DIR="$GEN_ROOT/$INSTALL_ID_VALUE"
+GEN_LINKS=""     # one landed path per line, relative to $CLAUDE_DIR: what the links cover
+GEN_NEW=""       # the links this run made where nothing was: removed again when the switch fails
+GEN_ABORTED=0
+
+# gen_abort: the old generation stays live. Removes the stage and the folder this run named, then fails the run.
+gen_abort() {
+  rm -rf "$GEN_STAGE" "$GEN_DIR"
+  GEN_ABORTED=1
+  INSTALL_FAILED=1
+}
+
+# stage_file SRC DEST: DEST is in the stage, which no reader sees yet, so it is written in place. In guard.py and
+# guard_*.py only, the whole placeholder line gets this run's id, the same stamp install.ps1 and its post-merge
+# hook write, so hooks/guard.py can tell a half-installed set from a whole one. No other line is touched.
+# STAMP_PLACEHOLDER is the same literal as $StampPlaceholder in install.ps1 (sh cannot share that code); an
+# optional CR before the line end is kept.
+stage_file() {
+  case "$1" in
+    */guard.py|*/guard_*.py)
+      sed "s/^$STAMP_PLACEHOLDER\($STAMP_CR\{0,1\}\)\$/INSTALL_ID = \"$INSTALL_ID_VALUE\"\1/" "$1" > "$2" ;;
+    *) cp "$1" "$2" ;;
+  esac
+}
+
+# stage_guard_set SRC_HOOKS STAGE_HOOKS: the guard set goes in the generation's hooks/guard.d/<id>/: every guard
+# file, stamped, and shared_names.py, git_reads.py, question_form.py, own_session.py and precompact_handoff.py,
+# which the guard imports. hooks/guard.py finds it by its own real path, so it is the set of its generation.
+stage_guard_set() {
+  sg_dir="$2/guard.d/$INSTALL_ID_VALUE"
+  mkdir -p "$sg_dir" || return 1
+  for gf in "$1"/guard.py "$1"/guard_*.py "$1"/shared_names.py "$1"/git_reads.py "$1"/question_form.py "$1"/own_session.py "$1"/precompact_handoff.py; do
+    [ -f "$gf" ] || continue
+    stage_file "$gf" "$sg_dir/$(basename "$gf")" || return 1
+  done
+}
+
+# stage_dir SUB: copy the files git lists directly under "$SRC/$SUB" into the stage and name each for a link.
+# A person's own folder at a file name is never replaced: the run exits 1, as it did before generations.
+stage_dir() {
+  sd_sub="$1"
+  # The live folder must be makeable too: the links go in it.
+  mkdir -p "$CLAUDE_DIR/$sd_sub" || land_failed "$sd_sub"
+  mkdir -p "$GEN_STAGE/$sd_sub" || { log "could not make $GEN_STAGE/$sd_sub; the old install stays as it was"; gen_abort; return 1; }
+  if [ "$sd_sub" = hooks ] && ! stage_guard_set "$SRC/hooks" "$GEN_STAGE/hooks"; then
+    log "could not stage the guard files; the old install stays as it was"; gen_abort; return 1
+  fi
+  for f in "$SRC/$sd_sub"/*; do
+    [ -f "$f" ] || continue
+    # A file git does not list (retired, or ignored) is not landed.
+    shipped "$sd_sub/$(basename "$f")" || continue
+    if [ -d "$CLAUDE_DIR/$sd_sub/$(basename "$f")" ] && [ ! -L "$CLAUDE_DIR/$sd_sub/$(basename "$f")" ]; then
+      log "kept $CLAUDE_DIR/$sd_sub/$(basename "$f"): a folder of yours sits where the file $sd_sub/$(basename "$f") lands; nothing under $sd_sub is removed this run"
+      land_failed "$sd_sub"; continue
+    fi
+    if ! stage_file "$f" "$GEN_STAGE/$sd_sub/$(basename "$f")"; then
+      log "could not copy $f into $GEN_STAGE; the old install stays as it was"; gen_abort; return 1
+    fi
+    GEN_LINKS="$GEN_LINKS$sd_sub/$(basename "$f")$NL"
+  done
+}
+
+# stage_skills_dir: each shipped skill is copied whole into the stage.
+stage_skills_dir() {
+  mkdir -p "$CLAUDE_DIR/skills" || land_failed skills
+  mkdir -p "$GEN_STAGE/skills" || { log "could not make $GEN_STAGE/skills; the old install stays as it was"; gen_abort; return 1; }
+  for d in "$SRC/skills"/*; do
+    [ -d "$d" ] || continue
+    name=$(basename "$d")
+    # A folder with no file git lists (retired, or only ignored files) is not landed.
+    shipped "skills/$name" || continue
+    if ! cp -r "$d" "$GEN_STAGE/skills/$name"; then
+      log "could not copy $d into $GEN_STAGE; the old install stays as it was"; gen_abort; return 1
+    fi
+    GEN_LINKS="$GEN_LINKS""skills/$name$NL"
+  done
+}
+
+# link_over TMP DEST: rename the link TMP over DEST in one step. DEST that is a link to a folder needs mv's
+# no-target-directory form, or mv puts TMP inside that folder: -T on GNU, -h on BSD and macOS. The idiom of
+# point_at in merge/install_from_main.sh. Never ln -sfn: GNU ln -f removes DEST before it makes the link.
+link_over() {
+  if [ -L "$2" ]; then
+    mv -fT "$1" "$2" 2>/dev/null || mv -fh "$1" "$2" || return 1
+  else
+    mv -f "$1" "$2" || return 1
+  fi
+}
+
+# gen_skill_copy DEST NAME: a skill that is a real folder or an outside link here cannot take a link by rename. Our
+# own copy (its tree hash is the recorded one, or the source's) is removed, a hand edit or a person's skill is
+# backed up first. That skill has a short gap, once, and no other name has one.
+gen_skill_copy() {
+  have=$(tree_hash "$1"); rec=$(cat "$SKILL_COPY_DIR/$2" 2>/dev/null)
+  if [ -n "$have" ] && { [ "$have" = "$rec" ] || [ "$have" = "$(tree_hash "$SRC/skills/$2")" ]; }; then
+    rm -rf "$1"
+  else
+    backup_skill "$1" "$2"
+  fi
+  rm -f "$SKILL_COPY_DIR/$2"
+}
+
+# gen_link REL: make "$CLAUDE_DIR/REL" a link to "$GEN_CUR/REL", through a link at a temp name that a rename puts
+# in place. A link that already has that target stays as it is.
+gen_link() {
+  gl_dest="$CLAUDE_DIR/$1"; gl_to="$GEN_CUR/$1"
+  if [ -L "$gl_dest" ] && [ "$(readlink "$gl_dest")" = "$gl_to" ]; then return 0; fi
+  mkdir -p "$(dirname "$gl_dest")" || return 1
+  gl_had=0
+  if [ -e "$gl_dest" ] || [ -L "$gl_dest" ]; then gl_had=1; fi
+  case "$1" in
+    skills/*) if [ -d "$gl_dest" ]; then gen_skill_copy "$gl_dest" "${1#skills/}"; gl_had=0; fi ;;
+  esac
+  gl_tmp="$gl_dest.cs-new"
+  rm -f "$gl_tmp"
+  ln -s "$gl_to" "$gl_tmp" || return 1
+  link_over "$gl_tmp" "$gl_dest" || { rm -f "$gl_tmp"; return 1; }
+  [ "$gl_had" = 1 ] || GEN_NEW="$GEN_NEW$1$NL"
+}
+
+# gen_skill_backups: before the switch, each skill of the live generation that matches neither the tree hash this
+# installer recorded for it nor the shipped source is a hand edit: it is copied to backups/skills (the live folder
+# stays whole, a running session reads it). An unedited skill, or one whose source changed since, gets no backup.
+# A backup that fails fails the run, so no edit is lost.
+gen_skill_backups() {
+  while IFS= read -r gb_rel; do
+    case "$gb_rel" in skills/*) ;; *) continue ;; esac
+    gb_name=${gb_rel#skills/}; gb_live="$GEN_CUR/$gb_rel"
+    [ -d "$gb_live" ] || continue
+    gb_have=$(tree_hash "$gb_live")
+    [ "$gb_have" != "$(cat "$SKILL_COPY_DIR/$gb_name" 2>/dev/null)" ] || continue
+    [ "$gb_have" != "$(tree_hash "$GEN_DIR/$gb_rel")" ] || continue
+    backup_skill "$gb_live" "$gb_name" copy || return 1
+  done <<EOF
+$GEN_LINKS
+EOF
+}
+
+# gen_record_skills: after a good switch, record the tree hash of each skill this run shipped, the hash a later
+# refresh compares the live skill with.
+gen_record_skills() {
+  mkdir -p "$SKILL_COPY_DIR" || { log "WARN: could not make $SKILL_COPY_DIR; no skill tree hash recorded"; return 0; }
+  while IFS= read -r gr_rel; do
+    case "$gr_rel" in skills/*) ;; *) continue ;; esac
+    gr_rec="$SKILL_COPY_DIR/${gr_rel#skills/}"
+    tree_hash "$GEN_DIR/$gr_rel" > "$gr_rec.cs-new" && mv -f "$gr_rec.cs-new" "$gr_rec" ||
+      log "WARN: could not record the tree hash of $gr_rel; a later refresh may back it up as a hand edit"
+  done <<EOF
+$GEN_LINKS
+EOF
+  return 0
+}
+
+# gen_switch: one rename of the link .cs-current onto the new generation. A failure leaves it as it was.
+# The outgoing generation is touched first, so its age for gen_prune counts from this retirement, not from its
+# creation: a hook that started in it may still run for an hour.
+gen_switch() {
+  gs_to="installs/$INSTALL_ID_VALUE"; gs_tmp="$GEN_CUR.cs-new"
+  gs_old=$(readlink "$GEN_CUR" 2>/dev/null)
+  [ -z "$gs_old" ] || [ "$gs_old" = "$gs_to" ] || touch "$CLAUDE_DIR/$gs_old" 2>/dev/null ||
+    log "WARN: could not touch the outgoing generation $gs_old; gen_prune may remove it early"
+  rm -f "$gs_tmp"
+  ln -s "$gs_to" "$gs_tmp" || return 1
+  if [ -L "$GEN_CUR" ]; then
+    mv -fT "$gs_tmp" "$GEN_CUR" 2>/dev/null || mv -fh "$gs_tmp" "$GEN_CUR" || { rm -f "$gs_tmp"; return 1; }
+  elif [ -e "$GEN_CUR" ]; then
+    rm -f "$gs_tmp"; return 1
+  else
+    mv "$gs_tmp" "$GEN_CUR" || { rm -f "$gs_tmp"; return 1; }
+  fi
+  [ "$(readlink "$GEN_CUR")" = "$gs_to" ] || return 1
+}
+
+# gen_links_all: a link for each staged path, settings.json last. The skills move out of skills/ their old backups first.
+gen_links_all() {
+  DEST_DIR="$CLAUDE_DIR/skills"; move_old_skill_baks
+  while IFS= read -r gla_rel; do
+    [ -n "$gla_rel" ] || continue
+    gen_link "$gla_rel" || { log "could not link $CLAUDE_DIR/$gla_rel"; return 1; }
+  done <<EOF
+$GEN_LINKS
+EOF
+  # hooks/guard.d: a link to the generation's guard sets, for a reader that goes by the flat path. A real folder
+  # from an older install stays as it is, because a rename cannot replace it; gen_prune ages its entries out.
+  if [ ! -d "$CLAUDE_DIR/hooks/guard.d" ] || [ -L "$CLAUDE_DIR/hooks/guard.d" ]; then
+    gen_link hooks/guard.d || { log "could not link $CLAUDE_DIR/hooks/guard.d"; return 1; }
+  fi
+  gen_link settings.json || { log "could not link $TARGET_JSON"; return 1; }
+}
+
+# gen_land: stage -> links -> switch, in that order; the first install has no .cs-current, so it switches before
+# its links. A failure before the switch removes the stage and the links this run made. The caller has staged
+# every folder and settings.json in $GEN_STAGE.
+gen_land() {
+  if ! mv "$GEN_STAGE" "$GEN_DIR"; then
+    log "could not rename $GEN_STAGE to $GEN_DIR; the old install stays as it was"; gen_abort; return 1
+  fi
+  if [ -L "$GEN_CUR" ]; then
+    if ! gen_skill_backups || ! gen_links_all || ! gen_switch; then
+      while IFS= read -r gl_rel; do
+        [ -n "$gl_rel" ] && rm -f "$CLAUDE_DIR/$gl_rel"
+      done <<EOF
+$GEN_NEW
+EOF
+      rm -f "$GEN_CUR.cs-new"
+      log "could not switch $GEN_CUR to $GEN_DIR; the old install stays live"
+      gen_abort; return 1
+    fi
+  else
+    if ! gen_switch; then
+      log "could not make the link $GEN_CUR; nothing is linked"; gen_abort; return 1
+    fi
+    gen_links_all || { INSTALL_FAILED=1; return 1; }
+  fi
+}
+
+# gen_prune: after a good switch, remove each generation, and each stage a killed run left, older than an hour
+# by its mtime. The age is the rule, never "keep the previous one": a CI wake runs up to 3300 s on the files it
+# started with. The current one stays. A real folder hooks/guard.d from an older install loses its entries older
+# than an hour the same way.
+gen_prune() {
+  gp_cur=$(readlink "$GEN_CUR")
+  find "$GEN_ROOT" -mindepth 1 -maxdepth 1 -mmin +60 2>/dev/null | while IFS= read -r gp; do
+    [ "installs/${gp##*/}" = "$gp_cur" ] || rm -rf "$gp"
+  done
+  if [ -d "$CLAUDE_DIR/hooks/guard.d" ] && [ ! -L "$CLAUDE_DIR/hooks/guard.d" ]; then
+    find "$CLAUDE_DIR/hooks/guard.d" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} + 2>/dev/null
+  fi
+  return 0
+}
+
+# gen_note_all: after the switch, record each linked path in the install manifest and log it by folder.
+gen_note_all() {
+  gn_sub=""; gn_list=""
+  while IFS= read -r gn_rel; do
+    [ -n "$gn_rel" ] || continue
+    gn_s=${gn_rel%/*}; gn_n=${gn_rel##*/}
+    if [ "$gn_s" != "$gn_sub" ]; then
+      [ -z "$gn_list" ] || log "$gn_sub in $CLAUDE_DIR/$gn_sub:$gn_list"
+      gn_sub=$gn_s; gn_list=""
+    fi
+    gn_list="$gn_list $gn_n"
+    note_landed "$gn_s" "$gn_n" "$GEN_CUR/$gn_rel"
+  done <<EOF
+$GEN_LINKS
+EOF
+  [ -z "$gn_list" ] || log "$gn_sub in $CLAUDE_DIR/$gn_sub:$gn_list"
+}
+
+# ---- ~/.claude/settings.json, cloud: generated into the stage ---------------------------------------
+TARGET_JSON="$CLAUDE_DIR/settings.json"
+
+# jq: true when a SessionStart entry fires for session source $s. A matcher of "", "*" or none fires for every
+# source; any other matcher is an anchored regex, as Claude Code reads it. A matcher that is no valid regex fires
+# for none. The one home of the rule: the cloud settings.json and the startup entries run below both use it.
+FIRES_JQ='def fires($s): (.matcher // "") as $m
+  | if $m == "" or $m == "*" then true else (try ($s | test("^(" + $m + ")$")) catch false) end;'
+
+# cloud_settings DEST: a real file (not a link into the clone) whose startup SessionStart entry is a hook that
+# refreshes ~/.claude by re-running install.sh from GitHub, written into the stage so the generation holds it. Claude Code runs the
+# entries of one event in parallel, so a repo entry that matches startup would run the snapshot's stale hooks
+# before the refresh replaced them. The generated file therefore drops those entries, and the
+# install runs them itself once the hooks are linked (see "cloud startup entries" below).
+# The refresh hook hands its stdin to install.sh, which reads the session source from it.
+# Locals get no refresh hook: their settings.json is a symlink into the clone.
+# A file that cannot be written fails the stage: a generation with no settings.json never goes live.
+cloud_settings() {
+  cs_out="$1"
+  HOOK_CMD='i=$(cat); curl -fsSL '"${RAW}"'/install.sh | CS_HOOK_INPUT="$i" bash -s -- --cloud'
+  SRC_SHA=$(git -C "$SRC" rev-parse --short HEAD 2>/dev/null) || SRC_SHA="no git"
+  if command -v jq >/dev/null 2>&1; then
+    # merge/cloud_allow.json: the `merge --confirm` and `merge --role` allow rules only a cloud session gets (a local settings.json links to the repo's, which has none).
+    # Read from the source checkout, never from main: launch.py's fallback and --dev run the checkout's own merge.py, and
+    # the file landed in the same commit as that merge.py's role check. A checkout without the file gets no rules.
+    ALLOW_FILE="$SRC/merge/cloud_allow.json"
+    [ -f "$ALLOW_FILE" ] || ALLOW_FILE=/dev/null   # a source without the file adds no rules
+    if jq --arg cmd "$HOOK_CMD" --slurpfile extra "$ALLOW_FILE" \
+      "$FIRES_JQ"'.hooks.SessionStart = ([(.hooks.SessionStart // [])[] | select(fires("startup") | not)] + [{"matcher":"startup|resume","hooks":[{"type":"command","command":$cmd,"timeout":60}]}])
+       | .permissions.allow = ((.permissions.allow // []) + ($extra[0].permissions.allow // []))' \
+      "$SRC/settings.json" > "$cs_out"; then
+      n=$(jq -s '[.[0].permissions.allow[]?] | length' "$ALLOW_FILE" 2>/dev/null)
+      if [ "${n:-0}" -gt 0 ] 2>/dev/null; then
+        log "wrote $TARGET_JSON (repo settings + cloud refresh hook + $n merge allow rules from $SRC at $SRC_SHA)"
+      else
+        log "WARNING: wrote $TARGET_JSON with no merge allow rules: $SRC at $SRC_SHA has no rules in merge/cloud_allow.json, so the auto-mode classifier judges each merge --confirm. Move $SRC to origin/$REF, then resume the session."
+      fi
+    else
+      rm -f "$cs_out"
+      log "WARNING: could not write $TARGET_JSON from $SRC/settings.json and merge/cloud_allow.json; the old install stays as it was"
+      return 1
+    fi
+  else
+    if cp "$SRC/settings.json" "$cs_out"; then
+      log "wrote $TARGET_JSON (jq missing, no refresh hook and no merge/cloud_allow.json rules added) from $SRC at $SRC_SHA"
+    else
+      rm -f "$cs_out"
+      log "WARNING: could not write $TARGET_JSON from $SRC/settings.json; the old install stays as it was"
+      return 1
+    fi
+  fi
+}
+
 # The set of directories landed above comes from landed-dirs.txt at the repo root, the single
 # source install.ps1 reads too (see the comment there). hooks/guard.py's CONFIG_FROZEN_DIRS is a
 # deliberately separate literal; see the comment beside it in hooks/guard.py for why.
 # lint/check_landed_dirs.py checks the two stay in agreement.
+if [ "$CLOUD" = 1 ] && ! mkdir -p "$GEN_STAGE"; then
+  log "could not make $GEN_STAGE; the old install stays as it was"
+  gen_abort
+fi
 while IFS= read -r sub || [ -n "$sub" ]; do
   sub=$(printf '%s' "$sub" | tr -d '\r' | sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//')
   [ -n "$sub" ] || continue
-  if [ "$sub" = "skills" ]; then land_skills_dir; else land_dir "$sub"; fi
+  if [ "$CLOUD" = 1 ]; then
+    [ "$GEN_ABORTED" = 1 ] && continue
+    if [ "$sub" = "skills" ]; then stage_skills_dir; else stage_dir "$sub"; fi
+  elif [ "$sub" = "skills" ]; then land_skills_dir; else land_dir "$sub"; fi
 done < "$SRC/landed-dirs.txt"
-retire_and_record
+# Cloud: the generation is whole only with its settings.json. Then links, then the switch, then what main no longer
+# ships is retired and the manifest written. A failed stage or switch has already removed the stage and failed the run.
+GEN_OK=0
+if [ "$CLOUD" = 1 ] && [ "$GEN_ABORTED" = 0 ]; then
+  if cloud_settings "$GEN_STAGE/settings.json"; then
+    gen_land && GEN_OK=1
+  else
+    gen_abort
+  fi
+fi
+if [ "$CLOUD" != 1 ]; then
+  retire_and_record
+elif [ "$GEN_OK" = 1 ]; then
+  gen_note_all
+  gen_record_skills
+  retire_and_record
+  [ "$INSTALL_FAILED" != 0 ] || gen_prune
+fi
 
 # A folder an earlier install landed and the repo has since moved: ux, now docs/design (decision
 # ux-house-rules). Local mode removes its dangling links into "$SRC/ux", the same test land_dir
@@ -990,50 +1337,9 @@ if [ "$CLOUD" = 1 ] && ! command -v pipx >/dev/null 2>&1; then
   fi
 fi
 
-# ---- ~/.claude/settings.json ------------------------------------------------------------------
-TARGET_JSON="$CLAUDE_DIR/settings.json"
-
-# jq: true when a SessionStart entry fires for session source $s. A matcher of "", "*" or none fires for every
-# source; any other matcher is an anchored regex, as Claude Code reads it. A matcher that is no valid regex fires
-# for none. The one home of the rule: the cloud settings.json and the startup entries run below both use it.
-FIRES_JQ='def fires($s): (.matcher // "") as $m
-  | if $m == "" or $m == "*" then true else (try ($s | test("^(" + $m + ")$")) catch false) end;'
-
-if [ "$CLOUD" = 1 ]; then
-  # Cloud: generate a real file (not a symlink) whose startup SessionStart entry is a hook that
-  # refreshes ~/.claude by re-running install.sh from GitHub. Claude Code runs the entries of one
-  # event in parallel, so a repo entry that matches startup would run the snapshot's stale hooks
-  # before the refresh replaced them. The generated file therefore drops those entries, and the
-  # install runs them itself once the hooks are copied (see "cloud startup entries" below).
-  # The refresh hook hands its stdin to install.sh, which reads the session source from it.
-  # Locals get no refresh hook: their settings.json is a symlink into the clone.
-  HOOK_CMD='i=$(cat); curl -fsSL '"${RAW}"'/install.sh | CS_HOOK_INPUT="$i" bash -s -- --cloud'
-  SRC_SHA=$(git -C "$SRC" rev-parse --short HEAD 2>/dev/null) || SRC_SHA="no git"
-  if command -v jq >/dev/null 2>&1; then
-    # merge/cloud_allow.json: the `merge --confirm` and `merge --role` allow rules only a cloud session gets (a local settings.json links to the repo's, which has none).
-    # Read from the source checkout, never from main: launch.py's fallback and --dev run the checkout's own merge.py, and
-    # the file landed in the same commit as that merge.py's role check. A checkout without the file gets no rules.
-    ALLOW_FILE="$SRC/merge/cloud_allow.json"
-    [ -f "$ALLOW_FILE" ] || ALLOW_FILE=/dev/null   # a source without the file adds no rules
-    if jq --arg cmd "$HOOK_CMD" --slurpfile extra "$ALLOW_FILE" \
-      "$FIRES_JQ"'.hooks.SessionStart = ([(.hooks.SessionStart // [])[] | select(fires("startup") | not)] + [{"matcher":"startup|resume","hooks":[{"type":"command","command":$cmd,"timeout":60}]}])
-       | .permissions.allow = ((.permissions.allow // []) + ($extra[0].permissions.allow // []))' \
-      "$SRC/settings.json" > "$TARGET_JSON.tmp" && mv "$TARGET_JSON.tmp" "$TARGET_JSON"; then
-      n=$(jq -s '[.[0].permissions.allow[]?] | length' "$ALLOW_FILE" 2>/dev/null)
-      if [ "${n:-0}" -gt 0 ] 2>/dev/null; then
-        log "wrote $TARGET_JSON (repo settings + cloud refresh hook + $n merge allow rules from $SRC at $SRC_SHA)"
-      else
-        log "WARNING: wrote $TARGET_JSON with no merge allow rules: $SRC at $SRC_SHA has no rules in merge/cloud_allow.json, so the auto-mode classifier judges each merge --confirm. Move $SRC to origin/main, then resume the session."
-      fi
-    else
-      rm -f "$TARGET_JSON.tmp"
-      log "WARNING: could not write $TARGET_JSON from $SRC/settings.json and merge/cloud_allow.json; any file from an earlier run stays"
-    fi
-  else
-    cp "$SRC/settings.json" "$TARGET_JSON"
-    log "wrote $TARGET_JSON (jq missing, no refresh hook and no merge/cloud_allow.json rules added) from $SRC at $SRC_SHA"
-  fi
-else
+# ---- ~/.claude/settings.json, local ------------------------------------------------------------
+# Cloud wrote its settings.json into the generation (cloud_settings, above) and linked it with the rest.
+if [ "$CLOUD" != 1 ]; then
   # Local: symlink, so `git pull` in the clone is the whole update.
   if [ -L "$TARGET_JSON" ] && [ "$(readlink "$TARGET_JSON")" = "$SRC/settings.json" ]; then
     log "$TARGET_JSON already links to $SRC/settings.json"
@@ -1158,6 +1464,30 @@ if [ "$CLOUD" = 1 ] && command -v jq >/dev/null 2>&1 && [ -f "$SRC/settings.json
     START_I=$((START_I + 1))
   done
 fi
+
+# Cloud, a whole install: record what this run installed, for hooks/stale_install.py. ref is $REF as this run
+# resolved it, sha is the source clone's HEAD, the commit the files came from (after a failed refresh, or a clone
+# the refresh left on a local commit, it is that commit, not origin's tip, which is the truth), source and installer
+# say where to run it again. No HEAD, no record: the hook then reports the freshness as unknown instead of reading a
+# guess. A failed write is a WARN, never a failed install. The file is built beside its place and renamed over it.
+record_install() {
+  ri_sha=$(git -C "$SRC" rev-parse -q --verify HEAD 2>/dev/null)
+  if [ -z "$ri_sha" ] || [ ! -f "$SRC/install.sh" ]; then
+    log "WARN: no install record written: $SRC has no readable HEAD or no install.sh"
+    return 0
+  fi
+  ri_file="$CLAUDE_DIR/.claude-settings-install.json"
+  ri_esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+  if printf '{"ref": "%s", "sha": "%s", "source": "%s", "installer": "%s"}\n' \
+       "$(ri_esc "$REF")" "$ri_sha" "$(ri_esc "$SRC")" "$(ri_esc "$SRC/install.sh")" > "$ri_file.cs-new" \
+     && mv -f "$ri_file.cs-new" "$ri_file"; then
+    :
+  else
+    rm -f "$ri_file.cs-new"
+    log "WARN: could not write the install record $ri_file"
+  fi
+}
+[ "$CLOUD" = 1 ] && [ "$INSTALL_FAILED" = 0 ] && [ -n "$SRC" ] && record_install
 
 # Marks a local install has landed here, so the NEXT local run treats a real file/dir at a
 # landed name as its own earlier copy rather than a person's. See the comment above its

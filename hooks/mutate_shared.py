@@ -70,7 +70,7 @@ def anchor_files(folder: str):
     """Every file a guard mutant may be anchored in: the guard modules, then git_reads.py, which
     holds the reads of the repository and of sessions that the guard and the janitor share, then
     proc_env.py, the one home of the exec-environment session-tag read, then reread_check.py,
-    the one home of the handoff-unread check the guard calls, then own_session.py, the one home of
+    the one home of the handoff-unread and compaction-audit checks the guard calls, then own_session.py, the one home of
     the own get_session read that guard_merge.py and lint/report_guard.py both import, then shared_names.py, the one home
     of the brief marker rows the guard reads."""
     shared = [os.path.join(folder, name) for name in ("git_reads.py", "proc_env.py", "reread_check.py", "own_session.py",
@@ -156,12 +156,17 @@ def job_count() -> int:
 def skip_reason(only_on):
     """Return why a mutation marked `only_on` does not run on this platform, or None to run it.
 
-    `only_on` is "posix" or "windows", for a mutation whose broken code path only exists on one
-    platform (e.g. a POSIX-only `ps` arm never reached on Windows). A mutation that carries no
+    `only_on` is "posix", "windows" or "linux", for a mutation whose broken code path only exists on
+    one platform (e.g. a POSIX-only `ps` arm never reached on Windows, or a /proc read that macOS
+    lacks too). A mutation that carries no
     `only_on` at all runs on every platform, and this returns None for it too.
     """
     if only_on is None:
         return None
+    if only_on == "linux":
+        if sys.platform.startswith("linux"):
+            return None
+        return "linux-only, this platform is %s" % sys.platform
     here = "windows" if sys.platform.startswith("win") else "posix"
     if only_on == here:
         return None

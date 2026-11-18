@@ -663,6 +663,21 @@ def push_verdict(args, cwd: str, overrides=None) -> str:
     return "" if includes or not unpinned else "deny"
 
 
+def push_is_plain(args) -> bool:
+    """True when the push carries no force, no lease of any form, no `--force-if-includes`, no `+` refspec,
+    and no `--tags` or `--follow-tags` (or an unambiguous prefix of either): it moves only the branches
+    it names, forward. A `--no-force-with-lease` that cancels a lease counts as none."""
+    force, _mirror, _every, includes, _unpinned, leased, _delete, _upstream, _remote, plain = _push_parse(args)
+    if force or leased or includes or any(spec.startswith("+") for spec in plain):
+        return False
+    for arg in args:
+        name = arg.replace('"', "").replace("'", "").partition("=")[0]
+        if name.startswith("--") and (
+                (len(name) >= 4 and "--tags".startswith(name)) or (len(name) >= 5 and "--follow-tags".startswith(name))):
+            return False
+    return True
+
+
 def _push_tags_only(args) -> bool:
     """True when the push carries `--tags` (or an unambiguous prefix): with no refspec it moves tags only."""
     for arg in args:
@@ -1532,6 +1547,97 @@ def cmd_exe_delete_hit(segment: str) -> str:
         if re.fullmatch("(?i)" + WIDE_TARGET, arg):
             return word + " /s " + arg
     return ""
+
+
+# ARCHIVE PUSH BEFORE DELETE. Rule archive-push-gates-delete (rule shared-trees-archive-then-delete): a remote
+# branch is lossless to delete only once its archive push has succeeded. A delete that follows an archive push
+# of the same branch in one command runs only when `&&` joins every step from the push to the delete, so the
+# push's own exit status decides it. A `;`, a newline, `||` or a pipe ends or hides that status. Segments and
+# ends come from `split_segments`; each push is read by `_push_parse`. A push and a delete pair when they
+# name the same branch by text: `${b}` folds to `$b`, and `$b` pairs with `$b` by equality, with no expansion
+# read. An explicit source `origin/<name>` is `<name>` alone. A `HEAD` or `@` source takes its names from the
+# archive name, with and without `-N`. One push that carries both the archive refspec and the delete never
+# pairs. `bash -c` bodies, heredocs, script files and PowerShell are not read (`guard-guards-mistakes-only`).
+ARCHIVE_JOIN = "&&"   # the join that keeps the push's exit status, and the one word the remedy names
+ARCHIVE_PREFIX = "archive/"
+ARCHIVE_COPY_SUFFIX = r"(-[0-9]+)?"   # a taken archive name: `archive/<branch>` or `archive/<branch>-<digits>`
+ARCHIVE_CURRENT_BRANCH = ("HEAD", "@")   # a source that names no branch
+_BRACED_VARIABLE = re.compile(r"\$\{(\w+)\}")
+
+
+def _branch_name(text: str) -> str:
+    """A branch name as two spellings of it agree: no quotes, no `+`, no `refs/heads/`, `${x}` as `$x`."""
+    text = _BRACED_VARIABLE.sub(r"$\1", text.replace('"', "").replace("'", ""))
+    return text.lstrip("+").removeprefix("refs/heads/")
+
+
+def _archive_names(source: str, dest: str):
+    """The branch names an archive push of `source` to `archive/<dest>` stands for. An explicit branch source
+    is that branch alone, without `origin/`. A `HEAD` or `@` source names no branch, so the destination
+    stands for it, with and without its `-N` suffix."""
+    if source not in ARCHIVE_CURRENT_BRANCH:
+        return {source.removeprefix("origin/")}
+    return {dest, re.fullmatch(r"(.+?)" + ARCHIVE_COPY_SUFFIX, dest).group(1)}
+
+
+def _push_events(segment: str):
+    """[(kind, names)] for each `git push` in one segment: 'archive' for a refspec whose destination is
+    `archive/<name>` (names: see `_archive_names`), 'delete' for each deleted branch."""
+    events = []
+    for subcommand, args in push_calls(segment):
+        if subcommand != "push":
+            continue
+        _f, _m, _e, _i, _u, _l, delete, _up, _remote, plain = _push_parse(args)
+        deleted = {_branch_name(spec.removeprefix(":")) for spec in plain if _colon_delete(delete, [spec])}
+        if deleted:
+            events.append(("delete", deleted))
+        if delete:
+            continue
+        for spec in plain:
+            source, colon, dest = spec.lstrip("+").partition(":")
+            source, dest = _branch_name(source), _branch_name(dest if colon else source)
+            name = dest.removeprefix(ARCHIVE_PREFIX)
+            if dest.startswith(ARCHIVE_PREFIX) and source and name:
+                events.append(("archive", _archive_names(source, name)))
+    return events
+
+
+def archive_guard_hits(segments, ends):
+    """Each delete that follows an archive push of its branch with anything but `&&` between them, as
+    `<name> deleted after its archive push`. `ends` is what `split_segments` filled in. A second reading
+    of the text (contractions as text) follows the first in both lists, and each ends with an empty end
+    and is judged alone."""
+    if len(segments) != len(ends):
+        return []
+    hits = []
+    start = 0
+    for stop in [number + 1 for number, end in enumerate(ends) if end == ""]:
+        reading, closes = segments[start:stop], ends[start:stop]
+        start = stop
+        archives = []   # (segment number, names), in order
+        chained = []    # whether each segment's close still keeps the push status: `&&`, or the line break after one
+        for number, segment in enumerate(reading):
+            # `a &&` newline `b` splits to an empty middle segment closed by the newline. The shell reads
+            # that line break as the rest of the `&&` chain, so it keeps the status; a bare newline or `;` does not.
+            chained.append(closes[number] == ARCHIVE_JOIN or (
+                closes[number] == "\n" and not segment.strip() and number > 0 and chained[number - 1]))
+            for kind, names in _push_events(segment):
+                if kind == "archive":
+                    archives.append((number, names))
+                    continue
+                for name in sorted(names):
+                    paired = [at for at, found in archives if at < number and name in found]
+                    if paired and not all(chained[paired[-1]:number]):
+                        hits.append(name + " deleted after its archive push")
+    return hits
+
+
+ARCHIVE_GUARD_REASON = (
+    "archive-push-gates-delete: this delete can run after its archive push failed, which loses the branch "  # glossary-ok: the pinned rule id, the step slug
+    "with no copy (rule shared-trees-archive-then-delete). "
+    "Remedy: run the delete only when the archive push has succeeded, by joining the two with `&&` "
+    "and nothing else between the push and the delete."
+)
 
 
 PUSH_REASON = (

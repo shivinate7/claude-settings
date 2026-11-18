@@ -64,14 +64,14 @@ Each open PR gets exactly one next act. The tool reads it from GitHub alone. The
 - Review log stale, newest record has a PASS Fix check, and the live head is a conflicted merge of main into the fixed head: one more fix verifier (decision pr-review-record). Its prior record must be a PASS that `review_state` accepts. Not built.
 - Review log stale, in any other case: the fresh full review at the live head, as decision pr-review-record (The review a changed head owes) sets it.
 - Label `held`, `parked` or `replaced`, with a `Waits on: debt:<slug>` or `Waits on: page:<item id>` comment line: `waits on` that debt or item. With no valid `Waits on:` line, the label holds nothing: no next act, shown red, even on a draft (lane pick, 12:13 CST Nov 12). This check runs after the stacked rule.
-- Label `batch` on an integration PR: `batch run`. It counts against the batch limit, aged from the label's last `labeled` event.
+- Label `batch` on an integration PR: `batch run`. It counts against the batch limit, aged from the label's last `labeled` event. Until the cutover only; after it, no integration PR exists and this rule goes.
 - The PR's base ref names an open PR's head branch (#N): blocked on #N. A `Based on #N` body line does not stack (coordinator pick, 12:01 CST Nov 12, from review round 1).
 - Draft with no record: `lane round 1`.
 - None of these: no next act, shown red.
 
 The first match wins, in this order. A held or unparseable record matches no record rule, so it falls to the label, blocked and draft rules. A stacked PR with a done record reads `batch`; the merge refuses one that cannot merge cleanly.
 
-The ledger reads no pull request's CI state. A batch line is a done record for the live head. `merge --lane-lint` checks the join, and the integration PR's CI run checks the merge. Its CI-side reads are main's runs, judged per workflow, for the main-red hold.
+The ledger reads no pull request's CI state. A batch line is a done record for the live head. `merge --lane-lint` checks the join, and the integration PR's CI run checks the merge. Until the cutover; after it, the lane PR's own run checks the merge. Its CI-side reads are main's runs, judged per workflow, for the main-red hold.
 
 Only the two batch acts have an age limit, in one constant, `PR_STATE_AGE_HOURS` in merge/merge.py. Batch and batch run are 24 h, an unmeasured first guess at one batch cycle (coordinator pick A, 12:33 CST Nov 7). Every other act has no limit: lane round 1 to 4, fix check, fresh full review, lane lint, `waits on` and blocked on #N. The owner ruled that no fixed numeric limit stands anywhere (R37, no fixed numeric limits; owner, Nov 11, restated 18:35 CST Nov 15), which retired the 72 h limits. A hold still goes red when it has no page item or debt, and blocked on #N is red while #N is red. A batch act over its limit is red.
 

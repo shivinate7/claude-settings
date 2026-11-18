@@ -102,6 +102,9 @@ ROLE_UNREADABLE_CFG = role_config("unreadable", role_table("unreadable", ROLE_TA
 ROLE_LIVE_POINTER = role_table("live", ROLE_TABLE_TEST_AUTHOR_HAIKU)
 ROLE_LIVE_CFG = role_config("live", ROLE_LIVE_POINTER)
 ROLE_RULES_POINTER = role_table("rules", ROLE_TABLE_RULES)
+# The repository's builder pins sonnet, so a case that needs a builder with no model pin reads this fixture folder.
+ROLE_UNPINNED_POINTER = role_table("unpinned", ROLE_TABLE_RULES, agents=("builder",))
+ROLE_UNPINNED_CFG = role_config("unpinned", ROLE_UNPINNED_POINTER)
 
 
 def role_input(role, model, prompt):
@@ -377,7 +380,8 @@ def workflow_opus_override_check():
 
 # ---- D: no model, and no `model:` pin in the role's agent file. The guard's default env decides it.
 role_model_refuse("role-model: builder with no model is denied when the default is unset",
-          "builder", None, "Fix the failing case.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
+          "builder", None, "Fix the failing case.", config=ROLE_UNPINNED_CFG, carries=(ROLE_DEFAULT_REMEDY,),
+          env=UNSET_DEFAULT)
 role_model_refuse("role-model: general-purpose with no model is denied when the default is unset",
           "general-purpose", None, "Find the file.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
 role_model_refuse("role-model: claude with no model is denied when the default is unset",
@@ -385,12 +389,13 @@ role_model_refuse("role-model: claude with no model is denied when the default i
 role_model_refuse("role-model: a spawn with no role and no model is denied when the default is unset",
           None, None, "Find the file.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
 role_model_refuse("role-model: a Task builder with no model is denied when the default is unset",
-          "builder", None, "Fix the failing case.", tool="Task", carries=(ROLE_DEFAULT_REMEDY,),
-          env=UNSET_DEFAULT)
+          "builder", None, "Fix the failing case.", tool="Task", config=ROLE_UNPINNED_CFG,
+          carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
 role_model_refuse("role-model: builder with no model is denied when the default is empty",
-          "builder", None, "Fix the failing case.", carries=(ROLE_DEFAULT_REMEDY,), env=EMPTY_DEFAULT)
+          "builder", None, "Fix the failing case.", config=ROLE_UNPINNED_CFG, carries=(ROLE_DEFAULT_REMEDY,),
+          env=EMPTY_DEFAULT)
 role_model_allow("role-model: builder with no model is allowed when the default is sonnet",
-           "builder", None, "Fix the failing case.", env=SONNET_DEFAULT)
+           "builder", None, "Fix the failing case.", config=ROLE_UNPINNED_CFG, env=SONNET_DEFAULT)
 role_model_allow("role-model: reviewer with no model is allowed when the default is unset (its file pins haiku)",
            "reviewer", None, "Check the diff for typos.", env=UNSET_DEFAULT)
 role_model_allow("role-model: test-author with no model is allowed when the default is unset (its file pins haiku)",
@@ -440,7 +445,7 @@ def role_override_lift_check():
 def role_override_no_model_check():
     """The no-model refusal stays never-lifted: under an override it is still refused and spends none, so the
     override that follows still lifts a test-author on sonnet."""
-    config, session = role_config("ov-no-model", REPO), "role-ov-no-model"
+    config, session = role_config("ov-no-model", ROLE_UNPINNED_POINTER), "role-ov-no-model"
 
     def call(seconds, spawn, env=None):
         return ov_call("Agent", dict(spawn), NOGIT, config, session, seconds, env=env)
@@ -629,6 +634,53 @@ def role_pin_unreadable_first_check():
     return role_pin_check(pointer, None, "an unreadable a.md sorts before a pinned b.md")
 
 
+# ---- G2: role_has_model_pin reads a pin's value through frontmatter_scalar (decision agent-model-cap). A value that is
+# only a comment, an unquoted `~` or `null`, or empty holds no model, so its line is no pin. A bare name, or a quoted
+# name with a trailing comment, is a pin. Each case is one frontmatter line in one agents/ file.
+def role_pin_line_check(name, line, want):
+    """role_has_model_pin gives `want` for an agents/ file whose frontmatter holds the one line `line`."""
+    pointer = role_table(name, files={"reviewer.md": "---\nname: reviewer\n%s\n---\n# reviewer\n" % line})
+    return role_pin_check(pointer, want, "a reviewer file with the frontmatter line %r" % line)
+
+
+def role_pin_line_case(name, line, want):
+    """The check for one frontmatter line: role_has_model_pin gives `want` for it."""
+    def check():
+        return role_pin_line_check(name, line, want)
+    return check
+
+
+# ---- H: role_model_rank(model) reads the family a model value holds (decision agent-model-cap, the pin reader's family
+# step). A family word is read from the value, never from a trailing comment, so `haiku  # sonnet` holds haiku. The
+# control reads bare names only, so a red comment case is the trailing comment alone.
+def role_model_rank_check(value, want, what):
+    """role_model_rank(value) gives `want`, an index into ROLE_MODEL_RANK."""
+    reader = getattr(_load_guard_module(), "role_model_rank", None)
+    if reader is None:
+        return False, "the guard has no role_model_rank(model) to read a model name's family"
+    try:
+        got = reader(value)
+    except Exception as exc:
+        return False, "%s: role_model_rank(%r) raised %r" % (what, value, exc)
+    if got != want:
+        return False, "%s: role_model_rank(%r) gives %r, want %r" % (what, value, got, want)
+    return True, "%s: role_model_rank(%r) gives %r" % (what, value, want)
+
+
+def role_model_rank_bare_check():
+    """Control: a bare model name reads its family. claude-sonnet-5-5 is sonnet (1) and Haiku is haiku (0)."""
+    for value, want in (("claude-sonnet-5-5", 1), ("Haiku", 0)):
+        ok, detail = role_model_rank_check(value, want, "a bare model name")
+        if not ok:
+            return ok, detail
+    return True, "a bare model name reads its family: claude-sonnet-5-5 is 1, Haiku is 0"
+
+
+def role_model_rank_comment_check():
+    """`haiku  # sonnet is above the row` holds haiku (0). The trailing comment names sonnet, and the reader must not read it."""
+    return role_model_rank_check("haiku  # sonnet is above the row", 0, "a trailing comment that names sonnet")
+
+
 # ---- F: the three role lists agree with the role table (decision agent-model-cap). role_list_drift(pointer_root)
 # in hooks/guard.py returns one line per disagreement, and [] when all agree. The lists are constants, and the table
 # is read from the pointer at run time. A real role is an agents/ file's `name`, or a built-in name. The junk rows
@@ -731,6 +783,23 @@ for _label, _check in (
     ("role-model: an unreadable decision file logs one unread line and allows the spawn", role_unread_bad_check),
     ("role-model: a pinned agent file sorts before an unreadable one, so the pin reads True", role_pin_first_check),
     ("role-model: an unreadable agent file sorts before a pinned one, so the read gives None", role_pin_unreadable_first_check),
+    ("role-model: a pin of only a comment (`model: # sonnet`) is no pin, so role_has_model_pin is False",
+     role_pin_line_case("pinline-comment-only", "model: # sonnet", False)),
+    ("role-model: a pin of `model: ~` is no pin, so role_has_model_pin is False",
+     role_pin_line_case("pinline-tilde", "model: ~", False)),
+    ("role-model: a pin of `model: null` is no pin, so role_has_model_pin is False",
+     role_pin_line_case("pinline-null", "model: null", False)),
+    ("role-model: a pin of empty quotes (`model: \"\"`) is no pin, so role_has_model_pin is False",
+     role_pin_line_case("pinline-empty-quotes", 'model: ""', False)),
+    ("role-model: a pin with no value (`model:`) is no pin, so role_has_model_pin is False",
+     role_pin_line_case("pinline-empty", "model:", False)),
+    ("role-model: a bare pin (`model: sonnet`) is a pin, so role_has_model_pin is True",
+     role_pin_line_case("pinline-bare", "model: sonnet", True)),
+    ("role-model: a quoted pin with a trailing comment (`model: \"sonnet\" # note`) is a pin, so role_has_model_pin is True",
+     role_pin_line_case("pinline-quoted-note", 'model: "sonnet" # note', True)),
+    ("role-model: role_model_rank reads a bare model name's family, sonnet 1 and haiku 0", role_model_rank_bare_check),
+    ("role-model: role_model_rank does not read sonnet from a trailing comment, so haiku # sonnet is 0",
+     role_model_rank_comment_check),
     ("role-list: the three role lists agree with the real decision record", role_list_real_check),
     ("role-list: the junk keys the reader yields on the record cause no drift", role_list_junk_check),
     ("role-list: test-author moved from a haiku row to sonnet drifts HAIKU_ROLES", role_list_haiku_check),
@@ -1076,7 +1145,7 @@ REVIEW_GUARD_MARKER = "Guard or check: yes"  # the review record's line; see the
 GUARD_NO_LINE = "Guard or check: no"
 
 # A reviewer on Sonnet passes with the marker at a line start: on line 1 or later, on any round, with text after it on
-# its line, and as a whole brief. The row still reads its Haiku pin, so a Haiku reviewer with the marker passes too.
+# its line, and as a whole brief. A Haiku reviewer with the marker is refused at the step-up, below.
 role_model_allow("role-model: reviewer on sonnet with the guard marker on line 1 is allowed", "reviewer", "sonnet",
                  REVIEW_GUARD_MARKER + "\nCheck the guard diff.")
 role_model_allow("role-model: reviewer on sonnet with the guard marker on line 3 is allowed", "reviewer", "sonnet",
@@ -1091,8 +1160,12 @@ role_model_allow("role-model: reviewer on sonnet with the guard marker at the en
                  "reviewer", "sonnet", "Check the diff.\n" * 399 + REVIEW_GUARD_MARKER)
 role_model_allow("role-model: reviewer on sonnet as a Task with the guard marker is allowed", "reviewer", "sonnet",
                  REVIEW_GUARD_MARKER + "\nCheck the guard diff.", tool="Task")
-role_model_allow("role-model: reviewer on haiku with the guard marker is allowed (its own row)", "reviewer", "haiku",
-                 REVIEW_GUARD_MARKER + "\nCheck the guard diff.")
+# A guard-marked first-round reviewer below its `1 guard` row (sonnet) is refused at the step-up. The reason is a literal
+# here, never read from the guard, and it names the row's model.
+add("role-model: reviewer on haiku with the guard marker is denied at the step-up (its 1 guard row is sonnet)",
+    "deny", STEP_UP, tool="Agent", config=ROLE_REAL_CFG,
+    carries=("Reviewer round 1 on a guard or check change runs on Sonnet. Spawn it with model sonnet.",),
+    **role_input("reviewer", "haiku", REVIEW_GUARD_MARKER + "\nCheck the guard diff."))
 # A marker line may start with leading blanks: the brief table's line-start rows allow them, and a brief indents its
 # template line. The first-pass brief is the case, since only the marker lifts Sonnet there.
 role_model_allow("role-model: reviewer on sonnet on Round 1 with the guard marker after two spaces is allowed", "reviewer",
@@ -1256,6 +1329,58 @@ WINDOWS_CHECKERS.update(LB_CHECKS)
 # override: a one-act override claimed by a rename let two Windows racers win (run 40296652083), and no
 # Linux run shows it, so the claim cases run in the Windows slice.
 WINDOWS_CHECKERS.update({ov_parallel_check, ov_take_race_check, ov_late_reader_check})
+
+
+# --------------------------------------------------------------------------- prior work (rule spawn-searches-existing-builds)
+# A build spawn names the prior work it searched, on a line of its own: `Prior work: #N (state) | branch <name> | none
+# found`. A builder or test-author Agent spawn carries it here, and a lane start or a lane brief carries it in section 42910.
+# A reviewer and an Explore spawn are exempt, since they build nothing new. Each spawn below runs its role's model from the
+# role table, so only the Prior work line can refuse it. The constants below are read by section 42910 too.
+PW_RULE = "spawn-searches-existing-builds"
+PW_LINE = "Prior work:"
+PW_NONE = "Prior work: none found (searched origin/main hooks and lint, origin/roadmap steps, PR titles and branches)"
+PW_PR = "Prior work: #3285 (open) | branch lane-step-dup"
+PW_BUILD = "Round 1 of 3. Start the fix."
+add("prior-work: a builder spawn with no Prior work line is refused", "deny", PW_RULE, carries=PW_LINE,
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD))
+add("prior-work: a test-author spawn with no Prior work line is refused", "deny", PW_RULE, carries=PW_LINE,
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("test-author", "haiku", "Write the failing cases."))
+add("prior-work: a builder spawn whose Prior work line is empty is refused", "deny", PW_RULE, carries=PW_LINE,
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_LINE))
+add("prior-work: a builder spawn whose Prior work line names a pull request is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_PR))
+add("prior-work: a builder spawn whose Prior work line says none found is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_NONE))
+add("prior-work: a reviewer spawn with no Prior work line is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("reviewer", "sonnet", "Round 2 of 3. Review the diff."))
+add("prior-work: an Explore spawn with no Prior work line is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("Explore", "haiku", "Find where X is defined."))
+# A line inside a ``` fence is a quoted example and names no prior work. A fenced example beside a real line outside the
+# fence is allowed, since the real line counts.
+PW_FENCED = "```\n" + PW_PR + "\n```"
+add("prior-work: a builder spawn whose only Prior work line sits inside a fence is refused", "deny", PW_RULE, carries=PW_LINE,
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_FENCED))
+add("prior-work: a builder spawn with a fenced example and a real Prior work line outside the fence is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_FENCED + "\n" + PW_NONE))
+# The marker with its colon outside the bold, and the marker as a numbered list item: each names the prior work it searched.
+add("prior-work: a builder spawn whose Prior work line has its colon outside the bold is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n**Prior work**: none found"))
+add("prior-work: a builder spawn whose Prior work line is a numbered list item is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n1. Prior work: none found"))
+# An unfilled angle-bracket placeholder names no prior work: the brief template's own line, and a line of only brackets.
+# Real text beside a bracket still names it, and so does the bare words `none found`.
+PW_TEMPLATE = "Prior work: <#N|branch|none found>"
+PW_BRACKETS_ONLY = "Prior work: <...>"
+PW_REUSED = "Prior work: #3560 <reused>"
+PW_BARE_NONE = "Prior work: none found"
+add("prior-work: a builder spawn whose Prior work line is the brief template's placeholder is refused", "deny", PW_RULE,
+    carries=PW_LINE, config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_TEMPLATE))
+add("prior-work: a builder spawn whose Prior work line holds only angle brackets is refused", "deny", PW_RULE,
+    carries=PW_LINE, config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_BRACKETS_ONLY))
+add("prior-work: a builder spawn whose Prior work line is the bare words none found is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_BARE_NONE))
+add("prior-work: a builder spawn whose Prior work line names a number beside a bracket is allowed", "allow",
+    config=ROLE_REAL_CFG, tool="Agent", **role_input("builder", "sonnet", PW_BUILD + "\n" + PW_REUSED))
 
 
 # --------------------------------------------------------------------------- the simulator boot rules

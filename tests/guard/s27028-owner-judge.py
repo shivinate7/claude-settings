@@ -9,8 +9,7 @@ FAMILY = "owner-judge"
 # start, in any case: `Goal: <goal>`, `Problem (<stake>): <text>`, and one to three
 # `Based on (<kind>): <premise>`. <stake> is one of goal, money, risk, rule, cannot undo; <kind> is one of
 # PREMISE_KINDS. Each option has a non-empty gain and lose. Only those lines count: the same words in the
-# title, an option, why or elsewhere in context never do. A stood pick (`stands: true`) may write
-# `Problem: <text>` with no stake. A task, a status-only or rank-only update, another artifact's page and a
+# title, an option, why or elsewhere in context never do. A task, a status-only or rank-only update, another artifact's page and a
 # decision with status closed (the chat-answer flow writes one already answered) pass.
 # A missing line is refused by `question-form`. The contract does not say whether `question-form` or
 # `owner-judge` names a bare Problem line or a stake outside the set, so those cases accept either id.
@@ -28,9 +27,9 @@ OJ_OPTIONS = [
 
 
 def oj_ctx(goal=OJ_GOAL, problem=OJ_STAKE, based=(OJ_BASED,), tail=OJ_CTX, departs=QD_LINE):
-    """The context of a decision: the form lines, the Departs from line, then the prose. A line passed as None or
-    empty is left out."""
-    return "\n".join(line for line in (goal, problem, *based, departs, tail) if line)
+    """The context of a decision: the form lines, the Departs from line, the Waiting on line, then the prose. A line
+    passed as None or empty is left out."""
+    return "\n".join(line for line in (goal, problem, *based, departs, OJ_WAIT, tail) if line)
 
 
 OJ_GOOD = oj_ctx()
@@ -38,7 +37,7 @@ OJ_GOOD = oj_ctx()
 
 def oj_item(**over):
     """Item 34's shape: a decision about which CI job runs a check, with options, a pick and a why, and no form lines."""
-    item = {"id": OJ_DOC, "kind": "decision", "status": "open", "title": "Which CI job runs the stamp check?",
+    item = {"id": OJ_DOC, "n": 928, "kind": "decision", "status": "open", "title": "Which CI job runs the stamp check?",
             "context": OJ_CTX, "options": OJ_OPTIONS, "pick": "a",
             "why": "The lint job already holds the other format checks."}
     item.update(over)
@@ -71,8 +70,8 @@ def oj_batch(name, expected, writes, **extra):
 
 oj("item 34's shape (a CI job choice with options, a pick, a why and no form lines) is denied", "deny",
    oj_item())
-oj("the refusal names the three lines, the five stakes and stands: true", "deny", oj_item(),
-   carries=("Goal", "Problem", "Based on", "stands: true", *OJ_KINDS))
+oj("the refusal names the three lines and the five stakes", "deny", oj_item(),
+   carries=("Goal", "Problem", "Based on", *OJ_KINDS))
 # Wrong-field class: the words are there, the lines are not.
 oj("risk and rule words in the title, the options and why, with no form lines, are denied", "deny",
    oj_item(title="Which CI job runs the stamp check? A risk, a rule",
@@ -118,7 +117,6 @@ oj("an option with an empty lose is denied", "deny",
    oj_item(context=OJ_GOOD, options=[OJ_OPTIONS[0], dict(OJ_OPTIONS[1], lose="")]))
 oj("a decision with no context is denied", "deny", oj_item(context=None))
 oj("an item with no kind is judged as a decision and denied", "deny", oj_item(kind=None))
-oj("stands false with no form lines is denied", "deny", oj_item(stands=False))
 oj("port false with no form lines is denied", "deny", oj_item(port=False))
 
 # False-alarm class: a stake of any kind, a premise of any kind, in any case, at a line start, is the form.
@@ -144,10 +142,6 @@ oj("form lines with more lines after them are allowed", "allow",
    oj_item(context=oj_ctx(tail=OJ_CTX + "\nThe test job runs longer.")))
 oj("a decision with the form is allowed", "allow", oj_item(context=OJ_GOOD))
 
-# Stood-pick class: the session's own pick stands, so the stake needs no kind.
-oj("a stood pick with `Problem:` and no stake is allowed", "allow",
-   oj_item(stands=True, context=oj_ctx(problem="Problem: which job runs the check, and why it needs your word")))
-oj("a stood pick with a stake is allowed", "allow", oj_item(stands=True, context=OJ_GOOD))
 oj("a port with a Departs from line and the form is allowed", "allow",
    oj_item(port=True, context=oj_ctx(tail=OJ_CTX + "\n" + PQ_DEPARTS)))
 oj("a task with a Why yours line and no form lines is not judged", "allow",
@@ -163,9 +157,9 @@ oj("an update that carries kind decision and context with no form lines is denie
    {"kind": "decision", "context": OJ_CTX}, action="update")
 oj("an update that carries kind decision and a context with the form is allowed", "allow",
    {"kind": "decision", "context": OJ_GOOD}, action="update")
-oj("an update that carries kind decision, a stood pick and `Problem:` with no stake is allowed", "allow",
-   {"kind": "decision", "context": oj_ctx(problem="Problem: which job runs the check"), "stands": True},
-   action="update")
+oj("an update that carries kind decision and a bare Problem line with no stake is denied", "deny",
+   {"kind": "decision", "context": oj_ctx(problem="Problem: which job runs the check")},
+   action="update", rule=OJ_PROBLEM_RULES)
 oj("an update that carries kind decision and no context is allowed", "allow",
    {"kind": "decision", "title": "Which CI job runs the check?"}, action="update")
 oj("an update that carries kind decision and options with an option that has no lose is denied", "deny",
@@ -183,7 +177,7 @@ OJ_ANSWERED = OJ_CTX + "\nAnswer from chat, 10:42: keep the check in the lint jo
 oj("a closed decision with the chat answer in context and no form lines is allowed", "allow",
    oj_item(status="closed", context=OJ_ANSWERED))
 oj("a closed decision with no options and no form lines is allowed", "allow",
-   {"id": OJ_DOC, "kind": "decision", "status": "closed", "title": "Which CI job runs the stamp check?",
+   {"id": OJ_DOC, "n": 928, "kind": "decision", "status": "closed", "title": "Which CI job runs the stamp check?",
     "context": OJ_ANSWERED})
 oj("an update that carries kind decision, status closed and context, no form lines, is allowed", "allow",
    {"kind": "decision", "status": "closed", "context": OJ_ANSWERED}, action="update")
@@ -222,8 +216,6 @@ oj_batch("with a str_replace that drops the Problem line is denied", "deny",
            "old_str": OJ_GOOD, "new_str": oj_ctx(problem=None)}])
 oj_batch("of decisions that each carry the form is allowed", "allow",
          [oj_write(oj_item(context=OJ_GOOD)), oj_write(oj_item(id="second", context=OJ_GOOD))])
-oj_batch("with a stood pick that writes `Problem:` with no stake is allowed", "allow",
-         [oj_write(oj_item(stands=True, context=oj_ctx(problem="Problem: which job runs the check")))])
 oj_batch("with a closed decision and no form lines is allowed", "allow",
          [oj_write(oj_item(status="closed", context=OJ_ANSWERED))])
 oj_batch("with a closed decision, then an open one with no form lines, is denied", "deny",

@@ -10,11 +10,12 @@ Applies to: each child `CLAUDE.md` line about merging.
 
 M2. Before a merge, judge the base branch's newest completed run per event group, not only the PR's own run.
 - joyous #68 — a red scheduled run on old main blocked every joyous merge until a newer green run of the same jobs cleared it (decision `no-merge-onto-red-main`).
-Applies to: every batch merge.
+Applies to: every merge.
 
-M3. Merge only on a green run that holds for the current base tip.
-- claude-settings steps c97 and c150 (decision `merge-needs-current-base`).
-Applies to: every batch merge.
+M3. Merge only on a head that merges cleanly with the base tip, and whose own run is green or still pending under a lane-lint PASS for that head. The head need not hold the tip. A finished red run, a red main and a PASS for another head refuse. A PASS for another head counts only when it carries over claim commits, or, for a PR that replaces a source PR, an identical tree. Under merge.requiredChecks "none" a stale records page is healed inside the confirm: the tool merges the base in when the base gained a record, pushes one page commit, waits only for GitHub to show the pushed head, and merges that sha, with no second confirm (page item 926 a, 14:32 CST, 2026-11-16). A relayed yes covers the page commit and the base's clean merge commit. A PR GitHub reads BLOCKED under "none" refuses and names the branch protection and requiredChecks.
+- claude-settings steps c97 and c150 (decision `merge-needs-current-base`, a clean merge with the base tip and a green or lint-passed run).
+- Owner ruling `own-merge-on-lint-pass` (owner, 2026-11-15 18:21 CST, typed "B for sure"): main's run after the merge is the check, and a red main reverts the blamed commit.
+Applies to: every merge.
 
 M4. Read every page of a PR's file list, or read git.
 - banchi #1042 — batch runner 9 read only the first page of 30 files, missed a deletion, and reported a script as left behind (note `pr-files-api-first-page`).
@@ -24,15 +25,15 @@ M5. Keep the output of every push that takes or releases a lock.
 - q_max, 2026-11-04 — a released merge lock blocked every later merge. The lock code read each failed push as a rival run and dropped its output, so the cause is unmeasured (note `cloud-released-lock-stuck`, rule `git-never-discard-output`).
 Applies to: the merge lock and any ref write the merge tool makes.
 
-M6. A small fix to a review finding gets a fix check on its own diff. A passing fix check merges on green, unless a guard or check change still owes round 3 with the net-value test (item 402 a, owner, 2026-11-08 06:08 CST). After a merge from main, the fix check reads `git diff origin/main...<head>` for its size test (item 401 a, owner, 2026-11-08 06:08 CST). It reads the same diff for the guard question (claude-settings coordinator, 2026-11-07 23:15 CST, lane batch63-lint-a; not the owner's words).
+M6. A small fix to a review finding gets a fix check on its own diff. A passing fix check merges on green after any round, for every change (record `pr-review-record`). After a merge from main, the fix check reads `git diff origin/main...<head>` for its size test (item 401 a, owner, 2026-11-08 06:08 CST). It reads the same diff for the guard question (claude-settings coordinator, 2026-11-07 23:15 CST, lane batch63-lint-a; not the owner's words).
 - degen page item 83 — five PRs were held about 2 hours for new rounds (decision `hold-unsafe-after-round-3`).
 Applies to: a fix that answers one named finding.
 
-M7. Merge an append-only file by union. Rebuild a generated table; never merge it by union.
-- claude-settings `docs/debts/notes.md` merges by union; `docs/records.md` is rebuilt by the merge tool (decisions `notes-merge-union`, `records-index-at-merge`).
-Applies to: each file that two lanes edit in one batch.
+M7. Give each note its own file, so lanes that each add a note never edit the same file. Rebuild a generated table; never merge it by union.
+- claude-settings: each note is one file in `docs/notes/`. The old notes file takes deletes only. `docs/records.md` is rebuilt by the merge tool (decisions `notes-merge-union`, `records-index-at-merge`).
+Applies to: each file that two open lanes edit.
 
-M2 and M3 are held by the merge tool. M7 is held by `.gitattributes` and the merge tool. M1, M4, M5 and M6 have no check.
+M2 and M3 are held by the merge tool. M7 is held by `lint/check_record_slugs.py` (the old notes file takes deletes only), `.gitattributes` (its union line for that file) and the merge tool. M1, M4, M5 and M6 have no check.
 
 Kind: process
 Home: agents/plan.md

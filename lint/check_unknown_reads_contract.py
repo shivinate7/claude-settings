@@ -59,7 +59,7 @@ import os
 import sys
 from typing import Tuple
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 ROOT = os.path.dirname(HERE)
 TEST_INSTALL_SRC = os.path.join(ROOT, "hooks", "test_install_src.sh")
 

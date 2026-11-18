@@ -38,11 +38,15 @@ The rest of the page's rules live in sibling files under `reference/`. Read a fi
 ## Find the page
 
 Run `python3 ~/.claude/lint/layout.py waiting-page <repo root>`. It prints the URL, or `unknown`.
-The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-extras.json`.
+The URL is the link of the `waiting-page` role entry in the `artifacts` key of the repo's extras file, `.claude/layout-extras.json`, else its old `waiting-page` key.
 
 - `unknown` is not an error. Ask in the reply while anything runs, else in the terminal question
   box, and say in one line that the repo has no waiting page.
 - Never guess a URL, and never use the page of another repo.
+
+## Print the page link
+
+Whenever the writer posts, changes or closes an item, its chat reply for that turn carries the page link as one line, `https://claude.ai/artifact/<id>`, the repo's page from "Find the page". A closed item and a change count too: the owner opens the page from chat (owner asks, Nov 12 12:50 CST to Nov 14 23:02 CST; roadmap step `surface-page-link-in-chat`). The Stop check `page_link_check` in `hooks/feedback_guard.py` blocks a turn that wrote an item, answer, group, ask or receipt on the page and whose last reply lacks the page link. A `meta/page` stamp owes none, and a link in a reply that a later notice follows covers every write before it. A repo with no page prints no link.
 
 ## The database
 
@@ -57,7 +61,6 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     - `holds` (one plain sentence: what is stopped until the answer) puts the item in Blocking.
     - `by` (an ISO deadline) puts an item with no `holds` in Upcoming.
     - An item with neither is in Whenever.
-    - `stands: true` puts the item in the last section, Pick stands (see "Add an item").
   - `arbiter: true` marks a ruling: an item the arbiter decided (decision `session-tiers`, Arbiter, "On the page").
     The arbiter hands each ruling to the writer. The writer writes it closed, with the item's `status` `closed`,
     `home` the ruling's record id, `recommended` (old name `pick`) the ruled option's key, `why`, and `ruled` (an ISO time). It cites the ruling.
@@ -88,7 +91,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     "Your sent answers, newest first." under "sink". The section is open on load, each card folded
     to its top row, title and answer line; one control holds the owner's note, last answer and reply. A card with a
     new reply (see `replied`) opens at load and carries the mark "New reply", in place. A Change keeps
-    the card in the section, open, until reload, and a reply that arrives opens a card in place. A card that holds a draft, a stood pick or a pending withdraw stays open. With no answered item the page draws no section and no rail row.
+    the card in the section, open, until reload, and a reply that arrives opens a card in place. A card that holds a draft or a pending withdraw stays open. With no answered item the page draws no section and no rail row.
   - `group` (a slug) puts the item in one frame with the other items of that group. See `groups/<slug>`.
   - `port: true` marks a question about a port or redesign of an existing app. Set `port: false` on an item
     whose text uses the word port for another meaning. Such an item needs a line in `context` that starts
@@ -107,10 +110,10 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   - `designs` (a list of `{slug, label, file}`; the guard requires `file`) shows mockups (see "Add a design"). An option names its picture with `design` (a slug in `designs`),
     and the picture sits at the top of that option's card.
   - A decision adds `options` (a list of `{key, label, how, gain, lose}`, plus `design` on a look question, plus an optional `differs` and `widens`), `recommended` (the key you
-    recommend; `pick` is its old name, and a page reads `recommended` first, then `pick`, so an old item stays readable) and `why`. `pick` is never the owner's answer: his answer is `choice` in `answers/<id>`. Each key is the letter the page shows for its position, in lowercase: `a`, `b`, `c` in order (guard rule `option-letter-keys`).
+    recommend; `pick` is its old name, and a page reads `recommended` first, then `pick`, so an old item stays readable) and `why`, the one-line reason. An open decision always carries both: guard rule `question-form` refuses a set with no valid `recommended` (one key of `options`, or a distinct list of keys on a `multi` or `ranked` item) or a blank `why`. An update is judged for the fields it carries, and one that carries `why` never blanks it. A closed item and a task, note or ruling pass. `pick` is never the owner's answer: his answer is `choice` in `answers/<id>`. Each key is the letter the page shows for its position, in lowercase: `a`, `b`, `c` in order (guard rule `option-letter-keys`).
     One letter per option: an option's `label` and its mockup carry no letter of their own (no "B:", no "Option B"), since the page's key is the only letter (guard rule `option-letter-keys` refuses a label that opens with another letter's tag).
-    An option keeps the letter it was shown with (owner ruling R60, decision option-keys-are-letters). Each option carries a unique short `id`, a slug that is never a lone letter, and the item carries `shown`: the options as first shown, in order, each as `{key, id, label}`. A later write keeps each shown position's key, id and label. A rule-driven change adds a `note` to the option ("Now means: ...") and reorders nothing; the page shows the note on the card. A new option goes at the end. Guard rule `option-letters-frozen` refuses an open decision's write that carries `options` in any of four cases. The write has no `shown`. An option has no unique id. There are fewer options than shown. A shown position changed in key, id or label. A first `set` carries a `shown` equal to its options; an update may append. The guard also refuses an `options` that is not a list. Known limit: the guard cannot see the stored item, so a write that rewrites `shown` itself passes. A held answer is the backstop.
-    One source for the chat question and the item: `python3 skills/waiting-page/question_source.py < spec.json` (function `render`) writes the chat text (`Page item: <id>`, then `a) <label>` per option) and the item's `options` and `shown` from one spec, so the two copies cannot differ. A spec that carries the earlier `shown` and `changes` ({key: note}) keeps each changed option's key, id and label and adds the note; `render` raises when the options do not extend `shown`.
+    An option keeps the letter it was shown with (owner ruling R60, decision option-keys-are-letters). Each option carries a unique short `id`, a slug that is never a lone letter, and the item carries `shown`: the options as first shown, in order, each as `{key, id, label}`. A later write keeps each shown position's key and id; a label may be reworded, never to another shown option's wording. A rule-driven change adds a `note` to the option ("Now means: ...") and reorders nothing; the page shows the note on the card. A new option goes at the end. Guard rule `option-letters-frozen` refuses an open decision's write that carries `options` in any of four cases. The write has no `shown`. An option has no unique id. There are fewer options than shown. A shown position changed in key or id, got an empty label, or took another shown option's label. A first `set` carries a `shown` equal to its options; an update may append. The guard also refuses an `options` that is not a list. Known limit: the guard cannot see the stored item, so a write that rewrites `shown` itself passes. A held answer is the backstop.
+    One source for the chat question and the item: `python3 skills/waiting-page/question_source.py < spec.json` (function `render`) writes the chat text (`Page item: <id>`, then `a) <label>` per option) and the item's `options` and `shown` from one spec, so the two copies cannot differ. A spec that carries the earlier `shown` and `changes` ({key: note}) keeps each changed option's key and id, takes its label from the spec (the shown label when the spec has none) and adds the note; `render` raises when the options do not extend `shown`.
     When an option asks for a settings change, its label names `settings.json` and the entry by its exact title or key, one entry per option. Otherwise no relayed grant covers it (decision relayed-grant-read-from-page).
     Never use the key `none`. The page adds its own "None of these" option
     with that key. Name an option in every item text by its letter ("option A", "pick b"), never by another key. The page shows each option by its letter by position and names a pick by its `label`, never by its `key`. The page never preselects an option: it stars `recommended`, labelled "Recommended", and a tap on the starred option picks it.
@@ -120,7 +123,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
       A `recommended` that does not fit the kind of item is not shown: no star. A list `recommended` on a pick-one item is one such value.
     - `differs` is a list from `picture`, `how`, `gain`, `lose`: the parts that set this option apart from the others. The page marks each named part with a bar, a "≠" and hidden words "Sets this option apart", and adds one line under the options: "≠ marks what sets an option apart." It drops a named text part whose text equals that part in every other option, a `picture` on an option with no picture, and any other name. Name few parts, and only true ones. With no `differs`, the option shows no mark.
   - A decision carries the question form of rule `style-question-form`. The lines go in `context`, and each option has a non-empty
-    `gain` and `lose`. `context` also has a line that starts "Departs from: <what on main> — <what changes>"; a change that restates main does not count. The writer refuses a decision without it (guard rules `question-form`, `owner-judge` and `question-departs`). A decision with
+    `gain` and `lose`. `context` also has a line that starts "Departs from: <what on main> — <what changes>"; a change that restates main does not count. After it comes "Waiting on: <what is stopped until his answer>; <who acts next>" ("nothing stopped; <who acts next>" when nothing waits); the page draws it as its own line. The writer checks that one such line is there with text after the colon, not where it sits. A `Meanwhile:` line stays allowed and is not checked. The writer refuses a decision without the Departs from line or the Waiting on line (guard rules `question-form`, `owner-judge` and `question-departs`). A decision with
     `status: "closed"` needs none; decision `question-form` holds the other exemptions. An update that
     carries `kind: decision` and `context` carries the lines again, and one that carries `options` carries each `gain` and `lose` again:
     the guard cannot see the stored fields.
@@ -148,8 +151,9 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     deletes that record (steps 2 to 4 of "Route and close"), and from a chat answer. When the item carries `shown`,
     each shown option keeps its key, so `lastAnswer` keeps its `choice`. An item with no `shown` may have moved its keys: write `lastAnswer` again without `choice`.
   - `lane` (the receiver's branch slug, or its tier, such as `batch-runner` from its `cs-build:` tag, when it has no branch) is set when an answer
-    takes the busy-lane path. The card shows "waits on lane <slug>" in its top row. The item stays open until the receiver
-    reports the act done, and then the owning session closes it and deletes `answers/<id>` (see "Route and close", the busy-lane path).
+    takes the busy-lane path. The item closes at routing, with `home` the step or debt that carries the work, and keeps `lane`, `lastAnswer` and
+    `answers/<id>` until the receiver reports the act done. Then the owning session drops `lane` and deletes `answers/<id>` (see "Route and close", the busy-lane path).
+    The page shows no "waits on lane" row for it. An older open item with `lane` still shows that row in its top row.
   - `closed` (an ISO UTC time with a trailing `Z`) is when the item closed. The session that closes the item writes it in the same `update` as `status: "closed"`
     (step 2 of "Route and close"; the writer does the same for a chat answer). The page shows a closed item that has a `closed` time as one line in "Answered" until the owner marks it read.
     A closed item with no `closed` time counts as read, so the page never shows it.
@@ -168,6 +172,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     check as `multi` and `ranked` (see "Update a repo's pages"). An older page draws none of the six. A page published before the `recommended` change reads only `pick`, so it shows no star for `recommended`: after the change merges, the writer republishes the page.
   - The page draws only the top-level fields that its `itemFields` block lists (`page.html`). A write that names another
     top-level field is refused (guard rule `item-field-rendered`), and a stored item that carries one shows a warning on its card.
+    The same rule refuses a `set` with no `n` and any write whose `n` is not a number (929, not "929"): the page cannot let the owner answer such an item.
     To add a field, draw it on the page and add its name to that block. A key inside `options` or `steps` is not judged. `shown` is in the block; an option's `id` and `note` sit inside `options`, so they are not listed.
     When the page is current, it saves `optionId` in an answer, and it draws an option's `note`. It lists `shown` in its item fields and draws nothing from it. An older page does none of these. Run `stale_pages.py` before you write `shown`, an option `note` or `optionId`.
     An update removes a stored field with `{"__delete__": true}`.
@@ -175,12 +180,11 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   Write the record in the same step that sets `group` on the second item.
 - `answers/<id>`: the page writes it when the owner presses Send. Fields: `item`, `n`, `at` (ISO
   time), `note`, and `choice` (a decision) or `done: true` (a task). A task answer may instead be
-  a note with no `done`. A pick that stands writes `choice` equal to `recommended`, with the note
-  `accepted pick`. A tap on the starred option is an ordinary pick, with no such note. On a `multi` item `choice` is a
-  list of option keys, in rank order when `ranked` and in option order otherwise. A stood pick writes the whole `recommended` list in that order. "None of these" writes
+  a note with no `done`. The page never preselects an answer and sends nothing the owner did not press: a tap on the
+  starred option is an ordinary pick. On a `multi` item `choice` is a
+  list of option keys, in rank order when `ranked` and in option order otherwise. "None of these" writes
   `choice: "none"`, and the page sends it only with a note that says what the owner wants
   instead. A note typed with no option picked is the same answer: `choice: "none"` plus the note.
-  On an item whose pick stands, a note with no new pick sends the stood pick plus the note.
   A decision answer also carries `label`, the words of the choice as the page showed them, so a reader sees what the letter meant: "A: Red" for a pick (the letter by position, then the option's `label`), a list of those for a `multi` item, "none of these" for none. `choice` stays the key, or the list of keys, and decides the answer. The answer also carries `optionId`, the id of the option picked (a list for a `multi` item), when every picked option has an id (ruling R60). If the item's option at that key no longer has that id, or, with no `optionId`, no longer has that letter and label, `page_grant.py` prints `held:` and exits 3: the owner confirms in words, and the answer is no grant. The same holds for a choice key the item no longer holds, when it equals `--pick`. The fields are new, so an older answer has neither.
   A changed answer that the owner leaves empty is withdrawn: Send reads "Withdraw answer" and
   deletes `answers/<id>`. The page re-reads the record first and leaves one that changed. A withdraw
@@ -251,7 +255,7 @@ extras key `page-writer`; the pick guard uses it when the transcript has no `met
 - Every other session sends its question to the writer, which writes the item. A lane sends its question
   to its parent in the same turn, and triage writes the item ("Add an item", step 0). Not built: the route from a lane to triage.
   `owner` stays the session that asked. It reads its own answer at its wake, so nobody relays answers.
-- The writer ranks. The fact tiers are the base: Blocking, Upcoming, Whenever and Pick stands. Never
+- The writer ranks. The fact tiers are the base: Blocking, Upcoming and Whenever. Never
   write a tier. Inside a tier the writer sets `rank` on each item, judged against every open item on
   the page, not only its own. It re-ranks when it adds, updates or closes an item. A close by
   another session needs no re-rank. The writer re-ranks at its next add or update.
@@ -308,13 +312,13 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
    items/<id>`). Check `n`, `kind` and, on a decision, `options`: at least one, each keyed
    `a`, `b`, `c` in order, and no key `none`. Give each option a unique `id` that is never a lone letter. Write `shown`, the options as first shown, each as `{key, id, label}`. When the item is new, `shown` equals `options` in length and in content.
    - When you append an option to a shown item, extend `shown` on the same write. A write whose `shown` is shorter than its `options` is refused.
-   - For an item already shown, add a `note` to the option that changed. Write a new option after the shown ones. Never reorder, relabel or drop a shown option.
+   - For an item already shown, add a `note` to the option that changed. Write a new option after the shown ones. Never reorder or drop a shown option, and never give one the wording shown for another letter.
    - To build the chat question and the item from one spec, run `question_source.py`. The spec carries an `id`. An existing item carries its own non-empty `shown`, with `"existing": true`. On a look question, check that each option has its own mockup
    drawing that option's state, and that each `focus` names an element in its mockup. If a check
    fails, fix the item at once. The page refuses to send an answer to a broken item.
    - Set `repo`. When it is not this page's repo, ask that repo's triage, coordinator or owner's-computer session whether the owner has ruled, and write its session id as `checked_with` (rule `question-checked-with-repo`).
    - Before you write a decision, run the owner-judge test: can the owner judge it from what he already knows?
-     An undoable choice on internals he has no stake in is not asked. Take your own pick and set `stands: true`.
+     An undoable choice on internals he has no stake in is not asked. Take your own pick and say it in the reply.
      A question stays only when it touches his goals, his money, a risk he would care about, a rule, or an act that
      cannot be undone. Name which as the stake of the Problem line of `context`. The writer refuses a decision with no such line.
      Then write the Departs from line: what main does now, and what your question changes. For a new thing, write `Departs from: main — adds <X>`.
@@ -335,10 +339,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
      Set either only on a page that `stale_pages.py` reports current (see "Update a repo's pages"). An older page draws radios.
      Write `recommended` only on a page that `stale_pages.py` reports current too: an older page reads only `pick` and shows no star for `recommended`.
      The page stars no option when `recommended` is not valid.
-   - Set `stands: true` only on a decision that changes no rule and has a `recommended`. Never set it on
-     an item in a group. The page shows it in the last section, and `recommended` goes with the owner's
-     next Send unless the owner chooses another. The owner cannot hold a stood pick
-     open: choosing another option is the only way out. A `multi` item stands with its list `recommended`: the owner's ticks replace it. A question that touches a rule starts blank.
+   - The page never preselects an answer. It draws the recommendation as a `Recommended:` line above the options (the option's letter and label, then `why`, printed once there), stars the recommended option, and draws the `Waiting on` line as its own line. Nothing is sent unless the owner presses; a tap on the line picks nothing. A `multi` item's `recommended` is a list; a tap on its star ticks the list.
 3. Once the item exists, name it in the reply in one line, with the page URL for an open item only
    (a closed item is one line on the page, with no card to open). Open no question box (`questions-go-to-owner`).
 4. Keep working on what does not depend on the answer.
@@ -364,6 +365,13 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 - At a comment wake, never at turn start, the writer saves `ArtifactData list receipts`, `answers` and `items`, and `meta/page`, to a folder. It lists `answers`, `items` and `receipts` in full: `query.limit` 1000, follow `next_cursor` until it is empty, as the export flow does. A cut list gives wrong lines. It runs `python3 ~/.claude/skills/waiting-page/stale_pages.py --unread <dir>`. For each `answer-unread` line it sends the session in the item's `owner` a `send_message` with the page URL, the item id and the act, never the answer text.
   At the end of that wake it writes `woke`. It uses `ArtifactData update meta/page` with only `woke`, never `set`: `set` drops `parked`, `identity` and `checked`. The value is the time now, ISO UTC with a trailing `Z`. On exit 2 it does not write `woke`.
   The check reads only the receipt field `read`. It does not use `filed`. It adds no store.
+  At the same wake the writer lists the awaiting threads. A thread is awaiting when it is open and its last comment is not Claude's. The tool prints no "awaiting reply" marker.
+  - Read: start `<dir>/threads.txt` empty at each wake. Read the threads with `ArtifactComments read`. Follow the cursor until a page ends with no "more threads not listed" line. Append each page in order, the first page first. Page 1's "more threads not listed" line stays in the file. It is fine once a later page follows it.
+  - Report: write a line `Awaiting reply: N`. Under Input Needed, name each awaiting thread by its 8-char id until it is answered. Save the report to `<dir>/report.md`. The count line may sit in a bullet, in bold, or before a list of ids. The bold label may carry its colon inside or after the bold, and the report may sit in a blockquote.
+  - Check: run `python3 ~/.claude/skills/waiting-page/stale_pages.py --awaiting <dir>`. With a report it prints report lines only. On `report-missing` or `report-count`, fix the report. A first page with no thread is `awaiting: clean`.
+  - Exit 2: re-read the threads. An open thread can stay elided after a re-read, because of the page size cap. Then name that thread under Input Needed as `unread: <id8>`.
+  - Cost: the check is one process start and reads two files. The routine adds one `ArtifactComments read` per page. It writes only `threads.txt` and `report.md`.
+  - The incident: an owner thread waited 37 h.
 - The owner can Undo a Send for 8 seconds, and Undo deletes the answers. Wait 10 seconds after an
   answer's `at` before you route it. An "Undone on the waiting page" notice withdraws the items it
   names.
@@ -383,7 +391,7 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 
 - An answer saved on the page counts as the owner's grant for the item it names (ruling 2a). The same answer in the terminal box counts the same. If the two disagree,
   the later one wins: compare the answer's `at` with the time of the terminal answer.
-- A session that acts on an answer it did not route checks it first. Make the fetch folder with `python3 ~/.claude/skills/waiting-page/page_grant.py --new-fetch <scratch dir>`; it prints `fetch <dir>`. Fetch `answers/<id>` and `items/<id>` with `ArtifactData get` and `out_dir` set to that `<dir>`. Then run `python3 ~/.claude/skills/waiting-page/page_grant.py --root <repo> --page-url <url> --item <id> --fetched <dir> --pick <key>`. `--root` is a checkout of the page's repo, the one whose extras register the page (in a cloud session, `/home/user/claude-settings`). `--pick` is required and must equal the page's choice. The checker counts only a folder `--new-fetch` made, checked once, holding only those two files, none older than its stamp: an absent doc saves no file, so a reused folder could hold a withdrawn answer. A check uses the folder up as its first step, so every verdict uses it up: a retry fetches again into a new folder. The `counted` line is `counted item=<id> n=<n> choice=<key> at=<time> label=<label> [note=<json>]`. `label=` is the picked option's label as one JSON string, a JSON list for a multi item, or `null` for an overturn. Act only on `counted`, and only on the act that label names. A settings change counts only when the label names `settings.json` and the entry by its exact title or key, one entry per grant. Quote its page, item id, n, choice, `at` and label. Decision relayed-grant-read-from-page holds the relay rules.
+- A session that acts on an answer it did not route checks it first. Make the fetch folder with `python3 ~/.claude/skills/waiting-page/page_grant.py --new-fetch <scratch dir>`; it prints `fetch <dir>`. Fetch `answers/<id>` and `items/<id>` with `ArtifactData get` and `out_dir` set to that `<dir>`. Then run `python3 ~/.claude/skills/waiting-page/page_grant.py --root <repo> --page-url <url> --item <id> --fetched <dir> --pick <key> [--as-lane <slug>]`. `--root` is a checkout of the page's repo, the one whose extras register the page (in a cloud session, `/home/user/claude-settings`). `--pick` is required and must equal the page's choice. `--as-lane` is the receiver's own lane slug. A routed close (a closed item with `lane` and `home`) counts only with it, equal to the item's `lane`. A receiver whose lane is a tier passes the tier, the `lane` value the owning session wrote. An open item and an arbiter overturn need no `--as-lane`. The checker counts only a folder `--new-fetch` made, checked once, holding only those two files, none older than its stamp: an absent doc saves no file, so a reused folder could hold a withdrawn answer. A check uses the folder up as its first step, so every verdict uses it up: a retry fetches again into a new folder. The `counted` line is `counted item=<id> n=<n> choice=<key> at=<time> label=<label> [note=<json>]`. `label=` is the picked option's label as one JSON string, a JSON list for a multi item, or `null` for an overturn. Act only on `counted`, and only on the act that label names. A settings change counts only when the label names `settings.json` and the entry by its exact title or key, one entry per grant. Quote its page, item id, n, choice, `at` and label. Decision relayed-grant-read-from-page holds the relay rules.
 - A withdrawn answer is no answer. Read `answers/<id>` again just before you route it. If it is gone,
   the owner withdrew it: the item is still open, and nothing is ruled. That re-read also saves the
   answer's note to your feedback inbox (`local_time.py --page-note`), so jot it like a chat message.
@@ -418,49 +426,51 @@ is busy or its act is another session's (a relay). Otherwise, and for every clea
 it is read, and closes that turn.
 
 Busy-lane path. The routing session files the
-answer at once as a note on its step (the item's home, step 1), never held for the receiver. It sets `lane` (the receiver's
-branch slug, or its tier, such as `batch-runner` from its `cs-build:` tag, when it has no branch) and `lastAnswer` on the item,
-and keeps the item
-open and `answers/<id>` in place. It never sets `added` here: rule 5 of `page_grant.py` needs the answer's `at` later than
-`added`. A relay sends the receiver only the page URL, the item id and the act. The routing session closes the item and deletes
-`answers/<id>` (step 2) only when the receiver reports the act done. An item whose lane is gone (no open pull on
+answer at once as a note on its step (the item's home, step 1), never held for the receiver. It closes the item in that turn (step 2's
+close update, pinned to the version it read), with `home` set to the step or debt that carries the work. In the same update it sets `lane` (the receiver's
+branch slug, or its tier, such as `batch-runner` from its `cs-build:` tag, when it has no branch) and `lastAnswer`. It keeps `answers/<id>` in place.
+It never sets `added` here: rule 5 of `page_grant.py` needs the answer's `at` later than
+`added`. A relay sends the receiver only the page URL, the item id and the act. The routing session drops `lane` and deletes
+`answers/<id>` only when the receiver reports the act done. An older open item with a `lane` whose lane is gone (no open pull on
 that branch, no live session tagged `cs-step:`, `cs-topic:` or, for a tier, `cs-build:`) shows stalled on the Status
-tab, and the roadmap build exits 1 on it, until the session re-routes it or closes it. The done report is status, never a grant. A Park is the
+tab. The roadmap build exits 1 on it until the session re-routes it or closes it. The done report is status, never a grant. A Park is the
 exception: on an item with `lane`, the writer tells the receiver the act is withdrawn and then closes the item, with no done
 report (see the park branch below). A `none` answer on this path gets no new options.
 
 - Already routed. The owning session reads `answers/` at each turn start, so a kept answer looks new. An answer whose item
-  already has `lane` and a `lastAnswer` with the same `at` is routed. Skip it until the done report.
+  already has `lane` and a `lastAnswer` with the same `at` is routed, open or closed. Skip it until the done report.
 - Changed. A kept answer with no `act: "park"` and a new `at` is a new answer: the owner changed it. Route it again, relay it with the new `at`,
   and rewrite `lastAnswer`.
-- Withdrawn. If a kept answer is gone from an open item at the owning session's re-read, the owner withdrew it. The session drops `lane`
-  (`{"lane": {"__delete__": true}}`) and nothing else, leaves the item open as unanswered, and tells the receiver the act is withdrawn.
+- Withdrawn. The owner withdraws a routed answer in chat. The writer then reopens the item (`status` open, `closed` and `lane` dropped with
+  `{"__delete__": true}`, `added` now, a new `n`), deletes `answers/<id>` in the same `batch` call as that update, and tells the receiver the act is withdrawn. For an older open item, if a kept answer
+  is gone at the owning session's re-read, the owner withdrew it: the session drops `lane` and nothing else, leaves the item open as unanswered, and tells the receiver.
 - Chat answer. A chat answer closes the item (decision questions-go-to-owner, and the busy-lane rule), so no page answer
   can follow. Steps 2 to 4 skip their delete, and the writer sets `lastAnswer` from it. It has no `answers/<id>`, so
   `page_grant.py` can never count it for a receiver. The routing session tells the owner in its reply that the receiver needs
   the owner's grant typed in the receiver's own session.
 
 The writer reads each `kept-answer:` line at its wake ("Keep the page on main's code", step 2). The item is closed and its answer is still kept:
-re-read `answers/<id>`, then delete it (pinned to its version), or, when the act is not done, reopen the item with `lane` and `lastAnswer`.
+re-read `answers/<id>`, then delete it (pinned to its version). A closed item with `lane` and `lastAnswer` is routed, so no line names it: it stays closed and its answer stays until the done report. The writer reopens it only on a withdraw (see the busy-lane path).
 A closed item with `waits` is named too ("is closed with waits"), since a chat answer can close an item during a wait: when its wait has ended, drop `waits`, then delete `answers/<id>`.
+An item named "is open" has an `answers/<id>` older than its `added`: delete it. The page already shows that item open. An update that bumps `added` deletes the record in the same `batch` call, never in a second call.
 A `kept-answer: unknown` line means that the check did not run: fetch again.
 
 Never-ending wait. The owning session checks the receiver at each turn start while it holds a lane item. It reads every page
 of `list_sessions`, with no `tags` argument, and picks the row whose `tags` hold `cs-step:<lane>`, or for a standing session
 `cs-build:<tier>` and the same `cs-repo:` tag. Then it reads the receiver with `get_session`. Cost: every page once per turn
-start, shared by all lane items, and one `get_session` per lane item, with no timer. The writer's `--items` lane line is the page-side sign. If the owning session itself ended, the
+start, shared by all lane items, and one `get_session` per lane item, with no timer. The page-side sign is the home step's stalled row. If the owning session itself ended, the
 inherit rule applies (see "Read the answers", the watch bullet). The receiver's status is `ended` when it ended, failed or was
 archived, and `unknown` when the read cannot run or finds no session, never `ended`. For either status with no done report,
 never re-run or re-route the act on the kept answer. Check whether the act landed (for example, the PR merged or the setting
-changed). If it did, close the item (step 2) with a home. If it did not, or you cannot tell, write one line on the item's
-`context` (the page draws `context`): "receiver <slug> <status> at <time> with no done report; the act is unconfirmed". Write it
-once: append it to `context`, never replace `context`, and skip it when `context` already holds a line for this receiver. Leave
-the item open, so the page shows it. There is no age threshold.
+changed). If it did, drop `lane` and delete `answers/<id>`. If it did not, or you cannot tell, write one line on the item's home step or debt note:
+"receiver <slug> <status> at <time> with no done report; the act is unconfirmed". Write it
+once: append it to that note, and skip it when the note already holds a line for this receiver. Leave
+the item as it is, closed, with `lane` and the kept answer. There is no age threshold.
 
 While an item has `waits`, steps 2 to 4 and the busy-lane path never delete `answers/<id>`. End of a wait: when the
 `--items` line for the item says `ended` ("Keep the page on main's code", step 2), the writer, in that wake, drops
-`waits` (`ArtifactData update items/<id> {"waits": {"__delete__": true}, "replied": "<now>"}`). With `lane` set, that is all: the close and the
-delete of `answers/<id>` wait for the done report. A Park is the exception (see the park branch). Otherwise it then closes or rewrites the item and deletes `answers/<id>`.
+`waits` (`ArtifactData update items/<id> {"waits": {"__delete__": true}, "replied": "<now>"}`). With `lane` set, that is all: the delete of
+`answers/<id>` waits for the done report. A Park is the exception (see the park branch). Otherwise it then closes or rewrites the item and deletes `answers/<id>`.
 
 1. Write `receipts/<id>` with `read` set to now, ISO UTC with a trailing `Z` (a time with no zone is read in the host's zone). Then move the answer to the item's home: the
    decision entry, the roadmap step or the PR, as rule `output-answer-has-a-home` (an answer has a
@@ -471,22 +481,22 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
    roadmap upkeep row "page rulings not on their step" checks.
 2. Close the item: `ArtifactData update items/<id> {"status": "closed", "closed": "<now, ISO UTC with a trailing Z>"}`, pinned to the version
    you read (`if_version`). If the close conflicts, the owner marked the item read in the meantime: read it again and retry the close. Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
-   in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item. The page shows a closed
-   item as one line, with its home and its reply, until the owner marks it read. The page shows `lastAnswer` as the answer on the opened line, and on an item left open (steps 3, 4 and a busy lane).
+   in the same update. Delete `answers/<id>` in the same `batch` call as the close, so the answer cannot count for a later item. The busy-lane path skips this delete until the done report. The page shows a closed
+   item as one line, with its home and its reply, until the owner marks it read. The page shows `lastAnswer` as the answer on the opened line, and on an item left open (steps 3 and 4) and on a routed closed item (a busy lane).
 3. If the answer is `none` with no clear direction, and you can write new `options`, `recommended` and `why` from the
    note in this same turn, act in this order. A `multi` item's new `recommended` is a list. First ask the chat
    question again with the new options, citing `Page item: <id>` and writing one `a) <label>` line per new option.
    Do this before the write:
    the earlier chat question still cites the id, and the guard (rule `option-labels-match-chat`) compares the new
    labels to the newest chat question's lines. Then write the new options and set `added` to now. Write `lastAnswer`
-   from the answer in the same update, without `choice`. On an item that carries `shown`, keep every shown option and append the new ones, or open a fresh item. The freeze refuses new options that replace shown ones. Then delete
-   `answers/<id>` (pinned to its version), and leave the item open. Say in the terminal that the item has new
+   from the answer in the same update, without `choice`. On an item that carries `shown`, keep every shown option and append the new ones, or open a fresh item. The freeze refuses new options that replace shown ones. Delete
+   `answers/<id>` (pinned to its version) in the same `batch` call as that update, and leave the item open. Say in the terminal that the item has new
    options. If you cannot write them in this turn,
    close the item (step 2) with a home that names the rework, and add a fresh item when the options are
    ready. A `none` answer with a clear direction never takes this fallback: the busy-lane rule sorts it. An open item never says it is being reworked (guard rule `rework-off-page`). If the note is not
    enough to write the options, ask in the terminal what the owner wants.
-4. If any other answer is not clear, rewrite the item's `context`, write `lastAnswer` from the answer, delete
-   `answers/<id>` (pinned to its version), and leave the item open. Say in the terminal what was not clear.
+4. If any other answer is not clear, rewrite the item's `context` and write `lastAnswer` from the answer.
+   Delete `answers/<id>` (pinned to its version) in the same `batch` call as that update, and leave the item open. Say in the terminal what was not clear.
 5. An `overturn` answer: the item's `owner` session reopens the ruling's item in one update to `items/<id>`:
    - `kind` `decision`, `status` `open`, `arbiter` false (the page tests `=== true`; an update merges and cannot drop a field), and `added` now.
    - A new `recommended` and `why`: its own recommendation. Never keep the arbiter's pick and why as the page's
@@ -495,7 +505,7 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
      "Your stake:" line that states the goal, money, risk, rule or what cannot be undone. The owner-judge
      guard refuses an update with `kind` `decision` and `context` that lacks it.
 
-   Then delete `answers/<id>` (pinned to its version). The ruling's record stands until the new answer is filed.
+   Delete `answers/<id>` (pinned to its version) in the same `batch` call as that update. The ruling's record stands until the new answer is filed.
 
 A parked answer (`answers/park.<id>`, or an item's answer with `act: "park"` under `answers/<item id>`): the writer waits 10 seconds after its `at`, as for an item's answer, so it never routes an act inside the Undo window.
 Then it reads the answer again (`ArtifactData get`). If it is gone, the owner undid or withdrew it: leave the entry, and rule nothing.
@@ -511,7 +521,7 @@ The writer finds the entry by its `ref`, or by its `id` when the word names it. 
 A park answer (`answers/<item id>` with `act: "park"`): the same wait and re-read. The writer reads the item first. When the item has `lane`,
 the writer finds the receiver by the lookup in "Never-ending wait", before any update. It sends it by `send_message` only the page URL,
 the item id and that the act is withdrawn. If that lookup finds no session or cannot run (status `unknown`), the close still goes
-ahead and the writer names the miss in its report. `page_grant.py` already refuses a closed item. An item with no `lane` gets no tell.
+ahead and the writer names the miss in its report. `page_grant.py` counts a closed item only as a routed close, one whose `lastAnswer.at` is the answer's `at` and whose `lane` equals the receiver's `--as-lane`. An item with no `lane` gets no tell.
 The writer adds `{id, ref, note}` to
 `meta/page.parked` in one update pinned with `if_version`. `id` is the item's id when it is a slug of 32 characters or fewer and
 unique in the list, else a new slug. `ref` is the item's home and title in plain words, and `note` is the answer's note.
