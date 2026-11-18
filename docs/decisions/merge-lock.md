@@ -37,7 +37,9 @@ Stops, by name. Each name is a row label of the refusal-vs-rule sweep, a plan re
 carries no such label. The code raises the exception named in each item.
 
 - `Held` (sweep row `lock-held`): a live lock whose holder is not dead, a live lock under the old name
-  (`GitLock` only), or a lost take race.
+  (`GitLock` only), or a lost take race. A lost take race re-reads the lock and names its holder and expiry
+  as a live lock does. When that re-read fails or finds no live lock, the text says only that another run
+  took the lock first.
 - Lock unreadable (sweep row `lock-acquire-unreadable`; `Stop`, or `NetStop` on a network error): the ref,
   the lock commit or the base branch cannot be read, or the lock commit or the take cannot be made.
 - Extend failed (sweep row `lock-extend-failed`; `NetStop`): the lock expired before the wait, the

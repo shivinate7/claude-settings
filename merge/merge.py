@@ -854,6 +854,14 @@ def holder_text(b, held, now):
         return text + " The holder is dead. The next merge run takes the lock over."
     return text + " Cannot tell if the holder is alive. Ask its owner before: merge --unlock"
 
+def lost_race_text(b, cur, now):
+    """The Held text for a take that lost its race. `cur` is the lock now on the ref (read()'s (sha, expiry, message)), or None when it could not be read or is gone.
+    A live lock with a readable commit is named by holder_text, the one home. Any other read keeps the plain text: an unread lock is no holder."""
+    text = "another run took the merge lock first"
+    if cur and cur[2] and cur[1] > now:
+        return text + ": " + holder_text(b, cur, now) + " " + LOCK_CITE
+    return text + " " + LOCK_CITE
+
 def holder_state(held):
     """-> "alive", "dead" or "unknown" for the holder of a lock `held` (read()'s (sha, expiry, message)). Dead only for a pid on this host, platform and boot:
     a lock with no boot line, or one from another boot, reads unknown."""
@@ -979,7 +987,7 @@ class GitLock(Lock):
             except Stop as e:  # keep the refusal text the failed push printed, and the error's class
                 raise type(e)(f"{e} (the lock push said: {out})") from e
             if (now_cur[0] if now_cur else None) != (cur[0] if cur else None):
-                raise Held("another run took the merge lock first " + LOCK_CITE)
+                raise Held(lost_race_text(b, now_cur, self.now()))
             if is_net(c, out):  # the call never reached the remote: that is no refusal
                 raise NetStop("cannot take the merge lock " + LOCK_CITE + ": " + out)
             raise Stop("the remote refused the push that takes the merge lock " + LOCK_CITE + ": " + out)
@@ -1087,7 +1095,11 @@ class GhLock(Lock):
                 raise NetStop("cannot take the merge lock " + LOCK_CITE + ": " + out)
             if "already exists" not in out:  # 422 "Reference already exists" is the race; any other text is the refusal itself
                 raise Stop("cannot take the merge lock " + LOCK_CITE + ": " + out)
-            raise Held("another run took the merge lock first " + LOCK_CITE)
+            try:
+                now_cur = self.read(b)
+            except Stop:  # no answer: the text stays plain, and the race is still the refusal
+                now_cur = None
+            raise Held(lost_race_text(b, now_cur, self.now()))
         self._take(b, sha, tree, msg, now)
         return sha
 
