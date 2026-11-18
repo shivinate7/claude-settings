@@ -16923,7 +16923,7 @@ def as_read(text):
         lines.pop()
     return lines
 
-class ReviewRecordDraws(Env):
+class ReviewLogDraws(Env):
     """Seeded draws through the review form's flags, run through the real main on FakeHost. The live head is the head of the feature branch, so an
     accepted draw prints its record. A draw the form takes must read back as drawn, in every variant form_variants names; a draw it refuses exits 2
     or 1 and prints no record."""
@@ -16976,7 +16976,7 @@ class ReviewRecordDraws(Env):
     def test_the_round_flags_are_taken_exactly_when_the_form_takes_them(self):
         self.run_draws("rounds", self.round_draw)
 
-    def test_the_fix_check_flag_is_taken_exactly_when_the_form_takes_it(self):
+    def test_the_fix_verifier_flag_is_taken_exactly_when_the_form_takes_it(self):
         self.run_draws("fix", self.fix_draw)
 
     def test_the_grant_flag_is_taken_exactly_when_the_form_takes_it(self):
@@ -17041,8 +17041,9 @@ class ReviewRecordDraws(Env):
             yield f"seeded edit {k}: character {i} to {c!r}", canon[:i] + c + canon[i + 1:]
 
     def form_failures(self, rec):
-        """What a parsed record may not hold beyond its text: a grant for another pull request, a fix check that reviews the record's own head,
-        and rounds that do not run 1 up to the ceiling (3, or 4 with a grant), in order, opening at 1 or at round 3."""
+        """What a parsed record may not hold beyond its text, since each one claims a review the form does not show: a grant for another pull
+        request, a fix verifier that reviews the record's own head, rounds that open at neither the first nor the last allowed round, rounds
+        past the ceiling (the last round, or one more with a grant), and rounds that do not rise by 0 or 1 at each step."""
         bad = []
         if rec["grant"] is not None:
             bound = review_fn(self, "grant_pr")(rec["grant"])
@@ -17087,8 +17088,8 @@ class ReviewRecordDraws(Env):
                 if self.type_refuses(name, text):
                     return False, f"{name} refuses {text!r}"
         fields = self.drawn_fields(d)
-        # The model rules the review-record branch of merge.main applies before parse_review (decision agent-model-cap, the round rows): every
-        # fix check runs the fix model, a reviewer's round 2 and later runs its row's model, and a grant names this pull request.
+        # The model rules the --review-record branch of merge.main applies before parse_review (decision agent-model-cap, the round rows): every
+        # fix verifier runs the fix model, a reviewer's second and later rounds run its row's model, and a grant names this pull request.
         if fields["fix"] is not None and fields["fix"][2].lower() != review_fn(self, "review_round_model")(merge.REVIEW_FIX_ROW):
             return False, "the fix check names a model other than the fix model"
         for n, role, model, _verdict in fields["rounds"]:

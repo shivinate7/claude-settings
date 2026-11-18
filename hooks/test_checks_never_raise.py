@@ -870,7 +870,7 @@ def family_list_is_whole():
 QUOTED_SEED = "quoted-data-sinks"
 QUOTED_COUNT = 60  # seeded draws
 QUOTED_SINKS = ("echo {q}", "printf '%s\\n' {q}", "grep -e {q} notes.txt", "git commit -m {q}")
-QUOTED_DENY = ("git push -f origin main", "git push --force origin main")  # each asks as a bare command; quoted_data_property checks that first
+QUOTED_REFUSE = ("git push -f origin main", "git push --force origin main")  # each asks as a bare command; quoted_data_property checks that first
 QUOTED_NEUTRAL = ("notes about the release", "a short line of text")
 QUOTED_TRAPS = (("", ""), ("http://a.test/ ", ""), ("/* not a comment ", " */"), ("# not a comment ", ""),
                 ("first line\nmiddle line\n", "\nlast line "), ("Don't ", ""), ("", " don't"))
@@ -915,7 +915,7 @@ def quoted_data_property():
     """-> the number of failing rows. Scope first: each deny text asks as a bare command and under `bash -c`. Then each seeded draw: the sink with
     the deny text reads as the sink with the neutral text does, and that neutral sink allows."""
     failing = 0
-    for text in QUOTED_DENY:
+    for text in QUOTED_REFUSE:
         for command in (text, "bash -c " + quoted(text, "single")):
             got = shell_decision(command)
             if got not in REFUSALS:
@@ -924,18 +924,18 @@ def quoted_data_property():
     rng = random.Random("%s:%s" % (SEED, QUOTED_SEED))
     for k in range(QUOTED_COUNT):
         sink = rng.choice(QUOTED_SINKS)
-        deny = rng.choice(QUOTED_DENY)
+        deny = rng.choice(QUOTED_REFUSE)
         neutral = rng.choice(QUOTED_NEUTRAL)
         before, after = rng.choice(QUOTED_TRAPS)
         style = "double" if "'" in before + after else rng.choice(("single", "double"))
-        deny_cmd = sink.format(q=quoted(before + deny + after, style))
+        refuse_cmd = sink.format(q=quoted(before + deny + after, style))
         neutral_cmd = sink.format(q=quoted(before + neutral + after, style))
-        want, got = shell_decision(neutral_cmd), shell_decision(deny_cmd)
+        want, got = shell_decision(neutral_cmd), shell_decision(refuse_cmd)
         if want != "allow" or got != want:
             failing += 1
             print("FAIL [quoted-data] seed %r, draw %d: %r reads %s, and its neutral twin %r reads %s (want allow, and equal)"
-                  % (QUOTED_SEED, k, deny_cmd, got, neutral_cmd, want))
-    print("quoted-data: %d seeded draws and %d scope checks, %d failing rows" % (QUOTED_COUNT, 2 * len(QUOTED_DENY), failing))
+                  % (QUOTED_SEED, k, refuse_cmd, got, neutral_cmd, want))
+    print("quoted-data: %d seeded draws and %d scope checks, %d failing rows" % (QUOTED_COUNT, 2 * len(QUOTED_REFUSE), failing))
     return failing
 
 def main():
