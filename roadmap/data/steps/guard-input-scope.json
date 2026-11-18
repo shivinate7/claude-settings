@@ -2,15 +2,15 @@
  "id": "guard-input-scope",
  "title": "Skip the Windows guard shards only when no guard input changed",
  "priority": "now",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "owner": "triage",
  "blockedBy": [],
- "updatedAt": "2026-11-17T13:39:30-06:00",
+ "updatedAt": "2026-11-18T04:27:16-06:00",
  "why": "[13:30 CST Nov 15, triage] Lane session_013NEJL2fP71oxAPczKdc3ru: Skips the Windows guard shards only when no guard input changed, and proves a test goes red when one does. Stacked on lane push-daily-slow-legs' draft #3540 (head 1f8509817c). Guard or check: yes. (source: coordinator 13:30 CST, relayed by triage; not owner-typed, undoable) New step; none existed.",
  "source": "coordinator 13:30 CST, relayed by triage; not owner-typed, undoable",
- "note": "Doing. Skips the Windows guard shards only when no guard input changed, and proves a test goes red when one does. Stacked on lane push-daily-slow-legs' draft #3540 (head 1f8509817c). Guard or check: yes.",
+ "note": "Doing. Skips the Windows guard shards only when no guard input changed, and proves a test goes red when one does. Stacked on lane push-daily-slow-legs' draft #3540 (head 1f8509817c). Guard or check: yes. 04:26 CST Nov 18: PR #3556 (branch lane/skip-guard-shards-no-input) merged 04:26:35 CST, merge commit af758ee23f9c, 29 commits, head 2955a6a2cd6c (REST; coordinator 04:27 CST relay). CI skips the three Windows guard shards when no guard input changed (owner item 901 a, 18:20 CST Nov 15). Review: round 3 PASS, net safety value zero. Named limits are notes guard-inputs-scan-repo-joins and guard-inputs-trace-dir-opens.",
  "lane": "session_013NEJL2fP71oxAPczKdc3ru",
  "pr": 3556
 }
