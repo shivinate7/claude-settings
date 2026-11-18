@@ -1,0 +1,1 @@
+- pin-tree-moving-ref-retro: 12:19 CST Nov 13 (triage): retro 12:15 CST agrees with 727 a, adding: pin_tree must resolve a moving ref (714 b's stable branch) to its commit first, then archive it; pinned_file handles only a sha pin. Told the R67-drain lane.

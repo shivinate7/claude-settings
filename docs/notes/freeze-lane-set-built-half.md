@@ -1,0 +1,1 @@
+- freeze-lane-set-built-half: batch-freeze-lane-set-enforce 13:39 CST Nov 12: Built half: PR #2882 (draft, head a810af538; round 2 running, round 3 net value owed, settings.json). Close the built half when #2882 merges; the lane keeps only the R55 express lane and cancel (coordinator split 13:36 CST Nov 12). Owner page item on the red-run flags.

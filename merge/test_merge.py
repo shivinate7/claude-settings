@@ -3199,6 +3199,9 @@ class GhLockTest(unittest.TestCase):
 #   - the cloud agent proxy refuses a numeric-ID path: when a case sets `proxy_refuses_paged`, a `--paginate` read of more than one page
 #     answers HTTP 403 on `repositories/<id>/...`, the path gh follows from the Link header. Off unless a case sets it.
 #   - `issues/comments` answers a case's `issue_comments` (oldest first) once the case sets them; with none set it stays a 404.
+#   - `echo_posts`: `issues/comments` answers the seeded comments, then each post as GitHub files it (owner OWNER, the post's body). Off unless a case sets it.
+#   - `pull_files`: `pulls/<n>/files` answers the case's files, and `GET pulls/<n>` then carries `changed_files` with their count. Off unless a case sets it.
+#   - `full_name`: the repo name `GET repos` answers (default o/r). Every pull request carries `created_at`.
 #   - a case's `fail_page` ({"page", "text"}) answers every read of that page with the error text (rest_err), so a later page of a list read fails.
 #   - a list read under `-i` prints the header block gh prints, with a `Link` header (rel="next" and rel="last", on the numeric route) while pages
 #     follow, and none on the last page. A `--paginate` read prints no Link header: gh follows it itself.
@@ -3329,7 +3332,7 @@ def combined_state(statuses):
 
 def pull(number, head, head_ref, base_ref, state="open", merged=False, draft=False, mergeable=True, mergeable_state="clean", body="", merge_commit_sha=TEST_MERGE_SHA):
     """A pull request as `GET pulls/<n>` returns it. An empty body is null, as on GitHub."""
-    return {"number": number, "state": state, "merged": merged, "draft": draft, "body": body or None, "mergeable": mergeable,
+    return {"number": number, "state": state, "merged": merged, "draft": draft, "body": body or None, "mergeable": mergeable, "created_at": "2026-10-02T00:00:00Z",
             "mergeable_state": mergeable_state, "merge_commit_sha": merge_commit_sha, "html_url": "https://github.com/o/r/pull/%d" % number,
             "head": {"ref": head_ref, "sha": head, "label": "o:" + head_ref}, "base": {"ref": base_ref, "sha": "b" * 40, "label": "o:" + base_ref}}
 
@@ -3480,7 +3483,7 @@ try:
         raise Refused(rf["msg"])
 
     if method == "GET" and not rel:
-        finish(one({"default_branch": S.get("default_branch", "main"), "full_name": "o/r"}, jq), 0, include)
+        finish(one({"default_branch": S.get("default_branch", "main"), "full_name": S.get("full_name", "o/r")}, jq), 0, include)
 
     elif method == "GET" and rel == "pulls":
         if S.get("open_pulls_fail"):
@@ -3521,6 +3524,8 @@ try:
             locked = bool(ref("refs/heads/merge-lock/main"))
             draft = bool(S.get("draft")) or (bool(S.get("draft_when_locked")) and locked)  # draft_when_locked: the PR turns draft once the merge lock is taken
             pr = pull(n, head, S.get("head_ref", "feat"), S.get("base", "main"), "open", False, draft, val, {True: "clean", False: "dirty", None: "unknown"}[val], S.get("body", ""))
+            if "pull_files" in S:  # opt-in: the count of the files the case seeds, as GET pulls/<n> reports it
+                pr["changed_files"] = len(S["pull_files"])
             if locked and S.get("merge_state_when_locked"):  # mergeable_state once the merge lock is taken: clean for the preview read, this for every read after it
                 pr["mergeable_state"] = S["merge_state_when_locked"]
             S["shown"] = S.get("shown", []) + [head]; save()
@@ -3605,6 +3610,10 @@ try:
         finish(one({"id": 555, "body": params.get("body")}, jq), 0, include)
     elif method == "GET" and rel == "issues/comments" and S.get("comments_fail"):  # a case's failed comment read: the text gh prints
         raise Refused(S["comments_fail"])
+    elif method == "GET" and re.fullmatch(r"pulls/\d+/files", rel) and "pull_files" in S:  # opt-in: the files a case seeds (the review record and the guard read them)
+        answer_list(S["pull_files"], None)
+    elif method == "GET" and rel == "issues/comments" and S.get("echo_posts"):  # opt-in: the seeded comments, then each post as GitHub files it (a lane's post reads back)
+        answer_list(S.get("issue_comments", []) + [{"id": 600 + k, "created_at": "2026-10-02T00:00:00Z", "updated_at": "2026-10-02T00:00:00Z", "issue_url": f"https://api.github.com/repos/o/r/issues/{p['n']}", "body": p["body"], "user": {"login": "o"}, "author_association": "OWNER"} for k, p in enumerate(S.get("posted", []))], None)
     elif method == "GET" and rel == "issues/comments" and "issue_comments" in S:  # the repo's issue comments, seeded by a case (the review record reads them)
         answer_list(S["issue_comments"], None)
 
@@ -17994,6 +18003,107 @@ class ReviewArgs(ReviewEnv):
         sentences = re.split(r"(?<=\.)\s", " ".join((merge.__doc__ or "").split()))
         self.assertTrue(any("first round" in s and "row" in s and "unknown" in s for s in sentences),
                         "the usage text does not say round 1 takes its row's model or unknown")
+
+def flow_row(test, out, n=7):
+    """-> (branch, sha9, state) of pull request n's `merge --reviewed` line. The state is the words before the first colon of the line's rest."""
+    _, branch, sha9, rest = list_line(test, out, n).split(" ", 3)
+    return branch, sha9, rest.split(":", 1)[0]
+
+class MergeFlow(CloudSession):
+    """The merge flow end to end on the gh shim: a lane posts its review record, marks its draft ready,
+    the batch reads the record with --reviewed, and --confirm merges the pull request at the head the record names. The fixture is GhHalf's,
+    but its helpers are called unbound, so GhHalf's own cases do not run a second time. One stand-in: merge.Host.ready sends no REST route
+    (route pr-ready-gh-api-cloud is unmeasured), so the host's mark is answered here and kept in self.marked."""
+
+    def setUp(self):
+        super().setUp()
+        gh_case_setup(self)
+        self.marked = []
+        head = self.head()
+        self.set(draft=True, echo_posts=True, full_name=merge.LANE_MERGE_REPO, open_prs=[["feat", head, "main", 7]], pull_files=self.feat_files(head),
+                 issue_comments=[lint_comment(501, head)])  # the lane-lint PASS at the live head, seeded: --lane-lint is not run here
+
+    def feat_files(self, head):
+        """The files `head` changes against main, from the fixture's own diff, in the files route's shape."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        status = {"A": "added", "M": "modified", "D": "removed"}
+        counts = {}
+        for line in sh(self.co, "git", "diff", "--numstat", "origin/main", head).splitlines():
+            add, dele, path = line.split("\t")
+            counts[path] = (int(add), int(dele))
+        files = []
+        for line in sh(self.co, "git", "diff", "--name-status", "origin/main", head).splitlines():
+            code, path = line.split("\t", 1)
+            files.append({"filename": path, "status": status[code], "additions": counts[path][0], "deletions": counts[path][1]})
+        return files
+
+    def set(self, **kw):
+        return GhHalf.set(self, **kw)
+
+    def gh_state(self, key):
+        return GhHalf.gh_state(self, key)
+
+    def gh_host(self):
+        host = GhHalf.gh_host(self)
+        host.ready = self.mark_ready  # the stand-in named in the class docstring
+        return host
+
+    def mark_ready(self, n):
+        self.marked.append(n)
+        self.set(draft=False)
+        return True, ""
+
+    def call(self, *argv):
+        """-> (rc, stdout, stderr) of merge on the gh host, as a cloud session: the --role call needs the cloud env, and the role file stays in this case's config dir."""
+        out, err = io.StringIO(), io.StringIO()
+        with self.cloud():
+            rc = self.run_merge(*argv, host=self.gh_host(), stdout=out, stderr=err)[0]
+        return rc, out.getvalue(), err.getvalue()
+
+    def lane_posts(self, body):
+        """The lane's post of its record: the body as --review-record printed it, with the footer GitHub adds."""
+        self.gh_host().post_comment(7, body + REVIEW_FOOTER)
+
+    def test_a_lane_merges_at_the_head_its_logged_record_names(self):
+        head = self.head()
+        rc, record, err = self.call("7", "--review-record", *REVIEW_FLAGS, "--head", head)
+        self.assertEqual(rc, 0, "--review-record was refused: " + record + err)
+        self.assertTrue(record.startswith(REVIEW_MARKER + "\n"), "--review-record did not print the record: " + record + err)
+        self.lane_posts(record)
+
+        rc, out, err = self.call("--role", "lane", "--step", "feat", "7", "--ready")
+        self.assertEqual(rc, 0, "the lane's --ready was refused: " + out + err)
+        self.assertEqual(self.marked, [7], "the lane's --ready did not mark #7 ready: " + out + err)
+
+        rc, out, err = self.call("--reviewed")
+        self.assertEqual(rc, 0, "--reviewed was refused: " + out + err)
+        branch, sha9, state = flow_row(self, out)
+        self.assertEqual((branch, sha9), ("feat", head[:9]), "the #7 row names another branch or head:\n" + out)
+        self.assertEqual(state, "done", "the logged record did not read as done:\n" + out)
+
+        rc, out, err = self.call("7", "--confirm", "--head", head)
+        self.assertEqual(rc, 0, "--confirm was refused after a done record: " + out + err)
+        merged = [f.get("sha") for f in self.gh_state("merge_fields") or []]
+        self.assertEqual(len(merged), 1, "--confirm did not merge #7 once: " + out + err)
+        self.assertIn(head, (merged[0], self.rev(merged[0] + "^")), "the merge carried neither the logged head nor a claim commit on it: " + out + err)
+        self.assertEqual(self.claims("main"), 1, "the merge did not claim exactly one record number: " + out + err)
+
+    def test_a_pull_request_with_no_record_is_not_done(self):
+        head = self.head()
+        rc, out, err = self.call("--reviewed")
+        self.assertEqual(rc, 0, "--reviewed was refused: " + out + err)
+        branch, sha9, state = flow_row(self, out)
+        self.assertEqual((branch, sha9), ("feat", head[:9]), "the #7 row names another branch or head:\n" + out)
+        self.assertEqual(state, "no record", "a pull request with no record did not read as no record:\n" + out)
+
+    def test_a_record_for_an_older_head_is_not_done(self):
+        head = self.head()
+        self.lane_posts(record_text(head=REVIEW_OLD_HEAD))
+        rc, out, err = self.call("--reviewed")
+        self.assertEqual(rc, 0, "--reviewed was refused: " + out + err)
+        branch, sha9, state = flow_row(self, out)
+        self.assertEqual((branch, sha9), ("feat", head[:9]), "the #7 row names another branch or head:\n" + out)
+        self.assertEqual(state, "stale", "a record for an older head did not read as stale:\n" + out)
 
 class ReviewRecordWrite(ReviewEnv):
     """`merge <pr> --review-record` prints the record for the pull request's live head. It posts nothing and pushes nothing: the lane posts it."""

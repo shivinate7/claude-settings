@@ -1,0 +1,1 @@
+- time-limits-cut-run-item-586: Step time-limits-end-hangs-only (coordinator 12:22 CST Nov 12): page item 586 cut-run-counts-as-sample (owner question; departs from R3; lane builds a as a switchable default meanwhile); stands item 587 pick-tiny-job-floor (coordinator pick 12:22: floor is the median of all computed limits).

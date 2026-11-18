@@ -74,39 +74,39 @@ Read the ruleset first, the way the merge tool does:
 gh api repos/<owner>/<repo>/rules/branches/<branch>
 ```
 
-Read its `required_status_checks` rule. It must name one check: `all-jobs-passed`. If no ruleset names a check, read the classic protection:
+Read its `required_status_checks` rule. It must name no check (ruling `own-all-jobs-passed-removed`, 2026-11-15 19:08 CST). If no ruleset names a check, read the classic protection:
 
 ```sh
 gh api repos/<owner>/<repo>/branches/<branch>/protection
 ```
 
-Read `required_status_checks` in that output. It must name one check: `all-jobs-passed`.
+Read `required_status_checks` in that output. It must name no check.
 
 A skipped job fails the rollup, unless `scope-skips` names it (step 19). So skip a scoped-out
 suite at its CI step, and the job still passes. A required job that never starts, because of a
 path filter on the whole workflow, stops the merge. Require a matrix through one fan-in job with
 `if: always()`. Its check name stays fixed when the matrix changes.
 
-Rename a required check by moving the rule to `all-jobs-passed`. `protect.py`, the one script that
-writes the ruled ruleset, accepts only that name for `--check`. It refuses any other name. Preview
-first. The preview changes nothing. It prints what differs from the ruled form, such as the checks the ruleset holds now.
+No check is required now (ruling `own-all-jobs-passed-removed`). `protect.py`, the one script that
+writes the ruled ruleset, still accepts only `all-jobs-passed` for `--check`, and refuses any other name.
+Its code change is pending (builder work). Preview first. The preview changes nothing. It prints what differs from the ruled form, such as the checks the ruleset holds now.
 
 ```sh
 # Preview: changes nothing
 python3 ~/.claude/skills/project-ops/scripts/protect.py --repo <owner>/<repo> --check all-jobs-passed --branch <branch>
 
-# Set it: the same command with --confirm
+# Set it: the same command with --confirm. Do not run it until the code change lands: it writes the removed one-check form. Ask the owner.
 python3 ~/.claude/skills/project-ops/scripts/protect.py --repo <owner>/<repo> --check all-jobs-passed --branch <branch> --confirm
 ```
 
-With no ruleset on the branch, the script creates one (POST): the one check, deletion and force-push
+With no ruleset on the branch, the script creates one (POST): the one check (the removed form, until the code changes), deletion and force-push
 blocked, and the Admin role able to bypass on pull requests only. A ruleset that differs from that
 form is updated in place (PUT): its other rules, its conditions and its strict value stay. The PUT sets the bypass list to the Admin role alone, so any other bypass actor is dropped. A ruleset
 already in the form is left alone. The script never reads or writes classic protection.
-`merge.requiredChecks` in `.github/stamp.json` says `"protection"` and needs no edit. A repo that
+`merge.requiredChecks` in `.github/stamp.json` needs no edit for this write. It says `"protection"` for a repo that names its checks there, and `"none"` on claude-settings `main`, which names none. A repo that
 pins a list there edits it too. The write needs an admin login. Push rights are not enough on the
 classic write, and the ruleset write is unmeasured (decision `main-branch-protection`). Do not write
-the rule with `gh api` by hand: a PUT to a ruleset replaces its rules. Ask the owner.
+the rule with `gh api` by hand: a PUT to a ruleset replaces its rules. Ask the owner. With `"protection"`, merge refuses a base that names no required check, so the code change must land before any repo moves to the no-check form. With `"none"`, merge does not stop.
 
 ## 4. Cancel superseded runs
 
@@ -143,7 +143,7 @@ jobs:
         with: {node-version: 22, cache: npm}
       - run: npm ci
   all-jobs-passed:
-    # The one required check. Lists every other job. Its draft guard keeps a draft run skipped.
+    # Lists every other job. Its draft guard keeps a draft run skipped.
     needs: [static, shards]
     if: ${{ always() && !github.event.pull_request.draft }}
     runs-on: ubuntu-latest

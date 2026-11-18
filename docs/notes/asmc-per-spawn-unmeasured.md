@@ -1,0 +1,1 @@
+- asmc-per-spawn-unmeasured: (#2486) per-spawn-beats-pin is unmeasured for Workflow builders.

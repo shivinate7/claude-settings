@@ -641,8 +641,6 @@ READ_MCP_WORDS = ("get", "list", "read", "query", "search", "view")
 # A whole name segment that makes an MCP tool a writer or a sender, whatever else its name says.
 WRITE_MCP_WORDS = ("write", "create", "update", "delete", "send", "set", "post", "add", "remove", "merge", "push",
                    "resolve", "submit", "edit", "put", "patch", "run", "trigger", "reply", "comment", "fork")
-GIT_WRITES = ("commit", "push", "add", "tag", "merge", "rebase", "reset", "restore", "checkout", "switch", "stash",
-              "cherry-pick", "apply", "am", "rm", "mv", "clean", "pull", "revert", "init", "clone", "config")
 SHELL_WRITES = ("rm", "mv", "cp", "touch", "mkdir", "tee", "chmod", "ln", "install", "truncate", "dd")
 
 
@@ -728,7 +726,7 @@ def _shell_reads(command):
     if not isinstance(command, str):
         return True
     for segment in guard_core.split_segments(command):
-        if any(sub in GIT_WRITES for sub, _rest in guard_core.git_calls(segment)):
+        if any(sub in guard_core.GIT_WRITES for sub, _rest in guard_core.git_calls(segment)):
             return False
         tokens = guard_core.segment_tokens(segment) or []
         at = guard_core.resolve_command(tokens) if tokens else None

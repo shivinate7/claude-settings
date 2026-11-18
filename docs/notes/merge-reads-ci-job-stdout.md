@@ -1,0 +1,1 @@
+- merge-reads-ci-job-stdout: merge/merge.py lines 1690 and 1818 read ci-job stdout outside ci_job_run. That is a second reader of one output (#1756).

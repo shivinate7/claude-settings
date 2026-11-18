@@ -1,0 +1,1 @@
+- plain-prose-lint-exit-zero: The plain-prose lint's run script exits 0 on an unread diff (q_max's FAIL SAFE comment says red). The `restates` probe skips headings and code spans.

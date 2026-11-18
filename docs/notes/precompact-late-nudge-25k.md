@@ -1,0 +1,1 @@
+- precompact-late-nudge-25k: Built as PR #3110 (head 1276503fc). Triage 01:41 CST Nov 13 accepted its departure from item 676 a: the late nudge fires when it sits 25k or more past the first (the 75k gap rule never fires, since the first sits 50k under the line). No owner item: 676 a was triage's pick. Runner 10 told to batch it.

@@ -1,0 +1,1 @@
+- cull-narration-fix-red-tests: guard-false-alarm-cull 14:26 CST Nov 12: Fix lane 14:25 CST Nov 12: branch cull-narration-hex-id-fix, head 4bb865643, 3 red tests on 2cb3ad856; builder running.

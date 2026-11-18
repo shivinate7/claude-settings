@@ -1,0 +1,1 @@
+- degen-d16-isolation-refusal: Degen ledger row D16 (isolation check refuses edits outside git; harness, raise upstream; debt note split-sentence-eight-copies) lands here; plans/degen-report-2026-11-12.md on branch restart-plan, commit 113d77849 (retrospective 21:04 CST Nov 12).

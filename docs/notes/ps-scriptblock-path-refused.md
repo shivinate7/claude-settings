@@ -1,1 +1,1 @@
-- ps-scriptblock-path-refused: the check still refuses `@{N='x'; E={ ./x.ps1 }}`, since the scriptblock lookahead covers only a letter after `{ ` while the trailing class also takes `.` and `/` (hooks/question_form.py PS_BASH_FORMS, its NAME= alternative). Decision: act-in-place
+- ps-scriptblock-path-refused: the check still refuses `@{N='x'; E={ ./x.ps1 }}`, since the scriptblock lookahead covers only a letter after `{ ` while the trailing class also takes `.` and `/` (hooks/question_form.py PS_BASH_FORMS, its NAME= alternative). Decision: act-in-place Seen: 2026-11-17 x1

@@ -1,0 +1,1 @@
+- past-ruling-skips-new-steps: Triage filed step merge-tool-follows-r9 (now done) from a lane's reading of R9 without reading roadmap/rulings/r9.json; the step contradicted the ruling. The past-ruling check reads page items only, not new steps (triage 18:01 CST Nov 12).

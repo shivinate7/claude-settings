@@ -1,0 +1,1 @@
+- rsg3-held-state-untested: No held-state test covers the report-guard refusal (PR #2252).

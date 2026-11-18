@@ -151,7 +151,7 @@ LINUX_SUITES = {
     "python3 hooks/test_wrappers.py": (None, None),
     "python3 hooks/test_scratchpad_owner.py": (None, None),
     "python3 hooks/test_checks_never_raise.py": (None, None),
-    "python3 hooks/test_session_start.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 hooks/test_session_start.py": (SCOPE_DOC_DECISIONS, None),  # its test class reads the session roles decision record
     "python3 hooks/test_session_role.py": (None, None),
     "python3 lint/test_claude_role.py": (None, None),
     "python3 lint/test_guard_merge_imports.py": (None, None),
@@ -215,6 +215,7 @@ LINUX_SUITES = {
     "python3 lint/test_check_agent_models.py": (SCOPE_DOC_ANY, None),
     "python3 lint/test_agent_push_form.py": (SCOPE_DOC_ANY, None),
     "python3 lint/test_check_skill_model_rows.py": (None, None),
+    "python3 lint/test_check_project_ops_roles.py": (None, None),
     "python3 lint/test_no_window_spawn.py": (None, None),
     "pwsh -NoProfile -File install.test.ps1": (LINUX_CODE, None),
     "python3 janitor/test_session_end_sweep.py": (LINUX_CODE, None),

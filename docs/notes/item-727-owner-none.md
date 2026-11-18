@@ -1,0 +1,1 @@
+- item-727-owner-none: 12:14 CST Nov 13: item 727 (#1938 pin design): the owner answered none, "did retro agree with this too?". Not asked of retro before; asked 12:14 CST Nov 13. Open.

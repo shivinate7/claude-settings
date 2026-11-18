@@ -1,0 +1,1 @@
+- notes-row-second-name: the glossary term is "note", but decision silent-undo-check-design and the edited_notes docstrings also say "row".

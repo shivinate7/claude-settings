@@ -1,0 +1,1 @@
+- local-checks-per-os-table-unread: (same source, #2536 PR body) the per-OS table is not read.
