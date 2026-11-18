@@ -361,6 +361,10 @@ jobs:
       - name: Job runner fixture suite (bin/ci-job)
         run: python3 lint/test_ci_job.py
 
+      - name: Review-layer recall eval (fixture shape and scorer report)
+        if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
+        run: python3 lint/test_review_layer_recall.py
+
       - name: Rule mechanization audit
         if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_rules == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/rule_audit.py

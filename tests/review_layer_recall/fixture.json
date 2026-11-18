@@ -1,0 +1,148 @@
+{
+  "about": "Eval fixture for the review-layer recall scorer. Incidents are reverts and red-main reverts on main, and merged PRs that a later fix PR found to be a reviewer miss. A revert incident names the PR the revert undid. A fix-found miss names its head and the fix PR (fixed_by) and has no revert. Each incident gives the review layer that should have caught it and a one-line answer key. Controls are merged PRs that no revert names and no fix names as a miss. The layer is the author's judgment from the revert message, the changed files and the PR title. It is not a recorded review verdict. A layer of 'unknown' means the revert gives no cause to judge: the incident stays in the fixture and in n.incidents, and in no layer's count.",
+  "read": "2026-11-17 CST. Reverts from git log on main (subjects and 'This reverts commit' lines). PRs from REST commits/<sha>/pulls or pulls/<n>. Controls from REST pulls/<n>, with commits checked against every reverted commit. 2026-11-18 CST: fix-found misses and their heads from git log on main (a fix PR's merge commit and the miss PR's second parent). Controls added from git log on main merge commits; merged_at is the merge commit's time in UTC, and each title is the PR title on the merge commit.",
+  "layers": ["reviewer", "refuter", "fix_verifier", "design_reviewer"],
+  "incidents": [
+    {
+      "pr": 38,
+      "reverted_before_merge": true,
+      "reverted": "215a236815",
+      "reverts": ["edf661032a"],
+      "layer": "unknown",
+      "note": "Revert gives no stated reason, so the answer key's cause is invented; layer unknown.",
+      "basis": "revert subject and changed files",
+      "answer_key": "A PR that dropped the counts from the verification rule and fixed the report gate was partly reverted in CLAUDE.md; the reviewer should check that the rule edit and the gate change agree."
+    },
+    {
+      "pr": 512,
+      "reverted_before_merge": true,
+      "batch": true,
+      "reverted": "7f41368639",
+      "reverts": ["18ec5d71c0"],
+      "layer": "reviewer",
+      "basis": "revert message",
+      "answer_key": "A shared is_git_work_tree import broke the mutant trees in hooks/mutate_guard.py and the Windows CI scope flag; the reviewer should check a shared import against the mutant copy list and the Windows scope."
+    },
+    {
+      "pr": 690,
+      "reverted_before_merge": true,
+      "batch": true,
+      "reverted": "a34066dbe2",
+      "reverts": ["8055ce7b7e"],
+      "layer": "unknown",
+      "note": "Revert gives no stated reason, so the answer key's cause is invented; layer unknown.",
+      "basis": "revert subject and changed files",
+      "answer_key": "A five-line teardown change in lint/test_check_mod_versions.py, meant to stop a git gc race, was reverted; the reviewer should check that the change fixes the race it names."
+    },
+    {
+      "pr": 936,
+      "reverted_before_merge": true,
+      "batch": true,
+      "reverted": "b8a0b5bd18",
+      "reverts": ["9e25c54728"],
+      "layer": "reviewer",
+      "basis": "revert message",
+      "answer_key": "A WIP commit deleted most of the builder's agent-role-model clause with no explanation; the reviewer should flag a deletion that the commit does not explain."
+    },
+    {
+      "pr": 1082,
+      "reverted_before_merge": true,
+      "batch": true,
+      "reverted": "6a24bef61b",
+      "reverts": ["7c19b3145a"],
+      "layer": "unknown",
+      "note": "Revert gives no stated reason, so the answer key's cause is invented; layer unknown.",
+      "basis": "revert subject and changed files",
+      "answer_key": "A 13-line test in hooks/test_guard.py that allowed a generator chain over a staged page was reverted; the reviewer should check the test's expected verdict against the guard rule."
+    },
+    {
+      "pr": 2236,
+      "reverted_before_merge": true,
+      "batch": true,
+      "reverted": "450b737bb",
+      "reverts": ["6c184ad22f"],
+      "layer": "fix_verifier",
+      "note": "fix check already found the defect",
+      "basis": "revert message",
+      "answer_key": "A scan-comment fix's length and strength claim was false, and its fix check found it; the fix verifier should check each claim in a fix before the merge."
+    },
+    {
+      "pr": 3389,
+      "reverted_before_merge": true,
+      "reverted": "08ce22cc46",
+      "reverts": ["6253b146a2", "2173f4d212", "bb1eec5fb1"],
+      "layer": "reviewer",
+      "basis": "revert subject and changed files",
+      "answer_key": "A default permission-mode change to auto, in settings and in the install script, rode in a PR about launcher role files; the reviewer should flag the default as out of scope."
+    },
+    {
+      "pr": 3435,
+      "reverted_before_merge": true,
+      "batch": true,
+      "reverted": "2d33883009",
+      "reverts": ["38082ba61f"],
+      "layer": "unknown",
+      "note": "Merge-conflict revert: the revert names no cause, so the layer is unknown.",
+      "basis": "revert message",
+      "answer_key": "The touchWidths wording edited lines that open #2716 and #2717 also edit; the refuter should test the premise that no other open lane owns those lines."
+    },
+    {
+      "pr": 3542,
+      "reverted": null,
+      "reverts": ["91ab71af93"],
+      "layer": "reviewer",
+      "note": "reviewer never replays CI suites",
+      "basis": "revert message",
+      "answer_key": "Adding merge --ready to permissions.allow turned the CloudAllow test red on three CI jobs; the reviewer should run the allow-list change against CloudAllow."
+    },
+    {
+      "pr": 3596,
+      "reverted": null,
+      "reverts": ["c868f93daf", "695ee9aeaf"],
+      "layer": "reviewer",
+      "basis": "revert message and PR title",
+      "answer_key": "An auto-mode allow for a lane's own merge turned main red, and its test file had to be restored; the reviewer should check the allow rule against hooks/test_auto_mode_allow.py before the merge."
+    },
+    {
+      "pr": 3293,
+      "reverted": null,
+      "reverts": [],
+      "head": "4686e4b478ac5e86198bc79236a4917c36d7b290",
+      "fixed_by": {"pr": 3641, "merge_sha": "e88dac4d5b5d23446278842ca54278f6dae4e118"},
+      "layer": "reviewer",
+      "note": "Found by a later fix PR, not a revert: a union merge was refused as lost.",
+      "basis": "fix PR title and changed files",
+      "answer_key": "A builder's union merge of a test conflict was refused as lost by _edit_dropped in hooks/guard.py; the reviewer should check the merge result against the guard's read of a union merge."
+    },
+    {
+      "pr": 3628,
+      "reverted": null,
+      "reverts": [],
+      "head": "4379292559c85bc39093093827aa665075174b05",
+      "fixed_by": {"pr": 3629, "merge_sha": "4d2ff66076ba1a6f32c9f1d7c14680c146766404"},
+      "layer": "reviewer",
+      "note": "Found by a later fix PR, not a revert: a docs reword changed owner rule d.",
+      "basis": "fix PR title and changed files",
+      "answer_key": "A docs reword of owner rule d changed the owner's words; the reviewer should check a rule reword against the owner's recorded words before the merge."
+    }
+  ],
+  "controls": [
+    {"pr": 2817, "merge_sha": "bdb344526a4d243ca4c9d295a39b9a9be80d9619", "merged_at": "2026-11-16T21:04:44Z", "title": "merge --idle-lanes flags a lane whose handoff is not on the record branch"},
+    {"pr": 2848, "merge_sha": "a752de196d9a61d1cc86f1def335c6d1ca37e32a", "merged_at": "2026-11-17T21:48:32Z", "title": "Archiving scope: whoever starts a session archives it; a lane pushes its handoff to the record branch"},
+    {"pr": 2917, "merge_sha": "1d611b6f051c675d8c3680f47691719a4dcd219e", "merged_at": "2026-11-16T20:04:14Z", "title": "A lane may push its own handoff file to the record branch"},
+    {"pr": 3362, "merge_sha": "0585146e3567115b681f59aacdce743997b11811", "merged_at": "2026-11-16T15:15:01Z", "title": "After a compaction, refuse writes and replies until an Audit: agent has run"},
+    {"pr": 3449, "merge_sha": "ce341560d954a1ab2ebf9773d1ad6c1ea7ea7147", "merged_at": "2026-11-16T21:29:35Z", "title": "Writer lists comment threads awaiting its reply at each wake"},
+    {"pr": 3530, "merge_sha": "107b66764211f5c8b53d280f65880dc1a8e0b59f", "merged_at": "2026-11-16T18:38:15Z", "title": "Export keeps all six waiting collections append-only"},
+    {"pr": 3536, "merge_sha": "d80b387908ed8d05dd7639651eeae1664c642936", "merged_at": "2026-11-16T17:39:01Z", "title": "Saved comment: a cut owner ends in an ellipsis"},
+    {"pr": 3550, "merge_sha": "92ca82f302cd3cb52a138f793557094504982c3d", "merged_at": "2026-11-17T22:00:51Z", "title": "Cloud refresh switches a whole install generation by one link rename"},
+    {"pr": 3553, "merge_sha": "a1d216e78b76cad337ab285924ad01f96f09a11e", "merged_at": "2026-11-16T20:23:42Z", "title": "A can't claim needs a probe"},
+    {"pr": 3395, "merge_sha": "60db33f8801cebbf3f8d43808cfd9ff8e6515127", "merged_at": "2026-11-14T13:59:56Z", "title": "A test-support helper has one home: the top-level testing folder"},
+    {"pr": 3401, "merge_sha": "c03312687c13825b46e2cf9f5f2db95c54e84796", "merged_at": "2026-11-14T15:54:56Z", "title": "Silent-undo: an appended negation clause is no drop, and the refusal prints a complete remedy"},
+    {"pr": 3382, "merge_sha": "dd816533b1ab0f97e85c736d27d0b28137f5b599", "merged_at": "2026-11-14T18:30:03Z", "title": "Print where else a landed ruling, rule or guard applies"},
+    {"pr": 3433, "merge_sha": "9fc4ed882fbfdc1eb1cd26582b29d69ff6ca4448", "merged_at": "2026-11-15T04:42:44Z", "title": "Step grant-line-clean-merge-no-verifier: a clean merge of main takes no fix verifier"},
+    {"pr": 3461, "merge_sha": "d8c75ee0f7c86221b42becd55816b6ee086c0c72", "merged_at": "2026-11-15T09:05:22Z", "title": "Judge prompt says \"page\", not \"waiting-page\", where the glossary check flags it"},
+    {"pr": 3488, "merge_sha": "ee7ab4423aaa89fe346133d0ce32b80e5ae7657b", "merged_at": "2026-11-15T12:09:03Z", "title": "merge: read the owner's recorded acceptance of a negative net value"},
+    {"pr": 3494, "merge_sha": "b5fb94e573f9b6fa0f50d08c671ce690f6535158", "merged_at": "2026-11-15T11:23:50Z", "title": "Reviewer and test-author probe tests for live-remote state"},
+    {"pr": 3455, "merge_sha": "718b0d3c63049565f9dcee2653b81e753acdda6f", "merged_at": "2026-11-15T10:04:37Z", "title": "Scope session-end agent-worktree rule to the ending repo"}
+  ]
+}
