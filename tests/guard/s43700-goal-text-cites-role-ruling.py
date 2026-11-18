@@ -36,7 +36,7 @@ def _gtr_fields(tool, message):
     return {"session_id": GTR_TARGET, "message": message}
 
 
-def gtr_deny(name, message, tool=SEND_MESSAGE):
+def gtr_refuse(name, message, tool=SEND_MESSAGE):
     """A send the guard refuses under this rule. The reason names the rule and the one remedy."""
     add(GTR_LABEL + name, "deny", rule=GTR_RULE, tool=tool, cwd=NOGIT, carries=GTR_CITE, **_gtr_fields(tool, message))
 
@@ -47,39 +47,39 @@ def gtr_allow(name, message, tool=SEND_MESSAGE):
 
 
 # ---- Refused: a limit on a role with no cite. The incident text first.
-gtr_deny("the incident text, with no ruling, is refused", "Triage cannot merge; hand to runner 10.")
-gtr_deny("the contraction can't is refused", "Triage can't merge the PR.")
-gtr_deny("the contraction with a curly apostrophe is refused", "Triage can’t merge the PR.")
-gtr_deny("can not, in two words, is refused", "The lane can not merge its own PR.")
-gtr_deny("may not merge is refused for the batch runner", "The batch runner may not merge its lane PRs.")
-gtr_deny("must not merge is refused for runner 10", "Runner 10 must not merge.")
-gtr_deny("must not push is refused for the coordinator", "The coordinator must not push to main.")
-gtr_deny("cannot push is refused for the consultant", "The consultant cannot push its own branch.")
-gtr_deny("may not mark ready is refused for the arbiter", "The arbiter may not mark ready the pull request.")
-gtr_deny("cannot mark ready is refused for the coordinator", "The coordinator cannot mark ready the integration PR.")
-gtr_deny("an upper-case limit is refused", "TRIAGE CANNOT MERGE.")
-gtr_deny("a role in the middle of a sentence is refused", "We agreed that triage cannot merge the PR.")
-gtr_deny("a limit on the third line of a 200-line message is refused", GTR_LONG_LIMIT)
-gtr_deny("SendMessage: a lane may not push, with no cite, is refused", "The lane may not push.", tool=SENDMESSAGE_TOOL)
+gtr_refuse("the incident text, with no ruling, is refused", "Triage cannot merge; hand to runner 10.")
+gtr_refuse("the contraction can't is refused", "Triage can't merge the PR.")
+gtr_refuse("the contraction with a curly apostrophe is refused", "Triage can’t merge the PR.")
+gtr_refuse("can not, in two words, is refused", "The lane can not merge its own PR.")
+gtr_refuse("may not merge is refused for the batch runner", "The batch runner may not merge its lane PRs.")
+gtr_refuse("must not merge is refused for runner 10", "Runner 10 must not merge.")
+gtr_refuse("must not push is refused for the coordinator", "The coordinator must not push to main.")
+gtr_refuse("cannot push is refused for the consultant", "The consultant cannot push its own branch.")
+gtr_refuse("may not mark ready is refused for the arbiter", "The arbiter may not mark ready the pull request.")
+gtr_refuse("cannot mark ready is refused for the coordinator", "The coordinator cannot mark ready the integration PR.")
+gtr_refuse("an upper-case limit is refused", "TRIAGE CANNOT MERGE.")
+gtr_refuse("a role in the middle of a sentence is refused", "We agreed that triage cannot merge the PR.")
+gtr_refuse("a limit on the third line of a 200-line message is refused", GTR_LONG_LIMIT)
+gtr_refuse("SendMessage: a lane may not push, with no cite, is refused", "The lane may not push.", tool=SENDMESSAGE_TOOL)
 
 # ---- Refused: a cite that does not count. A ruling word with no id, a decision word with no id, and a cite on another line.
-gtr_deny("the word ruling with no id is no cite, so the limit is refused", "Per the owner's ruling, triage cannot merge.")
-gtr_deny("the word decision with no id is no cite, so the limit is refused", "Triage cannot merge; the decision is open.")
-gtr_deny("a cite on the line above does not exempt the limit below it",
+gtr_refuse("the word ruling with no id is no cite, so the limit is refused", "Per the owner's ruling, triage cannot merge.")
+gtr_refuse("the word decision with no id is no cite, so the limit is refused", "Triage cannot merge; the decision is open.")
+gtr_refuse("a cite on the line above does not exempt the limit below it",
          "Ruling own-everyone-merges covers the merge.\nTriage cannot merge; hand to runner 10.")
-gtr_deny("a cite on the line below does not exempt the limit above it",
+gtr_refuse("a cite on the line below does not exempt the limit above it",
          "Triage cannot merge; hand to runner 10.\nSee decision session-tiers.")
 
 # ---- Refused: the scanner. A quote, a code span or a fence that never closes, or closes before the limit, hides nothing.
-gtr_deny("a lone apostrophe before an unquoted limit does not open a quote, so the limit is refused",
+gtr_refuse("a lone apostrophe before an unquoted limit does not open a quote, so the limit is refused",
          "Don't wait: triage can't merge the PR.")
-gtr_deny("a lone backtick before an unquoted limit does not open a code span, so the limit is refused",
+gtr_refuse("a lone backtick before an unquoted limit does not open a code span, so the limit is refused",
          "Note the `pins: triage cannot merge; hand to runner 10.")
-gtr_deny("a lone double quote before an unquoted limit does not open a quote, so the limit is refused",
+gtr_refuse("a lone double quote before an unquoted limit does not open a quote, so the limit is refused",
          'Owner said "go on. Triage cannot merge; hand to runner 10.')
-gtr_deny("a limit after a closed fenced block is refused, since the scanner returns to prose after the fence",
+gtr_refuse("a limit after a closed fenced block is refused, since the scanner returns to prose after the fence",
          "```\nrefused: example text\n```\nTriage cannot merge; hand to runner 10.")
-gtr_deny("a limit after a code span that holds comment openers is refused",
+gtr_refuse("a limit after a code span that holds comment openers is refused",
          "Paths `a//b` and `/*` are examples. Triage cannot merge; hand to runner 10.")
 
 # ---- Allowed: a limit quoted as text, which is not a statement. Owner words, a blockquote, a refusal text in a report, a
