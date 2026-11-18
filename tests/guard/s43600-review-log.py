@@ -25,6 +25,8 @@ FAMILY = "review-log"
 
 RVW_OWNER = "shivinate7"
 RVW_NAME = "claude-settings"
+RVW_ORIGIN = "https://github.com/%s/%s.git" % (RVW_OWNER, RVW_NAME)  # the checkout's origin: its own repo
+RVW_OTHER = "degen"                                                  # a repo of the same owner, not this checkout
 RVW_ADD = "mcp__github__add_issue_comment"
 RVW_UPDATE = "mcp__github__update_issue_comment"
 RVW_FORM = "review-log-form"
@@ -98,6 +100,7 @@ def _rvw_merge_module():
 def _rvw_build():
     os.makedirs(RVW_REPO, exist_ok=True)
     _rvw_git(RVW_REPO, "init", "-q", "-b", "main", ".")
+    _rvw_git(RVW_REPO, "remote", "add", "origin", RVW_ORIGIN)
     write(os.path.join(RVW_REPO, "README.md"), "review record fixture\n")
     _rvw_git(RVW_REPO, "add", "-A")
     _rvw_git(RVW_REPO, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "first", when=RVW_WHEN[0])
@@ -112,6 +115,9 @@ def _rvw_build():
     os.makedirs(RVW_EMPTY, exist_ok=True)
     _rvw_git(RVW_EMPTY, "init", "-q", "-b", "main", ".")
     os.makedirs(RVW_NOPATH, exist_ok=True)
+    # Scope before subject: the checkout is this repo, so a call that names another repo is a cross-repo call.
+    _rvw_need(_rvw_git(RVW_REPO, "remote", "get-url", "origin") == RVW_ORIGIN,
+              "the checkout's origin is not %s, so the cross-repo cases name no other repo" % RVW_ORIGIN)
     # Scope before subject: the shapes the cases name are the shapes the merge tool accepts or refuses.
     parse = _rvw_merge_module().parse_review
     _rvw_need(parse(rvw_body()) is not None, "parse_review refuses the tool-form record the cases allow")
@@ -124,9 +130,9 @@ def _rvw_build():
 lazy_fixture([RVW_REPO, RVW_NOTREE, RVW_EMPTY, RVW_NOPATH], _rvw_build)
 
 
-def rvw_add(name, expected, body, rule=None, cwd=RVW_REPO, env_path=None, carries=()):
+def rvw_add(name, expected, body, rule=None, cwd=RVW_REPO, env_path=None, carries=(), repo=RVW_NAME):
     add(name, expected, rule=rule, tool=RVW_ADD, cwd=cwd, env_path=env_path, carries=carries,
-        owner=RVW_OWNER, repo=RVW_NAME, issue_number=12, body=body)
+        owner=RVW_OWNER, repo=repo, issue_number=12, body=body)
 
 
 def rvw_update(name, expected, body, rule=None, cwd=RVW_REPO, carries=()):
@@ -149,6 +155,37 @@ def rvw_gh_pr_comment(name, expected, body, rule=None, carries=()):
 def rvw_gh_api_comment(name, expected, body, rule=None, carries=()):
     """A Bash `gh api` call that posts `body` as a new comment on issue 12, run in the fixture checkout."""
     sh(name, 'gh api repos/%s/%s/issues/12/comments -f body="%s"' % (RVW_OWNER, RVW_NAME, rvw_quoted(body)),
+       expected, rule=rule, cwd=RVW_REPO, carries=carries)
+
+
+def rvw_joined(body):
+    """The body with each newline written as a backslash and an n: two characters a double-quoted shell word keeps.
+    gh posts that text as typed, so the comment's first line is the whole body."""
+    _rvw_need(not any(ch in body for ch in '"$`'), "a log body holds a character a double-quoted shell word expands")
+    return "\\n".join(body.splitlines())
+
+
+def rvw_flag_pr(name, expected, flag, body, rule=None, carries=()):
+    """A Bash `gh pr comment 12` that posts `body` through `flag`, a template whose %s takes the quoted body."""
+    sh(name, "gh pr comment 12 " + flag % rvw_quoted(body), expected, rule=rule, cwd=RVW_REPO, carries=carries)
+
+
+def rvw_flag_api(name, expected, flag, body, rule=None, carries=()):
+    """A Bash `gh api` call that posts `body` as a comment on issue 12 through `flag`, a template whose %s takes the
+    quoted body."""
+    sh(name, "gh api repos/%s/%s/issues/12/comments " % (RVW_OWNER, RVW_NAME) + flag % rvw_quoted(body), expected,
+       rule=rule, cwd=RVW_REPO, carries=carries)
+
+
+def rvw_heredoc_pr(name, expected, body, rule=None, carries=()):
+    """A Bash `gh pr comment 12` whose body is `$(cat <<'EOF' ... EOF)`. The quoted delimiter keeps the body literal."""
+    sh(name, 'gh pr comment 12 --body "$(cat <<\'EOF\'\n' + body + 'EOF\n)"', expected, rule=rule, cwd=RVW_REPO,
+       carries=carries)
+
+
+def rvw_stdin_api(name, expected, body, rule=None, carries=()):
+    """A Bash `gh api` call that reads its comment body from stdin, `-F body=@-`, fed by a quoted heredoc."""
+    sh(name, "gh api repos/%s/%s/issues/12/comments -F body=@- <<'EOF'\n" % (RVW_OWNER, RVW_NAME) + body + "EOF",
        expected, rule=rule, cwd=RVW_REPO, carries=carries)
 
 
@@ -212,3 +249,48 @@ rvw_add("review-log-sha: a made-up Head is allowed in a folder that is no git tr
         rvw_body(head=RVW_UNKNOWN), cwd=RVW_NOTREE)
 rvw_gh_api_comment("review-log-sha: a Bash gh api call whose body does not open with the marker is allowed", "allow",
                    "Review below.\n" + rvw_body(head=RVW_UNKNOWN))
+
+# ---- The forms a Bash call posts that the cases above do not reach. Each red case is one the guard allows today.
+# Its green control sits beside it. A control that already passes is a pin, and says so in its commit.
+
+# A record written with a literal backslash-n: the comment posts the two characters, so its first line is the whole body
+# and no line is the marker. The record is valid apart from its newlines, so only the form is wrong.
+sh("review-log-form: a Bash gh pr comment whose record holds a literal backslash-n on one line is refused",
+   'gh pr comment 12 --body "%s"' % rvw_joined(rvw_body()), "deny", rule=RVW_FORM, cwd=RVW_REPO, carries=RVW_REMEDY)
+sh("review-log-form: a Bash gh pr comment with a literal backslash-n whose first line is not the marker is allowed",
+   'gh pr comment 12 --body "%s"' % rvw_joined("Lint PASS on the head.\nMerging after CI.\n"), "allow", cwd=RVW_REPO)
+
+# A body read through a command substitution or from stdin. The guard reads the text the heredoc holds, so a
+# hand-typed log is refused, and the merge tool's printed record is allowed.
+rvw_heredoc_pr("review-log-form: a Bash gh pr comment whose heredoc holds a hand-typed review log is refused", "deny",
+               RVW_HAND_KIND, rule=RVW_FORM, carries=RVW_REMEDY)
+rvw_heredoc_pr("review-log-form: a Bash gh pr comment whose heredoc holds the merge tool's printed record is allowed",
+               "allow", RVW_TOOL_OUT + "\n")
+rvw_stdin_api("review-log-form: a Bash gh api call that reads a hand-typed review log from stdin is refused", "deny",
+              RVW_HAND_KIND, rule=RVW_FORM, carries=RVW_REMEDY)
+rvw_stdin_api("review-log-form: a Bash gh api call that reads the merge tool's printed record from stdin is allowed",
+              "allow", RVW_TOOL_OUT + "\n")
+
+# A call that names another repo of the owner. The sha of the record names no commit in this checkout, and the sha
+# is not judged, because the checkout is not that repo. The same body on this repo is refused by the review-log-sha
+# case above.
+rvw_add("review-log-sha: a made-up Head is allowed when the call posts to another repo of the owner", "allow",
+        rvw_body(head=RVW_UNKNOWN), repo=RVW_OTHER)
+
+# The flags a Bash call posts a body through. Each pin refuses a hand-typed log, as the guard already does.
+# The one allow shows the merge tool's own record, passed as a command substitution, is not judged.
+rvw_flag_pr("review-log-form: a Bash gh pr comment that posts a hand-typed review log with -b is refused", "deny",
+            '-b "%s"', RVW_HAND_KIND, rule=RVW_FORM, carries=RVW_REMEDY)
+rvw_flag_pr("review-log-form: a Bash gh pr comment that posts a hand-typed review log with --body= is refused", "deny",
+            '--body="%s"', RVW_HAND_KIND, rule=RVW_FORM, carries=RVW_REMEDY)
+rvw_flag_api("review-log-form: a Bash gh api call that posts a hand-typed review log with --field is refused", "deny",
+             '--field body="%s"', RVW_HAND_KIND, rule=RVW_FORM, carries=RVW_REMEDY)
+rvw_flag_api("review-log-form: a Bash gh api call that posts a hand-typed review log with -F is refused", "deny",
+             '-F body="%s"', RVW_HAND_KIND, rule=RVW_FORM, carries=RVW_REMEDY)
+rvw_flag_api("review-log-form: a Bash gh api call that posts a hand-typed review log with -fbody= is refused", "deny",
+             '-fbody="%s"', RVW_HAND_KIND, rule=RVW_FORM, carries=RVW_REMEDY)
+rvw_flag_api("review-log-form: a Bash gh api call that posts a hand-typed review log with --raw-field is refused",
+             "deny", '--raw-field body="%s"', RVW_HAND_KIND, rule=RVW_FORM, carries=RVW_REMEDY)
+sh("review-log-form: a Bash gh pr comment whose body is the merge tool's own record command is allowed",
+   'gh pr comment 12 --body "$(merge 12 --review-record --head %s --kind normal --guard no '
+   '--round 1:reviewer:sonnet:PASS)"' % RVW_HEAD, "allow", cwd=RVW_REPO)
