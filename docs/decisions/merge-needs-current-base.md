@@ -14,14 +14,13 @@ Owner ruling `own-merge-on-lint-pass` (owner, 2026-11-15 18:21 CST, typed "B for
 - The tool sends its PUT past a BLOCKED read only when a PASS lifted the pending run. BEHIND still refuses.
 - The batch's wait for the base to move, the heal merge commit and the small-move suite run are gone.
 
-Rule d (main comes in once, at merge time). Only a conflict names a lane for a main-in after a batch merge (skill `ci-hygiene` step 8). Once #3481 (carry the lane lint across a clean merge of main) and #3552 (lane lint merges main into a lane head behind it and pushes the merge on a pass) are on main, at merge time the tool does one main-in and keeps the green run.
+Rule d. Lanes bring main in only on conflict; the merge tool does one main-in at merge time and keeps the green run (needs #3481 and #3552 on main). Skill `ci-hygiene` step 8 holds the same rule.
 
 Coordinator's reading, not the owner's: until both are on main, rule d is not in force and ruling `own-923-c-ready-lanes-bring-main-in` stands.
 
 - Based on (ruling): owner, 2026-11-17 14:20 CST, page item 925 `main-in-once-before-lint`, pick d, item closed 14:27 CST. His words: "Lanes bring main in only on conflict; the merge tool does one main-in at merge time and keeps the green run (needs #3481 and #3552 on main)."
-- Based on (ruling): owner, 2026-11-16 13:46 CST, page item 923 pick c, typed in the coordinator's chat, ruling `own-923-c-ready-lanes-bring-main-in`: ready lanes, or lanes one step from ready, bring main in after each merge. Pick d replaces it for ready lanes once it is in force. Ruling c was never filed to a record on main.
+- Based on (ruling): owner, 2026-11-16 13:46 CST, page item 923 pick c, typed in the coordinator's chat, ruling `own-923-c-ready-lanes-bring-main-in`: ready lanes, or lanes one step from ready, bring main in after each merge. Ruling c was never filed to a record on main.
 - Open, not built: a grade by priority that would bring some PRs to main together (page item 924). No grade is defined, so nothing here tiers a lane.
-- Why d: it keeps the ready queue clean (unmeasured).
 
 Why: branch protection on `main` has `strict` false, so GitHub reports BEHIND only when `strict` is on (`main-branch-protection`). The tool's own reads are the gate.
 
