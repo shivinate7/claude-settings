@@ -238,6 +238,12 @@ class Fixture(unittest.TestCase):
     def write_step(self, sid, step):
         (self.data / "steps" / (sid + ".json")).write_text(json.dumps(step), encoding="utf-8")
 
+    def commit_step(self, sid, **fields):
+        """Write a step on the record branch and commit it, where a build from main reads it. A field set to _ABSENT is left out."""
+        self.write_step(sid, {k: v for k, v in dict(STEP, **fields).items() if v is not _ABSENT})
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "step " + sid)
+
     def on_main(self):
         git(self.repo, "checkout", "-q", "main")
 
@@ -667,12 +673,6 @@ class UpkeepFixture(Fixture):
         super().setUp()
         self.use_origin(self.SLUG)
         self.origin_set = set()  # branches whose refs/remotes/origin/ ref a case set, dropped or broke
-
-    def commit_step(self, sid, **fields):
-        """Write a step on the record branch and commit it, where a build from main reads it. A field set to _ABSENT is left out."""
-        self.write_step(sid, {k: v for k, v in dict(STEP, **fields).items() if v is not _ABSENT})
-        git(self.repo, "add", "-A")
-        git(self.repo, "commit", "-q", "-m", "step " + sid)
 
     def publish(self, sessions=None, pulls=(), threads=(), read_at=None, items=None, landed=None):
         """Write the --live file. threads=_ABSENT leaves the threads key out. The sessions, items and landedPulls keys
@@ -4764,6 +4764,26 @@ class SingleBranchOrigin(Fixture):
         self.assertIsNotNone(data, "the block baked null: origin's roadmap branch was never fetched\n" + out)
         self.assertIn("s1", data["steps"], "the block lacks origin's step s1")
         self.assertEqual(data["steps"]["s1"]["title"], "Only on origin")
+
+    def test_a_second_build_reads_a_step_origin_gained_after_the_first(self):
+        # The first build leaves origin/roadmap behind. The second build must ask origin again, or it reads that stale ref.
+        origin, clone = self.clone_origin("second-build", "main", "roadmap")
+        self.assert_single_branch(clone)
+        first, out = self.block(clone)
+        self.assertIsNotNone(baked(first, "window.ROADMAP_DATA = "), "the first build baked null:\n" + out)
+        self.assertTrue(self.has_ref(clone, "refs/remotes/origin/roadmap"), "the first build left no origin/roadmap behind")
+        self.assertEqual(git(self.repo, "rev-parse", "--abbrev-ref", "HEAD").strip(), "roadmap", "the fixture repo is not on roadmap")
+        self.commit_step("s2", title="Added after the first build")
+        git(origin, "fetch", "-q", str(self.repo), "roadmap:roadmap")
+        self.assertIn("roadmap/data/steps/s2.json", git(origin, "ls-tree", "-r", "--name-only", "refs/heads/roadmap"),
+                      "origin lacks step s2 on its record branch")
+        self.assertNotIn("roadmap/data/steps/s2.json", git(clone, "ls-tree", "-r", "--name-only", "refs/remotes/origin/roadmap"),
+                         "the clone's origin/roadmap already holds s2, so a stale read would pass")
+        second, out = self.block(clone)
+        data = baked(second, "window.ROADMAP_DATA = ")
+        self.assertIsNotNone(data, "the second build baked null:\n" + out)
+        self.assertIn("s2", data["steps"], "the second build did not read origin's step s2, added after the first build\n" + out)
+        self.assertEqual(data["steps"]["s2"]["title"], "Added after the first build")
 
     def test_block_leaves_origin_roadmap_as_a_remote_tracking_ref(self):
         origin, clone = self.clone_origin("tracking", "main", "roadmap")
