@@ -739,6 +739,12 @@ def folders(root, flag):
     return tuple(path(root, name) for name, kind in kinds(root).items() if kind.get(flag))
 
 
+def fill_note_paths(root, text):
+    """`text` with {folder} (the note folder, with its slash) and {old} (the old notes file) filled from `root`'s layout.
+    The one filler for the agent-facing note rules (lint/check_record_slugs.py AGENT_FORM_RULES)."""
+    return text.replace("{folder}", path(root, "notes") + "/").replace("{old}", path(root, "debt-notes"))
+
+
 if __name__ == "__main__":
     import sys
     # python3 lint/layout.py path <root> <kind>: one path, for a shell step.
