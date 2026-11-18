@@ -332,10 +332,12 @@ def in_scope(entry, repo_dir):
     REPO_DIR. A repo whose visibility is unread, an entry with no scope or a scope check_entry refuses all stay
     in scope: nothing is hidden on a guess."""
     scope = entry.get("scope")
-    if not isinstance(scope, dict) or "visibility" not in scope or _scope_problems(scope):
+    if not isinstance(scope, dict) or "visibility" not in scope:
         return True
     import layout
     try:
+        if _scope_problems(scope):  # reads layout.json, so it sits inside the guarded read
+            return True
         mapped = layout.layout()["visibility-caution"]
         level = layout.caution(repo_dir)["level"]
     except (layout.LayoutError, OSError):
