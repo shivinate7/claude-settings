@@ -6,10 +6,11 @@ that pins it in one go and pass (decision guard-cases-from-base).
 
 Run it in a repository. It lists the cases of the merge base of --base and HEAD (from `git archive`) and of the head's, each
 with this checkout's runner (hooks/test_guard.py under GUARD_LIST), so the two lists differ only by their section
-files. It matches each base case to a head case by key, the hash of its payload, and prefers the one of the same
-name. A name alone is no match: a case may be renamed. Lines it prints:
+files. It matches each base case to a head case by name first, then by payload (decision guard-cases-from-base): a
+head case answers one base case at most. A name alone is no match, since a case may be renamed, and a payload alone is
+no match, since cases share payloads. Lines it prints:
 
-    RED <name>: ...      a loosening no trailer waives. The verdict drops (allow < ask < deny), or the key is gone
+    RED <name>: ...      a loosening no trailer waives. The verdict drops (allow < ask < deny), or its payload is gone
                          from the head (the case was removed, or its payload changed) and the base case was a deny
                          or an ask. Exit 1.
     WAIVED <name>: ...   the same, and a commit of BASE..HEAD carries the exact trailer `Guard-case-loosened: <name>`.
@@ -97,24 +98,48 @@ def waived_names(repo, base):
     return {name for message in log.split("\0") for name in TRAILER.findall(message)}
 
 
+def payload(key):
+    """The key without the verdict suffix that the listing adds when one payload holds two verdicts in a list."""
+    return key.partition("-")[0]
+
+
 def compare(base_rows, head_rows):
-    """-> [(kind, name, text)] with kind RED, REPORT. A RED may be waived by the caller."""
-    by_key = {}
-    for name, expected, key in head_rows:
-        by_key.setdefault(key, []).append((name, expected))
+    """-> [(kind, name, text)] with kind RED, REPORT. A RED may be waived by the caller.
+
+    Name first, then content, and a head case answers one base case at most. First a base case takes the head case of
+    its own name when the payload is the same: a verdict flip then reads as a flip, however many cases hold that
+    payload, and two cases that swap verdicts read as the loosening and the tightening they are. Then each base case
+    still open takes a head case still open with its payload (a rename), the one of its verdict first, else the
+    lowest verdict. A base case with no head case left is removed, or its payload changed."""
+    head_by_name = {}
+    for index, (name, _, _) in enumerate(head_rows):
+        head_by_name.setdefault(name, index)
+    taken = set()
+    matched = {}  # base index -> head index
+    for index, (name, _, key) in enumerate(base_rows):
+        found = head_by_name.get(name)
+        if found is not None and found not in taken and payload(head_rows[found][2]) == payload(key):
+            matched[index] = found
+            taken.add(found)
+    for index, (name, expected, key) in enumerate(base_rows):
+        if index in matched:
+            continue
+        open_rows = [i for i, row in enumerate(head_rows) if i not in taken and payload(row[2]) == payload(key)]
+        if open_rows:
+            same = [i for i in open_rows if head_rows[i][1] == expected]
+            found = same[0] if same else min(open_rows, key=lambda i: RANK.get(head_rows[i][1], 0))
+            matched[index] = found
+            taken.add(found)
     out = []
-    for name, expected, key in base_rows:
-        found = by_key.get(key)
-        if not found:
+    for index, (name, expected, key) in enumerate(base_rows):
+        if index not in matched:
             if RANK.get(expected, 0) > RANK["allow"]:
                 out.append(("RED", name, "the %s case has no case with its payload on the head (removed, or its "
                                          "payload changed)" % expected))
             else:
                 out.append(("REPORT", name, "the allow case has no case with its payload on the head"))
             continue
-        # The case of the same name, else the lowest verdict: a payload that two head cases hold reads as loosely as it can.
-        same = [row for row in found if row[0] == name]
-        head_name, head_verdict = same[0] if same else min(found, key=lambda row: RANK.get(row[1], 0))
+        head_name, head_verdict = head_rows[matched[index]][:2]
         if RANK.get(head_verdict, 0) < RANK.get(expected, 0):
             out.append(("RED", name, "the verdict drops from %s to %s" % (expected, head_verdict)))
         elif RANK.get(head_verdict, 0) > RANK.get(expected, 0):
