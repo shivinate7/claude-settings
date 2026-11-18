@@ -57,7 +57,7 @@ for _tool in ("Agent",):
 
 # ---- Step-up (rule roles-third-round-steps-up, decision agent-model-cap). The brief's fixed form
 # "Round N of 3" steps a reviewer up: the second needs sonnet, the third sonnet or opus. The
-# same form steps a builder up: the third needs opus, the first two stay on sonnet. The old
+# builder's marker steps nothing up. The builder row pins sonnet, so its third round needs no step-up. The old
 # builder form "Try N of 3" still counts until note try-marker-sunset.
 # A reviewer on the last step-up ("Round N of 3" with N = 3) passes the step-up on opus, and the Opus ceiling
 # below refuses it unless an owner override lifts it (item 127 pick a, Nov 1 17:25 CST). The middle step-up stays sonnet only.
@@ -86,7 +86,7 @@ add("floor step-up: reviewer Round 3 of 3 with model inherit is denied", "deny",
 add("floor step-up: reviewer Round 2 of 3 on claude-sonnet-5-5 is allowed", "allow",
     tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="claude-sonnet-5-5",
     subagent_type="reviewer")
-add("floor step-up: builder Try 3 of 3 on sonnet is denied", "deny", STEP_UP,
+add("floor step-up: builder Try 3 of 3 on sonnet is allowed (its row is sonnet, item 893)", "allow",
     tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="sonnet", subagent_type="builder")
 add("floor step-up: builder Try 3 of 3 on opus is allowed (standing grant)", "allow",
     tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="opus", subagent_type="builder")
@@ -114,9 +114,9 @@ add("floor step-up: builder Try 2 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Try 2 of 3. Continue the fix.", model="sonnet", subagent_type="builder")
 # The builder marker is the `Round N of 3` line (plan o13 group 9: a review and its fix is a round).
 # The old `Try N of 3` line still counts until the try-marker-sunset note removes it.
-add("floor step-up: builder Round 3 of 3 on sonnet is denied", "deny", STEP_UP,
+add("floor step-up: builder Round 3 of 3 on sonnet is allowed (its row is sonnet, item 893)", "allow",
     tool="Agent", prompt="Round 3 of 3. Finish the fix.", model="sonnet", subagent_type="builder")
-add("floor step-up: builder Round 3 of 3 with no model is denied", "deny", STEP_UP,
+add("floor step-up: builder Round 3 of 3 with no model is allowed (the pin runs sonnet, item 893)", "allow",
     tool="Agent", prompt="Round 3 of 3. Finish the fix.", subagent_type="builder")
 add("floor step-up: builder Round 3 of 3 on opus is allowed (standing grant)", "allow",
     tool="Agent", prompt="Round 3 of 3. Finish the fix.", model="opus", subagent_type="builder")
@@ -204,21 +204,21 @@ for _name, _verdict, _script in (
          _step_flow("'Round 2 of 3. Re-check the diff.'", "agentType: 'reviewer', model: 'sonnet'")),
         ("reviewer Round 3 on haiku", "deny",
          _step_flow("'Round 3 of 3. Re-check.'", "agentType: 'reviewer', model: 'haiku'")),
-        ("builder Try 3 on sonnet", "deny",
+        ("builder Try 3 on sonnet, its own row", "allow",
          _step_flow('"Try 3 of 3. Finish the fix."', 'agentType: "builder", model: "sonnet"')),
         ("builder Try 3 on opus", "allow",
          _step_flow('"Try 3 of 3. Finish the fix."', 'agentType: "builder", model: "opus"')),
-        ("builder Round 3 on sonnet", "deny",
+        ("builder Round 3 on sonnet, its own row", "allow",
          _step_flow('"Round 3 of 3. Finish the fix."', 'agentType: "builder", model: "sonnet"')),
-        ("builder Round 3 with no model", "deny",
+        ("builder Round 3 with no model, the pin runs sonnet", "allow",
          _step_flow("'Round 3 of 3. Finish the fix.'", "agentType: 'builder'")),
         ("builder Round 3 on opus", "allow",
          _step_flow('"Round 3 of 3. Finish the fix."', 'agentType: "builder", model: "opus"')),
-        ("builder Round 3 after a role word on line one, on sonnet", "deny",
+        ("builder Round 3 after a role word on line one, on sonnet", "allow",
          _step_flow("'Builder, Round 3 of 3. Finish the fix.'", "agentType: 'builder', model: 'sonnet'")),
         ("builder Round 3 after a role word on line one, on opus", "allow",
          _step_flow("'Builder, Round 3 of 3. Finish the fix.'", "agentType: 'builder', model: 'opus'")),
-        ("builder Round 3 as a prompt key on sonnet", "deny",
+        ("builder Round 3 as a prompt key on sonnet", "allow",
          "await agent({prompt: 'Round 3 of 3. Finish.', agentType: 'builder', model: 'sonnet'})"),
         ("builder Round 2 on sonnet", "allow",
          _step_flow("'Round 2 of 3. Continue the fix.'", "agentType: 'builder', model: 'sonnet'")),
@@ -292,30 +292,33 @@ add("floor step-up: Workflow reviewer with a fix verifier and a model in a varia
 add("floor step-up: Workflow reviewer with a fix verifier and a spread is allowed, the static read skips it", "allow",
     tool="Workflow", script=_step_flow("'%s. Re-check the diff.'" % FIX_VERIFIER, "agentType: 'reviewer', ...opts"))
 
-# ---- Step-up, a reviewer whose brief carries the guard marker (decision agent-model-cap, the `1 guard` round row, sonnet).
-# A reviewer on a guard or check change runs Sonnet on any round, so the step-up refuses a guard-marked reviewer below
-# Sonnet: on Haiku, on a blank model, or with no model. The marker counts only at the start of a line outside a fence.
-# A guard-marked reviewer on a later round keeps its round reason. The marker is typed here, as FIX_VERIFIER is, so a rename
-# of the constant cannot quietly change what these cases pin.
-# Failure classes: a false allow (a guard-marked reviewer on Haiku, a blank model or no model reviews a guard change on
-# Haiku); a false refusal (a fenced or mid-line marker, a non-reviewer, or a reviewer on Sonnet is refused).
+# ---- Step-up, a reviewer whose brief carries the guard marker (decision agent-model-cap, the `1 guard` round row). That row
+# is haiku, so the step-up refuses no model below Haiku for a guard-marked first-round reviewer. These cases read this
+# checkout's record (GUARD_RECORD_CFG), not the live pointer the default config reads. A guard-marked reviewer on a later
+# round keeps its round reason. The marker is typed here, as FIX_VERIFIER is, so a rename of the constant cannot quietly
+# change what these cases pin.
+# Failure class: a false refusal (a guard-marked reviewer on Haiku, on a blank model or with no model is refused at the step-up).
 GUARD_LINE = "Guard or check: yes"
 GUARD_REASON = "Reviewer round 1 on a guard or check change runs on Sonnet. Spawn it with model sonnet."
 GUARD_BRIEF = GUARD_LINE + "\nCheck the guard diff."
-add("floor step-up: reviewer with the guard marker on haiku is denied, and names Sonnet", "deny", STEP_UP,
-    tool="Agent", prompt=GUARD_BRIEF, model="haiku", subagent_type="reviewer", carries=(GUARD_REASON,), lacks=("Opus",))
-add("floor step-up: reviewer with the guard marker and a blank model is denied, and names Sonnet", "deny", STEP_UP,
-    tool="Agent", prompt=GUARD_BRIEF, model="  ", subagent_type="reviewer", carries=(GUARD_REASON,), lacks=("Opus",))
-add("floor step-up: reviewer with the guard marker and no model is denied, and names Sonnet", "deny", STEP_UP,
-    tool="Agent", prompt=GUARD_BRIEF, subagent_type="reviewer", carries=(GUARD_REASON,), lacks=("Opus",))
-add("floor step-up: reviewer with Round 1 of 3 and the guard marker on line two, on haiku, is denied", "deny", STEP_UP,
-    tool="Agent", prompt="Round 1 of 3. Check the guard diff.\n" + GUARD_LINE, model="haiku", subagent_type="reviewer",
-    carries=(GUARD_REASON,))
-add("floor step-up: reviewer with the guard marker at the end of a 400-line brief, on haiku, is denied", "deny", STEP_UP,
-    tool="Agent", prompt="Check the diff.\n" * 399 + GUARD_LINE, model="haiku", subagent_type="reviewer",
-    carries=(GUARD_REASON,))
-add("floor step-up: Workflow reviewer with the guard marker on haiku is denied", "deny", STEP_UP,
-    tool="Workflow", script=_step_flow("'%s. Check the guard diff.'" % GUARD_LINE, "agentType: 'reviewer', model: 'haiku'"))
+GUARD_RECORD_CFG = os.path.join(ROOT, "guardrecord")
+write(os.path.join(GUARD_RECORD_CFG, "CLAUDE.md"), "@%s/CLAUDE.md\n" % slash(REPO))
+add("floor step-up: reviewer with the guard marker on haiku is allowed (its 1 guard row is haiku)", "allow",
+    tool="Agent", config=GUARD_RECORD_CFG, prompt=GUARD_BRIEF, model="haiku", subagent_type="reviewer")
+add("floor step-up: reviewer with the guard marker and a blank model is allowed", "allow",
+    tool="Agent", config=GUARD_RECORD_CFG, prompt=GUARD_BRIEF, model="  ", subagent_type="reviewer")
+add("floor step-up: reviewer with the guard marker and no model is allowed (its role pins haiku)", "allow",
+    tool="Agent", config=GUARD_RECORD_CFG, env={"CLAUDE_CODE_SUBAGENT_MODEL": None}, prompt=GUARD_BRIEF,
+    subagent_type="reviewer")
+add("floor step-up: reviewer with Round 1 of 3 and the guard marker on line two, on haiku, is allowed", "allow",
+    tool="Agent", config=GUARD_RECORD_CFG, prompt="Round 1 of 3. Check the guard diff.\n" + GUARD_LINE, model="haiku",
+    subagent_type="reviewer")
+add("floor step-up: reviewer with the guard marker at the end of a 400-line brief, on haiku, is allowed", "allow",
+    tool="Agent", config=GUARD_RECORD_CFG, prompt="Check the diff.\n" * 399 + GUARD_LINE, model="haiku",
+    subagent_type="reviewer")
+add("floor step-up: Workflow reviewer with the guard marker on haiku is allowed", "allow",
+    tool="Workflow", config=GUARD_RECORD_CFG,
+    script=_step_flow("'%s. Check the guard diff.'" % GUARD_LINE, "agentType: 'reviewer', model: 'haiku'"))
 add("floor step-up: reviewer with the guard marker on sonnet is allowed", "allow",
     tool="Agent", prompt=GUARD_BRIEF, model="sonnet", subagent_type="reviewer")
 add("floor step-up: reviewer with Round 1 of 3 and no guard marker on haiku is allowed", "allow",
@@ -400,7 +403,7 @@ add("first-line marker: builder on opus with a role word before Round 3 of 3 on 
     "allow", tool="Agent", prompt=FIRST_LINE_BRIEF, model="opus", subagent_type="builder")
 add("first-line marker: builder on opus with blank lines ahead of that first line is allowed",
     "allow", tool="Agent", prompt="\n \t\n" + FIRST_LINE_BRIEF, model="opus", subagent_type="builder")
-add("first-line marker: the same brief on sonnet is denied by the step-up", "deny", STEP_UP,
+add("first-line marker: the same brief on sonnet is allowed (its row is sonnet, item 893)", "allow",
     tool="Agent", prompt=FIRST_LINE_BRIEF, model="sonnet", subagent_type="builder")
 for _label, _first in (("a role word and a dash", "Builder — Round 3 of 3"),
                        ("bold markup", "**Round 3 of 3**"),
