@@ -2053,10 +2053,9 @@ def case_past_rulings_skips_the_debt_notes_file():
 #
 # A decision's `## The ruling` section is cut to question_form.INDEX_CAP characters in the judge's index, so an owner
 # ruling sentence past the cap never reaches the judge. A record may add owner-ruling sentences past the cap, but never
-# more than RULING_EXTRA_CAP characters of them, so the prompt does not grow for every record. Each case makes its own
-# fixture decision in a fixture repo; the pointer is patched to that repo, so no real checkout is read. A case's
-# candidate lines are the ones that start with its record id (`decisions/<slug>: `).
-RULING_EXTRA_CAP = 1200  # the most text one record may add past INDEX_CAP (the bound the test owns)
+# more than question_form.RULING_EXTRA_CAP characters of them, so the prompt does not grow for every record. Each case
+# makes its own fixture decision in a fixture repo; the pointer is patched to that repo, so no real checkout is read.
+# A case's candidate lines are the ones that start with its record id (`decisions/<slug>: `).
 PAST_CAP_SLUG = "round-one-reviewers-haiku"
 PAST_CAP_QUESTION = "round 1 first review stronger model guard or check change"
 RULING_SENTENCE = "Round 1 reviewers run Haiku at xhigh on every change (owner ruling, 2026-11-17 19:45 CST)."
@@ -2151,7 +2150,7 @@ def case_past_ruling_section_without_owner_sentence_is_cut_at_the_cap():
     check("past rulings cut: a section with no owner sentence is cut, so its tail past the cap is absent",
           "TAILMARK-9c2d" not in text, text[-200:])
     check("past rulings cut: the record adds no more than INDEX_CAP plus RULING_EXTRA_CAP characters",
-          len(text) <= question_form.INDEX_CAP + RULING_EXTRA_CAP, "%d characters" % len(text))
+          len(text) <= question_form.INDEX_CAP + question_form.RULING_EXTRA_CAP, "%d characters" % len(text))
 
 
 def case_past_ruling_owner_sentences_added_text_is_capped():
@@ -2173,8 +2172,8 @@ def case_past_ruling_owner_sentences_added_text_is_capped():
     check("past rulings capped: the first owner sentence past INDEX_CAP reaches the record's line",
           OWNER_SENTENCES[0] in text, text[-200:])
     check("past rulings capped: 60 owner sentences sit past the cap, and the record adds no more than "
-          "INDEX_CAP plus RULING_EXTRA_CAP characters", len(text) <= question_form.INDEX_CAP + RULING_EXTRA_CAP,
-          "%d characters" % len(text))
+          "INDEX_CAP plus RULING_EXTRA_CAP characters",
+          len(text) <= question_form.INDEX_CAP + question_form.RULING_EXTRA_CAP, "%d characters" % len(text))
 
 
 # The owner's rulings not yet on main (the ruled store) sit on origin/roadmap. past_rulings puts each open entry first,
