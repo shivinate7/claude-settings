@@ -2316,6 +2316,7 @@ class ReadyNextAct(ReadyFixture):
 
     def test_the_count_line_reads_unknown_when_the_steps_are_unknown(self):
         self.on_main()
+        git(self.repo, "remote", "remove", "origin")  # the fixture's GitHub origin cannot be asked here; with none, the branch is simply absent
         _, out = run_build("--repo", str(self.repo), "--record-branch", "no-such-branch", "--out", str(self.out))
         self.assertEqual(count_lines(out), [ready_line("count unknown", why="unknown (steps unknown)")],
                          "with no steps, the count is unknown, never 0")
