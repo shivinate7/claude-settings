@@ -2611,6 +2611,81 @@ def builder_merge_write_ok(target: str, cwd: str, rel: str) -> bool:
     return bool(where) and norm(rel).lstrip("/") in {norm(c).lstrip("/") for c in merge_conflicts(where) or ()}
 
 
+def write_result_texts(tool_input, full: str):
+    """`(old, new)`: the whole file on disk and the whole text a write tool call leaves in it, or None when the
+    file is unreadable, an old string is not found, or the call carries no text. An Edit or a MultiEdit applies
+    each edit in order (every match with `replace_all`, else the first)."""
+    if not isinstance(tool_input, dict):
+        return None
+    try:
+        with open(full, encoding="utf-8") as handle:
+            old = handle.read()
+    except (OSError, ValueError):
+        return None
+    edits = tool_input.get("edits")
+    if isinstance(edits, list):
+        pairs = [(e.get("old_string"), e.get("new_string"), e.get("replace_all")) for e in edits if isinstance(e, dict)]
+    elif "old_string" in tool_input:
+        pairs = [(tool_input.get("old_string"), tool_input.get("new_string"), tool_input.get("replace_all"))]
+    elif isinstance(tool_input.get("content"), str):
+        return old, tool_input["content"]
+    else:
+        return None
+    text = old
+    for before, after, every in pairs:
+        if not isinstance(before, str) or not isinstance(after, str) or not before or before not in text:
+            return None
+        text = text.replace(before, after) if every is True else text.replace(before, after, 1)
+    return old, text
+
+
+def test_shape(text: str):
+    """`(shape, count)` of a python test file: its `ast` dump with each test function name and each docstring
+    blanked, and the number of distinct test names, one per class path. A comment is no node. None when the text
+    does not parse."""
+    import ast
+
+    def blank_docstring(node):
+        first = node.body[0] if node.body else None
+        if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str):
+            node.body = node.body[1:] or [ast.Pass()]
+
+    names = set()
+
+    def strip(node, scope):
+        for child in ast.iter_child_nodes(node):
+            inner = scope
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) and child.name.startswith("test"):
+                names.add(scope + (child.name,))
+                child.name = ""
+            if isinstance(child, ast.ClassDef):
+                inner = scope + (child.name,)
+            strip(child, inner)
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                blank_docstring(child)
+
+    try:
+        tree = ast.parse(text)
+        strip(tree, ())
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return None
+    blank_docstring(tree)
+    return ast.dump(tree), len(names)
+
+
+def builder_rename_only(rel: str, tool_input, target: str, cwd: str) -> bool:
+    """True when a builder's write to the python test path `rel` renames tests or edits comments and docstrings
+    only: the parsed bodies and the count of distinct test names stay (decision builders-cannot-edit-tests). A mutation test, test config, a file that is not python, a file that is not on
+    disk, and text that does not parse are not. The rule reads the file once and parses both texts."""
+    if not rel.lower().endswith(".py") or is_mutation_test_rel(rel) or is_test_config_rel(rel):
+        return False
+    texts = write_result_texts(tool_input, _expanded(target, cwd))
+    if texts is None:
+        return False
+    before, after = test_shape(texts[0]), test_shape(texts[1])
+    return before is not None and before == after
+
+
 def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:
     """The early warning for a write tool call: the target path a role may not change, else ''.
 
@@ -2646,7 +2721,8 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         return target
     if role == WRITER_ROLE:
         return "" if rel.lower().endswith(".md") else target
-    if builder_test_path(target, cwd) and not builder_merge_write_ok(target, cwd, rel):
+    if (builder_test_path(target, cwd) and not builder_merge_write_ok(target, cwd, rel)
+            and not builder_rename_only(rel, tool_input, target, cwd)):
         return target
     if is_test_config_rel(rel) and any(
             disables_tests(part.splitlines(), []) for part in write_content_parts(tool_input)):
