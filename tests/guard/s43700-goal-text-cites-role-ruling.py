@@ -144,6 +144,27 @@ gtr_refuse("the incident text in a SendMessage is refused", "Triage cannot merge
 gtr_refuse("a second-person limit in a create_session prompt is refused", "You cannot merge this PR.",
            tool=CREATE_SESSION_CALL)
 
+# ---- Refused: a colon that states no cause, and an if that sits in an earlier line. A clock time, a URL, a colon in
+# the next bullet or on the next line, and an if in an earlier line each pass the cause or conditional test on the
+# current code, so each is red here.
+gtr_refuse("a colon in a clock time after the limit is no cause, so the limit is refused",
+           "Triage cannot merge at 18:43 CST.")
+gtr_refuse("a colon in a clock time after until is no cause, so the limit is refused",
+           "Triage cannot merge until 18:30 CST.")
+gtr_refuse("a colon in a URL after the limit is no cause, so the limit is refused",
+           "Triage cannot merge, see https://example.com/x.")
+gtr_refuse("a colon in the next bullet is no cause for the limit above it, so the limit is refused",
+           "- Triage cannot merge\n- Runner 10: owns the queue")
+gtr_refuse("a label colon on the next line, with no period, is no cause, so the limit is refused",
+           "Triage cannot merge\nOwner: Shivam")
+gtr_refuse("an if in an earlier line is no conditional, so the limit is refused",
+           "Goal:\n- Ask me if unsure\n- Triage cannot merge.")
+# Controls, green on the current code. A period ends the sentence before the label, so the limit stays refused. A colon
+# cause in a create_session prompt passes, as it does in send and Agent.
+gtr_refuse("a period before the label keeps the limit refused, as a control", "Triage cannot merge.\nOwner: Shivam")
+gtr_allow("a colon cause in a create_session prompt is allowed", "The lane cannot push: the cloud proxy returns 403.",
+          tool=CREATE_SESSION_CALL)
+
 # ---- Allowed: a limit quoted as text, which is not a statement. Owner words, a blockquote, a refusal text in a report, a
 # code span and a fenced block, and an inner line of a fenced block.
 gtr_allow("owner words in double quotes, with the owner named, are allowed",
