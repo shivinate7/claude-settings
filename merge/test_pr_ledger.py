@@ -182,12 +182,6 @@ class NextActReds(LedgerCase):
         act, red = self.next_act(out, 7)
         self.assertTrue(red, f"#7's Waits line names no debt or page item, so it does not hold the PR and must read RED:\n{out}")
 
-    def test_an_idle_draft_past_its_72_h_limit_reads_red(self):
-        out = self.reviewed(LedgerHost([pull(9, draft=True, hours_ago=80)]))
-        act, red = self.next_act(out, 9)
-        self.assertEqual(act, "lane round 1", f"#9 is a draft with no record, so its act is lane round 1:\n{out}")
-        self.assertTrue(red, f"#9 has been a draft with no record for 80 h, past the 72 h limit, and its line does not read RED:\n{out}")
-
     def test_a_body_line_naming_a_base_does_not_stack_the_pr_and_reads_none_red(self):
         for body in ("Based on #5", "Stacked on #5"):
             with self.subTest(body=body):
@@ -233,7 +227,14 @@ class NextActShapes(LedgerCase):
         out = self.reviewed(LedgerHost([pull(9, draft=True, hours_ago=2)]))
         act, red = self.next_act(out, 9)
         self.assertEqual(act, "lane round 1", f"#9 is a draft with no record:\n{out}")
-        self.assertFalse(red, f"#9 is inside its 72 h limit, and its line reads RED:\n{out}")
+        self.assertFalse(red, f"#9 is a draft with no record, and its line reads RED:\n{out}")
+
+    def test_an_idle_draft_past_80_h_is_not_red(self):
+        # Ruling own-572-a-ledger-by-age-only (the ledger's age-only limits) gives lane round 1 no age limit, so an idle draft is never RED by age.
+        out = self.reviewed(LedgerHost([pull(9, draft=True, hours_ago=80)]))
+        act, red = self.next_act(out, 9)
+        self.assertEqual(act, "lane round 1", f"#9 is a draft with no record, so its act is lane round 1:\n{out}")
+        self.assertFalse(red, f"#9 has been a draft with no record for 80 h, and lane round 1 has no age limit, so its line reads RED:\n{out}")
 
     def test_an_open_record_reads_the_next_round_owed(self):
         out = self.reviewed(LedgerHost([pull(7)], comments=[record(7, 3, rounds=("Round 1: reviewer, sonnet, FAIL",))]))
