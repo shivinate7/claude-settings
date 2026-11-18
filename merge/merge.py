@@ -3516,9 +3516,33 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             raise Stop("\n".join([*([f"the lint of {head[:9]} against {base} FAILs:", *fails] if fails else []), stop if stop else LANE_LINT_REMEDY]))
         # A pull request on the default branch whose head lacks the tip the merge read: M, the merge commit of the head and that tip, is what the lint reads and a
         # pass pushes (never read again from origin/<base>). Any other target lints a merge commit of the tip and the head that is never pushed.
-        # The caller owns the branch only when its checkout holds the pushed head, so a wrong PR number pushes nothing. An unreadable ancestry (None) is no push, as is a Record-claim head: a merge commit on top would hide the claim from own_claim.
-        if (target.isdigit() and mergeable_into_branch(info) and ancestor(root, head, "HEAD") is True and not is_integration_pr(info) and not pre_join and base == default_branch(root)
-                and not head_claim(wt, head) and ancestor(wt, merged[1], head) is False):
+        # The caller owns the branch only when its checkout holds the pushed head, so a wrong PR number pushes nothing. An unreadable ancestry (None) is no push, as is a Record-claim head:
+        # a merge commit on top would hide the claim from own_claim. main_in_skip names the first gate that kept the push back, for the PASS line.
+        main_in_skip = ""
+        lacks_tip = target.isdigit() and ancestor(wt, merged[1], head) is False
+        if lacks_tip:
+            if not mergeable_into_branch(info):
+                main_in_skip = "closed or fork PR"
+            elif is_integration_pr(info):
+                main_in_skip = "integration PR"
+            elif pre_join:
+                main_in_skip = "batch runner pre-join"
+            elif head_claim(wt, head):
+                main_in_skip = "Record-claim head"
+            else:
+                held = ancestor(root, head, "HEAD")
+                if held is not True:
+                    main_in_skip = "checkout does not hold the head" if held is False else "checkout ancestry cannot be read"
+                else:
+                    try:  # a failed read keeps the push back; it never aborts a lint that passed
+                        default = default_branch(root)
+                    except Stop:
+                        default = None
+                    if default is None:
+                        main_in_skip = "default branch cannot be read"
+                    elif base != default:
+                        main_in_skip = "base is not the default branch"
+        if lacks_tip and not main_in_skip:
             c, made = git(wt, *identity(wt), "commit-tree", merged[0], "-p", head, "-p", merged[1], "-m", base_merge_message(base, info["branch"]))
             if c:
                 raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the merge of the head with {base} could not be made: {made} {LANE_LINT_CITE}")
@@ -3572,6 +3596,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             short = pushed_merge[:9]
         named = f" ({len(lines)} CI step{'s' if len(lines) != 1 else ''} skipped: {', '.join(lines)})" if lines else ""
         counts = f"; touched tests: {touched[0]} run, {len(touched[1])} skipped" if touched is not None else ""
+        counts += f"; main-in not pushed ({main_in_skip}): the head lacks {base}'s tip" if main_in_skip else ""
         tail = (f"The merge of {base} into the lane was pushed to {info['branch']}. " if pushed_merge else "") + "The batch runner may take this head, or join it to a batch." if target.isdigit() else "No comment is posted for a ref or commit, so this does not satisfy the join."
         say(f"PASS: lint of {short} against {base} passes{named}{counts}{'; ' + mutate if mutate else ''}. {tail}", *pin_notes, *report_lines)
         if target.isdigit():  # a ref or commit has no pull request to carry the comment
