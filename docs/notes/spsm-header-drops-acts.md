@@ -1,0 +1,1 @@
+- spsm-header-drops-acts: (#2464 stop-push-skips-merged, coordinator 01:29 CST Nov 10; none a safety hole) the shortened header drops "and acts".

@@ -1,0 +1,1 @@
+- ledger-draft-age-resets: a draft's age in the ledger runs from `updated_at`, so any comment or label resets the clock. Accepted under pick F2 (an idle draft still goes red). Found in review round 2 of lane pr-state-is-on-the-pr. Decision: pr-ledger.

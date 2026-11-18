@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """List the tests whose verdict depends on wall-clock speed. Read-only. Standard library only.
 
-    python3 lint/find_time_pinned.py <root> [--json]
+    python3 lint/find_time_pinned.py <root> [--json] [--check]
 
 Decision test-strategy-reset, point 2: no test waits on a fixed sleep or a wall-clock bound. This
 tool lists the tests that do. It fixes none, and it writes nothing. Each finding has one category:
@@ -39,28 +39,48 @@ it still counts when it is an operand of `-` or the receiver or argument of `.ti
 `.duration(to:`: that is a measured duration. An assert's message argument is not read. Clock reads inside a Swift interpolation
 hole are masked.
 
+Keep marker: a comment on the finding's own line, `# time-pinned-ok: <reason>` (Python) or
+`// time-pinned-ok: <reason>` (JS, TS, Swift), keeps that finding out of the listing. It keeps every
+category except an elapsed-assert, which stays listed: a timed test uses a synthetic clock, and the marker
+never keeps a hang guard's elapsed read. The reason must not be blank. A marker on another line, or marker text inside a string,
+keeps nothing. It is read from real comments only: Python from tokenizer comment tokens, JS and Swift from
+the `//` comment spans the masker blanks (a block comment is not a marker). A kept finding is counted,
+never listed.
+
 Paths are relative to <root>. Output is one `<path>:<line>: <category>: <source line>` per finding
 (one per line and category), then `UNREAD <path>: <reason>` per file that could not be read, then a
-summary. A file that cannot be read or parsed is unread, never clean.
-Exit 0: nothing found, nothing unread. Exit 1: findings. Exit 2: the root cannot be read, or nothing
-found but some file unread, so the result is unknown.
+summary. The summary ends `; kept N` when N > 0 findings were kept by the marker. `--json` holds listed
+findings only, and its counts leave kept findings out. A file that cannot be read or parsed is unread,
+never clean.
+Exit 0: nothing listed, nothing unread (kept findings alone leave it 0). Exit 1: findings listed. Exit 2:
+the root cannot be read, or nothing listed but some file unread, so the result is unknown.
+With `--check` the listing is the same, but the exit is 1 only when a sleep or an elapsed-assert is listed,
+2 when only an unread file remains, and 0 when nothing else is listed: a wait-cap or a test-cap is a hang
+guard the owner keeps (item 345), so it never fails the check.
+Python only: an `.elapsed` attribute in an assert is an elapsed-assert, also inside a helper call under a bound
+(`to_ms(r.elapsed) < 100`, `assertLess(to_ms(r.elapsed), 100)`). An exact `==` or `assertEqual` on it is a value
+check, so it is not listed. JS and Swift list no `.elapsed` read, only a clock call or a name that holds one.
+A file over 8 MiB is not scanned and is listed unread.
 Cost: one `git ls-files` (or one folder walk outside a git tree) and one read of each test file. No
 process stays running.
 """
 import argparse
 import ast
+import io
 import json
 import os
 import re
 import sys
+import tokenize
 import warnings
 from bisect import bisect_right
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
-MAX_BYTES = 1_000_000
+MAX_BYTES = 8 * 1024 * 1024
 CATEGORIES = ("sleep", "elapsed-assert", "test-cap", "wait-cap")
+CHECK_FAILS = ("sleep", "elapsed-assert")  # the categories --check fails on, besides an unread file
 WALK_SKIP = {".git", "node_modules", ".build", "DerivedData", "venv", ".venv"}
 JS_EXTS = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts", ".cts")
 TEXT_MAX = 120
@@ -427,6 +447,25 @@ class Hits:
         self.found.add((bisect_right(self.starts, pos), category))
 
 
+# ---- the keep marker ---------------------------------------------------------------------------------
+
+KEEP_MARKER = {"python": re.compile(r"#\s*time-pinned-ok:(.*)", re.S),
+               "js": re.compile(r"//\s*time-pinned-ok:(.*)", re.S)}
+KEEP_MARKER["swift"] = KEEP_MARKER["js"]
+
+
+def kept_lines(text, comments, marker):
+    """The lines of text whose own comment holds the keep marker with a reason. `comments` is a list of
+    (start, end) spans of real comments (never string text), so the marker is read from comments only."""
+    starts = [0] + [x.end() for x in re.finditer("\n", text)]
+    kept = set()
+    for a, b in comments:
+        got = marker.search(text[a:b])
+        if got and got.group(1).strip():
+            kept.add(bisect_right(starts, a))
+    return kept
+
+
 # ---- Python, through ast -----------------------------------------------------------------------------
 
 PY_CLOCKS = {"time.time", "time.monotonic", "time.perf_counter", "time.process_time", "time.time_ns",
@@ -491,6 +530,10 @@ PY_COMPARED = {"assertTrue": 1, "assertFalse": 1, "assertIsNone": 1, "assertIsNo
                                  "assertTupleEqual", "assertSequenceEqual", "assertMultiLineEqual")}}
 
 
+PY_EXACT = {"assertEqual"}  # an assert of one exact value, never a bound on a clock
+PY_ORDERED = {"assertLess", "assertLessEqual", "assertGreater", "assertGreaterEqual"}
+
+
 def assert_parts(call, name):
     """The nodes of an assert call that hold the asserted value: no message argument, no `msg=`."""
     count = PY_COMPARED.get(name)
@@ -522,33 +565,48 @@ def scan_python(text):
     def is_clock(node):
         return isinstance(node, ast.Call) and bool(names_of(node) & PY_CLOCKS)
 
-    def holds_clock(node, tainted, durations=False):
+    def is_elapsed(node):
+        return isinstance(node, ast.Attribute) and node.attr == "elapsed" and isinstance(node.ctx, ast.Load)
+
+    def holds_clock(node, tainted, durations=False, elapsed=True, bound=False):
         """True when node reads a clock call or a tainted name. The arguments of a call count only when that
         call is a pass-through, or, with `durations` (an asserted value), when they hold a difference with a
-        clock in it. A lambda reads what it returns."""
+        clock in it. A lambda reads what it returns. An `.elapsed` attribute is a measured duration, except
+        under an exact `==` (`elapsed` False): that checks one value and bounds no clock. Under an ordering
+        compare (`bound`), an `.elapsed` inside a helper call's arguments is a bound on a duration too."""
         if isinstance(node, ast.Lambda):
-            return holds_clock(node.body, tainted, durations)
+            return holds_clock(node.body, tainted, durations, elapsed, bound)
+        if isinstance(node, ast.Compare):
+            ordered = any(isinstance(o, (ast.Lt, ast.LtE, ast.Gt, ast.GtE)) for o in node.ops)
+            exact = all(isinstance(o, ast.Eq) for o in node.ops)
+            return any(holds_clock(c, tainted, durations, elapsed and not exact, bound or ordered)
+                       for c in [node.left] + node.comparators)
         if isinstance(node, ast.Call):
             if is_clock(node):
                 return True
             args = node.args + [k.value for k in node.keywords]
             if names_of(node) & PY_PASS_THROUGH:
-                return any(holds_clock(p, tainted, durations) for p in [node.func] + args)
-            return holds_clock(node.func, tainted, durations) or (
-                durations and any(holds_difference(p, tainted) for p in args))
+                return any(holds_clock(p, tainted, durations, elapsed, bound) for p in [node.func] + args)
+            return holds_clock(node.func, tainted, durations, elapsed, bound) or (
+                durations and any(holds_difference(p, tainted, elapsed, bound) for p in args))
         if isinstance(node, ast.Name):
             return isinstance(node.ctx, ast.Load) and node.id in tainted
-        return any(holds_clock(c, tainted, durations) for c in ast.iter_child_nodes(node))
+        if elapsed and is_elapsed(node):
+            return True  # a result's measured duration, such as `run_child().elapsed`
+        return any(holds_clock(c, tainted, durations, elapsed, bound) for c in ast.iter_child_nodes(node))
 
-    def holds_difference(node, tainted):
-        """True when node, an input to a call, holds `a - b` with a clock or a tainted name in a or b: a
-        measured duration, not an injected clock. A lambda's body is not searched."""
+    def holds_difference(node, tainted, elapsed=True, bound=False):
+        """True when node, an input to a call, holds `a - b` with a clock or a tainted name in a or b, or,
+        under a bound, an `.elapsed` attribute: a measured duration, not an injected clock. A lambda's body
+        is not searched."""
         if isinstance(node, ast.Lambda):
             return False
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Sub) and (
-                holds_clock(node.left, tainted, True) or holds_clock(node.right, tainted, True)):
+        if bound and elapsed and is_elapsed(node):
             return True
-        return any(holds_difference(c, tainted) for c in ast.iter_child_nodes(node))
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Sub) and (
+                holds_clock(node.left, tainted, True, elapsed) or holds_clock(node.right, tainted, True, elapsed)):
+            return True
+        return any(holds_difference(c, tainted, elapsed, bound) for c in ast.iter_child_nodes(node))
 
     scopes = {}
 
@@ -610,9 +668,25 @@ def scan_python(text):
                 found.add((n.lineno, "elapsed-assert"))
             elif isinstance(n, ast.Call):
                 name = n.func.attr if isinstance(n.func, ast.Attribute) else getattr(n.func, "id", "")
-                if name.startswith("assert") and any(holds_clock(x, tainted, True) for x in assert_parts(n, name)):
+                if name.startswith("assert") and any(
+                        holds_clock(x, tainted, True, name not in PY_EXACT, name in PY_ORDERED)
+                        for x in assert_parts(n, name)):
                     found.add((n.lineno, "elapsed-assert"))
-    return found
+    return found, python_kept(text)
+
+
+def python_kept(text):
+    """Lines whose real comment (a tokenizer COMMENT token, never string text) holds the keep marker."""
+    kept = set()
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+            if tok.type == tokenize.COMMENT:
+                got = KEEP_MARKER["python"].search(tok.string)
+                if got and got.group(1).strip():
+                    kept.add(tok.start[0])
+    except (tokenize.TokenError, SyntaxError):
+        pass  # the lines read so far still count; any line not read lists, which is the safe side
+    return kept
 
 
 # ---- JS and TS: one-pass masker, then patterns -------------------------------------------------------
@@ -622,9 +696,9 @@ _RE_WORDS = {"return", "typeof", "case", "do", "else", "in", "of", "yield", "awa
              "throw", "new"}
 
 
-def mask_js(src):
+def mask_js(src, comments=None):
     """src with every comment and every string, template or regex body blanked. Same length, same newlines.
-    Quote and backtick delimiters stay."""
+    Quote and backtick delimiters stay. A list passed as `comments` gets the (start, end) of each `//` comment."""
     n = len(src)
     out = list(src)
     template_parts = []  # brace depth at each open `${`
@@ -701,6 +775,8 @@ def mask_js(src):
         if c == "/" and d == "/":
             j = src.find("\n", i)
             j = n if j < 0 else j
+            if comments is not None:
+                comments.append((i, j))
             blank(i, j)
             i = j
             continue
@@ -870,7 +946,8 @@ def parse_test_head(m, i):
 
 
 def scan_js(text):
-    m = mask_js(text)
+    comments = []
+    m = mask_js(text, comments)
     hits = Hits(m)
     fake_clock = re.search(r"(?<![\w$])useFakeTimers\s*\(", m) is not None
     claimed = []  # character ranges whose `timeout:` a test-cap finding already holds
@@ -948,7 +1025,7 @@ def scan_js(text):
         got = args_of(mm.end() - 1)
         if got and is_num(m[got[1][0][0]:got[1][0][1]]):
             hits.add(mm.start(), "wait-cap")
-    return hits.found
+    return hits.found, kept_lines(text, comments, KEEP_MARKER["js"])
 
 
 # ---- Swift: one-pass masker, then patterns -----------------------------------------------------------
@@ -964,9 +1041,9 @@ SWIFT_DECL = re.compile(r"(?<![\w$.])(?:let|var)\s+(?=[A-Za-z_])")
 SWIFT_ASSERT = re.compile(r"(?<![\w$])(?:XCTAssert\w*|#expect|#require)\s*\(")
 
 
-def mask_swift(src):
+def mask_swift(src, comments=None):
     """src with every comment and every string body blanked, interpolation holes included. Same length,
-    same newlines. String delimiters stay."""
+    same newlines. String delimiters stay. A list passed as `comments` gets the (start, end) of each `//` comment."""
     n = len(src)
     out = list(src)
 
@@ -1024,6 +1101,8 @@ def mask_swift(src):
         if c == "/" and d == "/":
             j = src.find("\n", i)
             j = n if j < 0 else j
+            if comments is not None:
+                comments.append((i, j))
             blank(i, j)
             i = j
         elif c == "/" and d == "*":
@@ -1099,7 +1178,8 @@ def swift_function_returns(m, start, end):
 
 
 def scan_swift(text):
-    m = mask_swift(text)
+    comments = []
+    m = mask_swift(text, comments)
     hits = Hits(m)
 
     def args_of(open_idx):
@@ -1133,40 +1213,44 @@ def scan_swift(text):
         label = {"wait": r"(?<![\w])for\s*:", "fulfillment": r"(?<![\w])of\s*:"}.get(mm.group(1))
         if label is None or re.search(label, body):
             hits.add(mm.start(), "wait-cap")
-    return hits.found
+    return hits.found, kept_lines(text, comments, KEEP_MARKER["swift"])
 
 
 # ---- driver ------------------------------------------------------------------------------------------
 
 def scan_file(root, rel, kind):
-    """(findings as (line, category) pairs, lines of the file) or (None, reason) when it cannot be read."""
+    """(listed findings as (line, category) pairs, lines of the file, kept findings) or (None, reason, set()) when
+    it cannot be read. A kept finding sits on a line that holds the keep marker with a reason."""
     path = os.path.join(root, rel)
     try:
         if not os.path.isfile(path):
-            return None, "not a regular file"
+            return None, "not a regular file", set()
         if os.path.getsize(path) > MAX_BYTES:
-            return None, f"over {MAX_BYTES} bytes"
+            return None, f"over {MAX_BYTES} bytes", set()
         with open(path, "rb") as f:
             data = f.read()
     except OSError as e:
-        return None, f"cannot be read: {e.strerror or e}"
+        return None, f"cannot be read: {e.strerror or e}", set()
     try:
         text = data.decode("utf-8-sig")
     except UnicodeDecodeError:
-        return None, "not UTF-8"
+        return None, "not UTF-8", set()
     try:
-        found = {"python": scan_python, "js": scan_js, "swift": scan_swift}[kind](text)
+        found, kept = {"python": scan_python, "js": scan_js, "swift": scan_swift}[kind](text)
     except SyntaxError as e:
-        return None, f"syntax error at line {e.lineno}: {e.msg}"
+        return None, f"syntax error at line {e.lineno}: {e.msg}", set()
     except (ValueError, RecursionError, MemoryError) as e:
-        return None, f"cannot be parsed: {type(e).__name__}: {e}"
-    return found, re.split(r"\r\n|\r|\n", text)
+        return None, f"cannot be parsed: {type(e).__name__}: {e}", set()
+    held = {f for f in found if f[0] in kept and f[1] != "elapsed-assert"}
+    return found - held, re.split(r"\r\n|\r|\n", text), held
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("root", help="the repo root, or any folder")
     ap.add_argument("--json", action="store_true", help="print one JSON object")
+    ap.add_argument("--check", action="store_true",
+                    help="exit non-zero only on a sleep, an elapsed-assert or an unread file")
     args = ap.parse_args(argv)
     root = os.path.abspath(args.root)
     if not os.path.isdir(root):
@@ -1177,14 +1261,16 @@ def main(argv=None):
         print(f"unknown: git ls-files failed in {root}")
         return 2
     findings = []
+    kept_total = 0
     for rel in files:
         kind = kind_of(rel)
         if kind is None:
             continue
-        found, detail = scan_file(root, rel, kind)
+        found, detail, held = scan_file(root, rel, kind)
         if found is None:
             unread.append({"path": rel, "reason": detail})
             continue
+        kept_total += len(held)
         for line, category in sorted(found):
             src = detail[line - 1].strip() if 0 < line <= len(detail) else ""
             findings.append({"path": rel, "line": line, "category": category, "lang": kind,
@@ -1200,7 +1286,12 @@ def main(argv=None):
         nfiles = len({f["path"] for f in findings})
         print(f"{len(findings)} time-pinned in {nfiles} files (sleep {counts['sleep']}, "
               f"elapsed-assert {counts['elapsed-assert']}, test-cap {counts['test-cap']}, "
-              f"wait-cap {counts['wait-cap']}); {len(unread)} unread")
+              f"wait-cap {counts['wait-cap']}); {len(unread)} unread" + (f"; kept {kept_total}" if kept_total else ""))
+    if args.check:
+        # A wait-cap or a test-cap is a hang guard the owner keeps (item 345), so it never fails the check.
+        if any(f["category"] in CHECK_FAILS for f in findings):
+            return 1
+        return 2 if unread else 0
     if findings:
         return 1
     return 2 if unread else 0

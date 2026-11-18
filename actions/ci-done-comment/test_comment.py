@@ -18,9 +18,9 @@ SCRIPT = os.path.join(HERE, "comment.sh")
 CHECKS = os.path.join(HERE, "..", "..", ".github", "workflows", "checks.yml")
 
 
-def body(needs):
+def body(needs, job="", announced=""):
     env = dict(os.environ, NEEDS=json.dumps(needs), CI_DONE_DRY="1", PR="1", REPO="o/r",
-               SHA="0123456789abcdef", RUN_URL="https://example/run")
+               SHA="0123456789abcdef", RUN_URL="https://example/run", JOB=job, ANNOUNCED=announced)
     out = subprocess.run(["bash", SCRIPT], env=env, capture_output=True, text=True, check=True)
     return out.stdout
 
@@ -44,12 +44,100 @@ class Body(unittest.TestCase):
         self.assertEqual(got.strip(), "No red job: no comment.")
 
 
+class PerJob(unittest.TestCase):
+    """A failing job wakes the runner at once; the run-end comment names only jobs not yet announced."""
+
+    def test_job_mode_names_the_job_with_a_marker(self):
+        got = body({}, job="checks")
+        self.assertIn("<!-- ci-done -->", got)
+        self.assertIn("<!-- ci-job:checks -->", got)
+        self.assertIn("CI job checks failed on 0123456", got)
+        self.assertIn("Run: https://example/run", got)
+
+    def test_run_end_skips_announced_jobs(self):
+        needs = {"checks": {"result": "failure"}, "checks-macos": {"result": "failure"}}
+        got = body(needs, announced="checks")
+        self.assertIn("checks-macos (failure)", got)
+        self.assertNotIn("checks (failure)", got)
+
+    def test_run_end_posts_nothing_when_all_announced(self):
+        got = body({"checks": {"result": "failure"}}, announced="checks")
+        self.assertEqual(got.strip(), "No red job: no comment.")
+
+    def test_run_end_still_wakes_when_all_red_jobs_announced(self):
+        # all-jobs-passed fails with any red job and has no wake step, so the run-end comment names it.
+        needs = {"checks": {"result": "failure"}, "all-jobs-passed": {"result": "failure"}}
+        got = body(needs, announced="checks")
+        self.assertIn("all-jobs-passed (failure)", got)
+        self.assertNotIn("checks (failure)", got)
+
+    def test_run_end_still_names_unannounced_cancelled_job(self):
+        # A timeout cancels a job before any step can post, so only the run-end comment can name it.
+        got = body({"checks": {"result": "cancelled"}}, announced="")
+        self.assertIn("checks (cancelled)", got)
+
+
+NO_STEP_JOBS = {"all-jobs-passed", "ci-done", "push-skip", "nightly-skip"}  # the two skip jobs run only on push or schedule, so a wake step on a pull_request never fires
+
+
+def per_job_problems(text):
+    """Each job that fails without a step that wakes the runner as it fails."""
+    out = []
+    for name, job in checks_jobs(text).items():
+        if name in NO_STEP_JOBS:
+            continue
+        job = re.sub(r"^\s*#.*\n", "", job, flags=re.M)
+        if not re.search(r"^    permissions:\s*\n(?:      [\w-]+: \w+\s*\n)*      pull-requests:\s*write\s*$", job, re.M):
+            out.append(name + " lacks pull-requests: write")
+        step = re.search(r"- name: [^\n]*\n\s+if:\s*(.*)\n\s+uses:\s*\$/actions/ci-done-comment\s*\n\s*with:\s*\n\s*job:\s*(\S+)(?:[ \t]+#[^\n]*)?\s*$", job)
+        if not step:
+            out.append(name + " has no ci-done-comment job step")
+            continue
+        for part in ("failure()", "github.event_name == 'pull_request'"):
+            if part not in step.group(1):
+                out.append(name + " step if lacks " + part)
+        # A draft run runs no job, so the draft term adds nothing, and the lane lint cannot read it (a repo changes to fit the tool).
+        if "github.event.pull_request.draft" in step.group(1):
+            out.append(name + " step if carries the draft term the lane lint cannot read")
+        if step.group(2) != name:
+            out.append(name + " step names job " + step.group(2))
+    return out
+
+
+class JobSteps(unittest.TestCase):
+    def test_every_job_has_the_step(self):
+        with open(CHECKS, encoding="utf-8") as fh:
+            self.assertEqual(per_job_problems(fh.read()), [])
+
+    def test_all_jobs_passed_has_no_wake_step(self):
+        # all-jobs-passed fails with any red job, so the run-end comment is its wake; a step of its own would double it.
+        with open(CHECKS, encoding="utf-8") as fh:
+            job = checks_jobs(fh.read())["all-jobs-passed"]
+        self.assertNotRegex(job, r"uses:\s*\$/actions/ci-done-comment")
+
+    def test_detector_goes_red(self):
+        good = ("jobs:\n  a:\n    permissions:\n      contents: read\n      pull-requests: write\n    steps:\n"
+                "      - run: x\n      - name: Wake\n        if: ${{ failure() && github.event_name == 'pull_request' }}\n"
+                "        uses: $/actions/ci-done-comment\n        with:\n          job: a\n")
+        self.assertEqual(per_job_problems(good), [])
+        for name, bad in {"no step": good.split("      - name: Wake")[0],
+                          "wrong name": good.replace("job: a", "job: b"),
+                          "no failure": good.replace("failure() && ", ""),
+                          "draft term": good.replace("'pull_request' }}", "'pull_request' && !github.event.pull_request.draft }}"),
+                          "no write": good.replace("pull-requests: write", "pull-requests: read")}.items():
+            with self.subTest(name):
+                self.assertNotEqual(per_job_problems(bad), [], name)
+
+
 def checks_jobs(text):
     """{job name: its block text} for each job under `jobs:` in checks.yml. Stdlib only: CI has no PyYAML."""
     body = text[re.search(r"^jobs:\s*$", text, re.M).end():]
     marks = list(re.finditer(r"^  ([\w-]+):\s*$", body, re.M))
     return {m.group(1): body[m.end():(marks[i + 1].start() if i + 1 < len(marks) else len(body))]
             for i, m in enumerate(marks)}
+
+
+SCHEDULE_ONLY_IF = re.compile(r"^    if:\s*\$\{\{\s*github\.event_name == 'schedule'\s*\}\}[ \t]*(?:#[^\n]*)?$", re.M)
 
 
 def ci_done_problems(text):
@@ -62,7 +150,10 @@ def ci_done_problems(text):
     out = []
     needs = re.search(r"^    needs:\s*\n((?:      - [\w-]+\s*\n)+)", job, re.M)
     got = sorted(re.findall(r"- ([\w-]+)", needs.group(1))) if needs else []
-    if got != sorted(k for k in jobs if k != "ci-done"):
+    # R61 part 3: a job whose if is only the schedule is not needed here. ci-done runs on a pull_request alone, so it never
+    # reads a scheduled job, and it may name one with no harm.
+    scheduled = {k for k, body in jobs.items() if k != "ci-done" and SCHEDULE_ONLY_IF.search(body)}
+    if sorted(set(got) - scheduled) != sorted(k for k in jobs if k != "ci-done" and k not in scheduled):
         out.append("ci-done must need every other job, as a block list")
     cond = (re.search(r"^    if:\s*(.*)$", job, re.M) or [None, ""])[1]
     for part in ("!cancelled()", "github.event_name == 'pull_request'", "!github.event.pull_request.draft"):
@@ -110,6 +201,33 @@ class ChecksCaller(unittest.TestCase):
         for name, text in broken.items():
             with self.subTest(name):
                 self.assertNotEqual(ci_done_problems(text), [], name)
+
+
+class ScheduledSkip(unittest.TestCase):
+    """R61 part 3: the nightly gate is a schedule-only job, which ci-done need not name. Controls: the rule holds with the gate
+    beside ci-done, with or without its name in ci-done's needs, and a job that a pull_request run needs is still required."""
+    SKIP = "  nightly-skip:\n    if: ${{ github.event_name == 'schedule' }}\n    runs-on: x\n"
+
+    def test_a_schedule_only_skip_beside_ci_done_needs_no_entry_there(self):
+        self.assertEqual(ci_done_problems(GOOD.replace("  ci-done:", self.SKIP + "  ci-done:", 1)), [])
+
+    def test_a_schedule_only_skip_named_in_ci_done_is_accepted(self):
+        text = GOOD.replace("  ci-done:", self.SKIP + "  ci-done:", 1).replace("    needs:\n      - a\n", "    needs:\n      - a\n      - nightly-skip\n")
+        self.assertEqual(ci_done_problems(text), [])
+
+    def test_a_trailing_comment_on_the_skips_if_keeps_the_exemption(self):
+        # A trailing comment on the if: line is text to YAML, so the gate is still a schedule-only job that ci-done need not name.
+        nightly_skip = self.SKIP.replace("'schedule' }}\n", "'schedule' }}  # nightly only\n")
+        self.assertEqual(ci_done_problems(GOOD.replace("  ci-done:", nightly_skip + "  ci-done:", 1)), [])
+
+    def test_a_hash_inside_a_quoted_step_of_the_skip_keeps_the_exemption(self):
+        # A `#` inside quotes is text, not a comment: the gate's step still reads, and the gate stays exempt.
+        nightly_skip = self.SKIP + "    steps:\n      - run: echo \"skip=false # not a comment\" >> \"$GITHUB_OUTPUT\"\n"
+        self.assertEqual(ci_done_problems(GOOD.replace("  ci-done:", nightly_skip + "  ci-done:", 1)), [])
+
+    def test_a_pull_request_job_left_out_beside_the_skip_is_still_flagged(self):
+        text = GOOD.replace("  ci-done:", "  b:\n    runs-on: x\n" + self.SKIP + "  ci-done:", 1)
+        self.assertTrue(ci_done_problems(text), "a job a pull_request run needs is left out of ci-done's needs and is not flagged")
 
 
 if __name__ == "__main__":

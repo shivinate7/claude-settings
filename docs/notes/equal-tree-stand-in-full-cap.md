@@ -1,0 +1,1 @@
+- equal-tree-stand-in-full-cap: an equal-tree stand-in counts the full cap even when its source has no Fix line (merge/merge.py 3492-3494); it fails closed.

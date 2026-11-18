@@ -1,0 +1,1 @@
+- gh-write-graphql-refused: `gh api graphql -f` is refused, though the proxy already 403s it. Fix: none needed unless a read query must pass; then allow a query with no `mutation`.

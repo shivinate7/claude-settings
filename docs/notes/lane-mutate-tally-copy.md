@@ -1,0 +1,1 @@
+- lane-mutate-tally-copy: the tally regex in merge.py hand-copies mutate_shared.py's line (rule building-allow-list-is-the-constant). Fix: import the pattern from mutate_shared.py.

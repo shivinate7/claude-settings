@@ -7,13 +7,15 @@ ArtifactData, so the session makes a fetch folder, fetches into it, then runs th
     python3 ~/.claude/skills/waiting-page/page_grant.py --new-fetch PARENT   (prints `fetch DIR`)
     ArtifactData get collection=answers doc_id=ID out_dir=DIR   (an absent doc saves no file)
     ArtifactData get collection=items   doc_id=ID out_dir=DIR
-    python3 ~/.claude/skills/waiting-page/page_grant.py --root REPO_ROOT --page-url URL --item ID --fetched DIR [--pick KEY]
+    python3 ~/.claude/skills/waiting-page/page_grant.py --root REPO_ROOT --page-url URL --item ID --fetched DIR [--pick KEY] [--as-lane SLUG]
 
 DIR holds `answers/ID.json` and `items/ID.json`, the data object of each doc. `--new-fetch` makes DIR empty and writes
 the stamp `DIR.stamp` beside it, outside DIR. A check uses the stamp up (renames it `DIR.stamp.used`), so each fetch
 folder is checked once. REPO_ROOT is the repo of the page; its
 extras file holds the artifacts registry (lint/layout.py `artifacts()`). --pick is the pick the peer relayed: a key,
 or `a+c` for a multi item; the page's choice must equal it exactly. A decision is never counted without it.
+--as-lane is the receiver's own lane slug, or its tier when its lane is a tier (the `lane` value the owning session wrote).
+Only a routed close (rule 4) needs it.
 
 Verdict, one line on stdout, then exit:
   counted item=ID n=N choice=C at=T label=L [note=JSON]  exit 0. Choice of a multi item: keys joined by `+`.
@@ -34,7 +36,11 @@ Counted only when all hold:
      answers/ID.json and items/ID.json exist. Relay text alone never counts.
   3. The answer's `item` is --item (the item is read by its key, which is its id), and the answer's `n` is the item's `n`.
   4. The item is open: `status` is `open`, or absent (the page hides only `closed`, page.html `state.items`). A closed
-     item takes no answer, except an arbiter ruling (`arbiter` true, written closed) answered `overturn`.
+     item takes no answer, except an arbiter ruling (`arbiter` true, written closed) answered `overturn`, and a routed
+     close: `status` is `closed`, `lane` and `home` are strings non-empty after strip, `arbiter` is not true, and
+     `lastAnswer.at` equals the answer's `at`, and --as-lane, after strip, equals the item's `lane`: the receiver passes its
+     own lane, so the owning session on another lane, or a call with no --as-lane, is not counted. An open item and a closed
+     arbiter overturn need no --as-lane. Routing closes the item at once and keeps `lastAnswer` and answers/ID.
   5. The answer's `at` is later than the item's `added`: an earlier answer belongs to an earlier ask. Both carry a
      time zone (`Z` or an offset); one without is not counted.
   6. A decision (`kind` absent or `decision`): `choice` is the key of one option, or `overturn` when the item's `arbiter`
@@ -72,7 +78,8 @@ CHECK_FLAGS = (("--root", "<repo>", "repo root of the page (holds the extras fil
                ("--page-url", "<url>", "the page URL the session was given"),
                ("--item", "<id>", "the item id"),
                ("--fetched", "<dir>", "the --new-fetch folder with answers/<id>.json and items/<id>.json"),
-               ("--pick", "<key>", "the pick a peer relayed: a key, or a+c for several"))
+               ("--pick", "<key>", "the pick a peer relayed: a key, or a+c for several"),
+               ("--as-lane", "<slug>", "the receiver's own lane slug (or tier): a routed close counts only when it equals the item's lane"))
 COMMAND = " ".join(["python3 ~/.claude/skills/waiting-page/page_grant.py"] +
                    ["%s %s" % (flag, value) for flag, value, _ in CHECK_FLAGS])
 COUNTED_LINE = "counted item=<id> n=<n> choice=<key> at=<time> label=<label>"
@@ -265,6 +272,24 @@ def label_of(item, answer, choice):
     return labels.get(choice)
 
 
+def routed_close(item, answer, as_lane):
+    """Rule 4's routed close: the item closed at routing, with `lane` and `home` set, and still holds this answer as
+    `lastAnswer`. It counts only for the receiver on that lane: not counted when --as-lane is absent, blank or another lane."""
+    last = item.get("lastAnswer")
+    shaped = (item.get("status") == "closed"
+              and all(isinstance(item.get(key), str) and item[key].strip() for key in ("lane", "home"))
+              and item.get("arbiter") is not True
+              and isinstance(last, dict) and last.get("at") == answer.get("at"))
+    if not shaped:
+        return False
+    if as_lane is None:
+        raise not_counted("item is a routed close: it counts only with --as-lane, the receiver's own lane")
+    if not as_lane.strip() or as_lane.strip() != item["lane"].strip():
+        raise not_counted("--as-lane %s is not the item's lane %s: a routed close counts only for the receiver on that lane"
+                          % (json.dumps(as_lane), json.dumps(item["lane"])))
+    return True
+
+
 def judge(args):
     """The counted line, or a Verdict raised."""
     folder, made = use_stamp(args.fetched)
@@ -279,8 +304,7 @@ def judge(args):
     pages = [e for e in entries if e["role"] == layout.WAITING_ROLE]
     if not pages:
         raise unknown("%s has no waiting-page entry in its artifacts registry" % args.root)
-    page_id = layout.artifact_id(args.page_url)
-    if not page_id or page_id != layout.artifact_id(pages[0]["url"]):
+    if not layout.is_waiting_page_url(args.root, args.page_url):
         raise not_counted("page URL is not the registered waiting page")
 
     answer = read_doc(args.fetched, "answers", args.item)
@@ -296,7 +320,8 @@ def judge(args):
     if isinstance(n, bool) or not isinstance(n, int) or n != item.get("n"):
         raise not_counted("answer n %s is not the item's n %s: the answer is for another ask" % (n, item.get("n")))
     status = item.get("status", "open")  # absent is open, as the page reads it: it hides only "closed"
-    if status != "open" and not (status == "closed" and item.get("arbiter") is True and answer.get("choice") == "overturn"):
+    if status != "open" and not (status == "closed" and item.get("arbiter") is True and answer.get("choice") == "overturn") \
+            and not routed_close(item, answer, args.as_lane):
         raise not_counted("item status is %s: only an open item takes an answer, or a closed arbiter ruling an overturn"
                           % json.dumps(status))
     if moment(answer.get("at"), "answer at") <= moment(item.get("added"), "item added"):

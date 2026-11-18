@@ -1,0 +1,1 @@
+- batch-label-setter-missing: no code writes the `batch` label, so an integration PR with no record reads `none`, red, until someone labels it by hand. The ruling's setter (`merge --lane-lint <pr> --integration`, coordinator 13:54 CST Nov 7) is not built. Found in review round 3 of lane pr-state-is-on-the-pr. Decision: pr-ledger.

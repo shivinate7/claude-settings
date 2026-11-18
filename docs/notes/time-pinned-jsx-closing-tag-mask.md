@@ -1,0 +1,1 @@
+- time-pinned-jsx-closing-tag-mask: the JS masker (`mask_js`, lint/find_time_pinned.py) reads `</p>` as the start of a regex. So a sleep followed by `//` on that line is never listed. Pre-existing; found while testing the keep marker.

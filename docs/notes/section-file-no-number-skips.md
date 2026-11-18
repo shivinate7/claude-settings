@@ -1,0 +1,1 @@
+- section-file-no-number-skips: A guard section file with no leading number (`foo.py`, `s_43501-x.py`) skips the name check in lint/_guard_sections.py. Duplicate header numbers are still caught.

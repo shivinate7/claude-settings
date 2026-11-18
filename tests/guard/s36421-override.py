@@ -92,17 +92,18 @@ def ov_type(config, session, prompt, seconds=0):
 
 
 def ov_call(tool, tool_input, cwd, config, session, seconds, agent_id=None, agent_type=None,
-            temp=None, env=None, load=None, env_path=None):
+            temp=None, env=None, load=None, env_path=None, transcript=None):
     """One guard call at OV_T0 + seconds. Returns (decision, reason). `temp` is the folder the guard
     reads as the system temp: a git write under it is a throwaway, and silent-write skips it. `env`
     adds variables to this one guard run. `load` is the machine reading a start call meets
-    (LB_NORMAL when None). `env_path` is the PATH of this one guard run (None keeps the runner's)."""
+    (LB_NORMAL when None). `env_path` is the PATH of this one guard run (None keeps the runner's).
+    `transcript` is the payload's transcript_path (None sends none), for a rule that reads this session's history."""
     fixed = {"LOCAL_TIME_NOW": ov_clock(seconds)}
     fixed.update(env or {})
     return decide({
         "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": env_path,
         "config": config, "agent_id": agent_id, "agent_type": agent_type, "temp": temp,
-        "env": fixed, "tool_input": tool_input, "load": load,
+        "env": fixed, "tool_input": tool_input, "load": load, "transcript": transcript,
     })
 
 
@@ -1189,9 +1190,9 @@ def ov_role_acts(config, session):
               {"file_path": PROJ_LOCAL, "content": cap_settings()}, "agent-model-cap", "ask"),
         OvAct("a spawn on the Haiku model", "Agent",
               {"prompt": "do it", "model": "haiku"}, "agent-model-floor"),
-        OvAct("a builder's third round on Sonnet", "Agent",
-              {"prompt": "Round 3 of 3. Finish the fix.", "model": "sonnet",
-               "subagent_type": "builder"}, "roles-third-round-steps-up"),
+        OvAct("a reviewer's second round on Opus", "Agent",
+              {"prompt": "Round 2 of 3. Re-check the diff.", "model": "claude-opus-5-5",
+               "subagent_type": "reviewer"}, "roles-third-round-steps-up"),
         OvAct("a builder's edit of a test file", "Edit",
               {"file_path": "src/test_app.py", "new_string": "x = 1"}, "builder-test-edit",
               agent_id="bld1", agent_type="builder"),

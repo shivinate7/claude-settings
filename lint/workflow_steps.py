@@ -8,8 +8,11 @@ import os
 import re
 import sys
 
-# The Linux jobs that hold the suites of the one old `checks` job, split for wall time. merge/merge.py reads suites from each.
-CHECKS_SUITE_JOBS = ("checks", "checks-merge-install")
+# The Linux jobs that hold the suites of the one old `checks` job, split for wall time: the lint family (`checks`), the hooks/
+# suites (checks-hooks), the other suites (checks-rest), the merge and install suites (checks-merge-install), the install.sh
+# checkout-detection suite (checks-install-checkout) and the merge tool git-half suite (checks-merge-git).
+# lint/test_windows_split.py checks that each suite runs in one of them.
+CHECKS_SUITE_JOBS = ("checks", "checks-hooks", "checks-rest", "checks-merge-install", "checks-install-checkout", "checks-merge-git")
 
 
 def job_re(name):
@@ -47,9 +50,18 @@ def job_workflow(top, job):
     return None, "more than one workflow file in %s has a `%s` job: %s" % (folder, job, ", ".join(found))
 
 
+WAKE_STEP = re.compile(r"uses:\s*\$/actions/ci-done-comment\s*\n\s*with:\s*\n\s*job:")
+
+
 def step_blocks(block):
-    """Each `      - ` step of a job block, as raw text. Block scalars stay whole."""
-    return [p for p in re.split(r"^(?=      - )", block or "", flags=re.M) if p.startswith("      - ")]
+    """Each `      - ` step of a job block, as raw text. Block scalars stay whole.
+
+    The red-job wake step (`uses: $/actions/ci-done-comment` with a `job:` input) ends every job and
+    is no suite step, so it is left out (decision ci-wait-reads-run-status). The run-end ci-done step
+    passes `needs:`, not `job:`, and stays.
+    """
+    return [p for p in re.split(r"^(?=      - )", block or "", flags=re.M)
+            if p.startswith("      - ") and not WAKE_STEP.search(p)]
 
 
 def step_key(step, key):
@@ -168,7 +180,7 @@ def disables(key, value):
     `if:` that is always false. The value loses its inline comment first. hooks/guard.py's WORKFLOW_DISABLE_STEP is the
     one home of the disabling forms, so it decides; the import is lazy because guard.py is large and bin/ci-job loads
     this file."""
-    hooks = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks")
+    hooks = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks")
     if hooks not in sys.path:
         sys.path.insert(0, hooks)
     import guard

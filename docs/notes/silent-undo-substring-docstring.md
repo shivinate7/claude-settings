@@ -1,0 +1,1 @@
+- silent-undo-substring-docstring: the OwnLineSubstring docstring in lint/test_check_silent_undo.py still says branch_only_lines matches with `line in text`; it now matches whole lines.

@@ -1,0 +1,1 @@
+- silent-undo-strict-before-push: 12:36 CST Nov 13 (coordinator, lane pr-state-is-on-the-pr): check_silent_undo --strict runs before each lane push, not only at hand-in (lane lint). It is one of the fast checks this step calls; add it to the scope question. Todo after the drain unless it tracks or lands work.

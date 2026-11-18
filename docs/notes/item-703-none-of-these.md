@@ -1,0 +1,1 @@
+- item-703-none-of-these: Owner 11:13 CST Nov 13, item 703 "none of these" after asks 606 and 701: triage took the pick his questions point to (11:17 CST): both guard rules stay in the global CLAUDE.md; #2852 does not move them. Undo: reopen 703. Guard: step reask-reads-owner-notes.

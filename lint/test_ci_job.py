@@ -19,6 +19,9 @@ Lint mode: a --lint run that picks no lint step is unknown, exit 2; a lint step 
 unknown when it is skipped; a lint step that runs only off a pull request reads skipped, and the run still exits 0.
 ParallelLint: --lint runs its lint steps at once (CI_JOB_LINT_WORKERS, else the cpu count up to 4), keeps the printed
 lines and each step's log lines in workflow order, and treats an install step as a barrier. Overlap is proven by rendezvous.
+LocalActionUnderLint: --lint runs a local uses: action only when the read of its action.yml before any step runs accepts it; FAIL beats unknown, and each refusal
+names its file, line or value and runs no step. A plain run never runs one.
+OwnLogPrune: ci-job removes its own ci-job-* logs over one day old when it starts, and keeps the rest.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -30,6 +33,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -49,6 +53,7 @@ ENV = _test_git.apply(dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_
                            GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
 ENV.pop("VERDICT_LOG", None)
 ENV.pop("CI_JOB_LINT_WORKERS", None)
+ENV.pop("CI_JOB_HEAD_SHA", None)  # the lane lint's pushed head: a case sets it, and the unset case needs it absent
 
 
 def workflow(*steps, job="lane", other=None):
@@ -395,7 +400,10 @@ class StepSelect(Job):
 
 
 class SteAction(Job):
-    """The checks STE step is a `uses:` action. ci-job runs bin/ste-changed in its place (one home: run.sh)."""
+    """The checks STE step is a `uses:` action. ci-job runs bin/ste-changed in its place (one home: run.sh).
+    The lint refuses no sentence for its length, so the fail path's fixture is a double negative (STE013)."""
+
+    NEGATIVE = "This step is not unsafe."
 
     def branch_with(self, text):
         def git(*a):
@@ -410,8 +418,8 @@ class SteAction(Job):
             f.write("# T\n\n" + text + "\n")
         git("commit", "-qam", "change")
 
-    def test_an_over_long_sentence_in_a_changed_md_fails_the_lint_run(self):
-        self.branch_with(" ".join(["word"] * 40) + " end.")
+    def test_a_double_negative_in_a_changed_md_fails_the_lint_run(self):
+        self.branch_with(self.NEGATIVE)
         rc, lines, out = self.run_job(step("STE lint", uses="$/actions/ste-lint"),
                                       args=("--lint", "--base", "origin/main"))
         self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
@@ -423,7 +431,7 @@ class SteAction(Job):
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
 
     def test_with_no_base_the_ste_step_runs_against_origin_main(self):
-        self.branch_with(" ".join(["word"] * 40) + " end.")
+        self.branch_with(self.NEGATIVE)
         rc, lines, out = self.run_job(step("STE lint", uses="$/actions/ste-lint"), args=("--lint",))
         self.assertEqual((rc, self.verdicts(lines)), (1, ["base:", "FAIL"]), out)
 
@@ -539,6 +547,47 @@ class PinNoteEnv(Job):
         verdicts, seen, out = self.seen_after(step("seen", self.SEEN), env={PIN_NOTE_ENV: "1"})
         self.assertEqual(verdicts, ["PASS"], out)
         self.assertEqual(seen, "<unset>", "a step that is not ste-lint saw the pin note variable: " + out)
+
+
+class HeadShaCarrier(Job):
+    """ci-job gives a step's ${{ github.event.pull_request.head.sha }} the pushed head in CI_JOB_HEAD_SHA when that is set
+    and not blank (the lane lint's HEAD is a merge commit, so it passes the head in), else HEAD. No step's env carries
+    CI_JOB_HEAD_SHA. ci-job relays no step output, so each step writes the value it sees to seen.txt."""
+
+    SEEN = "printf '%s' \"$HEAD_SHA\" > seen.txt"
+    SEEN_ENV = "printf '%s' \"${CI_JOB_HEAD_SHA-<unset>}\" > seen.txt"
+    HEAD_EXPR = {"HEAD_SHA": "${{ github.event.pull_request.head.sha }}"}
+    PUSHED = "f" * 40  # a pushed head that is not HEAD of the throwaway repo
+
+    def setUp(self):
+        super().setUp()
+        subprocess.run(["git", "-C", self.root, "commit", "-q", "--allow-empty", "-m", "c"], check=True, env=ENV)
+        self.head_sha = subprocess.run(["git", "-C", self.root, "rev-parse", "HEAD"], capture_output=True, text=True,
+                                       check=True, env=ENV).stdout.strip()
+
+    def test_a_step_reading_the_head_sha_sees_the_pushed_head_when_the_env_sets_it(self):
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN, env=self.HEAD_EXPR),
+                                              env={"CI_JOB_HEAD_SHA": self.PUSHED})
+        self.assertEqual(verdicts, ["PASS"], out)
+        self.assertEqual(seen, self.PUSHED, "a step's head.sha is not CI_JOB_HEAD_SHA: " + out)
+
+    def test_a_blank_or_whitespace_pushed_head_falls_back_to_head(self):
+        for blank in ("", "   ", " \t "):
+            with self.subTest(blank=blank):
+                verdicts, seen, out = self.seen_after(step("seen", self.SEEN, env=self.HEAD_EXPR),
+                                                      env={"CI_JOB_HEAD_SHA": blank})
+                self.assertEqual(verdicts, ["PASS"], out)
+                self.assertEqual(seen, self.head_sha, "a blank CI_JOB_HEAD_SHA did not fall back to HEAD: " + out)
+
+    def test_an_unset_pushed_head_falls_back_to_head(self):
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN, env=self.HEAD_EXPR))
+        self.assertEqual(verdicts, ["PASS"], out)
+        self.assertEqual(seen, self.head_sha, "an unset CI_JOB_HEAD_SHA did not fall back to HEAD: " + out)
+
+    def test_a_step_env_never_carries_the_pushed_head_sha(self):
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN_ENV), env={"CI_JOB_HEAD_SHA": self.PUSHED})
+        self.assertEqual(verdicts, ["PASS"], out)
+        self.assertEqual(seen, "<unset>", "a step saw CI_JOB_HEAD_SHA in its env: " + out)
 
 
 def mapped(parent, body):
@@ -734,6 +783,47 @@ class RealChecks(unittest.TestCase):
         self.assertFalse(multi[0].startswith("skipped"), multi[0])
 
 
+class DebtRetireInLint(unittest.TestCase):
+    """The debt Retire step reads the PR body from the event file, which only CI has. A lint run of checks (merge's small-base
+    and lane lint) cannot read that body, so it does not plan the step. A plain plan of checks still plans it."""
+
+    STEP = "Debt retire check"
+
+    def planned(self, *args):
+        done = plan_job("checks", *args, "--base", "HEAD", cwd=os.path.join(HERE, ".."))
+        return done, by_step(done.stdout.splitlines())
+
+    def test_f1a_a_lint_run_of_checks_does_not_plan_the_debt_retire_step(self):
+        done, states = self.planned("--lint", "--plan")
+        self.assertIn(self.STEP, states, "scope: the lint plan names no %r step: %s" % (self.STEP, done.stdout + done.stderr))
+        self.assertIn(states[self.STEP], ("skipped", "not run"),
+                      "a lint run plans the debt Retire step as %r, which needs the PR body that only CI reads" % states[self.STEP])
+
+    def test_f1b_a_plain_plan_of_checks_still_plans_the_debt_retire_step(self):
+        done, states = self.planned("--plan")
+        self.assertIn(self.STEP, states, "scope: the plain plan names no %r step: %s" % (self.STEP, done.stdout + done.stderr))
+        self.assertEqual(states[self.STEP], "would run",
+                         "a plain plan of checks no longer plans the debt Retire step")
+
+
+class TokenValue(unittest.TestCase):
+    """A step env that maps ${{ github.token }} reads as a value: a plan has no runner token, so the value is empty. An unknown
+    there would refuse every lint run of a job whose step maps the token (bin/ci-job's values map, its one home)."""
+
+    def test_f8_a_step_env_of_github_token_is_planned_not_unknown(self):
+        root = tempfile.mkdtemp(prefix="token-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, root, True)
+        subprocess.run(["git", "init", "-q", "-b", "main", root], check=True, env=ENV)
+        path = os.path.join(root, "wf.yml")
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(workflow(step("reads token", "echo ok", env={"GH_TOKEN": "${{ github.token }}"})))
+        done = plan_job("lane", "--plan", "--base", "HEAD", "--workflow", path, cwd=root)
+        states = by_step(done.stdout.splitlines())
+        self.assertIn("reads token", states, "scope: the plan names no 'reads token' step: " + done.stdout + done.stderr)
+        self.assertEqual(states["reads token"], "would run",
+                         "the plan reads the step's ${{ github.token }} env as unknown, not as a value")
+
+
 def launcher(patch):
     """A `python3 -c` launcher: the code in `patch` runs first, then ci-job runs in this process with the argv it was given."""
     return patch + "\nimport runpy, sys; sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name='__main__')\n"
@@ -766,8 +856,12 @@ class LintMode(unittest.TestCase):
         subprocess.run(["git", "init", "-q", "-b", "main", self.root], check=True, env=ENV)
 
     def test_lint_mode_lists_exactly_the_lint_steps_of_checks(self):
-        # An independent read: the checks job's single-line run: commands, matched by a pattern written here.
+        # The checks job's lint steps, read from checks.yml. Each single-line run: command is matched by a pattern written here.
+        # Each uses: step is matched by bin/ci-job's KNOWN_ACTION and LOCAL_ACTION, the patterns it plans lint steps from,
+        # so no action name is copied here.
+        ci_job = load_ci_job()
         want, name, inside = [], None, False
+        failure_only = False
         with open(CHECKS, encoding="utf-8") as f:
             for line in f:
                 if re.match(r"^  [\w-]+:\s*$", line):
@@ -777,13 +871,20 @@ class LintMode(unittest.TestCase):
                 m = re.match(r"^      - name: (.*?)\s*$", line)
                 if m:
                     name = m.group(1)
+                    failure_only = False
+                if re.match(r"^        if: .*failure\(\)", line):
+                    failure_only = True  # the red-job wake step runs only after a failed job: a lint run reads it `not run` (decision ci-wait-reads-run-status)
                 m = re.match(r"^        run: (python3 (?:lint|actions)/\S+\.py\b.*|bin/ste-changed\b.*|"
                              r"pipx run [\w.-]+==[\w.]+ [^|&;]*)$", line)
                 if m and "mutate" not in m.group(1):
                     want.append(name)
-                if re.match(r"^        uses: \S*actions/(?:ste-lint|code-check|zizmor)\s*$", line):
-                    want.append(name)  # a known action: ci-job runs its one home's command in its place
+                m = re.match(r"^        uses: (\S+)(?: #.*)?\s*$", line)
+                if failure_only:
+                    m = None  # a failure()-only step is no lint step
+                if m and (ci_job.KNOWN_ACTION.fullmatch(m.group(1)) or ci_job.LOCAL_ACTION.fullmatch(m.group(1))):
+                    want.append(name)  # a known action, or this repo's own local action: ci-job plans each as a lint step
         self.assertGreater(len(want), 20)
+        self.assertTrue({"Code check", ZIZMOR, "Rules and records move together"} <= set(want), want)
         # --base HEAD: an empty diff, so the selector picks no suite and only the lint steps are planned.
         done = plan_job("checks", "--lint", "--plan", "--base", "HEAD", cwd=os.path.join(HERE, ".."))
         lines = [ln for ln in done.stdout.splitlines() if ln.startswith("would run ") and not SUMMARY.match(ln)]
@@ -792,7 +893,6 @@ class LintMode(unittest.TestCase):
             self.assertTrue(any(ln.split("  ", 1)[-1].startswith(expected) or ("  " + expected) in ln for ln in lines),
                             "missing %r in %s" % (expected, done.stdout))
         self.assertNotIn("test_guard", done.stdout)
-        self.assertTrue({"Code check", ZIZMOR} <= set(want), want)
 
     def test_a_new_lint_step_is_picked_up(self):
         code, lines, out = plan_lint(self.root, workflow(
@@ -949,6 +1049,15 @@ class NotRunLines(Job):
         self.assertEqual(by_step(lines), {"Checkout": "not run", "Setup node": "not run", "Python lint": "PASS",
                                           "Make lint-py": "not run", "Make gen-check": "not run"}, out)
         self.assertIn("summary: ran 1 of 5 steps", lines, out)
+
+    def test_a_failure_only_step_is_not_run_and_never_unknown(self):
+        # The red-job wake step (`if: failure()`, a local action) runs only after a red job. A green local lint run
+        # never reaches it, so it reads `not run`, not `unknown` (decision ci-wait-reads-run-status).
+        wake = step("Wake the batch runner (red job)", uses="$/actions/ci-done-comment",
+                    **{"if": "${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}"})
+        rc, lines, out = self.run_job(self.DEGEN[2], wake, args=("--lint",))
+        self.assertEqual(by_step(lines)["Wake the batch runner (red job)"], "not run", out)
+        self.assertEqual(rc, 0, out)
 
     def test_plan_under_lint_prints_the_same_not_run_lines_with_would_run_counts(self):
         code, lines, out = plan_lint(self.root, workflow(*self.DEGEN))
@@ -2100,6 +2209,297 @@ class ZizmorBranches(Job):
         self.assertIn("no run.sh: looked for", lines[0], out)
 
 
+PROBE = '''import os, sys
+# Stands in for lint/probe.py: it writes the file its second argument names, so a case can see that it ran, then exits
+# with the code its first argument names. The file holds $BASE_SHA, so a case can read the value its step was given.
+rc, marker = sys.argv[1], sys.argv[2]
+with open(marker, "w", encoding="utf-8") as f:
+    f.write(os.environ.get("BASE_SHA", "unset"))
+sys.exit(int(rc))
+'''
+ENV_PR_BODY = "      env:\n        PR_BODY: ${{ github.event.pull_request.body }}\n"  # an env the runner cannot read
+
+
+def composite_action(*steps):
+    """An action.yml of composite steps; each step's text sits under runs: steps: at four spaces."""
+    return "name: probe-check\ndescription: a test action\nruns:\n  using: composite\n  steps:\n" + "".join(steps)
+
+
+def action_step(name, run, extra=""):
+    """One composite step under shell: bash, then `extra`, its own lines such as an env: or an if:."""
+    return "    - name: %s\n      shell: bash\n      run: %s\n%s" % (name, run, extra)
+
+
+def probe_step(name, rc, marker, extra=""):
+    """A step that runs the probe through the action's own folder, as the composite action writes it."""
+    return action_step(name, "python3 ${{ github.action_path }}/../../lint/probe.py %s %s" % (rc, marker), extra)
+
+
+class LocalActionUnderLint(Job):
+    """--lint runs a local uses: action (`$/actions/<name>`) when its action.yml, read before any step runs, is composite, and every step a
+    bash run: whose lines are lint commands. The action prints one verdict line, FAIL beating unknown. A refusal prints
+    unknown naming the file, the line or the value it refused, and runs no step. A plain run never runs a local action."""
+
+    git = LintTools.git  # the fixture's git helper and lane builder: LintTools' one home, called here, never copied
+    lane = LintTools.lane
+    ACTION = step("Probe check", uses="$/actions/probe-check")
+    PLAIN = step("Plain lint", "python3 lint/probe.py 0 plain.marker")
+    BOTH = (ACTION, PLAIN)  # the action, then a plain lint step that passes, so the run has a lint step that ran
+    LINT = ("--lint", "--base", "origin/main")
+
+    def commit_lane(self, action):
+        """Commits the lane: the probe, and the action's action.yml when `action` is not None. Call it before run_job, so a
+        folder made for a stub or a PATH is not committed with the lane."""
+        files = {"lint/probe.py": PROBE}
+        if action is not None:
+            files["actions/probe-check/action.yml"] = action
+        self.lane(files)
+
+    def only_tools(self, *tools):
+        """A PATH of symlinks to the named tools and no other, so a step finds no python3."""
+        bin_dir = os.path.join(self.root, "only-tools")
+        os.makedirs(bin_dir)
+        for tool in tools:
+            os.symlink(shutil.which(tool), os.path.join(bin_dir, tool))
+        return {"PATH": bin_dir}
+
+    def ran(self, name):
+        return os.path.exists(os.path.join(self.root, name))
+
+    def assert_one_line(self, lines, out):
+        """The workflow step prints exactly one line, its verdict."""
+        named = [ln for ln in lines if "Probe check: " in ln]
+        self.assertEqual(len(named), 1, "the action's step did not print one line\n" + out)
+
+    @unittest.skipIf(os.name == "nt", "the PATH holds symlinks to bash and git: POSIX only")
+    def test_a_local_action_with_python3_missing_reads_unknown_naming_python3(self):
+        self.commit_lane(composite_action(probe_step("Probe", 0, "pass.marker")))
+        rc, lines, out = self.run_job(self.ACTION, args=self.LINT, env=self.only_tools("bash", "git"))
+        self.assertEqual(rc, 2, out)
+        self.assertIn("python3", lines[0], out)  # the reason: the tool the action's probe runs
+
+    def test_a_local_action_whose_probe_exits_1_reads_fail(self):
+        self.commit_lane(composite_action(probe_step("Probe", 1, "fail.marker")))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL", "PASS"]), out)
+        self.assert_one_line(lines, out)
+        self.assertTrue(self.ran("fail.marker"), "the probe did not run\n" + out)
+
+    def test_a_local_action_whose_probe_exits_2_also_reads_fail(self):
+        self.commit_lane(composite_action(probe_step("Probe", 2, "error.marker")))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL", "PASS"]), out)
+
+    def test_a_quoted_action_path_runs_the_probe_and_reads_fail(self):
+        # The real action writes its path in double quotes, as CI's shell reads it; the quotes drop before the run.
+        quoted = action_step("Probe", 'python3 "${{ github.action_path }}/../../lint/probe.py" 1 fail.marker')
+        self.commit_lane(composite_action(quoted))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL", "PASS"]), out)
+        self.assertTrue(self.ran("fail.marker"), "the quoted probe did not run\n" + out)
+
+    def test_a_passing_local_action_reads_pass(self):
+        self.commit_lane(composite_action(probe_step("Probe", 0, "pass.marker")))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS", "PASS"]), out)
+        self.assert_one_line(lines, out)
+        self.assertTrue(self.ran("pass.marker"), "the probe did not run\n" + out)
+
+    def test_a_failing_step_beats_an_unknown_step_in_one_action(self):
+        self.commit_lane(composite_action(probe_step("Probe", 1, "fail.marker"),
+                                          probe_step("Needs PR body", 0, "env.marker", extra=ENV_PR_BODY)))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL", "PASS"]), out)
+
+    def test_an_unknown_step_with_no_failing_step_makes_the_action_unknown_not_pass(self):
+        self.commit_lane(composite_action(probe_step("Probe", 0, "pass.marker"),
+                                          probe_step("Needs PR body", 0, "env.marker", extra=ENV_PR_BODY)))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
+        self.assertIn("github.event.pull_request.body", lines[0], out)  # the reason: the env the runner cannot read
+
+    def test_a_local_action_with_no_action_yml_reads_unknown_naming_the_file(self):
+        self.commit_lane(None)
+        rc, lines, out = self.run_job(step("New check", uses="$/actions/new-check"), self.PLAIN, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
+        self.assertIn("new-check/action.yml", lines[0], out)
+
+    def test_a_local_action_that_is_not_composite_reads_unknown_naming_the_runtime(self):
+        node = "name: probe-check\ndescription: a test action\nruns:\n  using: node20\n  main: index.js\n"
+        self.commit_lane(node)
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
+        self.assertIn("node20", lines[0], out)
+
+    def test_a_local_action_with_a_nested_uses_step_reads_unknown_naming_that_action(self):
+        self.commit_lane(composite_action("    - name: Nested\n      uses: actions/checkout@v4\n"))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
+        self.assertIn("actions/checkout@v4", lines[0], out)
+
+    def test_a_local_action_whose_env_needs_the_pr_body_reads_unknown_naming_the_expression(self):
+        self.commit_lane(composite_action(probe_step("Needs PR body", 0, "env.marker", extra=ENV_PR_BODY)))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
+        self.assertIn("github.event.pull_request.body", lines[0], out)
+
+    def test_a_local_action_with_an_npm_ci_line_reads_unknown_and_runs_no_step(self):
+        self.commit_lane(composite_action(probe_step("Probe", 0, "probe.marker"), action_step("Install", "npm ci")))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT, env=self.stub_path(npm=self.NPM_OK))
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
+        self.assertIn("npm ci", lines[0], out)  # the reason: the line the read before any step refused
+        self.assertFalse(self.ran("probe.marker"), "the probe ran although a later line was refused before any step ran\n" + out)
+        self.assertEqual(self.npm_calls(), "(no npm call)", out)
+
+    def test_a_local_action_with_a_curl_line_reads_unknown_and_runs_no_step(self):
+        self.commit_lane(composite_action(probe_step("Probe", 0, "probe.marker"),
+                                          action_step("Fetch", "curl -sS -o tool.sh https://example.invalid/tool.sh")))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT, env=self.stub_path(curl='echo "$*" >> curl-calls.txt'))
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
+        self.assertIn("curl", lines[0], out)  # the reason: the line the read before any step refused
+        self.assertFalse(self.ran("probe.marker"), "the probe ran although a later line was refused before any step ran\n" + out)
+        self.assertFalse(self.ran("curl-calls.txt"), "the curl line ran\n" + out)
+
+    def test_a_local_action_with_no_steps_reads_unknown_naming_the_file(self):
+        self.commit_lane("name: probe-check\ndescription: a test action\nruns:\n  using: composite\n  steps: []\n")
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)  # a pass that ran nothing proved nothing
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
+        self.assertIn("probe-check/action.yml", lines[0], out)
+
+    def test_a_local_action_step_with_a_false_if_is_skipped_and_its_run_is_not_made(self):
+        off = probe_step("Off branch", 0, "off.marker", extra="      if: github.event_name != 'pull_request'\n")
+        self.commit_lane(composite_action(probe_step("Probe", 0, "pass.marker"), off))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS", "PASS"]), out)
+        self.assertFalse(self.ran("off.marker"), "the if-false step ran\n" + out)
+
+    def test_the_serial_and_parallel_lint_print_the_same_lines(self):
+        self.commit_lane(composite_action(probe_step("Probe", 1, "fail.marker")))
+        rc, serial, out = self.run_job(*self.BOTH, args=self.LINT, env={"CI_JOB_LINT_WORKERS": "1"})
+        self.assertEqual((rc, self.verdicts(serial)), (1, ["FAIL", "PASS"]), out)
+        rc, parallel, out = self.run_job(*self.BOTH, args=self.LINT, env={"CI_JOB_LINT_WORKERS": "2"})
+        self.assertEqual(normal(parallel), normal(serial), "the parallel run printed other lines than the serial one\n" + out)
+
+    def test_a_local_action_with_an_outer_if_that_condition_cannot_read_reads_unknown_and_does_not_run(self):
+        outer = step("Probe check", uses="$/actions/probe-check", **{"if": "github.event_name == 'push'"})
+        self.commit_lane(composite_action(probe_step("Probe", 1, "probe.marker")))
+        rc, lines, out = self.run_job(outer, self.PLAIN, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
+        self.assertIn("an if: this runner cannot read", lines[0], out)  # the reason: the text plan() gives
+        self.assertFalse(self.ran("probe.marker"), "the action ran although its outer if cannot be read\n" + out)
+
+    def test_a_local_action_with_an_outer_if_that_is_false_on_a_pull_request_is_skipped(self):
+        outer = step("Probe check", uses="$/actions/probe-check", **{"if": "github.event_name != 'pull_request'"})
+        self.commit_lane(composite_action(probe_step("Probe", 1, "probe.marker")))
+        rc, lines, out = self.run_job(outer, self.PLAIN, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["skipped", "PASS"]), out)
+        self.assertFalse(self.ran("probe.marker"), "the action ran although its outer if is false on a pull request\n" + out)
+
+    def test_a_local_action_with_an_outer_continue_on_error_reads_unknown_and_does_not_run(self):
+        outer = step("Probe check", uses="$/actions/probe-check", continue_on_error="true")
+        self.commit_lane(composite_action(probe_step("Probe", 1, "probe.marker")))
+        rc, lines, out = self.run_job(outer, self.PLAIN, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
+        self.assertIn("continue-on-error", lines[0], out)  # the reason: plan() refuses a step allowed to fail
+        self.assertFalse(self.ran("probe.marker"), "the action ran although its continue-on-error is set\n" + out)
+
+    def test_a_comment_line_between_two_action_steps_does_not_end_the_step_list(self):
+        action = ("name: probe-check\ndescription: a test action\nruns:\n  using: composite\n  steps:\n"
+                  + probe_step("Probe pass", 0, "first.marker")
+                  + "  # a note between the steps, indented two spaces\n"
+                  + probe_step("Probe fail", 1, "second.marker"))
+        self.commit_lane(action)
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL", "PASS"]), out)
+        self.assertTrue(self.ran("second.marker"), "the second step was not read, so it did not run\n" + out)
+
+    def test_a_local_action_step_reads_the_base_sha_from_its_env(self):
+        base_env = "      env:\n        BASE_SHA: ${{ github.event.pull_request.base.sha }}\n"
+        self.commit_lane(composite_action(probe_step("Base probe", 0, "base.marker", extra=base_env)))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS", "PASS"]), out)
+        expected = git_in(self.root, "rev-parse", "origin/main")  # the base the lint diffs against
+        with open(os.path.join(self.root, "base.marker"), encoding="utf-8") as f:
+            self.assertEqual(f.read(), expected, "the probe was not given the base sha\n" + out)
+
+    def test_a_local_action_after_a_failed_install_reads_unknown_naming_it_and_does_not_run(self):
+        install = step("Install deps", "npm ci")
+        self.commit_lane(composite_action(probe_step("Probe", 1, "probe.marker")))
+        rc, lines, out = self.run_job(install, self.ACTION, self.PLAIN, args=self.LINT, env=self.stub_path(npm="exit 1"))
+        named = [ln for ln in lines if "Probe check: " in ln]
+        self.assertEqual(len(named), 1, "the action's step did not print one line\n" + out)
+        self.assertTrue(named[0].startswith("unknown"), "the action after a failed install did not read unknown\n" + out)
+        self.assertIn("Install deps", named[0], out)  # the reason: the install step that did not finish
+        self.assertNotIn("FAIL", self.verdicts(lines), out)
+        self.assertFalse(self.ran("probe.marker"), "the action ran after a failed install\n" + out)
+
+    def test_a_comment_above_the_first_action_step_does_not_make_the_action_unknown(self):
+        action = ("name: probe-check\ndescription: a test action\nruns:\n  using: composite\n  steps:\n"
+                  "    # a note above the first step, indented four spaces\n" + probe_step("Probe", 0, "pass.marker"))
+        self.commit_lane(action)
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS", "PASS"]), out)
+        self.assertTrue(self.ran("pass.marker"), "the first step did not run\n" + out)
+
+    def test_a_comment_above_the_first_action_step_still_reads_fail_for_a_failing_probe(self):
+        action = ("name: probe-check\ndescription: a test action\nruns:\n  using: composite\n  steps:\n"
+                  "    # a note above the first step, indented four spaces\n" + probe_step("Probe", 1, "fail.marker"))
+        self.commit_lane(action)
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL", "PASS"]), out)
+        self.assertTrue(self.ran("fail.marker"), "the first step did not run\n" + out)
+
+    def test_an_install_before_a_missing_local_action_is_not_run_under_plan(self):
+        self.commit_lane(None)  # the uses: names no action, so no lint step after the install would run
+        rc, lines, out = self.run_job(step("Install deps", "npm ci"), step("Missing", uses="$/actions/no-such-action"),
+                                      args=("--lint", "--plan", "--base", "origin/main"))
+        install = [ln for ln in lines if "Install deps" in ln]
+        self.assertEqual(len(install), 1, "the install step did not print one line\n" + out)
+        self.assertTrue(install[0].startswith("not run"), "the install was not marked not run\n" + out)
+        self.assertIn("no lint step after it will run", install[0], out)
+        self.assertNotIn("would run", install[0], "the install was planned to run\n" + out)
+
+    def test_an_install_before_a_local_action_with_a_false_outer_if_is_not_run(self):
+        self.commit_lane(composite_action(probe_step("Probe", 0, "probe.marker")))
+        outer = step("Probe check", uses="$/actions/probe-check", **{"if": "github.event_name != 'pull_request'"})
+        rc, lines, out = self.run_job(step("Install deps", "npm ci"), outer, args=self.LINT,
+                                      env=self.stub_path(npm="touch npm-ran.marker"))
+        install = [ln for ln in lines if "Install deps" in ln]
+        self.assertEqual(len(install), 1, "the install step did not print one line\n" + out)
+        self.assertTrue(install[0].startswith("not run"), "the install was not marked not run\n" + out)
+        self.assertIn("no lint step after it will run", install[0], out)
+        self.assertFalse(self.ran("npm-ran.marker"), "the install ran before a skipped action\n" + out)
+        self.assertFalse(self.ran("probe.marker"), "the skipped action ran\n" + out)
+
+    def test_a_local_uses_step_with_its_own_env_reads_unknown_naming_the_env_and_does_not_run(self):
+        self.commit_lane(composite_action(probe_step("Probe", 0, "probe.marker")))
+        strict = step("Probe check", uses="$/actions/probe-check", env={"STRICT": "1"})
+        rc, lines, out = self.run_job(strict, self.PLAIN, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
+        self.assertIn("STRICT", lines[0], out)  # the reason: the env the uses: step carries, which the action does not read
+        self.assertFalse(self.ran("probe.marker"), "the action ran although its uses: step has an env\n" + out)
+
+    # Controls: each reads the same today and after the change. The probe as a plain run: step proves the fixture works.
+
+    def test_the_same_probe_as_a_plain_run_step_reads_fail(self):
+        self.commit_lane(None)
+        rc, lines, out = self.run_job(step("Probe", "python3 lint/probe.py 1 fail.marker"), self.PLAIN, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL", "PASS"]), out)
+        self.assertTrue(self.ran("fail.marker"), out)
+
+    def test_a_remote_uses_under_lint_is_still_not_run(self):
+        self.commit_lane(None)
+        rc, lines, out = self.run_job(step("Remote check", uses="example-org/other-repo/actions/fetch@v1"),
+                                      self.PLAIN, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
+
+    def test_a_plain_run_does_not_run_a_local_action(self):
+        self.commit_lane(composite_action(probe_step("Probe", 1, "fail.marker")))
+        rc, lines, out = self.run_job(self.ACTION)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["not run locally"]), out)
+        self.assertFalse(self.ran("fail.marker"), "a plain run ran the local action\n" + out)
+
+
 HARNESS = '''import os, sys
 # Stands in for actions/code-check/code_check.py: its verdict is the rule that the tree's lint/rule.txt names.
 root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
@@ -2222,8 +2622,8 @@ class PinnedHarness(Job):
         git_in(self.source, "checkout", "-qb", "symlinked", self.pin_a)
         write_lf(os.path.join(self.source, "CLAUDE.md"), "rules\n")
         git_in(self.source, "add", "CLAUDE.md")
-        blob = subprocess.run(["git", "-C", self.source, "hash-object", "-w", "--stdin"], input="CLAUDE.md", check=True,
-                              env=ENV, capture_output=True, text=True).stdout.strip()
+        blob = subprocess.run(["git", "-C", self.source, "hash-object", "-w", "--stdin"], input=b"CLAUDE.md", check=True,
+                              env=ENV, capture_output=True).stdout.decode("utf-8").strip()
         git_in(self.source, "update-index", "--add", "--cacheinfo", "120000,%s,AGENTS.md" % blob)
         git_in(self.source, "commit", "-qm", "AGENTS.md is a symlink to CLAUDE.md")
         sha = git_in(self.source, "rev-parse", "HEAD")
@@ -2555,6 +2955,47 @@ class WindowsShell(unittest.TestCase):
     def test_off_windows_the_shell_is_path_bash(self):
         self.assertEqual(self.ci_job.shell_argv(None, nt=False), [shutil.which("bash"), "-e"])
         self.assertEqual(self.ci_job.shell_argv("python", nt=False), ["python3"])
+
+
+class OwnLogPrune(Job):
+    """bin/ci-job removes its own ci-job-* logs over one day old when it starts. Each run names its log in the fixture
+    TMPDIR, as a real run does. A ci-job log 12 hours old, a log of another name and the run's own log must stay."""
+
+    def setUp(self):
+        super().setUp()
+        self.tmp = os.path.join(self.root, "tmp")
+        os.makedirs(self.tmp)
+        self.env = {"VERDICT_LOG": "", "TMPDIR": self.tmp, "TMP": self.tmp, "TEMP": self.tmp}  # no caller log: ci-job names its own
+
+    def ci_logs(self):
+        return sorted(n for n in os.listdir(self.tmp) if n.startswith("ci-job-"))
+
+    def age(self, path, hours):
+        stamp = time.time() - hours * 3600
+        os.utime(path, (stamp, stamp))
+        return path
+
+    def plant(self, name, hours):
+        path = os.path.join(self.tmp, name)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("kept\n")
+        return self.age(path, hours)
+
+    def test_a_log_over_a_day_old_is_pruned_when_the_next_run_starts(self):
+        rc, _, out = self.run_job(step("ok", "true"), env=self.env)
+        self.assertEqual(rc, 0, out)
+        first = self.ci_logs()
+        self.assertEqual(len(first), 1, "scope: the first run must name one ci-job log under the fixture TMPDIR, got %r" % first)
+        stale = self.age(os.path.join(self.tmp, first[0]), 48)
+        kept = self.plant("ci-job-lane-kept.log", 12)
+        other = self.plant("other-tool.log", 48)
+        rc, _, out = self.run_job(step("ok", "true"), env=self.env)
+        self.assertEqual(rc, 0, out)
+        self.assertFalse(os.path.exists(stale), "a ci-job log 48 hours old must be pruned when the next ci-job run starts")
+        self.assertTrue(os.path.exists(kept), "a ci-job log 12 hours old must stay")
+        self.assertTrue(os.path.exists(other), "a log whose name is not ci-job-* must stay")
+        own = [n for n in self.ci_logs() if n not in (first[0], "ci-job-lane-kept.log")]
+        self.assertEqual(len(own), 1, "the second run must leave its own log, got %r" % own)
 
 
 if __name__ == "__main__":

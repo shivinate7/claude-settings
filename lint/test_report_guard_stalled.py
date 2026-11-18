@@ -5,7 +5,7 @@ The coordinator's ruling sets the rule: triage's Stop refuses to end a wake whil
 so a triage session cannot end a wake that leaves a stall unread. The rules the cases pin:
 
 - Only a session whose own newest get_session record carries cs-build:triage is held. A set_session_tags call
-  after that record ends the proof, as in hooks/guard_merge.py _own_tier_proved.
+  after that record ends the proof, as in hooks/guard_merge.py _own_role_proved.
 - The newest build output decides. A build output is the result of a Bash call that runs build.py. A clean
   build prints no stalled line, so a newer clean build releases an older entry.
 - An entry line is `stalled step: <id> (...)` or `stalled step: item <n> (...)`. An unknown line is not an entry.
@@ -16,7 +16,7 @@ so a triage session cannot end a wake that leaves a stall unread. The rules the 
 - An owner `override` typed for the session lifts the hold, as guard_core's refuse() honours override.grant.
   The Stop that the override lifts spends it: the next Stop is held again.
 - A build run through the verdict wrapper is read from the log path its result names, where its lines are kept.
-- A held Stop on a well-formed report carries no correction tail: the report is not to be sent again.
+- A held Stop on a well-formed report ends with the shared correction tail, so the report is not sent again.
 - A non-triage Stop opens its transcript no more often than the base commit does (BASE_OPENS on this transcript).
 
 The stalled lines come from build.stalled_lines, the one emitter, so a change to the format reaches these cases.
@@ -39,6 +39,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "skills", "roadmap"))
 import test_report_guard as trg  # noqa: E402  the fixture, helpers and run folder (one home)
+import report_guard as RG  # noqa: E402  CORRECTION_TAIL, the one home of the shared correction line
 import build  # noqa: E402  the emitter of the stalled lines (one home)
 import override  # noqa: E402  the owner override and its file (one home)
 
@@ -381,13 +382,14 @@ class TriageHoldTests(StalledFixture, unittest.TestCase):
 
     # Held on the report's shape and on the run's log. Red on the current head: the refusal and the log read are missing.
 
-    def test_st_red_held_first_stop_on_a_well_formed_report_has_no_correction_tail(self):
-        # Catches: the hold's refusal carries the report's correction tail, so a well-formed report is told to send itself again.
+    def test_st_held_first_stop_on_a_well_formed_report_carries_the_correction_tail(self):
+        # Catches: the hold's refusal lacks the shared correction tail, so the session
+        # is not told to post only the correction and never resend the report.
         out = self.run_stop(self.stalled_wake() + [assistant_text(WELL_FORMED)])
         self.held(out, "build-stalled-check")
-        tails = ("Post only the corrected lines", "Never send the report again")
-        self.assertFalse(any(tail in out["reason"] for tail in tails),
-                         "the hold's refusal carries the report's correction tail: %r" % (out["reason"],))
+        tail = getattr(RG, "CORRECTION_TAIL", "")
+        self.assertTrue(tail, "report_guard holds no shared CORRECTION_TAIL constant")
+        self.assertIn(tail, out["reason"], "the hold's refusal lacks the shared correction tail: %r" % (out["reason"],))
 
     def test_st_red_build_run_through_verdict_is_read_from_its_log(self):
         # Catches: a build run through the verdict wrapper shows only its FAIL line and log path, so the stalled lines in that log go unread.

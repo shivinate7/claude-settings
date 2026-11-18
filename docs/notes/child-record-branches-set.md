@@ -1,0 +1,1 @@
+- child-record-branches-set: Triage 21:46 CST Nov 12: record branches. joyous already has roadmap at b49c5b8 (scaffold, Nov 8). ios-adblock roadmap was pushed by triage at c0fe3f9 (project-ops skeleton, item 2 a). The tiers in each claude.ai project (project-ops step 4) are the owner's. Expect asks from mailaudit, banchi and q_max.

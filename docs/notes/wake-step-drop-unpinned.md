@@ -1,0 +1,1 @@
+- wake-step-drop-unpinned: `lint/workflow_steps.py` and `lint/test_windows_split.py` drop the red-job wake step silently, and no test pins that drop on the real workflow. Found in PR 2860. Decision: ci-wait-reads-run-status. Seen: 2026-11-17 x1

@@ -1,0 +1,1 @@
+- mutation-lint-unknown-unliftable: No case lifts an unknown lint with --lint-unknown-ok on a lane that touches a mutation test file (PR #2443).

@@ -201,8 +201,11 @@ The preview lists each one in a "dead-rooted servers" section, with a reason.
 - The process is owned by the account running the sweep.
 
 An unreadable answer means keep. The signal, the grace period, and the report
-are the same as for a listener. This tier is machine-wide and not tied to a
-repository, so `janitor.roots` and `.claude/janitor.json` do not narrow it.
+are the same as for a listener. The daily job's run of this tier is machine-wide
+and not tied to a repository, so `janitor.roots` and `.claude/janitor.json` do not
+narrow it. The SessionEnd run stops only a dead-rooted server rooted in its own
+repository (owner ruling `own-828-a-sessionend-this-repo-only`, 2026-11-14 19:57:58
+CST). A server rooted elsewhere waits for the daily job.
 
 ## Simulators
 
@@ -289,6 +292,21 @@ A folder that fails a check is kept. A `buildDirs` value that is not a list of
 strings refuses all build-folder deletes, defaults included. A later reap and
 the daily sweep delete trash names a child left. The checks are in decision
 `build-dirs-reaped-at-agent-end` (build folders are reaped at agent end).
+
+## What cleans what
+
+Each tool removes its own leftovers when it starts, so a cloud session with no
+daily sweep stays clean too. The sweep above is the backstop, not the only cleaner.
+
+| Leftover | Cleaned by | When | Age or condition |
+| --- | --- | --- | --- |
+| `verdict-*.log` in the temp folder | `bin/verdict` | start of a run with no `VERDICT_LOG` | over 1 day old, and the first line is its own header |
+| `ci-job-*.log` in the temp folder | `bin/ci-job` | start of a run with no `VERDICT_LOG` | over 1 day old |
+| `ci-job-lint-*` folder and `ci-job-pin-*` trees | `bin/ci-job` | exit | the run's own, always |
+| `merge-wt-*` tree of a finished run | `merge/merge.py` | exit | the run's own, always |
+| `merge-wt-*` tree of a dead run | `merge/merge.py` (`add_worktree`) | job start | lock reason `merge tool, pid N` with N dead |
+| test run folder `<pid>-<uuid>` | `lint/_test_temp.py` | job start (the next test run) | pid dead and over 1 hour old; pid alive and over 1 day old |
+| session scratch `<temp>/claude/...` (Windows) and `<tmp>/claude-<uid>/...` (POSIX) | `janitor/temp_sweep.py`, through `janitor/sweep.py` | each sweep, on every OS | transcript idle over 24 hours, and no live session |
 
 ## How you opt out
 

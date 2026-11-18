@@ -1,0 +1,1 @@
+- frozen-path-grep-false-alarm: guard frozen-path refused a read-only `grep -n ... ~/.claude/skills/waiting-page/SKILL.md | sed | cut` in a cloud session, saying the command changes a frozen file. Nothing was written. The Grep tool on the clone read the same file. Possible false alarm: a read of a frozen path should pass.

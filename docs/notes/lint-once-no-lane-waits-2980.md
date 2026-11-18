@@ -1,0 +1,1 @@
+- lint-once-no-lane-waits-2980: 18:33 CST Nov 13 (coordinator, 18:31): no lane exists for this step; it waits on #2980, and the coordinator starts a lane after #2980 merges (ruling own-728-b-route-2-only).

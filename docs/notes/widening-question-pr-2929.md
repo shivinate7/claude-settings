@@ -1,0 +1,1 @@
+- widening-question-pr-2929: Owner item 643 (14:24 CST Nov 12): PR #2929 (lane widening-question-not-asked) refuses a question that revisits uniform-over-variants; archive/widening-question-not-asked at 17c6ceb5c, old branch delete waits on a local session.

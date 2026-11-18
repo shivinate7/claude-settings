@@ -1,0 +1,1 @@
+- ci-hygiene-ready-first-stale: What: skills/ci-hygiene/SKILL.md lines 163 and 185 say a lane runs `merge <pr> --ready` first; #3535 refuses that for a lane-tagged session. Where: skills/ci-hygiene/SKILL.md lines 163 and 185 (as relayed, not read by triage). Decision: unverified. Retire: when the skill text matches what the tool allows a lane.

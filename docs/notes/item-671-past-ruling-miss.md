@@ -1,0 +1,1 @@
+- item-671-past-ruling-miss: Triage 18:52 CST Nov 12: item 671 posted although decision relayed-grant-read-from-page already settled it; the past-ruling check caught it only at the report, after the page write. Third such miss today (651, 662).

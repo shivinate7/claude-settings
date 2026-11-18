@@ -1,0 +1,1 @@
+- joined-r-repo-no-mutant: no mutant covers the joined `-R<repo>` arm (`_gh_root_repo_flag` startswith("-R"), and the repo read in merge_call_of), though test_guard.py has cases.

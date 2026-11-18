@@ -1,0 +1,1 @@
+- llrcc-claim-only-keyerror: (#2382) claim_only reads `k["folder"]`, which raises KeyError for a heading-shape kind with `file` (actions/stamp/examples/heading.stamp.json:39); a traceback, not a Stop, on a resumed join only. Dead code here (.github/stamp.json kinds []). Also duplicate trailer ids.

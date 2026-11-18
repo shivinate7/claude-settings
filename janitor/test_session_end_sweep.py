@@ -106,7 +106,7 @@ def run_capped(argv, timeout, input_text="", cwd=None, env=None, start_after=Non
                 proc.wait(timeout=30)
                 raise AssertionError("%s did not write %s in %s s, so it was killed (a start guard)"
                                      % (argv[0], start_after, START_CAP_SECONDS))
-            time.sleep(0.05)
+            time.sleep(0.05)  # poll step: the start wait is a condition, and START_CAP_SECONDS above caps it
         try:
             code = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -226,11 +226,13 @@ class RaisingOrHangingSweepFailsOpen(unittest.TestCase):
             raise RuntimeError("this fake sweep always raises")
         """))
 
+        cls.hanging_started = os.path.join(ROOT, "fake_sweep_hangs.started")
         cls.hanging_sweep = os.path.join(ROOT, "fake_sweep_hangs.py")
         write(cls.hanging_sweep, textwrap.dedent("""\
             import time
+            open(%r, "w").close()  # the start marker: the hook really ran this sweep
             time.sleep(600)
-        """))
+        """) % cls.hanging_started)
 
     def test_raising_sweep_still_exits_0(self):
         result = run_hook(
@@ -240,17 +242,24 @@ class RaisingOrHangingSweepFailsOpen(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_hanging_sweep_still_exits_0_and_does_not_wait_out_the_hang(self):
-        start = time.monotonic()
-        result = run_hook(
-            {"hook_event_name": "SessionEnd", "cwd": self.repo},
-            env_extra={"JANITOR_SWEEP_PATH": self.hanging_sweep, "JANITOR_SWEEP_TIMEOUT": "1"},
-            timeout=20,
-        )
-        elapsed = time.monotonic() - start
+        # The fuse is 3 s, the hook's own sweep timeout. It must clear MIN_USEFUL_SWEEP_SECONDS (2 s), or
+        # the hook skips the sweep and this case passes without testing the hang. The start marker proves
+        # the sweep ran. The 10 s cap counts from that marker, so a slow start cannot spend it. The fuse
+        # must end the hook well inside the cap: a fuse honoured late reads as the hang, and the cap ends it.
+        try:
+            result = run_hook(
+                {"hook_event_name": "SessionEnd", "cwd": self.repo},
+                env_extra={"JANITOR_SWEEP_PATH": self.hanging_sweep, "JANITOR_SWEEP_TIMEOUT": "3"},
+                timeout=10,
+                start_after=self.hanging_started,
+            )
+        except AssertionError as hang:
+            if not os.path.exists(self.hanging_started):
+                raise  # no sweep ever started: a start guard, which names itself
+            self.fail("hook did not honor its own sweep timeout: %s" % hang)
+        self.assertTrue(os.path.exists(self.hanging_started),
+                        "the hook never started the sweep, so the hang was never tested")
         self.assertEqual(result.returncode, 0, result.stderr)
-        # the fake sweep sleeps 600s; the hook's own internal timeout (set to 1s above) must
-        # have cut it off, never the outer test harness timeout (20s).
-        self.assertLess(elapsed, 10, "hook did not honor its own sweep timeout")
 
 
 class SweepsOnlyTheEndingSessionsRepository(unittest.TestCase):
@@ -727,14 +736,149 @@ class SweepIsToldItsTimeLeftAsADeadline(unittest.TestCase):
 
     def test_the_sweep_is_told_it_is_the_session_end_run(self):
         """The SessionEnd run passes `--session-end`: it judges branches and worktrees in its own
-        repository only, stops proven orphans machine-wide like the scheduled job, and skips the
-        loose-process report."""
+        repository only, stops dead-rooted servers rooted in that repository only (the daily job
+        covers the rest of the machine), and skips the loose-process report."""
         repo = os.path.join(ROOT, "session_end_flag_repo")
         make_repo(repo)
         calls = self.sweep_argv_for(repo, 0.0)
         self.assertEqual(len(calls), 1, "the hook ran the sweep %d times" % len(calls))
         self.assertIn("--session-end", calls[0],
                       "the SessionEnd sweep was not told it is session-scoped: %r" % (calls[0],))
+
+
+class SessionEndStopsOnlyServersInItsRepository(unittest.TestCase):
+    """The SessionEnd sweep stops a dead-rooted server
+    only when the server's root is the repository that ended the session. A server rooted elsewhere on
+    the machine waits for the daily job. Driven through `handle`, as a SessionEnd does: the sweep child
+    runs in-process (`sweep.main`, as SessionEndFetchThrottle runs it), the machine's dead-rooted read is
+    answered with fixed decisions, and the stop seam is `sweep.send_signal`, the call every stop makes."""
+
+    def setUp(self):
+        import _nowindow
+        import session_end_sweep
+        import sweep
+        self.hook, self.sweep, self.nowindow = session_end_sweep, sweep, _nowindow
+        self.cfg = tempfile.mkdtemp(prefix="scope_cfg_", dir=ROOT)
+
+    def build(self, name):
+        """One base folder under ROOT, holding:
+          here      this session's repository
+          sibling   another repository
+          under     a linked worktree inside `here`, at here/.claude/worktrees/x
+          beside    a linked worktree beside `here`, at base/here-wt. The name shares `here`'s
+                    prefix, so a prefix match with no folder boundary would wrongly stop it
+          .claude   so a script missing from `base` itself has `base` as its project ancestor
+        Returns the realpath of `here`, and one dead-rooted decision per server, shaped as
+        `sweep.find_dead_rooted` returns them. Each decision's home is `_project_ancestor` of its
+        missing script, as the real read computes it."""
+        base = os.path.realpath(os.path.join(ROOT, name))
+        os.makedirs(os.path.join(base, ".claude"))
+        here, sibling = os.path.join(base, "here"), os.path.join(base, "sibling")
+        under, beside = os.path.join(here, ".claude", "worktrees", "x"), os.path.join(base, "here-wt")
+        make_repo(here)
+        make_repo(sibling)
+        for folder in (under, beside):
+            os.makedirs(os.path.join(folder, ".claude"))
+
+        def dead(pid, home, missing):
+            return {"pid": pid, "command": "sh " + missing, "missing": missing, "home": home,
+                    "action": "reap", "reason": "dead-rooted-server"}
+
+        def home_of(folder):
+            return self.sweep._project_ancestor(os.path.join(folder, "tools", "serve.sh"))
+
+        return {
+            "here": here,
+            "in_repo": dead(910101, here, os.path.join(here, "tools", "serve.sh")),
+            "sibling": dead(910102, sibling, os.path.join(sibling, "tools", "serve.sh")),
+            "ancestor": dead(910103, base, os.path.join(base, "elsewhere", "x.sh")),
+            "under": dead(910104, home_of(under), os.path.join(under, "tools", "serve.sh")),
+            "beside": dead(910105, home_of(beside), os.path.join(beside, "tools", "serve.sh")),
+        }
+
+    def session_end(self, repo, decisions):
+        """One SessionEnd for `repo`, with the machine's dead-rooted read answered by `decisions`.
+        Returns the pids the sweep stopped, the root of each sweep child, what the sweep raised, and
+        each kill that bypassed send_signal."""
+        stopped, roots, raised, kills = [], [], [], []
+        real_run, real_kill = self.nowindow.run, os.kill
+
+        def sweep_in_process(argv, *args, **kwargs):
+            if isinstance(argv, list) and self.hook.SWEEP_PATH in argv:
+                roots.append(os.path.normcase(os.path.realpath(argv[2])))
+                try:
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        code = self.sweep.main(argv[2:])
+                except (Exception, SystemExit) as exc:
+                    raised.append(repr(exc))
+                    code = 1
+                return subprocess.CompletedProcess(argv, code or 0, "", "")
+            return real_run(argv, *args, **kwargs)
+
+        def stop(pid):
+            stopped.append(pid)
+            return True
+
+        def kill(pid, sig):
+            if sig == 0:
+                return real_kill(pid, sig)  # a liveness probe, not a stop
+            kills.append(pid)
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.cfg}))
+            stack.enter_context(mock.patch.object(self.nowindow, "run", sweep_in_process))
+            stack.enter_context(mock.patch.object(os, "kill", kill))
+            stack.enter_context(mock.patch.object(self.sweep, "find_dead_rooted", lambda: decisions))
+            stack.enter_context(mock.patch.object(self.sweep, "send_signal", stop))
+            stack.enter_context(mock.patch.object(self.sweep, "find_swept_listeners",
+                                                  lambda paths: []))
+            stack.enter_context(mock.patch.object(self.sweep, "sim_tier",
+                                                  lambda confirm, record_path=None: []))
+            stack.enter_context(mock.patch.object(self.sweep, "temp_tier", lambda confirm: 0))
+            stack.enter_context(mock.patch.object(self.sweep, "print_grace_period_report",
+                                                  lambda *a, **k: None))
+            self.hook.handle({"hook_event_name": "SessionEnd", "cwd": repo}, elapsed_seconds=0.0)
+        return stopped, roots, raised, kills
+
+    def test_a_dead_server_outside_this_repository_is_not_stopped(self):
+        fx = self.build("scope_mixed")
+        stopped, roots, raised, kills = self.session_end(
+            fx["here"], [fx["in_repo"], fx["sibling"], fx["ancestor"]])
+        self.assertEqual(raised, [], "the sweep child raised, so this run proved nothing: %r" % (raised,))
+        self.assertEqual(roots, [os.path.normcase(fx["here"])],
+                         "the sweep child was not given this repository as its root")
+        self.assertIn(fx["in_repo"]["pid"], stopped,
+                      "a dead server rooted in this repository was not stopped")
+        self.assertNotIn(fx["sibling"]["pid"], stopped,
+                         "the session-end sweep stopped a dead server rooted in a sibling repository")
+        self.assertNotIn(fx["ancestor"]["pid"], stopped,
+                         "the session-end sweep stopped a dead server rooted in a folder above this "
+                         "repository")
+        self.assertEqual(kills, [], "a kill bypassed send_signal: %r" % (kills,))
+
+    def test_a_session_end_with_only_outside_servers_stops_none(self):
+        fx = self.build("scope_only_outside")
+        stopped, roots, raised, kills = self.session_end(fx["here"], [fx["sibling"], fx["ancestor"]])
+        self.assertEqual(raised, [], "the sweep child raised, so this run proved nothing: %r" % (raised,))
+        self.assertEqual(roots, [os.path.normcase(fx["here"])],
+                         "the sweep child was not given this repository as its root")
+        self.assertEqual(stopped, [],
+                         "the session-end sweep stopped dead servers rooted outside this repository: "
+                         "%r" % (stopped,))
+        self.assertEqual(kills, [], "a kill bypassed send_signal: %r" % (kills,))
+
+    def test_worktree_under_this_repository_stops_and_sibling_worktree_does_not(self):
+        fx = self.build("scope_worktrees")
+        stopped, roots, raised, kills = self.session_end(fx["here"], [fx["under"], fx["beside"]])
+        self.assertEqual(raised, [], "the sweep child raised, so this run proved nothing: %r" % (raised,))
+        self.assertEqual(roots, [os.path.normcase(fx["here"])],
+                         "the sweep child was not given this repository as its root")
+        self.assertIn(fx["under"]["pid"], stopped,
+                      "a dead server rooted in a linked worktree under this repository was not stopped")
+        self.assertNotIn(fx["beside"]["pid"], stopped,
+                         "the session-end sweep stopped a dead server rooted in a linked worktree "
+                         "beside this repository")
+        self.assertEqual(kills, [], "a kill bypassed send_signal: %r" % (kills,))
 
 
 class SessionEndHookStartsOneSweepProcess(unittest.TestCase):
@@ -791,6 +935,8 @@ class SessionEndFetchThrottle(unittest.TestCase):
     real git."""
 
     RECORD_DIR = ("state", "sweep-fetch")
+    # a fixed wall-clock second, well behind the real clock: a record written from the real clock cannot pass for it
+    PINNED_WALL_CLOCK = 1_500_000_000.0
 
     def setUp(self):
         import _nowindow
@@ -833,6 +979,13 @@ class SessionEndFetchThrottle(unittest.TestCase):
     def session_end(self, cwd):
         self.hook.handle({"hook_event_name": "SessionEnd", "cwd": cwd}, elapsed_seconds=0.0)
 
+    def pinned_clock(self):
+        """The sweep's wall clock, pinned to PINNED_WALL_CLOCK. A fixture stamped from that value and the
+        sweep that judges it read one instant, so a stall between the stamp and the judge cannot flip it."""
+        pinned = mock.MagicMock(wraps=time)
+        pinned.time.return_value = self.PINNED_WALL_CLOCK
+        return mock.patch.object(self.sweep, "time", pinned)
+
     def counts(self, repo):
         where = os.path.normcase(os.path.realpath(repo))
         mine = [kind for kind, path in self.calls if path == where]
@@ -855,14 +1008,16 @@ class SessionEndFetchThrottle(unittest.TestCase):
 
     def test_first_session_end_fetches_and_records_the_time(self):
         repo = self.repo("throttle_first")
-        before = time.time()
-        self.session_end(repo)
+        # pinned, so the record can be checked for exact equality with the sweep's own clock reading
+        with self.pinned_clock():
+            self.session_end(repo)
         fetches, listings = self.counts(repo)
         self.assertEqual(fetches, 1, "the first SessionEnd must fetch once")
         self.assertGreaterEqual(listings, 1, "the first SessionEnd must run ls-remote (counter check)")
         self.assertEqual(len(self.records()), 1, "one record per repository in the state folder")
         with open(self.records()[0], encoding="utf-8") as handle:
-            self.assertGreaterEqual(float(handle.read().strip()), before - 1)
+            self.assertEqual(float(handle.read().strip()), self.PINNED_WALL_CLOCK,
+                             "the fetch record is not the sweep's own clock reading")
 
     def test_second_session_end_within_10_minutes_runs_no_fetch_and_no_ls_remote(self):
         repo = self.repo("throttle_second")
@@ -874,27 +1029,30 @@ class SessionEndFetchThrottle(unittest.TestCase):
 
     def test_a_record_just_inside_the_window_still_throttles(self):
         repo = self.repo("throttle_inside")
-        self.session_end(repo)
-        first = self.counts(repo)
-        self.set_records(repr(time.time() - (FETCH_THROTTLE_SECONDS - 60)))
-        self.session_end(repo)
+        with self.pinned_clock():
+            self.session_end(repo)
+            first = self.counts(repo)
+            self.set_records(repr(self.PINNED_WALL_CLOCK - (FETCH_THROTTLE_SECONDS - 60)))
+            self.session_end(repo)
         self.assertEqual(self.counts(repo), first)
 
     def test_after_10_minutes_it_fetches_again(self):
         repo = self.repo("throttle_after")
-        self.session_end(repo)
-        self.set_records(repr(time.time() - (FETCH_THROTTLE_SECONDS + 60)))
-        self.session_end(repo)
+        with self.pinned_clock():
+            self.session_end(repo)
+            self.set_records(repr(self.PINNED_WALL_CLOCK - (FETCH_THROTTLE_SECONDS + 60)))
+            self.session_end(repo)
         fetches, listings = self.counts(repo)
         self.assertEqual(fetches, 2, "a record older than 10 minutes must allow a new fetch")
         self.assertGreaterEqual(listings, 2)
 
     def test_the_fetch_after_the_window_renews_the_record(self):
         repo = self.repo("throttle_renew")
-        self.session_end(repo)
-        self.set_records(repr(time.time() - (FETCH_THROTTLE_SECONDS + 60)))
-        self.session_end(repo)
-        self.session_end(repo)
+        with self.pinned_clock():
+            self.session_end(repo)
+            self.set_records(repr(self.PINNED_WALL_CLOCK - (FETCH_THROTTLE_SECONDS + 60)))
+            self.session_end(repo)
+            self.session_end(repo)
         self.assertEqual(self.counts(repo)[0], 2, "the renewed record must throttle the third call")
 
     def test_two_repositories_each_get_their_own_fetch(self):
@@ -917,24 +1075,26 @@ class SessionEndFetchThrottle(unittest.TestCase):
             ("garbage", "not a time"),
             ("nan", "nan"),
             ("inf", "inf"),
-            ("future", repr(time.time() + 3600)),
+            ("future", repr(self.PINNED_WALL_CLOCK + 3600)),
         )
-        for label, text in rows:
-            with self.subTest(record=label):
-                repo = self.repo("throttle_damaged_" + label)
-                self.session_end(repo)
-                self.assertEqual(len(self.records()), 1, "fixture: the first fetch left a record")
-                if text is None:
+        # pinned, so "future" is judged against the same clock that makes it future
+        with self.pinned_clock():
+            for label, text in rows:
+                with self.subTest(record=label):
+                    repo = self.repo("throttle_damaged_" + label)
+                    self.session_end(repo)
+                    self.assertEqual(len(self.records()), 1, "fixture: the first fetch left a record")
+                    if text is None:
+                        for path in self.records():
+                            os.remove(path)
+                    else:
+                        self.set_records(text)
+                    before = self.counts(repo)[0]
+                    self.session_end(repo)
+                    self.assertEqual(self.counts(repo)[0], before + 1,
+                                     "a %s record must fail toward fetching" % label)
                     for path in self.records():
                         os.remove(path)
-                else:
-                    self.set_records(text)
-                before = self.counts(repo)[0]
-                self.session_end(repo)
-                self.assertEqual(self.counts(repo)[0], before + 1,
-                                 "a %s record must fail toward fetching" % label)
-                for path in self.records():
-                    os.remove(path)
 
     def test_an_unwritable_record_folder_still_fetches_and_still_exits(self):
         repo = self.repo("throttle_unwritable")
@@ -999,8 +1159,9 @@ class SessionEndFetchThrottle(unittest.TestCase):
                       "a throttled call reaped a branch holding the only copy, on a stale ref")
         self.assertIn("still-pushed", local_branches(repo),
                       "a throttled call reaped a branch on the strength of an on-remote read")
-        self.set_records(repr(time.time() - (FETCH_THROTTLE_SECONDS + 60)))
-        self.session_end(repo)
+        with self.pinned_clock():
+            self.set_records(repr(self.PINNED_WALL_CLOCK - (FETCH_THROTTLE_SECONDS + 60)))
+            self.session_end(repo)
         self.assertEqual(self.counts(repo)[0], first[0] + 1, "fixture: the third call fetched")
         self.assertIn("gone-upstream", local_branches(repo),
                       "a fetching run must keep the only copy once the stale ref is pruned")
@@ -1080,7 +1241,7 @@ def assert_heartbeat_stops(case, path, what):
     case.assertIsNotNone(last, "%s never wrote a heartbeat, so this case proved nothing" % what)
     deadline = time.time() + 10
     while True:
-        time.sleep(1.0)
+        time.sleep(1.0)  # the holder writes every 0.1 s, so a 1 s hold with no write is a stop; no pid decides it
         now = read_beat(path)
         if now == last:
             return
@@ -1127,7 +1288,7 @@ def spawn_orphan(cwd, env_entries=()):
     HOLDERS.append((pid, beat))  # before the ppid check, so the holder is stopped even when the case skips
     start_by = time.time() + 30  # each read below judges a holder that runs, not one still starting
     while read_beat(beat) is None and time.time() < start_by:
-        time.sleep(0.05)
+        time.sleep(0.05)  # poll step: the first beat is a condition, and start_by above caps the wait
     try:
         parent = run_capped(["ps", "-o", "ppid=", "-p", str(pid)], timeout=5).stdout.strip()
     except OSError:
@@ -1181,7 +1342,7 @@ class ScratchpadReap(unittest.TestCase):
     def assert_stopped(self, pid):
         deadline = time.time() + 5
         while still_running(pid) and time.time() < deadline:
-            time.sleep(0.1)
+            time.sleep(0.1)  # poll step: exit is a condition of the pid, and deadline above caps the wait
         self.assertFalse(still_running(pid), "the hook left pid %d running" % pid)
 
     def test_tagged_orphan_in_scratchpad_is_stopped(self):

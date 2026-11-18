@@ -1,0 +1,1 @@
+- mutate-merge-substring-anchor: (#2513) the mutate merge target accepts a substring anchor and does not report it.

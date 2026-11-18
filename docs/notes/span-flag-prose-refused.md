@@ -1,0 +1,1 @@
+- span-flag-prose-refused: a step refuses quoted prose after a verb that is not an edit verb when a flag follows it, as in "Add the line `retry -n 3` to the config." (hooks/question_form.py SPAN_FLAG, `_shell_line`). Decision: act-in-place Seen: 2026-11-17 x1

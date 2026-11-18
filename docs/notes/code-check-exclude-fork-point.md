@@ -1,0 +1,1 @@
+- code-check-exclude-fork-point: the exclude list is compared against main's entries plus the fork point's, so a branch can re-add an entry main removed after the fork.

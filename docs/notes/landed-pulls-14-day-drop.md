@@ -1,0 +1,1 @@
+- landed-pulls-14-day-drop: (#2525) a merged lane PR older than 14 days drops out of landedPulls, so a doing step with no Step: trailer flips back to stalled.

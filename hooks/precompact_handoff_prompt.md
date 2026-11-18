@@ -50,13 +50,21 @@ The handoff holds these sections, in this order:
 - Rulings with NO HOME YET, first: only a ruling whose record is being written now. Name
   the branch that writes it. File every other ruling and task at once, in a decision record,
   a rule, or the repo's todo or debt store. The handoff is never their home.
+- Waiting on the owner, under the heading `## Waiting on the owner in this session`: one
+  line per thing only the owner can clear in this session, with what it unblocks. List an
+  open permission prompt (allow once or always allow) with the exact command or tool it
+  holds, a refusal that printed an override line, and a grant that needs his typed words
+  here. Name a page item by its number only (its home is the page), and write `none` when
+  empty. A coordinator's Stop blocks until each unanswered refused act is named here. Put each
+  refused or waiting act in backticks, one line per item, with what it unblocks.
 - Goal: one line, the owner's goal in the owner's words, with its source (the owner
   message and its date).
 - Working premises: the facts the next steps lean on, at most about 15, under the heading
   `## Working premises`. One line each, in this form:
   `- P1 [ruling|measured|read|notes|assumed] <statement>. Source: <where>. Checked <date or never>.`
   The kinds and what each means: docs/decisions/premise-format.md. A fact with no source is
-  `assumed`.
+  `assumed`. A premise about starting a lane names the helper `bin/lane-start` and holds no recipe: no
+  field list and no tag list, which the helper prints.
 - Where things stand: the branch, the head commit, and the GitHub query for its open PRs and their CI state.
 - Work in flight: agents, workflow runs, and servers. Give each server its pid
   and its port.
@@ -70,6 +78,7 @@ drops one, and the Stop hook names one that is missing. Each sits under its own 
 <!-- handoff-sections: Goal | Working premises | Where things stand | Work in flight | Next steps | Files and commands -->
 
 For a list that has a home (a page collection, a roadmap ref, a git ref or a GitHub query), name the home and never copy the list.
+A batch runner's merge queue, folds, gos, holds and archive pass have one: `plans/runner-state.json` on the record branch. Write one line, `Runner state: origin/roadmap:plans/runner-state.json, last sent version <N>.`, and no list; the successor reads the file first.
 
 ## 5. Check premises
 

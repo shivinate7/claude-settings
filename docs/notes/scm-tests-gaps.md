@@ -1,0 +1,1 @@
+- scm-tests-gaps: (#2410) no test for the *unfetched entry in the conflict-FAIL list; no case runs cross_measure behind a lagging head (LagHost leaves pulls None).

@@ -1,0 +1,1 @@
+- model-table-one-home-nits: Low: decision hold-unsafe-after-round-3 line 28 lacks the model record; merge.py:264 comment should cite pr-review-record; agent-model-cap near line 206 says "a fix check".
