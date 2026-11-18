@@ -6,6 +6,8 @@
 # Run it from the repository root:
 #
 #   sh hooks/test_install_src.sh [case ...]   # names given: run only those cases
+#   sh hooks/test_install_src.sh --list       # print the case names this run selects, run nothing, exit 0
+#   INSTALL_SRC_SHARD=1/2 sh hooks/test_install_src.sh   # run shard 1 of 2: every other case by run order
 #
 # Every case uses a temp HOME and a temp CLAUDE_CONFIG_DIR so the real /root/.claude is
 # never touched. SESSION_START_SH lets a case point at a different copy of
@@ -17,6 +19,52 @@
 # Windows has its own test, under the real Git Bash uname: hooks/test_install_windows.sh.
 
 set -u
+
+# Selection, read before any case runs. INSTALL_SRC_SHARD=i/k runs only the cases at run-list positions p with
+# (p - 1) % k == i - 1, round-robin in run order. Unset runs every case. A set value that is not i/k with
+# 1 <= i <= k exits 2 before any case runs; an empty value is bad too, so a CI matrix that passes none fails
+# loudly instead of running every case on each leg. --list prints the selected names and exits 0, running nothing.
+# Names left in "$@" filter the cases, as before.
+LIST_ONLY=0
+for arg in "$@"; do
+  shift
+  if [ "$arg" = "--list" ]; then LIST_ONLY=1; else set -- "$@" "$arg"; fi
+done
+ONLY=" $* "
+SHARD_I=1
+SHARD_K=1
+shard_bad() {
+  printf 'INSTALL_SRC_SHARD=%s is not i/k with 1 <= i <= k (for example 1/2); no case ran\n' "$INSTALL_SRC_SHARD" >&2
+  exit 2
+}
+if [ "${INSTALL_SRC_SHARD+set}" = set ]; then
+  case "$INSTALL_SRC_SHARD" in
+    */*/*|*/|/*|'') shard_bad ;;
+    */*) ;;
+    *) shard_bad ;;
+  esac
+  SHARD_I=${INSTALL_SRC_SHARD%%/*}
+  SHARD_K=${INSTALL_SRC_SHARD#*/}
+  for n in "$SHARD_I" "$SHARD_K"; do
+    case "$n" in ''|0*|*[!0-9]*) shard_bad ;; esac
+    [ "${#n}" -le 9 ] || shard_bad
+  done
+  [ "$SHARD_I" -le "$SHARD_K" ] || shard_bad
+fi
+# True when the case at run-list position $1 (1-based) belongs to this shard.
+shard_has() { [ $(( ($1 - 1) % SHARD_K )) -eq $(( SHARD_I - 1 )) ]; }
+# True when case $1 passes the name filter in ONLY.
+name_wanted() { [ "$ONLY" = "  " ] || case "$ONLY" in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+# --list: print the names this run selects, then exit before any setup. The names come only from the final region
+# (the filter comment to the end of the file), so a `run` word above it is text, never a case.
+if [ "$LIST_ONLY" = 1 ]; then
+  list_pos=0
+  for name in $(sed -n '/^# Optional case filter/,$p' "$0" | sed -n 's/^run \([A-Za-z0-9_]*\)$/\1/p'); do
+    list_pos=$((list_pos + 1))
+    if shard_has "$list_pos" && name_wanted "$name"; then printf '%s\n' "$name"; fi
+  done
+  exit 0
+fi
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/../lint/_test_git.sh"  # test-run signing opt-out
@@ -5450,6 +5498,157 @@ caseK15() {
   fi
 }
 
+# roadmap_fixture DIR TAG: commits one change, named TAG, on a branch off the fixture's main and pushes it as the fixture's
+# roadmap branch. Main does not move. The install's roadmap fetch brings this branch into refs/remotes/origin/roadmap.
+roadmap_fixture() {
+  git -C "$1/src" checkout -q -b "rm-$2"
+  printf 'roadmap %s\n' "$2" > "$1/src/ROADMAP-$2.txt"
+  git -C "$1/src" add -A
+  git -C "$1/src" -c user.email=t@example.com -c user.name=t commit -q -m "roadmap $2"
+  git -C "$1/src" push -q "$1/bare.git" HEAD:refs/heads/roadmap
+  git -C "$1/src" checkout -q main
+}
+# make_git_log_stub BIN LOG: a git in BIN that appends its arguments to LOG, then runs the real git. Every git call the install
+# makes through PATH passes through it, so a case counts the fetches of a run by their arguments.
+make_git_log_stub() {
+  mkdir -p "$1"
+  mgl_git=$(command -v git)
+  cat > "$1/git" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >> "$2"
+exec "$mgl_git" "\$@"
+EOF
+  chmod +x "$1/git"
+}
+# fetches_of LOG REF: the number of fetch calls in LOG whose arguments name REF (0 when LOG is absent).
+fetches_of() { fo_n=$(grep -c " fetch .*$2" "$1" 2>/dev/null); printf '%s\n' "${fo_n:-0}"; }
+
+# ---- caseK16: a cloud refresh fetches origin's roadmap branch once, beside the stable fetch, into refs/remotes/origin/roadmap ----
+caseK16() {
+  name="caseK16: a cloud refresh fetches origin's roadmap branch once, beside the stable fetch, into refs/remotes/origin/roadmap"
+  fx="$work/k16-fx"; h="$work/k16-home"; scratch="$work/k16-scratch"; bin="$work/k16-bin"; co="$h/claude-settings"; log="$work/k16-git.log"
+  mkdir -p "$h" "$scratch"
+  stable_fixture "$fx" k16
+  roadmap_fixture "$fx" k16
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  make_git_log_stub "$bin" "$log"
+  cloud_install "$h" "$scratch" "$bin" stable
+  if [ $rc -ne 0 ] || [ ! -d "$co/.git" ]; then
+    bad "$name" "setup: the fresh install failed (exit $rc): $(install_problems)"
+    return
+  fi
+  # The empty state: no roadmap ref before the refresh, whatever the fresh install made.
+  git -C "$co" update-ref -d refs/remotes/origin/roadmap 2>/dev/null || :
+  advance_stable_fixture "$fx" k16s2
+  rf_want=$(git -C "$fx/bare.git" rev-parse refs/heads/roadmap)
+  : > "$log"
+  cloud_install "$h" "$scratch" "$bin" stable
+  rf_stable=$(fetches_of "$log" stable); rf_road=$(fetches_of "$log" roadmap)
+  rf_now=$(git -C "$co" rev-parse -q --verify refs/remotes/origin/roadmap 2>/dev/null)
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc on the refresh: $(install_problems)"
+  elif [ "$rf_stable" -lt 1 ]; then
+    bad "$name" "scope: the refresh made no stable fetch, so the roadmap fetch cannot be judged beside it"
+  elif [ "$rf_road" -ne 1 ]; then
+    bad "$name" "the refresh made $rf_road roadmap fetch(es), want one"
+  elif [ "$rf_now" != "$rf_want" ]; then
+    bad "$name" "refs/remotes/origin/roadmap is ${rf_now:-absent}, want origin's roadmap $rf_want"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK17: a refresh whose roadmap fetch fails exits 0, keeps the old roadmap ref, and logs one WARN line naming roadmap ----
+caseK17() {
+  name="caseK17: a refresh whose roadmap fetch fails exits 0, keeps the old roadmap ref, and logs one WARN line naming roadmap"
+  fx="$work/k17-fx"; h="$work/k17-home"; scratch="$work/k17-scratch"; bin="$work/k17-bin"; co="$h/claude-settings"
+  mkdir -p "$h" "$scratch"
+  stable_fixture "$fx" k17
+  roadmap_fixture "$fx" k17
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin" stable
+  if [ $rc -ne 0 ] || [ ! -d "$co/.git" ]; then
+    bad "$name" "setup: the fresh install failed (exit $rc): $(install_problems)"
+    return
+  fi
+  # The old ref is a commit the checkout holds. Origin's roadmap branch is then removed, so the refresh's fetch is refused.
+  rf_old=$(git -C "$co" rev-parse HEAD)
+  git -C "$co" update-ref refs/remotes/origin/roadmap "$rf_old"
+  git -C "$fx/bare.git" update-ref -d refs/heads/roadmap
+  cloud_install "$h" "$scratch" "$bin" stable
+  rf_warns=$(printf '%s\n' "$out" | grep -c 'WARN.*roadmap')
+  rf_now=$(git -C "$co" rev-parse -q --verify refs/remotes/origin/roadmap 2>/dev/null)
+  if [ $rc -ne 0 ]; then
+    bad "$name" "a failed roadmap fetch failed the install: exit $rc: $(install_problems)"
+  elif [ "$rf_warns" -ne 1 ]; then
+    bad "$name" "want one WARN line naming roadmap, got $rf_warns: $(install_problems)"
+  elif [ "$rf_now" != "$rf_old" ]; then
+    bad "$name" "the failed fetch left refs/remotes/origin/roadmap at ${rf_now:-absent}, want the old $rf_old kept"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK18: a cloud start in a session's own detached checkout fetches origin's roadmap once, beside the stable fetch ----
+caseK18() {
+  name="caseK18: a cloud start in a session's own detached checkout fetches origin's roadmap once, beside the stable fetch"
+  fx="$work/k18-fx"; h="$work/k18-home"; scratch="$work/k18-scratch"; bin="$work/k18-bin"; co="$work/k18-co"; log="$work/k18-git.log"
+  mkdir -p "$h" "$scratch"
+  stable_fixture "$fx" k18
+  roadmap_fixture "$fx" k18
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  make_git_log_stub "$bin" "$log"
+  # A session's own checkout: a clone, origin the GitHub URL, detached at origin's stable, as a cloud session starts it.
+  git clone -q "$fx/bare.git" "$co"
+  git -C "$co" config remote.origin.url https://github.com/shivinate7/claude-settings.git
+  git -C "$co" checkout -q --detach "$(git -C "$fx/bare.git" rev-parse refs/heads/stable)"
+  git -C "$co" update-ref -d refs/remotes/origin/roadmap 2>/dev/null || :
+  rf_want=$(git -C "$fx/bare.git" rev-parse refs/heads/roadmap)
+  cloud_install "$h" "$co" "$bin" stable
+  rf_stable=$(fetches_of "$log" stable); rf_road=$(fetches_of "$log" roadmap)
+  rf_now=$(git -C "$co" rev-parse -q --verify refs/remotes/origin/roadmap 2>/dev/null)
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc in the checkout: $(install_problems)"
+  elif [ "$rf_stable" -lt 1 ]; then
+    bad "$name" "scope: the start made no stable fetch, so the roadmap fetch cannot be judged beside it"
+  elif [ "$rf_road" -ne 1 ]; then
+    bad "$name" "the start made $rf_road roadmap fetch(es) in the checkout, want one"
+  elif [ "$rf_now" != "$rf_want" ]; then
+    bad "$name" "refs/remotes/origin/roadmap in the checkout is ${rf_now:-absent}, want origin's roadmap $rf_want"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK19: a local install never fetches origin's roadmap branch, and makes no refs/remotes/origin/roadmap ----
+caseK19() {
+  name="caseK19: a local install never fetches origin's roadmap branch, and makes no refs/remotes/origin/roadmap"
+  fx="$work/k19-fx"; h="$work/k19-home"; co="$work/k19-co"; cfg="$work/k19-cfg"; bin="$work/k19-bin"; log="$work/k19-git.log"
+  mkdir -p "$h" "$bin"
+  stable_fixture "$fx" k19
+  roadmap_fixture "$fx" k19
+  write_redirect "$h" "$fx/bare.git"
+  local_stable_clone "$co" "$fx"
+  # The clone of origin fetched every branch, roadmap included. Remove that ref, so only the install can make it.
+  git -C "$co" update-ref -d refs/remotes/origin/roadmap 2>/dev/null || :
+  make_git_log_stub "$bin" "$log"
+  out=$(cd "$co" && env -i PATH="$bin:$work/npm-stub:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" bash ./install.sh 2>&1); rc=$?
+  rf_road=$(fetches_of "$log" roadmap)
+  rf_now=$(git -C "$co" rev-parse -q --verify refs/remotes/origin/roadmap 2>/dev/null)
+  if [ ! -s "$log" ]; then
+    bad "$name" "scope: the local install ran no git call, so the roadmap check proves nothing (exit $rc: $(install_problems))"
+  elif [ "$rf_road" -ne 0 ]; then
+    bad "$name" "the local install made $rf_road roadmap fetch(es), want none"
+  elif [ -n "$rf_now" ]; then
+    bad "$name" "the local install made refs/remotes/origin/roadmap at $rf_now"
+  else
+    ok "$name"
+  fi
+}
+
 # ---- caseR1: a cloud install writes the install record: ref, sha, source and installer ----
 # hooks/stale_install.py reads this record each turn. With CLAUDE_SETTINGS_REF=main it names main. With a
 # non-default ref it names that branch, whose tip differs from main's (the fixture moves main on), so a sha
@@ -6172,7 +6371,7 @@ m10_run() {
     printf 'the checkout origin/main is [%s], want [%s]: the fetch did not land or moved it' "$(git -C "$co" rev-parse refs/remotes/origin/main)" "$tip_after"; return 1
   fi
   if [ "$1" = stalefetch ] || [ "$1" = stalekeep ]; then
-    n_fetch=$(printf '%s\n' "$out" | grep WARN | grep -c fetch)
+    n_fetch=$(printf '%s\n' "$out" | grep WARN | grep -v 'fetch roadmap' | grep -c fetch)
     if [ "$n_fetch" -ne 1 ]; then printf 'want one WARN line naming the fetch, got %s: %s' "$n_fetch" "$(install_problems)"; return 1; fi
     if printf '%s\n' "$out" | grep -q 'main tip'; then printf 'the install claims the checkout is at the main tip: %s' "$(printf '%s\n' "$out" | grep 'main tip' | head -n 1)"; return 1; fi
   fi
@@ -6287,7 +6486,7 @@ caseM11() {
   if ! mirror_ff_setup m11; then bad "$name" "FIXTURE $fix_why"; return; fi
   move_install
   if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"; return; fi
-  wl=$(printf '%s\n' "$out" | grep WARN | grep -F "$mirror")
+  wl=$(printf '%s\n' "$out" | grep WARN | grep -F "$mirror" | grep -v 'fetch roadmap')
   if [ -n "$wl" ]; then bad "$name" "a WARN names the mirror, though it holds no local commit: $wl"; return; fi
   if [ "$(git -C "$mirror" rev-parse HEAD)" != "$want" ]; then
     bad "$name" "the mirror is at $(git -C "$mirror" rev-parse HEAD), not origin's main [$want]"; return
@@ -6486,7 +6685,7 @@ caseM18() {
   if [ "$(git -C "$mirror" config --get claude-settings.mirrorSha)" != "$kept_sha" ]; then
     bad "$name" "mirrorSha moved though the full-history fetch failed"; return
   fi
-  wl=$(printf '%s\n' "$out" | grep WARN | grep -F "$mirror")
+  wl=$(printf '%s\n' "$out" | grep WARN | grep -F "$mirror" | grep -v 'fetch roadmap')
   n_wl=$(printf '%s\n' "$wl" | grep -c .)
   if [ "$n_wl" -ne 1 ]; then bad "$name" "want one WARN that names the mirror, got $n_wl: $wl"; return; fi
   case "$wl" in *"could not tell"*) ;; *) bad "$name" "the WARN does not say could not tell: $wl"; return ;; esac
@@ -6634,7 +6833,13 @@ default_home "$work/runner-home"; HOME="$work/runner-home"; export HOME
 # Optional case filter: `sh hooks/test_install_src.sh caseF4 caseF6` runs only those cases.
 # No arguments runs every case. lint/check_unknown_reads_contract.py uses it.
 ONLY=" $* "
-run() { [ "$ONLY" = "  " ] || case "$ONLY" in *" $1 "*) ;; *) return 0 ;; esac; "$1"; }
+# POS numbers each run call, so a shard holds the same cases whatever the name filter says.
+POS=0
+run() {
+  POS=$((POS + 1))
+  shard_has "$POS" && name_wanted "$1" || return 0
+  "$1"
+}
 
 run case1
 run case2
@@ -6784,6 +6989,10 @@ run caseK12
 run caseK13
 run caseK14
 run caseK15
+run caseK16
+run caseK17
+run caseK18
+run caseK19
 run caseP1
 run caseP2
 run caseP3

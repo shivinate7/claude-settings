@@ -1,0 +1,1 @@
+- handoff-guard-dotted-id: a session id with a dot is skipped.

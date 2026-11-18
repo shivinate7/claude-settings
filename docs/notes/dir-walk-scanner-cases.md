@@ -1,0 +1,1 @@
+- dir-walk-scanner-cases: hooks/test_dir_before_segment.py lacks a multi-line quoted string holding `R=<B>` on a later line, and `//` or `/*` inside a string (rule building-scanner-respects-strings); the product reads all of these right (probed).

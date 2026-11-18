@@ -1,0 +1,1 @@
+- casetmp1-name-and-remedy: (a) caseTmp1's name says "any fixed temp path" but only the /tmp spelling matches ($TMPDIR/x and /dev/shm/x pass). Fix: name it for the /tmp spelling, or match the others. (b) its failure message does not say how to keep a legitimate /tmp string. Fix: the message says to build the string from pieces.

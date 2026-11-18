@@ -1,0 +1,1 @@
+- touches-rollup-exact-name: the rollup is matched by exact job name, so `caller / all-jobs-passed` reads unknown (a false alarm, never a false clear). Fix: match the rollup name as the last segment after ` / `. Unmeasured: the live job-log redirect.

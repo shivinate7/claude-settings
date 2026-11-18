@@ -1,0 +1,1 @@
+- own-session-tags-replay: own_session: with applied=True, an own `set_session_tags` before `get_session` in the same message is not replayed. Fix: replay own tag writes in message order.

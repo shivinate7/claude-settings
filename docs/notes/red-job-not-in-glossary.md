@@ -1,0 +1,1 @@
+- red-job-not-in-glossary: "red job" is not a GLOSSARY.md term, and "red run" there names a test-author proof. Found in PR 2860. Decision: roles-findings-are-debts-or-notes.

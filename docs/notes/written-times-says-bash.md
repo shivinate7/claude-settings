@@ -1,0 +1,1 @@
+- written-times-says-bash: the "Written times" bullet says Bash, but SHELL_TOOLS also judges PowerShell.

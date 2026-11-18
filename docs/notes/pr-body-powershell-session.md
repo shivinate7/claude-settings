@@ -1,0 +1,1 @@
+- pr-body-powershell-session: unmeasured whether a PowerShell call keeps variables from an earlier call.

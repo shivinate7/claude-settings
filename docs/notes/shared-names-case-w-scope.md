@@ -1,0 +1,1 @@
+- shared-names-case-w-scope: case (w) in test_shared_names.py tests _test_temp.sweep, not the role reader.

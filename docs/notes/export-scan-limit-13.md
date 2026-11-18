@@ -1,0 +1,1 @@
+- export-scan-limit-13: `token=return-1!Kq8LmZ2xW` passes: the keyword rule reads only `return-1` and has no value-end check (attacker-only). Fix: none until a real incident. Decision: waiting-data-in-repo.

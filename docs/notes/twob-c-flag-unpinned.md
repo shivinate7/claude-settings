@@ -1,0 +1,1 @@
+- twob-c-flag-unpinned: (#1583 two-worktrees-one-branch round 3, decision two-worktrees-one-branch) no hook case proves `-C` picks the tree that rule 1b2 judges; a mutant that drops head_root passes the family (hooks/guard.py, rule 1b2's two_worktrees_hit call). Matters only where other-checkout lets a cross-checkout `-C` through (a scratchpad worktree, or an override).

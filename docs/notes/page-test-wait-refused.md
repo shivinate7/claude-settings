@@ -1,0 +1,1 @@
+- page-test-wait-refused: (on #2268) `node --test skills/waiting-page/tests/page.test.mjs` ran past two minutes with no verdict, and every wait form the agent tried was refused by a guard, so the run read unknown.

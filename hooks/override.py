@@ -14,9 +14,10 @@ writes, so a session cannot grant itself an override. It is valid only while now
          It reaches agents. The owner picks the length, so there is no cap.
   `override off` ends any override at once. `override`, `override <n>[m|h]` and `override off` mean
   that only as the whole prompt: a word after the length or after `off` is ambiguous, so it grants
-  nothing on this route (an intended "off" must never become a grant). On this keyword route, a later line starting
-  with the word grants nothing. The plain ask below reads a later line with the whole word like any prompt, so
-  `thanks` then `override 15m` on the next line grants 15m on a judge yes.
+  nothing on this route (an intended "off" must never become a grant). A whole line that is a keyword form
+  (`override`, `override <n>[m|h]`, `override off`, `override: <reason>`) inside a prose message grants the same, only for an owner-typed prompt:
+  the gates of the plain asks (_owner_ask) refuse a notice, a fired task, an agent's `source` and a cloud session's seed brief. A line inside a backtick or tilde fence, an
+  indented code line, or a pasted or notice block grants nothing, and neither does a word inside a sentence.
   A plain ask (`yes override that`, `override that for 15 minutes please`) writes the same file when a model judges the
   prompt to be the owner's own present request to override a refusal (grant_override_ask, call_judge.override_ask). Cost:
   one model call, only for an owner prompt that holds the whole word `override` outside backtick code spans and
@@ -522,7 +523,45 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=N
     return _write_opus(session_id, path, at, length, _file_role(roles), said)
 
 
-def grant(session_id, prompt, at, defer=True):
+# One prose line that is the whole keyword form (an override line inside a prose message counts):
+# `override`, `override <n>[m|h]`, `override off`, or `override: <reason>`.
+FENCED = re.compile(r"```.*?```|```.*|~~~.*?~~~|~~~.*", re.S)
+INDENTED = re.compile(r"(?: {4}|\t)")  # markdown's code block: a line that starts with 4 spaces or a tab
+KEYWORD_LINE = re.compile(r"override(?:\s*:\s*(\S.*)|\s+(off|\d+[mh]?))?", re.I)
+
+
+def _keyword_line(prompt):
+    """The prompt text a prose line grants: the first whole line that is a keyword form, after pasted or machine blocks,
+    fenced blocks (backtick or tilde) and indented code lines are left out, as an `override ...` string for the one
+    grant path. None for no such line. A mention inside a sentence is no whole line, so it never grants."""
+    if not isinstance(prompt, str):
+        return None
+    for line in FENCED.sub("\n", BLOCKS.sub("\n", prompt)).splitlines():
+        if not INDENTED.match(line) and KEYWORD_LINE.fullmatch(line.strip()):
+            return line.strip()
+    return None
+
+
+def grant(session_id, prompt, at, defer=True, transcript=None, source=None):
+    """Write, replace or remove the session's override for one owner prompt. A keyword line inside a prose message
+    counts (_keyword_line) when the first-word form of the prompt grants nothing, and only for an owner-typed prompt:
+    the plain asks' gates (_owner_ask) refuse a notice, a fired task, an agent's `source`, and in a cloud session the
+    seed brief, which its coordinator wrote. Only the line route reads the transcript."""
+    got = _grant_first_word(session_id, prompt, at, defer)
+    if got is None:
+        line = _keyword_line(prompt)
+        if line is not None and line != (prompt.strip() if isinstance(prompt, str) else None):
+            try:
+                gated = _owner_ask(prompt, source, transcript, lambda text: True)
+            except Exception as exc:  # a gate that cannot run grants nothing
+                print("override: prose line grants nothing: %s" % " ".join(str(exc).split()), file=sys.stderr)
+                return None
+            if gated is not None:
+                return _grant_first_word(session_id, line, at, False)
+    return got
+
+
+def _grant_first_word(session_id, prompt, at, defer=True):
     """Write, replace or remove the session's override for one owner prompt. Returns (kind, until) for a
     new override, ("off", None) when `override off` removed one, the _grant_opus result for the Opus word,
     else None: the prompt is not a word. With `defer`, a first word `override` whose rest is no whole keyword form and
@@ -605,7 +644,7 @@ def grant_override_ask(session_id, prompt, at, judge=None, transcript=None, sour
     keyword = PROMPT.match(prompt) is not None
 
     def main():
-        return grant(session_id, prompt, at, defer=False) if keyword else None
+        return _grant_first_word(session_id, prompt, at, defer=False) if keyword else None
 
     try:  # a gate that raises (a transcript read, an import) leaves main's result standing
         gated = _owner_ask(prompt, source, transcript, _override_wanted)

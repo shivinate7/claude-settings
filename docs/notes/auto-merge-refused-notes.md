@@ -1,0 +1,1 @@
+- auto-merge-refused-notes: Lane auto-merge-refused, three low notes on hooks/guard_merge.py: `--subject "--disable-auto"` is an attacker-only form; `gh api -X PUT .../merge --help` is a false alarm; the remedy names merge --confirm in repos with no merge tool.

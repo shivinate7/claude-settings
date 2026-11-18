@@ -1,0 +1,1 @@
+- opus-grant-false-alarm: False alarm: the past-ruling guard named decision opus-grant-expires as deciding whether an arbiter may grant Opus; that record covers only the repo-wide settings write (CLAUDE_CODE_SUBAGENT_MODEL), not step grants, plain-word asks or `opus <role> <time>`.
