@@ -3632,22 +3632,59 @@ class WindowsJobsOnPullRequest(unittest.TestCase):
                                     f"{name} does not start on a schedule (flags {flag}): {expr}")
 
 
-class WindowsStepsOnSchedule(unittest.TestCase):
-    """The daily scheduled run runs the whole Windows set: every step of every Windows job runs on a schedule, even when every scope
-    flag is false, so the nightly does not depend on what the diff touched. A step that reads a flag or code is a gap on that run."""
+SCOPE_SCRIPT = os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
+SCOPE_ENV_DROP = ("PR_HEAD", "GREEN_HEAD", "BASE_SHA", "HEAD_REF", "EVENT")
 
-    def test_every_windows_step_runs_on_a_schedule_whatever_the_scope_flags_say(self):
-        # Named failure: a Windows step reads a scope flag or code, so a scheduled run with every flag false skips it (one subtest per step).
+
+def schedule_scope_flags():
+    """{name: 'true'|'false'} that the scope script writes for a schedule. The schedule arm reads no diff, so the script runs with
+    no git repository, in a folder of this run."""
+    with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+        out = os.path.join(d, "out.txt")
+        env = dict(os.environ)
+        for name in SCOPE_ENV_DROP:
+            env.pop(name, None)
+        env.update(EVENT="schedule", GITHUB_OUTPUT=out)
+        subprocess.run(["bash", SCOPE_SCRIPT], cwd=d, env=env, check=True, capture_output=True, text=True)
+        with open(out, encoding="utf-8") as f:
+            return dict(line.split("=", 1) for line in f.read().split())
+
+
+def windows_scope_flags(jobs):
+    """The scope outputs the Windows jobs read, in their job-level ifs and step ifs. records_only_skip is a skip, not a flag."""
+    read = set()
+    for job in jobs.values():
+        read |= set(re.findall(r"needs\.scope\.outputs\.(\w+)", repr(job)))
+    return read - {"records_only_skip"}
+
+
+class WindowsStepsOnSchedule(unittest.TestCase):
+    """The daily scheduled run runs the whole Windows set. The scope script sets every flag true on a schedule, so each step that reads
+    a flag runs on it. A step that a schedule does not run is a gap on that run."""
+
+    def gap_flags(self, jobs):
+        on_schedule = schedule_scope_flags()
+        return [flag for flag in sorted(windows_scope_flags(jobs)) if on_schedule.get(flag) != "true"]
+
+    def test_a_schedule_sets_every_scope_flag_the_windows_steps_read_true(self):
+        # Named failure: the scope script leaves a flag a Windows step reads false on a schedule, so that step skips on the nightly run.
         with open(CHECKS, encoding="utf-8") as f:
-            text = f.read()
-        jobs = windows_jobs(text)
+            jobs = windows_jobs(f.read())
+        self.assertTrue(windows_scope_flags(jobs), "the Windows jobs read no scope flag, so this case would prove nothing")
+        self.assertEqual(self.gap_flags(jobs), [], "a schedule does not set these flags true, so their steps skip on the nightly run")
+
+    def test_every_windows_step_runs_on_a_schedule_where_the_scope_sets_its_flags_true(self):
+        # Named failure: a Windows step does not run on a schedule with every flag the scope script sets there (one subtest per step).
+        with open(CHECKS, encoding="utf-8") as f:
+            jobs = windows_jobs(f.read())
         self.assertTrue(jobs, "checks.yml has no Windows job")
+        self.assertEqual(self.gap_flags(jobs), [], "a schedule does not set these flags true, so the steps below would skip")
         for name in sorted(jobs):
             job = jobs[name]
             for st in job["steps"]:
                 with self.subTest(job=name, step=step_label(st)):
-                    self.assertTrue(runs_on(job, st, "schedule", "false", draft=False),
-                                    f"{name} step {step_label(st)!r} does not run on a schedule with every scope flag false")
+                    self.assertTrue(runs_on(job, st, "schedule", "true", draft=False),
+                                    f"{name} step {step_label(st)!r} does not run on a schedule with every scope flag true")
 
 
 if __name__ == "__main__":
