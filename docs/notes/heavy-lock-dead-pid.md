@@ -1,0 +1,1 @@
+- heavy-lock-dead-pid: after merge's SIGKILL, the busy line names the dead ci-job pid, but the live lock holder is its verdict child; a hung step holds the heavy lock with no time limit. Fix: name the live holder and give the lock a time limit.

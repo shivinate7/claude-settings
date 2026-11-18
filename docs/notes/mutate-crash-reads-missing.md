@@ -1,0 +1,1 @@
+- mutate-crash-reads-missing: a crashed suite's stderr (ModuleNotFoundError) never reaches run_mutant's returned lines, so a crash reads only as a missing required case. Fix: carry the crash's stderr tail into the mutant's result line.

@@ -1,0 +1,1 @@
+- touches-ignores-session-config: (#2431) --touches ignores --session/--config; no test pins the closing-reason order.

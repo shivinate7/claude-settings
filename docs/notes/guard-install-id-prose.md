@@ -1,0 +1,1 @@
+- guard-install-id-prose: hooks/guard.py line 367 holds the prose `INSTALL_ID = "<id>"`, which matches an unanchored stamp regex, so the new tests use a minimal fixture. Fix: reword that line, so the real file can pin the mutant.

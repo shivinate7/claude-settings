@@ -1,0 +1,1 @@
+- node-heredoc-frozen-write-gaps: (#1186) on main and on #1186, a node heredoc that writes `$F` (or a template literal) to a frozen or capped path is allowed (4 probe cases), and python open() of a literal frozen path inside a heredoc is allowed. Main's gaps, not #1186's; kept out of its lane. Candidate debt if Claude writes such a form.

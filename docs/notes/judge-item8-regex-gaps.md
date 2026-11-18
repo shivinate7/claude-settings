@@ -1,0 +1,1 @@
+- judge-item8-regex-gaps: Notes from lane ruling-challenge-passes: call_judge.py lines 476-477, the `Item 8:` plus unshown record branch has no test (a mutant survives); the `Item 8:` regex reads "Item 18:" as 1 and 8; the judge model's own refusal text can still say "do not re-ask".

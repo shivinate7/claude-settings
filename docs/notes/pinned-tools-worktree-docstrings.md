@@ -1,0 +1,1 @@
+- pinned-tools-worktree-docstrings: #1417 open notes, to docs/debts/notes.md: (a) pinned-tools-one-worktree-docstrings: the run_ready_checks and draft_step docstrings in merge.py, and lint/test_ci_job.py's module docstring, still say one worktree. Fix: reword them to the pinned-tools form. (b) settings-dir-two-pins moved to step merge-passes-settings-dir.

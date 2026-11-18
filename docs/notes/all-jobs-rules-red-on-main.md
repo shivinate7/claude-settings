@@ -1,0 +1,1 @@
+- all-jobs-rules-red-on-main: lint/all_jobs_passed_rules.py fails on main 2ac382cc6. No workflow on main runs it, so main CI stays green (run 42522167511, success).

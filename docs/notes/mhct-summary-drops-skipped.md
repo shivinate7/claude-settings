@@ -1,0 +1,1 @@
+- mhct-summary-drops-skipped: (#2443) the summary drops the tally's skipped count.

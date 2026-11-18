@@ -1,0 +1,1 @@
+- export-scan-fa-left: false alarms that remain, not added by #2372: `a.password=!0,a.token=!1` (a name with a dot), `password:!0,hint:""`, `password:void 0,x:1`. Decision: waiting-data-in-repo.
