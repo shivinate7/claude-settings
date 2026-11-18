@@ -47,7 +47,7 @@ output style load in each session on each repo.
   has handed in, with no clock rule. A lane that pushes again to a handed-in branch says so first. No rebase,
   no force push. A conflict that changes behaviour goes back to the coordinator. Each new head gets a fix
   verifier and a fresh review log, except a clean merge of main, which takes none (decision `pr-review-record`,
-  the review record, posted once and never edited). Source: decision `standing-merge-grant`.
+  the review record). Source: decision `standing-merge-grant`.
 - **Overlaps between lane branches** (owner, 2026-11-13 14:17 CST, typed in runner 10's chat: "you have a
   standing grant to act on overlaps by me, owner"). The batch runner may act on overlaps between lane branches.
   Runner 10 reads that as a plain merge of one lane's head into another lane's branch, under the limits of the
