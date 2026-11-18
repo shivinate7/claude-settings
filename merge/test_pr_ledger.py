@@ -278,7 +278,7 @@ class NextActShapes(LedgerCase):
         self.assertEqual(act, "batch run", f"#7 carries the batch label, so its act is batch run:\n{out}")
         self.assertFalse(red, f"#7's batch label was last added 2 h ago, inside the 24 h limit, and its line reads RED:\n{out}")
 
-    def test_a_fix_check_at_10_h_is_not_red(self):
+    def test_a_fix_verifier_at_10_h_is_not_red(self):
         host = LedgerHost([pull(7)], comments=[record(7, 10, head=OLD)], commits={LIVE: [OLD]})
         out = self.reviewed(host)
         act, red = self.next_act(out, 7)
@@ -325,7 +325,7 @@ class NextActShapes(LedgerCase):
                                  f"#7 is a draft labelled {label} with `Waits on: debt:merge-flake`, so its act is waits on that item:\n{out}")
                 self.assertFalse(red, f"#7 waits on debt:merge-flake, which has no limit of its own, and its line reads RED:\n{out}")
 
-    def test_a_fix_check_at_1000_h_is_not_red(self):
+    def test_a_fix_verifier_at_1000_h_is_not_red(self):
         host = LedgerHost([pull(7)], comments=[record(7, 1000, head=OLD)], commits={LIVE: [OLD]})
         out = self.reviewed(host)
         self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} stale: ", "control: #7's record does not read stale at the live head")
