@@ -1236,10 +1236,10 @@ class ConfirmIdleLanes(Env):
     def merge_at(self, when):
         """Make the merge commit's committer time `when`, offset included, for the merge call only. The host writes the merge
         commit inside its merge(), so GIT_COMMITTER_DATE is set there and popped after it."""
-        real, stamp = self.host.merge, when.replace(microsecond=0).isoformat()
+        real, commit_time = self.host.merge, when.replace(microsecond=0).isoformat()
 
         def merge(n, method, sha):
-            os.environ["GIT_COMMITTER_DATE"] = stamp
+            os.environ["GIT_COMMITTER_DATE"] = commit_time
             try:
                 return real(n, method, sha)
             finally:
