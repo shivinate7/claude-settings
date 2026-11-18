@@ -329,7 +329,7 @@ meets each item below. What the tool does when it runs is written in `confirm` i
    `merge/merge.py`.
 2. `merge.method` is `merge`, `squash` or `rebase`. Read it from the repo's own merge history
    before you set it. `merge.deadlineMinutes` is the longest that one wait for checks may last.
-3. `merge.requiredChecks` is `"protection"` (the default) or a list of check names.
+3. `merge.requiredChecks` is `"protection"` (the default), `"none"` (a repo with no required check, which reads neither ruleset nor protection), or a list of check names.
    `"protection"` reads the branch protection of the pull request's base. If the list is
    empty or cannot be read, the command stops before the claim push. A repo with no branch
    protection on a base, such as an integration branch, must write the list.

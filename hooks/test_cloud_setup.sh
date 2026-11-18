@@ -159,9 +159,11 @@ fetch_asked() {
   grep -qF -- '--max-time 20' "$1/curl.log" 2>/dev/null && grep -qF -- "$DEAD_RAW/install.sh" "$1/curl.log" 2>/dev/null
 }
 
-# The checksums of the install's agents and settings, in a stable order.
+# The checksums of the install's agents and settings, in a stable order. A cloud install lands each file as a
+# link through ~/.claude/.cs-current (decision install-hooks-whole), so find -L follows the link to the file it
+# names. Without -L, -type f skips every link and the snapshot reads empty.
 snapshot() {
-  ( cd "$1/cfg" 2>/dev/null && find agents settings.json -type f 2>/dev/null | sort | while IFS= read -r f; do cksum "$f"; done )
+  ( cd "$1/cfg" 2>/dev/null && find -L agents settings.json -type f 2>/dev/null | sort | while IFS= read -r f; do cksum "$f"; done )
 }
 
 # ---- a: checkout under a search root, no network: installs, one verdict line says installed ----

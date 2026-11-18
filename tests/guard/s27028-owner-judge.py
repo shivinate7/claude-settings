@@ -27,9 +27,9 @@ OJ_OPTIONS = [
 
 
 def oj_ctx(goal=OJ_GOAL, problem=OJ_STAKE, based=(OJ_BASED,), tail=OJ_CTX, departs=QD_LINE):
-    """The context of a decision: the form lines, the Departs from line, then the prose. A line passed as None or
-    empty is left out."""
-    return "\n".join(line for line in (goal, problem, *based, departs, tail) if line)
+    """The context of a decision: the form lines, the Departs from line, the Waiting on line, then the prose. A line
+    passed as None or empty is left out."""
+    return "\n".join(line for line in (goal, problem, *based, departs, OJ_WAIT, tail) if line)
 
 
 OJ_GOOD = oj_ctx()
@@ -37,7 +37,7 @@ OJ_GOOD = oj_ctx()
 
 def oj_item(**over):
     """Item 34's shape: a decision about which CI job runs a check, with options, a pick and a why, and no form lines."""
-    item = {"id": OJ_DOC, "kind": "decision", "status": "open", "title": "Which CI job runs the stamp check?",
+    item = {"id": OJ_DOC, "n": 928, "kind": "decision", "status": "open", "title": "Which CI job runs the stamp check?",
             "context": OJ_CTX, "options": OJ_OPTIONS, "pick": "a",
             "why": "The lint job already holds the other format checks."}
     item.update(over)
@@ -177,7 +177,7 @@ OJ_ANSWERED = OJ_CTX + "\nAnswer from chat, 10:42: keep the check in the lint jo
 oj("a closed decision with the chat answer in context and no form lines is allowed", "allow",
    oj_item(status="closed", context=OJ_ANSWERED))
 oj("a closed decision with no options and no form lines is allowed", "allow",
-   {"id": OJ_DOC, "kind": "decision", "status": "closed", "title": "Which CI job runs the stamp check?",
+   {"id": OJ_DOC, "n": 928, "kind": "decision", "status": "closed", "title": "Which CI job runs the stamp check?",
     "context": OJ_ANSWERED})
 oj("an update that carries kind decision, status closed and context, no form lines, is allowed", "allow",
    {"kind": "decision", "status": "closed", "context": OJ_ANSWERED}, action="update")

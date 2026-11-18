@@ -7,9 +7,11 @@
    `tee`, `sed -i`, `cp`, `mv`, `rm`) into the pin and into the stamped worktree the pin link points at. It does not read git
    commands. The other-checkout guard does: an agent's `git -C <pin> <file-changing verb>`, such as `reset --hard`, is refused.
    `merge/install_from_main.sh` runs inside the merge tool, not as an agent tool call, so that refusal does not touch it.
-2. This repo's `merge.afterMerge` runs `merge/install_from_main.sh` after each merge. The script moves the pinned checkout to the
-   new local `main`, then runs the install from it. It never installs from the checkout that ran the merge, because that is often
-   a temporary worktree.
+2. This repo's `merge.afterMerge` runs `merge/install_from_main.sh` after each merge. The script moves the pinned checkout to
+   origin's `stable` commit, which follows each green push run of main (decision `stable-branch`, the stable branch follows each
+   green push run of main), then runs the install from it. With no `origin/stable`, or with `CLAUDE_SETTINGS_REF=main`, it moves the
+   pin to local `main` (decision `stable-fallback-warn`, the fallback warns). Local `main` still fast-forwards to origin's `main`. It never installs from the checkout that
+   ran the merge, because that is often a temporary worktree.
 3. The move never exposes a mix (owner ruling 2026-10-15). The new main is checked out in a fresh worktree `<clone>-live-<commit>`, and `<clone>-live` becomes a link to it by one rename. The old worktree stays until the next move. Without link rights the pin is switched in place. The script takes the install lock the installers take (`install-hooks-whole`), reads main's commit only once it holds the lock, and holds the lock through the install.
 4. Only that script moves the pinned checkout. A branch switch in any other checkout changes no live setting.
 5. The install makes the pinned checkout when it is missing. Where the OS refuses symlinks, the install copies instead.

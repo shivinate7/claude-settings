@@ -38,7 +38,7 @@ import re
 import os
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 import layout  # noqa: E402  the one home of the extras keys (lint/layout.py)
 
