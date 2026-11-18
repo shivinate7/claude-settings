@@ -55,6 +55,10 @@ that each fixture reaches its check, so a moved key or path fails by name instea
 The self-test feeds a raising check, a silent exit and a real refusal through the same harness. A
 sweep case proves the shared run-folder sweep (lint/_test_temp.py) removes an old sibling and keeps
 a new one.
+
+Quoted text is data (quoted_data_property): a deny text inside the quotes of echo, printf, grep -e or git commit -m
+reads as the same sink reads with neutral words, and under bash -c the same text still asks. The draws are seeded
+(QUOTED_SEED) and print the seed, the draw and both verdicts on a failure.
 """
 
 import ast
@@ -859,6 +863,81 @@ def family_list_is_whole():
     return files - {"guard_core"} == set(guard._FAMILY_MODULES)
 
 
+# ---- quoted text is data. A deny text inside the quotes of a data sink (echo, printf, grep -e, git commit -m) gets the verdict the same sink
+# gets with neutral words in those quotes, and the same text under `bash -c` still asks. The draws are seeded (QUOTED_SEED) and run in
+# this process under the isolation above. The traps are the three building-scanner-respects-strings names: a comment opener in the text,
+# a multi-line quote, and a lone quote.
+QUOTED_SEED = "quoted-data-sinks"
+QUOTED_COUNT = 60  # seeded draws
+QUOTED_SINKS = ("echo {q}", "printf '%s\\n' {q}", "grep -e {q} notes.txt", "git commit -m {q}")
+QUOTED_DENY = ("git push -f origin main", "git push --force origin main")  # each asks as a bare command; quoted_data_property checks that first
+QUOTED_NEUTRAL = ("notes about the release", "a short line of text")
+QUOTED_TRAPS = (("", ""), ("http://a.test/ ", ""), ("/* not a comment ", " */"), ("# not a comment ", ""),
+                ("first line\nmiddle line\n", "\nlast line "), ("Don't ", ""), ("", " don't"))
+REFUSALS = ("ask", "deny")
+
+def quoted(text, style):
+    """`text` in shell quotes: single quotes as they are, or double quotes with \\, $, backtick, " and ! escaped."""
+    if style == "single":
+        if "'" in text:
+            raise ValueError("a single-quoted draw holds a single quote")
+        return "'" + text + "'"
+    for ch in ("\\", "$", "`", '"', "!"):
+        text = text.replace(ch, "\\" + ch)
+    return '"' + text + '"'
+
+def shell_decision(command):
+    """-> what judge_shell decides for a Bash call of `command`: "allow" when it returns, the permissionDecision it prints (deny or ask), "exit"
+    when it exits with none printed, or "raised: ..." when it raises."""
+    out = io.StringIO()
+    exited = False
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            guard.judge_shell("Bash", command, CHECKOUT)
+    except SystemExit:
+        exited = True
+    except Exception as exc:
+        return "raised: " + describe(exc)
+    decision = None
+    for line in out.getvalue().splitlines():
+        try:
+            found = json.loads(line)
+        except ValueError:
+            continue
+        hook = found.get("hookSpecificOutput") if isinstance(found, dict) else None
+        if isinstance(hook, dict) and "permissionDecision" in hook:
+            decision = hook["permissionDecision"]
+    if decision is not None:
+        return decision
+    return "exit" if exited else "allow"
+
+def quoted_data_property():
+    """-> the number of failing rows. Scope first: each deny text asks as a bare command and under `bash -c`. Then each seeded draw: the sink with
+    the deny text reads as the sink with the neutral text does, and that neutral sink allows."""
+    failing = 0
+    for text in QUOTED_DENY:
+        for command in (text, "bash -c " + quoted(text, "single")):
+            got = shell_decision(command)
+            if got not in REFUSALS:
+                failing += 1
+                print("FAIL [quoted-data] scope: %r reads %s, not ask or deny" % (command, got))
+    rng = random.Random("%s:%s" % (SEED, QUOTED_SEED))
+    for k in range(QUOTED_COUNT):
+        sink = rng.choice(QUOTED_SINKS)
+        deny = rng.choice(QUOTED_DENY)
+        neutral = rng.choice(QUOTED_NEUTRAL)
+        before, after = rng.choice(QUOTED_TRAPS)
+        style = "double" if "'" in before + after else rng.choice(("single", "double"))
+        deny_cmd = sink.format(q=quoted(before + deny + after, style))
+        neutral_cmd = sink.format(q=quoted(before + neutral + after, style))
+        want, got = shell_decision(neutral_cmd), shell_decision(deny_cmd)
+        if want != "allow" or got != want:
+            failing += 1
+            print("FAIL [quoted-data] seed %r, draw %d: %r reads %s, and its neutral twin %r reads %s (want allow, and equal)"
+                  % (QUOTED_SEED, k, deny_cmd, got, neutral_cmd, want))
+    print("quoted-data: %d seeded draws and %d scope checks, %d failing rows" % (QUOTED_COUNT, 2 * len(QUOTED_DENY), failing))
+    return failing
+
 def main():
     started = time.monotonic()
     try:
@@ -905,6 +984,7 @@ def main():
                     failures = run_checks(root_checks, COUNT, tools, unpinned)
                 report(failures, unpinned)
                 failing += len(failures)
+        failing += quoted_data_property()
         elapsed = time.monotonic() - started
         print("checks-never-raise: %d direct checks and judge, %d tools, %d env shapes, %d root-reading checks also run "
               "with the root unpinned, %d inputs each per pass (%d random + %d edge), %d failing rows, %.1f s"
