@@ -18120,6 +18120,7 @@ class ReviewFixBase(ReviewEnv):
     EARLIER_HEAD = "1e" * 20  # a head that an earlier record reviewed, and that is not the newest record's
     OTHER_HEAD = "2e" * 20  # a head that no record reviewed
     MID_HEAD = "3e" * 20  # a head that a middle record reviewed, between the oldest record and the newest
+    LATER_HEAD = "4e" * 20  # the head of a later review log, which FAILed a round or a fix verifier, and is not the base
 
     def review_with_base(self, base, host, flags=REVIEW_FLAGS):
         return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *flags, "--fix-check", f"{base}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS", host=host)
@@ -18185,6 +18186,20 @@ class ReviewFixBase(ReviewEnv):
         rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(other, mine))
         self.assert_refused(rc, out, err)
 
+    def test_a_base_named_only_by_a_review_log_posted_on_another_pull_request_thread_is_refused(self):
+        # Scope: a log of pull request 8 posted on pull request 7's thread is listed under 7 and names the base. The filter that reads a log for another
+        # pull request as no earlier log here drops it, so the base starts nothing. The control is this pull request's newest head.
+        def comments():
+            return (review_comment(1, 7, record_text(n=8, head=self.EARLIER_HEAD, rounds=REVIEW_PASS)),
+                    review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)))
+        listed = self.record_host(*comments()).review_comments("1970-01-01T00:00:00Z").get(7, [])
+        self.assertIn(record_text(n=8, head=self.EARLIER_HEAD, rounds=REVIEW_PASS), listed,
+                      "fixture: the log of pull request 8 is not listed under 7, so the filter is not what the case tests")
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(*comments()))
+        self.assertEqual(rc, 0, "control: a fix verifier from this pull request's newest head was refused:\n" + out + err)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(*comments()))
+        self.assert_refused_for_start(rc, out, err)
+
     def test_a_base_an_older_record_names_is_accepted_only_when_the_new_record_carries_its_rounds(self):
         # "as long as the rounds it lists are carried": the older record lists a FAIL round 1 and a PASS round 2. A new record that posts both
         # rounds as the older record has them is accepted from that head. One that posts round 1 as PASS rewrites a round, and is refused.
@@ -18211,6 +18226,64 @@ class ReviewFixBase(ReviewEnv):
         newest = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, fix=(fix_verifier_line(verdict="FAIL", head=self.EARLIER_HEAD),)))
         rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(older, newest))
         self.assert_refused(rc, out, err)
+
+    def assert_refused_for_start(self, rc, out, err):
+        """assert_refused, and the refusal names the start, so another refusal cannot pass for it."""
+        self.assert_refused(rc, out, err)
+        self.assertIn("the reviewed head must be the Head of", err, "the refusal is not the start refusal:\n" + err)
+
+    def test_a_base_an_older_review_log_names_is_refused_when_a_later_review_log_fails_a_round_on_another_head(self):
+        # A later round that FAILed on another head starts no fix verifier from an older head, as a later FAILed fix verifier does. The control is the
+        # newest head itself, with the same FAILed round, which starts the fix verifier beside it.
+        failed = ("Round 1: reviewer, sonnet, FAIL",)
+        carried = ("--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:FAIL")
+        older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=failed))
+        newest = review_comment(2, 7, record_text(head=self.LATER_HEAD, rounds=failed))
+        rc, out, err = self.review_with_base(self.LATER_HEAD, self.record_host(older, newest), flags=carried)
+        self.assertEqual(rc, 0, "control: a fix verifier from the newest head, after its failed round, was refused:\n" + out + err)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(older, newest), flags=carried)
+        self.assert_refused_for_start(rc, out, err)
+
+    def test_a_base_an_older_review_log_names_is_refused_when_a_later_fix_verifier_failed_from_another_head(self):
+        # A FAILed fix verifier that started at another head blocks the older head too. The control is the same newest log with no fix line, which
+        # leaves the older head its start.
+        older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        no_fix = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        failed = fix_verifier_line(verdict="FAIL", head=self.LATER_HEAD)
+        newest = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, fix=(failed,)))
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(older, no_fix))
+        self.assertEqual(rc, 0, "control: a fix verifier from the older head was refused with no later fix line:\n" + out + err)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(older, newest))
+        self.assert_refused_for_start(rc, out, err)
+
+    def test_a_base_an_older_review_log_names_is_refused_when_an_unreadable_review_log_lies_between_them(self):
+        # An unreadable log between the named log and the newest may hold a FAILed fix verifier from the base, so the base starts none. The control is
+        # the same pull request with a readable middle log that holds no fix line. Scope: the middle text does not parse, and the newest log parses
+        # and names the other head, so the refusal comes from the middle log alone.
+        middle_text = record_text(head=self.MID_HEAD, rounds=REVIEW_PASS, kind="bogus")
+        self.assertIsNone(review_fn(self, "parse_review")(middle_text), "fixture: the middle log parses, so the case tests nothing")
+        newest_text = record_text(head=self.LATER_HEAD, rounds=REVIEW_PASS)
+        self.assertEqual(parse_text(self, newest_text)["head"], self.LATER_HEAD, "fixture: the newest log does not name its head")
+        older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        newest = review_comment(3, 7, newest_text)
+        readable = review_comment(2, 7, record_text(head=self.MID_HEAD, rounds=REVIEW_PASS))
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(older, readable, newest))
+        self.assertEqual(rc, 0, "control: a fix verifier from the older head was refused with a readable middle log:\n" + out + err)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(older, review_comment(2, 7, middle_text), newest))
+        self.assert_refused_for_start(rc, out, err)
+
+    def test_a_base_an_older_review_log_names_is_refused_when_another_earlier_log_naming_it_is_not_carried(self):
+        # Every earlier log that names the base must have its rounds carried, not only the newest one that names it. The first names the base with a
+        # FAILed round 1, the second with a PASSed round 1, and the newest names another head. The new log carries round 1 PASS, which the second log
+        # has. The control gives the first log round 1 PASS too, so every log that names the base has the round the new log carries.
+        second = review_comment(2, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        newest = review_comment(3, 7, record_text(head=self.LATER_HEAD, rounds=REVIEW_PASS))
+        same_first = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        failed_first = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",)))
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(same_first, second, newest))
+        self.assertEqual(rc, 0, "control: a fix verifier from the older head was refused with both earlier logs at round 1 PASS:\n" + out + err)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(failed_first, second, newest))
+        self.assert_refused_for_start(rc, out, err)
 
     def test_a_newest_earlier_record_with_a_passing_fix_line_accepts_its_head_as_the_base(self):
         # owner, page item 741: the newest record's fix check passed, so a further fix check from its head is accepted; the new head is a plain commit
