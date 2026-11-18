@@ -400,6 +400,44 @@ class NextActGaps(LedgerCase):
                 self.assertEqual(act, f"blocked on #{on}", f"control: #{n}'s base ref is the head of #{on}, so it is blocked on #{on}:\n{out}")
                 self.assertTrue(red, f"#{n} is blocked on #{on}, which is blocked on #{n}: a loop with no PR that can move, and its line does not read RED:\n{out}")
 
+    def carry_host(self, *, draft, comments=(), source=()):
+        """Pull request 7 at LIVE, a replacement whose body names #6 as its source, and #6's own comment list `source`. LIVE and #6's head hold one
+        tree, so the carry is read by tree and no git read runs."""
+        return LedgerHost([pull(7, draft=draft, body=tm.REPLACES_BODY)], comments=list(comments), per_issue={tm.REPLACES_SOURCE: list(source)},
+                          commits={LIVE: [], tm.SOURCE_HEAD: []}, trees={LIVE: tm.SOURCE_TREE, tm.SOURCE_HEAD: tm.SOURCE_TREE})
+
+    def test_a_replacement_carries_its_source_open_record_and_reads_the_round_owed(self):
+        # Red on a merge.py that drops the carried record: the replacement then reads lane round 1, the round owed with no record of its own.
+        source = [record(6, 3, rounds=("Round 1: reviewer, sonnet, FAIL",), head=tm.SOURCE_HEAD)]
+        out = self.reviewed(self.carry_host(draft=False, source=source))
+        self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} open: carried from #6 by tree",
+                         "control: #7 does not carry the open record of #6 by tree:\n" + out)
+        act, red = self.next_act(out, 7)
+        self.assertEqual(act, "lane round 2", f"#7 carries #6's record, which fails round 1, so round 2 is the next round owed:\n{out}")
+        self.assertFalse(red, f"#7's lane round 2 has no age limit, and its line reads RED:\n{out}")
+
+    def test_a_replacement_carries_its_source_done_record_and_lint_and_reads_batch(self):
+        # A control: the carried done record reads batch, with the lane-lint PASS that carries from #6 by tree.
+        source = [record(6, 3, head=tm.SOURCE_HEAD), lint(6, tm.SOURCE_HEAD)]
+        out = self.reviewed(self.carry_host(draft=False, source=source))
+        self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} done: carried from #6 by tree",
+                         "control: #7 does not carry the done record of #6 by tree:\n" + out)
+        act, owner, red = self.next_part(out, 7)
+        self.assertEqual(act, "batch", f"#7 carries a done record and #6's lane-lint PASS at its tree, so its act is batch:\n{out}")
+        self.assertEqual(owner, "batch runner", f"#7's act is batch, so its owner is the batch runner:\n{out}")
+        self.assertFalse(red, f"#7 is done 3 h ago, inside the 24 h limit, and its line reads RED:\n{out}")
+
+    def test_a_draft_replacement_with_no_readable_source_record_reads_lane_round_1(self):
+        # Nothing carries when #6's list holds no record that parses, so the draft has no record of its own and its act is lane round 1.
+        for label, source in (("no comment", []), ("a comment that is no record", [tm.review_comment(1, tm.REPLACES_SOURCE, "Looks good to me.\n")])):
+            with self.subTest(source=label):
+                out = self.reviewed(self.carry_host(draft=True, source=source))
+                self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} no record: ",
+                                 f"control: #7 reads no record, so no record of #6 carried:\n{out}")
+                act, red = self.next_act(out, 7)
+                self.assertEqual(act, "lane round 1", f"#7 is a draft and #6 gives it no record, so its act is lane round 1:\n{out}")
+                self.assertFalse(red, f"#7's lane round 1 has no age limit, and its line reads RED:\n{out}")
+
 
 class NumberLines(LedgerCase):
     """The two gold-0 numbers, each after a control line that the fixture still gives."""
