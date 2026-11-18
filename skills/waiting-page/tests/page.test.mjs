@@ -7998,34 +7998,54 @@ const ACT_PULLS = [
   { number: 8, title: "Pull eight", branch: "feat-eight" },
   { number: 9, title: "Pull nine", branch: "feat-nine" },
 ];
-const actsOver = () => ({
-  pulls: ACT_PULLS,
-  ledger: {
-    readAt: new Date().toISOString(),
-    rows: [
-      { number: 7, act: "lane round 2", owner: "lane", ageHours: 3, red: false, blockedOn: null },
-      { number: 8, act: "batch", owner: "batch runner", ageHours: 30, red: true, blockedOn: null },
-      { number: 9, act: "lane round 1", owner: "lane", ageHours: 2, red: false, blockedOn: null },
-    ],
-  },
-});
+const ACT_ROWS = [
+  { number: 7, act: "lane round 2", owner: "lane", ageHours: 3, red: false, blockedOn: null },
+  { number: 8, act: "batch", owner: "batch runner", ageHours: 48, red: true, blockedOn: null },
+  { number: 9, act: "lane round 1", owner: "lane", ageHours: 2, red: false, blockedOn: null },
+];
+const actsOver = () => ({ pulls: ACT_PULLS, ledger: { readAt: new Date().toISOString(), rows: ACT_ROWS } });
 const actRow = (page, title) => page.locator("details.live li", { hasText: title });
 const rowText = async (loc) => (await loc.first().textContent()).replace(/\s+/g, " ").trim();
 // Whether a heading's text counts `n` pulls for `owner`, in either order ("lane 2" or "2 lane").
 const countedAs = (text, owner, n) => new RegExp(`${owner}\\D{0,12}\\b${n}\\b|\\b${n}\\b\\D{0,12}${owner}`).test(text);
 
-test("the Status tab shows each open pull request's act, owner, age and RED", async (t) => {
+// The row's act line, as the mockup draws it (item 1): the act, then "owner <owner>", then "waited <age>" from the page's span().
+test("the Status tab shows each open pull request's act, owner and age in the mockup's act line", async (t) => {
   const page = await liveStatus(t, actsOver()); if (!page) return;
   assert.equal(await actRow(page, "Pull seven").count(), 1, "scope: the Status tab draws no row for open pull request #7");
   const seven = await rowText(actRow(page, "Pull seven")), eight = await rowText(actRow(page, "Pull eight"));
   assert.match(seven, /lane round 2/, "the row of #7 shows no act 'lane round 2': " + seven);
-  assert.match(seven, /\blane\b/, "the row of #7 shows no owner 'lane': " + seven);
-  assert.match(seven, /\b3(\.0)?\s?h(ours?)?\b/, "the row of #7 shows no age of 3 h: " + seven);
-  assert.doesNotMatch(seven, /\bRED\b/i, "the row of #7 reads RED, and its ledger row says red false: " + seven);
+  assert.match(seven, /owner lane/, "the row of #7 shows no owner 'lane': " + seven);
+  assert.match(seven, /waited 3 hours/, "the row of #7 shows no age 'waited 3 hours': " + seven);
   assert.match(eight, /batch/, "the row of #8 shows no act 'batch': " + eight);
-  assert.match(eight, /batch runner/, "the row of #8 shows no owner 'batch runner': " + eight);
-  assert.match(eight, /\b30(\.0)?\s?h(ours?)?\b/, "the row of #8 shows no age of 30 h: " + eight);
-  assert.match(eight, /\bRED\b/i, "the row of #8 does not read RED, and its ledger row says red true: " + eight);
+  assert.match(eight, /owner batch runner/, "the row of #8 shows no owner 'batch runner': " + eight);
+  assert.match(eight, /waited 2 days/, "the row of #8 shows no age 'waited 2 days': " + eight);
+});
+
+// The red mark (the mockup's "edge and mark" pick, item 3): a role=img mark whose label starts "Red", on a red row only.
+// Its text is the label, not visible words; the word "red" shows once, in the head count.
+test("a red open pull request carries the Red mark, and a row that is not red carries none", async (t) => {
+  const page = await liveStatus(t, actsOver()); if (!page) return;
+  assert.equal(await actRow(page, "Pull eight").count(), 1, "scope: the Status tab draws no row for open pull request #8");
+  const mark = (title) => actRow(page, title).locator('[role="img"][aria-label^="Red"]');
+  assert.equal(await mark("Pull eight").count(), 1, "the row of #8 is red and carries no Red mark: " + (await rowText(actRow(page, "Pull eight"))));
+  assert.equal(await mark("Pull seven").count(), 0, "the row of #7 is not red and carries a Red mark");
+  assert.equal(await mark("Pull nine").count(), 0, "the row of #9 is not red and carries a Red mark");
+});
+
+// Acts unknown with the ledger unread (item 7, "reason once at the head"): each row reads "act unknown" alone, and the reason is one
+// line of the list head. The readAt is not a time, so the case reads no clock.
+test("an acts-unknown ledger gives its reason once, at the list head, and no row carries it", async (t) => {
+  const page = await liveStatus(t, { pulls: ACT_PULLS, ledger: { readAt: "yesterday", rows: ACT_ROWS } }); if (!page) return;
+  assert.equal(await actRow(page, "Pull seven").count(), 1, "scope: the Status tab draws no row for open pull request #7");
+  for (const title of ["Pull seven", "Pull eight", "Pull nine"]) {
+    const text = await rowText(actRow(page, title));
+    assert.match(text, /act unknown/, `the row of ${title} does not read 'act unknown': ${text}`);
+    assert.doesNotMatch(text, /ledger/, `the row of ${title} carries the reason, which shows once at the list head: ${text}`);
+  }
+  const live = (await page.locator("details.live").textContent()).replace(/\s+/g, " ");
+  const times = live.split("ledger").length - 1;
+  assert.equal(times, 1, `the ledger's reason shows ${times} times in Live work, not once at the list head: ${live}`);
 });
 
 test("the Status tab lists a red open pull request before the others", async (t) => {
