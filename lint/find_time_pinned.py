@@ -608,16 +608,41 @@ def scan_python(text):
             return True
         return any(holds_difference(c, tainted, elapsed, bound) for c in ast.iter_child_nodes(node))
 
-    scopes = {}
+    infos = {}
 
-    def scope_taint(root):
-        """The clock-tainted names of root's own scope, repeated until nothing changes. A def in that scope
-        taints its name when a value it returns reads a clock."""
-        if id(root) in scopes:
-            return scopes[id(root)]
-        tainted = scopes[id(root)] = set()
+    def bound_names(root, nodes):
+        """The names root's own scope binds: its parameters, stores, defs, classes, imports and `except as`."""
+        names = set()
+        if isinstance(root, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            a = root.args
+            names.update(x.arg for x in a.posonlyargs + a.args + a.kwonlyargs + [a.vararg, a.kwarg] if x)
+        for n in nodes:
+            if isinstance(n, ast.Name) and not isinstance(n.ctx, ast.Load):
+                names.add(n.id)
+            elif isinstance(n, ast.ClassDef):
+                names.add(n.name)
+            elif isinstance(n, (ast.Import, ast.ImportFrom)):
+                names.update((x.asname or x.name.split(".")[0]) for x in n.names)
+            elif isinstance(n, ast.ExceptHandler) and n.name:
+                names.add(n.name)
+            for child in ast.iter_child_nodes(n):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    names.add(child.name)
+        return names
+
+    def scope_info(root, outer):
+        """(tainted, helpers, kids) of root's own scope. `outer` holds the helper names the enclosing scopes
+        offer: a def whose returned value reads a clock. A name that root rebinds is not one. The clock-tainted
+        names are repeated until nothing changes. A def in the scope taints its name when a value it returns
+        reads a clock, and a def that is not a method is a helper for every scope inside this one."""
+        key = (id(root), outer)
+        if key in infos:
+            return infos[key]
         nodes = list(walk_scope(root))
+        helpers = set(outer - bound_names(root, nodes))
+        tainted = set(helpers)
         assigns = []
+        kids = []
         for n in nodes:
             if isinstance(n, ast.Assign):
                 assigns.append(([x for t in n.targets for x in target_names(t)], n.value))
@@ -627,10 +652,21 @@ def scan_python(text):
                 assigns.append((target_names(n.target), n.value))
             for child in ast.iter_child_nodes(n):
                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    inner = scope_taint(child)
-                    if any(isinstance(r, ast.Return) and r.value is not None and holds_clock(r.value, inner)
-                           for r in walk_scope(child)):
-                        tainted.add(child.name)
+                    kids.append((child, isinstance(n, ast.ClassDef)))
+        pending = list(kids)
+        changed = True
+        while changed:  # a def may call a sibling def that a later pass shows to return a clock
+            changed = False
+            for entry in list(pending):
+                kid, method = entry
+                inner = scope_info(kid, frozenset(helpers))[0]
+                if any(isinstance(r, ast.Return) and r.value is not None and holds_clock(r.value, inner)
+                       for r in walk_scope(kid)):
+                    tainted.add(kid.name)
+                    if not method:
+                        helpers.add(kid.name)
+                    pending.remove(entry)
+                    changed = True
         changed = True
         while changed:
             changed = False
@@ -638,7 +674,8 @@ def scan_python(text):
                 if not set(targets) <= tainted and holds_clock(value, tainted):
                     tainted.update(targets)
                     changed = True
-        return tainted
+        infos[key] = (tainted, helpers, [k for k, _ in kids])
+        return infos[key]
 
     found = set()
     decorator_calls = {id(d) for n in ast.walk(tree)
@@ -660,9 +697,8 @@ def scan_python(text):
         elif any(k.arg == "timeout" and py_number(k.value) for k in call.keywords):
             found.add((call.lineno, "wait-cap"))
 
-    roots = [tree] + [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
-    for root in roots:
-        tainted = scope_taint(root)
+    def visit(root, outer):
+        tainted, helpers, kids = scope_info(root, outer)
         for n in walk_scope(root):
             if isinstance(n, ast.Assert) and holds_clock(n.test, tainted, True):
                 found.add((n.lineno, "elapsed-assert"))
@@ -672,6 +708,10 @@ def scan_python(text):
                         holds_clock(x, tainted, True, name not in PY_EXACT, name in PY_ORDERED)
                         for x in assert_parts(n, name)):
                     found.add((n.lineno, "elapsed-assert"))
+        for kid in kids:
+            visit(kid, frozenset(helpers))
+
+    visit(tree, frozenset())
     return found, python_kept(text)
 
 

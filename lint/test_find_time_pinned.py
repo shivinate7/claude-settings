@@ -1918,6 +1918,122 @@ class BigFileTest(FinderCase):
         self.assertEqual(proc.returncode, 1, proc.stdout[-200:])
 
 
+# ---- a clock read that a same-file helper returns, followed into the test that calls the helper -------
+
+class HelperFollowTest(FinderCase):
+    """A test's call to a helper in the same file. A clock read that the helper returns reaches the assert
+    that holds the call, one helper deep or two. A helper that no test calls, and a local that shadows a
+    helper's name, are not followed. The two red cases fail on the old code. The three controls pass on it."""
+
+    def test_helper_that_sleeps_is_listed_at_its_sleep_once(self):
+        text = src(
+            "import time",
+            "",
+            "",
+            "def _settle():",
+            "    time.sleep(1)",
+            "",
+            "",
+            "def test_waits():",
+            "    _settle()",
+            "    assert True",
+        )
+        self.put("tests/test_sleep_helper.py", text)
+        code, out = self.report()
+        self.assertEqual(self.rows(out), pinned(
+            "tests/test_sleep_helper.py", text, ("time.sleep(1)", "sleep"),
+        ), "a sleep in a helper that a test calls is not listed once, at its own line")
+        self.assertEqual(code, 1)
+
+    def test_clock_read_a_helper_returns_reaches_the_test_assert(self):
+        text = src(
+            "import time",
+            "",
+            "",
+            "def _age(t0):",
+            "    return time.monotonic() - t0",
+            "",
+            "",
+            "def test_budget():",
+            "    t0 = time.monotonic()",
+            "    assert _age(t0) < 1",
+        )
+        self.put("tests/test_one_helper.py", text)
+        code, out = self.report()
+        self.assertEqual(self.rows(out), pinned(
+            "tests/test_one_helper.py", text, ("assert _age(t0) < 1", "elapsed-assert"),
+        ), "a clock read that a same-file helper returns is not followed into the test's assert")
+        self.assertEqual(code, 1)
+
+    def test_clock_read_two_helpers_deep_reaches_the_test_assert(self):
+        text = src(
+            "import time",
+            "",
+            "",
+            "def _now():",
+            "    return time.monotonic()",
+            "",
+            "",
+            "def _age(t0):",
+            "    return _now() - t0",
+            "",
+            "",
+            "def test_budget():",
+            "    t0 = time.monotonic()",
+            "    assert _age(t0) < 1",
+        )
+        self.put("tests/test_two_deep.py", text)
+        code, out = self.report()
+        self.assertEqual(self.rows(out), pinned(
+            "tests/test_two_deep.py", text, ("assert _age(t0) < 1", "elapsed-assert"),
+        ), "a clock read two same-file helpers deep is not followed into the test's assert")
+        self.assertEqual(code, 1)
+
+    def test_helper_no_test_calls_is_not_followed(self):
+        text = src(
+            "import time",
+            "",
+            "",
+            "def _age(t0):",
+            "    return time.monotonic() - t0",
+            "",
+            "",
+            "def test_fast():",
+            "    assert time.time() > 0",
+        )
+        self.put("tests/test_uncalled.py", text)
+        code, out = self.report()
+        sibling = ("tests/test_uncalled.py", lineno(text, "assert time.time() > 0"), "elapsed-assert")
+        self.assertIn(sibling, self.rows(out), "scope: the sibling assert is not listed, so the file was not read")
+        self.assertEqual(self.rows(out), {sibling},
+                         "a helper that no test calls is followed: its clock return is listed")
+        self.assertEqual(code, 1)
+
+    def test_local_that_shadows_a_helper_name_is_not_followed(self):
+        text = src(
+            "import time",
+            "",
+            "",
+            "def _age(t0):",
+            "    return time.monotonic() - t0",
+            "",
+            "",
+            "def test_shadowed():",
+            "    def _age(t0):",
+            "        return 0.0",
+            "    t0 = time.monotonic()",
+            "    assert _age(t0) < 1",
+            "    assert time.time() > 0",
+        )
+        self.put("tests/test_shadowed.py", text)
+        code, out = self.report()
+        sibling = ("tests/test_shadowed.py", lineno(text, "assert time.time() > 0"), "elapsed-assert")
+        self.assertIn(sibling, self.rows(out), "scope: the sibling assert is not listed, so the file was not read")
+        self.assertEqual(self.rows(out), {sibling},
+                         "a call to a local that shadows a helper's name is followed to the module helper")
+        self.assertEqual(code, 1)
+
+
 if __name__ == "__main__":
     try:
         unittest.main()
