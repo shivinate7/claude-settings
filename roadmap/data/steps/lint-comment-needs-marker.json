@@ -1,10 +1,10 @@
 {
  "id": "lint-comment-needs-marker",
  "title": "A lane session cannot post a lane-lint comment without the lane-lint marker",
- "status": "queued",
+ "status": "blocked",
  "repo": "shivinate7/claude-settings",
  "why": "Coordinator guard candidate, low, 04:48 CST Nov 15 (relayed; triage's call). On #3496 the lane typed lint comment 6893187872 by hand: no <!-- lane-lint --> marker, the tool printed only a PASS line and posted nothing. The comment reads as a PASS nobody ran, so it is VOID (coordinator). Harm: a typed lint is a PASS nobody ran. Fix: refuse a lane-lint comment without the marker when a lane session posts it. Same family as hand-posted record cases (#3468, #3464) and steps record-tool-posts-itself and lane-lint-background-refused (a lane runs merge --lane-lint and the tool posts; a lane never prints or types a PASS line); none covers a typed lint comment (grep of roadmap steps for hand-post, lane-lint marker, hand-typed, 04:50 CST). Kin sighting: #3494's lane printed a PASS line by hand and was refused by the classifier (step tests-never-read-live-origin-main). Past rulings checked: none found.",
  "source": "coordinator 04:48 CST Nov 15, relayed by triage",
- "note": "Low. Open.",
- "updatedAt": "2026-11-15T04:50:00-06:00"
+ "note": "Blocked (lane glossary-step-statuses, 19:38 CST Nov 17, owner page item 941 a): waits on nothing named; the note says only Low, Open. Low. Open.",
+ "updatedAt": "2026-11-17T19:38:10-06:00"
 }

@@ -1,8 +1,10 @@
 {
   "id": "draft-remedy-mcp-grant",
   "title": "Owner question: widen the H1 grant so the draft refusal's remedy names the MCP form",
-  "status": "queued",
+  "status": "blocked",
   "repo": "claude-settings",
   "why": "After #2571 the DRAFT_PR_REASON refusal fires on mcp__github__create_pull_request, but its remedy names only gh pr create --draft. The lane kept it a debt; the remedy fix needs the owner's word on the H1 grant. Stage 3.",
-  "source": "lane guard-matcher-github-mcp (#2571), relayed by the coordinator 2026-11-10 20:17 CST"
+  "source": "lane guard-matcher-github-mcp (#2571), relayed by the coordinator 2026-11-10 20:17 CST",
+  "note": "Blocked (lane glossary-step-statuses, 19:38 CST Nov 17, owner page item 941 a): waits on the owner's word on widening the H1 grant so the draft refusal's remedy can name the MCP form.",
+  "updatedAt": "2026-11-17T19:38:10-06:00"
 }
