@@ -17,6 +17,8 @@ def lane_cost_run(body):
         env.pop("CLAUDE_CODE_SESSION_ID", None)
         env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
         spec = {"mode": "judge", "reading": LB_NORMAL}
+        # The default Prior work line goes on a build spawn here too, as decide() adds it (see with_prior_work).
+        body = dict(body, tool_input=with_prior_work(body["tool_name"], body["tool_input"]))
         done = subprocess.run([sys.executable, "-c", LB_PROBE, GUARD, side_file, json.dumps(spec)],
                               input=json.dumps(body), capture_output=True, text=True, env=env, timeout=120)
         try:
@@ -146,6 +148,51 @@ add("lane-start-settings: triage call with no model and no source_url is allowed
     tool=LANE_TOOL, tags=["cs-build:triage"], prompt="do the task")
 add("lane-start-settings: batch-runner call with no model and no source_url is allowed", "allow",
     tool=LANE_TOOL, tags=["cs-build:batch-runner"], prompt="do the task")
+
+
+# The settings rule's own contract: a call with no lane tag is not judged (lane_start_settings_hit's docstring). The judge
+# reaches the function only through lane_start_hits, which gates on the same tag first, so a judged case cannot see that
+# inner gate go. This check calls the function on the guard under test, loaded from the folder GUARD sits in.
+def _guard_under_test():
+    """guard.py loaded from the folder of GUARD, with that folder first on sys.path, so its sibling modules come from
+    the same copy."""
+    import importlib.util
+    folder = os.path.dirname(GUARD)
+    spec = importlib.util.spec_from_file_location("guard_settings_direct", os.path.join(folder, "guard.py"))
+    module = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, folder)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(folder)
+    return module
+
+
+def lane_settings_direct_case():
+    """A call with no lane tag reads no missing settings, whatever it leaves out. The scope is asserted first: the
+    coordinator input must not be a lane start. The control beside it is a lane start with no model or source_url,
+    which must read both."""
+    guard = _guard_under_test()
+    coordinator = {"tags": ["cs-build:coordinator"], "prompt": "do the task"}
+    if guard.is_lane_create_session(LANE_TOOL, coordinator):
+        return False, "scope: the coordinator tag reads as a lane start, so this case proves nothing"
+    got = guard.lane_start_settings_hit(LANE_TOOL, coordinator)
+    if got:
+        return False, "lane_start_settings_hit reads %r for a call with no lane tag, want an empty reading" % got
+    lane = {"tags": ["cs-build:lane"], "prompt": "do the task"}
+    if not guard.is_lane_create_session(LANE_TOOL, lane):
+        return False, "control: the lane tag reads as no lane start, so the control proves nothing"
+    control = guard.lane_start_settings_hit(LANE_TOOL, lane)
+    if control != "model, source_url":
+        return False, ("lane_start_settings_hit reads %r for a lane start with no model or source_url, "
+                       "want 'model, source_url'" % control)
+    return True, "a call with no lane tag reads no missing settings, and a lane start reads model, source_url"
+
+
+FIXTURELESS_CHECKS.add(lane_settings_direct_case)
+LOG_CHECKS_EXTRA.append((
+    "lane-start-settings: coordinator call with no model and no source_url is allowed, read straight from "
+    "lane_start_settings_hit", lane_settings_direct_case))
 
 # ---- The floor's remedy for a lane start. A lane create_session below the floor is refused, and its reason must not
 # tell the caller to name no model: with no model, rule lane-start-settings refuses the lane again. The reason names
