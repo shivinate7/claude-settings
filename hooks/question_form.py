@@ -2109,7 +2109,7 @@ UNVETTED_LINE = re.compile(r"^[ \t>*+-]*Unvetted:[ \t]*\S", re.I | re.M)
 UNREADABLE = "unreadable"
 CLOSED_ITEMS = "closed page items"
 INDEX_CAP, STEP_TOP, STEP_GIT_TIMEOUT, RULED_TOP = 800, 30, 10, 8
-RULING_EXTRA_CAP = 600  # the most a record's ruling section adds past INDEX_CAP, as owner ruling sentences
+RULING_EXTRA_CAP = 600  # the most a record's ruling section adds past INDEX_CAP, as sentences that state a ruling by the owner
 RULING_HEADING = re.compile(r"^##[ \t]+The ruling[ \t]*$", re.I | re.M)
 RULING_WORDS = re.compile(r"ruling|owner|shiv", re.I)
 SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
@@ -2134,8 +2134,9 @@ def _words(text) -> set:
 
 def _ruling_text(body) -> str:
     """The `## The ruling` section (to the next `## `), else the body after the title line, white space
-    collapsed and cut at INDEX_CAP. A longer section also gets its owner ruling sentences from past the cut
-    (see _owner_sentences), so a ruling late in a long section still reaches the judge."""
+    collapsed and cut at INDEX_CAP. A longer section also gets the sentences that
+    state a ruling by the owner from past the cut (see _owner_sentences), so a ruling late in a long section still
+    reaches the judge."""
     match = RULING_HEADING.search(body)
     if match:
         section = body[match.end():]
