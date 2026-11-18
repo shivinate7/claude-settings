@@ -1,7 +1,7 @@
 {
   "id": "check-judged-by-main-copy",
   "title": "A guard or check file that a PR changes is judged by main's copy, not the PR's",
-  "status": "ready",
+  "status": "blocked",
   "repo": "shivinate7/claude-settings",
   "phase": "next",
   "lane": "",
@@ -9,7 +9,7 @@
   "blockedBy": [],
   "why": "Owner, 19:45 CST Nov 17 (relayed by the consultant): review the Claude Code team blogs https://claude.dev/blog/how-the-claude-code-team-thinks-about-verification/ and https://claude.dev/blog/solving-code-review-at-anthropic/ and land their findings. Triage read both through a page summary, not word for word. Finding: Verification blog: if a change can modify the check that judges it, the check is broken; review rules are read from the base branch.",
   "source": "owner words 19:45 CST Nov 17 via the consultant; blogs read through a page summary",
-  "note": "Read done 20:31 CST (Explore, sonnet, on origin/main 69ab9988): merge --lane-lint runs lint/*.py and hooks/test_*.py from a merge commit of main and the PR head (merge/merge.py:3504, bin/ci-job:662), so a changed check runs as the PR's copy, and the step list comes from the PR's own checks.yml. Tool code (ci-job, merge.py, the suite selector) runs from main's installed copy. agents/reviewer.md has no rule to compare a changed check with main's copy. Two precedents run main's copy: the Debt retire check (.github/workflows/checks.yml:600-607) and --express. So a PR that weakens lint/X.py and its test together passes its own lane lint: the red case is real. Next: test-author writes that red case. Unknown: installed tool version per machine; the CI run's own checkout ref.",
-  "updatedAt": "2026-11-17T20:30:54-06:00",
+  "note": "Red case: test-author (haiku) 7b2d62ce30 on lane/check-judged-by-main-copy-tests. Builder (sonnet) d74cfe6683 on lane/check-judged-by-main-copy: lane lint lays main's copy of changed lint and test files. Round-1 reviewer (sonnet, 20:56 CST) FAIL: (1) the laid copies leave the work tree dirty, so the stale-cites check reads main's copy and can FAIL a lane that adds a cited name; (2) a lane that changes code and re-points a test is judged by main's old test and fails; 53 of the last 150 main commits touch a judged file; (3) a mutant that drops restore_lane_copies survives; (4) rename plus weaken passes (low). Finding 2 is an owner choice: page item 952 (a keep, b main's copy for all, c lint check files only, recommended). Builder round 2 fixes findings 1 and 3 whichever is picked. No pull request yet.",
+  "updatedAt": "2026-11-17T20:57:31-06:00",
   "ask": "Lane brief: a guard or check file that a PR changes is judged by main's copy, not the PR's.\nGoverning: decision guard-guards-mistakes-only (harm bound). Harm: a lane that edits a guard or lint file could pass its own lane lint with the weaker copy. Not measured yet.\n0. Explore (read-only, first line `Audit:`): does merge --lane-lint, or the reviewer brief, read the PR's copy of a changed check? Report yes or no with file and line.\n1. If yes: test-author writes a red case where a PR weakens a check and still passes. If no: close the step with the read as proof.\n2. builder fixes; reviewer (guard or check: yes).\nProof command: the red case green through `~/.claude/bin/verdict`. Report cap: 25 lines."
 }
