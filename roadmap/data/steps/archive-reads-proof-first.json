@@ -1,0 +1,14 @@
+{
+ "id": "archive-reads-proof-first",
+ "title": "An archive reads the proof first: `merge --idle-lanes --session <id>` prints a SAFE or UNSAFE verdict, and the archive hook allows on SAFE",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Coordinator relay 14:29 CST Nov 18, from the consultant's read at 14:28 CST. Incident: the 14:20 CST archive of seven lanes (and three more at 14:23 CST) was judged from post-turn summaries, with the REST proof read after the plan (safe in the end, no loss). The owner at 14:21 CST: \"Not confirming before archiving is itself possibly also a bug\".",
+ "source": "coordinator relay 14:29 CST Nov 18 (consultant's read 14:28 CST); owner 14:21 CST",
+ "note": "Wish: `merge --idle-lanes` gets a per-lane mode, `merge --idle-lanes --session <id>`, printing the evidence for one lane (branch pushed or merged; each PR merged, or closed as replaced by a merged PR, by REST; the step landed) and one SAFE or UNSAFE verdict. Hook `lane-closes-after-records` then allows `archive_session` when that command printed SAFE for the session at its current state, in place of the tag-only read. This absorbs step lane-close-reads-branch-pr and fixes the no-`cs-step` refusal. Needs a test-author first; prior-work search first. The consultant says do not build it now.",
+ "updatedAt": "2026-11-18T14:29:31-06:00"
+}
