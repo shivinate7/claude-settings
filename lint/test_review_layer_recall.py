@@ -34,6 +34,7 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the
 FIXTURE = os.path.join(ROOT, "tests", "review_layer_recall", "fixture.json")
 SCORER = os.path.join(HERE, "review_layer_recall.py")
 LAYERS = ("reviewer", "refuter", "fix_verifier", "design_reviewer")
+INCIDENT_LABELS = LAYERS + ("unknown",)  # an incident whose revert gives no cause to judge: kept, counted in no layer
 BASES = ("revert message", "revert subject and changed files", "revert message and PR title")
 SCORER_MISSING = "scorer missing: lint/review_layer_recall.py is not in the tree"
 SCORER_TIMEOUT = 120  # hang guard, well above one local run of the scorer
@@ -96,7 +97,7 @@ class FixtureShape(unittest.TestCase):
 
     def test_incident_layers_are_in_the_layer_set(self):
         for inc in self.fixture["incidents"]:
-            self.assertIn(inc["layer"], LAYERS, "incident #%s names a layer outside the set" % inc["pr"])
+            self.assertIn(inc["layer"], INCIDENT_LABELS, "incident #%s names a label outside the layers and unknown" % inc["pr"])
 
     def test_incident_prs_are_positive_and_unique(self):
         prs = [inc["pr"] for inc in self.fixture["incidents"]]
@@ -123,7 +124,8 @@ class FixtureShape(unittest.TestCase):
     def test_fixture_reaches_the_empty_state_for_a_layer(self):
         counts = {layer: 0 for layer in LAYERS}
         for inc in self.fixture["incidents"]:
-            counts[inc["layer"]] += 1
+            if inc["layer"] in counts:  # an unknown incident is in no layer's count
+                counts[inc["layer"]] += 1
         self.assertIn(0, counts.values(), "no layer has zero incidents, so the empty state is untested")
 
     def test_controls_are_ten_merged_prs_with_full_shas(self):

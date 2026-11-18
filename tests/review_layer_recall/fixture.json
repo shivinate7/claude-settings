@@ -1,18 +1,22 @@
 {
-  "about": "Eval fixture for the review-layer recall scorer. Incidents are reverts and red-main reverts on main. Each names the PR the revert undid, the review layer that should have caught it, and a one-line answer key. Controls are merged PRs that no revert names. The layer is the author's judgment from the revert message, the changed files and the PR title. It is not a recorded review verdict.",
+  "about": "Eval fixture for the review-layer recall scorer. Incidents are reverts and red-main reverts on main. Each names the PR the revert undid, the review layer that should have caught it, and a one-line answer key. Controls are merged PRs that no revert names. The layer is the author's judgment from the revert message, the changed files and the PR title. It is not a recorded review verdict. A layer of 'unknown' means the revert gives no cause to judge: the incident stays in the fixture and in n.incidents, and in no layer's count.",
   "read": "2026-11-17 CST. Reverts from git log on main (subjects and 'This reverts commit' lines). PRs from REST commits/<sha>/pulls or pulls/<n>. Controls from REST pulls/<n>, with commits checked against every reverted commit.",
   "layers": ["reviewer", "refuter", "fix_verifier", "design_reviewer"],
   "incidents": [
     {
       "pr": 38,
+      "reverted_before_merge": true,
       "reverted": "215a236815",
       "reverts": ["edf661032a"],
-      "layer": "reviewer",
+      "layer": "unknown",
+      "note": "Revert gives no stated reason, so the answer key's cause is invented; layer unknown.",
       "basis": "revert subject and changed files",
       "answer_key": "A PR that dropped the counts from the verification rule and fixed the report gate was partly reverted in CLAUDE.md; the reviewer should check that the rule edit and the gate change agree."
     },
     {
       "pr": 512,
+      "reverted_before_merge": true,
+      "batch": true,
       "reverted": "7f41368639",
       "reverts": ["18ec5d71c0"],
       "layer": "reviewer",
@@ -21,14 +25,19 @@
     },
     {
       "pr": 690,
+      "reverted_before_merge": true,
+      "batch": true,
       "reverted": "a34066dbe2",
       "reverts": ["8055ce7b7e"],
-      "layer": "reviewer",
+      "layer": "unknown",
+      "note": "Revert gives no stated reason, so the answer key's cause is invented; layer unknown.",
       "basis": "revert subject and changed files",
       "answer_key": "A five-line teardown change in lint/test_check_mod_versions.py, meant to stop a git gc race, was reverted; the reviewer should check that the change fixes the race it names."
     },
     {
       "pr": 936,
+      "reverted_before_merge": true,
+      "batch": true,
       "reverted": "b8a0b5bd18",
       "reverts": ["9e25c54728"],
       "layer": "reviewer",
@@ -37,22 +46,29 @@
     },
     {
       "pr": 1082,
+      "reverted_before_merge": true,
+      "batch": true,
       "reverted": "6a24bef61b",
       "reverts": ["7c19b3145a"],
-      "layer": "reviewer",
+      "layer": "unknown",
+      "note": "Revert gives no stated reason, so the answer key's cause is invented; layer unknown.",
       "basis": "revert subject and changed files",
       "answer_key": "A 13-line test in hooks/test_guard.py that allowed a generator chain over a staged page was reverted; the reviewer should check the test's expected verdict against the guard rule."
     },
     {
       "pr": 2236,
+      "reverted_before_merge": true,
+      "batch": true,
       "reverted": "450b737bb",
       "reverts": ["6c184ad22f"],
       "layer": "fix_verifier",
+      "note": "fix check already found the defect",
       "basis": "revert message",
       "answer_key": "A scan-comment fix's length and strength claim was false, and its fix check found it; the fix verifier should check each claim in a fix before the merge."
     },
     {
       "pr": 3389,
+      "reverted_before_merge": true,
       "reverted": "08ce22cc46",
       "reverts": ["6253b146a2", "2173f4d212", "bb1eec5fb1"],
       "layer": "reviewer",
@@ -61,9 +77,12 @@
     },
     {
       "pr": 3435,
+      "reverted_before_merge": true,
+      "batch": true,
       "reverted": "2d33883009",
       "reverts": ["38082ba61f"],
-      "layer": "refuter",
+      "layer": "unknown",
+      "note": "Merge-conflict revert: the revert names no cause, so the layer is unknown.",
       "basis": "revert message",
       "answer_key": "The touchWidths wording edited lines that open #2716 and #2717 also edit; the refuter should test the premise that no other open lane owns those lines."
     },
@@ -72,6 +91,7 @@
       "reverted": null,
       "reverts": ["91ab71af93"],
       "layer": "reviewer",
+      "note": "reviewer never replays CI suites",
       "basis": "revert message",
       "answer_key": "Adding merge --ready to permissions.allow turned the CloudAllow test red on three CI jobs; the reviewer should run the allow-list change against CloudAllow."
     },
