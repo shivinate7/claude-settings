@@ -179,6 +179,7 @@ FAMILIES = {
     "sections": "the section files: a set the loader refuses (no section file, two files with one number, a name whose number disagrees with its header, a log check appended after the LOG_CHECKS_EXTRA join) stops a run before any case",
     "fg-bash-while-bg": "a foreground Bash call that can run long (a test, lint, merge, build or install, or a time limit over 60000 ms) is refused while this session's background command or agent runs; the run_in_background form, a quick read and a call with no background work pass",
     "review-log": "a PR comment whose first line is the review marker: refused when merge/merge.py parse_review refuses its body (review-log-form), and when a 40-hex sha on its Head or Fix check line does not resolve in the call's checkout (review-log-sha); the add and update comment tools, a body with no marker, and a check that cannot run pass",
+    "note-form-at-write": "the old notes file, the path lint/check_record_slugs.py names through the layout: a Write, Edit or MultiEdit that adds a line to it is logged once as noted, with the checker's remedy, and refused nothing; a delete, a blank line, a reorder, a new note file and a debt record pass silently",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
