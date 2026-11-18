@@ -854,11 +854,12 @@ def holder_text(b, held, now):
         return text + " The holder is dead. The next merge run takes the lock over."
     return text + " Cannot tell if the holder is alive. Ask its owner before: merge --unlock"
 
-def lost_race_text(b, cur, now):
+def lost_race_text(b, cur, now, own=None):
     """The Held text for a take that lost its race. `cur` is the lock now on the ref (read()'s (sha, expiry, message)), or None when it could not be read or is gone.
+    `own` is the sha this run pushed: a ref that holds it is this run's own lock (a push that landed and lost its reply), never a rival's.
     A live lock with a readable commit is named by holder_text, the one home. Any other read keeps the plain text: an unread lock is no holder."""
     text = "another run took the merge lock first"
-    if cur and cur[2] and cur[1] > now:
+    if cur and cur[2] and cur[1] > now and cur[0] != own:
         return text + ": " + holder_text(b, cur, now) + " " + LOCK_CITE
     return text + " " + LOCK_CITE
 
@@ -987,7 +988,7 @@ class GitLock(Lock):
             except Stop as e:  # keep the refusal text the failed push printed, and the error's class
                 raise type(e)(f"{e} (the lock push said: {out})") from e
             if (now_cur[0] if now_cur else None) != (cur[0] if cur else None):
-                raise Held(lost_race_text(b, now_cur, self.now()))
+                raise Held(lost_race_text(b, now_cur, self.now(), sha.strip()))
             if is_net(c, out):  # the call never reached the remote: that is no refusal
                 raise NetStop("cannot take the merge lock " + LOCK_CITE + ": " + out)
             raise Stop("the remote refused the push that takes the merge lock " + LOCK_CITE + ": " + out)
@@ -1054,15 +1055,16 @@ class GhLock(Lock):
         c, out, _ = retry_net(lambda: sh(["gh", "api", "-i", *a], cwd=self.cwd), self.pause, retries, f"the lock call {path}", self.now, self.extend_for, net_method(a), idempotent, landed)
         return c, out
 
-    def read(self, b):
-        c, sha = self.api(f"repos/{{owner}}/{{repo}}/git/ref/{lock_ref(b)[5:]}", "--jq", ".object.sha")
+    def read(self, b, once=False):
+        """-> (sha, expiry, message), or None when no lock is there. `once`: each call is one try with no wait (api once), for a read that only adds detail to a refusal."""
+        c, sha = self.api(f"repos/{{owner}}/{{repo}}/git/ref/{lock_ref(b)[5:]}", "--jq", ".object.sha", once=once)
         if c:
             if is_net(c, sha):  # first: a 5xx reply whose url holds "404" is no proof the lock is gone
                 raise NetStop("cannot read the merge lock " + LOCK_CITE + ": " + sha)
             if "404" in sha or "Not Found" in sha:
                 return None
             raise Stop("cannot read the merge lock " + LOCK_CITE + ": " + sha)
-        c, out = self.api(f"repos/{{owner}}/{{repo}}/git/commits/{sha}", "--jq", ".message")
+        c, out = self.api(f"repos/{{owner}}/{{repo}}/git/commits/{sha}", "--jq", ".message", once=once)
         if is_net(c, out):  # an unread expiry is no lock that never expires
             raise NetStop("cannot read the merge lock commit " + LOCK_CITE + ": " + out)
         return (sha, expiry_of(out), out) if not c else (sha, float("inf"), "")
@@ -1096,10 +1098,10 @@ class GhLock(Lock):
             if "already exists" not in out:  # 422 "Reference already exists" is the race; any other text is the refusal itself
                 raise Stop("cannot take the merge lock " + LOCK_CITE + ": " + out)
             try:
-                now_cur = self.read(b)
+                now_cur = self.read(b, once=True)  # one try, no wait: a rate limit here must not hold the refusal for up to 21 minutes
             except Stop:  # no answer: the text stays plain, and the race is still the refusal
                 now_cur = None
-            raise Held(lost_race_text(b, now_cur, self.now()))
+            raise Held(lost_race_text(b, now_cur, self.now(), sha.strip()))
         self._take(b, sha, tree, msg, now)
         return sha
 
