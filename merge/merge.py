@@ -21,7 +21,7 @@
                           (the 3600 s lint bound applies), and a head that lacks the default base's tip adds one merge commit, one more local `git merge` start and one push even when its page is current (a head that holds the tip with a current page pushes none; any head pushes at most once). No new file but ci-job's own log.
                           After a landed merge onto the default branch (never a refused one, never a merge onto another base) it fetches origin/roadmap and reads
                           roadmap/live/live.json. A readAt later than the merge commit's time prints the `merge --idle-lanes` report. Otherwise (a stale or unread file, where a failed
-                          fetch is unread, or a fresh file whose report reads unknown) one line says the idle-lanes pass is owed and names `merge --idle-lanes`, and the merged step's lane (its record's `lane`,
+                          fetch is unread, or a fresh file whose report holds an unknown line, alone or beside a lane or a hold) one line says the idle-lanes pass is owed and names `merge --idle-lanes`, and the merged step's lane (its record's `lane`,
                           else the session link at the foot of the PR body) prints as `check this lane`, never as a lane to archive. A lane still working prints
                           no line (a step still doing under it holds it unless a Step trailer on main shows that step landed). The merged steps are those of
                           `commit^1..commit` and of the base's tip before the merge to the merge, so a rebase merge names each lane. A session in the file's keepSessions, read at any age, prints a `hold (` line. With no roadmap branch on origin it prints nothing.
@@ -6841,8 +6841,8 @@ LIVE_PATH = "roadmap/live/live.json"  # triage commits the live file here on ori
 
 def idle_lanes_after_merge(root, commit, host, n, body, before=None):
     """After a landed merge onto the default branch: print the `merge --idle-lanes` report when the live file on origin/roadmap was read after the
-    merge commit's time and reads as a list. Otherwise (stale, missing, unreadable, origin unreadable, or a fresh file whose report reads
-    unknown) print one line saying the pass is owed, which names `merge --idle-lanes`, then the
+    merge commit's time and reads as a list. Otherwise (stale, missing, unreadable, origin unreadable, or a fresh file whose report holds an
+    unknown line, alone or beside a lane or a hold, so it is not fully read) print one line saying the pass is owed, which names `merge --idle-lanes`, then the
     lanes to check from the merged step's record (idle_lanes_to_check). `before` is the base's tip before the merge, or None. A repo whose origin has no roadmap branch has no live file and owes no pass:
     it prints nothing. The live file is passed in memory, never written. Never raises and never moves the exit code: the merge has landed.
     Cost: one fetch, one git show of the live file, one of the merge commit's time. Fresh path: the full idle-lanes report's reads (unmeasured).
