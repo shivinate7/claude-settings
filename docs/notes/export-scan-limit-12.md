@@ -1,0 +1,1 @@
+- export-scan-limit-12: a passphrase with a short version part (`secret=horse-battery-staple-v2`, `API_KEY=abc-def-g1`) passes the hyphen-words rule, as do toy vendor forms (`KEY=abcd-live-x1`, `KEY=stripe-live-a1`, `KEY=sk-live-a1-b`). Fix: none until a real incident. Decision: waiting-data-in-repo.

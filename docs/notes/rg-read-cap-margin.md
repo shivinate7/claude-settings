@@ -1,0 +1,1 @@
+- rg-read-cap-margin: lint/report_guard.py:175: the 64 KB read cap leaves about 34 KB over the stamp (byte ~30255 of hooks/guard.py). A stamp past the cap falls back to flat with no message, but test_rgs_red_stamp_and_folder_load_the_stamped_helper goes red first.

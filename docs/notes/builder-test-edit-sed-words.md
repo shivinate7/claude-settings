@@ -1,0 +1,1 @@
+- builder-test-edit-sed-words: guard builder-test-edit refused a builder's `sed -i` on docs/debts/notes.md, likely reading "stress test" inside the sed script as a test target (builder_shell_test_hit); the Edit tool made the same change unrefused. Possible false alarm.

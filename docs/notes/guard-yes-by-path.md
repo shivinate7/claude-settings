@@ -1,0 +1,1 @@
+- guard-yes-by-path: three reviewers judged #2593 "guard no" (a PostToolUse notify hook). The merge tool counts any hooks/ or settings.json edit as a guard change and refused `--guard no`. Briefs should name the tool's path rule, so reviewers judge net value from round 1.

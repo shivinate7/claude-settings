@@ -1,0 +1,1 @@
+- remove-item-quoted-false-alarm: a Bash call whose single-quoted text holds `Remove-Item -Recurse -Force C:\` is refused, while the same shape with `rm -rf /` in quotes passes. Quoted data is not an act. One sighting; no open step owns the check.

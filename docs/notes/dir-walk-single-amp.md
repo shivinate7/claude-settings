@@ -1,0 +1,1 @@
+- dir-walk-single-amp: a single `&` inside a segment (`true & R=B; cd "$R"` or `cd "$R" &`) makes dir_before_segment (hooks/guard_core.py) read only the segment's first command, so the walk reads a stale folder; main does the same for the literal twin `true & cd A; cmd`.

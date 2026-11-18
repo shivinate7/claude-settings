@@ -1,0 +1,1 @@
+- gh-verb-hidden-forms: `gh pr -- comment 5` and `gh pr --json x comment 5` still hide the verb, and a literal `-h` token disables gh_write_of. Pre-existing, out of #2462's scope. Related: note gh-body-h-hides-write.

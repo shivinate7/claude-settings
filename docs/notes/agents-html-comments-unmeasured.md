@@ -1,0 +1,1 @@
+- agents-html-comments-unmeasured: Claude Code docs say block-level HTML comments in CLAUDE.md are stripped; for agents/*.md the loader's handling is unmeasured.

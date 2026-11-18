@@ -1,0 +1,1 @@
+- ps-read-debt-leftover-line: docs/debts/ps-read-with-bash-quotes.md, the What ends with a leftover instruction "Also name this form in the Retire cases". The Retire already holds it. Fix: delete that sentence.
