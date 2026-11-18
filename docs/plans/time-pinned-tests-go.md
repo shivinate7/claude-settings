@@ -1,5 +1,7 @@
 # Time-pinned tests go: the plan
 
+Refuter: refuter opus, 2026-11-18, revise (its changes are folded into the lanes below)
+
 This plan turns the time-pinned tests into outcome checks. A time-pinned test passes or fails
 on the speed of a clock or a runner. It is the working plan for roadmap step time-pinned-tests-go,
 the step that ends the time-pinned tests and with them the stopgap job caps.
