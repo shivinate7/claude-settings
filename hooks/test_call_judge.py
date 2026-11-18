@@ -1405,9 +1405,9 @@ def widening_pin(sentences, *groups):
     return any(all(any(w in s for w in group) for group in groups) for s in sentences)
 
 
-# Owner ruling 2026-11-17 14:19 CST (decision uniform-over-variants): a change to the shared tool that every repo gets
-# alike is not widening, so the judge never flags it. Widening is a form, allow entry or exception made so that one
-# repo's differing form passes. The judge reads both in its widening slot, so the cases read that slot.
+# A change to the shared tool that every repo gets alike is not widening, so the judge never flags it. Widening is a
+# form, allow entry or exception made so that one repo's differing form passes (decision uniform-over-variants: one
+# shared tool for every repo). The judge reads both in its widening slot, so the cases read that slot.
 def case_widening_rule_spares_a_tool_wide_change_with_no_repo_named():
     r = run_hook(page_input("set", good_page_item()), answer=ALLOW)
     prompt = r.calls[0]["prompt"] if r.calls else ""

@@ -1376,9 +1376,9 @@ def case_prompt_flags_a_recommended_option_that_widens():
           has_pin(sentences, ("never flag",), ("describes the rule",)), sentences)
 
 
-# Owner ruling 2026-11-17 14:19 CST (decision uniform-over-variants): a change to the shared tool that every repo gets
-# alike is not widening, so the judge never flags it. Widening is a form, allow entry or exception made so that one
-# repo's differing form passes.
+# A change to the shared tool that every repo gets alike is not widening, so the judge never flags it. Widening is a
+# form, allow entry or exception made so that one repo's differing form passes (decision uniform-over-variants: one
+# shared tool for every repo).
 def case_prompt_spares_a_tool_wide_change_with_no_repo_named():
     run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
     sentences = rule_sentences(run, WIDENS_ASK)
