@@ -508,6 +508,12 @@ class LaneFixture(CiJobStub, tm.CloudSession):
         sweep_patch = unittest.mock.patch.object(sweep, "sweep_repo", side_effect=self.record_sweep)
         self.sweep_mock = sweep_patch.start()
         self.addCleanup(sweep_patch.stop)
+        # The floor reads the host's drives (merge.refuse_full_disk). A case that names a drive patches shutil.disk_usage itself, and that patch
+        # wins until it ends. Every other case reads this roomy drive, so no result depends on the host's free space.
+        roomy = types.SimpleNamespace(total=int(DISK_GIB * GIB), used=int((DISK_GIB - 500) * GIB), free=int(500 * GIB))
+        disk_patch = unittest.mock.patch.object(shutil, "disk_usage", return_value=roomy)
+        disk_patch.start()
+        self.addCleanup(disk_patch.stop)
 
     def record_sweep(self, root, confirm, restore_log_path, mode="full", attended=False, own_lock_rule=True):
         """The stand-in for janitor/sweep.py's sweep_repo: it records the call with where stdout stands, and reaps nothing. -> sweep_repo's result shape.
