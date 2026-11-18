@@ -1,0 +1,58 @@
+{
+  "added": "2026-11-18T15:23:13-06:00",
+  "context": "Goal: several full test suites running at once stop slowing each other down.\nProblem (rule): a fixed limit goes against your ruling of no fixed numbers (22 Oct, and 12:54 CST on 11 Nov), so the way the brake should count is your call.\nBased on (read): the tile-windows session's report you forwarded: 3 to 5 suites at once turned a 9-minute run into 16 to 18 minutes (not re-read by triage).\nDeparts from: main \u2014 the load brake reads memory and disk only \u2014 it also refuses a new suite start while the machine reads busy.\nWaiting on: nothing is stopped; the consultant builds step suite-load-brake on your answer.",
+  "home": "step suite-load-brake",
+  "kind": "decision",
+  "n": 979,
+  "options": [
+    {
+      "gain": "No fixed number.",
+      "how": "The brake adds one reading at each suite start and refuses while it reads busy.",
+      "id": "refuse-when-busy",
+      "key": "a",
+      "label": "Refuse a new full-suite start while the machine reads busy (recommended)",
+      "lose": "One more reading at every suite start."
+    },
+    {
+      "gain": "Simple.",
+      "how": "The brake counts running suites and refuses a third.",
+      "id": "fixed-limit-2",
+      "key": "b",
+      "label": "A fixed limit of 2 suites",
+      "lose": "Goes against your ruling of no fixed numbers."
+    },
+    {
+      "gain": "No change to the brake.",
+      "how": "No change.",
+      "id": "do-nothing",
+      "key": "c",
+      "label": "Nothing",
+      "lose": "The slowdowns stay."
+    }
+  ],
+  "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "recommended": "a",
+  "ref": "consultant message 15:23 CST Nov 18, from your 14:54 CST review list (feedback from the local tile-windows session)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Load brake: stop parallel suites",
+  "shown": [
+    {
+      "id": "refuse-when-busy",
+      "key": "a",
+      "label": "Refuse a new full-suite start while the machine reads busy (recommended)"
+    },
+    {
+      "id": "fixed-limit-2",
+      "key": "b",
+      "label": "A fixed limit of 2 suites"
+    },
+    {
+      "id": "do-nothing",
+      "key": "c",
+      "label": "Nothing"
+    }
+  ],
+  "status": "open",
+  "title": "How should the machine's load brake stop several full test suites from slowing each other?",
+  "why": "a follows your no-fixed-numbers ruling; b breaks it and c leaves the slowdown. Recommended by the consultant, not owner-typed."
+}

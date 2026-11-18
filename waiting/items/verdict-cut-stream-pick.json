@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-18T15:23:13-06:00",
+  "context": "Goal: a test run that stops partway never reads as passed.\nProblem (rule): bin/verdict (the tool that reads a test run and prints one word) has only PASS, SKIP and FAIL, so a log whose stream stopped early has no honest word, and adding a word changes what every reader handles.\nBased on (read): the consultant's read of bin/verdict line 99, which passes a log whose stream stopped early, and lines 123 to 128, where an exit code 0 with no test count reads PASS (not re-read by triage).\nDeparts from: main \u2014 verdict has three words and a cut stream can read PASS \u2014 a cut stream stops reading PASS.\nWaiting on: nothing is stopped; the consultant builds step verdict-cut-stream on your answer.",
+  "home": "step verdict-cut-stream",
+  "kind": "decision",
+  "n": 977,
+  "options": [
+    {
+      "gain": "No new word; every reader already handles FAIL.",
+      "how": "A cut stream prints FAIL and the line says it was cut.",
+      "id": "fail-cut",
+      "key": "a",
+      "label": "Print FAIL with the word \"cut\" in the line (recommended)",
+      "lose": "A cut looks like a test failure until someone reads the line."
+    },
+    {
+      "gain": "The label is exact.",
+      "how": "bin/verdict prints UNKNOWN for a cut stream.",
+      "id": "new-unknown-word",
+      "key": "b",
+      "label": "Add a new word, UNKNOWN, for a cut stream",
+      "lose": "Every reader of the verdict must learn the new word."
+    }
+  ],
+  "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "recommended": "a",
+  "ref": "consultant message 15:23 CST Nov 18, from your 14:54 CST review list (feedback from the local tile-windows session)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Verdict: a cut test log reads PASS",
+  "shown": [
+    {
+      "id": "fail-cut",
+      "key": "a",
+      "label": "Print FAIL with the word \"cut\" in the line (recommended)"
+    },
+    {
+      "id": "new-unknown-word",
+      "key": "b",
+      "label": "Add a new word, UNKNOWN, for a cut stream"
+    }
+  ],
+  "status": "open",
+  "title": "A test run that stops partway can read as passed: what should the verdict tool print for a cut log?",
+  "why": "a needs no new word and every reader already stops on FAIL; b is exact but touches every reader. Recommended by the consultant, not owner-typed."
+}
