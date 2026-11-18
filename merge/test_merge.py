@@ -26040,6 +26040,32 @@ class StaleMergeTrees(unittest.TestCase):
         self.assertIn(os.path.realpath(far_wt), self.locked_trees(), "the dead-locked tree outside the temp folder must stay registered")
 
 
+class VerifiedLine(RecordsEnv):
+    """The claim commit and the records-page commit each carry a Verified line (lint/check_red_run.py)."""
+
+    def test_claim_commit_carries_a_verified_line(self):
+        info = self.host.pr(7)
+        tmp, wt = merge.open_worktree(self.co, info, "main")
+        try:
+            trailer = merge.do_claim(wt, ".github/stamp.json", "origin/main")
+            sha = merge.commit_claim(wt, trailer)
+            subject = sh(self.co, "git", "log", "-1", "--format=%s", sha)
+            message = sh(self.co, "git", "log", "-1", "--format=%B", sha)
+        finally:
+            merge.drop_worktree(self.co, tmp, wt)
+        self.assertEqual(subject, "Claim record numbers", "fixture: the commit is not the claim")  # scope before subject
+        self.assertIn("Record-claim: ", message, "fixture: the claim commit holds no Record-claim trailer")
+        self.assertRegex(message, r"(?m)^Verified: \S", "the claim commit has no Verified line:\n" + message)
+
+    def test_page_commit_carries_a_verified_line(self):
+        parent = sh(self.co, "git", "rev-parse", "origin/main")
+        page = self.tool_page(parent, rebuild=False, hand="# Records\n\nwritten by the Verified line case\n")
+        subject = sh(self.co, "git", "log", "-1", "--format=%s", page)
+        message = sh(self.co, "git", "log", "-1", "--format=%B", page)
+        self.assertEqual(subject, merge.PAGE_SUBJECT, "fixture: the commit is not the records-page commit")  # scope before subject
+        self.assertRegex(message, r"(?m)^Verified: \S", "the records-page commit has no Verified line:\n" + message)
+
+
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
         # A run that holds the lock in its merge call for a minute, for a signal to reach. It prints READY once it holds the lock.

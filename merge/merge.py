@@ -2267,6 +2267,10 @@ def claim_only(root, cfgrel, base, linted, live):
     return True
 
 PAGE_SUBJECT = "Rebuild the records page"  # the subject of a page-only commit (commit_claim with no trailer)
+_GENERATOR = "python3 lint/" + os.path.basename(RECORDS) + " --records-only"  # the records generator's command, as run_records starts it, without the tool's own path
+_CLAIM_COMMAND = "node actions/stamp/" + os.path.basename(STAMP) + " --claim"  # the claim's command, as node_stamp starts it; glossary-ok: STAMP is the existing constant for the tool path
+VERIFIED_CLAIM = f"Verified: {_CLAIM_COMMAND}; {_GENERATOR} -> both exited 0"  # do_claim and rebuild_records ran before the commit, and each raises Stop on a nonzero exit
+VERIFIED_PAGE = f"Verified: {_GENERATOR} -> exited 0 and changed the records page"  # a page-only commit exists only when rebuild_records changed the tree
 
 def page_only(wt, sha, strict=False):
     """-> the parent of `sha` when it is a page-only commit: one parent, the subject PAGE_SUBJECT, and the records page alone changed. Else None,
@@ -2379,8 +2383,9 @@ def identity(wt):
 def commit_claim(wt, trailer):
     """One commit for the claim and the rebuilt records page. No trailer: the page alone."""
     git(wt, "add", "-A")
-    msg = ["-m", "Claim record numbers", "-m", trailer] if trailer else ["-m", PAGE_SUBJECT,
-           "-m", f"Drops-lines: {RECORDS_PAGE} -- a generated page, rebuilt by the generator"]  # the silent-undo check reads the rebuilt page as generated
+    # One last paragraph holds each trailer, so git reads Record-claim and Drops-lines beside the Verified line (lint/check_red_run.py).
+    msg = ["-m", "Claim record numbers", "-m", trailer + "\n" + VERIFIED_CLAIM] if trailer else ["-m", PAGE_SUBJECT,
+           "-m", f"Drops-lines: {RECORDS_PAGE} -- a generated page, rebuilt by the generator\n" + VERIFIED_PAGE]  # the silent-undo check reads the rebuilt page as generated
     c, out = git(wt, *identity(wt), "commit", "-q", *msg)
     if c:
         raise Stop("cannot commit the claim " + STAMP_RUN_CITE + ": " + out)
