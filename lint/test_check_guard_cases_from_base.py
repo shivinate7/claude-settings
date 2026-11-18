@@ -153,6 +153,12 @@ def tail(out, lines=6):
     return "\n".join(out.splitlines()[-lines:])
 
 
+# The kill cases. Both are deny and share one payload shape and one cwd, so they differ only by the pid's class:
+# own is a pid this process owns (OWNED, the sleep the real suite starts), live is the parent of this process.
+# The cwd is unique to them, so no real case of the suite shares their key.
+KILL_CWD = 'cwd=ROOT + "/fixture-kill-class"'
+KILL_OWN = 'sh("fixture kill own", "kill -9 " + str(OWNED.pid), "deny", "fixture-kill", %s)' % KILL_CWD
+KILL_LIVE = 'sh("fixture kill live", "kill -9 " + str(os.getppid()), "deny", "fixture-kill", %s)' % KILL_CWD
 CLOCK = ['sh("fixture clock", "touch " + ROOT + "/clock-" + repr(time.time()), "deny", "fixture-rule")']
 
 RED_BASE = section_text([
@@ -162,14 +168,14 @@ RED_BASE = section_text([
     case("fixture removed", "deny", "fixture-rule", "removed"),
     case("fixture unwaived", "deny", "fixture-rule", "unwaived"),
     case("fixture stays", "deny", "fixture-rule", "stays"),
-])
+], [KILL_OWN, KILL_LIVE])
 RED_HEAD = section_text([
     case("fixture flip", "allow", None, "flip"),
     case("fixture to ask", "ask", "fixture-ask-rule", "to-ask"),
     case("fixture kept", "deny", "fixture-rule", "kept"),
     case("fixture unwaived", "allow", None, "unwaived"),
     case("fixture stays", "deny", "fixture-rule", "stays"),
-])
+], [KILL_LIVE])
 RED_MESSAGE = "Loosen some cases\n\nGuard-case-loosened: fixture stays"
 
 GREEN_BASE = section_text([
@@ -178,14 +184,14 @@ GREEN_BASE = section_text([
     case("fixture reason", "deny", "fixture-reason-old", "reason"),
     case("fixture rename old", "deny", "fixture-rule", "renamed"),
     case("fixture waived", "deny", "fixture-rule", "waived"),
-], CLOCK)
+], [*CLOCK, KILL_OWN, KILL_LIVE])
 GREEN_HEAD = section_text([
     case("fixture tighten", "deny", "fixture-rule", "tighten"),
     case("fixture ask to deny", "deny", "fixture-rule", "ask-deny"),
     case("fixture reason", "deny", "fixture-reason-new", "reason"),
     case("fixture rename new", "deny", "fixture-rule", "renamed"),
     case("fixture waived", "allow", None, "waived"),
-], CLOCK)
+], [*CLOCK, KILL_OWN, KILL_LIVE])
 GREEN_MESSAGE = "Tighten some cases, rename one and loosen one with its trailer\n\nGuard-case-loosened: fixture waived"
 
 UNKNOWN_BASE = section_text([case("fixture kept", "deny", "fixture-rule", "kept")])
@@ -268,6 +274,15 @@ class GuardCasesFromBase(unittest.TestCase):
     def test_removed_deny_case_reads_red(self):
         """Red on pass-all, and on red-all, which flags only the case that stays and so never names the removed one."""
         self.assert_red("red", "fixture removed")
+
+    def test_removed_kill_case_reads_red(self):
+        """Red on the commit before the pid class joined the key (5005dd4502), where the two kill cases share one key.
+        The removed own-pid case then reads as a rename of the live one, and no RED names it."""
+        self.assert_red("red", "fixture kill own")
+
+    def test_unchanged_kill_cases_read_green(self):
+        """Control, red on red-all and on pid-runner: the two kill cases keep their payloads, so neither reads red."""
+        self.assert_green("green", "fixture kill own", "fixture kill live")
 
     def test_tightening_allow_to_deny_passes(self):
         """Control, red on red-all: it flags the tightened case, and a tightening must read green."""
