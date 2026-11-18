@@ -58,7 +58,7 @@ One ledger. Home: `merge/merge.py`. It extends `merge --reviewed`. It adds no to
 
 Each open PR gets exactly one next act. The tool reads it from GitHub alone. The first match wins:
 
-- Done review log for the live head, with a lane-lint PASS at that head: `batch`. Without the PASS: `lane lint`, owner the lane (coordinator pick, 12:01 CST Nov 12). A clean merge of main keeps a record for the live head (decision pr-review-record, The review a changed head owes). Not built.
+- Done review log for the live head, with a lane-lint PASS at that head: `batch`. Without the PASS: `lane lint`, owner the lane (coordinator pick, 12:01 CST Nov 12). A PR whose lane lint was skipped because its CI is green reads `batch`. A clean merge of main keeps a record for the live head (decision pr-review-record, The review a changed head owes). Not built.
 - Review record open: `lane round n`, n the next round owed. A failed fix check: `lane round 1`.
 - Review log stale, newest record has no Fix check line: fix check.
 - Review log stale, newest record has a PASS Fix check, and the live head is a conflicted merge of main into the fixed head: one more fix verifier (decision pr-review-record). Its prior record must be a PASS that `review_state` accepts. Not built.
@@ -73,7 +73,7 @@ The first match wins, in this order. A held or unparseable record matches no rec
 
 The ledger reads no pull request's CI state. A batch line is a done record for the live head. `merge --lane-lint` checks the join, and the integration PR's CI run checks the merge. Until the cutover; after it, the lane PR's own run checks the merge. Its CI-side reads are main's runs, judged per workflow, for the main-red hold.
 
-Only the two batch acts have an age limit, in one constant, `PR_STATE_AGE_HOURS` in merge/merge.py. Batch and batch run are 24 h, an unmeasured first guess at one batch cycle (coordinator pick A, 12:33 CST Nov 7). Every other act has no limit: lane round 1 to 4, fix check, fresh full review, lane lint, `waits on` and blocked on #N. The owner ruled that no fixed numeric limit stands anywhere (R37, no fixed numeric limits; owner, Nov 11, restated 18:35 CST Nov 15), which retired the 72 h limits. A hold still goes red when it has no page item or debt, and blocked on #N is red while #N is red. A batch act over its limit is red.
+Only the two batch acts have an age limit, in one constant, `PR_STATE_AGE_HOURS` in merge/merge.py. Batch and batch run are 24 h, an unmeasured first guess at one batch cycle (coordinator pick A, 12:33 CST Nov 7). Every other act has no limit: lane round 1 to 4, fix check, fresh full review, lane lint, `waits on` and blocked on #N. Owner pick a on item 572 (ruling `own-572-a-ledger-by-age-only`, 23:10 CST Nov 15) retired the 72 h numbers of the lane acts: a stalled review is flagged only by an age measured from the review records. Step `pr-ledger-round-ages` holds that measure. A hold still goes red when it has no page item or debt, and blocked on #N is red while #N is red. A batch act over its limit is red.
 
 A main-red hold shows on each batch line it holds.
 
