@@ -266,6 +266,8 @@ def _test_run_word(tokens, index: int) -> str:
     interpreter-operand reader as the check roster (`_script_operand`): a script whose name is a test's,
     `pytest`, `python -m pytest|unittest`, `node --test`, `npm test`, `swift test`, `xcodebuild test`. A syntax check
     or an info screen (SYNTAX_CHECK_FLAGS, PYTEST_INFO_FLAGS) is no test run."""
+    if _fg_lookup(tokens, index):  # `command -v pytest` names where the program is and runs nothing
+        return ""
     program = basename(tokens[index]).removesuffix(".exe")
     rest = tokens[index + 1:]
     if program == "pytest":

@@ -446,7 +446,7 @@ PLAYWRIGHT_SET_DENY = (
     ("playwright: an inline assignment ahead of an install",
      "PLAYWRIGHT_BROWSERS_PATH=/tmp/x npx playwright install chromium", "Bash"),
     ("playwright: an export ahead of a test run",
-     "export PLAYWRIGHT_BROWSERS_PATH=/tmp/x; npm test", "Bash"),
+     "export PLAYWRIGHT_BROWSERS_PATH=/tmp/x; verdict npm test", "Bash"),
     ("playwright: env names the variable for a test run",
      "env PLAYWRIGHT_BROWSERS_PATH=/tmp/x npx playwright test", "Bash"),
     ("playwright: bash -c sets it", 'bash -c "export PLAYWRIGHT_BROWSERS_PATH=/x"', "Bash"),

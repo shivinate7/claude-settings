@@ -5391,15 +5391,15 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = check_tail_hit(stripped, background)
     if matched:
         refuse(tool, "deny", "check-tail", CHECK_TAIL_REASON, matched)
-    matched = bare_check_hit(stripped, background)
-    if matched:
-        refuse(tool, "deny", "bare-check", BARE_CHECK_REASON, matched)
     # The long foreground call is read first, so a foreground lane lint under background work gets this refusal and
     # its rerun then meets check-timeout's limit. Only a call that can run long reads the transcript.
     if not background and not agent:
         matched = fg_long_hit(split_segments(stripped), timeout_ms)
         if matched and background_work_running(transcript):
             refuse(tool, "deny", "fg-bash-while-bg", FG_BACKGROUND_REASON, matched)
+    matched = bare_check_hit(stripped, background)
+    if matched:
+        refuse(tool, "deny", "bare-check", BARE_CHECK_REASON, matched)
     matched = check_timeout_hit(stripped, background, timeout_ms)
     if matched:
         refuse(tool, "deny", "check-timeout", CHECK_TIMEOUT_TEMPLATE % check_timeout_limit_text(), matched)

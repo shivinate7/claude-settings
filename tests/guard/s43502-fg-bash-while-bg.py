@@ -118,8 +118,14 @@ def fg_refuse(name, command, transcript, **fields):
         **fields)
 
 
+FG_BARE_TEST = ("pytest", "npm test", "node --test")  # a bare test run is bare-check's refusal (rule tokens-run-through-verdict)
+
+
 def fg_allow(name, command, transcript, silent=False, **fields):
-    """A call the rule lets through. silent: the allow must print nothing."""
+    """A call the rule lets through. silent: the allow must print nothing. A test run goes behind verdict, so the
+    rows judge fg-bash-while-bg and not bare-check; a `command -v` lookup runs nothing and stays as it is."""
+    if any(word in command for word in FG_BARE_TEST) and not command.startswith(("verdict", "command -v")):
+        command = "verdict " + command
     add(name, "allow", cwd=FG_CWD, transcript=transcript, command=command, silent=silent, **fields)
 
 
