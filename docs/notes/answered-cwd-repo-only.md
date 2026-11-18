@@ -1,0 +1,1 @@
+- answered-cwd-repo-only: items are read from the repo of the cwd only (hooks/answered_claims.py, answered_claim_hit, line 209). Decision: `answered-claims-match-page` (a claim that a waiting-page item is answered matches the page).

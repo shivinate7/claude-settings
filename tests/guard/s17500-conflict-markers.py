@@ -160,6 +160,14 @@ CMK_SEQB = os.path.join(CMKPUSH, "seqtriplet")  # as seqclean, with b.txt holdin
 CMK_REL = os.path.join(CMKPUSH, "relative")    # diff.relative set; a triplet unpushed in sub/f.txt
 CMK_PAREN = os.path.join(CMKPUSH, "fixparen")  # an unpushed triplet on branch fix(x); HEAD on clean topic
 CMK_GONE = os.path.join(CMKROOT, "gone")       # a folder no fixture makes: the cd target of the missing-folder cases
+CMK_SUB = os.path.join(CMK_CL, "sub")          # an existing folder inside the clean repo: the cd target of the control
+CMK_MADE = os.path.join(CMK_CL, "made")        # a folder a mkdir in the same call makes: absent at check time
+CMK_MADE_T = os.path.join(CMK_CLT, "made")     # the same folder, inside the triplet repo
+CMK_WT = os.path.join(CMKPUSH, "wt")           # the worktree that `worktree add ../wt` makes, from CMK_CL
+CMK_CLONE = os.path.join(CMK_CL, "cloned")     # the folder that a clone in the same call makes
+CMK_GONE_INNER = os.path.join(CMK_GONE, "inner")  # under the missing folder: the cd target of a mkdir that fails
+CMK_SUB_INNER = os.path.join(CMK_SUB, "inner")    # under an existing folder: the cd target of a mkdir that works
+CMK_INIT = os.path.join(CMK_CL, "inited")         # made by a git init in the same call: absent at check time
 
 
 def _cmk_commit(where, rel, text, msg):
@@ -255,7 +263,9 @@ def _build_conflict_markers_push():
     commit(CMK_PAREN, "a.txt", CM_TRIPLET, "triplet on fix(x), unpushed")
     run(CMK_PAREN, "checkout", "-q", "topic")
     run(CMK_PAREN, "branch", "fixy", "fix(x)")             # the same commit, under a plain name
-    for gone in (CMK_GONE, os.path.join(CMK_CLT, "nope")):
+    os.makedirs(CMK_SUB)                                   # an empty folder: git does not track it
+    for gone in (CMK_GONE, os.path.join(CMK_CLT, "nope"), CMK_MADE, CMK_MADE_T, CMK_WT, CMK_CLONE,
+                 CMK_GONE_INNER, CMK_SUB_INNER, CMK_INIT):
         if os.path.exists(gone):
             sys.exit("fixture setup failed in the conflict-markers fixtures: %r exists, so a cd to it does not fail"
                      % gone)
@@ -308,8 +318,91 @@ cmk_refuse("a cd into a missing relative folder, then ; add -A and commit, with 
            "cd nope ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
 cmk_allow("a cd into a missing folder, then && add -A and commit, with a triplet tracked in the cwd repo",
           "cd " + slash(CMK_GONE) + " && " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
-cmk_allow("a cd into a missing folder, then ; add -A and commit, in a cwd repo whose edit is clean",
-          "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CL)
+# A `;` after a cd to a missing folder still runs the git write in the cwd repo, because a failed cd leaves the shell
+# there. The guard refuses that write even when the cwd repo is clean, since the command did not name that repo.
+cmk_refuse("a cd into a missing folder, then ; add -A and commit, in a cwd repo whose edit is clean",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CL)
+# The control for it: the same call, with the cd to a folder that exists. Only the cd target differs, so this
+# one is allowed.
+cmk_allow("a cd into an existing folder, then ; add -A and commit, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_SUB) + " ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CL)
+# The ruling covers every git write after a cd, not only a commit: a push, a merge, and a commit after a newline.
+# Each deny runs in the clean CMK_CL, so the missing cd target is the only reason to refuse. Each control is the
+# same call after a cd to an existing folder. `&&` stops the chain after a missing cd, so that one is allowed.
+cmk_refuse("a cd into a missing folder, then ; push, in a cwd repo whose edit is clean",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " push", CMK_CL)
+cmk_allow("a cd into an existing folder, then ; push, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_SUB) + " ; " + VCS + " push", CMK_CL)
+cmk_refuse("a cd into a missing folder, then ; merge main, in a cwd repo whose edit is clean",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " merge main", CMK_CL)
+cmk_allow("a cd into an existing folder, then ; merge main, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_SUB) + " ; " + VCS + " merge main", CMK_CL)
+cmk_refuse("a cd into a missing folder, then a newline, then commit, in a cwd repo whose edit is clean",
+           "cd " + slash(CMK_GONE) + "\n" + VCS + " commit -m x", CMK_CL)
+cmk_allow("a cd into an existing folder, then a newline, then commit, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_SUB) + "\n" + VCS + " commit -m x", CMK_CL)
+cmk_allow("a cd into a missing folder, then && push, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_GONE) + " && " + VCS + " push", CMK_CL)
+# The same ruling covers the other git writes after a missing cd: add, pull, rebase, cherry-pick, and the --continue
+# of a rebase or a cherry-pick. Each deny runs in the clean CMK_CL, so the missing cd target is the only reason to
+# refuse. Each control is the same call after a cd to an existing folder.
+cmk_refuse("a cd into a missing folder, then ; add -A, in a cwd repo whose edit is clean",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A", CMK_CL)
+cmk_allow("a cd into an existing folder, then ; add -A, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_SUB) + " ; " + VCS + " add -A", CMK_CL)
+cmk_refuse("a cd into a missing folder, then ; pull, in a cwd repo whose edit is clean",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " pull", CMK_CL)
+cmk_allow("a cd into an existing folder, then ; pull, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_SUB) + " ; " + VCS + " pull", CMK_CL)
+cmk_refuse("a cd into a missing folder, then ; rebase main, in a cwd repo whose edit is clean",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " rebase main", CMK_CL)
+cmk_allow("a cd into an existing folder, then ; rebase main, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_SUB) + " ; " + VCS + " rebase main", CMK_CL)
+cmk_refuse("a cd into a missing folder, then ; cherry-pick a sha, in a cwd repo whose edit is clean",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " cherry-pick abc1234", CMK_CL)
+cmk_allow("a cd into an existing folder, then ; cherry-pick a sha, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_SUB) + " ; " + VCS + " cherry-pick abc1234", CMK_CL)
+cmk_refuse("a cd into a missing folder, then ; rebase --continue, in a cwd repo whose edit is clean",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " rebase --continue", CMK_CL)
+cmk_allow("a cd into an existing folder, then ; rebase --continue, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_SUB) + " ; " + VCS + " rebase --continue", CMK_CL)
+cmk_refuse("a cd into a missing folder, then ; cherry-pick --continue, in a cwd repo whose edit is clean",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " cherry-pick --continue", CMK_CL)
+cmk_allow("a cd into an existing folder, then ; cherry-pick --continue, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_SUB) + " ; " + VCS + " cherry-pick --continue", CMK_CL)
+# A folder that the same call makes first is in place when the cd runs, so the cd works and the write runs there.
+# The brief reads "missing" as "not made earlier in the same call". Each case runs in CMK_CL, so the cd rule is
+# the only thing that can refuse it. Each is refused today.
+cmk_allow("a mkdir of a folder, then ; cd into it and commit, in a cwd repo whose edit is clean",
+          "mkdir -p " + slash(CMK_MADE) + " ; cd " + slash(CMK_MADE) + " ; " + VCS + " commit -m x", CMK_CL)
+cmk_allow("a worktree add of ../wt, then ; cd into it and commit, in a cwd repo whose edit is clean",
+          VCS + " worktree add ../wt b ; cd ../wt ; " + VCS + " commit -m x", CMK_CL)
+cmk_allow("a clone into a folder, then ; cd into it and commit, in a cwd repo whose edit is clean",
+          VCS + " clone " + slash(CMK_CL) + " " + slash(CMK_CLONE) + " ; cd " + slash(CMK_CLONE) + " ; "
+          + VCS + " commit -m x", CMK_CL)
+# `git init` makes its folder, so the cd into it lands in a repository and the commit is judged there. The cwd repo
+# is clean, so the missing-cd rule is the only cause that could refuse this call.
+cmk_allow("a git init of a folder, then ; cd into it and commit, in a cwd repo whose edit is clean",
+          VCS + " init " + slash(CMK_INIT) + " ; cd " + slash(CMK_INIT) + " ; " + VCS + " commit -m x", CMK_CL)
+# The control: the init makes one folder and the cd goes to another, so that cd still fails and the commit is refused.
+cmk_refuse("a git init of one folder, then ; cd into another missing folder and commit, in a clean cwd repo",
+           VCS + " init " + slash(CMK_INIT) + " ; cd " + slash(CMK_GONE) + " ; " + VCS + " commit -m x", CMK_CL)
+cmk_allow("a cd into a missing folder, then || exit 1, then ; commit, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_GONE) + " || exit 1 ; " + VCS + " commit -m x", CMK_CL)
+# A read-only git after a missing cd is no write, so it stays allowed.
+cmk_allow("a cd into a missing folder, then ; status, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_GONE) + " ; " + VCS + " status", CMK_CL)
+# The folder a mkdir makes, inside the triplet repo, still refuses: the add and the commit land in that repo.
+cmk_refuse("a mkdir of a folder in the triplet repo, then ; cd into it, add -A and commit",
+           "mkdir -p " + slash(CMK_MADE_T) + " ; cd " + slash(CMK_MADE_T) + " ; " + VCS + " add -A && "
+           + VCS + " commit -m x", CMK_CLT)
+# A mkdir that fails leaves its folder missing. Without -p it fails when its parent is missing, so the cd into the
+# folder fails too, and the shell stays in the cwd repo. The cwd repo is clean, so the missing-cd rule is the cause.
+cmk_refuse("a mkdir without -p under a missing parent, then ; cd into it and commit, in a cwd repo whose edit is clean",
+           "mkdir " + slash(CMK_GONE_INNER) + " ; cd " + slash(CMK_GONE_INNER) + " ; " + VCS + " commit -m x", CMK_CL)
+# The control: the same call under a parent that exists, so the mkdir makes the folder and the cd works.
+cmk_allow("a mkdir without -p under an existing parent, then ; cd into it and commit, in a clean cwd repo",
+          "mkdir " + slash(CMK_SUB_INNER) + " ; cd " + slash(CMK_SUB_INNER) + " ; " + VCS + " commit -m x", CMK_CL)
 
 # A failed cd leaves the shell where it was, so the next command after `;`, a newline or `||` runs there. After
 # `&&` the chain stops. `--work-tree` names the folder an add reads: a missing one fails the add (exit 128), so
@@ -328,6 +421,13 @@ cmk_refuse("a cd into a missing folder, then || true, then ; add -A and commit, 
            "cd " + slash(CMK_GONE) + " || true ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
 cmk_refuse("a cd into a missing folder, then a newline, then add -A and commit, the triplet in the cwd repo",
            "cd " + slash(CMK_GONE) + "\n" + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+# Bash's `return` outside a function does not end the shell: it reports an error, and the next command runs. So after
+# `cd <missing> || return`, a git write after `;` runs in the cwd repo, as it does after a `;` alone.
+cmk_refuse("a cd into a missing folder, then || return, then ; add -A and commit, the triplet in the cwd repo",
+           "cd " + slash(CMK_GONE) + " || return ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+# The control: `exit` ends the shell, so the commit after it never runs. Only the word differs from the case above.
+cmk_allow("a cd into a missing folder, then || exit 1, then ; add -A and commit, the triplet in the cwd repo",
+          "cd " + slash(CMK_GONE) + " || exit 1 ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
 
 # `cd -` goes back to the folder before the last cd that worked. A failed cd leaves that folder alone, so the
 # commit lands in the triplet repo. The NOGIT form has no triplet to refuse, so this case starts in CMK_CLT.

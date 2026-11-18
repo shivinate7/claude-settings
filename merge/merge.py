@@ -95,6 +95,11 @@
                           State f: a branch on origin ahead of the base that no PR of any state names or holds, with no `archive/NAME` copy, and not
                           `archive/`, `batch-`, or the base, whose newest commit is 6 h old or more: `lost-work branch NAME (f)`.
                           Same reader as the rows above; the ledger reuses the run's one fetch and adds three git reads per row, no gh call.
+  merge --reviewed --json
+                          in place of the lines, one JSON object: {readAt, rows}. readAt is the time the read began (ISO, UTC); each open pull request
+                          has one row {number, act, owner, ageHours, red, blockedOn}, the act, owner, age and RED of its line (the blocked-on red
+                          fix-up included), and blockedOn the number it is blocked on or null. The roadmap's publisher puts it whole under the live
+                          file's `ledger` key. Stands alone: no --root, --live or --ledger. Cost: that of one --reviewed; no new call, process, file or timer.
   merge --reviewed --root DIR [--root DIR ...]
                           the same list for each repo checkout DIR, in the order given, one block each: `repo OWNER/NAME:`, then that repo's lines.
                           Each lane merges on its own, so a block names no batch to open or build. The base is the root's
@@ -5731,7 +5736,7 @@ def own_records(n, bodies):
     """-> the parsed records among `bodies` that name pull request `n`, in order: the earlier records review_state walks back through."""
     return [e for e in (parse_review(b) for b in bodies) if e and e["n"] == n]
 
-def reviewed_read(h, cfgrel=None, facts=None):
+def reviewed_read(h, cfgrel=None, facts=None, ledger=None):
     """-> (lines, pulls, totals): the lines of `merge --reviewed`, built before any is printed so a failed read prints none; the open pull request rows; and
     the two PR ledger number lines (decision pr-ledger). Each open pull request gets a line, `#<n> <branch> <sha9> <state>: <why>; next: <act>, owner <owner>,
     age <H>h[, RED]; CI <ci>`; one with no record of its own and no carried one too reads state `no record`, CI not read, and the `no record:` line names it as
@@ -5748,7 +5753,9 @@ def reviewed_read(h, cfgrel=None, facts=None):
     request's own base. A claim commit on the reviewed head carries both the record and the lint (claim_only, with the stamp config `cfgrel`), as
     the join reads it; that reads git in the host's checkout, and fetches a pull request head it lacks.
     `facts`, when a dict is given, gains {number: (the log's own state, never a lint state, created_at of its own newest review log)} for each open pull request, (None, None) for one with
-    no log of its own (a carried log is no log of its own here): what lost_work_rows reads, from the same two list reads, so it adds no gh call."""
+    no log of its own (a carried log is no log of its own here): what lost_work_rows reads, from the same two list reads, so it adds no gh call.
+    `ledger`, when a list is given, gains one row {number, act, owner, ageHours, red, blockedOn} for each open pull request, in number order: the rows the text
+    lines print, built after the blocked-on red fix-up, so `merge --reviewed --json` (reviewed_json) and the lines read one source; it adds no gh call."""
     main, cfgrel, root, now = h.base, cfgrel or DEFAULT_CONFIG, h.cwd or ".", h.now()
     with bulk_reads(h):
         pulls = h.pages("pulls", fields={"state": "open"})
@@ -5817,7 +5824,11 @@ def reviewed_read(h, cfgrel=None, facts=None):
                 seen.add(at)
                 at = acts[at][4]
             got[3] = acts[at][0].startswith("blocked on") or acts[at][3]
-    out = [f"{head}; next: {acts[n][0]}, owner {acts[n][1]}, age {acts[n][2]:.1f}h{', RED' if acts[n][3] else ''}; CI {ci}" for n, head, ci in lines]
+    rows_out = {n: {"number": n, "act": got[0], "owner": got[1], "ageHours": round(got[2], 1), "red": bool(got[3]),
+                    "blockedOn": got[4] if got[0].startswith("blocked on") else None} for n, got in acts.items()}  # after the fix-up above: the one source of the lines and the JSON
+    if ledger is not None:
+        ledger.extend(rows_out[n] for n in sorted(rows_out))
+    out = [f"{head}; next: {rows_out[n]['act']}, owner {rows_out[n]['owner']}, age {rows_out[n]['ageHours']:.1f}h{', RED' if rows_out[n]['red'] else ''}; CI {ci}" for n, head, ci in lines]
     totals = [f"longest wait from a done record: {longest:.1f}h", f"open PRs with no next act: {sum(1 for a in acts.values() if a[0] == 'none')}"]
     return out + ([f"no record: {', '.join(bare)}"] if bare else []), pulls, totals
 
@@ -5861,6 +5872,15 @@ def reviewed_lines(h, cfgrel=None, live=None):
     lines, pulls, totals = reviewed_read(h, cfgrel, facts)
     rows, ok = lost_work_rows(h, pulls, facts, live)
     return lines + totals + rows, ok
+
+def reviewed_json(h, cfgrel=None):
+    """-> the object `merge --reviewed --json` prints: {readAt, rows}. readAt is the time the read began (ISO, UTC, with a zone); rows are the open pull requests'
+    {number, act, owner, ageHours, red, blockedOn} from reviewed_read, the same rows its text lines print. The roadmap publisher puts the whole object under the
+    live file's `ledger` key. Cost: that of reviewed_read, and no more."""
+    read_at = datetime.datetime.fromtimestamp(h.now(), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    rows = []
+    reviewed_read(h, cfgrel, ledger=rows)
+    return {"readAt": read_at, "rows": rows}
 
 LOST_WORK_OWNER = {"a": "batch runner", "b": "the lane's own session", "b-archived": "coordinator", "c": "coordinator", "d": "coordinator", "e": "triage", "f": "coordinator"}  # who fixes each state's row
 LOST_WORK_UNKNOWN_OWNER = "coordinator"  # an unread lane has no state to route by; the coordinator wakes the silent lane
@@ -6833,6 +6853,7 @@ def build_parser():
     p.add_argument("--idle-lanes", action="store_true", help="list the lanes to archive from the roadmap's live file; takes no lock, merges and posts nothing")
     p.add_argument("--live", default=None, metavar="FILE", help="the publisher's live-work file: with --idle-lanes its lanes to archive, with --reviewed the lost-work rows")
     p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
+    p.add_argument("--json", action="store_true", help="with --reviewed: print {readAt, rows} as one JSON object, a row for each open pull request with its number, next act, owner, ageHours, red and blockedOn, in place of the lines")
     p.add_argument("--ledger", action="store_true", help="with --reviewed --live FILE and --verdicts FILE: write the lost-work ledger (one JSON row per lost-work pull request and per pushed branch with no pull request) to --out, or print it, then the line `unsorted: N`")
     p.add_argument("--out", default=None, metavar="FILE", help="with --ledger: write the ledger here (nothing is written when a read stopped)")
     p.add_argument("--verdicts", default=None, metavar="FILE", help="with --ledger: the verdicts file, a tab-separated header row PR, verdict, kind, step, head, reason, then one row per sorted pull request")
@@ -6891,6 +6912,8 @@ def main(argv, host=None, lock=None, hosts=None):
         p.error("--out, --verdicts and --subsumed go with --ledger")
     if a.ledger and not (a.reviewed and a.live is not None and a.verdicts is not None and not a.root):
         p.error("--ledger goes with --reviewed, --live FILE and --verdicts FILE, and no --root")
+    if a.json and not (a.reviewed and not a.root and a.live is None and not a.ledger):
+        p.error("--json goes with --reviewed alone: no --root, --live or --ledger")
     if a.root and not a.reviewed:
         p.error("--root goes with --reviewed")
     if a.root and a.repo_dir is not None:  # each --root names its own checkout, so a -C beside it would be read by nothing
@@ -7141,6 +7164,9 @@ def main(argv, host=None, lock=None, hosts=None):
                     print(f"merge: --ledger: a read stopped, so {a.out} was not written. Read the lines above and the verdicts file, then run again {READ_CITE}.", file=sys.stderr)
                 say(count_line)
                 return 0 if ok else 1
+            if a.json:
+                say(json.dumps(reviewed_json(h, a.config), indent=1, sort_keys=True))
+                return 0
             lines, ok = reviewed_lines(h, a.config, a.live)
             say(*lines)
             return 0 if ok else 1

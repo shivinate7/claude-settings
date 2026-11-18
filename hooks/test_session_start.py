@@ -2829,5 +2829,93 @@ class SessionStartRoleFileTests(SessionStartAgentWorktreeNoticeTests):
                         "no SessionStart entry that runs session_start.sh fires on clear: matchers %r" % (matchers,))
 
 
+class SessionStartRolePickTests(unittest.TestCase):
+    """The tier line's "No parent" sentence tells a session with no parent which role to pick: lane for one line of work,
+    coordinator for a standing build (rule roles-pick-mode-from-request; decision session-tiers, the session roles). Solo and
+    one lane collapsed into lane, so that sentence names neither, and the Session roles bullet of that record names each role
+    word the sentence names. It reads the hook's text and the record's text, so no repo fixture is built."""
+
+    SESSION_ROLES_RECORD = os.path.join(HERE, "..", "docs", "decisions", "session-tiers.md")
+    ROLE_BULLET = "- **Session roles**"  # the bullet that opens the session roles in that record
+    ROLE_WORDS = ("coordinator", "lane")  # the role words the No parent sentence is checked for
+    SOLO_SHAPES = (("solo", r"\bsolo\b"), ("one lane", r"\bone[ -]lane\b"))  # the shapes that collapsed into lane
+
+    @staticmethod
+    def names(text, pattern):
+        """True when the regex matches the text, ignoring case. The pattern carries its own word edges."""
+        return re.search(pattern, text, re.IGNORECASE) is not None
+
+    @staticmethod
+    def no_parent_sentences(line):
+        """The sentences of the line that start with "No parent". A sentence that only contains those words does not count."""
+        return [s for s in sentences(line) if re.match(r"No parent\b", s) is not None]
+
+    @staticmethod
+    def session_roles_bullets(text):
+        """The lines of the text that start with the Session roles bullet. An indented sub-bullet does not start with it."""
+        return [line for line in text.splitlines() if line.startswith(SessionStartRolePickTests.ROLE_BULLET)]
+
+    def no_parent_sentence(self):
+        """The one sentence of the tier line that starts "No parent". Asserts that scope before any content."""
+        found = self.no_parent_sentences(hook_role_line())
+        self.assertEqual(len(found), 1, "expected one sentence starting No parent, found %d: %r" % (len(found), found))
+        return found[0]
+
+    def session_roles_bullet(self):
+        """The one Session roles bullet of the session roles record. Asserts that scope before any content."""
+        with open(self.SESSION_ROLES_RECORD, encoding="utf-8") as handle:
+            found = self.session_roles_bullets(handle.read())
+        self.assertEqual(len(found), 1, "expected one Session roles bullet in the session roles record, found %d: %r" % (len(found), found))
+        return found[0]
+
+    # decision session-tiers (the session roles): solo and one lane collapsed into lane, so the No parent sentence names neither
+    def test_the_no_parent_sentence_names_neither_solo_nor_one_lane(self):
+        sentence = self.no_parent_sentence()
+        for word, pattern in self.SOLO_SHAPES:
+            with self.subTest(word=word):
+                self.assertFalse(self.names(sentence, pattern), "the No parent sentence names %r: %r" % (word, sentence))
+
+    # rule roles-pick-mode-from-request: a standing build picks coordinator, else lane
+    def test_the_no_parent_sentence_names_coordinator_lane_and_standing_build(self):
+        sentence = self.no_parent_sentence()
+        for word in ("coordinator", "lane", "standing build"):
+            with self.subTest(word=word):
+                self.assertTrue(self.names(sentence, r"\b%s\b" % word), "the No parent sentence does not name %r: %r" % (word, sentence))
+
+    # decision session-tiers (the session roles): each role word the sentence names is one the record's bullet names too
+    def test_every_role_word_the_no_parent_sentence_names_is_in_the_session_roles_bullet(self):
+        bullet = self.session_roles_bullet()
+        sentence = self.no_parent_sentence()
+        named = [word for word in self.ROLE_WORDS if self.names(sentence, r"\b%s\b" % word)]
+        self.assertTrue(named, "the No parent sentence names no role word: %r" % sentence)
+        for word in named:
+            with self.subTest(word=word):
+                self.assertTrue(self.names(bullet, r"\b%s\b" % word), "the Session roles bullet does not name %r" % word)
+
+    # green control for the scope the cases above share: exactly one sentence of the real tier line starts No parent
+    def test_one_sentence_of_the_role_pick_line_starts_no_parent(self):
+        found = self.no_parent_sentences(hook_role_line())
+        self.assertEqual(len(found), 1, "expected one sentence starting No parent, found %d: %r" % (len(found), found))
+
+    # green control: the anchor takes the sentence that starts with the words, not one that only contains them
+    def test_the_no_parent_finder_takes_only_a_sentence_that_starts_with_no_parent(self):
+        line = "A x. No parent: pick lane. A solo session with no parent_session_id merges."
+        self.assertEqual(self.no_parent_sentences(line), ["No parent: pick lane."])
+
+    # green control: the bullet finder takes the top-level bullet and not an indented sub-bullet with the same words
+    def test_the_bullet_finder_takes_only_a_top_level_session_roles_bullet(self):
+        self.assertEqual(self.session_roles_bullets("- **Other** text.\n"), [])
+        self.assertEqual(self.session_roles_bullets("- **Session roles** (owner) text.\n  - **Session roles** sub.\n"),
+                         ["- **Session roles** (owner) text."])
+
+    # green control: the word predicate flags each shape and passes a sentence that names lane for one line of work
+    def test_the_names_predicate_flags_each_shape_and_passes_a_lane_sentence(self):
+        self.assertTrue(self.names("Pick SOLO.", r"\bsolo\b"))
+        self.assertTrue(self.names("A one-lane session.", r"\bone[ -]lane\b"))
+        lane = "Pick lane for one line of work, or coordinator for a standing build."
+        self.assertFalse(self.names(lane, r"\bone[ -]lane\b"))
+        self.assertFalse(self.names(lane, r"\bsolo\b"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

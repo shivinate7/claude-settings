@@ -279,12 +279,21 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        line in one file's added lines, read with `git diff --check`: the index, or the working
                        tree (untracked files too) when `-a`, a pathspec or an earlier add reaches the file; a
                        `merge`, `rebase` or `cherry-pick --continue` counts as a commit. It judges a commit only
-                       when each earlier segment is a git add, commit or read, `true`, `false` or `cd`. Also a
+                       when each earlier segment is a git add, commit or read, `true`, `false`, `cd` or a
+                       `mkdir` with no substitution. Also a
                        `git push` whose net range (remote-tracking tip, else upstream, else default base, up
                        to the pushed ref, else HEAD) adds such a file; and a push after a commit the guard
                        could not judge, when that commit covers a triplet already in the tree or the chain
-                       runs merge, pull, rebase, cherry-pick, stash pop or apply, or am.
-                       (commit-refuses-conflict-markers)
+                       runs merge, pull, rebase, cherry-pick, stash pop or apply, or am. Also any git
+                       write (`GIT_WRITES`: add, commit, push, merge, pull, rebase, cherry-pick, reset and
+                       the rest) after a `cd` into a folder that is missing now, ended by `;`, a newline or
+                       `||`: the shell stays put and the write lands in a repo the call did not name. A
+                       folder an earlier segment makes (mkdir with its parent present or with -p, git clone,
+                       git init, git worktree add) counts as present. After `&&`, or `|| exit`, nothing more runs, so that passes. A `|| return` does not end
+                       the shell outside a function, so the write after it is judged.
+                       A git read passes. A forced push after such a cd is reported by force-push's own ask
+                       (ask-alone when chained), which comes first.
+                       (commit-refuses-conflict-markers; ruling own-476-c-refuse-cd-missing-folder)
   red-run              deny. A `git commit` with no push after it, or a `git push` whose range (the one
                        conflict-markers reads, less the commits the default base holds) has a non-merge commit that adds lines to a test path and has no
                        valid `Red-run:` trailer, judged by `judge` in lint/check_red_run.py, the one home. A
@@ -470,6 +479,15 @@ Other tools, in `judge` order:
                        (`FACT_CLOSE_PLACEHOLDER`, `PR_NUMBER`) or a `__X__` word. A sentence that holds one, a
                        short all-caps word, no args and empty args pass. A bare env var name as the whole value
                        is refused too; an override lifts it for a real one. (workflow-args-shape-check)
+  brief-checks-answered-claims-match-page
+                       deny. A claude-code-remote send_message or create_session, or a SendMessage, whose text
+                       (`message`, or `prompt` for create_session) has a sentence that holds an item reference (`item <n>`,
+                       `item #<n>`, `page:<n>`; any case), the whole word answered, approved or ruled, and no negator before
+                       it in its clause (lint/report_guard.py ANSWERED_NEGATOR_RE), when the waiting page's data in git
+                       (hooks/answered_claims.py, local and origin record branch) holds that item and no owner answer for
+                       it: no answers file and no lastAnswer. A sentence ending in `?`, text in a fence or inline code,
+                       and a claim by an id slug alone pass. A number not in the store, an absent ref or registry, a git
+                       error or a timeout passes with one stderr line. An override lifts it. (answered-claims-match-page)
   ci-wait-cap
                        deny. A claude-code-remote send_later whose message says it waits on CI (the whole word CI,
                        checks, pipeline, check run, PR run(s), workflow run(s) or GitHub Actions, in any case,
@@ -696,7 +714,7 @@ while True:
         )
         _loading = "guard_merge"
         from guard_merge import (
-            BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
+            BARE_MERGE_REASON, CONFLICT_MARKERS_CD_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, OCTOPUS_PUSH_STALE, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, LANE_READY_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit, lane_ready_hit, lane_mcp_ready_hit, self_role_child_hit, self_role_hit,
@@ -5544,13 +5562,19 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # A push of a test commit with no Red-run trailer is refused here too (rule red-run): it shares the push's
     # range, and adds one `git log` per push. A commit in the same call, before the push, is read from its
     # `-m` text; so is a lone commit with no push after it, which adds one `git diff --numstat` only when its
-    # message holds no trailer. guard_merge states the cost.
+    # message holds no trailer. A git write after a cd into a missing folder adds one `git rev-parse` of the
+    # folder the shell stays in; the scan for folders the call makes is parsing only. guard_merge states the cost.
     kind, matched = conflict_markers_hit(stripped, cwd, is_test_rel, raw)
     if kind in ("red-run", "red-run-commit"):
         red_reason, red_shown = red_run_reason(matched, kind == "red-run-commit")
         refuse(tool, "deny", "red-run", red_reason, red_shown)
+    elif matched and kind == "cd" and PENDING_ASK and PENDING_ASK[0][0] == "force-push":
+        # A forced push after a failed cd already asks (its folder is unknown), and the ask names the push. Let
+        # settle_ask report that, so a forced push is named first (it also denies when chained: rule ask-alone).
+        pass
     elif matched:
         markers_reason = (CONFLICT_MARKERS_CHAIN_REASON if kind == "chain" else
+                          CONFLICT_MARKERS_CD_REASON if kind == "cd" else
                           CONFLICT_MARKERS_PUSH_REASON if kind == "push" else CONFLICT_MARKERS_REASON)
         refuse(tool, "deny", "conflict-markers", markers_reason.format(file=matched), matched)
 
@@ -7557,6 +7581,10 @@ def ci_wait_hit(tool: str, tool_input: dict) -> str:
     return CI_WAIT_REASON % (cap, cap, cap) if wait > cap else ""
 
 
+# The cite of the answered-claim refusal. The reason itself is built by answered_claim_hit (hooks/answered_claims.py).
+ANSWERED_CLAIM_CITE = "(decision answered-claims-match-page, a claim of an answer matches the page)"
+
+
 def judge(payload) -> None:
     if payload.get("hook_event_name") == "SubagentStop":
         judge_stop(payload)
@@ -7785,6 +7813,14 @@ def judge(payload) -> None:
     stamped = stamp_hit(tool, tool_input)
     if stamped:
         refuse(tool, "deny", "message-time-matches-clock", stamped[1], stamped[0])
+
+    # A message or brief that says a waiting-page item is answered when the page's data holds no owner answer for it
+    # (rule brief-checks-answered-claims-match-page). The page is read from git, only for a text that holds a claim.
+    import answered_claims  # the one home of the claim test and the page read
+    answered = answered_claims.answered_claim_hit(tool, tool_input, cwd)
+    if answered:
+        refuse(tool, "deny", "brief-checks-answered-claims-match-page", answered[1] + " " + ANSWERED_CLAIM_CITE,
+               answered[0][:120])
 
     # A check-in that waits on CI past the cap (rule ci-wait-cap). An agent's call was refused at 8b before this point.
     ci_wait = ci_wait_hit(tool, tool_input)
