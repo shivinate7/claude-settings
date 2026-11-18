@@ -1,0 +1,14 @@
+{
+ "id": "sort-base-fresh-before-act",
+ "title": "A sort of a backlog names its base commit, and a check refuses to act on it when main moved past that base",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Triage 11 acted on the outbox sort of Nov 17 (base b58eb9848) as if K 480 notes were still missing at 11:38 CST Nov 18. A PR filing 419 K notes merged at 01:18 CST Nov 18, so six agents re-checked and found 70 missing.",
+ "source": "triage 11, 11:50 CST Nov 18, from the six record-writer reports",
+ "note": "Not built. Prior work: searched steps and lint for a base-freshness check on a sort; none found (read 11:58 CST). Done when: a brief that acts on a sort or audit file refuses when the file's base commit is not an ancestor-or-equal check against main's tip for the paths it names, or names the paths that changed since the base. Mover: the coordinator's say-so.",
+ "updatedAt": "2026-11-18T11:51:51-06:00"
+}
