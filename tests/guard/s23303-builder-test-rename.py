@@ -1,6 +1,6 @@
 # section 23303
 # A builder may rename a test and edit its comments and docstrings, when the parsed test bodies and the test
-# count are unchanged (owner ruling, 2026-11-18 15:50 CST; decision builders-cannot-edit-tests). Every other
+# count are unchanged (decision builders-cannot-edit-tests). Every other
 # edit to a test file stays refused, as before. The allow cases are red on the old code; the refuse cases are its
 # green controls.
 #

@@ -1,7 +1,7 @@
 # section 23306
 # A builder's commit, push and stop are judged on its own diff. A test-file change that only renames a test, or
-# only edits its comments or docstrings, passes at all three (owner ruling, 2026-11-18 15:50 CST; decision
-# builders-cannot-edit-tests). The Edit and Write side is pinned in section 23303. A change that alters a body or an
+# only edits its comments or docstrings, passes at all three (decision builders-cannot-edit-tests). The Edit and
+# Write side is pinned in section 23303. A change that alters a body or an
 # assertion, drops a test, or edits a test file that is no python file stays refused.
 #
 # Each tree is one lazy diff repo (diff_repo, section 21304). The change stays uncommitted in the worktree, as a
