@@ -1,0 +1,14 @@
+{
+ "id": "review-head-stays-current",
+ "title": "A push to a PR whose head carries a review record is refused or asked unless it carries a fix-check line or is a clean main merge",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 14:40 CST Nov 18 on item 949: 'a lane's head goes stale when the lane pushes commits after a review' sounds like the larger bug; it should be landed if nothing covers it. Consultant 14:48 CST: make it a row of the next goal.",
+ "source": "owner page comment 14:40 CST Nov 18 (item 949 a); consultant 14:48 CST Nov 18",
+ "note": "Names the cause: a lane pushes after its review, so the record's head goes stale. Pieces: steps reviewed-head-push-ask (doing), ready-records-push-keeps-record-head (doing), round-one-reset (ready). End state: a push to a PR whose head carries a review record is refused or asked unless the push carries a fix-check line or is a clean main merge. Triage lands it with its own agents if the three pieces do not already cover it once they land; prior-work search first (also steps fix-check-chains-from-descendant, done).",
+ "updatedAt": "2026-11-18T14:49:32-06:00"
+}

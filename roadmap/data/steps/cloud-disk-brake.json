@@ -1,0 +1,14 @@
+{
+ "id": "cloud-disk-brake",
+ "title": "A mechanized brake for a cloud container's storage",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "consultant",
+ "blockedBy": [],
+ "why": "Owner 14:45 CST Nov 18, word for word: 'there should be a mechanized brake for cloud's storage'.",
+ "source": "owner 14:45 CST Nov 18 via the consultant; consultant 14:48 CST: no prior step and no earlier chat found",
+ "note": "Links: closed step brake-same-everywhere; note cloud-disk-full (docs/debts/notes.md:1126, as the consultant cites it; triage did not find it by grep in the roadmap checkout); coordinator pick 14:48 CST Nov 12. E9 in the consultant's goal. Owner question 14:43 CST: does each cloud session run on its own machine? Open.",
+ "updatedAt": "2026-11-18T14:49:32-06:00"
+}

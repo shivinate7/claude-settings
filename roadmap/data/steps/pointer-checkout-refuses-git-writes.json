@@ -1,0 +1,14 @@
+{
+ "id": "pointer-checkout-refuses-git-writes",
+ "title": "A git commit or git merge whose cwd is the pointer checkout is refused with the remedy 'call EnterWorktree' when the session holds its own worktree",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Coordinator relay 14:47 CST Nov 18, from lane ci-cancel-on-close-v2 (session_013NEJL3WnhxtGWz1TAEcDVq), its own report, guard not run by the coordinator. Incident: a cloud resume left the lane's shell in the pointer checkout /home/user/claude-settings and it committed a merge on the detached head (95593e649c to e9ef1060c, nothing pushed).",
+ "source": "coordinator relay 14:47 CST Nov 18 (lane ci-cancel-on-close-v2)",
+ "note": "Wish: guard case red on the old code first (test-author first). Where, per the lane: hooks/guard_pointer.py; decision pointer-edit covers Write and Edit only; rule pointer-head refuses only a head move off main. Harm: unreviewed commits move the live guard head for every session. Not step push-new-branch-from-detached (that one is the `git push origin HEAD:<branch>` form). Prior-work search first. Open: decision recovery-independent-of-state already lets a move back to main through with no override (`git switch -C main origin/main`); the coordinator asked the lane to try it. The lane says the triage session it knew is inactive; routed to triage 11.",
+ "updatedAt": "2026-11-18T14:49:32-06:00"
+}
