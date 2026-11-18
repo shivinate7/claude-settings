@@ -1,0 +1,14 @@
+{
+ "id": "record-writer-stale-cites",
+ "title": "G9: record-writer runs lint/stale_cites.py for decision records too, plus a facts-agree check",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "consultant",
+ "blockedBy": [],
+ "why": "Consultant 15:22 CST Nov 18 (his sort of the owner's 11-item review, owner 14:54 CST; the feedback came from a local tile-windows coordinator session; all 11 open on main per the consultant's Explore read, not read by triage).",
+ "source": "consultant relay 15:22 CST Nov 18",
+ "note": "Per the feedback. Full text pending from the consultant. Prior-work search first.",
+ "updatedAt": "2026-11-18T15:22:13-06:00"
+}

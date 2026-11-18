@@ -1,0 +1,14 @@
+{
+ "id": "lane-cuts-from-main",
+ "title": "G10: a rule that a lane cuts its branch from main, with a stated exception",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "consultant",
+ "blockedBy": [],
+ "why": "Consultant 15:22 CST Nov 18 (his sort of the owner's 11-item review, owner 14:54 CST; the feedback came from a local tile-windows coordinator session; all 11 open on main per the consultant's Explore read, not read by triage).",
+ "source": "consultant relay 15:22 CST Nov 18",
+ "note": "Fold into step pr-base-must-be-main if that fits: step file exists. Full text pending from the consultant. Prior-work search first.",
+ "updatedAt": "2026-11-18T15:22:13-06:00"
+}

@@ -1,0 +1,14 @@
+{
+ "id": "ruling-cites-code",
+ "title": "G11: guard step ruling-cites-code",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "consultant",
+ "blockedBy": [],
+ "why": "Consultant 15:22 CST Nov 18 (his sort of the owner's 11-item review, owner 14:54 CST; the feedback came from a local tile-windows coordinator session; all 11 open on main per the consultant's Explore read, not read by triage).",
+ "source": "consultant relay 15:22 CST Nov 18",
+ "note": "Incident 2026-11-17 21:04 CST: Get-MonitorIdentity in tile.ps1. Full text pending from the consultant. Prior-work search first.",
+ "updatedAt": "2026-11-18T15:22:13-06:00"
+}
