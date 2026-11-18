@@ -27,7 +27,7 @@ Limits: a pure rename of a test file reads as a delete and an add, so it needs `
 branch that merged a newer main carries main's commits in the range, and the CLI judges each like the rest. The
 guard's push check leaves out the commits the default base holds.
 
-Verified trailer, observe mode (the CLI only): each non-merge, non-revert commit also says how it was verified:
+Verified line, observe mode (the CLI only): each non-merge, non-revert commit also says how it was verified:
 
     Verified: <command> -> <verdict>                a command that ran, and its verdict, in free text
     Verified: none: <reason>                        no command ran; the reason is not empty
@@ -36,7 +36,8 @@ A commit with no valid Verified line prints `check_red_run: OBSERVE: <sha> <subj
 exit code stays 0: only a Red-run gap sets exit 1. The rollout reads git's trees, never the disk: it judges a commit
 only when <head>'s check file holds VERIFIED_ROLLOUT and so does that commit's parent's, so a repo whose check file
 lacks the marker (a child repo's installed copy) judges nothing, and a commit from before the marker landed is not
-judged. `gaps` and `judge`, which the push guard calls, never read a Verified line. Renaming the check file turns the
+judged. `gaps` and `judge`, which the push guard calls, never read a Verified line. A Verified read that git cannot
+finish prints one OBSERVE line and keeps the exit code at what the Red-run read gave. Renaming the check file turns the
 Verified read off.
 
 Exit 0: clean. Exit 1: a commit is named with its short sha, subject and test path. Exit 2: UNKNOWN, because git
@@ -54,7 +55,7 @@ REVERT = re.compile(r"^This reverts commit [0-9a-fA-F]{7,64}\.?\s*$", re.MULTILI
 NONE = re.compile(r"^Red-run: none: \s*\S.*$")
 VERIFIED = re.compile(r"^Verified: \S.*? -> \S.*$")
 VERIFIED_NONE = re.compile(r"^Verified: none: \s*\S.*$")
-VERIFIED_ROLLOUT = "verified-trailer-rollout-1"  # a check file that holds this string reads Verified trailers (git grep of a rev's file)
+VERIFIED_ROLLOUT = "verified-trailer-rollout-1"  # a check file that holds this string reads Verified lines (git grep of a rev's file)
 FIELD = "\x1f"
 START = "\x01"  # opens each commit in the log output, so a commit's header and its file rows split apart
 MAX_PATHS = 5
@@ -94,7 +95,7 @@ def has_trailer(message):
 
 
 def has_verified(message):
-    """True when a line of the message is a valid Verified trailer: a command with `->` and a verdict, or none with a reason."""
+    """True when a line of the message is a valid Verified line: a command with `->` and a verdict, or none with a reason."""
     return any(VERIFIED.match(line.rstrip()) or VERIFIED_NONE.match(line.rstrip()) for line in message.splitlines())
 
 
@@ -225,10 +226,13 @@ def main(args):
         import guard  # is_test_rel is the one home of what a test path is (hooks/guard.py)
         rows = commits(root, base, "HEAD", "", guard.is_test_rel)  # one git log serves both reads
         bad = gaps(root, base, rows=rows)
-        observed = verified_gaps(root, rows)
     except Unknown as err:
         print("check_red_run: UNKNOWN, " + str(err))
         return 2
+    try:
+        observed = verified_gaps(root, rows)
+    except Unknown as err:  # observe mode fails nothing: an unread Verified line never sets the exit code
+        observed = ["check_red_run: OBSERVE: the Verified line read could not run, so it is unknown: " + str(err)]
     for line in bad + observed:
         print(line)
     if bad:
