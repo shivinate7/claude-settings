@@ -1,7 +1,7 @@
 {
   "id": "repeated-findings-count",
   "title": "Count review findings repeated across rounds and re-review only the diff",
-  "status": "todo",
+  "status": "done",
   "repo": "shivinate7/claude-settings",
   "phase": "next",
   "lane": "",
@@ -9,7 +9,7 @@
   "blockedBy": [],
   "why": "Owner, 19:45 CST Nov 17 (relayed by the consultant): review the Claude Code team blogs https://claude.dev/blog/how-the-claude-code-team-thinks-about-verification/ and https://claude.dev/blog/solving-code-review-at-anthropic/ and land their findings. Triage read both through a page summary, not word for word. Finding: Code-review blog: convergence needs a three-round cap, diff-only re-review and no repeated findings; one PR went through fifty rounds; 59% of flagged code predated the reviewer's first pass.",
   "source": "owner words 19:45 CST Nov 17 via the consultant; blogs read through a page summary",
-  "note": "We have the three-round cap but no count of how often round 2 or 3 repeats a round-1 finding. Brief: Explore (read-only) counts repeats over merged review records first and reports the rate with its sample size; build only if the rate is real. Proof: the count with n. Not built.",
-  "updatedAt": "2026-11-17T20:27:48-06:00",
+  "note": "Counted 20:36 CST Nov 17 (Explore, sonnet; 30 newest merged lane PRs with a round 2 or 3 line, merged Nov 16 11:39 to Nov 17 19:05 CST). Strict repeat: 1 of 22 named round 2 or 3 findings (5%); 0 of 14 blocking. Same defect class in a new place: 2 of 14 blocking confirmed (PRs 3584, 3525), up to 4. A floor, not a rate: only 5 of 15 PRs with a later FAIL name findings on both sides, and 10 PRs hold verdict lines only. Unread: reviewer transcripts, docs/notes and docs/debts. Finding: review records hold verdicts, not findings, so a repeat cannot be counted well. No repeat guard built: the readable sample shows no blocking strict repeat. Follow-up, owner's choice: give each round's findings one readable home with an id per finding, then measure again.",
+  "updatedAt": "2026-11-17T20:36:19-06:00",
   "ask": "Lane brief: count review findings repeated across rounds.\nGoverning: rule roles-review-cap-three. Harm: unmeasured whether round 2 or 3 repeats a round-1 finding.\n1. Explore (read-only, first line `Audit:`): over merged review records, count findings that round 2 or 3 repeats from round 1. Report the rate with n.\n2. Build (test-author first) only if the rate is real; otherwise close the step with the count.\nProof: the count with n. Report cap: 15 lines."
 }
