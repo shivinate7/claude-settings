@@ -1021,13 +1021,16 @@ def live_ledger(path, work):
     rows, at, why, skipped, wrong = ledger_read(raw.get("ledger") if isinstance(raw, dict) else None)
     work["ledgerAt"], work["ledgerWhy"] = at if zoned_time(at) else None, why
     work["skipped"] = list(work.get("skipped") or []) + skipped
-    # Why no lane hold can be told, from the sessions list alone: a skipped session row may be the lane that holds a draft, and its tags were never read.
-    if not isinstance(raw.get("sessions") if isinstance(raw, dict) else None, list):
+    # Why no lane hold can be told, from the sessions list alone. A malformed session row may be the lane that holds a draft, and its tags were never
+    # read. live_work skips such a row only when it can read the GitHub name, so the row is judged here by the same shape test, whatever the name.
+    sessions = raw.get("sessions") if isinstance(raw, dict) else None
+    if not isinstance(sessions, list):
         list_why = LANE_WHY_NO_LIST
+    elif not all(isinstance(r, dict) and isinstance(r.get("id"), str) and isinstance(r.get("session_status"), str)
+                 and (r.get("tags") is None or isinstance(r["tags"], list)) for r in sessions):
+        list_why = LANE_WHY_SKIPPED
     elif work.get("laneSessions") is None:  # glossary-ok: the key live_work returns, the name its readers use
         list_why = LANE_WHY_NO_NAME
-    elif any(x.startswith("session ") for x in work["skipped"]):
-        list_why = LANE_WHY_SKIPPED
     else:
         list_why = None
     work["laneWhy"] = None
