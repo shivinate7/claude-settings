@@ -1,0 +1,1 @@
+- classifier-merge-reviewed: The auto-mode classifier refused `merge --reviewed`, a read-only check, as 'Merge Without Review'. A likely fix is an autoMode.allow entry for `merge --reviewed`, `merge --lane-lint` and `merge --review-record`; the owner pastes such entries (classifier-refuses-allow-brief). Held unless it recurs. Decision: refusals-reach-the-owner.

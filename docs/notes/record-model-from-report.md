@@ -1,0 +1,1 @@
+- record-model-from-report: Two lanes wrote the role's model into a review log, not the model the reviewer ran (haiku recorded as opus, and haiku as sonnet) (PRs #2534 and #2539). The review log's model should come from the reviewer's own report header. A third case would make this a step.

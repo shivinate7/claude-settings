@@ -1,0 +1,1 @@
+- guard-stream-bare-wait-pid: hooks/guard_stream.py, lines 73, 559 and 728, still print a bare `bin/wait-pid PID` (PR #2528).

@@ -1,0 +1,1 @@
+- claude-md-edit-cloud-refused: A .claude/CLAUDE.md edit cannot be built in a cloud session, even with the owner's typed go-ahead (the auto mode Self-Modification refusal hits the coordinator and the lane). Route such steps to the owner's local session from the start.

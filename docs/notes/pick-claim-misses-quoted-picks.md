@@ -1,0 +1,1 @@
+- pick-claim-misses-quoted-picks: The pick-claim reader misses `Owner pick a` and quoted picks (#2294).

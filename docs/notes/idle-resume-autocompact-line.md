@@ -1,0 +1,1 @@
+- idle-resume-autocompact-line: Rewrite the /autocompact lever line in decision idle-resume-compacts to match precompact-handoff rule 1.
