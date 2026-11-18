@@ -1,0 +1,58 @@
+{
+  "added": "2026-11-18T15:11:48-06:00",
+  "context": "Goal: the live file (the session and pull request snapshot at roadmap/live/live.json) holds only rows that earn their size.\nProblem (goal): archived session rows are 1,903 of its 2,304 session rows and about a third of the file, and whether they are worth keeping is a rule choice about what the lost-work report may see, which only you can make.\nBased on (measured): triage's size count of the live file (its rows were read at 14:38 CST): 1,291,768 bytes in all; the session rows are 531,754 bytes, of which archived rows 431,909; statuses archived 1,903, idle 395, running 4, requires-action 2; each row holds only an id, a status, tags and a status bucket.\nBased on (read): the page build and the idle-lane report (merge --idle-lanes) both skip archived rows (skills/roadmap/build.py lines 894 and 2004-2010); the lost-work report (merge --ledger) reads the archived status of a lane to print 'its lane is archived, pull request open' and 'its lane is gone' (merge/merge.py lines 5612-5651). Read from the plugin copy on this machine, not checked against main.\nDeparts from: main \u2014 adds a rule that drops archived session rows from the live file.\nWaiting on: nothing is stopped; runner 12 asked and acts on nothing; step live-file-refresh-one-command takes your pick.\nMeanwhile: a refresh still reads all 24 pages of sessions either way, so the saving is file size, not reads.",
+  "home": "step live-file-refresh-one-command",
+  "kind": "decision",
+  "n": 976,
+  "options": [
+    {
+      "gain": "The lost-work report keeps seeing an archived lane that still has an open pull request.",
+      "how": "No change: the file keeps all 2,304 rows, 1,903 of them archived.",
+      "id": "keep-all",
+      "key": "a",
+      "label": "Keep all session rows in the live file",
+      "lose": "The file stays 1.29 MB, a third of it archived rows that two readers skip."
+    },
+    {
+      "gain": "The file shrinks by about 0.43 MB (33%).",
+      "how": "The refresh drops every archived row, leaving 401 rows.",
+      "id": "drop-archived",
+      "key": "b",
+      "label": "Keep only idle, running and requires-action rows",
+      "lose": "The lost-work report can no longer tell an archived lane with an open pull request from a lane the file does not list; it reports it as unknown or gone instead."
+    },
+    {
+      "gain": "The file shrinks and the lost-work report keeps its archived-lane signal.",
+      "how": "A builder changes the refresh to keep an archived row only when an open pull request's footer or a live step's lane names that session.",
+      "id": "keep-named-archived",
+      "key": "c",
+      "label": "Keep non-archived rows, plus archived rows a live pull request or step names (recommended)",
+      "lose": "A builder lane and one more rule in the refresh; the saving is smaller than b (unmeasured)."
+    }
+  ],
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "c",
+  "ref": "owner typed in runner 12's chat 15:10 CST Nov 18, relayed by runner 12 (session_013NEJL33U96UiyE6UtCHct3)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Live file: keep archived rows?",
+  "shown": [
+    {
+      "id": "keep-all",
+      "key": "a",
+      "label": "Keep all session rows in the live file"
+    },
+    {
+      "id": "drop-archived",
+      "key": "b",
+      "label": "Keep only idle, running and requires-action rows"
+    },
+    {
+      "id": "keep-named-archived",
+      "key": "c",
+      "label": "Keep non-archived rows, plus archived rows a live pull request or step names (recommended)"
+    }
+  ],
+  "status": "open",
+  "title": "The live file keeps 1,903 archived session rows: keep them, drop them, or keep only the ones something still names?",
+  "why": "c keeps the one thing archived rows are used for and drops the rest; a keeps a third of the file for two readers that skip it; b loses the lost-work signal. Recommended by triage, not owner-typed."
+}
