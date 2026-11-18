@@ -1,0 +1,1 @@
+- lane-mutate-cap-load: a loaded lane machine can pass the 25 min cap and fail a lane that is green in CI. Fix: report a cap hit as unknown, not FAIL.

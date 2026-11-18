@@ -1,0 +1,1 @@
+- session-messages-556a-time: Triage: item 556 a was saved at 11:59 CST Nov 12 (page lastAnswer 17:59:44Z, same save as item 539). docs/decisions/session-messages.md line 10 says 12:04 CST; that is wrong. Fix in the next edit of that record (lane session-messages-status-line found it, outside #3100).

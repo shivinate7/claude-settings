@@ -1,0 +1,1 @@
+- stamp-write-forms-untested: (#2480) the write forms redirect, rm, mv, cp, tee, sed -i, git add and push have no test. Family: stamp-shell-write-not-judged.

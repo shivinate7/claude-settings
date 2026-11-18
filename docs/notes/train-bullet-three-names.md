@@ -1,0 +1,1 @@
+- train-bullet-three-names: the "Rolling combine train" bullet in decision `session-tiers` says "fold round", "dry round" and "fast checks" for near the same act, and "dry round" reuses the glossary word "round". Pick one name. Decision: session-tiers (session roles).

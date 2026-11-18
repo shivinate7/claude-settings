@@ -1,0 +1,1 @@
+- guard-sed-in-python-string: possible false alarm: the guard refused a read-only `python3 -I -c` whose quoted string held a sed command. Guard not named. Fix: scan the shell words, not text inside a quoted interpreter argument.

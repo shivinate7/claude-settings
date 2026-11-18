@@ -1,0 +1,1 @@
+- mutate-ci-merge-row-literal: #2563 fix check: at hooks/test_mutate_ci.py:1878 the merge family reads guard_table(), so nothing pins the guard_merge row with a literal. Possible fix: a literal ["hooks/test_guard.py::merge"]. A note, not a debt. <!-- ste-disable-line STALE010 -->

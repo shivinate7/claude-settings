@@ -63,7 +63,8 @@ The handoff holds these sections, in this order:
   `## Working premises`. One line each, in this form:
   `- P1 [ruling|measured|read|notes|assumed] <statement>. Source: <where>. Checked <date or never>.`
   The kinds and what each means: docs/decisions/premise-format.md. A fact with no source is
-  `assumed`.
+  `assumed`. A premise about starting a lane names the helper `bin/lane-start` and holds no recipe: no
+  field list and no tag list, which the helper prints.
 - Where things stand: the branch, the head commit, and the GitHub query for its open PRs and their CI state.
 - Work in flight: agents, workflow runs, and servers. Give each server its pid
   and its port.
@@ -77,6 +78,7 @@ drops one, and the Stop hook names one that is missing. Each sits under its own 
 <!-- handoff-sections: Goal | Working premises | Where things stand | Work in flight | Next steps | Files and commands -->
 
 For a list that has a home (a page collection, a roadmap ref, a git ref or a GitHub query), name the home and never copy the list.
+A batch runner's merge queue, folds, gos, holds and archive pass have one: `plans/runner-state.json` on the record branch. Write one line, `Runner state: origin/roadmap:plans/runner-state.json, last sent version <N>.`, and no list; the successor reads the file first.
 
 ## 5. Check premises
 

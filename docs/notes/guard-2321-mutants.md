@@ -1,0 +1,1 @@
+- guard-2321-mutants: (on #2321) new refusal branches have no mutation test: hooks/guard.py:3485-3491, hooks/reread_check.py:43-47, and the `unread_handoff` callable check. The guard-set line in docs/decisions/background-check-through-verdict.md leaves out stall_watch.py, agent_brief.py and mail.py.

@@ -1,0 +1,1 @@
+- record-post-pipe-long-wait: hooks/guard_stream.py narrating_stage refuses `merge <pr> --review-record ... --confirm | tail` as a long wait; a false alarm only when piped.

@@ -1,0 +1,1 @@
+- lane-mutate-js-only: hooks/mutate_js.mjs is reached only by --report, so a lane touching only it pays the run for nothing. Fix: leave mutate_js.mjs out of the trigger, or run --report for it.

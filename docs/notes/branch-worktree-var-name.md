@@ -1,0 +1,1 @@
+- branch-worktree-var-name: a branch name written as `$b` or `"$BRANCH"` is read as literal text, so `git checkout -B "$BRANCH" origin/$BRANCH` passes. Debt two-worktrees-unexpanded-target covers only cd and -C targets. Fix: widen that debt to the branch argument. Not a hold.

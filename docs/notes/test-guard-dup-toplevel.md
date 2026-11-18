@@ -1,0 +1,1 @@
+- test-guard-dup-toplevel: hooks/test_guard.py on main 624dcc188 defines _load_git_reads, _mv, FAMILY, TEMP_DIR, OTHER_SESSION, ROLE_RULE, _repo and LOG_CHECKS twice at top level; the later one shadows the earlier, so a case may test the wrong constant. Fix: extend lint/check_hook_dup_names.py to top-level names in test files, then rename or merge each pair.

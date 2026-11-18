@@ -119,7 +119,7 @@ OLD_WIDENS_CARD = "uniform ruling (t18)"
 
 # Waiting item 92 as the writer sent it (Oct 30): a decision with a Goal line and no Problem line, no Based
 # on line, and a widening option 'b' not marked widens. It holds no personal data.
-ITEM92 = json.loads(r'''{"kind":"decision","title":"Let the batch runner merge each batch on its own?","context":"Goal: the batch runner merges each batch with no help from the coordinator or you. Today auto mode refuses the runner's `merge --role batch-runner` (03:04 CDT, main d545baf4): the cloud allow rules from #841 cover only `merge N --confirm`. The lane that would widen them was refused as a change to the sessions' own rules, so it needs your word. Asked in chat 03:05 CDT, no answer. Task home: docs/todo.md line fb-0303-1 (#845).","options":[{"gain":"No new form on the shared allow list.","how":"The coordinator merges each batch the runner builds.","key":"a","label":"Keep it as is","lose":"Each batch waits until the coordinator wakes."},{"gain":"The runner merges alone, so batches land sooner.","how":"Lane merge-role-allow adds `merge --role` to the auto-mode allow list, for the coordinator and batch-runner tiers only.","key":"b","label":"Allow merge --role","lose":"A second merge form on the shared allow list, against your one-form ruling (t18)."}],"pick":"a","why":"Your 16:54 CDT ruling (no owner step per merge) holds either way; a keeps the allow list to one form.","status":"open"}''')
+ITEM92 = json.loads(r'''{"n":928,"kind":"decision","title":"Let the batch runner merge each batch on its own?","context":"Goal: the batch runner merges each batch with no help from the coordinator or you. Today auto mode refuses the runner's `merge --role batch-runner` (03:04 CDT, main d545baf4): the cloud allow rules from #841 cover only `merge N --confirm`. The lane that would widen them was refused as a change to the sessions' own rules, so it needs your word. Asked in chat 03:05 CDT, no answer. Task home: docs/todo.md line fb-0303-1 (#845).","options":[{"gain":"No new form on the shared allow list.","how":"The coordinator merges each batch the runner builds.","key":"a","label":"Keep it as is","lose":"Each batch waits until the coordinator wakes."},{"gain":"The runner merges alone, so batches land sooner.","how":"Lane merge-role-allow adds `merge --role` to the auto-mode allow list, for the coordinator and batch-runner tiers only.","key":"b","label":"Allow merge --role","lose":"A second merge form on the shared allow list, against your one-form ruling (t18)."}],"pick":"a","why":"Your 16:54 CDT ruling (no owner step per merge) holds either way; a keeps the allow list to one form.","status":"open"}''')
 
 # The form lines of the rewrite. Item 92's subject, in the owner's terms; no web marker, no press verb.
 GOAL = "Goal: the batch runner merges each batch with no help from the coordinator or you."
@@ -140,8 +140,13 @@ def parts(**over):
     return found
 
 
-def form_text(goal=GOAL, problem=PROBLEM, based=BASED, departs=DEPARTS):
-    return "\n".join(line for line in (goal, problem, *based, departs) if line)
+# The Waiting on line (tcj.WAITING_LINE, one home). A build without it gets a sentinel line, so each case that
+# needs it goes red by its own name instead of raising (the WIDE pattern below).
+WAITING = getattr(tcj, "WAITING_LINE", None) or "<WAITING_LINE missing from hooks/test_call_judge.py>"
+
+
+def form_text(goal=GOAL, problem=PROBLEM, based=BASED, departs=DEPARTS, waiting=WAITING):
+    return "\n".join(line for line in (goal, problem, *based, departs, waiting) if line)
 
 
 def page_item(tail="", options=None, lines=None, **over):
@@ -163,7 +168,7 @@ TASK_WHY = "Why yours: a session on your computer was asked first and none could
 def task_item(steps, **over):
     """A waiting-page task with these steps and the Why yours line in `context`, so only the rule a case
     names judges it (task-names-check reads that line). `over` sets or replaces any field."""
-    item = {"kind": "task", "title": "Merge the batch", "status": "open", "steps": list(steps), "context": TASK_WHY}
+    item = {"n": 928, "kind": "task", "title": "Merge the batch", "status": "open", "steps": list(steps), "context": TASK_WHY}
     item.update(over)
     return item
 
@@ -792,7 +797,8 @@ LINE_VARIANTS = [
 
 def case_line_order_and_prose():
     for name, lines, want in LINE_VARIANTS:
-        page(name, "set", entry_of(page_item(lines=lines)), want)
+        # The Waiting on line goes last on the page; the chat box carries no such line, so it gets none.
+        page(name, "set", entry_of(page_item(lines=lines + [WAITING])), want)
         box = tcj.good_box()
         box["questions"][0]["question"] = "\n".join(lines)
         chat(name, box, want)
@@ -1137,7 +1143,7 @@ GH_WHY = "Why yours: a session on your computer was asked first and none could r
 
 def gh_task(mac, ps, **over):
     """A task whose command is {powershell, mac}. `mac` is bash and `ps` its PowerShell 5.1-safe twin."""
-    task = {"kind": "task", "title": "Protect main on claude-settings", "status": "open",
+    task = {"n": 928, "kind": "task", "title": "Protect main on claude-settings", "status": "open",
             "steps": ["Open Terminal", "Paste the command below and run it"], "context": GH_WHY,
             "command": {"powershell": ps, "mac": mac}}
     task.update(over)
@@ -1342,6 +1348,252 @@ def case_command_in_item_spans():
          entry_of(task_item(["Check the output:\n```\ngrep x a | head\n```"])), ("command-in-item", "shell line"))
 
 
+# ------------------------------------------------------------------ a span an edit verb quotes is text, not a shell line
+
+def span_scope(name, text, body):
+    """The scope a quoted-span case judges (P7): `text` holds exactly one unfenced span, `body`. Without it a pass
+    could come from a step with no span at all."""
+    spans = call("_code_spans", text)
+    got = [(b, f) for _, b, f in spans] if isinstance(spans, list) else spans
+    check("span scope: " + name, got == [(body, False)], "want one span %r, got %r" % (body, got))
+
+
+def case_quoted_span_after_edit_verb():
+    # An edit verb before a span, with no run verb in its sentence, quotes the span: the step finds or replaces
+    # that line of a file, so the span-flag clause reads `scripts/x.py --y` as text (question_form._shell_line,
+    # `quoted`). The same span after a run verb is a command. A listed program stays a shell line when quoted, and
+    # so does a span whose sentence has both verbs: a run verb in the sentence wins (command_in_item_hit).
+    span = "scripts/x.py --y"
+    for verb in ("Find", "Locate", "Replace", "Swap", "Search for", "Look for", "Edit"):
+        text = "%s the line `%s` in the page" % (verb, span)
+        span_scope("%s quotes the span" % verb, text, span)
+        page("an edit-verb step (%s) quoting `%s` passes" % (verb, span), "set", entry_of(task_item([text])), None)
+    # Delete and remove are no edit verb here: a step that deletes a lane may run the span ("Delete the lane with
+    # `merge --drop 5`"), so the span is read as a command. case_delete_remove_span_is_a_shell_line holds the wording.
+    for verb in ("Delete", "Remove"):
+        text = "%s the line `%s` in the page" % (verb, span)
+        span_scope("%s holds the span" % verb, text, span)
+        page("a %s step holding `%s` is refused as a shell line" % (verb.lower(), span), "set",
+             entry_of(task_item([text])), ("command-in-item", "shell line"))
+    text = "Run `%s` in the page" % span
+    span_scope("run takes the same span", text, span)
+    page("the same span after run is refused as a shell line", "set", entry_of(task_item([text])),
+         ("command-in-item", "shell line"))
+    text = "Find the line `git push origin x` in the page"
+    span_scope("find quotes a listed program", text, "git push origin x")
+    page("a quoted git push after find is still refused as a shell line", "set", entry_of(task_item([text])),
+         ("command-in-item", "shell line"))
+    text = "Find the line and run `%s` in the page" % span
+    span_scope("find and run share one sentence", text, span)
+    page("a sentence with both find and run refuses the span as a shell line", "set", entry_of(task_item([text])),
+         ("command-in-item", "shell line"))
+
+
+def case_delete_remove_span_is_a_shell_line():
+    # "Delete the lane with `merge --drop 5`." runs that command, so the span is a shell line, as after a run verb.
+    # "Find the lane with the same span" quotes it and passes: the verb alone decides. Delete and remove are not edit
+    # verbs (question_form.SPAN_EDIT_VERB), so the span is never quoted after them.
+    span = "merge --drop 5"
+    for text in ("Delete the lane with `%s`." % span, "Remove the lane: `%s`" % span):
+        span_scope("delete or remove holds the span: %s" % text, text, span)
+        page("a step that says `%s` is refused as a shell line" % text, "set", entry_of(task_item([text])),
+             ("command-in-item", "shell line"))
+    text = "Find the lane with `%s`." % span
+    span_scope("find holds the same span", text, span)
+    page("a find step quoting `%s` passes" % span, "set", entry_of(task_item([text])), None)
+
+
+def case_quoted_span_run_after_is_refused():
+    # A run verb after an edit-verb span, in the same sentence, makes the span a command: "Find `x` and run it" runs
+    # it. The run verb is read after the span up to the sentence break (question_form.SPAN_RUN_AFTER). The control has
+    # no run verb after the span, so the span stays quoted text and passes; the two differ only in that run verb.
+    span = "scripts/x.py --y"
+    text = "Find `%s` in the page" % span
+    span_scope("find quotes the span with no run after it", text, span)
+    page("an edit-verb step quoting `%s` with no run after passes" % span, "set", entry_of(task_item([text])), None)
+    text = "Find `%s` and run it" % span
+    span_scope("find, then run after the span", text, span)
+    page("a step that finds `scripts/x.py --y` and runs it after the span is refused", "set",
+         entry_of(task_item([text])), ("command-in-item", "shell line"))
+
+
+# ------------------------------------------------------------------ a PowerShell string and a step's shell span
+
+def ps_task(ps, mac="git log -1"):
+    """A task whose command is {powershell: ps, mac}, with no gh in either, so only the bash-operator check judges it."""
+    return task_item(["Open PowerShell", "Paste the command below and run it"], command={"powershell": ps, "mac": mac})
+
+
+def case_powershell_bash_forms():
+    # A bash form in a PowerShell command is refused: PS_BASH_OPERATOR reads only &&, ||, <<, /dev/null and export,
+    # and PS_BASH_FORMS reads the rest with strings and comments blanked. Each bash form is refused, and its
+    # PowerShell twin passes. The traps
+    # are PowerShell text that looks like a bash form: a cast, a regex escape, a pipe in a string or a comment, and a
+    # backslash path that ends a line.
+    for name, ps in (("a pipe to head", "git log | head -5"), ("a pipe to grep", "git log --oneline | grep -i fix"),
+                     ("a leading NAME=value", "FOO=1 git push"),
+                     ("a bracket test", "if [ -f x ]; then git push; fi"),
+                     ("a backslash line end", "git push origin \\\nmain"),
+                     ("a pipe to jq", "Get-Content x | jq ."), ("a pipe to less", "Get-Content x | less"),
+                     ("a double-bracket test", "if [[ -f x ]]; then git push; fi"),
+                     ("a pipe to tail", "Get-Content x | tail -5"), ("a pipe to xargs", "Get-ChildItem | xargs rm"),
+                     ("a pipe to sed", "git log | sed 1d"), ("a pipe to awk", "git log | awk 1"),
+                     ("a pipe to cut", "git log | cut -c1-7"), ("a pipe to wc", "git log | wc -l"),
+                     ("a pipe to uniq", "git log --oneline | uniq"), ("a pipe to tr", "git log | tr a b"),
+                     ("a pipe to tac", "git log | tac"),
+                     ("a while bracket test", "while [ -f x ]; do git push; done"),
+                     ("an until bracket test", "until [ -f x ]; do git push; done"),
+                     ("an elif bracket test", "if false; then git push; elif [ -f x ]; then git push; fi"),
+                     ("a bracket test after an open paren", "git push ( [ -f x ] )"),
+                     ("a bracket test after a semicolon", "git status; [ -f x ]; git push"),
+                     ("a bracket test at a line start", "[ -f x ]\nRun-It")):
+        page("a PowerShell command with %s is refused as a bash operator" % name, "set",
+             entry_of(ps_task(ps)), ("command-in-item", "bash operator"))
+    # A backslash that ends the string, with no line after it, is a path or an argument: each passes.
+    for name, ps in (("cd to a backslash", "cd \\"), ("Set-Location to a backslash", "Set-Location \\"),
+                     ("dir of a backslash", "dir \\")):
+        page("a PowerShell command, %s, passes" % name, "set", entry_of(ps_task(ps)), None)
+    # A backslash with a line after it is a continuation, and refuses.
+    page("a PowerShell dir with a continuation backslash and a line after it is refused as a bash operator", "set",
+         entry_of(ps_task("dir \\\n-Force")), ("command-in-item", "bash operator"))
+    # A lone backslash argument is the drive root, a path, so a line that names a tool after it is no continuation.
+    page("a PowerShell cd to a lone backslash, then a line that names a tool, passes", "set",
+         entry_of(ps_task("cd \\\ntool x")), None)
+    # A backslash glued to a word (origin\) is a path end, not a continuation, so it passes.
+    page("a PowerShell push with origin\\ then a line, the backslash glued to a word, passes", "set",
+         entry_of(ps_task("git push origin\\\nmain")), None)
+    for name, ps in (("a Select-Object pipe", "Get-ChildItem | Select-Object -First 5"),
+                     ("a PowerShell variable assignment", '$env:FOO = "1"; git push'),
+                     ("a PowerShell if test", "if (Test-Path x) { git push }"),
+                     ("a backtick line continuation", "git push origin `\nmain")):
+        page("a PowerShell twin with %s passes" % name, "set", entry_of(ps_task(ps)), None)
+    # A `[ ... ]` with spaces is a test only at a line start, after `;` or `(`, or after `if`, `elif`, `while` or
+    # `until`, so an index with a space after a variable passes. A pipe to a cmdlet whose name starts with a listed
+    # name, such as Trace-Command for `tr`, passes: a listed name must end at a word edge.
+    for name, ps in (("a backslash path that ends a line", "Set-Location C:\\repo\\\ngit push origin main"),
+                     ("a cast and a regex escape", "[int]$n = 5; if ('a[b' -match '\\[') { git push }"),
+                     ("a pipe inside a string", 'Write-Host "a | head"'),
+                     ("a pipe after a comment opener", "git log # | head"),
+                     ("a here-string holding a pipe", "@'\n| head\n'@"),
+                     ("a pipe to Trace-Command, named like tr", "Get-Date | Trace-Command"),
+                     ("an index with a space in brackets after a variable", "Write-Output $names[ 0 ]")):
+        page("a PowerShell trap, %s, passes" % name, "set", entry_of(ps_task(ps)), None)
+
+
+def case_command_refusal_names_the_bash_forms():
+    # A PowerShell command with a bash-only form is refused by command-in-item, and the reason a refused Claude reads
+    # (PAGE_REASONS) names that form, so Claude sees its own form in the printed list. Each form is refused first (the
+    # scope), then its reason is read for its fragment.
+    for form, ps, fragment, named in (
+            ("a pipe to head", "git log | head -5", r"\bpipe\b.*\bhead\b|\|\s*head\b",
+             "a pipe to a Unix tool, such as head"),
+            ("a leading NAME=value", "FOO=1 git push", r"\w+=value\b", "a NAME=value prefix"),
+            ("a bracket test", "if [ -f x ]; then git push; fi", r"bracket|\[\s*\]|\[\[", "a bracket test"),
+            ("a backslash line end", "git push origin \\\nmain", r"backslash", "a backslash line end")):
+        got = call("item_hit", "set", entry_of(ps_task(ps)))
+        refused = isinstance(got, tuple) and got[0] == "command-in-item"
+        check("%s is refused by command-in-item, the rule whose reason is checked" % form, refused,
+              "got %r" % (got,))
+        reason = question_form.PAGE_REASONS.get(got[0], "") if refused else ""
+        check("the reason a refused Claude reads names %s" % named,
+              re.search(fragment, reason, re.I) is not None, "reason %r" % reason)
+
+
+def case_powershell_hashtable_is_no_bash_form():
+    # PS_BASH_FORMS ends a NAME=value value at a `;`, so a hashtable's second pair is no `NAME=value tool` line.
+    # A hashtable with `;` between its pairs passes. A leading NAME=value before a command is refused, and so is
+    # one after a `;`.
+    for name, ps in (("a hashtable of three pairs", "$h = @{a=1; b=2; c=3}"),
+                     ("a hashtable of two named pairs", "$o = @{Name='x'; Value=2}")):
+        page("a PowerShell %s passes" % name, "set", entry_of(ps_task(ps)), None)
+    # A scriptblock value (`E={ ... }`) holds statements, and its `}` closes the value, not the hashtable's. So a `{`
+    # and a letter after `NAME=` is a scriptblock, not a `NAME=value tool` line. `E={ $_.Name }` is the control: a `$`
+    # after the brace is no command word, and it passes already.
+    for name, ps in (("a PowerShell calculated property whose scriptblock calls a cmdlet",
+                      "Get-Process | Select-Object @{N='x'; E={ Get-Date }}"),
+                     ("a PowerShell calculated property whose scriptblock is an if statement",
+                      "@{L='Size'; E={ if ($_.Length -gt 1) { 1 } else { 2 } }}"),
+                     ("a PowerShell hashtable whose second value is a scriptblock with a command", "@{a=1; b={ foo }}"),
+                     ("a PowerShell calculated property whose scriptblock reads a property (control)",
+                      "Get-Process | Select-Object @{N='x'; E={ $_.Name }}")):
+        page("%s passes: %s" % (name, ps), "set", entry_of(ps_task(ps)), None)
+    for ps in ("FOO=1 tool run", "tool run;FOO=1 tool run"):
+        page("a PowerShell command %s is refused as a bash operator" % ps, "set",
+             entry_of(ps_task(ps)), ("command-in-item", "bash operator"))
+
+
+def case_powershell_comment_quote_ends_at_its_line():
+    # The quote walk ends a `#` line comment at its newline, so a quote in the comment opens nothing past its line,
+    # and the next line is read as it stands. A contraction in a comment is text too, and a comment opener inside a
+    # string opens no comment.
+    refused = ("command-in-item", "bash operator")
+    page("a PowerShell comment with an unpaired single quote, then a pipe to head on the next line, is refused",
+         "set", entry_of(ps_task("# the 'main branch\ngit log | head -5")), refused)
+    page("a PowerShell comment with an unpaired double quote, then a pipe to head on the next line, is refused",
+         "set", entry_of(ps_task('# the "main branch\ngit log | head -5')), refused)
+    page("a PowerShell comment with a contraction, then Get-ChildItem, passes", "set",
+         entry_of(ps_task("# it's fine\nGet-ChildItem")), None)
+    page("a PowerShell block comment with a contraction, then a pipe to head, is refused", "set",
+         entry_of(ps_task("<# it's #>\ngit log | head -5")), refused)
+    page("a PowerShell string holding a comment opener, then a pipe to head on the next line, is refused", "set",
+         entry_of(ps_task('Write-Host "# ok"\ngit log | head -5')), refused)
+
+
+def case_powershell_bash_prefix_braced_expansion():
+    # A NAME=value prefix holding a braced expansion in its value (`${PORT:-8080}`, `${HOME}/bin`) is a bash form,
+    # so each is refused. A `$` inside the expansion and one nested expansion are refused too. The hashtable controls
+    # pass: their `}` closes the hashtable, not an expansion.
+    refused = ("command-in-item", "bash operator")
+    page("a PowerShell command, PORT=${PORT:-8080} node server.js, is refused as a bash operator", "set",
+         entry_of(ps_task("PORT=${PORT:-8080} node server.js")), refused)
+    page("a PowerShell command, X=${HOME}/bin tool run, is refused as a bash operator", "set",
+         entry_of(ps_task("X=${HOME}/bin tool run")), refused)
+    page("a PowerShell command, PORT=${PORT:-$DEFAULT} node server.js, is refused as a bash operator", "set",
+         entry_of(ps_task("PORT=${PORT:-$DEFAULT} node server.js")), refused)
+    page("a PowerShell command, PORT=${A:-${B}} node server.js, is refused as a bash operator", "set",
+         entry_of(ps_task("PORT=${A:-${B}} node server.js")), refused)
+    for name, ps in (("a hashtable of three pairs", "@{a=1; b=2; c=3}"),
+                     ("a hashtable with no space after its first semicolon", "@{a=1;b=2 }"),
+                     ("a hashtable with a double-quoted underscore name", '@{Name="_"; Value=2}')):
+        page("a PowerShell %s passes" % name, "set", entry_of(ps_task(ps)), None)
+
+
+def case_powershell_hash_mid_token_is_no_comment():
+    # A `#` opens a line comment only at a token start (guard_core.token_start), so a `#` inside a word is text, and
+    # the bash form after it on the same line is read. The next-line and here-string pins hold the refusal too.
+    # Neither depends on that condition: a line comment ends at its newline, and a here-string body is quoted text.
+    refused = ("command-in-item", "bash operator")
+    page("a PowerShell command, a#b | head, is refused: a # inside a word opens no comment", "set",
+         entry_of(ps_task("a#b | head")), refused)
+    page("a PowerShell command, https://x/#frag | head, is refused: a # inside a word opens no comment", "set",
+         entry_of(ps_task("https://x/#frag | head")), refused)
+    page("a PowerShell command, $x#y | head, is refused: a # inside a word opens no comment", "set",
+         entry_of(ps_task("$x#y | head")), refused)
+    page("a PowerShell command, $x#y then | head on the next line, is refused", "set",
+         entry_of(ps_task("$x#y\n| head")), refused)
+    page("a PowerShell here-string holding # x 'y, then git log | head on a later line, is refused", "set",
+         entry_of(ps_task("$h = @'\n# x 'y\n'@\ngit log | head -5")), refused)
+
+
+def case_step_shell_programs_partial():
+    # A single-span step is a shell line when its first word is in SHELL_PROGRAMS (a cloud CLI included), or a
+    # lowercase word whose second word is a flag (chmod +x f, rg --files). Each span below is refused. Controls pass:
+    # a bare tool name, a flag alone and a minus between two words. The chained span stays refused, as on main.
+    for span in ("gsutil ls", "yarn install", "kubectl get pods", "terraform plan", "chmod +x f", "grep -r x",
+                 "pnpm install", "aws s3 ls", "az login", "helm list", "rg --files", "sync --dry-run"):
+        page("a step holding `%s` is refused as a shell line" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), ("command-in-item", "shell line"))
+    for span in ("kubectl", "--force", "a - b"):
+        page("a step holding `%s` alone is text and passes" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), None)
+    page("a fence holding a chained terraform plan with a pipe stays a shell line", "set",
+         entry_of(task_item(["Check the output:\n```\nterraform plan | tee plan.txt\n```"])),
+         ("command-in-item", "shell line"))
+    # A program at a path is judged by its bare name, as `chmod` is alone: the word after the directory is the program.
+    page("a step holding `/usr/bin/chmod +x f` is refused as a shell line", "set",
+         entry_of(task_item(["Check the output of `/usr/bin/chmod +x f`"])), ("command-in-item", "shell line"))
+
+
 # ------------------------------------------------------------------ a question says how it departs from main
 #
 # Rule question-departs: a question is asked only when the work departs from main. A line that restates
@@ -1432,7 +1684,7 @@ def case_departs_out_of_scope_passes():
     one = tcj.good_box(departs=None)
     one["questions"][0].update(question="Ship it?", options=[{"label": "Yes", "description": "go"}])
     chat("a one-option question with no Departs from line passes", one, None)
-    task = {"kind": "task", "title": "Merge the batch", "status": "open", "steps": ["Open Terminal"],
+    task = {"n": 928, "kind": "task", "title": "Merge the batch", "status": "open", "steps": ["Open Terminal"],
             "context": "Why yours: a session on your computer was asked first and none could reach the remote"}
     page("a task with a Why yours line and no Departs from line passes", "set", entry_of(task), None)
     page("a closed decision with no form lines and no Departs from line passes", "set",
@@ -1547,7 +1799,7 @@ def case_departs_line_forms_pass():
         dp_chat("a line form %r passes" % body, body, None)
         dp_page("a page line form %r passes" % body, body, None)
     # CRLF line endings: the same form lines, joined with CR LF. The line's \r is no part of either side.
-    crlf = "\r\n".join(line for line in (GOAL, PROBLEM, *BASED, DEPARTS) if line)
+    crlf = "\r\n".join(line for line in (GOAL, PROBLEM, *BASED, DEPARTS, WAITING) if line)
     box = chat_box()
     box["questions"][0]["question"] = crlf
     chat("a question with CRLF line endings and a valid Departs from line passes", box, None)
@@ -1590,7 +1842,7 @@ PORT_BAD_LINES = [
 
 def port_task(departs):
     """A port task with a Why yours line, so only the port and departs checks can refuse it."""
-    return {"kind": "task", "port": True, "title": "Merge the batch", "status": "open",
+    return {"n": 928, "kind": "task", "port": True, "title": "Merge the batch", "status": "open",
             "context": "Why yours: a session on your computer was asked first and none could reach the remote\n"
                        + departs}
 
@@ -2039,6 +2291,134 @@ def case_item_51_stray_field():
          entry_of(page_item(focus="#fill")), ("item-field-rendered", "focus"))
 
 
+# ------------------------------------------------------------------ n is a number (step item-n-must-be-number)
+
+# The page's own rule is `typeof it.n === "number" && isFinite(it.n)` (skills/waiting-page/page.html, problem()).
+# An item whose n fails it shows "This item has no number, so it cannot be answered". The guard refuses the write
+# under the rule item-field-rendered with the reason "item-n-number", and names the item id.
+N_RULE = "item-field-rendered"
+N_ITEM_ID = "item-n-case"
+
+
+def with_n(**over):
+    """The form item with n set to a value, or with no n when `absent` is passed."""
+    item = page_item()
+    if over.pop("absent", False):
+        item.pop("n", None)
+    else:
+        item["n"] = over.pop("n", 929)
+    item.update(over)
+    return item
+
+
+def case_item_n_text_is_refused():
+    for value in ("929", "", " 929", "9.29e2"):
+        page("a set whose n is the text %r is refused, naming the item" % value, "set",
+             entry_of(with_n(n=value), doc_id=N_ITEM_ID), (N_RULE, N_ITEM_ID))
+    page("an update whose n is the text \"929\" is refused, naming the item", "update",
+         entry_of({"n": "929"}, doc_id=N_ITEM_ID), (N_RULE, N_ITEM_ID))
+    page("a str_replace on the field n is refused, since it can only give text", "str_replace",
+         {"collection": "items", "doc_id": N_ITEM_ID, "field": "n", "old_str": "9", "new_str": "8"},
+         (N_RULE, N_ITEM_ID))
+
+
+def case_item_n_other_non_numbers_are_refused():
+    # The page's rule: a number that isfinite. A bool, a null, a list, an object, NaN and infinity all fail it.
+    for label, value in (("true", True), ("null", None), ("a list", [929]), ("an object", {"n": 929}),
+                         ("NaN", float("nan")), ("infinity", float("inf")), ("minus infinity", float("-inf")),
+                         ("an int too big for a float", 10 ** 400)):
+        page("a set whose n is %s is refused" % label, "set",
+             entry_of(with_n(n=value), doc_id=N_ITEM_ID), (N_RULE, N_ITEM_ID))
+    page("an update that removes n with the delete marker is refused", "update",
+         entry_of({"n": {"__delete__": True}}, doc_id=N_ITEM_ID), (N_RULE, N_ITEM_ID))
+
+
+def case_item_n_number_passes():
+    for label, value in (("929", 929), ("0", 0), ("a negative number", -3), ("a float, which the page accepts", 929.5)):
+        page("a set whose n is %s passes" % label, "set", entry_of(with_n(n=value), doc_id=N_ITEM_ID), None)
+    page("an update whose n is the number 929 passes", "update", entry_of({"n": 929}, doc_id=N_ITEM_ID), None)
+
+
+def case_item_n_absent():
+    page("a set with no n is refused: a new item needs a number", "set",
+         entry_of(with_n(absent=True), doc_id=N_ITEM_ID), (N_RULE, N_ITEM_ID))
+    page("an update that does not touch n passes", "update",
+         entry_of({"title": "A new title"}, doc_id=N_ITEM_ID), None)
+    page("an update of the form fields that does not touch n passes", "update",
+         entry_of({"kind": "decision", "context": form_text()}, doc_id=N_ITEM_ID), None)
+    page("a str_replace on another field is not judged for n", "str_replace",
+         {"collection": "items", "doc_id": N_ITEM_ID, "field": "title", "old_str": "a", "new_str": "b"}, None)
+
+
+def case_item_n_batch_and_file_path():
+    def write(op, data, doc_id):
+        return {"op": op, "collection": "items", "doc_id": doc_id, "data": data}
+
+    def batch(*writes):
+        return {"action": "batch", "url": PAGE_URL, "writes": list(writes)}
+
+    bad = batch(write("set", with_n(n=928), "good-one"), write("set", with_n(n="929"), "bad-one"),
+                write("update", {"title": "x"}, "fine-one"))
+    verdict("batch: one item with a text n refuses the call, naming that item",
+            guard.data_tool_hit(bad, PAGE_REPO), (N_RULE, "bad-one"))
+    verdict("batch: the same call through question_form.page_item_hit refuses the same item",
+            question_form.page_item_hit(bad, PAGE_REPO)[0], (N_RULE, "bad-one"))
+    ok = batch(write("set", with_n(n=928), "good-one"), write("set", with_n(n=929), "good-two"),
+               write("update", {"title": "x"}, "fine-one"))
+    verdict("batch: numbers on every set and an update with no n pass", guard.data_tool_hit(ok, PAGE_REPO), None)
+    # The file_path form: the data is read from the file, a relative path against the payload cwd.
+    folder = judged_folder()
+    write_json_file(os.path.join(folder, "n-text.json"), with_n(n="929"))
+    write_json_file(os.path.join(folder, "n-number.json"), with_n(n=929))
+    refused = {"collection": "items", "doc_id": N_ITEM_ID, "file_path": "n-text.json"}
+    passed = {"collection": "items", "doc_id": N_ITEM_ID, "file_path": "n-number.json"}
+    verdict("file_path: a file whose n is text is refused, read at the payload cwd",
+            call("item_hit", "set", refused, folder), (N_RULE, N_ITEM_ID))
+    verdict("file_path: a file whose n is a number passes", call("item_hit", "set", passed, folder), None)
+
+
+def case_item_n_posted_text_names_the_item():
+    # The text Claude sees is the printed reason, not the log line: in a batch it must say which write to fix.
+    def write(op, data, doc_id):
+        return {"op": op, "collection": "items", "doc_id": doc_id, "data": data}
+
+    bad = {"action": "batch", "url": PAGE_URL,
+           "writes": [write("set", with_n(n=928), "good-one"), write("set", with_n(n="929"), "bad-one"),
+                      write("update", {"title": "x"}, "fine-one")]}
+    said = printed_reason(bad)
+    check("batch: the posted n refusal names the bad item", "bad-one" in said, repr(said)[:300])
+    check("batch: the posted n refusal names no good item",
+          not re.search(r"good-one|fine-one", said), repr(said)[:300])
+    check("batch: the posted n refusal still carries the correction",
+          "number such as 929" in said, repr(said)[:300])
+
+
+def case_item_n_text_inside_other_text_is_not_judged():
+    # Scanner-safe: the check reads the parsed n, never the text of the write. Text that looks like an n, and
+    # comment openers and a lone quote, beside a real number are plain text.
+    context = form_text(goal='Goal: keep "n": "929" and n: "929" as plain text, with //path, /* glob and # tags, and don\'t parse it.')
+    page("a real number n beside text that reads as a text n passes", "set",
+         entry_of(with_n(n=929, context=context), doc_id=N_ITEM_ID), None)
+    page("a text n beside text that reads as a number n is still refused", "set",
+         entry_of(with_n(n="929", context=form_text(goal='Goal: keep "n": 929 as plain text.')), doc_id=N_ITEM_ID),
+         (N_RULE, N_ITEM_ID))
+
+
+def case_item_n_reason_and_the_pages_own_rule():
+    reasons = getattr(question_form, "PAGE_REASONS", None) or {}
+    text = reasons.get("item-n-number") or ""
+    check("the n reason says n must be a number such as 929, not \"929\"",
+          "number such as 929" in text and '"929"' in text, repr(text)[:200])
+    check("the n reason cites the decision item-field-rendered", "decision item-field-rendered" in text, repr(text)[:200])
+    check("the n reason posts only the correction: it names no other rule's remedy",
+          not re.search(r"itemFields|Goal|Problem|__delete__", text), repr(text)[:200])
+    # The allow list points at the page's own rule: the page must still carry the predicate the guard follows.
+    with open(os.path.join(REPO, "skills", "waiting-page", "page.html"), encoding="utf-8") as f:
+        page_text = f.read()
+    check("the page's problem() still judges n by typeof number and isFinite",
+          'typeof it.n === "number" && isFinite(it.n)' in page_text, "page.html no longer carries the n rule")
+
+
 # ------------------------------------------------------------------ dismissed: the page's own Mark read
 
 def case_session_update_naming_dismissed_is_refused():
@@ -2149,6 +2529,43 @@ def case_page_lists_holds_lane():
           "the itemFields block in skills/waiting-page/page.html did not read as a list of strings")
     check("page: the itemFields block lists holdsLane", "holdsLane" in (fields or []),
           "the page's itemFields block does not list holdsLane")
+
+
+# ------------------------------------------------------------------ a press link needs a string label
+
+def case_press_link_label_is_a_string():
+    # A link counts when it has a url, but the page draws a link only when its label is a string too
+    # (skills/waiting-page/page.html isLink). A press whose only link has no
+    # string label shows the owner no link, so it is refused. A link to the page with an empty-string label is still
+    # a string, so it passes. A labelled link to another PR does not stand for the page, so an unlabelled link to
+    # the page beside it does not save the press.
+    pr, other = "https://github.com/shivinate7/home/pull/374", "https://github.com/shivinate7/home/pull/999"
+    # The option names the pr URL's number, so a link must reach that page: with no number in the text any link passes.
+    base = copy.deepcopy(ITEM92["options"])
+    base[1].update(label="Merge PR #374", how="Press Merge in GitHub.")
+
+    def with_links(links):
+        options = copy.deepcopy(base)
+        options[1]["links"] = links
+        return entry_of(page_item(options=options))
+
+    page("a press whose link to the page has no label is refused as press-link", "set",
+         with_links([{"url": pr}]), ("press-link", None))
+    page("a press whose link to the page has a null label is refused as press-link", "set",
+         with_links([{"label": None, "url": pr}]), ("press-link", None))
+    page("a press whose link to the page has a numeric label is refused as press-link", "set",
+         with_links([{"label": 5, "url": pr}]), ("press-link", None))
+    page("a press with an unlabelled link to the page beside a labelled link to another PR is refused as press-link",
+         "set", with_links([{"label": "the other pull request", "url": other}, {"url": pr}]), ("press-link", None))
+    page("a press with only a labelled link to another PR stays refused as press-link", "set",
+         with_links([{"label": "the other pull request", "url": other}]), ("press-link", None))
+    page("a press whose link to the page has an empty-string label passes", "set",
+         with_links([{"label": "", "url": pr}]), None)
+    task = task_item(["Open PR #374 on GitHub", "Press Merge."], links=[{"url": pr}])
+    page("a task whose step presses in GitHub, with an unlabelled link to the page, is refused as press-link", "set",
+         entry_of(task), ("press-link", None))
+    page("a task whose step presses in GitHub, with a labelled link to the page, passes", "set",
+         entry_of(dict(task, links=[{"label": "PR #374", "url": pr}])), None)
 
 
 # ------------------------------------------------------------------ a press link that is not a list; a partial edit of the Why yours line
@@ -2290,6 +2707,7 @@ def ma144(repo=OTHER_REPO, checked=None, **over):
     """The incident item, judged on `repo` (None leaves the field out). `checked` sets checked_with (None leaves it
     out, "" sets it empty). `over` sets or replaces any other field."""
     item = copy.deepcopy(MA144)
+    item["context"] = item["context"] + "\n" + WAITING  # the incident item predates the Waiting on line
     if repo is not None:
         item["repo"] = repo
     if checked is not None:
@@ -2757,8 +3175,453 @@ def case_judged_mixed_writes_all_returned():
           "doc ids %r: the relative write p4 is read against the process cwd and dropped" % (ids,))
 
 
+# ------------------------------------------------------------------ stops: the entries Blocking counts are named in holds
+#
+# Design notes docs/design/session-role-sort-notes.md, ruling Q1 and point 1: `stops` is a list of what an answer stops, each entry a
+# lane slug, a PR number or a step id. holds names them in words, so the two cannot drift. The rule id is not fixed by the
+# brief, so each case takes any refusal, other than item-field-rendered, that names the entry it refuses.
+
+STOPS_HOLDS = "Lane fix-proxy and PR #1201 wait on your word."
+STOPS_NOT_A_REFUSAL = ("", "MISSING", "RAISED", "item-field-rendered")
+_STOPS_PAGE = []
+
+
+def stops_fields_page():
+    """A page whose itemFields block is the real page's list plus `stops`. The list is read from the page, never copied, and
+    the seam GUARD_ITEM_FIELDS_PAGE points the check at it, so a stops write is judged by the stops rule, not by
+    item-field-rendered. The real page lists `stops` (page.html itemFields), and the seam writes that list as it is."""
+    if not _STOPS_PAGE:
+        fields = question_form._item_fields(question_form.ITEM_FIELDS_PAGE)
+        check("stops: the page's itemFields list reads", fields is not None, "no itemFields list in the page")
+        check("stops: the page's itemFields list names stops", "stops" in (fields or []), "the page does not list stops")
+        path = os.path.join(RUN_FOLDER, "stops_fields_page.html")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('<script type="application/json" id="itemFields">%s</script>' % json.dumps(fields or []))
+        _STOPS_PAGE.append(path)
+    return _STOPS_PAGE[0]
+
+
+def stops_item(holds=None, stops=None):
+    """A decision in the form. `holds` and `stops` are set when given and left out when None."""
+    item = page_item(holds=holds, stops=stops)
+    return {k: v for k, v in item.items() if not (k in ("holds", "stops") and v is None)}
+
+
+def stops_refused(name, got, fragment):
+    ok = got[0] not in STOPS_NOT_A_REFUSAL and fragment.lower() in str(got[1]).lower()
+    check(name, ok, "want a refusal naming %r, got %r" % (fragment, got))
+
+
+def stops_page(name, data, fragment=None, op="set"):
+    """One page write judged by item_hit and by the guard, with the stops seam. A fragment is a refusal that names it;
+    None is a pass. `op` is the write's verb: set by default, or update for a write that carries only the fields it changes."""
+    with mock.patch.dict(os.environ, {question_form.ITEM_FIELDS_SEAM: stops_fields_page()}):
+        for surface, got in (("page item_hit", call("item_hit", op, entry_of(data))),
+                             ("page guard", guard_hit(op, entry_of(data)))):
+            if fragment is None:
+                check("%s: %s passes" % (surface, name), got == ("", ""), "want a pass, got %r" % (got,))
+            else:
+                stops_refused("%s: %s" % (surface, name), got, fragment)
+
+
+def case_stops_names_each_entry_in_holds():
+    """A lane is named by its slug in the words, a PR by "#N" or "PR N". A PR number is not named by a longer one that
+    starts with it (#12 is not #1201), nor a lane slug by a longer slug (fix is not fix-proxy)."""
+    stops_page("a lane entry that holds does not name", stops_item(holds="PR #1201 waits on your word.", stops=["lane fix-proxy"]), "fix-proxy")
+    stops_page("a PR entry that holds does not name", stops_item(holds="Lane fix-proxy waits on your word.", stops=["PR #1201"]), "1201")
+    stops_page("a second entry that holds does not name", stops_item(holds="Lane fix-proxy waits on your word.", stops=["lane fix-proxy", "PR #1201"]), "1201")
+    stops_page("a PR number that is the start of the one holds names", stops_item(holds="Waits on PR #1201.", stops=["PR #12"]), "PR #12")
+    stops_page("a lane slug that is the start of the one holds names", stops_item(holds="Lane fix-proxy waits on your word.", stops=["lane fix"]), "fix")
+
+
+def case_stops_consistent_items_pass():
+    """Controls: an item whose holds names every entry passes, with the PR written either way, and so does an item with
+    neither field, or an empty list."""
+    stops_page("holds names both entries", stops_item(holds=STOPS_HOLDS, stops=["lane fix-proxy", "PR #1201"]), None)
+    stops_page("holds writes the PR as PR N", stops_item(holds="Lane fix-proxy and PR 1201 wait on your word.", stops=["lane fix-proxy", "PR #1201"]), None)
+    stops_page("holds writes the PR as #N", stops_item(holds="Lane fix-proxy waits on #1201.", stops=["PR #1201"]), None)
+    stops_page("an empty stops list with holds", stops_item(holds=STOPS_HOLDS, stops=[]), None)
+    stops_page("neither holds nor stops", stops_item(), None)
+
+
+def case_stops_item_passes_the_real_page_fields():
+    """No seam: the check reads the real page's itemFields list, which lists `stops`, so a consistent stops item passes on
+    both surfaces. A page that dropped `stops` from that list would refuse it as item-field-rendered, naming the field."""
+    page("a consistent stops item passes the page's own field list", "set",
+         entry_of(stops_item(holds=STOPS_HOLDS, stops=["lane fix-proxy", "PR #1201"])), None)
+
+
+def case_stops_needs_holds_and_a_list():
+    """stops with no holds, a stops that is not a list, and a repeated entry are each refused, naming the stops or the entry."""
+    stops_page("stops with no holds", stops_item(stops=["lane fix-proxy"]), "stops")
+    stops_page("stops that is a string, not a list", stops_item(holds=STOPS_HOLDS, stops="lane fix-proxy"), "stops")
+    stops_page("a repeated entry", stops_item(holds=STOPS_HOLDS, stops=["lane fix-proxy", "lane fix-proxy"]), "fix-proxy")
+
+
+def case_stops_refusal_prints_its_table_text():
+    """A stops refusal prints its rule's text from question_form.PAGE_REASONS, the one table guard.py prints from (as
+    case_page_reasons_are_one_table checks the other page rules)."""
+    table = getattr(question_form, "PAGE_REASONS", None)
+    if table is None:
+        check("stops reason: question_form.PAGE_REASONS is the table of page reasons", False, MISSING)
+        return
+    tool_input = {"url": PAGE_URL, "action": "set", "collection": "items", "doc_id": DOC,
+                  "data": stops_item(holds="PR #1201 waits on your word.", stops=["lane fix-proxy"])}
+    with mock.patch.dict(os.environ, {question_form.ITEM_FIELDS_SEAM: stops_fields_page()}):
+        rule = guard.data_tool_hit(tool_input, PAGE_REPO)[0]
+        check("stops reason: the refused entry has a rule that is in the page reasons table",
+              rule in table and rule not in STOPS_NOT_A_REFUSAL, "rule %r" % (rule,))
+        if rule in table:
+            printed = printed_reason(tool_input)
+            check("stops reason: the refusal prints its rule's table text", table[rule] in printed, printed[:200])
+
+
+def case_stops_update_judged_by_the_fields_it_carries():
+    """An update that sets stops with no holds is refused, as a set is. An update that removes stops passes, and so does
+    one that carries holds alone: the stored stops is unseen, so the update is judged by what it carries."""
+    stops_page("an update that sets stops with no holds", {"stops": ["lane fix-proxy"]}, "stops", op="update")
+    stops_page("an update that sets stops and holds that names both", {"stops": ["lane fix-proxy", "PR #1201"], "holds": STOPS_HOLDS},
+               None, op="update")
+    stops_page("an update that removes stops", {"stops": {"__delete__": True}}, None, op="update")
+    stops_page("an update that carries holds only", {"holds": "Lane fix-proxy waits on your word."}, None, op="update")
+
+
+def case_stops_batch_judged_per_write():
+    """A batch that holds a stops write with no holds is refused by the stops rule. A batch of consistent stops writes passes."""
+    def batch(writes):
+        with mock.patch.dict(os.environ, {question_form.ITEM_FIELDS_SEAM: stops_fields_page()}):
+            return page_batch(writes)
+    good = {"op": "set", "collection": "items", "doc_id": "stops-batch-ok", "data": stops_item(holds=STOPS_HOLDS, stops=["lane fix-proxy", "PR #1201"])}
+    bad = {"op": "set", "collection": "items", "doc_id": "stops-batch-bad", "data": stops_item(stops=["lane fix-proxy"])}
+    verdict("page guard: a batch with a stops write and no holds is refused", batch([good, bad]),
+            (getattr(question_form, "STOPS_RULE", "<STOPS_RULE missing from hooks/question_form.py>"), "stops"))
+    verdict("page guard: a batch of consistent stops writes passes", batch([good]), None)
+
+
+def case_stops_str_replace_on_holds_is_a_known_gap():
+    """KNOWN GAP, pinned so it is on record: a str_replace that drops an entry from holds passes, since stops_hit judges a
+    set and an update only, and the stored stops is unseen. This case passes today. A fix that judges the edit turns it red,
+    and the case is re-pointed then."""
+    page("KNOWN GAP: a str_replace that drops PR #1201 from holds passes while stops still lists it", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "holds", "old_str": STOPS_HOLDS,
+          "new_str": "Lane fix-proxy waits on your word."}, None)
+# ------------------------------------------------------------------ a decision states its recommendation, why, and what waits
+#
+# Rule question-form (decision question-form, the page's card). An open decision set or update shows a
+# recommendation that names an option (`recommended`, else the old `pick`), a non-blank `why`, and a `Waiting on:`
+# line in `context`. A closed item, another kind, and an update that carries none of these fields pass.
+# The page draws the recommendation as visible text above the options, and never preselects one.
+
+WAIT_LINE_TEXT = "Waiting on: nothing stopped; the lane acts next."
+PLAIN_OPTIONS = [{k: v for k, v in option.items() if k != "widens"} for option in ITEM92["options"]]
+
+
+def rec_item(context=None, options=None, **over):
+    """A decision that passes the recommendation, why and Waiting on rules: page_item() with `recommended` a and no
+    legacy `pick`. `context` replaces the whole context; `options` replaces the options. `over` sets a field, and a
+    field set to None is left out, so a case drops one field and keeps the rest."""
+    item = page_item(options=options, lines=None if context is None else [context])
+    item.pop("pick", None)
+    item["recommended"] = "a"
+    for key, value in over.items():
+        if value is None:
+            item.pop(key, None)
+        else:
+            item[key] = value
+    return item
+
+
+def rec_page(name, op, entry, rule, fragments):
+    """A page write judged by item_hit and by the guard. Both give `rule`, and the matched text names one of
+    `fragments` (a word the refusal may carry, such as the pick's own name or the recommendation's)."""
+    for surface, got in (("item_hit", call("item_hit", op, entry)), ("guard", guard_hit(op, entry))):
+        ok = got[0] == rule and any(f in str(got[1]).lower() for f in fragments)
+        check("page %s: %s" % (surface, name), ok, "want %s naming one of %r, got %r" % (rule, fragments, got))
+
+
+def case_recommend_base_passes():
+    # Scope before subject: the base decision passes, and each case below removes one part of it.
+    page("a decision with a recommended key, a why and a Waiting on line passes", "set", entry_of(rec_item()), None)
+    page("a Waiting on line that says nothing is stopped, and who acts next, passes", "set",
+         entry_of(rec_item(context=form_text(waiting=WAIT_LINE_TEXT))), None)
+
+
+def case_recommend_missing_or_unknown_is_refused():
+    page("a set with no recommended and no pick is refused, naming the recommendation", "set",
+         entry_of(rec_item(recommended=None)), (FORM_RULE, "recommend"))
+    page("a set with a blank recommended is refused, naming the recommendation", "set",
+         entry_of(rec_item(recommended="")), (FORM_RULE, "recommend"))
+    page("a set whose recommended key names no option is refused, naming the recommendation", "set",
+         entry_of(rec_item(recommended="z")), (FORM_RULE, "recommend"))
+
+
+def case_legacy_pick_is_the_recommendation():
+    # The red is the refusal: a pick that names no option is read as the recommendation and refused.
+    # The control, green on the old code, is a pick that names an option: it is accepted as the recommendation.
+    page("a legacy pick that names an option, with no recommended, passes", "set",
+         entry_of(rec_item(recommended=None, pick="a")), None)
+    rec_page("a legacy pick that names no option is refused, as the recommendation", "set",
+             entry_of(rec_item(recommended=None, pick="z")), FORM_RULE, ("recommend", "pick"))
+
+
+def case_why_is_required():
+    page("a blank why is refused, naming why", "set", entry_of(rec_item(why="")), (FORM_RULE, "why"))
+    page("a why of spaces only is refused, naming why", "set", entry_of(rec_item(why="   ")), (FORM_RULE, "why"))
+    page("a decision with no why is refused, naming why", "set", entry_of(rec_item(why=None)), (FORM_RULE, "why"))
+
+
+def case_waiting_on_line_is_required():
+    page("a decision with no Waiting on line is refused, naming Waiting on", "set",
+         entry_of(rec_item(context=form_text(waiting=None))), (FORM_RULE, "Waiting on"))
+    page("a Waiting on line with no text after the colon is refused, naming Waiting on", "set",
+         entry_of(rec_item(context=form_text(waiting="Waiting on:"))), (FORM_RULE, "Waiting on"))
+    page("a Waiting on line of spaces only is refused, naming Waiting on", "set",
+         entry_of(rec_item(context=form_text(waiting="Waiting on:    "))), (FORM_RULE, "Waiting on"))
+    page("a Meanwhile line is no Waiting on line, and is refused, naming Waiting on", "set",
+         entry_of(rec_item(context=form_text(waiting=None) + "\nMeanwhile: the lane keeps its work.")),
+         (FORM_RULE, "Waiting on"))
+    page("Waiting on words in prose, not at a line start, are no Waiting on line", "set",
+         entry_of(rec_item(context=form_text(waiting=None) + "\nWE ARE WAITING ON YOU, nothing else.")),
+         (FORM_RULE, "Waiting on"))
+
+
+def case_update_judges_only_the_fields_it_carries():
+    page("an update that carries context with no Waiting on line is refused, naming Waiting on", "update",
+         entry_of({"kind": "decision", "context": form_text(waiting=None)}), (FORM_RULE, "Waiting on"))
+    page("an update that blanks why is refused, naming why", "update",
+         entry_of({"kind": "decision", "why": ""}), (FORM_RULE, "why"))
+    page("an update that carries options and a recommended key that names no option is refused", "update",
+         entry_of(tcj.with_frozen_fields({"kind": "decision", "options": copy.deepcopy(ITEM92["options"]),
+                                          "recommended": "z"})), (FORM_RULE, "recommend"))
+    page("an update that carries options and a recommended key that names an option passes", "update",
+         entry_of(tcj.with_frozen_fields({"kind": "decision", "options": copy.deepcopy(ITEM92["options"]),
+                                          "recommended": "a"})), None)
+    page("an update that carries a why with words in it passes", "update",
+         entry_of({"kind": "decision", "why": "A keeps the allow list to one form."}), None)
+
+
+def case_kindless_update_with_a_goal_line_needs_the_waiting_line():
+    # The guard cannot see the stored kind, so an update with no kind is a decision when its context carries a Goal
+    # line: that line is the decision form. A context with no Goal line is a task's, and passes.
+    page("a kindless update whose context has no Goal line (a task) passes", "update",
+         entry_of({"context": TASK_WHY}), None)
+    page("a kindless update whose context has a Goal line and a Waiting on line passes", "update",
+         entry_of({"context": form_text()}), None)
+    page("a kindless update whose context has a Goal line and no Waiting on line is refused, naming Waiting on",
+         "update", entry_of({"context": form_text(waiting=None)}), (FORM_RULE, "Waiting on"))
+    page("a kindless update with a Goal line and a blank Waiting on line is refused, naming Waiting on",
+         "update", entry_of({"context": form_text(waiting="Waiting on:")}), (FORM_RULE, "Waiting on"))
+
+
+def case_kindless_update_with_a_why_yours_line_is_a_task():
+    # A kindless update whose context holds a Why yours line is a task, so it passes even when a Goal line opens it.
+    # The mirror control: the same text with the Why yours line taken out has no task marker, and is a decision.
+    task = "Goal: g\nWhy yours: y (measured 2026-11-10, x)\nSteps: s"
+    page("a kindless update whose task context opens with a Goal line and holds a Why yours line passes", "update",
+         entry_of({"context": task}), None)
+    page("a kindless update whose task context opens with a lower-case goal: line passes", "update",
+         entry_of({"context": task.replace("Goal:", "goal:")}), None)
+    page("a kindless update whose task context opens with an indented Goal line passes", "update",
+         entry_of({"context": task.replace("Goal:", "  Goal:")}), None)
+    page("a kindless update with a Goal line and no Why yours line is refused, naming Problem", "update",
+         entry_of({"context": "Goal: g\nSteps: s"}), (FORM_RULE, "Problem"))
+    page("a kindless update with a Goal line, no Why yours line and no Waiting on line is refused, naming Waiting on",
+         "update", entry_of({"context": form_text(waiting=None)}), (FORM_RULE, "Waiting on"))
+
+
+def case_update_null_recommendation_is_refused():
+    # A null key names no option, so it is no recommendation. A null `recommended` beside a valid `pick` passes: the
+    # valid key is the recommendation the page draws.
+    page("an update with kind decision and a valid recommended key passes", "update",
+         entry_of({"kind": "decision", "recommended": "a"}), None)
+    page("an update with kind decision, recommended null and a valid pick passes", "update",
+         entry_of({"kind": "decision", "recommended": None, "pick": "a"}), None)
+    page("an update with kind decision and recommended null is refused, naming the recommendation", "update",
+         entry_of({"kind": "decision", "recommended": None}), (FORM_RULE, "recommend"))
+    page("an update with kind decision and pick null is refused, naming the recommendation", "update",
+         entry_of({"kind": "decision", "pick": None}), (FORM_RULE, "recommend"))
+    page("an update with kind decision and both keys null is refused, naming the recommendation", "update",
+         entry_of({"kind": "decision", "recommended": None, "pick": None}), (FORM_RULE, "recommend"))
+
+
+def case_waiting_on_line_is_the_pages_line():
+    # The page draws the first context line that starts `Waiting on:` at column 0, with text after the colon
+    # (skills/waiting-page/page.html, the waitline split). A bold, bulleted, lower-case or indented label is a line the
+    # page does not draw, so a set whose only such line is that form has no Waiting on line.
+    page("a plain Waiting on line at column 0, with text after the colon, passes", "set",
+         entry_of(rec_item(context=form_text(waiting=WAIT_LINE_TEXT))), None)
+    for label, line in (("bold label", "**Waiting on:** nothing stopped; the lane acts next."),
+                        ("bullet", "- Waiting on: nothing stopped; the lane acts next."),
+                        ("lower-case label", "waiting on: nothing stopped; the lane acts next."),
+                        ("indented label", "  Waiting on: nothing stopped; the lane acts next.")):
+        page("a Waiting on line in the %s form, which the page does not draw, is refused, naming Waiting on" % label,
+             "set", entry_of(rec_item(context=form_text(waiting=line))), (FORM_RULE, "Waiting on"))
+
+
+def case_str_replace_keeps_the_waiting_line():
+    context_replace("that removes the Waiting on line is refused, naming Waiting on",
+                    form_text(), form_text(waiting=None), (FORM_RULE, "Waiting on"))
+    context_replace("that leaves the Waiting on line with no text is refused, naming Waiting on",
+                    WAITING, "Waiting on:", (FORM_RULE, "Waiting on"))
+    context_replace("that swaps the Waiting on line for another valid line passes", WAITING, WAIT_LINE_TEXT, None)
+    context_replace("whose old_str holds no Waiting on line passes", "The lane merge-role-allow would do it.",
+                    "The lane would do it.", None)
+
+
+def case_recommended_list_is_the_multi_form():
+    # The list form holds the multi and ranked decisions: a list of distinct keys, each naming an option. The page
+    # marks such an item with its drawn `multi` or `ranked` flag, so these cases carry the flag.
+    page("a multi item whose recommended list names every option, in order, passes", "set",
+         entry_of(rec_item(options=copy.deepcopy(PLAIN_OPTIONS), multi=True, recommended=["a", "b"])), None)
+    page("a multi item whose recommended list is one key passes", "set",
+         entry_of(rec_item(options=copy.deepcopy(PLAIN_OPTIONS), multi=True, recommended=["b"])), None)
+    page("a ranked item whose recommended list is in rank order passes", "set",
+         entry_of(rec_item(options=copy.deepcopy(PLAIN_OPTIONS), ranked=True, recommended=["b", "a"])), None)
+    page("an empty recommended list on a multi item is refused, naming the recommendation", "set",
+         entry_of(rec_item(options=copy.deepcopy(PLAIN_OPTIONS), multi=True, recommended=[])), (FORM_RULE, "recommend"))
+    page("a recommended list that repeats a key is refused, naming the recommendation", "set",
+         entry_of(rec_item(options=copy.deepcopy(PLAIN_OPTIONS), multi=True, recommended=["a", "a"])),
+         (FORM_RULE, "recommend"))
+    page("a recommended list that names an option not there is refused, naming the recommendation", "set",
+         entry_of(rec_item(options=copy.deepcopy(PLAIN_OPTIONS), multi=True, recommended=["a", "z"])),
+         (FORM_RULE, "recommend"))
+
+
+def case_recommend_exemptions_pass():
+    no_form = form_text(waiting=None)
+    page("a closed decision with no recommendation, why or Waiting on line passes", "set",
+         entry_of(rec_item(status="closed", recommended=None, why=None, context=no_form)), None)
+    page("a note with no recommendation, why or Waiting on line passes", "set",
+         entry_of(rec_item(kind="note", recommended=None, why=None, context=no_form)), None)
+    page("a ruling with no recommendation, why or Waiting on line passes", "set",
+         entry_of(rec_item(kind="ruling", recommended=None, why=None, context=no_form)), None)
+    page("a task with no recommendation, why or Waiting on line passes", "set",
+         entry_of(task_item(STEPS)), None)
+    page("an update that carries only the title passes", "update",
+         entry_of({"title": "Let the batch runner merge each batch on its own?"}), None)
+    page("an update that carries only the status passes", "update", entry_of({"status": "open"}), None)
+
+
+def case_recommend_applies_to_a_port_and_a_set_without_kind():
+    page("a port decision with a recommendation, why and Waiting on line passes", "set",
+         entry_of(rec_item(port=True)), None)
+    page("a port decision with no Waiting on line is refused, naming Waiting on", "set",
+         entry_of(rec_item(port=True, context=form_text(waiting=None))), (FORM_RULE, "Waiting on"))
+    page("a set with no kind is judged as a decision, and is refused for no Waiting on line", "set",
+         entry_of(rec_item(kind=None, context=form_text(waiting=None))), (FORM_RULE, "Waiting on"))
+
+
+# The five real items on the owner's waiting page, each as its form lines: the same labelled lines, field names,
+# option count and recommendation shape, with placeholder text. The owner's words and session ids are not copied.
+# Each item's shape is one of the forms the rule must judge: a Meanwhile line, a prose paragraph before the Goal
+# line, a holds field, an option-level star, and a widening option.
+FIVE_FORMS = {
+    "one wait per ready PR (836 shape)": {
+        "lines": [GOAL, PROBLEM, BASED[1], THIRD, DEPARTS, "Meanwhile: the lane keeps its work and waits for no one."],
+        "options": [{"key": "a", "label": "One wait", "gain": "No new rule.", "lose": "An older PR can go unchecked."},
+                    {"key": "b", "label": "One wait per PR", "gain": "No PR goes unchecked.",
+                     "lose": "A new rule to write and test."}],
+        "recommended": "b", "why": "B leaves no ready PR without a check-in."},
+    "check-in tools (837 shape)": {
+        "lines": [GOAL, PROBLEM, BASED[1], THIRD, DEPARTS, "Meanwhile: the lane keeps option a as a limit."],
+        "options": [{"key": "a", "label": "Count four tools", "gain": "No case changes.",
+                     "lose": "A recurring cron counts as a one-time check-in.", "widens": True},
+                    {"key": "b", "label": "Count send_later", "gain": "The check matches the remedy text.",
+                     "lose": "Two tools are blocked at Stop."},
+                    {"key": "c", "label": "Read each call", "gain": "The rule text becomes true in code.",
+                     "lose": "A new rule and its tests."},
+                    {"key": "d", "label": "send_later for session waits", "gain": "A session wait is told apart.",
+                     "lose": "How often sessions wait this way is unmeasured."}],
+        "recommended": "c", "why": "C matches the rule text and blocks no measured session."},
+    "a granted lane flag (844 shape)": {
+        "lines": [GOAL, PROBLEM, BASED[1], THIRD, DEPARTS, "Meanwhile: the lane waits; nothing else runs on it."],
+        "options": [{"key": "a", "label": "Add a flag", "gain": "A check closes the path.",
+                     "lose": "The entry's command text changes.", "widens": True},
+                    {"key": "b", "label": "Prose only", "gain": "No entry edit.", "lose": "No check."},
+                    {"key": "c", "label": "Flag outside the command", "gain": "No entry edit.",
+                     "lose": "The receiver fails closed."}],
+        "recommended": "b", "why": "B changes no entry and widens nothing."},
+    "the records-only skip (857 shape)": {
+        "lines": ["In plain words: the skip is built narrower than the owner chose.", GOAL, PROBLEM, THIRD, DEPARTS,
+                  "Meanwhile: the pick stands and the work under it continues.",
+                  "WE ARE WAITING ON YOU, nothing else: choose Keep or Overrule."],
+        "options": [{"key": "a", "label": "Keep", "gain": "No guard change.", "lose": "A smaller saving."},
+                    {"key": "b", "label": "Overrule", "gain": "The full skip.",
+                     "lose": "A lane relaxes a pin.", "widens": True}],
+        "recommended": "a", "why": "A changes no guard, and the saving is not yet measured."},
+    "the push-skip reason line (878 shape)": {
+        "lines": ["Plain words: a push run is the CI run that starts when a commit lands on main.", GOAL, PROBLEM,
+                  BASED[0], THIRD, DEPARTS],
+        "options": [{"key": "a", "label": "Require the tip", "gain": "Most pushes skip.", "lose": "One more run."},
+                    {"key": "b", "label": "Print a reason line", "gain": "A reader sees why a run ran.",
+                     "lose": "Saves no minutes."},
+                    {"key": "c", "label": "Read the merge ref", "gain": "No ruling changes.", "lose": "Unproven."}],
+        "recommended": "b", "why": "B costs no ruling and removes the silent skip.",
+        "holds": "The lane waits until the owner answers."},
+}
+
+
+def five_form_item(name, waiting=True, status="open", **over):
+    """One of FIVE_FORMS as a page write: its lines, its options and its recommendation. `waiting` adds the Waiting
+    on line last, as a fixed shape gets it; the item's status is `status`."""
+    shape = FIVE_FORMS[name]
+    lines = shape["lines"] + ([WAITING] if waiting else [])
+    extra = {"holds": shape["holds"]} if "holds" in shape else {}
+    return rec_item(context="\n".join(lines), options=copy.deepcopy(shape["options"]), recommended=shape["recommended"],
+                    why=shape["why"], status=status, **dict(extra, **over))
+
+
+def case_five_real_forms():
+    for name in FIVE_FORMS:
+        page("%s: with its Waiting on line passes (scope)" % name, "set", entry_of(five_form_item(name)), None)
+        page("%s: open, with no Waiting on line, is refused naming Waiting on" % name, "set",
+             entry_of(five_form_item(name, waiting=False)), (FORM_RULE, "Waiting on"))
+        page("%s: closed, with no Waiting on line, passes" % name, "set",
+             entry_of(five_form_item(name, waiting=False, status="closed")), None)
+
+
+def case_five_real_forms_as_written():
+    # As written, two real items name no item-level recommendation: one stars an option, the other names none.
+    page("the granted-lane-flag shape, starred on option b only, with no item recommendation, is refused naming the "
+         "recommendation", "set",
+         entry_of(rec_item(context="\n".join(FIVE_FORMS["a granted lane flag (844 shape)"]["lines"] + [WAITING]),
+                           options=[dict(o, recommended=True) if o["key"] == "b" else dict(o)
+                                    for o in FIVE_FORMS["a granted lane flag (844 shape)"]["options"]],
+                           recommended=None)), (FORM_RULE, "recommend"))
+    page("the records-only shape with no item recommendation is refused naming the recommendation", "set",
+         entry_of(rec_item(context="\n".join(FIVE_FORMS["the records-only skip (857 shape)"]["lines"] + [WAITING]),
+                           options=copy.deepcopy(FIVE_FORMS["the records-only skip (857 shape)"]["options"]),
+                           recommended=None)), (FORM_RULE, "recommend"))
+
+
+def case_widens_reason_no_longer_leaves_recommended_out():
+    # The remedy for a decision where every option widens: add an option that does not widen, and recommend it.
+    text = getattr(question_form, "WIDENS_REASON", None)
+    if text is None:
+        check("widens reason: question_form.WIDENS_REASON is there", False, MISSING)
+        return
+    flat = re.sub(r"\s+", " ", text)
+    check("widens reason: question_form.WIDENS_REASON no longer says to leave recommended out",
+          "leave recommended out" not in flat.lower(), flat)
+    check("widens reason: question_form.WIDENS_REASON says to add an option that does not widen",
+          "does not widen" in flat.lower(), flat)
+
+
 def main():
-    for case in (case_item_92, case_item_51_stray_field, case_session_update_naming_dismissed_is_refused,
+    for case in (case_recommend_base_passes, case_recommend_missing_or_unknown_is_refused,
+                 case_legacy_pick_is_the_recommendation, case_why_is_required, case_waiting_on_line_is_required,
+                 case_update_judges_only_the_fields_it_carries, case_str_replace_keeps_the_waiting_line,
+                 case_kindless_update_with_a_goal_line_needs_the_waiting_line,
+                 case_kindless_update_with_a_why_yours_line_is_a_task, case_update_null_recommendation_is_refused,
+                 case_waiting_on_line_is_the_pages_line,
+                 case_recommended_list_is_the_multi_form, case_recommend_exemptions_pass,
+                 case_recommend_applies_to_a_port_and_a_set_without_kind, case_five_real_forms,
+                 case_five_real_forms_as_written, case_widens_reason_no_longer_leaves_recommended_out,
+                 case_item_92, case_item_51_stray_field, case_item_n_text_is_refused,
+                 case_item_n_other_non_numbers_are_refused, case_item_n_number_passes, case_item_n_absent,
+                 case_item_n_batch_and_file_path, case_item_n_posted_text_names_the_item,
+                 case_item_n_text_inside_other_text_is_not_judged,
+                 case_item_n_reason_and_the_pages_own_rule, case_session_update_naming_dismissed_is_refused,
                  case_dismissed_refused_on_every_route, case_dismissed_refused_without_a_readable_field_list,
                  case_dismissed_reason_keeps_the_generic_remedy_for_other_fields,
                  case_lane_wait_flag_is_not_refused_as_undrawn, case_page_lists_holds_lane,
@@ -2774,6 +3637,12 @@ def main():
                  case_claude_own_merge_needs_no_link,
                  case_chat_reasons_name_a_remedy_and_no_page_field, case_page_reasons_are_one_table,
                  case_gh_login_hit_direct, case_gh_login_switch_on_the_page, case_command_in_item_spans,
+                 case_powershell_bash_forms, case_command_refusal_names_the_bash_forms,
+                 case_powershell_hashtable_is_no_bash_form,
+                 case_powershell_comment_quote_ends_at_its_line, case_powershell_bash_prefix_braced_expansion,
+                 case_powershell_hash_mid_token_is_no_comment, case_step_shell_programs_partial,
+                 case_quoted_span_after_edit_verb, case_delete_remove_span_is_a_shell_line,
+                 case_quoted_span_run_after_is_refused, case_press_link_label_is_a_string,
                  case_departs_missing, case_departs_empty_or_malformed, case_departs_restates_main,
                  case_departs_valid_passes, case_departs_out_of_scope_passes, case_departs_str_replace,
                  case_departs_ids_and_order, case_departs_reasons,
@@ -2809,7 +3678,12 @@ def main():
                  case_cross_repo_writer_guard_path, case_cross_repo_writer_page_item_hit,
                  case_cross_repo_writer_call_judge, case_cross_repo_update_checked_with_needs_repo,
                  case_judged_relative_file_path_read_at_cwd, case_judged_absolute_and_empty_are_unchanged,
-                 case_judged_mixed_writes_all_returned):
+                 case_judged_mixed_writes_all_returned,
+                 case_stops_names_each_entry_in_holds, case_stops_consistent_items_pass,
+                 case_stops_item_passes_the_real_page_fields,
+                 case_stops_needs_holds_and_a_list, case_stops_refusal_prints_its_table_text,
+                 case_stops_update_judged_by_the_fields_it_carries, case_stops_batch_judged_per_write,
+                 case_stops_str_replace_on_holds_is_a_known_gap):
         try:
             case()
         except Exception as exc:

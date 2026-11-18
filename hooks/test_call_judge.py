@@ -205,7 +205,8 @@ def record_branch_checkout():
     git(repo, "checkout", "-q", "-b", "main")
     os.makedirs(os.path.join(repo, ".claude"))
     with open(os.path.join(repo, ".claude", "layout-extras.json"), "w", encoding="utf-8") as f:
-        json.dump({"kinds": {}, "artifacts": [{"id": "queue", "url": PAGE_URL, "role": "waiting-page", "account": "current"}]}, f)
+        json.dump({"kinds": {}, "artifacts": [{"id": "queue", "role": "waiting-page", "export": "waiting",
+                                               "links": [{"account": "current", "url": PAGE_URL}]}]}, f)
     git(repo, "add", ".claude/layout-extras.json")
     git(repo, "commit", "-q", "-m", "extras")
     git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
@@ -356,6 +357,8 @@ PROBLEM_LINE = "Problem (risk): the change touches the guard, so it needs your w
 BASED_LINES = ("Based on (read): the diff changes one rule",)
 # The line a question to the owner carries (rule question-departs): what is on main, and what changes.
 DEPARTS_LINE = "Departs from: lint/stamp.py:run_stamp — the stamp check moves to the lint job"
+# The line a waiting-page decision carries after Departs from: what is stopped until his answer, and who acts next.
+WAITING_LINE = "Waiting on: the change waits until your answer; the session acts next."
 
 
 def good_options():
@@ -424,8 +427,9 @@ def good_page_item(mark=PAGE_MARK, **over):
     """A waiting-page decision that passes the form. `mark` rides in option a's gain, so a case finds the item
     in the prompt. `over` replaces fields, for a case that changes one. Its options carry ids and `shown` (see
     with_frozen_fields), so a case that replaces `options` gets a matching `shown` too."""
-    context = "\n".join((GOAL_LINE, PROBLEM_LINE, *BASED_LINES, DEPARTS_LINE))
-    item = {"kind": "decision", "title": "Ship the change today?", "status": "open", "context": context,
+    context = "\n".join((GOAL_LINE, PROBLEM_LINE, *BASED_LINES, DEPARTS_LINE, WAITING_LINE))
+    item = {"n": 928, "kind": "decision", "title": "Ship the change today?", "status": "open", "context": context,
+            "recommended": "a", "why": "A ships the change today, and nothing else waits on it.",
             "options": [{"key": "a", "label": "Ship it", "gain": "The change lands today. " + mark,
                          "lose": "Nobody reads it first."},
                         {"key": "b", "label": "Hold it", "gain": "A reviewer reads it first.",
@@ -447,7 +451,7 @@ TASK_FLAG = '{"ok": false, "reason": "a step that replaces text quotes the whole
 def good_task_item(step=GOOD_TASK_STEP, **over):
     """A task item that passes question_form.item_hit: its Why yours line in `context`, and one step. `over`
     replaces fields, for a case that changes one."""
-    item = {"kind": "task", "title": "Set the guard skip", "status": "open", "context": TASK_WHY, "steps": [step]}
+    item = {"n": 928, "kind": "task", "title": "Set the guard skip", "status": "open", "context": TASK_WHY, "steps": [step]}
     item.update(over)
     return item
 
@@ -960,7 +964,7 @@ def relative_item_repo():
 
 def apps_item():
     """A waiting-page decision on the apps question: it passes item_hit, and its text lists the APPS record."""
-    context = "\n".join((APPS_GOAL, APPS_PROBLEM, APPS_BASED[0], DEPARTS_LINE))
+    context = "\n".join((APPS_GOAL, APPS_PROBLEM, APPS_BASED[0], DEPARTS_LINE, WAITING_LINE))
     options = [
         {"key": "a", "label": "Keep the apps", "gain": "Calls into the repo stay straightforward. " + PAGE_MARK,
          "lose": "An unused app keeps its access."},
@@ -1390,6 +1394,44 @@ def case_widening_rule_names_the_mark():
     check("widening key: WIDENING_RULE contains WIDENS_KEY", bool(rule) and bool(key) and key in rule, cause)
 
 
+def widening_sentences(prompt):
+    """The lowercase sentences of a judged prompt's widening slot. [] when the slot is absent."""
+    region = widening_region(prompt, "PAGE_PROMPT") or ""
+    return [s for s in re.split(r"[.\n]", region.lower()) if s.strip()]
+
+
+def widening_pin(sentences, *groups):
+    """True when one sentence holds at least one word from each group."""
+    return any(all(any(w in s for w in group) for group in groups) for s in sentences)
+
+
+# A change to the shared tool that every repo gets alike is not widening, so the judge never flags it. Widening is a
+# form, allow entry or exception made so that one repo's differing form passes (decision uniform-over-variants: one
+# shared tool for every repo). The judge reads both in its widening slot, so the cases read that slot.
+def case_widening_rule_spares_a_tool_wide_change_with_no_repo_named():
+    r = run_hook(page_input("set", good_page_item()), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    sentences = widening_sentences(prompt)
+    check("widening slot: the judged prompt carries the widening slot after the question-format prompt",
+          bool(sentences), prompt[:200])
+    check("widening: a sentence never flags a tool-wide change with no repo named as its reason",
+          widening_pin(sentences, ("never flag", "not flag", "not widen"), ("tool-wide", "every repo", "alike"),
+                       ("no repo", "names no", "repo named", "without a repo")),
+          sentences or prompt[:200])
+
+
+def case_widening_rule_says_widening_is_a_form_that_passes_one_repos_variant():
+    r = run_hook(page_input("set", good_page_item()), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    sentences = widening_sentences(prompt)
+    check("widening slot: the judged prompt carries the widening slot after the question-format prompt",
+          bool(sentences), prompt[:200])
+    check("widening: a sentence says widening is a form, allow entry or exception made so that one repo's differing form passes",
+          widening_pin(sentences, ("widen",), ("form", "allow", "exception"), ("differ", "variant"),
+                       ("pass", "accept", "through")),
+          sentences or prompt[:200])
+
+
 def case_fail_open():
     for label, inp, kwargs in (
         ("a model failure on a spawn", spawn_input("builder", model="sonnet"), {"model_fail": True}),
@@ -1475,7 +1517,7 @@ CI_CHAT_OPTIONS = [
      "description": "Gain: the milestone run stops ending at its cap. Lose: each run takes longer."},
     {"label": "Keep the cap",
      "description": "Gain: nothing changes on main. Lose: the milestone run may end at its cap again."}]
-CI_PAGE_CONTEXT = "\n".join((CI_GOAL, CI_PROBLEM, CI_BASED[0], DEPARTS_LINE))
+CI_PAGE_CONTEXT = "\n".join((CI_GOAL, CI_PROBLEM, CI_BASED[0], DEPARTS_LINE, WAITING_LINE))
 CI_PAGE_OPTIONS = [
     {"key": "a", "label": "Raise the cap", "gain": "The milestone run stops ending at its cap.",
      "lose": "Each run takes longer and uses more minutes."},
@@ -1821,6 +1863,8 @@ def main():
                  case_widening_set_holds_rule_once, case_widening_batch_holds_rule_once,
                  case_widening_absent_without_options, case_widening_refusal_names_the_option,
                  case_widening_fair_option_passes_code_path, case_widening_rule_names_the_mark,
+                 case_widening_rule_spares_a_tool_wide_change_with_no_repo_named,
+                 case_widening_rule_says_widening_is_a_form_that_passes_one_repos_variant,
                  case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,

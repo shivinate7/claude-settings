@@ -1,0 +1,1 @@
+- write-run-heredoc-overwrite: the disk copy of a script is judged even when the same command overwrites it with a heredoc (false alarm, read from code, not run). Fix: when the command writes the script first, judge the heredoc body, not the disk copy.

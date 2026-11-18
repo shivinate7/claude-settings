@@ -1,0 +1,1 @@
+- path-reset-decision-followups: (a) docs/decisions/agent-worktree-discard-is-noted.md uses "deny" as the verdict word; reword to refuse. (b) its "Measured" fsck claim in the unstage caveat could not be re-read. (c) hooks/guard_shared_tree.py:40 reads a staged-only change as dirty (recorded, pinned at test_guard.py). Fix: one docs lane for (a) and (b).

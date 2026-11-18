@@ -85,6 +85,9 @@ MERGE_NAMES = ("MERGE_TOOLS", "TRUST_TOOLS", "ARCHIVE_TOOL", "BRIEF_TOOL")
 GITHUB_WRITE_TOOLS = tuple("mcp__github__" + short for short in (
     "merge_pull_request", "create_pull_request", "push_files", "create_or_update_file", "delete_file",
     "update_pull_request"))
+# The two GitHub comment tools a review record is posted by. Rules review-log-form and review-log-sha judge
+# their body, so the guard's matcher must see both (the body is the record's form, read by merge/merge.py).
+GITHUB_COMMENT_TOOLS = tuple("mcp__github__" + short for short in ("add_issue_comment", "update_issue_comment"))
 
 
 def load_hook(name, path):
@@ -191,6 +194,12 @@ class JudgedToolMatcher(unittest.TestCase):
     def test_guard_matcher_covers_the_six_github_write_tools(self):
         self.assertTrue(self.matchers, "no guard.py entry in settings.json PreToolUse")
         missed = self.unmatched(GITHUB_WRITE_TOOLS)
+        if missed:
+            self.fail("no guard matcher covers: %s" % ", ".join(missed))
+
+    def test_guard_matcher_covers_the_github_comment_tools(self):
+        self.assertTrue(self.matchers, "no guard.py entry in settings.json PreToolUse")
+        missed = self.unmatched(GITHUB_COMMENT_TOOLS)
         if missed:
             self.fail("no guard matcher covers: %s" % ", ".join(missed))
 
@@ -718,7 +727,7 @@ class QuestionReviewer(unittest.TestCase):
 
 
 # The STE write guard and the markdown sweep are not wired in settings.json.
-# CI's STE lint (actions/ste-lint) carries STE001, STE011 and STE013 on changed lines instead.
+# CI's STE lint (actions/ste-lint) carries STE011 and STE013 on changed lines instead.
 class SteHooksRemoved(unittest.TestCase):
     def test_no_hook_runs_the_removed_scripts(self):
         with open(SETTINGS, encoding="utf-8") as f:

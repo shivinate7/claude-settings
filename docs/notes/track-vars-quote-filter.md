@@ -1,0 +1,1 @@
+- track-vars-quote-filter: the quote and backslash filter in `_track_variables` (hooks/guard_core.py, about line 1104) runs on shlex tokens whose quotes are already gone, so its docstring is wrong. Fix: filter on the raw text, or correct the docstring.

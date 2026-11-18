@@ -1,0 +1,1 @@
+- wrap-filed-title-overstates: the `.filed` case title says "never widens the Questions tab" while the case hides `.hometag`; lane page-home-tag-cut-off owns the home tag (.ahead 684 px at 360 px with a 90-character home). Step answered-sections-by-repo.

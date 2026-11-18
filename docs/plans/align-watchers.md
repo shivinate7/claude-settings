@@ -69,7 +69,7 @@ small, M medium, L large).
 | `question_form.py` git child | Starts one long-lived `git cat-file --batch` process (line 1422). | Bound it to the hook timeout, or close it when the call ends. | no | S |
 | `bin/ci-job` verdict run | Starts one `verdict` process per job (line 351). | Record it. | no | S |
 | `hooks/mutate_shared.py` child | Starts a child with `start_new_session` on POSIX (line 483). The critic found it. The map read this file as CI tooling. | Record its cost. Bound it by time. | no | S |
-| `bin/verdict` | Writes a per-run log. Deletes `verdict-*.log` files older than 7 days (lines 8 and 16). No decision record. | Write the record: cost, reader and test. | no | S |
+| `bin/verdict` | Writes a per-run log. A run with no `VERDICT_LOG` deletes `verdict-*.log` files over 1 day old whose first line is its own header (lines 8 and 16). No decision record. | Write the record: cost, reader and test. | no | S |
 | SessionStart refresh child | Inline SessionStart row (startup and resume; 20 s) starts a detached child. `hooks/session_start.sh` (10 s) runs too (checked: `settings.json`). The lock gap is in debt `refresh-lock-untested`. | Move its cost into record `merge-reinstalls-from-main`. Add the lock test. | no | S |
 | `daily_note` (SessionStart, startup; 10 s) | One python per startup. The record names no cost test. Rule 5 needs one. | Add a "no process" test. Keep the slug. | no | S |
 | Waiter guard (`hooks/guard_stream.py`) | In-process. Starts no child. Its remedy names the CI-wake notice or Monitor (checked: `WAITER_REASON`, line 248). | Record its cost. | no | S |

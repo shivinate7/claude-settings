@@ -1,0 +1,1 @@
+- check-allow-empty-silent: skills/waiting-page/export_page.py accepts `--check --allow-empty X --fetched D --page F` and ignores --allow-empty with no message, because the allow-empty check comes after the --check block. --check writes nothing, so it does no harm. Fix: refuse --allow-empty with --check, or say it is ignored.

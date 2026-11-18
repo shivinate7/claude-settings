@@ -1,0 +1,1 @@
+- branch-worktree-bash-c: rule 1b2 reads only the outer command, so `bash -c '... git checkout -B <held> ...'` passes. Main's hook-bypass rule already unwraps bash -c (hooks/guard.py). Fix: run rule 1b2 on the unwrapped command. Not a hold.
