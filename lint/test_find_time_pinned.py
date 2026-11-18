@@ -1109,8 +1109,9 @@ class TypedHelperCleanTest(FinderCase):
 
 
 # ---- the keep marker: `# time-pinned-ok: <reason>` (Python), `// time-pinned-ok: <reason>` (JS, TS, Swift) ----
-# A comment on a finding's own line keeps it out of the list for sleep, elapsed-assert and wait-cap. A blank
-# reason keeps nothing. The red cases fail on their marked line. Each control stays green on the old code.
+# A comment on a finding's own line keeps it out of the list for sleep, test-cap and wait-cap: the hang guards
+# and poll sleeps that owner item 345 (13:00 CST, Nov 7) allows. An elapsed-assert stays listed under a marker.
+# A blank reason keeps nothing. The red cases fail on their marked line. Each control stays green on the old code.
 # Each case has an unmarked sibling that must still list, so a failure names the marker, not a broken read.
 
 MIXED_KEPT = src(
@@ -1141,7 +1142,7 @@ class KeepMarkerPythonTest(FinderCase):
             "tests/test_kept_sleep.py", text, ("time.sleep(2)", "sleep")),
             "a sleep with a marker and a reason still lists")
 
-    def test_elapsed_assert_with_marker_and_reason_is_kept(self):
+    def test_elapsed_assert_with_marker_and_reason_still_lists(self):
         text = src(
             "import time",
             "",
@@ -1150,12 +1151,16 @@ class KeepMarkerPythonTest(FinderCase):
             "    assert time.monotonic() - t0 < 1  # time-pinned-ok: budget read in a manual run",
             "    assert time.monotonic() - t0 < 2",
         )
-        self.put("tests/test_kept_elapsed.py", text)
+        path = "tests/test_kept_elapsed.py"
+        self.put(path, text)
         code, out = self.report()
         self.assertEqual(out["unread"], [], "the fixture is not read")
-        self.assertEqual(self.rows(out), pinned(
-            "tests/test_kept_elapsed.py", text, ("t0 < 2", "elapsed-assert")),
-            "an elapsed-assert with a marker and a reason still lists")
+        rows = self.rows(out)
+        self.assertIn((path, lineno(text, "t0 < 2"), "elapsed-assert"), rows,
+                      "the unmarked elapsed-assert is not listed")
+        self.assertIn((path, lineno(text, "t0 < 1"), "elapsed-assert"), rows,
+                      "a marked elapsed-assert is kept, but the marker keeps only hang guards and poll sleeps")
+        self.assertEqual(rows, pinned(path, text, ("t0 < 1", "elapsed-assert"), ("t0 < 2", "elapsed-assert")))
 
     def test_wait_cap_with_marker_and_reason_is_kept(self):
         text = src(
@@ -1338,6 +1343,24 @@ class KeepMarkerTestCapTest(FinderCase):
                         "the summary counts a kept test-cap: " + last)
         self.assertIn("kept 1", last, "the summary does not count the kept test-cap")
 
+    def test_marked_sleep_and_marked_test_cap_both_stay_kept(self):
+        text = src(
+            "import time",
+            "import pytest",
+            "",
+            "pytestmark = pytest.mark.timeout(10)  # time-pinned-ok: hang guard for the whole file",
+            "",
+            "def test_wait():",
+            "    time.sleep(1)  # time-pinned-ok: poll gap of a condition wait",
+        )
+        self.put("tests/test_kept_both.py", text)
+        code, out = self.report()
+        self.assertEqual(out["unread"], [], "the fixture is not read")
+        self.assertEqual(self.rows(out), set(), "a marked sleep or a marked test-cap is listed")
+        proc = run(self.root)
+        last = proc.stdout.splitlines()[-1]
+        self.assertIn("kept 2", last, "the summary does not count both kept findings: " + last)
+
     def test_unmarked_test_cap_still_lists(self):
         text = src(
             "import time",
@@ -1373,18 +1396,23 @@ class KeepMarkerJsTest(FinderCase):
             "tests/waits.test.js", text, ("await sleep(100)", "sleep")),
             "a setTimeout or sleep with a marker and a reason still lists")
 
-    def test_elapsed_assert_with_marker_and_reason_is_kept(self):
+    def test_elapsed_assert_with_marker_and_reason_still_lists(self):
         text = src(
             "const t0 = Date.now();",
             "expect(Date.now() - t0).toBeLessThan(100); // time-pinned-ok: budget checked in a manual run",
             "expect(Date.now() - t0).toBeLessThan(200);",
         )
-        self.put("tests/timing.test.js", text)
+        path = "tests/timing.test.js"
+        self.put(path, text)
         code, out = self.report()
         self.assertEqual(out["unread"], [], "the fixture is not read")
-        self.assertEqual(self.rows(out), pinned(
-            "tests/timing.test.js", text, ("toBeLessThan(200)", "elapsed-assert")),
-            "an elapsed-assert with a marker and a reason still lists")
+        rows = self.rows(out)
+        self.assertIn((path, lineno(text, "toBeLessThan(200)"), "elapsed-assert"), rows,
+                      "the unmarked elapsed-assert is not listed")
+        self.assertIn((path, lineno(text, "toBeLessThan(100)"), "elapsed-assert"), rows,
+                      "a marked elapsed-assert is kept, but the marker keeps only hang guards and poll sleeps")
+        self.assertEqual(rows, pinned(path, text, ("toBeLessThan(100)", "elapsed-assert"),
+                                      ("toBeLessThan(200)", "elapsed-assert")))
 
     def test_wait_cap_with_marker_and_reason_is_kept(self):
         text = src(
@@ -1508,7 +1536,7 @@ class KeepMarkerSwiftTest(FinderCase):
             "Tests/KeptWaitTests.swift", text, ("forTimeInterval: 0.5)", "sleep")),
             "a sleep with a marker and a reason still lists")
 
-    def test_elapsed_assert_with_marker_and_reason_is_kept(self):
+    def test_elapsed_assert_with_marker_and_reason_still_lists(self):
         text = src(
             "import XCTest",
             "final class KeptTimingTests: XCTestCase {",
@@ -1520,12 +1548,17 @@ class KeepMarkerSwiftTest(FinderCase):
             "    }",
             "}",
         )
-        self.put("Tests/KeptTimingTests.swift", text)
+        path = "Tests/KeptTimingTests.swift"
+        self.put(path, text)
         code, out = self.report()
         self.assertEqual(out["unread"], [], "the fixture is not read")
-        self.assertEqual(self.rows(out), pinned(
-            "Tests/KeptTimingTests.swift", text, ("XCTAssertLessThan(elapsed, 2.0)", "elapsed-assert")),
-            "an elapsed-assert with a marker and a reason still lists")
+        rows = self.rows(out)
+        self.assertIn((path, lineno(text, "XCTAssertLessThan(elapsed, 2.0)"), "elapsed-assert"), rows,
+                      "the unmarked elapsed-assert is not listed")
+        self.assertIn((path, lineno(text, "XCTAssertLessThan(elapsed, 1.0)"), "elapsed-assert"), rows,
+                      "a marked elapsed-assert is kept, but the marker keeps only hang guards and poll sleeps")
+        self.assertEqual(rows, pinned(path, text, ("XCTAssertLessThan(elapsed, 1.0)", "elapsed-assert"),
+                                      ("XCTAssertLessThan(elapsed, 2.0)", "elapsed-assert")))
 
     def test_wait_cap_with_marker_and_reason_is_kept(self):
         text = src(
@@ -1572,25 +1605,31 @@ class KeepMarkerOutputTest(FinderCase):
         lines = proc.stdout.splitlines()
         self.assertIn("tests/test_mixed.py:%d: sleep: time.sleep(4)" % lineno(MIXED_KEPT, "time.sleep(4)"), lines,
                       "the unmarked sleep is missing from the text output")
-        kept = [lineno(MIXED_KEPT, n) for n in ("time.sleep(1)", "t0 < 2", "p.wait(timeout=3)")]
+        self.assertTrue(any(line.startswith("tests/test_mixed.py:%d: elapsed-assert:" % lineno(MIXED_KEPT, "t0 < 2"))
+                            for line in lines),
+                        "the marked elapsed-assert is missing from the text output")
+        kept = [lineno(MIXED_KEPT, n) for n in ("time.sleep(1)", "p.wait(timeout=3)")]
         self.assertFalse([line for line in lines if any(line.startswith("tests/test_mixed.py:%d:" % k)
                                                         for k in kept)],
                          "a kept line is printed in the text output")
         self.assertEqual(proc.returncode, 1, proc.stderr)
         self.assertTrue(lines[-1].startswith(
-            "1 time-pinned in 1 files (sleep 1, elapsed-assert 0, test-cap 0, wait-cap 0)"),
-            "the summary counts a kept line: " + lines[-1])
-        self.assertIn("kept 3", lines[-1], "the summary does not say how many lines were kept")
+            "2 time-pinned in 1 files (sleep 1, elapsed-assert 1, test-cap 0, wait-cap 0)"),
+            "the summary does not count the listed lines: " + lines[-1])
+        self.assertIn("kept 2", lines[-1], "the summary does not say how many lines were kept")
 
     def test_json_omits_kept_findings_and_counts_only_listed(self):
         self.put("tests/test_mixed.py", MIXED_KEPT)
         code, out = self.report()
         self.assertEqual(out["unread"], [], "the fixture is not read")
-        self.assertEqual(self.rows(out), pinned(
-            "tests/test_mixed.py", MIXED_KEPT, ("time.sleep(4)", "sleep")),
-            "a kept line is still in the JSON findings")
-        self.assertEqual(out["counts"], {"sleep": 1, "elapsed-assert": 0, "test-cap": 0, "wait-cap": 0},
-                         "the JSON counts include a kept line")
+        rows = self.rows(out)
+        self.assertIn(("tests/test_mixed.py", lineno(MIXED_KEPT, "t0 < 2"), "elapsed-assert"), rows,
+                      "the marked elapsed-assert is missing from the JSON findings")
+        self.assertEqual(rows, pinned(
+            "tests/test_mixed.py", MIXED_KEPT, ("time.sleep(4)", "sleep"), ("t0 < 2", "elapsed-assert")),
+            "a kept line is in the JSON findings")
+        self.assertEqual(out["counts"], {"sleep": 1, "elapsed-assert": 1, "test-cap": 0, "wait-cap": 0},
+                         "the JSON counts do not match the listed lines")
 
     def test_exit_0_when_only_kept_lines_remain(self):
         text = src(
