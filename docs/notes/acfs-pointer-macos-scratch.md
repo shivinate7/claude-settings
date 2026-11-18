@@ -1,0 +1,1 @@
+- acfs-pointer-macos-scratch: (#2334) the pointer read allows only the checkout or the temp folder; the macOS scratchpad is unchecked (fails open).

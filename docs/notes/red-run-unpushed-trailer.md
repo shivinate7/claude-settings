@@ -1,0 +1,1 @@
+- red-run-unpushed-trailer: option-keys-match-chat 17:07 CST Nov 12: Lane 17:06 CST Nov 12: check_red_run fails on unpushed red-tests commit 653a0eac0 (trailer form). Triage 17:07 CST, process-only: rewrite own unpushed commits, backup branch first (shared-trees-no-destructive-git protects others' work). Chromium-only test_guard cases unknown locally; CI runs them.

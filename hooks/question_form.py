@@ -338,13 +338,17 @@ def _write_data(entry, cwd=""):
 # chat box the mark is the words below in an option's label or description, and such an option's label
 # never carries (Recommended). Read at the same ArtifactData call.
 WIDENS_TEXT = "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo"
-WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts: the owner ruled that "
-                 "a repo changes to fit a shared tool, never the tool to fit a repo. Make `recommended` (or `pick`, "
+WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts, so that one repo's "
+                 "differing form passes: the owner ruled that "
+                 "a repo changes to fit a shared tool, never the tool to fit a repo. A change to the shared tool "
+                 "that every repo gets alike, with no repo named as its reason, is not widening. Make `recommended` (or `pick`, "
                  "its old name, where the item still uses it) an option where the repo changes to match the "
                  "shared format. When every option widens, add an option that does not widen and "
                  "recommend that one.")
-CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool accepts: the owner ruled that a "
-                      "repo changes to fit a shared tool, never the tool to fit a repo. Recommend an option "
+CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool accepts, so that one repo's "
+                      "differing form passes: the owner ruled that a "
+                      "repo changes to fit a shared tool, never the tool to fit a repo. A change to the shared tool "
+                      "that every repo gets alike, with no repo named as its reason, is not widening. Recommend an option "
                       "where the repo changes to match the shared format, and give the widening option no "
                       "(Recommended) label.")
 # Older sessions still write these words in chat; the mark keeps refusing them. No card, rule text or
@@ -1171,6 +1175,9 @@ def item_hit(op, entry, cwd="", session_id=None):
         if hit:
             return "rework-off-page", hit
         return PASS
+    hit = stops_hit(op, data)
+    if hit:
+        return STOPS_RULE, hit
     hit = port_item_hit(op, data)
     if hit:
         return "port-question", hit
@@ -2047,9 +2054,59 @@ def cross_repo_hit(op, data, page_repo, session_id=None):
     return None
 
 
+# ------------------------------------------------------------------ stops: what Blocking counts is named in holds
+#
+# An item's `stops` lists what its answer stops (a lane slug, a PR number or a step id); the page sorts Blocking by the
+# count and shows it on the card. `holds` says the same in words, so each entry must appear in it, or the count and the
+# words drift apart (docs/design/session-role-sort-notes.md, ruling Q1).
+STOPS_RULE = "stops-named-in-holds"
+STOPS_REASON = ("`stops` lists what the owner's answer stops: one string per lane (\"lane fix-proxy\"), PR (\"PR #1201\") or "
+                "step (\"step merge-queue\"), each once. `holds` names every entry in words, and `stops` needs `holds`. "
+                "An update that sets `stops` carries `holds` too. (decision question-form, `stops` and `holds` say one thing)")
+_STOPS_PR = re.compile(r"PR\s*#?\s*(\d+)", re.IGNORECASE)
+
+
+def _holds_names(holds, entry) -> bool:
+    """True when `holds` names `entry`. A PR is named by "#N" or "PR N" and not by a longer number; a lane or step by its slug,
+    and not by a longer slug that starts with it (fix is not fix-proxy)."""
+    pr = _STOPS_PR.fullmatch(entry)
+    if pr:
+        return re.search(r"(?:#|\bPR\s*#?)%s(?!\d)" % pr.group(1), holds, re.IGNORECASE) is not None
+    parts = entry.split(None, 1)
+    ref = parts[-1]
+    return re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(ref), holds, re.IGNORECASE) is not None
+
+
+def stops_hit(op, data) -> str:
+    """The matched text when this write names `stops` that is not a list of distinct non-empty strings, has no `holds`,
+    or holds an entry that `holds` does not name; else "". A write with no `stops`, an update that removes it, and a
+    str_replace (the stored item is unseen) pass. An update that carries `stops` must carry `holds`; one that carries
+    only `holds` passes, since the stored `stops` is unseen."""
+    if op not in ("set", "update") or not isinstance(data, dict) or "stops" not in data:
+        return ""
+    stops, holds = data["stops"], data.get("holds")
+    if op == "update" and isinstance(stops, dict) and stops.get("__delete__") is True:
+        return ""
+    if not isinstance(stops, list):
+        return "stops is not a list"
+    for entry in stops:
+        if not isinstance(entry, str) or not entry.strip():
+            return "stops entry %r is not a non-empty string" % (entry,)
+    if len(set(stops)) < len(stops):
+        return "stops repeats an entry: " + next(e for e in stops if stops.count(e) > 1)
+    if not stops:
+        return ""
+    if not (isinstance(holds, str) and holds.strip()):
+        return "stops with no holds"
+    for entry in stops:
+        if not _holds_names(holds, entry.strip()):
+            return "stops entry %r is not named in holds" % entry
+    return ""
+
+
 # ------------------------------------------------------------------ the reasons, one table per surface
 
-PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "press-link": PRESS_LINK_REASON,
+PAGE_REASONS = {STOPS_RULE: STOPS_REASON,"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "press-link": PRESS_LINK_REASON,
                 "command-in-item": COMMAND_REASON, "gh-login-switch": GH_LOGIN_REASON,
                 "task-names-check": TASK_REASON, WHY_RULE: WHY_CITED_REASON, CROSS_REPO_RULE: CROSS_REPO_REASON,
                 FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON, "item-field-rendered": ITEM_FIELD_REASON,

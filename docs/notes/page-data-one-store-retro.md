@@ -1,0 +1,1 @@
+- page-data-one-store-retro: (from page-data-one-store 12:11 CST 11-13) Lane page-one-store-git-home, session_013NEJL1agou8xGXea9pQSAJ, rewrites #2829 and carries the three cross-account fixes (coordinator 12:10 CST Nov 13; step page-one-store-fixes folded in). The owner's 12:03 CST words are confirmed verbatim in the retrospective's feedback log (retro 12:09 CST).

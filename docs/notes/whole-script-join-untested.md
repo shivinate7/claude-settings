@@ -1,0 +1,1 @@
+- whole-script-join-untested: no allow-case test and no mutant for the string-join write-target fix in #1186.

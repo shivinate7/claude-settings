@@ -16,13 +16,13 @@ WP_CHECK = os.path.join(WP_DIR, "checkout")        # origin/main is its one comm
 WP_NOMAIN = os.path.join(WP_DIR, "nomain")         # the same files, with no origin/main ref
 WP_GUARD = os.path.join(WP_CHECK, "hooks", "guard.py")
 WP_GUARD_NOMAIN = os.path.join(WP_NOMAIN, "hooks", "guard.py")
-WP_CURRENT = os.path.join(WP_DIR, "current.html")  # main's page.html, byte for byte
+WP_CURRENT = os.path.join(WP_DIR, "current.html")  # main's page.html, its roadmap block baked (wp_template)
 WP_BEHIND = os.path.join(WP_DIR, "behind.html")    # main's page with one div after its style block
 WP_WRITER = os.path.join(WP_DIR, "writer.html")    # main's page with the writer's designData, roadmap and title text
 WP_DESIGN_LIVE = os.path.join(WP_DIR, "design-live.html")    # main's page with only the designData block live
 WP_ROADMAP_LIVE = os.path.join(WP_DIR, "roadmap-live.html")  # main's page with only the roadmap block live
-WP_TITLED_EMPTY = os.path.join(WP_DIR, "titled-empty.html")  # main's page with its own title and both blocks empty
-WP_QUEUE_EMPTY = os.path.join(WP_DIR, "queue-empty.html")    # main's page titled with the old name Queue, both blocks empty
+WP_TITLED_EMPTY = os.path.join(WP_DIR, "titled-empty.html")  # main's page with its own title and no live data
+WP_QUEUE_EMPTY = os.path.join(WP_DIR, "queue-empty.html")    # main's page titled with the old name Queue, no live data
 WP_SPACED = os.path.join(WP_DIR, "spaced-empty.html")        # main's raw page with designData written as "{ }"
 WP_SOURCE = os.path.join(REPO, "skills", "waiting-page", "page.html")  # read at run time, not a fixed text
 WP_STAMP = "waiting-page-built"
@@ -39,6 +39,12 @@ WP_WRITER_ROADMAP = ("<!-- roadmap:data -->\n"
                      "const sample = `first line\nsecond // line`;\n"
                      'window.ROADMAP_BUILD = {"repo": "r"};</script>\n'
                      "<!-- /roadmap:data -->")
+# main's roadmap block as build.py bakes it for a repo with no record branch: ROADMAP_DATA is null. stale_pages
+# reads a baked block as not empty. Every fixture page is built from main's page with this block, so each
+# page's roadmap equals main's, and carries_data still decides the refusal cases.
+WP_BAKED_ROADMAP = ("<!-- roadmap:data -->\n"
+                    '<script>window.ROADMAP_DATA = null; window.ROADMAP_BUILD = {"repo": "r"};</script>\n'
+                    "<!-- /roadmap:data -->")
 
 
 def wp_must(ok, why):
@@ -64,6 +70,15 @@ def wp_writer(template, design=True, roadmap=True, title=True, design_text=WP_WR
     return text
 
 
+def wp_template():
+    """main's page.html as this repository holds it, its one roadmap block replaced by WP_BAKED_ROADMAP. Read at
+    run time. The fixture's main and its pages all start from this text."""
+    with open(WP_SOURCE, encoding="utf-8", newline="") as handle:
+        template = handle.read()
+    wp_must(len(WP_ROADMAP.findall(template)) == 1, "main's page has no one roadmap block to bake")
+    return WP_ROADMAP.sub(lambda m: WP_BAKED_ROADMAP, template, count=1)
+
+
 def wp_put(path, text):
     """Write `text` to `path` byte for byte, so a page keeps its line endings."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -72,9 +87,8 @@ def wp_put(path, text):
 
 
 def wp_write_pages():
-    """The three page files, built from main's page.html as this repository holds it now."""
-    with open(WP_SOURCE, encoding="utf-8", newline="") as handle:
-        template = handle.read()
+    """The page files, built from wp_template(): main's page.html with its roadmap block baked."""
+    template = wp_template()
     wp_must(template.count("</style>") == 1, "main's page has no single style block to add a div after")
     behind = template.replace("</style>", "</style>\n<div>x</div>", 1)
     pages = ((WP_CURRENT, template), (WP_BEHIND, behind), (WP_WRITER, wp_writer(template)),
@@ -95,8 +109,8 @@ def wp_git(where, *args):
 
 
 def wp_populate(folder):
-    """The copy's files: the guard family, the layout lint reads, and the skill's scripts and page as this
-    repository holds them. The copy's guard finds stale_pages.py beside its own folder."""
+    """The copy's files: the guard family, the layout lint reads, the skill's scripts, and its page with the
+    roadmap block baked (wp_template). The copy's guard finds stale_pages.py beside its own folder."""
     os.makedirs(os.path.join(folder, "hooks"), exist_ok=True)
     copy_guard_family(os.path.join(folder, "hooks"))
     for rel in ("lint/layout.py", "lint/layout.json", "skills/waiting-page/stale_pages.py",
@@ -104,6 +118,7 @@ def wp_populate(folder):
         dest = os.path.join(folder, *rel.split("/"))
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         shutil.copy(os.path.join(REPO, *rel.split("/")), dest)
+    wp_put(os.path.join(folder, "skills", "waiting-page", "page.html"), wp_template())
     wp_put(os.path.join(folder, ".claude", "layout-extras.json"),
              json.dumps({"kinds": {}, "waiting-page": PQ_URL}))
 

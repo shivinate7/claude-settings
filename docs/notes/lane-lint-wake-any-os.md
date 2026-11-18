@@ -1,0 +1,1 @@
+- lane-lint-wake-any-os: 11:46 CST Nov 13 (coordinator, audit finding 3): widened: wake and cancel on the first failed job on any OS, not lint only.

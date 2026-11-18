@@ -1,0 +1,1 @@
+- silent-undo-restore-cost: one extra `git cat-file --batch` process starts per merge that has a finding; none starts when nothing was lost.

@@ -106,6 +106,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        this session. (a-kill-by-pid-needs-an-owned-pid)
   detached-launch      deny. A command that starts a process and detaches it from the session.
   wsl-allow-list       deny. A `wsl` call outside the fixed list of test commands. (wsl-allow-list)
+  review-log-form, review-log-sha  deny. A PR comment (the add and update tools, a Bash gh pr comment or gh api body) whose
+                       first line is the review log marker and whose body merge/merge.py parse_review refuses, or
+                       whose Head or Fix check sha names no commit in the call's checkout. (review-log-hand-form)
   live-stream, waiter  deny. A command that follows a stream with no end, or polls with sleep.
   verdict-pipe         deny. A `verdict` stage piped into another command: the exit is the last
                        stage's, and a filter can cut verdict's FAIL line.
@@ -279,12 +282,21 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        line in one file's added lines, read with `git diff --check`: the index, or the working
                        tree (untracked files too) when `-a`, a pathspec or an earlier add reaches the file; a
                        `merge`, `rebase` or `cherry-pick --continue` counts as a commit. It judges a commit only
-                       when each earlier segment is a git add, commit or read, `true`, `false` or `cd`. Also a
+                       when each earlier segment is a git add, commit or read, `true`, `false`, `cd` or a
+                       `mkdir` with no substitution. Also a
                        `git push` whose net range (remote-tracking tip, else upstream, else default base, up
                        to the pushed ref, else HEAD) adds such a file; and a push after a commit the guard
                        could not judge, when that commit covers a triplet already in the tree or the chain
-                       runs merge, pull, rebase, cherry-pick, stash pop or apply, or am.
-                       (commit-refuses-conflict-markers)
+                       runs merge, pull, rebase, cherry-pick, stash pop or apply, or am. Also any git
+                       write (`GIT_WRITES`: add, commit, push, merge, pull, rebase, cherry-pick, reset and
+                       the rest) after a `cd` into a folder that is missing now, ended by `;`, a newline or
+                       `||`: the shell stays put and the write lands in a repo the call did not name. A
+                       folder an earlier segment makes (mkdir with its parent present or with -p, git clone,
+                       git init, git worktree add) counts as present. After `&&`, or `|| exit`, nothing more runs, so that passes. A `|| return` does not end
+                       the shell outside a function, so the write after it is judged.
+                       A git read passes. A forced push after such a cd is reported by force-push's own ask
+                       (ask-alone when chained), which comes first.
+                       (commit-refuses-conflict-markers; ruling own-476-c-refuse-cd-missing-folder)
   red-run              deny. A `git commit` with no push after it, or a `git push` whose range (the one
                        conflict-markers reads, less the commits the default base holds) has a non-merge commit that adds lines to a test path and has no
                        valid `Red-run:` trailer, judged by `judge` in lint/check_red_run.py, the one home. A
@@ -385,7 +397,7 @@ Other tools, in `judge` order:
                        cannot read is skipped, and an unread brief is judged as an empty brief.
                        (agent-model-cap)
   agent-model-floor, roles-third-round-steps-up
-                       deny. A spawn below the model floor, or a third round on the wrong model. A
+                       deny. A spawn below the model floor, or a reviewer's later round on the wrong model. A
                        start_session call never reaches this hook: settings.json lists it in no PreToolUse
                        matcher, so hooks/start_session_audit.py checks its floor and handoff after the call.
                        The Workflow scan is static. It reads string-literal `model` and
@@ -602,7 +614,7 @@ if sys.path[:1] != [_HERE]:
 
 # The rule families in import order: each one imports only guard_core and the families before it.
 _FAMILY_MODULES = ("guard_branch_worktree", "guard_shared_tree", "guard_pointer",
-                   "guard_push_delete", "guard_merge", "guard_frozen", "guard_env",
+                   "guard_push_delete", "guard_merge", "guard_review_log", "guard_frozen", "guard_env",
                    "guard_kill", "guard_argv", "guard_stream", "guard_rm_var", "guard_mask_script", "guard_wsl")
 # guard.py and each guard_*.py the installer copies carry `INSTALL_ID = "<id>"`, one value per install
 # run, stamped at copy time in place of the whole commented placeholder line below. A file with no such line is a placeholder
@@ -710,7 +722,7 @@ while True:
         )
         _loading = "guard_merge"
         from guard_merge import (
-            BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
+            BARE_MERGE_REASON, CONFLICT_MARKERS_CD_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, OCTOPUS_PUSH_STALE, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, LANE_READY_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit, lane_ready_hit, lane_mcp_ready_hit, self_role_child_hit, self_role_hit,
@@ -718,6 +730,8 @@ while True:
             BRIEF_ID_REASON, BRIEF_TOPIC_REASON, STEP_DUP_REASON,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
+        _loading = "guard_review_log"
+        from guard_review_log import review_log_hit
         _loading = "guard_frozen"
         from guard_frozen import (
             FROZEN_REASON, MUTATING_COMMAND, _holds_frozen, _resolve_vars, _shell_write_hit, interpreter_may_write,
@@ -2972,7 +2986,8 @@ def test_file_parts(text: str):
     """A python test file read with `ast`, or None when it does not parse. `cases` maps each test function by
     its class path and name to `(dump, node)`. `others` holds each other statement, and each class header with
     its members taken out as their own entries, as `(dump, node)`; `keys` holds `(key, dump)` for each of them
-    but an import (a union of imports is free) and a bare string, and `calls` each module-level call statement. Comments are no
+    but an import (a union of imports is free) and a bare string, `key_nodes` the same `(key, node)` pairs, and `calls`
+    each module-level call statement. Comments are no
     node, so they are free, and a test written inside a string is no case."""
     import ast
     import copy
@@ -2980,7 +2995,7 @@ def test_file_parts(text: str):
         tree = ast.parse(text)
     except (SyntaxError, ValueError, RecursionError, MemoryError):
         return None
-    cases, others, keys, calls = {}, [], [], []
+    cases, others, keys, calls, key_nodes = {}, [], [], [], []
 
     def walk(body, prefix, top_level):
         for node in body:
@@ -2995,6 +3010,7 @@ def test_file_parts(text: str):
                 shell.body = []
                 others.append((ast.dump(shell), shell))
                 keys.append((_node_key(node, prefix), ast.dump(shell)))
+                key_nodes.append((_node_key(node, prefix), shell))
                 walk(node.body, prefix + node.name + ".", False)
             elif top_level and isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
                 calls.append((ast.dump(node), node))
@@ -3004,9 +3020,10 @@ def test_file_parts(text: str):
                 if not isinstance(node, (ast.Import, ast.ImportFrom)) and not (
                         isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)):
                     keys.append((_node_key(node, prefix) or (prefix, ast.dump(node)), ast.dump(node)))
+                    key_nodes.append((_node_key(node, prefix) or (prefix, ast.dump(node)), node))
 
     walk(tree.body, "", True)
-    return {"cases": cases, "others": others, "keys": keys, "calls": calls}
+    return {"cases": cases, "others": others, "keys": keys, "calls": calls, "key_nodes": key_nodes}
 
 
 def _case_shape(node) -> str:
@@ -3030,11 +3047,89 @@ def _key_counts(parts):
     return {key: len(dumps) for key, dumps in _key_versions(parts).items()}
 
 
-def _edit_dropped(first, second, base, result) -> bool:
+def _entries(node):
+    """The entry dumps of a list, tuple, set or dict display, else None. A dict entry is its key and value."""
+    import ast
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return [ast.dump(e) for e in node.elts]
+    if isinstance(node, ast.Dict) and None not in node.keys:
+        return [ast.dump(k) + ":" + ast.dump(v) for k, v in zip(node.keys, node.values)]
+    return None
+
+
+def _entry_union(result, first, second, base) -> bool:
+    """True when the entry lists `result`, `first`, `second` and `base` (None when the base lacks the display)
+    make a union: the result holds each entry as often as the parent that holds it most, and no more often than
+    both parents added it beyond the base, and holds no entry neither parent holds."""
+    for entry in set(result) | set(first) | set(second):
+        c1, c2 = first.count(entry), second.count(entry)
+        origin = base.count(entry) if base is not None else 0
+        if not (max(c1, c2) <= result.count(entry) <= max(c1, c2, c1 + c2 - origin)):
+            return False
+    return True
+
+
+def _is_union(result, first, second, base) -> bool:
+    """True when statement `result` is the union of `first` and `second`: the three differ only in the entries of
+    the list, tuple, set or dict displays they hold, and `result` keeps every entry both parents added to a display
+    and adds none. `base` is the merge base's statement, or None. Any other difference is no union."""
+    import ast
+    if ast.dump(first) == ast.dump(second):
+        return ast.dump(result) == ast.dump(first)
+    if not (type(result) is type(first) is type(second)):
+        return False
+    base = base if type(base) is type(first) else None
+    entries = [_entries(n) for n in (result, first, second)]
+    if all(e is not None for e in entries):
+        if isinstance(first, (ast.List, ast.Tuple)) and ast.dump(result.ctx) != ast.dump(first.ctx):
+            return False
+        return _entry_union(*entries, _entries(base) if base is not None else None)
+    for field in first._fields:
+        got = [getattr(n, field, None) for n in (result, first, second)]
+        origin = getattr(base, field, None) if base is not None else None
+        if all(isinstance(v, list) for v in got):
+            if len({len(v) for v in got}) != 1:
+                return False
+            for i, items in enumerate(zip(*got)):
+                kin = origin[i] if isinstance(origin, list) and len(origin) == len(got[0]) else None
+                if not _node_union(items, kin):
+                    return False
+        elif not _node_union(got, origin):
+            return False
+    return True
+
+
+def _node_union(items, origin) -> bool:
+    """`_is_union` for one field of three nodes, or a plain value that the three must hold alike."""
+    import ast
+    if all(isinstance(v, ast.AST) for v in items):
+        return _is_union(*items, origin if isinstance(origin, ast.AST) else None)
+    return items[0] == items[1] == items[2]
+
+
+def _union_keys(parts):
+    """The statement keys of `parts`' result that are a union of both parents' statements, as a set of keys.
+    `parts` is `(first, second, base, result)` from `test_file_parts`. A key counts only when each reading holds it
+    once (the base may lack it); a key held twice reads as before."""
+    nodes = []
+    for part in parts:
+        found = {}
+        for key, node in part["key_nodes"]:
+            found.setdefault(key, []).append(node)
+        nodes.append(found)
+    first, second, base, result = nodes
+    return {key for key, held in result.items()
+            if len(held) == 1 and len(first.get(key, ())) == 1 and len(second.get(key, ())) == 1
+            and len(base.get(key, ())) <= 1
+            and _is_union(held[0], first[key][0], second[key][0], (base.get(key) or [None])[0])}
+
+
+def _edit_dropped(first, second, base, result, union=()) -> bool:
     """True when a key both parents hold at different versions loses a parent's edit. Each argument maps a key to
     its version. Both parents changed it from the base: the result keeps one version at most. One changed it: the
-    result must keep that version, since the base version drops that parent's edit."""
-    for key in set(first) & set(second):
+    result must keep that version, since the base version drops that parent's edit. A key in `union` is one the
+    result built from both parents' entries (`_union_keys`): it drops no edit."""
+    for key in set(first) & set(second) - set(union):
         mine, theirs, origin = first[key], second[key], base.get(key)
         if mine != theirs and (origin not in (mine, theirs) or result.get(key) == origin):
             return True
@@ -3072,8 +3167,9 @@ def merge_test_issue(result, first, second, elsewhere, base=None):
         # The same reading for a case body and for any other statement a parent edited (a table, a helper, a class
         # header): a result that keeps the other parent's version drops the edit, though every key survives.
         read = (first, second, base, result)
+        unions = _union_keys(read)
         if _edit_dropped(*({key: dump for key, (dump, _) in p["cases"].items()} for p in read)) or _edit_dropped(
-                *(_key_versions(p) for p in read)):
+                *(_key_versions(p) for p in read), union=unions):
             issues.add("lost")
     # A statement a parent holds (not an import, not a comment) that the result no longer holds.
     have = _key_counts(result)
@@ -3082,6 +3178,9 @@ def merge_test_issue(result, first, second, elsewhere, base=None):
             if have.get(key, 0) < count:
                 issues.add("lost")
     kept = {d for p in parents for d, _ in p["others"]}
+    if base is not None:
+        # A statement built as the union of both parents' entries is held by neither parent, and drops none.
+        kept |= {dump for key, dump in result["keys"] if key in unions}
     for dump, node in result["others"]:
         if dump not in kept:
             issues.add("skip" if _skip_marks(node) else "body")
@@ -4142,12 +4241,10 @@ def step_up_reason(prompt: str, role, model, rounds=None) -> str:
             return "Reviewer fix verifier runs on %s. Spawn it with model %s." % (want.capitalize(), want)
     if role == "reviewer" and review_guard_marked(prompt):
         want = role_round_model(rounds, role, "1", "guard")
-        if want and (not model or (named is not None and named < ROLE_MODEL_RANK.index(want))):
+        # A blank model runs the reviewer's role row (its agent file pins haiku), so it is below only a row above haiku.
+        if want and ((not model and ROLE_MODEL_RANK.index(want) > 0)
+                     or (named is not None and named < ROLE_MODEL_RANK.index(want))):
             return "Reviewer round 1 on a guard or check change runs on %s. Spawn it with model %s." % (want.capitalize(), want)
-    if role == "builder" and builder_third_round(prompt):
-        want = role_round_model(rounds, role, "3")
-        if want and (named is None or named < ROLE_MODEL_RANK.index(want)):
-            return "Builder round 3 runs on %s. Spawn it with model %s." % (want.capitalize(), want)
     return ""
 
 
@@ -4180,8 +4277,9 @@ ROLE_MODEL_REASON = (
     "field, or name the role's model%s. (decision agent-model-cap)"
 )
 # A reviewer has a second way past its row, so only its refusal names it. Rounds come from the constant at call time.
-ROLE_REVIEWER_ROUND_REMEDY = (", or, when this brief is for review round %s, open its first line with a `Round N of 3` marker (%s)"
-                              ", or, when it is for a guard or check diff, start a line with `%s`")
+ROLE_REVIEWER_ROUND_REMEDY = ", or, when this brief is for review round %s, open its first line with a `Round N of 3` marker (%s)"
+# Named only while the `1 guard` row sits above the reviewer's row: at the reviewer's own row the marker lifts nothing.
+ROLE_REVIEWER_GUARD_REMEDY = ", or, when it is for a guard or check diff, start a line with `%s`"
 ROLE_REVIEWER_FIX_CHECK_REMEDY = (", or, when this brief is a fix check, open its first line with the `%s` marker, "
                                   "or with `Round N of 3 (fix check)` (N = %s)")
 # Last sentence of a reviewer's refusal. It says the first review runs on the role's model only while the first round has no row above the reviewer's row.
@@ -4258,14 +4356,13 @@ def role_model_table(pointer_root):
 # model of each round: the key is (role, round, kind), the round a number or "fix verifier", the kind "guard" for a
 # first-round brief with the guard marker and "other" for every other brief. role_round_table is the one reader; the merge tool
 # reads it through the guard's helpers. A row the record lacks, or one whose model has no rank, falls back to
-# ROLE_ROUND_FALLBACK (sonnet for a reviewer's `1 guard`, later rounds and fix verifier, opus for the builder's third try; no `1 other` entry). Cost: one more read of the record per spawn.
+# ROLE_ROUND_FALLBACK (haiku for a reviewer's `1 guard`, sonnet for later rounds and fix verifier, no row for the builder's third try, which runs its role row, sonnet (owner item 893); no `1 other` entry). Cost: one more read of the record per spawn.
 ROLE_ROUND_HEADER = ["role", "round", "model", "effort"]
 ROLE_ROUND_CELL = re.compile(r"(\d+|fix verifier)(?:\s+(guard|other))?$")
 ROLE_ROUND_FIX = "fix verifier"
 ROLE_ROUND_EXACT = ("2",)  # the second round above its row is refused at the step-up, where no override lifts it; a later round above its row falls to the Opus ceiling
 ROLE_ROUND_FALLBACK = dict([(("reviewer", n, "other"), "sonnet") for n in ROLE_REVIEWER_FREE_ROUNDS]
-                           + [(("reviewer", "1", "guard"), "sonnet"), (("reviewer", ROLE_ROUND_FIX, "other"), "sonnet"),
-                              (("builder", "3", "other"), "opus")])
+                           + [(("reviewer", "1", "guard"), "haiku"), (("reviewer", ROLE_ROUND_FIX, "other"), "sonnet")])
 
 
 def _role_record_text(pointer_root):
@@ -4661,8 +4758,10 @@ def role_model_one(tool_input):
                 extra = ROLE_EXPLORE_AUDIT_REMEDY % EXPLORE_AUDIT_MARKER
             if role == "reviewer":
                 free = reviewer_free_rounds(rounds, row)
-                extra = ROLE_REVIEWER_ROUND_REMEDY % (" or ".join(free), ", ".join("`Round %s of 3`" % n for n in free),
-                                                    REVIEW_GUARD_MARKER)
+                extra = ROLE_REVIEWER_ROUND_REMEDY % (" or ".join(free), ", ".join("`Round %s of 3`" % n for n in free))
+                guard_row = role_round_model(rounds, role, "1", "guard")
+                if guard_row and ROLE_MODEL_RANK.index(guard_row) > ROLE_MODEL_RANK.index(row):
+                    extra += ROLE_REVIEWER_GUARD_REMEDY % REVIEW_GUARD_MARKER
                 extra += ROLE_REVIEWER_FIX_CHECK_REMEDY % (FIX_CHECK_MARKER, " or ".join(free))  # glossary-ok: the line keeps its names; only the rounds came from the rows
             if tool_input.get(BRIEF_UNREAD):
                 extra += ", or " + BRIEF_LITERAL_REMEDY
@@ -4890,8 +4989,7 @@ def opus_spawn_hit(tool: str, tool_input) -> tuple:
     """(model, role, brief_unread) of the first spawn in an Agent, Task or Workflow call that sets Opus with no standing grant,
     else ("", "", False). `role` is the role the spawn names, "" for none. `brief_unread` is the spawn's BRIEF_UNREAD.
     A standing grant
-    is the role Plan, designer, design-reviewer or refuter, a builder whose brief holds the third-round marker (the same marker
-    step_up_hit reads), or an Explore whose brief's first non-blank line carries EXPLORE_AUDIT_MARKER (decision agent-model-cap).
+    is the role Plan, designer, design-reviewer or refuter, a builder whose brief holds the third-round marker (builder_third_round reads it), or an Explore whose brief's first non-blank line carries EXPLORE_AUDIT_MARKER (decision agent-model-cap).
     Any other spawn above its role's model is refused (decision agent-model-cap), a reviewer on Opus too. The refusal is liftable by an override, so never_lifted does not read it."""
     for spawn in spawn_inputs(tool, tool_input):
         if opus_without_grant(spawn):
@@ -5491,13 +5589,19 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # A push of a test commit with no Red-run trailer is refused here too (rule red-run): it shares the push's
     # range, and adds one `git log` per push. A commit in the same call, before the push, is read from its
     # `-m` text; so is a lone commit with no push after it, which adds one `git diff --numstat` only when its
-    # message holds no trailer. guard_merge states the cost.
+    # message holds no trailer. A git write after a cd into a missing folder adds one `git rev-parse` of the
+    # folder the shell stays in; the scan for folders the call makes is parsing only. guard_merge states the cost.
     kind, matched = conflict_markers_hit(stripped, cwd, is_test_rel, raw)
     if kind in ("red-run", "red-run-commit"):
         red_reason, red_shown = red_run_reason(matched, kind == "red-run-commit")
         refuse(tool, "deny", "red-run", red_reason, red_shown)
+    elif matched and kind == "cd" and PENDING_ASK and PENDING_ASK[0][0] == "force-push":
+        # A forced push after a failed cd already asks (its folder is unknown), and the ask names the push. Let
+        # settle_ask report that, so a forced push is named first (it also denies when chained: rule ask-alone).
+        pass
     elif matched:
         markers_reason = (CONFLICT_MARKERS_CHAIN_REASON if kind == "chain" else
+                          CONFLICT_MARKERS_CD_REASON if kind == "cd" else
                           CONFLICT_MARKERS_PUSH_REASON if kind == "push" else CONFLICT_MARKERS_REASON)
         refuse(tool, "deny", "conflict-markers", markers_reason.format(file=matched), matched)
 
@@ -7654,7 +7758,7 @@ def judge(payload) -> None:
     if floor_model:
         refuse(tool, "deny", "agent-model-floor", MODEL_FLOOR_REASON, floor_model)
 
-    # 9b. Step-up: a reviewer's second round on Sonnet, a builder's third on Opus. A reviewer's third round passes here on
+    # 9b. Step-up: a reviewer's second round on Sonnet. A builder's third try has no step-up: it runs Sonnet, its role row (owner item 893). A reviewer's third round passes here on
     # Sonnet or Opus; the Opus ceiling (9d, opus_spawn_hit) then refuses Opus unless an override lifts it.
     step_up = step_up_hit(tool, tool_input)
     if step_up:
@@ -7731,6 +7835,14 @@ def judge(payload) -> None:
     if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:
         refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "create_pull_request without draft")
 
+    # A review log comment the merge tool cannot read, or one that names a sha the checkout does not hold (rules
+    # review-log-form and review-log-sha). One literal refuse() per rule: lint/rule_audit.py reads only string-literal rule ids.
+    review = review_log_hit(tool, tool_input, cwd)
+    if review and review[0] == "review-log-form":
+        refuse(tool, "deny", "review-log-form", review[1], review[2])
+    if review and review[0] == "review-log-sha":
+        refuse(tool, "deny", "review-log-sha", review[1], review[2])
+
     # A SendMessage addressed to a cloud session id (rule sendmessage-session-id).
     if tool == "SendMessage":
         target = tool_input.get("to")
@@ -7798,6 +7910,8 @@ def judge(payload) -> None:
             if str(matched).endswith(question_form.N_MARK):
                 refuse(tool, "deny", "item-field-rendered", question_form.n_lead(matched) + question_form.PAGE_REASONS["item-n-number"], matched)
             refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-rendered"], matched)
+        if rule == "stops-named-in-holds":
+            refuse(tool, "deny", "stops-named-in-holds", question_form.PAGE_REASONS["stops-named-in-holds"], matched)
         if rule == "question-checked-with-repo":
             refuse(tool, "deny", "question-checked-with-repo", question_form.PAGE_REASONS["question-checked-with-repo"], matched)
         if rule == "option-labels-match-chat":

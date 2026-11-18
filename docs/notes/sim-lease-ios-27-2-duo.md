@@ -1,0 +1,1 @@
+- sim-lease-ios-27-2-duo: 06:32 CST Nov 13, Degen D13: this step never names the iOS 27.2 Duo pin (ruling ios-27-2-duo). Add it to the scope.

@@ -1,0 +1,1 @@
+- record-before-fix-2559: (note, step record-before-fix-push, incident 7) #2559 had no review record posted for rounds 1 and 2 before their fix pushes; the round 3 record (comment 6779647389) lists all three. Source: GitHub comments read 15:25 CST Nov 10.

@@ -1,0 +1,1 @@
+- export-scan-limit-7: postgres://{admin:pw}@host, a braced user that holds user:secret, passes (attacker-only). Fix: none until a real incident. Decision: waiting-data-in-repo.

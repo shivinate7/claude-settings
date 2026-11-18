@@ -1,0 +1,1 @@
+- message-ref-short-colour: a 3- or 4-digit colour after a PR word (`The PR changes the border to #000.`) reads as a PR and refuses if missing.

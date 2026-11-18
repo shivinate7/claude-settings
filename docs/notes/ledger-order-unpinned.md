@@ -1,0 +1,1 @@
+- ledger-order-unpinned: in `pr_next_act` (`merge/merge.py`), no test pins where a held label with no `Waits on:` line sits. A mutant that moves it before the stacked rule stays green. So does one that lets a held label suppress `batch`. Found in review round 3 of lane pr-state-is-on-the-pr. Decision: roles-findings-are-debts-or-notes.

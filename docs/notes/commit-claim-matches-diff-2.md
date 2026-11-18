@@ -1,0 +1,1 @@
+- commit-claim-matches-diff-2: Coordinator, note only (lane child-gap-ios-adblock): commit 3e2676d said "now a symlink" for an AGENTS.md that already was one. Guard candidate commit-claim-matches-diff: a commit message claiming a file mode or type change must match the staged diff. A step if it repeats.

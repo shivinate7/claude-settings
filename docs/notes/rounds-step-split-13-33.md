@@ -1,0 +1,1 @@
+- rounds-step-split-13-33: 13:33 CST Nov 13 (coordinator, split): lane session_013NEJL1WaFntJRa9xwoqMHZ does only the CLAUDE.md roles-review-cap-three sentence, after #2888 lands, and brings its exact wording to the owner. The other rewrites go to lane merge-tool-r9-no-round-3 (step merge-lint-fix-no-round-3).

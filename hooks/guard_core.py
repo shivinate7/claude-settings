@@ -1291,6 +1291,11 @@ _MAIN_HEADER = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 # `git checkout main` move a branch and keep every file, so they pass. `git checkout <path>`
 # overwrites a file from the index, so it is refused.
 
+# The git subcommands that change a repository or the tree. Some read in one form (`stash list`, `tag -l`,
+# `config --get`): a reader of this list counts those as writes (debt stamp-read-false-alarms).
+GIT_WRITES = ("commit", "push", "add", "tag", "merge", "rebase", "reset", "restore", "checkout", "switch", "stash",
+              "cherry-pick", "apply", "am", "rm", "mv", "clean", "pull", "revert", "init", "clone", "config")
+
 # `git` reads these options before the subcommand, and each one takes a value.
 GIT_OPT_WITH_VALUE = {
     "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path",
@@ -1626,7 +1631,7 @@ def _read_cd_variable(known, segment: str, move: str, ran: bool) -> str:
     return read if isinstance(read, str) and read else move
 
 
-def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False, made=frozenset()):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
@@ -1642,25 +1647,32 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
     leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
     worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
-    a segment in it gets None, and its own `cd` moves nothing. Off by default, so a rule that
-    fails closed on an untrusted `cd` keeps doing so."""
+    a segment in it gets None, and its own `cd` moves nothing. A failed cd then `|| exit`
+    ends the shell: every later segment gets None. A `return` does not: outside a function bash reports an error and
+    the next command runs. A brace group after the `||` is not read. Off by
+    default, so a rule that fails closed on an untrusted `cd` keeps doing so.
+    `made` holds normalized folders an earlier segment of the same call makes (a mkdir, a clone): a `cd`
+    into one is read as one that works, though the folder is missing at check time. Empty by default."""
     where = None
-    for at, where in enumerate(segment_dirs(segments[:number + 1], shell_cwd, ends, failed_cd_stays)):
+    for at, where in enumerate(segment_dirs(segments[:number + 1], shell_cwd, ends, failed_cd_stays, made)):
         if at == number:
             return where
     return where
 
 
-def segment_dirs(segments, shell_cwd: str, ends=(), failed_cd_stays=False):
+def segment_dirs(segments, shell_cwd: str, ends=(), failed_cd_stays=False, made=frozenset()):
     """dir_before_segment for every segment in one walk: yields each segment's folder in order, then
     the folder after the last one. A caller that needs the folder of many segments reads them here,
-    since one dir_before_segment call per segment walks the command once per segment."""
+    since one dir_before_segment call per segment walks the command once per segment. `ends`,
+    `failed_cd_stays` and `made` read as in dir_before_segment."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
     known = {}         # the variables the shell holds: plain assignments that ran here (`_track_variables`)
     doubt = False      # the last cd may have failed in an `&&` chain: a segment after it may not run
     unsure = False     # the last segment may have failed or not run: an assignment after its `&&` may not run
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
+    bail = False       # a failed cd ended in `||`: an `exit` next ends the shell
+    gone = False       # the shell has ended: nothing after runs
     last_end = ""      # the operator that ended the last non-empty segment
     for at, segment in enumerate(segments):
         marks = [(index, char) for index, char, quote in walk_quotes(segment) if not quote and char in "()"]
@@ -1668,9 +1680,11 @@ def segment_dirs(segments, shell_cwd: str, ends=(), failed_cd_stays=False):
         stack.extend((where, prev, dict(known), index in groups) for index, char in marks if char == "(")
         closes = sum(1 for _, char in marks if char == ")")
         end = ends[at] if at < len(ends) else ""
-        yield None if skipping else where
+        yield None if skipping or gone else where
         if not segment.strip():
             continue   # an operator at end of line then the newline leaves an empty part: it changes nothing
+        if gone:
+            continue
         if skipping:
             last_end = end
             skipping = end in ("&&", "|")
@@ -1684,6 +1698,12 @@ def segment_dirs(segments, shell_cwd: str, ends=(), failed_cd_stays=False):
         move = _segment_cd_move(tokens) if tokens else None
         before = last_end
         last_end = end
+        if bail and before == "||" and not stack and tokens:
+            word = resolve_command(tokens)
+            gone = word is not None and basename(tokens[word]) == "exit"
+            if gone:
+                continue
+        bail = False
         piped = "|" in (end, before)
         if move is not None and not is_powershell(segment) and piped:
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
@@ -1705,10 +1725,11 @@ def segment_dirs(segments, shell_cwd: str, ends=(), failed_cd_stays=False):
                 where = None
             else:
                 target = shell_abs(move or "~", where)
-                if target and os.path.isdir(target):
+                if target and (os.path.isdir(target) or os.path.normpath(target) in made):
                     where = target
                 elif target and failed_cd_stays:
                     skipping = end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops
+                    bail = end == "||"
                     old = prev   # a failed cd leaves the folder `cd -` goes back to alone
                 else:
                     where = None

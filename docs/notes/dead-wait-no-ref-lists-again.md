@@ -1,0 +1,1 @@
+- dead-wait-no-ref-lists-again: #2560 dead-PR wait row: with no main ref or a stale origin/main, head_on_main reads False and lane PRs replaced on main are listed again; the row should read unknown, as pull_landed_marks marks nothing then; no test covers missing-head, bad-head or no-ref.

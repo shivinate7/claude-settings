@@ -1,0 +1,1 @@
+- merge-copy-step7-names-step: SKILL.md "Merge a copy into a live page" step 7 says "copy steps"; it should name "Keep the page on main's code" step 3, run on a fresh fetch, because the live folder is stale after the batches land.

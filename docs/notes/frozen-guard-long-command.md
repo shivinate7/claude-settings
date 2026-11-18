@@ -1,0 +1,1 @@
+- frozen-guard-long-command: the frozen-file guard takes about 35 s on a 1000-line command (1000 `echo` lines), on both #2418's base and head, so it is not new. Measured once. Becomes a debt if a normal command nears the Stop or PreToolUse time limit.

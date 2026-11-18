@@ -1,0 +1,1 @@
+- geometry-reds-epi2b-3: Coordinator 11:39 CST Nov 12: geometry reds done except EPI2B-3, which q_max #1162 fixes (handed to runner 11 at 11:36 CST). Close step qmax-geometry-reds and page item 539 when #1162 merges. The check-seconds.json refusal was test-author scope, not a false alarm.

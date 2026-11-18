@@ -1,0 +1,1 @@
+- cdvar-glob-cd-stays: (#2379) `R=<dir>/h*; cd $R` under failed_cd_stays reads "stays" where bash goes to the match (same on main).
