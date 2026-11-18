@@ -20,6 +20,9 @@ jobs: a clean lint starts three mutate stubs (unmeasured), and a stop or a FAIL 
 The progress cases (test_mutation_test_progress_*) check the lines a shard run prints: a start and an end line per shard, and heartbeat
 lines while a shard runs (merge.MUTATE_HEARTBEAT_SECONDS, patched small or huge). Their slow shards sleep inside the mutate stub: 1 s in the
 heartbeat case (shard 2/3 of two runs), 0.6 s in the timeout case. Their clean runs use the fake clock. Measured: unmeasured.
+The closed-stdout cases (test_mutation_test_progress_broken_pipe_*, _value_error_*) make merge.say raise on every shard line; the join case
+(test_mutation_test_progress_heartbeat_thread_is_gone_*) holds a heartbeat line until the call joins its thread. Their cost: one lint each, two for the
+closed-stdout pair (a control run and the raising run); unmeasured.
 BatchHeadMutation (class BatchHeadMutation) lints a touched lane's head at the batch runner's pre-join call, `--lane-lint <pr>`, through the gh shim,
 in a cloud session with the batch-runner role or with none; the shim's comment list holds the hand-off PASS record. Cost per case: one ci-job stub
 start, and one mutate stub start where the run starts. Its times are unmeasured since the batch-build cases were removed.
@@ -413,6 +416,8 @@ HEARTBEAT_THREAD = "mutate-heartbeat"  # the name merge.py gives the thread that
 HEARTBEAT_FAST = 0.2  # MUTATE_HEARTBEAT_SECONDS where a case needs heartbeats: a shard that runs for a second or more prints several
 HEARTBEAT_NEVER = 3600  # MUTATE_HEARTBEAT_SECONDS where a case must print none: no shard in these cases runs for an hour
 SHARD_EVENT = re.compile(r"mutation test shard (\d+)/(\d+): (start|end|running)\b")  # the progress line of one shard, as merge.py prints it
+PROGRESS_START = "mutation test shard "  # the opening of every shard progress line: what a closed-stdout case makes merge.say raise on
+HOLD_CEILING = 10  # seconds a held heartbeat line waits for its release: a hang guard only. A correct run releases it at the join or at the end line
 
 
 def heartbeat_every(seconds):
@@ -582,6 +587,48 @@ class LaneLint(LaneFixture):
                 break
         out, rest = proc.communicate(timeout=120)
         return proc.returncode, out, "".join(err) + rest
+
+    def closed_stdout_run(self, make_exc):
+        """Run the lane lint on the sharded head with merge.say raising make_exc() on every shard progress line, as a closed or broken stdout
+        does. -> (rc, stdout, stderr, attempts): attempts are the lines the raise was tried on, oldest first. An error that leaves the lint
+        fails the case with its cause; it is not a crash of the test."""
+        attempts, real_say = [], merge.say
+
+        def say_raising(*lines):
+            if lines and lines[0].startswith(PROGRESS_START):
+                attempts.append(lines[0])
+                raise make_exc()
+            return real_say(*lines)
+
+        error = None
+        with heartbeat_every(HEARTBEAT_FAST), unittest.mock.patch.object(merge, "say", say_raising):
+            try:
+                rc, out, err = self.lane_streams("--lane-lint", "7")
+            except AssertionError:
+                raise
+            except Exception as e:
+                error = e
+        if error is not None:  # raised here, outside the except: one failure, with no chained traceback
+            self.fail("the lint let %s out of a shard progress line, so the run ended in a traceback, not its verdict: %s" % (type(error).__name__, error))
+        return rc, out, err, attempts
+
+    def assert_closed_stdout_changes_no_verdict(self, make_exc):
+        """Why: a shard progress line that cannot be written must not change the lint's verdict. The run with the raise gives the exit code and the
+        PASS lines of the run without it, and tries each shard's start, running and end line in order. Shard 2/3 sleeps 1 s, so its heartbeat fires."""
+        self.use_ci_job(PASSING, 0)
+        self.push_sharded_lane(shard_jobs(), sleeps={"2/3": 1})
+        with heartbeat_every(HEARTBEAT_FAST):
+            rc_plain, out_plain, err_plain = self.lane_streams("--lane-lint", "7")
+        self.assertEqual(rc_plain, 0, "precondition: the unpatched sharded run does not pass: " + out_plain + err_plain)
+        rc, out, err, attempts = self.closed_stdout_run(make_exc)
+        self.assertTrue(attempts, "precondition: no shard progress line reached the raise, so the case probes nothing: " + out + err)
+        self.assertEqual(rc, rc_plain, "a closed stdout changed the exit code: %d, want %d: %s" % (rc, rc_plain, out + err))
+        self.assertEqual(masked_verdict(out), masked_verdict(out_plain), "a closed stdout changed the verdict line: " + out)
+        tried = shard_events("\n".join(attempts))
+        self.assertEqual([ev for ev in tried if ev[2] != "running"], [(n, 3, kind) for n in (1, 2, 3) for kind in ("start", "end")],
+                         "the lint did not try a start and an end line for each shard, in order: " + "\n".join(attempts))
+        self.assertIn((2, 3, "running"), tried, "the heartbeat of shard 2/3 was not tried: " + "\n".join(attempts))
+        self.assertNotIn("Traceback", out + err, "the lint printed a traceback: " + out + err)
 
     def test_a_progress_line_from_ci_job_reaches_the_callers_stderr_live_and_the_pass_still_reads_from_stdout(self):
         rc, out, err = self.progress_run(PASSING, 0, "--lane-lint", self.head("feat"))
@@ -1759,6 +1806,64 @@ class LaneLint(LaneFixture):
         self.assertIsNone(counts_missing(end, {"killed": 694, "survived": 0, "unknown": 0}), "the end line of the one-job run does not show its tally: " + end)
         self.assertEqual(progress_passes(out), [], "a progress line of the one-job run starts with PASS: " + out)
         self.assert_one_mutation_test_run(head)
+
+    def test_mutation_test_progress_broken_pipe_on_a_shard_line_changes_no_verdict(self):  # BrokenPipeError is an OSError, which progress swallows: the run reads as it does unpatched
+        self.assert_closed_stdout_changes_no_verdict(lambda: BrokenPipeError(32, "Broken pipe"))
+
+    def test_mutation_test_progress_value_error_on_a_shard_line_changes_no_verdict(self):  # a closed file raises ValueError, which progress must catch too: the lint must not end in a traceback
+        self.assert_closed_stdout_changes_no_verdict(lambda: ValueError("I/O operation on closed file."))
+
+    def test_mutation_test_progress_heartbeat_thread_is_gone_before_its_shard_end_line(self):  # the join pin: the call joins the heartbeat thread itself, so no thread outlives its shard
+        """Why: the running line of shard 2/3 is held until the call joins its heartbeat thread, or until shard 2/3's end line is about to print.
+        A call that does not join prints that held line after the end line, with the thread alive at the end line. The hold is an event, not a
+        sleep: no verdict here depends on elapsed time."""
+        self.use_ci_job(PASSING, 0)
+        self.push_sharded_lane(shard_jobs())
+        self.assertEqual(live_heartbeat_threads(), [], "precondition: a heartbeat thread is alive before the run, so the case probes nothing")
+        in_flight, released = threading.Event(), threading.Event()  # the held line was reached; the hold is over
+        real_say, real_sh, real_join = merge.say, merge.sh, threading.Thread.join
+        seen = {}
+
+        def say_holding(*lines):
+            line = lines[0] if lines else ""
+            if line.startswith("mutation test shard 2/3: running"):
+                in_flight.set()
+                released.wait(HOLD_CEILING)
+            elif line.startswith("mutation test shard 2/3: end"):
+                seen["alive_at_end"] = [t.name for t in live_heartbeat_threads()]
+                real_say(*lines)
+                released.set()
+                return
+            return real_say(*lines)
+
+        def sh_marking(args, *rest, **kwargs):
+            result = real_sh(args, *rest, **kwargs)
+            if mutation_test_run(args) and (kwargs.get("env") or {}).get("MUTATE_SHARD") == "2/3":
+                seen["in_flight"] = in_flight.wait(HOLD_CEILING)
+            return result
+
+        def join_releasing(thread, timeout=None):
+            if thread.name == HEARTBEAT_THREAD:
+                released.set()
+            return real_join(thread, timeout)
+
+        def join_leftovers():
+            for t in live_heartbeat_threads():
+                t.join(timeout=HOLD_CEILING)
+        self.addCleanup(join_leftovers)  # runs after the asserts, so a leftover thread cannot reach the next case
+        self.addCleanup(released.set)  # runs first: a held line never outlives the case
+        with heartbeat_every(HEARTBEAT_FAST), unittest.mock.patch.object(merge, "say", say_holding), \
+                unittest.mock.patch.object(merge, "sh", sh_marking), unittest.mock.patch.object(threading.Thread, "join", join_releasing):
+            rc, out, err = self.lane_streams("--lane-lint", "7")
+        self.assertTrue(seen.get("in_flight"), "precondition: the heartbeat of shard 2/3 never reached its running line, so the case probes nothing: " + out + err)
+        self.assertEqual(seen.get("alive_at_end"), [], "the heartbeat thread of shard 2/3 was alive at its end line: the call did not join it first: %s" % seen.get("alive_at_end"))
+        self.assertEqual(rc, 0, "the held run of the clean sharded head did not pass: " + out + err)
+        lines = out.splitlines()
+        ends = [i for i, ln in enumerate(lines) if ln.startswith("mutation test shard 2/3: end")]
+        self.assertTrue(ends, "shard 2/3 printed no end line: " + out)
+        after_end = [ln for ln in lines[ends[0] + 1:] if shard_events(ln) == [(2, 3, "running")]]
+        self.assertEqual(after_end, [], "a heartbeat line of shard 2/3 printed after its end line: " + out)
+        self.assertEqual(live_heartbeat_threads(), [], "a heartbeat thread was alive when the call returned, with no join from the test: " + out)
 
 
 # The stack cross-measure (roadmap step stack-cross-measure): `merge --lane-lint <pr>` checks the PR's head against each other open PR of its
