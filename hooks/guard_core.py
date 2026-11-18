@@ -1525,13 +1525,21 @@ _VARIABLE_SAFE_WORDS = frozenset(CD_WORDS + POP_WORDS + (
 _VARIABLE_SET_IN_ARGS = re.compile(r"\$\(\(|\$\{[^}]*=")   # `$((R=1))` and `${R:=x}` set R from an argument
 
 
+_IDENTIFIER = re.compile(r"[A-Za-z_]\w*")
+
+
 def _variable_text(known, text: str) -> str:
     """`text` with each `$VAR` read as the value in `known`. The values go through `_resolve_vars`, the
     one resolver, as assignments written ahead of the text; it is imported late (guard_frozen imports
-    this file). A variable not in `known` stays as written."""
+    this file). A variable not in `known` stays as written.
+    Only the variables whose name occurs in `text` go through the resolver, with `IFS`, which it reads
+    without a use. Each known value is already plain text, so the others cannot change the answer, and
+    handing it all of `known` per call made a long run of assignments cost the square of its length."""
     from guard_frozen import _resolve_vars
     mark = " ;\x00; "
-    given = "".join('%s="%s"%s' % (name, value, mark) for name, value in known.items())
+    used = set(_IDENTIFIER.findall(text))
+    used.add("IFS")
+    given = "".join('%s="%s"%s' % (name, value, mark) for name, value in known.items() if name in used)
     return _resolve_vars(given + text).split(mark)[-1]
 
 
