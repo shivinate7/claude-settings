@@ -26,18 +26,24 @@ Stand-ins, not the feature. Each red is shown on a stand-in that is wrong in one
 - GUARD_CASES_RUNNER_UNDER_TEST. pid-runner writes a key that carries os.getpid(), so two runs of one tree differ.
 The stand-ins sit outside every repository. Each case's docstring names the stand-in it is red on.
 
-The fixtures. setUpModule builds three fixture trees, one commit pair each, over the tracked tests/guard. testing/tracked_tree.py
+The fixtures. setUpModule builds four fixture trees, one commit pair each, over the tracked tests/guard. testing/tracked_tree.py
 copies it, the one home of that copy. The copy is whole because the runner's sections share globals (ROOT, OWNED) that
 only the real suite defines. One section file, s99101-guard-cases-fixture.py, sits on top of it in each tree. The check
 of each tree and two listings of the green head run once, in parallel, and each case reads its own lines:
 - red tree: each red case reads RED for its name, and the tree exits 1.
-- green tree: each control reads no RED for its names, and the tree exits 0.
+- green tree: each control reads no RED for its names, and the tree exits 0. Its listing pins the keys of two cases that
+  differ only by a fixed epoch, and of a deny and an allow case that share one payload.
+- moved tree: the base ref is a commit that moved on after the branch point, and the head is the branch point's tree.
+  Its extra case is the base's only, so the check must read the fork, not the base ref's newest.
 - unknown tree: its base holds two section files with one number, so the base list cannot be read.
 - listing pair: two listings of the green head's folder give equal keys.
-Each tree's cases have distinct payloads, so no case of one tree matches a case of another.
+Each tree's cases have distinct payloads, so no case of one tree matches a case of another. The one shared payload is
+the green tree's deny and allow pair, which is meant to share one. The two epochs are past values (2020 and 2022), outside
+the check's clock window for any run made after 2022.
 """
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -122,10 +128,11 @@ def section_text(cases, extra=()):
     return "\n".join(lines) + "\n"
 
 
-def make_pair(base_text, head_text, head_message="", extra_base=None):
+def make_pair(base_text, head_text, head_message="", extra_base=None, ahead_text=None):
     """A fixture repository. A base commit holds the tracked tests/guard, with base_text as the section file and each
     extra_base file (name -> text). A head commit holds head_text as the section file, with head_message, and no extra
-    file. -> (repository, base sha)."""
+    file. With ahead_text, a branch made from the base commit holds it, one commit on, and the head stays where it is:
+    the base moved on after the branch point. -> (repository, the base sha, or the ahead sha when ahead_text is set)."""
     repo = os.path.join(RUN_FOLDER, uuid.uuid4().hex)
     os.makedirs(repo)
     git(repo, "init", "-q")
@@ -142,6 +149,13 @@ def make_pair(base_text, head_text, head_message="", extra_base=None):
         os.remove(os.path.join(folder, name))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "--allow-empty", "-F", "-", input_text=(head_message or "fixture head") + "\n")
+    if ahead_text is not None:
+        git(repo, "switch", "-q", "-c", "ahead", base)
+        write(os.path.join(folder, SECTION_FILE), ahead_text)
+        git(repo, "add", "-A")
+        git(repo, "commit", "-q", "-m", "fixture base moves on")
+        base = git(repo, "rev-parse", "HEAD")
+        git(repo, "switch", "-q", "-")
     return repo, base
 
 
@@ -178,12 +192,25 @@ RED_HEAD = section_text([
 ], [KILL_LIVE])
 RED_MESSAGE = "Loosen some cases\n\nGuard-case-loosened: fixture stays"
 
+# Two cases that differ only by a fixed epoch in the payload, and a deny and an allow case that hold one payload. Both pairs
+# sit in the green tree, in base and head alike, so the listing pins their keys and the check reads them as unchanged.
+EPOCH = [
+    ("fixture epoch early", '"touch " + ROOT + "/epoch-1600000000"', "deny", "fixture-rule"),
+    ("fixture epoch late", '"touch " + ROOT + "/epoch-1650000000"', "deny", "fixture-rule"),
+]
+SHARED = [
+    case("fixture shared deny", "deny", "fixture-rule", "shared-payload"),
+    case("fixture shared allow", "allow", None, "shared-payload"),
+]
+
 GREEN_BASE = section_text([
     case("fixture tighten", "allow", None, "tighten"),
     case("fixture ask to deny", "ask", "fixture-ask-rule", "ask-deny"),
     case("fixture reason", "deny", "fixture-reason-old", "reason"),
     case("fixture rename old", "deny", "fixture-rule", "renamed"),
     case("fixture waived", "deny", "fixture-rule", "waived"),
+    *EPOCH,
+    *SHARED,
 ], [*CLOCK, KILL_OWN, KILL_LIVE])
 GREEN_HEAD = section_text([
     case("fixture tighten", "deny", "fixture-rule", "tighten"),
@@ -191,17 +218,24 @@ GREEN_HEAD = section_text([
     case("fixture reason", "deny", "fixture-reason-new", "reason"),
     case("fixture rename new", "deny", "fixture-rule", "renamed"),
     case("fixture waived", "allow", None, "waived"),
+    *EPOCH,
+    *SHARED,
 ], [*CLOCK, KILL_OWN, KILL_LIVE])
 GREEN_MESSAGE = "Tighten some cases, rename one and loosen one with its trailer\n\nGuard-case-loosened: fixture waived"
 
 UNKNOWN_BASE = section_text([case("fixture kept", "deny", "fixture-rule", "kept")])
 UNKNOWN_EXTRA = {"s99101-duplicate.py": section_text([case("fixture dup", "deny", "fixture-rule", "dup")])}
+# The branch point holds one case. The base moves on with a second deny case, which the head never takes.
+MOVED_FORK = section_text([case("fixture moved kept", "deny", "fixture-rule", "moved-kept")])
+MOVED_AHEAD = section_text([case("fixture moved kept", "deny", "fixture-rule", "moved-kept"),
+                            case("fixture ahead only", "deny", "fixture-rule", "ahead-only")])
 
-# label -> (base text, head text, head message, extra base files). setUpModule builds each one.
+# label -> (base text, head text, head message, extra base files, ahead text). setUpModule builds each one.
 TREES = {
     "red": (RED_BASE, RED_HEAD, RED_MESSAGE, None),
     "green": (GREEN_BASE, GREEN_HEAD, GREEN_MESSAGE, None),
     "unknown": (UNKNOWN_BASE, UNKNOWN_BASE, "fixture head", UNKNOWN_EXTRA),
+    "moved": (MOVED_FORK, MOVED_FORK, "fixture head", None, MOVED_AHEAD),
 }
 
 
@@ -249,19 +283,41 @@ class GuardCasesFromBase(unittest.TestCase):
             self.assertFalse(hits, "a control reads red: %s" % hits[:1])
         self.assertEqual(rc, 0, "the %s tree exits %s, want 0, with these RED lines: %s" % (label, rc, reds(out)))
 
+    def listing_keys(self, label):
+        """{name: key} of the listing that one run wrote. A listing that was not written fails here, with the run's exit."""
+        rc, out, path = self.result(label)
+        self.assertTrue(os.path.isfile(path), "no listing written by %s, exit %s: %s" % (label, rc, tail(out)))
+        with open(path, encoding="utf-8") as f:
+            return {row["name"]: row["key"] for row in json.load(f)}
+
     def test_listing_same_tree_twice_gives_equal_keys(self):
         """Red on pid-runner (GUARD_CASES_RUNNER_UNDER_TEST): its key carries the process id, so the two runs differ.
         The green head holds a clock line, which puts a time-derived value in a payload, so a build that does not
         normalise it reads red too."""
-        listings = []
-        for label in ("listing-1", "listing-2"):
-            rc, out, path = self.result(label)
-            self.assertTrue(os.path.isfile(path), "no listing written by %s, exit %s: %s" % (label, rc, tail(out)))
-            with open(path, encoding="utf-8") as f:
-                listings.append({row["name"]: row["key"] for row in json.load(f)})
+        listings = [self.listing_keys("listing-1"), self.listing_keys("listing-2")]
         self.assertTrue(listings[0], "the listing holds no rows")
         differ = sorted(name for name in listings[0] if listings[0][name] != listings[1].get(name))
         self.assertFalse(differ, "keys differ between two runs of one tree, first: %s" % differ[:1])
+
+    def test_fixed_epochs_keep_their_keys_apart(self):
+        """Red on _clock_word that always reads <CLOCK> (lint/_guard_case_list.py): the two cases differ only by a fixed
+        epoch, so their normalised payloads are one, and one key stands for both. The names are checked first, so a
+        missing row fails as a missing row."""
+        keys = self.listing_keys("listing-1")
+        for name in ("fixture epoch early", "fixture epoch late"):
+            self.assertIn(name, keys, "the listing holds no row for %r" % name)
+        self.assertNotEqual(keys["fixture epoch early"], keys["fixture epoch late"],
+                            "two cases that differ only by a fixed epoch share one key")
+
+    def test_deny_and_allow_on_one_payload_keep_their_keys_apart(self):
+        """Red with no verdict suffix on a shared key (lint/_guard_case_list.py): the deny and the allow case hold one
+        payload, so only the suffix keeps their keys apart. Without it, a rename of the deny case reads as a drop from
+        deny to allow, since the lowest verdict of the shared key is the allow case."""
+        keys = self.listing_keys("listing-1")
+        for name in ("fixture shared deny", "fixture shared allow"):
+            self.assertIn(name, keys, "the listing holds no row for %r" % name)
+        self.assertNotEqual(keys["fixture shared deny"], keys["fixture shared allow"],
+                            "a deny and an allow case on one payload share one key")
 
     def test_deny_to_allow_flip_reads_red(self):
         """Red on pass-all: the flipped verdict reads green. The case is edited; its name and payload stay."""
@@ -316,6 +372,17 @@ class GuardCasesFromBase(unittest.TestCase):
         unknown = [line for line in out.splitlines() if line.startswith("UNKNOWN")]
         self.assertTrue(unknown, "an unreadable list read green: no UNKNOWN line, exit %s: %s" % (rc, tail(out)))
         self.assertNotEqual(rc, 0, "UNKNOWN printed but exit is 0")
+
+    def test_base_that_moved_on_reads_the_fork(self):
+        """Red on fork = args.base (the base ref's newest, not the merge base): the base ref holds a deny case the branch
+        point never had, and the head lacks it, so the mutant reads it as removed. Scope first: the head is the branch
+        point's tree, so the base list and the head list hold the same number of cases."""
+        rc, out = self.result("moved")[:2]
+        counts = re.search(r"(\d+) base cases, (\d+) head cases", out)
+        self.assertIsNotNone(counts, "no count line, so the two lists were not compared: %s" % tail(out))
+        base, head = (int(n) for n in counts.groups())
+        self.assertEqual(base, head, "the base list is not the branch point's: %d base cases, %d head cases" % (base, head))
+        self.assert_green("moved", "fixture ahead only")
 
 
 def setUpModule():

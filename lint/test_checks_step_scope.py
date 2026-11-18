@@ -298,6 +298,7 @@ PR_ONLY = [
     'Ruling kind check',
     'Silent undo check',
     'Comment narration check',
+    'Guard cases from base check',
 ]
 
 # The checks job's step names. An unnamed step is its `uses:` reference.
@@ -376,6 +377,7 @@ MAIN_STEPS = [
     'Ruled store fixture suite',
     'Route judge measure fixture suite',
     'Guard cases from base fixture suite',
+    'Guard cases from base check',
     'Guard log report fixture suite',
     'Verdict runner fixture suite',
     'Wait-pid helper fixture suite',
