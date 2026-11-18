@@ -80,7 +80,7 @@ EDIT_NEW = "- edited-note: the second wording of the note (hooks/guard.py)\n"
 
 SECTIONS = "tests/guard"  # the section folder, as hooks/test_guard.py's SECTION_DIR names it
 PINNED_TODAY = "2026-11-18"  # the clock every case pins: the check reads FIXED_TODAY, so no case reads the real date
-CENTRAL_NOON = "2000-01-17T12:00:00-06:00"  # the Central pin (hooks/local_time.py LOCAL_TIME_NOW): 2000-01-17 Central
+CENTRAL_NOON = "2000-01-17T12:00:00-06:00"  # a noon on a fixed Central day: the check reads it, not the machine's
 MACHINE_ZONE = "UTC-14"  # a POSIX zone far from Central: the machine's date must not enter a Central-dated verdict
 # The text of docs/notes/ps-scriptblock-path-refused.md, copied as the fixture: a real note's length and form.
 REAL_NOTE_TEXT = ("the check still refuses `@{N='x'; E={ ./x.ps1 }}`, since the scriptblock lookahead covers only a "
