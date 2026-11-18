@@ -51,6 +51,29 @@ VERIFIED = "Verified: python3 lint/test_widgets.py -> PASS"  # the default Verif
 GADGET_PATH = "src/gadget.py"
 GADGET_TEXT = "def gadget():\n    return 2\n"
 PRE_ROLLOUT_CHECK = "# the check file before the Verified rollout\n"  # a check file with no Verified rollout in it
+ROLLOUT_MARKER = "verified-trailer-rollout-1"  # the string a check file holds once the Verified rollout landed
+# Runs lint/check_red_run.py by path. A `fail` run makes the git call named by argv[2] exit 128, a read git cannot
+# finish. A `count` run counts that call's starts. A grep counts only when it names the check file: that is a Verified read.
+PROBE = (
+    "import importlib.util, subprocess, sys\n"
+    "spec = importlib.util.spec_from_file_location('check_red_run', sys.argv[1])\n"
+    "module = importlib.util.module_from_spec(spec)\n"
+    "spec.loader.exec_module(module)\n"
+    "watch, mode = sys.argv[2], sys.argv[3]\n"
+    "real, starts = module._nowindow.run, []\n"
+    "def watched(argv):\n"
+    "    return argv[:2] == ['git', watch] and (watch != 'grep' or module.SELF_REL in argv)\n"
+    "def run(argv, *args, **kwargs):\n"
+    "    if watched(argv):\n"
+    "        starts.append(argv)\n"
+    "        if mode == 'fail':\n"
+    "            return subprocess.CompletedProcess(argv, 128, '', 'fatal: simulated failure of git ' + watch)\n"
+    "    return real(argv, *args, **kwargs)\n"
+    "module._nowindow.run = run\n"
+    "rc = module.main(sys.argv[4:])\n"
+    "print('PROBE_EXIT=%d' % rc)\n"
+    "print('PROBE_STARTS=%d' % len(starts))\n"
+)
 # Every commit carries this block, as real commits do. A check that wants Red-run as the last
 # trailer fails here, not on the first real commit.
 ATTRIBUTION = ["Co-Authored-By: Claude <noreply@anthropic.com>",
@@ -598,6 +621,125 @@ class VerifiedCase(Fixture):
         self.base()
         self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT}, verified=None)
         self.assertEqual(self.gap_rows(self.base_sha), [], "gaps() lists a Verified gap, which the push guard would read")
+
+    def run_probe(self, watch, mode, args=None):
+        """Run the check by MODULE path in the fixture repo, under PROBE. Returns (exit code, output, starts of `watch`).
+        The probe's result lines must print, so a crash is never read as an exit code. Not the fixture's disk copy: a
+        case that commits the check file without the marker overwrites that copy."""
+        argv = ["--base", self.base_sha] if args is None else args
+        done = subprocess.run([sys.executable, "-c", PROBE, MODULE, watch, mode, *argv], cwd=self.tree,
+                              capture_output=True, text=True, encoding="utf-8", errors="replace", env=GIT_ENV)
+        out = done.stdout + done.stderr
+        exits = re.findall(r"^PROBE_EXIT=(\d+)$", out, re.M)
+        starts = re.findall(r"^PROBE_STARTS=(\d+)$", out, re.M)
+        self.assertTrue(exits and starts, "the probe printed no result, so it crashed:\n" + out)
+        return int(exits[0]), out, int(starts[0])
+
+    def test_unread_verified_read_exits_zero_with_one_observe_line(self):
+        """A Verified read git cannot finish prints one OBSERVE line and exits 0. Red on e6d5f62: there its Unknown exits 2."""
+        self.base()
+        self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT}, verified=None)  # the Verified read judges this commit
+        rc, out, starts = self.run_probe("grep", "fail")
+        self.assertGreaterEqual(starts, 1, "the simulated failure never reached the Verified read:\n" + out)  # scope before subject
+        self.assertEqual(rc, 0, "observe mode: an unread Verified line must leave the exit code at 0:\n" + out)
+        observe = [line for line in out.splitlines() if "OBSERVE" in line]
+        self.assertEqual(len(observe), 1, "one OBSERVE line for the unread Verified read:\n" + out)
+        self.assertIn("the Verified line read could not run", observe[0], out)
+
+    def test_unread_verified_read_keeps_the_red_run_exit_one(self):
+        """A Red-run gap keeps exit 1 when the Verified read cannot finish, and the OBSERVE line joins the FAIL line.
+        Red on e6d5f62: there the Verified read's Unknown exits 2 instead."""
+        self.base()
+        self.commit("add widget tests", {self.new_test_path(): TEST_TEXT}, verified=None)  # no Red-run line: a Red-run gap
+        rc, out, starts = self.run_probe("grep", "fail")
+        self.assertGreaterEqual(starts, 1, "the simulated failure never reached the Verified read:\n" + out)  # scope before subject
+        self.assertTrue(any("check_red_run: FAIL" in line for line in out.splitlines()), "the Red-run gap is not named:\n" + out)
+        self.assertEqual(rc, 1, "a Red-run gap keeps the exit at 1 when the Verified read cannot run:\n" + out)
+        observe = [line for line in out.splitlines() if "OBSERVE" in line]
+        self.assertEqual(len(observe), 1, "one OBSERVE line for the unread Verified read:\n" + out)
+
+    def test_unread_red_run_read_still_exits_two(self):
+        """Control, green on e6d5f62 too: a Red-run read git cannot finish still exits 2, as UNKNOWN."""
+        self.base()
+        self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT}, verified=None)
+        rc, out, starts = self.run_probe("log", "fail")
+        self.assertGreaterEqual(starts, 1, "the simulated failure never reached the Red-run read:\n" + out)  # scope before subject
+        self.assertEqual(rc, 2, "a Red-run read git cannot finish must exit 2:\n" + out)
+        self.assertIn("check_red_run: UNKNOWN", out, out)
+
+    def test_empty_range_starts_no_git_grep(self):
+        """Empty state, a control green on e6d5f62 too. The Cost of decision verified-trailer (Verified line): an empty
+        range starts no git grep."""
+        self.base()
+        rc, out, starts = self.run_probe("grep", "count")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(starts, 0, "an empty range starts %d git grep; the Cost says 0" % starts)
+
+    def test_verified_read_starts_one_git_grep_and_one_per_unverified_commit(self):
+        """Control, green on e6d5f62 too. The Cost of decision verified-trailer: one git grep for HEAD, then one for the
+        parent of each commit with no valid line that is not a revert. Three such commits, one verified commit and its
+        revert: 1 + 3."""
+        self.base()
+        for i in range(3):
+            self.commit("change part %d" % i, {"src/part_%d.py" % i: "def part():\n    return %d\n" % i}, verified=None)
+        self.commit("change part 3", {"src/part_3.py": "def part():\n    return 3\n"})  # a valid line: no git grep
+        self.git("revert", "--no-edit", "HEAD")  # a revert: not judged, so no git grep
+        rc, out, starts = self.run_probe("grep", "count")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(starts, 1 + 3, "the Verified read starts %d git grep; the Cost says 1 + 3" % starts)
+
+    def test_full_size_range_starts_one_git_grep_per_commit_plus_one(self):
+        """Full-size state, a control green on e6d5f62 too: 25 unverified commits start 1 + 25 git grep."""
+        self.base()
+        for i in range(25):
+            self.commit("change part %d" % i, {"src/part_%d.py" % i: "def part():\n    return %d\n" % i}, verified=None)
+        rc, out, starts = self.run_probe("grep", "count")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(starts, 1 + 25, "the Verified read starts %d git grep; the Cost says 1 + 25" % starts)
+
+    def test_head_without_the_marker_starts_one_git_grep(self):
+        """Control, green on e6d5f62 too. The Cost of decision verified-trailer: a HEAD without the marker starts one git grep."""
+        self.base()
+        self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT}, verified=None)
+        dropped = self.commit("drop the Verified rollout", {CHECK_REL: PRE_ROLLOUT_CHECK}, verified=None)
+        self.assertNotIn(ROLLOUT_MARKER, self.git("show", dropped + ":" + CHECK_REL), "fixture: HEAD still holds the marker")
+        rc, out, starts = self.run_probe("grep", "count")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(starts, 1, "a HEAD without the marker starts %d git grep; the Cost says 1" % starts)
+
+    def test_head_without_the_marker_judges_nothing_over_a_parent_that_has_it(self):
+        """HEAD lacks the marker and its parent holds it: no commit is judged. The control is the same range with HEAD
+        holding the marker, which lists both commits. Red on a check that drops the HEAD gate."""
+        self.base()
+        self.git("checkout", "-q", "-b", "keep")
+        held = self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT}, verified=None)  # its parent holds the marker
+        kept = self.commit("change gadget product", {GADGET_PATH: GADGET_TEXT}, verified=None)  # HEAD holds the marker
+        rc, out, _starts = self.run_probe("grep", "count")
+        self.assertEqual(rc, 0, out)
+        self.assertListed(out, held, "change widget product")  # control: with the marker at HEAD, the parent's commit is judged
+        self.assertListed(out, kept, "change gadget product")
+        self.git("checkout", "-q", "-b", "drop", held)
+        dropped = self.commit("drop the Verified rollout", {CHECK_REL: PRE_ROLLOUT_CHECK}, verified=None)  # HEAD lacks the marker
+        self.assertNotIn(ROLLOUT_MARKER, self.git("show", dropped + ":" + CHECK_REL), "fixture: HEAD still holds the marker")
+        self.assertIn(ROLLOUT_MARKER, self.git("show", held + ":" + CHECK_REL), "fixture: the parent lost the marker")
+        rc, out, _starts = self.run_probe("grep", "count")
+        self.assertEqual(rc, 0, out)
+        self.assertNotListed(out, dropped, "a HEAD without the marker is judged over a parent that holds it")
+        self.assertNotListed(out, held, "a commit is judged when HEAD lacks the marker")
+
+    def test_root_commit_is_not_judged_and_its_child_is_listed(self):
+        """A root commit has no parent, so it is not judged. The commit on it is judged: the root holds the marker.
+        Control, green on e6d5f62 too."""
+        self.base()
+        self.git("checkout", "-q", "--orphan", "new-history")
+        self.git("rm", "-r", "-q", "--cached", "--", ".")  # the root commit holds only the check file, which it names
+        root = self.commit("start a new history", {CHECK_REL: read_module()}, verified=None)
+        self.assertEqual(self.git("log", "-1", "--format=%P", root), "", "fixture: the root commit has a parent")  # scope
+        child = self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT}, verified=None)
+        rc, out, _starts = self.run_probe("grep", "count")
+        self.assertEqual(rc, 0, out)
+        self.assertListed(out, child, "change widget product")
+        self.assertNotListed(out, root, "a root commit is judged, so it is listed as a Verified gap")
 
 
 if __name__ == "__main__":
