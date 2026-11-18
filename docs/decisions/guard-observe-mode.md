@@ -7,7 +7,7 @@ slug: guard-observe-mode
 
 ## The ruling
 
-Source: owner, 2026-11-17 20:01 CST, consultant goal v6. Goal v6 names it "guard-observe-mode (new guards log before they refuse)". Goal v7 restates it, 2026-11-18. The owner reads the practice as coming from a Claude Code blog post on verification. The post is not linked.
+Source: owner, 2026-11-17 20:01 CST, consultant goal v6. Goal v6 names it "guard-observe-mode (new guards log before they refuse)". Goal v7 restates it, 2026-11-18. The owner's goal lists it among the practices from two Claude Code blog posts (verification; code review). The posts are not linked.
 
 - A new guard rule ships log-only. Its call site writes `record(tool, "noted", "<new-id>", matched)`. It never calls `refuse()` or `ask_command()`.
 - The id is new. An existing rule id never gets this line, because that would quiet a guard that already refuses.
@@ -22,7 +22,7 @@ Source: owner, 2026-11-17 20:01 CST, consultant goal v6. Goal v6 names it "guard
 
 A rule that refuses before it has a true hit can cry wolf. Its readers then learn to scroll past its refusals (decision `guard-that-cries-wolf-is-spent`). Rule `verification-trust-guard-after-red` (a guard earns trust only after it goes red on the defect it guards) needs that proof first. Log-only gathers it, and the flip PR changes one line from a log to a refusal.
 
-Cost: a call that a log-only rule matches adds one append to guard.log, as a refusal does today. A call that no rule matches does no extra work. No new process, file or timer. The cost test is owed with the first rule that uses this form.
+Cost: a call that a log-only rule matches adds one append to guard.log, as a refusal does today (unmeasured). A call that no rule matches does no extra work. No new process, file or timer.
 
 Risk: guard.log is per machine, so each count is a lower bound.
 
