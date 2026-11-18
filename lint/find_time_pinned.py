@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """List the tests whose verdict depends on wall-clock speed. Read-only. Standard library only.
 
-    python3 lint/find_time_pinned.py <root> [--json]
+    python3 lint/find_time_pinned.py <root> [--json] [--check]
 
 Decision test-strategy-reset, point 2: no test waits on a fixed sleep or a wall-clock bound. This
 tool lists the tests that do. It fixes none, and it writes nothing. Each finding has one category:
@@ -54,6 +54,13 @@ findings only, and its counts leave kept findings out. A file that cannot be rea
 never clean.
 Exit 0: nothing listed, nothing unread (kept findings alone leave it 0). Exit 1: findings listed. Exit 2:
 the root cannot be read, or nothing listed but some file unread, so the result is unknown.
+With `--check` the listing is the same, but the exit is 1 only when a sleep or an elapsed-assert is listed,
+2 when only an unread file remains, and 0 when nothing else is listed: a wait-cap or a test-cap is a hang
+guard the owner keeps (item 345), so it never fails the check.
+Python only: an `.elapsed` attribute in an assert is an elapsed-assert, also inside a helper call under a bound
+(`to_ms(r.elapsed) < 100`, `assertLess(to_ms(r.elapsed), 100)`). An exact `==` or `assertEqual` on it is a value
+check, so it is not listed. JS and Swift list no `.elapsed` read, only a clock call or a name that holds one.
+A file over 8 MiB is not scanned and is listed unread.
 Cost: one `git ls-files` (or one folder walk outside a git tree) and one read of each test file. No
 process stays running.
 """
@@ -71,8 +78,9 @@ from bisect import bisect_right
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
-MAX_BYTES = 1_000_000
+MAX_BYTES = 8 * 1024 * 1024
 CATEGORIES = ("sleep", "elapsed-assert", "test-cap", "wait-cap")
+CHECK_FAILS = ("sleep", "elapsed-assert")  # the categories --check fails on, besides an unread file
 WALK_SKIP = {".git", "node_modules", ".build", "DerivedData", "venv", ".venv"}
 JS_EXTS = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts", ".cts")
 TEXT_MAX = 120
@@ -522,6 +530,10 @@ PY_COMPARED = {"assertTrue": 1, "assertFalse": 1, "assertIsNone": 1, "assertIsNo
                                  "assertTupleEqual", "assertSequenceEqual", "assertMultiLineEqual")}}
 
 
+PY_EXACT = {"assertEqual"}  # an assert of one exact value, never a bound on a clock
+PY_ORDERED = {"assertLess", "assertLessEqual", "assertGreater", "assertGreaterEqual"}
+
+
 def assert_parts(call, name):
     """The nodes of an assert call that hold the asserted value: no message argument, no `msg=`."""
     count = PY_COMPARED.get(name)
@@ -553,33 +565,48 @@ def scan_python(text):
     def is_clock(node):
         return isinstance(node, ast.Call) and bool(names_of(node) & PY_CLOCKS)
 
-    def holds_clock(node, tainted, durations=False):
+    def is_elapsed(node):
+        return isinstance(node, ast.Attribute) and node.attr == "elapsed" and isinstance(node.ctx, ast.Load)
+
+    def holds_clock(node, tainted, durations=False, elapsed=True, bound=False):
         """True when node reads a clock call or a tainted name. The arguments of a call count only when that
         call is a pass-through, or, with `durations` (an asserted value), when they hold a difference with a
-        clock in it. A lambda reads what it returns."""
+        clock in it. A lambda reads what it returns. An `.elapsed` attribute is a measured duration, except
+        under an exact `==` (`elapsed` False): that checks one value and bounds no clock. Under an ordering
+        compare (`bound`), an `.elapsed` inside a helper call's arguments is a bound on a duration too."""
         if isinstance(node, ast.Lambda):
-            return holds_clock(node.body, tainted, durations)
+            return holds_clock(node.body, tainted, durations, elapsed, bound)
+        if isinstance(node, ast.Compare):
+            ordered = any(isinstance(o, (ast.Lt, ast.LtE, ast.Gt, ast.GtE)) for o in node.ops)
+            exact = all(isinstance(o, ast.Eq) for o in node.ops)
+            return any(holds_clock(c, tainted, durations, elapsed and not exact, bound or ordered)
+                       for c in [node.left] + node.comparators)
         if isinstance(node, ast.Call):
             if is_clock(node):
                 return True
             args = node.args + [k.value for k in node.keywords]
             if names_of(node) & PY_PASS_THROUGH:
-                return any(holds_clock(p, tainted, durations) for p in [node.func] + args)
-            return holds_clock(node.func, tainted, durations) or (
-                durations and any(holds_difference(p, tainted) for p in args))
+                return any(holds_clock(p, tainted, durations, elapsed, bound) for p in [node.func] + args)
+            return holds_clock(node.func, tainted, durations, elapsed, bound) or (
+                durations and any(holds_difference(p, tainted, elapsed, bound) for p in args))
         if isinstance(node, ast.Name):
             return isinstance(node.ctx, ast.Load) and node.id in tainted
-        return any(holds_clock(c, tainted, durations) for c in ast.iter_child_nodes(node))
+        if elapsed and is_elapsed(node):
+            return True  # a result's measured duration, such as `run_child().elapsed`
+        return any(holds_clock(c, tainted, durations, elapsed, bound) for c in ast.iter_child_nodes(node))
 
-    def holds_difference(node, tainted):
-        """True when node, an input to a call, holds `a - b` with a clock or a tainted name in a or b: a
-        measured duration, not an injected clock. A lambda's body is not searched."""
+    def holds_difference(node, tainted, elapsed=True, bound=False):
+        """True when node, an input to a call, holds `a - b` with a clock or a tainted name in a or b, or,
+        under a bound, an `.elapsed` attribute: a measured duration, not an injected clock. A lambda's body
+        is not searched."""
         if isinstance(node, ast.Lambda):
             return False
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Sub) and (
-                holds_clock(node.left, tainted, True) or holds_clock(node.right, tainted, True)):
+        if bound and elapsed and is_elapsed(node):
             return True
-        return any(holds_difference(c, tainted) for c in ast.iter_child_nodes(node))
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Sub) and (
+                holds_clock(node.left, tainted, True, elapsed) or holds_clock(node.right, tainted, True, elapsed)):
+            return True
+        return any(holds_difference(c, tainted, elapsed, bound) for c in ast.iter_child_nodes(node))
 
     scopes = {}
 
@@ -641,7 +668,9 @@ def scan_python(text):
                 found.add((n.lineno, "elapsed-assert"))
             elif isinstance(n, ast.Call):
                 name = n.func.attr if isinstance(n.func, ast.Attribute) else getattr(n.func, "id", "")
-                if name.startswith("assert") and any(holds_clock(x, tainted, True) for x in assert_parts(n, name)):
+                if name.startswith("assert") and any(
+                        holds_clock(x, tainted, True, name not in PY_EXACT, name in PY_ORDERED)
+                        for x in assert_parts(n, name)):
                     found.add((n.lineno, "elapsed-assert"))
     return found, python_kept(text)
 
@@ -1220,6 +1249,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("root", help="the repo root, or any folder")
     ap.add_argument("--json", action="store_true", help="print one JSON object")
+    ap.add_argument("--check", action="store_true",
+                    help="exit non-zero only on a sleep, an elapsed-assert or an unread file")
     args = ap.parse_args(argv)
     root = os.path.abspath(args.root)
     if not os.path.isdir(root):
@@ -1256,6 +1287,11 @@ def main(argv=None):
         print(f"{len(findings)} time-pinned in {nfiles} files (sleep {counts['sleep']}, "
               f"elapsed-assert {counts['elapsed-assert']}, test-cap {counts['test-cap']}, "
               f"wait-cap {counts['wait-cap']}); {len(unread)} unread" + (f"; kept {kept_total}" if kept_total else ""))
+    if args.check:
+        # A wait-cap or a test-cap is a hang guard the owner keeps (item 345), so it never fails the check.
+        if any(f["category"] in CHECK_FAILS for f in findings):
+            return 1
+        return 2 if unread else 0
     if findings:
         return 1
     return 2 if unread else 0
