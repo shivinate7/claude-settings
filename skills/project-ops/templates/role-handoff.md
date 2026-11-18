@@ -13,6 +13,9 @@ From "<old session title>" at <the limit hit, or the slip>. Checked: main <commi
 waits), the home of the list: a page collection, a roadmap ref, a git ref or a GitHub query. Add only
 the items that have no home, each with whom it is handed to. Never copy a list that has a home.>
 
+<A batch runner adds one line here: `Runner state: origin/roadmap:plans/runner-state.json, last sent version <N>.` The queue,
+folds, gos, holds and archive pass live in that file, never in this one. `scripts/check_runner_state.py handoff` checks the line.>
+
 ## Deferred for the owner
 
 <The home of the list of deferred steps: a page collection, a roadmap ref, a git ref or a GitHub

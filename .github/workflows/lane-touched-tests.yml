@@ -2,7 +2,7 @@ name: lane-touched-tests
 
 # A lane PR is a draft, and checks.yml skips every job on a draft (decision draft-until-reviewed), so a test that
 # fails on Windows or macOS alone first shows in the batch. This workflow runs only the test files a draft touches,
-# on both systems (item 400 a, owner, 2026-11-08 06:08 CST). Every job skips on a ready PR. It is not in checks.yml,
+# on Windows (item 400 a, owner, 2026-11-08 06:08 CST; macOS went off, owner, 2026-11-16 01:33 CST). Every job skips on a ready PR. It is not in checks.yml,
 # not in all-jobs-passed and not a required check. The selector is .github/scripts/touched-tests.py: it names each
 # touched test it does not run, and exits non-zero on a diff it cannot read.
 on:
@@ -31,10 +31,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      any: ${{ steps.select.outputs.any }}
-      matrix: ${{ steps.select.outputs.matrix }}
+      any: ${{ steps.legs.outputs.any }}
+      matrix: ${{ steps.legs.outputs.matrix }}
       commands_windows: ${{ steps.select.outputs.commands_windows }}
-      commands_macos: ${{ steps.select.outputs.commands_macos }}
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -95,6 +94,17 @@ jobs:
           esac
           python .github/scripts/touched-tests.py
 
+      # No macOS leg on a pull request (owner, 2026-11-16 01:33 CST, "turn off all mac runs for now"; consultant pick,
+      # 08:42 CST). The selector still lists the macOS tests; only the Windows legs go to the matrix, and `any` is true
+      # only when a Windows leg is left, so a macOS-only diff starts no `run` job.
+      - name: Keep the Windows legs
+        id: legs
+        shell: bash
+        env:
+          MATRIX: ${{ steps.select.outputs.matrix }}
+        run: |
+          python -c 'import json, os; m = json.loads(os.environ["MATRIX"]); inc = [e for e in m["include"] if e["os"] == "windows-latest"]; open(os.environ["GITHUB_OUTPUT"], "a", newline="\n").write("matrix=" + json.dumps({"include": inc}) + "\nany=" + ("true" if inc else "false") + "\n")'
+
   run:
     name: run (${{ matrix.os }})
     needs: touched
@@ -126,8 +136,8 @@ jobs:
         shell: bash
         env:
           FILES: ${{ matrix.files }}
-          # This system's own map of path to interpreter.
-          COMMANDS: ${{ matrix.os == 'windows-latest' && needs.touched.outputs.commands_windows || needs.touched.outputs.commands_macos }}
+          # The Windows map of path to interpreter: the matrix holds Windows legs only.
+          COMMANDS: ${{ needs.touched.outputs.commands_windows }}
         run: |
           set -u
           # Each line is "path<TAB>cmd", cmd being the interpreter the file's checks.yml run line starts with (this

@@ -154,7 +154,8 @@ OPUS_ROLES = ("builder", "reviewer", "test-author", "record-writer", "claude-cod
 # The roles a plain ask or its scope read can name: OPUS_ROLES less `claude`, which in prose addresses the assistant.
 ASK_ROLES = tuple(role for role in OPUS_ROLES if role != "claude")
 LOG_REASON_MAX = 300
-SESSION_ID = re.compile(r"[\w.-]{1,128}")  # the id names a file: no separator, no leading dot
+ID_CHAR = r"[\w.-]"  # the characters of a session id, for a reader that finds one inside other text
+SESSION_ID = re.compile(ID_CHAR + "{1,128}")  # the id names a file: no separator, no leading dot
 LIFTED = "override"  # the log decision of a lifted act
 UNREAD = "override-unread"  # the log decision when an override file cannot be read
 OPUS_LIFTED = "opus-override"  # the log decision of an Opus spawn an Opus override lifted
@@ -334,7 +335,7 @@ def _file_role(roles):
 
 def _text_of(rec):
     """The owner text of one transcript record (lint/_transcript.py owner_text), or None."""
-    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    lint = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lint")
     if lint not in sys.path:
         sys.path.insert(0, lint)
     import _transcript

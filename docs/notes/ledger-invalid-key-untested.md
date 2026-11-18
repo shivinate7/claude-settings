@@ -1,0 +1,1 @@
+- ledger-invalid-key-untested: no test runs an invalid `record-branch` key through the ledger path; it shares `lost_work_rows` with the covered failed-fetch ledger case.

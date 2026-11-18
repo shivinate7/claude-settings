@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
 # The stable mover's one step. Run in a checkout whose origin is the repo. HEAD_SHA is the commit of a
-# finished main run and RUN_CONCLUSION is that run's conclusion. It moves origin's stable branch to
-# HEAD_SHA only when the run succeeded, HEAD_SHA is on origin's main, and HEAD_SHA descends from stable (a
-# fast-forward). GH_TOKEN, when set, authenticates the push; a local origin needs none.
+# finished main run, RUN_CONCLUSION is that run's conclusion and RUN_EVENT is its event. It moves origin's stable
+# branch to HEAD_SHA only when the run succeeded, the run is a push run or a schedule run (stable follows each green
+# push run of main, owner 12:59 CST Nov 16, "for now"), HEAD_SHA is on origin's main, and HEAD_SHA descends from
+# stable (a fast-forward). A schedule run that nightly-skip skipped runs no check job (only nightly-skip and push-skip
+# start; scope is skipped) and still counts. GH_TOKEN, when set, authenticates the push; a local origin needs none.
 set -u
 head="${HEAD_SHA:-}"
 conclusion="${RUN_CONCLUSION:-}"
+event="${RUN_EVENT:-}"
 
 [ -n "$head" ] || { echo "stable-mover: HEAD_SHA is not set" >&2; exit 2; }
 if [ "$conclusion" != "success" ]; then
   echo "stable-mover: refused: the run concluded '${conclusion:-unknown}', not 'success'; stable stays where it is" >&2
+  exit 1
+fi
+if [ "$event" != "schedule" ] && [ "$event" != "push" ]; then
+  echo "stable-mover: refused: a '${event:-unknown}' run is not a push or schedule run; stable stays where it is" >&2
   exit 1
 fi
 git cat-file -e "$head^{commit}" 2>/dev/null || { echo "stable-mover: refused: $head is not a commit in this checkout" >&2; exit 1; }
