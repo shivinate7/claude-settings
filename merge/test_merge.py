@@ -1327,7 +1327,7 @@ class ConfirmIdleLanes(Env):
         self.assert_report_after_merge(rc, out, err)
 
     def test_fresh_live_file_with_an_unknown_report_falls_back_and_names_the_fixing_command(self):
-        # The owner's goal (11:49 CST, Nov 18, line 2): `merge --idle-lanes` never ends in a bare "unknown" with no command that fixes
+        # `merge --idle-lanes` never ends in a bare "unknown" with no command that fixes
         # it. The file is fresh, but its one session row carries an unarchived_epoch of -5, so the report reads unknown. The pass then
         # falls back to the merged step's record: the lane gets its check line, and an owed line names `merge --idle-lanes`. The merge
         # landed, so the confirm exits 0 as before.
@@ -1515,7 +1515,7 @@ class ConfirmIdleLanes(Env):
 
     def test_an_unreadable_keep_list_reads_unknown_after_a_fresh_merge(self):
         # keepSessions is a bare string, not a list of {id, reason} rows: the report reads unknown, never an empty keep list.
-        # The owner's goal (11:49 CST, Nov 18, line 2): `merge --idle-lanes` never ends in a bare "unknown" with no command that
+        # `merge --idle-lanes` never ends in a bare "unknown" with no command that
         # fixes it. So the unknown line is followed by one owed line that names `merge --idle-lanes` as the fixing command.
         rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE, keep="session_a"))
         self.assert_landed(rc, out, err)  # scope: the merge landed

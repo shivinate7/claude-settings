@@ -61,8 +61,8 @@ DOING_HOLD = "hold (step %s still doing under this lane; set the step's status t
 # The joint line for one lane: its stale draft PRs to close, their branches to archive, then the lane's session id.
 JOINT = "joint (close #%d; archive archive/%s; archive lane %s)"
 MIXED_TWO = "merge: 2 lanes to archive, 1 held. Run get_session on each lane line alone, then archive it; never archive a hold line."
-# A line names its fix when it names the command to run again once the file is fixed, or the step to take first. The owner's goal
-# (11:49 CST, Nov 18, line 2): `merge --idle-lanes` never ends in a bare "unknown" with no command that fixes it.
+# A line names its fix when it names the command to run again once the file is fixed, or the step to take first.
+# `merge --idle-lanes` never ends in a bare "unknown" with no command that fixes it.
 FIX_NAMED = re.compile(r"merge --idle-lanes|read (?:it|the live file|the file) again")
 
 # Made in setUpModule, not at import, so a helper that imports this file leaks no folder.
@@ -713,7 +713,7 @@ class IdleLanesCli(unittest.TestCase):
         ]
 
     def test_every_unknown_line_of_a_hand_run_names_its_fix(self):
-        # The owner's goal (11:49 CST, Nov 18, line 2): `merge --idle-lanes` never ends in a bare "unknown" with no command that
+        # `merge --idle-lanes` never ends in a bare "unknown" with no command that
         # fixes it. Each shape is one bad file or repo. Scope: the hand run prints an unknown line for it, so the shape reaches the
         # unknown path. Then every unknown line names its fix (FIX_NAMED). The stale file is the control and already passes.
         for index, (name, prepare) in enumerate(self.hand_run_shapes()):
