@@ -1,0 +1,1 @@
+- write-run-py2-fallback: an unparsable python script of 256 KB or less falls to the literal fallback, so py2 `print 'hi'` plus a test-path string beside a write is refused. Fix: on a parse error, judge only the write calls' arguments, not every string in the file.

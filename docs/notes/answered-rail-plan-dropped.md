@@ -1,0 +1,1 @@
+- answered-rail-plan-dropped: `answeredEl` plans over all lines (dropped ones too); the rail row plans over non-dropped lines, so a repo head or its count can differ between the section and the rail. Step answered-sections-by-repo; seen in round 2 review, unprobed.

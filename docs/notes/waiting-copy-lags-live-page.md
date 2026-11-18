@@ -1,0 +1,1 @@
+- waiting-copy-lags-live-page: the waiting copy lags the live page, so an item closed after the last export passes.

@@ -353,7 +353,8 @@ def grant_override(raw, at):
     try:
         hook = json.loads(raw.decode("utf-8"))
         import override
-        result = override.grant(hook.get("session_id"), hook.get("prompt"), at)
+        result = override.grant(hook.get("session_id"), hook.get("prompt"), at,
+                                transcript=hook.get("transcript_path"), source=hook.get("source"))
         if result is None:
             result = override.grant_opus_ask(hook.get("session_id"), hook.get("prompt"), at,
                                              transcript=hook.get("transcript_path"),

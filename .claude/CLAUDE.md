@@ -38,15 +38,18 @@ output style load in each session on each repo.
   accepts a live head that equals the `--head` passed, or sits on it with only a Record-claim commit,
   its revert or a page-only commit. It does not check that `--head` against the relay.
   `relayed_head_holds` in `merge/merge.py` reads no review record.
-- **Lane draft PR** (owner, 2026-11-12 17:19 CST; until withdrawn). Any lane that a coordinator or another
-  lane started may open its own draft PR, and never marks it ready. Only the batch runner marks a
-  PR ready. Source: decision `draft-until-reviewed` (every PR opens as a draft).
+- **Lane draft PR** (owner, 2026-11-12 17:19 CST; changed by owner, 12:58 CST Nov 16, "No now everyone merges",
+  ruling Q2). Any lane that a coordinator or another lane started may open its own draft PR. It marks that PR
+  ready once, by the merge tool, after its last review and lane lint, and never marks another PR ready. Source:
+  decision `draft-until-reviewed` (every PR opens as a draft).
 - **Main merge into handed-in branches** (owner, 2026-11-13 13:12 CST; until withdrawn; changed by owner,
   23:40 CST, waiting-page item 806 d). The batch runner may push a plain merge of main into a PR that a lane
   has handed in, with no clock rule. A lane that pushes again to a handed-in branch says so first. No rebase,
   no force push. A conflict that changes behaviour goes back to the coordinator. Each new head gets a fix
-  verifier and a fresh review log. Source: decision `standing-merge-grant`.
+  verifier and a fresh review log, except a clean merge of main, which takes none (decision `pr-review-record`,
+  the review record). Source: decision `standing-merge-grant`.
 - **Overlaps between lane branches** (owner, 2026-11-13 14:17 CST, typed in runner 10's chat: "you have a
   standing grant to act on overlaps by me, owner"). The batch runner may act on overlaps between lane branches.
   Runner 10 reads that as a plain merge of one lane's head into another lane's branch, under the limits of the
   bullet above. The owner has not confirmed that reading. Source: decision `standing-merge-grant`.
+- **Merge in any repo** (owner, 2026-11-15 23:43 CST): any session may merge a PR in any of the owner's repos with the merge tool, under every merge check. The grant covers that wording only (ruling own-913-a-merge-any-repo-grant-line, owner, 2026-11-16 13:34 CST).

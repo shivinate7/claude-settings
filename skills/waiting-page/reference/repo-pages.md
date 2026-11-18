@@ -43,10 +43,11 @@ The Status tab draws each phase id that its steps use, and a step with no phase 
 
 1. Build the roadmap block: `python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --block --out <block file>`
    (add `--live <file>` as the skill roadmap says). The live file's pull rows carry `createdAt` (GitHub's
-   `created_at`), `held` and `reviewLog`. A pull is `held` when the batch runner's hand-in or hold list names it.
+   `created_at`), `held` and `reviewLog`. Only the joint line (`stale_draft_pull`) reads `createdAt`.
+   A pull is `held` when the batch runner's hand-in or hold list names it.
    A pull is `reviewLog` when it has a posted review log. Both are JSON bools, omitted when false or unknown.
    Its item rows carry `lane` when the page item has one. Its `landedPulls` rows are the pull requests
-   closed in the last 14 days with the default branch as base, each with `number`, `branch`, `head` and `merged`. Exit 1 with `todo step with an open PR`
+   closed in the last 14 days with the default branch as base, each with `number`, `branch`, `head` and `merged`, and `replacedBy` on a pull the tool closed as replaced (the number in its newest pointer comment, `Replaced by #N`). Exit 1 with `todo step with an open PR`
    lines still writes a valid block: splice and publish as usual, then set each named step to `doing`. Exit 1
    with `stalled step:` lines does the same: splice, publish, then dispose each one (a step: set it `todo` or
    `done`, or write its `paused` field; an item: re-route it, close it, or resume its lane). The unknown
@@ -100,8 +101,9 @@ else their old `waiting-page` keys, read by `live_pages()` in `~/.claude/lint/la
    republish routes (exit 4 a held item, exit 3 `checks unknown`, exit 2 no page file). Republish `<new page>` to the same URL
    with the capabilities `db` and `{comments: {}}`, one publish at a time, never with `force`. A
    republish of plain `page.html` drops the open items' designs and the Status tab.
-   `stale_pages.py` empties both blocks before it compares, so it cannot tell that they were lost: it
-   reads such a page current. After the publish, re-read the republished page (`Artifact` action
+   `stale_pages.py` empties both blocks before it compares, so it cannot tell that `designData` was lost: it
+   reads such a page current. It does flag an empty roadmap block (`roadmap block: empty on <owner> page`, exit 1):
+   bake it ("Update the roadmap block"). After the publish, re-read the republished page (`Artifact` action
    `read`) and check that its `designData` block equals the one in the page you fetched in step 1.
 4. Update one page first, then read its items: they must all still be there. That the database and
    its saved answers survive a republish is unmeasured until this live check is run.

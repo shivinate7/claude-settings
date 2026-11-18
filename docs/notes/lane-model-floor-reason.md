@@ -1,0 +1,1 @@
+- lane-model-floor-reason: (#2292 lane-start-followup) LANE_MODEL_FLOOR_REASON hard-codes "sonnet"; if debt lane-model-recheck flips the row, that reason changes too. Add it to that debt's Where list (debt file on main; edit by PR).

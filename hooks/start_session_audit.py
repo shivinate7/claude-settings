@@ -16,7 +16,7 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
 
 # A session id such as session_abc. The field name session_id and the word session_start are not ids.

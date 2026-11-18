@@ -104,7 +104,24 @@ def run(parent, child, *extra):
     return proc
 
 
+def reaped_child_pid():
+    """A pid whose process has run to its end, so no live process holds it."""
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait(timeout=60)
+    return child.pid
+
+
+def aged_folder(root, name, hours):
+    path = os.path.join(root, name)
+    os.makedirs(path)
+    stamp = time.time() - hours * 3600
+    os.utime(path, (stamp, stamp))
+    return path
+
+
 class RunFolderSweepTest(unittest.TestCase):
+    """The sweep of test-temp-standard: a run folder whose pid is dead goes after an hour, and a live run's folder stays."""
+
     def test_old_sibling_goes_and_new_one_stays(self):
         root = os.path.join(RUN_FOLDER, "root")
         old = os.path.join(root, "1-" + "a" * 32)
@@ -120,6 +137,29 @@ class RunFolderSweepTest(unittest.TestCase):
         self.assertTrue(os.path.isdir(new))
         self.assertTrue(os.path.isdir(other))
         self.assertTrue(os.path.isdir(own))
+
+    def test_a_dead_pid_folder_over_an_hour_old_goes(self):
+        root = os.path.join(RUN_FOLDER, "sweep-dead-hour")
+        stale = aged_folder(root, "%d-%s" % (reaped_child_pid(), "c" * 32), 2)
+        own = _test_temp.run_folder(root)
+        self.assertFalse(os.path.exists(stale), "a run folder whose pid is dead and that is over an hour old must be swept")
+        self.assertTrue(os.path.isdir(own), "the sweep must keep the run's own folder")
+
+    def test_a_dead_pid_folder_under_an_hour_old_stays(self):
+        root = os.path.join(RUN_FOLDER, "sweep-dead-fresh")
+        control = aged_folder(root, "%d-%s" % (reaped_child_pid(), "c" * 32), 2)
+        fresh = aged_folder(root, "%d-%s" % (reaped_child_pid(), "d" * 32), 0.5)
+        _test_temp.run_folder(root)
+        self.assertFalse(os.path.exists(control), "positive control: a dead-pid folder over an hour old must be swept in this run")
+        self.assertTrue(os.path.isdir(fresh), "a run folder whose pid is dead but that is under an hour old must stay")
+
+    def test_a_live_pid_folder_an_hour_old_stays(self):
+        root = os.path.join(RUN_FOLDER, "sweep-live-hour")
+        control = aged_folder(root, "%d-%s" % (reaped_child_pid(), "c" * 32), 2)
+        live = aged_folder(root, "%d-%s" % (os.getpid(), "e" * 32), 2)
+        _test_temp.run_folder(root)
+        self.assertFalse(os.path.exists(control), "positive control: a dead-pid folder over an hour old must be swept in this run")
+        self.assertTrue(os.path.isdir(live), "a run folder whose pid is alive must stay: a parallel run owns it")
 
 
 class FindCopiesTest(unittest.TestCase):

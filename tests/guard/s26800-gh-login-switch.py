@@ -117,8 +117,9 @@ gl("ssemwal-cdc on a repo not under shivinate7 in powershell only is allowed", "
 
 # A decision is not judged: it carries the command, with the form lines and gain and lose, and no switch.
 wp_write("gh login switch: a decision that holds a gh command with no switch is not judged", "allow", "gh-login-switch",
-         {"id": GL_DOC, "kind": "decision", "status": "open", "title": "Protect main on claude-settings?",
-          "context": OJ_FORM + "\n" + QD_LINE + "\nThe branch rule needs admin, and the active login decides who can run it.",
+         {"id": GL_DOC, "n": 928, "kind": "decision", "status": "open", "title": "Protect main on claude-settings?",
+          "recommended": "b", "why": "Waiting costs nothing; the login decides who runs it.",
+          "context": OJ_FORM + "\n" + QD_LINE + "\n" + OJ_WAIT + "\nThe branch rule needs admin, and the active login decides who can run it.",
           "command": {"powershell": GL_PATCH, "mac": GL_PATCH},
           "options": [{"key": "a", "label": "Apply the rule", "how": "Run the command the item holds.",
                        "gain": "g", "lose": "l"},

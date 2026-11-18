@@ -1,0 +1,1 @@
+- cloud-bin-rc-shell-mismatch: the install writes the PATH block only to the rc of $SHELL. With a zsh SHELL and a bash Bash tool, bin stays off PATH. Unmeasured.

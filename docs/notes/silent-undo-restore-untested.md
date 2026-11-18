@@ -1,0 +1,1 @@
+- silent-undo-restore-untested: no case pins the position-blind clear (the same line text added elsewhere in the same file clears), and none pins two parents of one merge losing the same line with one head copy (one finding stays). Both are by design. Also uncovered: a path absent at head, and an empty file the merge kept; both refuse, the safe side.

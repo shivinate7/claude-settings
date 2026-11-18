@@ -1,8 +1,9 @@
 """The clause parser the cannot-claim check reads: sentences, clauses and the lexicons of their grammar.
 
 `lint/report_guard.py` imports this module, so the check has one copy of its sentence and clause boundaries and one home
-for each word list (NEGATORS, ADVERBS, CONDITIONALS, REASON_LINKS, DETERMINERS, CANT_FORMS, COULD_NOT_FORMS, CANNOT_FORMS, CHECK_WORDS,
-STATE_VERBS, OUTAGE_NOUNS, OUTAGE_VERBS, BACK_PATTERN, STATUS_PATTERN, SPEECH_VERBS, CALL_SUBJECTS) and for the words that
+for each word list (NEGATORS, ADVERBS, CONDITIONALS, REASON_LINKS, DETERMINERS, CANT_FORMS, COULD_NOT_FORMS, ACCESS_FORMS, CANNOT_FORMS, CHECK_WORDS,
+STATE_VERBS, OUTAGE_NOUNS, OUTAGE_VERBS, BACK_PATTERN, STATUS_PATTERN, STATUS_FORM_PATTERN, SPEECH_VERBS, CALL_SUBJECTS,
+FACT_VERBS, FACT_OPENERS, FIND_VERBS, ACCESS_NOUNS) and for the words that
 name the writer (WRITER_BEFORE_RE, FROM_HERE_RE and the lead-ins and subject words that own_subject reads). The module reads text and
 a mask only: no file, no process. Its cost is one regex pass over a sentence and one over each clause, so the work grows
 in step with the text.
@@ -15,7 +16,7 @@ opens it (and, but, or, so, yet, then, because) is its `join`. `lead` and `term`
 after its start sits, and `sent_end` the nearest of . ; : ! ? (a dot inside a token counts); all are offsets into the
 sentence. A clause's other fields are read from its words alone. The helpers below the clauses (conditional,
 veil, negated_near, own_subject, past, opens_with, opens_with_joiner, strip_adverbs, reasons, reasons_before, is_reason,
-check_word_counts, form_pattern, unopen) read the grammar of the cannot-claim check from the same lexicons.
+check_word_counts, form_pattern, unopen, judged_object) read the grammar of the cannot-claim check from the same lexicons.
 """
 import bisect
 import re
@@ -26,7 +27,7 @@ ADVERBS = ("even", "yet", "currently", "actually", "really", "still", "also", "j
            "unfortunately")
 # Any other adverb in -ly ("temporarily", "honestly") is read as an adverb where the grammar allows one: between a subject
 # and its verb, after not, and before the act.
-ADVERB_PATTERN = "(?:%s|[a-z]{3,}ly)" % "|".join(ADVERBS)
+ADVERB_PATTERN = "(?:%s|[a-z]{2,}ly)" % "|".join(ADVERBS)
 CONDITIONALS = ("if", "unless", "whether", "would")
 REASON_LINKS = ("because",)
 DETERMINERS = ("a", "an", "the", "this", "that", "these", "those", "its", "their", "his", "her", "our", "my", "your")
@@ -46,16 +47,22 @@ CANT_FORMS = ("can't", "cannot", "unable to")
 # The two past forms the hand-off cite also reads as a capability. They sit in CANNOT_FORMS after "can not", and a form
 # added to CANT_FORMS would widen CANNOT_FORMS, so the cite takes them from this list.
 COULD_NOT_FORMS = ("could not", "couldn't")
+# The access and permission forms. The hand-off cite reads them as a capability too (report_guard.CAPABILITY_RE), so a Why
+# yours line that says "I lack access to the mailbox" needs a cite. They sit in CANNOT_FORMS, so a form added here reaches both.
+ACCESS_FORMS = ("don't have access to", "do not have access to", "doesn't have access to", "does not have access to",
+                "lack permission to", "lacks permission to",
+                "have no access to", "has no access to", "have no access", "has no access", "no access to",
+                "don't have access", "do not have access", "doesn't have access", "does not have access",
+                "lack access", "lacks access", "have no permission to", "has no permission to", "no permission to") + tuple(
+    "%s have %s%s to" % (verb, the, noun)
+    for verb in ("don't", "do not", "doesn't", "does not") for the in ("", "the ") for noun in _PERMISSION_NOUNS)
 CANNOT_FORMS = CANT_FORMS + ("can not",) + COULD_NOT_FORMS + ("no way to", "no way I can",
                 "no way we can", "not able to", "won't be able to", "will not be able to",
                 "haven't been able to", "hasn't been able to", "have not been able to", "has not been able to",
                 "not allowed to", "not permitted to", "not going to be able to", "not authorized to", "not authorised to",
-                "don't have access to", "do not have access to", "doesn't have access to", "does not have access to",
-                "lack permission to", "lacks permission to", "blocked from", "forbidden from") + tuple(
+                "blocked from", "forbidden from", "unable") + ACCESS_FORMS + tuple(
     "%s %s" % (be, able)
-    for be in _BE_NT_FORMS for able in ("able to", "allowed to", "permitted to", "going to be able to")) + tuple(
-    "%s have %s%s to" % (verb, the, noun)
-    for verb in ("don't", "do not", "doesn't", "does not") for the in ("", "the ") for noun in _PERMISSION_NOUNS)
+    for be in _BE_NT_FORMS for able in ("able to", "allowed to", "permitted to", "going to be able to"))
 # The nouns that make a checks noun an outage, not a CI check ("the network checks are failing"), and the verbs that make
 # "failing to <verb>" an outage, not a red check. They live here, a shared lexicon, so each caller reads an outage alike.
 OUTAGE_NOUNS = ("connection", "network", "connectivity", "api", "auth", "authentication", "proxy", "health")
@@ -67,6 +74,36 @@ BACK_FORMS = ("sent", "came", "gave", "given", "comes", "sends", "gives", "come"
 BACK_PATTERN = r"(?:%s)\s+back" % "|".join(BACK_FORMS)
 SIZE_UNITS = ("lines?", "files?", "words?", "chars?", "commits?", "bytes?", "[km]b", "ms")
 STATUS_PATTERN = r"[45]\d\d\b(?![-\w])(?!\s+(?:%s)\b)" % "|".join(SIZE_UNITS)
+# A status named as one: a status word before it (HTTP 500, status 407, returned 403, sent back 403) or after it (500 error,
+# 403 Forbidden). A bare number after a comma ("500 rows") is a count. The probe form reads only this form.
+_STATUS_BEFORE = (r"HTTP(?:/[\d.]+)?", r"status(?:\s+code)?", "code", "error", "returned", "answered", BACK_PATTERN)
+_STATUS_AFTER = ("error", "status", "response", "forbidden", "unauthori[sz]ed", r"not\s+found", r"bad\s+gateway",
+                 r"service\s+unavailable", r"gateway\s+time-?out", r"proxy\s+authentication\s+required")
+STATUS_FORM_PATTERN = r"\b(?:(?:%s)\s+(?:an?\s+)?%s|[45]\d\d\s+(?:%s)\b)" % (
+    "|".join(_STATUS_BEFORE), STATUS_PATTERN, "|".join(_STATUS_AFTER))
+# The probe form's judgement rule (decision cant-claim-needs-probe, judged_object): a claim names no act on a system when
+# its object is a fact, a choice or a size. A pronoun object ("confirm that") carries no kind of its own, so the verbs whose
+# object is only ever a fact or a remark are the one list (FACT_VERBS). Verify, check, test, see and find act on a system,
+# so they are not in it. The nouns of a need that is access keep "without the token" a claim (ACCESS_NOUNS).
+FACT_VERBS = ("agree", "disagree", "comment", "speak", "say", "tell", "argue", "complain", "blame", "thank", "apologise",
+              "apologize", "stress", "emphasise", "emphasize", "overstate", "overemphasise", "overemphasize", "recall",
+              "remember", "imagine", "think", "know", "determine", "confirm", "predict", "explain", "decide", "judge",
+              "guess", "estimate", "promise", "guarantee")
+FACT_OPENERS = ("why", "how", "whether", "if")  # a clause object; what and where may name a thing ("see what's in it")
+FIND_VERBS = ("see", "find", "spot", "notice", "identify")
+ACCESS_NOUNS = _PERMISSION_NOUNS + OUTAGE_NOUNS + (
+    "access", "credential", "credentials", "token", "key", "login", "password", "vpn", "tunnel", "secret", "account",
+    "certificate", "cert", "sign-in", "grant", "approval")  # glossary-ok: the noun a reply uses for an access need; the predicate must match it
+_WORK_UNITS = tuple(unit for unit in SIZE_UNITS if unit != "ms") + (
+    "steps?", "pass(?:es)?", "go", "PRs?", "edits?", "changes?", "patch(?:es)?", "diffs?")
+_FACT_RE = re.compile(r"^(?:(?:%s)\b|\w+(?:\s+(?:out|up))?\s+(?:%s)\b)" % (
+    "|".join(FACT_VERBS), "|".join(FACT_OPENERS)), re.I)
+_CHOICE_RE = re.compile(r"^\w+\s+between\b", re.I)
+_FIND_NOTHING_RE = re.compile(r"^(?:%s)\s+(?:any|anything|no|nothing|another|a\s+(?:problem|bug|issue))\b" % "|".join(
+    FIND_VERBS), re.I)
+_SIZE_RE = re.compile(r"\bin\s+(?:one|a\s+single|a|an|\d+|two|three|four|five|ten|a\s+few|few|(?:fewer|less)\s+than\s+\w+|"
+                      r"under\s+\w+)\s+(?:%s)\b" % "|".join(_WORK_UNITS), re.I)
+_WITHOUT_RE = re.compile(r"\bwithout\b", re.I)
 WINDOW = 6  # words after a phrase, in its clause, that may name the act
 NEGATOR_GAP = 3  # words before a phrase that a negator may sit in and still negate it
 NEGATOR_GAP_SKIP = ("am",)  # words the gap does not count: "did not say I am not authorized" reaches the first not
@@ -175,7 +212,8 @@ _NEGATOR_RE = re.compile(r"\b(?:%s)\b|n['’]t\b" % "|".join(w for w in NEGATORS
 # The writer: the one home of its lead-ins and subject words. A joiner, because or a subordinator may open the clause before
 # its subject. I and we are the writer wherever they sit just before a phrase; the cloud and this session too, unless a
 # preposition (PREPOSITIONS) sits just before them: "The builder in this session is unable to push." is the builder's line.
-_WRITER = r"(?:I|we)"
+_WRITER = r"(?:I|we)(?:\s+(?:myself|ourselves))?"
+WRITER_PATTERN = _WRITER  # the same pattern, public for a guard that reads the writer's own act
 _PLACE = r"(?:the\s+cloud(?:\s+session)?|this\s+session)"
 _LEAD = "|".join(JOINERS + REASON_LINKS + SUBORDINATORS)
 _LEAD_RE = re.compile(r"^\W*(?:(?:%s)\b\W*)?" % _LEAD, re.I)
@@ -274,6 +312,27 @@ def opens_with_joiner(text):
 def strip_adverbs(text):
     """`text` without the adverbs (ADVERBS) that open it."""
     return _ADV_LEAD_RE.sub("", text)
+
+
+def judged_object(window, clause):
+    """The kind of object that makes a claim a judgement and not an act on a system, else "". `window` is the words after
+    the phrase and `clause` the rest of its clause. A fact: a verb of FACT_VERBS, or a clause that why, how, whether or if
+    opens ("see why it fails"). A choice: a between ("decide between A and B"), or a need the act waits on that names no
+    access noun (ACCESS_NOUNS): "ship this without the migration". A size: a measure of the work, read from the whole
+    clause ("fix this in one line"). A find of nothing ("see any issues") names no object at all."""
+    window = strip_adverbs(window)
+    if _FACT_RE.match(window):
+        return "fact"
+    if _CHOICE_RE.match(window):
+        return "choice"
+    if _FIND_NOTHING_RE.match(window):
+        return "nothing"
+    if _SIZE_RE.search(clause):
+        return "size"
+    need = _WITHOUT_RE.search(clause)
+    if need and not any(word in ACCESS_NOUNS for word in words(clause[need.end():])[:4]):
+        return "choice"
+    return ""
 
 
 def is_reason(text):

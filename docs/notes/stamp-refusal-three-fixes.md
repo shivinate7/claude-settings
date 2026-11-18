@@ -1,0 +1,1 @@
+- stamp-refusal-three-fixes: the stamp refusal names three fixes, not two (STAMP_REASON in hooks/guard_merge.py). Decision: local-time-central.

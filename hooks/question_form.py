@@ -24,7 +24,7 @@ THE FORM. A decision on the page (in `context`), or a chat question with 2+ opti
 chat `Gain:` and `Lose:` in the option's description. Only a line at a line start counts.
 
 THE OLDER RULES keep their ids and run first, in this order, then the form:
-`item-field-rendered` (a field the page draws), `port-question`, `uniform-pick`, `press-link`, `command-in-item`,
+`item-field-rendered` (a field the page draws, and an `n` that is a number: item_n_hit), `port-question`, `uniform-pick`, `press-link`, `command-in-item`,
 `gh-login-switch`, `task-names-check`, `task-why-cited` (page items), then the form. A missing Goal, Problem or Based on line, a
 Based on count outside 1-3, a kind outside
 PREMISE_KINDS and an option with no gain or no loss refuse as `question-form`, and so does a Goal, Problem or
@@ -47,12 +47,13 @@ nothing, and the chat-answer flow writes one. A str_replace on `context` that re
 refused.
 """
 import json
+import math
 import os
 import re
 import sys
 from html.parser import HTMLParser
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
@@ -108,7 +109,12 @@ FORM_REASON = ("A question to the owner states the form, in this order: a line \
                "premise>\" where kind is one of %s. Each option states its gain and its loss."
                % (", ".join(OWNER_STAKES), ", ".join(PREMISE_KINDS)))
 PAGE_FORM_REASON = FORM_REASON + (" On the page the lines go in `context`, and each option has a "
-                                  "non-empty `gain` and `lose`.")
+                                  "non-empty `gain` and `lose`. An open decision also names the option you "
+                                  "recommend in `recommended` (a key of `options`, a list of keys on a multi or "
+                                  "ranked item), gives the one-line reason in `why`, and holds in `context` a "
+                                  "line that starts `Waiting on:` at column 0, plain text: \"Waiting on: <what "
+                                  "is stopped until his answer>; <who acts next>\" (\"nothing stopped\" when "
+                                  "nothing is).")
 CHAT_FORM_REASON = FORM_REASON + (" In the question box the lines go in the question text, and each "
                                   "option's description holds \"Gain: <text>\" and \"Lose: <text>\".")
 STAKE_REASON = ("A decision is the owner's only when he can judge it. Write the Problem line as "
@@ -315,12 +321,17 @@ def _write_data(entry, cwd=""):
 # chat box the mark is the words below in an option's label or description, and such an option's label
 # never carries (Recommended). Read at the same ArtifactData call.
 WIDENS_TEXT = "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo"
-WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts: the owner ruled that "
-                 "a repo changes to fit a shared tool, never the tool to fit a repo. Make `recommended` (or `pick`, "
+WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts, so that one repo's "
+                 "differing form passes: the owner ruled that "
+                 "a repo changes to fit a shared tool, never the tool to fit a repo. A change to the shared tool "
+                 "that every repo gets alike, with no repo named as its reason, is not widening. Make `recommended` (or `pick`, "
                  "its old name, where the item still uses it) an option where the repo changes to match the "
-                 "shared format, or leave recommended out.")
-CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool accepts: the owner ruled that a "
-                      "repo changes to fit a shared tool, never the tool to fit a repo. Recommend an option "
+                 "shared format. When every option widens, add an option that does not widen and "
+                 "recommend that one.")
+CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool accepts, so that one repo's "
+                      "differing form passes: the owner ruled that a "
+                      "repo changes to fit a shared tool, never the tool to fit a repo. A change to the shared tool "
+                      "that every repo gets alike, with no repo named as its reason, is not widening. Recommend an option "
                       "where the repo changes to match the shared format, and give the widening option no "
                       "(Recommended) label.")
 # Older sessions still write these words in chat; the mark keeps refusing them. No card, rule text or
@@ -986,6 +997,13 @@ def decision_form_hit(op: str, data):
     if op == "set":
         if data.get("kind") not in (None, "decision"):
             return PASS
+    elif data.get("kind") is None:
+        # The guard cannot see the stored kind. A Why yours line is the task marker, so a context that holds one is
+        # a task's and passes, even when a Goal line opens it. Otherwise an update with no kind is a decision when
+        # its context carries the decision form's Goal line; a context with no Goal line is a task's, and passes.
+        context = str(data.get("context") or "")
+        if WHY_YOURS_LINE.search(context) or not GOAL_LINE.search(context):
+            return PASS
     elif data.get("kind") != "decision":
         return PASS
     judged_context = op == "set" or "context" in data
@@ -1003,11 +1021,76 @@ def decision_form_hit(op: str, data):
         miss = departs_hit(str(data.get("context") or ""))
         if miss:
             return DEPARTS_RULE, miss
+    miss = recommendation_miss(op, data)
+    if miss:
+        return FORM_RULE, miss
+    if judged_context and not waiting_filled(str(data.get("context") or "")):
+        return FORM_RULE, "no Waiting on line, or one with no text after the colon"
     return PASS
 
 
 def _filled(value) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+# The Waiting on line: plain text at column 0, case-sensitive, with text after the colon. It mirrors the page's
+# split in skills/waiting-page/page.html (`/^Waiting on:\s*\S/`, tested on each line, the function that reads the
+# context): the two patterns must stay the same, so a line the rule accepts is a line the page draws. It is
+# matched per line, as the page does, so `\s*` never reaches the next line. The rule does not check line order.
+WAITING_LINE = re.compile(r"^Waiting on:\s*\S")
+
+
+def waiting_filled(text) -> bool:
+    """True when `text` holds a Waiting on line the page draws."""
+    return any(WAITING_LINE.match(line) for line in str(text or "").split("\n"))
+
+
+def _key_shape_miss(value, keys, multi):
+    """Why `value` is no recommendation of this kind of item, else "". `keys` is the option keys, or None when
+    the write carries no options (an update): then only the shape is judged. `multi` is True, False, or None
+    when the write does not say (an update that carries neither flag): then either shape is accepted."""
+    if isinstance(value, list):
+        if multi is False:
+            return "recommended is a list, but this item picks one option"
+        if (not value or any(not isinstance(k, str) or not k.strip() for k in value)
+                or len(set(value)) != len(value)):
+            return "recommended is an empty list, or one that repeats a key"
+        if keys is not None and any(k not in keys for k in value):
+            return "recommended names an option the item does not have"
+        return ""
+    if multi is True:
+        return "recommended is one key, but this item takes a list"
+    if not _filled(value):
+        return "no recommendation: recommended is blank"
+    if keys is not None and value not in keys:
+        return "recommended names an option the item does not have"
+    return ""
+
+
+def recommendation_miss(op: str, data) -> str:
+    """The miss when this decision write shows no visible recommendation, else "". A set must carry a valid
+    recommendation (`recommended`, else its old name `pick`, as the page's recOf reads them) and a non-blank
+    `why`. An update is judged only for the fields it carries: the guard cannot see the stored item."""
+    full = op == "set"
+    # A null `recommended` or `pick` is absent: it names no option. A write that carries only nulls is refused.
+    carried = [f for f in RECOMMENDED_FIELDS if data.get(f) is not None]
+    touched = any(f in data for f in RECOMMENDED_FIELDS)
+    options = data.get("options")
+    keys = ({o.get("key") for o in options if isinstance(o, dict) and isinstance(o.get("key"), str)}
+            if isinstance(options, list) else None)
+    if full or touched:
+        if not carried:
+            return "no recommendation: name the recommended option's key in `recommended`"
+        if full and keys is None:
+            return "no recommendation: the item has no options to recommend"
+        flags = [data.get(f) for f in ("multi", "ranked") if f in data]
+        multi = (any(v is True for v in flags)) if (full or flags) else None
+        miss = _key_shape_miss(data.get(carried[0]), keys, multi)
+        if miss:
+            return miss
+    if (full or "why" in data) and not _filled(data.get("why")):
+        return "no why: write the one-line reason for the recommendation in `why`"
+    return ""
 
 
 def form_str_replace_hit(entry):
@@ -1035,6 +1118,9 @@ def form_str_replace_hit(entry):
         miss = departs_hit(new)
         if miss:
             return DEPARTS_RULE, "context edit that leaves no valid Departs from line (%s)" % miss
+    # The same for the Waiting on line: an edit may swap it for another with text, never drop or blank it.
+    if waiting_filled(old) and not waiting_filled(new):
+        return FORM_RULE, "context edit that removes the Waiting on line, or leaves it with no text"
     return PASS
 
 
@@ -1043,6 +1129,9 @@ def item_hit(op, entry, cwd="", session_id=None):
     writer's, for the cross-repo check."""
     data = _write_data(entry, cwd)
     hit = item_field_hit(op, entry, data)
+    if hit:
+        return "item-field-rendered", hit
+    hit = item_n_hit(op, entry, data)
     if hit:
         return "item-field-rendered", hit
     if op == "str_replace":
@@ -1069,6 +1158,9 @@ def item_hit(op, entry, cwd="", session_id=None):
         if hit:
             return "rework-off-page", hit
         return PASS
+    hit = stops_hit(op, data)
+    if hit:
+        return STOPS_RULE, hit
     hit = port_item_hit(op, data)
     if hit:
         return "port-question", hit
@@ -1776,6 +1868,55 @@ def item_field_hit(op, entry, data) -> str:
     return ""
 
 
+# An item's `n` is the number the owner answers by. The page's own rule for it is `typeof it.n === "number" &&
+# isFinite(it.n)` (skills/waiting-page/page.html, function problem()); an item that fails it shows "This item has
+# no number, so it cannot be answered". `page_number` follows that rule and no other, so the guard and the page agree.
+# Rule item-field-rendered, its own reason: the matched text ends with N_MARK, and guard.py prints N_REASON for it.
+N_MARK = " (n must be a number)"
+N_REASON = ("An item's `n` is a number such as 929, not the text \"929\". The page cannot let the owner answer an "
+            "item whose `n` is not a number, and a new item needs one. Write `n` as a JSON number. "
+            "(decision item-field-rendered, a waiting item names only fields the page can draw and read)")
+
+
+def n_lead(matched) -> str:
+    """The write to fix first, ahead of the n correction: the item id and what its n is, from `matched`. A batch holds
+    up to 50 writes, so the posted reason must say which one. guard.py joins it to PAGE_REASONS["item-n-number"], so
+    the refusal audit still reads that subscript at the call."""
+    found = str(matched)
+    if found.endswith(N_MARK):
+        found = found[:-len(N_MARK)]
+    return "Fix this write: %s. " % found
+
+
+def page_number(value) -> bool:
+    """True when `value` passes the page's rule for n: a number that isFinite. A bool is no number in JSON."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:  # an int past float range: the page reads it as Infinity
+        return False
+
+
+def item_n_hit(op, entry, data) -> str:
+    """The matched text when this write of a waiting item leaves n as no number: a set with no n or a bad n, an
+    update that names a bad n, or a str_replace on n (it can only give text). An update that does not name n passes.
+    Data that did not read (`data` not a dict) is unknown and passes."""
+    item = str(entry.get("doc_id") or "?")[:80]
+    if op == "str_replace":
+        field = entry.get("field")
+        if isinstance(field, str) and field.split(".", 1)[0] == "n":
+            return "item %s: str_replace on n%s" % (item, N_MARK)
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    if "n" not in data:
+        return "item %s: a new item has no n%s" % (item, N_MARK) if op == "set" else ""
+    if page_number(data["n"]):
+        return ""
+    return "item %s: n is %s%s" % (item, json.dumps(data["n"], default=str)[:40], N_MARK)
+
+
 # ------------------------------------------------------------------ the chat question box
 
 
@@ -1887,13 +2028,63 @@ def cross_repo_hit(op, data, page_repo, session_id=None):
     return None
 
 
+# ------------------------------------------------------------------ stops: what Blocking counts is named in holds
+#
+# An item's `stops` lists what its answer stops (a lane slug, a PR number or a step id); the page sorts Blocking by the
+# count and shows it on the card. `holds` says the same in words, so each entry must appear in it, or the count and the
+# words drift apart (docs/design/session-role-sort-notes.md, ruling Q1).
+STOPS_RULE = "stops-named-in-holds"
+STOPS_REASON = ("`stops` lists what the owner's answer stops: one string per lane (\"lane fix-proxy\"), PR (\"PR #1201\") or "
+                "step (\"step merge-queue\"), each once. `holds` names every entry in words, and `stops` needs `holds`. "
+                "An update that sets `stops` carries `holds` too. (decision question-form, `stops` and `holds` say one thing)")
+_STOPS_PR = re.compile(r"PR\s*#?\s*(\d+)", re.IGNORECASE)
+
+
+def _holds_names(holds, entry) -> bool:
+    """True when `holds` names `entry`. A PR is named by "#N" or "PR N" and not by a longer number; a lane or step by its slug,
+    and not by a longer slug that starts with it (fix is not fix-proxy)."""
+    pr = _STOPS_PR.fullmatch(entry)
+    if pr:
+        return re.search(r"(?:#|\bPR\s*#?)%s(?!\d)" % pr.group(1), holds, re.IGNORECASE) is not None
+    parts = entry.split(None, 1)
+    ref = parts[-1]
+    return re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(ref), holds, re.IGNORECASE) is not None
+
+
+def stops_hit(op, data) -> str:
+    """The matched text when this write names `stops` that is not a list of distinct non-empty strings, has no `holds`,
+    or holds an entry that `holds` does not name; else "". A write with no `stops`, an update that removes it, and a
+    str_replace (the stored item is unseen) pass. An update that carries `stops` must carry `holds`; one that carries
+    only `holds` passes, since the stored `stops` is unseen."""
+    if op not in ("set", "update") or not isinstance(data, dict) or "stops" not in data:
+        return ""
+    stops, holds = data["stops"], data.get("holds")
+    if op == "update" and isinstance(stops, dict) and stops.get("__delete__") is True:
+        return ""
+    if not isinstance(stops, list):
+        return "stops is not a list"
+    for entry in stops:
+        if not isinstance(entry, str) or not entry.strip():
+            return "stops entry %r is not a non-empty string" % (entry,)
+    if len(set(stops)) < len(stops):
+        return "stops repeats an entry: " + next(e for e in stops if stops.count(e) > 1)
+    if not stops:
+        return ""
+    if not (isinstance(holds, str) and holds.strip()):
+        return "stops with no holds"
+    for entry in stops:
+        if not _holds_names(holds, entry.strip()):
+            return "stops entry %r is not named in holds" % entry
+    return ""
+
+
 # ------------------------------------------------------------------ the reasons, one table per surface
 
-PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "press-link": PRESS_LINK_REASON,
+PAGE_REASONS = {STOPS_RULE: STOPS_REASON,"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "press-link": PRESS_LINK_REASON,
                 "command-in-item": COMMAND_REASON, "gh-login-switch": GH_LOGIN_REASON,
                 "task-names-check": TASK_REASON, WHY_RULE: WHY_CITED_REASON, CROSS_REPO_RULE: CROSS_REPO_REASON,
                 FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON, "item-field-rendered": ITEM_FIELD_REASON,
-                "item-field-page-only": PAGE_ONLY_REASON,
+                "item-field-page-only": PAGE_ONLY_REASON, "item-n-number": N_REASON,
                 DEPARTS_RULE: PAGE_DEPARTS_REASON,
                 "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON,
                 LABELS_RULE: LABELS_REASON, FROZEN_RULE: FROZEN_REASON}

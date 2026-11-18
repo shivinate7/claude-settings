@@ -1,0 +1,1 @@
+- bare-git-reset-q-passes: A lint clash builder ran a bare `git reset -q` in its own worktree with a clean tree. Nothing was lost (a mixed reset to HEAD only unstages), and the guard let it through. Not a debt: no work can be lost by that form.

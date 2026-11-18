@@ -44,6 +44,10 @@ The URL is the link of the `waiting-page` role entry in the `artifacts` key of t
   box, and say in one line that the repo has no waiting page.
 - Never guess a URL, and never use the page of another repo.
 
+## Print the page link
+
+Whenever the writer posts, changes or closes an item, its chat reply for that turn carries the page link as one line, `https://claude.ai/artifact/<id>`, the repo's page from "Find the page". A closed item and a change count too: the owner opens the page from chat (owner asks, Nov 12 12:50 CST to Nov 14 23:02 CST; roadmap step `surface-page-link-in-chat`). The Stop check `page_link_check` in `hooks/feedback_guard.py` blocks a turn that wrote an item, answer, group, ask or receipt on the page and whose last reply lacks the page link. A `meta/page` stamp owes none, and a link in a reply that a later notice follows covers every write before it. A repo with no page prints no link.
+
 ## The database
 
 Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `answered`) from `~/.claude/bin/now-central --iso`, never from memory.
@@ -64,10 +68,14 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     A ruling is never in a tier and never counts as open. It keeps `owner`, `n`, `title` and `options`:
     the card names the ruled option from `options`. Write a ruling only on a page that `stale_pages.py` reports
     current (see "Update a repo's pages"). An older page hides closed items, so the ruling would not show.
+  - `stops` (a list of strings, each once) names what the answer stops: `"lane <slug>"`, `"PR #<n>"` or `"step <id>"`. `holds` carries each entry's slug (the entry
+    "step merge-queue" needs the slug "merge-queue" in `holds`; a PR needs "#<n>" or "PR <n>"), and `stops` needs `holds`. The writer refuses a write that sets `stops` without `holds`, or with a
+    `stops` entry that `holds` does not name. It does not see a later reword of `holds` alone (debt `stops-holds-reword-gap`). Blocking sorts by the count; the card shows "stops N". A group counts each entry once across its members.
+    An update that sets `stops` carries `holds` too.
   - `rank` (an integer, lower first) orders items inside a tier. Only the page's writer sets it
-    (see "The writer"). It never moves an item to another tier. An item with no `rank` follows the
+    (see "The writer"). It never moves an item to another tier. In Blocking, `rank` follows `stops`. An item with no `rank` follows the
     ranked items, newest first. A group sits together at its best member's `rank`. Inside a tier,
-    new items come first, then seen ones, each part in that order. Seen: the item is open, has no
+    new items come first, then seen ones, each part in that order. Inside each tier, one sub-group per repo, this repo first. Seen: the item is open, has no
     `answers/<id>`, and was `added` before the owner's last Send (the newest `answers/<id>.at` or
     `lastAnswer.at` on any item, closed ones too). A group is seen only when every member is; a ruling is
     never seen. The page works this out once at load and keeps it; a reload works it out again. A seen card keeps every answer part open (options, or steps, command and links; the ready
@@ -93,8 +101,8 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     whose text uses the word port for another meaning. Such an item needs a line in `context` that starts
     "Departs from: <file>:<symbol> — <what changes>" and never has `holds`. The writer refuses it otherwise
     (guard rule `port-question`). The existing app answers every other question: read it, never ask.
-  - `widens: true` on an option marks one that widens what a shared tool accepts: a second accepted form,
-    an allow-list entry or a per-repo exception. Its card shows "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo": a repo
+  - `widens: true` on an option marks one that widens what a shared tool accepts, so that one repo's differing form passes (item 734 (widening means one repo)):
+    a second accepted form, an allow-list entry or a per-repo exception. A change to the shared tool that every repo gets alike, with no repo named as its reason, is never marked. Its card shows "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo": a repo
     that differs from a shared format changes to match it. `recommended` never names such an option, and a list `recommended` never holds its key (the old name `pick` is read the same way). The writer refuses
     it (guard rule `uniform-pick`). An update that sets `recommended` carries `options` again: the guard cannot see the stored field.
   - An option may carry `links` (a list of `{label, url}`): its card shows them, and each opens in a new tab. An option that
@@ -106,7 +114,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   - `designs` (a list of `{slug, label, file}`; the guard requires `file`) shows mockups (see "Add a design"). An option names its picture with `design` (a slug in `designs`),
     and the picture sits at the top of that option's card.
   - A decision adds `options` (a list of `{key, label, how, gain, lose}`, plus `design` on a look question, plus an optional `differs` and `widens`), `recommended` (the key you
-    recommend; `pick` is its old name, and a page reads `recommended` first, then `pick`, so an old item stays readable) and `why`. `pick` is never the owner's answer: his answer is `choice` in `answers/<id>`. Each key is the letter the page shows for its position, in lowercase: `a`, `b`, `c` in order (guard rule `option-letter-keys`).
+    recommend; `pick` is its old name, and a page reads `recommended` first, then `pick`, so an old item stays readable) and `why`, the one-line reason. An open decision always carries both: guard rule `question-form` refuses a set with no valid `recommended` (one key of `options`, or a distinct list of keys on a `multi` or `ranked` item) or a blank `why`. An update is judged for the fields it carries, and one that carries `why` never blanks it. A closed item and a task, note or ruling pass. `pick` is never the owner's answer: his answer is `choice` in `answers/<id>`. Each key is the letter the page shows for its position, in lowercase: `a`, `b`, `c` in order (guard rule `option-letter-keys`).
     One letter per option: an option's `label` and its mockup carry no letter of their own (no "B:", no "Option B"), since the page's key is the only letter (guard rule `option-letter-keys` refuses a label that opens with another letter's tag).
     An option keeps the letter it was shown with (owner ruling R60, decision option-keys-are-letters). Each option carries a unique short `id`, a slug that is never a lone letter, and the item carries `shown`: the options as first shown, in order, each as `{key, id, label}`. A later write keeps each shown position's key and id; a label may be reworded, never to another shown option's wording. A rule-driven change adds a `note` to the option ("Now means: ...") and reorders nothing; the page shows the note on the card. A new option goes at the end. Guard rule `option-letters-frozen` refuses an open decision's write that carries `options` in any of four cases. The write has no `shown`. An option has no unique id. There are fewer options than shown. A shown position changed in key or id, got an empty label, or took another shown option's label. A first `set` carries a `shown` equal to its options; an update may append. The guard also refuses an `options` that is not a list. Known limit: the guard cannot see the stored item, so a write that rewrites `shown` itself passes. A held answer is the backstop.
     One source for the chat question and the item: `python3 skills/waiting-page/question_source.py < spec.json` (function `render`) writes the chat text (`Page item: <id>`, then `a) <label>` per option) and the item's `options` and `shown` from one spec, so the two copies cannot differ. A spec that carries the earlier `shown` and `changes` ({key: note}) keeps each changed option's key and id, takes its label from the spec (the shown label when the spec has none) and adds the note; `render` raises when the options do not extend `shown`.
@@ -119,7 +127,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
       A `recommended` that does not fit the kind of item is not shown: no star. A list `recommended` on a pick-one item is one such value.
     - `differs` is a list from `picture`, `how`, `gain`, `lose`: the parts that set this option apart from the others. The page marks each named part with a bar, a "≠" and hidden words "Sets this option apart", and adds one line under the options: "≠ marks what sets an option apart." It drops a named text part whose text equals that part in every other option, a `picture` on an option with no picture, and any other name. Name few parts, and only true ones. With no `differs`, the option shows no mark.
   - A decision carries the question form of rule `style-question-form`. The lines go in `context`, and each option has a non-empty
-    `gain` and `lose`. `context` also has a line that starts "Departs from: <what on main> — <what changes>"; a change that restates main does not count. The writer refuses a decision without it (guard rules `question-form`, `owner-judge` and `question-departs`). A decision with
+    `gain` and `lose`. `context` also has a line that starts "Departs from: <what on main> — <what changes>"; a change that restates main does not count. After it comes "Waiting on: <what is stopped until his answer>; <who acts next>" ("nothing stopped; <who acts next>" when nothing waits); the page draws it as its own line. The writer checks that one such line is there with text after the colon, not where it sits. A `Meanwhile:` line stays allowed and is not checked. The writer refuses a decision without the Departs from line or the Waiting on line (guard rules `question-form`, `owner-judge` and `question-departs`). A decision with
     `status: "closed"` needs none; decision `question-form` holds the other exemptions. An update that
     carries `kind: decision` and `context` carries the lines again, and one that carries `options` carries each `gain` and `lose` again:
     the guard cannot see the stored fields.
@@ -168,6 +176,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     check as `multi` and `ranked` (see "Update a repo's pages"). An older page draws none of the six. A page published before the `recommended` change reads only `pick`, so it shows no star for `recommended`: after the change merges, the writer republishes the page.
   - The page draws only the top-level fields that its `itemFields` block lists (`page.html`). A write that names another
     top-level field is refused (guard rule `item-field-rendered`), and a stored item that carries one shows a warning on its card.
+    The same rule refuses a `set` with no `n` and any write whose `n` is not a number (929, not "929"): the page cannot let the owner answer such an item.
     To add a field, draw it on the page and add its name to that block. A key inside `options` or `steps` is not judged. `shown` is in the block; an option's `id` and `note` sit inside `options`, so they are not listed.
     When the page is current, it saves `optionId` in an answer, and it draws an option's `note`. It lists `shown` in its item fields and draws nothing from it. An older page does none of these. Run `stale_pages.py` before you write `shown`, an option `note` or `optionId`.
     An update removes a stored field with `{"__delete__": true}`.
@@ -223,6 +232,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   `checked` (what the items were measured against), `parked` (a list of
   `{id, ref, note}`: `id` is a slug of 32 characters or fewer, unique in the list, that you set; a line with no `id` has its acts off) and `identity` (`{name, mark, brand, face, icon}`). The field `woke` is optional.
   - `woke` is the ISO UTC time of the writer's previous wake, with a trailing `Z`. Only the writer writes it. At a comment wake the writer runs `--unread` ("Read the answers"), then writes `woke` at the end of that wake. With no `woke`: the first run; every answer with no receipt is listed. An answer still in its 10 s wait may be listed once. The cost is one message with no answer text.
+  - `repo` (`owner/name`) is this page's repo, which the page sorts first inside each tier. With none, the page takes the repo whose name part matches `name`.
   - `name` is the repo's name. It shows on the colour bar and in the tab title.
   - `mark` is one letter for the bar. It defaults to the first letter of `name`.
   - `brand` is one hex colour, such as `#f47820`. The page derives every colour from it and
@@ -326,7 +336,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
      `request_computer_folder`), and name that outcome in the line. The writer refuses a task without it. A capability reason in the line ends with `(route <id>)` or `(measured <YYYY-MM-DD>, <check and result>)`; the writer refuses it otherwise.
      Carry `kind: task` again on a `context` update: the guard cannot see the stored field.
    - Fill `holds` (never on a port item) whenever a lane, a merge or a PR waits on the answer. Never guess an urgency:
-     with nothing waiting, leave `holds` out.
+     with nothing waiting, leave `holds` out. List each lane, PR or step it names in `stops`.
    - Fill `by` when something reads the answer at a set time.
    - Set `group` on an item that relates to an open one, and write `groups/<slug>` with a `title`
      and a one-sentence `why`. Set `group` on both items.
@@ -334,7 +344,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
      Set either only on a page that `stale_pages.py` reports current (see "Update a repo's pages"). An older page draws radios.
      Write `recommended` only on a page that `stale_pages.py` reports current too: an older page reads only `pick` and shows no star for `recommended`.
      The page stars no option when `recommended` is not valid.
-   - The page never preselects an answer. A decision may carry a starred `recommended` option, and nothing is sent unless the owner presses. A `multi` item's `recommended` is a list; a tap on its star ticks the list.
+   - The page never preselects an answer. It draws the recommendation as a `Recommended:` line above the options (the option's letter and label, then `why`, printed once there), stars the recommended option, and draws the `Waiting on` line as its own line. Nothing is sent unless the owner presses; a tap on the line picks nothing. A `multi` item's `recommended` is a list; a tap on its star ticks the list.
 3. Once the item exists, name it in the reply in one line, with the page URL for an open item only
    (a closed item is one line on the page, with no card to open). Open no question box (`questions-go-to-owner`).
 4. Keep working on what does not depend on the answer.
@@ -360,6 +370,13 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 - At a comment wake, never at turn start, the writer saves `ArtifactData list receipts`, `answers` and `items`, and `meta/page`, to a folder. It lists `answers`, `items` and `receipts` in full: `query.limit` 1000, follow `next_cursor` until it is empty, as the export flow does. A cut list gives wrong lines. It runs `python3 ~/.claude/skills/waiting-page/stale_pages.py --unread <dir>`. For each `answer-unread` line it sends the session in the item's `owner` a `send_message` with the page URL, the item id and the act, never the answer text.
   At the end of that wake it writes `woke`. It uses `ArtifactData update meta/page` with only `woke`, never `set`: `set` drops `parked`, `identity` and `checked`. The value is the time now, ISO UTC with a trailing `Z`. On exit 2 it does not write `woke`.
   The check reads only the receipt field `read`. It does not use `filed`. It adds no store.
+  At the same wake the writer lists the awaiting threads. A thread is awaiting when it is open and its last comment is not Claude's. The tool prints no "awaiting reply" marker.
+  - Read: start `<dir>/threads.txt` empty at each wake. Read the threads with `ArtifactComments read`. Follow the cursor until a page ends with no "more threads not listed" line. Append each page in order, the first page first. Page 1's "more threads not listed" line stays in the file. It is fine once a later page follows it.
+  - Report: write a line `Awaiting reply: N`. Under Input Needed, name each awaiting thread by its 8-char id until it is answered. Save the report to `<dir>/report.md`. The count line may sit in a bullet, in bold, or before a list of ids. The bold label may carry its colon inside or after the bold, and the report may sit in a blockquote.
+  - Check: run `python3 ~/.claude/skills/waiting-page/stale_pages.py --awaiting <dir>`. With a report it prints report lines only. On `report-missing` or `report-count`, fix the report. A first page with no thread is `awaiting: clean`.
+  - Exit 2: re-read the threads. An open thread can stay elided after a re-read, because of the page size cap. Then name that thread under Input Needed as `unread: <id8>`.
+  - Cost: the check is one process start and reads two files. The routine adds one `ArtifactComments read` per page. It writes only `threads.txt` and `report.md`.
+  - The incident: an owner thread waited 37 h.
 - The owner can Undo a Send for 8 seconds, and Undo deletes the answers. Wait 10 seconds after an
   answer's `at` before you route it. An "Undone on the waiting page" notice withdraws the items it
   names.
