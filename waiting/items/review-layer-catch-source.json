@@ -2,6 +2,7 @@
   "added": "2026-11-17T21:30:00-06:00",
   "closed": "2026-11-18T14:40:30-06:00",
   "context": "Goal: know which review layers (reviewer, refuter, fix verifier, design reviewer) catch real defects, so a layer that only adds cost can go.\nProblem (rule): the scorer is built and its fixture holds 10 past incidents, but a review record holds only a verdict per round, with no refuter field and no cost, so refuter and cost read unknown and reviewer recall can never read measured from real records; changing what a review record holds is your call.\nBased on (read): the first review of the scoring work (its branch), 21:16 CST: 8 of the 10 incidents were reverted inside their own pull request before merge, and 6 are batch pull requests, which have no review record of their own (your ruling that a pull request carries its own review record).\nBased on (read): the glossary says a finding is a reviewer's report; a verdict row is one PASS or FAIL per round.\nDeparts from: main \u2014 a review record holds a verdict and a head \u2014 b adds a refuter and a cost field to the record, c leaves the record alone.\nWaiting on: nothing is stopped. The scoring tool is built and checked and goes on to be merged whichever you pick; only the later steps that measure real review records wait for your pick.",
+  "dismissed": "2026-11-18T20:41:23.985Z",
   "home": "step review-layer-recall-eval",
   "id": "review-layer-catch-source",
   "kind": "decision",
