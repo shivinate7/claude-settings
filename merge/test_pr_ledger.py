@@ -75,10 +75,10 @@ def event(name, hours_ago, action="labeled"):
 
 class LedgerHost(tm.PullsHost):
     """PullsHost that also serves each pull request's label events (`issues/<n>/events`), on both seams: pages() and gh's answer.
-    `event_reads` keeps the number of each events list read, in order. The clock is NOW (Host.now)."""
+    `event_reads` keeps the number of each events list read, in order. The clock is NOW (Host.now). `check_rows` maps a head sha to its check runs."""
 
-    def __init__(self, pulls, comments=(), events=None, count_gh=False, **reads):
-        super().__init__(pulls, {}, comments=comments, count_gh=count_gh, **reads)
+    def __init__(self, pulls, comments=(), events=None, count_gh=False, check_rows=None, **reads):
+        super().__init__(pulls, check_rows or {}, comments=comments, count_gh=count_gh, **reads)
         self.events, self.event_reads = events or {}, []
         self.now = lambda: NOW
 
@@ -230,7 +230,7 @@ class NextActShapes(LedgerCase):
         self.assertFalse(red, f"#9 is a draft with no record, and its line reads RED:\n{out}")
 
     def test_an_idle_draft_past_80_h_is_not_red(self):
-        # Ruling own-572-a-ledger-by-age-only (the ledger's age-only limits) gives every lane act no age limit, so an idle draft is never RED by age.
+        # Ruling own-572-a-ledger-by-age-only (23:10 CST Nov 15) gives every lane act no age limit, so an idle draft is never RED by age.
         out = self.reviewed(LedgerHost([pull(9, draft=True, hours_ago=80)]))
         act, red = self.next_act(out, 9)
         self.assertEqual(act, "lane round 1", f"#9 is a draft with no record, so its act is lane round 1:\n{out}")
@@ -278,7 +278,7 @@ class NextActShapes(LedgerCase):
         self.assertEqual(act, "batch run", f"#7 carries the batch label, so its act is batch run:\n{out}")
         self.assertFalse(red, f"#7's batch label was last added 2 h ago, inside the 24 h limit, and its line reads RED:\n{out}")
 
-    def test_a_fix_check_at_10_h_is_not_red(self):
+    def test_a_fix_verifier_at_10_h_is_not_red(self):
         host = LedgerHost([pull(7)], comments=[record(7, 10, head=OLD)], commits={LIVE: [OLD]})
         out = self.reviewed(host)
         act, red = self.next_act(out, 7)
@@ -308,6 +308,18 @@ class NextActShapes(LedgerCase):
         self.assertEqual(owner, "batch runner", f"#7's act is batch, so its owner is the batch runner:\n{out}")
         self.assertFalse(red, f"#7 is done 3 h ago, inside the 24 h limit, and its line reads RED:\n{out}")
 
+    def test_a_done_record_whose_lint_is_skipped_reads_batch(self):
+        # A green control: the all-jobs-passed rollup is green on the live head, so the lint is skipped and the record stays done. A mutant that
+        # marks the lint missing in that branch reads lane lint here, and this case goes red.
+        rollup = tm.batch_run(tm.merge.ROLLUP_JOB, "completed", "success")
+        out = self.reviewed(LedgerHost([pull(7)], comments=[record(7, 3)], check_rows={LIVE: [rollup]}))
+        self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} done: .*; lint skipped: ",
+                         "control: #7's green rollup on the live head does not skip the lint:\n" + out)
+        act, owner, red = self.next_part(out, 7)
+        self.assertEqual(act, "batch", f"#7 is done at the live head and its rollup skips the lint, so its act is batch:\n{out}")
+        self.assertEqual(owner, "batch runner", f"#7's act is batch, so its owner is the batch runner:\n{out}")
+        self.assertFalse(red, f"#7 is done 3 h ago, inside the 24 h limit, and its line reads RED:\n{out}")
+
     def test_a_done_record_with_no_lint_at_60_h_reads_lane_lint_and_not_red(self):
         out = self.reviewed(LedgerHost([pull(7, hours_ago=70)], comments=[record(7, 60)]))
         self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} no lint: ", "control: #7's record does not read no lint at the live head")
@@ -325,7 +337,7 @@ class NextActShapes(LedgerCase):
                                  f"#7 is a draft labelled {label} with `Waits on: debt:merge-flake`, so its act is waits on that item:\n{out}")
                 self.assertFalse(red, f"#7 waits on debt:merge-flake, which has no limit of its own, and its line reads RED:\n{out}")
 
-    def test_a_fix_check_at_1000_h_is_not_red(self):
+    def test_a_fix_verifier_at_1000_h_is_not_red(self):
         host = LedgerHost([pull(7)], comments=[record(7, 1000, head=OLD)], commits={LIVE: [OLD]})
         out = self.reviewed(host)
         self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} stale: ", "control: #7's record does not read stale at the live head")
@@ -353,7 +365,7 @@ class NextActShapes(LedgerCase):
 
     def test_a_granted_round_4_at_1000_h_is_not_red(self):
         grant = ("Grant: #7, item 444 a, owner, 2026-11-10 12:00 CST",)
-        # Ruling own-572-a-ledger-by-age-only (the ledger's age-only limits) gives every lane act no age limit. A passing granted round ends
+        # Ruling own-572-a-ledger-by-age-only (23:10 CST Nov 15) gives every lane act no age limit. A passing granted round ends
         # the review, so the fixture ends in a FAIL: a failed final round on a guard change owes its net value and reads open, and its lane
         # act has no limit. A grant parses only with its granted round recorded.
         rounds = tm.REVIEW_FAILED_THREE + ("Round 4: reviewer, opus, FAIL",)
@@ -383,7 +395,7 @@ class NextActGaps(LedgerCase):
         self.assertFalse(red, f"#7 waits on debt:merge-flake, which has no limit of its own, and its line reads RED:\n{out}")
 
     def test_a_pr_blocked_on_a_red_pr_reads_red(self):
-        # Ruling own-572-a-ledger-by-age-only (the ledger's age-only limits) keeps an age limit on the batch acts alone, so the blocker
+        # Ruling own-572-a-ledger-by-age-only (23:10 CST Nov 15) keeps an age limit on the batch acts alone, so the blocker
         # is a done record that has waited past one batch cycle.
         out = self.reviewed(LedgerHost([pull(7, base="feat5", hours_ago=5), pull(5, hours_ago=2)], comments=[record(5, 30), lint(5)]))
         self.assertEqual(self.next_act(out, 5), ("batch", True),
@@ -399,6 +411,44 @@ class NextActGaps(LedgerCase):
                 act, red = self.next_act(out, n)
                 self.assertEqual(act, f"blocked on #{on}", f"control: #{n}'s base ref is the head of #{on}, so it is blocked on #{on}:\n{out}")
                 self.assertTrue(red, f"#{n} is blocked on #{on}, which is blocked on #{n}: a loop with no PR that can move, and its line does not read RED:\n{out}")
+
+    def carry_host(self, *, draft, comments=(), source=()):
+        """Pull request 7 at LIVE, a replacement whose body names #6 as its source, and #6's own comment list `source`. LIVE and #6's head hold one
+        tree, so the carry is read by tree and no git read runs."""
+        return LedgerHost([pull(7, draft=draft, body=tm.REPLACES_BODY)], comments=list(comments), per_issue={tm.REPLACES_SOURCE: list(source)},
+                          commits={LIVE: [], tm.SOURCE_HEAD: []}, trees={LIVE: tm.SOURCE_TREE, tm.SOURCE_HEAD: tm.SOURCE_TREE})
+
+    def test_a_replacement_carries_its_source_open_record_and_reads_the_round_owed(self):
+        # Red on a merge.py that drops the carried record: the replacement then reads the act of a draft with no record, not the act of the open record.
+        source = [record(6, 3, rounds=("Round 1: reviewer, sonnet, FAIL",), head=tm.SOURCE_HEAD)]
+        out = self.reviewed(self.carry_host(draft=False, source=source))
+        self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} open: carried from #6 by tree",
+                         "control: #7 does not carry the open record of #6 by tree:\n" + out)
+        act, red = self.next_act(out, 7)
+        self.assertEqual(act, "lane round 2", f"#7 carries #6's record, which fails round 1, so round 2 is the next round owed:\n{out}")
+        self.assertFalse(red, f"#7's lane round 2 has no age limit, and its line reads RED:\n{out}")
+
+    def test_a_replacement_carries_its_source_done_record_and_lint_and_reads_batch(self):
+        # A control: the carried done record reads batch, with the lane-lint PASS that carries from #6 by tree.
+        source = [record(6, 3, head=tm.SOURCE_HEAD), lint(6, tm.SOURCE_HEAD)]
+        out = self.reviewed(self.carry_host(draft=False, source=source))
+        self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} done: carried from #6 by tree",
+                         "control: #7 does not carry the done record of #6 by tree:\n" + out)
+        act, owner, red = self.next_part(out, 7)
+        self.assertEqual(act, "batch", f"#7 carries a done record and #6's lane-lint PASS at its tree, so its act is batch:\n{out}")
+        self.assertEqual(owner, "batch runner", f"#7's act is batch, so its owner is the batch runner:\n{out}")
+        self.assertFalse(red, f"#7 is done 3 h ago, inside the 24 h limit, and its line reads RED:\n{out}")
+
+    def test_a_draft_replacement_with_no_readable_source_record_reads_lane_round_1(self):
+        # Nothing carries when #6's list holds no record that parses, so the draft reads as a draft with no record of its own.
+        for label, source in (("no comment", []), ("a comment that is no record", [tm.review_comment(1, tm.REPLACES_SOURCE, "Looks good to me.\n")])):
+            with self.subTest(source=label):
+                out = self.reviewed(self.carry_host(draft=True, source=source))
+                self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} no record: ",
+                                 f"control: #7 reads no record, so no record of #6 carried:\n{out}")
+                act, red = self.next_act(out, 7)
+                self.assertEqual(act, "lane round 1", f"#7 is a draft and #6 gives it no record, so its act is lane round 1:\n{out}")
+                self.assertFalse(red, f"#7's lane round 1 has no age limit, and its line reads RED:\n{out}")
 
 
 class NumberLines(LedgerCase):
