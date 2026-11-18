@@ -2,15 +2,15 @@
  "id": "mutate-stage-prints-progress",
  "title": "merge --lane-lint mutation stage prints progress per shard",
  "priority": "now",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "owner": "triage",
  "lane": "session_013NEJKzJGK41QGR8wh8oCT2",
  "blockedBy": [],
- "updatedAt": "2026-11-17T13:39:30-06:00",
+ "updatedAt": "2026-11-18T02:28:45-06:00",
  "why": "[13:06 CST Nov 15, triage] `merge --lane-lint`'s mutation stage prints nothing per shard, so runner 10 stopped two good lints of #3482 at 33 and 25 min (a shard measures up to 41 min; shard 1 2467 s; lane sim-lease-gaps read it, builder reproduced). The lane (slug mutate-stage-prints-progress) adds shard start/end lines and a 60 s heartbeat, no verdict change. Guard or check: yes. (source: coordinator 13:06 CST, relayed by triage; not owner-typed, undoable) New step.",
  "source": "coordinator 13:06 CST, relayed by triage; not owner-typed",
- "note": "Doing. Adds shard start/end lines and a 60 s heartbeat to the lane-lint mutation stage; no verdict change. Guard or check: yes.",
+ "note": "Doing. Adds shard start/end lines and a 60 s heartbeat to the lane-lint mutation stage; no verdict change. Guard or check: yes. 02:25 CST Nov 18: PR #3539 (branch lint-mutate-progress) merged 02:25:48 CST, merge commit 0e7d2a55761f, 9 commits, head 60598f6cf914, runner 10, no flag (REST; coordinator 02:29 CST relay). Open notes from its review: the new join case stays green with the join removed; no case injects OSError into say(). Slow mutant not fixed: tests/guard/s35192-mask-script.py line 287 runs 4000 segments unbounded.",
  "pr": 3539
 }
