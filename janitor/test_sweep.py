@@ -537,8 +537,9 @@ def tearDownModule():
 # <session id>\`, once the session's transcript, `<CLAUDE_CONFIG_DIR>\projects\<project>\
 # <session id>.jsonl`, has been idle 24 hours. No transcript found means keep. The step runs as a
 # real process. Each case points LOCALAPPDATA, TEMP, TMP, HOME, USERPROFILE, CLAUDE_CONFIG_DIR and
-# TMPDIR at fixture folders, so no case can reach the real temp folder, the real ~/.claude or the
-# POSIX root `<TMPDIR>/claude-<uid>`, where Claude Code keeps its session scratch. Without
+# TMPDIR at fixture folders, and the fixed base JANITOR_FIXED_TMP_DIR at the TMPDIR fixture, so no case
+# can reach the real temp folder, the real ~/.claude, or the POSIX roots `<TMPDIR>/claude-<uid>` and
+# `/tmp/claude-<uid>`, where Claude Code keeps its session scratch. Without
 # --confirm the step removes nothing. Each keep case carries a positive control: an idle session
 # that the same run must remove, so a keep verdict cannot pass over a step that never ran.
 
@@ -604,6 +605,8 @@ class TempSweepTests(unittest.TestCase):
         self.home = os.path.join(self.base, "home")
         self.tmpdir = os.path.join(self.base, "tmp")
         self.posix_root = os.path.join(self.tmpdir, "claude-%d" % os.getuid()) if hasattr(os, "getuid") else None
+        # Where a case's session folders go unless it names a root: the Windows root on Windows, else the POSIX root.
+        self.own_root = self.temp_root if os.name == "nt" else self.posix_root
         for folder in (self.temp_root, self.projects, self.home, self.tmpdir):
             os.makedirs(folder)
 
@@ -613,7 +616,7 @@ class TempSweepTests(unittest.TestCase):
     def make_session(self, session, transcript_hours=None, folder_hours=None, root=None):
         """A session folder with a nested file. transcript_hours None means no transcript at all.
         folder_hours None leaves the folder's own mtime at now."""
-        folder = os.path.join(root or self.temp_root, TEMP_SWEEP_PROJECT, session)
+        folder = os.path.join(root or self.own_root, TEMP_SWEEP_PROJECT, session)
         write(os.path.join(folder, "nested", "scratch.txt"), "temp")
         if transcript_hours is not None:
             transcript = os.path.join(self.projects, TEMP_SWEEP_PROJECT, session + ".jsonl")
@@ -625,10 +628,12 @@ class TempSweepTests(unittest.TestCase):
 
     def run_step(self, *flags, temp=None, count_ps=False):
         env = dict(os.environ)
-        # TMPDIR is the fixture: the POSIX root is read from it, so no case reaches the real /tmp/claude-<uid>.
+        # TMPDIR is the fixture: the POSIX root is read from it. The fixed base is the same fixture, so no case
+        # reaches the real /tmp/claude-<uid>.
         env.update(LOCALAPPDATA=self.localappdata, TEMP=os.path.join(self.localappdata, "Temp"),
                    TMP=os.path.join(self.localappdata, "Temp"), HOME=self.home,
                    USERPROFILE=self.home, CLAUDE_CONFIG_DIR=self.cfg, TMPDIR=self.tmpdir)
+        env[sweep.temp_sweep.FIXED_TMP_ENV] = self.tmpdir
         if temp is not None:
             env.update(TEMP=temp, TMP=temp)
         if count_ps:
@@ -698,6 +703,7 @@ class TempSweepTests(unittest.TestCase):
         self.check_kept(kept, "a session with no transcript found must be kept", proc)
         self.check_exit(proc)
 
+    @unittest.skipUnless(os.name == "nt", "Temp\\claude-old and Temp\\elsewhere are Windows Temp paths")
     def test_a_path_outside_the_temp_claude_root_is_never_touched(self):
         control = self.make_session(temp_session_id(6), transcript_hours=TEMP_IDLE_HOURS)
         # `claude-old` shares the prefix `claude`, so a plain startswith test would reach it.
@@ -841,6 +847,7 @@ class TempSweepTests(unittest.TestCase):
         self.check_removed(folder, "the idle session folder must be removed even with a link in it", proc)
         self.check_exit(proc)
 
+    @unittest.skipUnless(os.name == "nt", "TEMP names the Windows temp root; POSIX cases are the ones below")
     def test_temp_names_the_root_when_it_differs_from_localappdata(self):
         temp = os.path.join(self.base, "TEMP-set")
         control = self.make_session(temp_session_id(25), transcript_hours=TEMP_IDLE_HOURS,
@@ -851,6 +858,35 @@ class TempSweepTests(unittest.TestCase):
                                     "must be removed", proc)
         self.check_kept(kept, "TEMP is set: LOCALAPPDATA\\Temp\\claude is not the root, so it must be "
                               "kept", proc)
+        self.check_exit(proc)
+
+    # Off Windows the step reads only `<TMPDIR>/claude-<uid>` (decision windows-temp-sweep, rule 3). Each case below
+    # checks one way the step could reach a Windows temp folder, and each carries a positive control.
+    @unittest.skipUnless(os.name != "nt" and hasattr(os, "getuid"), "the POSIX step reads only claude-<uid>")
+    def test_posix_does_not_read_an_explicit_temp_folder(self):
+        temp = os.path.join(self.base, "TEMP-set")
+        kept = self.make_session(temp_session_id(27), transcript_hours=TEMP_IDLE_HOURS,
+                                 folder_hours=TEMP_IDLE_HOURS, root=os.path.join(temp, "claude"))
+        control = self.make_session(temp_session_id(28), transcript_hours=TEMP_IDLE_HOURS, root=self.posix_root)
+        self.assertTrue(os.path.isdir(kept), "scope: the TEMP session folder must exist before the step runs")
+        proc = self.run_step("--confirm", temp=temp)
+        self.check_removed(control, "positive control: an idle 25-hour session under <TMPDIR>/claude-<uid> must be "
+                                    "removed in this run", proc)
+        self.check_kept(kept, "off Windows the step must not read TEMP: an idle session under <TEMP>/claude "
+                              "was removed", proc)
+        self.check_exit(proc)
+
+    @unittest.skipUnless(os.name != "nt" and hasattr(os, "getuid"), "the POSIX step reads only claude-<uid>")
+    def test_posix_does_not_read_localappdata_when_temp_is_empty(self):
+        kept = self.make_session(temp_session_id(37), transcript_hours=TEMP_IDLE_HOURS,
+                                 folder_hours=TEMP_IDLE_HOURS, root=self.temp_root)  # LOCALAPPDATA\Temp\claude
+        control = self.make_session(temp_session_id(38), transcript_hours=TEMP_IDLE_HOURS, root=self.posix_root)
+        self.assertTrue(os.path.isdir(kept), "scope: the LOCALAPPDATA session folder must exist before the step runs")
+        proc = self.run_step("--confirm", temp="")  # an empty TEMP makes the step fall back to LOCALAPPDATA
+        self.check_removed(control, "positive control: an idle 25-hour session under <TMPDIR>/claude-<uid> must be "
+                                    "removed in this run", proc)
+        self.check_kept(kept, "off Windows the step must not read LOCALAPPDATA: an idle session under "
+                              "LOCALAPPDATA\\Temp\\claude was removed", proc)
         self.check_exit(proc)
 
 
@@ -895,7 +931,7 @@ class TempSweepTests(unittest.TestCase):
 #
 # Claude Code keeps its POSIX session scratch at `<base>/claude-<uid>`. The step reads `<base>` from $TMPDIR. On a Mac the same
 # scratch also lives at `/tmp/claude-<uid>`, which $TMPDIR does not reach. The fixed base is the module attribute
-# `temp_sweep.FIXED_TMP_DIR`, which the builder adds. These cases patch it to a fixture, so no case reaches the real /tmp. The walk runs
+# `temp_sweep.FIXED_TMP_DIR`. These cases patch it to a fixture, so no case reaches the real /tmp. The walk runs
 # in-process, and each case reads only the session ids it yields. Nothing is removed.
 
 @unittest.skipUnless(hasattr(os, "getuid"), "the POSIX claude root exists only where os.getuid does")
@@ -912,8 +948,9 @@ class ScratchRootsTests(unittest.TestCase):
         uid = "claude-%d" % os.getuid()
         self.tmp_root = os.path.join(self.tmpdir, uid)
         self.fixed_root = os.path.join(self.fixed, uid)
+        # The env var beats the patched global in posix_claude_roots, so the caller's value must not reach the walk.
         env = {"TMPDIR": self.tmpdir, "TEMP": self.temp, "TMP": self.temp, "LOCALAPPDATA": self.base,
-               "CLAUDE_CONFIG_DIR": self.cfg}
+               "CLAUDE_CONFIG_DIR": self.cfg, sweep.temp_sweep.FIXED_TMP_ENV: self.fixed}
         patches = (mock.patch.dict(os.environ, env),
                    mock.patch.object(tempfile, "tempdir", self.tmpdir),
                    mock.patch.object(sweep.temp_sweep, "FIXED_TMP_DIR", self.fixed, create=True))
@@ -1024,24 +1061,33 @@ class TempSweepWiringTests(unittest.TestCase):
 
 
 class TempStepCanaryTests(unittest.TestCase):
-    """A canary folder under a fake real-temp root (TEMP) survives a full `--confirm` run on Windows.
-    Only the setUpModule stub keeps it there. The positive control shows the real step would remove it."""
+    """A canary folder under the step's own root survives a full `--confirm` run. Only the setUpModule stub keeps it
+    there. The positive control shows the real step would remove it."""
 
     def setUp(self):
         self.base = tempfile.mkdtemp(prefix="janitor_canary_")
         self.addCleanup(shutil.rmtree, self.base, True)
         self.temp = os.path.join(self.base, "Temp")
+        self.tmp = os.path.join(self.base, "tmp")  # $TMPDIR, and the fixed base too
         self.cfg = os.path.join(self.base, "cfg")
+        os.makedirs(self.tmp)
+        own = (os.path.join(self.temp, "claude") if os.name == "nt"
+               else os.path.join(self.tmp, "claude-%d" % os.getuid()))
         session = temp_session_id(7)
-        self.canary = os.path.join(self.temp, "claude", TEMP_SWEEP_PROJECT, session)
+        self.canary = os.path.join(own, TEMP_SWEEP_PROJECT, session)
         write(os.path.join(self.canary, "scratch.txt"), "canary")
         transcript = os.path.join(self.cfg, "projects", TEMP_SWEEP_PROJECT, session + ".jsonl")
         write(transcript, '{"type": "user"}\n')
         temp_set_age(transcript, TEMP_IDLE_HOURS)
         env = mock.patch.dict(os.environ, {"TEMP": self.temp, "LOCALAPPDATA": self.base,
-                                           "CLAUDE_CONFIG_DIR": self.cfg})
+                                           "CLAUDE_CONFIG_DIR": self.cfg, "TMPDIR": self.tmp,
+                                           sweep.temp_sweep.FIXED_TMP_ENV: self.tmp})
         env.start()
         self.addCleanup(env.stop)
+        # gettempdir() caches its answer, so the in-process step reads the fixture only with this patch.
+        tempdir = mock.patch.object(tempfile, "tempdir", self.tmp)
+        tempdir.start()
+        self.addCleanup(tempdir.stop)
 
     def test_the_real_step_removes_the_canary(self):
         with contextlib.redirect_stdout(io.StringIO()):
