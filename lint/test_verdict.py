@@ -886,6 +886,84 @@ class NoTestCount(unittest.TestCase):
                 self.assert_pass(r)
 
 
+# A cut run: pytest output that stops before its summary. The rule is in CutStream's docstring.
+PYTEST_START = "=" * 29 + " test session starts " + "=" * 30 + "\n"  # pytest's session header, captured here
+COLOURED_START = "\x1b[32m" + "=" * 29 + " \x1b[1mtest session starts\x1b[0m " + "\x1b[32m" + "=" * 30 + "\x1b[0m\n"  # the same header with --color=yes
+PYTEST_ALL_PASS = "=" * 30 + " 3 passed in 0.02s " + "=" * 30 + "\n"  # a summary with no skip; PYTEST_OUT reads SKIP
+PROGRESS = "tests/test_big.py " + "." * 1000 + "\n"  # one progress line, 1,019 bytes
+CUT_LINE = r"^FAIL .* rc=1[^(]*\bcut\b"  # the note sits between rc=1 and the timing
+
+
+def straddling_body():
+    """A complete run whose summary starts 40 bytes before the chunk edge, so the summary crosses that edge. Returns (body, offset)."""
+    offset = CHUNK - 40
+    n = (offset - len(PYTEST_START) - 1) // len(PROGRESS)
+    pad = offset - len(PYTEST_START) - n * len(PROGRESS)  # 1 to len(PROGRESS) bytes: the dots that end the filler
+    return PYTEST_START + PROGRESS * n + "." * (pad - 1) + "\n" + PYTEST_ALL_PASS, offset
+
+
+class CutStream(unittest.TestCase):
+    """A run that exits 0 and stops before its pytest summary reads FAIL, with `cut` in the note.
+    Rule: a run is cut when it exits 0, one of its lines starts with pytest's session header (`=` bars around
+    `test session starts`), and no line starts with pytest's summary (`=` bars around ` in <N>s`). Colour codes are
+    ignored, so a coloured header counts. A header quoted mid-line does not. A run with no header is never cut, so
+    `print('noisy')` still reads PASS. Pytest only: it is the one runner the repo shows with both a start line and a
+    summary line. A cut run of another runner, such as a PowerShell `All checks passed.` style, is not covered yet."""
+    check = Skips.check  # one home for a fixture's run and its timeout
+    assert_pass = Skips.assert_pass
+    assert_skip = Skips.assert_skip
+    assert_fail = Skips.assert_fail
+
+    def assert_cut(self, r):
+        first = r.stdout.splitlines()[0] if r.stdout.strip() else ""
+        self.assertRegex(first, CUT_LINE, f"a run cut before its summary must read FAIL with cut, got: {first!r}")
+        self.assertEqual(r.returncode, 1, r.stdout[:300])
+
+    def test_header_only_run_that_exits_0_is_cut(self):
+        self.assert_cut(self.check(printing(PYTEST_START)))
+
+    def test_run_cut_after_progress_lines_is_cut(self):
+        self.assert_cut(self.check(printing(PYTEST_START + PROGRESS * 3)))
+
+    def test_coloured_run_cut_after_progress_lines_is_cut(self):
+        self.assert_cut(self.check(printing(COLOURED_START + PROGRESS * 3)))
+
+    def test_full_size_run_cut_after_2mib_is_cut(self):
+        body = PYTEST_START + PROGRESS * 2048
+        self.assertGreater(len(body), CHUNK, "the fixture must hold more than one chunk")
+        self.assert_cut(self.check(printing(body)))
+
+    def test_run_with_a_summary_is_not_cut(self):
+        self.assert_pass(self.check(printing(PYTEST_START + PROGRESS * 3 + PYTEST_ALL_PASS)))
+
+    def test_coloured_complete_run_is_not_cut(self):
+        self.assert_skip(self.check(printing(COLOURED_START + PROGRESS + PYTEST_COLOUR)), 2)
+
+    def test_full_size_complete_run_is_not_cut(self):
+        body = PYTEST_START + PROGRESS * 2048 + PYTEST_ALL_PASS
+        self.assertGreater(len(body), CHUNK, "the fixture must hold more than one chunk")
+        self.assert_pass(self.check(printing(body)))
+
+    def test_summary_straddling_the_chunk_edge_is_not_cut(self):
+        body, offset = straddling_body()
+        self.assertEqual(body.index(PYTEST_ALL_PASS), offset, "the fixture must start the summary at its offset")
+        self.assertGreater(offset + len(PYTEST_ALL_PASS), CHUNK, "the fixture must run the summary past the edge")
+        self.assert_pass(self.check(printing(body)))
+
+    def test_header_quoted_mid_line_is_no_header(self):
+        body = "note: the pytest header is '=== test session starts ===' here\n" + PROGRESS * 3
+        self.assert_pass(self.check(printing(body)))
+
+    def test_silent_run_is_not_cut(self):
+        self.assert_pass(self.check(printing("")))
+
+    def test_header_then_log_truncated_under_verdict_keeps_log_unreadable(self):
+        code = ("import os\n"
+                f"print({PYTEST_START!r}, end='', flush=True)\n"
+                "open(os.environ['VERDICT_LOG'], 'w').close()\n")
+        self.assert_fail(self.check(code), 1, "log unreadable")
+
+
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
