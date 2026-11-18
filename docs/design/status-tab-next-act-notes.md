@@ -62,8 +62,8 @@ Deep links: `#s=live|lanes|stale`, `&red=mark|word`, `&why=row|head`, `&w=1440|8
    Owner: the owner reads "lane", as `pr_next_act` gives it, because the coordinator owns the row
    only once the build knows that no lane holds it. Other options: "owner unknown", or "owner lane
    or coordinator".
-   Pick: owner lane. Owner grant: no (the plan does not rule the owner here, so this is a builder
-   default; see Input Needed).
+   Pick: owner lane. The plan does not say which owner shows here; this is a question for the
+   owner, not blocking.
 
 7. **Acts too old** (`#s=stale`). The ledger's readAt is older than STALE_LIVE_MINUTES (60), or
    missing. Every act reads "act unknown", with no owner, no age and no red. The rows keep REST
@@ -75,8 +75,9 @@ Deep links: `#s=live|lanes|stale`, `&red=mark|word`, `&why=row|head`, `&w=1440|8
      read 2 hours ago, past the 60-minute limit.". Each row reads "act unknown" alone.
    Gain of once: the same reason does not show nine times (ux-label-once). Loss: a row read alone
    does not say why.
-   Pick: Reason once at the head. Departs from: the brief's "every act reads unknown with its
-   reason". Not blocking.
+   Pick: Reason once at the head. Departs from: the brief's and the plan's test case "every act
+   reads unknown with that reason". Owner grant: yes (it changes the spec). Not blocking. The
+   mockup's default view draws "Reason on each row", per the spec, until the owner rules.
 
 8. **Owner word "owner".** The pull request that waits on a page item reads "owner owner", because
    `pr_next_act` names the owner "owner". The mockup draws the real string. A label such as "owner
@@ -101,6 +102,9 @@ Deep links: `#s=live|lanes|stale`, `&red=mark|word`, `&why=row|head`, `&w=1440|8
   "Skipped, wrong shape" line keeps the same fault; it is out of this step.
 - The detector (`impeccable detect`) found nothing, on the mockup file or on the rendered live and
   stale screens. The run was single-context: no sub-agent tool was exposed.
+- `label_once.py` on the rendered screens: "working" twice (today's thread tags, data) and, in the
+  stale state, "act unknown" nine times. Each row must read unknown, never blank (plan test case),
+  so the per-row words stay; the reason sentence shows once with item 7's pick.
 - The h4 holds the counts, so a screen reader reads a long heading. Kept: the brief puts the counts
   in the h4.
 - The red mark's pill border around a filled circle is heavy at 12 px. It matches the stalled mark's
