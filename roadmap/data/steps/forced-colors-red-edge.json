@@ -1,0 +1,14 @@
+{
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "source": "coordinator 09:12 CST Nov 18, relayed to triage 11",
+ "updatedAt": "2026-11-18T09:14:32-06:00",
+ "id": "forced-colors-red-edge",
+ "title": "In forced-colors mode the red edge on a live PR row and on the stalled band is lost, so a red row loses its mark",
+ "why": "Coordinator, 09:12 CST Nov 18 (its pick, not owner-typed): in forced-colors mode `.live li.red` loses its red edge in skills/waiting-page/page.html (about line 497) and skills/roadmap/page/index.html (about line 346); the stalled band has the same gap. Seen while reviewing the Status tab build (draft PR 3649).",
+ "note": "Not built; lines are the coordinator's reading, not read by triage 11. Fix the coordinator proposes: an `@media (forced-colors: active)` rule giving the edge a border-left in CanvasText. Kept out of PR 3649 on purpose. Next: a lane brief with a test-author first (a forced-colors render must still show the edge); mover: a lane after the coordinator's say-so, and after PR 3649 merges, since both touch the same rows."
+}

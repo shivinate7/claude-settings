@@ -1,0 +1,14 @@
+{
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "source": "coordinator 09:12 CST Nov 18, relayed to triage 11",
+ "updatedAt": "2026-11-18T09:14:32-06:00",
+ "id": "live-rows-before-stale-check",
+ "title": "build.py builds the live rows before it checks whether the ledger is stale, so a stale read can show \"no live lane\"",
+ "why": "Coordinator, 09:12 CST Nov 18 (its pick, not owner-typed): in build.py live_work builds liveRows before its staleness check, so a fresh ledger with a stale top-level readAt can show \"no live lane\" from stale session rows. The builder confirmed it; no test pins it. Found in the Status tab build (draft PR 3649).",
+ "note": "Not built; confirmed by the coordinator's builder, not by triage 11. Next: a lane brief with a test-author first (a fresh ledger with a stale top-level readAt must read \"act unknown\", never \"no live lane\"). Mover: a lane after the coordinator's say-so, and after PR 3649 merges, since it changes the same function."
+}
