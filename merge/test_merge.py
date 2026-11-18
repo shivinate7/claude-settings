@@ -471,6 +471,7 @@ class Env(unittest.TestCase):
         self.lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)  # a retry pause is a no-op: a test never sleeps
         self.addCleanup(lambda: os.environ.pop("MERGE_TEST_HOOK", None))
         self.sweep_runs = []  # each sweep_repo call a merge makes; the stand-in reaps nothing, so no case sweeps a fixture repo
+        self.sweep_look = None  # a case's read, run inside each sweep call: its value, or the error it raised, lands on that call's record
         sweep_patch = unittest.mock.patch.object(sweep, "sweep_repo", side_effect=self.record_sweep)
         self.sweep_mock = sweep_patch.start()
         self.addCleanup(sweep_patch.stop)
@@ -564,8 +565,14 @@ class Env(unittest.TestCase):
     def record_sweep(self, root, confirm, restore_log_path, mode="full", attended=False):
         """The stand-in for janitor/sweep.py's sweep_repo: it records the call with where stdout stands, and reaps nothing. -> sweep_repo's result shape."""
         out = sys.stdout
-        self.sweep_runs.append({"root": root, "confirm": confirm, "mode": mode, "attended": attended,
-                                "stdout_at": len(out.getvalue()) if hasattr(out, "getvalue") else None})
+        run = {"root": root, "confirm": confirm, "mode": mode, "attended": attended,
+               "stdout_at": len(out.getvalue()) if hasattr(out, "getvalue") else None}
+        if self.sweep_look is not None:
+            try:
+                run["look"] = self.sweep_look()
+            except Exception as e:  # run_safe_sweep swallows an error, so a case asserts on this value, never on a raise here
+                run["look"] = e
+        self.sweep_runs.append(run)
         return {"root": root, "refused": None, "branches": [], "worktrees": [], "listeners": [], "pruned": None,
                 "husks": [], "strays": [], "trash": []}
 
@@ -2085,6 +2092,51 @@ class PerLaneMerge(Env):
         self.assertIn("No pull request was merged.", out, "scope first: the draft step did not run, so this control proves nothing: " + out)
         self.assertFalse(getattr(self.host, "merged", False), "scope first: the draft step merged the pull request: " + out)
         self.assertEqual(self.sweep_runs, [], "the draft step ran the sweep %d times: %s" % (len(self.sweep_runs), out))
+
+    def test_the_safe_sweep_runs_after_the_merge_lock_on_main_is_released(self):
+        put_base_config(self, complete_config())
+        self.main_moves()  # main gains elsewhere.txt, a path no lane touches
+        self.sweep_look = lambda: self.lock.read("main")  # read inside the sweep call: the lock ref as the sweep finds it
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)  # scope first: the merge landed
+        self.assertIn("merge: #7 merged as ", out)
+        self.assertEqual(len(self.sweep_runs), 1, "the sweep ran %d times after the merge, want once: %s" % (len(self.sweep_runs), out))
+        look = self.sweep_runs[0]["look"]
+        self.assertNotIsInstance(look, Exception, "the lock read inside the sweep failed: %r" % (look,))
+        self.assertTrue(look is None or look[1] <= self.now,
+                        "the sweep ran while the merge lock on main was held, until %r: %s" % (look[1] if look else None, out))
+
+    def test_a_safe_sweep_that_raises_leaves_a_landed_merge_exit_zero_with_one_line(self):
+        put_base_config(self, complete_config())
+        self.main_moves()
+        self.sweep_mock.side_effect = RuntimeError("the sweep broke")
+        try:
+            rc, out = self.run_merge("7", "--confirm", stderr=io.StringIO())
+        except RuntimeError as e:  # the error left the merge command: a named failure, not an error
+            self.fail("a raising sweep escaped run_safe_sweep and the merge command: %s" % e)
+        self.assertIn("merge: #7 merged as ", out)  # scope first: the merge landed
+        self.assertEqual(self.sweep_mock.call_count, 1, "scope first: the sweep did not run once after the merge: " + out)
+        self.assertEqual(rc, 0, "a sweep that raised changed the exit of a landed merge to %d: %s" % (rc, out))
+        lines = [line for line in out.splitlines() if line.startswith("merge: the safe sweep")]
+        self.assertEqual(len(lines), 1, "the sweep's failure printed %d lines, want one: %s" % (len(lines), out))
+        self.assertIn("RuntimeError: the sweep broke", lines[0])
+        self.assertNotIn("Traceback", out)
+
+    def test_a_safe_sweep_that_refuses_leaves_a_landed_merge_exit_zero_with_one_line(self):
+        put_base_config(self, complete_config())
+        self.main_moves()
+
+        def refuse(root, confirm, restore_log_path, mode="full", attended=False):
+            return {"root": root, "refused": "no-default-base"}  # a refusal names its reason; it runs nothing
+
+        self.sweep_mock.side_effect = refuse
+        rc, out = self.run_merge("7", "--confirm", stderr=io.StringIO())
+        self.assertIn("merge: #7 merged as ", out)  # scope first: the merge landed
+        self.assertEqual(self.sweep_mock.call_count, 1, "scope first: the sweep did not run once after the merge: " + out)
+        self.assertEqual(rc, 0, "a sweep that refused changed the exit of a landed merge to %d: %s" % (rc, out))
+        lines = [line for line in out.splitlines() if line.startswith("merge: the safe sweep")]
+        self.assertEqual(len(lines), 1, "the sweep's refusal printed %d lines, want one: %s" % (len(lines), out))
+        self.assertIn("refused: no-default-base", lines[0])
 
 
 class CutBranch(Env):
