@@ -18,6 +18,7 @@ Output names pinned (the `scope` job re-exports them as job outputs):
 Run with:  python3 lint/test_ci_scope.py -v
 """
 import ast
+import fnmatch
 import os
 import re
 import shutil
@@ -454,10 +455,14 @@ class Scope(unittest.TestCase):
 
     # A non-.md path under mods/ also sets `code`: the whole-tree readers (retired names, retired repo, glossary, hook catalog) run on
     # `code` or a doc flag, so a mods-only pull request must start them. A .md path under mods/ keeps `code` off.
+    # A mods/ file is no Windows-only path, so it starts the macOS mod job and no Windows job: Windows jobs start only on the
+    # Windows-only list. The mod step still runs on Linux (checks) and macOS. Named failure: a mods/ file starts checks_windows.
     def test_a_mods_only_diff_sets_the_mod_jobs_code_and_no_other_flag(self):
-        got = run(["mods/plain-diff/check.mjs"])
-        self.assertFlags(got, want_true=["mods", "code"] + self.MOD_JOBS,
-                         want_false=[n for n in ALL if n not in ["mods", "code"] + self.MOD_JOBS])
+        for existing in ((), ("mods/plain-diff/check.mjs",)):
+            with self.subTest(edit=bool(existing)):
+                got = run(["mods/plain-diff/check.mjs"], existing=list(existing))
+                want = ["mods", "code", "checks_macos"]
+                self.assertFlags(got, want_true=want, want_false=[n for n in ALL if n not in want])
 
     def test_a_non_md_mods_path_sets_code(self):
         for p in ("mods/x/y/z.mjs", "mods/x/data.json", "mods/x/y/check.test.mjs"):
@@ -482,13 +487,14 @@ class Scope(unittest.TestCase):
     # other job flag off, so the set is exact. A new file under lint/ or skills/ is in a landed dir, which adds
     # shell_macos and guard by its own rule, so a new file is checked for the jobs it must not start.
     # `.gitignore` is an arm too: skills/plain-english-map/tests/typescript-home.test.mjs reads it, so a .gitignore-only
-    # pull request must run the CI step. It keeps `code`, which its lint suites read.
-    MOD_ARMS = ["mods/zz-new/a.mjs", "lint/test_scanner_traps.mjs", "skills/plain-english-map/README.md", ".gitignore"]
+    # pull request must run the CI step. It keeps `code`, which its lint suites read. The mods/ arm is not here: its
+    # Windows job is gone (test_a_mods_only_diff_sets_the_mod_jobs_code_and_no_other_flag).
+    MOD_ARMS = ["lint/test_scanner_traps.mjs", "skills/plain-english-map/README.md", ".gitignore"]
 
     def test_each_mods_arm_starts_the_windows_and_macos_jobs(self):
         for p in self.MOD_ARMS:
             with self.subTest(path=p, edit=True):
-                code_arm = p.startswith("lint/") or (p.startswith("mods/") and not p.endswith(".md")) or p == ".gitignore"
+                code_arm = p.startswith("lint/") or p == ".gitignore"
                 want = {"mods", "checks_windows", "checks_macos"} | ({"code"} if code_arm else set())
                 self.assertEqual(self.true_set(run([p], existing=[p])), want,
                                  msg=f"{p}: the mods arm must start the CI step and both mod jobs, and keep code")
@@ -1575,7 +1581,9 @@ SNAPSHOT_DIFFS = [
                               "lint_red_run", "shell_macos", "shoot", "sweep"]),
     (["lint/test_x.py"], {}, ["checks_guard", "checks_windows", "code", "guard", "lint_comment_narration", "lint_red_run",
                               "shell_macos"]),
-    (["install.ps1"], {}, ["code", "lint_comment_narration", "lint_red_run", "pointer_windows"]),
+    # install.ps1 is a Windows-only path, so it starts the Windows set (WindowsOnlyPaths pins that).
+    (["install.ps1"], {}, ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_windows_rest_2",
+                           "checks_windows_sweep", "code", "lint_comment_narration", "lint_red_run", "pointer_windows"]),
     (["settings.json"], {}, ["checks_guard", "checks_macos", "checks_windows", "checks_windows_merge", "checks_windows_rest",
                              "checks_windows_rest_2", "checks_windows_sweep", "code", "guard", "lint_comment_narration",
                              "lint_red_run", "sweep"]),
@@ -1707,6 +1715,85 @@ class WindowsGuardShards(unittest.TestCase):
                 got = run(paths, **kw)
                 have = sorted(n for n, v in got.items() if v == "true" and n != "windows_guard")
                 self.assertEqual(have, sorted(want), f"a flag changed for {paths}: {got}")
+
+
+# The Windows-only list. ci-scope.sh emits the one list of globs that make a path Windows-only,
+# as the output windows_only_globs (comma-separated). A pull request whose diff touches none of them starts no Windows job: the
+# outputs checks_windows, checks_windows_merge, checks_windows_rest, checks_windows_rest_2, checks_windows_sweep, pointer_windows
+# and windows_guard are all false. A diff that touches one starts the Windows set (WINDOWS_SET). windows_guard keeps its
+# guard-input meaning (lint/*, hooks/* and the rest of .github/guard-inputs.txt), so it is not in WINDOWS_SET. The cases read the
+# list from the output and keep no copy of it here.
+WINDOWS_CONSTANT = "windows_only_globs"
+WINDOWS_SET = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_windows_rest_2", "checks_windows_sweep",
+               "pointer_windows"]
+# A new mod file. Its mod tests are not a Windows check, so it sets no Windows flag once mods/ leaves the list. On the old script
+# it sets checks_windows.
+MOD_PROBE = "mods/zz-probe/check.mjs"
+# Paths the old script reads with no Windows flag: a README and a docs file, which no guard-input glob names.
+NO_WINDOWS_CONTROLS = [["README.md"], ["docs/zz-probe.md"]]
+# The owner's example of a Windows-only path (*.ps1).
+WINDOWS_ONLY_EXAMPLE = "install.ps1"
+
+
+def windows_globs(got):
+    """-> the globs in run()'s windows_only_globs output, or None when the output is absent. An empty value gives []."""
+    if WINDOWS_CONSTANT not in got:
+        return None
+    return [g for g in got[WINDOWS_CONSTANT].split(",") if g]
+
+
+def concrete_path(glob):
+    """A path the glob matches: `**` becomes a folder, `*` becomes `probe` and `?` becomes `x`."""
+    return glob.replace("**", "d/").replace("*", "probe").replace("?", "x")
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class WindowsOnlyPaths(unittest.TestCase):
+    """The Windows-only list: a pull request that touches none of its paths sets no Windows flag, and one that touches a
+    path sets the Windows set. Each failure names one cause."""
+
+    def test_a_pull_request_touching_no_windows_only_path_sets_no_windows_flag(self):
+        # Named failure: a path the list does not name sets a Windows flag, so a pull request with no Windows-only path starts a Windows job.
+        for paths in [[MOD_PROBE]] + NO_WINDOWS_CONTROLS:
+            got = run(paths)
+            globs = windows_globs(got)
+            with self.subTest(paths=paths, precondition="not a Windows-only path"):
+                # Scope before the subject: the sample must be one the list does not name, read from the script's own output.
+                if globs is not None:
+                    hit = [g for g in globs if fnmatch.fnmatchcase(paths[0], g)]
+                    self.assertEqual(hit, [], f"{paths[0]} matches a Windows-only glob, so it is no sample of a non-Windows path: {hit}")
+            for flag in WINDOWS_SET + ["windows_guard"]:
+                with self.subTest(paths=paths, flag=flag):
+                    self.assertEqual(got.get(flag), "false", f"{paths} sets {flag}={got.get(flag)!r}, want false: {got}")
+
+    def test_a_pull_request_touching_a_windows_only_path_sets_the_windows_set(self):
+        # Named failure: a *.ps1 path sets no Windows flag, so the Windows jobs it needs never start (one subtest per flag).
+        got = run([WINDOWS_ONLY_EXAMPLE])
+        for flag in WINDOWS_SET:
+            with self.subTest(flag=flag):
+                self.assertEqual(got.get(flag), "true", f"{WINDOWS_ONLY_EXAMPLE} sets {flag}={got.get(flag)!r}, want true: {got}")
+
+    def test_the_scope_script_emits_one_windows_only_list_that_names_the_ps1_files(self):
+        # Named failure: the script emits no windows_only_globs output, an empty list, or a list no glob of which matches *.ps1.
+        globs = windows_globs(run([WINDOWS_ONLY_EXAMPLE]))
+        self.assertIsNotNone(globs, f"ci-scope.sh emits no {WINDOWS_CONSTANT} output")
+        self.assertTrue(globs, f"ci-scope.sh emits an empty {WINDOWS_CONSTANT}")
+        self.assertTrue(any(fnmatch.fnmatchcase(WINDOWS_ONLY_EXAMPLE, g) for g in globs),
+                        f"no glob in {WINDOWS_CONSTANT} matches {WINDOWS_ONLY_EXAMPLE}: {globs}")
+
+    def test_every_glob_in_the_windows_only_list_sets_the_windows_set(self):
+        # Named failure: a glob the list names sets no Windows flag for a path it matches (one subtest per glob and flag).
+        globs = windows_globs(run([WINDOWS_ONLY_EXAMPLE]))
+        self.assertIsNotNone(globs, f"ci-scope.sh emits no {WINDOWS_CONSTANT} output")
+        self.assertTrue(globs, f"ci-scope.sh emits an empty {WINDOWS_CONSTANT}")
+        for glob in globs:
+            path = concrete_path(glob)
+            with self.subTest(glob=glob, path=path):
+                self.assertTrue(fnmatch.fnmatchcase(path, glob), f"{path} does not match its own glob {glob}")
+                got = run([path])
+                for flag in WINDOWS_SET:
+                    with self.subTest(glob=glob, flag=flag):
+                        self.assertEqual(got.get(flag), "true", f"{path} matches {glob} and sets {flag}={got.get(flag)!r}, want true")
 
 
 if __name__ == "__main__":

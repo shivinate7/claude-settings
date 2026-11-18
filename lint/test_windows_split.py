@@ -391,6 +391,17 @@ def shard_base(name):
 MUTATE_CMD = "python3 hooks/mutate_guard.py"
 MUTATE_JOB = "checks-mutate-guard"
 MUTATE_JOBS = [MUTATE_JOB, MUTATE_JOB + "-b", MUTATE_JOB + "-c"]  # shard i of 3 runs MUTATE_SHARD=i/3
+# The slow legs (owner page item 880): the Windows guard shards and the guard mutation shards run
+# only on the daily scheduled run, as the macOS jobs do since #3586. WindowsJobsOnPullRequest pins each event they start on.
+SLOW_LEG_JOBS = (GUARD_JOB, "checks-windows-guard-2", "checks-windows-guard-3", MUTATE_JOB, MUTATE_JOB + "-b", MUTATE_JOB + "-c")
+# The fast Windows jobs and the scope flags each one reads (brief windows-nightly). On a pull_request a fast job starts only when one of
+# its flags is set, and the flags follow the Windows-only list ci-scope.sh emits. The merge shards belong to checks-windows-merge.
+FAST_WINDOWS_JOBS = {"pointer-windows": ("pointer_windows",), "checks-windows": ("checks_windows",),
+                     "checks-windows-rest": ("checks_windows_rest",), "checks-windows-rest-2": ("checks_windows_rest", "checks_windows_rest_2"),
+                     "checks-windows-sweep": ("checks_windows_sweep", "sweep"),  # the mutation step in it reads `sweep` (IF_PIN)
+                     **{name: ("checks_windows_merge",) for name in ("checks-windows-merge", "checks-windows-merge-2", "checks-windows-merge-3",
+                                                                     "checks-windows-merge-4", "checks-windows-merge-5")}}
+WINDOWS_FLAG_NAMES = sorted({flag for flags in FAST_WINDOWS_JOBS.values() for flag in flags})
 # The bin/shoot suite and its browser install have their own Linux job, off the `checks` lint job.
 SHOOT_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_shoot.mjs'
 SHOOT_JOB = "checks-shoot"
@@ -1871,9 +1882,10 @@ def schedule_only(expr):
 
 
 def push_off_only(expr):
-    """True when a job-level `if:` is the push guard and nothing else: false on a push with any flag and any draft state, true on a
-    schedule, a dispatch and a pull_request that is not a draft. A draft pull_request may read either way (a shard keeps the draft
-    guard, see shard_push_off). It reads no scope flag and no other job's output, so its answer holds for every flag and skip value."""
+    """True when a job-level `if:` holds the push guard: false on a push with any flag and any draft state, true on a schedule and a
+    dispatch with any flag. It says nothing about a pull_request. That side is each job's own rule (WindowsJobsOnPullRequest, and
+    daily_only_expr for a slow leg), since a fast Windows job starts on a pull_request only with its flag. It reads no other job's
+    output, so its answer holds for every skip value."""
     e = unwrap(expr)
     if not e:
         return False
@@ -1881,7 +1893,7 @@ def push_off_only(expr):
         return all(eval_if(e, event, flag, draft=draft, nightly_skip=skip) == want
                    for skip in SKIP_VALUES for flag in ("true", "false")
                    for event, draft, want in (("push", False, False), ("push", True, False), ("schedule", False, True),
-                                              ("workflow_dispatch", False, True), ("pull_request", False, True)))
+                                              ("workflow_dispatch", False, True)))
     except Exception:
         return False
 
@@ -1917,10 +1929,12 @@ def push_guard_jobs(text):
     return sorted(n for n, j in all_jobs(text).items() if j["if"] is not None and holds_push_guard(n, j["if"]))
 
 
-def macos_daily_ok(name, expr):
-    """True when `expr` is macOS job `name`'s job-level if: false on a push, false on a pull_request whatever its flags and draft
-    state, true on a schedule and a workflow_dispatch. A step-level skip still starts the macOS runner, so the job-level if keeps it off."""
-    if name not in MACOS_JOBS or not expr:
+def daily_only_expr(expr):
+    """True when a job-level `if:` (raw, or unwrapped) starts its job on a schedule and a workflow_dispatch, and on no push and no
+    pull_request: false on a push and on a pull_request whatever its scope flags and draft state, true on a schedule and a dispatch.
+    The macOS jobs (through macos_daily_ok) and the slow legs use it. A step-level skip still starts the runner, so the job-level if
+    keeps it off."""
+    if not expr:
         return False
     flags = sorted(set(re.findall(r"needs\.scope\.outputs\.(\w+)", expr)))
     try:
@@ -1933,6 +1947,11 @@ def macos_daily_ok(name, expr):
         return True
     except Exception:
         return False
+
+
+def macos_daily_ok(name, expr):
+    """True when `expr` is macOS job `name`'s job-level if, read by daily_only_expr."""
+    return name in MACOS_JOBS and daily_only_expr(expr)
 
 
 def macos_daily_problems(text):
@@ -2240,10 +2259,20 @@ class PushOffDaily(unittest.TestCase):
                     self.assertTrue(runs_on_event(self.jobs.get(name, {}).get("if"), event), f"{name} does not run on {event}")
 
     def test_each_push_off_job_still_runs_on_a_ready_pull_request(self):
-        # Control, green on the old code: the pull request run keeps every Windows and mutation job.
+        # A fast Windows job runs on a ready pull request with its own flag set, and a slow leg runs on none
+        # (WindowsJobsOnPullRequest). The mutation-report job still runs on every ready pull request.
         for name in WINDOWS_PUSH_OFF_JOBS + MUTATE_PUSH_OFF_JOBS:
+            if name in SLOW_LEG_JOBS:
+                continue
             with self.subTest(job=name):
-                self.assertTrue(runs_on_event(self.jobs.get(name, {}).get("if"), "pull_request"), f"{name} does not run on a ready pull request")
+                expr = self.jobs.get(name, {}).get("if")
+                self.assertIsNotNone(expr, f"{name} has no job-level if")
+                if name in FAST_WINDOWS_JOBS:
+                    own = {flag: "true" for flag in FAST_WINDOWS_JOBS[name]}
+                    self.assertTrue(eval_with(job_if_without_records(expr), "pull_request", own),
+                                    f"{name} does not run on a ready pull request with its flag set: {expr}")
+                else:
+                    self.assertTrue(runs_on_event(expr, "pull_request"), f"{name} does not run on a ready pull request")
 
     def test_each_shard_keeps_the_draft_guard_beside_the_push_guard(self):
         # Named failure: a shard's job-level if drops the draft guard, so a draft pull request starts every shard. Control on the old file.
@@ -2469,17 +2498,19 @@ class ReadyPullFullSuite(unittest.TestCase):
         return names
 
     # R62 re-pointed for windows_guard: the owner granted the narrowing (waiting-page item 901 a, 18:20 CST Nov 15).
-    def test_a_docs_only_ready_pull_request_runs_every_step_of_the_full_suite_jobs(self):
-        # Named failure: a step of a full-suite job is conditioned on a scope flag or on code, which a docs-only PR leaves false.
-        # The guard shards read windows_guard, so this case sets it true; the sibling case below sets it false.
-        # The records-only condition is the one a ready pull_request does not meet: with it shut, no run step runs.
+    # A fast full-suite job starts on a ready pull_request only with its flag, and the guard family is daily only. Named failure: a
+    # step of a fast job is conditioned on something a ready pull_request with every Windows flag set does not meet. The
+    # records-only condition is the one a ready pull_request does not meet: with it shut, no run step runs.
+    def test_a_ready_pull_request_with_the_flags_set_runs_every_step_of_the_fast_suite_jobs(self):
+        values = {flag: "true" for flag in WINDOWS_FLAG_NAMES}
         for name in self.suite_jobs():
+            if name in SLOW_LEG_JOBS:
+                continue
             job = self.jobs[name]
-            values = {"windows_guard": "true"} if (shard_base(name) or name) == GUARD_JOB else {}
             for st in job["steps"]:
                 with self.subTest(job=name, step=step_label(st)):
                     self.assertTrue(runs_with_values(job, st, "pull_request", values),
-                                    f"{name} step {step_label(st)!r} does not run on a ready pull_request with {values or 'no flag set'}")
+                                    f"{name} step {step_label(st)!r} does not run on a ready pull_request with the Windows flags set")
                 if "run" in st:
                     with self.subTest(job=name, step=step_label(st), condition="shut"):
                         self.assertFalse(runs_with_values(job, st, "pull_request", dict(values, records_only_skip="true")),
@@ -2500,16 +2531,19 @@ class ReadyPullFullSuite(unittest.TestCase):
                     else:
                         self.assertTrue(runs, f"{name} step {step_label(st)!r} is a checkout or setup step and does not run on a ready PR")
 
-    def test_a_shard_job_skips_a_draft_pull_request_at_job_level_and_runs_a_ready_one(self):
-        # Control, green on the old code: the draft skip is the shard job's own if, and it stays.
+    def test_a_fast_shard_job_skips_a_draft_pull_request_and_runs_a_ready_one_with_its_flag(self):
+        # A fast shard starts on a ready pull_request only with its flag, and on no
+        # draft. The guard shards are daily only (WindowsJobsOnPullRequest), so they are not read here.
         for name in self.suite_jobs():
-            if shard_base(name) is None:
+            if shard_base(name) is None or name in SLOW_LEG_JOBS:
                 continue
             expr = self.jobs[name]["if"]
             with self.subTest(job=name):
                 self.assertIsNotNone(expr, f"{name} has no job-level if, so a draft pull_request starts its shard")
-                self.assertFalse(eval_if(expr, "pull_request", "true", draft=True), f"{name} runs on a draft pull_request: {expr}")
-                self.assertTrue(eval_if(expr, "pull_request", "false", draft=False), f"{name} does not run on a ready pull_request: {expr}")
+                self.assertFalse(eval_with(expr, "pull_request", {flag: "true" for flag in WINDOWS_FLAG_NAMES}, draft=True),
+                                 f"{name} runs on a draft pull_request: {expr}")
+                own = {flag: "true" for flag in FAST_WINDOWS_JOBS[name]}
+                self.assertTrue(eval_with(expr, "pull_request", own, draft=False), f"{name} does not run on a ready pull_request with its flag: {expr}")
 
     def test_no_step_of_a_full_suite_job_runs_on_a_draft_pull_request_with_no_flag_set(self):
         # Control, green on the old code: a draft with every flag false runs no suite step, so the R62 change must keep that.
@@ -3550,6 +3584,85 @@ class CiCoverageCollector(unittest.TestCase):
         self.assertIsNotNone(error, "the scan passed although the collector exits 3; a failed collector must fail it")
         self.assertNotIsInstance(error, AssertionError, "a failed collector reads as a gap report, not as an error")
         self.assertRegex(str(error), r"\b3\b", "the collector's error does not name its exit code 3: %s" % error)
+
+
+# ---- The Windows jobs on a pull_request, the slow legs, and the nightly run. Each case reads the
+# real checks.yml, so it is red until the change lands. The Windows-only list itself is read in lint/test_ci_scope.py.
+
+class WindowsJobsOnPullRequest(unittest.TestCase):
+    """A fast Windows job starts on a pull_request only when one of its own flags is set, so a pull_request that touches no Windows-only
+    path starts none of them. A slow leg starts on no push and no pull_request, whatever its flags: it runs on the daily scheduled run
+    only, like the macOS jobs (daily_only_expr)."""
+
+    def setUp(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            self.text = f.read()
+        self.jobs = all_jobs(self.text)
+
+    def job_expr(self, name):
+        # Scope first: the job must exist and carry a job-level if before its condition is read.
+        self.assertIn(name, self.jobs, f"checks.yml has no {name} job")
+        raw = self.jobs[name]["if"]
+        self.assertIsNotNone(raw, f"{name} has no job-level if, so every pull_request starts it")
+        return job_if_without_records(raw)
+
+    def test_a_fast_windows_job_starts_on_a_pull_request_only_when_its_own_flag_is_set(self):
+        # Named failure: a fast Windows job starts on a pull_request with no Windows flag set (the off case), or does not start with
+        # its own flag set (the on case).
+        for name, own in FAST_WINDOWS_JOBS.items():
+            with self.subTest(job=name):
+                expr = self.job_expr(name)
+                off = {flag: "false" for flag in WINDOWS_FLAG_NAMES}
+                on = {flag: ("true" if flag in own else "false") for flag in WINDOWS_FLAG_NAMES}
+                self.assertFalse(eval_with(expr, "pull_request", off), f"{name} starts on a pull_request with no Windows flag set: {expr}")
+                self.assertTrue(eval_with(expr, "pull_request", on), f"{name} does not start on a pull_request with {list(own)} set: {expr}")
+
+    def test_each_slow_leg_starts_on_no_push_and_no_pull_request_whatever_its_flags(self):
+        # Named failure: a slow leg starts on a push or on a pull_request, with any Windows flag and any draft state (one subtest each).
+        for name in SLOW_LEG_JOBS:
+            expr = self.job_expr(name)
+            for event in ("push", "pull_request"):
+                for flag, draft in itertools.product(("true", "false"), (False, True)):
+                    with self.subTest(job=name, event=event, flag=flag, draft=draft):
+                        values = {f: flag for f in WINDOWS_FLAG_NAMES}
+                        self.assertFalse(eval_with(expr, event, values, draft=draft),
+                                         f"{name} starts on a {event} (flags {flag}, draft {draft}): {expr}")
+
+    def test_each_slow_leg_starts_on_a_schedule_whatever_its_flags(self):
+        # Control: the daily scheduled run runs every slow leg, whatever the flags say.
+        for name in SLOW_LEG_JOBS:
+            with self.subTest(job=name):
+                expr = self.job_expr(name)
+                for flag in ("true", "false"):
+                    self.assertTrue(eval_with(expr, "schedule", {f: flag for f in WINDOWS_FLAG_NAMES}),
+                                    f"{name} does not start on a schedule (flags {flag}): {expr}")
+
+    def test_each_fast_windows_job_starts_on_a_schedule_whatever_its_flags(self):
+        # Control, green on the old code: the daily scheduled run starts every fast Windows job, whatever its flags say.
+        for name in FAST_WINDOWS_JOBS:
+            with self.subTest(job=name):
+                expr = self.job_expr(name)
+                for flag in ("true", "false"):
+                    self.assertTrue(eval_with(expr, "schedule", {f: flag for f in WINDOWS_FLAG_NAMES}),
+                                    f"{name} does not start on a schedule (flags {flag}): {expr}")
+
+
+class WindowsStepsOnSchedule(unittest.TestCase):
+    """The daily scheduled run runs the whole Windows set: every step of every Windows job runs on a schedule, even when every scope
+    flag is false, so the nightly does not depend on what the diff touched. A step that reads a flag or code is a gap on that run."""
+
+    def test_every_windows_step_runs_on_a_schedule_whatever_the_scope_flags_say(self):
+        # Named failure: a Windows step reads a scope flag or code, so a scheduled run with every flag false skips it (one subtest per step).
+        with open(CHECKS, encoding="utf-8") as f:
+            text = f.read()
+        jobs = windows_jobs(text)
+        self.assertTrue(jobs, "checks.yml has no Windows job")
+        for name in sorted(jobs):
+            job = jobs[name]
+            for st in job["steps"]:
+                with self.subTest(job=name, step=step_label(st)):
+                    self.assertTrue(runs_on(job, st, "schedule", "false", draft=False),
+                                    f"{name} step {step_label(st)!r} does not run on a schedule with every scope flag false")
 
 
 if __name__ == "__main__":
