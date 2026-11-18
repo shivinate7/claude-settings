@@ -45,7 +45,8 @@ Short and plain are one goal. Never trade one for the other.
   waiting page the same lines go in `context`, with a `gain` and a `lose` on each option and `widens:
   true` on a widening one. When the options trade off heavily, so that every `Lose:` is large (a ruling gone, a known gap left
   open), add one better-solution option that keeps most of the gain. That option is a writing rule only:
-  no check reads it. `hooks/question_form.py` checks the box and the page
+  no check reads it. `hooks/question_form.py` checks the box and the page, and vets each question against past rulings
+  read from the decision records: the first 800 characters of each ruling plus its owner-ruling sentences past the cut
   (decisions `question-form` and `port-keeps-behaviour`).<!-- rule:style-question-form -->
 - Put all a question needs inside the question box: its text, its options, or an option's
   preview. Text written before the box may not show. While work runs there is no box (rule

@@ -2109,9 +2109,11 @@ UNVETTED_LINE = re.compile(r"^[ \t>*+-]*Unvetted:[ \t]*\S", re.I | re.M)
 UNREADABLE = "unreadable"
 CLOSED_ITEMS = "closed page items"
 INDEX_CAP, STEP_TOP, STEP_GIT_TIMEOUT, RULED_TOP = 800, 30, 10, 8
+RULING_EXTRA_CAP = 600  # the most a record's ruling section adds past INDEX_CAP, as sentences that state a ruling by the owner
 RULING_HEADING = re.compile(r"^##[ \t]+The ruling[ \t]*$", re.I | re.M)
 RULING_WORDS = re.compile(r"ruling|owner|shiv", re.I)
 SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+DATE_STAMP = re.compile(r"\b20\d\d-\d\d-\d\d(?: \d\d:\d\d)?")
 WORD = re.compile(r"[a-z]{4,}")
 STOPWORDS = frozenset(("that", "this", "with", "from", "have", "will", "should", "would", "could", "there", "their",
                        "about", "which", "when", "what", "were", "been", "into", "than", "then", "them", "they",
@@ -2131,19 +2133,65 @@ def _words(text) -> set:
 
 
 def _ruling_text(body) -> str:
-    """The whole `## The ruling` section (to the next `## `), else the body after the title line, white space
-    collapsed and capped."""
+    """The `## The ruling` section (to the next `## `), else the body after the title line, white space
+    collapsed and cut at INDEX_CAP. A longer section also gets the sentences that
+    state a ruling by the owner from past the cut (see _owner_sentences), so a ruling late in a long section still
+    reaches the judge."""
     match = RULING_HEADING.search(body)
     if match:
         section = body[match.end():]
         nxt = re.search(r"^##[ \t]", section, re.M)
-        text = " ".join((section[:nxt.start()] if nxt else section).split())
+        section = section[:nxt.start()] if nxt else section
+        text = " ".join(section.split())
         if text:
-            return text[:INDEX_CAP]
+            extra = _owner_sentences(section)
+            return text[:INDEX_CAP] + (" " + extra if extra else "")
     lines = body.splitlines()
     if lines and lines[0].startswith("#"):
         lines = lines[1:]
     return " ".join(" ".join(lines).split())[:INDEX_CAP]
+
+
+def _units(section):
+    """The sentences of `section`, white space collapsed, in order. A markdown table row (a line that starts with
+    `|`) is one unit of its own, so a row that holds the ruling words is kept alone and not run on with its table.
+    The units joined by one space are the section collapsed."""
+    units, paragraph = [], []
+
+    def flush():
+        if paragraph:
+            units.extend(SENTENCE_SPLIT.split(" ".join(" ".join(paragraph).split())))
+            paragraph.clear()
+
+    for line in section.splitlines():
+        if line.lstrip().startswith("|"):
+            flush()
+            units.append(" ".join(line.split()))
+        elif line.strip():
+            paragraph.append(line)
+    flush()
+    return units
+
+
+def _owner_sentences(section) -> str:
+    """The units of `section` (see _units) that end past INDEX_CAP and carry a ruling word (RULING_WORDS), joined
+    with a space, at most RULING_EXTRA_CAP characters in all, the space before them included. When they do not all
+    fit, the one with the newest date stamp comes first, then the rest in document order (a later ruling sits late
+    in a long section); a unit that does not fit is skipped. The kept ones read in document order. "" when none."""
+    found, pos = [], 0
+    for unit in _units(section):
+        end = pos + len(unit)
+        pos = end + 1
+        if end > INDEX_CAP and RULING_WORDS.search(unit):
+            stamps = DATE_STAMP.findall(unit)
+            found.append((len(found), max(stamps) if stamps else "", unit))
+    picked, size = [], 1
+    for index, _stamp, unit in sorted(found, key=lambda item: item[1], reverse=True):  # stable: ties keep order
+        cost = len(unit) + bool(picked)
+        if size + cost <= RULING_EXTRA_CAP:
+            size += cost
+            picked.append((index, unit))
+    return " ".join(unit for _index, unit in sorted(picked))
 
 
 def _record_index(root, folder, unknown, label, seen):
