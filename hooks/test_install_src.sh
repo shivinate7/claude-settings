@@ -6836,7 +6836,7 @@ rows = route_match.read_rows()
 print("module " + route_match.__file__)
 print("rows " + ("none" if rows is None else json.dumps(sorted(str(row.get("id")) for row in rows))))
 PY
-  rc_out=$( cd "$rc_co" && env -i PATH="$PATH" HOME="$rc_h" CLAUDE_CONFIG_DIR="$rc_cfg" bash ./install.sh --cloud 2>&1 ); rc_rc=$?
+  rc_out=$( cd "$rc_co" && env -i PATH="$PATH" HOME="$rc_h" CLAUDE_CONFIG_DIR="$rc_cfg" CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" bash ./install.sh --cloud 2>&1 ); rc_rc=$?
   if [ "$rc_rc" -ne 0 ]; then bad "$1" "install.sh --cloud exited $rc_rc: $(printf '%s' "$rc_out" | tail -n 3)"; return 1; fi
   if ! grep -q "$ROUTE_PROBE_ROW" "$rc_cfg/hooks/route_rows.json" 2>/dev/null; then
     bad "$1" "the install did not land hooks/route_rows.json with the probe row"; return 1
