@@ -43,6 +43,11 @@ STEP_FLAGS = ["code", "guard", "sweep", "mods", "shoot"]
 # directly by the arm for actions/playwright-setup and .github/shoot (the paths checks-guard installs from).
 DERIVED_FLAGS = ["checks_windows_sweep", "checks_guard"]
 ALL = JOB_FLAGS + STEP_FLAGS
+# The Windows flags (R62/R63). A Windows job starts only on its own scope flag or a Windows-only path, so the catch-all arm
+# sets none of these. windows_guard is not here: it is the guard-input gate, not a Windows job.
+WINDOWS_SET = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_windows_rest_2", "checks_windows_sweep",
+               "pointer_windows"]
+ALL_NO_WINDOWS = [n for n in ALL if n not in WINDOWS_SET]
 BASH = shutil.which("bash")
 # This module's run folder (test-temp-standard). run() makes its scratch repos under it; the module teardown removes it.
 RUN_DIR = None
@@ -295,8 +300,10 @@ class Scope(unittest.TestCase):
             with self.subTest(path=p):
                 self.assertFlags(run([p]), want_true=ALL + DERIVED_FLAGS)
 
-    def test_unmapped_path_runs_everything(self):
-        self.assertFlags(run(["zz-unmapped/blob.bin"]), want_true=ALL)
+    # The catch-all arm (R62/R63): an unmapped path turns on every non-Windows flag and no Windows flag.
+    # Named failure: the catch-all starts a Windows job for a path that no rule names.
+    def test_unmapped_path_runs_every_non_windows_flag(self):
+        self.assertFlags(run(["zz-unmapped/blob.bin"]), want_true=ALL_NO_WINDOWS, want_false=WINDOWS_SET)
 
     def test_unreadable_diff_runs_everything(self):
         bogus = "f" * 40
@@ -333,9 +340,14 @@ class Scope(unittest.TestCase):
         # hooks/session_start.sh is not a Windows-only path (R62/R63), so the Windows rest job does not start for it.
         self.assertFlags(run(["hooks/session_start.sh"]), want_false=["checks_windows_rest"])
 
+    # A new file under a landed dir sets checks_windows, except under lint/: a new non-Windows lint file sets no Windows
+    # flag (R62/R63). test_scanner_traps and the lint/test_x.py snapshot row pin the same rule.
     def test_a_new_file_in_a_landed_dir_turns_on_the_install_suite(self):
-        for p in ("agents/new.md", "skills/new/SKILL.md", "output-styles/new.md", "lint/new.py"):
-            self.assertFlags(run([p]), want_true=["checks_windows", "shell_macos"])
+        for p in ("agents/new.md", "skills/new/SKILL.md", "output-styles/new.md"):
+            with self.subTest(path=p):
+                self.assertFlags(run([p]), want_true=["checks_windows", "shell_macos"])
+        with self.subTest(path="lint/new.py"):
+            self.assertFlags(run(["lint/new.py"]), want_true=["shell_macos"], want_false=["checks_windows"])
         # Named failure: review
         # finding on #305. The guard suite reads this path; if `guard` stays off, cut F runs it in no job.
         self.assertFlags(run(["lint/zz_new.py"]), want_true=["guard"])
@@ -523,12 +535,15 @@ class Scope(unittest.TestCase):
                     got = run([p], existing=existing)
                     self.assertFlags(got, want_true=["mods"] + self.MOD_JOBS)
 
-    # Control: the fix must not narrow the skill's non-.md paths. They stay on the fail-safe arm.
-    def test_a_map_skill_script_change_still_turns_everything_on(self):
+    # Control: the fix must not narrow the skill's non-.md paths. They stay on the fail-safe arm: every non-Windows flag
+    # and no Windows flag (R62/R63). A new file under skills/ also sets checks_windows by the landed-dir rule. That flag
+    # is pinned once, in test_a_new_file_in_a_landed_dir_turns_on_the_install_suite, so the new-file row leaves it out.
+    def test_a_map_skill_script_change_still_turns_every_non_windows_flag_on(self):
         p = self.MAP_SKILL + "scripts/map-check.mjs"
         for existing in ((), (p,)):
             with self.subTest(edit=bool(existing)):
-                self.assertFlags(run([p], existing=existing), want_true=ALL)
+                off = WINDOWS_SET if existing else [n for n in WINDOWS_SET if n != "checks_windows"]
+                self.assertFlags(run([p], existing=existing), want_true=ALL_NO_WINDOWS, want_false=off)
 
     # Control: another skill's .md keeps today's flags. The new rule must name the map skill only.
     def test_another_skills_md_keeps_its_current_flags(self):
@@ -1500,13 +1515,16 @@ class DocGroups(unittest.TestCase):
         self.assertJobFlagsOff(got, f"deleted {path}")
 
     # Control, the fail-safe: the doc arms match a lower-case .md only. An upper-case .MD name falls to the catch-all arm, so every
-    # flag is on. That is a false alarm, never a skipped step. It is not a DOC_CASES row: that loop expects a docs-only change.
+    # non-Windows flag is on and no Windows flag is (R62/R63). That is a false alarm, never a skipped step. It is not a DOC_CASES
+    # row: that loop expects a docs-only change.
     def test_an_upper_case_md_name_takes_the_fail_safe_arm(self):
         path = "docs/decisions/x.MD"
         got = run([path], existing=[path])
         self.assertDocFlags(got, set(DOC_GROUPS), path)
-        for n in ALL:
+        for n in ALL_NO_WINDOWS:
             self.assertEqual(got.get(n), "true", f"{n} is off for {path}, so the catch-all arm no longer covers it: {got}")
+        for n in WINDOWS_SET:
+            self.assertEqual(got.get(n), "false", f"{n} is on for {path}, so the catch-all arm starts a Windows job: {got}")
 
     def test_a_new_decision_doc_sets_its_flags_and_no_job_flag(self):
         # docs/decisions is in no landed dir, so a new file there sets nothing but its doc flags.
@@ -1576,26 +1594,22 @@ class MutationReport(unittest.TestCase):
 # windows_guard in ci-scope.sh, read from .github/guard-inputs.txt. The gate is read from checks.yml's own step condition, so each
 # case states what the workflow does with the scope outputs, not the value of one output. Cost: parses checks.yml once per call.
 GUARD_SHARDS = ("checks-windows-guard", "checks-windows-guard-2", "checks-windows-guard-3")
-# Flags the old script sets true for SNAPSHOT_DIFFS, each run() with its default arguments. windows_guard is left out of the
-# comparison: it is the one output the gate adds. Recorded on the script before the gate existed.
+# Flags the script sets true for SNAPSHOT_DIFFS, each run() with its default arguments, under R62/R63: a non-Windows path
+# sets no Windows flag, and a new non-Windows file under lint/ sets none either. windows_guard is left out of the
+# comparison: it is the one output the gate adds, so each row keeps every other flag the R62/R63 script sets.
 SNAPSHOT_DIFFS = [
     (["docs/x.md"], {}, ["doc_any", "doc_other"]),
     (["README.md"], {}, ["doc_any", "doc_glossary"]),
     (["docs/records.md"], {"green": ["hooks/guard.py"]},
      ["doc_any", "doc_other", "lint_comment_narration", "lint_plan_refuter", "lint_red_run", "records_only_skip"]),
-    (["hooks/guard.py"], {}, ["checks_guard", "checks_macos", "checks_windows", "checks_windows_rest", "checks_windows_rest_2",
-                              "checks_windows_sweep", "code", "guard", "lint_comment_narration", "lint_plan_refuter",
+    (["hooks/guard.py"], {}, ["checks_guard", "checks_macos", "code", "guard", "lint_comment_narration", "lint_plan_refuter",
                               "lint_red_run", "shell_macos", "shoot", "sweep"]),
-    (["lint/test_x.py"], {}, ["checks_guard", "checks_windows", "code", "guard", "lint_comment_narration", "lint_red_run",
-                              "shell_macos"]),
+    (["lint/test_x.py"], {}, ["checks_guard", "code", "guard", "lint_comment_narration", "lint_red_run", "shell_macos"]),
     # install.ps1 is a Windows-only path, so it starts the Windows set (WindowsOnlyPaths pins that).
     (["install.ps1"], {}, ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_windows_rest_2",
                            "checks_windows_sweep", "code", "lint_comment_narration", "lint_red_run", "pointer_windows"]),
-    (["settings.json"], {}, ["checks_guard", "checks_macos", "checks_windows", "checks_windows_merge", "checks_windows_rest",
-                             "checks_windows_rest_2", "checks_windows_sweep", "code", "guard", "lint_comment_narration",
-                             "lint_red_run", "sweep"]),
-    (["merge/merge.py"], {}, ["checks_guard", "checks_macos", "checks_windows", "checks_windows_merge", "code", "guard",
-                              "lint_comment_narration", "lint_red_run"]),
+    (["settings.json"], {}, ["checks_guard", "checks_macos", "code", "guard", "lint_comment_narration", "lint_red_run", "sweep"]),
+    (["merge/merge.py"], {}, ["checks_guard", "checks_macos", "code", "guard", "lint_comment_narration", "lint_red_run"]),
     (["agents/builder.md"], {"existing": ["agents/builder.md"]}, ["doc_agents", "doc_any"]),
     (["docs/decisions/agent-model-cap.md"], {"existing": ["docs/decisions/agent-model-cap.md"]},
      ["doc_any", "doc_decisions", "lint_ruling_kind"]),
@@ -1715,7 +1729,7 @@ class WindowsGuardShards(unittest.TestCase):
         shards = guard_shards_run(got)
         self.assertEqual(set(shards.values()), {False}, f"a guard shard runs after a records-only push: {shards}")
 
-    # The gate adds one output and changes no other: each sample diff keeps the flags the pre-gate script set.
+    # The gate adds one output and changes no other: each sample diff keeps the flags the R62/R63 script sets (SNAPSHOT_DIFFS).
     def test_every_other_flag_keeps_its_value_for_the_sample_diffs(self):
         for paths, kw, want in SNAPSHOT_DIFFS:
             with self.subTest(paths=paths, kw=kw):
@@ -1731,8 +1745,6 @@ class WindowsGuardShards(unittest.TestCase):
 # guard-input meaning (lint/*, hooks/* and the rest of .github/guard-inputs.txt), so it is not in WINDOWS_SET. The cases read the
 # list from the output and keep no copy of it here.
 WINDOWS_CONSTANT = "windows_only_globs"
-WINDOWS_SET = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_windows_rest_2", "checks_windows_sweep",
-               "pointer_windows"]
 # A new mod file. Its mod tests are not a Windows check, so it sets no Windows flag once mods/ leaves the list. On the old script
 # it sets checks_windows.
 MOD_PROBE = "mods/zz-probe/check.mjs"
