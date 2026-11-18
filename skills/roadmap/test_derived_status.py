@@ -242,16 +242,14 @@ class OffMainAndStatuses(DriftFixture):
         self.assert_drift(out, [("c3", "doing", "done")],
                           "a closed unmerged row whose head is off main marks nothing")
 
-    def test_blocked_queued_and_folded_with_an_open_lane_pull_are_flagged(self):
+    def test_blocked_and_folded_with_an_open_lane_pull_are_flagged(self):
         self.commit_step("b1", status="blocked", order=2)
-        self.commit_step("q1", status="queued", order=3)
-        self.commit_step("f1", status="folded", order=4)
+        self.commit_step("f1", status="folded", order=3)
         self.no_trailer_on_main()
-        self.publish(sessions=[], items=[], pulls=[self.open_pull(61, "lane/b1"), self.open_pull(62, "lane/q1"),
-                                                   self.open_pull(63, "lane/f1")])
+        self.publish(sessions=[], items=[], pulls=[self.open_pull(61, "lane/b1"), self.open_pull(63, "lane/f1")])
         out = self.out_with_live(expect=(0,))
-        self.assert_drift(out, [("b1", "blocked", "doing"), ("f1", "folded", "doing"), ("q1", "queued", "doing")],
-                          "every disagreement flags: blocked, queued and folded with an open lane pull derive doing")
+        self.assert_drift(out, [("b1", "blocked", "doing"), ("f1", "folded", "doing")],
+                          "every disagreement flags: blocked and folded with an open lane pull derive doing")
 
 
 if __name__ == "__main__":

@@ -2346,8 +2346,8 @@ class UntouchedInLivePhase(UpkeepFixture):
 class LiveStatusPhase(UpkeepFixture):
     """A phase is live when it holds an open step whose status is in build.LIVE_STATUS (doing, and the legacy active).
     The two rows, `untouched 5 days in a live phase` (updatedAt STALE_DAYS old or more) and `no note in a live phase`
-    (an empty note), read the open steps of a live phase whose status is todo, ready, queued or live. A step with no
-    phase never makes a phase live and is never listed. A phase holding only blocked, queued or ready steps is not live."""
+    (an empty note), read the open steps of a live phase whose status is todo, ready or live. A step with no
+    phase never makes a phase live and is never listed. A phase holding only blocked, folded or ready steps is not live."""
 
     STALE = "untouched 5 days in a live phase"
     EMPTY = "no note in a live phase"
@@ -2374,16 +2374,16 @@ class LiveStatusPhase(UpkeepFixture):
         self.assertEqual(empty, (1, ["build-todo"]),
                          "build is live, so its empty todo step is listed; later is not live, so later-todo is in neither row")
 
-    def test_a_phase_holding_only_blocked_or_queued_steps_is_not_live(self):
+    def test_a_phase_holding_only_blocked_or_folded_steps_is_not_live(self):
         self.commit_step("build-doing", status="doing", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
         self.commit_step("build-ready", status="ready", phase="build", note="Parked for a lane.",
                          updatedAt=self.ten_days_ago(), order=2)
         self.commit_step("stuck-blocked", status="blocked", phase="stuck", note="", updatedAt=self.ten_days_ago(), order=3)
-        self.commit_step("waiting-queued", status="queued", phase="waiting", note="", updatedAt=self.ten_days_ago(), order=4)
+        self.commit_step("waiting-folded", status="folded", phase="waiting", note="", updatedAt=self.ten_days_ago(), order=4)
         (_, stale), (_, empty) = self.stale_and_empty()
         self.assertIn("build-ready", stale, "scope first: build holds a doing step, so its ready step is listed")
         self.assertNotIn("stuck-blocked", stale + empty, "stuck holds only a blocked step, so it is not live")
-        self.assertNotIn("waiting-queued", stale + empty, "waiting holds only a queued step, so it is not live")
+        self.assertNotIn("waiting-folded", stale + empty, "waiting holds only a folded step, so it is not live")
 
     def test_a_legacy_active_step_still_makes_its_phase_live(self):
         # A legacy active step still makes its phase live, which the upkeep rows in this file depend on.
@@ -2421,7 +2421,7 @@ class LiveStatusPhase(UpkeepFixture):
         self.assertEqual(count, 30, "all 30 stale ready steps in build are counted")
         self.assertEqual(stale, ids, "the row lists all 30, with no cut-off for a long list")
 
-    def test_folded_and_blocked_steps_are_read_by_neither_row_and_queued_is_read_like_todo(self):
+    def test_folded_blocked_and_queued_steps_are_read_by_neither_row(self):
         self.commit_step("build-doing", status="doing", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
         self.commit_step("build-folded", status="folded", phase="build", note="", updatedAt=self.ten_days_ago(), order=2)
         self.commit_step("build-blocked", status="blocked", phase="build", note="", updatedAt=self.ten_days_ago(), order=3)
@@ -2429,10 +2429,10 @@ class LiveStatusPhase(UpkeepFixture):
         self.commit_step("build-todo", status="todo", phase="build", note="", updatedAt=self.ten_days_ago(), order=5)
         (stale_count, stale), (empty_count, empty) = self.stale_and_empty()
         self.assertIn("build-todo", stale, "scope first: build is live, so its todo step, untouched 10 days, is listed")
-        self.assertEqual((stale_count, stale), (2, ["build-queued", "build-todo"]),
-                         "the stale row reads todo, ready, queued and live steps, so folded and blocked are not listed")
-        self.assertEqual((empty_count, empty), (2, ["build-queued", "build-todo"]),
-                         "the empty row reads todo, ready, queued and live steps, so folded and blocked are not listed")
+        self.assertEqual((stale_count, stale), (1, ["build-todo"]),
+                         "the stale row reads todo, ready and live steps, so folded, blocked and queued are not listed")
+        self.assertEqual((empty_count, empty), (1, ["build-todo"]),
+                         "the empty row reads todo, ready and live steps, so folded, blocked and queued are not listed")
 
     def test_a_step_with_no_phase_makes_no_phase_live_and_is_never_listed(self):
         self.commit_step("build-doing", status="doing", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
@@ -2466,20 +2466,31 @@ class LiveStatusPhase(UpkeepFixture):
         self.assertEqual(stale, ["build-todo"], "ready-only holds no live step, so it is not live and is not listed")
         self.assertEqual(empty, ["build-todo"], "ready-only holds no live step, so it is not live and is not listed")
 
-    def test_blocked_queued_and_folded_are_known_statuses(self):
-        missing = [s for s in ("blocked", "queued", "folded") if s not in build.KNOWN_STATUS]
+    def test_blocked_and_folded_are_known_statuses_and_not_listed(self):
+        self.assertIn("todo", build.LISTED_STATUS, "scope first: LISTED_STATUS holds the statuses the stale and empty rows read")
+        missing = [s for s in ("blocked", "folded") if s not in build.KNOWN_STATUS]
         self.assertEqual(missing, [], "KNOWN_STATUS lacks these statuses, so upkeep reports a step in one as unknown")
+        listed = [s for s in ("blocked", "folded") if s in build.LISTED_STATUS]
+        self.assertEqual(listed, [], "LISTED_STATUS holds these statuses, so the stale and empty rows read a step in one")
 
-    def test_blocked_queued_and_folded_steps_are_not_unknown_status_entries(self):
+    def test_queued_is_not_a_known_status(self):
+        self.assertIn("blocked", build.KNOWN_STATUS, "scope first: KNOWN_STATUS holds the statuses that stay")
+        self.assertNotIn("queued", build.KNOWN_STATUS, "queued is retired, so KNOWN_STATUS does not accept it")
+
+    def test_queued_is_not_a_listed_status(self):
+        self.assertIn("todo", build.LISTED_STATUS, "scope first: LISTED_STATUS holds the statuses the stale and empty rows read")
+        self.assertNotIn("queued", build.LISTED_STATUS, "queued is retired, so the stale and empty rows do not read it")
+
+    def test_queued_is_an_unknown_status_entry_and_blocked_and_folded_are_not(self):
         self.commit_step("c-waiting", status="waiting", order=1)  # an unknown status is still listed
-        for order, status in enumerate(("blocked", "queued", "folded"), start=2):
+        for order, status in enumerate(("blocked", "folded", "queued"), start=2):
             self.commit_step("c-" + status, status=status, order=order)
         self.publish(sessions=[])
         _, detail = self.row(self.out_with_live(), StaleInProgress.ROW)
         self.assertIn('c-waiting (unknown status "waiting")', self.entries(detail),
                       "scope first: the row lists a step with an unknown status")
-        self.assertEqual(self.entries(detail), ['c-waiting (unknown status "waiting")'],
-                         "blocked, queued and folded are known statuses, so the row does not list them as unknown")
+        self.assertEqual(self.entries(detail), ['c-queued (unknown status "queued")', 'c-waiting (unknown status "waiting")'],
+                         "queued is retired, so the row lists it as an unknown status; blocked and folded are known, so they are not listed")
 
     def test_build_spells_the_live_statuses_only_in_live_status(self):
         path = HERE / "build.py"
