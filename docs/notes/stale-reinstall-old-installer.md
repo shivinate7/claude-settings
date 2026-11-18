@@ -1,0 +1,1 @@
+- stale-reinstall-old-installer: After a deploy, the first stale reinstall runs the old installer, which has no stamp code, so one failure window reruns each prompt. The window is bounded.

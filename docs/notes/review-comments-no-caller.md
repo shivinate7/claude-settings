@@ -1,0 +1,1 @@
+- review-comments-no-caller: `Host.review_comments` in merge/merge.py has no production caller. Fix: give it a caller or delete it (#2440).
