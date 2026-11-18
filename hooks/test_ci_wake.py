@@ -77,8 +77,9 @@ A prs, runs or workflows entry with a `repo` field answers only a call that reac
 with its own -R or --repo (any spelling gh takes), else a PR URL selector's repo, else GH_REPO, else the
 fixture's `cwd_repo`. An entry with no
 `repo` answers every call. `workflows` is the `gh workflow list` answer (one active `checks` workflow
-when absent); without --all only active entries answer. The fixture key `workflow_list` ("error" or
-"garbage") fails that one call and no other. The fixture key `list_error_from` N makes every `run list`
+when absent); without --all only active entries answer. The fixture key `workflow_list` ("error",
+"garbage" or "empty") changes that one call and no other. "empty" prints nothing and exits 0: the answer
+gh 2.89.0 gives for a repo with no workflow. The fixture key `list_error_from` N makes every `run list`
 from the Nth call of the case on exit 1 (HTTP 403), so a re-list can be refused after a judged run.
 
 Draft run, then the real run: `gh pr create --draft` makes a run
@@ -367,6 +368,8 @@ def main(args):
         if fx.get("workflow_list") == "garbage":
             sys.stdout.write("<html>not json</html>\n")
             return 0
+        if fx.get("workflow_list") == "empty":
+            return 0   # gh 2.89.0 prints 0 bytes and exits 0 for a repo with no workflow, not "[]"
         # gh lists the active workflows unless --all; the fixture's repo field is not gh's, so it is dropped
         wf = [{k: v for k, v in w.items() if k != "repo"} for w in fx.get("workflows", DEFAULT_WORKFLOWS)
               if here(w, args, fx) and ("--all" in args or w.get("state") == "active")]
@@ -1623,6 +1626,30 @@ def case_failed_workflow_read_is_not_no_workflows():
         expect_watch(label, res, ["902"])
 
 
+def case_empty_workflow_list_is_no_workflows():
+    """A repo with no workflow starts no watch. The answer that shows it is gh 2.89.0's, probed on
+    shivinate7/session-mailbox (REST total_count 0, no .github/workflows): `gh workflow list --json id` writes
+    0 bytes to stdout and exits 0. It does not write "[]". A repo with a workflow prints a JSON list. An empty
+    answer is no workflow, so the hook must not read it as unknown and watch. Rows: no repo flag, --repo."""
+    rows = (
+        ("no repo flag", "gh pr ready 7", False),
+        ("--repo", "gh pr ready 7 --repo " + REPO_HOME, True),
+    )
+    for name, command, asks in rows:
+        label = "empty workflow list, %s" % name
+        fx = fixture([pr(7, repo=REPO_HOME)], [], cwd_repo=REPO_HOME, workflow_list="empty")
+        res = run_hook(bash(command), fx, extra={"CI_WAKE_DEADLINE": "4"})
+        check("%s: the hook reads the workflow list" % label, count(res, "workflow", "list") >= 1, why(res))
+        if asks:
+            check("%s: the list reads -R %s" % (label, REPO_HOME),
+                  any(GH.strip_repo(c)[:2] == ["workflow", "list"] and GH.repo_of(c) == REPO_HOME
+                      for c in res.calls), why(res))
+        expect_silent(label, res)
+        expect_no_watch(label, res)
+        check("%s: no run list or run view call" % label,
+              count(res, "run", "list") == 0 and count(res, "run", "view") == 0, why(res))
+
+
 # Selector forms that leave the repo out of the hook's own parse. The PR lives in REPO_APP, and the folder
 # is REPO_HOME, which has no workflow. Each form must give the PR's verdict, and every gh call after the
 # pr view must name REPO_APP with -R, taken from the PR's own url field.
@@ -2272,6 +2299,7 @@ def main():
     case_repo_without_ci_starts_no_watch()
     case_workflows_but_no_run_on_head_still_says_no_run_yet()
     case_failed_workflow_read_is_not_no_workflows()
+    case_empty_workflow_list_is_no_workflows()
 
     # Selector forms that leave the repo blank, and the folder without workflows.
     case_url_selector_pins_pr_repo_on_later_calls()
