@@ -9,6 +9,6 @@
   "blockedBy": [],
   "why": "Owner, 19:45 CST Nov 17, relayed by the consultant: round-1 reviewers on Haiku are intended; run them at xhigh for every change, guard or check included.",
   "source": "owner chat via the consultant, 19:45 CST Nov 17 (inbox fb-1945-1)",
-  "note": "Waits on the consultant landing the change in decision agent-model-cap. Triage reads the decision's round rows from main and files the merge. Proof: the round rows on main. Not built by triage.",
-  "updatedAt": "2026-11-17T20:30:23-06:00"
+  "note": "Waits on the consultant landing the change in decision agent-model-cap. Triage reads the decision's round rows from main and files the merge. Proof: the round rows on main. Not built by triage. Read by triage 11 at 22:31 CST Nov 17 (origin/main b58eb9848, 22:05 CST): docs/decisions/agent-model-cap.md line 30 still says round 1 runs haiku only on a change with no guard or check and sonnet on a guard or check change, so the owner's 19:45 CST change is not on main. Wake: that line reads haiku for every round 1, then triage files the merge.",
+  "updatedAt": "2026-11-17T22:30:38-06:00"
 }
