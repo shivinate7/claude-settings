@@ -2202,6 +2202,57 @@ def case_past_ruling_owner_row_after_a_long_table_reaches_the_line():
           len(text) <= question_form.INDEX_CAP + question_form.RULING_EXTRA_CAP, "%d characters" % len(text))
 
 
+# Owner ruling sentences that do not all fit are taken newest date stamp first (question_form._owner_sentences). So a
+# newer ruling beats an older one that sits earlier in the section, and an undated one sorts after the dated ones.
+NEWEST_LEAD = "Owner ruling, 2026-11-17 19:45 CST: keep the new review budget"
+OLDER_LEAD = "Owner ruling, 2026-11-16 09:00 CST: keep the old review budget"
+UNDATED_LEAD = "Owner ruling: keep the undated review budget"
+PAD_WORDS = "keep the review stack and its model pins as they are".split()
+
+
+def _sized_sentence(lead, n_chars):
+    """One sentence of n_chars characters: `lead`, then plain words with no ruling word, then a period. It holds no
+    sentence break before its end."""
+    text, index = lead, 0
+    while len(text) < n_chars - 1:
+        text += " " + PAD_WORDS[index % len(PAD_WORDS)]
+        index += 1
+    return text[:n_chars - 1] + "."
+
+
+def case_past_ruling_owner_sentences_newest_date_first():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("past rulings newest first: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    cap = question_form.RULING_EXTRA_CAP  # the budget is read from the module, never copied
+    older = _sized_sentence(OLDER_LEAD, cap * 7 // 10)
+    undated = _sized_sentence(UNDATED_LEAD, cap // 2)
+    newer = _sized_sentence(NEWEST_LEAD, cap * 37 // 100)
+    section = _filler(900) + " " + older + " " + undated + " " + newer
+    check("past rulings newest first: the fixture puts the three owner sentences past INDEX_CAP",
+          min(section.index(s) for s in (older, undated, newer)) > question_form.INDEX_CAP,
+          "offset %d" % section.index(older))
+    check("past rulings newest first: the two dated sentences together are over RULING_EXTRA_CAP",
+          len(older) + len(newer) > cap, "%d characters" % (len(older) + len(newer)))
+    check("past rulings newest first: the older dated sentence comes first in the section",
+          section.index(older) < section.index(newer), "fixture order")
+    record_id, candidates = _past_cap_candidates("past-owner-newest-first", section, fn)
+    lines = _record_lines(candidates, record_id)
+    check("past rulings newest first: the decision record is a candidate (scope)", bool(lines),
+          str(candidates)[:200])
+    if not lines:
+        return
+    text = _record_text(candidates, record_id)
+    check("past rulings newest first: the newer dated owner sentence reaches the record's line", newer in text,
+          text[-200:])
+    check("past rulings newest first: the older dated owner sentence is dropped, as it does not fit beside the newer",
+          older not in text, text[-200:])
+    check("past rulings newest first: the undated owner sentence sorts after the dated ones, and is kept when they "
+          "leave room", undated in text, text[-200:])
+
+
 # The owner's rulings not yet on main (the ruled store) sit on origin/roadmap. past_rulings puts each open entry first,
 # ahead of the decision records, and names what it supersedes. The pointer is patched to the fixture repo, so the cases
 # pass whichever checkout past_rulings reads the store from.
@@ -3812,6 +3863,7 @@ def main():
                  case_past_ruling_section_without_owner_sentence_is_cut_at_the_cap,
                  case_past_ruling_owner_sentences_added_text_is_capped,
                  case_past_ruling_owner_row_after_a_long_table_reaches_the_line,
+                 case_past_ruling_owner_sentences_newest_date_first,
                  case_ruled_store_first_and_carries_supersedes, case_ruled_store_absent_is_only_unknown,
                  case_ruled_store_words_filter_leaves_out_an_unrelated_entry,
                  case_ruled_store_caps_matching_entries_at_eight_newest_first,
