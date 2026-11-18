@@ -402,17 +402,27 @@ def fetch_origin_record(repo, branch):
 def record_source(repo, branch, fetch=False):
     """(source, why): the record branch to read, or None and the reason it cannot be read.
 
-    `fetch` (the build) asks origin for a branch no local ref holds; a read-only caller never starts network.
+    `fetch` (the build) asks origin on every call, because the build's own fetch leaves origin/<branch> behind and a
+    later build would read that ref as current. When origin cannot be asked or read, a local record is read with a
+    warning on stderr; with no local record the build exits non-zero. A read-only caller never starts network.
     """
     here = git(repo, "symbolic-ref", "--quiet", "--short", "HEAD")
     if here is not None and here.strip() == branch and (repo / DATA).is_dir():
         return Tree(repo), None
-    for ref in ("origin/" + branch, branch):
-        if git(repo, "rev-parse", "--verify", "--quiet", ref + "^{commit}") is not None:
-            return Ref(repo, ref), None
-    fetched = fetch_origin_record(repo, branch) if fetch else None
-    if fetched:
-        return Ref(repo, fetched), None
+    local = next((ref for ref in ("origin/" + branch, branch)
+                  if git(repo, "rev-parse", "--verify", "--quiet", ref + "^{commit}") is not None), None)
+    if fetch:
+        try:
+            fetched = fetch_origin_record(repo, branch)
+        except SystemExit as stop:
+            if local is None:
+                raise
+            print("warning: %s. Reading the local %s, which may be behind origin." % (stop, local), file=sys.stderr)
+            return Ref(repo, local), None
+        if fetched:
+            return Ref(repo, fetched), None
+    if local:
+        return Ref(repo, local), None
     return None, "no %s branch in this checkout" % branch
 
 

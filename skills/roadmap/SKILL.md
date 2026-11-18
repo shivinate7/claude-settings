@@ -28,8 +28,10 @@ the whole old read-only page. Nothing publishes it.
 - **On the record branch.** The checkout stands on the record branch: the roadmap build script reads the working
   tree. Build after each edit to `roadmap/data/`.
 - **Anywhere else.** The roadmap build script reads the record branch through the repo history, `origin/<branch>`
-  first. With no local copy, the build fetches the branch from `origin` itself, even on a single-branch checkout.
-  If origin has it and it cannot be read, the build exits non-zero and writes nothing. The block is as old as that fetch.
+  first. The build asks `origin` on every run and fetches the branch itself, even on a single-branch checkout, so a
+  later build sees what origin gained. If origin has it and it cannot be read, the build exits non-zero and writes
+  nothing. Offline, a GitHub-origin checkout with no local record exits 1 and writes no block (fail closed); with a
+  local record it reads that copy and warns on stderr. The block is as old as that read.
 - `--block` needs `--out`, on either path.
 
 The record homes (decisions, debts, debt notes, notes, plans, specs) come from the checkout, at the paths
