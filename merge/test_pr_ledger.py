@@ -380,9 +380,11 @@ class NextActGaps(LedgerCase):
         self.assertFalse(red, f"#7 waits on debt:merge-flake, which has no limit of its own, and its line reads RED:\n{out}")
 
     def test_a_pr_blocked_on_a_red_pr_reads_red(self):
-        out = self.reviewed(LedgerHost([pull(7, base="feat5", hours_ago=5), pull(5, draft=True, hours_ago=80)]))
-        self.assertEqual(self.next_act(out, 5), ("lane round 1", True),
-                         f"control: #5 is a draft with no record for 80 h, past its 72 h limit, so it reads RED:\n{out}")
+        # Ruling own-572-a-ledger-by-age-only (the ledger's age-only limits) keeps an age limit on the batch acts alone, so the blocker
+        # is a done record that has waited past one batch cycle.
+        out = self.reviewed(LedgerHost([pull(7, base="feat5", hours_ago=5), pull(5, hours_ago=2)], comments=[record(5, 30), lint(5)]))
+        self.assertEqual(self.next_act(out, 5), ("batch", True),
+                         f"control: #5 is done at the live head and has waited 30 h for a batch, past its 24 h limit, so it reads RED:\n{out}")
         act, red = self.next_act(out, 7)
         self.assertEqual(act, "blocked on #5", f"#7's base ref is feat5, the head branch of open #5, so it is blocked on #5:\n{out}")
         self.assertTrue(red, f"#7 is blocked on #5, which reads RED, and its line does not read RED:\n{out}")
