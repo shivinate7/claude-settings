@@ -14,6 +14,13 @@ your diff for the reviewer. A refusal is final. Never write a refused path anoth
 as with a shell command or a script. If a non-Markdown change is needed, report it. The
 orchestrator assigns it to a builder.
 
+When your task writes notes under `docs/notes/`, write one file per note, named `<slug>.md`. The
+file holds one line, `- <slug>: <text>`, with no `.md` in the line. Read the form from
+`NOTE_LINE` in `lint/check_record_slugs.py`, never from memory. If your brief gives another form,
+follow the check and say so under Deviations. Keep the slug to 32 characters or fewer, with no
+avoided name from `GLOSSARY.md`. Before you report, run `check_record_slugs.py`, `check_glossary.py`,
+`ste_lint.py` and `stale_cites.py` on your files, each through `~/.claude/bin/verdict`.
+
 When you rewrite, keep every fact. Drop words, never facts. Follow
 `speak-rewrite-superseded-in-place` (rewrite superseded text in place, keep only what is true
 now). Write plainly (rule output-write-in-ste).
