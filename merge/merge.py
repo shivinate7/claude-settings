@@ -6785,7 +6785,13 @@ def load_roadmap_build():
     return build
 
 def idle_lanes(live, repo_dir=None):
-    """merge --idle-lanes: print lane lines (a lane to archive; a lane whose handoff is not on the record branch ends with
+    """merge --idle-lanes: the exit code of idle_lanes_read, whose docstring holds the report's form."""
+    return idle_lanes_read(live, repo_dir)[0]
+
+def idle_lanes_read(live, repo_dir=None):
+    """merge --idle-lanes -> (exit code, whether the printed report holds an `unknown (` line). A report with an unknown line beside a lane or
+    a hold exits 0 and is only partly read; idle_lanes_after_merge reads the flag to print its owed line.
+    The report prints lane lines (a lane to archive; a lane whose handoff is not on the record branch ends with
     HOLD and counts only in the summary's "M held", not in "N lanes to archive") and `hold (` lines (a lane not to archive
     now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane;
     the last clears when the step's status is set to todo or done; a lane whose pull an open or merged pull replaced is listed whatever
@@ -6798,21 +6804,21 @@ def idle_lanes(live, repo_dir=None):
     prints a `hold (kept: ...)` line. Each `unknown (` line ends with IDLE_UNKNOWN_FIX unless it already says to read the live file again. `repo_dir` is the -C checkout (None: the one the process stands in)."""
     if not live:
         print("merge: --idle-lanes needs --live FILE, the publisher's live-work file. No list was made.", file=sys.stderr)
-        return 1
+        return 1, False
     try:
         build = load_roadmap_build()
     except Exception as e:
         print(f"merge: cannot load the roadmap build {IDLE_BUILD}: {type(e).__name__}: {e}. No list was made.", file=sys.stderr)
-        return 1
+        return 1, False
     c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=repo_dir)
     if c:
         print("merge: not in a git checkout. No list was made.", file=sys.stderr)
-        return 1
+        return 1, False
     try:
         entries = build.idle_lanes_report(root, live)
     except (Exception, SystemExit) as e:
         print(f"merge: the roadmap build could not read the lanes: {type(e).__name__}: {e}. No list was made.", file=sys.stderr)
-        return 1
+        return 1, False
     holds = [x for x in entries if x.startswith("hold (")]
     lanes = [x for x in entries if not x.startswith("unknown (") and x not in holds]
     handoff_held = [x for x in lanes if build.IDLE_HOLD_MARK in x]  # lanes whose handoff is not on the record branch
@@ -6829,7 +6835,7 @@ def idle_lanes(live, repo_dir=None):
     # No unknown line ends bare: each names what to fix and to read the live file again, so a reader never meets a dead end. The checks above read the raw entries.
     entries = [x + IDLE_UNKNOWN_FIX if x.startswith("unknown (") and not IDLE_FIX_NAMED.search(x) else x for x in entries]
     say(*entries)
-    return 1 if unread else 0
+    return (1 if unread else 0), any(x.startswith("unknown (") for x in entries)
 
 LIVE_PATH = "roadmap/live/live.json"  # triage commits the live file here on origin's roadmap branch at each batch merge
 
@@ -6880,10 +6886,13 @@ def idle_lanes_after_merge(root, commit, host, n, body, before=None):
             elif why is None and read_at <= landed:
                 why = "stale (read before this merge landed)"
         if why is None:
-            if idle_lanes(raw, root) == 0:  # its exit code is the report's own; the merge's code stays as it was
+            code, partial = idle_lanes_read(raw, root)  # its exit code is the report's own; the merge's code stays as it was
+            if code == 0 and not partial:
                 return
-            # The fresh file read unknown (a bad shape, an unread build): the lines above say why, and a bare unknown names no command that fixes it.
-            say("merge: the idle-lanes pass is owed: the live file on origin/roadmap is fresh but its report reads unknown (above). "
+            # The fresh file read unknown, wholly (a bad shape, an unread build) or beside a lane or a hold: the lines above say why, and a bare
+            # unknown names no command that fixes it. A partly read report owes the pass too, so the reader runs it again once the file is fixed.
+            reads = "reads unknown" if code else "holds an unknown line, so it is only partly read"
+            say(f"merge: the idle-lanes pass is owed: the live file on origin/roadmap is fresh but its report {reads} (above). "
                 "Fix what the line above names in the live file, then run merge --idle-lanes --live FILE. " + IDLE_CITE)
         else:
             say(owed % why)
