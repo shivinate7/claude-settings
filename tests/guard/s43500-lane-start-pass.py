@@ -243,7 +243,7 @@ add(LSP_TOKEN + ": a send_message brief that names a bare session id is refused 
 # ---- The helper's output, through the guard. A missing or wrong helper fails here, by its exit and its output.
 _lsp_log(LSP_TOKEN + ": the output of bin/lane-start is allowed as a create_session", _lsp_round_trip_check)
 
-# ---- Change 4. Only a 403 or 404 on a repo's read names add_repo (ruling 937 a). Any other failed read says to retry.
+# ---- Change 4. Only a 403 or 404 on a repo's read names add_repo (page item 937 b, 14:20 CST Nov 17). Any other failed read says to retry.
 FAMILY = "lane-closes-after-records"
 # The open-list read fails (a broken gh): no 403 or 404, so the remedy is the retry alone.
 archive_refuse(LSP_TOKEN + ": a lane whose open pull requests cannot be read says retry once gh answers, and no add_repo",
