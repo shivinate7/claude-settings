@@ -958,7 +958,7 @@ class ScratchRootsTests(unittest.TestCase):
 # ----------------------------------------------------- the temp-folder step's wiring in sweep.main
 #
 # `sweep.main` calls the temp-folder step once per full run, after the simulator tier, with the
-# run's confirm flag, on every OS (owner ruling, 2026-11-17 13:30 CST). Here the step is a recorder
+# run's confirm flag, on every OS. Here the step is a recorder
 # and every tier that reads the real machine is stubbed, so no case touches a real temp
 # folder, process, or run log. `reached` is the positive control: the run got past the simulator
 # tier, so an empty recording means the step did not run, not that the run ended early.
@@ -1009,7 +1009,7 @@ class TempSweepWiringTests(unittest.TestCase):
         self.assertEqual(seen, [False], "on Windows a preview run must call the temp step once, "
                                         "with confirm False; it saw %r" % (seen,))
 
-    # Owner ruling, 2026-11-17 13:30 CST: the janitor clears idle session scratch on Linux and Mac too.
+    # The janitor clears idle session scratch on Linux and Mac too, so the step runs off Windows as well.
     def test_not_windows_runs_the_step_once_without_confirm(self):
         seen, reached = self.run_main(False)
         self.assertTrue(reached, "the run never reached the simulator tier, so this case proved nothing")
