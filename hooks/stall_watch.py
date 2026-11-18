@@ -98,7 +98,8 @@ Stop: stall_watch.py --stop
   ready call (`gh pr ready <N>` in Bash or PowerShell, outside quotes, heredoc bodies and `#` comments, not
   --undo; or MCP update_pull_request with draft false) opens a wait. An --undo, or draft true, closes the wait on its PR. A `gh` global flag before `pr`
   (`gh -R o/r pr ready 5`) is skipped. A later user or queued message with a
-  `CI green|cancelled on <sha>` line closes it; a `CI unknown` line leaves it open. A merge or close that
+  `CI green|cancelled on <sha>` line closes it (ci_wake writes `CI green` for a repo with no active workflow,
+  so the Stop starts no gh process); a `CI unknown` line leaves it open. A merge or close that
   names the waited PR number closes it (bin/merge N, merge N, gh pr merge N, gh pr close N in Bash or
   PowerShell, same scanner rules; MCP merge_pull_request with that pullNumber). The ready call's PR and a
   merge's are read alike (pr_ref): the first all-digit word or the N of a /pull/N URL, with each flag and its

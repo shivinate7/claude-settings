@@ -12,8 +12,10 @@ ran shows (a skipped draft run is no run), waits on it, lists once more at once 
     CI <green|red|cancelled> on <sha7>: <failing job names>
     CI unknown on <sha7 or PR>: <reason>        (also "still running" at the deadline)
 
-Then it exits 2 once, which wakes the session. It prints nothing and exits 0 when no watch starts,
-when the repo has no active workflow, or when another watcher already holds every PR it would watch. Any error exits 2 with an unknown
+Then it exits 2 once, which wakes the session. A repo with no active workflow has no CI to wait for, so
+it wakes with `CI green on <sha7>: no active workflow`: the Stop check closes its CI wait on that line, and
+reads only the transcript (stall_watch `open_ci_wait`). It prints nothing and exits 0 when no watch starts, for a
+draft or when another watcher already holds every PR it would watch. Any error exits 2 with an unknown
 line, never 1. It lists runs, and reads a run's status, 30 s apart for the first 4 minutes, then at
 gaps that grow to 120 s (`pauses`). One extra list comes at once after the first judged run, to catch a
 run that shows late (debt ci-wake-lists-runs-once). It never loops on a red run.
@@ -52,6 +54,9 @@ PR_URL = re.compile(r"^https?://([^/]+)/([^/]+/[^/]+)/pull/(\d+)")
 # A word-internal apostrophe (don't) opens no quote. Masked here, so split_segments does not read it as one.
 APOSTROPHE = re.compile(r"(?<=[A-Za-z])'(?=[A-Za-z])")
 HELD = []   # open lock files, kept until the process ends: the OS drops the locks then, kill included
+
+
+NO_CI_LINE = "CI green on %s: no active workflow"   # stall_watch's CI wait closes on a green line
 
 
 class Unknown(Exception):
@@ -408,10 +413,10 @@ def watch_pr(selector, repo, cwd, deadline, lock_dir):
         repo = repo_of_url(pr.get("url")) or repo   # the PR's own repo, whatever form named it
         if pr.get("isDraft"):
             return None   # gh pr ready did not take: a draft runs no CI
-        if no_workflows(cwd, repo):
-            return None   # a repo with no active workflow runs no CI: nothing to wait for
         if not lock_pr(pr, lock_dir):
             return None
+        if no_workflows(cwd, repo):
+            return NO_CI_LINE % ident   # no CI to wait for; the line closes the Stop's CI wait
         return verdict(pr["headRefOid"], wait_for(pr["headRefOid"], cwd, deadline, repo))
     except NoPR:
         return None
