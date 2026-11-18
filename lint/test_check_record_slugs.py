@@ -80,10 +80,14 @@ EDIT_NEW = "- edited-note: the second wording of the note (hooks/guard.py)\n"
 
 SECTIONS = "tests/guard"  # the section folder, as hooks/test_guard.py's SECTION_DIR names it
 PINNED_TODAY = "2026-11-18"  # the clock every case pins: the check reads FIXED_TODAY, so no case reads the real date
+CENTRAL_NOON = "2000-01-17T12:00:00-06:00"  # the Central pin (hooks/local_time.py LOCAL_TIME_NOW): 2000-01-17 Central
+MACHINE_ZONE = "UTC-14"  # a POSIX zone far from Central: the machine's date must not enter a Central-dated verdict
 # The text of docs/notes/ps-scriptblock-path-refused.md, copied as the fixture: a real note's length and form.
 REAL_NOTE_TEXT = ("the check still refuses `@{N='x'; E={ ./x.ps1 }}`, since the scriptblock lookahead covers only a "
                   "letter after `{ ` while the trailing class also takes `.` and `/` (hooks/question_form.py "
                   "PS_BASH_FORMS, its NAME= alternative). Decision: act-in-place")
+# That note's line as its file holds it on main, with its Seen field. Fixed text: a note added later cannot change it.
+REAL_NOTE_LINE = "- ps-scriptblock-path-refused: %s Seen: 2026-11-17 x1\n" % REAL_NOTE_TEXT
 RENAME_FROM = "alpha-note"  # a rename pair of one length, so git reads the rename: the slug changes, the text does not
 RENAME_TO = "bravo-note"
 
@@ -114,12 +118,17 @@ def debt_body(slug, seen_line=None):
 
 
 def clean_env(**extra):
-    """The environment a check run gets: CI and git's repo variables stripped, the clock pinned, `extra` added."""
+    """The environment a check run gets: CI and git's repo variables stripped, the clock pinned, `extra` added.
+    A value of None in `extra` removes that variable."""
     env = dict(os.environ)
     for key in ("CI", "GIT_DIR", "GIT_WORK_TREE"):  # CI turns an unknown diff red; the repo variables pick the repo
         env.pop(key, None)
     env["FIXED_TODAY"] = PINNED_TODAY
-    env.update(extra)
+    for key, value in extra.items():
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
     return env
 
 
@@ -787,6 +796,16 @@ class RecordSlugsTests(unittest.TestCase):
         self.add_note_file("seen-edge", seen(-30, 1))
         self.assert_passes()
 
+    def test_edit_keeping_an_old_seen_date_and_count_passes(self):
+        # An edit is not judged on age: it keeps the old date and count, so it passes. Adding such a note is refused.
+        rc, out = self.lint_after_edit("- edited-note: the reworded note text (hooks/guard.py) " + seen(-40, 1) + "\n",
+                                       base=note_line("edited-note", seen(-40, 1)))
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("FAIL", out)
+
+    def test_added_note_with_an_old_seen_date_is_refused(self):
+        self.assert_added_note_refused("seen-old-add", seen(-40, 1), "Seen")
+
     def test_deleted_note_at_two_sightings_passes(self):
         # A deleted note file passes whatever its count: the x2 remedy is to delete it.
         self.roll_out()
@@ -849,20 +868,15 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertNotIn(NOTE % "seen-beside", flagged(out), out)  # the valid note passes; the frozen line is refused
         self.remedy_names_note_folder(out)
 
-    def test_main_real_note_files_pass_as_added_files(self):
-        # Full size: every note file the checkout holds, added as new files, with the text they hold on main.
+    def test_a_real_note_form_passes_as_an_added_file(self):
+        # One note's text as main holds it, with its Seen field. It reads no live file: a note added later, dated after
+        # PINNED_TODAY, must not turn this case red.
         self.roll_out()
         self.commit_base()
-        folder = os.path.join(REPO, *NOTE_DIR.split("/"))
-        names = sorted(n for n in os.listdir(folder) if n.endswith(".md") and n != "README.md")
-        self.assertTrue(names, "the checkout holds no note file to add")  # scope: there are real notes to read
-        for name in names:
-            with open(os.path.join(folder, name), encoding="utf-8", newline="") as f:
-                self.put(NOTE_DIR + "/" + name, f.read())
+        self.put(NOTE % "ps-scriptblock-path-refused", REAL_NOTE_LINE)
         self.commit_change()
         statuses = self.git_out("diff", "--name-status", "origin/main", "HEAD").splitlines()
-        added = [s for s in statuses if s.startswith("A\t" + NOTE_DIR + "/")]
-        self.assertEqual(len(added), len(names), statuses)  # scope: every real note is in the diff
+        self.assertIn("A\t" + NOTE % "ps-scriptblock-path-refused", statuses, statuses)  # scope: it is an added file
         self.assert_passes()
 
     # Debt files. A Seen line at column one, or after one leading "- ", is checked when present. No age limit for debts.
@@ -895,6 +909,35 @@ class RecordSlugsTests(unittest.TestCase):
         self.put("debts/seen-bullet.md", debt_body("seen-bullet", "- " + seen(0, 1)))
         self.commit_change()
         self.assert_passes()
+
+    def test_debt_with_a_future_seen_date_is_refused(self):
+        self.assert_debt_seen_refused("seen-future", seen(1, 1))
+
+    def test_edited_debt_whose_seen_turns_malformed_is_refused(self):
+        self.put("debts/edited-debt.md", debt_body("edited-debt", seen(-1, 1)))
+        self.commit_base()
+        self.put("debts/edited-debt.md", debt_body("edited-debt", "Seen: 2026-02-30 x1"))
+        self.commit_change()
+        statuses = self.git_out("diff", "--name-status", "origin/main", "HEAD").splitlines()
+        self.assertIn("M\tdebts/edited-debt.md", statuses, statuses)  # scope: the debt edit is in the diff
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), ["debts/edited-debt.md"], out)
+
+    def test_renamed_debt_whose_seen_is_in_the_future_is_refused(self):
+        body = "# Shared gap\n\nWhat. A gap with a fix named.\n"  # the same text under a new name: git reads a rename
+        self.put("debts/old-gap.md", body + seen(-1, 1) + "\n")
+        self.commit_base()
+        self.move("debts/old-gap.md", "debts/new-gap.md")
+        self.put("debts/new-gap.md", body + seen(1, 1) + "\n")
+        self.commit_change()
+        statuses = self.git_out("diff", "--name-status", "origin/main", "HEAD").splitlines()
+        renamed = [s.split("\t")[1:] for s in statuses if s.startswith("R")]
+        want = [["debts/old-gap.md", "debts/new-gap.md"]]
+        self.assertEqual(renamed, want, statuses)  # scope: the rename is in the diff
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), ["debts/new-gap.md"], out)
 
     # --next-debt: the debt with the highest count. A debt with no Seen line counts as x1 with no date. A count tie goes
     # to the oldest date, a debt with no date after the dated ones, then the slug.
@@ -1012,6 +1055,42 @@ class RecordSlugsTests(unittest.TestCase):
         rc, out = self.run_check(outside, "--debt-flow", "HEAD", "HEAD", **ceiling)
         self.assertEqual(rc, 1, out)
         self.assertIn("UNKNOWN", out, out)
+
+    def test_debt_flow_in_a_shallow_clone_is_unknown(self):
+        # A shallow clone's boundary commit has no parent, so its window would count every debt as opened.
+        self.commit_base()
+        self.put("debts/shallow-old.md", debt_body("shallow-old"))
+        self.commit_change()
+        self.put("debts/shallow-new.md", debt_body("shallow-new"))
+        self.commit_change()
+        clone = os.path.join(RUN_FOLDER, "shallow-clone")
+        subprocess.run(["git", "clone", "-q", "--depth", "1", "file://" + self.tree, clone], check=True,
+                       capture_output=True, text=True, env=clean_env())
+        probe = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=clone, env=clean_env(),
+                               capture_output=True, text=True)
+        self.assertEqual(probe.stdout.strip(), "true", probe.stdout + probe.stderr)  # scope: the clone is shallow
+        parents = subprocess.run(["git", "rev-list", "--parents", "-n", "1", "HEAD"], cwd=clone, env=clean_env(),
+                                 capture_output=True, text=True).stdout.split()
+        self.assertEqual(len(parents), 1, parents)  # scope: HEAD is the boundary commit, with no parent
+        rc, out = self.run_check(clone, "--debt-flow", "HEAD", "HEAD")
+        self.assertIn("UNKNOWN", out, out)
+        self.assertNotIn("debts opened", out, out)
+        self.assertEqual(rc, 1, out)
+
+    # The check's date is Central's: hooks/local_time.py is the one home of the Central clock, and LOCAL_TIME_NOW pins
+    # it. FIXED_TODAY is removed here, and the machine's zone (TZ) is set far from Central, so neither can supply it.
+
+    def test_central_today_is_the_check_date_with_no_fixed_today(self):
+        self.add_note_file("central-today", "Seen: 2000-01-17 x1")
+        rc, out = self.run_check(self.tree, FIXED_TODAY=None, LOCAL_TIME_NOW=CENTRAL_NOON, TZ=MACHINE_ZONE)
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("FAIL", out)
+
+    def test_central_tomorrow_is_refused_as_future_with_no_fixed_today(self):
+        self.add_note_file("central-tomorrow", "Seen: 2000-01-18 x1")
+        rc, out = self.run_check(self.tree, FIXED_TODAY=None, LOCAL_TIME_NOW=CENTRAL_NOON, TZ=MACHINE_ZONE)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("in the future", self.fail_line(out, "central-tomorrow"), out)
 
     # Section files. Git merges two branches' new section files clean, so the check reads the whole
     # tree. Each red names its cause alone.
