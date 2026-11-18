@@ -29,12 +29,15 @@ JOBS="checks_windows checks_windows_merge checks_windows_rest checks_windows_swe
 LINTS="lint_red_run lint_plan_refuter lint_ruling_kind lint_comment_narration"
 DOCS="doc_decisions doc_rules doc_skills doc_agents doc_glossary doc_map doc_other doc_any"
 ALL="$JOBS checks_guard code mods guard sweep shoot $LINTS $DOCS"
+# The Windows-only list: the one list of globs that set the Windows set (W M R Z P in the loop below). Space-separated; `*` also matches `/`.
+WINDOWS_ONLY_GLOBS="*.ps1"
 range=""
 [ "${EVENT:-}" = pull_request ] && [ -n "${BASE_SHA:-}" ] && range="$BASE_SHA...HEAD"
 on=" "
 whole_read=0
 # --no-renames lists the old path of a rename too, so a move out of a mapped path counts.
 if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name-only --no-renames "$range" 2>/dev/null) && [ -n "$files" ]; then
+  IFS=' ' read -r -a win_globs <<< "$WINDOWS_ONLY_GLOBS"
   W=checks_windows M=checks_windows_merge R=checks_windows_rest Z=checks_windows_sweep X=checks_macos S=shell_macos P=pointer_windows
   while IFS= read -r f; do
     case "$f" in
@@ -93,7 +96,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       actions/stamp/*) on="$on $R $Z $X $M code " ;;
       # Mod tests: the mod-tests.sh step in checks, checks-windows and checks-macos reads mods/.
       # A non-.md path also sets `code`: the whole-tree readers (retired names, retired repo, glossary, hook catalog) run on `code` or a doc flag.
-      mods/*) on="$on $W $X mods "; case "$f" in *.md) ;; *) on="$on code " ;; esac ;;
+      mods/*) on="$on $X mods "; case "$f" in *.md) ;; *) on="$on code " ;; esac ;;
       install.ps1|install.test.ps1|install-no-gap.test.ps1|install-bin-eol.test.ps1|install-set.test.ps1) on="$on $P code " ;;
       # decision-watch.test.mjs imports lint/test_scanner_traps.mjs, so the mod-tests.sh step runs it too.
       lint/test_scanner_traps.mjs) on="$on $W $X mods code " ;;
@@ -109,6 +112,11 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       *.md) ;;
       *) on="$on $ALL " ;;
     esac
+    # A path in the Windows-only list sets the whole Windows set. This is another case, so the flags each path sets above stay as they are.
+    for g in "${win_globs[@]}"; do
+      # shellcheck disable=SC2254  # the list's globs are the case patterns
+      case "$f" in $g) on="$on $W $M $R $Z $P "; break ;; esac
+    done
     # shoot also covers the files the waiting page export suite (skills/waiting-page/test_export_page.py) imports, lazy
     # imports included: page_check.py reaches the guard family (guard_merge.py imports ci_wake.py and lint/check_red_run.py), question_form.py, _nowindow.py, report_guard.py and its lint/_clause.py;
     # the suite's run folder is lint/_test_temp.py; layout.artifacts reads lint/layout.json at run time; SKILL.md and every file in reference/ hold the steps it and the page suite read. This is a second case, so the
@@ -244,6 +252,8 @@ for n in $ALL windows_guard; do
   # checks-windows-rest-2 is the second half of the rest suites (R62). Its output repeats the rest flag; no job reads it (the job runs every step on a ready pull_request).
   [ "$n" = checks_windows_rest ] && echo "checks_windows_rest_2=$v" >> "$GITHUB_OUTPUT"
 done
+# windows_only_globs: the Windows-only list, comma-separated, on every event. No job reads it; the tests read the list from this output.
+echo "windows_only_globs=${WINDOWS_ONLY_GLOBS// /,}" >> "$GITHUB_OUTPUT"
 # mutation_report: the mutation-report job runs on a pull request from a `batch-` branch (HEAD_REF), and on any other event, where the
 # action skips a push or a schedule itself. It is outside ALL: a change to this script or the workflow must not start it on any other PR.
 case "${EVENT:-}" in
