@@ -2,7 +2,7 @@
  "id": "archive-sweep-runs-per-merge",
  "title": "Find out why no archive ran after 10:44 CST although steps idle-lane-archive and idle-lane-archive-at-merge are done",
  "status": "doing",
- "pr": 3383,
+ "pr": 3667,
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL1co4LC5YoQSfpziti",
@@ -10,6 +10,6 @@
  "blockedBy": [],
  "why": "Coordinator 22:39 CST Nov 13 (relayed, unchecked): archives have not run since 10:44 CST; the owner asked for status on archivals at 22:37 CST.",
  "source": "Coordinator 22:39 CST Nov 13 (relayed); plan part 7.",
- "note": "Triage 22:38 CST Nov 13: both earlier steps read done, yet no archive followed the merges since 10:44 CST. Read first, change later: is the merge-time archive list built and handed to the runner, does the runner run it, and what did its last run report. Mistake it stops: idle sessions piling up. Harm: clutter and spend. Guard candidate, not built: the final report after a merge says how many sessions were archived, and a merge with none says why. The first sweep is plan part 7 (runner 10); this step is the cause. Needs a past-ruling and record read before any build. Coordinator 22:45 CST Nov 13 (22:45): lane started, session_013NEJL1co4LC5YoQSfpziti; grant owner 22:43 via the consultant (triage did not see it). Tracker the coordinator; path: read first, then a fix PR alone on the coordinator's word. Leads: open drafts #3108 (merge --confirm prints the idle-lanes report, or says the pass is owed), #2848 (archiving scope), #2817 (merge --idle-lanes flags a lane whose handoff is not on the record branch); the lane reads their blockers. Guard candidate filed 00:54 CST Nov 14 (lane's proposal, relayed): step report-says-archived-count.",
- "updatedAt": "2026-11-14T00:54:30-06:00"
+ "note": "Cause read first (triage 22:38 CST Nov 13): the merge-time archive list was not reaching a sweep after 10:44 CST. Mistake it stops: idle sessions piling up. Harm: clutter and spend. Guard candidate: step report-says-archived-count. Fix: draft PR 3667 (head a9c155ce48) replaces draft PR 3383; round 2 PASS by a sonnet reviewer (record comment 6989169440), full merge/test_merge.py 1990 OK (coordinator relay 13:26 CST Nov 18). Ruling in it: a fresh live file with a bad shape falls back to the step record and prints a line naming `merge --idle-lanes`; a hand run is `merge --idle-lanes --live FILE` in scope. Non-blocking notes: merge/merge.py:6886-6888 says 'Fix what the line above names in the live file' but five hand-run shapes are faults outside it; skills/roadmap/build.py:921 rebinds the nested function `keep` from line 833; an unknown-only fresh report prints two fix sentences (merge.py:6830 and :6886, deliberate per the comment at 352-353). Owner question, non-blocking: goal line 2 wants a command that fixes an 'unknown', the built text names the step not the command; page item idle-lanes-unknown-names-command. #3667 draft: the ready mark is refused by hook records-page-ready.",
+ "updatedAt": "2026-11-18T13:27:21-06:00"
 }
