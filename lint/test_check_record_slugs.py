@@ -63,7 +63,8 @@ NOTE = NOTE_DIR + "/%s.md"  # a note file, named by its slug
 SLUG_MAX = "wheel-speed-cap-" + "abcdefghijklmnop"  # 32 characters: the longest slug a note file may have
 SLUG_LONG = SLUG_MAX + "q"  # 33 characters
 SLUG_LINE = re.compile(r"^- [a-z0-9-]+: ")  # a note line in the `- slug: text` form
-NOTE_TEXT = "- %s: the spin rate is capped at twelve degrees per frame (hooks/guard.py)\n"
+NOTE_TEXT = ("- %s: the spin rate is capped at twelve degrees per frame (hooks/guard.py) "
+             "Seen: 2026-11-17 x1\n")  # a valid note: one line, with a Seen field the check accepts
 NEW_LINE = ("- wheel-speed-probe: a line added to the frozen file (hooks/guard.py) Fix: none — rare and "
             "harmless. Until: 2026-11-30")
 # Real lines of the notes file as they stand: one with no `- slug:` form, one with a lone quote and a backslash.
@@ -556,7 +557,7 @@ class RecordSlugsTests(unittest.TestCase):
     def test_added_valid_note_file_passes_beside_a_bad_note(self):
         self.roll_out()
         self.commit_base()
-        self.put(NOTE % "ansi-c-escape-not-decoded", ANSI_LINE + "\n")
+        self.put(NOTE % "ansi-c-escape-not-decoded", ANSI_LINE + " " + seen(-1, 1) + "\n")
         self.put(NOTE % "alpha-note", MISMATCH_TEXT)
         self.commit_change()
         rc, out = self.lint()
@@ -642,7 +643,8 @@ class RecordSlugsTests(unittest.TestCase):
     def assert_note_file_with_a_separator_passes_the_form_check(self, sep):
         self.roll_out()
         self.commit_base()
-        self.put(NOTE % "spin-rate-cap", "- spin-rate-cap: the spin rate" + sep + "is capped (hooks/guard.py)\n")
+        self.put(NOTE % "spin-rate-cap",
+                 "- spin-rate-cap: the spin rate" + sep + "is capped (hooks/guard.py) Seen: 2026-11-17 x1\n")
         self.commit_change()
         self.assert_passes()
 
@@ -667,7 +669,7 @@ class RecordSlugsTests(unittest.TestCase):
     def test_slug_with_digits_and_letters_passes(self):
         self.roll_out()
         self.commit_base()
-        self.put(NOTE % "2fa-note", "- 2fa-note: text (hooks/guard.py)\n")
+        self.put(NOTE % "2fa-note", "- 2fa-note: text (hooks/guard.py) Seen: 2026-11-17 x1\n")
         self.commit_change()
         self.assert_passes()
 
@@ -989,7 +991,7 @@ class RecordSlugsTests(unittest.TestCase):
         self.commit_change()
         start = self.git_out("rev-parse", "HEAD").strip()
         changed = self.git_out("show", "--format=", "--name-status", start).splitlines()
-        want = ["M\t" + DEBT_NOTES, "M\t" + DEBT_README]
+        want = sorted(["M\t" + DEBT_NOTES, "M\t" + DEBT_README])
         self.assertEqual(sorted(changed), want, changed)  # scope: both are in START
         rc, out = self.lint("--debt-flow", start, "HEAD")
         self.assertEqual(rc, 0, out)
