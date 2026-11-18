@@ -9,7 +9,7 @@ No network, no real repo. Every run uses a local bare origin in a temp dir, the 
 actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
 """
-import ast, atexit, base64, calendar, contextlib, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
+import argparse, ast, atexit, base64, calendar, contextlib, inspect, io, pathlib, json, os, random, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
 import ctypes  # the Windows-branch test patches os.name; ctypes' own import would then take the Windows path on Linux, so it loads here first
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -16887,6 +16887,255 @@ class ReviewRecordForm(unittest.TestCase):
         self.assertIsNone(review_fn(self, "parse_review")(with_note), "parse_review read a note line below the CI line as part of the record")
         self.assertEqual(record_state(self, no_note, head=head), "done", "the record without the note is not done at its head")
         self.assertEqual(parse_text(self, no_note).get("fix"), (fix_head, "reviewer", "sonnet", "PASS"), "the fix check did not parse")
+
+# ---- A2: seeded draws through the review-record form. Each method draws from its own stream, random.Random(f"{REVIEW_DRAW_SEED}:{method}"),
+# so a failure names the seed, the method, the draw number and the argv. The argument types and parse_review predict each draw: main takes
+# an argv exactly when they do, and what it prints reads back as drawn.
+REVIEW_DRAW_SEED = "review-record-form"
+REVIEW_DRAW_COUNT = 20  # draws per method, and seeded line mutants
+DRAW_GRANTS = (None, "#7, item 1 a, owner, 2026-11-08 06:08 CST", "#7, item 2 b, owner, 2026-11-08 06:08 CST",
+               "#8, item 1 a, owner, 2026-11-08 06:08 CST", "#7, item 1 A, owner, 2026-11-08 06:08 CST",
+               "#7, item 1 a, owner, 2026-13-08 06:08 CST", "#7, item 1 a, owner, 2026-11-08 06:08 PST")
+DRAW_ACCEPTED = (None, "own-3381-a,2026-11-15 01:50 CST", "own-3381-a, 2026-11-15 01:50 CDT",
+                 "own-3381-a,2026-02-30 01:50 CST", "BAD ID,2026-11-15 01:50 CST", "own-3381-a,2026-11-15 1:50 CST")
+DRAW_ROUNDS = ("1:reviewer:sonnet:PASS", "1:reviewer:sonnet:FAIL", "1:design-reviewer:opus:PASS", "2:reviewer:sonnet:PASS",
+               "2:reviewer:sonnet:FAIL", "3:reviewer:opus:PASS", "3:design-reviewer:opus:PARTIAL", "4:reviewer:opus:PASS",
+               "0:reviewer:sonnet:PASS", "5:reviewer:sonnet:PASS", "1:qa-reviewer:sonnet:PASS", "1:reviewer:sonnet:MAYBE",
+               "1:reviewer:bad model:PASS", "1:reviewer:unknown:PASS")
+
+# A mutant the form reads as the same record, though its text is not the printed form. parse_review takes the digits of `PR: #(\d+)`, so a
+# zero-padded number is the same pull request, and the record reads back equal. The reprint differs, so the converse checks the read instead.
+# A finding, not a weakened check: the reader accepts non-canonical digits. Named here, never skipped.
+SAME_RECORD_READS = ("a zero-padded pull request number",)
+
+def form_variants(body):
+    """A printed record as a GitHub post carries it: as printed, with the attribution footer, with CRLF line ends, and with trailing blank lines."""
+    return (("as printed", body), ("with the footer", body.rstrip("\n") + REVIEW_FOOTER), ("with CRLF line ends", body.replace("\n", "\r\n")),
+            ("with trailing blank lines", body + "\n\n"))
+
+def as_read(text):
+    """The lines the form reads of a record: those before the first line that is exactly `---`, without trailing blank lines (the two allowances
+    parse_review documents)."""
+    lines = text.splitlines()
+    if "---" in lines:
+        lines = lines[:lines.index("---")]
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return lines
+
+class ReviewRecordDraws(Env):
+    """Seeded draws through the review form's flags, run through the real main on FakeHost. The live head is the head of the feature branch, so an
+    accepted draw prints its record. A draw the form takes must read back as drawn, in every variant form_variants names; a draw it refuses exits 2
+    or 1 and prints no record."""
+
+    def setUp(self):
+        super().setUp()
+        self.live = self.head()
+
+    def run_draws(self, method, make):
+        rng = random.Random(f"{REVIEW_DRAW_SEED}:{method}")
+        taken = [self.check_draw(method, k, make(rng)) for k in range(REVIEW_DRAW_COUNT)]
+        self.assertTrue(any(taken) and not all(taken), f"seed {REVIEW_DRAW_SEED!r}, {method}: the {REVIEW_DRAW_COUNT} draws must reach both a taken "
+                        f"and a refused argv (taken {sum(taken)})")
+
+    def base_draw(self, rng):
+        def mostly(valid, junk):  # the valid value four times in five, so a stream takes some draws as well as refuses some
+            return rng.choice(valid) if rng.random() < 0.8 else rng.choice(junk)
+        return {"head": mostly((self.live,), (self.live[:39], self.live.upper())), "kind": mostly(merge.REVIEW_KINDS, ("bogus",)),
+                "guard": mostly(merge.REVIEW_GUARDS, ("maybe",)), "net": mostly(merge.REVIEW_NETS, ("huge",)), "rounds": ["1:reviewer:sonnet:PASS"]}
+
+    def round_draw(self, rng):
+        if rng.random() < 0.5:  # a chain that reads as drawn, one token of it maybe changed
+            chain = [f"{i}:reviewer:sonnet:{rng.choice(('PASS', 'FAIL'))}" for i in range(1, rng.randint(1, 3) + 1)]
+            if rng.random() < 0.3:
+                chain[rng.randrange(len(chain))] = rng.choice(DRAW_ROUNDS)
+        else:
+            chain = [rng.choice(DRAW_ROUNDS) for _ in range(rng.randint(1, 3))]
+        return {"head": self.live, "kind": "normal", "guard": "no", "net": "not owed", "rounds": chain}
+
+    def fix_tokens(self):
+        return (None, f"{REVIEW_OLD_HEAD}:reviewer:sonnet:PASS", f"{REVIEW_OLD_HEAD}:reviewer:haiku:FAIL", f"{REVIEW_OLD_HEAD}:reviewer:sonnet:PARTIAL",
+                f"{REVIEW_OLD_HEAD}:design-reviewer:sonnet:PASS", f"{self.live}:reviewer:sonnet:PASS", f"{REVIEW_OLD_HEAD[:38]}:reviewer:sonnet:PASS")
+
+    def fix_draw(self, rng):
+        return {"head": self.live, "kind": "normal", "guard": "no", "net": "not owed", "rounds": ["1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS"],
+                "fix": rng.choice(self.fix_tokens())}
+
+    def grant_draw(self, rng):
+        return {"head": self.live, "kind": "normal", "guard": "yes", "net": "not owed",
+                "rounds": ["1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:sonnet:FAIL", "4:reviewer:sonnet:PASS"],
+                "grant": rng.choice(DRAW_GRANTS)}
+
+    def accepted_draw(self, rng):
+        return {"head": self.live, "kind": "normal", "guard": "yes", "net": "negative",
+                "rounds": ["1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:sonnet:FAIL"], "accepted": rng.choice(DRAW_ACCEPTED)}
+
+    def test_the_base_flags_are_taken_exactly_when_the_form_takes_them(self):
+        self.run_draws("base", self.base_draw)
+
+    def test_the_round_flags_are_taken_exactly_when_the_form_takes_them(self):
+        self.run_draws("rounds", self.round_draw)
+
+    def test_the_fix_check_flag_is_taken_exactly_when_the_form_takes_it(self):
+        self.run_draws("fix", self.fix_draw)
+
+    def test_the_grant_flag_is_taken_exactly_when_the_form_takes_it(self):
+        self.run_draws("grant", self.grant_draw)
+
+    def test_the_accepted_flag_is_taken_exactly_when_the_form_takes_it(self):
+        self.run_draws("accepted", self.accepted_draw)
+
+    def test_a_line_mutant_parses_to_none_or_reads_back_as_it_was_printed(self):
+        canon = self.canonical_record()
+        rec = review_fn(self, "parse_review")(canon)
+        self.assertIsNotNone(rec, "control: the canonical record does not parse:\n" + canon)
+        self.assertEqual(self.form_failures(rec), [], "control: the canonical record holds a failure")
+        for label, text in form_variants(canon)[1:]:
+            self.assertEqual(review_fn(self, "parse_review")(text), rec, f"seed {REVIEW_DRAW_SEED!r}, variant {label!r}: reads back other than the canonical record")
+        refused = 0
+        for label, text in self.line_mutants(canon):
+            where = f"seed {REVIEW_DRAW_SEED!r}, mutant {label!r}, text {text!r}"
+            got = review_fn(self, "parse_review")(text)
+            if got is None:
+                refused += 1
+                continue
+            self.assertEqual(self.form_failures(got), [], f"{where}: parsed, and holds a failure")
+            if label in SAME_RECORD_READS:  # the form reads the text as the same record, though its printed form differs
+                self.assertEqual(got, rec, f"{where}: parsed as another record")
+                continue
+            self.assertEqual(review_fn(self, "review_body")(**got).splitlines(), as_read(text), f"{where}: parsed, and reprints other than it read")
+        self.assertGreater(refused, 0, "no mutant was refused: the mutants never reach the form's refusals")
+
+    def canonical_record(self):
+        rounds = [(1, "reviewer", "sonnet", "FAIL"), (2, "reviewer", "sonnet", "FAIL"), (3, "reviewer", "opus", "FAIL"), (4, "reviewer", "opus", "PASS")]
+        return review_fn(self, "review_body")(7, REVIEW_HEAD, "normal", "yes", rounds, "zero", fix=(REVIEW_OLD_HEAD, "reviewer", "sonnet", "PASS"),
+                                              grant=REVIEW_GRANT_TEXT, accepted=(ACCEPT_ID, ACCEPT_AT))
+
+    def line_mutants(self, canon):
+        """Each line dropped, repeated and swapped with its neighbour; one named edit per refusal the form makes; the line after the CI line;
+        and REVIEW_DRAW_COUNT seeded single-character edits."""
+        lines = canon.splitlines()
+        for i in range(len(lines)):
+            yield f"drop line {i}", "\n".join(lines[:i] + lines[i + 1:]) + "\n"
+            yield f"repeat line {i}", "\n".join(lines[:i + 1] + lines[i:]) + "\n"
+        for i in range(len(lines) - 1):
+            yield f"swap lines {i} and {i + 1}", "\n".join(lines[:i] + [lines[i + 1], lines[i]] + lines[i + 2:]) + "\n"
+        for label, old, new in (
+                ("another pull request's number", "PR: #7", "PR: #8"),
+                ("a zero-padded pull request number", "PR: #7", "PR: #007"),
+                ("another pull request's grant", "Grant: #7,", "Grant: #8,"),
+                ("a round above the ceiling", "Round 4:", "Round 5:"),
+                ("a round out of order", "Round 2:", "Round 4:"),
+                ("a lower-case verdict", "PASS", "pass"),
+                ("a trailing space on Kind", "Kind: normal", "Kind: normal "),
+                ("a fix check on the record's own head", REVIEW_OLD_HEAD, REVIEW_HEAD),
+                ("an upper-case head", REVIEW_HEAD, REVIEW_HEAD.upper()),
+                ("an impossible accepted time", "01:50", "25:50")):
+            yield label, canon.replace(old, new, 1)
+        yield "a field after the CI line", canon + "Net value: positive\n"
+        yield "a blank line inside the record", canon.replace("\n", "\n\n", 1)
+        rng = random.Random(f"{REVIEW_DRAW_SEED}:line-mutants")
+        for k in range(REVIEW_DRAW_COUNT):
+            i = rng.randrange(len(canon))
+            c = rng.choice(" ,:#\t.0aZ-")
+            yield f"seeded edit {k}: character {i} to {c!r}", canon[:i] + c + canon[i + 1:]
+
+    def form_failures(self, rec):
+        """What a parsed record may not hold beyond its text: a grant for another pull request, a fix check that reviews the record's own head,
+        and rounds that do not run 1 up to the ceiling (3, or 4 with a grant), in order, opening at 1 or at round 3."""
+        bad = []
+        if rec["grant"] is not None:
+            bound = review_fn(self, "grant_pr")(rec["grant"])
+            if bound is None or bound[0] != rec["n"]:
+                bad.append(f"the grant binds to another pull request ({rec['grant']!r}), not #{rec['n']}")
+        if rec["fix"] is not None and rec["fix"][0] == rec["head"]:
+            bad.append("the fix check reviews the record's own head")
+        nums = [r[0] for r in rec["rounds"]]
+        ceiling = merge.REVIEW_LAST_ROUND + (rec["grant"] is not None)
+        if nums and nums[0] not in (1, merge.REVIEW_LAST_ROUND):
+            bad.append(f"the rounds open at {nums[0]}")
+        if any(i < 1 or i > ceiling for i in nums):
+            bad.append(f"a round is outside 1..{ceiling}: {nums}")
+        if any(b - a not in (0, 1) for a, b in zip(nums, nums[1:])):  # a round may repeat: a reviewer and a design reviewer share one
+            bad.append(f"the rounds do not rise by 0 or 1: {nums}")
+        return bad
+
+    def type_refuses(self, name, text):
+        try:
+            review_fn(self, name)(text)
+        except argparse.ArgumentTypeError:
+            return True
+        return False
+
+    def drawn_fields(self, d):
+        """The values a draw names, each through its own argument type; None where the draw names none."""
+        def typed(name, text):
+            return None if text is None else review_fn(self, name)(text)
+        return {"rounds": [review_fn(self, "round_arg")(r) for r in d["rounds"]], "fix": typed("fix_verifier_arg", d.get("fix")),
+                "grant": typed("grant_arg", d.get("grant")), "accepted": typed("accepted_arg", d.get("accepted"))}
+
+    def form_accepts(self, d):
+        """-> (accepts, why): whether the form takes draw d, from each value's own argument type and from parse_review of the body it would print."""
+        if d["kind"] not in merge.REVIEW_KINDS or d["guard"] not in merge.REVIEW_GUARDS or d["net"] not in merge.REVIEW_NETS:
+            return False, "a choice flag takes no such value"
+        typed = [("head_arg", [d["head"]]), ("round_arg", d["rounds"])]
+        for name, key in (("fix_verifier_arg", "fix"), ("grant_arg", "grant"), ("accepted_arg", "accepted")):
+            if d.get(key) is not None:
+                typed.append((name, [d[key]]))
+        for name, texts in typed:
+            for text in texts:
+                if self.type_refuses(name, text):
+                    return False, f"{name} refuses {text!r}"
+        fields = self.drawn_fields(d)
+        # The model rules the review-record branch of merge.main applies before parse_review (decision agent-model-cap, the round rows): every
+        # fix check runs the fix model, a reviewer's round 2 and later runs its row's model, and a grant names this pull request.
+        if fields["fix"] is not None and fields["fix"][2].lower() != review_fn(self, "review_round_model")(merge.REVIEW_FIX_ROW):
+            return False, "the fix check names a model other than the fix model"
+        for n, role, model, _verdict in fields["rounds"]:
+            if role == merge.REVIEW_ROLES[0] and n >= 2 and review_fn(self, "review_round_model")(n) not in model.lower():
+                return False, f"round {n} names a model other than its row's"
+        if fields["grant"] is not None and review_fn(self, "grant_pr")(fields["grant"])[0] != 7:
+            return False, "the grant names another pull request"
+        shown = types.SimpleNamespace(round=fields["rounds"], head=d["head"], kind=d["kind"], guard=d["guard"], net_value=d["net"])
+        if review_fn(self, "round_three_refusal")(shown, []):  # the round chain, read from the draw alone: this fixture holds no earlier record
+            return False, "round_three_refusal: a round 3 follows a round 2 that reads done"
+        body = review_fn(self, "review_body")(7, d["head"], d["kind"], d["guard"], fields["rounds"], d["net"], fix=fields["fix"],
+                                              grant=fields["grant"], accepted=fields["accepted"])
+        if review_fn(self, "parse_review")(body) is None:
+            return False, "parse_review refuses the body the form would print"
+        return True, ""
+
+    def argv_of(self, d):
+        argv = ["7", "--review-record", "--head", d["head"], "--kind", d["kind"], "--guard", d["guard"], "--net-value", d["net"]]
+        for r in d["rounds"]:
+            argv += ["--round", r]
+        for flag, key in (("--fix-check", "fix"), ("--grant", "grant"), ("--accepted", "accepted")):
+            if d.get(key) is not None:
+                argv += [flag, d[key]]
+        return argv
+
+    def check_draw(self, method, k, d):
+        argv = self.argv_of(d)
+        where = f"seed {REVIEW_DRAW_SEED!r}, {method} draw {k}, argv {argv!r}"
+        rc, out, err = self.run_args(*argv)
+        self.assertNotIn("Traceback", err, where)
+        for old in OLD_PARSER_ERRORS:
+            self.assertNotIn(old, err, f"{where}: a parser that lacks the flag refused it")
+        accepts, why = self.form_accepts(d)
+        if not accepts:  # every refusal the form makes before any host read exits 2
+            self.assertEqual(rc, 2, f"{where}: the form refuses it ({why}), and main exited {rc}; stderr {err.strip()!r}")
+            return False
+        if d.get("fix") is not None and rc != 0 and "usage:" not in err and "--fix-check" in err:
+            return False  # the fix check's history rule (the newest earlier log, git's descent) is a host read: this fixture has no earlier log to pass it
+        self.assertEqual(rc, 0, f"{where}: the form takes it, and main exited {rc}; stderr {err.strip()!r}")
+        fields = self.drawn_fields(d)
+        want = {"n": 7, "head": d["head"], "kind": d["kind"], "guard": d["guard"], "net": d["net"], **fields}
+        body = posted_body(self, out)
+        for label, text in form_variants(body):
+            got = review_fn(self, "parse_review")(text)
+            self.assertEqual(got, want, f"{where}: the printed record ({label}) reads back other than drawn")
+        self.assertEqual(self.form_failures(got), [], f"{where}: the printed record holds a failure")
+        return True
 
 class ReviewRecordRules(unittest.TestCase):
     """review_state over records the form gives (owner, page item 471 a). A change with Guard or check no is done by the review cap rule
