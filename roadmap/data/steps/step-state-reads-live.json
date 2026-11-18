@@ -1,0 +1,14 @@
+{
+ "id": "step-state-reads-live",
+ "title": "A step reads 'doing' only while a live lane or an open PR holds it; one check flags each doing step with neither",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 15:15 CST Nov 18 via the consultant: step ci-linux-windows-once read 'doing' while its PR 3042 had closed unmerged on Nov 14 and nothing replaced it; that is a bug twice: it should read the real state, and the false state should never have stood.",
+ "source": "owner 15:15 CST Nov 18 via the consultant (15:15 message); REST read of PR 3042 at 15:19 CST Nov 18",
+ "note": "End state: a step reads 'doing' only while a live lane or an open PR holds it; a step whose PR closed unmerged with no successor reads 'stalled' with the date and reason; one check over roadmap/data/steps flags each doing step with no open PR or live session (read from REST and the live file). The status tab already prints stalled steps by age (build.py upkeep list); that rule does not look at a closed PR, so it missed this one. Prior-work search first (steps stale-close-hold-reads-notes, status-stall-tx-overflow-390). Incident: ci-linux-windows-once, corrected to todo at 15:20 CST. Triage lands it with its own agents; test-author first.",
+ "updatedAt": "2026-11-18T15:17:57-06:00"
+}
