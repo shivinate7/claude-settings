@@ -9,7 +9,7 @@ Three things can drift from it, and this check reads each:
      layout's extras file from LAYOUT_EXTRAS, which must equal "extras" in lint/layout.json.
   2. A path literal in a reader: any Python file in lint/, hooks/, merge/ or janitor/, tests and
      mutation tests aside. A string constant there may not name a record
-     path: a layout, legacy or legacy-repos path of a record or listed kind, the notes file or the todo file, followed by `/` or holding one, at
+     path: a layout, legacy or legacy-repos path of a record or listed kind, the notes file, the notes folder or the todo file, followed by `/` or holding one, at
      either end or inside (`decisions/`, `docs/decisions`, `x/decisions/a.md`), or a bare folder
      name passed to a `join` or a `/` (`Path(root) / "decisions"`).
      Any other bare kind name (`"decisions"`) is a key into the layout, not a path, and passes. Docstrings pass. The Python parser reads the code,
@@ -31,7 +31,7 @@ import os
 import re
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 ROOT = os.path.dirname(HERE)
 
 GUARD = "hooks/guard.py"
@@ -51,14 +51,16 @@ def read(rel):
 
 
 FILE_KINDS = ("debt-notes", "todo")  # record files that are not a listed folder
+# The note folder is no record dir, but a reader that names its path would drift as a record path does.
+NOTE_FOLDER_KINDS = ("notes",)
 
 
 def record_paths(data):
-    """Every layout, legacy and legacy-repos path of a kind marked record or listed, or in FILE_KINDS."""
+    """Every layout, legacy and legacy-repos path of a kind marked record or listed, or in FILE_KINDS or NOTE_FOLDER_KINDS."""
     paths = set()
     legacy = data.get("legacy", {})
     for name, kind in data["kinds"].items():
-        if kind.get("record") or kind.get("listed") or name in FILE_KINDS:
+        if kind.get("record") or kind.get("listed") or name in FILE_KINDS + NOTE_FOLDER_KINDS:
             paths.add(kind["path"].strip("/"))
             if kind["path"] in legacy:
                 paths.add(legacy[kind["path"]].strip("/"))

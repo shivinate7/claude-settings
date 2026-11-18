@@ -19,6 +19,19 @@ add("frozen: Write of a config lint script", "deny", "frozen-path", tool="Write"
     file_path=CFG_LINT)
 add("frozen: Write of a config agent file", "deny", "frozen-path", tool="Write", cwd=NOGIT,
     file_path=CFG_AGENT)
+# A cloud install lands each hook through a generation folder, installs/<id>/, and links each name through the
+# link .cs-current (decision install-hooks-whole). A write under a generation is a write to a live hook by its real
+# path, and a write through the link reaches the same hook, so both are frozen like a write to hooks/ (see
+# CONFIG_FROZEN_DIRS in hooks/guard_frozen.py, which names installs and .cs-current).
+CFG_GEN_HOOK = slash(os.path.join(CFG, "installs", "20261115190000123", "hooks", "x.py"))
+CFG_CS_CURRENT = slash(os.path.join(CFG, ".cs-current"))
+CFG_CS_CURRENT_HOOK = slash(os.path.join(CFG, ".cs-current", "hooks", "x.py"))
+add("frozen: Write of a file in a cloud install generation", "deny", "frozen-path", tool="Write", cwd=NOGIT,
+    file_path=CFG_GEN_HOOK)
+add("frozen: Write of a hook through the .cs-current link of a cloud install", "deny", "frozen-path", tool="Write",
+    cwd=NOGIT, file_path=CFG_CS_CURRENT_HOOK)
+add("frozen: Write of the .cs-current link of a cloud install", "deny", "frozen-path", tool="Write", cwd=NOGIT,
+    file_path=CFG_CS_CURRENT)
 # docs/design/ holds the house rules (decision ux-house-rules). A session that could rewrite them could
 # loosen its own review bar, so it is frozen like agents/ and output-styles/. It is two levels deep, so
 # its siblings under docs/, a name that only starts with "design", and a product repo's own copy stay open.

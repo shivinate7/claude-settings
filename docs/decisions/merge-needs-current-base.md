@@ -1,21 +1,34 @@
-# A merge needs a green run on its own base and a clean merge with the base tip
+# A merge needs a clean merge with the base tip, and a green run or a lane-lint PASS
 
 ## The ruling
 
-Owner pick A for R42 part 2 (per-lane merge). Rule M3, per lane: the head must already be green on its own base, and it must merge cleanly with the base tip. The head need not hold the tip.
+Owner pick A for R42 part 2 (per-lane merge). Rule M3, per lane: the head must merge cleanly with the base tip. Its own run must be green, or still pending under a lane-lint PASS that names its live head. The head need not hold the tip.
 
-- The green read is one read, with no wait under the lock.
+Owner ruling `own-merge-on-lint-pass` (owner, 2026-11-15 18:21 CST, typed "B for sure") added the pending case. Main's run after the merge is the check, and a red main reverts the blamed commit.
+
+- The run read is one read, with no wait under the lock. The lint proof is asked only when the read says the head is pending. A pending head with no PASS stops the merge at that read.
+- A PASS lifts a pending run only for the head it names. It carries to the live head over claim commits. For a PR that replaces a source PR, it also carries over an identical tree. Any other PASS refuses.
+- A finished red run refuses. A red main refuses too, except its revert (`git-red-main-reverts`).
 - The clean merge is `git merge-tree --write-tree` of the head and the base tip. `confirm` reads it before the claim and again after the claim push. A conflict refuses. So does a read that cannot run.
-- A confirm that must push a claim commit pushes it and stops. The next confirm merges a green claim head.
+- A confirm that must push a claim commit pushes it and stops. The next confirm merges the claim head once its run is green, or pending under a PASS that carries over the claim commit.
+- The tool sends its PUT past a BLOCKED read only when a PASS lifted the pending run. BEHIND still refuses.
 - The batch's wait for the base to move, the heal merge commit and the small-move suite run are gone.
+
+Rule d. Lanes bring main in only on conflict; the merge tool does one main-in at merge time and keeps the green run (needs #3481 and #3552 on main). Skill `ci-hygiene` step 8 holds the same rule.
+
+Coordinator's reading, not the owner's: until both are on main, rule d is not in force and ruling `own-923-c-ready-lanes-bring-main-in` stands.
+
+- Based on (ruling): owner, 2026-11-17 14:20 CST, page item 925 `main-in-once-before-lint`, pick d, item closed 14:27 CST. His words: "Lanes bring main in only on conflict; the merge tool does one main-in at merge time and keeps the green run (needs #3481 and #3552 on main)."
+- Based on (ruling): owner, 2026-11-16 13:46 CST, page item 923 pick c, typed in the coordinator's chat, ruling `own-923-c-ready-lanes-bring-main-in`: ready lanes, or lanes one step from ready, bring main in after each merge. Ruling c was never filed to a record on main.
+- Open, not built: a grade by priority that would bring some PRs to main together (page item 924). No grade is defined, so nothing here tiers a lane.
 
 Why: branch protection on `main` has `strict` false, so GitHub reports BEHIND only when `strict` is on (`main-branch-protection`). The tool's own reads are the gate.
 
-Residual risk: a clean merge can still break a suite. Main's run after the merge finds it. A red main is then held under the red-main rule (`git-red-main-reverts`) until its revert merges with its tree proven.
+Residual risk: a clean merge can still break a suite, and a head can merge before its own run ends. Main's run after the merge finds it. A red main is then held under the red-main rule (`git-red-main-reverts`) until its revert merges with its tree proven.
 
 Kind: process
 Home: merge/merge.py
 
-Cost: per merge, one green read of the head and two `git merge-tree --write-tree` starts (unmeasured).
+Cost: per merge, one read of the head's run and two `git merge-tree --write-tree` starts (unmeasured). A pending head adds one paged read of the repo's comments and the carry checks (unmeasured).
 
-Risk: likely. Lanes merge while main moves, so main often moves under a green head.
+Risk: likely. Lanes merge while main moves, so main often moves under a green or pending head.
