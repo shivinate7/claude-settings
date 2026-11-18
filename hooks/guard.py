@@ -4122,7 +4122,9 @@ def step_up_reason(prompt: str, role, model, rounds=None) -> str:
             return "Reviewer fix verifier runs on %s. Spawn it with model %s." % (want.capitalize(), want)
     if role == "reviewer" and review_guard_marked(prompt):
         want = role_round_model(rounds, role, "1", "guard")
-        if want and (not model or (named is not None and named < ROLE_MODEL_RANK.index(want))):
+        # A blank model runs the reviewer's role row (its agent file pins haiku), so it is below only a row above haiku.
+        if want and ((not model and ROLE_MODEL_RANK.index(want) > 0)
+                     or (named is not None and named < ROLE_MODEL_RANK.index(want))):
             return "Reviewer round 1 on a guard or check change runs on %s. Spawn it with model %s." % (want.capitalize(), want)
     if role == "builder" and builder_third_round(prompt):
         want = role_round_model(rounds, role, "3")
@@ -4160,8 +4162,9 @@ ROLE_MODEL_REASON = (
     "field, or name the role's model%s. (decision agent-model-cap)"
 )
 # A reviewer has a second way past its row, so only its refusal names it. Rounds come from the constant at call time.
-ROLE_REVIEWER_ROUND_REMEDY = (", or, when this brief is for review round %s, open its first line with a `Round N of 3` marker (%s)"
-                              ", or, when it is for a guard or check diff, start a line with `%s`")
+ROLE_REVIEWER_ROUND_REMEDY = ", or, when this brief is for review round %s, open its first line with a `Round N of 3` marker (%s)"
+# Named only while the `1 guard` row sits above the reviewer's row: at the reviewer's own row the marker lifts nothing.
+ROLE_REVIEWER_GUARD_REMEDY = ", or, when it is for a guard or check diff, start a line with `%s`"
 ROLE_REVIEWER_FIX_CHECK_REMEDY = (", or, when this brief is a fix check, open its first line with the `%s` marker, "
                                   "or with `Round N of 3 (fix check)` (N = %s)")
 # Last sentence of a reviewer's refusal. It says the first review runs on the role's model only while the first round has no row above the reviewer's row.
@@ -4223,13 +4226,13 @@ def role_model_table(pointer_root):
 # model of each round: the key is (role, round, kind), the round a number or "fix verifier", the kind "guard" for a
 # first-round brief with the guard marker and "other" for every other brief. role_round_table is the one reader; the merge tool
 # reads it through the guard's helpers. A row the record lacks, or one whose model has no rank, falls back to
-# ROLE_ROUND_FALLBACK (sonnet for a reviewer's `1 guard`, later rounds and fix verifier, opus for the builder's third try; no `1 other` entry). Cost: one more read of the record per spawn.
+# ROLE_ROUND_FALLBACK (haiku for a reviewer's `1 guard`, sonnet for later rounds and fix verifier, opus for the builder's third try; no `1 other` entry). Cost: one more read of the record per spawn.
 ROLE_ROUND_HEADER = ["role", "round", "model", "effort"]
 ROLE_ROUND_CELL = re.compile(r"(\d+|fix verifier)(?:\s+(guard|other))?$")
 ROLE_ROUND_FIX = "fix verifier"
 ROLE_ROUND_EXACT = ("2",)  # the second round above its row is refused at the step-up, where no override lifts it; a later round above its row falls to the Opus ceiling
 ROLE_ROUND_FALLBACK = dict([(("reviewer", n, "other"), "sonnet") for n in ROLE_REVIEWER_FREE_ROUNDS]
-                           + [(("reviewer", "1", "guard"), "sonnet"), (("reviewer", ROLE_ROUND_FIX, "other"), "sonnet"),
+                           + [(("reviewer", "1", "guard"), "haiku"), (("reviewer", ROLE_ROUND_FIX, "other"), "sonnet"),
                               (("builder", "3", "other"), "opus")])
 
 
@@ -4626,8 +4629,10 @@ def role_model_one(tool_input):
                 extra = ROLE_EXPLORE_AUDIT_REMEDY % EXPLORE_AUDIT_MARKER
             if role == "reviewer":
                 free = reviewer_free_rounds(rounds, row)
-                extra = ROLE_REVIEWER_ROUND_REMEDY % (" or ".join(free), ", ".join("`Round %s of 3`" % n for n in free),
-                                                    REVIEW_GUARD_MARKER)
+                extra = ROLE_REVIEWER_ROUND_REMEDY % (" or ".join(free), ", ".join("`Round %s of 3`" % n for n in free))
+                guard_row = role_round_model(rounds, role, "1", "guard")
+                if guard_row and ROLE_MODEL_RANK.index(guard_row) > ROLE_MODEL_RANK.index(row):
+                    extra += ROLE_REVIEWER_GUARD_REMEDY % REVIEW_GUARD_MARKER
                 extra += ROLE_REVIEWER_FIX_CHECK_REMEDY % (FIX_CHECK_MARKER, " or ".join(free))  # glossary-ok: the line keeps its names; only the rounds came from the rows
             if tool_input.get(BRIEF_UNREAD):
                 extra += ", or " + BRIEF_LITERAL_REMEDY

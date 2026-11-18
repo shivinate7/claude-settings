@@ -27,7 +27,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | Explore that audits or judges meaning, not a plain search | sonnet or opus, when its brief's first non-blank line carries the `Audit:` marker (owner, 2026-11-01 18:38 CST, item 137, pick a); set per spawn, which overrides the frontmatter `haiku` | high |
 | test-author | haiku | xhigh |
 | reviewer | haiku | xhigh |
-| reviewer, per round (the round rows below) | the round rows: haiku on a round 1 of a change with no guard or check, sonnet from round 2, on a guard or check change, and on a fix verifier; set per spawn, which overrides the frontmatter `haiku` | the round rows |
+| reviewer, per round (the round rows below) | the round rows: haiku at xhigh on round 1 of every change, a guard or check change included (owner ruling, 2026-11-17 19:45 CST), sonnet from round 2, on a fix verifier and on round 3; set per spawn, which overrides the frontmatter `haiku` | the round rows |
 | record-writer (`agents/record-writer.md`) | haiku | xhigh |
 | builder | sonnet | high |
 | builder, try 3 after a FAIL at review round 2, or a round 1 FAIL with failed fix verifiers | the round rows: opus, the owner's standing grant; set per spawn, which overrides `CLAUDE_CODE_SUBAGENT_MODEL` | the round rows |
@@ -77,11 +77,11 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | every other hook and guard | no model; plain code | n/a |
 | local_time (`hooks/local_time.py`, UserPromptSubmit only; a model call only for a plain owner ask with the whole word `override` or `opus` that passes its gates, plus one scope read after a yes, for an opus ask that names no role and has an earlier prompt; a failed plain ask grants nothing; a first-word `override` with a reason still grants a one-act override) | haiku, through `decision_watch.invoke_model` | low |
 
-**The round rows.** The one home of the model and effort of each review round and of the builder's third try. The guard (`role_round_table` in `hooks/guard.py`, beside `role_model_table`) and the merge tool (`--round`, `--fix-check`) read these rows, so a changed row changes their verdicts with no code edit. A `Round` cell is a round number, `1 guard` or `1 other` for round 1, or `fix verifier`. A round 1 brief that starts a line with `Guard or check: yes` (`REVIEW_GUARD_MARKER` in `hooks/shared_names.py`, the guard marker) takes the `1 guard` row, any other round 1 brief the `1 other` row. A reviewer brief for round 2 or 3 opens its first line with `Round N of 3`; a fix verifier's first non-blank line starts with `Fix check`. A round with no row, or a row naming a model the guard cannot rank, falls back to `ROLE_ROUND_FALLBACK` in `hooks/guard.py`. That table gives sonnet for a reviewer's `1 guard`, round 2, round 3 and `fix verifier`, and opus for the builder's round 3. It has no row for a reviewer's `1 other`, so the role row (haiku) applies. `lint/check_agent_models.py` fails a row whose model the guard cannot rank.
+**The round rows.** The one home of the model and effort of each review round and of the builder's third try. The guard (`role_round_table` in `hooks/guard.py`, beside `role_model_table`) and the merge tool (`--round`, `--fix-check`) read these rows, so a changed row changes their verdicts with no code edit. A `Round` cell is a round number, `1 guard` or `1 other` for round 1, or `fix verifier`. A round 1 brief that starts a line with `Guard or check: yes` (`REVIEW_GUARD_MARKER` in `hooks/shared_names.py`, the guard marker) takes the `1 guard` row, any other round 1 brief the `1 other` row. A reviewer brief for round 2 or 3 opens its first line with `Round N of 3`; a fix verifier's first non-blank line starts with `Fix check`. A round with no row, or a row naming a model the guard cannot rank, falls back to `ROLE_ROUND_FALLBACK` in `hooks/guard.py`. That table gives haiku for a reviewer's `1 guard` and sonnet for round 2, round 3 and `fix verifier`, and opus for the builder's round 3. It has no row for a reviewer's `1 other`, so the role row (haiku) applies. `lint/check_agent_models.py` fails a row whose model the guard cannot rank.
 
 | Role | Round | Model | Effort |
 |---|---|---|---|
-| reviewer | 1 guard | sonnet | xhigh |
+| reviewer | 1 guard | haiku | xhigh |
 | reviewer | 1 other | haiku | xhigh |
 | reviewer | 2 | sonnet | high |
 | reviewer | 3 | sonnet | xhigh |
