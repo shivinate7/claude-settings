@@ -1,1 +1,0 @@
-- stamp-tool-name-reads-write: (#2480 handoff-checked-stamp) mcp__github__get_check_run and get_project_message_reply read as writes (the words "run" and "reply"), so a CI premise checked with get_check_run alone is denied once. Likely in normal work. Same family as debt stamp-read-false-alarms; fold there if that debt's fix covers tool names.

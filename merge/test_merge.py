@@ -9,7 +9,7 @@ No network, no real repo. Every run uses a local bare origin in a temp dir, the 
 actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
 """
-import ast, atexit, base64, calendar, contextlib, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
+import argparse, ast, atexit, base64, calendar, contextlib, inspect, io, pathlib, json, os, random, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
 import ctypes  # the Windows-branch test patches os.name; ctypes' own import would then take the Windows path on Linux, so it loads here first
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -3200,6 +3200,9 @@ class GhLockTest(unittest.TestCase):
 #   - the cloud agent proxy refuses a numeric-ID path: when a case sets `proxy_refuses_paged`, a `--paginate` read of more than one page
 #     answers HTTP 403 on `repositories/<id>/...`, the path gh follows from the Link header. Off unless a case sets it.
 #   - `issues/comments` answers a case's `issue_comments` (oldest first) once the case sets them; with none set it stays a 404.
+#   - `echo_posts`: `issues/comments` answers the seeded comments, then each post as GitHub files it (owner OWNER, the post's body). Off unless a case sets it.
+#   - `pull_files`: `pulls/<n>/files` answers the case's files, and `GET pulls/<n>` then carries `changed_files` with their count. Off unless a case sets it.
+#   - `full_name`: the repo name `GET repos` answers (default o/r). Every pull request carries `created_at`.
 #   - a case's `fail_page` ({"page", "text"}) answers every read of that page with the error text (rest_err), so a later page of a list read fails.
 #   - a list read under `-i` prints the header block gh prints, with a `Link` header (rel="next" and rel="last", on the numeric route) while pages
 #     follow, and none on the last page. A `--paginate` read prints no Link header: gh follows it itself.
@@ -3330,7 +3333,7 @@ def combined_state(statuses):
 
 def pull(number, head, head_ref, base_ref, state="open", merged=False, draft=False, mergeable=True, mergeable_state="clean", body="", merge_commit_sha=TEST_MERGE_SHA):
     """A pull request as `GET pulls/<n>` returns it. An empty body is null, as on GitHub."""
-    return {"number": number, "state": state, "merged": merged, "draft": draft, "body": body or None, "mergeable": mergeable,
+    return {"number": number, "state": state, "merged": merged, "draft": draft, "body": body or None, "mergeable": mergeable, "created_at": "2026-10-02T00:00:00Z",
             "mergeable_state": mergeable_state, "merge_commit_sha": merge_commit_sha, "html_url": "https://github.com/o/r/pull/%d" % number,
             "head": {"ref": head_ref, "sha": head, "label": "o:" + head_ref}, "base": {"ref": base_ref, "sha": "b" * 40, "label": "o:" + base_ref}}
 
@@ -3481,7 +3484,7 @@ try:
         raise Refused(rf["msg"])
 
     if method == "GET" and not rel:
-        finish(one({"default_branch": S.get("default_branch", "main"), "full_name": "o/r"}, jq), 0, include)
+        finish(one({"default_branch": S.get("default_branch", "main"), "full_name": S.get("full_name", "o/r")}, jq), 0, include)
 
     elif method == "GET" and rel == "pulls":
         if S.get("open_pulls_fail"):
@@ -3522,6 +3525,8 @@ try:
             locked = bool(ref("refs/heads/merge-lock/main"))
             draft = bool(S.get("draft")) or (bool(S.get("draft_when_locked")) and locked)  # draft_when_locked: the PR turns draft once the merge lock is taken
             pr = pull(n, head, S.get("head_ref", "feat"), S.get("base", "main"), "open", False, draft, val, {True: "clean", False: "dirty", None: "unknown"}[val], S.get("body", ""))
+            if "pull_files" in S:  # opt-in: the count of the files the case seeds, as GET pulls/<n> reports it
+                pr["changed_files"] = len(S["pull_files"])
             if locked and S.get("merge_state_when_locked"):  # mergeable_state once the merge lock is taken: clean for the preview read, this for every read after it
                 pr["mergeable_state"] = S["merge_state_when_locked"]
             S["shown"] = S.get("shown", []) + [head]; save()
@@ -3606,6 +3611,10 @@ try:
         finish(one({"id": 555, "body": params.get("body")}, jq), 0, include)
     elif method == "GET" and rel == "issues/comments" and S.get("comments_fail"):  # a case's failed comment read: the text gh prints
         raise Refused(S["comments_fail"])
+    elif method == "GET" and re.fullmatch(r"pulls/\d+/files", rel) and "pull_files" in S:  # opt-in: the files a case seeds (the review record and the guard read them)
+        answer_list(S["pull_files"], None)
+    elif method == "GET" and rel == "issues/comments" and S.get("echo_posts"):  # opt-in: the seeded comments, then each post as GitHub files it (a lane's post reads back)
+        answer_list(S.get("issue_comments", []) + [{"id": 600 + k, "created_at": "2026-10-02T00:00:00Z", "updated_at": "2026-10-02T00:00:00Z", "issue_url": f"https://api.github.com/repos/o/r/issues/{p['n']}", "body": p["body"], "user": {"login": "o"}, "author_association": "OWNER"} for k, p in enumerate(S.get("posted", []))], None)
     elif method == "GET" and rel == "issues/comments" and "issue_comments" in S:  # the repo's issue comments, seeded by a case (the review record reads them)
         answer_list(S["issue_comments"], None)
 
@@ -15344,13 +15353,20 @@ class MergeRoleCheck(CloudSession):
 OWN_SESSION_LINK ="https://claude.ai/code/session_" + ROLE_SESSION[len("cse_"):]  # the link a session's pull request ends with: session_<x> for cse_<x> (hooks/override.py remote_session_id)
 OWN_PR_BODY = "Small edit.\n\n" + OWN_SESSION_LINK + "\n"
 OTHER_PR_BODY = "Small edit.\n\nhttps://claude.ai/code/session_another_session\n"
+CARRIED_BODY = OTHER_PR_BODY + "Carried by: " + OWN_SESSION_LINK + "\n"  # another session's pull request, carried here by a line that names this session (owner pick a, standing-merges-stragglers)
+CARRIED_ELSEWHERE_BODY = OTHER_PR_BODY + "Carried by: https://claude.ai/code/session_third_session\n"  # the same, with the carry line naming a third session
+BARE_MENTION_BODY = "Small edit, raised in " + OWN_SESSION_LINK + ".\n\nhttps://claude.ai/code/session_another_session\n"  # this session's link named in the text, with no carry line; the closing link is another session's
 
 class StandingMergeRole(CloudSession):
     """Ruling own-tiny-fixes-b: a standing session (a coordinator, a triage or a consultant, decision session-tiers)
-    records the `standing` merge role and merges its OWN pull request through the merge tool, on green. The gate sits after the pull request
-    read and before the lock or any claim. The pull request is this session's own when its body names this session's link. CI is green.
-    A docs-only pull request with no guard path needs no record. Any other pull request needs one passing reviewer record on the live
-    head, whatever its model (owner, pick A). No pull request is bounded by line or file counts. The batch runner is not judged by this gate. A refusal names no tier word and no command."""
+    records the `standing` merge role and merges a pull request through the merge tool, on green. The gate sits after the pull request
+    read and before the lock or any claim. The pull request is this session's when its body names this session's link anywhere: its closing link,
+    a `Carried by:` line that a carrying session adds (owner pick a, standing-merges-stragglers), or any other mention. The owner's messages of
+    10:27 CST say a straggling pull request may be merged under any standing session's purview, by whichever route is faster, and that the
+    batch runner, consultant, triage or coordinator may merge one whose opening lane ended. A body that names another session's link only,
+    or no link, is refused. CI is green. A docs-only pull request with no guard path needs no
+    record. Any other pull request needs one passing reviewer record on the live head, whatever its model (owner, pick A). No pull request is
+    bounded by line or file counts. The batch runner is not judged by this gate. A refusal names no tier word and no command."""
 
     def own_pr(self, changed, body=OWN_PR_BODY):
         """Make pull request 7 a case's pull request: its body is `body`, its files are `changed`, and this session records standing."""
@@ -15435,7 +15451,7 @@ class StandingMergeRole(CloudSession):
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(getattr(self.host, "merged", False), out + err)
 
-    # ---- the gate refuses: not this session's pull request
+    # ---- the gate refuses: a body that names another session's link only, or no link
     def test_another_sessions_pr_is_refused_under_standing(self):
         self.own_pr([("docs/notes.md", "modified", 1)], body=OTHER_PR_BODY)
         self.assert_standing_refused()
@@ -15444,6 +15460,83 @@ class StandingMergeRole(CloudSession):
         # no link is no proof that the pull request is this session's
         self.own_pr([("docs/notes.md", "modified", 1)], body="Small edit.\n")
         self.assert_standing_refused()
+
+    # ---- a carried pull request: a `Carried by:` line naming this session stands for its own link (owner pick a, standing-merges-stragglers;
+    # the owner's messages of 10:27 CST, straggling pull requests merged by whichever standing session is faster)
+    def assert_carried_scope(self, body):
+        """P7, the scope before the gate reads it: `body` holds a carry line for this session, and its closing link is another session's, so a
+        pass comes from the carry line. Read from the strings, not from the gate's own reader, so the verdict stays the gate's."""
+        self.assertIn("Carried by: " + OWN_SESSION_LINK, body, "the case's body holds no carry line for this session")
+        self.assertNotIn(OWN_SESSION_LINK, OTHER_PR_BODY, "the case's closing link is this session's, so the pass is not the carry line's")
+
+    def test_carried_docs_pr_merges_under_standing(self):
+        # owner pick a, standing-merges-stragglers: a carry line naming this session passes as the session's own closing link does
+        self.commit_feat({"docs/notes.md": "Notes.\n"})
+        self.own_pr([("docs/notes.md", "modified", 1)], body=CARRIED_BODY)
+        self.assert_carried_scope(CARRIED_BODY)
+        rc, out, err = self.standing_confirm()
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+    def test_carried_code_pr_with_a_passing_sonnet_record_merges_under_standing(self):
+        self.commit_feat({"tools/note.py": "X = 1\n"})
+        changed = [("tools/note.py", "added", 1)]
+        self.own_pr(changed, body=CARRIED_BODY)
+        self.assert_carried_scope(CARRIED_BODY)
+        self.assert_standing_merges(changed, record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, PASS",)))
+
+    def test_a_bare_mention_of_this_session_link_merges_under_standing(self):
+        # the gate reads the whole body for this session's link, so a link named in the text passes with no carry line (own_session_link)
+        self.commit_feat({"docs/notes.md": "Notes.\n"})
+        self.own_pr([("docs/notes.md", "modified", 1)], body=BARE_MENTION_BODY)
+        self.assertNotIn("Carried by:", BARE_MENTION_BODY, "the case's body holds a carry line, so the pass is not a bare mention's")
+        self.assertIn(OWN_SESSION_LINK, BARE_MENTION_BODY, "the case's body does not name this session")
+        self.assertTrue(BARE_MENTION_BODY.rstrip().endswith("session_another_session"), "the case's closing link is this session's, so the pass is not the bare mention's")
+        rc, out, err = self.standing_confirm()
+        self.assertEqual(rc, 0, (err.strip().splitlines() or [out])[-1])  # the refusal is the last line; the stamp warning comes first
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+    # ---- a carry line that names another session, and the other checks on a carried pull request still refuse
+    def test_carried_pr_naming_another_session_is_refused_under_standing(self):
+        # owner pick, option a: a carry line naming another session is no proof that this session carries the pull request
+        self.own_pr([("docs/notes.md", "modified", 1)], body=CARRIED_ELSEWHERE_BODY)
+        self.assertNotIn(OWN_SESSION_LINK, CARRIED_ELSEWHERE_BODY, "P7, the scope before the subject: the case's body names this session")
+        err = self.assert_standing_refused()
+        self.assertIn("this session did not open this pull request, so it may not merge it.", err)
+
+    def test_carried_docs_pr_with_red_ci_is_refused_under_standing(self):
+        self.commit_feat({"docs/notes.md": "Notes.\n"})
+        self.own_pr([("docs/notes.md", "modified", 1)], body=CARRIED_BODY)
+        self.assert_carried_scope(CARRIED_BODY)
+        self.host.checks = (False, "a check is red: checks: fail")
+        self.host.state = "red: checks: fail"  # the head reads red, as the red-head cases above set it (head_state reads this)
+        err = self.assert_standing_refused()
+        # the gate's own words, "not green: <state>.": confirm's head check words the same fact with a comma, so this line holds the gate's refusal alone
+        self.assertIn("the head's own checks are not green: ", err)
+
+    def assert_carried_code_refused_without_record(self, *bodies):
+        """The record check still runs on a carried code pull request: `bodies` are its only records, and none passes on the live head. Each
+        case is its own fixture, because a merge that slips past the gate moves the head, and a later read would see no head at all."""
+        self.own_pr([("tools/note.py", "added", 1)], body=CARRIED_BODY)
+        self.assert_carried_scope(CARRIED_BODY)
+        self.scripted_records(*bodies)
+        err = self.assert_standing_refused()
+        self.assertIn("its head has no passing review record", err)
+
+    def test_carried_code_pr_with_no_record_is_refused_under_standing(self):
+        self.assert_carried_code_refused_without_record()
+
+    def test_carried_code_pr_with_a_sonnet_record_on_an_old_head_is_refused_under_standing(self):
+        self.assert_carried_code_refused_without_record(record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+
+    def test_carried_code_pr_with_a_failing_sonnet_record_is_refused_under_standing(self):
+        self.assert_carried_code_refused_without_record(record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, FAIL",)))
+
+    def test_carried_pr_with_no_changed_file_is_refused_under_standing(self):
+        self.own_pr([], body=CARRIED_BODY)
+        self.assert_carried_scope(CARRIED_BODY)
+        err = self.assert_standing_refused()
+        self.assertIn("this pull request changes no file.", err)
 
     # ---- a code pull request, guard paths included, merges under standing with one passing reviewer
     # record on the live head, whatever its model. Without that record it is refused, whatever its size.
@@ -16897,6 +16990,256 @@ class ReviewRecordForm(unittest.TestCase):
         self.assertEqual(record_state(self, no_note, head=head), "done", "the record without the note is not done at its head")
         self.assertEqual(parse_text(self, no_note).get("fix"), (fix_head, "reviewer", "sonnet", "PASS"), "the fix check did not parse")
 
+# ---- A2: seeded draws through the review-record form. Each method draws from its own stream, random.Random(f"{REVIEW_DRAW_SEED}:{method}"),
+# so a failure names the seed, the method, the draw number and the argv. The argument types and parse_review predict each draw: main takes
+# an argv exactly when they do, and what it prints reads back as drawn.
+REVIEW_DRAW_SEED = "review-record-form"
+REVIEW_DRAW_COUNT = 20  # draws per method, and seeded line mutants
+DRAW_GRANTS = (None, "#7, item 1 a, owner, 2026-11-08 06:08 CST", "#7, item 2 b, owner, 2026-11-08 06:08 CST",
+               "#8, item 1 a, owner, 2026-11-08 06:08 CST", "#7, item 1 A, owner, 2026-11-08 06:08 CST",
+               "#7, item 1 a, owner, 2026-13-08 06:08 CST", "#7, item 1 a, owner, 2026-11-08 06:08 PST")
+DRAW_ACCEPTED = (None, "own-3381-a,2026-11-15 01:50 CST", "own-3381-a, 2026-11-15 01:50 CDT",
+                 "own-3381-a,2026-02-30 01:50 CST", "BAD ID,2026-11-15 01:50 CST", "own-3381-a,2026-11-15 1:50 CST")
+DRAW_ROUNDS = ("1:reviewer:sonnet:PASS", "1:reviewer:sonnet:FAIL", "1:design-reviewer:opus:PASS", "2:reviewer:sonnet:PASS",
+               "2:reviewer:sonnet:FAIL", "3:reviewer:opus:PASS", "3:design-reviewer:opus:PARTIAL", "4:reviewer:opus:PASS",
+               "0:reviewer:sonnet:PASS", "5:reviewer:sonnet:PASS", "1:qa-reviewer:sonnet:PASS", "1:reviewer:sonnet:MAYBE",
+               "1:reviewer:bad model:PASS", "1:reviewer:unknown:PASS")
+
+# A mutant the form reads as the same record, though its text is not the printed form. parse_review takes the digits of `PR: #(\d+)`, so a
+# zero-padded number is the same pull request, and the record reads back equal. The reprint differs, so the converse checks the read instead.
+# A finding, not a weakened check: the reader accepts non-canonical digits. Named here, never skipped.
+SAME_RECORD_READS = ("a zero-padded pull request number",)
+
+def form_variants(body):
+    """A printed record as a GitHub post carries it: as printed, with the attribution footer, with CRLF line ends, and with trailing blank lines."""
+    return (("as printed", body), ("with the footer", body.rstrip("\n") + REVIEW_FOOTER), ("with CRLF line ends", body.replace("\n", "\r\n")),
+            ("with trailing blank lines", body + "\n\n"))
+
+def as_read(text):
+    """The lines the form reads of a record: those before the first line that is exactly `---`, without trailing blank lines (the two allowances
+    parse_review documents)."""
+    lines = text.splitlines()
+    if "---" in lines:
+        lines = lines[:lines.index("---")]
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return lines
+
+class ReviewLogDraws(Env):
+    """Seeded draws through the review form's flags, run through the real main on FakeHost. The live head is the head of the feature branch, so an
+    accepted draw prints its record. A draw the form takes must read back as drawn, in every variant form_variants names; a draw it refuses exits 2
+    or 1 and prints no record."""
+
+    def setUp(self):
+        super().setUp()
+        self.live = self.head()
+
+    def run_draws(self, method, make):
+        rng = random.Random(f"{REVIEW_DRAW_SEED}:{method}")
+        taken = [self.check_draw(method, k, make(rng)) for k in range(REVIEW_DRAW_COUNT)]
+        self.assertTrue(any(taken) and not all(taken), f"seed {REVIEW_DRAW_SEED!r}, {method}: the {REVIEW_DRAW_COUNT} draws must reach both a taken "
+                        f"and a refused argv (taken {sum(taken)})")
+
+    def base_draw(self, rng):
+        def mostly(valid, junk):  # the valid value four times in five, so a stream takes some draws as well as refuses some
+            return rng.choice(valid) if rng.random() < 0.8 else rng.choice(junk)
+        return {"head": mostly((self.live,), (self.live[:39], self.live.upper())), "kind": mostly(merge.REVIEW_KINDS, ("bogus",)),
+                "guard": mostly(merge.REVIEW_GUARDS, ("maybe",)), "net": mostly(merge.REVIEW_NETS, ("huge",)), "rounds": ["1:reviewer:sonnet:PASS"]}
+
+    def round_draw(self, rng):
+        if rng.random() < 0.5:  # a chain that reads as drawn, one token of it maybe changed
+            chain = [f"{i}:reviewer:sonnet:{rng.choice(('PASS', 'FAIL'))}" for i in range(1, rng.randint(1, 3) + 1)]
+            if rng.random() < 0.3:
+                chain[rng.randrange(len(chain))] = rng.choice(DRAW_ROUNDS)
+        else:
+            chain = [rng.choice(DRAW_ROUNDS) for _ in range(rng.randint(1, 3))]
+        return {"head": self.live, "kind": "normal", "guard": "no", "net": "not owed", "rounds": chain}
+
+    def fix_tokens(self):
+        return (None, f"{REVIEW_OLD_HEAD}:reviewer:sonnet:PASS", f"{REVIEW_OLD_HEAD}:reviewer:haiku:FAIL", f"{REVIEW_OLD_HEAD}:reviewer:sonnet:PARTIAL",
+                f"{REVIEW_OLD_HEAD}:design-reviewer:sonnet:PASS", f"{self.live}:reviewer:sonnet:PASS", f"{REVIEW_OLD_HEAD[:38]}:reviewer:sonnet:PASS")
+
+    def fix_draw(self, rng):
+        return {"head": self.live, "kind": "normal", "guard": "no", "net": "not owed", "rounds": ["1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS"],
+                "fix": rng.choice(self.fix_tokens())}
+
+    def grant_draw(self, rng):
+        return {"head": self.live, "kind": "normal", "guard": "yes", "net": "not owed",
+                "rounds": ["1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:sonnet:FAIL", "4:reviewer:sonnet:PASS"],
+                "grant": rng.choice(DRAW_GRANTS)}
+
+    def accepted_draw(self, rng):
+        return {"head": self.live, "kind": "normal", "guard": "yes", "net": "negative",
+                "rounds": ["1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:sonnet:FAIL"], "accepted": rng.choice(DRAW_ACCEPTED)}
+
+    def test_the_base_flags_are_taken_exactly_when_the_form_takes_them(self):
+        self.run_draws("base", self.base_draw)
+
+    def test_the_round_flags_are_taken_exactly_when_the_form_takes_them(self):
+        self.run_draws("rounds", self.round_draw)
+
+    def test_the_fix_verifier_flag_is_taken_exactly_when_the_form_takes_it(self):
+        self.run_draws("fix", self.fix_draw)
+
+    def test_the_grant_flag_is_taken_exactly_when_the_form_takes_it(self):
+        self.run_draws("grant", self.grant_draw)
+
+    def test_the_accepted_flag_is_taken_exactly_when_the_form_takes_it(self):
+        self.run_draws("accepted", self.accepted_draw)
+
+    def test_a_line_mutant_parses_to_none_or_reads_back_as_it_was_printed(self):
+        canon = self.canonical_record()
+        rec = review_fn(self, "parse_review")(canon)
+        self.assertIsNotNone(rec, "control: the canonical record does not parse:\n" + canon)
+        self.assertEqual(self.form_failures(rec), [], "control: the canonical record holds a failure")
+        for label, text in form_variants(canon)[1:]:
+            self.assertEqual(review_fn(self, "parse_review")(text), rec, f"seed {REVIEW_DRAW_SEED!r}, variant {label!r}: reads back other than the canonical record")
+        refused = 0
+        for label, text in self.line_mutants(canon):
+            where = f"seed {REVIEW_DRAW_SEED!r}, mutant {label!r}, text {text!r}"
+            got = review_fn(self, "parse_review")(text)
+            if got is None:
+                refused += 1
+                continue
+            self.assertEqual(self.form_failures(got), [], f"{where}: parsed, and holds a failure")
+            if label in SAME_RECORD_READS:  # the form reads the text as the same record, though its printed form differs
+                self.assertEqual(got, rec, f"{where}: parsed as another record")
+                continue
+            self.assertEqual(review_fn(self, "review_body")(**got).splitlines(), as_read(text), f"{where}: parsed, and reprints other than it read")
+        self.assertGreater(refused, 0, "no mutant was refused: the mutants never reach the form's refusals")
+
+    def canonical_record(self):
+        rounds = [(1, "reviewer", "sonnet", "FAIL"), (2, "reviewer", "sonnet", "FAIL"), (3, "reviewer", "opus", "FAIL"), (4, "reviewer", "opus", "PASS")]
+        return review_fn(self, "review_body")(7, REVIEW_HEAD, "normal", "yes", rounds, "zero", fix=(REVIEW_OLD_HEAD, "reviewer", "sonnet", "PASS"),
+                                              grant=REVIEW_GRANT_TEXT, accepted=(ACCEPT_ID, ACCEPT_AT))
+
+    def line_mutants(self, canon):
+        """Each line dropped, repeated and swapped with its neighbour; one named edit per refusal the form makes; the line after the CI line;
+        and REVIEW_DRAW_COUNT seeded single-character edits."""
+        lines = canon.splitlines()
+        for i in range(len(lines)):
+            yield f"drop line {i}", "\n".join(lines[:i] + lines[i + 1:]) + "\n"
+            yield f"repeat line {i}", "\n".join(lines[:i + 1] + lines[i:]) + "\n"
+        for i in range(len(lines) - 1):
+            yield f"swap lines {i} and {i + 1}", "\n".join(lines[:i] + [lines[i + 1], lines[i]] + lines[i + 2:]) + "\n"
+        for label, old, new in (
+                ("another pull request's number", "PR: #7", "PR: #8"),
+                ("a zero-padded pull request number", "PR: #7", "PR: #007"),
+                ("another pull request's grant", "Grant: #7,", "Grant: #8,"),
+                ("a round above the ceiling", "Round 4:", "Round 5:"),
+                ("a round out of order", "Round 2:", "Round 4:"),
+                ("a lower-case verdict", "PASS", "pass"),
+                ("a trailing space on Kind", "Kind: normal", "Kind: normal "),
+                ("a fix check on the record's own head", REVIEW_OLD_HEAD, REVIEW_HEAD),
+                ("an upper-case head", REVIEW_HEAD, REVIEW_HEAD.upper()),
+                ("an impossible accepted time", "01:50", "25:50")):
+            yield label, canon.replace(old, new, 1)
+        yield "a field after the CI line", canon + "Net value: positive\n"
+        yield "a blank line inside the record", canon.replace("\n", "\n\n", 1)
+        rng = random.Random(f"{REVIEW_DRAW_SEED}:line-mutants")
+        for k in range(REVIEW_DRAW_COUNT):
+            i = rng.randrange(len(canon))
+            c = rng.choice(" ,:#\t.0aZ-")
+            yield f"seeded edit {k}: character {i} to {c!r}", canon[:i] + c + canon[i + 1:]
+
+    def form_failures(self, rec):
+        """What a parsed record may not hold beyond its text, since each one claims a review the form does not show: a grant for another pull
+        request, a fix verifier that reviews the record's own head, rounds that open at neither the first nor the last allowed round, rounds
+        past the ceiling (the last round, or one more with a grant), and rounds that do not rise by 0 or 1 at each step."""
+        bad = []
+        if rec["grant"] is not None:
+            bound = review_fn(self, "grant_pr")(rec["grant"])
+            if bound is None or bound[0] != rec["n"]:
+                bad.append(f"the grant binds to another pull request ({rec['grant']!r}), not #{rec['n']}")
+        if rec["fix"] is not None and rec["fix"][0] == rec["head"]:
+            bad.append("the fix check reviews the record's own head")
+        nums = [r[0] for r in rec["rounds"]]
+        ceiling = merge.REVIEW_LAST_ROUND + (rec["grant"] is not None)
+        if nums and nums[0] not in (1, merge.REVIEW_LAST_ROUND):
+            bad.append(f"the rounds open at {nums[0]}")
+        if any(i < 1 or i > ceiling for i in nums):
+            bad.append(f"a round is outside 1..{ceiling}: {nums}")
+        if any(b - a not in (0, 1) for a, b in zip(nums, nums[1:])):  # a round may repeat: a reviewer and a design reviewer share one
+            bad.append(f"the rounds do not rise by 0 or 1: {nums}")
+        return bad
+
+    def type_refuses(self, name, text):
+        try:
+            review_fn(self, name)(text)
+        except argparse.ArgumentTypeError:
+            return True
+        return False
+
+    def drawn_fields(self, d):
+        """The values a draw names, each through its own argument type; None where the draw names none."""
+        def typed(name, text):
+            return None if text is None else review_fn(self, name)(text)
+        return {"rounds": [review_fn(self, "round_arg")(r) for r in d["rounds"]], "fix": typed("fix_verifier_arg", d.get("fix")),
+                "grant": typed("grant_arg", d.get("grant")), "accepted": typed("accepted_arg", d.get("accepted"))}
+
+    def form_accepts(self, d):
+        """-> (accepts, why): whether the form takes draw d, from each value's own argument type and from parse_review of the body it would print."""
+        if d["kind"] not in merge.REVIEW_KINDS or d["guard"] not in merge.REVIEW_GUARDS or d["net"] not in merge.REVIEW_NETS:
+            return False, "a choice flag takes no such value"
+        typed = [("head_arg", [d["head"]]), ("round_arg", d["rounds"])]
+        for name, key in (("fix_verifier_arg", "fix"), ("grant_arg", "grant"), ("accepted_arg", "accepted")):
+            if d.get(key) is not None:
+                typed.append((name, [d[key]]))
+        for name, texts in typed:
+            for text in texts:
+                if self.type_refuses(name, text):
+                    return False, f"{name} refuses {text!r}"
+        fields = self.drawn_fields(d)
+        # The model rules the --review-record branch of merge.main applies before parse_review (decision agent-model-cap, the round rows): every
+        # fix verifier runs the fix model, a reviewer's second and later rounds run its row's model, and a grant names this pull request.
+        if fields["fix"] is not None and fields["fix"][2].lower() != review_fn(self, "review_round_model")(merge.REVIEW_FIX_ROW):
+            return False, "the fix check names a model other than the fix model"
+        for n, role, model, _verdict in fields["rounds"]:
+            if role == merge.REVIEW_ROLES[0] and n >= 2 and review_fn(self, "review_round_model")(n) not in model.lower():
+                return False, f"round {n} names a model other than its row's"
+        if fields["grant"] is not None and review_fn(self, "grant_pr")(fields["grant"])[0] != 7:
+            return False, "the grant names another pull request"
+        shown = types.SimpleNamespace(round=fields["rounds"], head=d["head"], kind=d["kind"], guard=d["guard"], net_value=d["net"])
+        if review_fn(self, "round_three_refusal")(shown, []):  # the round chain, read from the draw alone: this fixture holds no earlier record
+            return False, "round_three_refusal: a round 3 follows a round 2 that reads done"
+        body = review_fn(self, "review_body")(7, d["head"], d["kind"], d["guard"], fields["rounds"], d["net"], fix=fields["fix"],
+                                              grant=fields["grant"], accepted=fields["accepted"])
+        if review_fn(self, "parse_review")(body) is None:
+            return False, "parse_review refuses the body the form would print"
+        return True, ""
+
+    def argv_of(self, d):
+        argv = ["7", "--review-record", "--head", d["head"], "--kind", d["kind"], "--guard", d["guard"], "--net-value", d["net"]]
+        for r in d["rounds"]:
+            argv += ["--round", r]
+        for flag, key in (("--fix-check", "fix"), ("--grant", "grant"), ("--accepted", "accepted")):
+            if d.get(key) is not None:
+                argv += [flag, d[key]]
+        return argv
+
+    def check_draw(self, method, k, d):
+        argv = self.argv_of(d)
+        where = f"seed {REVIEW_DRAW_SEED!r}, {method} draw {k}, argv {argv!r}"
+        rc, out, err = self.run_args(*argv)
+        self.assertNotIn("Traceback", err, where)
+        for old in OLD_PARSER_ERRORS:
+            self.assertNotIn(old, err, f"{where}: a parser that lacks the flag refused it")
+        accepts, why = self.form_accepts(d)
+        if not accepts:  # every refusal the form makes before any host read exits 2
+            self.assertEqual(rc, 2, f"{where}: the form refuses it ({why}), and main exited {rc}; stderr {err.strip()!r}")
+            return False
+        if d.get("fix") is not None and rc != 0 and "usage:" not in err and "--fix-check" in err:
+            return False  # the fix check's history rule (the newest earlier log, git's descent) is a host read: this fixture has no earlier log to pass it
+        self.assertEqual(rc, 0, f"{where}: the form takes it, and main exited {rc}; stderr {err.strip()!r}")
+        fields = self.drawn_fields(d)
+        want = {"n": 7, "head": d["head"], "kind": d["kind"], "guard": d["guard"], "net": d["net"], **fields}
+        body = posted_body(self, out)
+        for label, text in form_variants(body):
+            got = review_fn(self, "parse_review")(text)
+            self.assertEqual(got, want, f"{where}: the printed record ({label}) reads back other than drawn")
+        self.assertEqual(self.form_failures(got), [], f"{where}: the printed record holds a failure")
+        return True
+
 class ReviewRecordRules(unittest.TestCase):
     """review_state over records the form gives (owner, page item 471 a). A change with Guard or check no is done by the review cap rule
     (roles-review-cap-three): the last round is PASS and the last design-reviewer line is PASS or absent, or the final round is recorded, whatever its
@@ -18004,6 +18347,107 @@ class ReviewArgs(ReviewEnv):
         self.assertTrue(any("first round" in s and "row" in s and "unknown" in s for s in sentences),
                         "the usage text does not say round 1 takes its row's model or unknown")
 
+def flow_row(test, out, n=7):
+    """-> (branch, sha9, state) of pull request n's `merge --reviewed` line. The state is the words before the first colon of the line's rest."""
+    _, branch, sha9, rest = list_line(test, out, n).split(" ", 3)
+    return branch, sha9, rest.split(":", 1)[0]
+
+class MergeFlow(CloudSession):
+    """The merge flow end to end on the gh shim: a lane posts its review record, marks its draft ready,
+    the batch reads the record with --reviewed, and --confirm merges the pull request at the head the record names. The fixture is GhHalf's,
+    but its helpers are called unbound, so GhHalf's own cases do not run a second time. One stand-in: merge.Host.ready sends no REST route
+    (route pr-ready-gh-api-cloud is unmeasured), so the host's mark is answered here and kept in self.marked."""
+
+    def setUp(self):
+        super().setUp()
+        gh_case_setup(self)
+        self.marked = []
+        head = self.head()
+        self.set(draft=True, echo_posts=True, full_name=merge.LANE_MERGE_REPO, open_prs=[["feat", head, "main", 7]], pull_files=self.feat_files(head),
+                 issue_comments=[lint_comment(501, head)])  # the lane-lint PASS at the live head, seeded: --lane-lint is not run here
+
+    def feat_files(self, head):
+        """The files `head` changes against main, from the fixture's own diff, in the files route's shape."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        status = {"A": "added", "M": "modified", "D": "removed"}
+        counts = {}
+        for line in sh(self.co, "git", "diff", "--numstat", "origin/main", head).splitlines():
+            add, dele, path = line.split("\t")
+            counts[path] = (int(add), int(dele))
+        files = []
+        for line in sh(self.co, "git", "diff", "--name-status", "origin/main", head).splitlines():
+            code, path = line.split("\t", 1)
+            files.append({"filename": path, "status": status[code], "additions": counts[path][0], "deletions": counts[path][1]})
+        return files
+
+    def set(self, **kw):
+        return GhHalf.set(self, **kw)
+
+    def gh_state(self, key):
+        return GhHalf.gh_state(self, key)
+
+    def gh_host(self):
+        host = GhHalf.gh_host(self)
+        host.ready = self.mark_ready  # the stand-in named in the class docstring
+        return host
+
+    def mark_ready(self, n):
+        self.marked.append(n)
+        self.set(draft=False)
+        return True, ""
+
+    def call(self, *argv):
+        """-> (rc, stdout, stderr) of merge on the gh host, as a cloud session: the --role call needs the cloud env, and the role file stays in this case's config dir."""
+        out, err = io.StringIO(), io.StringIO()
+        with self.cloud():
+            rc = self.run_merge(*argv, host=self.gh_host(), stdout=out, stderr=err)[0]
+        return rc, out.getvalue(), err.getvalue()
+
+    def lane_posts(self, body):
+        """The lane's post of its record: the body as --review-record printed it, with the footer GitHub adds."""
+        self.gh_host().post_comment(7, body + REVIEW_FOOTER)
+
+    def test_a_lane_merges_at_the_head_its_logged_record_names(self):
+        head = self.head()
+        rc, record, err = self.call("7", "--review-record", *REVIEW_FLAGS, "--head", head)
+        self.assertEqual(rc, 0, "--review-record was refused: " + record + err)
+        self.assertTrue(record.startswith(REVIEW_MARKER + "\n"), "--review-record did not print the record: " + record + err)
+        self.lane_posts(record)
+
+        rc, out, err = self.call("--role", "lane", "--step", "feat", "7", "--ready")
+        self.assertEqual(rc, 0, "the lane's --ready was refused: " + out + err)
+        self.assertEqual(self.marked, [7], "the lane's --ready did not mark #7 ready: " + out + err)
+
+        rc, out, err = self.call("--reviewed")
+        self.assertEqual(rc, 0, "--reviewed was refused: " + out + err)
+        branch, sha9, state = flow_row(self, out)
+        self.assertEqual((branch, sha9), ("feat", head[:9]), "the #7 row names another branch or head:\n" + out)
+        self.assertEqual(state, "done", "the logged record did not read as done:\n" + out)
+
+        rc, out, err = self.call("7", "--confirm", "--head", head)
+        self.assertEqual(rc, 0, "--confirm was refused after a done record: " + out + err)
+        merged = [f.get("sha") for f in self.gh_state("merge_fields") or []]
+        self.assertEqual(len(merged), 1, "--confirm did not merge #7 once: " + out + err)
+        self.assertIn(head, (merged[0], self.rev(merged[0] + "^")), "the merge carried neither the logged head nor a claim commit on it: " + out + err)
+        self.assertEqual(self.claims("main"), 1, "the merge did not claim exactly one record number: " + out + err)
+
+    def test_a_pull_request_with_no_record_is_not_done(self):
+        head = self.head()
+        rc, out, err = self.call("--reviewed")
+        self.assertEqual(rc, 0, "--reviewed was refused: " + out + err)
+        branch, sha9, state = flow_row(self, out)
+        self.assertEqual((branch, sha9), ("feat", head[:9]), "the #7 row names another branch or head:\n" + out)
+        self.assertEqual(state, "no record", "a pull request with no record did not read as no record:\n" + out)
+
+    def test_a_record_for_an_older_head_is_not_done(self):
+        head = self.head()
+        self.lane_posts(record_text(head=REVIEW_OLD_HEAD))
+        rc, out, err = self.call("--reviewed")
+        self.assertEqual(rc, 0, "--reviewed was refused: " + out + err)
+        branch, sha9, state = flow_row(self, out)
+        self.assertEqual((branch, sha9), ("feat", head[:9]), "the #7 row names another branch or head:\n" + out)
+        self.assertEqual(state, "stale", "a record for an older head did not read as stale:\n" + out)
+
 class ReviewRecordWrite(ReviewEnv):
     """`merge <pr> --review-record` prints the record for the pull request's live head. It posts nothing and pushes nothing: the lane posts it."""
 
@@ -18120,15 +18564,19 @@ class ReviewFixFlag(ReviewEnv):
                 self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (REVIEW_OLD_HEAD, "reviewer", model, "PASS"))
 
 class ReviewFixBase(ReviewEnv):
-    """`--fix-check BASE:...` with --review-record refuses unless BASE is the head of the newest review record already on the pull request, and
-    that record has no fix check line, or its fix check passed (owner, page item 741: a fix check after a passing one is accepted). The
-    earlier records come from review_comments, which PullsHost serves from its comment list, oldest first. A refusal exits 2 and prints no record."""
+    """`--fix-check BASE:...` with --review-record refuses unless BASE is the head of an earlier record on the pull request. That record must parse,
+    and have no fix check line or a passing one (owner, page item 741: a fix check after a passing one is accepted). The newest record must parse
+    too, since an unreadable one may hold a FAILed fix check. An older record's head starts the fix check only when the new record posts that
+    record's rounds as they are. The earlier records come from review_comments, which PullsHost serves from its comment list, oldest first. A
+    refusal exits 2 and prints no record."""
 
     EARLIER_HEAD = "1e" * 20  # a head that an earlier record reviewed, and that is not the newest record's
     OTHER_HEAD = "2e" * 20  # a head that no record reviewed
+    MID_HEAD = "3e" * 20  # a head that a middle record reviewed, between the oldest record and the newest
+    LATER_HEAD = "4e" * 20  # the head of a later review log, which FAILed a round or a fix verifier, and is not the base
 
-    def review_with_base(self, base, host):
-        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *REVIEW_FLAGS, "--fix-check", f"{base}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS", host=host)
+    def review_with_base(self, base, host, flags=REVIEW_FLAGS):
+        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *flags, "--fix-check", f"{base}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS", host=host)
 
     def assert_refused(self, rc, out, err):
         self.assertEqual(rc, 2, "the fix check was not refused:\n" + out + err)
@@ -18142,14 +18590,153 @@ class ReviewFixBase(ReviewEnv):
         self.assertEqual(rc, 0, "a base that is the newest record's head was refused:\n" + out + err)
         self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
 
-    def test_a_base_that_is_not_the_head_of_the_newest_earlier_record_is_refused(self):
-        # only the newest record's head counts, so a head that just an older record reviewed is refused as well as a head no record reviewed
+    def test_a_base_no_record_names_is_refused_beside_an_older_record_head(self):
+        # the start must be a head that a parseable record names, so a head no record reviewed is refused with an older record beside the newest one.
+        # The head that the older record names is taken in, by the case below.
         older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
         newest = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
-        for base in (self.OTHER_HEAD, self.EARLIER_HEAD):
-            with self.subTest(base=base):
-                rc, out, err = self.review_with_base(base, self.record_host(older, newest))
-                self.assert_refused(rc, out, err)
+        rc, out, err = self.review_with_base(self.OTHER_HEAD, self.record_host(older, newest))
+        self.assert_refused(rc, out, err)
+
+    def test_a_base_an_older_record_names_is_accepted_when_the_newest_record_names_another_head(self):
+        # The start may be any head that a parseable record on this pull request names, not only the newest record's (the --fix-check rule in the
+        # review-record decision). The control is the newest record's own head, which stays accepted beside it. A hand-written body and a tool-made one both count.
+        for label, body in (("hand-written", record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS)),
+                            ("tool-made, with its footer", record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS) + REVIEW_FOOTER)):
+            with self.subTest(body=label):
+                older = review_comment(1, 7, body)
+                newest = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+                self.assertEqual(parse_text(self, body)["head"], self.EARLIER_HEAD, "fixture: the older record does not name the earlier head")
+                rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, newest))
+                self.assertEqual(rc, 0, "control: a fix check from the newest record's own head was refused:\n" + out + err)
+                rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(older, newest))
+                self.assertEqual(rc, 0, f"a fix check from the head that an older {label} record names was refused:\n" + out + err)
+                self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (self.EARLIER_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS"),
+                                 "the printed record does not carry the fix check from the older head")
+
+    def test_a_base_an_older_record_names_is_accepted_among_three_earlier_records_and_an_unnamed_head_is_refused(self):
+        # Full size: three earlier records, each on its own head. The newest head is the control. The oldest and the middle head are accepted,
+        # and a head that no record names is refused.
+        comments = (review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS)),
+                    review_comment(2, 7, record_text(head=self.MID_HEAD, rounds=REVIEW_PASS)),
+                    review_comment(3, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)))
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(*comments))
+        self.assertEqual(rc, 0, "control: a fix check from the newest record's own head was refused:\n" + out + err)
+        for label, base in (("the oldest record's head", self.EARLIER_HEAD), ("the middle record's head", self.MID_HEAD)):
+            with self.subTest(base=label):
+                rc, out, err = self.review_with_base(base, self.record_host(*comments))
+                self.assertEqual(rc, 0, f"a fix check from {label}, which an earlier record names, was refused:\n" + out + err)
+        rc, out, err = self.review_with_base(self.OTHER_HEAD, self.record_host(*comments))
+        self.assert_refused(rc, out, err)
+
+    def test_a_base_named_only_by_a_record_on_another_pull_request_is_refused(self):
+        # Scope: a record of pull request 8 is no earlier record of pull request 7, so the head it names is no start here. The control is this
+        # pull request's newest head, which stays accepted.
+        other = review_comment(1, 8, record_text(n=8, head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        mine = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(other, mine))
+        self.assertEqual(rc, 0, "control: a fix check from this pull request's newest head was refused:\n" + out + err)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(other, mine))
+        self.assert_refused(rc, out, err)
+
+    def test_a_base_named_only_by_a_review_log_posted_on_another_pull_request_thread_is_refused(self):
+        # Scope: a log of pull request 8 posted on pull request 7's thread is listed under 7 and names the base. The filter that reads a log for another
+        # pull request as no earlier log here drops it, so the base starts nothing. The control is this pull request's newest head.
+        def comments():
+            return (review_comment(1, 7, record_text(n=8, head=self.EARLIER_HEAD, rounds=REVIEW_PASS)),
+                    review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)))
+        listed = self.record_host(*comments()).review_comments("1970-01-01T00:00:00Z").get(7, [])
+        self.assertIn(record_text(n=8, head=self.EARLIER_HEAD, rounds=REVIEW_PASS), listed,
+                      "fixture: the log of pull request 8 is not listed under 7, so the filter is not what the case tests")
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(*comments()))
+        self.assertEqual(rc, 0, "control: a fix verifier from this pull request's newest head was refused:\n" + out + err)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(*comments()))
+        self.assert_refused_for_start(rc, out, err)
+
+    def test_a_base_an_older_record_names_is_accepted_only_when_the_new_record_carries_its_rounds(self):
+        # The older record names the base and holds a FAIL entry, then a PASS entry. A new record that repeats both entries as the older record
+        # holds them starts a fix check from that head. One that turns the FAIL entry into a PASS rewrites an entry the older record carries, so it
+        # is refused. One that holds a single PASS entry is a restart, and the restart refusal stops it first.
+        two_rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")
+        comments = (review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=two_rounds)),
+                    review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)))
+        carried = ("--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:FAIL", "--round", "2:reviewer:sonnet:PASS")
+        rewritten = ("--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:PASS", "--round", "2:reviewer:sonnet:PASS")
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(*comments), flags=carried)
+        self.assertEqual(rc, 0, "control: a record that carries the rounds, from the newest head, was refused:\n" + out + err)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(*comments), flags=carried)
+        self.assertEqual(rc, 0, "a record that carries the older record's rounds, from that record's head, was refused:\n" + out + err)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(*comments), flags=rewritten)
+        self.assert_refused(rc, out, err)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(*comments), flags=REVIEW_FLAGS)
+        self.assert_refused(rc, out, err)
+        self.assertIn("restarts the review", err, "the refusal of a record that posts round 1 alone is not the restart refusal:\n" + err)
+
+    def test_a_base_an_older_record_names_is_refused_when_a_newer_fix_verifier_failed_from_it(self):
+        # control: the newer record's fix check FAILed from the head the older record names, so that head starts no fix check. A fix check after a
+        # FAIL gets the fresh full review (the fix-verifier rule of the review-record decision), not a fix verifier from the same start
+        older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        newest = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, fix=(fix_verifier_line(verdict="FAIL", head=self.EARLIER_HEAD),)))
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(older, newest))
+        self.assert_refused(rc, out, err)
+
+    def assert_refused_for_start(self, rc, out, err):
+        """assert_refused, and the refusal names the start, so another refusal cannot pass for it."""
+        self.assert_refused(rc, out, err)
+        self.assertIn("the reviewed head must be the Head of", err, "the refusal is not the start refusal:\n" + err)
+
+    def test_a_base_an_older_review_log_names_is_refused_when_a_later_review_log_fails_a_round_on_another_head(self):
+        # A later round that FAILed on another head starts no fix verifier from an older head, as a later FAILed fix verifier does. The control is the
+        # newest head itself, with the same FAILed round, which starts the fix verifier beside it.
+        failed = ("Round 1: reviewer, sonnet, FAIL",)
+        carried = ("--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:FAIL")
+        older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=failed))
+        newest = review_comment(2, 7, record_text(head=self.LATER_HEAD, rounds=failed))
+        rc, out, err = self.review_with_base(self.LATER_HEAD, self.record_host(older, newest), flags=carried)
+        self.assertEqual(rc, 0, "control: a fix verifier from the newest head, after its failed round, was refused:\n" + out + err)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(older, newest), flags=carried)
+        self.assert_refused_for_start(rc, out, err)
+
+    def test_a_base_an_older_review_log_names_is_refused_when_a_later_fix_verifier_failed_from_another_head(self):
+        # A FAILed fix verifier that started at another head blocks the older head too. The control is the same newest log with no fix line, which
+        # leaves the older head its start.
+        older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        no_fix = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        failed = fix_verifier_line(verdict="FAIL", head=self.LATER_HEAD)
+        newest = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, fix=(failed,)))
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(older, no_fix))
+        self.assertEqual(rc, 0, "control: a fix verifier from the older head was refused with no later fix line:\n" + out + err)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(older, newest))
+        self.assert_refused_for_start(rc, out, err)
+
+    def test_a_base_an_older_review_log_names_is_refused_when_an_unreadable_review_log_lies_between_them(self):
+        # An unreadable log between the named log and the newest may hold a FAILed fix verifier from the base, so the base starts none. The control is
+        # the same pull request with a readable middle log that holds no fix line. Scope: the middle text does not parse, and the newest log parses
+        # and names the other head, so the refusal comes from the middle log alone.
+        middle_text = record_text(head=self.MID_HEAD, rounds=REVIEW_PASS, kind="bogus")
+        self.assertIsNone(review_fn(self, "parse_review")(middle_text), "fixture: the middle log parses, so the case tests nothing")
+        newest_text = record_text(head=self.LATER_HEAD, rounds=REVIEW_PASS)
+        self.assertEqual(parse_text(self, newest_text)["head"], self.LATER_HEAD, "fixture: the newest log does not name its head")
+        older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        newest = review_comment(3, 7, newest_text)
+        readable = review_comment(2, 7, record_text(head=self.MID_HEAD, rounds=REVIEW_PASS))
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(older, readable, newest))
+        self.assertEqual(rc, 0, "control: a fix verifier from the older head was refused with a readable middle log:\n" + out + err)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(older, review_comment(2, 7, middle_text), newest))
+        self.assert_refused_for_start(rc, out, err)
+
+    def test_a_base_an_older_review_log_names_is_refused_when_another_earlier_log_naming_it_is_not_carried(self):
+        # Each earlier record that names the base must have its entries carried, not only the newest one that names it. The first names the base with a
+        # FAIL entry, the second with a PASS entry, and the newest names another head. The new record carries a PASS entry, which the second record
+        # holds. So the FAIL entry in the first record alone refuses the start. The control gives the first record a PASS entry too.
+        second = review_comment(2, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        newest = review_comment(3, 7, record_text(head=self.LATER_HEAD, rounds=REVIEW_PASS))
+        same_first = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        failed_first = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",)))
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(same_first, second, newest))
+        self.assertEqual(rc, 0, "control: a fix verifier from the older head was refused with both earlier logs at round 1 PASS:\n" + out + err)
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(failed_first, second, newest))
+        self.assert_refused_for_start(rc, out, err)
 
     def test_a_newest_earlier_record_with_a_passing_fix_line_accepts_its_head_as_the_base(self):
         # owner, page item 741: the newest record's fix check passed, so a further fix check from its head is accepted; the new head is a plain commit
@@ -18187,7 +18774,7 @@ class ReviewFixBase(ReviewEnv):
         self.assertNotIn(REVIEW_MARKER, out, "a failed comments read still printed a record")
 
     def test_a_malformed_newest_earlier_record_refuses_the_base(self):
-        # the newest record does not parse, so it cannot name a head, and the base is refused even when an older record has that head
+        # the newest record does not parse, so the tool cannot read whether it holds a FAILed fix check on that head: the base is refused even when an older record names it
         older = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
         malformed = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, kind="bogus"))
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, malformed))
@@ -18627,15 +19214,16 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
         """The record text of the newest earlier record: its head is `head`, fx.fixed by default, and its fix check starts at fx.pre."""
         return record_text(head=head or fx.fixed, rounds=rounds, net=net, guard=guard, fix=(fix_verifier_line(verdict=verdict, head=fx.pre, model=model),))
 
-    def prior_host(self, fx, prior, head):
-        """The pull request at `head`, whose one earlier record is `prior`, with the commits, trees and compares of fx."""
-        return PullsHost([batch_pull(7, head)], {}, comments=[review_comment(1, 7, prior)], commits=fx.parents, trees=fx.trees, compares=fx.on_main)
+    def prior_host(self, fx, prior, head, later=()):
+        """The pull request at `head`, whose earlier records are `prior`, then each of `later`, oldest first, with the commits, trees and compares of fx."""
+        comments = [review_comment(1, 7, prior), *(review_comment(i, 7, body) for i, body in enumerate(later, start=2))]
+        return PullsHost([batch_pull(7, head)], {}, comments=comments, commits=fx.parents, trees=fx.trees, compares=fx.on_main)
 
-    def run_fix_after_prior(self, fx, prior, head, base=None, model=merge.REVIEW_FIX_GUARD_MODEL, flags=REVIEW_FLAGS):
-        """-> (rc, out, err) of --review-record on `head`, with a fix check after the `prior` record. The fix check starts at `base`, which
-        defaults to the fixed head. `flags` are the record's own flags (the guard and the round), REVIEW_FLAGS by default."""
+    def run_fix_after_prior(self, fx, prior, head, base=None, model=merge.REVIEW_FIX_GUARD_MODEL, flags=REVIEW_FLAGS, later=()):
+        """-> (rc, out, err) of --review-record on `head`, with a fix check after the `prior` record and the records of `later` after it. The fix
+        check starts at `base`, which defaults to the fixed head. `flags` are the record's own flags (the guard and the round), REVIEW_FLAGS by default."""
         return self.run_args("7", "--review-record", "--head", head, *flags, "--fix-check", f"{base or fx.fixed}:reviewer:{model}:PASS",
-                             host=self.prior_host(fx, prior, head))
+                             host=self.prior_host(fx, prior, head, later))
 
     def chained_head(self, fx, base, name):
         """-> the sha of a commit with one parent, `base`, that adds the file `name`: a head a chain case reviews. facts() records its parents and tree."""
@@ -18716,7 +19304,7 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
 
     def test_a_fix_verifier_started_at_a_plain_commit_above_the_reviewed_head_is_refused(self):
         # The head is one plain commit on `plain`, so it descends from `plain` and from the reviewed head. Control: the fix check started at the
-        # reviewed head is accepted. The start must be the newest record's Head, so a start at `plain` is refused, with the start refusal's text.
+        # reviewed head is accepted. `plain` is the Head of no record, so a start there is refused although the head descends from it, with the start refusal's text.
         fx = self.real_commits()
         prior = self.prior_text(fx)
         head = self.chained_head(fx, fx.plain, "chain.txt")
@@ -18725,7 +19313,7 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
         self.assertEqual(rc, 0, "control: a fix check started at the reviewed head was refused:\n" + out + err)
         rc, out, err = self.run_fix_after_prior(fx, prior, head, base=fx.plain)
         self.assertEqual(rc, 2, "a fix check started at plain, a commit above the reviewed head, was accepted:\n" + out + err)
-        self.assertIn("the reviewed head must be the Head of the newest earlier review log", err, "the refusal is not the start refusal:\n" + err)
+        self.assertIn("the reviewed head must be the Head of", err, "the refusal is not the start refusal:\n" + err)
         self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
         self.assertNotIn("Traceback", err)
 
@@ -18899,6 +19487,39 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
         self.assertFalse(self.is_ancestor(fx.fixed, fx.feat), "fixture: the reviewed head is an ancestor of feat, so the case tests nothing")
         rc, out, err = self.guard_fix_after(fx, prior, fx.feat)
         self.assert_refused_start(rc, out, err, "a fix verifier on a head that does not descend from the newest reviewed head was not refused")
+
+    def test_a_fix_verifier_from_the_head_an_older_record_names_is_accepted_when_the_newest_record_names_another_head(self):
+        # The start is a head that an older record names with a sonnet PASS fix check, while the newest record names another head (the --fix-check rule
+        # for --fix-check). The head is a plain commit above that start, so git's ancestry holds. Two controls stay refused: a head no record names,
+        # and a head off main that does not descend from the named head.
+        fx = self.real_commits()
+        older = self.prior_text(fx)
+        newest = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)
+        self.assertEqual(record_state(self, older, head=fx.fixed), "done", "fixture: the older record does not read done, so the case tests nothing")
+        self.assertEqual(parse_text(self, newest)["head"], REVIEW_OLD_HEAD, "fixture: the newest record does not name the other head")
+        head = self.chained_head(fx, fx.fixed, "named.txt")
+        self.assertTrue(self.is_ancestor(fx.fixed, head), "fixture: the head does not descend from the older record's head, so the case tests nothing")
+        off_main = self.chained_head(fx, fx.main, "outside.txt")
+        self.assertFalse(self.is_ancestor(fx.fixed, off_main), "fixture: the head off main holds the named head, so the case tests nothing")
+        rc, out, err = self.run_fix_after_prior(fx, older, head, base=fx.plain, later=(newest,))
+        self.assert_refused_start(rc, out, err, "a fix verifier from plain, a head no record names, was not refused")
+        rc, out, err = self.run_fix_after_prior(fx, older, off_main, base=fx.fixed, later=(newest,))
+        self.assert_refused_start(rc, out, err, "a fix verifier from the older head, on a head off main that does not descend from it, was not refused")
+        rc, out, err = self.run_fix_after_prior(fx, older, head, base=fx.fixed, later=(newest,))
+        self.assertEqual(rc, 0, "a fix verifier from the head an older record names was refused, though the newest record names another head:\n" + out + err)
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (fx.fixed, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS"),
+                         "the printed record does not carry the fix check from the older head")
+
+    def test_a_fix_verifier_from_an_older_record_head_is_refused_when_that_records_fix_verifier_failed(self):
+        # The control for the case above: an older record whose fix check FAILed names no start, even while the newest record names another head.
+        fx = self.real_commits()
+        older = self.prior_text(fx, verdict="FAIL")
+        newest = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)
+        self.assertEqual(record_state(self, older, head=fx.fixed), "open", "fixture: the older record with a FAIL fix check does not read open, so the case tests nothing")
+        head = self.chained_head(fx, fx.fixed, "failed.txt")
+        rc, out, err = self.run_fix_after_prior(fx, older, head, base=fx.fixed, later=(newest,))
+        self.assert_refused_start(rc, out, err, "a fix verifier from the head of an older record whose fix check FAILED was not refused")
 
 class ReviewRoundModel(ReviewEnv):
     """The --round values against the reviewer row (agent-model-cap): a review after the first round, the last round included, names sonnet, the first
@@ -25603,6 +26224,32 @@ class StaleMergeTrees(unittest.TestCase):
         self.assertFalse(os.path.exists(stale_tmp), "control: the dead merge tree inside the temp folder must be removed in this run")
         self.assertTrue(os.path.isdir(far_tmp), "a dead-locked merge-wt tree outside the temp folder must stay")
         self.assertIn(os.path.realpath(far_wt), self.locked_trees(), "the dead-locked tree outside the temp folder must stay registered")
+
+
+class VerifiedLine(RecordsEnv):
+    """The claim commit and the records-page commit each carry a Verified line (lint/check_red_run.py)."""
+
+    def test_claim_commit_carries_a_verified_line(self):
+        info = self.host.pr(7)
+        tmp, wt = merge.open_worktree(self.co, info, "main")
+        try:
+            trailer = merge.do_claim(wt, ".github/stamp.json", "origin/main")
+            sha = merge.commit_claim(wt, trailer)
+            subject = sh(self.co, "git", "log", "-1", "--format=%s", sha)
+            message = sh(self.co, "git", "log", "-1", "--format=%B", sha)
+        finally:
+            merge.drop_worktree(self.co, tmp, wt)
+        self.assertEqual(subject, "Claim record numbers", "fixture: the commit is not the claim")  # scope before subject
+        self.assertIn("Record-claim: ", message, "fixture: the claim commit holds no Record-claim trailer")
+        self.assertRegex(message, r"(?m)^Verified: \S", "the claim commit has no Verified line:\n" + message)
+
+    def test_page_commit_carries_a_verified_line(self):
+        parent = sh(self.co, "git", "rev-parse", "origin/main")
+        page = self.tool_page(parent, rebuild=False, hand="# Records\n\nwritten by the Verified line case\n")
+        subject = sh(self.co, "git", "log", "-1", "--format=%s", page)
+        message = sh(self.co, "git", "log", "-1", "--format=%B", page)
+        self.assertEqual(subject, merge.PAGE_SUBJECT, "fixture: the commit is not the records-page commit")  # scope before subject
+        self.assertRegex(message, r"(?m)^Verified: \S", "the records-page commit has no Verified line:\n" + message)
 
 
 if __name__ == "__main__":

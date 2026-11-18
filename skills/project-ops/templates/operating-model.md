@@ -17,6 +17,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   The arbiter is a separate role that holds a repo's ruling and grant voice (decision `session-tiers`, Arbiter).
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
+  The consultant is not a tier: the owner starts it, and no coordinator sets its tag. The guard reads the tag `cs-build:consultant`.
   A lane also gets `cs-topic:<topic slug>`, its one topic, and a `cs-step:<step id>` for each step it takes, so triage can see each step is live.
   It plans, briefs, verifies and reports, and builds only as rule `roles-orchestrator-never-builds` allows. It builds what the owner asks of it and lands it on main. Long reads go to read-only agents: the red-run reads, each `merge --touches` read of an open PR, and audits. It keeps lane state, the briefs and the talk with the owner.
 - **Triage.** A standing session. It writes the roadmap. Only triage writes a new step,
@@ -106,6 +107,17 @@ A spawner is a session that starts its own agents. Each session role is a set of
   exact line. It ends with no step still doing under its id. It marks each part that is ruled but not built "ruled, not built".
   It reports up to the coordinator. Work that needs a local machine is a lane whose brief
   names the machine. It may drive a Remote Control session on the owner's machine.
+- **Arbiter.** A standing session and a decider only. It ranks below the owner in its repo. It makes rulings
+  and grants, each marked as its own, for its own repo only. The coordinator starts it only on the owner's grant,
+  such as the words "spawn arbiter", for a long run the owner does not want to sit through. It may start only
+  read-only agents (Explore, refuter), to gather evidence. It builds nothing, starts no lanes and grants no Opus.
+  Batch checks go to the batch runner. It compacts in place. Each ruling it makes goes to the page writer, which
+  adds a closed item with an Overturn choice (decision `session-tiers`, Arbiter).
+- **Consultant.** A session the owner starts on demand, in claude-settings. The consultant is not a tier: the owner starts
+  it, and no coordinator sets its tag. The guard reads the tag `cs-build:consultant`. It talks with the owner and runs read-only audits. It keeps one plan file, rewritten in place. It sends
+  each ruling to triage. A finding about another repo goes to that repo's triage. It builds what the owner asks of it and
+  merges its own pull requests under the standing merge role. It decides nothing: an arbiter decides, and a consultant helps the owner decide. It ends when its plan lands. The name
+  "advisor" is not used, since the built-in advisor (`advisorModel`) has it (decision `session-tiers`, Consultant).
 - **Batch runner's standing duty: a rolling combine train.** In a repo that still batches, the batch runner keeps it all the time (ruled, not in force or built; both routes stay, picked by speed per situation; the scope reading is the lane's, unchecked; a repo on per-lane merging, where each lane PR merges alone, does not)
   (claude-settings decision `session-tiers`, the session roles decision, bullet "Rolling combine train": the levels L1 to L4, what is
   frozen, what keeps folding, what a fold owes, the pre-merge reads and the fold checks (both relayed, not checked), and the per-batch report numbers).

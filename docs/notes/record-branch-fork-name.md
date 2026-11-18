@@ -1,1 +1,1 @@
-- record-branch-fork-name: state f skips only the record branch of the repo the run is rooted at. A fork's own record branch (`roadmap-<fork>`) still lists as an f row in a run rooted at main.
+- record-branch-fork-name: state f skips only the record branch of the repo the run is rooted at. A fork's own record branch (`roadmap-<fork>`) still lists as an f row in a run rooted at main. Seen: 2026-11-17 x1

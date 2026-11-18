@@ -1,0 +1,1 @@
+- lane-title-untagged-start: PR 2761 (step lane-title-slug) judges only a tagged create_session. An untagged start_session (the Mac route, with no tags field) is not judged, so a free title still passes (decision agent-model-cap, "The lane title"). The coordinator accepted this gap; it is a debt only after a real miss.

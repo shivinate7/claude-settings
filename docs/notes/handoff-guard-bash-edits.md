@@ -1,1 +1,0 @@
-- handoff-guard-bash-edits: (debt) the handoff-sections guard judges only Write, Edit and MultiEdit, so a Bash edit of a handoff (python, sed, a redirect) is caught only by the Stop flag after the turn. Decision: precompact-handoff.
