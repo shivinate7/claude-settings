@@ -6098,6 +6098,28 @@ class LaneLintDiskFloor(LaneFixture):
                     self.assertEqual(rc, 0, "99% memory with 50 GiB free on the disk refused the lane lint: " + out)
                     self.assertEqual(len(pass_lines(out)), 1, out)
 
+    def disk_paths_read_by_refusal(self, free_gib=50):
+        """`refuse_full_disk` in a cloud session with `free_gib` free on every drive. -> the paths shutil.disk_usage is asked for, in order."""
+        read = []
+        def usage(path):
+            read.append(path)
+            return types.SimpleNamespace(total=int(DISK_GIB * GIB), used=int((DISK_GIB - free_gib) * GIB), free=int(free_gib * GIB))
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_REMOTE": "true"}), \
+                unittest.mock.patch.object(shutil, "disk_usage", side_effect=usage):
+            merge.refuse_full_disk(self.co)
+        return read
+
+    def test_a_cloud_lane_lint_reads_the_home_drive_first_as_main_does_and_never_the_root(self):
+        """The lane lint's guard reader reads the home folder's drive in a cloud session, as on main. The root folder is the cloud read
+        of a start, and the lane lint takes no part in it."""
+        home = os.path.expanduser("~")
+        self.assertNotEqual(os.path.realpath(home), "/", "the home folder is the root folder here, so the case proves nothing")
+        paths = self.disk_paths_read_by_refusal()
+        self.assertTrue(paths, "the lane lint read no drive in a cloud session")
+        self.assertEqual(paths[0], home, "the lane lint's first disk read in a cloud session is %r, not the home folder %r, as on main"
+                         % (paths[0], home))
+        self.assertNotIn("/", paths, "the lane lint read the root folder's drive, which only a cloud start reads: %r" % (paths,))
+
     def test_a_full_temp_drive_refuses_a_cloud_lane_lint_while_home_has_room(self):
         """The lint tree lands under the temp folder (add_worktree's mkdtemp). That drive is full and home's drive has room, so the lane lint
         must refuse before it makes the tree. A check that reads only home's drive would pass, so the case fills the temp drive."""

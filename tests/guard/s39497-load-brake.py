@@ -2,7 +2,8 @@
 FAMILY = "load-brake"
 # The machine-load brake. On a start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
 # the guard reads the machine's load once: memory in use as a share of this machine's memory, and disk free on
-# the home drive in GB against the drive's size. CPU is not read (decision machine-load-brake): a 200 ms CPU
+# the home drive (the root drive in a cloud session) in GB against the drive's size. CPU is not read
+# (decision machine-load-brake): a 200 ms CPU
 # sample is noise, and memory and disk are what stall a machine. It counts no claude process and no running
 # lane. A GB here is 2**30 bytes, as df -k and PowerShell 1GB give. The levels:
 #   busy  memory over 85%, or disk free under the smaller of 10% of the disk and 15 GB. An Agent or Task call
@@ -24,14 +25,15 @@ FAMILY = "load-brake"
 #   read_load()    a function in guard.py, or in a guard_*.py module that guard.py imports. It takes
 #                  no argument and does every OS read. It returns a dict with the keys memory_pct
 #                  (percent of physical memory IN USE), disk_free_gb and disk_total_gb (GB FREE and GB
-#                  TOTAL on the home drive, never clamped to 0-100). It returns no cpu_pct key. A
+#                  TOTAL on the home drive (the root drive in a cloud session), never clamped to 0-100). It returns no
+#                  cpu_pct key. A
 #                  missing key or a None is an unread reading, which counts as normal. read_load may
 #                  raise: every reading then counts as normal. It returns no claude_procs, and a
 #                  claude_procs key in a reading changes nothing. A cpu_pct key in a stub reading changes
 #                  nothing either: a change that still reads the CPU refuses on those stubs and fails here.
 #                  The OS sources, all faked by THE FAKE HOST: darwin reads memory through sysctlbyname;
-#                  linux reads memory unread; both read the disk through shutil.disk_usage on the home
-#                  folder. Neither reads the CPU ticks, the load average, or waits.
+#                  linux reads memory unread; both read the disk through shutil.disk_usage: the home folder, or "/"
+#                  in a cloud session. Neither reads the CPU ticks, the load average, or waits.
 # The judge must call it by its bare name, so the probe's patch (set on every guard module that
 # holds the name) is the function that runs. A function the probe cannot replace fails every case.
 # The reading of a call is one read_load() per start call, and none on any other call.
@@ -52,6 +54,12 @@ from unittest import mock
 guard_path, side, spec = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
 children = []
 sleeps = []
+disk_paths = []   # each path that shutil.disk_usage is asked for under THE FAKE HOST, in order
+
+
+def disk_read(path, usage):
+    disk_paths.append(str(path))
+    return usage
 time.sleep = lambda seconds: sleeps.append(seconds)   # counted, never waited on
 real_popen = subprocess.Popen
 in_popen = [0]
@@ -137,7 +145,7 @@ def under_fake(read, fake):
             mock.patch("ctypes.CDLL", cdll), \
             mock.patch("ctypes.cdll", types.SimpleNamespace(LoadLibrary=cdll)), \
             mock.patch("os.getloadavg", lambda: (load, load, load), create=True), \
-            mock.patch("shutil.disk_usage", lambda path: usage), \
+            mock.patch("shutil.disk_usage", lambda path: disk_read(path, usage)), \
             mock.patch("builtins.open", stat_open), mock.patch("io.open", stat_open):
         try:
             return read()
@@ -236,6 +244,7 @@ except Exception as exc:
     out["probe_error"] = type(exc).__name__ + ": " + str(exc)[:200]
 out["sleeps"] = len(sleeps)
 out["children"] = children
+out["disk_paths"] = disk_paths
 with open(side, "w", encoding="utf-8") as handle:
     json.dump(out, handle, default=str)
 if out.get("probe_error"):
@@ -382,7 +391,8 @@ def lb_names(word, *numbers, percent=True):
 
 
 def lb_decision_check(tool, reading, want, names=(), background=None, tool_input=None, reads=1, lacks=(),
-                      fake=None, agent=None, remote=None, own_env=None, transcript=None, spy=False):
+                      fake=None, agent=None, remote=None, own_env=None, transcript=None, spy=False,
+                      disk_paths=None, disk_reads=None):
     """A start call under a forced reading, or under THE FAKE HOST when `fake` is given (then `reading`
     is unused and the real read_load runs). `background` is the call's run_in_background: True, False, or
     None to leave it out. `tool_input` replaces the whole input. `remote` is CLAUDE_CODE_REMOTE (see lb_run),
@@ -402,6 +412,12 @@ def lb_decision_check(tool, reading, want, names=(), background=None, tool_input
             return False, "%s, want %s (the reader ran %s times): %s" % (got, want, called, reason[:80])
         if reads is not None and called != reads:
             return False, "%s as wanted, but the reader ran %s times, want %d" % (got, called, reads)
+        if disk_reads is not None and len(side.get("disk_paths", [])) != disk_reads:
+            return False, "the start read the disk %d time(s), want %d" % (len(side.get("disk_paths", [])), disk_reads)
+        if disk_paths is not None:
+            want_paths = disk_paths() if callable(disk_paths) else disk_paths
+            if side.get("disk_paths") != want_paths:
+                return False, "the disk reads %r, want %r" % (side.get("disk_paths"), want_paths)
         if got == "allow" and side["files"]:
             return False, "an allowed lane call wrote %d file(s)" % len(side["files"])
         for pattern in names:
@@ -851,7 +867,21 @@ lb_add("a Bash call whose agent_id is malformed reads no load under the worst re
 # writes fail, so the start is what gets stopped. Memory and busy never brake a cloud start. A running agent or lane is
 # never stopped, and reads no load. Allowed calls run end to end, so their file writes are checked too.
 LB_CLOUD = "true"
-LB_SWEEP = re.compile(r"sweep\.py")   # the sweep command a refusal names (the-janitor-is-one-machine-wide-sweep)
+def lb_sweep_text():
+    """guard.LOAD_SWEEP, the whole sweep command a refusal must name. None when guard holds no such name."""
+    return getattr(_load_guard_module(), "LOAD_SWEEP", None)
+
+
+class LB_SWEEP_NAMED:
+    """A refusal's reason holds guard.LOAD_SWEEP whole, read at each check. A bare `sweep.py` does not match."""
+    pattern = "guard.LOAD_SWEEP"
+
+    def search(self, text):
+        sweep = lb_sweep_text()
+        return bool(sweep) and sweep in text
+
+
+LB_SWEEP = LB_SWEEP_NAMED()
 LB_WAIT = re.compile(r"wait", re.I)   # and it never tells the session to wait
 LB_CLOUD_STARTS = (("Agent", True, "run_in_background true"), ("Agent", None, "run_in_background left out"),
                    ("Agent", False, "run_in_background false"), ("Task", True, "run_in_background true"),
@@ -867,7 +897,7 @@ def lb_full_point(total):
 
 
 def lb_cloud_disk_check(tool, free, total, want, side, tool_input=None, background=None, memory=None, fake=False,
-                        reads=1, names=(), lacks=(), agent=None):
+                        reads=1, names=(), lacks=(), agent=None, disk_paths=None, disk_reads=None, remote=LB_CLOUD):
     """A cloud call on a disk of `total` GB with `free` GB free. `side` is "under" or "above": where the free space
     must sit against the full point. That is checked first, so a case whose numbers drift past the point fails on its
     scope, not on the verdict. `memory` None leaves memory unread. `fake` runs the real reader on a linux host."""
@@ -880,7 +910,8 @@ def lb_cloud_disk_check(tool, free, total, want, side, tool_input=None, backgrou
         spec_fake = lb_fake("linux", disk_total=total, disk_free=free) if fake else None
         reading = None if fake else dict(LB_NORMAL, memory_pct=memory, disk_free_gb=free, disk_total_gb=total)
         return lb_decision_check(tool, reading, want, names=names, background=background, tool_input=tool_input,
-                                 reads=reads, lacks=lacks, fake=spec_fake, agent=agent, remote=LB_CLOUD)()
+                                 reads=reads, lacks=lacks, fake=spec_fake, agent=agent, remote=remote,
+                                 disk_paths=disk_paths, disk_reads=disk_reads)()
     return check
 
 
@@ -924,6 +955,19 @@ lb_add("cloud: Agent, linux disk 3.1 GB free of 926 GB, run_in_background true, 
        "disk and sweep.py, never says wait",
        lb_cloud_disk_check("Agent", 3.1, 926.0, "deny", "under", background=True, fake=True,
                            names=(lb_gb(3.1, 926.0), LB_SWEEP), lacks=(LB_WAIT,)))
+# The disk path. The probe records each path shutil.disk_usage is asked for. A cloud start reads the
+# root folder's drive, once. A local start reads the home folder's drive, once.
+lb_add("cloud: Agent, run_in_background true, disk 4.0 GB free of 252 GB, the real reader: the one disk read is \"/\"",
+       lb_cloud_disk_check("Agent", 4.0, 252.0, "deny", "under", background=True, fake=True, disk_paths=["/"],
+                           disk_reads=1, names=(lb_gb(4.0, 252.0), LB_SWEEP), lacks=(LB_WAIT,)))
+lb_add("cloud: Workflow, disk 4.0 GB free of 252 GB, the real reader: a start reads the disk once",
+       lb_cloud_disk_check("Workflow", 4.0, 252.0, "deny", "under", fake=True, disk_reads=1,
+                           names=(lb_gb(4.0, 252.0), LB_SWEEP), lacks=(LB_WAIT,)))
+lb_add("local: Agent, run_in_background true, disk 4.0 GB free of 252 GB, the real reader: the one disk read is "
+       "the home folder's drive",
+       lb_cloud_disk_check("Agent", 4.0, 252.0, "deny", "under", background=True, fake=True, remote=None,
+                           disk_paths=lambda: [os.path.expanduser("~")], disk_reads=1,
+                           names=(lb_gb(4.0, 252.0),)))
 # Above the full point a cloud start passes, whatever the memory reading and at busy. These do not pin the read.
 for _tool, _bg, _say in LB_CLOUD_STARTS:
     lb_add("cloud: %s, %s, memory unread, disk 6.0 GB free of 252 GB (above the full point): allowed" % (_tool, _say),
