@@ -1,4 +1,4 @@
-# Triage 11 goal, version 4 (final, 10:29 CST Nov 18)
+# Triage 11 goal, version 4 (final, 10:36 CST Nov 18)
 
 Replaces goal v3. The owner pastes it with `/goal`; triage cannot set it.
 
@@ -24,7 +24,7 @@ Scope: I write the page items and the roadmap record, file merges others make, a
 Rows (the state is read from REST or the page, never from memory):
 1. Outbox drain: PR 3647 (342 J notes) merged by runner 10. Then drop the J lines from roadmap/outbox/triage.md and file the merge on step triage-outbox-drain. Then outbox R (25), U (51) and K lines.
 2. Ledger of lost PRs: owner item 962 answered, then the rerun and publish to roadmap/backlog/lost-prs.json.
-3. Blog findings: (a) item 953, (c) item 952, (d) items 956 to 959, (e) item guard-stages-observe wait on the owner; (b) step verify-skill-per-repo is ready for runner 10.
+3. Blog practices to instill (from the verification and code-review blogs; each ends as a landed rule or check, not only a filed step): (a) measure what each review layer catches before changing a layer (item 953); (b) a verify skill per repo that drives the real thing (step verify-skill-per-repo, ready for runner 10); (c) a guard or check file a PR changes is judged by main's copy (item 952); (d) PR template lines Testing, Risk, How to revert, and risk tiers by change (items 956 to 959); (e) guard stages off, observe, enforce (item guard-stages-observe); (f) count findings repeated across review rounds (measured; no guard built, because records hold verdicts, not findings). A finding is landed when its rule or check is merged on main (REST) or it waits on a named owner pick.
 4. Lost work: step fix-check-other-records is in build by the coordinator (rebuild on main; stalled draft PR 2940 is closed as replaced when the rebuilt PR opens). I file the merge from REST.
 5. Guard steps from my own mistakes (each starts with a prior-work search): placeholder time in a message (the future-stamp half is covered by rule message-time-matches-clock and draft PR 3234), check past rulings before posting an owner question, read PR state from REST before writing "waits on <PR>". The coordinator gives each a lane or agents.
 6. Status-tab build (draft PR 3649, the coordinator's): when it merges, publish the ledger key and do act (c). After PR 3264 (merged 10:20 CST Nov 18) the live page needs a republish; a one-item survival test of stored items comes first.
