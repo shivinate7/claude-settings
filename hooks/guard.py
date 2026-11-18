@@ -106,9 +106,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        this session. (a-kill-by-pid-needs-an-owned-pid)
   detached-launch      deny. A command that starts a process and detaches it from the session.
   wsl-allow-list       deny. A `wsl` call outside the fixed list of test commands. (wsl-allow-list)
-  review-record-form, review-record-sha  deny. A PR comment (add or update) whose first line is the review log marker and whose
-                       body merge/merge.py parse_review refuses, or whose Head or Fix check sha names no commit in the
-                       call's checkout. (review-record-hand-form)
+  review-log-form, review-log-sha  deny. A PR comment (the add and update tools, a Bash gh pr comment or gh api body) whose
+                       first line is the review log marker and whose body merge/merge.py parse_review refuses, or
+                       whose Head or Fix check sha names no commit in the call's checkout. (review-log-hand-form)
   live-stream, waiter  deny. A command that follows a stream with no end, or polls with sleep.
   verdict-pipe         deny. A `verdict` stage piped into another command: the exit is the last
                        stage's, and a filter can cut verdict's FAIL line.
@@ -7684,12 +7684,12 @@ def judge(payload) -> None:
         refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "create_pull_request without draft")
 
     # A review log comment the merge tool cannot read, or one that names a sha the checkout does not hold (rules
-    # review-record-form and review-record-sha). One literal refuse() per rule: lint/rule_audit.py reads only string-literal rule ids.
+    # review-log-form and review-log-sha). One literal refuse() per rule: lint/rule_audit.py reads only string-literal rule ids.
     review = review_log_hit(tool, tool_input, cwd)
-    if review and review[0] == "review-record-form":  # glossary-ok: the rule id is fixed by its cases
-        refuse(tool, "deny", "review-record-form", review[1], review[2])  # glossary-ok: the rule id is fixed by its cases
-    if review and review[0] == "review-record-sha":  # glossary-ok: the rule id is fixed by its cases
-        refuse(tool, "deny", "review-record-sha", review[1], review[2])  # glossary-ok: the rule id is fixed by its cases
+    if review and review[0] == "review-log-form":
+        refuse(tool, "deny", "review-log-form", review[1], review[2])
+    if review and review[0] == "review-log-sha":
+        refuse(tool, "deny", "review-log-sha", review[1], review[2])
 
     # A SendMessage addressed to a cloud session id (rule sendmessage-session-id).
     if tool == "SendMessage":
