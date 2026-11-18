@@ -397,7 +397,7 @@ SLOW_LEG_JOBS = (GUARD_JOB, "checks-windows-guard-2", "checks-windows-guard-3", 
 # The fast Windows jobs and the scope flags each one reads (brief windows-nightly). On a pull_request a fast job starts only when one of
 # its flags is set, and the flags follow the Windows-only list ci-scope.sh emits. The merge shards belong to checks-windows-merge.
 FAST_WINDOWS_JOBS = {"pointer-windows": ("pointer_windows",), "checks-windows": ("checks_windows",),
-                     "checks-windows-rest": ("checks_windows_rest",), "checks-windows-rest-2": ("checks_windows_rest", "checks_windows_rest_2"),
+                     "checks-windows-rest": ("checks_windows_rest",), "checks-windows-rest-2": ("checks_windows_rest_2",),
                      "checks-windows-sweep": ("checks_windows_sweep", "sweep"),  # the mutation step in it reads `sweep` (IF_PIN)
                      **{name: ("checks_windows_merge",) for name in ("checks-windows-merge", "checks-windows-merge-2", "checks-windows-merge-3",
                                                                      "checks-windows-merge-4", "checks-windows-merge-5")}}
