@@ -1,4 +1,4 @@
-# Triage 11 goal, version 4 (final, 10:31 CST Nov 18)
+# Triage 11 goal, version 4 (final, 10:29 CST Nov 18)
 
 Replaces goal v3. The owner pastes it with `/goal`; triage cannot set it.
 
