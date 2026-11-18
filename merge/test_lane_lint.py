@@ -5368,7 +5368,7 @@ class MergedLintTree(LaneFixture):
         self.main_fix_after_branch()
         self.host.body = lane_body(OWN, "Rules checked: some-record \u2014 no change")
         self.use_ci_job(PASSING, 0)
-        rc, text = self.lint_run("--lane-lint", "7")
+        rc, text = self.lint_run("--lane-lint", "7", pushed=True)
         self.assertEqual(rc, 0, text)
         run = self.lint_calls()[0]
         self.assertEqual(run["pr_body_env"], self.host.body,
@@ -5379,7 +5379,7 @@ class MergedLintTree(LaneFixture):
         self.main_fix_after_branch()
         self.host.body = ""
         self.use_ci_job(PASSING, 0)
-        rc, text = self.lint_run("--lane-lint", "7")
+        rc, text = self.lint_run("--lane-lint", "7", pushed=True)
         self.assertEqual(rc, 0, text)
         self.assertEqual(self.lint_calls()[0]["pr_body_env"], "", "an empty PR body did not reach ci-job as an empty PR_BODY: " + text)
 
@@ -5389,10 +5389,11 @@ class MergedLintTree(LaneFixture):
         self.host.body = lane_body(OWN, "this PR's body")
         self.use_ci_job(PASSING, 0)
         with unittest.mock.patch.dict(os.environ, {"PR_BODY": "another PR's body"}):
-            rc, text = self.lint_run("--lane-lint", "7")
+            rc, text = self.lint_run("--lane-lint", "7", pushed=True)
         self.assertEqual(rc, 0, text)
         self.assertEqual(self.lint_calls()[0]["pr_body_env"], self.host.body, "the caller's PR_BODY reached ci-job beside the PR's own body: " + text)
         os.remove(self.log)
+        # the pushed merge is now origin's feat, a head that holds the tip: the ref target lints it as a merge of the tip and it, never pushed
         with unittest.mock.patch.dict(os.environ, {"PR_BODY": "another PR's body"}):
             rc, text = self.lint_run("--lane-lint", "feat")
         self.assertEqual(rc, 0, text)
