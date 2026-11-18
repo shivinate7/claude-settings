@@ -85,7 +85,7 @@ MERGE_NAMES = ("MERGE_TOOLS", "TRUST_TOOLS", "ARCHIVE_TOOL", "BRIEF_TOOL")
 GITHUB_WRITE_TOOLS = tuple("mcp__github__" + short for short in (
     "merge_pull_request", "create_pull_request", "push_files", "create_or_update_file", "delete_file",
     "update_pull_request"))
-# The two GitHub comment tools a review record is posted by. Rules review-record-form and review-record-sha judge
+# The two GitHub comment tools a review record is posted by. Rules review-log-form and review-log-sha judge
 # their body, so the guard's matcher must see both (the body is the record's form, read by merge/merge.py).
 GITHUB_COMMENT_TOOLS = tuple("mcp__github__" + short for short in ("add_issue_comment", "update_issue_comment"))
 
