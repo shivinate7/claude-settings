@@ -1,0 +1,1 @@
+- roles-check-wrapped-false-alarm: lint/check_project_ops_roles.py reads a backticked or bold role in the session-roles sentence, or a clause after the last role, as a made-up role. It exits 1, so the failure is loud, not silent. Fix: strip `*` and backticks, or document both forms. Decision: session-tiers (session roles).
