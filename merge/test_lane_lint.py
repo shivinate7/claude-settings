@@ -5805,7 +5805,7 @@ class LaneLintDiskFloor(LaneFixture):
 
     def test_a_full_temp_drive_refuses_a_cloud_lane_lint_while_home_has_room(self):
         """The lint tree lands under the temp folder (add_worktree's mkdtemp). That drive is full and home's drive has room, so the lane lint
-        must refuse before it makes the tree. Red on the head, which reads home's drive alone."""
+        must refuse before it makes the tree. A check that reads only home's drive would pass, so the case fills the temp drive."""
         temp = tempfile.mkdtemp(prefix="full-temp-", dir=RUN_FOLDER)
         self.use_ci_job(PASSING, 0)
         with unittest.mock.patch.object(tempfile, "tempdir", temp), unittest.mock.patch.dict(os.environ, {"TMPDIR": temp}), \
