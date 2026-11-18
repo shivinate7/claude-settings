@@ -739,10 +739,15 @@ def folders(root, flag):
     return tuple(path(root, name) for name, kind in kinds(root).items() if kind.get(flag))
 
 
+def note_dir(root):
+    """The note folder of `root` with its trailing slash. Raises LayoutError when the layout cannot be read."""
+    return path(root, "notes") + "/"
+
+
 def fill_note_paths(root, text):
     """`text` with {folder} (the note folder, with its slash) and {old} (the old notes file) filled from `root`'s layout.
     The one filler for the agent-facing note rules (lint/check_record_slugs.py AGENT_FORM_RULES)."""
-    return text.replace("{folder}", path(root, "notes") + "/").replace("{old}", path(root, "debt-notes"))
+    return text.replace("{folder}", note_dir(root)).replace("{old}", path(root, "debt-notes"))
 
 
 if __name__ == "__main__":
