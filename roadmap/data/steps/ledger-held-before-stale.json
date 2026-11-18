@@ -1,0 +1,14 @@
+{
+ "id": "ledger-held-before-stale",
+ "title": "The PR ledger tests a held review record before a stale one, so a held record on an old head no longer shows \"fix check\"",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator, 07:41 CST Nov 18: in merge/merge.py review_state returns stale (about line 5203) before held (about line 5205), so a held record on an old head can read as a fix check. Decision pr-ledger says a held record matches no record rule and falls to the label, blocked and draft rules (docs/decisions/pr-ledger.md lines 61 to 73), and its part 3b says it fixes this order (line 97). Part 1 (PR 2845, merged 07:24 CST Nov 18) left it.",
+ "source": "coordinator 07:41 CST Nov 18, relayed to triage 11",
+ "note": "Not built. Kept out of step status-tab-lists-coord-prs on purpose, because it changes a merge verdict. Lines are the coordinator's reading at 07:41 CST; triage 11 has not read merge/merge.py. Next: a lane brief with a test-author first (a held record on an old head must read as a label, blocked or draft act, not a fix check); mover: whoever takes the lane after the coordinator's say-so.",
+ "updatedAt": "2026-11-18T07:42:28-06:00"
+}
