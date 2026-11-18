@@ -800,10 +800,11 @@ def spo_folder_writes(fx, name, writes):
     return problems
 
 
-def spo_folder_case(tag, name, writes, agent, command_of, passed, want="deny"):
+def spo_folder_case(tag, name, writes, agent, command_of, passed, want="deny", folder=False):
     """The files of `writes` are made, then `agent`'s call `command_of(scratchpad)` runs. With `want` "deny" the call
     is refused, and the refusal names scratchpad-owner, neither the folder nor the files. With "ask" the call is asked,
-    and the ask names scratchpad-owner, neither the folder nor the files. With "allow" it passes."""
+    and the ask names scratchpad-owner, neither the folder nor the files. With "allow" it passes. With `folder` a
+    refusal must be the folder's reason, which names a folder; the file's reason names a file, so it fails here."""
     fx = spo_fixture(tag)
     problems = spo_folder_writes(fx, name, writes)
     got, reason = spo_run(fx, agent, command_of(fx["scratch"]))
@@ -814,6 +815,8 @@ def spo_folder_case(tag, name, writes, agent, command_of, passed, want="deny"):
         problems.append(spo_asked(name, got, reason, banned))
     else:
         problems.append(spo_refused(name, got, reason, banned))
+        if folder and got == "deny" and "folder" not in reason:
+            problems.append("%s: the refusal is not the folder's reason (%s)" % (name, reason[:100]))
     return spo_result(problems, passed)
 
 
@@ -1373,6 +1376,34 @@ spo_register("scratchpad-owner: run and folder control 2, agent B's rm -rf of ag
              lambda: spo_folder_case("run-folder-ctl-2", "run and folder control 2", SPO_RUN_FOLDER, SPO_OTHER,
                                      lambda s: "rm -rf %s" % os.path.join(s, "sub"),
                                      "agent B's rm -rf of agent A's folder with no run is refused"))
+# Rule scratchpad-owner, one call that overwrites, removes or moves another agent's file and also removes or moves a
+# folder that holds another agent's file. The file alone is asked, but the folder makes the call a refusal, whichever
+# word comes first. Agent A's file `top.txt` sits beside its folder `sub`. The control rows are the folder first, then
+# the file (refused), and the file alone (asked).
+SPO_FILE_FOLDER = SPO_FOLDER_SUB + ((SPO_WRITER, "top.txt", "from A\n"),)
+SPO_FILE_FOLDER_FORMS = (
+    # (case tag, label, agent B's command for the scratchpad path s)
+    ("file-folder-1", "file and folder 1, agent B's rm of agent A's file, then agent A's folder",
+     lambda s: "rm %s %s" % (os.path.join(s, "top.txt"), os.path.join(s, "sub"))),
+    ("file-folder-2", "file and folder 2, agent B's echo over agent A's file, then rm -rf of agent A's folder",
+     lambda s: "echo x > %s && rm -rf %s" % (os.path.join(s, "top.txt"), os.path.join(s, "sub"))),
+    ("file-folder-3", "file and folder 3, agent B's mv of agent A's file, then rm -rf of agent A's folder",
+     lambda s: "mv %s %s && rm -rf %s" % (os.path.join(s, "top.txt"), os.path.join(s, "mine.txt"),
+                                          os.path.join(s, "sub"))),
+)
+for _tag, _label, _command_of in SPO_FILE_FOLDER_FORMS:
+    spo_register("scratchpad-owner: %s: refused" % _label,
+                 lambda t=_tag, n=_label, c=_command_of: spo_folder_case(t, n, SPO_FILE_FOLDER, SPO_OTHER, c,
+                                                                         "%s is refused" % n, folder=True))
+spo_register("scratchpad-owner: file and folder control 1, agent B's rm -rf of agent A's folder, then its file: "
+             "refused",
+             lambda: spo_folder_case("file-folder-ctl-1", "file and folder control 1", SPO_FILE_FOLDER, SPO_OTHER,
+                                     lambda s: "rm -rf %s %s" % (os.path.join(s, "sub"), os.path.join(s, "top.txt")),
+                                     "agent B's rm -rf of agent A's folder, then its file, is refused", folder=True))
+spo_register("scratchpad-owner: file and folder control 2, agent B's rm of agent A's file alone: asked",
+             lambda: spo_folder_case("file-folder-ctl-2", "file and folder control 2", SPO_FILE_FOLDER, SPO_OTHER,
+                                     lambda s: "rm %s" % os.path.join(s, "top.txt"),
+                                     "agent B's rm of agent A's file with no folder call is asked", want="ask"))
 spo_register("scratchpad-owner: cost 1 a call outside any scratchpad makes no helper realpath, open or "
              "gettempdir call", spo_cost_case)
 
