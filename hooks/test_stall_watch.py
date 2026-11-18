@@ -121,7 +121,7 @@ def wait_until(cond, secs):
             return True
         if time.monotonic() >= deadline:
             return False
-        time.sleep(0.2)  # kept: the poll interval of a condition wait; secs only ends a failed wait
+        time.sleep(0.2)  # the poll interval of a condition wait; secs only ends a failed wait
 
 
 def shells():
