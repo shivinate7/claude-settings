@@ -1,0 +1,1 @@
+- env-remedy-names-listing: the env-file guard refused a reviewer's `find ... -name '.env*'` plus grep probe; its remedy says a listing is allowed, but only `ls` and `test` are (ENV_EXISTENCE_COMMANDS, hooks/guard_env.py:95). Either the remedy names `ls` and `test`, or `find -name` counts as a listing.

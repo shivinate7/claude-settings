@@ -1,0 +1,1 @@
+- cdvar-stale-847-reason: (#2379) hooks/test_dir_before_segment.py says the B="$A"/x case waits on step 847, but 847 landed; the reason misleads.

@@ -1,0 +1,1 @@
+- merge-value-flags-dead-r: hooks/guard_merge.py MERGE_VALUE_FLAGS: "-R" and "--repo" are now unreachable in merge_call_of. Dead entries, no verdict effect.

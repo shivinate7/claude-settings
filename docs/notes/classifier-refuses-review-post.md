@@ -1,0 +1,1 @@
+- classifier-refuses-review-post: Second sighting: the auto-mode classifier refused batch64-prose-judge-docs' review-record post; batch runner 10 posted it instead.

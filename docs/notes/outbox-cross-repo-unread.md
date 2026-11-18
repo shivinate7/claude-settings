@@ -1,0 +1,1 @@
+- outbox-cross-repo-unread: triage wrote child-repo hand-off lines into claude-settings' roadmap/outbox/triage.md, which no child triage reads; each repo's triage reads only its own record branch's outbox (skill project-ops). Guard: refuse an outbox line that names another repo, and point to that repo's outbox. The 10:30 CST hand-off lines stay until page item 489 is answered.

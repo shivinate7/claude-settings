@@ -1,0 +1,1 @@
+- item-field-rendered-missed-batch: the item-field-rendered guard refused an update that set the unrendered field `answer` on item 486, but an update on item 487 at 10:51 CST and a batch on item 485 at 10:55 CST set the same field with no refusal. Both are now removed. Either the guard does not read batch writes, or it loaded only at this session's 10:45 CST resume; unmeasured.

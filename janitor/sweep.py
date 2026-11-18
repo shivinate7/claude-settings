@@ -2087,10 +2087,11 @@ def _on_windows():
 
 
 def temp_tier(confirm):
-    """The Windows temp-folder step: removes the temp folder of a session idle over 24 hours (preview
-    without CONFIRM). Windows only. It stops at the sweep deadline. Returns the number of
-    failures: folders it could not remove or folders it could not read."""
-    if temp_sweep is None or not _on_windows():
+    """The session temp-folder step: removes the temp folder of a session idle over 24 hours (preview
+    without CONFIRM), under the Windows temp root and the POSIX `claude-<uid>` root. Every OS. It
+    stops at the sweep deadline. Returns the number of failures: folders it could not remove or
+    folders it could not read."""
+    if temp_sweep is None:
         return 0
     print("")
     print("== session temp folders ==")

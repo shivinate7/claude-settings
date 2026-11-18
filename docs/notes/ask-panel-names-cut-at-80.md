@@ -1,0 +1,1 @@
+- ask-panel-names-cut-at-80: the Ask panel's askWriter and askOwner in page.html still cut owner names at 80 without an ellipsis, by UTF-16 unit, the same fault #3536 fixed elsewhere. Reader: the next lane that edits page.html (step saved-comment-truncates-owner).

@@ -1,0 +1,1 @@
+- gh-write-cloud-input-file: gh-write-cloud: a graphql query or PATCH body read from a file goes unread; gh api pulls create with --input is refused even when the body sets draft true.

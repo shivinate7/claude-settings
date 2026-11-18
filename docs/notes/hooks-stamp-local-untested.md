@@ -1,0 +1,1 @@
+- hooks-stamp-local-untested: all six stamp tests run cloud installs; none asserts a local install writes no stamp, so dropping the CLOUD gate stays green. Fix: add a local-install case.

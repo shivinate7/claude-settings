@@ -1,0 +1,1 @@
+- wake-step-no-timeout: the red-job wake steps in `checks.yml` set no timeout-minutes, so a hung PR-comment post holds a red job to its cap. Found in PR 2860. Decision: ci-wait-reads-run-status.
