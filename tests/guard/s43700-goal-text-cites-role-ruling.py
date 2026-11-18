@@ -1,19 +1,23 @@
 # section 43700
 FAMILY = "goal-text-cites-role-ruling"
 #
-# Rule goal-text-cites-role-ruling. A send_message, or a SendMessage, whose text
-# states a limit on a session's role is refused unless the same sentence or the same line names a ruling or a decision id.
+# Rule goal-text-cites-role-ruling. A send_message, a SendMessage, an Agent spawn or a create_session whose text (its
+# message, or its prompt) states a limit on a session's role is refused unless the same sentence or the same line names
+# a ruling or a decision id.
 #
-#   A limit   a role, then cannot, can't, can not, may not or must not, then merge, push or mark ready.
-#   A role    triage, the batch runner, runner <n>, the coordinator, a lane, the consultant or the arbiter (GLOSSARY.md).
+#   A limit   a role, then cannot, can't, can not, won't, may not, must not or isn't allowed to, then merge, push or mark
+#             ready. A send to another session may state it in the second person: You cannot merge.
+#   A role    triage (also a triage session), the batch runner, runner <n> or runner #<n>, the coordinator, a lane or lanes
+#             (lane <n> or lane <slug> too), the consultant or the arbiter (GLOSSARY.md).
 #   A cite    an id in backticks, or the word ruling or decision with an id after it. An id is a hyphenated slug.
 #
-# The case it stops: a goal text told triage that triage cannot merge, with no ruling cited. Ruling own-everyone-merges
-# (each session merges its own pull requests) makes that limit wrong.
+# The case it stops: a goal text told triage that triage cannot merge, with no ruling cited. Decision `draft-until-reviewed`
+# (ruling Q2: each session merges its own pull requests) makes that limit wrong.
 #
-# Quoted text is not a statement. A limit in double quotes, in a blockquote, in a code span or in a fenced block passes, so a
-# report can carry a relayed owner word or a refusal text. A quote that never closes is text: a lone apostrophe, backtick or
-# double quote before a limit does not hide it from the scanner.
+# Quoted text is not a statement. A limit in double or single quotes, in a blockquote, in a code span or in a fenced block
+# passes, so a report can carry a relayed owner word or a refusal text. A quote that never closes is text: a lone apostrophe,
+# backtick or double quote before a limit does not hide it from the scanner. An apostrophe inside a word (don't, runner 10's)
+# opens no single quote.
 #
 # Out of scope: every other tool. A limit in a Bash command passes this rule. So does a limit whose subject is no role (a PR,
 # a branch), a grant (can merge, may push) and a verb outside merge, push and mark ready.
@@ -27,22 +31,31 @@ GTR_TARGET = "session_GTRTARGET01"  # a target that no record row or listed sess
 GTR_CITE = (("ruling", "decision"),)  # the one remedy the refusal names: cite a ruling or decision, or drop the limit
 GTR_PROSE = "\n".join("Status line %d: the page is current." % number for number in range(1, 201))  # full size, no limit
 GTR_LONG_LIMIT = "PR 12 is green.\nRunner 10 is idle.\nTriage cannot merge; hand to runner 10.\n" + GTR_PROSE
+# The spawn and session-start tools carry their goal text in `prompt`. Each takes the fields its call needs, so a case
+# reaches this rule and no other: a sonnet model clears the model floor, and the Explore type is no builder.
+GTR_PROMPT_FIELDS = {
+    "Agent": {"subagent_type": "Explore", "description": "goal text", "model": "sonnet"},
+    CREATE_SESSION_CALL: {"model": "sonnet"},
+}
 
 
 def _gtr_fields(tool, message):
-    """The tool_input of a send: SendMessage names its receiver in `to`, and the MCP tool in `session_id`."""
+    """The tool_input of a send or a spawn. SendMessage names its receiver in `to`, the MCP send in `session_id`, and an
+    Agent spawn or a create_session carries its goal text in `prompt`."""
     if tool == SENDMESSAGE_TOOL:
         return {"to": "triage", "message": message}
+    if tool in GTR_PROMPT_FIELDS:
+        return dict(GTR_PROMPT_FIELDS[tool], prompt=message)
     return {"session_id": GTR_TARGET, "message": message}
 
 
 def gtr_refuse(name, message, tool=SEND_MESSAGE):
-    """A send the guard refuses under this rule. The reason names the rule and the one remedy."""
+    """A send or a spawn the guard refuses under this rule. The reason names the rule and the one remedy."""
     add(GTR_LABEL + name, "deny", rule=GTR_RULE, tool=tool, cwd=NOGIT, carries=GTR_CITE, **_gtr_fields(tool, message))
 
 
 def gtr_allow(name, message, tool=SEND_MESSAGE):
-    """A send the guard lets through silently. This rule prints nothing for it."""
+    """A send or a spawn the guard lets through silently. This rule prints nothing for it."""
     add(GTR_LABEL + name, "allow", tool=tool, cwd=NOGIT, silent=True, **_gtr_fields(tool, message))
 
 
@@ -66,7 +79,7 @@ gtr_refuse("SendMessage: a lane may not push, with no cite, is refused", "The la
 gtr_refuse("the word ruling with no id is no cite, so the limit is refused", "Per the owner's ruling, triage cannot merge.")
 gtr_refuse("the word decision with no id is no cite, so the limit is refused", "Triage cannot merge; the decision is open.")
 gtr_refuse("a cite on the line above does not exempt the limit below it",
-         "Ruling own-everyone-merges covers the merge.\nTriage cannot merge; hand to runner 10.")
+         "Decision draft-until-reviewed covers the merge.\nTriage cannot merge; hand to runner 10.")
 gtr_refuse("a cite on the line below does not exempt the limit above it",
          "Triage cannot merge; hand to runner 10.\nSee decision session-tiers.")
 
@@ -81,11 +94,37 @@ gtr_refuse("a limit after a closed fenced block is refused, since the scanner re
          "```\nrefused: example text\n```\nTriage cannot merge; hand to runner 10.")
 gtr_refuse("a limit after a code span that holds comment openers is refused",
          "Paths `a//b` and `/*` are examples. Triage cannot merge; hand to runner 10.")
+# Apostrophes inside words open no single quote. A naive pairing would hide the limit between them, so it must read.
+gtr_refuse("a limit between two apostrophes in words is refused",
+         "Owner's call: triage cannot merge; it's runner 10's job.")
+
+# ---- Refused: the role and verb forms the first version missed. A plural role, a lane with a number or a branch slug, a
+# runner with a hash number, a triage session, the contractions won't and isn't allowed to, and the second person sent to
+# another session. Each reads allow on the old code.
+gtr_refuse("plural lanes cannot merge is refused", "lanes cannot merge their own PRs.")
+gtr_refuse("a lane with a number cannot merge is refused", "lane 3 cannot merge its PR.")
+gtr_refuse("a lane with a branch slug cannot merge is refused", "lane my-branch-slug cannot merge its PR.")
+gtr_refuse("a runner with a hash number cannot merge its lane PRs is refused", "Runner #10 cannot merge its lane PRs.")
+gtr_refuse("a triage session cannot merge is refused", "The triage session cannot merge the PR.")
+gtr_refuse("won't, in place of cannot, is refused for triage", "Triage won't merge the page.")
+gtr_refuse("isn't allowed to, in place of may not, is refused for triage", "Triage isn't allowed to merge.")
+gtr_refuse("a second-person limit sent to another session is refused", "You cannot merge this PR until CI is green.")
+
+# ---- Refused: the same limit in a spawn prompt or a session start. The step covers any goal or brief a session writes for
+# another session or agent, so an Agent prompt and a create_session prompt are judged as a send is.
+gtr_refuse("the incident text in an Agent prompt is refused", "Triage cannot merge; hand to runner 10.", tool="Agent")
+gtr_refuse("the incident text in a create_session prompt is refused", "Triage cannot merge; hand to runner 10.",
+         tool=CREATE_SESSION_CALL)
+# Controls: the same two calls with no limit pass, so a red above is the limit and not the call.
+gtr_allow("an Agent prompt with no limit is allowed", "Explore the page and list its states.", tool="Agent")
+gtr_allow("a create_session prompt with no limit is allowed", "Explore the page and list its states.",
+          tool=CREATE_SESSION_CALL)
 
 # ---- Allowed: a limit quoted as text, which is not a statement. Owner words, a blockquote, a refusal text in a report, a
 # code span and a fenced block, and an inner line of a fenced block.
 gtr_allow("owner words in double quotes, with the owner named, are allowed",
           'Owner, typed: "triage cannot merge; hand to runner 10."')
+gtr_allow("owner words in single quotes, with the owner named, are allowed", "Owner said 'triage cannot merge'.")
 gtr_allow("a limit in a blockquote is allowed", "> Triage cannot merge; hand to runner 10.")
 gtr_allow("a limit in a fenced block, quoted as refusal text, is allowed",
           "Refusal text, verbatim:\n```\nTriage cannot merge; hand to runner 10.\n```\nResent without it.")
@@ -99,16 +138,20 @@ gtr_allow("the inner line of a multi-line fenced block is allowed",
 # ---- Allowed: a limit with a cite in its sentence or on its line.
 gtr_allow("a limit with a backticked decision id in the same sentence is allowed",
           "Triage cannot merge (decision `session-tiers`).")
-gtr_allow("a limit with a bare ruling id after the word ruling is allowed",
-          "Triage cannot merge, per ruling own-everyone-merges.")
+gtr_allow("a limit with a bare id after the word ruling is allowed",
+          "Triage cannot merge, per ruling draft-until-reviewed.")
 gtr_allow("a limit with a bare decision id after the word decision is allowed",
           "Triage cannot merge; decision standing-merge-grant says so.")
-gtr_allow("a limit with a backticked ruling id in the next sentence on its line is allowed",
-          "Triage cannot merge. See `own-everyone-merges`.")
+gtr_allow("a limit with a backticked id in the next sentence on its line is allowed",
+          "Triage cannot merge. See `draft-until-reviewed`.")
 gtr_allow("a limit whose sentence wraps onto a line that holds the cite is allowed",
-          "Triage cannot merge the lane PR, which\nruling own-everyone-merges covers.")
-gtr_allow("SendMessage: a limit with a ruling id in its sentence is allowed",
-          "Triage cannot merge (ruling own-everyone-merges).", tool=SENDMESSAGE_TOOL)
+          "Triage cannot merge the lane PR, which\ndecision draft-until-reviewed covers.")
+gtr_allow("SendMessage: a limit with a decision id in its sentence is allowed",
+          "Triage cannot merge (decision draft-until-reviewed).", tool=SENDMESSAGE_TOOL)
+
+# ---- Allowed: a limit that is no role limit. A passive names no act by a role, and a first-person limit names no role.
+gtr_allow("a passive limit, which names no act by a role, is allowed", "Triage cannot be merged by anyone.")
+gtr_allow("a first-person limit with no role is allowed", "I cannot merge this PR until CI is green.")
 
 # ---- Allowed: false alarms. A subject that is no role, a grant, a verb outside the three, and a message with no limit.
 gtr_allow("a status line with a role and no limit is allowed", "Triage: PR 12 is ready for your review.")
