@@ -1,0 +1,14 @@
+{
+ "id": "install-suite-over-10-min",
+ "title": "hooks/test_install_src.sh ran past 10 minutes locally: measure whether it is slow or hung",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Builder 2 (sonnet) of the standing-merge-role hook lane, 19:52 CST Nov 17: it started the full hooks/test_install_src.sh, it ran past 10 minutes, and it stopped it. Owner, 19:57 CST Nov 17: 'prob some kinda bug'.",
+ "source": "builder report 19:52 CST Nov 17; owner message 19:57 CST Nov 17; CI times read from REST by triage (below)",
+ "note": "Measured (REST, workflow checks on main, 25 completed runs, created to updated, includes queue and one retry): about 20 to 100 minutes per run, newest run 100 minutes and red. No per-job or per-step time was read, so whether the install suite alone is slow, hung or just large is unmeasured. First act (read only): per-case timing of the install suite in one CI log, and a local run with timing on one case at a time. Then decide: a hung case is a bug (fix lane, test-author first); a slow suite goes to step ci-skip-untouched-steps. Proof: per-case seconds with n.",
+ "updatedAt": "2026-11-17T19:57:52-06:00"
+}
