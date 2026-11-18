@@ -1,5 +1,5 @@
 {
- "readAt": "2026-11-18T13:05:00-06:00",
+ "readAt": "2026-11-18T14:38:00-06:00",
  "pulls": [
   {
    "number": 1034,
@@ -211,7 +211,7 @@
   },
   {
    "number": 1863,
-   "title": "Heredoc-keep reader: cases and mutants for its known gaps; `$(< f)` reads as a read",
+   "title": "Heredoc-keep reader: cases and mutants for its known gaps; `$(&lt; f)` reads as a read",
    "draft": true,
    "branch": "heredoc-keep-gap-cases",
    "head": "fae8e4f7b0b64dac94179a3d5538ff7257c3d2a8",
@@ -3123,7 +3123,7 @@
   },
   {
    "number": 3380,
-   "title": "Allow entries name [--priority-rows <file>] on the runner's merge (owner ruling own-817-a-priority-rows)",
+   "title": "Allow entries name [--priority-rows ] on the runner's merge (owner ruling own-817-a-priority-rows)",
    "draft": true,
    "branch": "priority-rows-allow-entries",
    "head": "b84074f5e660e5715aaafa50107e2536cf129761",
@@ -3450,14 +3450,6 @@
    "createdAt": "2026-11-15T18:02:47Z"
   },
   {
-   "number": 3521,
-   "title": "project-ops: check every session role has text and a brief template",
-   "draft": false,
-   "branch": "project-ops-roles",
-   "head": "5650c8329365ef78d49e864b74990514e02ffb75",
-   "createdAt": "2026-11-15T18:16:37Z"
-  },
-  {
    "number": 3523,
    "title": "Stale-page remedy and ready-mark docs name merge --ready first",
    "draft": true,
@@ -3504,14 +3496,6 @@
    "branch": "debt-cloud-refresh-clear-fork",
    "head": "fe7acc0d905b606636503dab96e545be27f12ace",
    "createdAt": "2026-11-15T20:20:58Z"
-  },
-  {
-   "number": 3548,
-   "title": "Answered claims match the waiting page",
-   "draft": false,
-   "branch": "answered-claims-match-page",
-   "head": "151ab3a7b13f1481ef84575edd97f1161ce510ce",
-   "createdAt": "2026-11-15T20:28:28Z"
   },
   {
    "number": 3551,
@@ -3606,7 +3590,7 @@
    "title": "Rebuild #2156: glued-& reader on #2015's any-filter, on current main",
    "draft": false,
    "branch": "glued-amp-on-any-filter",
-   "head": "bfe0c05499a23cd6380496366113aaf183727f80",
+   "head": "a61529c376fc3ac60f08bf192cd147d97603c75f",
    "createdAt": "2026-11-17T00:42:36Z"
   },
   {
@@ -3626,17 +3610,9 @@
    "createdAt": "2026-11-18T01:15:04Z"
   },
   {
-   "number": 3636,
-   "title": "Notes expiry, lane 1: check Seen on each note file, add --next-debt and --debt-flow",
-   "draft": false,
-   "branch": "notes-seen-tests",
-   "head": "bcbff58e15da7e685312a8a069c3229c15182ce9",
-   "createdAt": "2026-11-18T01:36:03Z"
-  },
-  {
    "number": 3651,
    "title": "Add red cases for the review tally",
-   "draft": true,
+   "draft": false,
    "branch": "review-tally",
    "head": "1693f5302f28e55ac238311d67739e9e5ba5dbaa",
    "createdAt": "2026-11-18T16:38:17Z"
@@ -3644,7 +3620,7 @@
   {
    "number": 3652,
    "title": "Pin the carried pull request under the standing merge gate",
-   "draft": true,
+   "draft": false,
    "branch": "standing-merges-stragglers",
    "head": "862190294933cf8b032450b0ba6a56c49baa33e8",
    "createdAt": "2026-11-18T16:41:25Z"
@@ -3660,15 +3636,15 @@
   {
    "number": 3654,
    "title": "Review rounds: one tagged finding per line, delta reads from round 2",
-   "draft": true,
+   "draft": false,
    "branch": "review-converges",
-   "head": "d52d84a5194541c32a5d0703aea7bfebd5a8abc9",
+   "head": "3ec3e0b56077db5406464bdbcabe05ec18c6d9e9",
    "createdAt": "2026-11-18T17:01:28Z"
   },
   {
    "number": 3655,
    "title": "Red cases for the Verified trailer (observe first)",
-   "draft": true,
+   "draft": false,
    "branch": "verified-trailer",
    "head": "9dbbc5c126fb43c636a7c18b2cae97c5bd878d4b",
    "createdAt": "2026-11-18T17:02:44Z"
@@ -3678,23 +3654,23 @@
    "title": "Add red tests for guard cases compared with the base branch",
    "draft": true,
    "branch": "guard-cases-from-base",
-   "head": "9c56080cf73bec18b625d4e76e55f96c70dae036",
+   "head": "ec587004009f10047db340e0b984e37427379d9c",
    "createdAt": "2026-11-18T17:05:36Z"
   },
   {
    "number": 3657,
    "title": "Pin the note rules the shared brief reads from check_record_slugs",
-   "draft": true,
+   "draft": false,
    "branch": "brief-note-form",
-   "head": "276c38023ba3b6fd7748c2abf2732fbb6b6bb568",
+   "head": "1609697548e4f921b4c4cd6825973ebfe75221ce",
    "createdAt": "2026-11-18T17:14:16Z"
   },
   {
    "number": 3658,
    "title": "merge --fix-check takes a head an earlier record names (step fix-check-other-records)",
-   "draft": true,
+   "draft": false,
    "branch": "fix-check-other-records",
-   "head": "707d06369ff724e92a1168fb83758e91f4c087c0",
+   "head": "26fa9a80c8979887408cd516bd2b10614262de80",
    "createdAt": "2026-11-18T17:14:45Z"
   },
   {
@@ -3702,7 +3678,7 @@
    "title": "Pin a write-time log for a line added to the old notes file",
    "draft": true,
    "branch": "note-form-at-write",
-   "head": "5f1cab43f771dbd45a1b27b2291efbe936c6d0ae",
+   "head": "01cae7d05ad7e68429d0b158bf01ecbb39b7c642",
    "createdAt": "2026-11-18T17:14:48Z"
   },
   {
@@ -3718,37 +3694,13 @@
    "title": "Test flow and quoted-data properties (PARTIAL: A2, A3, G1)",
    "draft": true,
    "branch": "flow-and-property-tests",
-   "head": "a1df0b15c9132042967ba2da275bdcfb576dafa6",
+   "head": "17c81a39c3e8cab1eaa25a06faca915ebb924998",
    "createdAt": "2026-11-18T17:28:54Z"
-  },
-  {
-   "number": 3662,
-   "title": "Outbox drain: file 70 more K notes into docs/notes",
-   "draft": false,
-   "branch": "outbox-drain-k-notes",
-   "head": "1baf85effcf2f5936db7f5e867f2c1408c74f626",
-   "createdAt": "2026-11-18T17:51:07Z"
-  },
-  {
-   "number": 3664,
-   "title": "Test the merge flow end to end on the gh shim",
-   "draft": true,
-   "branch": "merge-flow-test",
-   "head": "9e1fc346c3a6982edee0483899ea6dd86a2bc3ba",
-   "createdAt": "2026-11-18T17:59:32Z"
-  },
-  {
-   "number": 3665,
-   "title": "Outbox drain: file 10 debt records, delete their 10 duplicate notes",
-   "draft": false,
-   "branch": "outbox-drain-debts",
-   "head": "2747b148cc78086c53681f81677937cc17e1f6a5",
-   "createdAt": "2026-11-18T18:01:30Z"
   },
   {
    "number": 3666,
    "title": "question check: keep the owner-ruling sentences past the 800-character cut",
-   "draft": true,
+   "draft": false,
    "branch": "past-ruling-reads-owner-sentences",
    "head": "f5dacb6595988308e0f22b3f66f738e968fc165a",
    "createdAt": "2026-11-18T18:19:03Z"
@@ -3758,13 +3710,13 @@
    "title": "Add the idle-lane list tests after a landed merge (replaces #3383)",
    "draft": true,
    "branch": "archive-list-at-merge-c",
-   "head": "a9c155ce48c3b22221909b4ae39816ee350aafa0",
+   "head": "01588fae6623bdce85ebff93bcfc4aaf20a7f6fd",
    "createdAt": "2026-11-18T18:19:32Z"
   },
   {
    "number": 3668,
    "title": "Red cases: finder follows a helper's clock read into the test's assert",
-   "draft": true,
+   "draft": false,
    "branch": "time-pinned-helper-read",
    "head": "ddfd05fb5810e5f2b5598b9eacd699aa952e9f94",
    "createdAt": "2026-11-18T18:35:16Z"
@@ -3772,9 +3724,9 @@
   {
    "number": 3669,
    "title": "Finder lists poll-loop sleeps as wait-cap",
-   "draft": true,
+   "draft": false,
    "branch": "finder-deadline-poll-3",
-   "head": "df2a6369fa6f4b5e1f8ffddfb08788d63ee93d3b",
+   "head": "285e4422f339ad56483252a2688b52297d1bf688",
    "createdAt": "2026-11-18T18:48:10Z"
   }
  ],
@@ -3873,8 +3825,9 @@
   },
   {
    "id": "session_013NEJL2aerEJsj7ANguceeX",
-   "session_status": "SESSION_STATUS_IDLE",
+   "session_status": "SESSION_STATUS_ARCHIVED",
    "tags": [
+    "cs-archive-ready",
     "cs-build:lane",
     "cs-repo:shivinate7/claude-settings",
     "cs-step:answered-claims-match-page",
@@ -4059,8 +4012,9 @@
   },
   {
    "id": "session_013NEJL475DM2SFvuoMakXhQ",
-   "session_status": "SESSION_STATUS_IDLE",
+   "session_status": "SESSION_STATUS_ARCHIVED",
    "tags": [
+    "cs-archive-ready",
     "cs-build:lane",
     "cs-repo:shivinate7/claude-settings",
     "cs-step:close-writes-receipt-answer-gone"
@@ -4131,13 +4085,13 @@
   },
   {
    "id": "session_013NEJKzR4LGK5pZTcRkCGLF",
-   "session_status": "SESSION_STATUS_RUNNING",
+   "session_status": "SESSION_STATUS_IDLE",
    "tags": [
     "cs-build:lane",
     "cs-repo:shivinate7/q_max",
     "cs-step:qmax-test-beside-checks"
    ],
-   "status_bucket": "SESSION_STATUS_BUCKET_WORKING"
+   "status_bucket": "SESSION_STATUS_BUCKET_REVIEW_READY"
   },
   {
    "id": "session_013NEJL3BPtoGAWtg8n5fUy2",
@@ -4151,7 +4105,7 @@
   },
   {
    "id": "session_013NEJL3C8YM2r4iexezbU7K",
-   "session_status": "SESSION_STATUS_RUNNING",
+   "session_status": "SESSION_STATUS_IDLE",
    "tags": [
     "cs-build:lane",
     "cs-repo:shivinate7/claude-settings",
@@ -5301,7 +5255,7 @@
   },
   {
    "id": "session_013NEJKzxQjwbpPKha4o65Ph",
-   "session_status": "SESSION_STATUS_IDLE",
+   "session_status": "SESSION_STATUS_ARCHIVED",
    "tags": [
     "cs-archive-ready",
     "cs-build:lane",
@@ -5312,7 +5266,7 @@
   },
   {
    "id": "session_013NEJL4H5ydMKyC89u4Ysrd",
-   "session_status": "SESSION_STATUS_IDLE",
+   "session_status": "SESSION_STATUS_ARCHIVED",
    "tags": [
     "cs-archive-ready",
     "cs-build:lane",
@@ -5333,7 +5287,7 @@
   },
   {
    "id": "session_013NEJL36opN4CVri4n41V42",
-   "session_status": "SESSION_STATUS_IDLE",
+   "session_status": "SESSION_STATUS_ARCHIVED",
    "tags": [
     "cs-archive-ready",
     "cs-build:lane",
@@ -5344,7 +5298,7 @@
   },
   {
    "id": "session_013NEJL4UfzMamzs7iTjSjsz",
-   "session_status": "SESSION_STATUS_IDLE",
+   "session_status": "SESSION_STATUS_ARCHIVED",
    "tags": [
     "cs-archive-ready",
     "cs-build:lane",
@@ -5365,7 +5319,7 @@
   },
   {
    "id": "session_013NEJL2ops9Gsgk3MaPAVwp",
-   "session_status": "SESSION_STATUS_IDLE",
+   "session_status": "SESSION_STATUS_ARCHIVED",
    "tags": [
     "cs-archive-ready",
     "cs-build:lane",
@@ -5376,13 +5330,13 @@
   },
   {
    "id": "session_013NEJL3eb1MNw7mNXUqZoPS",
-   "session_status": "SESSION_STATUS_IDLE",
+   "session_status": "SESSION_STATUS_ARCHIVED",
    "tags": [
     "cs-archive-ready",
     "cs-build:lane",
     "cs-repo:shivinate7/claude-settings"
    ],
-   "status_bucket": "SESSION_STATUS_BUCKET_REVIEW_READY"
+   "status_bucket": "SESSION_STATUS_BUCKET_COMPLETED"
   },
   {
    "id": "session_013NEJL1sQdYhZzBrVywMEdX",
@@ -5404,7 +5358,7 @@
   },
   {
    "id": "session_013NEJL3kAdP2WqoWYSYypxM",
-   "session_status": "SESSION_STATUS_IDLE",
+   "session_status": "SESSION_STATUS_ARCHIVED",
    "tags": [
     "cs-archive-ready",
     "cs-build:lane",
@@ -5545,7 +5499,7 @@
   },
   {
    "id": "session_013NEJL33U96UiyE6UtCHct3",
-   "session_status": "SESSION_STATUS_RUNNING",
+   "session_status": "SESSION_STATUS_IDLE",
    "tags": [
     "cs-build:batch-runner",
     "cs-repo:shivinate7/banchi",
@@ -5555,7 +5509,7 @@
     "cs-repo:shivinate7/q_max",
     "cs-topic:child-merge"
    ],
-   "status_bucket": "SESSION_STATUS_BUCKET_WORKING"
+   "status_bucket": "SESSION_STATUS_BUCKET_REVIEW_READY"
   },
   {
    "id": "session_013NEJKzVWixDqQgAjMzTCgV",
@@ -6404,7 +6358,7 @@
   },
   {
    "id": "session_013NEJL2mVxp6aijDQkbL7Rd",
-   "session_status": "SESSION_STATUS_IDLE",
+   "session_status": "SESSION_STATUS_ARCHIVED",
    "tags": [
     "cs-archive-ready",
     "cs-build:lane",
@@ -6631,7 +6585,7 @@
   },
   {
    "id": "session_013NEJKzrLryhDJM1V5TTtR1",
-   "session_status": "SESSION_STATUS_IDLE",
+   "session_status": "SESSION_STATUS_ARCHIVED",
    "tags": [
     "cs-archive-ready",
     "cs-build:lane",
@@ -6723,7 +6677,7 @@
   },
   {
    "id": "session_013NEJKzYjx9Yxhcgjg2xtu4",
-   "session_status": "SESSION_STATUS_IDLE",
+   "session_status": "SESSION_STATUS_ARCHIVED",
    "tags": [
     "cs-archive-ready",
     "cs-build:lane",
@@ -11093,13 +11047,13 @@
   },
   {
    "id": "session_013NEJL2f1YCYsvLdpFqtWP3",
-   "session_status": "SESSION_STATUS_RUNNING",
+   "session_status": "SESSION_STATUS_IDLE",
    "tags": [
     "cs-build:batch-runner",
     "cs-repo:shivinate7/claude-settings",
     "ui:pinned"
    ],
-   "status_bucket": "SESSION_STATUS_BUCKET_WORKING"
+   "status_bucket": "SESSION_STATUS_BUCKET_COMPLETED"
   },
   {
    "id": "session_013NEJKzCzoWhfP8FMCPtQU6",
@@ -11113,7 +11067,7 @@
   },
   {
    "id": "session_013NEJL1gw6EdrSyvHkTUEx6",
-   "session_status": "SESSION_STATUS_IDLE",
+   "session_status": "SESSION_STATUS_RUNNING",
    "tags": [
     "cs-build:coordinator",
     "cs-repo:shivinate7/claude-settings",
