@@ -9,7 +9,8 @@ The contract this file pins. The builder implements it. On origin/main neither t
 - GUARD_LIST=<path> python3 hooks/test_guard.py writes a JSON list of rows {name, tool, expected, key}, one row per
   case, then exits before any case runs. Run filters do not narrow the listing. The listing case sets GUARD_FAMILY to a
   name no family has, so a runner that still runs cases before its listing stops at once. key is a hash of the
-  case's payload with the per-run values normalised: the run's root folder, the temp root and the clock.
+  case's payload with the per-run values normalised: the run's root folder, the temp root, the clock, and each pid a
+  kill names, as its class (own, live or gone).
 - python3 lint/check_guard_cases_from_base.py --base REF, run in a repository, lists the base's tests/guard (from
   `git archive REF`) and the head's, and matches each base case by name, then by key. It prints one line per finding:
     RED <name>: ...      a loosening that no trailer waives: a verdict drops (allow < ask < deny), or the key is gone. Exit 1.
@@ -25,16 +26,22 @@ Stand-ins, not the feature. Each red is shown on a stand-in that is wrong in one
 - GUARD_CASES_RUNNER_UNDER_TEST. pid-runner writes a key that carries os.getpid(), so two runs of one tree differ.
 The stand-ins sit outside every repository. Each case's docstring names the stand-in it is red on.
 
-Each case builds a fixture repository under this run's folder (lint/_test_temp.py). It holds the tracked tests/guard,
-copied by testing/tracked_tree.py, the one home of that copy. The copy is whole because the runner's sections share
-globals (ROOT, OWNED) that only the real suite defines. One section file, s99101-guard-cases-fixture.py, sits on top,
-with a base commit and a head commit.
+The fixtures. setUpModule builds three fixture trees, one commit pair each, over the tracked tests/guard. testing/tracked_tree.py
+copies it, the one home of that copy. The copy is whole because the runner's sections share globals (ROOT, OWNED) that
+only the real suite defines. One section file, s99101-guard-cases-fixture.py, sits on top of it in each tree. The check
+of each tree and two listings of the green head run once, in parallel, and each case reads its own lines:
+- red tree: each red case reads RED for its name, and the tree exits 1.
+- green tree: each control reads no RED for its names, and the tree exits 0.
+- unknown tree: its base holds two section files with one number, so the base list cannot be read.
+- listing pair: two listings of the green head's folder give equal keys.
+Each tree's cases have distinct payloads, so no case of one tree matches a case of another.
 """
 import json
 import os
 import signal
 import subprocess
 import sys
+import threading
 import unittest
 import uuid
 
@@ -54,6 +61,7 @@ SECTION_NO = 99101
 SECTION_FILE = "s99101-guard-cases-fixture.py"
 CAP = 120  # seconds. A check or a listing takes well under one; the cap sits far above the run.
 RUN_FOLDER = None
+RESULTS = {}  # fixture label -> ("ran", rc, out[, path]) or ("error", reason), set by setUpModule
 
 
 def git_env():
@@ -145,36 +153,104 @@ def tail(out, lines=6):
     return "\n".join(out.splitlines()[-lines:])
 
 
+CLOCK = ['sh("fixture clock", "touch " + ROOT + "/clock-" + repr(time.time()), "deny", "fixture-rule")']
+
+RED_BASE = section_text([
+    case("fixture flip", "deny", "fixture-rule", "flip"),
+    case("fixture to ask", "deny", "fixture-rule", "to-ask"),
+    case("fixture kept", "deny", "fixture-rule", "kept"),
+    case("fixture removed", "deny", "fixture-rule", "removed"),
+    case("fixture unwaived", "deny", "fixture-rule", "unwaived"),
+    case("fixture stays", "deny", "fixture-rule", "stays"),
+])
+RED_HEAD = section_text([
+    case("fixture flip", "allow", None, "flip"),
+    case("fixture to ask", "ask", "fixture-ask-rule", "to-ask"),
+    case("fixture kept", "deny", "fixture-rule", "kept"),
+    case("fixture unwaived", "allow", None, "unwaived"),
+    case("fixture stays", "deny", "fixture-rule", "stays"),
+])
+RED_MESSAGE = "Loosen some cases\n\nGuard-case-loosened: fixture stays"
+
+GREEN_BASE = section_text([
+    case("fixture tighten", "allow", None, "tighten"),
+    case("fixture ask to deny", "ask", "fixture-ask-rule", "ask-deny"),
+    case("fixture reason", "deny", "fixture-reason-old", "reason"),
+    case("fixture rename old", "deny", "fixture-rule", "renamed"),
+    case("fixture waived", "deny", "fixture-rule", "waived"),
+], CLOCK)
+GREEN_HEAD = section_text([
+    case("fixture tighten", "deny", "fixture-rule", "tighten"),
+    case("fixture ask to deny", "deny", "fixture-rule", "ask-deny"),
+    case("fixture reason", "deny", "fixture-reason-new", "reason"),
+    case("fixture rename new", "deny", "fixture-rule", "renamed"),
+    case("fixture waived", "allow", None, "waived"),
+], CLOCK)
+GREEN_MESSAGE = "Tighten some cases, rename one and loosen one with its trailer\n\nGuard-case-loosened: fixture waived"
+
+UNKNOWN_BASE = section_text([case("fixture kept", "deny", "fixture-rule", "kept")])
+UNKNOWN_EXTRA = {"s99101-duplicate.py": section_text([case("fixture dup", "deny", "fixture-rule", "dup")])}
+
+# label -> (base text, head text, head message, extra base files). setUpModule builds each one.
+TREES = {
+    "red": (RED_BASE, RED_HEAD, RED_MESSAGE, None),
+    "green": (GREEN_BASE, GREEN_HEAD, GREEN_MESSAGE, None),
+    "unknown": (UNKNOWN_BASE, UNKNOWN_BASE, "fixture head", UNKNOWN_EXTRA),
+}
+
+
+def _job(label, work):
+    """One fixture run in its own thread. A fault is kept here, and the case that reads the label fails with it."""
+    try:
+        RESULTS[label] = ("ran",) + tuple(work())
+    except Exception as exc:  # a fault is one case's failure, never a module error
+        RESULTS[label] = ("error", "%s: %s" % (type(exc).__name__, exc))
+
+
+def _check(repo, base):
+    if not os.path.isfile(CHECK):
+        raise FileNotFoundError("the check module is missing: %s" % CHECK)
+    return run([sys.executable, CHECK, "--base", base], cwd=repo, env=GIT_ENV)
+
+
+def _listing(repo, folder, path):
+    env = dict(GIT_ENV, GUARD_SECTION_DIR=folder, GUARD_LIST=path, GUARD_FAMILY="no-such-family")
+    rc, out = run([sys.executable, RUNNER], cwd=repo, env=env)
+    return rc, out, path
+
+
 class GuardCasesFromBase(unittest.TestCase):
 
-    def run_check(self, repo, base):
-        self.assertTrue(os.path.isfile(CHECK), "the check module is missing: %s" % CHECK)
-        return run([sys.executable, CHECK, "--base", base], cwd=repo, env=GIT_ENV)
+    def result(self, label):
+        """The run of one fixture, as setUpModule made it. A fault fails the case that reads it."""
+        got = RESULTS.get(label)
+        self.assertIsNotNone(got, "the fixture %r did not run" % label)
+        self.assertEqual(got[0], "ran", "the %s fixture did not build or run: %s" % (label, got[1]))
+        return got[1:]
 
-    def assert_red(self, rc, out, name):
-        """A loosening that reads red: a RED line naming the case, and exit 1."""
+    def assert_red(self, label, name):
+        """A loosening that reads red: a RED line naming the case in the tree, and the tree exits 1."""
+        rc, out = self.result(label)[:2]
         hits = [line for line in reds(out) if line.startswith("RED %s:" % name)]
         self.assertTrue(hits, "a loosening read green: no RED line for %r, exit %s: %s" % (name, rc, tail(out)))
         self.assertEqual(rc, 1, "RED printed for %r but exit is %s, want 1" % (name, rc))
 
-    def assert_green(self, rc, out, what):
-        """A control that reads green: no RED line at all, and exit 0."""
-        self.assertEqual(reds(out), [], "%s: a RED line printed: %s" % (what, tail(out)))
-        self.assertEqual(rc, 0, "%s: no RED line but exit %s, want 0: %s" % (what, rc, tail(out)))
+    def assert_green(self, label, *names):
+        """Controls that read green: no RED line naming any of them, and the tree exits 0."""
+        rc, out = self.result(label)[:2]
+        for name in names:
+            hits = [line for line in reds(out) if line.startswith("RED %s:" % name)]
+            self.assertFalse(hits, "a control reads red: %s" % hits[:1])
+        self.assertEqual(rc, 0, "the %s tree exits %s, want 0, with these RED lines: %s" % (label, rc, reds(out)))
 
     def test_listing_same_tree_twice_gives_equal_keys(self):
         """Red on pid-runner (GUARD_CASES_RUNNER_UNDER_TEST): its key carries the process id, so the two runs differ.
-        The fixture's clock line puts a time-derived value in a payload, so a build that does not normalise it reads red too."""
-        clock = ['sh("fixture clock", "touch " + ROOT + "/clock-" + repr(time.time()), "deny", "fixture-rule")']
-        text = section_text([case("fixture deny", "deny", "fixture-rule", "listed")], clock)
-        repo, _ = make_pair(text, text)
-        folder = os.path.join(repo, "tests", "guard")
+        The green head holds a clock line, which puts a time-derived value in a payload, so a build that does not
+        normalise it reads red too."""
         listings = []
-        for number in (1, 2):
-            path = os.path.join(RUN_FOLDER, "listing-%s-%d.json" % (uuid.uuid4().hex[:8], number))
-            env = dict(GIT_ENV, GUARD_SECTION_DIR=folder, GUARD_LIST=path, GUARD_FAMILY="no-such-family")
-            rc, out = run([sys.executable, RUNNER], cwd=repo, env=env)
-            self.assertTrue(os.path.isfile(path), "no listing written by run %d, exit %s: %s" % (number, rc, tail(out)))
+        for label in ("listing-1", "listing-2"):
+            rc, out, path = self.result(label)
+            self.assertTrue(os.path.isfile(path), "no listing written by %s, exit %s: %s" % (label, rc, tail(out)))
             with open(path, encoding="utf-8") as f:
                 listings.append({row["name"]: row["key"] for row in json.load(f)})
         self.assertTrue(listings[0], "the listing holds no rows")
@@ -183,90 +259,45 @@ class GuardCasesFromBase(unittest.TestCase):
 
     def test_deny_to_allow_flip_reads_red(self):
         """Red on pass-all: the flipped verdict reads green. The case is edited; its name and payload stay."""
-        repo, base = make_pair(
-            section_text([case("fixture flip", "deny", "fixture-rule", "flip")]),
-            section_text([case("fixture flip", "allow", None, "flip")]))
-        rc, out = self.run_check(repo, base)
-        self.assert_red(rc, out, "fixture flip")
+        self.assert_red("red", "fixture flip")
 
     def test_deny_to_ask_reads_red(self):
         """Red on pass-all: the verdict drops from deny to ask, and that reads green."""
-        repo, base = make_pair(
-            section_text([case("fixture to ask", "deny", "fixture-rule", "to-ask")]),
-            section_text([case("fixture to ask", "ask", "fixture-ask-rule", "to-ask")]))
-        rc, out = self.run_check(repo, base)
-        self.assert_red(rc, out, "fixture to ask")
+        self.assert_red("red", "fixture to ask")
 
     def test_removed_deny_case_reads_red(self):
         """Red on pass-all, and on red-all, which flags only the case that stays and so never names the removed one."""
-        repo, base = make_pair(
-            section_text([case("fixture kept", "deny", "fixture-rule", "kept"),
-                          case("fixture removed", "deny", "fixture-rule", "removed")]),
-            section_text([case("fixture kept", "deny", "fixture-rule", "kept")]))
-        rc, out = self.run_check(repo, base)
-        self.assert_red(rc, out, "fixture removed")
+        self.assert_red("red", "fixture removed")
 
     def test_tightening_allow_to_deny_passes(self):
         """Control, red on red-all: it flags the tightened case, and a tightening must read green."""
-        repo, base = make_pair(
-            section_text([case("fixture tighten", "allow", None, "tighten")]),
-            section_text([case("fixture tighten", "deny", "fixture-rule", "tighten")]))
-        rc, out = self.run_check(repo, base)
-        self.assert_green(rc, out, "a tightening, allow to deny")
+        self.assert_green("green", "fixture tighten")
 
     def test_ask_to_deny_passes(self):
         """Control, red on red-all: an ask that becomes a deny is a tightening, and reads green."""
-        repo, base = make_pair(
-            section_text([case("fixture ask to deny", "ask", "fixture-ask-rule", "ask-deny")]),
-            section_text([case("fixture ask to deny", "deny", "fixture-rule", "ask-deny")]))
-        rc, out = self.run_check(repo, base)
-        self.assert_green(rc, out, "a tightening, ask to deny")
+        self.assert_green("green", "fixture ask to deny")
 
     def test_reworded_reason_passes(self):
         """Control, red on red-all: the reason's rule changes but the verdict and the payload stay, so it reads green."""
-        repo, base = make_pair(
-            section_text([case("fixture reason", "deny", "fixture-reason-old", "reason")]),
-            section_text([case("fixture reason", "deny", "fixture-reason-new", "reason")]))
-        rc, out = self.run_check(repo, base)
-        self.assert_green(rc, out, "a reworded reason")
+        self.assert_green("green", "fixture reason")
 
     def test_pure_rename_passes(self):
         """Control, red on red-all: the name changes and the payload and verdict stay, so the key still matches."""
-        repo, base = make_pair(
-            section_text([case("fixture rename old", "deny", "fixture-rule", "renamed")]),
-            section_text([case("fixture rename new", "deny", "fixture-rule", "renamed")]))
-        rc, out = self.run_check(repo, base)
-        self.assert_green(rc, out, "a pure rename")
+        self.assert_green("green", "fixture rename old", "fixture rename new")
 
     def test_loosening_with_exact_trailer_passes(self):
         """Control, red on red-all: the green control beside test_deny_to_allow_flip_reads_red. The same flip, with
         its exact trailer, reads green."""
-        repo, base = make_pair(
-            section_text([case("fixture waived", "deny", "fixture-rule", "waived")]),
-            section_text([case("fixture waived", "allow", None, "waived")]),
-            head_message="Loosen one case\n\nGuard-case-loosened: fixture waived")
-        rc, out = self.run_check(repo, base)
-        self.assert_green(rc, out, "a loosening with its exact trailer")
+        self.assert_green("green", "fixture waived")
 
     def test_trailer_naming_another_case_still_reads_red(self):
         """Red on pass-all. The flip has no trailer of its own: a trailer that names another, unchanged case waives nothing."""
-        repo, base = make_pair(
-            section_text([case("fixture unwaived", "deny", "fixture-rule", "unwaived"),
-                          case("fixture stays", "deny", "fixture-rule", "stays")]),
-            section_text([case("fixture unwaived", "allow", None, "unwaived"),
-                          case("fixture stays", "deny", "fixture-rule", "stays")]),
-            head_message="Loosen one case\n\nGuard-case-loosened: fixture stays")
-        rc, out = self.run_check(repo, base)
-        self.assert_red(rc, out, "fixture unwaived")
+        self.assert_red("red", "fixture unwaived")
 
     def test_unreadable_list_prints_unknown(self):
         """Red on pass-all and on red-all: neither prints an UNKNOWN line. The base holds two section files with
         number 99101, so the runner refuses the set before any case, and the base list cannot be read."""
-        base_text = section_text([case("fixture kept", "deny", "fixture-rule", "kept")])
-        repo, base = make_pair(
-            base_text, base_text,
-            extra_base={"s99101-duplicate.py": section_text([case("fixture dup", "deny", "fixture-rule", "dup")])})
-        rc, out = self.run_check(repo, base)
+        rc, out = self.result("unknown")[:2]
         unknown = [line for line in out.splitlines() if line.startswith("UNKNOWN")]
         self.assertTrue(unknown, "an unreadable list read green: no UNKNOWN line, exit %s: %s" % (rc, tail(out)))
         self.assertNotEqual(rc, 0, "UNKNOWN printed but exit is 0")
@@ -275,6 +306,24 @@ class GuardCasesFromBase(unittest.TestCase):
 def setUpModule():
     global RUN_FOLDER
     RUN_FOLDER = _test_temp.run_folder()
+    built = {}
+    for label, spec in TREES.items():
+        try:
+            built[label] = make_pair(*spec)
+        except Exception as exc:  # a fixture fault fails the cases that read this tree
+            RESULTS[label] = ("error", "%s: %s" % (type(exc).__name__, exc))
+    jobs = {label: (lambda label=label: _check(*built[label])) for label in built}
+    if "green" in built:
+        green_repo = built["green"][0]
+        green_folder = os.path.join(green_repo, "tests", "guard")
+        for number in (1, 2):
+            path = os.path.join(RUN_FOLDER, "listing-%d.json" % number)
+            jobs["listing-%d" % number] = (lambda path=path: _listing(green_repo, green_folder, path))
+    threads = [threading.Thread(target=_job, args=(label, work)) for label, work in jobs.items()]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
 
 
 def tearDownModule():
