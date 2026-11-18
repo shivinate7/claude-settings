@@ -1,6 +1,6 @@
 {
   "about": "Eval fixture for the review-layer recall scorer. Incidents are reverts and red-main reverts on main, and merged PRs that a later fix PR found to be a reviewer miss. A revert incident names the PR the revert undid. A fix-found miss names its head and the fix PR (fixed_by) and has no revert. Each incident gives the review layer that should have caught it and a one-line answer key. Controls are merged PRs that no revert names and no fix names as a miss. The layer is the author's judgment from the revert message, the changed files and the PR title. It is not a recorded review verdict. A layer of 'unknown' means the revert gives no cause to judge: the incident stays in the fixture and in n.incidents, and in no layer's count. A layer of 'ci' means CI caught the defect after merge: no review layer replays CI suites, so the incident stays in n.incidents and in no layer's count.",
-  "read": "2026-11-17 CST. Reverts from git log on main (subjects and 'This reverts commit' lines). PRs from REST commits/<sha>/pulls or pulls/<n>. Controls from REST pulls/<n>, with commits checked against every reverted commit. 2026-11-18 CST: fix-found misses and their heads from git log on main (a fix PR's merge commit and the miss PR's second parent). Controls added from git log on main merge commits; merged_at is the merge commit's time in UTC, and each title is the PR title on the merge commit. 2026-11-18 CST: PR 3542 relabelled 'ci' (owner pick a: count true reviewer misses only). PR 3628's evidence is its review-log comment on the PR, read from the PR's comments.",
+  "read": "2026-11-17 CST. Reverts from git log on main (subjects and 'This reverts commit' lines). PRs from REST commits/<sha>/pulls or pulls/<n>. Controls from REST pulls/<n>, with commits checked against every reverted commit. 2026-11-18 CST: fix-found misses and their heads from git log on main (a fix PR's merge commit and the miss PR's second parent). Controls added from git log on main merge commits; merged_at is the merge commit's time in UTC, and each title is the PR title on the merge commit. 2026-11-18 CST: PR 3542 relabelled 'ci' (owner pick a: count true reviewer misses only). PR 3596 relabelled 'ci' the same way: its red-main revert is 5e9f66d64d, which names the blamed merge. PR 3628's evidence is its review-log comment on the PR, read from the PR's comments.",
   "layers": ["reviewer", "refuter", "fix_verifier", "design_reviewer"],
   "incidents": [
     {
@@ -99,7 +99,8 @@
       "pr": 3596,
       "reverted": null,
       "reverts": ["c868f93daf", "695ee9aeaf"],
-      "layer": "reviewer",
+      "layer": "ci",
+      "note": "CI caught it after merge: the red-main revert names this merge as the blamed merge; no review layer replays CI suites (owner pick a: count true reviewer misses only).",
       "basis": "revert message and PR title",
       "answer_key": "An auto-mode allow for a lane's own merge turned main red, and its test file had to be restored; the reviewer should check the allow rule against hooks/test_auto_mode_allow.py before the merge."
     },

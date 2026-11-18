@@ -41,6 +41,7 @@ EVAL_MISSES = (  # (PR, head sha, fix PR) of each miss a later fix PR found; no 
     (3628, "4379292559c85bc39093093827aa665075174b05", 3629),
 )
 EVAL_CONTROLS = (3395, 3401, 3382, 3433, 3461, 3488, 3494, 3455)
+CI_CAUGHT_PRS = (3542, 3596)  # reverts of red main that CI caught after merge; no review layer counts them
 SCORER_MISSING = "scorer missing: lint/review_layer_recall.py is not in the tree"
 SCORER_TIMEOUT = 120  # hang guard, well above one local run of the scorer
 SHA_SHORT = re.compile(r"[0-9a-f]{7,40}")
@@ -162,9 +163,11 @@ class FixtureShape(unittest.TestCase):
 
     def test_a_ci_caught_revert_counts_in_no_review_layer(self):
         incidents = {inc["pr"]: inc for inc in self.fixture["incidents"]}
-        self.assertIn(3542, incidents, "PR #3542 is gone from the fixture; its revert stays in n.incidents")
-        self.assertNotIn(incidents[3542]["layer"], LAYERS,
-                         "PR #3542 is counted in a review layer; CI caught it after merge, and no review layer replays CI")
+        for pr in CI_CAUGHT_PRS:
+            with self.subTest(pr=pr):
+                self.assertIn(pr, incidents, "PR #%d is gone from the fixture; its revert stays in n.incidents" % pr)
+                self.assertNotIn(incidents[pr]["layer"], LAYERS,
+                                 "PR #%d is counted in a review layer; CI caught it after merge, and no review layer replays CI" % pr)
 
     def test_the_3628_miss_cites_the_review_log_that_passed_it(self):
         incidents = {inc["pr"]: inc for inc in self.fixture["incidents"]}
