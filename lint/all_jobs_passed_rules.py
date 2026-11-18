@@ -17,7 +17,7 @@ import sys
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
-from test_windows_split import (ALL_JOBS_PASSED_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_OFF_JOBS, PUSH_SKIP_JOB, RECORDS_ONLY_CONDITION, all_jobs, draft_guard_only, drop_condition, eval_if,  # noqa: E402,F401  the one home of the scope condition and scalar parsers
+from test_windows_split import (ALL_JOBS_PASSED_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_OFF_JOBS, PUSH_SKIP_JOB, RECORDS_ONLY_CONDITION, all_jobs, delta_clauses_off, draft_guard_only, drop_condition, eval_if,  # noqa: E402,F401  the one home of the scope condition and scalar parsers
                                 job_if_without_records, push_guard_only, push_off_only, shard_base, shard_push_off, unwrap, yaml_scalar)  # NIGHTLY_SKIP_JOB and PUSH_SKIP_JOB are read from here by actions/push-skip/push-skip.py
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
 
@@ -167,10 +167,11 @@ def steps_problems(text):
     return problems
 
 
-def records_only_if(expr):
-    """True when a job-level if is the records-only skip alone. check.sh passes the job's skip on a run whose scope job says
-    records_only_skip true, and reads any wider condition as a skip it cannot tell from a failure."""
-    return unwrap(expr) == RECORDS_ONLY_CONDITION
+def records_only_if(expr, name):
+    """True when a job-level if is the records-only skip alone, or that skip followed by job `name`'s delta clauses (delta_clauses_off).
+    check.sh passes the job's skip on a run whose scope job says records_only_skip true, and reads any wider condition as a skip it
+    cannot tell from a failure."""
+    return unwrap(delta_clauses_off(name, expr)) == RECORDS_ONLY_CONDITION
 
 
 def shard_records_only_if(expr):
@@ -195,12 +196,12 @@ def off_problems(text):
         if shard_base(name):
             # R62: a Windows full shard runs on a ready pull request, so it is needed. Its job-level if is the draft guard only.
             rest = job_if_without_records(jobs[name]["if"])
-            if not draft_guard_only(jobs[name]["if"] or "") and not shard_push_off(rest or "") and not shard_records_only_if(jobs[name]["if"]) and not records_only_if(jobs[name]["if"]):
+            if not draft_guard_only(jobs[name]["if"] or "") and not shard_push_off(rest or "") and not shard_records_only_if(jobs[name]["if"]) and not records_only_if(jobs[name]["if"], name):
                 problems.append(f"shard {name} is in all-jobs-passed's needs but its job-level if is not the draft guard: "
                                 f"{jobs[name]['if']}")
         elif name in PUSH_OFF_JOBS and jobs[name]["if"] is not None and push_off_only(job_if_without_records(jobs[name]["if"])):
             continue  # a listed job (R61 push-off list) with the push guard alone, or with the records-only skip joined: a pull_request runs it, so the rollup needs it and never reads a skip
-        elif name != "scope" and jobs[name]["if"] is not None and not records_only_if(jobs[name]["if"]):
+        elif name != "scope" and jobs[name]["if"] is not None and not records_only_if(jobs[name]["if"], name):
             problems.append(f"{name} is needed and keeps a job-level if: all-jobs-passed reads its skip as red, "
                             "so its scope condition belongs in its steps")
     return problems
