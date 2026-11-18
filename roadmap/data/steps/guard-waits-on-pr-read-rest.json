@@ -5,10 +5,10 @@
  "lane": "",
  "owner": "triage",
  "blockedBy": [],
- "updatedAt": "2026-11-18T10:23:47-06:00",
+ "updatedAt": "2026-11-18T10:44:00-06:00",
  "source": "triage 11, own mistake; owner frustration relayed by the consultant 10:22 CST Nov 18",
  "id": "guard-waits-on-pr-read-rest",
  "title": "A written claim that work waits on a named PR is backed by a REST read of that PR",
  "why": "Triage 11 wrote that the J notes waited on PR 3569, which had merged at 10:16 CST Nov 17.",
- "note": "Own mistake, in the README of plans/outbox-drain-2026-11-17, since fixed. Guard idea: a record that says it waits on a PR carries that PR's REST state and a time. Next: decide whether rule verification-counts-from-rest already covers it; if not, a lane brief with a test-author first; mover: the coordinator's say-so."
+ "note": "Own mistake, in the README of plans/outbox-drain-2026-11-17, since fixed. Guard idea: a record that says it waits on a PR carries that PR's REST state and a time. Next: decide whether rule verification-counts-from-rest already covers it; if not, a lane brief with a test-author first; mover: the coordinator's say-so. 10:44 CST Nov 18 (triage 11, prior-work search by a read-only Explore agent): PARTLY COVERED, so rule verification-counts-from-rest does not already cover it. Partial homes: the build-time dead-PR wait check (skills/roadmap/build.py about line 1562) flags steps waiting on a PR closed unmerged, and drops merged PRs at about line 1574, so the PR 3569 case (merged) is missed; steps dead-pr-waits (doing) and dead-pr-wait-guard (ready). Branch origin/dead-pr-waits-place (commit 177719bf86) refuses a staged open step that waits on a bare PR number; unmerged. Facts-line check (docs/decisions/facts-line-checks-state.md): 'Facts: pr N open|merged' is checked against live state in CI, decision records only. Steps progress-claims-cite-live-read, act-claims-read-back and priority-table-reads-pr ask for a live PR read and are not built. Narrowed scope: extend those homes to a merged PR and to wait claims in notes and READMEs; no second home. Line numbers are the agent's reading, not rechecked by triage 11; PR states came from git, not GitHub."
 }
