@@ -2421,6 +2421,125 @@ def case_ruled_store_ranks_by_shared_words_before_recency():
           len(listed) <= RULED_CAP_MAX, "listed %d: %r" % (len(listed), listed))
 
 
+# A ruling's optional `scope` (lint/test_ruled_store.py): {"visibility": "private"} governs a private repo only. The
+# repo's visibility is its extras key `visibility`, which lint/layout.py reads (make_repo(visibility=...) writes it). Each
+# case reads that visibility back through layout.caution, and asserts it, before it judges the candidates.
+SCOPE_PRIVATE = {"visibility": "private"}
+SCOPE_OPEN_ID, SCOPE_PRIVATE_ID = "scope-open", "scope-private"
+SCOPE_DAY = "2026-11-13T09:00:00-06:00"
+
+
+def _reads_as(repo, level):
+    """True when lint/layout.py reads the repo's visibility as the caution level `level` (public or private-solo)."""
+    import layout  # lint/layout.py, the one reader of the visibility key
+    return layout.caution(repo)["level"] == level
+
+
+def _scoped_store(repo, entries):
+    fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files(entries), tcj.ROOT)
+
+
+def _listed_ruled_ids(repo):
+    """The ruled ids past_rulings lists for the Apps goal, the store read from `repo` itself."""
+    import question_form  # the one form check (hooks/question_form.py)
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
+        candidates, _unknown = question_form.past_rulings(tcj.APPS_GOAL, repo)
+    return ruled_ids(candidates)
+
+
+def case_ruled_store_scope_omits_a_private_ruling_in_a_public_repo():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled scope public: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-scope-public", decisions={tcj.APPS_SLUG: tcj.APPS_RULING}, visibility="public")
+    _scoped_store(repo, {
+        SCOPE_OPEN_ID: fixture.entry(SCOPE_OPEN_ID, at=SCOPE_DAY, ruling=RULED_TEXT),
+        SCOPE_PRIVATE_ID: fixture.entry(SCOPE_PRIVATE_ID, at=SCOPE_DAY, ruling=RULED_TEXT, scope=SCOPE_PRIVATE),
+    })
+    reads_public = _reads_as(repo, "public")
+    check("ruled scope public: the fixture repo reads as public (scope control)", reads_public,
+          "layout.caution did not read the repo's visibility as public")
+    if not reads_public:
+        return
+    listed = _listed_ruled_ids(repo)
+    check("ruled scope public: an unscoped ruling is listed in a public repo", SCOPE_OPEN_ID in listed, str(listed))
+    check("ruled scope public: a ruling scoped to private is omitted from a public repo",
+          SCOPE_PRIVATE_ID not in listed, str(listed))
+
+
+def case_ruled_store_scope_keeps_a_private_ruling_in_a_private_repo():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled scope private: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-scope-private", decisions={tcj.APPS_SLUG: tcj.APPS_RULING}, visibility="private")
+    _scoped_store(repo, {
+        SCOPE_OPEN_ID: fixture.entry(SCOPE_OPEN_ID, at=SCOPE_DAY, ruling=RULED_TEXT),
+        SCOPE_PRIVATE_ID: fixture.entry(SCOPE_PRIVATE_ID, at=SCOPE_DAY, ruling=RULED_TEXT, scope=SCOPE_PRIVATE),
+    })
+    reads_private = _reads_as(repo, "private-solo")
+    check("ruled scope private: the fixture repo reads as private (scope control)", reads_private,
+          "layout.caution did not read the repo's visibility as private")
+    if not reads_private:
+        return
+    listed = _listed_ruled_ids(repo)
+    check("ruled scope private: an unscoped ruling is listed in a private repo", SCOPE_OPEN_ID in listed, str(listed))
+    check("ruled scope private: a ruling scoped to private is listed in a private repo",
+          SCOPE_PRIVATE_ID in listed, str(listed))
+
+
+def case_ruled_store_scope_private_only_lists_no_ruling_in_a_public_repo():
+    # The empty state: the only ruling that shares words with the question is private-scoped.
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled scope empty: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-scope-empty", decisions={tcj.APPS_SLUG: tcj.APPS_RULING}, visibility="public")
+    _scoped_store(repo, {
+        SCOPE_PRIVATE_ID: fixture.entry(SCOPE_PRIVATE_ID, at=SCOPE_DAY, ruling=RULED_TEXT, scope=SCOPE_PRIVATE),
+    })
+    reads_public = _reads_as(repo, "public")
+    check("ruled scope empty: the fixture repo reads as public (scope control)", reads_public,
+          "layout.caution did not read the repo's visibility as public")
+    if not reads_public:
+        return
+    listed = _listed_ruled_ids(repo)
+    check("ruled scope empty: a public repo whose only matching ruling is private lists no ruled candidate",
+          listed == [], str(listed))
+
+
+def case_ruled_store_scope_private_rulings_do_not_take_the_cap():
+    # The full-size state: RULED_CAP_MAX private-scoped rulings are newer than the unscoped one, and all match the words.
+    # A cap applied before the scope filter would spend its slots on them and drop the unscoped ruling.
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled scope cap: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-scope-cap", decisions={tcj.APPS_SLUG: tcj.APPS_RULING}, visibility="public")
+    entries = {SCOPE_OPEN_ID: fixture.entry(SCOPE_OPEN_ID, at="2026-11-01T09:00:00-06:00", ruling=RULED_TEXT)}
+    for day in range(1, RULED_CAP_MAX + 1):
+        rid = "scope-cap-private-%02d" % day
+        entries[rid] = fixture.entry(rid, at="2026-11-%02dT09:00:00-06:00" % (10 + day),
+                                     ruling="Owner: keep the apps' access to claude-settings, round %02d." % day,
+                                     scope=SCOPE_PRIVATE)
+    _scoped_store(repo, entries)
+    reads_public = _reads_as(repo, "public")
+    check("ruled scope cap: the fixture repo reads as public (scope control)", reads_public,
+          "layout.caution did not read the repo's visibility as public")
+    if not reads_public:
+        return
+    listed = _listed_ruled_ids(repo)
+    check("ruled scope cap: the unscoped ruling is listed though %d newer private rulings match" % RULED_CAP_MAX,
+          SCOPE_OPEN_ID in listed, str(listed))
+    check("ruled scope cap: no private-scoped ruling is listed in a public repo",
+          not any(rid.startswith("scope-cap-private-") for rid in listed), str(listed))
+
+
 class _BrokenPipeGit:
     """A git child that dies before its stdin is read: the write raises BrokenPipeError, and stderr holds the text."""
 
@@ -3872,6 +3991,10 @@ def main():
                  case_ruled_store_caps_matching_entries_at_eight_newest_first,
                  case_ruled_store_marks_an_unread_entry_unchecked,
                  case_ruled_store_ranks_by_shared_words_before_recency,
+                 case_ruled_store_scope_omits_a_private_ruling_in_a_public_repo,
+                 case_ruled_store_scope_keeps_a_private_ruling_in_a_private_repo,
+                 case_ruled_store_scope_private_only_lists_no_ruling_in_a_public_repo,
+                 case_ruled_store_scope_private_rulings_do_not_take_the_cap,
                  case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
                  case_task_why_cited_reds, case_task_why_cited_greens,
                  case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
