@@ -2251,6 +2251,8 @@ def claim_only(root, cfgrel, base, linted, live):
     return True
 
 PAGE_SUBJECT = "Rebuild the records page"  # the subject of a page-only commit (commit_claim with no trailer)
+VERIFIED_CLAIM = "Verified: none: the merge tool claimed the record numbers, and the pull request run proves the tree"
+VERIFIED_PAGE = "Verified: none: the records generator rebuilt a generated page"
 
 def page_only(wt, sha, strict=False):
     """-> the parent of `sha` when it is a page-only commit: one parent, the subject PAGE_SUBJECT, and the records page alone changed. Else None,
@@ -2363,8 +2365,9 @@ def identity(wt):
 def commit_claim(wt, trailer):
     """One commit for the claim and the rebuilt records page. No trailer: the page alone."""
     git(wt, "add", "-A")
-    msg = ["-m", "Claim record numbers", "-m", trailer] if trailer else ["-m", PAGE_SUBJECT,
-           "-m", f"Drops-lines: {RECORDS_PAGE} -- a generated page, rebuilt by the generator"]  # the silent-undo check reads the rebuilt page as generated
+    # One last paragraph holds each trailer, so git reads Record-claim and Drops-lines beside the Verified line (the Verified trailer, lint/check_red_run.py).
+    msg = ["-m", "Claim record numbers", "-m", trailer + "\n" + VERIFIED_CLAIM] if trailer else ["-m", PAGE_SUBJECT,
+           "-m", f"Drops-lines: {RECORDS_PAGE} -- a generated page, rebuilt by the generator\n" + VERIFIED_PAGE]  # the silent-undo check reads the rebuilt page as generated
     c, out = git(wt, *identity(wt), "commit", "-q", *msg)
     if c:
         raise Stop("cannot commit the claim " + STAMP_RUN_CITE + ": " + out)
