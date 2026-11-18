@@ -1694,7 +1694,7 @@ class GateModeTest(FinderCase):
         sleep_row = ("tests/test_wait.py", lineno(text, "time.sleep(1)"), "sleep")
         self.assertIn(sleep_row, self.rows(plain), "scope: the sleep is not listed without --gate")
         code, out = self.gated()
-        self.assertNotEqual(code, 0, "--gate exits 0 on a sleep")
+        self.assertEqual(code, 1, "--gate exits %d on a sleep, not 1" % code)
         self.assertIn(sleep_row, self.rows(out), "--gate does not list the sleep")
 
     def test_gate_fails_on_an_elapsed_assert(self):
@@ -1710,7 +1710,7 @@ class GateModeTest(FinderCase):
         row = ("tests/test_budget.py", lineno(text, "assert time.monotonic() - t0 < 1"), "elapsed-assert")
         self.assertIn(row, self.rows(plain), "scope: the elapsed-assert is not listed without --gate")
         code, out = self.gated()
-        self.assertNotEqual(code, 0, "--gate exits 0 on an elapsed-assert")
+        self.assertEqual(code, 1, "--gate exits %d on an elapsed-assert, not 1" % code)
         self.assertIn(row, self.rows(out), "--gate does not list the elapsed-assert")
 
     def test_gate_fails_on_an_unread_file(self):
@@ -1719,7 +1719,7 @@ class GateModeTest(FinderCase):
         self.assertEqual([u["path"] for u in plain["unread"]], ["tests/test_bad.py"],
                          "scope: the file is not listed unread without --gate")
         code, out = self.gated()
-        self.assertNotEqual(code, 0, "--gate exits 0 on an unread file")
+        self.assertEqual(code, 2, "--gate exits %d on an unread file alone, not 2" % code)
         self.assertEqual([u["path"] for u in out["unread"]], ["tests/test_bad.py"],
                          "--gate does not list the unread file")
 
@@ -1796,15 +1796,83 @@ class AssertLessElapsedTest(FinderCase):
         self.assertEqual({row for row in self.rows(out) if row[2] == "elapsed-assert"}, set(),
                          "an assertLess on r.count or on a message is listed as elapsed-assert")
 
+    def test_value_checks_on_elapsed_are_not_elapsed_asserts(self):
+        # An equality checks one value. It sets no bound on the clock, so it is not a wall-clock bound.
+        text = src(
+            "import time",
+            "import unittest",
+            "",
+            "class ValueTest(unittest.TestCase):",
+            "    def test_zero_elapsed(self):",
+            "        job = run_child()",
+            "        assert job.elapsed == 0",
+            "",
+            "    def test_exact_elapsed(self):",
+            "        stats = run_child()",
+            "        self.assertEqual(stats.elapsed, 3)",
+            "",
+            "    def test_scope_sleep(self):",
+            "        time.sleep(1)",
+        )
+        self.put("tests/test_value_elapsed.py", text)
+        code, out = self.report()
+        sleep_row = ("tests/test_value_elapsed.py", lineno(text, "time.sleep(1)"), "sleep")
+        self.assertIn(sleep_row, self.rows(out), "scope: the fixture's sleep is not listed, so it was not scanned")
+        self.assertEqual({row for row in self.rows(out) if row[2] == "elapsed-assert"}, set(),
+                         "an equality on .elapsed is listed as elapsed-assert, but it is a value check, not a bound")
 
-# ---- a file over 1 MB is read, not listed unread ----------------------------------------------------
+    def helper_bound_rows(self, assert_line):
+        """Scans one fixture whose test holds assert_line, with a sleep as the scope sentinel. Returns (text, rows)."""
+        rel = "tests/test_helper_bound.py"
+        text = src(
+            "import time",
+            "import unittest",
+            "",
+            "class HelperBoundTest(unittest.TestCase):",
+            "    def test_bound(self):",
+            "        r = run_child()",
+            "        " + assert_line,
+            "",
+            "    def test_scope_sleep(self):",
+            "        time.sleep(1)",
+        )
+        self.put(rel, text)
+        _, out = self.report()
+        sleep_row = (rel, lineno(text, "time.sleep(1)"), "sleep")
+        self.assertIn(sleep_row, self.rows(out), "scope: the fixture's sleep is not listed, so it was not scanned")
+        return text, self.rows(out)
+
+    def test_bound_on_elapsed_inside_a_helper_call_is_an_elapsed_assert(self):
+        line = "assert to_ms(r.elapsed) < 100"
+        text, rows = self.helper_bound_rows(line)
+        self.assertIn(("tests/test_helper_bound.py", lineno(text, line), "elapsed-assert"), rows,
+                      "an assert bound on to_ms(r.elapsed) is not listed as elapsed-assert")
+
+    def test_assertless_bound_on_elapsed_inside_a_helper_call_is_an_elapsed_assert(self):
+        line = "self.assertLess(to_ms(r.elapsed), 100)"
+        text, rows = self.helper_bound_rows(line)
+        self.assertIn(("tests/test_helper_bound.py", lineno(text, line), "elapsed-assert"), rows,
+                      "an assertLess bound on to_ms(r.elapsed) is not listed as elapsed-assert")
+
+
+# ---- a file over 1 MB is read, a file over 8 MB is unread ------------------------------------------
+
+EIGHT_MB = 8 * 1024 * 1024  # 8 MiB: over the 8,000,000 bytes that "8 MB" may also mean
+
+
+def comment_padded(total, head, tail):
+    """Python source of at least `total` bytes: the head lines, comment lines of 100 bytes each, then the tail
+    lines. Comments scan in a fraction of a second, so the byte count is the only thing a case probes."""
+    fixed = len(src(*head, *tail).encode("utf-8"))
+    pad = ["# " + "p" * 97] * max(0, -(-(total - fixed) // 100))  # 100 bytes a line, newline included
+    return src(*head, *pad, *tail)
+
 
 class BigFileTest(FinderCase):
     def test_a_file_over_one_megabyte_is_read_and_its_late_sleep_is_listed(self):
         # About 1.75 MB. merge/test_merge.py is the real file over the 1 MB limit, at 1.7 MB. The sleep sits
         # past the first megabyte, so a read that stops there misses it.
-        pad = ["# " + "p" * 97 for _ in range(1_750_000 // 100)]  # 100 bytes a line, newline included
-        text = src("import time", *pad, "", "def test_late():", "    time.sleep(1)")
+        text = comment_padded(1_750_000, ["import time"], ["", "def test_late():", "    time.sleep(1)"])
         size = len(text.encode("utf-8"))
         self.assertTrue(1_000_000 < size < 2_000_000, "scope: the fixture is %d bytes, not 1 MB to 2 MB" % size)
         self.put("tests/test_big.py", text)
@@ -1814,6 +1882,39 @@ class BigFileTest(FinderCase):
         self.assertEqual(self.rows(out), pinned(
             "tests/test_big.py", text, ("time.sleep(1)", "sleep"),
         ), "the sleep past the 1 MB mark is not listed")
+        self.assertEqual(proc.returncode, 1, proc.stdout[-200:])
+
+    def over_cap_text(self):
+        # Over 8 MB under both readings. The sleep sits near the top, so a read that scans the file lists it.
+        text = comment_padded(EIGHT_MB + 1, ["import time", "", "def test_head():", "    time.sleep(1)"],
+                              ["", "def test_tail():", "    pass"])
+        self.assertGreater(len(text.encode("utf-8")), EIGHT_MB, "scope: the fixture is not over 8 MiB")
+        return text
+
+    def test_a_file_over_8_mb_is_listed_unread(self):
+        self.put("tests/test_over_cap.py", self.over_cap_text())
+        proc = run(self.root, "--json")
+        out = json.loads(proc.stdout)
+        self.assertEqual([u["path"] for u in out["unread"]], ["tests/test_over_cap.py"],
+                         "a file over 8 MB is read, not listed unread")
+        self.assertEqual(proc.returncode, 2, "a file over 8 MB alone exits %d, not 2" % proc.returncode)
+
+    def test_a_file_over_8_mb_is_not_scanned(self):
+        self.put("tests/test_over_cap.py", self.over_cap_text())
+        out = json.loads(run(self.root, "--json").stdout)
+        self.assertEqual(self.rows(out), set(), "a file over 8 MB is scanned: its sleep is listed as a finding")
+
+    def test_a_file_under_8_mb_and_an_empty_file_are_read(self):
+        text = comment_padded(7 * 1024 * 1024, ["import time", "", "def test_head():", "    time.sleep(1)"], [""])
+        self.assertLess(len(text.encode("utf-8")), 8_000_000, "scope: the fixture is not under 8 MB")
+        self.put("tests/test_under_cap.py", text)
+        self.put("tests/test_empty.py", "")
+        proc = run(self.root, "--json")
+        out = json.loads(proc.stdout)
+        self.assertEqual(out["unread"], [], "a file under 8 MB or an empty file is listed unread")
+        self.assertEqual(self.rows(out), pinned(
+            "tests/test_under_cap.py", text, ("time.sleep(1)", "sleep"),
+        ), "the sleep in a file under 8 MB is not listed")
         self.assertEqual(proc.returncode, 1, proc.stdout[-200:])
 
 
