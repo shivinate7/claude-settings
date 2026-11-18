@@ -40,6 +40,24 @@ SWIFT_CLOCKS = [
 SUMMARY_ZERO = "0 time-pinned in 0 files (sleep 0, elapsed-assert 0, test-cap 0, wait-cap 0); 0 unread"
 
 
+def summary_line(total, files, sleep=0, elapsed=0, calendar=0, hang_guards=0, unread=0):
+    """The one summary line. A hang guard (test-cap or wait-cap) is its own count: it is never added to the
+    total or the file count, and it is not a kind in the parenthesised list (test-practices P5)."""
+    return ("%d time-pinned in %d files (sleep %d, elapsed-assert %d, calendar %d); "
+            "hang guards %d (allowed; check each cap sits well above the run); %d unread"
+            % (total, files, sleep, elapsed, calendar, hang_guards, unread))
+
+
+def assert_summary(case, stdout, expected):
+    """The summary is the last line. The total and the file count come first, so a hang guard counted there
+    fails with that cause alone. Then the whole line, so a changed kinds list or hang guards count fails
+    with the summary-form cause alone."""
+    last = (stdout.splitlines() or [""])[-1]
+    case.assertEqual(last.split(" (", 1)[0], expected.split(" (", 1)[0],
+                     "a hang guard or test-cap is counted in the time-pinned total or files")
+    case.assertEqual(last, expected, "the summary line is not the pinned form")
+
+
 def src(*lines):
     return "\n".join(lines) + "\n"
 
@@ -1219,10 +1237,11 @@ class PollLoopTest(FinderCase):
             "    return flag.is_set()",
         )
         self.put(POLL_PATH, text)
-        proc = run(self.root)
+        proc = run(self.root, "--check")
         self.assertNotIn("UNREAD", proc.stdout, "scope: the fixture was not read")
         self.assertEqual(proc.returncode, 0,
-                         "a file whose only findings are poll-loop hang guards exits %d, not 0" % proc.returncode)
+                         "a file whose only findings are poll-loop hang guards exits %d under --check, not 0"
+                         % proc.returncode)
         assert_summary(self, proc.stdout, summary_line(0, 0, hang_guards=3))
 
     # A raise or a fail in an if caps the loop. It does not end the wait, so the loop has no condition.
