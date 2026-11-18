@@ -2144,13 +2144,14 @@ def idle_lanes_report(repo, live, record_branch=None, main_branch="main"):
 SESSION_LINK = re.compile(r"claude\.ai/code/(session_[A-Za-z0-9_]+)")
 
 
-def lanes_to_check(steps, slugs, body, raw, open_heads):
+def lanes_to_check(steps, slugs, body, raw, landed, open_heads):
     """Lines for the lanes behind the merged steps `slugs`, for a merge whose live file could not list the idle lanes
     (stale, missing or unreadable). The lane is the step record's `lane`, else the last session link in the pull request
-    `body`. `raw` is the live file parsed, or None; `open_heads` is a function that returns the set of head refs with an
+    `body`. `raw` is the live file parsed, or None; `landed` is the set of steps whose Step trailer is on main (landed_marks), or None
+    when main could not be read; `open_heads` is a function that returns the set of head refs with an
     open pull (it may raise: the read then counts as not read). It runs once, and only for a lane no earlier test skipped. Each line says to check the lane by hand, and none says to archive it: a stale file cannot prove
     the lane is done. No line for a lane that is still working (its row is not completed or review ready, a step outside `slugs` is doing
-    under it, or an open pull is on its head; a step in `slugs` just landed, so its doing record does not hold the lane) or archived. A session in keepSessions (read at any age) prints one hold
+    under it and has no Step trailer on main, or an open pull is on its head; a step in `slugs` just landed, so its doing record does not hold the lane) or archived. A session in keepSessions (read at any age) prints one hold
     line; a keepSessions that could not be read, or a live file that could not be read (`raw` None), prints an unknown line for a lane not already
     skipped as working. Reads only what the caller loaded."""
     keep, keep_why = keep_sessions(raw) if raw is not None else ({}, None)
@@ -2184,8 +2185,12 @@ def lanes_to_check(steps, slugs, body, raw, open_heads):
         row = rows.get(sid)
         if row and (row.get("session_status") == ARCHIVED_SESSION or row.get("status_bucket") not in IDLE_BUCKETS):
             continue
-        if any(running_under(d, sid) for k, d in steps.items() if k not in slugs):
-            continue  # a lane still working needs no keep list; a step in `slugs` just landed
+        holding = [k for k, d in steps.items() if k not in slugs and running_under(d, sid)]
+        if holding and landed is None:  # without main's trailers a doing step cannot be shown landed, and a lane is not dropped unread
+            out.append("unknown (the Step trailers on main could not be read, so lane %s is not named)" % sid)
+            continue
+        if any(k not in landed for k in holding):
+            continue  # a lane still working needs no keep list; a step in `slugs` just landed, and a doing step with a trailer on main is landed (as idle_lanes reads it)
         if raw is None or keep_why:  # an unreadable file has no keep list: the owner may keep this lane
             out.append("unknown (the keep list could not be read, so lane %s is not named)" % sid)
             continue
