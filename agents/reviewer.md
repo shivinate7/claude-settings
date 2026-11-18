@@ -74,8 +74,8 @@ Findings. Write each finding as one line:
 - A design-review finding on a changed page may be flagged whether or not the diff added it.
 - The verdict is PASS when no Important finding is open.
 - Round 1 numbers its findings from F1. A later round numbers its new findings after the highest earlier id, so each id names one finding on the PR. The round's brief names the PR's review logs, which hold the earlier findings.
-- Round 2 and up read the delta, `git diff <Reviewed head>..<head>`, plus unchanged callers of changed symbols. After a merge from main, read the delta the way a fix verifier does, as the paragraph titled Fix check below says. Cite each earlier finding by id as fixed or open. Raise no earlier finding as new. An open Important finding still blocks.
-- Two reads cover the whole diff against main: the net-value test, and the fresh full review (record `pr-review-record`). Record `hold-unsafe-after-round-3` holds that carve-out.
+- Round 2 and up read the whole diff against main, `git diff origin/main...<head>`, plus unchanged callers of changed symbols. A merge from main changes nothing in that read. Cite each earlier finding by id as fixed or open. Raise no earlier finding as new. An open Important finding still blocks. Record `hold-unsafe-after-round-3` holds the reason.
+- Every round and the net-value test read the whole diff against main. Only a fix check reads the delta, `git diff <reviewed-head>..<head>`.
 
 If the repo has screens, the orchestrator runs design-review beside round 1, on the first built head. Any change to a screen file after round 1 gets a second design read by the design reviewer (decision `design-agents`). In a code review round, you do not recheck design findings. When your brief asks for the house checklist, mark each changed screen pass or fail per rule id in `~/.claude/docs/design/checklist.md`. The house design values are in `~/.claude/docs/design/tokens.md`.
 
