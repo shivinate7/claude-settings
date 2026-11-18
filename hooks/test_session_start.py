@@ -1105,9 +1105,9 @@ class SessionStartRosterTests(SessionStartAgentWorktreeNoticeTests):
         self.assert_records_standing(ROSTER_COORD_ID, "a start with gh and curl on PATH did not record the standing role")
         self.assertFalse(os.path.exists(marker), "the standing role write started gh or curl")
 
-    def test_a_stale_roadmap_ref_still_records_the_role_the_remote_record_names(self):
-        # The checkout's origin/roadmap is the record as the checkout last fetched it. Here it predates the coordinator's row;
-        # the remote's record has the row.
+    def test_a_stale_roadmap_ref_records_no_role_until_the_ref_is_fetched(self):
+        # The hook reads the roadmap ref the checkout last fetched and never fetches it (hooks/own_session.py), so a start on a
+        # stale ref fails closed. The install refresh fetches the ref; a start after that records the role.
         stale = roster_record([row for row in STANDING_ROSTER_ROWS if ROSTER_COORD_ID not in row])
         self.put_record(stale)
         fresh = self.record_commit(roster_record(STANDING_ROSTER_ROWS))
@@ -1116,8 +1116,12 @@ class SessionStartRosterTests(SessionStartAgentWorktreeNoticeTests):
         self.assertNotIn(ROSTER_COORD_ID, self.git_in(["show", "refs/remotes/origin/roadmap:CLAUDE.md"]),
                          "scope: the checkout's own record already names the coordinator")
         self.start_as(ROSTER_COORD_ID)
+        self.assertNotEqual(self.merge_role_of(ROSTER_COORD_ID), "standing",
+                            "a start on a stale roadmap ref recorded the role before the ref was fetched")
+        self.put_record(roster_record(STANDING_ROSTER_ROWS))  # the refresh fetched the record: the ref holds the remote's rows
+        self.start_as(ROSTER_COORD_ID)
         self.assert_records_standing(ROSTER_COORD_ID,
-                                     "a start on a stale roadmap ref did not record the role the remote record names")
+                                     "a start on a fetched roadmap ref did not record the standing role")
 
 
 class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
