@@ -1326,6 +1326,33 @@ add("role-model: no decision record still refuses a round 2 reviewer on haiku at
     **role_input("reviewer", "haiku", "Round 2 of 3. Re-check the diff."))
 
 
+# ---- K: the live record's `1 guard` row (owner ruling 2026-11-17 19:45 CST: a round 1 reviewer runs Haiku at xhigh on every
+# change, a guard or check change included). These cases read this checkout's record, so the row the ruling changes decides
+# them: they are red while that row reads sonnet and green once it reads haiku. Section I holds the marker's own reading, on a
+# sonnet fixture, so it holds whatever the live row says. The Haiku and no-model allows are in section 28508's step-up block.
+# A round 1 reviewer on Sonnet is refused with the marker, with or without a Round 1 line: the marker lifts nothing above Haiku.
+role_model_refuse("role-model: round 1 reviewer on sonnet with the guard marker is denied (the live 1 guard row is haiku)",
+                  "reviewer", "sonnet", REVIEW_GUARD_MARKER + "\nCheck the guard diff.")
+role_model_refuse("role-model: round 1 reviewer on sonnet with a Round 1 line and the guard marker is denied (the live 1 guard row "
+                  "is haiku)", "reviewer", "sonnet", "Round 1 of 3. Check the guard diff.\n" + REVIEW_GUARD_MARKER)
+workflow_refuse("role-model: Workflow round 1 reviewer on sonnet with the guard marker is denied under agent-role-model",
+                _step_flow("'%s. Check the guard diff.'" % REVIEW_GUARD_MARKER, "agentType: 'reviewer', model: 'sonnet'"),
+                rule=ROLE_RULE, carries=(ROLE_REMEDY,), lacks=ROLE_LACKS)
+# With no round rows in the record, the fallback row stands in for the `1 guard` row, so the fallback must read haiku too.
+role_model_refuse("role-model: round 1 reviewer on sonnet with the guard marker is denied with no round rows (the fallback row is "
+                  "haiku)", "reviewer", "sonnet", REVIEW_GUARD_MARKER + "\nCheck the guard diff.", config=ROLE_UNPINNED_CFG)
+# Controls: a second round and a fix check keep their sonnet rows, with the marker on either.
+role_model_allow("role-model: round 2 reviewer on sonnet with the guard marker is allowed (round 2 keeps its sonnet row)",
+                 "reviewer", "sonnet", "Round 2 of 3. Check the guard diff.\n" + REVIEW_GUARD_MARKER)
+role_model_allow("role-model: fix check reviewer on sonnet with the guard marker on line two is allowed (the fix verifier row is "
+                 "sonnet)", "reviewer", "sonnet", "Fix check. Confirm the fix to the named finding.\n" + REVIEW_GUARD_MARKER)
+# The refusal of a round 1 reviewer with no marker names no marker lift: the marker lifts nothing above Haiku, so naming it
+# sends the agent back to the same refusal.
+role_model_refuse("role-model: round 1 reviewer on sonnet with no marker is denied, and its remedy names no guard marker lift",
+                  "reviewer", "sonnet", "Check the guard diff.", carries=(ROLE_REMEDY, ROUND_MARKER) + FREE_ROUND_MARKERS,
+                  lacks=ROLE_LACKS + (REVIEW_GUARD_MARKER,))
+
+
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
 
 # The log checkers tagged "windows". Each one reads a live process's start time (guard.py
