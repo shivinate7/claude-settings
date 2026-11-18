@@ -109,12 +109,15 @@ class IdleLanesCli(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def publish(self, sessions, read_at=None, pulls=(), landed=None):
-        """Write the --live file. Its readAt is five minutes old by default. `landed` is the landedPulls rows, written when given."""
+    def publish(self, sessions, read_at=None, pulls=(), landed=None, keep=None):
+        """Write the --live file. Its readAt is five minutes old by default. `landed` is the landedPulls rows, written when given.
+        `keep` is the file's keepSessions value, written when given."""
         value = {"readAt": read_at or roadmap.iso_ago(5), "threads": [], "pulls": list(pulls), "items": [],
                  "sessions": list(sessions)}
         if landed is not None:
             value["landedPulls"] = list(landed)
+        if keep is not None:
+            value["keepSessions"] = keep
         self.live.write_text(json.dumps(value), encoding="utf-8")
 
     def stale_draft(self, number, branch, **fields):
@@ -474,6 +477,40 @@ class IdleLanesCli(unittest.TestCase):
                          "a lane with an unarchived commit printed a joint line: %r" % out)
         self.assertEqual(lines, [JOINT % (101, "lane/c1", "session_a"), SUMMARY_ONE],
                          "the output has lines beyond the control's joint line and summary: %r" % out)
+
+    def test_a_kept_session_prints_a_hold_line_and_no_lane_line(self):
+        # The control is the idle lane with no keep list: it is listed and the summary counts it. Then keepSessions names it:
+        # no lane line, one hold line that names the keep reason and the session, and no lane to archive in the summary.
+        self.publish([lane("session_a", "c1")])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(out.splitlines()[-1:], [SUMMARY_ONE], "scope: session_a is not listed before the keep list: %r" % out)
+        self.publish([lane("session_a", "c1")], keep=[{"id": "session_a", "reason": "kept for a reader"}])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 0, err)
+        lines = out.splitlines()
+        self.assertEqual([line for line in lines if not line.startswith(("hold (", "merge:"))], [],
+                         "a kept session printed a line that is not a hold line: %r" % out)
+        holds = [line for line in lines if line.startswith("hold (")]
+        self.assertEqual(len(holds), 1, "a kept session printed no hold line: %r" % out)
+        self.assertIn("kept for a reader", holds[0], "the hold line does not name the keep reason: %r" % holds[0])
+        self.assertIn("session_a", holds[0], "the hold line does not name the session: %r" % holds[0])
+        self.assertRegex(lines[-1], r"^merge: 0 lanes to archive\b", "the summary counts a lane to archive for a kept session: %r" % out)
+
+    def test_a_malformed_keep_list_reads_unknown_not_as_an_empty_keep_list(self):
+        # The control is the idle lane with no keepSessions: it is listed and the command exits 0. Then keepSessions is not a
+        # list of {id, reason} rows, so the whole list reads unknown and exits 1.
+        self.publish([lane("session_a", "c1")])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual((code, out.splitlines()[-1:]), (0, [SUMMARY_ONE]), "scope: session_a is not listed before the keep list: %r" % out)
+        for keep in ("session_a", [{"reason": "no id"}]):
+            with self.subTest(keep=keep):
+                self.publish([lane("session_a", "c1")], keep=keep)
+                code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+                self.assertTrue(any(line.startswith("unknown (") for line in out.splitlines()),
+                                "a malformed keepSessions printed no unknown line: out %r, err %r" % (out, err))
+                self.assertNotRegex(out, ZERO_LINE, "a malformed keepSessions read as an empty keep list: %r" % out)
+                self.assertNotRegex(out, SUMMARY_LINE, "a malformed keepSessions printed a summary: %r" % out)
+                self.assertEqual(code, 1, "a malformed keepSessions exits %d, so a caller reads the list as read: %s" % (code, err))
 
     def test_joint_lane_tagged_archive_ready_with_no_handoff_is_held_and_the_summary_takes_the_long_tail(self):
         # The joint line of an archive-ready lane takes the handoff check like a plain entry. Its handoff is not on the
