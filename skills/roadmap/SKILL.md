@@ -74,6 +74,7 @@ ready for review, failed, stopped) and the open pull requests, folded to one lin
 lists the threads, the pull requests and the branches. The roadmap build script cannot reach project threads or
 GitHub, so the publisher reads them just before the build and passes one file:
 
+    merge --reviewed --json     # one run before the build; its whole output goes under live.json's "ledger" key
     python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --live live.json --block --out FILE
 
     {"readAt": "<ISO time of the reads>",
