@@ -1113,6 +1113,59 @@ class LedgerActs(UpkeepFixture):
                              f"#7's lane holds its branch in a sessions row the build skipped, and #7 reads act {row[7].get('act')!r}, not 'lane unknown'")
             self.assertEqual(row[7].get("owner"), "unknown", f"#7's lane holds its branch in a skipped row, and #7 reads owner {row[7].get('owner')!r}, not 'unknown'")
 
+    def test_a_draft_reads_lane_unknown_when_a_sessions_row_fails_one_shape_clause_it_holds_the_branch_by(self):
+        # live_work and live_ledger each test a sessions row's shape: id text, session_status text, tags a list or left out. Each row
+        # below fails one clause and holds the draft's branch, so a one-clause edit to either copy reads a live lane or no live lane.
+        draft = self.draft(7, "feat-x", title="Draft seven")
+        ledger = {"readAt": self.FRESH, "rows": [ledger_row(7, "lane round 1", owner="lane")]}
+        holds = [self.REPO, "cs-step:feat-x"]
+        for name, row in (
+            ("id is not text", {"id": 3, "session_status": "SESSION_STATUS_RUNNING", "tags": holds}),
+            ("tags are not a list", {"id": "session_test01", "session_status": "SESSION_STATUS_RUNNING", "tags": "cs-step:feat-x"}),
+            ("session_status is missing", {"id": "session_test01", "tags": holds}),
+        ):
+            with self.subTest(clause=name):
+                self.publish_read([draft], ledger, sessions=[row])
+                page = self.build()
+                live = build_info(page)["live"]
+                self.assertEqual(sorted(self.baked(page)), [7], "scope: the baked pulls are the one draft")
+                self.assertIn("session 1", live.get("skipped") or [],
+                              f"live_work does not skip the sessions row whose {name}: skipped is {live.get('skipped')!r}")
+                self.assertEqual(self.baked(page)[7].get("act"), "lane unknown",
+                                 f"#7's sessions row {name}, so the lane hold is unknown, and #7 reads act {self.baked(page)[7].get('act')!r}, not 'lane unknown'")
+                self.assertEqual(live.get("laneWhy"), self.SKIPPED_ROW_WHY,
+                                 f"#7's sessions row {name}, and its lane reads reason {live.get('laneWhy')!r}, not {self.SKIPPED_ROW_WHY!r}")
+
+    def test_live_work_and_live_ledger_judge_each_sessions_row_by_the_same_shape(self):
+        # live_work skips a sessions row, and live_ledger reads a draft's lane reason from the same list. One row at a time, the two
+        # must agree: live_work skips the row exactly when live_ledger gives the skipped-row reason.
+        draft = self.draft(7, "feat-x", title="Draft seven")
+        ledger = {"readAt": self.FRESH, "rows": [ledger_row(7, "lane round 1", owner="lane")]}
+        repo_step = [self.REPO, "cs-step:feat-x"]
+        running = "SESSION_STATUS_RUNNING"
+        for name, row in (
+            ("not an object", "x"),
+            ("id an int", {"id": 3, "session_status": running, "tags": repo_step}),
+            ("id missing", {"session_status": running, "tags": repo_step}),
+            ("session_status missing", {"id": "session_test01", "tags": repo_step}),
+            ("session_status an int", {"id": "session_test01", "session_status": 1, "tags": repo_step}),
+            ("tags as text", {"id": "session_test01", "session_status": running, "tags": "cs-step:feat-x"}),
+            ("tags as an object", {"id": "session_test01", "session_status": running, "tags": {"step": "feat-x"}}),
+            ("no tags", {"id": "session_test01", "session_status": running}),
+            ("tags None", {"id": "session_test01", "session_status": running, "tags": None}),
+            ("tags without the step", {"id": "session_test01", "session_status": running, "tags": [self.REPO]}),
+            ("an empty tags list", {"id": "session_test01", "session_status": running, "tags": []}),
+        ):
+            with self.subTest(row=name):
+                self.publish_read([draft], ledger, sessions=[row])
+                page = self.build()
+                live = build_info(page)["live"]
+                self.assertEqual(sorted(self.baked(page)), [7], "scope: the baked pulls are the one draft")
+                work_skips = "session 1" in (live.get("skipped") or [])
+                ledger_skips = live.get("laneWhy") == self.SKIPPED_ROW_WHY
+                self.assertEqual(work_skips, ledger_skips,
+                                 f"live_work skips this sessions row: {work_skips}, but live_ledger reads it as skipped: {ledger_skips}")
+
     def test_a_ledger_of_500_pulls_bakes_the_act_of_each(self):
         # Full size (test-practices P8): 500 open pulls, each with a ledger row.
         count = 500
