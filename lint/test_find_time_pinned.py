@@ -1492,11 +1492,11 @@ class PollLoopTest(FinderCase):
             "        last = now",
             "    case.fail('the heartbeat still moves')",
         )
-        code, cats = self.listed(text, "time.sleep(1.0)")
+        code, cats = self.listed(text, "time.sleep(1.0)", "--check")
         self.assertEqual(cats, {"wait-cap"},
                          "the heartbeat spelling with the deadline in the while test is listed as %s, not wait-cap"
                          % sorted(cats))
-        self.assertEqual(code, 0, "the heartbeat spelling is wait-cap but is counted as time-pinned (exit %d)" % code)
+        self.assertEqual(code, 0, "the heartbeat spelling is wait-cap and fails --check (exit %d)" % code)
 
 
 # ---- helper taint, assert arguments, a Playwright wait, an unlistable folder --------------
