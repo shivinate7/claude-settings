@@ -244,7 +244,7 @@ def late_land_stale_ph_case():
                            % (control_decision, control_reason[:90]))
         folder, good = _reload_copy(name, INSTALL_ID)
         _put_whole(os.path.join(folder, "precompact_handoff.py"), stale)
-        _damage_stamp(folder, good)   # guard_core's stamp is stale: the first load fails the install-id check
+        _damage_stamp(folder, good)   # glossary-ok: the INSTALL_ID stamp of guard_core, not a Verified line. Its stamp is stale: the first load fails the install-id check
         fix = _fix_with(folder, {"precompact_handoff.py": fresh, RELOAD_CORE: good[RELOAD_CORE]},
                         ["precompact_handoff.py", RELOAD_CORE])   # ph first, so a reload that sees matching ids sees fresh ph
         hu_files(_reload_cfg(name), flag=True, handoff=True)
