@@ -108,13 +108,14 @@
                           Cost: one call per 100 open PRs and one per page of repo comments; no per-PR call, no file, no new process or timer.
   merge --review-tally --since ISO [--split ISO]
                           counts review outcomes from the review records: one list read of the repo's issue comments from --since (ISO is
-                          `YYYY-MM-DDTHH:MM:SSZ`). A pull request counts from its first record that holds a `Round 1:` line. Each round counts once per
-                          pull request, from the first record that holds a reviewer line of it, so a later record that reprints the earlier rounds adds
-                          nothing. A design-reviewer line is no round. Per section: a line per round and model (`round 1, haiku: PASS 37, FAIL 146`),
+                          `YYYY-MM-DDTHH:MM:SSZ`). A pull request counts from its first record that holds a reviewer `Round 1:` line. Each round counts
+                          once per pull request, from the first record that holds a reviewer line of it, so a later record that reprints the earlier
+                          rounds adds nothing. A design-reviewer line is no round and starts nothing. A record that names another pull request is not
+                          counted on the thread it is posted on. Per section: a line per round and model (`round 1, haiku: PASS 37, FAIL 146`),
                           `round 1 FAIL, then round 2: PASS n, FAIL n, none n` (a round 2 that is PARTIAL, or absent, is none), then `unknown: n`, the
-                          records parse_review refuses; a pull request whose starting record is refused counts no round. With --split a pull request
-                          lands in `before the split` or `after the split` by when its starting record was posted; without it, one `all` section. A
-                          failed read prints `unknown` on stderr and exits 1, with no count. Stands alone; takes no lock, merges and posts nothing.
+                          records parse_review refuses. A refused record is counted unknown, and later valid records of its pull request still count.
+                          With --split a pull request lands in `before the split` or `after the split` by when its starting record was posted;
+                          without it, one `all` section. A failed read prints `unknown` on stderr and exits 1, with no count. Stands alone; takes no lock, merges and posts nothing.
                           Cost: the one comment list read (one call per 100 comments); no file, process or timer.
   merge --touches [--run RUN_ID|URL] [--case TEXT ...] [--file PATH ...]
                           one line per open PR that touches a named file (a changed file of that path) or holds a named case in a `+` line of its
@@ -5862,29 +5863,37 @@ def audit_prs(h):
 
 def review_tally(h, since, split=None):
     """-> the lines of `merge --review-tally`: the review outcomes in the records posted since `since`, one section per `split` side, or one `all` section.
-    One list read (issue_comments), so the cost is that read: no file, no timer. A pull request starts at its first record with a Round 1 line (a record that
-    parse_review refuses is judged by its text). Each round counts once per pull request, from the first record at or after the start that holds a reviewer line
-    of it, since a later record reprints the earlier rounds. A design-reviewer line is no round. A record parse_review refuses counts as unknown, and a pull request
-    whose starting record is refused counts no round. The section is by the created time of the starting record, or of the first record when none starts; a time the
-    read did not give is unknown. Round 2 that is PARTIAL or missing reads as none in the round 1 FAIL follow-up."""
+    One list read (issue_comments), so the cost is that read: no file, no timer. A pull request starts at its first record that holds a reviewer Round 1
+    line. A record that parse_review refuses counts as unknown and is skipped: it starts nothing and drops nothing, so a later valid record still counts.
+    A record whose PR line names another pull request is not counted on the thread it is posted on (own_records reads the PR line the same way). Each round
+    counts once per pull request, from the first record at or after the start that holds a reviewer line of it, since a later record reprints the earlier
+    rounds. A design-reviewer line is no round and starts nothing. The section is by the created time of the starting record, or of the first record when
+    none starts; a time the read did not give is unknown. Round 2 that is PARTIAL or missing reads as none in the round 1 FAIL follow-up."""
     records = h.issue_comments(since)[0]
     cut = iso_time(split) if split else None
     names = ("before the split", "after the split") if split else ("all",)
     tallies = {name: {"rounds": {}, "follow": [0, 0, 0], "unknown": 0} for name in names}
     for n in sorted(records):
-        rows = [(parse_review(body), body, created) for body, created, _updated in records[n]]
-        start = next((i for i, (rec, body, _c) in enumerate(rows)
-                      if (any(r[0] == 1 for r in rec["rounds"]) if rec else re.search(r"^Round 1:", body, re.M))), None)
-        when = iso_time(rows[start or 0][2])
+        rows = []  # (the record, or None for a refused one; created time); a record that names another pull request is left out
+        for body, created, _updated in records[n]:
+            own = own_records(n, [body])
+            if own:
+                rows.append((own[0], created))
+            elif parse_review(body) is None:
+                rows.append((None, created))
+        if not rows:
+            continue
+        start = next((i for i, (rec, _c) in enumerate(rows) if rec and any(r[0] == 1 and r[1] == REVIEW_ROLES[0] for r in rec["rounds"])), None)
+        when = iso_time(rows[start or 0][1])
         if split and when is None:
             tallies[names[0]]["unknown"] += 1
             continue
         t = tallies[names[1] if split and when >= cut else names[0]]
-        t["unknown"] += sum(1 for rec, _b, _c in rows if rec is None)
-        if start is None or rows[start][0] is None:
+        t["unknown"] += sum(1 for rec, _c in rows if rec is None)
+        if start is None:
             continue
         seen, first = set(), {}
-        for rec, _b, _c in (row for row in rows[start:] if row[0]):
+        for rec, _c in (row for row in rows[start:] if row[0]):
             mine = [(i, model.lower(), verdict) for i, role, model, verdict in rec["rounds"] if role == REVIEW_ROLES[0]]
             for i, model, verdict in mine:
                 if i not in seen:
