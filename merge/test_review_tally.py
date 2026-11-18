@@ -6,18 +6,22 @@ file and starts no timer, so its whole cost is that read (rule outcomes-mechaniz
 review marker is its first line. The record form is decision pr-review-record; parse_review in merge/merge.py reads it.
 
 Readings the cases pin:
-- A pull request counts from its first record whose body has a `Round 1:` line. A record before that one, with no such line, is skipped.
+- A pull request counts from its first record with a `Round 1:` line. A record before that one, with no such line, is skipped.
+- A record whose PR line names another pull request does not count on the thread it is posted on: it neither starts that thread's
+  pull request nor sets its split side (own_records reads the PR line the same way).
 - Round 1 counts once per pull request, from that first record. A later record reprints round 1, so it is not counted again.
 - Round N above 1 counts once, from the first record of that pull request that holds a Round N line. A record posted after a round
   reprints the earlier rounds, and a round 2 line sits only in a record that opens at round 1. So the first Round 1 record alone
   would leave round 2 and round 3 empty. The first later record and the newest one give the same line.
 - A round 1 FAIL reads as round 2 PASS, round 2 FAIL, or none (no record of the pull request holds a round 2 line).
-- A first record that parse_review refuses is unknown for its pull request. It counts no round, and nothing is dropped.
-- --split sorts each pull request by the created time of its first record: before the split, or after it. Without --split, one
-  section, `all`, holds every pull request. The cases keep each record away from the split instant.
+- A design-reviewer line is no round. It counts in no table, and it neither starts a pull request nor sets its split side.
+- A record that parse_review refuses counts as unknown. It drops nothing: a later record that reprints its rounds still counts them.
+- --split sorts each pull request by the created time of the record it starts at: before the split, or after it. A record created at
+  exactly the split counts after it. Without --split, one section, `all`, holds every pull request. The other cases keep each record
+  away from the split instant.
 - A failed comment read prints `unknown` and exits non-zero. It never prints a count (rule verification-report-unknown-reads).
-Left open, and not pinned: whether a design-reviewer line counts as a round (the cases use reviewer lines only), and whether an
-unparseable record with no Round 1 line counts as unknown.
+Left open, and not pinned: where a record whose PR line names another pull request counts (the cases assert only its own thread),
+and whether an unparseable record with no Round 1 line counts as unknown.
 
 Printed contract, which the builder matches and parse_tally reads:
     before the split                          a section header: `before the split`, `after the split`, or `all`
@@ -25,9 +29,8 @@ Printed contract, which the builder matches and parse_tally reads:
     round 1 FAIL, then round 2: PASS 1, FAIL 0, none 0
     unknown: 0
 
-Each case calls merge.main with the GitHub half faked by test_merge's PullsHost. On the old code the flag is refused with exit 2,
-so the first assert of each case fails, and its message carries the exit code and the refusal text. The controls at the end read
-only what the old code already has, so they stay green there.
+Each case calls merge.main with the GitHub half faked by test_merge's PullsHost. The first assert of each case checks the exit code, so
+a refused flag fails there with its text. The controls at the end read only the fixtures and the comment read, and do not depend on the tally.
 Run: python3 merge/test_review_tally.py
 """
 import contextlib, io, os, re, sys, unittest
@@ -40,6 +43,7 @@ import test_merge as tm  # noqa: E402  the GitHub half (PullsHost) and the revie
 SINCE = "2026-11-14T00:00:00Z"
 OTHER_SINCE = "2026-11-01T00:00:00Z"  # a second --since: the read must start there, not at a built-in date
 SPLIT = "2026-11-17T00:00:00Z"
+JUST_BEFORE_SPLIT = "2026-11-16T23:59:59Z"  # one second before SPLIT: the split's own instant is the boundary case
 EARLY, LATER, LATEST = "2026-11-15T09:00:00Z", "2026-11-15T10:00:00Z", "2026-11-15T11:00:00Z"  # all before the split
 LATE = "2026-11-17T09:00:00Z"  # after the split
 SECTION_BEFORE, SECTION_AFTER, SECTION_ALL = "before the split", "after the split", "all"
@@ -51,6 +55,8 @@ SONNET_FAIL = "Round 1: reviewer, sonnet, FAIL"
 SONNET_R2_PASS = "Round 2: reviewer, sonnet, PASS"
 SONNET_R2_FAIL = "Round 2: reviewer, sonnet, FAIL"
 OPUS_R3_PASS = "Round 3: reviewer, opus, PASS"
+DESIGN_R1_FAIL = "Round 1: design-reviewer, opus, FAIL"  # the design reviewer runs opus, and no reviewer line in these cases does
+DESIGN_R1_PASS = "Round 1: design-reviewer, opus, PASS"
 FIX_CHECK = f"Fix check: {tm.REVIEW_OLD_HEAD}, reviewer, sonnet, PASS"
 UNPARSEABLE = "Round 1: reviewer, haiku, MAYBE"  # a verdict parse_review refuses
 
@@ -183,6 +189,13 @@ class RoundCounts(TallyCase):
                          f"the record with no Round 1 line is skipped, so the later round 1 record counts: {out}")
         self.assertEqual(unknown(out, SECTION_BEFORE), 0, f"a skipped record that parses is not unknown: {out}")
 
+    def test_a_design_reviewer_line_is_no_round(self):
+        comments = [comment(1, 7, record(7, SONNET_FAIL, DESIGN_R1_PASS), EARLY)]
+        out = self.tally(comments, "--split", SPLIT)
+        self.assertEqual(round_one_total(out, SECTION_BEFORE), 1,
+                         f"a design-reviewer round 1 line was counted as a round, beside the reviewer's one: {out}")
+        self.assertEqual(rounds(out, SECTION_BEFORE, 1, "opus"), (0, 0), f"the design reviewer's opus line is in the table: {out}")
+
 
 class SplitAndSections(TallyCase):
     def test_each_pull_request_lands_before_or_after_the_split_by_when_its_record_was_posted(self):
@@ -207,6 +220,30 @@ class SplitAndSections(TallyCase):
         self.assertEqual(set(parse_tally(out)), {SECTION_ALL}, f"without --split the output holds one section: {out}")
         self.assertEqual(rounds(out, SECTION_ALL, 1, "sonnet"), (1, 0), f"the sonnet record in the all section: {out}")
         self.assertEqual(rounds(out, SECTION_ALL, 1, "haiku"), (1, 1), f"both haiku records in the all section: {out}")
+
+    def test_a_design_reviewer_round_one_line_does_not_set_its_pull_requests_split_side(self):
+        comments = [
+            comment(1, 7, record(7, DESIGN_R1_FAIL), EARLY),
+            comment(2, 7, record(7, SONNET_PASS), LATE),
+        ]
+        out = self.tally(comments, "--split", SPLIT)
+        self.assertEqual(rounds(out, SECTION_BEFORE, 1, "sonnet"), (0, 0),
+                         f"the design reviewer's round 1 line, in an earlier record, put pull request 7 before the split: {out}")
+        self.assertEqual(rounds(out, SECTION_AFTER, 1, "sonnet"), (1, 0),
+                         f"the reviewer's round 1 record, posted after the split, does not count after it: {out}")
+
+    def test_a_record_at_exactly_the_split_counts_after_it(self):
+        comments = [
+            comment(1, 7, record(7, SONNET_PASS), JUST_BEFORE_SPLIT),
+            comment(2, 8, record(8, HAIKU_FAIL), SPLIT),
+        ]
+        out = self.tally(comments, "--split", SPLIT)
+        self.assertEqual(rounds(out, SECTION_BEFORE, 1, "sonnet"), (1, 0),
+                         f"the record one second before the split does not count before it: {out}")
+        self.assertEqual(rounds(out, SECTION_BEFORE, 1, "haiku"), (0, 0),
+                         f"the record at exactly the split counts before it: {out}")
+        self.assertEqual(rounds(out, SECTION_AFTER, 1, "haiku"), (0, 1),
+                         f"the record at exactly the split does not count after it: {out}")
 
 
 class UnknownsAndNonRecords(TallyCase):
@@ -239,6 +276,32 @@ class UnknownsAndNonRecords(TallyCase):
         self.assertIn("unknown", out, f"a failed read is not reported as unknown: {out}")
         self.assertFalse(any_count(out), f"a failed read printed a count: {out}")
 
+    def test_a_record_that_names_another_pull_request_is_not_counted_on_the_thread_it_is_posted_on(self):
+        # Posted on pull request 7's thread, the record's PR line names pull request 8, so own_records would skip it for pull request 7.
+        comments = [
+            comment(1, 7, record(8, HAIKU_FAIL), EARLY),
+            comment(2, 7, record(7, SONNET_PASS), LATE),
+        ]
+        out = self.tally(comments, "--split", SPLIT)
+        self.assertEqual(rounds(out, SECTION_BEFORE, 1, "haiku"), (0, 0),
+                         f"a record that names pull request 8 was counted on pull request 7's thread: {out}")
+        self.assertEqual(rounds(out, SECTION_AFTER, 1, "sonnet"), (1, 0),
+                         f"a record that names another pull request set pull request 7's split side: {out}")
+
+    def test_a_refused_first_record_does_not_drop_the_corrected_reprint_after_it(self):
+        comments = [
+            comment(1, 7, record(7, UNPARSEABLE), EARLY),
+            comment(2, 7, record(7, HAIKU_FAIL, SONNET_R2_PASS), LATER),
+        ]
+        out = self.tally(comments, "--split", SPLIT)
+        self.assertEqual(rounds(out, SECTION_BEFORE, 1, "haiku"), (0, 1),
+                         f"the corrected reprint's round 1 FAIL is dropped after a refused first record: {out}")
+        self.assertEqual(rounds(out, SECTION_BEFORE, 2, "sonnet"), (1, 0),
+                         f"the corrected reprint's round 2 PASS is dropped after a refused first record: {out}")
+        self.assertEqual(follow(out, SECTION_BEFORE), (1, 0, 0),
+                         f"the round 1 FAIL of the corrected reprint has no round 2 read after a refused first record: {out}")
+        self.assertEqual(unknown(out, SECTION_BEFORE), 1, f"the refused first record is not counted as unknown: {out}")
+
 
 class EdgeStates(TallyCase):
     def test_the_read_starts_at_since_and_the_tally_reads_nothing_else(self):
@@ -268,9 +331,11 @@ class FixtureControls(unittest.TestCase):
 
     def test_control_the_records_the_cases_count_parse_and_the_refused_one_does_not(self):
         for body in (record(7, HAIKU_FAIL, SONNET_R2_PASS), record(7, HAIKU_FAIL), record(7, fix=(FIX_CHECK,)),
-                     record(7, HAIKU_FAIL, SONNET_R2_FAIL, OPUS_R3_PASS)):
+                     record(7, HAIKU_FAIL, SONNET_R2_FAIL, OPUS_R3_PASS), record(7, DESIGN_R1_FAIL),
+                     record(7, SONNET_FAIL, DESIGN_R1_PASS)):
             self.assertIsNotNone(merge.parse_review(body), f"fixture: a record the cases count does not parse:\n{body}")
         self.assertIsNone(merge.parse_review(record(7, UNPARSEABLE)), "fixture: the refused record parses, so it is not unknown")
+        self.assertEqual(merge.parse_review(record(8, HAIKU_FAIL))["n"], 8, "fixture: a record whose PR line names 8 does not parse as 8")
 
     def test_control_the_comment_read_keeps_only_records_with_the_marker_first(self):
         good = record(7, HAIKU_FAIL)
