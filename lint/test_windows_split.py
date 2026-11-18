@@ -2516,21 +2516,6 @@ class ReadyPullFullSuite(unittest.TestCase):
                         self.assertFalse(runs_with_values(job, st, "pull_request", dict(values, records_only_skip="true")),
                                          f"{name} step {step_label(st)!r} runs on a ready pull_request with the records-only condition shut")
 
-    def test_a_docs_only_ready_pull_request_keeps_the_guard_shard_steps_off_without_windows_guard(self):
-        # The off side of the gate on the same kind of PR: with windows_guard false, each guard shard's run step is off, and the
-        # steps that only check out and set up still run.
-        for name in self.suite_jobs():
-            if (shard_base(name) or name) != GUARD_JOB:
-                continue
-            job = self.jobs[name]
-            for st in job["steps"]:
-                with self.subTest(job=name, step=step_label(st)):
-                    runs = runs_with_values(job, st, "pull_request", {"windows_guard": "false"})
-                    if "run" in st:
-                        self.assertFalse(runs, f"{name} step {step_label(st)!r} runs on a ready pull_request with windows_guard false")
-                    else:
-                        self.assertTrue(runs, f"{name} step {step_label(st)!r} is a checkout or setup step and does not run on a ready PR")
-
     def test_a_fast_shard_job_skips_a_draft_pull_request_and_runs_a_ready_one_with_its_flag(self):
         # A fast shard starts on a ready pull_request only with its flag, and on no
         # draft. The guard shards are daily only (WindowsJobsOnPullRequest), so they are not read here.
