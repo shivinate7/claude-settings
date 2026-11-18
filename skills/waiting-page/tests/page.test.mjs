@@ -7989,6 +7989,103 @@ test("control: the Status tab with a live file that has no pulls list reads live
   assert.match((await line.textContent()).replace(/\s+/g, " "), /not read/, "the live work line does not say not read");
 });
 
+// ---------------------------------------------------------------- the open pull requests' next acts (decision pr-ledger, part 3b)
+// The live file's `ledger` key holds `merge --reviewed --json`: {readAt, rows}. The build bakes each pull row with its act, owner,
+// ageHours and red, and the Status tab draws them. The ledger's readAt is taken from the clock: the build reads a live file's age
+// against the real clock, so a fixed date would read every act unknown.
+const ACT_PULLS = [
+  { number: 7, title: "Pull seven", branch: "feat-seven" },
+  { number: 8, title: "Pull eight", branch: "feat-eight" },
+  { number: 9, title: "Pull nine", branch: "feat-nine" },
+];
+const actsOver = () => ({
+  pulls: ACT_PULLS,
+  ledger: {
+    readAt: new Date().toISOString(),
+    rows: [
+      { number: 7, act: "lane round 2", owner: "lane", ageHours: 3, red: false, blockedOn: null },
+      { number: 8, act: "batch", owner: "batch runner", ageHours: 30, red: true, blockedOn: null },
+      { number: 9, act: "lane round 1", owner: "lane", ageHours: 2, red: false, blockedOn: null },
+    ],
+  },
+});
+const actRow = (page, title) => page.locator("details.live li", { hasText: title });
+const rowText = async (loc) => (await loc.first().textContent()).replace(/\s+/g, " ").trim();
+// Whether a heading's text counts `n` pulls for `owner`, in either order ("lane 2" or "2 lane").
+const countedAs = (text, owner, n) => new RegExp(`${owner}\\D{0,12}\\b${n}\\b|\\b${n}\\b\\D{0,12}${owner}`).test(text);
+
+test("the Status tab shows each open pull request's act, owner, age and RED", async (t) => {
+  const page = await liveStatus(t, actsOver()); if (!page) return;
+  assert.equal(await actRow(page, "Pull seven").count(), 1, "scope: the Status tab draws no row for open pull request #7");
+  const seven = await rowText(actRow(page, "Pull seven")), eight = await rowText(actRow(page, "Pull eight"));
+  assert.match(seven, /lane round 2/, "the row of #7 shows no act 'lane round 2': " + seven);
+  assert.match(seven, /\blane\b/, "the row of #7 shows no owner 'lane': " + seven);
+  assert.match(seven, /\b3(\.0)?\s?h(ours?)?\b/, "the row of #7 shows no age of 3 h: " + seven);
+  assert.doesNotMatch(seven, /\bRED\b/i, "the row of #7 reads RED, and its ledger row says red false: " + seven);
+  assert.match(eight, /batch/, "the row of #8 shows no act 'batch': " + eight);
+  assert.match(eight, /batch runner/, "the row of #8 shows no owner 'batch runner': " + eight);
+  assert.match(eight, /\b30(\.0)?\s?h(ours?)?\b/, "the row of #8 shows no age of 30 h: " + eight);
+  assert.match(eight, /\bRED\b/i, "the row of #8 does not read RED, and its ledger row says red true: " + eight);
+});
+
+test("the Status tab lists a red open pull request before the others", async (t) => {
+  const page = await liveStatus(t, actsOver()); if (!page) return;
+  const order = await page.locator("details.live li").allTextContents();
+  const at = (title) => order.findIndex((s) => s.includes(title));
+  assert.ok(at("Pull eight") >= 0, "scope: the Status tab draws no row for open pull request #8: " + JSON.stringify(order));
+  assert.ok(at("Pull eight") < at("Pull seven"), "the red open pull request #8 is listed after #7, which is not red: " + JSON.stringify(order));
+  assert.ok(at("Pull eight") < at("Pull nine"), "the red open pull request #8 is listed after #9, which is not red: " + JSON.stringify(order));
+});
+
+test("the Open pull requests heading counts each owner's pull requests", async (t) => {
+  const page = await liveStatus(t, actsOver()); if (!page) return;
+  const heading = page.locator("details.live h4", { hasText: "Open pull requests" });
+  assert.equal(await heading.count(), 1, "scope: the Status tab has no Open pull requests heading");
+  const text = (await heading.textContent()).replace(/\s+/g, " ");
+  assert.ok(countedAs(text, "lane", 2), "the Open pull requests heading does not count 2 lane pull requests: " + text);
+  assert.ok(countedAs(text, "batch runner", 1), "the Open pull requests heading does not count 1 batch runner pull request: " + text);
+});
+
+test("the Live work header shows when the acts were read", async (t) => {
+  const page = await liveStatus(t, actsOver()); if (!page) return;
+  const summary = (await page.locator("details.live > summary").textContent()).replace(/\s+/g, " ").trim();
+  assert.doesNotMatch(summary, /acts read unknown/, "the header reads the acts unknown with a fresh ledger: " + summary);
+  assert.match(summary, /acts read [A-Z][a-z]{2} \d{1,2}, \d{2}:\d{2} [A-Z]{2,4}/, "the header shows no 'acts read <time>': " + summary);
+});
+
+// The roadmap page (skills/roadmap/page/index.html) and this page draw one open pull request's act row with the same text.
+const ROADMAP_BUILT = path.join(HERE, "..", "..", "roadmap", "tests", "built_index.py");
+function roadmapPage(live) {
+  const r = spawnSync(process.env.PYTHON || "python3", [ROADMAP_BUILT, "--live", JSON.stringify(live)], { encoding: "utf8", maxBuffer: 1 << 28 });
+  assert.equal(r.status, 0, "the roadmap page build failed: " + (r.stderr || r.error));
+  return r.stdout;
+}
+async function openRoadmap(t, html) {
+  browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
+  if (!browser) return null;
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  page.setDefaultTimeout(Number(process.env.WP_TIMEOUT) || 5000);
+  t.after(() => page.close());
+  await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body: html }) : r.abort()));
+  await page.goto(ORIGIN);
+  await page.waitForSelector("#live");
+  return page;
+}
+test("the roadmap page and this page draw one open pull request's act row with the same text", async (t) => {
+  const over = {
+    pulls: [{ number: 8, title: "Pull eight", branch: "feat-eight" }],
+    ledger: { readAt: new Date().toISOString(), rows: [{ number: 8, act: "batch", owner: "batch runner", ageHours: 30, red: true, blockedOn: null }] },
+  };
+  const waiting = await liveStatus(t, over); if (!waiting) return;
+  const plan = await openRoadmap(t, roadmapPage(liveFile(over))); if (!plan) return;
+  assert.equal(await actRow(waiting, "Pull eight").count(), 1, "scope: this page draws no row for open pull request #8");
+  assert.equal(await plan.locator("#live li", { hasText: "Pull eight" }).count(), 1, "scope: the roadmap page draws no row for open pull request #8");
+  const here = await rowText(actRow(waiting, "Pull eight")), there = await rowText(plan.locator("#live li", { hasText: "Pull eight" }));
+  assert.match(here, /batch runner/, "this page's row for #8 shows no act owner: " + here);
+  assert.match(there, /batch runner/, "the roadmap page's row for #8 shows no act owner: " + there);
+  assert.equal(there, here, "the roadmap page and this page draw #8's row with different text:\n  roadmap: " + there + "\n  waiting: " + here);
+});
+
 // The threads-unknown marker in the Live work summary. A pill reads as a thread state (failed and stopped share its colour), so an
 // unknown thread count gets a dashed ring and the words, the same ring the panel draws for a line not read.
 const summaryText = (page) => page.locator("details.live > summary").textContent().then((s) => s.replace(/\s+/g, " ").trim());
