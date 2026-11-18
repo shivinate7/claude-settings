@@ -41,7 +41,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
-# The shared correction tail (owner, 2026-11-17 09:30 CST, decision guard-remedy-not-to-owner). Each reply refusal but
+# The shared correction tail (decision guard-remedy-not-to-owner). Each reply refusal but
 # a missing report ends with it. Read with getattr, so a build without it fails on the assert that names it, not on
 # the import.
 CORRECTION_TAIL = getattr(RG, "CORRECTION_TAIL", "")

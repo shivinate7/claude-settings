@@ -383,7 +383,7 @@ class TriageHoldTests(StalledFixture, unittest.TestCase):
     # Held on the report's shape and on the run's log. Red on the current head: the refusal and the log read are missing.
 
     def test_st_held_first_stop_on_a_well_formed_report_carries_the_correction_tail(self):
-        # Catches: the hold's refusal lacks the shared correction tail (owner, 2026-11-17 09:30 CST), so the session
+        # Catches: the hold's refusal lacks the shared correction tail, so the session
         # is not told to post only the correction and never resend the report.
         out = self.run_stop(self.stalled_wake() + [assistant_text(WELL_FORMED)])
         self.held(out, "build-stalled-check")

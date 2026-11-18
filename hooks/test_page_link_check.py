@@ -159,7 +159,7 @@ def case_p11_full_size_turn_with_no_link_blocks():
 
 def case_p12_link_refusal_ends_with_the_correction_tail():
     """P01 read for its ending: the refusal ends with report_guard.CORRECTION_TAIL, the one shared line that every
-    reply refusal but a missing report ends with (owner, 2026-11-17 09:30 CST)."""
+    reply refusal but a missing report ends with."""
     obj = expect_link_block("P12", twe.run_stop("p12", page_repo("p12"), page_turn("Done.")))
     reason = obj.get("reason") or ""
     tail = getattr(RG, "CORRECTION_TAIL", "")

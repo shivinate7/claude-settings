@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Every Stop refusal of a reply tells the session to post only the missing or corrected line, never to resend it.
 
-Owner ruling R10 (inbox fb-1544-5, decision guard-remedy-not-to-owner): after any hook refusal of a reply, the session
+Decision guard-remedy-not-to-owner sets the rule: after any hook refusal of a reply, the session
 posts only the short correction and never resends the reply, and every refusal text says so. The breach it stops:
 the Departs-from and Recovered refusals named only what was missing, so the session resent the whole report.
 
@@ -9,7 +9,7 @@ The table is the refusal fixtures of lint/test_report_guard_remedy.py (its FIXTU
 report_guard as the Stop hook, through that suite's refusal_for(). The printed reason must tell the session to post only
 the missing or corrected line and not to resend the reply, and it must carry the one shared correction tail,
 report_guard.CORRECTION_TAIL. A refusal that builds its own text fails the second assert. A missing report asks for the
-report itself, so it is left out of the table and gets no tail (owner, 2026-11-17 09:30 CST). Its own case pins that.
+report itself, so it is left out of the table and gets no tail. Its own case pins that.
 
 Not run one by one: the Unvetted "the check failed" text (only an exception reaches it), and the departs and hand-off
 misses the remedy suite does not fixture. Each of those reaches the Stop join, where the reasons are joined, so the
@@ -48,7 +48,7 @@ POST_ONLY = re.compile(r"\bpost only\b", re.IGNORECASE)
 MISSING_OR_CORRECTED = re.compile(r"\b(?:missing|corrected|correction)\b", re.IGNORECASE)
 NO_RESEND = re.compile(r"\b(?:never|do not|don't)\s+(?:re-?send|send|write|repeat|post)\b[^.;]*?\b(?:reply|report)\b",
                        re.IGNORECASE)
-# Refusals that carry the tail. A missing report gets none: it asks for the report (owner, 2026-11-17 09:30 CST).
+# Refusals that carry the tail. A missing report gets none: it asks for the report.
 TABLE = tuple(name for name in trr.FIXTURES if name != "missing_report")
 
 
@@ -105,8 +105,8 @@ class CorrectionTailControls(unittest.TestCase):
 
 
 class TriageRewriteHoldTail(trs.StalledFixture, unittest.TestCase):
-    """The triage hold on a rewrite, with no other problem in the reply, ends with the shared line. The ruling covers a
-    triage hold on a rewrite too (owner, 2026-11-17 09:30 CST)."""
+    """The triage hold on a rewrite, with no other problem in the reply, ends with the shared line. The shared tail
+    covers a triage hold on a rewrite too."""
 
     def test_rewrite_hold_with_no_other_problem_says_post_only_the_correction(self):
         out = self.run_stop(self.stalled_wake() + [trs.assistant_text("Build read.")], stop_active=True)

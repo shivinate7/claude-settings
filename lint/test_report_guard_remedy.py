@@ -530,7 +530,7 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
                                  "3 the record holds no step heading and step line for the check %r" % name)
 
     def test_3_record_holds_the_correction_step_in_shared_tails(self):
-        # Each reply refusal ends with report_guard.CORRECTION_TAIL (owner, 2026-11-17 09:30 CST). The record's shared
+        # Each reply refusal ends with report_guard.CORRECTION_TAIL. The record's shared
         # tails must state that line. The section must exist first; the line is then read inside it.
         with open(RECORD, encoding="utf-8") as handle:
             record = handle.read()
@@ -554,7 +554,7 @@ def _case_1a(name):
     def test(self):
         reason, _ = self.refusal_for(name)
         self.check_no_session_problem(name, reason)
-        # A missing report asks for the report itself, so it gets no tail (owner, 2026-11-17 09:30 CST).
+        # A missing report asks for the report itself, so it gets no tail.
         if name != "missing_report":
             self.check_correction_tail(name, reason)
     return test
