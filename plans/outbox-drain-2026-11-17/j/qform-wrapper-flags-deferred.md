@@ -1,0 +1,1 @@
+- qform-wrapper-flags-deferred (plan): qform-wrapper-flags 14:37 CST Nov 12: Deferred (coordinator 14:35 CST Nov 12): needs a carry of #1785 (about 275 lines), #2024 (about 330, on #1785) and #2293 (about 160, on #2024); #2293's diff does not apply to main; about 900 lines and fresh reviews. Rank against the stability work at the next triage review. Lane ended, no branch.

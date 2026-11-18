@@ -1,0 +1,1 @@
+- loop-while-until-dead: (#2123) hooks/guard_frozen.py:812 and :909, `while` and `until` in `_LOOP_OPENERS` are dead code, so an inner while's `done` closes the outer for. Documented in session-tiers.

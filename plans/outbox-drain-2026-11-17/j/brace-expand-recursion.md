@@ -1,0 +1,1 @@
+- brace-expand-recursion: (#2123) hooks/guard_frozen.py:844-858, `_brace_expand` recurses once per group; about 1500 `{a,b}` groups raise RecursionError, which fails open. Not reachable by mistake. Fix: cap the group count.

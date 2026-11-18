@@ -1,0 +1,1 @@
+- judge-replay-items-664-666: judge-replay-corpus 17:05 CST Nov 12: Lane 17:04 CST Nov 12: points retry, 20-item cap and judging/mark split depart from main; posted as owner items 664-666 (stands, lane pick a each). Point red non-cap alarm opens an issue: settled, main does it (alarm.sh calls issue.sh).

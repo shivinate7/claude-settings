@@ -1,0 +1,1 @@
+- child-branch-protection-set: Owner 21:44 CST Nov 12 (retrospective relay): branch protection is already set on all child repos (project-ops step 6).

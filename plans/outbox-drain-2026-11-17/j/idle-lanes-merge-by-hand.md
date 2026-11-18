@@ -1,0 +1,1 @@
+- idle-lanes-merge-by-hand: Cause read for archive-sweep-runs-per-merge (lane session_013NEJL1co4LC5YoQSfpziti, read-only, 22:47 CST Nov 13, relayed, unchecked by triage): no merge hands the runner the idle-lane list on main; only `merge --idle-lanes --live FILE` (merge/merge.py line 4505) produces it, and it is run by hand.

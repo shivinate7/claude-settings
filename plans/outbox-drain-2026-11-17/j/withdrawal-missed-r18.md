@@ -1,0 +1,1 @@
+- withdrawal-missed-r18: Triage 18:55 CST Nov 12: the item 671 withdrawal cited the older decision text and missed the later ruling R18 in roadmap/rulings. A ruled-store check must also compare times and supersedes, not only find the first match.

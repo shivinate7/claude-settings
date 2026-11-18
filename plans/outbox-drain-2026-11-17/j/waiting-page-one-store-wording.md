@@ -1,0 +1,1 @@
+- waiting-page-one-store-wording: Note for docs/debts/notes.md (lane page-data-one-store, coordinator 12:28 CST Nov 12): decision waiting-page-one-store line 76 "by the ruleset alone" and line 68 "His word" are unclear wording (non-blocking).

@@ -1,0 +1,1 @@
+- agent-end-read-lane: 18:37 CST Nov 13 (coordinator 18:36): lane agent-end-read-in-hook (session_013NEJL2rLAiZQJ6RWgGu6Fu, Sonnet medium) started; it recounts the 29-of-60 captures first and reports before building, then designs a read inside the hook event with no watcher or says it is too flaky. Interim end: page item 783.

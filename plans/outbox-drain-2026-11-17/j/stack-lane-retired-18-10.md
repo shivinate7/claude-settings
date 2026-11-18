@@ -1,0 +1,1 @@
+- stack-lane-retired-18-10: 18:10 CST Nov 13 (coordinator): the stack lane session_013NEJL1RHFvXyfXKmdj9BQe is retired; lane ci-speed-stack-4 (session_013NEJKzYPcwdLyfXoaZiZ7t) rebuilds the CI-speed stack. Whether it carries this step is unchecked by triage; the lane field still names the retired lane until the coordinator confirms.

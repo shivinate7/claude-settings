@@ -1,0 +1,1 @@
+- other-checkout-own-worktree-cd: (lane git-dash-c-other-checkout #2494, coordinator 01:42 CST Nov 10; possible false alarm, hit in normal work, no earlier record found) the other-checkout guard refused a `cd` into the lane's own worktree. Route: EnterWorktree with path. Becomes a debt on a second sighting.

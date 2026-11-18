@@ -1,0 +1,1 @@
+- mailbox-2890-express: 12:28 CST Nov 13 (express): #2890 goes express; batch it as soon as ready. The 20-message trial (session-messages step 5) follows both merges, then the standing roles cut over. Ruling mailbox-replaces-send-message.

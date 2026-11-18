@@ -1,0 +1,1 @@
+- merge-usage-sonnet-only: Coordinator 21:50 CST Nov 12, sighting from lane agent-worktree-add-in-tool-dir: merge.py's usage text says every record model must be sonnet, but round-1 reviewers run haiku (agents/reviewer.md) and the tool accepts 1:reviewer:haiku:FAIL. The usage line looks stale; fix it with this record.

@@ -1,0 +1,1 @@
+- spsm-mode-0755-only: (#2464) the file mode is tested only at 0755.

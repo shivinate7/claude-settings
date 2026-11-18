@@ -1,0 +1,1 @@
+- merge-route-cost-line-overstates: (lane batch-ci-merge-guard, #2513 round 3, coordinator 04:08 CST Nov 10) the #2513 decision cost line says the merge-route cost case "pins the spawn count"; it pins only one pull-list read.

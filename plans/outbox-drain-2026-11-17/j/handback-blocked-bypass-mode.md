@@ -1,0 +1,1 @@
+- handback-blocked-bypass-mode: subagent-handback-skipped 14:23 CST Nov 12: Owner 14:21 CST Nov 12 (coordinator chat): the tile-windows parent ran in bypassPermissions, "it was on bypass permissions mode tho which is stornger no". Defect: SubagentHandback is gated on auto mode exactly, so bypass (a wider mode) blocks it.

@@ -1,0 +1,1 @@
+- combined-pr-review-record-rule: 18:19 CST Nov 13 (coordinator, from lane combine-first-three): recipe text to carry: a combined PR gets its own record from one Sonnet round 1 reviewer scoped to what the combination adds; members' records stand; no fix verifier unless round 1 FAILs. A process call by the coordinator under pr-review-record line 7; no owner ruling.

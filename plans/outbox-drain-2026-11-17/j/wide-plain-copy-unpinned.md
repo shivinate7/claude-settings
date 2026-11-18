@@ -1,0 +1,1 @@
+- wide-plain-copy-unpinned (outbox labels it debt): no test pins a WIDE plain copy, so the mutant `!= "PASS"` to `== "FAIL"` at merge/merge.py 3974 survives.

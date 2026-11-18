@@ -1,0 +1,1 @@
+- r64-hold-withdrawn: Coordinator 21:00 CST Nov 12: R64 hold withdrawn. Lane started on part 1, the gap table built from git reads; per-repo fix lanes follow from its list.
