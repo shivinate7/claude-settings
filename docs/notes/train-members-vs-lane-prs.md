@@ -1,0 +1,1 @@
+- train-members-vs-lane-prs: the report numbers say "lane PRs in", the combine-train ruling and the dry tool say "members in". One term would read better. Decision: session-tiers.
