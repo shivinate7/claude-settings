@@ -500,7 +500,8 @@ ALLOWED = {
         "skills/waiting-page/reference/designs.md", "skills/waiting-page/reference/repo-pages.md",
         "skills/waiting-page/reference/republish.md", "skills/waiting-page/reference/routing-and-sessions.md",
         "tests/fixture/docs/map/core.md", "tests/fixture/docs/map/traces/home.md", "docs/records.md",
-    ], "paths that run() commits into temp git repos, the doc-group cases' rule and glossary paths included; the records-only skip "
+        "agents/builder.md", "docs/decisions/agent-model-cap.md", "skills/impeccable/SKILL.md",
+    ], "paths that run() commits into temp git repos, the doc-group cases' rule and glossary paths and the guard-inputs cases' three modified .md files included; the records-only skip "
        "fixtures name the generated page as the one file a records push changes; the file reads no tracked .md at run time"),
     "lint/test_find_copies.py": ([
         ".github/pull_request_template.md", "reference/document.md", "skills/impeccable/SKILL.md",

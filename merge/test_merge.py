@@ -1754,6 +1754,7 @@ class Guards(Env):
             merge.drop_worktree(self.co, tmp, wt)
 
 SCOPE_SCRIPT = os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")  # the real script: the one home of which jobs read which paths
+GUARD_INPUTS = os.path.join(HERE, "..", ".github", "guard-inputs.txt")  # the real list ci-scope.sh reads for windows_guard; an empty or missing list turns it on
 def scope_line(name):
     """The words of ci-scope.sh's `NAME="..."` line (JOBS, LINTS, ALL). A fixture that fakes the script's flags takes its names here, so it cannot drift from the script."""
     with open(SCOPE_SCRIPT, encoding="utf-8") as f:
@@ -1798,6 +1799,8 @@ class ScopedRepo:
         if scope:
             with open(SCOPE_SCRIPT, encoding="utf-8") as f:
                 put_lf(os.path.join(o, ".github/scripts/ci-scope.sh"), f.read())
+            with open(GUARD_INPUTS, encoding="utf-8") as f:
+                put_lf(os.path.join(o, ".github/guard-inputs.txt"), f.read())
         put(os.path.join(o, ".github/workflows", name), workflow)
         put(os.path.join(o, "landed-dirs.txt"), "hooks\n")
         put(os.path.join(o, "lint/check_slugs.py"), SLUG_LINT)
