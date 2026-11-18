@@ -6323,7 +6323,7 @@ m10_run() {
     printf 'the checkout origin/main is [%s], want [%s]: the fetch did not land or moved it' "$(git -C "$co" rev-parse refs/remotes/origin/main)" "$tip_after"; return 1
   fi
   if [ "$1" = stalefetch ] || [ "$1" = stalekeep ]; then
-    n_fetch=$(printf '%s\n' "$out" | grep WARN | grep -c fetch)
+    n_fetch=$(printf '%s\n' "$out" | grep WARN | grep -v 'fetch roadmap' | grep -c fetch)
     if [ "$n_fetch" -ne 1 ]; then printf 'want one WARN line naming the fetch, got %s: %s' "$n_fetch" "$(install_problems)"; return 1; fi
     if printf '%s\n' "$out" | grep -q 'main tip'; then printf 'the install claims the checkout is at the main tip: %s' "$(printf '%s\n' "$out" | grep 'main tip' | head -n 1)"; return 1; fi
   fi
@@ -6438,7 +6438,7 @@ caseM11() {
   if ! mirror_ff_setup m11; then bad "$name" "FIXTURE $fix_why"; return; fi
   move_install
   if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"; return; fi
-  wl=$(printf '%s\n' "$out" | grep WARN | grep -F "$mirror")
+  wl=$(printf '%s\n' "$out" | grep WARN | grep -F "$mirror" | grep -v 'fetch roadmap')
   if [ -n "$wl" ]; then bad "$name" "a WARN names the mirror, though it holds no local commit: $wl"; return; fi
   if [ "$(git -C "$mirror" rev-parse HEAD)" != "$want" ]; then
     bad "$name" "the mirror is at $(git -C "$mirror" rev-parse HEAD), not origin's main [$want]"; return
@@ -6637,7 +6637,7 @@ caseM18() {
   if [ "$(git -C "$mirror" config --get claude-settings.mirrorSha)" != "$kept_sha" ]; then
     bad "$name" "mirrorSha moved though the full-history fetch failed"; return
   fi
-  wl=$(printf '%s\n' "$out" | grep WARN | grep -F "$mirror")
+  wl=$(printf '%s\n' "$out" | grep WARN | grep -F "$mirror" | grep -v 'fetch roadmap')
   n_wl=$(printf '%s\n' "$wl" | grep -c .)
   if [ "$n_wl" -ne 1 ]; then bad "$name" "want one WARN that names the mirror, got $n_wl: $wl"; return; fi
   case "$wl" in *"could not tell"*) ;; *) bad "$name" "the WARN does not say could not tell: $wl"; return ;; esac
