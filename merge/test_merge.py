@@ -1199,6 +1199,31 @@ class ConfirmIdleLanes(Env):
         sh(o, "git", "commit", "-q", "-m", "feat: step %s done\n\nStep: %s" % (step, step))
         sh(o, "git", "push", "-q", "origin", "feat")
 
+    def main_step_commit(self, step):
+        """Push one commit to main whose message ends in `Step: <step>`: a step that landed in an earlier merge, so its trailer is on
+        main while its record may still read doing. The PR branch then takes main, as a lane does before its run."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, "landed-%s.txt" % step), "done\n")
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", "main: step %s landed\n\nStep: %s" % (step, step))
+        sh(o, "git", "push", "-q", "origin", "main")
+        head_takes_base(self)
+
+    def rebase_merge(self, n, method, sha):
+        """A fake of GitHub's rebase merge: each commit the pull adds is copied onto main, one after another, and no merge commit is
+        made. Then triage's step runs, as LandedHost.merge does after a merge commit. -> (tip, "")."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        for c in sh(o, "git", "rev-list", "--reverse", "--no-merges", f"origin/main..{sha}").split():
+            sh(o, "git", "cherry-pick", c)
+        sh(o, "git", "push", "-q", "origin", "main")
+        tip = sh(o, "git", "rev-parse", "HEAD")
+        self.after_landed(tip)
+        return tip, ""
+
     def stale_merge(self, files, sessions=(), body="", keep=None, text=None):
         """A landed merge of #7 on a live file read a minute before the merge: the owed path, where the merged step's record is the
         second source. `files` is origin's roadmap branch, `body` the pull request's body. `text`, a function of the merge commit's
@@ -1301,20 +1326,25 @@ class ConfirmIdleLanes(Env):
         rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), WORKING_LANE))
         self.assert_report_after_merge(rc, out, err)
 
-    def test_fresh_live_file_with_an_unknown_report_still_exits_0(self):
-        # The file is fresh, but its one session row carries an unarchived_epoch of -5, so the report reads unknown: one unknown
-        # line, no summary, and the report's own exit is 1. The merge landed, so the confirm exits 0 as before.
-        rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(),
+    def test_fresh_live_file_with_an_unknown_report_falls_back_and_names_the_fixing_command(self):
+        # The owner's goal (11:49 CST, Nov 18, line 2): `merge --idle-lanes` never ends in a bare "unknown" with no command that fixes
+        # it. The file is fresh, but its one session row carries an unarchived_epoch of -5, so the report reads unknown. The pass then
+        # falls back to the merged step's record: the lane gets its check line, and an owed line names `merge --idle-lanes`. The merge
+        # landed, so the confirm exits 0 as before.
+        self.step_commit("c1")
+        rc, out, err = self.confirm(files=roadmap_files(lane="session_a"),
+                                    live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(),
                                                                  dict(IDLE_LANE, unarchived_epoch=-5)))
-        self.assertEqual(len([line for line in out if line.startswith("merge: #7 merged as ")]), 1,
-                         "the merge did not land: out %r, err %r" % (out, err))
-        # Scope first: the unknown line comes from the fresh read, so no owed line prints.
-        self.assertEqual([line for line in out + err if OWED_WORD.search(line)], [],
-                         "scope: the owed path ran, not the fresh read: %r" % (out + err))
+        self.assert_landed(rc, out, err)  # the merge landed and exits 0
+        # Scope first: the fresh read ran and reads unknown, so this is the bad-shape path.
         unknown = [line for line in out + err if line.startswith("unknown (")]
-        self.assertEqual(len(unknown), 1, "the fresh read did not print one unknown line: %r" % (out + err))
+        self.assertEqual(len(unknown), 1, "scope: the fresh read did not print one unknown line: %r" % (out + err))
         self.assertFalse([line for line in out if ARCHIVE_SUMMARY.match(line)], "a summary printed for an unknown report: %r" % out)
-        self.assertEqual(rc, 0, "the report's exit 1 became the merge's exit code: rc %r, err %r" % (rc, err))
+        fixers = [line for line in out + err if OWED_WORD.search(line) and "merge --idle-lanes" in line]
+        self.assertEqual(len(fixers), 1, "a bad-shape fresh file printed no owed line that names the fixing command: %r" % (out + err))
+        checks = self.check_lines(out, err)
+        self.assertEqual(len(checks), 1, "the fallback printed %d check-this-lane lines, not one: %r" % (len(checks), out + err))
+        self.assertIn("session_a", checks[0], "the check line does not name the step's lane: %r" % checks[0])
 
     def test_stale_live_file_prints_the_owed_line(self):
         # readAt one minute before the merge commit: the file was read before the batch landed.
@@ -1522,6 +1552,53 @@ class ConfirmIdleLanes(Env):
         self.assertIn("step c1 landed; lane session_a", checks[0], "the check line does not name the merged step and its lane: %r" % checks[0])
         self.assertFalse([line for line in out if line.startswith("session_a (")], "the lane printed as a lane to archive: %r" % out)
 
+    def test_a_doing_step_whose_trailer_is_on_main_does_not_hold_its_lane(self):
+        # Step c2 is still recorded doing under lane session_a, but an earlier merge landed its Step trailer on main, so c2 is landed.
+        # The lane's only live step is then the merged one, so the lane gets its check line. The control is the case above that holds
+        # the lane: c2 with no trailer on main (test_no_check_line_while_a_step_is_still_doing_under_the_lane).
+        self.main_step_commit("c2")
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a", others=OTHER_DOING_STEP), [IDLE_LANE])
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path
+        landed = sh(self.t, "git", "--git-dir", self.bare, "log", "--format=%B", "main")
+        self.assertIn("Step: c2", landed, "scope: step c2's Step trailer is not on main: %r" % landed)
+        record = json.loads(sh(self.t, "git", "--git-dir", self.bare, "show", "roadmap:roadmap/data/steps/c2.json"))
+        self.assertEqual(record["status"], "doing", "scope: step c2's record does not read doing: %r" % record)
+        checks = self.check_lines(out, err)
+        self.assertEqual(len(checks), 1, "a doing step whose trailer is on main held its lane: %d check-this-lane lines, not one: %r"
+                         % (len(checks), out + err))
+        self.assertIn("step c1 landed; lane session_a", checks[0], "the check line does not name the merged step and its lane: %r" % checks[0])
+
+    def test_a_todo_step_under_the_lane_does_not_hold_it(self):
+        # Control: a step under the lane that is todo is not running, so it holds nothing, and the lane gets its check line.
+        others = {"c2": dict(order=2, status="todo", lane="session_a")}
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a", others=others), [IDLE_LANE])
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path
+        checks = self.check_lines(out, err)
+        self.assertEqual(len(checks), 1, "a todo step under the lane held it: %d check-this-lane lines, not one: %r" % (len(checks), out + err))
+        self.assertIn("step c1 landed; lane session_a", checks[0], "the check line does not name the merged step and its lane: %r" % checks[0])
+
+    def test_a_rebase_merge_names_the_lane_of_every_step_it_landed(self):
+        # A rebase merge copies each commit of the pull onto main, one after another, and makes no merge commit. The merge's
+        # commit^1..commit range then holds only the last copy, so the earlier copy's Step trailer is missed and its lane gets no
+        # check line. Step c0 is in lane session_c and step c1 in lane session_a: both must get a check line.
+        put_base_config(self, json.dumps({"defaultBranch": "main", "merge": {"method": "rebase"}}))
+        self.step_commit("c0")
+        self.step_commit("c1")
+        self.host.merge = self.rebase_merge
+        others = {"c0": dict(order=0, status="done", lane="session_c")}
+        rc, out, err = self.confirm(files=roadmap_files(lane="session_a", others=others),
+                                    live_at=lambda at: live_json((at - _timedelta(seconds=60)).isoformat(), IDLE_LANE))
+        self.assert_owed_path(rc, out, err)  # scope: the merge landed and the stale read took the owed path
+        parents = sh(self.t, "git", "--git-dir", self.bare, "rev-list", "--parents", "-n", "1", "main").split()
+        self.assertEqual(len(parents), 2, "scope: the tip of main has no single parent, so the fake made a merge commit: %r" % parents)
+        landed = sh(self.t, "git", "--git-dir", self.bare, "log", "--format=%B", "main")
+        self.assertIn("Step: c0", landed, "scope: step c0's trailer is not on main: %r" % landed)
+        checks = self.check_lines(out, err)
+        self.assertTrue(any("step c0 landed" in line and "lane session_c" in line for line in checks),
+                        "the rebase merge's step c0 got no check-this-lane line naming session_c: %r" % (out + err))
+        self.assertTrue(any("step c1 landed; lane session_a" in line for line in checks),
+                        "the rebase merge's step c1 got no check-this-lane line naming session_a: %r" % (out + err))
+
     def test_no_check_line_while_an_open_pull_holds_the_lanes_head(self):
         # The lane's session is complete and its step is done, but an open pull request is on its head ref lane/c1.
         self.host.pulls = {8: REST.list_item(8, "2" * 40, "lane/c1", "main", body="")}
@@ -1597,16 +1674,20 @@ class ConfirmIdleLanes(Env):
     def test_the_idle_pass_after_a_merge_makes_reads_only(self):
         # The pass starts git and no timer, each git call it makes is a read, and it makes no file in the repo or the temp dir.
         # Its window opens at its fetch of origin's roadmap branch (the last one the run makes) and closes where the run reaches
-        # prose_judge_run, which runs after the pass. Process starts are seen only through merge.git and threading.Timer.
+        # prose_judge_run, which runs after the pass. Process starts are seen through the one no-window run that merge's git and
+        # the roadmap build's git both start git with (hooks/_nowindow.run), and through threading.Timer.
         git_calls, timers, start, end = [], [], {}, {}
-        real_git, real_timer, real_judge = merge.git, threading.Timer, merge.prose_judge_run
+        real_run, real_timer, real_judge = merge._nowindow.run, threading.Timer, merge.prose_judge_run
         temp = self.temp_folder()  # tempfile.tempdir is this folder, so a temp file the pass makes lands inside the case folder
 
-        def git(cwd, *a, **k):
-            if a[:1] == ("fetch",) and any("roadmap" in x for x in a):
-                start["calls"], start["files"] = len(git_calls), self.tree_files(self.t)
-            git_calls.append(a)
-            return real_git(cwd, *a, **k)
+        def run(argv, *a, **k):
+            # sh() resolves the program to its full path, so the name is matched by its base name, not as the literal "git".
+            if isinstance(argv, (list, tuple)) and argv and os.path.splitext(os.path.basename(str(argv[0])))[0].lower() == "git":
+                args = tuple(argv[3:] if argv[1:2] == ["-C"] else argv[1:])  # ["git", "-C", repo, subcommand, ...]
+                if args[:1] == ("fetch",) and any("roadmap" in x for x in args):
+                    start["calls"], start["files"] = len(git_calls), self.tree_files(self.t)
+                git_calls.append(args)
+            return real_run(argv, *a, **k)
 
         def timer(*a, **k):
             timers.append(a)
@@ -1615,14 +1696,19 @@ class ConfirmIdleLanes(Env):
         def judge_run(plan, n):
             end["files"] = self.tree_files(self.t)
             return real_judge(plan, n)
-        with unittest.mock.patch.object(merge, "git", git), unittest.mock.patch.object(merge, "prose_judge_run", judge_run), \
+        with unittest.mock.patch.object(merge._nowindow, "run", run), unittest.mock.patch.object(merge, "prose_judge_run", judge_run), \
                 unittest.mock.patch.object(threading, "Timer", timer), unittest.mock.patch.object(tempfile, "tempdir", temp):
             rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE))
         self.assertTrue("calls" in start and "files" in end,
                         "scope: the run never reached the pass's roadmap fetch and its end (%d git calls, none a roadmap fetch)" % len(git_calls))
         self.assert_report_after_merge(rc, out, err)  # scope: the fresh read ran the pass
         window = git_calls[start["calls"]:]
-        self.assertEqual([a[0] for a in window if a[0] not in READ_ONLY_GIT], [], "the pass after the merge wrote to git: %r" % window)
+
+        def is_read(a):
+            if a[0] == "symbolic-ref":  # a read names one ref and sets none: one argument after its options
+                return len([x for x in a[1:] if not x.startswith("-")]) == 1
+            return a[0] in READ_ONLY_GIT
+        self.assertEqual([a for a in window if not is_read(a)], [], "the pass after the merge wrote to git: %r" % window)
         created = sorted(end["files"] - start["files"])
         self.assertEqual(created, [], "the pass after the merge created files: %r" % created)
         self.assertEqual(timers, [], "the run started a timer: %r" % timers)
