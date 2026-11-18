@@ -1,0 +1,75 @@
+{
+  "added": "2026-11-18T13:29:14-06:00",
+  "context": "Goal: the two finished draft pull requests, 3658 (rebuilds the fix-check step) and 3667 (sweeps idle sessions after each merge), reach main.\nProblem (rule): the coordinator's ready mark on both is refused because the hook's merge tool is older than main, and the fix (a reinstall in the main clone) is barred to the coordinator, so only your typed override can lift it.\nBased on (read): the refusal text relayed by the coordinator at 13:27 CST Nov 18; both PRs have posted review records and 3667 passed the full merge test suite (1990 OK).\nDeparts from: main \u2014 the ready mark on a branch needs the hook to read the branch's ancestry \u2014 your typed override lets the mark go through for the PRs it names.\nWaiting on: the merge of both PRs, which also holds the idle-session sweep and the fix-check rebuild; you type the override in the coordinator's chat, then the coordinator marks both ready.",
+  "holds": "The merge of the two finished draft PRs, 3658 and 3667, waits on a typed override.",
+  "home": "step archive-sweep-runs-per-merge",
+  "id": "records-page-ready-override",
+  "kind": "decision",
+  "n": 972,
+  "options": [
+    {
+      "gain": "One typed line covers both PRs and any retry within the 15 minutes.",
+      "how": "Type `override 15m` in the coordinator's chat. Every act the guard refuses is allowed for 15 minutes, so the coordinator marks both PRs ready and retries.",
+      "id": "override-15m",
+      "key": "a",
+      "label": "Type `override 15m` in the coordinator's chat",
+      "links": [
+        {
+          "label": "Coordinator's chat",
+          "url": "https://claude.ai/code/session_013NEJL1gw6EdrSyvHkTUEx6"
+        },
+        {
+          "label": "PR 3658",
+          "url": "https://github.com/shivinate7/claude-settings/pull/3658"
+        },
+        {
+          "label": "PR 3667",
+          "url": "https://github.com/shivinate7/claude-settings/pull/3667"
+        }
+      ],
+      "lose": "For 15 minutes the coordinator may do any act the guards would refuse, not only the two ready marks."
+    },
+    {
+      "gain": "Only the two named acts are allowed, and nothing else.",
+      "how": "Type `override` in the coordinator's chat once for each PR, at the moment the coordinator tries its ready mark.",
+      "id": "override-once",
+      "key": "b",
+      "label": "Type `override` once for each of the two PRs (recommended)",
+      "links": [
+        {
+          "label": "Coordinator's chat",
+          "url": "https://claude.ai/code/session_013NEJL1gw6EdrSyvHkTUEx6"
+        },
+        {
+          "label": "PR 3658",
+          "url": "https://github.com/shivinate7/claude-settings/pull/3658"
+        },
+        {
+          "label": "PR 3667",
+          "url": "https://github.com/shivinate7/claude-settings/pull/3667"
+        }
+      ],
+      "lose": "Two typed lines instead of one."
+    }
+  ],
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "b",
+  "ref": "coordinator relay 13:27 CST Nov 18: ready mark refused on the two PRs",
+  "repo": "shivinate7/claude-settings",
+  "short": "Override the ready-mark refusal?",
+  "shown": [
+    {
+      "id": "override-15m",
+      "key": "a",
+      "label": "Type `override 15m` in the coordinator's chat"
+    },
+    {
+      "id": "override-once",
+      "key": "b",
+      "label": "Type `override` once for each of the two PRs (recommended)"
+    }
+  ],
+  "status": "open",
+  "title": "Will you type an override so the coordinator can mark the two finished PRs ready?",
+  "why": "b allows only the two named acts; a is one line but opens every refused act for 15 minutes. The real fix, running the reinstall in the main clone, is not open to the coordinator or to me. Recommended by triage, not owner-typed."
+}
