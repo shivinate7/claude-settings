@@ -1,0 +1,1 @@
+- merge-copy-step7-unknown: step 7 does not say what to do when `stale_pages.py --write` prints unknown, or when the out folder has no designData.json because the copy holds no designs.

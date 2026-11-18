@@ -1,0 +1,1 @@
+- llrcc-lint-check-hides-cause: (#2382) lint_check reports `no lane-lint PASS names this head` when the branch fetch or the claim_only read failed; the cause is hidden.

@@ -1,0 +1,1 @@
+- dismissed-field-asks-unjudged: The question_form guard judges `dismissed` only on `items`; a session update naming `dismissed` on an `asks` doc is not refused, though SKILL.md says no session writes it; main is the same (#2559 round 2).

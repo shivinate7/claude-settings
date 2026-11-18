@@ -1,0 +1,1 @@
+- mail-utf8-proof-linux-only: (#2519) the UTF-8 proof covers Linux with PYTHONIOENCODING only.

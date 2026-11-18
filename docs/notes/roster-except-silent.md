@@ -1,0 +1,1 @@
+- roster-except-silent: What: a blanket except returns None with no stderr line, so a missing layout.py turns the rule off silently. Where: hooks/guard_merge.py:2619 (unverified). Retire: the except writes a stderr line, or a test fails when layout.py is missing. Decision: brief-ids-in-roster.

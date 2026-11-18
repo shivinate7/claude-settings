@@ -1,0 +1,1 @@
+- lane-lint-guessed-pr: Read-only, no harm: lane ci-merge-install-cap ran `merge --lane-lint 2652` on a guessed PR number before its own PR (#2653) existed. Guard idea: lane lint refuses a PR whose head branch is not the caller's branch.

@@ -1,0 +1,1 @@
+- llrcc-claim-only-rules-untested: (#2382) merge/test_lane_lint.py does not test claim_only's single-parent rule, its direct-child-of-a-kind-folder rule, or the marker-is-first-line rule (merge.py:938); mutants survive. Low harm: needs a deliberate forge. No test of `--head` against a real Host; dead `GET user` shim route in merge/test_merge.py.

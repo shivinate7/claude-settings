@@ -1,0 +1,1 @@
+- page-dejavu-ask-overlap: on main, with the DejaVu fallback font at 338-347 px wide, "Add to list" overlaps "Send ask". Note, not debt: only a fallback font at a 10 px band.

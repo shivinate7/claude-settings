@@ -91,7 +91,7 @@
 # not match the sha pattern, so it runs the local copy. A SIGKILL from merge's timeout skips the cleanup and leaves the
 # export in TMPDIR: one export per run, about 24 MB at worst.
 # --plan prints each step's verdict-to-be and runs nothing. Output of each run: $VERDICT_LOG, else one new
-# temp log per call, named on the last line. Exit: 1 if a step fails, else 2 if one is unknown, else 0.
+# temp log per call, named on the last line. A run that makes its own log first removes ci-job-*.log files over 1 day old from the temp folder (one scandir). Exit: 1 if a step fails, else 2 if one is unknown, else 0.
 # CI checks out with fetch-depth: 0. When the job's checkout step says so and the clone is shallow, ci-job first
 # runs `git fetch --unshallow` once (--plan only says so); a failed fetch is one unknown line. Cost: one git fetch,
 # only when shallow.
@@ -115,7 +115,7 @@
 # (a SIGKILL from merge's timeout reaches only ci-job: it leaves the folder in TMPDIR and may leave verdict children running). Each `not run` line,
 # the summary and each CI step's `start: <name>` line on stderr (before it runs, so a caller sees which CI step is running)
 # are one print.
-import concurrent.futures, os, re, shutil, subprocess, sys, tarfile, tempfile, threading
+import concurrent.futures, os, re, shutil, subprocess, sys, tarfile, tempfile, threading, time
 BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
@@ -746,6 +746,25 @@ def preamble_marked(body, shell):
     return "\n".join(lines[:first] + [PREAMBLE_DONE] + lines[first:]) + "\n"
 
 
+LOG_KEEP = 86400  # a run with no $VERDICT_LOG removes the ci-job-*.log files in the temp folder that are over a day old
+
+
+def prune_own_logs(folder, now=None):
+    """Remove each regular ci-job-*.log in FOLDER whose mtime is over a day old. Errors are skipped; a fresh log (a parallel run's) stays."""
+    now = time.time() if now is None else now
+    try:
+        with os.scandir(folder) as it:
+            for e in it:
+                try:
+                    if (e.name.startswith("ci-job-") and e.name.endswith(".log") and e.is_file(follow_symlinks=False)
+                            and now - e.stat(follow_symlinks=False).st_mtime > LOG_KEEP):
+                        os.remove(e.path)
+                except OSError:
+                    pass
+    except OSError:
+        pass
+
+
 def main(argv):
     args = list(argv)
     opts = {"--workflow": None, "--base": None}
@@ -821,6 +840,7 @@ def main(argv):
               "github.token": ""}  # no runner token here (RUNNER_UNSET): a step that maps it into GH_TOKEN reads gh's own login
     log = os.environ.get("VERDICT_LOG")
     if not log and not dry:
+        prune_own_logs(tempfile.gettempdir())
         fd, log = tempfile.mkstemp(prefix="ci-job-%s-" % re.sub(r"[^\w-]", "_", job), suffix=".log")
         os.close(fd)
     tally = {"FAIL": 0, "unknown": int(no_base)}

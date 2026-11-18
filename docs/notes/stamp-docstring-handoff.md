@@ -1,0 +1,1 @@
+- stamp-docstring-handoff: (#2480) the guard.py docstring row says the handoff is no evidence; the code excludes only a Read of it.

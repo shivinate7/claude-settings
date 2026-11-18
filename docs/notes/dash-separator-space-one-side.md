@@ -1,0 +1,1 @@
+- dash-separator-space-one-side: the dash separator regex needs a space only before the dash, not on both sides.

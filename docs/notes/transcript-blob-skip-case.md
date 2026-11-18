@@ -1,0 +1,1 @@
+- transcript-blob-skip-case: (#2561 round 1) lint/_transcript.py's tool_results blob skip has no named case; ruling_census iter_ask_answers could count a blob copy twice.
