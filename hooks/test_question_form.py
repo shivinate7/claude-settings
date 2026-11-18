@@ -2049,6 +2049,134 @@ def case_past_rulings_skips_the_debt_notes_file():
           notes_mark not in text, text[:200])
 
 
+# ------------------------------------------------------------------ past rulings: owner sentences past the index cap
+#
+# A decision's `## The ruling` section is cut to question_form.INDEX_CAP characters in the judge's index, so an owner
+# ruling sentence past the cap never reaches the judge. A record may add owner-ruling sentences past the cap, but never
+# more than RULING_EXTRA_CAP characters of them, so the prompt does not grow for every record. Each case makes its own
+# fixture decision in a fixture repo; the pointer is patched to that repo, so no real checkout is read. A case's
+# candidate lines are the ones that start with its record id (`decisions/<slug>: `).
+RULING_EXTRA_CAP = 1200  # the most text one record may add past INDEX_CAP (the bound the test owns)
+PAST_CAP_SLUG = "round-one-reviewers-haiku"
+PAST_CAP_QUESTION = "round 1 first review stronger model guard or check change"
+RULING_SENTENCE = "Round 1 reviewers run Haiku at xhigh on every change (owner ruling, 2026-11-17 19:45 CST)."
+OWNER_SENTENCES = ["Owner ruling %02d: keep item %02d as it is." % (i, i) for i in range(60)]
+
+
+def _filler(n_chars):
+    """Plain sentences with no RULING_WORDS word (ruling, owner, shiv), at least n_chars long."""
+    sentences, size = [], 0
+    while size < n_chars:
+        sentence = "Background sentence %03d: the review stack and its model pins stay as they are." % len(sentences)
+        sentences.append(sentence)
+        size += len(sentence) + 1
+    return " ".join(sentences)
+
+
+def _record_lines(candidates, record_id):
+    """The candidate lines of one record, `<record id>: <text>`, in the order past_rulings gave them."""
+    prefix = record_id + ": "
+    return [str(c) for c in candidates if str(c).startswith(prefix)]
+
+
+def _record_text(candidates, record_id):
+    """The record's text: its candidate lines after the id, joined. The most a record adds is what this bounds."""
+    prefix = record_id + ": "
+    return " ".join(line[len(prefix):] for line in _record_lines(candidates, record_id))
+
+
+def _past_cap_candidates(name, section, fn):
+    """(record id, candidates) for one decision whose `## The ruling` section is `section`, from past_rulings."""
+    repo = tcj.make_repo(name, decisions={PAST_CAP_SLUG: section})
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
+        candidates, _unknown = fn(PAST_CAP_QUESTION, repo)
+    return "decisions/" + PAST_CAP_SLUG, candidates
+
+
+def case_past_ruling_owner_sentence_past_the_cap_reaches_the_line():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("past rulings past cap: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    section = _filler(1000) + " " + RULING_SENTENCE + " " + _filler(300)
+    offset = section.index(RULING_SENTENCE)
+    check("past rulings past cap: the fixture puts the owner sentence past INDEX_CAP and past character 1000",
+          offset > question_form.INDEX_CAP and offset >= 1000, "offset %d" % offset)
+    record_id, candidates = _past_cap_candidates("past-owner-past-cap", section, fn)
+    lines = _record_lines(candidates, record_id)
+    check("past rulings past cap: the decision record is a candidate (scope)", bool(lines), str(candidates)[:200])
+    if not lines:
+        return
+    check("past rulings past cap: a candidate line for the record carries Haiku at xhigh and 2026-11-17 19:45",
+          any("Haiku at xhigh" in line and "2026-11-17 19:45" in line for line in lines),
+          "line ends: ..." + lines[0][-160:])
+
+
+def case_past_ruling_owner_sentence_inside_the_cap_reaches_the_line():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("past rulings inside cap: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    section = RULING_SENTENCE + " " + _filler(1500)
+    check("past rulings inside cap: the fixture puts the owner sentence inside INDEX_CAP",
+          section.index(RULING_SENTENCE) + len(RULING_SENTENCE) <= question_form.INDEX_CAP,
+          "sentence ends at %d" % (section.index(RULING_SENTENCE) + len(RULING_SENTENCE)))
+    record_id, candidates = _past_cap_candidates("past-owner-inside-cap", section, fn)
+    lines = _record_lines(candidates, record_id)
+    check("past rulings inside cap: the decision record is a candidate (scope)", bool(lines), str(candidates)[:200])
+    if not lines:
+        return
+    check("past rulings inside cap: the owner sentence inside INDEX_CAP still reaches the record's line",
+          any("Haiku at xhigh" in line and "2026-11-17 19:45" in line for line in lines), lines[0][:200])
+
+
+def case_past_ruling_section_without_owner_sentence_is_cut_at_the_cap():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("past rulings cut: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    head, tail = "HEADMARK-5a1e opens the record.", "TAILMARK-9c2d closes it."
+    section = head + " " + _filler(2400) + " " + tail
+    record_id, candidates = _past_cap_candidates("past-owner-none", section, fn)
+    lines = _record_lines(candidates, record_id)
+    check("past rulings cut: the decision record is a candidate (scope)", bool(lines), str(candidates)[:200])
+    if not lines:
+        return
+    text = _record_text(candidates, record_id)
+    check("past rulings cut: the text inside INDEX_CAP still reaches the record's line", "HEADMARK-5a1e" in text,
+          text[:200])
+    check("past rulings cut: a section with no owner sentence is cut, so its tail past the cap is absent",
+          "TAILMARK-9c2d" not in text, text[-200:])
+    check("past rulings cut: the record adds no more than INDEX_CAP plus RULING_EXTRA_CAP characters",
+          len(text) <= question_form.INDEX_CAP + RULING_EXTRA_CAP, "%d characters" % len(text))
+
+
+def case_past_ruling_owner_sentences_added_text_is_capped():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("past rulings capped: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    section = _filler(900) + " " + " ".join(OWNER_SENTENCES)
+    check("past rulings capped: the fixture puts the first owner sentence past INDEX_CAP",
+          section.index(OWNER_SENTENCES[0]) > question_form.INDEX_CAP,
+          "offset %d" % section.index(OWNER_SENTENCES[0]))
+    record_id, candidates = _past_cap_candidates("past-owner-bounded", section, fn)
+    lines = _record_lines(candidates, record_id)
+    check("past rulings capped: the decision record is a candidate (scope)", bool(lines), str(candidates)[:200])
+    if not lines:
+        return
+    text = _record_text(candidates, record_id)
+    check("past rulings capped: the first owner sentence past INDEX_CAP reaches the record's line",
+          OWNER_SENTENCES[0] in text, text[-200:])
+    check("past rulings capped: 60 owner sentences sit past the cap, and the record adds no more than "
+          "INDEX_CAP plus RULING_EXTRA_CAP characters", len(text) <= question_form.INDEX_CAP + RULING_EXTRA_CAP,
+          "%d characters" % len(text))
+
+
 # The owner's rulings not yet on main (the ruled store) sit on origin/roadmap. past_rulings puts each open entry first,
 # ahead of the decision records, and names what it supersedes. The pointer is patched to the fixture repo, so the cases
 # pass whichever checkout past_rulings reads the store from.
@@ -3654,6 +3782,10 @@ def main():
                  case_past_rulings_caps_and_ranks, case_past_rulings_reads_debts, case_key_overlap,
                  case_key_overlap_resend_and_fact_lists, case_key_overlap_similar_questions_clash,
                  case_past_rulings_skips_the_debt_notes_file,
+                 case_past_ruling_owner_sentence_past_the_cap_reaches_the_line,
+                 case_past_ruling_owner_sentence_inside_the_cap_reaches_the_line,
+                 case_past_ruling_section_without_owner_sentence_is_cut_at_the_cap,
+                 case_past_ruling_owner_sentences_added_text_is_capped,
                  case_ruled_store_first_and_carries_supersedes, case_ruled_store_absent_is_only_unknown,
                  case_ruled_store_words_filter_leaves_out_an_unrelated_entry,
                  case_ruled_store_caps_matching_entries_at_eight_newest_first,
