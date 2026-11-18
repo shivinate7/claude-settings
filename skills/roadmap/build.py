@@ -998,7 +998,7 @@ def live_ledger(path, work):
     time) and `ledgerWhy` (None, or why every act reads unknown: said once, for the list head, never on a row). A pull with no ledger
     row reads act `act unknown`, owner None. A draft whose ledger act is `lane round 1` is the parked mark: with the sessions list read,
     no live lane holding its branch (live_lane_holds) reads act `no live lane`, owner `coordinator`, never red; with the sessions list
-    unread it reads act `lane unknown`, owner `unknown`. A ledger row with the wrong shape is added to `skipped`. A live file that gave
+    unread, or a session row was skipped, it reads act `lane unknown`, owner `unknown`. A ledger row with the wrong shape is added to `skipped`. A live file that gave
     no pulls list (work has no `pulls`) is left alone. The ledger comes from `merge --reviewed --json`; this reads the live file again
     and nothing else: no GitHub read, no process."""
     if "pulls" not in work:
@@ -1017,7 +1017,8 @@ def live_ledger(path, work):
             continue
         pull.update(act=row["act"], owner=row["owner"], ageHours=row["ageHours"], red=row["red"])
         if pull.get("draft") is True and row["act"] == "lane round 1":
-            if work.get("laneSessions") is None:  # glossary-ok: the key live_work returns, the name its readers use
+            # A skipped session row may be the lane that holds this draft, and its tags were never read: the hold is unknown, not absent.
+            if work.get("laneSessions") is None or any(x.startswith("session ") for x in work["skipped"]):  # glossary-ok: the key live_work returns, the name its readers use
                 pull.update(act=LEDGER_LANE_UNKNOWN, owner="unknown")
             elif not live_lane_holds(work, pull.get("branch")):
                 pull.update(act=LEDGER_NO_LIVE_LANE, owner="coordinator", red=False)
