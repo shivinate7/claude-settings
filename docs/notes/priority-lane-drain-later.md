@@ -1,1 +1,1 @@
-- priority-lane-drain-later: 15:38 CST Nov 13 (owner 15:37 via retro, relayed by the coordinator 15:38): #3211 and #2890 leave the priority lane; they drain later. Gap measured by runner 10: no tool route or written recipe for a combined PR; step combined-pr-recipe.
+- priority-lane-drain-later: 15:38 CST Nov 13 (owner 15:37 through retro, relayed by the coordinator 15:38): #3211 and #2890 leave the priority lane; they drain later. Gap measured by runner 10: no tool route or written recipe for a combined PR; step combined-pr-recipe.

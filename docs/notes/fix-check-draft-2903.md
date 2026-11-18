@@ -1,1 +1,0 @@
-- fix-check-draft-2903: review-fix-check-round 13:58 CST Nov 12: Lane 13:56 CST Nov 12: built only --fix-check needs --round, draft #2903 (head d22a4bd0d, merge suite 1603 OK, round 1 FAIL fixed, fix verifier running); the rest is in #2326 and rounds-rules-one-record. Owner item 625: does a FAIL in a granted round 4 hold the change?

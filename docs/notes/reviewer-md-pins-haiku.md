@@ -1,1 +1,1 @@
-- reviewer-md-pins-haiku: reviewer-model-hook-latest 16:13 CST Nov 12: lane fan-prose-unmapped-5 via coordinator 16:13 CST Nov 12: agents/reviewer.md pins haiku, but fix checks need sonnet (rule roles-third-round-steps-up: reviewers run Sonnet from round 2).
+- reviewer-md-pins-haiku: reviewer-model-hook-latest 16:13 CST Nov 12: lane fan-prose-unmapped-5 through coordinator 16:13 CST Nov 12: agents/reviewer.md pins haiku, but fix checks need sonnet (rule roles-third-round-steps-up: reviewers run Sonnet from round 2).
