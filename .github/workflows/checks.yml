@@ -322,6 +322,10 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_rules == 'true' || needs.scope.outputs.doc_other == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_prove_route_judge.py
 
+      - name: Guard cases from base fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
+        run: python3 lint/test_check_guard_cases_from_base.py
+
       - name: Guard log report fixture suite
         if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_guard_log_report.py
