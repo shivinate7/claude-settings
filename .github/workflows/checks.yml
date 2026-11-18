@@ -783,6 +783,9 @@ jobs:
       - name: CI-wait cap fixture suite
         run: python3 hooks/test_ci_wait_cap.py
 
+      - name: Answered-claim fixture suite
+        run: python3 hooks/test_answered_claims.py
+
       - name: Handoff wave-2 fixture suite
         run: python3 hooks/test_handoff_wave2.py
 
