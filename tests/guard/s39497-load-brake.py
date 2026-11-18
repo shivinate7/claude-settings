@@ -11,7 +11,7 @@ FAMILY = "load-brake"
 #         to make this an Agent call that leaves run_in_background out or sets it false. A disk reading
 #         names free disk space instead.
 #   full  memory over 95%, or disk free under the smaller of 5% of the disk and 5 GB. Every lane call is refused,
-#         an Agent or Task call too.
+#         an Agent or Task call too. In a cloud session only a full disk refuses a start (CLOUD, below).
 # The refusal names the reading that tripped it, and never names the CPU. A read that fails, or a reading left
 # unread, counts as normal. An agent's own shell or file write reads once and is refused at full only
 # (A RUNNING LANE, below). Every other tool reads no load. The read starts no child process, writes no file,
@@ -846,20 +846,54 @@ lb_add("an agent's session tool that writes nothing reads no load under the wors
 lb_add("a Bash call whose agent_id is malformed reads no load under the worst reading",
        lb_no_read_check("Bash", {"command": "echo hi"}, agent="not an id!"))
 
-# CLOUD. decision session-tiers: the load brake is local-only. With CLAUDE_CODE_REMOTE=true a start call is
-# allowed at busy and full. These run end to end, so an allowed call's file writes are checked too (nothing reaches
-# guard.log). The section below already holds an Agent with run_in_background true, a Workflow and the writes at full,
-# so those are not repeated here.
+# CLOUD. Decision machine-load-brake, "Cloud sessions" (owner ruling 2026-11-18 14:45 CST). With CLAUDE_CODE_REMOTE=true
+# a new Agent, Task or Workflow start is refused at a full disk: free under the full point, read from guard.py at each
+# case, never copied here. Memory and busy never brake a cloud start. A running agent or lane session is never stopped,
+# and reads no load. The allowed calls run end to end, so their file writes are checked too (nothing reaches guard.log).
 LB_CLOUD = "true"
-CLOUD_VALUES = ((None, False), ("true", True), ("TRUE", False), ("True", False), ("1", False), ("", False),
+LB_SWEEP = re.compile(r"sweep\.py")   # the sweep command a refusal names (the-janitor-is-one-machine-wide-sweep)
+LB_WAIT = re.compile(r"wait", re.I)   # and it never tells the session to wait
+LB_CLOUD_STARTS = (("Agent", True, "run_in_background true"), ("Agent", None, "run_in_background left out"),
+                   ("Agent", False, "run_in_background false"), ("Task", True, "run_in_background true"),
+                   ("Task", None, "run_in_background left out"), ("Task", False, "run_in_background false"),
+                   ("Workflow", None, "no run_in_background field"))
+
+
+def lb_full_point(total):
+    """The full point of a disk of `total` GB, in GB: the smaller of LOAD_FULL_DISK_SHARE percent of it and
+    LOAD_FULL_DISK_GB. Read from guard.py at each call, so a changed constant moves every case with it."""
+    guard = _load_guard_module()
+    return min(total * guard.LOAD_FULL_DISK_SHARE / 100.0, guard.LOAD_FULL_DISK_GB)
+
+
+def lb_cloud_disk_check(tool, free, total, want, side, tool_input=None, background=None, memory=None, fake=False,
+                        reads=1, names=(), lacks=(), agent=None):
+    """A cloud call on a disk of `total` GB with `free` GB free. `side` is "under" or "above": where the free space
+    must sit against the full point. That is checked first, so a case whose numbers drift past the point fails on its
+    scope, not on the verdict. `memory` None leaves memory unread. `fake` runs the real reader on a linux host."""
+    def check():
+        point = lb_full_point(total)
+        where = "under" if free < point else "above"
+        if where != side:
+            return False, "scope: %.2f GB free of %.0f GB is %s the full point %.2f GB, the case wants %s" % (
+                free, total, where, point, side)
+        spec_fake = lb_fake("linux", disk_total=total, disk_free=free) if fake else None
+        reading = None if fake else dict(LB_NORMAL, memory_pct=memory, disk_free_gb=free, disk_total_gb=total)
+        return lb_decision_check(tool, reading, want, names=names, background=background, tool_input=tool_input,
+                                 reads=reads, lacks=lacks, fake=spec_fake, agent=agent, remote=LB_CLOUD)()
+    return check
+
+
+CLOUD_VALUES =((None, False), ("true", True), ("TRUE", False), ("True", False), ("1", False), ("", False),
                 ("false", False), (" true", False))
 for _tool, _bg, _say in (("Agent", False, "run_in_background false"),
                          ("Agent", None, "run_in_background left out"),
                          ("Task", True, "run_in_background true"),
                          ("Task", False, "run_in_background false"),
                          ("Task", None, "run_in_background left out")):
-    lb_add("cloud: %s, memory 99%%, disk 1.0 GB free of 926 GB, %s: allowed, nothing written" % (_tool, _say),
-           lb_decision_check(_tool, LB_ALL_HIGH, "allow", background=_bg, reads=None, remote=LB_CLOUD))
+    lb_add("cloud: %s, memory 99%%, disk 500 GB free of 926 GB, %s: allowed, nothing written" % (_tool, _say),
+           lb_decision_check(_tool, lb_reading(memory_pct=99.0), "allow", background=_bg, reads=None,
+                             remote=LB_CLOUD))
 lb_add("cloud: start_session, memory 99%, disk 1.0 GB free of 926 GB: allowed, nothing written",
        lb_decision_check("mcp__ccd_session__start_session", LB_ALL_HIGH, "allow", reads=None, remote=LB_CLOUD))
 for _tool in ("Agent", "Task"):
@@ -875,9 +909,33 @@ lb_add("cloud: an agent's Agent call, memory 97.2%: allowed",
 lb_add("cloud: Agent, darwin host at memory 97.2%, run_in_background false, the real reader: allowed",
        lb_decision_check("Agent", None, "allow", background=False, fake=lb_fake("darwin", memory=97.2), reads=None,
                          remote=LB_CLOUD))
-lb_add("cloud: Agent, linux disk 3.1 GB free of 926 GB, run_in_background true, the real reader: allowed",
-       lb_decision_check("Agent", None, "allow", background=True, fake=lb_fake("linux", disk_free=3.1), reads=None,
-                         remote=LB_CLOUD))
+# A cloud start at a full disk is refused. Memory is unread here, as on the cloud's linux host, so the disk alone trips
+# it. The refusal names the disk reading and the sweep command, and never tells the session to wait.
+for _tool, _bg, _say in LB_CLOUD_STARTS:
+    lb_add("cloud: %s, %s, memory unread, disk 4.0 GB free of 252 GB (under the full point): refused, names the disk "
+           "and sweep.py, never says wait" % (_tool, _say),
+           lb_cloud_disk_check(_tool, 4.0, 252.0, "deny", "under", background=_bg,
+                               names=(lb_gb(4.0, 252.0), LB_SWEEP), lacks=(LB_WAIT,)))
+lb_add("cloud: Agent, run_in_background left out, memory unread, disk 2.0 GB free of 60 GB (under the share point): "
+       "refused, names the disk and sweep.py, never says wait",
+       lb_cloud_disk_check("Agent", 2.0, 60.0, "deny", "under", names=(lb_gb(2.0, 60.0), LB_SWEEP),
+                           lacks=(LB_WAIT,)))
+lb_add("cloud: Agent, linux disk 3.1 GB free of 926 GB, run_in_background true, the real reader: refused, names the "
+       "disk and sweep.py, never says wait",
+       lb_cloud_disk_check("Agent", 3.1, 926.0, "deny", "under", background=True, fake=True,
+                           names=(lb_gb(3.1, 926.0), LB_SWEEP), lacks=(LB_WAIT,)))
+# Above the full point a cloud start passes, whatever the memory reading and at busy. These do not pin the read.
+for _tool, _bg, _say in LB_CLOUD_STARTS:
+    lb_add("cloud: %s, %s, memory unread, disk 6.0 GB free of 252 GB (above the full point): allowed" % (_tool, _say),
+           lb_cloud_disk_check(_tool, 6.0, 252.0, "allow", "above", background=_bg, reads=None))
+lb_add("cloud: Agent, run_in_background true, memory unread, disk 10.0 GB free of 252 GB (busy, above the full point): "
+       "allowed", lb_cloud_disk_check("Agent", 10.0, 252.0, "allow", "above", background=True, reads=None))
+lb_add("cloud: Workflow, memory unread, disk 10.0 GB free of 252 GB (busy, above the full point): allowed",
+       lb_cloud_disk_check("Workflow", 10.0, 252.0, "allow", "above", reads=None))
+lb_add("cloud: Agent, memory unread, disk 500 GB free of 926 GB: allowed",
+       lb_cloud_disk_check("Agent", 500.0, 926.0, "allow", "above", reads=None))
+lb_add("cloud: Agent, memory unread, disk 3.5 GB free of 60 GB (above the share point of a small disk): allowed",
+       lb_cloud_disk_check("Agent", 3.5, 60.0, "allow", "above", reads=None))
 # Only the exact value "true" is cloud: the other values keep the local brake, so the refusal still stands.
 for _remote in ("1", "TRUE", ""):
     lb_add("CLAUDE_CODE_REMOTE=%r is local: Agent, memory 97.2%%, run_in_background false: full, refused" % _remote,
@@ -924,10 +982,10 @@ lb_add('cloud check: guard_core.is_cloud exists and is True only for exactly "tr
 lb_add("cloud check: guard.py's brake guard holds guard_core.is_cloud, one home", cloud_one_home_check)
 
 
-# A CLOUD SESSION. The brake is specific to local sessions: with CLAUDE_CODE_REMOTE "true" it skips every lane
-# start and every running-lane call, and reads no load, so the reader is never called. Only the exact value
-# "true" is a cloud session. Unset and "false" are local and keep the brake. Every label names CLAUDE_CODE_REMOTE,
-# so MUTATE_ONLY=CLAUDE_CODE_REMOTE runs this section alone.
+# A CLOUD SESSION. With CLAUDE_CODE_REMOTE "true", a start call is refused at a full disk and reads the disk once, and a
+# running agent or lane call skips the brake and reads no load. Only the exact value "true" is a cloud session. Unset
+# and "false" are local and keep the brake. Every label names CLAUDE_CODE_REMOTE, so MUTATE_ONLY=CLAUDE_CODE_REMOTE runs
+# this section alone.
 LB_FULL_READING = lb_reading(memory_pct=97.2)   # a full machine: memory over 95%
 
 
@@ -963,20 +1021,25 @@ def lb_hit_check(which, tool, reading, tool_input, remote=None, deny=None, reads
     return check
 
 
-# Cloud: the direct pairs are empty and the reader never runs.
+# Cloud: a start call reads the disk once, and its pair is empty at a disk that is not full. A running agent's call
+# reads nothing.
 lb_add("CLAUDE_CODE_REMOTE=true, Agent run_in_background true, memory 97.2%: load_hit returns the empty pair, "
-       "the reader never runs",
-       lb_hit_check("load_hit", "Agent", LB_FULL_READING, lb_lane_input("Agent", True), remote="true", reads=0))
-lb_add("CLAUDE_CODE_REMOTE=true, Workflow, memory 97.2%: load_hit returns the empty pair, the reader never runs",
-       lb_hit_check("load_hit", "Workflow", LB_FULL_READING, lb_lane_input("Workflow"), remote="true", reads=0))
+       "the reader runs once",
+       lb_hit_check("load_hit", "Agent", LB_FULL_READING, lb_lane_input("Agent", True), remote="true", reads=1))
+lb_add("CLAUDE_CODE_REMOTE=true, Workflow, memory 97.2%: load_hit returns the empty pair, the reader runs once",
+       lb_hit_check("load_hit", "Workflow", LB_FULL_READING, lb_lane_input("Workflow"), remote="true", reads=1))
 lb_add("CLAUDE_CODE_REMOTE=true, an agent's Bash, memory 97.2%: running_agent_hit returns the empty pair, "
        "the reader never runs",
        lb_hit_check("running_agent_hit", "Bash", LB_FULL_READING, {"command": "echo hi"}, remote="true", reads=0,
                     agent=LB_AGENT))
-lb_add("CLAUDE_CODE_REMOTE=true, Agent run_in_background true, full reading: allowed, the reader never runs",
-       lb_no_read_check("Agent", lb_lane_input("Agent", True), remote="true"))
-lb_add("CLAUDE_CODE_REMOTE=true, Workflow, full reading: allowed, the reader never runs",
-       lb_no_read_check("Workflow", lb_lane_input("Workflow"), remote="true"))
+lb_add("CLAUDE_CODE_REMOTE=true, Agent run_in_background true, disk 1.0 GB free of 926 GB, memory 99%: refused, "
+       "names the disk and sweep.py, the reader runs once",
+       lb_decision_check("Agent", LB_ALL_HIGH, "deny", names=(lb_gb(1.0, 926.0), LB_SWEEP), lacks=(LB_WAIT,),
+                         tool_input=lb_lane_input("Agent", True), remote="true"))
+lb_add("CLAUDE_CODE_REMOTE=true, Workflow, disk 1.0 GB free of 926 GB, memory 99%: refused, names the disk and "
+       "sweep.py, the reader runs once",
+       lb_decision_check("Workflow", LB_ALL_HIGH, "deny", names=(lb_gb(1.0, 926.0), LB_SWEEP), lacks=(LB_WAIT,),
+                         remote="true"))
 for _tool, _given in LB_WRITES:   # the agent's Bash is the first of these
     lb_add("CLAUDE_CODE_REMOTE=true, an agent's %s, full reading: allowed, the reader never runs" % _tool,
            lb_no_read_check(_tool, _given, agent=LB_AGENT, remote="true"))
