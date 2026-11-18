@@ -1,0 +1,14 @@
+{
+ "id": "status-tab-lists-coord-prs",
+ "title": "The page's Status tab shows each open lane PR with its next act from REST, and the open-PR map plan is retired",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner, 19:04 CST Nov 17, relayed by the coordinator: the coordinator's PR list should live on the artifact or the roadmap branch. Consultant, 19:12 CST Nov 17, asked for this step (the answer on the table). Today the list is plans/open-pr-map-2026-11-15.md on roadmap, section Coordinator, and it is out of date: two of its five PRs had merged (triage read 19:04 CST).",
+ "source": "owner 19:04 CST Nov 17 via coordinator; consultant 19:12 CST Nov 17, relayed to triage 11",
+ "note": "Not built; not read in depth. Home to use: decision pr-ledger (one ledger, merge/merge.py --reviewed --ledger). Today the roadmap build reads the REST open-PR list only to find draft PRs over 12 h with no live lane (skills/roadmap/SKILL.md, build.py next_act for ready and stalled steps); it shows no per-PR next act for every open lane PR. Then retire plans/open-pr-map-2026-11-15.md. A lane brief names a test-author first. Owner may change the scope.",
+ "updatedAt": "2026-11-17T19:12:45-06:00"
+}
