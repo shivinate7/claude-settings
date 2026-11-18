@@ -16,8 +16,9 @@ output style load in each session on each repo.
 - **Acts the cloud refuses** (owner, 2026-10-30 16:20 CDT; changed by Cockpit item 219 a,
   2026-11-04 17:44 CST, and its follow-up pick a, 17:55 CST; until withdrawn). When any repo's
   coordinator asks, a session on Shivam's computer may do three acts. It may move main to the shared
-  ruleset (owner, 2026-11-11 16:43 CST, ruling r): only the all-jobs-passed check required, and
-  deletion and force-push of main blocked. The ruleset may also let the repository admin role skip
+  ruleset (owner, 2026-11-11 16:43 CST, ruling r): no status check required (owner, 2026-11-15 19:08
+  CST, ruling `own-all-jobs-passed-removed`: "all jobs passed has been removed as a status requirement"),
+  and deletion and force-push of main blocked. The ruleset may also let the repository admin role skip
   the checks on pull requests only (owner, 16:49 CST, "yes with bypass"; coordinator-relayed). It may remove main's old branch protection
   only after step merge-reads-ruleset (the merge tool reads main's ruleset) has merged, and only once
   the ruleset is on; the grant covers no removal before that step lands. (restart-plan R45, ruling c, owner 19:49 CST Nov 11; the plan says the step lands before any sweep removes old protection) It may delete a branch whose last commit is on the default branch or on an archive
