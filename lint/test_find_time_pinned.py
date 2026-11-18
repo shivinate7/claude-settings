@@ -40,12 +40,12 @@ SWIFT_CLOCKS = [
 SUMMARY_ZERO = "0 time-pinned in 0 files (sleep 0, elapsed-assert 0, test-cap 0, wait-cap 0); 0 unread"
 
 
-def summary_line(total, files, sleep=0, elapsed=0, calendar=0, hang_guards=0, unread=0):
+def summary_line(total, files, sleep=0, elapsed=0, hang_guards=0, unread=0):
     """The one summary line. A hang guard (test-cap or wait-cap) is its own count: it is never added to the
     total or the file count, and it is not a kind in the parenthesised list (test-practices P5)."""
-    return ("%d time-pinned in %d files (sleep %d, elapsed-assert %d, calendar %d); "
+    return ("%d time-pinned in %d files (sleep %d, elapsed-assert %d); "
             "hang guards %d (allowed; check each cap sits well above the run); %d unread"
-            % (total, files, sleep, elapsed, calendar, hang_guards, unread))
+            % (total, files, sleep, elapsed, hang_guards, unread))
 
 
 def assert_summary(case, stdout, expected):
