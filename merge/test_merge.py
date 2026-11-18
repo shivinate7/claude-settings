@@ -1531,13 +1531,13 @@ class LockRetake(Env):
         self.assertEqual(merge.expiry_of(self.lock_text()), 0)
         return self.head("merge-lock/main")
 
-    def rival_lock(self, lease):
-        """Another run's live lock, pushed by the other clone under `lease`. -> its sha."""
-        sha = sh(self.other, "git", "commit-tree", self.EMPTY_TREE, "-m", merge.lock_message(600, self.now))
+    def rival_lock(self, lease, holder=None):
+        """Another run's live lock, pushed by the other clone under `lease`. `holder` (pr, branch) names the rival in its lock text. -> its sha."""
+        sha = sh(self.other, "git", "commit-tree", self.EMPTY_TREE, "-m", merge.lock_message(600, self.now, holder))
         sh(self.other, "git", "push", "-q", lease, "origin", f"{sha}:refs/heads/merge-lock/main")
         return sha
 
-    def move_after_first_read(self, lock):
+    def move_after_first_read(self, lock, holder=None):
         """`lock`'s first read of the main ref answers as the ref stands, then another run moves the ref before the push. Later reads are real.
         -> the list that receives the rival's sha once it has moved."""
         real, moved = lock.read, []
@@ -1545,7 +1545,7 @@ class LockRetake(Env):
             if ref is not None or moved:
                 return real(b, ref)
             got = real(b, ref)
-            moved.append(self.rival_lock(f"--force-with-lease={merge.lock_ref(b)}:{got[0] if got else ''}"))
+            moved.append(self.rival_lock(f"--force-with-lease={merge.lock_ref(b)}:{got[0] if got else ''}", holder))
             return got
         lock.read = read
         return moved
@@ -1641,6 +1641,54 @@ class LockRetake(Env):
         with self.assertRaises(merge.Held):
             self.lock.acquire("main", 600)
         self.assertEqual(self.head("merge-lock/main"), held)
+
+    HOLDER = {"pr": 9, "branch": "rival-branch"}  # the rival's holder, as its lock text names it
+
+    def assert_names_current_holder(self, exc, sha):
+        """The refusal names the lock that holds the ref now: its PR, branch and expiry, in the one holder text (merge.holder_text), read from that commit."""
+        self.assertEqual(self.head("merge-lock/main"), sha, "scope: the rival's lock is not the one on origin, so the case proves nothing")
+        msg = self.lock_text()
+        want = merge.holder_text("main", (sha, merge.expiry_of(msg), msg), self.now)
+        self.assertIn(want, str(exc), "the refusal does not name the holder of the lock on origin: PR #9, its branch and its expiry")
+
+    def test_a_ref_absent_at_the_read_and_present_at_the_push_names_its_holder(self):
+        self.now = 1000.0  # a synthetic clock: the expiry in the holder text is then exact, never a real-time fraction
+        self.assertFalse(self.lock_ref())  # scope: no lock ref on origin before the take
+        lock2 = merge.GitLock(self.other, now=lambda: self.now)
+        moved = self.move_after_first_read(lock2, self.HOLDER)
+        with self.assertRaises(merge.Held) as cm:
+            lock2.acquire("main", 600)
+        self.assertEqual(len(moved), 1, "the rival never moved the ref, so the case proves nothing")
+        self.assert_names_current_holder(cm.exception, moved[0])
+
+    def test_a_refusal_on_a_live_lock_already_on_origin_names_its_holder(self):  # the control: refuse_or_take_over already names the holder, and must still
+        self.now = 1000.0
+        sha = self.rival_lock("--force-with-lease=refs/heads/merge-lock/main:", self.HOLDER)  # create-only: the rival's lock is on origin before the take
+        with self.assertRaises(merge.Held) as cm:
+            self.lock.acquire("main", 600)
+        self.assert_names_current_holder(cm.exception, sha)
+
+class LockRefusalNamesHolderGh(unittest.TestCase):
+    """GhLock.acquire when the ref POST answers 422: another run made the ref between acquire's read and its POST (decision merge-lock, a lost take race).
+    The Held text names the holder of the lock on the ref now. LockApi is the fake gh api."""
+    NOW = 1000.0
+
+    def setUp(self):
+        self.api = LockApi()
+        p = unittest.mock.patch.object(merge, "sh", self.api)
+        p.start(); self.addCleanup(p.stop)
+
+    def test_a_ref_made_after_the_read_names_its_holder_and_expiry(self):
+        rival = "rivalsha"
+        msg = merge.lock_message(600, self.NOW, {"pr": 9, "branch": "rival-branch"})
+        self.api.commits[rival] = msg
+        self.api.ref = rival  # the rival's lock is on the ref from the POST on
+        self.api.limit("lock-read", (1, "gh: Not Found (HTTP 404)"))  # acquire's own read saw no lock
+        with self.assertRaises(merge.Held) as cm:
+            merge.GhLock(now=lambda: self.NOW, pause=lambda s: None).acquire("main", 600)
+        self.assertIn("refs-post", self.api.steps(), "scope: the ref POST never ran, so the case proves nothing")
+        want = merge.holder_text("main", (rival, merge.expiry_of(msg), msg), self.NOW)
+        self.assertIn(want, str(cm.exception), "the refusal does not name the holder of the lock on the ref: PR #9, its branch and its expiry")
 
 class Guards(Env):
     def main_conflicts(self):
