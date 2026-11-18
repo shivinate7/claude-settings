@@ -717,7 +717,8 @@ def scan_python(text):
     def is_hang_guard_poll(call):
         """A sleep in a loop that has both a condition and a clock or count cap is a hang guard, not a fixed
         wait (decision test-practices P5). A condition is a while-test term that is neither `True` nor a clock
-        comparison, or an if in the body that returns or breaks and tests something other than a clock. A cap
+        comparison, or an if in the body that returns or breaks and tests something other than a clock or an error flag (a
+        name with fail, error or abort in it: it aborts the loop, so a sleep that only paces work is a sleep). A cap
         is a clock comparison in the while test or in such an if, or `range(<literal>)` in a for. An if in a
         nested loop ends the wait only by a `return`. An if that only raises or fails is never the condition.
         Its clock comparison is a cap only when the while test holds the condition. So a `while True` poll that
@@ -737,9 +738,18 @@ def scan_python(text):
         def always_true(t):
             return isinstance(t, ast.Constant) and bool(t.value)
 
+        def error_flag(t):
+            """A bare name, attribute or call named for a failure. Breaking on it aborts the loop; it is not the
+            state the loop waits for."""
+            if isinstance(t, ast.Call):
+                t = t.func
+            name = t.attr if isinstance(t, ast.Attribute) else getattr(t, "id", "")
+            return bool(re.search(r"fail|error|abort|(^|_)err($|_)", name.lower()))
+
         all_ifs = [n for n in own_nodes(loop.body) if isinstance(n, ast.If)]
         ifs = [n for n in all_ifs if exits(n, poll_loop_of(n) is not loop)]
-        has_cond = any(not all(clock_term(t) or always_true(t) for t in terms_of(i.test)) for i in ifs)
+        has_cond = any(not all(clock_term(t) or always_true(t) or error_flag(t) for t in terms_of(i.test))
+                       for i in ifs)
         cap = any(clock_term(t) for i in ifs for t in terms_of(i.test))
         if isinstance(loop, ast.While):
             terms = terms_of(loop.test)
@@ -1405,7 +1415,7 @@ def main(argv=None):
             pinned = [f for f in findings if f["category"] in CHECK_FAILS]
             nfiles = len({f["path"] for f in pinned})
             print(f"{len(pinned)} time-pinned in {nfiles} files (sleep {counts['sleep']}, "
-                  f"elapsed-assert {counts['elapsed-assert']}, calendar 0); hang guards "
+                  f"elapsed-assert {counts['elapsed-assert']}); hang guards "
                   f"{counts['test-cap'] + counts['wait-cap']} (allowed; check each cap sits well above the run); "
                   f"{len(unread)} unread{kept}")
         else:
