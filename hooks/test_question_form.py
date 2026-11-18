@@ -2425,7 +2425,8 @@ def case_ruled_store_ranks_by_shared_words_before_recency():
 # repo's visibility is its extras key `visibility`, which lint/layout.py reads (make_repo(visibility=...) writes it). Each
 # case reads that visibility back through layout.caution, and asserts it, before it judges the candidates.
 SCOPE_PRIVATE = {"visibility": "private"}
-SCOPE_OPEN_ID, SCOPE_PRIVATE_ID = "scope-open", "scope-private"
+SCOPE_PUBLIC = {"visibility": "public"}
+SCOPE_OPEN_ID, SCOPE_PRIVATE_ID, SCOPE_PUBLIC_ID = "scope-open", "scope-private", "scope-public"
 SCOPE_DAY = "2026-11-13T09:00:00-06:00"
 
 
@@ -2538,6 +2539,54 @@ def case_ruled_store_scope_private_rulings_do_not_take_the_cap():
           SCOPE_OPEN_ID in listed, str(listed))
     check("ruled scope cap: no private-scoped ruling is listed in a public repo",
           not any(rid.startswith("scope-cap-private-") for rid in listed), str(listed))
+
+
+def case_ruled_store_scope_omits_a_public_ruling_in_a_private_repo():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled scope public-in-private: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-scope-public-in-private", decisions={tcj.APPS_SLUG: tcj.APPS_RULING},
+                         visibility="private")
+    _scoped_store(repo, {
+        SCOPE_OPEN_ID: fixture.entry(SCOPE_OPEN_ID, at=SCOPE_DAY, ruling=RULED_TEXT),
+        SCOPE_PUBLIC_ID: fixture.entry(SCOPE_PUBLIC_ID, at=SCOPE_DAY, ruling=RULED_TEXT, scope=SCOPE_PUBLIC),
+    })
+    reads_private = _reads_as(repo, "private-solo")
+    check("ruled scope public-in-private: the fixture repo reads as private (scope control)", reads_private,
+          "layout.caution did not read the repo's visibility as private")
+    if not reads_private:
+        return
+    listed = _listed_ruled_ids(repo)
+    check("ruled scope public-in-private: an unscoped ruling is listed in a private repo",
+          SCOPE_OPEN_ID in listed, str(listed))
+    check("ruled scope public-in-private: a ruling scoped to public is omitted from a private repo",
+          SCOPE_PUBLIC_ID not in listed, str(listed))
+
+
+def case_ruled_store_scope_keeps_a_public_ruling_in_a_public_repo():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled scope public-in-public: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-scope-public-in-public", decisions={tcj.APPS_SLUG: tcj.APPS_RULING},
+                         visibility="public")
+    _scoped_store(repo, {
+        SCOPE_OPEN_ID: fixture.entry(SCOPE_OPEN_ID, at=SCOPE_DAY, ruling=RULED_TEXT),
+        SCOPE_PUBLIC_ID: fixture.entry(SCOPE_PUBLIC_ID, at=SCOPE_DAY, ruling=RULED_TEXT, scope=SCOPE_PUBLIC),
+    })
+    reads_public = _reads_as(repo, "public")
+    check("ruled scope public-in-public: the fixture repo reads as public (scope control)", reads_public,
+          "layout.caution did not read the repo's visibility as public")
+    if not reads_public:
+        return
+    listed = _listed_ruled_ids(repo)
+    check("ruled scope public-in-public: an unscoped ruling is listed in a public repo",
+          SCOPE_OPEN_ID in listed, str(listed))
+    check("ruled scope public-in-public: a ruling scoped to public is listed in a public repo",
+          SCOPE_PUBLIC_ID in listed, str(listed))
 
 
 class _BrokenPipeGit:
@@ -3995,6 +4044,8 @@ def main():
                  case_ruled_store_scope_keeps_a_private_ruling_in_a_private_repo,
                  case_ruled_store_scope_private_only_lists_no_ruling_in_a_public_repo,
                  case_ruled_store_scope_private_rulings_do_not_take_the_cap,
+                 case_ruled_store_scope_omits_a_public_ruling_in_a_private_repo,
+                 case_ruled_store_scope_keeps_a_public_ruling_in_a_public_repo,
                  case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
                  case_task_why_cited_reds, case_task_why_cited_greens,
                  case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
