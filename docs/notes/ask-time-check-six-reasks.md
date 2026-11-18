@@ -1,0 +1,1 @@
+- ask-time-check-six-reasks: Retrospective 11:45 CST Nov 12: the ask-time past-ruling check let six re-asks through (page items 528-532 and 537, see step ruling-challenge-passes); add this case to the existing debt on the judge missing past rulings when a notes lane next runs.

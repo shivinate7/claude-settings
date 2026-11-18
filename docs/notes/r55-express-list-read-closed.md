@@ -1,0 +1,1 @@
+- r55-express-list-read-closed: 10:53 CST Nov 13, R39 incident: the retrospective read R55's express list as closed, so the owner had to restate that his rulings are read too strictly (10:54 CST).

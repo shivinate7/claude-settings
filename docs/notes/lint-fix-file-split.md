@@ -1,0 +1,1 @@
+- lint-fix-file-split: 13:33 CST Nov 13 (coordinator, file split): this lane rewrites merge/merge.py, docs/decisions/pr-review-record.md, docs/decisions/hold-unsafe-after-round-3.md and agents/reviewer.md.

@@ -1,0 +1,1 @@
+- pick-first-red-job-read: 12:03 CST Nov 13, coordinator pick (stood, page item 728, pick-first-red-job-read): build B now (merge --run-state <pr>, read at check-ins, no CI change), and A (wake-<job> jobs in checks.yml) after #2980. No GitHub event fires a workflow on one failed Actions job (lane read the docs 11:59 CST).

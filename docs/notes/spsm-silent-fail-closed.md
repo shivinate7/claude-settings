@@ -1,0 +1,1 @@
+- spsm-silent-fail-closed: (#2464) silent paths fail closed when cp, awk or mktemp fails.

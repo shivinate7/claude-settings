@@ -1,0 +1,1 @@
+- stylisms-table-signed-six: Also from the coordinator (relayed, unchecked): #3340 (table only) is placed by runner 10 on its record at head; the owner signed the six, and a new lane edits the style file.

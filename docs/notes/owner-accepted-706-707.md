@@ -1,0 +1,1 @@
+- owner-accepted-706-707: Owner 11:45 CST Nov 13, accepted picks: item 706 a (wait for the Mac mailbox measurement before building the triage mailbox folder) and item 707 a (degen's triage clears its own claude-settings-coordinator.md note). Plan line (outbox-aggregate-plan).

@@ -1,0 +1,1 @@
+- ste-pin-pattern-copy: (#1755 lint-before-record-push round 3 at 76301610a, sonnet; decision ste-lint-at-push; lane 02:59 CST Nov 10) the lane's STE guard (a file not on main) has pin_pattern and LINT_PIN, which repeat the regex of `pin_regex` in hooks/action_pin.py (the one home on main), with no stated reason and no test tying them. Fix: call `action_pin.pin_regex`.

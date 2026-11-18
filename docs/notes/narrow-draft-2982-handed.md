@@ -1,0 +1,1 @@
+- narrow-draft-2982-handed: page-narrow-word-breaks 15:19 CST Nov 12: Lane 15:19 CST Nov 12: draft #2982 (stacked on #2347) handed to runner 10. The rest of the defect, where text overflows instead of breaking, is step page-narrow-overflow-rest; the #2982 follow-up cases are step page-narrow-breaks-cases.

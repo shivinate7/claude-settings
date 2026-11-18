@@ -1,0 +1,1 @@
+- degen-d15-owner-grant-relay: Degen ledger row D15 (no trusted relay of an owner chat grant) lands here (#3038); plans/degen-report-2026-11-12.md on branch restart-plan, commit 113d77849 (retrospective 21:04 CST Nov 12).

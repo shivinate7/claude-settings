@@ -1,0 +1,1 @@
+- tag-base-ref-unknown: a tag BASE_REF reads as UNKNOWN.

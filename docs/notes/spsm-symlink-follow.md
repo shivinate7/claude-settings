@@ -1,0 +1,1 @@
+- spsm-symlink-follow: (#2464) -f/-w follow a symlink, and mv -f replaces it.
