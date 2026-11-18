@@ -5,10 +5,10 @@
  "lane": "",
  "owner": "triage",
  "blockedBy": [],
- "updatedAt": "2026-11-18T10:23:47-06:00",
+ "updatedAt": "2026-11-18T10:27:02-06:00",
  "source": "triage 11, own mistake; owner frustration relayed by the consultant 10:22 CST Nov 18",
  "id": "guard-send-message-no-placeholder",
- "title": "A session message with a placeholder or a future time is refused before it is sent",
+ "title": "A session message with a literal placeholder time is refused; a future stamp is already covered by rule message-time-matches-clock",
  "why": "Triage 11 sent messages stamped ahead of the clock twice on Nov 17 and 18.",
- "note": "Own mistake, 09:15 CST Nov 18. Guard: refuse a send_message whose body holds a bracketed stamp later than now-central, or text like HH:MM. Next: a lane brief with a test-author first (two cases: a future stamp and a placeholder both refuse); mover: whoever takes the lane after the coordinator's say-so."
+ "note": "Own mistake, 09:15 CST Nov 18. Guard: refuse a send_message whose body holds a bracketed stamp later than now-central, or text like HH:MM. Next: a lane brief with a test-author first (two cases: a future stamp and a placeholder both refuse); mover: whoever takes the lane after the coordinator's say-so. 10:27 CST Nov 18 (triage 11, prior-work search before a build spawn): the future-stamp half already has a home. Rule message-time-matches-clock checks the send_message header on main; draft PR 3234 (step stamp-clock-check-everywhere, REST: open, draft, updated 2026-11-13) widens it to bracketed and dated forms and has sat unmerged since Nov 13. Archive branches also exist: archive/stamp-guard-send-message, archive/send-message-refs-resolve. Not yet read: whether main reads an unlabeled stamp like '[10:12 CST] text' (the form my messages used). Narrowed scope: the placeholder half only ('HH:MM', '10:2x'), plus that unlabeled-stamp check. Do not build a second home (rule building-one-home-per-capability): extend message-time-matches-clock. No agent spawned."
 }
