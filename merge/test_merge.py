@@ -18193,9 +18193,9 @@ class ReviewRoundOneCompletes(ReviewEnv):
 
 class ReviewFixAfterMainMerge(ReviewEnv):
     """A fix check after a merge of main (decision pr-review-record). The newest earlier record holds a fix check, so the rule of ReviewFixBase
-    refuses every fix check from its head. A lane that merges main into the fixed head has a new head: a merge commit whose first parent is that
-    head and whose second parent is on main. Only that shape gets a fix check. A plain commit on the head, a merge with a commit off main, or a
-    merge whose first parent is not the fixed head, is refused. The newest record's fix check must have passed: a fix check after a FAIL one
+    refuses every fix check from its head. A lane that merges main into the fixed head has a new head: a merge commit whose second parent is on main,
+    and whose first parent is the fixed head or a commit after it, as git's ancestry reads it. A merge with a commit off main is refused. A plain
+    commit on the head is accepted after a PASS fix check. The newest record's fix check must have passed: a fix check after a FAIL one
     is refused, whatever the merge. The parents come from the commit read and the on-main test from the compare read, both scripted by PullsHost."""
 
     PRE_FIX_HEAD = "1e" * 20  # the head the newest record's fix diff started from
@@ -18268,19 +18268,20 @@ class ReviewFixAfterMainMerge(ReviewEnv):
         self.assertNotIn("Traceback", err)
         self.assertNotIn("is unknown", err, "the refusal is a failed read, not the base check")
 
-    def test_d_a_fix_verifier_after_a_merge_of_main_whose_first_parent_is_not_the_fixed_head_is_refused(self):
-        # Control: a clean merge of main two merges past the fixed head is accepted, since the walk reads clean merges back to the fixed head.
-        # The case differs in its first parent alone: a plain commit on the fixed head that changes a file. The walk stops there and refuses.
+    def test_d_a_fix_verifier_after_a_merge_of_main_whose_first_parent_is_a_plain_commit_on_the_fixed_head_is_accepted(self):
+        # Control: a clean merge of main two merges past the fixed head is accepted, since the fixed head is an ancestor of it.
+        # The case differs in its first parent alone: a plain commit on the fixed head that changes a file. The fixed head is still an ancestor
+        # of the live head, so the fix check starts there and is accepted.
         fx = self.real_commits()
         rc, out, err = self.fix_from_fixed_head(self.real_fixed_host(fx, fx.clean2), fixed=fx.fixed, live=fx.clean2)
         self.assertEqual(rc, 0, "control: a fix verifier after two clean merges of main was refused:\n" + out + err)
         self.assertEqual(fx.parents[fx.after_plain], [fx.plain, fx.main], "fixture: the merge is not a merge of the plain commit and main")
-        self.assertNotEqual(fx.trees[fx.plain], fx.trees[fx.fixed], "fixture: the plain commit changes no file, so the walk has nothing to refuse")
+        self.assertNotEqual(fx.trees[fx.plain], fx.trees[fx.fixed], "fixture: the plain commit changes no file, so the case tests nothing")
         rc, out, err = self.fix_from_fixed_head(self.real_fixed_host(fx, fx.after_plain), fixed=fx.fixed, live=fx.after_plain)
-        self.assertEqual(rc, 2, "a fix verifier after a merge of main whose first parent is a plain commit was not refused:\n" + out + err)
-        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
-        self.assertNotIn("Traceback", err)
-        self.assertNotIn("is unknown", err, "the refusal is a failed read, not the walk")
+        self.assertEqual(rc, 0, "a fix verifier after a merge of main whose first parent is a plain commit on the fixed head was refused:\n" + out + err)
+        body = posted_body(self, out)
+        self.assertEqual(parse_text(self, body)["head"], fx.after_plain, "the printed record names the wrong head")
+        self.assertEqual(parse_text(self, body)["fix"], (fx.fixed, *REVIEW_FIX_PASS[1:]), "the printed record does not name the fix check from fx.fixed")
 
     def test_e_a_fix_verifier_after_a_merge_of_main_is_refused_when_the_newest_fix_verifier_failed(self):
         # Control: the same conflicted merge after a PASS fix verifier is accepted. The case differs in the newest fix verifier's FAIL alone. That
@@ -18326,17 +18327,23 @@ class ReviewFixAfterMainMerge(ReviewEnv):
         self.assertEqual(parse_text(self, body)["head"], m2, "the printed record names the wrong head")
         self.assertEqual(parse_text(self, body)["fix"], (fx.fixed, *REVIEW_FIX_PASS[1:]), "the printed record lacks the fix check")
 
-    def test_h_a_conflicted_merge_of_main_after_a_plain_commit_on_the_reviewed_head_is_refused(self):
-        # Control: a plain commit between the reviewed head and the conflicted merge is no clean merge of main, so that fix check stays refused.
+    def test_h_a_conflicted_merge_of_main_after_a_plain_commit_on_the_reviewed_head_is_accepted(self):
+        # The plain commit on the reviewed head is an ancestor of the live head, so the fix check starts there. The hand resolution keeps every
+        # path git's merge keeps, so the conflict is the only edit: a.txt.
         fx = self.real_commits()
-        m3 = self.git_commit(fx.plain, {"a.txt": "resolved\n", "c.txt": "c\n"}, fx.main3)
+        m3 = self.git_commit(fx.plain, {"a.txt": "resolved\n", "b.txt": "b\n", "c.txt": "c\n"}, fx.main3)
         self.facts(fx, [m3])
         self.assertEqual(fx.parents[fx.plain], [fx.fixed], "fixture: the plain commit is not on the reviewed head")
+        r = subprocess.run(["git", "merge-tree", "--write-tree", fx.plain, fx.main3], cwd=self.co, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, "fixture: the plain commit and main3 do not conflict in git:\n" + r.stdout + r.stderr)
+        edits = sh(self.co, "git", "diff-tree", "-r", "--name-only", r.stdout.split()[0], fx.trees[m3]).split()
+        self.assertEqual(sorted(set(edits) - {"a.txt"}), [], "fixture: the hand resolution edits a path outside git's conflict")
         host = self.record_host(self.newest_record(head=fx.fixed, pre=fx.pre), head=m3, commits=fx.parents, trees=fx.trees, compares=fx.on_main)
         rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=m3)
-        self.assertEqual(rc, 2, "a fix check after a plain commit and a conflicted merge of main was not refused:\n" + out + err)
-        self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
-        self.assertNotIn("Traceback", err)
+        self.assertEqual(rc, 0, "a fix check after a plain commit on the reviewed head and a conflicted merge of main was refused:\n" + out + err)
+        body = posted_body(self, out)
+        self.assertEqual(parse_text(self, body)["head"], m3, "the printed record names the wrong head")
+        self.assertEqual(parse_text(self, body)["fix"], (fx.fixed, *REVIEW_FIX_PASS[1:]), "the printed record lacks the fix check from the reviewed head")
 
 class ReviewCleanMainMerge(ReviewEnv):
     """A record stays done when the pull request head is one or more clean merges of main after the record's head (decision pr-review-record).
