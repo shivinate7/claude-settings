@@ -640,10 +640,18 @@ class SpawnBriefHead(BriefCase):
 
     def test_spawn_brief_from_the_block_passes_the_real_guard_with_each_marker(self):
         block = self.block()
-        for marker in ("Guard or check: yes", "Fix check", "Round 2 of 3"):
-            reason = guard_reason(self.config, spawn_brief(block, marker))
-            self.assertEqual(reason, "", "the real guard refused a sonnet reviewer whose first line is %r: %s"
-                             % (marker, reason[:200]))
+        # A round 1 guard or check reviewer runs the `1 guard` row, haiku (owner ruling 2026-11-17 19:45 CST).
+        for marker, model in (("Guard or check: yes", "haiku"), ("Fix check", "sonnet"), ("Round 2 of 3", "sonnet")):
+            with self.subTest(marker=marker, model=model):
+                reason = guard_reason(self.config, spawn_brief(block, marker), model=model)
+                self.assertEqual(reason, "", "the real guard refused a %s reviewer whose first line is %r: %s"
+                                 % (model, marker, reason[:200]))
+
+    def test_the_real_guard_refuses_a_sonnet_reviewer_whose_first_line_is_the_guard_marker(self):
+        reason = guard_reason(self.config, spawn_brief(self.block(), "Guard or check: yes"), model="sonnet")
+        self.assertTrue(reason.startswith("agent-role-model:"),
+                        "the guard marker lifted a sonnet reviewer above the `1 guard` row, which is haiku: %r"
+                        % reason[:200])
 
     def test_the_real_guard_refuses_the_same_spawn_without_a_marker(self):
         reason = guard_reason(self.config, spawn_brief(self.block()))
