@@ -616,10 +616,10 @@ def case_runner_run(kinds):
 class Skips(unittest.TestCase):
     """A skip is counted and shown, never read as a pass (plan row S8, test-ci-standard plan)."""
 
-    def check(self, code, extra=None):
+    def check(self, code, extra=None, timeout=120):
         """Run one fixture with its log in this run's folder, never the system temp dir."""
         with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
-            return run(code, os.path.join(d, "v.log"), extra, timeout=120)
+            return run(code, os.path.join(d, "v.log"), extra, timeout=timeout)
 
     def assert_skip(self, r, count):
         first = r.stdout.splitlines()[0] if r.stdout.strip() else ""
@@ -892,6 +892,9 @@ COLOURED_START = "\x1b[32m" + "=" * 29 + " \x1b[1mtest session starts\x1b[0m " +
 PYTEST_ALL_PASS = "=" * 30 + " 3 passed in 0.02s " + "=" * 30 + "\n"  # a summary with no skip; PYTEST_OUT reads SKIP
 PROGRESS = "tests/test_big.py " + "." * 1000 + "\n"  # one progress line, 1,019 bytes
 CUT_LINE = r"^FAIL .* rc=1[^(]*\bcut\b"  # the note sits between rc=1 and the timing
+QUIET_SUMMARY = "3 passed in 0.1s\n"  # the summary `pytest -q` prints: no bars
+ONE_LINE_BOUND = 2.0  # seconds a verdict may take on one 1 MiB line
+HANG_GUARD = 20  # seconds before a verdict counts as hung: well above ONE_LINE_BOUND, so a run that finishes never trips it
 
 
 def straddling_body():
@@ -903,16 +906,43 @@ def straddling_body():
 
 
 class CutStream(unittest.TestCase):
-    """A run that exits 0 and stops before its pytest summary reads FAIL, with `cut` in the note.
-    Rule: a run is cut when it exits 0, one of its lines starts with pytest's session header (`=` bars around
-    `test session starts`), and no line starts with pytest's summary (`=` bars around ` in <N>s`). Colour codes are
-    ignored, so a coloured header counts. A header quoted mid-line does not. A run with no header is never cut, so
-    `print('noisy')` still reads PASS. Pytest only: it is the one runner the repo shows with both a start line and a
-    summary line. A cut run of another runner, such as a PowerShell `All checks passed.` style, is not covered yet."""
+    """A pytest run that exits 0 and stops before its summary reads FAIL, with `cut` in the note.
+    Rule: the argv is pytest's (`pytest`, or `python -m pytest`), and no line starts with pytest's summary: `=` bars
+    around ` in <N>s`, or the bare `<counts> in <N>s` that `-q` prints. Where the header sits does not matter.
+    Colour codes are ignored. A run that is not pytest is never cut, even when it prints pytest's header or progress
+    lines, so `print('noisy')` still reads PASS. A header quoted mid-line is no header. Other runners are not covered."""
     check = Skips.check  # one home for a fixture's run and its timeout
     assert_pass = Skips.assert_pass
     assert_skip = Skips.assert_skip
     assert_fail = Skips.assert_fail
+
+    def pytest_case(self, text, args=(), form="module", timeout=120):
+        """Run `text` as the output of a pytest run, and return the run. The fake pytest writes `text`, exits 0 and
+        leaves a sentinel file, so a case knows the fake ran before it reads the verdict. form "module" runs
+        `python -m pytest` through a fake package on PYTHONPATH; form "bare" runs `pytest` from a fake on PATH."""
+        if form == "bare" and os.name == "nt": raise unittest.SkipTest(SHIM_SKIP)
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            ran, log = os.path.join(d, "ran"), os.path.join(d, "v.log")
+            fake = "open(%r, 'w').close()\n" % ran + printing(text)
+            if form == "bare":
+                r = run(log=log, shim=("pytest", "#!%s\n" % sys.executable + fake), argv=["pytest"] + list(args), timeout=timeout)
+            else:
+                pkg = os.path.join(d, "pytest")
+                os.mkdir(pkg)
+                open(os.path.join(pkg, "__init__.py"), "w").close()
+                with open(os.path.join(pkg, "__main__.py"), "w") as g: g.write(fake)
+                path = os.pathsep.join(p for p in (d, os.environ.get("PYTHONPATH")) if p)
+                r = run(log=log, extra={"PYTHONPATH": path}, argv=[sys.executable, "-m", "pytest"] + list(args), timeout=timeout)
+            self.assertTrue(os.path.exists(ran), "the fake pytest never ran, so this case proves nothing")
+        return r
+
+    def run_logged(self, code=None, argv=None, timeout=120):
+        """Run one fixture as `check` does, and return the run with its log text, so a case reads its output first."""
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            log = os.path.join(d, "v.log")
+            r = run(code, log, argv=argv, timeout=timeout)
+            with open(log, encoding="utf-8", errors="replace") as f: full = f.read()
+        return r, full
 
     def assert_cut(self, r):
         first = r.stdout.splitlines()[0] if r.stdout.strip() else ""
@@ -920,35 +950,90 @@ class CutStream(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout[:300])
 
     def test_header_only_run_that_exits_0_is_cut(self):
-        self.assert_cut(self.check(printing(PYTEST_START)))
+        self.assert_cut(self.pytest_case(PYTEST_START))
 
     def test_run_cut_after_progress_lines_is_cut(self):
-        self.assert_cut(self.check(printing(PYTEST_START + PROGRESS * 3)))
+        self.assert_cut(self.pytest_case(PYTEST_START + PROGRESS * 3))
 
     def test_coloured_run_cut_after_progress_lines_is_cut(self):
-        self.assert_cut(self.check(printing(COLOURED_START + PROGRESS * 3)))
+        self.assert_cut(self.pytest_case(COLOURED_START + PROGRESS * 3))
 
     def test_full_size_run_cut_after_2mib_is_cut(self):
         body = PYTEST_START + PROGRESS * 2048
         self.assertGreater(len(body), CHUNK, "the fixture must hold more than one chunk")
-        self.assert_cut(self.check(printing(body)))
+        self.assert_cut(self.pytest_case(body))
+
+    def test_quiet_run_cut_before_its_summary_is_fail(self):
+        """`-q` prints no header, so a cut quiet run is progress lines with no summary. Its argv is pytest's, so it is cut."""
+        for form in ("module", "bare"):
+            with self.subTest(form=form):
+                self.assert_cut(self.pytest_case(PROGRESS * 3, args=("-q",), form=form))
+        with self.subTest(size="full"):
+            body = PROGRESS * 2048
+            self.assertGreater(len(body), CHUNK, "the fixture must hold more than one chunk")
+            self.assert_cut(self.pytest_case(body, args=("-q",)))
+
+    def test_quiet_complete_run_is_pass(self):
+        """The control for the quiet cut: the same progress lines, ending in the summary `-q` prints, read as complete."""
+        for form in ("module", "bare"):
+            with self.subTest(form=form):
+                self.assert_pass(self.pytest_case(PROGRESS * 3 + QUIET_SUMMARY, args=("-q",), form=form))
+        with self.subTest(size="full"):
+            self.assert_pass(self.pytest_case(PROGRESS * 2048 + QUIET_SUMMARY, args=("-q",)))
+
+    def test_header_first_in_a_later_chunk_still_cuts(self):
+        body = PROGRESS * 1100 + PYTEST_START + PROGRESS * 3  # 1,100 progress lines first, so the header is past the first chunk
+        self.assertGreater(body.index(PYTEST_START), CHUNK, "the fixture must put the header past the first chunk")
+        self.assert_cut(self.pytest_case(body))
 
     def test_run_with_a_summary_is_not_cut(self):
-        self.assert_pass(self.check(printing(PYTEST_START + PROGRESS * 3 + PYTEST_ALL_PASS)))
+        self.assert_pass(self.pytest_case(PYTEST_START + PROGRESS * 3 + PYTEST_ALL_PASS))
 
     def test_coloured_complete_run_is_not_cut(self):
-        self.assert_skip(self.check(printing(COLOURED_START + PROGRESS + PYTEST_COLOUR)), 2)
+        self.assert_skip(self.pytest_case(COLOURED_START + PROGRESS + PYTEST_COLOUR), 2)
 
     def test_full_size_complete_run_is_not_cut(self):
         body = PYTEST_START + PROGRESS * 2048 + PYTEST_ALL_PASS
         self.assertGreater(len(body), CHUNK, "the fixture must hold more than one chunk")
-        self.assert_pass(self.check(printing(body)))
+        self.assert_pass(self.pytest_case(body))
 
     def test_summary_straddling_the_chunk_edge_is_not_cut(self):
         body, offset = straddling_body()
         self.assertEqual(body.index(PYTEST_ALL_PASS), offset, "the fixture must start the summary at its offset")
         self.assertGreater(offset + len(PYTEST_ALL_PASS), CHUNK, "the fixture must run the summary past the edge")
-        self.assert_pass(self.check(printing(body)))
+        self.assert_pass(self.pytest_case(body))
+
+    def test_non_pytest_run_with_a_pytest_header_is_pass(self):
+        """A command that is not pytest reads PASS, though its output is the output of a cut pytest run."""
+        body = PYTEST_START + PROGRESS * 3
+        commands = {"script": {"code": printing(body)},
+                    "c": {"argv": [sys.executable, "-c", "import sys; sys.stdout.write(%s)" % ascii(body)]}}
+        for name, kwargs in commands.items():
+            with self.subTest(command=name):
+                r, full = self.run_logged(**kwargs)
+                self.assertIn(PYTEST_START.strip(), full, "the header must reach the log, or this case proves nothing")
+                self.assert_pass(r)
+
+    def test_non_pytest_progress_run_with_no_summary_is_pass(self):
+        """Progress lines with no summary are a cut only under pytest's argv. Any other command reads PASS."""
+        self.assert_pass(self.check(printing(PROGRESS * 3)))
+
+    def test_one_mib_equals_line_finishes_under_the_bound(self):
+        """One 1 MiB line of `=` finishes within ONE_LINE_BOUND seconds, as a plain command and as a pytest run.
+        A run still going at HANG_GUARD seconds is hung, and that is its own failure."""
+        line = "=" * CHUNK + "\n"
+        runs = {"plain": lambda: self.check(printing(line), timeout=HANG_GUARD),
+                "pytest": lambda: self.pytest_case(line, timeout=HANG_GUARD)}
+        for name, go in runs.items():
+            with self.subTest(run=name):
+                t0 = time.monotonic()
+                try:
+                    r = go()
+                except subprocess.TimeoutExpired:
+                    self.fail(f"verdict hung: still running after {HANG_GUARD} s on one 1 MiB '=' line")
+                elapsed = time.monotonic() - t0
+                self.assertLess(elapsed, ONE_LINE_BOUND, f"verdict took {elapsed:.2f} s on one 1 MiB '=' line")
+                self.assertIn(r.stdout.split()[:1], (["PASS"], ["FAIL"]), r.stdout[:300])
 
     def test_header_quoted_mid_line_is_no_header(self):
         body = "note: the pytest header is '=== test session starts ===' here\n" + PROGRESS * 3
