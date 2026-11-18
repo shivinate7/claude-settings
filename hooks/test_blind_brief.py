@@ -280,13 +280,14 @@ class BriefFaults(unittest.TestCase):
                 self.assertIn("outside", codes(self.m.brief_faults(brief(header=header))))
 
     def test_long_digit_run_is_fast(self):
-        # A hang guard, not a speed ratio: the scan is linear and far under the cap, so machine load does
-        # not trip it. A quadratic scan of this run takes longer than the cap and fails.
-        import time
-        start = time.perf_counter()
-        self.m.brief_faults(brief(job=JOB + "\n" + "1" * 20000))
-        elapsed = time.perf_counter() - start
-        self.assertLess(elapsed, 2.0, "a 20000-digit run took %.2f s; the cap is 2 s" % elapsed)
+        # A hang guard, not a speed ratio. The scan runs in a child process, so a scan that does not end is
+        # killed at the cap. The cap sits far above a linear scan, so machine load does not trip it.
+        cap = 5  # seconds
+        try:
+            done = scan_in_child(brief(job=JOB + "\n" + "1" * 20000), cap)
+        except subprocess.TimeoutExpired:
+            self.fail("a 20000-digit run did not finish in %d s" % cap)
+        self.assertEqual(done.stdout.strip(), "0", "the child did not judge the brief: " + done.stderr)
 
     def test_device_written_sizes_pass(self):
         line = "iPhone Duo, 1114 x 705 pt open, 540 x 720 px per screen."
@@ -380,6 +381,18 @@ class RunFaults(unittest.TestCase):
 def run_cli(*args, env=None):
     return subprocess.run([sys.executable, MODULE] + list(args), capture_output=True, text=True,
                           env=env, timeout=60)
+
+
+def scan_in_child(text, timeout):
+    # The child loads the module and prints the fault count of one brief read from stdin, so a scan that
+    # does not end is killed at the timeout.
+    code = ("import importlib.util, sys\n"
+            "spec = importlib.util.spec_from_file_location('under_test', sys.argv[1])\n"
+            "m = importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(m)\n"
+            "print(len(m.brief_faults(sys.stdin.read())))\n")
+    return subprocess.run([sys.executable, "-c", code, MODULE], input=text, capture_output=True, text=True,
+                          timeout=timeout)
 
 
 class Cli(unittest.TestCase):
