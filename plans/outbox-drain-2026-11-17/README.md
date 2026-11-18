@@ -9,7 +9,7 @@ Files: sort-1.md lines 1-340, sort-2.md 341-680, sort-3.md 681-1020, sort-4.md 1
 Known limits (each report states them): PR merged or closed state came from main commit subjects, not GitHub; K rests on one grep per bullet; F is an upper bound; J may hide F; the step data the sorters read may lag origin/roadmap.
 
 Acts that follow, none done yet:
-- K: one-line notes on main, in the form at triage.md line 5, after draft PR 3569 (one file per note) merges.
+- K: one-line notes on main, in the form at triage.md line 5, in one file per note; PR 3569 (one file per note) merged 10:16 CST Nov 17, so nothing waits on it.
 - J: append to the named open step's note, by slug.
 - S: drop from triage.md once K is filed.
 - R: file rulings only from owner words that no ruling holds; the owner's answers are in waiting/answers/*.json.
