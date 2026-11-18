@@ -15,6 +15,7 @@ script from that tree. The diff cases also make a temp git repo and set refs/rem
 the base the script diffs against. RECORD_SLUGS_UNDER_TEST overrides the module path.
 """
 import contextlib
+import datetime
 import importlib.util
 import io
 import os
@@ -77,11 +78,48 @@ EDIT_OLD = "- edited-note: the first wording of the note (hooks/guard.py)\n"
 EDIT_NEW = "- edited-note: the second wording of the note (hooks/guard.py)\n"
 
 SECTIONS = "tests/guard"  # the section folder, as hooks/test_guard.py's SECTION_DIR names it
+PINNED_TODAY = "2026-11-18"  # the clock every case pins: the check reads FIXED_TODAY, so no case reads the real date
+# The text of docs/notes/ps-scriptblock-path-refused.md, copied as the fixture: a real note's length and form.
+REAL_NOTE_TEXT = ("the check still refuses `@{N='x'; E={ ./x.ps1 }}`, since the scriptblock lookahead covers only a "
+                  "letter after `{ ` while the trailing class also takes `.` and `/` (hooks/question_form.py "
+                  "PS_BASH_FORMS, its NAME= alternative). Decision: act-in-place")
+RENAME_FROM = "alpha-note"  # a rename pair of one length, so git reads the rename: the slug changes, the text does not
+RENAME_TO = "bravo-note"
 
 
 def section_text(n, body=""):
     """A section file: its first line is the `# section <n>` header that test_guard.py reads."""
     return "# section %d\n%s" % (n, body)
+
+
+def day(offset):
+    """The ISO date `offset` days from PINNED_TODAY. A negative offset is in the past."""
+    return (datetime.date.fromisoformat(PINNED_TODAY) + datetime.timedelta(days=offset)).isoformat()
+
+
+def seen(offset, count):
+    """A Seen field: the date `offset` days from PINNED_TODAY, and the sighting count."""
+    return "Seen: %s x%d" % (day(offset), count)
+
+
+def note_line(slug, field=None):
+    """A note file's one line, `- <slug>: <text>`, with the Seen field at its end when one is given."""
+    return "- %s: %s%s\n" % (slug, REAL_NOTE_TEXT, " " + field if field else "")
+
+
+def debt_body(slug, seen_line=None):
+    """A debt file: a title, a body, and the Seen line when one is given."""
+    return "# %s\n\nWhat. A gap with a fix named.\n%s" % (slug, seen_line + "\n" if seen_line else "")
+
+
+def clean_env(**extra):
+    """The environment a check run gets: CI and git's repo variables stripped, the clock pinned, `extra` added."""
+    env = dict(os.environ)
+    for key in ("CI", "GIT_DIR", "GIT_WORK_TREE"):  # CI turns an unknown diff red; the repo variables pick the repo
+        env.pop(key, None)
+    env["FIXED_TODAY"] = PINNED_TODAY
+    env.update(extra)
+    return env
 
 
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
@@ -118,13 +156,20 @@ class RecordSlugsTests(unittest.TestCase):
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
 
-    def lint(self, *args):
-        env = dict(os.environ)
-        env.pop("CI", None)  # CI turns an unknown diff into red; these cases run locally
+    def run_check(self, cwd, *args, **env_extra):
+        """The check run on the command line from `cwd`, with clean_env(**env_extra). Returns (exit code, output)."""
         cmd = [sys.executable, os.path.join(self.tree, "lint", "check_record_slugs.py"), *args]
-        r = subprocess.run(cmd, cwd=self.tree, env=env, capture_output=True, text=True,
+        r = subprocess.run(cmd, cwd=cwd, env=clean_env(**env_extra), capture_output=True, text=True,
                            encoding="utf-8", errors="replace")
         return r.returncode, r.stdout + r.stderr
+
+    def lint(self, *args):
+        return self.run_check(self.tree, *args)
+
+    def fail_line(self, out, needle):
+        """The first FAIL line of the check that names `needle`, or '' when none does."""
+        return next((line for line in out.splitlines()
+                     if line.startswith("check_record_slugs: FAIL:") and needle in line), "")
 
     def assert_passes(self, *args):
         rc, out = self.lint(*args)
@@ -626,10 +671,10 @@ class RecordSlugsTests(unittest.TestCase):
         self.commit_change()
         self.assert_passes()
 
-    def lint_after_edit(self, text):
-        # The base holds EDIT_OLD in a note file; the branch writes `text` into the same file.
+    def lint_after_edit(self, text, base=EDIT_OLD):
+        # The base holds `base` in a note file; the branch writes `text` into the same file.
         self.roll_out()
-        self.put(NOTE % "edited-note", EDIT_OLD)
+        self.put(NOTE % "edited-note", base)
         self.commit_base()
         self.put(NOTE % "edited-note", text)
         self.commit_change()
@@ -692,6 +737,279 @@ class RecordSlugsTests(unittest.TestCase):
         rc, out = self.lint()
         self.assertEqual(rc, 1, out)
         self.assertEqual(flagged(out), [nested], out)
+
+    # Seen (decision notes-sightings-expiry). A note file's line may carry `Seen: YYYY-MM-DD xN`. An added note needs a
+    # valid one, and a count of 2 or more is a debt. An edit or a rename keeps the base's count and its field. No case
+    # here moves a fielded date at the same count: only a repeat sighting refreshes Seen (item 547 b).
+
+    def add_note_file(self, slug, field):
+        """Adds one note file, with `field` as its Seen field (None for no field), to a base that holds no note."""
+        self.roll_out()
+        self.commit_base()
+        self.put(NOTE % slug, note_line(slug, field))
+        self.commit_change()
+        statuses = self.git_out("diff", "--name-status", "origin/main", "HEAD").splitlines()
+        self.assertIn("A\t" + NOTE % slug, statuses, statuses)  # scope: the note file is in the diff
+
+    def assert_added_note_refused(self, slug, field, cause):
+        self.add_note_file(slug, field)
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [NOTE % slug], out)
+        self.assertIn(cause, self.fail_line(out, slug), out)
+
+    def test_added_note_without_seen_is_refused(self):
+        self.assert_added_note_refused("seen-missing", None, "Seen")
+
+    def test_added_note_at_two_sightings_is_refused_as_a_debt(self):
+        self.assert_added_note_refused("seen-twice", seen(0, 2), "debt")
+
+    def test_added_note_seen_31_days_old_is_refused(self):
+        self.assert_added_note_refused("seen-stale", seen(-31, 1), "Seen")
+
+    def test_added_note_seen_in_the_future_is_refused(self):
+        self.assert_added_note_refused("seen-early", seen(1, 1), "Seen")
+
+    def test_added_note_with_a_count_of_zero_is_refused(self):
+        self.assert_added_note_refused("seen-zero", "Seen: %s x0" % day(0), "Seen")
+
+    def test_added_note_with_a_date_that_is_not_a_day_is_refused(self):
+        self.assert_added_note_refused("seen-feb30", "Seen: 2026-02-30 x1", "Seen")
+
+    def test_added_note_seen_today_passes(self):
+        self.add_note_file("seen-today", seen(0, 1))
+        self.assert_passes()
+
+    def test_added_note_seen_30_days_old_passes(self):
+        # "No more than 30 days old": the window's edge passes, and the 31-day case above is one day past it.
+        self.add_note_file("seen-edge", seen(-30, 1))
+        self.assert_passes()
+
+    def test_deleted_note_at_two_sightings_passes(self):
+        # A deleted note file passes whatever its count: the x2 remedy is to delete it.
+        self.roll_out()
+        self.put(NOTE % "seen-gone", note_line("seen-gone", seen(-1, 2)))
+        self.commit_base()
+        self.delete(NOTE % "seen-gone")
+        self.commit_change()
+        statuses = self.git_out("diff", "--name-status", "origin/main", "HEAD").splitlines()
+        self.assertIn("D\t" + NOTE % "seen-gone", statuses, statuses)  # scope: the delete is in the diff
+        self.assert_passes()
+
+    def test_edit_that_drops_the_seen_field_is_refused(self):
+        rc, out = self.lint_after_edit(note_line("edited-note"), base=note_line("edited-note", seen(-1, 1)))
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [NOTE % "edited-note"], out)
+
+    def test_edit_that_lowers_the_sighting_count_is_refused(self):
+        rc, out = self.lint_after_edit(note_line("edited-note", seen(-1, 1)),
+                                       base=note_line("edited-note", seen(-1, 3)))
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [NOTE % "edited-note"], out)
+
+    def lint_after_rename(self, base, text):
+        # The base holds `base` as the note RENAME_FROM. The branch renames it to RENAME_TO and writes `text` there.
+        self.roll_out()
+        self.put(NOTE % RENAME_FROM, base)
+        self.commit_base()
+        self.move(NOTE % RENAME_FROM, NOTE % RENAME_TO)
+        self.put(NOTE % RENAME_TO, text)
+        self.commit_change()
+        statuses = self.git_out("diff", "--name-status", "origin/main", "HEAD").splitlines()
+        renamed = [s.split("\t")[1:] for s in statuses if s.startswith("R")]
+        want = [[NOTE % RENAME_FROM, NOTE % RENAME_TO]]
+        self.assertEqual(renamed, want, statuses)  # scope: the rename is in the diff
+        return self.lint()
+
+    def test_rename_that_drops_the_seen_field_is_refused(self):
+        rc, out = self.lint_after_rename(note_line(RENAME_FROM, seen(-1, 1)), note_line(RENAME_TO))
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [NOTE % RENAME_TO], out)
+
+    def test_rename_that_lowers_the_sighting_count_is_refused(self):
+        rc, out = self.lint_after_rename(note_line(RENAME_FROM, seen(-1, 3)), note_line(RENAME_TO, seen(-1, 1)))
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [NOTE % RENAME_TO], out)
+
+    def test_rename_that_keeps_the_count_and_the_date_passes(self):
+        rc, out = self.lint_after_rename(note_line(RENAME_FROM, seen(-1, 1)), note_line(RENAME_TO, seen(-1, 1)))
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("FAIL", out)
+
+    def test_added_line_in_the_frozen_file_is_still_refused_beside_a_seen_note(self):
+        lines = self.frozen_base()
+        self.commit_base()
+        self.put(OLD_NOTES, "\n".join(lines + [NEW_LINE]) + "\n")
+        self.put(NOTE % "seen-beside", note_line("seen-beside", seen(0, 1)))
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn(NOTE % "seen-beside", flagged(out), out)  # the valid note passes; the frozen line is refused
+        self.remedy_names_note_folder(out)
+
+    def test_main_real_note_files_pass_as_added_files(self):
+        # Full size: every note file the checkout holds, added as new files, with the text they hold on main.
+        self.roll_out()
+        self.commit_base()
+        folder = os.path.join(REPO, *NOTE_DIR.split("/"))
+        names = sorted(n for n in os.listdir(folder) if n.endswith(".md") and n != "README.md")
+        self.assertTrue(names, "the checkout holds no note file to add")  # scope: there are real notes to read
+        for name in names:
+            with open(os.path.join(folder, name), encoding="utf-8", newline="") as f:
+                self.put(NOTE_DIR + "/" + name, f.read())
+        self.commit_change()
+        statuses = self.git_out("diff", "--name-status", "origin/main", "HEAD").splitlines()
+        added = [s for s in statuses if s.startswith("A\t" + NOTE_DIR + "/")]
+        self.assertEqual(len(added), len(names), statuses)  # scope: every real note is in the diff
+        self.assert_passes()
+
+    # Debt files. A Seen line at column one, or after one leading "- ", is checked when present. No age limit for debts.
+
+    def assert_debt_seen_refused(self, slug, seen_line):
+        self.commit_base()
+        self.put("debts/%s.md" % slug, debt_body(slug, seen_line))
+        self.commit_change()
+        statuses = self.git_out("diff", "--name-status", "origin/main", "HEAD").splitlines()
+        self.assertIn("A\tdebts/%s.md" % slug, statuses, statuses)  # scope: the debt file is in the diff
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), ["debts/%s.md" % slug], out)
+
+    def test_debt_seen_without_a_count_is_refused(self):
+        self.assert_debt_seen_refused("seen-no-count", "Seen: %s" % day(0))
+
+    def test_debt_seen_with_a_count_of_zero_is_refused(self):
+        self.assert_debt_seen_refused("seen-zero", "Seen: %s x0" % day(0))
+
+    def test_debt_seen_with_a_date_that_is_not_a_day_is_refused(self):
+        self.assert_debt_seen_refused("seen-feb30", "Seen: 2026-02-30 x2")
+
+    def test_debt_seen_with_a_word_for_a_date_is_refused(self):
+        self.assert_debt_seen_refused("seen-word", "Seen: soon x2")
+
+    def test_debt_seen_at_two_sightings_passes_at_any_age_in_either_form(self):
+        self.commit_base()
+        self.put("debts/seen-old.md", debt_body("seen-old", seen(-400, 2)))
+        self.put("debts/seen-bullet.md", debt_body("seen-bullet", "- " + seen(0, 1)))
+        self.commit_change()
+        self.assert_passes()
+
+    # --next-debt: the debt with the highest count. A debt with no Seen line counts as x1 with no date. A count tie goes
+    # to the oldest date, a debt with no date after the dated ones, then the slug.
+
+    def commit_debts(self, *debts):
+        """Commits each (slug, Seen line or None) debt on a base, so the folder read and the commit read agree."""
+        self.commit_base()
+        for slug, seen_line in debts:
+            self.put("debts/%s.md" % slug, debt_body(slug, seen_line))
+        self.commit_change()
+
+    def assert_next_debt(self, expected, *slugs):
+        listed = self.git_out("ls-files", "--", "debts").split()
+        for slug in slugs:  # scope: each debt the case names is in the tree before the check reads the folder
+            self.assertIn("debts/%s.md" % slug, listed, listed)
+        rc, out = self.lint("--next-debt")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(out.strip(), expected, out)
+
+    def test_next_debt_names_the_debt_with_the_highest_count(self):
+        self.commit_debts(("alpha", seen(-30, 2)), ("beta", "- " + seen(-1, 5)), ("gamma", seen(-60, 3)))
+        self.assert_next_debt("beta", "alpha", "beta", "gamma")
+
+    def test_next_debt_breaks_a_count_tie_by_the_oldest_date(self):
+        self.commit_debts(("aaa-later", seen(-1, 3)), ("zzz-earlier", seen(-20, 3)))  # the slug order picks the first
+        self.assert_next_debt("zzz-earlier", "aaa-later", "zzz-earlier")
+
+    def test_next_debt_breaks_a_date_tie_by_the_slug(self):
+        self.commit_debts(("zeta", seen(-5, 3)), ("alpha", seen(-5, 3)))
+        self.assert_next_debt("alpha", "zeta", "alpha")
+
+    def test_next_debt_ranks_a_dated_debt_above_an_undated_one_of_the_same_count(self):
+        # The undated debt counts x1 and sorts first by slug, so only the rule about dates picks the other one.
+        self.commit_debts(("aaa-undated", None), ("zzz-dated", seen(-3, 1)))
+        self.assert_next_debt("zzz-dated", "aaa-undated", "zzz-dated")
+
+    def test_next_debt_names_a_lone_debt_with_no_seen_line(self):
+        self.commit_debts(("quiet", None))
+        self.assert_next_debt("quiet", "quiet")
+
+    def test_next_debt_ignores_the_notes_file_the_readme_and_the_note_folder(self):
+        self.commit_debts(("small", seen(-1, 1)))
+        self.put(DEBT_README, "# Debts\n\nSeen: %s x9\n" % day(-1))
+        self.put(DEBT_NOTES, "- loud-note: a gap (hooks/guard.py) Seen: %s x9\n" % day(-1))
+        self.put(NOTE % "loud-note", note_line("loud-note", seen(-1, 9)))
+        self.commit_change()
+        self.assert_next_debt("small", "small")
+
+    # --debt-flow START END: the debt files opened and closed between two refs. The window includes START itself, and a
+    # debt added and deleted inside it is in neither list. The notes file and the README are not debts.
+
+    def test_debt_flow_counts_the_start_commit_and_nets_out_a_debt_opened_and_closed_inside_the_window(self):
+        self.put("debts/old-debt.md", debt_body("old-debt"))
+        self.commit_base()  # the parent of START
+        self.put("debts/start-debt.md", debt_body("start-debt"))
+        self.commit_change()
+        start = self.git_out("rev-parse", "HEAD").strip()  # START
+        self.put("debts/netted-debt.md", debt_body("netted-debt"))
+        self.commit_change()
+        self.delete("debts/netted-debt.md", "debts/old-debt.md")
+        self.put("debts/fresh-debt.md", debt_body("fresh-debt"))
+        self.commit_change()
+        at_start = self.git_out("show", "--format=", "--name-status", start).splitlines()
+        self.assertIn("A\tdebts/start-debt.md", at_start, at_start)  # scope: START itself adds a debt
+        window = self.git_out("log", "--format=", "--name-status", start + "..HEAD").splitlines()
+        self.assertIn("A\tdebts/netted-debt.md", window, window)  # scope: netted-debt is added inside the window
+        self.assertIn("D\tdebts/netted-debt.md", window, window)  # and deleted inside it
+        rc, out = self.lint("--debt-flow", start, "HEAD")
+        self.assertEqual(rc, 0, out)
+        lines = out.splitlines()
+        self.assertEqual(lines[:1], ["debts opened 2, closed 1"], out)
+        self.assertEqual(sorted(lines[1:]), ["+ fresh-debt", "+ start-debt", "- old-debt"], out)
+
+    def test_debt_flow_counts_a_root_start_commit_from_the_empty_tree(self):
+        self.put("debts/root-debt.md", debt_body("root-debt"))
+        self.commit_base()  # START has no parent
+        start = self.git_out("rev-parse", "HEAD").strip()
+        parents = self.git_out("rev-list", "--parents", "-n", "1", start).split()
+        self.assertEqual(len(parents), 1, parents)  # scope: START is a root commit
+        self.put("debts/later-debt.md", debt_body("later-debt"))
+        self.commit_change()
+        rc, out = self.lint("--debt-flow", start, "HEAD")
+        self.assertEqual(rc, 0, out)
+        lines = out.splitlines()
+        self.assertEqual(lines[:1], ["debts opened 2, closed 0"], out)
+        self.assertEqual(sorted(lines[1:]), ["+ later-debt", "+ root-debt"], out)
+
+    def test_debt_flow_with_only_the_readme_and_the_notes_file_changed_names_no_debt(self):
+        self.put(DEBT_README, "# Debts\n\nOne debt per file.\n")
+        self.put(DEBT_NOTES, "- old-line: a gap (hooks/guard.py)\n")
+        self.commit_base()
+        self.put(DEBT_README, "# Debts\n\nOne debt per file, as before.\n")
+        self.put(DEBT_NOTES, "- old-line: a gap (hooks/guard.py)\n- new-line: a gap (hooks/guard.py)\n")
+        self.commit_change()
+        start = self.git_out("rev-parse", "HEAD").strip()
+        changed = self.git_out("show", "--format=", "--name-status", start).splitlines()
+        want = ["M\t" + DEBT_NOTES, "M\t" + DEBT_README]
+        self.assertEqual(sorted(changed), want, changed)  # scope: both are in START
+        rc, out = self.lint("--debt-flow", start, "HEAD")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(out.splitlines(), ["debts opened 0, closed 0"], out)
+
+    def test_debt_flow_with_a_start_that_is_not_a_commit_is_unknown(self):
+        self.commit_base()
+        rc, out = self.lint("--debt-flow", "no-such-start", "HEAD")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("UNKNOWN", out, out)
+
+    def test_debt_flow_outside_a_repo_is_unknown(self):
+        outside = tempfile.mkdtemp(prefix="outside_", dir=RUN_FOLDER)  # a folder in the run folder, no repo above it
+        ceiling = {"GIT_CEILING_DIRECTORIES": RUN_FOLDER}  # git stops searching at the run folder
+        probe = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=outside, env=clean_env(**ceiling),
+                               capture_output=True, text=True)
+        self.assertNotEqual(probe.returncode, 0, "the folder is inside a repo, so the case proves nothing")  # scope
+        rc, out = self.run_check(outside, "--debt-flow", "HEAD", "HEAD", **ceiling)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("UNKNOWN", out, out)
 
     # Section files. Git merges two branches' new section files clean, so the check reads the whole
     # tree. Each red names its cause alone.
