@@ -1,5 +1,7 @@
 {
   "added": "2026-11-15T00:23:00-06:00",
+  "closeReason": "Stale (consultant review, relayed 09:56 CST Nov 17): replaced by your 09:20 CST ruling that a proven fix may merge on a red main.",
+  "closed": "2026-11-17T15:57:00Z",
   "context": "Goal: you see and can overrule every pick a session takes for you (\"Nothing can't be undone don't wait on me\", your 20:18 CST Nov 14 words; and your 00:11 CST Nov 15 question where the picks went).\nProblem (rule): you typed B (option 1, keep as written) on item 791, with the note \"ask consultsnt for a or b and why\". The consultant read that note and your \"always obey the consultant\" as handing it the pick, picked 2 instead, and told you so in chat at 20:33 CST Nov 14. It is the consultant's reading, not your typed words.\nBased on (ruling): own-791-2-narrow-revert-first. The consultant's reasons: the only merge your rules allow onto a red main is the revert of the blamed commit; option 1 lets any merge typed with --base-red-ok and a reason land with no prompt; option 3 keeps a prompt on every revert, which is waste. Unread by triage: merge/merge.py lines 2961-2987.\nDeparts from: main - `--base-red-ok` asks before it lets a merge land on a red main; the pick adds a check that the PR reverts the breaking merge.\nMeanwhile: the pick stands and the work under it continues. Undo: say Overrule; the ruling reopens. An answer of Keep closes this with no act.\nTAKEN FOR YOU: your item 791, option 2 (narrow first): a lane adds the merge-tool check that a `--base-red-ok` PR reverts the breaking merge; the no-prompt rule in #3097 follows it. Taken by consultant (session_013NEJKz5AWFJhGvmCUoi6wQ) at 20:34 CST Nov 14.",
   "home": "ruling own-791-2-narrow-revert-first; step allow-merge-base-red-ok",
   "id": "taken-791-2-revert-first",
@@ -26,7 +28,7 @@
   "ref": "ruling own-791-2-narrow-revert-first",
   "repo": "shivinate7/claude-settings",
   "short": "Taken for you: narrow --base-red-ok first",
-  "status": "open",
+  "status": "closed",
   "title": "Taken for you, against your typed B: narrow first on --base-red-ok. Overrule?",
   "why": "A session took this pick for you. Keep it, or overrule it and the ruling reopens."
 }

@@ -6,6 +6,7 @@
     "powershell": "echo \"CLAUDE_CODE_SESSION_ID=[$env:CLAUDE_CODE_SESSION_ID]\""
   },
   "context": "Goal: local sessions get cloud's autonomy, with the role-file guard still bounding who merges.\nProblem (goal): the lane's design reads the variable CLAUDE_CODE_SESSION_ID to match a session to its role file. Only a local session on your own computers can show whether it exists there. The lane cannot run this from the cloud.\nBased on (read): the coordinator's relay of the lane's request, 20:49 CST (unchecked by triage).\nDeparts from: main \u2014 adds a one-time check on your Mac and your Windows machine; nothing on main changes.\nMeanwhile: the lane builds its tests red first; a second check (claude-role) comes after its first PR lands and is not asked yet.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step local-autonomy-equals-cloud; ruling own-local-autonomy-like-cloud",
   "id": "act-local-session-id-var",
   "kind": "decision",

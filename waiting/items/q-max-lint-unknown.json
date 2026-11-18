@@ -1,0 +1,64 @@
+{
+  "added": "2026-11-17T21:58:25-06:00",
+  "closed": "2026-11-18T10:19:00-06:00",
+  "context": "Goal: unpark six q_max pull requests (1181, 1178, 1183, 1184, 1186 and 1187) without lifting a check.\nProblem (rule): lane lint (the check a lane's branch passes before it merges) refuses q_max pull request 1187 with \"no `touched` job (lane-touched-tests) has run\", because q_max has no such job and marking the pull request ready started no hosted run, so the lint reads unknown for good; only you can allow the flag that skips this or pick another route.\nBased on (measured): runner 12, the GitHub REST read and the merge tool at 21:56 CST Nov 17 on the running tool version a9b6f78f3ace: the hosted-run list for 1187 is empty and the refusal is verbatim as above.\nBased on (ruling): decision private-repos-no-ci (the owner's 11:20 CST Nov 16 ruling that private repos run no hosted jobs and merge without them) and your ruling that a repo changes to fit a shared tool, never the tool to fit a repo.\nDeparts from: main \u2014 lane lint accepts only a real touched run, or the flag, and this adds one of three routes for q_max.\nWaiting on: nothing is stopped by this item except the six parked q_max pull requests; runner 12 holds them until you pick.",
+  "home": "runner 12 holds the six q_max pull requests",
+  "id": "q-max-lint-unknown",
+  "kind": "decision",
+  "n": 955,
+  "options": [
+    {
+      "gain": "The six parked q_max pull requests can move now.",
+      "how": "Each q_max pull request runs lane lint with --lint-unknown-ok \"private-repos-no-ci: q_max has no touched job\".",
+      "id": "allow-lint-unknown-flag",
+      "key": "a",
+      "label": "Allow the lint-unknown flag for q_max pull requests, with a stated reason",
+      "lose": "A flag that lifts a check becomes routine for one repo. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    },
+    {
+      "gain": "No flag is needed, and other repos with no touched job benefit too.",
+      "how": "A builder changes merge --lane-lint so a repo that has no touched job passes that part of the lint.",
+      "id": "tool-reads-not-applicable",
+      "key": "b",
+      "label": "Change the shared merge tool so a repo with no touched job reads not-applicable",
+      "lose": "Hours of building while q_max stays parked. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    },
+    {
+      "gain": "Lane lint reads a real result and no check is lifted; it fits your ruling.",
+      "how": "One q_max pull request adds a job named touched to q_max's own workflow file; after it merges, lane lint reads a real run for the other six.",
+      "id": "q-max-adds-touched-job",
+      "key": "c",
+      "label": "q_max adds a touched job to its own workflow, in one q_max pull request (recommended)",
+      "lose": "The six stay parked until that one pull request merges, and it needs lane lint too, so it may hit the same refusal and need your word on the flag once."
+    }
+  ],
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ), asked by the coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "recommended": "c",
+  "ref": "coordinator relay 21:57 CST Nov 17",
+  "replied": "2026-11-18T10:19:00-06:00",
+  "reply": "Closed, already answered: decision private-repos-no-ci line 25 on main says under \"none\" a lane PR passes lane lint on its local steps alone, so no flag is needed (read on main 10:18 CST; runner 12 and the coordinator report the same). q_max 1186 fails only one real local step (.claude/layout-extras.json kind notes); 1187 carries the same one-line fix. Runner 12 and the q_max lane own the fix.",
+  "repo": "shivinate7/q_max",
+  "short": "q_max lane lint reads unknown: which route?",
+  "shown": [
+    {
+      "id": "allow-lint-unknown-flag",
+      "key": "a",
+      "label": "Allow the lint-unknown flag for q_max pull requests, with a stated reason"
+    },
+    {
+      "id": "tool-reads-not-applicable",
+      "key": "b",
+      "label": "Change the shared merge tool so a repo with no touched job reads not-applicable"
+    },
+    {
+      "id": "q-max-adds-touched-job",
+      "key": "c",
+      "label": "q_max adds a touched job to its own workflow, in one q_max pull request (recommended)"
+    }
+  ],
+  "status": "closed",
+  "title": "How should six parked q_max pull requests pass lane lint when q_max has no touched job?",
+  "why": "c fits your ruling and lifts no check; a lifts a check for a whole repo and b bends the shared tool to one repo's gap. Recommended by the coordinator, relayed, not owner-typed."
+}

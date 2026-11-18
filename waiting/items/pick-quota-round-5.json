@@ -2,6 +2,7 @@
   "added": "2026-11-13T18:58:30-06:00",
   "closed": "2026-11-13T19:22:30-06:00",
   "context": "Goal: the merge tool backs off when the GitHub quota runs low, and never merges under a running batch.\nProblem (risk): round 4 closed the defect you granted (780 c) but found the same kind again: a low-quota reply on the batch-brake check can hold the merge call for up to 900 s after that check. A batch PR marked ready in that window is missed, and the lane would merge under a running batch. Your grant covered one defect only.\nBased on (measured): the reviewer's probe, per the lane (unchecked by triage): with the pulls list low it paused 600 s, then read the PR, then the merge call landed.\nDeparts from: main \u2014 main sends the merge call right after the brake check; this branch can wait first. a changes the branch again, b leaves main as it is, c changes nothing.\nMeanwhile: the lane waits and does nothing more.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "PR #3288; step gh-quota-budget; ruling own-780-c-round-4-3288; decision hold-unsafe-after-round-3",
   "id": "pick-quota-round-5",
   "kind": "decision",

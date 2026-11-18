@@ -1,0 +1,61 @@
+{
+  "added": "2026-11-17T23:38:00-06:00",
+  "closed": "2026-11-18T11:07:00-06:00",
+  "context": "Goal: triage 11's goal reads as met, not stuck on a wording mismatch.\nProblem (rule): the goal text says the step about triage merging its own green PRs (step standing-merges-own-green-pr) lands your 19:05 CST Nov 17 grant \"into CLAUDE.md\", but that step was dropped and the grant sits in the session-tiers bullet (decision session-tiers, the record of what each session role may do) that PR 3639 (the hook merge) landed; the goal check keeps reading gap 2 as unmet, and only you can reword the goal or add a second home.\nBased on (read): the merge tool already lets triage merge only a PR it opened, once its checks pass, and code changes also need a passing Sonnet review on record; it sets no limit on size. The coordinator and an audit agent read it, and it is noted on the step at 20:30 CST Nov 17.\nBased on (ruling): the coordinator's 23:36 CST Nov 17 relay: leave the step dropped; the session-tiers bullet is the grant's home, because a ruling lives in its decision record; it made no CLAUDE.md edit and will not. A coordinator pick, not owner-typed.\nDeparts from: main \u2014 the goal text names CLAUDE.md as the grant's home; this changes the goal wording or adds a second home.\nWaiting on: nothing is stopped; triage keeps gap 2 closed as dropped until you answer.",
+  "home": "triage 11 goal text, gap 2 (the dropped step about triage merging its own green PRs)",
+  "kind": "decision",
+  "n": 960,
+  "options": [
+    {
+      "gain": "The goal check stops flagging gap 2, and there is one place to change the grant later.",
+      "how": "You edit the /goal text so step 2 reads closed: the grant lives in decision session-tiers (landed by PR 3639, the hook merge).",
+      "id": "reword-goal-gap-2",
+      "key": "a",
+      "label": "Reword the goal: gap 2 is closed, the grant's home is the session-tiers bullet",
+      "lose": "You edit the goal text once."
+    },
+    {
+      "gain": "The goal's literal wording is met.",
+      "how": "You or the consultant add one line to the global CLAUDE.md naming the standing merge grant.",
+      "id": "add-claude-md-line",
+      "key": "b",
+      "label": "Also add one CLAUDE.md line carrying the grant",
+      "lose": "Two places that can disagree about what triage may merge. Triage does not edit CLAUDE.md."
+    },
+    {
+      "gain": "No edit.",
+      "how": "Nothing changes; the goal check keeps reporting gap 2 unmet.",
+      "id": "leave-goal-as-is",
+      "key": "c",
+      "label": "Leave the goal as is",
+      "lose": "The goal can never read as met while gap 2 is dropped."
+    }
+  ],
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ), asked by the coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "recommended": "a",
+  "ref": "coordinator relay 23:36 CST Nov 17",
+  "replied": "2026-11-18T11:07:00-06:00",
+  "reply": "Closed. You picked a. Goal v3 is cleared and goal v4 (briefs/triage-11-goal-v4.md) has no gap 2; the grant's home is the session-tiers bullet.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Goal gap 2 wording: grant's home",
+  "shown": [
+    {
+      "id": "reword-goal-gap-2",
+      "key": "a",
+      "label": "Reword the goal: gap 2 is closed, the grant's home is the session-tiers bullet"
+    },
+    {
+      "id": "add-claude-md-line",
+      "key": "b",
+      "label": "Also add one CLAUDE.md line carrying the grant"
+    },
+    {
+      "id": "leave-goal-as-is",
+      "key": "c",
+      "label": "Leave the goal as is"
+    }
+  ],
+  "status": "closed",
+  "title": "Where should the merge grant live: the session-tiers bullet, or also CLAUDE.md?",
+  "why": "a keeps one home for the grant and ends the false unmet reading; b adds a second home that can drift. The coordinator also advised rewording the goal text."
+}

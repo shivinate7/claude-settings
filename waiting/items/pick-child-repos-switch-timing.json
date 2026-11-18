@@ -2,6 +2,7 @@
   "added": "2026-11-13T15:29:34-06:00",
   "closed": "2026-11-13T21:32:00Z",
   "context": "Goal: the child repos move to per-lane merge without losing open work or a way back.\nProblem (rule): your ruling Q1 a (2026-11-12 09:42 CST, decision all-repos-switch-together) says all repos switch together; no repo switches alone. The shared merge tool now has no batch build on main 59da758a3. Child repos still batch through an older installed copy (f1b8031f1): q_max, ios-adblock, banchi, mailaudit (#323 queued) and degen (#702 held on a queued Mac run). Refreshing a child's install removes --batch-build there. The decision says each child needs the stable branch and the revert route first.\nBased on (read): batch runner 11's read, 15:27 CST (home, joyous and the rest unknown), the coordinator's 15:27 note, and the decision text on main. Triage has not read the child repos' PRs.\nDeparts from: main \u2014 children batch today on the old install; both options end that, at different times.\nMeanwhile: runner 11 starts no new batch and keeps its install; nothing refreshes.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step merge-flow-after-anthropic; decision all-repos-switch-together",
   "id": "pick-child-repos-switch-timing",
   "kind": "decision",

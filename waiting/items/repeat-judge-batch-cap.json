@@ -2,6 +2,7 @@
   "added": "2026-11-12T23:04:00Z",
   "closed": "2026-11-13T19:45:46Z",
   "context": "Goal: one stop never sends the model an unbounded prompt.\nProblem (rule): the lane picked 20 as a guess; the oldest 20 new messages go, the rest wait for the next stop; no ruling covers the number.\nBased on (read): main sends every new message in one call, with no cap.\nDeparts from: main has no cap \u2014 the change adds a cap of 20 messages per call.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step judge-replay-corpus",
   "id": "repeat-judge-batch-cap",
   "kind": "decision",

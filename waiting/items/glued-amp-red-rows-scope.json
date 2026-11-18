@@ -1,9 +1,15 @@
 {
   "added": "2026-11-16T15:07:00-06:00",
-  "context": "Goal: the glued-& rebuild makes the check agree with one set of rows, not two.\nProblem (goal): pull request 2015, the earlier glued-& fix, carries test rows that disagree with main's rows for the same command in five groups (14 push rows, 4 owner-judge rows, 2 rule rows, 2 merge rows, 6 more rows), and your b pick on the glued-& question does not say how far it reaches into them.\nBased on (ruling): own-896-897-glued-amp-b, your b pick on the glued-& question.\nBased on (read): the lane's count of red rows by group, as it relayed at 15:01 CST; triage has not re-counted.\nDeparts from: main refuses or asks today in each of the five groups \u2014 option b follows the old pull request's row and loosens main there; option a changes nothing on main.\nMeanwhile: the lane builds only the families your b pick covers.",
+  "closed": "2026-11-17T22:01:17Z",
+  "context": "Answered a, Main's rule wins every time, at 13:14 CST Nov 17. Filed in PR #3606 (head 1fe492990f, lane lint PASS): 27 old rows dropped (push-delete 14, owner-judge 4, shared-tree 2, rule9 2, model-cap 2, frozen 1, ask-alone 1, role-model 1), and the 2 duplicate gh-write-cloud rows in s13406-merge.py. 9 merge-batch rows and 2 rm-var timing rows are red in the lane's sandbox, unmeasured on CI.",
   "holds": "The lane builds only the families your b pick covers; the other red rows wait until you answer.",
   "home": "step check-tail-amp-tidy; ruling own-896-897-glued-amp-b",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-17T19:14:44.370Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 927,
   "options": [
     {
@@ -52,7 +58,7 @@
       "label": "You rule each of the five groups"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "For the glued-& rebuild, when the old pull request 2015's test rows and main's rows give opposite answers for the same command, should main's rule win (a), the old row win (b), or do you rule per group (c)?",
   "why": "The lane recommends a (its words, not yours): it loosens nothing on main."
 }

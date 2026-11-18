@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-18T17:57:53.895Z",
+  "choice": "a",
+  "item": "lane-lint-push-needs-flag",
+  "label": "A: Amend the allow entry and auto-mode-owner-acts so `--lane-lint` may push the main-in merge to the caller's own lane branch",
+  "n": 951,
+  "note": "",
+  "optionId": "amend-entry"
+}

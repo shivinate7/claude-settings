@@ -2,6 +2,7 @@
   "added": "2026-11-13T19:59:09Z",
   "closed": "2026-11-13T20:27:30Z",
   "context": "Goal: a change that keeps failing review ends cleanly, and the stronger model is used only where it earns its cost.\nProblem (rule): you saw an Opus \"final round\". That was the builder's third try (Opus, by standing grant) after a round 2 FAIL, together with the old reviewer round 3. Your 14:01 CST words: round 3 stays for a change that failed round 2; only the round 3 forced after a pass is gone. So the third try still happens. The question is only the model for it.\nBased on (ruling): r9, newest text 14:01 CST Nov 13 (corrected from the 13:29 CST reading); rule roles-third-round-steps-up, which runs a builder's third try on Opus.\nDeparts from: main CLAUDE.md, where roles-third-round-steps-up runs the builder's third try on Opus \u2014 option b would run it on the builder's own row (Sonnet).\nMeanwhile: the third try keeps running on Opus; lane rounds-rules-one-record waits on your pick for the CLAUDE.md wording.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "ruling r9; step rounds-rules-one-record",
   "id": "pick-builder-third-try",
   "kind": "decision",

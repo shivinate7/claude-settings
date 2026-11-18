@@ -2,6 +2,7 @@
   "added": "2026-11-13T15:05:02-06:00",
   "closed": "2026-11-13T16:09:30-06:00",
   "context": "Goal: the receipt-close check stops crying wolf, so a real alarm is not scrolled past.\nProblem (rule): the check's `lane-missing` line fires on every open item with `holds`, but `holds` is also set when an item waits on a merge or a PR, not a lane. The check has no signal that tells a lane wait from a PR wait, so most of its alarms are false. Step close-writes-receipt-answer-gone lists lane-missing as a check in scope (2); dropping it changes that scope.\nBased on (read): lane receipt-close-express's account via the coordinator, 15:04 CST Nov 13. Triage has read neither the check nor the PR. Past rulings: none found on lane-missing in the roadmap record (rulings or steps); your 13:32 CST ruling own-receipt-fix-express only made the lane express.\nDeparts from: main \u2014 the step's scope (2) lists lane-missing as a check; this makes it posting text only (set `lane` on the item when a lane waits) plus the lane named on `answer-unread` lines.\nMeanwhile: the lane fixes its other review findings and waits on this one.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step close-writes-receipt-answer-gone; PR #3264; lane receipt-close-express (session_013NEJL3o4VZAch2NXdx3diD)",
   "id": "pick-drop-lane-missing",
   "kind": "decision",

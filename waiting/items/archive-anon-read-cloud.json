@@ -1,0 +1,53 @@
+{
+  "added": "2026-11-17T20:20:00Z",
+  "closed": "2026-11-17T20:24:00Z",
+  "context": "Goal: a finished lane archives without a session guessing why the guard refused.\nProblem (goal): you picked 937 a, where the guard reads a public repo's open PRs anonymously. The consultant measured at 14:15 CST that in a cloud session the session proxy refuses an unattached public repo even with no token (cli/cli answered 403, \"GitHub access to this repository is not enabled... add_repo\"). An attached repo reads anonymously fine. So the anonymous read only helps where a session has direct internet access, which today means local sessions, not the cloud where the incident happened. Only you can say whether it is still worth building.\nBased on (measured): consultant, 14:15 CST Nov 17: cli/cli 403 from the proxy with no token; claude-settings (attached) returned 505 open PRs anonymously.\nBased on (ruling): own-937-a (owner, 2026-11-17 13:11 CST, the guard reads a public repo's open PRs anonymously; a private repo's refusal names add_repo access push, then retry)\nDeparts from: ruling 937 a \u2014 the \"reads anonymously\" half; a keeps it, b drops it and keeps only the add_repo access push remedy text.\nMeanwhile: draft PR #3136 stays at 764e0adf21; the consultant builds nothing more on it until you answer.",
+  "home": "step archive-refusal-names-add-repo (PR #3136)",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-17T20:20:00Z",
+    "choice": "b",
+    "note": "b) Drop the anonymous read; keep only the add_repo access push remedy. Owner chat 14:20 CST Nov 17, relayed by the consultant: \"Gotcha on 937 then just do the option that has you add in the repo you need\"."
+  },
+  "n": 940,
+  "options": [
+    {
+      "gain": "Local sessions read a public repo with no token.",
+      "how": "Keep the anonymous read plus the add_repo access push remedy.",
+      "id": "keep-anon",
+      "key": "a",
+      "label": "Keep the anonymous read and the add_repo access push remedy",
+      "lose": "A test seam (GITHUB_API_URL) and a local test server to build; no gain in the cloud, where the incident happened."
+    },
+    {
+      "gain": "Smaller change that fixes the cloud incident.",
+      "how": "Drop the anonymous read; the refusal names add_repo access push and says retry.",
+      "id": "drop-anon",
+      "key": "b",
+      "label": "Drop the anonymous read; keep only the add_repo access push remedy",
+      "lose": "A local session with no gh login still cannot read a public repo."
+    }
+  ],
+  "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "recommended": "b",
+  "ref": "consultant message 14:18 CST Nov 17; ruling 937 a; PR #3136",
+  "replied": "2026-11-17T20:24:00Z",
+  "reply": "Answered b at 14:20 CST in chat, relayed by the consultant. It replaces the \"reads anonymously\" half of ruling 937 a. Closed 14:24 CST by triage 11 and filed on step archive-refusal-names-add-repo.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Anonymous read in the cloud?",
+  "shown": [
+    {
+      "id": "keep-anon",
+      "key": "a",
+      "label": "Keep the anonymous read and the add_repo access push remedy"
+    },
+    {
+      "id": "drop-anon",
+      "key": "b",
+      "label": "Drop the anonymous read; keep only the add_repo access push remedy"
+    }
+  ],
+  "status": "closed",
+  "title": "The anonymous read does not work in the cloud. Keep it, or drop it and keep only the remedy text?",
+  "why": "b fixes the cloud incident with less to build; a only helps local sessions without a login."
+}

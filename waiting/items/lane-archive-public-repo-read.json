@@ -1,0 +1,64 @@
+{
+  "added": "2026-11-17T19:14:00Z",
+  "closed": "2026-11-17T19:16:00Z",
+  "context": "Goal: a finished lane can be archived without a session guessing why the guard refused.\nProblem (goal): The hook lane-closes-after-records refused archive_session twice with \"the open pull requests of the lane's repo (shivinate7/mailaudit) could not be read\". Cause, measured by the coordinator: its first add_repo used access read; the repo is public, so read attached nothing and the guard's gh could not read its open PRs; add_repo with access push fixed it. The refusal names no remedy, so a session cannot tell \"cannot read\" from \"records not landed\". You asked how to resolve this mechanically.\nBased on (measured): the coordinator's own attach and retry, 11:4x to 13:10 CST Nov 17; step archive-refusal-names-add-repo already plans a remedy text, but it says \"(read)\", which fails for a public repo.\nDeparts from: main, where the hook refuses with no remedy and reads only through the session's gh; a changes how it reads, b changes only the text, c changes no code.\nWaiting on: nothing stopped; the coordinator attaches with push meanwhile, and triage files your answer on the step.\nAnswered 13:11 CST Nov 17 in the coordinator's chat (relayed by the coordinator, 13:11 CST): option a, \"approved\". Closed 13:16 CST by triage 11. Filed on step archive-refusal-names-add-repo.",
+  "home": "step archive-refusal-names-add-repo (PR #3136); hook lane-closes-after-records",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-17T19:11:00Z",
+    "choice": "a",
+    "note": "a) Recommended. The guard reads a public repo's open PRs anonymously. The refusal names the route for a private repo: attach with add_repo access push, then retry. Then: approved."
+  },
+  "n": 937,
+  "options": [
+    {
+      "gain": "Fixes the cause for public repos and names the way out for private ones; no session has to guess.",
+      "how": "A code change in the hook plus the refusal text.",
+      "id": "guard-reads-anon",
+      "key": "a",
+      "label": "The guard reads a public repo's open PRs anonymously over REST, and for a private repo the refusal says to attach it with add_repo access push, then retry",
+      "lose": "A hook change that needs review rounds, and an anonymous read is rate limited."
+    },
+    {
+      "gain": "Cheapest; the existing step nearly covers it.",
+      "how": "One sentence in the refusal; no new read.",
+      "id": "text-only",
+      "key": "b",
+      "label": "Only the refusal text changes: it names the add_repo access push attach",
+      "lose": "A public repo still needs the attach every time."
+    },
+    {
+      "gain": "No code change.",
+      "how": "A standing rule for the coordinator.",
+      "id": "attach-at-start",
+      "key": "c",
+      "label": "The coordinator attaches every lane repo with push access at lane start; no guard change",
+      "lose": "One attach per repo at every lane start, and the rule can be forgotten; the refusal still names no remedy."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "recommended": "a",
+  "ref": "hook lane-closes-after-records (refused archive_session twice, 11:4x CST Nov 17); step archive-refusal-names-add-repo",
+  "repo": "shivinate7/claude-settings",
+  "short": "Archive refusal on a public repo",
+  "shown": [
+    {
+      "id": "guard-reads-anon",
+      "key": "a",
+      "label": "The guard reads a public repo's open PRs anonymously over REST, and for a private repo the refusal says to attach it with add_repo access push, then retry"
+    },
+    {
+      "id": "text-only",
+      "key": "b",
+      "label": "Only the refusal text changes: it names the add_repo access push attach"
+    },
+    {
+      "id": "attach-at-start",
+      "key": "c",
+      "label": "The coordinator attaches every lane repo with push access at lane start; no guard change"
+    }
+  ],
+  "status": "closed",
+  "title": "A lane's archive was refused because the guard could not read its repo's open PRs, and the refusal named no way out. Which fix?",
+  "why": "It fixes the cause for public repos and gives private repos a named remedy; b and c leave a public repo failing the same way."
+}

@@ -2,6 +2,7 @@
   "added": "2026-11-13T20:33:00-06:00",
   "closed": "2026-11-14T02:35:00Z",
   "context": "Goal: a local session creates sessions without asking you, as a cloud session does.\nProblem (goal): you said you get asked to create sessions locally and not in the cloud (your ruling 20:28). The lane needs the exact words of that prompt, and which tool it names, to find the setting that asks. The prompt lives on your screen, in no log triage can read.\nBased on (read): your ruling 20:28 CST via the consultant; the lane is reading the Mac session's logs meanwhile (the consultant's word; unchecked by triage).\nDeparts from: main \u2014 main's local settings leave session creation to an ask; the lane changes that to match cloud.\nMeanwhile: the lane reads the Mac session's logs; nothing else waits on this.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step local-autonomy-equals-cloud; ruling own-local-autonomy-like-cloud",
   "id": "act-local-create-session-prompt",
   "kind": "task",

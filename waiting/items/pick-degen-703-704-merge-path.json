@@ -2,6 +2,7 @@
   "added": "2026-11-13T22:12:00-06:00",
   "closed": "2026-11-14T04:15:00Z",
   "context": "Goal: degen PRs #703 (six Playwright shards) and #704 merge now, since you want to work in degen and home.\nProblem (rule): degen has no way to merge them today. Its lane PRs stay draft, so their checks skip. Decision draft-until-reviewed and decision all-repos-switch-together keep per-lane merge off until every repo switches, and the batch tool they need (--batch-build) is not on the stable tool (9f8ea0e3c). Runner 11 will not run an old tool by hand. Triage has not read those two decisions; the coordinator cites them.\nBased on (read): runner 11 reads of #703 (run 43478243400) and #704 (run 43498238812), both skipped because draft, relayed by the coordinator 22:09 CST; unchecked by triage.\nBased on (ruling): your 16:09 CST Nov 13 words (ruling own-act6-draft-prs-when-green): child-repo switch waits for the drain to end.\nDeparts from: main \u2014 child repos get no batch build today; a adds a pin branch of the removed tool for degen only, b changes degen alone to per-lane merge, c changes nothing.\nMeanwhile: the coordinator keeps working and holds only degen #703 and #704.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step merge-flow-after-anthropic; ruling own-act6-draft-prs-when-green; coordinator 22:09 CST Nov 13",
   "id": "pick-degen-703-704-merge-path",
   "kind": "decision",

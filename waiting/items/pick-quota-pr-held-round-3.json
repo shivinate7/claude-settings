@@ -2,6 +2,7 @@
   "added": "2026-11-13T17:19:45-06:00",
   "closed": "2026-11-13T18:29:53-06:00",
   "context": "Goal: the merge tool backs off when the GitHub quota runs low, without opening a way to merge a blocked PR.\nProblem (risk): PR #3288 failed round 3 review with a small negative net safety value, so it is held (decision hold-unsafe-after-round-3). The back-off can delay the final merge call by up to 15 minutes after the BLOCKED/BEHIND check. A PR that turns BLOCKED in that window could be merged by the admin-bypass token. A held change gets no fix lane and no more work until you decide. My earlier pick (wait for GitHub's reset time, step gh-quota-budget) did not say where the wait may sit; that gap is what round 3 found.\nBased on (measured): the reviewer's probe on a scratch copy with the quota at 20 of 5000: PR read, wait 900 s, then the merge call; main sends the merge call within milliseconds. Lane gh-quota-budget's account via its message 17:19 CST Nov 13; triage has not read the review. Past rulings: hold-unsafe-after-round-3 and pr-review-record (round 4 needs your grant).\nDeparts from: main \u2014 main sends the merge call right after the check; the branch can wait first.\nMeanwhile: the lane waits and does nothing more; the quota back-off does not ship.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "PR #3288; step gh-quota-budget; decision hold-unsafe-after-round-3; lane gh-quota-budget (session_013NEJKzVtYq71orELDCuDRV)",
   "id": "pick-quota-pr-held-round-3",
   "kind": "decision",

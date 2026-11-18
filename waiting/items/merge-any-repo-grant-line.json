@@ -2,6 +2,7 @@
   "added": "2026-11-15T23:50:00-06:00",
   "closed": "2026-11-16T19:35:30Z",
   "context": "Goal: your standing merge words have one home in the repo, so every session reads the same grant.\nProblem (rule): the grant line belongs in `.claude/CLAUDE.md` Standing grants, a file only you may change; the consultant asks to add the line below, and it says more than runner 12's five repos.\nBased on (notes): you typed in the consultant's chat at 23:43 CST Nov 15: \"runner 12\u2019s repos it has standing merge authority in just like any session anything can merge rn isnt that not a surprise\". The consultant's reading of the line is wider than the ruling I filed (scope a, runner 12's five repos); this item lets you choose.\nProposed line: \"Merge in any repo (owner, 2026-11-15 23:43 CST): any session may merge a PR in any of the owner's repos with the merge tool, under every merge check.\"\nDeparts from: main \u2014 `.claude/CLAUDE.md` Standing grants lets only the batch runner merge, on a named yes or the relayed yes; this adds a line that lets any session merge in any of your repos.\nMeanwhile: sessions act on your relayed chat words; the merge tool's checks still apply.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "rewrite-merge-decisions-for-lane-merge",
   "kind": "decision",
   "lane": "consultant",

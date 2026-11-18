@@ -1,5 +1,7 @@
 {
   "added": "2026-11-15T01:24:19-06:00",
+  "closeReason": "Consultant takes it (relayed 09:56 CST Nov 17): the groups already ship.",
+  "closed": "2026-11-17T15:57:00Z",
   "context": "Goal: the page's group names tell you at a glance what each group means.\nProblem (goal): the lane that sorts the page says the old name for these groups, \"session role\", misnames them. The page groups items by how soon an answer is needed: Blocking (something is stopped until you answer), Upcoming (an answer is needed by a set time) and Whenever (nothing waits). Its current names are Blocking, Upcoming and Whenever. Only you can say what these groups should be called.\nBased on (report): the lane's report relayed by the coordinator at 01:24 CST; the waiting-page skill's tier definitions (holds puts an item in Blocking, by puts it in Upcoming, neither puts it in Whenever). No ruling on group names was found in the rulings.\nDeparts from: main \u2014 adds a question; nothing on main changes until you answer. The names the lane uses now stay.\nMeanwhile: the lane's PR 2906 goes on to runner 10; nothing waits on this answer.\nWhy yours: only you choose what the groups on your page are called, and the page has no free-text decision shape, so it is asked as a task with a note box.",
   "home": "step tier-items-sorted; PR 2906",
   "id": "ask-names-for-three-page-groups",
@@ -10,7 +12,7 @@
   "ref": "lane waiting-page-sorting report, relayed by the coordinator 01:24 CST Nov 15; PR 2906 (waiting page sorting)",
   "repo": "shivinate7/claude-settings",
   "short": "Names for three groups",
-  "status": "open",
+  "status": "closed",
   "steps": [
     "Type the names you want for the three groups into this item's note box, in this order: Blocking, Upcoming, Whenever. Write \"keep\" for any you want left as is.",
     "Press Done. Triage relays your names to the lane."

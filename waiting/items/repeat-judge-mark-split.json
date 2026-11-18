@@ -2,6 +2,7 @@
   "added": "2026-11-12T23:04:00Z",
   "closed": "2026-11-13T19:45:46Z",
   "context": "Goal: a repeated message is marked once, and a failed check never marks a clean message.\nProblem (rule): the lane split checking from marking so a failure leaves every line unmarked; no ruling covers this.\nBased on (read): main marks each message inside the check step.\nDeparts from: main marks while checking \u2014 the change checks all first, then marks.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step judge-replay-corpus",
   "id": "repeat-judge-mark-split",
   "kind": "decision",

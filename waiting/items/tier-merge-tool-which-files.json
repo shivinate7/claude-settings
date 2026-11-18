@@ -1,0 +1,48 @@
+{
+  "added": "2026-11-17T22:00:36-06:00",
+  "context": "Goal: every pull request gets the review depth its kind of change needs, set by one table, with no gap where two rules disagree.\nProblem (rule): the round rules list names the checks inside merge/ but not every file there, so the table cell for the merge tool is unset and only you can say which files count.\nBased on (read): the plan plan on branch lane/pr-template-risk-tiers (docs/plans/pr-template-risk-tiers.md, read from main commit 69ab998832, 21:38 CST Nov 17): the list names merge/ checks, not all of merge/.\nDeparts from: main \u2014 the list names merge/ checks only and no decision covers the rest of merge/ \u2014 a reading is picked (a or b).\nWaiting on: nothing is stopped; step pr-template-risk-tiers waits on your pick, then a test-author writes the template-check cases and a builder lands them.",
+  "home": "step pr-template-risk-tiers",
+  "id": "tier-merge-tool-which-files",
+  "kind": "decision",
+  "n": 957,
+  "options": [
+    {
+      "gain": "Matches the list; no new cost on routine merge-tool edits.",
+      "how": "The table follows the list as written. Round 1 stays Haiku at xhigh, as for every change.",
+      "id": "checks-only",
+      "key": "a",
+      "label": "Only the merge/ check files count: the net-value test applies there, not to other merge/ files (recommended)",
+      "lose": "An edit to a merge/ file that is not a listed check owes no net-value test."
+    },
+    {
+      "gain": "The merge tool, which every merge depends on, always gets the net-value test.",
+      "how": "The table row reads guard or check yes for any merge/ file. Round 1 stays Haiku at xhigh, as for every change.",
+      "id": "all-merge",
+      "key": "b",
+      "label": "All of merge/ counts: the net-value test applies to any merge/ edit that fails its last round",
+      "lose": "More review work on every merge-tool edit that fails a round."
+    }
+  ],
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "a",
+  "ref": "owner chat 19:45 CST Nov 17 (relayed by the consultant): land the verification article's findings; PR template lines and risk tiers by change",
+  "replied": "2026-11-18T11:59:00-06:00",
+  "reply": "Fastest while still effective is a (only the merge/ check files count). One correction to the item: the 'stronger first review' wording is wrong. Round 1 runs the same model (Haiku at xhigh) for every change, a guard or check change included (your ruling of 19:45 CST Nov 17, decision agent-model-cap). What the 'guard or check' label changes is only what is owed after a failed last round: a net-value test and a third round. So a costs nothing extra on routine merge-tool edits, and b adds that test to every merge/ edit, which only matters when a review fails. I have asked the consultant for its view and will add it here. Item 956 has the same wrong wording.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Tier table: which merge-tool files count as checks?",
+  "shown": [
+    {
+      "id": "checks-only",
+      "key": "a",
+      "label": "Only the merge/ check files count: the net-value test applies there, not to other merge/ files (recommended)"
+    },
+    {
+      "id": "all-merge",
+      "key": "b",
+      "label": "All of merge/ counts: the net-value test applies to any merge/ edit that fails its last round"
+    }
+  ],
+  "status": "open",
+  "title": "Which files under merge/ make a pull request a guard or check change?",
+  "why": "a matches the list as written; b is safer but adds the net-value test to every merge-tool edit. Round 1 is the same model either way (decision agent-model-cap). Recommended by triage, not owner-typed."
+}

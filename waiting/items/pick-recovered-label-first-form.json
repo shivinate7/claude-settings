@@ -2,6 +2,7 @@
   "added": "2026-11-15T00:43:00-06:00",
   "closed": "2026-11-15T17:39:30Z",
   "context": "Goal: the Recovered guard accepts the carry-line form that the report rules teach.\nProblem (rule): the guard now counts `- OTHER: Recovered: x (git)` (a bullet, then the Done tag). It still refuses the label-first form `**Done** OTHER: Recovered: x (git)`. Counting that form too would add a second accepted form to a shared tool, which needs your word.\nBased on (read): the round 1 reviewer of PR 3456 found the label-first form refused and the bullet form passing (lint/report_guard.py, CARRY_START). Triage read the lane's message, not the code.\nBased on (ruling): your 23:50 CST Nov 14 \"we need to fix the guard\" (step recovered-guard-remedy; the meaning is the consultant's reading). Your earlier cull ruling r5 covers wrong refusals of the Recovered line (15:18 CST Nov 10: \"A is fine ...\"); it does not say whether a second form is accepted.\nDeparts from: main refuses `- OTHER: Recovered: ...`; PR 3456 accepts it; the label-first form stays refused.\nMeanwhile: the lane keeps PR 3456 as it is (a draft, handed in to its coordinator). Nothing else waits.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step recovered-guard-label-first (lint/report_guard.py)",
   "id": "pick-recovered-label-first-form",
   "kind": "decision",

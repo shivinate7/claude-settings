@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-18T05:44:00-06:00",
+  "context": "Goal: publish the list of open pull requests whose work may be lost, so each can be sorted.\nProblem (rule): The ledger tool writes nothing when any read fails, and 89 of 478 rows cannot be read today, so only you can say whether unread rows may be published marked unknown.\nBased on (measured): the fourth run (73 minutes, 05:40 CST Nov 18) wrote nothing and printed 89 unknown rows; only the newest 100 of 2,304 sessions were refreshed, and three earlier runs failed on time limits and a stale input file.\nBased on (read): the coordinator at 05:43 CST says no session can read project chat threads, so the thread list has no source, and a full session list is about 23 calls of 64 KB each that it will not spend unless you ask.\nDeparts from: main \u2014 the ledger tool refuses to write when a read is unknown; option a changes it to write the row marked unknown.\nWaiting on: the ledger stays unpublished; triage 11 acts next on your pick (option a: change the tool, run it, publish; option b: wait for a source of the thread list).",
+  "home": "step lost-work-ledger-no-merge-base",
+  "kind": "decision",
+  "n": 962,
+  "options": [
+    {
+      "gain": "The ledger publishes now, with 389 rows sorted and 89 plainly marked unread.",
+      "how": "Change the tool so a failed read marks that row unknown instead of stopping the whole run; run it once and publish the file with every unknown row visible.",
+      "id": "write-unread-as-unknown",
+      "key": "a",
+      "label": "Write unread rows marked unknown",
+      "lose": "A ledger with 89 unknown rows; the refuse-on-failed-read rule no longer protects this file."
+    },
+    {
+      "gain": "No unknown rows and the refusal rule stays whole.",
+      "how": "Nothing is published until someone supplies the project chat thread list and about 23 pages of session reads.",
+      "id": "wait-for-full-reads",
+      "key": "b",
+      "label": "Wait for a thread list and a full session list",
+      "lose": "No ledger for a time that cannot be measured; the thread list has no source today."
+    }
+  ],
+  "owner": "triage 11 (session_013NEJKzyLYRTQKeLpis8JKJ), from the coordinator's relay at 05:43 CST Nov 18",
+  "recommended": "a",
+  "ref": "coordinator relay 05:43 CST Nov 18; ledger run four, 05:40 CST Nov 18",
+  "replied": "2026-11-18T11:08:00-06:00",
+  "reply": "Your point is fair. A PR with no live owner (archived, stale, forgotten) is not what made 89 of 478 rows unknown: GitHub lists every PR whatever its owner. The unknown part was which session holds each one, because the run could not read the full thread list or session list. Your idea fixes that. The coordinator answered at 11:07 CST: 653 sessions under it (254 archived, 399 not), too long to send as rows; my live file's session list comes from the same read, so I use that. A PR no listed session holds reads 'no live owner', a known value, not unknown. This item stays open until the rerun shows the unknown count.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Lost-work ledger unknowns",
+  "shown": [
+    {
+      "id": "write-unread-as-unknown",
+      "key": "a",
+      "label": "Write unread rows marked unknown"
+    },
+    {
+      "id": "wait-for-full-reads",
+      "key": "b",
+      "label": "Wait for a thread list and a full session list"
+    }
+  ],
+  "status": "open",
+  "title": "Publish the lost-work ledger with unread rows marked unknown, or wait for full reads?",
+  "why": "a publishes the 389 rows that were read now and keeps each unread row visible; b has no source for the thread list, so it may never finish. The coordinator also recommends a."
+}

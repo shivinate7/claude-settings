@@ -2,6 +2,7 @@
   "added": "2026-11-13T17:40:00Z",
   "closed": "2026-11-13T18:29:53-06:00",
   "context": "Goal: child repos' CI follows the stable branch (R44).\nProblem (rule): the reviewer found no owner words retiring D-499 and D-833; R44 (your 13:57 and 14:05 CST words) only names them as the obstacle. Round 1 of #1167 failed on this.\nThe nuance, read from q_max's decisions by runner 11 (11:57 CST Nov 13): D-499 deleted q_max's own tool guard and its whole-tree text sweep; the parent's guard plus a CI `ste-lint` step on changed files replace them. You accepted that narrowing, knowing the trade. D-833 makes `npm run lint` run q_max's STE lint from the claude-settings commit that checks.yml pins, so a lane sees the same STE lines CI does (cause: PRs #1019 and #1101 went red on STE after hand-off). D-833 names D-499 and changes neither. Both stand today. a deletes both (D-570: a retired entry is deleted, not bannered) before the stable branch exists, so lane lint would lose the lock that keeps it matching CI. b keeps them live and rewrites the pin entry when the branch lands. Your 714 b answer (lane lint resolves the same moving ref CI uses) points where D-833 ends up anyway, so this is timing.\nBased on (ruling): R44; decision D-570 (how decisions end); your 714 b.\nDeparts from: q_max main \u2014 it keeps both decisions live; choosing a deletes them.\nMeanwhile: #1167 waits; #1165 goes on.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "q_max PR #1167 (R44 lane)",
   "id": "qmax-d499-d833-end",
   "kind": "decision",

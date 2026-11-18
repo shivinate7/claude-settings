@@ -2,6 +2,7 @@
   "added": "2026-11-13T19:38:56-06:00",
   "closed": "2026-11-13T19:44:30-06:00",
   "context": "Goal: degen PR #702 merges on a real green run, and the three held degen PRs (#702, #703, #704) follow.\nProblem (rule): the merge tool refused #702 with git-never-merge-failing-ci: \"a check is red: milestone-proof (suite): fail\". It names two OLD runs on the same head (43472967936, the hang on your Mac, and 43401362635), while the newest run 43534814910 (the Mac suite leg you asked to re-run on 770 a) is green on that head, after 34 minutes on the GitHub runner. The merge tool's own text says any red check or run ends the wait (merge.py, wait_checks); I have not read whether a newer green run of the same name clears an older red one. Runner 11's reading: likely a false alarm, unmeasured.\nBased on (read): runner 11's report via the coordinator; I read the tool's wait_checks text in a local checkout that may be behind main.\nDeparts from: main \u2014 the tool counts old red runs; a waits for a fix that reads the newest run per name, b has you merge #702 on GitHub.\nMeanwhile: runner 11 holds #702, #703 and #704 and sends nothing.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "degen PR #702 (head 4a40bb5868b7); ruling own-770-a-degen-702-mac-rerun; step merge-reads-newest-check-run",
   "id": "pick-degen-702-old-red-runs",
   "kind": "decision",

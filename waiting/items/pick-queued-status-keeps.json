@@ -1,13 +1,14 @@
 {
-  "added": "2026-11-13T18:21:00Z",
+  "added": "2026-11-17T19:56:00Z",
+  "closed": "2026-11-17T20:53:00Z",
   "context": "ANSWER to your question (20:29 CST Nov 14), from this item's earlier reply (13 Nov 13:22 CST) and main's GLOSSARY.md read now: nothing is overruled. 'debt' has a glossary home on main (a known gap, or deferred work). 'deferred' is not a step status: the roadmap build only counts steps waiting on you under that word. Main's glossary has no step-status rows yet; step glossary-step-statuses adds them (blocked, folded; PR #3195 also adds queued). The only open question is queued: keep it as its own status (a) or fold it into todo (b). Until you say, the lane keeps queued.\nGoal: one name per step status in GLOSSARY.md.\nProblem (rule): your 583 a asked for one name per thing, and my brief said to drop 'queued' as an alias of todo. The lane read the code: the roadmap build accepts 'queued' and treats it differently from todo (ready-not-started reads only todo and ready). Dropping it would make the 3 queued steps on the roadmap branch show as an unknown status and fail the build.\nBased on (read): KNOWN_STATUS, LISTED_STATUS and TODO_STATUS in skills/roadmap/build.py.\nDeparts from: main has no step-status rows in the glossary \u2014 a adds rows and keeps 'queued' as its own status; b retires it.\nMeanwhile: draft PR #3195 waits on the lane lint.",
   "home": "step glossary-step-statuses (draft PR #3195)",
   "id": "pick-queued-status-keeps",
   "kind": "decision",
   "lastAnswer": {
-    "at": "2026-11-16T05:10:39.004Z",
-    "choice": "none",
-    "note": "does it make sense to get another new word and if so make the case for it"
+    "at": "2026-11-17T20:49:17Z",
+    "choice": "c",
+    "note": "c) Fold 'queued' into 'blocked', each step naming the step it waits behind. Saved on the page 14:49 CST Nov 17."
   },
   "n": 735,
   "options": [
@@ -26,12 +27,21 @@
       "key": "b",
       "label": "Retire 'queued'",
       "lose": "A second lane for a small gain."
+    },
+    {
+      "gain": "One fewer status, and 'waits behind X' says more than 'queued'; matches your lean and the consultant's view.",
+      "how": "The 3 queued steps (about 22 records) become blocked, each naming the step id it waits behind. The same lane adds a guard so the blocked-nag skips a blocker whose step is open and moving. Draft PR #3195 is rewritten to drop 'queued'.",
+      "id": "fold-into-blocked",
+      "key": "c",
+      "label": "Fold 'queued' into 'blocked', each step naming the step it waits behind (you and the consultant lean here)",
+      "lose": "A lane that edits about 22 records and the nag guard; without the guard the steps nag as if someone had to act."
     }
   ],
-  "owner": "triage (session_013NEJL19M4Jwh49tAdowQXp)",
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "c",
   "ref": "lane glossary-step-statuses, 12:17 CST Nov 13",
-  "replied": "2026-11-16T13:40:45-06:00",
-  "reply": "The consultant's read, 13:39 CST Nov 16 (relayed, not your answer): it also picks the third way, fold the queued steps into blocked, each naming what it waits behind. Why: one fewer status, and \"waits behind X\" says more than \"queued\". Risk it names: blocked steps show in the build's blocked list and may nag as if a blocker needs action, when they only wait their turn. Its guard: the blocker named is a step id, and the nag skips a blocker whose step is open and moving. So you and the consultant both lean to the third way. It is not option a or b, and it changes about 22 records, so I have not done it. Say \"fold into blocked\" and the lane does it (the nag guard comes with it). Item stays open.",
+  "replied": "2026-11-17T20:58:00Z",
+  "reply": "Answered c at 14:49 CST. Closed 14:53 CST by triage 11. Correction 14:58 CST: the lane found that main's roadmap build has no blocked-nag and no row that reads blockedBy, so the guard I named has nothing to guard. The lane now does the fold only (queued to blocked, glossary and build.py drop queued) and builds no new nag row; I wrongly wrote that the nag existed. A blocked-step nag row would be a separate step, and only if you want it.",
   "repo": "shivinate7/claude-settings",
   "short": "Keep 'queued' as its own step status?",
   "shown": [
@@ -44,9 +54,14 @@
       "id": "retire-queued",
       "key": "b",
       "label": "Retire 'queued'"
+    },
+    {
+      "id": "fold-into-blocked",
+      "key": "c",
+      "label": "Fold 'queued' into 'blocked', each step naming the step it waits behind (you and the consultant lean here)"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "In the glossary, should 'queued' stay as its own step status, or be retired into 'todo'?",
   "why": "Triage took this pick (undoable: a later lane can retire the name); it stands unless you choose b."
 }

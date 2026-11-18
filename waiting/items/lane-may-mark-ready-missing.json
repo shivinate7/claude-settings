@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-17T18:08:00Z",
+  "closed": "2026-11-17T18:20:00Z",
+  "context": "Goal: a lane in a cloud session can mark its own PR ready, or the rule says plainly why not.\nProblem (rule): The coordinator asked for the cloud ready-mark debt to point to decision lane-may-mark-ready. Triage read main: no decision file has that name; it is only a guard test family in hooks/test_guard.py. The debt in draft PR #3622 points to draft-until-reviewed (ruling Q2) instead.\nDeparts from: main, where no decision named lane-may-mark-ready exists; a keeps that, b adds a decision file.\nWaiting on: nothing stopped.\nClosed 12:20 CST Nov 17: pick a, taken by triage 11 on the consultant's word (the name was a typo for the guard test family; no decision is missing; a reversible home pick the record already answers). Not an owner answer. The debt stays on draft-until-reviewed (ruling Q2).",
+  "home": "step lane-ready-mark-mcp-cloud; PR #3622",
+  "kind": "decision",
+  "n": 936,
+  "options": [
+    {
+      "gain": "No new record; PR #3622 can merge as written.",
+      "how": "The debt cites the existing ruling. No new decision.",
+      "id": "keep-q2",
+      "key": "a",
+      "label": "Keep the debt on draft-until-reviewed",
+      "lose": "The name the coordinator and lane used stays unwritten."
+    },
+    {
+      "gain": "The name in use has a home you can read.",
+      "how": "A record-writer adds the decision file; the debt cites it.",
+      "id": "write-decision",
+      "key": "b",
+      "label": "Write a decision named lane-may-mark-ready and point the debt to it",
+      "lose": "One more decision file, and PR #3622 waits for it."
+    }
+  ],
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "a",
+  "ref": "decision lane-may-mark-ready (named by the coordinator 11:16 CST Nov 17, no file on main); decision draft-until-reviewed (ruling Q2)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Which decision owns the ready mark?",
+  "shown": [
+    {
+      "id": "keep-q2",
+      "key": "a",
+      "label": "Keep the debt on draft-until-reviewed"
+    },
+    {
+      "id": "write-decision",
+      "key": "b",
+      "label": "Write a decision named lane-may-mark-ready and point the debt to it"
+    }
+  ],
+  "status": "closed",
+  "title": "The ready-mark debt cites a decision that does not exist on main. Keep the debt on draft-until-reviewed, or write the missing decision?",
+  "why": "The existing ruling already covers it, so a second decision would repeat it."
+}

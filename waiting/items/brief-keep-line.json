@@ -2,6 +2,7 @@
   "added": "2026-11-12T17:10:00Z",
   "closed": "2026-11-16T04:55:58Z",
   "context": "Goal: a fix round never undoes work the lane already landed (your ask fb-1041-1, Nov 2 10:41 CST).\nProblem (rule): the fix needs one new sentence in rule roles-brief-contents (what a spawner's brief to an agent must hold) in CLAUDE.md, and a CLAUDE.md rule takes your wording.\nBased on (read): lane fan-prose-unmapped-3 checked old #1099 (an older no-undo PR that #2734 replaces) against main and #2734 at 11:08 CST Nov 12; the builder.md and brief.md prose ship on #2734, and this sentence is the part left.\nDeparts from: main \u2014 adds a Keep: line to every round 2 and 3 brief, naming the lane's earlier commits to keep.\nMeanwhile: the lane ships the builder.md and brief.md prose and does not wait.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "no-undo-brief-rule-sentence",
   "kind": "decision",
   "lastAnswer": {

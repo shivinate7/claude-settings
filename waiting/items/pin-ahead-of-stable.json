@@ -1,0 +1,63 @@
+{
+  "added": "2026-11-17T21:45:00-06:00",
+  "context": "Goal: lane lint (the check a lane's branch passes before it merges) runs each step with the tool version that step pins, with no false red.\nProblem (rule): your ruling of 11:57 CST Nov 15 says a tool pin is compared to the head of the stable branch (the branch installs read), but pull request 3551 also passes any pin ahead of stable, which the ruling did not grant, and the first review found that this lets an unmerged lane commit pass as a pin; only you can change your ruling's words.\nBased on (read): bin/ste-changed lines 112 to 114 (the changed-files script of the plain-words check) exit 0 for any pin that descends from stable; stable lags main.\nBased on (read): the first review, by a haiku reviewer, read the code and found that without the ahead pass a pin to main ahead of stable reads stale, and pulling cannot clear it.\nDeparts from: your 11:57 CST Nov 15 ruling \u2014 a pin is compared to the stable branch head \u2014 a pin ahead of stable passes when main has reached it (option a), or any ahead pin passes (option b).\nWaiting on: nothing is stopped; the consultant fixes the review's other finding (a failed stable fetch blocks lane lint) and holds the ahead-pin fix for your pick.",
+  "home": "step lane-lint-pin-ahead-of-stable",
+  "id": "pin-ahead-of-stable",
+  "kind": "decision",
+  "n": 954,
+  "options": [
+    {
+      "gain": "No false red after main moves ahead of stable, and an unmerged lane commit still fails.",
+      "how": "The check lets a pin ahead of stable pass when origin/main already contains it; a lane's own unmerged commit still fails.",
+      "id": "ahead-passes-if-main-reached",
+      "key": "a",
+      "label": "An ahead pin passes only when main has reached it",
+      "lose": "Your ruling's wording changes to add this case. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    },
+    {
+      "gain": "The simplest change.",
+      "how": "No change to pull request 3551.",
+      "id": "any-ahead-passes",
+      "key": "b",
+      "label": "Any ahead pin passes, as the pull request does now",
+      "lose": "An unmerged lane commit passes as a pin. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    },
+    {
+      "gain": "Your ruling's words stay as they are.",
+      "how": "An ahead pin exits 3 (stale) until stable catches up.",
+      "id": "ruling-as-written",
+      "key": "c",
+      "label": "Keep your ruling as written: an ahead pin reads stale (recommended)",
+      "lose": "A false red each time main moves ahead of stable, which pulling cannot clear."
+    }
+  ],
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ), asked by the consultant (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "recommended": "c",
+  "ref": "consultant relay 21:45 CST Nov 17 (pull request 3551, lane lane-lint-runs-local-tools)",
+  "replied": "2026-11-18T11:59:00-06:00",
+  "reply": "A correction to the question first: it is the stable branch that lags main, not main that lags the pin. The lane lint check compares a tool version that a step pins with the head of the stable branch (the branch installs read). Stable is updated by hand now and then, so it can sit behind main. When a lane pins a tool to a commit that is on main but not yet on stable, the pin is ahead of stable, and your 11:57 CST Nov 15 ruling says that reads stale, so lane lint goes red and pulling cannot clear it. Option c keeps that: wait until stable catches up. Option a lets the pin pass once main has it. Option b lets any ahead pin pass, including a lane's own unmerged commit. The item stays open; tell me which you want after this.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Tool pin ahead of the stable branch: pass?",
+  "shown": [
+    {
+      "id": "ahead-passes-if-main-reached",
+      "key": "a",
+      "label": "An ahead pin passes only when main has reached it"
+    },
+    {
+      "id": "any-ahead-passes",
+      "key": "b",
+      "label": "Any ahead pin passes, as the pull request does now"
+    },
+    {
+      "id": "ruling-as-written",
+      "key": "c",
+      "label": "Keep your ruling as written: an ahead pin reads stale (recommended)"
+    }
+  ],
+  "status": "open",
+  "title": "May a lane's tool pin that is ahead of the stable branch pass, once main has reached it?",
+  "why": "a and b widen what a shared check accepts, which your rule says never to do; c keeps your ruling and costs a false red until main reaches stable. The consultant recommends a, so this is your call, not owner-typed."
+}

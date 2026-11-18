@@ -2,6 +2,7 @@
   "added": "2026-11-13T19:59:09Z",
   "closed": "2026-11-13T20:02:43Z",
   "context": "Goal: each agent runs the least effort that keeps it accurate.\nProblem (rule): you asked \"Builder shd be sonnet medium no?\" Main runs the builder on Sonnet high. Your 13:51 layout covered session rows only, so the builder row is untouched. Changing it edits a ruled table.\nBased on (read): the retrospective's take: effort follows the lane's kind, because a failed review round costs more than the effort saved. Unmeasured.\nDeparts from: main, where the builder runs Sonnet high in every lane \u2014 options a and b change it.\nMeanwhile: builders keep Sonnet high.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "decision agent-model-cap; step model-layout-to-table",
   "id": "pick-builder-effort",
   "kind": "decision",

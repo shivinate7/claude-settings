@@ -1,10 +1,15 @@
 {
   "added": "2026-11-13T19:47:01Z",
+  "closed": "2026-11-18T04:30:30Z",
   "context": "Goal: a routed closed item counts as the owner's grant for a merge (your 748 b).\nProblem (rule): you picked a at 14:24 CST, and I closed the item and removed your answer too early. The answer check counts a settings.json change only when the saved answer's option label names settings.json and the entry. Your a did not, so the builder cannot edit the entry on it. Please pick again on the label below; the answer stays until the builder has fetched it.\nBased on (read): the lane of PR #3224 found the clause (\"never covers a closed item (except an arbiter overturn)\") in the entry titled \"Relayed Grant\" at settings.json line 56, pinned by hooks/test_auto_mode_allow.py line 114. The first version of this item named \"Relayed Merge Yes\"; whether those are two entries or one is unchecked by triage.\nDeparts from: main \u2014 the clause says a closed item never counts; a changes it to match your 748 b.\nMeanwhile: PR #3224 does not carry this edit; step page-grant-closed-item-leftovers does, and reads both entries first.",
-  "home": "ruling own-748-b-rule-4; step answered-leaves-page; PR #3224",
+  "home": "step fix-3308-own-count-closed",
   "id": "pick-relayed-grant-closed-item",
   "kind": "decision",
-  "lastAnswer": "753 a: edit the Relayed Grant entry and its test.",
+  "lastAnswer": {
+    "at": "2026-11-14T00:24:29.832Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 753,
   "options": [
     {
@@ -22,10 +27,11 @@
   ],
   "owner": "lane of PR #3224 (session_013NEJKyqQmpj2FNxeZzDV7s) via coordinator; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "ref": "coordinator 13:47 CST Nov 13",
-  "reply": "Answered 753 a (18:24 CST Nov 13), filed as ruling own-753-a-relayed-grant-entry. Kept open with your answer on the page until the lane fetches it; nothing for you to do.",
+  "replied": "2026-11-18T04:30:30Z",
+  "reply": "Done: your pick a (edit the Relayed Grant entry and its pinned test) landed as pull request 3308, merged 21:40 CST Nov 17 (REST read 21:58 CST); the step fix-3308-own-count-closed is done. Closed by triage 11 at 22:30 CST.",
   "repo": "shivinate7/claude-settings",
   "short": "Edit the Relayed Grant entry to match your 748 b?",
-  "status": "open",
+  "status": "closed",
   "title": "Should the Relayed Grant auto-mode entry change to match your ruling that a routed closed item counts?",
   "why": "The entry is owner-edited; it and the checker now disagree."
 }

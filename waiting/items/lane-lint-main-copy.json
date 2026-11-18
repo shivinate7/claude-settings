@@ -1,0 +1,59 @@
+{
+  "added": "2026-11-17T20:57:00-06:00",
+  "context": "Goal: a lane cannot pass its own lint by loosening the check that judges it, and a lane that fixes a check is never stuck.\nProblem (rule): lane lint (the check run on a lane's branch before it merges) runs the lane's own copy of any lint file it changed, so a lane that loosens a check and its test together passes; a builder made it use main's copy, and a reviewer found that this fails honest lanes that change code and re-point a test, so a rule must give way and only you can say which.\nBased on (read): an Explore read of merge/merge.py lines 3504 to 3511 and bin/ci-job line 662, 20:31 CST: lane lint runs the lane's copy of a changed lint file.\nBased on (measured): the round-1 reviewer on branch lane/check-judged-by-main-copy, 20:56 CST: 53 of the last 150 main commits touch a file that lane lint judges, and a lane that changes code and re-points its test fails against main's old test.\nDeparts from: main \u2014 lane lint judges the lane's copy of a changed check \u2014 b and c change it to main's copy for all changed checks or for lint checks only.\nWaiting on: nothing stopped; step check-judged-by-main-copy waits on your pick (the reviewer's other two findings are fixed by a builder either way).",
+  "home": "step check-judged-by-main-copy",
+  "id": "lane-lint-main-copy",
+  "kind": "decision",
+  "n": 952,
+  "options": [
+    {
+      "gain": "No lane is ever stuck on lane lint.",
+      "how": "No change; the builder's branch is dropped.",
+      "id": "keep-pr-copy",
+      "key": "a",
+      "label": "Keep lane lint as it is: it judges the lane's own copy of a changed check",
+      "lose": "A lane that loosens a check and its test together still passes its own lane lint (a mistake the reviewer must catch by reading the diff)."
+    },
+    {
+      "gain": "A lane cannot pass by loosening the check that judges it.",
+      "how": "The builder's branch as it stands: main's version of each changed lint file and hooks test file runs at lane lint.",
+      "id": "main-copy-all",
+      "key": "b",
+      "label": "Judge every changed check and test file by main's copy",
+      "lose": "A lane that changes code and re-points its test is judged by the old test and fails; 53 of the last 150 main commits touch such a file; a fix to a broken check cannot pass until main has it."
+    },
+    {
+      "gain": "The loosened-check hole closes for the checks, and a lane that re-points a test is not stuck.",
+      "how": "A builder narrows the laying to lint/*.py check files; hooks/test_*.py suites keep the lane's copy, as they are re-pointed with their code.",
+      "id": "main-copy-lint-only",
+      "key": "c",
+      "label": "Judge only changed lint/*.py check files by main's copy; tests stay the lane's (recommended)",
+      "lose": "A lane that loosens only a test still passes lane lint; a fix to a broken lint check is still judged by the broken copy and needs the solo merge route."
+    }
+  ],
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "c",
+  "ref": "owner chat 19:45 CST Nov 17 (relayed by the consultant): land the verification article's findings",
+  "repo": "shivinate7/claude-settings",
+  "short": "Lane lint: judge changed checks by main's copy?",
+  "shown": [
+    {
+      "id": "keep-pr-copy",
+      "key": "a",
+      "label": "Keep lane lint as it is: it judges the lane's own copy of a changed check"
+    },
+    {
+      "id": "main-copy-all",
+      "key": "b",
+      "label": "Judge every changed check and test file by main's copy"
+    },
+    {
+      "id": "main-copy-lint-only",
+      "key": "c",
+      "label": "Judge only changed lint/*.py check files by main's copy; tests stay the lane's (recommended)"
+    }
+  ],
+  "status": "open",
+  "title": "Should lane lint judge a changed check by main's copy, knowing a lane that re-points a test can then fail it?",
+  "why": "c closes the hole where a check judges itself without failing the common lane that re-points a test with its code; a leaves the hole, b fails the lanes behind about 1 in 3 main commits. Recommended by triage, not owner-typed."
+}

@@ -1,5 +1,7 @@
 {
   "added": "2026-11-15T18:53:00Z",
+  "closeReason": "Duplicate of item 894 (consultant review, relayed 09:56 CST Nov 17).",
+  "closed": "2026-11-17T15:57:00Z",
   "context": "Goal: the stale-draft row needs no hand-dumped live file.\nProblem (goal): the build reads open PRs from REST itself, but Python cannot list sessions, so the lane, held and reviewLog checks still need a fresh live file. With a stale or missing file the row reads unknown, never clear. Needs the owner's word because option b adds a secret and a reach to a service.\nBased on (measured): the live file was 19 h old and held 200 of about 500 PRs.\nDeparts from: main \u2014 the row needs the live file for the PR list; this lane \u2014 only for sessions.\nMeanwhile: the lane keeps option a; its draft PR #3531 waits on nothing.",
   "home": "step stale-drafts-read-rest",
   "kind": "decision",
@@ -40,7 +42,7 @@
       "label": "Give build.py a sessions read from a named source"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "Should the stale-draft row read sessions from a named source, so it needs no hand-dumped live file?",
   "why": "Option a adds no secret and no reach; the row already reads unknown, never clear, when the file is stale."
 }

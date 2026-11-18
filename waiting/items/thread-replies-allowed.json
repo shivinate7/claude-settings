@@ -1,0 +1,53 @@
+{
+  "added": "2026-11-17T20:15:00Z",
+  "closed": "2026-11-17T20:53:00Z",
+  "context": "Goal: your comments on the page get an answer where you wrote them, with no extra reading for you.\nProblem (rule): the waiting-page skill says a session never replies inside a comment thread, but goal draft 4 says each open thread is answered with a routed reply, and I replied in thread bb051198 today. The two disagree, and only you can say which wins.\nBased on (read): skills/waiting-page/SKILL.md line 381 (\"Never reply in a comment thread\"); goal draft 4, DONE WHEN item 1; the reply I posted in thread bb051198 at 13:33 CST Nov 17.\nBased on (measured): 21 comment threads are open on the page; two of yours still wait for a reply (817a973d: items 926, and 935/927/925/928/929).\nDeparts from: main \u2014 the skill forbids a reply inside a thread \u2014 a lets the writer reply in the thread you wrote in; b keeps the ban and answers go on the page as items only.\nMeanwhile: triage keeps reading the open threads and answers none until you pick.",
+  "home": "step thread-replies-allowed",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-17T20:49:17Z",
+    "choice": "b",
+    "note": "b) Keep the ban: answer on the page only. Saved on the page 14:49 CST Nov 17."
+  },
+  "n": 939,
+  "options": [
+    {
+      "gain": "You get the answer under your own comment.",
+      "how": "The page writer may post one reply in a thread, saying what it did or where the answer is, and never resolves it for you.",
+      "id": "replies-allowed",
+      "key": "a",
+      "label": "Allow a reply in the thread you wrote in",
+      "lose": "The skill's ban changes; a thread can fill with replies."
+    },
+    {
+      "gain": "One place to read answers: the page.",
+      "how": "No reply in a thread. Each thread's answer is a page item or a one-line closed entry, and the thread stays for you to resolve.",
+      "id": "page-only",
+      "key": "b",
+      "label": "Keep the ban: answer on the page only",
+      "lose": "You see no answer under the comment you wrote; the bb051198 reply stands as an exception."
+    }
+  ],
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "b",
+  "ref": "your words 14:14 CST Nov 17 \"Answer on the page only\"; skills/waiting-page/SKILL.md line 381",
+  "replied": "2026-11-17T20:53:00Z",
+  "reply": "Answered b at 14:49 CST: no reply in a comment thread; answers go on the page. Closed 14:53 CST by triage 11. The skill stays as written.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Reply in comment threads?",
+  "shown": [
+    {
+      "id": "replies-allowed",
+      "key": "a",
+      "label": "Allow a reply in the thread you wrote in"
+    },
+    {
+      "id": "page-only",
+      "key": "b",
+      "label": "Keep the ban: answer on the page only"
+    }
+  ],
+  "status": "closed",
+  "title": "May the page writer reply inside a comment thread, or answer on the page only?",
+  "why": "Your words \"Answer on the page only\" point at b, and it keeps the skill as written; a changes the skill."
+}

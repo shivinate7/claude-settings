@@ -2,6 +2,7 @@
   "added": "2026-11-13T23:36:30-06:00",
   "closed": "2026-11-14T05:40:00Z",
   "context": "Goal: finished chats in other repos are archived too, with nothing lost.\nProblem (rule): about 243 sessions belong to other repos (q_max and others). This session's GitHub reads return 403 for them, so the sweep cannot read their PRs. Reading a PR is how the sweep knows a chat is done. Giving the sweep's session read access to each repo is a change to what that session can see, so it needs your word; read access only, no push (your rule: a second repo with push is your word alone).\nBased on (read): the consultant's count and options, relayed 23:35 CST; the 403 is the consultant's report, unchecked by triage.\nDeparts from: main's sweep \u2014 it reads only claude-settings; a adds each other repo to the sweep's session with read access and reads the PR; b archives on a title read alone.\nMeanwhile: these 243 sessions are kept.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "plan part 7 (archive sweep); page item 800; step archive-sweep-runs-per-merge",
   "id": "pick-archive-other-repo-sessions",
   "kind": "decision",

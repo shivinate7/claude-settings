@@ -2,6 +2,7 @@
   "added": "2026-11-14T00:12:30-06:00",
   "closed": "2026-11-14T06:21:45Z",
   "context": "Goal: CI speed in every repo tonight, q_max first (its tests take 15.3 min wall, the slowest child).\nProblem (rule): runner 11 reads that no one can merge a PR in q_max, banchi, mailaudit, ios-adblock or joyous today. Your 22:13 CST exception (ruling own-degen-home-switch-now) names degen and home only, and stable has no batch tool for the other route. So a CI-speed PR there stays a draft and no lane may start. This merges two asks of one question: the coordinator's 00:10 CST item and the consultant's 00:10 CST question (step tci-11, mutation-report-child-adoption).\nBased on (record): runner 11's blocker line, 00:10 CST, relayed; ruling own-degen-home-switch-now (22:13 CST, read by triage); decision all-repos-switch-together and ruling own-act6-draft-prs-when-green hold the other five until the drain. Triage did not re-read runner 11's line.\nDeparts from: main \u2014 merge in those five repos waits for a batch tool or the drain; a lets runner 11 merge a lane's own PR on its own green run in q_max, then each other repo on your yes; c does that in all five at once.\nMeanwhile: the coordinator starts nothing in those five repos; degen and home lanes run.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "ruling own-degen-home-switch-now; step tci-11-qmax-shards; step mutation-report-child-adoption; session runner 11 (session_013NEJKzRugXqBZrZ8xwXmW7)",
   "id": "pick-child-lane-merge-five",
   "kind": "decision",

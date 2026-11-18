@@ -1,5 +1,7 @@
 {
   "added": "2026-11-15T14:52:09-06:00",
+  "closeReason": "Stale (consultant review, relayed 09:56 CST Nov 17): PR 3542 was reverted by PR 3555, and PR 3592 voids the question.",
+  "closed": "2026-11-17T15:57:00Z",
   "context": "Goal: a lane's lint result means what CI means, and settings.json and its test agree.\nProblem (rule): main's commit a8c3af717e (PR #3542, allow-merge-ready, merged 19:51Z = 13:51 CST) added two allow rules to the root settings.json: \"Bash(~/.claude/bin/merge --ready *)\" and \"Bash(verdict ~/.claude/bin/merge --ready *)\". The test merge/test_merge.py::CloudAllow::test_the_repo_settings_json_has_no_merge_allow_rule (line ~14820) says no allow rule may contain \"bin/merge\". Replaying its asserts against main's settings.json gives 2 failures; the parent commit gives 0. No decision or ruling records the allow rule; PR #3542's body says only \"The owner asked for the allow rule in chat\". The checks-windows-merge job failed on PR #3542's head; its log was not read. Needs your word: is the test stale, or does the allow rule go?\nBased on (measured): the read-only replay of the test's asserts against origin/main; the full test run is unmeasured.\nDeparts from: main \u2014 the test says no merge allow rule; main's settings.json now has one.\nIf you did not ask for this rule, pick b.\nUpdate 15:22 CST: main is red because of #3542 (push run 43754746334 on c47fe6003): checks-merge-git, checks-windows-merge (shard 1 of 5) and checks-install-checkout all fail on the two new allow rules; the same three failed on the PR's own head run. The consultant (relayed, not owner-typed) reverts #3542 now under the red-main rule and has the lane re-land the allow rule with the test fixed, so option a is what is under way and option b (rule removed) is what the revert does until the re-land. This item stays open for your answer on whether the allow rule should exist at all; the PR body says you asked for it in chat.",
   "holds": "PR #3551 waits on this answer (the lane waits; the PR stays draft).",
   "home": "PR #3551 / PR #3542",
@@ -39,6 +41,6 @@
       "label": "Remove the allow rule"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "Does the merge --ready allow rule in settings.json stay, or does the test that forbids it stand?"
 }

@@ -1,0 +1,61 @@
+{
+  "added": "2026-11-18T10:14:35-06:00",
+  "closed": "2026-11-18T10:23:00-06:00",
+  "context": "Goal: round-1 reviews that catch real defects without failing sound changes.\nProblem (rule): round 1 runs on Haiku at xhigh since your 19:45 CST Nov 17 pick and you now doubt it, and only you can change the model table in decision agent-model-cap.\nBased on (ruling): your 19:45 CST Nov 17 pick put round 1 on Haiku at xhigh for every change, guard or check included.\nBased on (assumed): the FAIL rate is high because Haiku is weak; nothing measured separates that from Haiku catching real defects.\nDeparts from: main \u2014 agent-model-cap has round 1 on Haiku at xhigh, and this adds a measure or changes the model.\nWaiting on: nothing stopped; round 1 stays on Haiku at xhigh, and the consultant lands the pick in agent-model-cap.",
+  "home": "decision agent-model-cap",
+  "kind": "decision",
+  "n": 965,
+  "options": [
+    {
+      "gain": "You decide on numbers, not a feeling.",
+      "how": "A lane reads about 30 round-1 records on merged pull requests and compares each FAIL with the later fix or revert, then reports false alarms and misses by model.",
+      "id": "measure-first",
+      "key": "a",
+      "label": "Measure first, keep round 1 on Haiku meanwhile (recommended)",
+      "lose": "Round 1 stays on Haiku until the numbers come."
+    },
+    {
+      "gain": "The stronger reader sits on the riskiest changes at once.",
+      "how": "Decision agent-model-cap gets a round-1 row that runs Sonnet for guard or check changes.",
+      "id": "sonnet-guard-only",
+      "key": "b",
+      "label": "Switch round 1 back to Sonnet now for guard and check changes only",
+      "lose": "More review cost, and no numbers on whether Haiku was the problem."
+    },
+    {
+      "gain": "Ends the complaint at once.",
+      "how": "Decision agent-model-cap returns round 1 to Sonnet for all changes.",
+      "id": "sonnet-all",
+      "key": "c",
+      "label": "Switch round 1 back to Sonnet for every change",
+      "lose": "The most cost, and it undoes your 19:45 CST Nov 17 pick unmeasured."
+    }
+  ],
+  "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ), written by triage 11 (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "a",
+  "ref": "owner chat 10:13 CST Nov 18, relayed by the consultant",
+  "replied": "2026-11-18T10:23:00-06:00",
+  "reply": "Closed by triage: already ruled. Decision agent-model-cap holds your ruling \"haiku is intentional\" (19:45 CST Nov 15; the item text said Nov 17, wrong), and R9 holds the Nov 10 rates. Consultant count, Nov 14 to 18: round-1 PASS Haiku 37 of 183, Sonnet 61 of 141. Reopen by telling the consultant or me in chat that you want it changed.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Round 1 model: Haiku or Sonnet?",
+  "shown": [
+    {
+      "id": "measure-first",
+      "key": "a",
+      "label": "Measure first, keep round 1 on Haiku meanwhile (recommended)"
+    },
+    {
+      "id": "sonnet-guard-only",
+      "key": "b",
+      "label": "Switch round 1 back to Sonnet now for guard and check changes only"
+    },
+    {
+      "id": "sonnet-all",
+      "key": "c",
+      "label": "Switch round 1 back to Sonnet for every change"
+    }
+  ],
+  "status": "closed",
+  "title": "Should round-1 reviews run on Haiku or Sonnet?",
+  "why": "a gives numbers before undoing your own pick; b and c fix it by feel and cost more. Recommended by triage, not owner-typed."
+}

@@ -2,6 +2,7 @@
   "added": "2026-11-15T15:10:20-06:00",
   "closed": "2026-11-16T00:35:38Z",
   "context": "Goal: skip the slow Windows guard shards when a change touches no file the guard suite reads.\nProblem (rule): main runs those shards on every ready pull request (your ruling R62, 15:55 CST Nov 12). This lane's change skips them on diffs outside one pinned list (.github/guard-inputs.txt, pinned by lint/test_guard_inputs.py), so it departs from R62. The lane re-points the one test that asserts R62 (lint/test_windows_split.py, ReadyPullFullSuite), as its own commit, under a coordinator pick that is not owner-typed.\nBased on (ruling): R62 and own-830-c, which narrows it to a records-only push.\nDeparts from: main runs the full Windows guard shards on every ready PR \u2014 this lane skips them when no guard input changed.\nYour answer on item 893 (the daily run for the slow legs) is related and still open; this lane is stacked on #3540.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "holds": "That lane's merge waits on this answer; it stays stacked on draft PR #3540 and nothing merges meanwhile.",
   "home": "guard-input-scope",
   "kind": "decision",

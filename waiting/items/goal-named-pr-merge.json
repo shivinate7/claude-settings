@@ -1,0 +1,61 @@
+{
+  "added": "2026-11-18T10:25:00-06:00",
+  "closed": "2026-11-18T10:28:00-06:00",
+  "context": "Goal: the consultant merges the carry-list pull requests itself, so they stop waiting on a hand-off to runner 10.\nProblem (rule): the merge tool refuses a standing session any pull request it did not open, and no code reads a session's goal, so \"the PRs the goal names\" has no source the tool can check; only you can say which route to allow.\nBased on (ruling): your 10:15 CST Nov 18 chat words, relayed by the consultant: \"this always was a yes??\"; ruling own-tiny-fixes-b (00:50 CST Nov 15, in decision session-tiers) lets a standing session merge its own pull requests.\nBased on (read): the consultant's test-author search found no goal reader on origin/main; merge/merge.py standing_refusal (about line 6707) is the refusal.\nDeparts from: main \u2014 the merge tool refuses a standing session any pull request it did not open \u2014 and this adds a route to merge another session's pull request.\nWaiting on: nothing stopped; the consultant keeps routing carry-list pull requests to runner 10 until you pick.",
+  "home": "step standing-merges-own-green-pr (dropped), decision session-tiers",
+  "kind": "decision",
+  "n": 966,
+  "options": [
+    {
+      "gain": "No goal reader to build, and the carry is visible in the pull request.",
+      "how": "The tool accepts that line like the session's own link; every other merge check stays unchanged.",
+      "id": "carried-by-line",
+      "key": "a",
+      "label": "A \"Carried by\" line in the pull request body that the carrying session adds (recommended by the consultant)",
+      "lose": "Any session could add the line to any pull request, so the line is not a real limit; a reviewer and the other checks still stand."
+    },
+    {
+      "gain": "Tied to your own goal text, so only what you named can be carried.",
+      "how": "The tool reads the owner's goal and accepts only pull requests it names.",
+      "id": "build-goal-reader",
+      "key": "b",
+      "label": "A builder first adds a reader of the goal text the harness stores, then the tool accepts pull requests that goal names",
+      "lose": "A new reader of harness state, and it takes longer to build."
+    },
+    {
+      "gain": "No guard change.",
+      "how": "No change to the merge tool.",
+      "id": "keep-runner-10",
+      "key": "c",
+      "label": "Keep the hand-off to runner 10",
+      "lose": "The slow path you objected to at 10:15 CST."
+    }
+  ],
+  "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ), written by triage 11 (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "a",
+  "ref": "consultant relay 10:25 CST Nov 18 (slug goal-named-pr-merge)",
+  "replied": "2026-11-18T10:30:00-06:00",
+  "reply": "Closed. Owner picked a in chat, 10:29 CST Nov 18 (relayed by the consultant): \"this seems fine\" - a Carried by line in the PR description, accepted like the session's own link; every other merge check stays. Owner's 10:27 CST words also hold: any standing session may merge a straggling PR. Home: the consultant's branch standing-merges-stragglers (not merged at 10:30 CST); the ruling goes in decision session-tiers with that change.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Consultant merges carry-list PRs",
+  "shown": [
+    {
+      "id": "carried-by-line",
+      "key": "a",
+      "label": "A \"Carried by\" line in the pull request body that the carrying session adds (recommended by the consultant)"
+    },
+    {
+      "id": "build-goal-reader",
+      "key": "b",
+      "label": "A builder first adds a reader of the goal text the harness stores, then the tool accepts pull requests that goal names"
+    },
+    {
+      "id": "keep-runner-10",
+      "key": "c",
+      "label": "Keep the hand-off to runner 10"
+    }
+  ],
+  "status": "closed",
+  "title": "How should the consultant be allowed to merge the carry-list pull requests its goal names, with no hand-off to runner 10?",
+  "why": "a needs no new reader and shows the carry in the pull request, but it is a weak limit; b is the strict route and costs build time. Recommended by the consultant, relayed, not owner-typed."
+}

@@ -2,6 +2,7 @@
   "added": "2026-11-13T18:10:00Z",
   "closed": "2026-11-13T19:26:08Z",
   "context": "Goal: CI changes pay for themselves.\nProblem (cost): the review of mailaudit #322 failed it on your ruling 176 b (keep non-macOS push suites until claude-settings changes the red-main check). The change would save about 15 to 20 s of a 236 s run on 3 runners.\nBased on (ruling): 176 b (21:45 CST Nov 12).\nBased on (measured): the reviewer's numbers, 15 to 20 s of 236 s, 3 runners.\nDeparts from: mailaudit main, which runs all push suites \u2014 a leaves it that way and drops #322; the push trim waits on item 729.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "ruling mailaudit-322-not-worth-it",
   "id": "pick-mailaudit-322-close",
   "kind": "decision",

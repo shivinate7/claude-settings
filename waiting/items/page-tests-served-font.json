@@ -2,6 +2,7 @@
   "added": "2026-11-15T12:12:43-06:00",
   "closed": "2026-11-15T18:15:41Z",
   "context": "Goal: land the waiting-page test lane's changes without more than one full CI run per change.\nProblem (rule): the waiting-page lane wants to start a full CI run by hand on every head, but your rule is one full CI run per change.\nBased on (read): the coordinator's audit of ruling page-tests-served-font (roadmap/rulings/page-tests-served-font.json, status open, filed by triage Nov 13 from PR 2347's body). It says \"prove each head with a dispatched checks run\". The words are the coordinator's, relayed by a lane, not a quote from you.\nBased on (ruling): rule roles-each-layer-proves-once in CLAUDE.md: the PR run is the merge check, and a change is proved once per layer. No decision or ruling on the roadmap branch or in docs/decisions answers this for the page lane.\nDeparts from: main (one full CI run per change) \u2014 a lane starts an extra full run by hand on every head.\nMeanwhile: the lane keeps its font tests; nothing else waits on this.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "roadmap/rulings/page-tests-served-font.json",
   "kind": "decision",
   "lastAnswer": {

@@ -2,6 +2,7 @@
   "added": "2026-11-15T12:56:00-06:00",
   "closed": "2026-11-15T20:20:18Z",
   "context": "Goal: clear the 132 conflicting drafts.\nProblem (rule): #2808, #2850, #2943, #3186 (conflicts in code files against main ae13fcab3) and #3188 (a new conflict in hooks/test_install_src.sh after main moved to b600c126) need a merge that may change how a guard, a check or a rule behaves. Your order sends that back to you before the lane pushes.\nBased on (ruling): \"any conflict that changes behaviour of a guard, a check or a rule comes back to me before you push\".\nDeparts from: main \u2014 the lane merges main into drafts whose conflicts are in code files, and resolves them by hand.\nMeanwhile: the lane does nothing on these five; it already merged main into #3084 (8237024e), #3164 (2e2be170) and #2881 (c4fb57ed), fix check PASS, lane-lint PASS.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "holds": "The push of five conflicting drafts waits on this answer.",
   "home": "lane pr-backlog wave 1; drafts #2808, #2850, #2943, #3186, #3188",
   "kind": "decision",

@@ -10,7 +10,7 @@
       "gain": "The lane records the new head without another ask.",
       "id": "any-head",
       "key": "a",
-      "label": "Yes: the same command form covers any head of PR #3264 (recommended)",
+      "label": "Yes: the same command form covers any head of PR #3264",
       "lose": "The grant is wider than the command you were shown: it names no head."
     },
     {
@@ -22,10 +22,11 @@
     }
   ],
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), lane receipt-close-express (session_013NEJL3o4VZAch2NXdx3diD); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "recommended": "b",
   "ref": "coordinator 19:28 CST Nov 13",
   "repo": "shivinate7/claude-settings",
   "short": "774 b follow-up: does it cover PR 3264's new head?",
   "status": "open",
   "title": "Your 774 b let PR #3264's record command run unwrapped. The PR has a new head. Does the grant cover the new head too?",
-  "why": "A grant covers the act it names, never a variant; the head is part of the command you were shown."
+  "why": "Your own rule is that a grant covers the act it names, never a variant; b keeps to it at the cost of one more ask."
 }

@@ -2,6 +2,7 @@
   "added": "2026-11-13T18:09:36-06:00",
   "closed": "2026-11-14T04:58:00Z",
   "context": "Goal: the red-main check never says green while main is red, and never blocks merges while main is green.\nProblem (rule): Main now skips its full test run after a green PR run of the same code (your ruling own-769). A skipped run proves nothing, so the check must look back to a run that really ran the tests. The first way I built to do that can be fooled: a docs-only PR shows green even though its tests were skipped, so it could wrongly clear a red main.\nBased on (read): lane merge-flow-after-anthropic's reads on PR #3297, via the coordinator 18:08 CST; unchecked by triage. How far back main's newest test-running run sits is unmeasured.\nDeparts from: the 16:06 CST wording on step red-gate-reads-suite-run and the cover in main's red-main check \u2014 a and b drop the cover; your ruling own-769 (the skip itself) stays.\nMeanwhile: PR #3297 waits.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "PR #3297; step red-gate-reads-suite-run; ruling own-769-a-narrowed-pr-push; lane merge-flow-after-anthropic (session_013NEJL2oxYMVKoXseeKacVG)",
   "id": "pick-red-gate-cover-signal",
   "kind": "decision",

@@ -1,0 +1,61 @@
+{
+  "added": "2026-11-18T07:43:00-06:00",
+  "closed": "2026-11-18T11:07:00-06:00",
+  "context": "Goal: the page's Status tab shows the coordinator's open pull requests, each with its one next act, so the list no longer lives in an old plan file.\nProblem (goal): The list's scope is not yet chosen, and only you can say which pull requests belong on a page you read.\nBased on (read): the coordinator's plan, relayed at 07:41 CST Nov 18, builds option a as the default; the build started at 07:41 CST.\nBased on (ruling): you asked at 19:04 CST Nov 17, relayed by the coordinator, that the coordinator's pull request list live on the page or the roadmap branch.\nDeparts from: main \u2014 adds a pull request list to the Status tab; the old list is a plan file on the roadmap branch.\nWaiting on: nothing stopped; the coordinator's agents build option a meanwhile and the coordinator acts next on your pick.\nMeanwhile: the coordinator's own pick (not typed by you, undoable) is that this build lands before draft pull request 2943 (the coordinator session board, second copy), which then rebases.",
+  "home": "step status-tab-lists-coord-prs",
+  "kind": "decision",
+  "n": 964,
+  "options": [
+    {
+      "gain": "Nothing is hidden, and it matches the build already under way.",
+      "how": "The Status tab lists all open pull requests, each with its next act, owner and age.",
+      "id": "every-open-pr",
+      "key": "a",
+      "label": "Every open pull request, as the plan file does today",
+      "lose": "A long list that includes pull requests with no one working on them."
+    },
+    {
+      "gain": "A short list of work in motion.",
+      "how": "The Status tab lists a pull request only while a running lane session owns it.",
+      "id": "live-lane-prs-only",
+      "key": "b",
+      "label": "Only pull requests that a live lane is working on",
+      "lose": "A pull request with no live lane drops off the page, so a stalled one can go unseen."
+    },
+    {
+      "gain": "You see at once whose pull requests wait.",
+      "how": "Same list as option a, with one heading per owning session.",
+      "id": "every-open-pr-by-owner",
+      "key": "c",
+      "label": "Every open pull request, grouped by owner",
+      "lose": "More code to build and keep, and a second pass on the build already under way."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), written by triage 11 (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "a",
+  "ref": "coordinator relay 07:41 CST Nov 18",
+  "replied": "2026-11-18T11:07:00-06:00",
+  "reply": "Closed. You picked c: every open pull request, grouped by owner. Routed to the coordinator and step status-tab-lists-coord-prs; the build under way lists every open PR, and grouping by owner is a second pass.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Status tab PR list scope",
+  "shown": [
+    {
+      "id": "every-open-pr",
+      "key": "a",
+      "label": "Every open pull request, as the plan file does today"
+    },
+    {
+      "id": "live-lane-prs-only",
+      "key": "b",
+      "label": "Only pull requests that a live lane is working on"
+    },
+    {
+      "id": "every-open-pr-by-owner",
+      "key": "c",
+      "label": "Every open pull request, grouped by owner"
+    }
+  ],
+  "status": "closed",
+  "title": "Which open pull requests should the Status tab list?",
+  "why": "a is the default being built and hides nothing; b can hide a stalled pull request. The coordinator also recommends a."
+}

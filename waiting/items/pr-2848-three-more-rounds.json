@@ -2,6 +2,7 @@
   "added": "2026-11-15T23:25:07-06:00",
   "closed": "2026-11-16T05:33:00Z",
   "context": "Goal: PR #2848 reaches a merge-ready review record.\nProblem (rule): PR #2848 at f33b681d5 passed round 4 (sonnet) and a fix verifier, but used its three rounds and one fix check; a fourth round needs your word (rule roles-review-cap-three, decision pr-review-record).\nBased on (notes): the lane archive-flow reported at 23:24 CST Nov 15 that you typed in its chat: \"reset its roudns it cna have up to 3 more if it needs it\". The lane's report is not relayed through the coordinator, and the consultant confirms the words with you first.\nDeparts from: main \u2014 a change gets at most three review rounds and a fourth needs your grant; this gives #2848 up to three more if it needs them.\nMeanwhile: the lane holds; no grant string is issued until you confirm.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "holds": "Lane archive-flow holds PR #2848 until the rounds question is answered.",
   "home": "PR #2848",
   "kind": "decision",

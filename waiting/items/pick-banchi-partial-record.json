@@ -2,6 +2,7 @@
   "added": "2026-11-13T18:21:00Z",
   "closed": "2026-11-13T20:34:00Z",
   "context": "Goal: banchi's push-to-main browser run skips what the PR run proved and never runs more than it must.\nProblem (rule): decision D215 says a partial PR run writes no pass record. After PR 1094 ran 44 of 64 specs, the push found no record and ran all 64 (run 43384801390, 14 min 46 s). It changes a ruling, so it needs your word.\nBased on (read): D215 and run 43384801390; the builder read PR 1094's browser scope, '44 of 64 specs, a genuine narrowing'.\nDeparts from: D215 writes no record for a partial run \u2014 a writes one naming the specs that run covered, and the push runs only the other 20.\nMeanwhile: runner 11 asks lane push-skip-proven-tree whether the shared skip (your 729 a) covers a partial run.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "banchi decision D215",
   "id": "pick-banchi-partial-record",
   "kind": "decision",

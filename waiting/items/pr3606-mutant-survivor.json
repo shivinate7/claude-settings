@@ -1,5 +1,7 @@
 {
   "added": "2026-11-16T21:09:44-06:00",
+  "closeReason": "Stale (consultant staleness review, relayed 09:56 CST Nov 17): the lane took option c and lane lint passed. Triage 9 did not re-read the lane.",
+  "closed": "2026-11-17T15:57:00Z",
   "context": "Goal: PR #3606 (the glued-& rebuild) passes its lane lint so it can be handed in.\nProblem (rule): lint fails on one job because one of 307 guard mutants survives, and the lane cannot run the likely one, since a hook refuses any command that names install.sh.\nBased on (read): the lane's word, relayed by the coordinator at 21:06 CST: the third mutant-test job (a mutant is a deliberate small break in the guard code that a test must catch) caught 306 of 307; the first two mutant-test jobs and every other lint check pass; the log does not name the survivor; the likeliest is the lane's new mutant \"handoff-unread: the guard-crash refusal drops its install.sh fix\". Triage read #3606 by REST at 21:10 CST: open, draft, and its latest commit matches the lane's.\nBased on (read): the PR body says that mutant is unproven in the lane and that the PR's own CI run proves it; the frozen-path hook's text says no override lifts its refusal (the coordinator's relay of it; triage did not read the hook).\nDeparts from: main \u2014 has no such mutant and the frozen-path hook refuses any command naming install.sh; #3606 adds the mutant, and a, b and c change only how its one survivor is named.\nMeanwhile: the lane tries c on its own; its other red test rows wait on a separate question to you about which old rule wins.\nWaiting on: you.",
   "home": "PR #3606 (lane glued-amp-rebuild-2156); item 927",
   "id": "pr3606-mutant-survivor",
@@ -61,7 +63,7 @@
       "label": "The lane finds it by reading only: it lists the tests that cover each mutant's file and checks which mutant has none, then the next lint run proves it"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "PR #3606's lint has one surviving mutant it cannot name, because a hook refuses any command that names install.sh. Who finds it: a person, an override, or the lane by reading?",
   "why": "The coordinator recommends c: it needs no bypass and no person, and the next lint run proves it. It is the coordinator's pick, relayed, not owner-typed."
 }

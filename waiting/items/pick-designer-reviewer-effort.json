@@ -2,6 +2,7 @@
   "added": "2026-11-13T19:59:09Z",
   "closed": "2026-11-13T20:02:43Z",
   "context": "Goal: design work gets enough thought without paying for it twice.\nProblem (rule): you asked \"should both design reviewer and designer be opus high? or should one be pegged down a notch?\" Main runs both on Opus high.\nBased on (read): the retrospective's take: the designer keeps Opus high (a wide design space); the design reviewer drops to Opus medium (it judges against a mockup and the repo's design rules). Unmeasured.\nDeparts from: main, where both run Opus high \u2014 option a lowers the design reviewer.\nMeanwhile: both keep Opus high.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "decision agent-model-cap; step model-layout-to-table",
   "id": "pick-designer-reviewer-effort",
   "kind": "decision",

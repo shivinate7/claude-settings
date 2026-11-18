@@ -2,6 +2,7 @@
   "added": "2026-11-13T15:57:47-06:00",
   "closed": "2026-11-13T22:05:00Z",
   "context": "Goal: CI much faster by cutting repetition (your 15:49 CST words, relayed by the consultant).\nProblem (goal): under per-lane merge, PR #3217 skips the push run only after a full PR run, and lane PR runs are narrowed, so the skip rarely fires and main still runs all 26 jobs after every merge.\nBased on (read): the consultant's CI audit, 15:56 CST: #3217 skips on full runs, and ci-scope.sh sets all flags only for batch-* heads. Your ruling 729 a (12:18 CST Nov 13, step push-skip-proven-tree) skips the push re-run when the pushed tree equals the tree the PR tested; it does not say whether a narrowed PR run counts as tested. Triage has not read #3217 or ci-scope.sh.\nDeparts from: main \u2014 a full push run after every merge becomes a skip after a green PR run; the options differ on what the skip covers.\nMeanwhile: #3217 stays as built; steps ci-mac-once-per-batch, ci-linux-windows-once, push-skip-proven-tree and drop-nightly-schedule are marked top priority, tracked until each lands on main (your 15:56 CST words).",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step push-skip-proven-tree; ruling push-skip-proven-tree (729 a); PRs #3217, #3042, #3088, #3278",
   "id": "pick-narrowed-pr-proves-push",
   "kind": "decision",

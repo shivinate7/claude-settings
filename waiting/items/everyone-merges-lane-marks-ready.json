@@ -2,6 +2,7 @@
   "added": "2026-11-16T13:08:50-06:00",
   "closed": "2026-11-16T19:09:33Z",
   "context": "Goal: every session merges its own PR, and lanes stop handing finished PRs to runner 10.\nProblem (rule): decision standing-merge-grant on main says only the batch runner marks a PR ready, and a lane never does. Your 12:58 CST words say everyone merges. A lane cannot merge a draft, so the two cannot both stand. This needs your word because it changes a rule you set.\nBased on (ruling): own-everyone-merges, filed on step rewrite-merge-decisions-for-lane-merge (your 12:58 CST Nov 16 words, relayed by the coordinator at 13:07 CST): each session merges its own PR with the merge tool; lanes no longer hand a finished PR to runner 10; the limits stay.\nBased on (read): the coordinator's 13:07 CST message that decision standing-merge-grant keeps marking ready with the batch runner (relayed; triage did not read the decision).\nDeparts from: standing-merge-grant and the \"Lane draft PR\" standing grant: a lane never marks its own PR ready. Option A changes that; option B keeps it.\nMeanwhile: lanes #3569, #3449, #3469 and #3570 proceed under ruling own-lanes-merge-claude-settings-prs. The coordinator also asked you in chat; an answer there closes this item.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "rewrite-merge-decisions-for-lane-merge",
   "kind": "decision",
   "n": 922,

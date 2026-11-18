@@ -1,8 +1,14 @@
 {
-  "added": "2026-11-16T13:53:00-06:00",
-  "context": "Goal: every ready PR merges fast, with its lint and review still true for the head that merges.\nProblem (rule): your two picks pull apart, and a bring-in on a ready PR costs a new head and a new run, so it needs your word on which pick wins.\nBased on (ruling): own-923-c-ready-lanes-bring-main-in (you, 13:46 CST Nov 16): ready and near-ready lanes bring main in after each merge. It clashes with merge-needs-current-base / own-merge-on-lint-pass (you, 18:21 CST Nov 15, \"B for sure\"): a head needs only a clean merge with main's tip and need not hold it.\nBased on (read): runner 10 reported at 13:46 CST that a bring-in on a ready PR makes a new head and a new ready run and may send it back to draft; it happened once today (coordinator relay, not read by triage).\nDeparts from: main \u2014 a head needs only a clean merge with main's tip, and the CI step names only conflicting PRs; the options change when a lane brings main in.\nMeanwhile: the coordinator holds the agent that would write this rule until you pick; ready PRs behind main but clean still merge as they are.",
+  "added": "2026-11-17T19:30:00Z",
+  "closed": "2026-11-17T20:27:00Z",
+  "context": "Goal: every ready PR merges fast, with its lint and review still true for the head that merges.\nProblem (rule): your two picks pull apart, and a bring-in on a ready PR costs a new head and a new run, so it needs your word on which pick wins.\nBased on (ruling): own-923-c-ready-lanes-bring-main-in (owner, 2026-11-16 13:46 CST, ready lanes bring main in after each merge): ready and near-ready lanes bring main in after each merge. It clashes with merge-needs-current-base / own-merge-on-lint-pass (you, 18:21 CST Nov 15, \"B for sure\"): a head needs only a clean merge with main's tip and need not hold it.\nBased on (read): runner 10 reported at 13:46 CST that a bring-in on a ready PR makes a new head and a new ready run and may send it back to draft; it happened once today (coordinator relay, not read by triage).\nDeparts from: main \u2014 a head needs only a clean merge with main's tip, and the CI step names only conflicting PRs; a, b and c change when a lane brings main in, and d moves the one main-in from the lane to the merge tool at merge time (decision merge-needs-current-base, your \"B for sure\" of 15 Nov 18:21 CST, and your 923 c pick, after each merge, ready lanes).\nMeanwhile: the coordinator holds the agent that would write this rule until you pick; ready PRs behind main but clean still merge as they are.\nBased on (read): the consultant's view (coordinator relay 13:26 CST): a lane brings main in only on conflict or when about to merge with its tree not proven; never on a timer. The coordinator's web read (sonnet Explore, partly unverified): with a gate before main moves, syncing only on conflict wins; syncing after every merge is the \"require up to date\" treadmill, about 34 min per run (bors-ng).",
   "home": "rewrite-merge-decisions-for-lane-merge",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-17T20:20:40Z",
+    "choice": "d",
+    "note": "d) Lanes bring main in only on conflict; the merge tool does one main-in at merge time and keeps the green run (needs #3481 and #3552 on main). Saved on the page 14:20 CST Nov 17."
+  },
   "n": 925,
   "options": [
     {
@@ -28,11 +34,21 @@
       "key": "c",
       "label": "Only a PR that conflicts brings main in",
       "lose": "Lint and review may sit on a head that is far behind main, so a clean-looking PR can still break main."
+    },
+    {
+      "gain": "Fewest runs and no hand main-ins; matches the merge-queue practice of GitHub, Mergify and Zuul, where the queue, not the author, updates the base (coordinator's web read, partly unverified).",
+      "how": "A lane brings main in only when it conflicts, or when it is about to merge with its tree not proven; never on a timer. The merge tool does one main-in at merge time and keeps the green run: #3481 carries lane lint across a clean main merge, #3552 merges main into a lagging head at lint time (consultant's order: #3481, #3552, #3383).",
+      "id": "tool-main-in-at-merge",
+      "key": "d",
+      "label": "Lanes bring main in only on conflict; the merge tool does one main-in at merge time and keeps the green run (needs #3481 and #3552 on main)",
+      "lose": "Relies on two unmerged PRs; until they land, a lane still merges main by hand at merge time."
     }
   ],
-  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJL2kLm8c5qDhosD6Nqb)",
-  "recommended": "a",
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "recommended": "d",
   "ref": "your 13:46 CST Nov 16 pick that ready and near-ready lanes bring main in after each merge, against your 18:21 CST Nov 15 pick \"B for sure\" that a head needs only a clean merge with main's tip; relayed by the coordinator 13:50 CST Nov 16",
+  "replied": "2026-11-17T20:27:00Z",
+  "reply": "Answered d at 14:20 CST on the page. Closed 14:27 CST by triage 11; routed to the coordinator, who writes it into home rewrite-merge-decisions-for-lane-merge. It needs #3481 and #3552 on main; until then a lane merges main by hand at merge time.",
   "repo": "shivinate7/claude-settings",
   "short": "When lanes bring main in",
   "shown": [
@@ -50,9 +66,14 @@
       "id": "only-on-conflict",
       "key": "c",
       "label": "Only a PR that conflicts brings main in"
+    },
+    {
+      "id": "tool-main-in-at-merge",
+      "key": "d",
+      "label": "Lanes bring main in only on conflict; the merge tool does one main-in at merge time and keeps the green run (needs #3481 and #3552 on main)"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "When should a lane bring main into its branch: once before lint, after every merge, or only on a conflict?",
-  "why": "The coordinator recommends a; triage read no diff and agrees only on the cost shown: it keeps the lint true for the merged head without a new run after every merge. It is a recommendation, not owner-typed."
+  "why": "It gives the fewest runs and no hand main-ins, and it is how merge queues work; the cost is that it needs #3481 and #3552 on main first. Recommended by the coordinator and consultant, not owner-typed."
 }

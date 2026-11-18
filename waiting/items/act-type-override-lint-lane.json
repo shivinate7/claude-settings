@@ -2,6 +2,7 @@
   "added": "2026-11-15T11:50:00-06:00",
   "closed": "2026-11-15T17:48:08Z",
   "context": "Goal: lane lane-lint-allow-entry starts, so it can carry out your pick b on item 863.\nWhat happened: the coordinator's create_session call that starts this lane was refused by the auto-mode check, \"[Undermining Oversight]\". No override line was printed. Source: the consultant, 11:49 CST, relayed; triage has not read the refusal.\nWhat your word covers: only the start of lane lane-lint-allow-entry. It covers no other act and no other session.\nUnmeasured: whether a typed `override` reaches the auto-mode check. Decision owner-override names only the guard, not this check. If the start is refused again, the coordinator says so and this item reopens.\nWhy yours: a start of this lane needs your own typed word in the coordinator's own session, and the coordinator's attempt was refused (measured 2026-11-15, the coordinator's create_session was refused by the auto-mode check with \"[Undermining Oversight]\", relayed by the consultant, not read by triage).",
+  "dismissed": "2026-11-17T20:04:20Z",
   "holds": "Lane lane-lint-allow-entry does not start until the coordinator's start of it goes through.",
   "home": "item 863 b; step lane-lint-background-refused; lane lane-lint-allow-entry",
   "id": "act-type-override-lint-lane",

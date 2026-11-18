@@ -2,6 +2,7 @@
   "added": "2026-11-13T23:55:45-06:00",
   "closed": "2026-11-14T06:21:45Z",
   "context": "Goal: a runner cannot merge a lower-priority PR ahead of a ready top-priority PR (the #3302 sequence), and the check that stops it is not switched off by a permission prompt.\nProblem (rule): the new check adds a flag, --priority-rows <file>, to the runner's merge command. Two settings.json allow entries (\"Relayed Merge Yes\" and \"Batch Runner Merge\", lines 59-60) name the allowed act as `merge <pr> --confirm --head <sha>` and say any other act is not covered. The auto-mode classifier may read the new flag as a different act and deny the runner's call. Nobody could probe the classifier. Only you change permission settings.\nBased on (read): the lane's round 2 reviewer, settings.json:59-60, operating-model.md runner confirm forms; relayed by the lane priority-vs-merge-order (session_013NEJKzPki46QeHmV8zxLAh) 23:56 CST; unchecked by triage. Your earlier picks on allow entries (759 b, 753 a, the reinstall entry) each named one exact act; none covers this flag.\nDeparts from: main \u2014 the two entries name `--confirm --head <sha>` only; a adds `[--priority-rows <file>]` to both; b leaves them.\nMeanwhile: the lane continues round 3; the check is built; nothing else depends on this.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "lane priority-vs-merge-order (branch priority-vs-merge-order); settings.json autoMode.allow lines 59-60; its pinned test hooks/test_auto_mode_allow.py",
   "id": "pick-priority-rows-allow",
   "kind": "decision",

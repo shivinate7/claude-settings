@@ -2,6 +2,7 @@
   "added": "2026-11-13T18:47:00Z",
   "closed": "2026-11-13T19:26:08Z",
   "context": "Goal: a question with a large trade-off reaches you with a better option on the table.\nProblem (goal): you asked on Nov 8 whether large trade-offs between a question's choices could trigger an option judge to push back. The lane measured it: a rule that counts ruling-and-open-gap losses as large catches item 416 (3 of 3), but sends back 10 of 163 past items you answered with a listed option (6.1%) and catches 1 of 33 otherwise answered. That is not near zero, so the judge was not built. The 416 kind may need the writer to add a third option, not a judge. The lane waits on your pick.\nBased on (measured): the lane's run, 11:41 CST Nov 8; #2173 keeps the rule as built (0 of 196).\nDeparts from: main has no option pushback at all \u2014 a adds a writing rule; b leaves main as it is.\nMeanwhile: the lane (prose-guard-2) waits for your pick.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step option-tradeoff-pushback (ask-mw80xweioa)",
   "id": "pick-option-tradeoff-pushback",
   "kind": "decision",

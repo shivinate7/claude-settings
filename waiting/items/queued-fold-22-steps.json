@@ -1,0 +1,66 @@
+{
+  "added": "2026-11-17T20:58:00Z",
+  "closed": "2026-11-18T01:32:00Z",
+  "context": "Goal: one name per step status, with 'queued' retired as you chose.\nProblem (rule): You chose to fold queued into blocked with each step naming the step it waits behind, but 19 of the 22 wait on no step and 3 wait on work already merged, so the lane needs your word on how to fold them.\nBased on (read): the lane's read of the 22 step records on the roadmap record branch and skills/roadmap/build.py: the 19 wait on incidents, debts, a freeze or an owner word; the 3 (page-term-sweep, tilde-control-pins-nothing, touches-check-flags) wait on PRs already in main (coordinator relay, 14:57 CST Nov 17, not re-read by triage).\nBased on (ruling): own-735-c-fold-queued (owner, 2026-11-17 14:49 CST, fold 'queued' into 'blocked', each step naming the step it waits behind)\nDeparts from: main \u2014 'queued' is its own status on 22 steps \u2014 a folds all 22 into blocked with a note naming what each waits on; b sets all 22 to todo; c keeps queued.\nWaiting on: the lane holds and pushes nothing that drops 'queued' until your pick; draft PR #3195 stays a draft; the coordinator acts next.",
+  "home": "step glossary-step-statuses (draft PR #3195)",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-18T01:29:25Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 941,
+  "options": [
+    {
+      "gain": "Statuses stay true, and your fold holds.",
+      "how": "All 22 become blocked, each with a note naming what it waits on. A step is linked to the step it waits behind only where one exists. The 3 finished waits go to todo.",
+      "id": "blocked-all-noted",
+      "key": "a",
+      "label": "Blocked for all 22, each noting what it waits on; the 3 finished waits go to todo (recommended)",
+      "lose": "Most blocked steps do not link to a step they wait behind, so you read each note to see what holds it."
+    },
+    {
+      "gain": "Simplest, fewest names.",
+      "how": "All 22 become todo, with 3 noted. Blocked is used only where a real blocking step exists.",
+      "id": "todo-all",
+      "key": "b",
+      "label": "Todo for all 22; blocked only where a real blocker exists",
+      "lose": "19 steps that wait on incidents, debts, a freeze or an owner word read as ready to start."
+    },
+    {
+      "gain": "No step changes.",
+      "how": "Keep 'queued' as its own status, as it is today.",
+      "id": "keep-queued",
+      "key": "c",
+      "label": "Keep 'queued' as its own status",
+      "lose": "One more status name; you chose to fold it."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "recommended": "a",
+  "ref": "coordinator relay 14:57 CST Nov 17, lane glossary-step-statuses (session_013NEJL475DP95wLmQcdZh57)",
+  "replied": "2026-11-18T01:32:00Z",
+  "reply": "Saved a at 19:29 CST Nov 17 (all 22 blocked, each noting what it waits on; the 3 finished waits go to todo). Closed 19:32 CST by triage 11. Triage files the fold as a step and writes the 22 status changes on the record branch.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Fold 22 queued steps: how?",
+  "shown": [
+    {
+      "id": "blocked-all-noted",
+      "key": "a",
+      "label": "Blocked for all 22, each noting what it waits on; the 3 finished waits go to todo (recommended)"
+    },
+    {
+      "id": "todo-all",
+      "key": "b",
+      "label": "Todo for all 22; blocked only where a real blocker exists"
+    },
+    {
+      "id": "keep-queued",
+      "key": "c",
+      "label": "Keep 'queued' as its own status"
+    }
+  ],
+  "status": "closed",
+  "title": "Your fold needs each queued step to name the step it waits behind, but 19 of 22 wait on no step. How should the fold go?",
+  "why": "a keeps your fold and keeps every status true; the cost is that most blocked steps do not link to a step they wait behind. Recommended by the coordinator, not owner-typed."
+}

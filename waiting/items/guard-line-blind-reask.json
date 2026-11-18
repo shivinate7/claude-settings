@@ -2,6 +2,7 @@
   "added": "2026-11-13T17:02:00Z",
   "closed": "2026-11-13T18:40:00-06:00",
   "context": "Goal: a report that admits a mistake names a PR, commit, step or debt, never a habit.\nProblem (rule): \"The builders broke X \u2014 Guard: future briefs run Y first.\" passes today with no ref.\nBased on (read): lint/report_guard.py MISTAKE_FIRST_PERSON_RE counts only \"I\" and \"my\" as admitting a mistake.\nBased on (ruling): decision mistake-means-missing-guard, Incident line (\"named the builders, not I\").\nDeparts from: main, where an admission needs \"I\" or \"my\" and the label must lead its sentence \u2014 widens the label forms, and option b also adds role subjects.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step habit-is-not-a-guard",
   "id": "guard-line-blind-reask",
   "kind": "decision",

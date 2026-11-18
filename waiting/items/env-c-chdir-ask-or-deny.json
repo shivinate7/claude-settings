@@ -1,0 +1,71 @@
+{
+  "added": "2026-11-17T09:52:00-06:00",
+  "closed": "2026-11-17T22:01:17Z",
+  "context": "Goal: a lane's undo command that reaches into the shared checkout with `env -C` or `env --chdir` is stopped the same way `env -vC` already is.\nProblem (rule): the lane carries the test rows of the older pull request #2015 (its opener session is inactive). Rows 901 to 904 of test file s02747 want the guard to ask. Their twins at rows 908 to 911, and the comments at lines 871 and 906, want it to deny. The product denies today, so \"keep the rows as written\" cannot hold. Only you can pick, because b turns a deny into an ask.\nAlready answered (you, typed in the lane's chat at 09:26 CST per the lane's report, relayed by the coordinator): the `env -vC` pick is \"deny (and correct the gap)\". The lane dropped test row 938 and kept the deny row.\nBased on (read): the coordinator's relay at 09:51 CST of the lane's report, not read by triage 9: rows 901 to 904 want ask (shared tree); rows 908 to 911 and comments at lines 871 and 906 say other-checkout denies.\nDeparts from: main denies `env -C` and `env --chdir` into the shared checkout (the other-checkout guard) \u2014 a keeps that deny and drops the two ask rows; b turns the deny into an ask.\nMeanwhile: the lane merges main into its branch, reruns lint once, and leaves the two ask rows red. The pull request #3606 stays a draft.\nWaiting on: you.",
+  "holds": "The lane's family of test rows stays red until you pick.",
+  "home": "PR #3606; step lane-report-plain-form covers the flagged report. No step yet for the older #2015 rows.",
+  "id": "env-c-chdir-ask-or-deny",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-17T19:14:44.370Z",
+    "choice": "a",
+    "note": ""
+  },
+  "links": [
+    {
+      "label": "claude-settings PR #3606",
+      "url": "https://github.com/shivinate7/claude-settings/pull/3606"
+    }
+  ],
+  "n": 935,
+  "options": [
+    {
+      "gain": "Same rule as your env -vC pick, and the test family goes green.",
+      "id": "deny-drop-ask-rows",
+      "key": "a",
+      "label": "Keep the deny and drop the two ask rows (rows 901 to 904 of file s02747)",
+      "links": [
+        {
+          "label": "claude-settings PR #3606",
+          "url": "https://github.com/shivinate7/claude-settings/pull/3606"
+        }
+      ],
+      "lose": "Two test rows from the older pull request #2015 are deleted.",
+      "widens": false
+    },
+    {
+      "gain": "Every row from the older pull request #2015 holds as written.",
+      "id": "product-asks",
+      "key": "b",
+      "label": "Change the guard so it asks instead of denying",
+      "links": [
+        {
+          "label": "claude-settings PR #3606",
+          "url": "https://github.com/shivinate7/claude-settings/pull/3606"
+        }
+      ],
+      "lose": "A deny on main becomes a prompt, which lets a mistaken command into the shared checkout after one yes. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    }
+  ],
+  "owner": "lane glued-amp-on-any-filter (session_013NEJL3C8YM2r4iexezbU7K), relayed by the coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 09:51 CST Nov 17; posted by triage (session_013NEJL19M4Jwh49tAdowQXp). The coordinator and the lane recommend a; the star is theirs, not yours.",
+  "recommended": "a",
+  "ref": "PR #3606; the older pull request #2015; coordinator message 09:51 CST Nov 17",
+  "repo": "shivinate7/claude-settings",
+  "short": "env -C into shared checkout: deny or ask?",
+  "shown": [
+    {
+      "id": "deny-drop-ask-rows",
+      "key": "a",
+      "label": "Keep the deny and drop the two ask rows (rows 901 to 904 of file s02747)"
+    },
+    {
+      "id": "product-asks",
+      "key": "b",
+      "label": "Change the guard so it asks instead of denying"
+    }
+  ],
+  "status": "closed",
+  "title": "A lane's undo command that changes into the shared checkout with env -C or env --chdir: does the guard deny it or ask? The lane's two sets of test rows disagree.",
+  "why": "The lane's report says its two sets of test rows from the older pull request #2015 want opposite results for the same kind of command, so the lane cannot keep both. The coordinator relayed this from the lane at 09:51 CST; triage did not read the lane's report or the test file."
+}

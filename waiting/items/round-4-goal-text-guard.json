@@ -1,0 +1,61 @@
+{
+  "added": "2026-11-18T06:19:00-06:00",
+  "closed": "2026-11-18T11:12:00-06:00",
+  "context": "Goal: land pull request 3635, a guard that refuses a goal text whose ruling id no record holds.\nProblem (rule): Its three review rounds are spent and the merge tool refuses any further review record, so only you can grant a fourth round.\nBased on (read): the third round passed on the branch's earlier code, then a fix check failed, and the branch took a merge of pull request 3634 (now on main).\nBased on (ruling): the review rule allows three rounds and says a fourth round needs your grant; the merge tool refuses a fix check recorded after a failed fix-check line.\nDeparts from: main \u2014 adds a goal-text guard, and option a lifts the three-round cap once.\nWaiting on: pull request 3635 stays unmerged; the consultant works pull requests 3625, 3630 and 3642 and the queue meanwhile, and acts next on your pick.",
+  "home": "pull request 3635 (consultant's lane)",
+  "kind": "decision",
+  "n": 963,
+  "options": [
+    {
+      "gain": "Lands now on the existing branch with one more review.",
+      "how": "The existing branch gets one more review by a sonnet reviewer and lands on a pass.",
+      "id": "grant-round-4",
+      "key": "a",
+      "label": "Grant a fourth round on pull request 3635",
+      "lose": "Breaks the three-round cap once."
+    },
+    {
+      "gain": "No exception to the three-round cap.",
+      "how": "A new pull request carries the same diff and starts at round 1.",
+      "id": "replace-from-main",
+      "key": "b",
+      "label": "Open a replacing pull request from main with the same change",
+      "lose": "A full new review cycle (about 2 hours with lint, unmeasured) and the record trail splits across two pull requests."
+    },
+    {
+      "gain": "No cap exception and no cost.",
+      "how": "Nothing more is done on it until you say so.",
+      "id": "park-3635",
+      "key": "c",
+      "label": "Park pull request 3635",
+      "lose": "The guard stays off main."
+    }
+  ],
+  "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ), written by triage 11 (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "a",
+  "ref": "consultant relay 06:16 CST Nov 18",
+  "replied": "2026-11-18T11:12:00-06:00",
+  "reply": "Parked. The consultant (relay 11:12 CST Nov 18) could not name the outcome this guard protects in one sentence, so it has none yet. Pull request 3635 stays unmerged and gets no more work until an outcome is named.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Round 4 on goal-text guard",
+  "shown": [
+    {
+      "id": "grant-round-4",
+      "key": "a",
+      "label": "Grant a fourth round on pull request 3635"
+    },
+    {
+      "id": "replace-from-main",
+      "key": "b",
+      "label": "Open a replacing pull request from main with the same change"
+    },
+    {
+      "id": "park-3635",
+      "key": "c",
+      "label": "Park pull request 3635"
+    }
+  ],
+  "status": "closed",
+  "title": "Grant a fourth review round on pull request 3635, the goal-text guard?",
+  "why": "a lands the guard now at the cost of one cap exception; b costs a full review cycle for the same diff. The consultant also recommends a."
+}

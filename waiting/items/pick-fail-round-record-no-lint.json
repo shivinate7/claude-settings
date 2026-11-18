@@ -2,6 +2,7 @@
   "added": "2026-11-13T20:34:01Z",
   "closed": "2026-11-13T21:05:00Z",
   "context": "Goal: a reviewer FAIL round is never lost.\nProblem (rule): lane R67-drain's PR #3222 (rebuild of #1760) makes the record path run lane lint first and refuse when it is red. A FAIL round on a lint-red head therefore cannot be recorded, so the round count never sees it (merge.py line 5776, the lane's reading). Your rule says a change gets at most three review rounds; a lost FAIL round breaks that count.\nBased on (read): the lane's hand-in message 14:30 CST Nov 13; triage has not read merge.py or #3222. Past rulings: none found in roadmap/rulings for a FAIL-only record.\nDeparts from: main \u2014 main prints a FAIL record with no lint (lane's words); option b keeps that for FAIL only, option a drops it.\nMeanwhile: nothing changes; #3222 is handed in as built. The lane's candidate debt (no check refuses a push after a FAIL round with no record for that head) is filed as step fail-round-needs-record-before-push.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step record-post-runs-lane-lint; PR #3222",
   "id": "pick-fail-round-record-no-lint",
   "kind": "decision",

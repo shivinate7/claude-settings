@@ -1,0 +1,66 @@
+{
+  "added": "2026-11-17T19:45:00Z",
+  "closed": "2026-11-17T20:53:00Z",
+  "context": "Goal: the Answered list on this page shows only what still needs a look, so you can read the page without clearing hundreds of lines.\nProblem (goal): the list shows 217 entries. About 212 are closed items kept as one line until you press Mark read; deleting answer records cannot lower it, and the writer cannot clear them, so it needs your word on who clears them.\nBased on (read): a headless render of the page with 89 answer records left (triage 11, 13:35 CST Nov 17) shows Answered 217: 5 open items with a kept answer (925, 927, 928, 929, 935) and the closed one-liners. It used a stand-in database, so it is a close check, not your live view; your own count was 219.\nBased on (read): the consultant's view (13:40 CST Nov 17): option b, because the count then shows only what is live; c lets the writer hide items you never read.\nDeparts from: main \u2014 closed items stay as one line until you press Mark read \u2014 a hides nothing new; b makes the page hide a closed item one day after it closed; c lets the page writer mark closed items read for you.\nMeanwhile: triage keeps the kept answers of closed items deleted as the skill allows; nothing else waits on this.",
+  "home": "page-answered-count-hide",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-17T20:49:17Z",
+    "choice": "a",
+    "note": "a) Leave it: you press Mark read. Saved on the page 14:49 CST Nov 17."
+  },
+  "n": 938,
+  "options": [
+    {
+      "gain": "Nothing hidden that you have not seen.",
+      "how": "No change. You clear the closed one-liners yourself with Mark read.",
+      "id": "leave",
+      "key": "a",
+      "label": "Leave it: you press Mark read",
+      "lose": "The count stays high and nobody but you can lower it."
+    },
+    {
+      "gain": "The count shows only live items, with no button to press.",
+      "how": "A page change: a closed item older than one day drops out of Answered by itself. Its record stays in the database and in the receipts.",
+      "id": "page-hides-after-day",
+      "key": "b",
+      "label": "The page hides a closed item one day after it closed",
+      "lose": "A closed item you did not read disappears after a day; a page change needs a build and a publish."
+    },
+    {
+      "gain": "The count drops at once with no page change.",
+      "how": "The page writer sets dismissed on closed items it has filed a receipt for.",
+      "id": "writer-marks-read",
+      "key": "c",
+      "label": "The writer marks closed items read for you",
+      "lose": "The writer hides items you never read, which the skill keeps for you."
+    }
+  ],
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "b",
+  "ref": "your 13:2x CST Nov 17 words about 219 answered items showing on the page; consultant view 13:40 CST Nov 17",
+  "replied": "2026-11-17T20:58:00Z",
+  "reply": "Answered shows 49 because 25 closed one-liners wait for your Mark read (20 of them closed today, after the cleanup) and 24 open items still hold your answer while their work is not done (for example 727, 753, 759, 786, 737, 721); a headless render of the page gave 49, the same as yours. Your pick a (leave it) stands, so nothing was hidden or cleared. The 24 leave Answered when their work lands and the item closes; the 25 leave when you press Mark read.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Answered count won't drop",
+  "shown": [
+    {
+      "id": "leave",
+      "key": "a",
+      "label": "Leave it: you press Mark read"
+    },
+    {
+      "id": "page-hides-after-day",
+      "key": "b",
+      "label": "The page hides a closed item one day after it closed"
+    },
+    {
+      "id": "writer-marks-read",
+      "key": "c",
+      "label": "The writer marks closed items read for you"
+    }
+  ],
+  "status": "closed",
+  "title": "Who clears the closed one-liners from the Answered list: you with Mark read, the page after a day, or the writer?",
+  "why": "It removes the 217-line pile with no button for you to press; the cost is a page change, and closed items you never read vanish after a day. Recommended by the consultant and triage, not owner-typed."
+}

@@ -2,6 +2,7 @@
   "added": "2026-11-16T13:44:30-06:00",
   "closed": "2026-11-16T19:48:00Z",
   "context": "Goal: merges get faster and easier because lanes stay close to main.\nProblem (rule): no rule or hook says when a lane brings main into its branch, and most open PRs are far behind. Each time a lane brings main in, it pushes, so its checks and review run again; that costs runs, time and tokens. It needs your word because it sets how often every lane pushes.\nBased on (measured): the coordinator's REST read at 13:43 CST, main at 4680473b0, first 300 open PRs (a fourth page not read): 8 at main, 5 are 6 to 50 commits behind, 287 are more than 50 behind. Ready ones: #3553 at main, #3577 354 behind, #2917 394, #3548 482, #3097 1,710 (why #3097 is ready that far behind: unknown). Relayed; triage did not re-read it.\nBased on (read): the four lanes the coordinator told brought main in within minutes, so it is easy to do; the cost is the re-run, not the effort.\nDeparts from: main \u2014 no rule says when a lane merges main in; a lane does it when it chooses, which today is right before lint and record. The options set a time.\nMeanwhile: the coordinator acts on your pick, not before; nothing waits on this answer.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "rewrite-merge-decisions-for-lane-merge",
   "kind": "decision",
   "lane": "coordinator",

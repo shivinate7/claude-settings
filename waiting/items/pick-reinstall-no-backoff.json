@@ -2,6 +2,7 @@
   "added": "2026-11-15T03:20:00-06:00",
   "closed": "2026-11-15T17:41:00Z",
   "context": "This item asks which way to settle a known gap. It does not block the PR.\nGoal: a cloud session that cannot reinstall does not waste work on every prompt, and a failed first install does not stay silent.\nProblem (rule): debt reinstall-no-backoff. After a failed landing the old install record stays, so the hook retries on every prompt: one `git ls-remote` plus one installer run, with no backoff. A failed first install of a session leaves no record, so no retry runs and the hook prints \"install freshness unknown\". Whether to leave this as a debt or build a backoff is your call, since a backoff changes what the hook does.\nBased on (read): PR 3487 body, \"Retry cost for debt reinstall-no-backoff\", read by triage at 03:15 CST Nov 15; the coordinator relayed the lane's wording at 03:12 CST. Triage read no code.\nBased on (unmeasured): how often a landing fails in a cloud session, and what one installer run costs.\nDeparts from: main \u2014 adds a retry on every prompt after a failed landing, with no limit; a backoff would change that.\nWho recommends what: nobody has recommended an option; no star.\nMeanwhile: PR 3487 is not held on this answer. The debt stays filed as reinstall-no-backoff.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step refresh-backoff-and-cost (follow-up lane on #3487's head); debt reinstall-no-backoff; PR 3487 comment 6898557129",
   "kind": "decision",
   "lane": "refresh-backoff-and-cost",

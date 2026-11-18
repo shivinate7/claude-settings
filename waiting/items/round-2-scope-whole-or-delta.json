@@ -1,0 +1,49 @@
+{
+  "added": "2026-11-18T11:11:00-06:00",
+  "closed": "2026-11-18T11:31:00-06:00",
+  "context": "Goal: round-2 reviews catch what round 1 missed, without slowing merges.\nProblem (rule): Pull request 3654 makes round 2 read only the changes since round 1, and past full-diff round-2 reviews caught 2 of 14 blocking defects in places round 1 never looked (pull requests 3584 and 3525), so only you can trade speed against those catches.\nBased on (measured): the repeated-findings count on the roadmap step, 2 of 14 blocking defects caught by a whole-diff round 2 in new places.\nBased on (read): docs/decisions/pr-review-record.md line 96 says the reviewer reads the whole diff against main; no ruling of yours on round-2 scope found in docs/decisions or roadmap/rulings (searched 11:10 CST).\nDeparts from: docs/decisions/pr-review-record.md line 96 \u2014 a round-2 reviewer reads the whole diff against main \u2014 round 2 reads only the delta since round 1.\nWaiting on: pull request 3654 is held; the writer fixes findings F1 to F5 and F7 meanwhile, and the consultant acts next on your pick.",
+  "holds": "Pull request 3654 stays unmerged until you pick.",
+  "home": "PR 3654 (review-converges, finding F6, the sixth review finding)",
+  "kind": "decision",
+  "n": 969,
+  "options": [
+    {
+      "gain": "Keeps the catches a whole-diff round 2 made (2 of 14 blocking defects).",
+      "how": "Round 2 keeps reading the whole diff; pull request 3654 drops the delta-only change and lands the rest.",
+      "id": "keep-whole-diff",
+      "key": "a",
+      "label": "Keep the whole-diff round 2 for now",
+      "lose": "Round 2 stays slower until the delta rule is measured."
+    },
+    {
+      "gain": "A faster round 2.",
+      "how": "Round 2 reads only what changed since round 1, as pull request 3654 does.",
+      "id": "delta-only",
+      "key": "b",
+      "label": "Round 2 reads only the delta",
+      "lose": "Up to 4 of 14 such blocking defects may slip through."
+    }
+  ],
+  "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ), written by triage 11 (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "a",
+  "ref": "consultant relay 11:09 CST Nov 18; pull request 3654",
+  "replied": "2026-11-18T11:31:00-06:00",
+  "reply": "Closed. The consultant took pick a (round 2 keeps reading the whole diff) at 11:32 CST Nov 18, because the act is reversible and a standing rule lets a session take it. Not an owner-typed pick. Pull request 3654 is being changed to match.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Round 2 scope: whole or delta",
+  "shown": [
+    {
+      "id": "keep-whole-diff",
+      "key": "a",
+      "label": "Keep the whole-diff round 2 for now"
+    },
+    {
+      "id": "delta-only",
+      "key": "b",
+      "label": "Round 2 reads only the delta"
+    }
+  ],
+  "status": "closed",
+  "title": "Should review round 2 read the whole diff, or only what changed since round 1?",
+  "why": "a keeps the measured catches; b saves time but may let up to 4 of 14 blocking defects through, and the speed gain is unmeasured. The consultant also recommends a."
+}

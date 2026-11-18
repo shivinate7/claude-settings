@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-17T19:14:44.370Z",
+  "choice": "b",
+  "item": "setup-pr-lint-unknown",
+  "label": "B: Change the merge tool so a setup PR whose own head stamp.json says \"none\" lints and merges from that stamp, with no flag; the change must cover the merge deadline too",
+  "n": 929,
+  "note": "",
+  "optionId": "tool-lints-from-head-stamp"
+}

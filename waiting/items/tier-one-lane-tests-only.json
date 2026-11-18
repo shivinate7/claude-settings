@@ -1,0 +1,49 @@
+{
+  "added": "2026-11-17T22:00:36-06:00",
+  "closed": "2026-11-18T11:38:00-06:00",
+  "context": "Goal: every pull request gets the review depth its kind of change needs, set by one table, with no gap where two rules disagree.\nProblem (rule): rule roles-solo-reviews-logic-diffs-only (in a one-lane run a fresh reviewer reads only changes that touch rule behaviour, a guard, a check or program logic) says other edits merge on checks alone, while the table owes one round for tests-only changes, so only you can say which governs.\nBased on (read): the plan plan on branch lane/pr-template-risk-tiers (docs/plans/pr-template-risk-tiers.md, read from main commit 69ab998832, 21:38 CST Nov 17): the solo rule and the table disagree for tests-only changes.\nDeparts from: main \u2014 the solo rule lets tests-only changes merge on checks alone and the table owes one round \u2014 one reading is picked (a or b).\nWaiting on: nothing is stopped; step pr-template-risk-tiers waits on your pick, then a test-author writes the template-check cases and a builder lands them.",
+  "home": "step pr-template-risk-tiers",
+  "id": "tier-one-lane-tests-only",
+  "kind": "decision",
+  "n": 959,
+  "options": [
+    {
+      "gain": "A weakened test is caught by a reader, not only by green checks.",
+      "how": "The solo rule is reworded to except tests-only changes.",
+      "id": "one-round",
+      "key": "a",
+      "label": "Owe one round on tests-only changes, as the table says (recommended)",
+      "lose": "One more review on small test edits in one-lane runs."
+    },
+    {
+      "gain": "No review cost on test edits.",
+      "how": "The table row reads: rounds owed 0 in a one-lane run.",
+      "id": "checks-alone",
+      "key": "b",
+      "label": "Tests-only changes merge on passing checks alone, as the solo rule says",
+      "lose": "A test that was loosened to pass can merge unread; your rule says a failing test is a claim to re-point or fix."
+    }
+  ],
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "a",
+  "ref": "owner chat 19:45 CST Nov 17 (relayed by the consultant): land the verification article's findings; PR template lines and risk tiers by change",
+  "replied": "2026-11-18T11:38:00-06:00",
+  "reply": "Closed. You picked b: in a one-lane run, a pull request that changes only tests merges on passing checks alone; the tier table row reads rounds owed 0. Filed on step pr-template-risk-tiers.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Tier table: does a tests-only change in a one-lane run owe a review round?",
+  "shown": [
+    {
+      "id": "one-round",
+      "key": "a",
+      "label": "Owe one round on tests-only changes, as the table says (recommended)"
+    },
+    {
+      "id": "checks-alone",
+      "key": "b",
+      "label": "Tests-only changes merge on passing checks alone, as the solo rule says"
+    }
+  ],
+  "status": "closed",
+  "title": "In a run with one lane, does a pull request that changes only tests get one review round, or merge on passing checks alone?",
+  "why": "a keeps a human-style read on tests, which your rule treats as claims; b saves a round but lets a loosened test through unread. Recommended by triage, not owner-typed."
+}

@@ -22,10 +22,11 @@
     }
   ],
   "owner": "lane runner-repos-in-parallel-rest (session_013NEJL4RgQWEJ7kqZC5AfMD), via the coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "recommended": "a",
   "ref": "coordinator 18:32 CST Nov 13",
   "repo": "shivinate7/claude-settings",
   "short": "715 follow-up: what counts as a small build for the guard?",
   "status": "open",
   "title": "Your pick keeps the merge-roots guard only if its build is small. It is about 275 lines. Drop it, or say what small means?",
-  "why": "Your pick used the word small without a number, and the lane's measure says it is not small."
+  "why": "About 275 hook lines plus 755 test lines is not small, and no incident shows a runner dropping --root."
 }

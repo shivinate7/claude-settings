@@ -2,6 +2,7 @@
   "added": "2026-11-13T17:31:00Z",
   "closed": "2026-11-13T18:29:53-06:00",
   "context": "Goal: guards stop mistakes Claude is likely to make, and cost less than the harm they stop.\nProblem (rule): no record shows a runner dropping `--root`. You said building-guard-needs-incident is a judge of lift, not a hard rule, and asked whether keeping the guard loses nothing. Not quite nothing: (1) main has none of merge_calls, _call_pieces or merge_args_of, so keeping means building them: measured by the lane at 13:2x CST, about 275 added lines of hook code (guard_merge.py +246/-15, guard.py +24/-2, guard_core.py +4/-2) plus 755 test lines; the splitting fix alone is about 50 lines; (2) a guard that wrongly refuses a valid command costs a runner time, and this one's false-refusal rate is still unmeasured: the cloud session has no past runner commands, the real ones are on your computer (guard.log, transcripts). The guard's own 16 allow/refuse test cases are green, which is fixtures, not history. If both are small, keeping loses little and gains a catch for the dropped-root case. The `$( )` splitting fix in #2071 stands alone either way.\nBased on (ruling): your words 11:53 CST Nov 13 (that rule is a lift judge); decision guard-that-cries-wolf-is-spent.\nDeparts from: main \u2014 main has no such guard; b or c adds it.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "rule building-guard-needs-incident",
   "id": "drain-2071-guard-incident",
   "kind": "decision",

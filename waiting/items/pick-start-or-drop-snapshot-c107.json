@@ -2,6 +2,7 @@
   "added": "2026-11-13T18:48:00Z",
   "closed": "2026-11-13T19:26:08Z",
   "context": "Goal: new lanes stop printing old warnings, and an orchestrator starts its lanes without you clicking.\nProblem (goal): both steps are ready with no lane. cloud-snapshot-age-check: a stale snapshot makes every new lane print old warnings and run old hooks (31 lanes printed the old EXECPATH line); PR #1363 passed round 3 and was held, then went back to ready on Nov 12. c107: your Oct 26 gripe that the degen orchestrator on the Mac needed you to accept each started session; the cloud cannot reach the Mac, so a probe has to run there. A local lane start needs your click.\nBased on (read): the two step notes; ruling lanes-start-as-agents (item 168 a) keeps one press per Mac lane start.\nDeparts from: main \u2014 neither step has a lane; a starts one, b starts two, c closes both.\nMeanwhile: nothing else waits on this.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "steps cloud-snapshot-age-check and c107",
   "id": "pick-start-or-drop-snapshot-c107",
   "kind": "decision",

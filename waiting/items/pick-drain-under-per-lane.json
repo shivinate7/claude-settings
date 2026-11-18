@@ -2,6 +2,7 @@
   "added": "2026-11-13T15:27:32-06:00",
   "closed": "2026-11-13T21:36:00Z",
   "context": "Goal: land the roughly 400 open lane PRs fast and correct under per-lane merge.\nProblem (rule): a ruling of yours rests on a tool that is gone. Record: ruling backlog-drain-plan (owner 10:45 CST Nov 13, Cockpit item 691 a), the sentence \"Runner 10 batches keep rows\". Measured: main 59da758a3 has no batch build or drop (act 4, your force-merge at 15:15 CST). Outcome it protected: one CI run for many lanes. What protects it now: nothing. The rest of the plan stands.\nBased on (measured): the retrospective's reading of main 59da758a3 and its run times, 33 to 52 minutes per run, about 400 PR runs plus 400 main push runs for one by one. Based on (read): the rulings backlog-drain-plan and drain-first-hold (10:50 CST, item 693 a, big batches) are both open on the record.\nAlso recorded: never cancelling main push runs stays (skill ci-hygiene step 4; R42 design P3, one verdict per commit for the blame walk).\nDeparts from: your ruling backlog-drain-plan \u2014 runner 10 no longer batches the lanes; a lane per step group combines that group's reviewed commits into one PR that merges alone on its own green run. Main's per-lane rule does not change: the PRs change shape to fit the tool.\nMeanwhile: lanes merge one by one as today.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step merge-flow-after-anthropic; step backlog-drain; rulings backlog-drain-plan and drain-first-hold",
   "id": "pick-drain-under-per-lane",
   "kind": "decision",

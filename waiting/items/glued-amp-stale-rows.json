@@ -2,6 +2,7 @@
   "added": "2026-11-15T14:36:06-06:00",
   "closed": "2026-11-16T19:31:26Z",
   "context": "Goal: #2015 (any-filter) plus the glued-& reader on main.\nProblem (rule): lane branch glued-amp-on-any-filter (head 8ea6264c2, #2015 merged on main b600c126d, pushed, no PR) has 71 of 10286 test rows red. They are #2015's expectations that main's rules changed since Nov 11: scratchpad-owner 16, push 14, check-tail 13, the merge-batch family 10, others small. Dropping or re-pointing a failing row needs your word. The stake is a rule: the refusals main holds today.\nBased on (measured): the test-author's failure count by family (3 shards, 9 skipped); the counts are not checked row by row.\nDeparts from: main refuses these acts today \u2014 option a changes no refusal; option b would turn main's refusals back into the old allowances.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "holds": "The lane's #2156 merge, the curl x?a=1&b=2 case, review and the draft PR wait on this answer.",
   "home": "check-tail-amp-tidy",
   "kind": "decision",

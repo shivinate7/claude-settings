@@ -1,0 +1,61 @@
+{
+  "added": "2026-11-18T10:37:00-06:00",
+  "closed": "2026-11-18T11:07:00-06:00",
+  "context": "Goal: the lost merge-tool change you remember lands, so a fix check no longer needs an extra Sonnet round or a hand-off when a PR already holds other records.\nProblem (rule): making the coordinator's red test pass changes line 134 of decision pr-review-record (\"HEAD must be the Head of the newest earlier record on the PR\"), which carries no owner tag, and a change that departs from a ruling goes to you before it is built.\nBased on (read): line 134 and line 137 of docs/decisions/pr-review-record.md on origin/main (read 10:35 CST); line 137 (your 20:01 CST Nov 17 ruling that an older head is accepted for a merge only when it is an ancestor of the newest head and its record reads done) reaches only a merge head, not an older plain head.\nBased on (read): the coordinator's red case on branch fix-check-other-records (merge/test_merge.py, class ReviewFixBase) fails with \"a fix check naming an older record's head ... was refused\"; the subtest at merge/test_merge.py line 18136 pins the current rule.\nDeparts from: docs/decisions/pr-review-record.md line 134 \u2014 the fix check must name the newest record's head \u2014 a fix check may name an older reviewed head that has its own record.\nWaiting on: nothing stopped; the coordinator builds option a now and you can narrow it to c before it merges.",
+  "home": "step fix-check-other-records",
+  "kind": "decision",
+  "n": 967,
+  "options": [
+    {
+      "gain": "The lost work lands as you remember it.",
+      "how": "Line 134 changes as the step says: a head with a record is accepted, a head with no record still refuses.",
+      "id": "any-reviewed-head",
+      "key": "a",
+      "label": "Accept any reviewed head that has its own record (default being built, recommended)",
+      "lose": "The merge check accepts more heads; the change owes the net-value test if it reaches round 3."
+    },
+    {
+      "gain": "No loosening of the check.",
+      "how": "No change to the merge tool; the step closes.",
+      "id": "keep-line-134",
+      "key": "b",
+      "label": "Keep line 134, drop the case and close the step",
+      "lose": "The lost work stays lost."
+    },
+    {
+      "gain": "Most of the step, with the same safety test you ruled on Nov 17.",
+      "how": "Your Nov 17 ancestry rule, now for merge heads, is extended to plain heads.",
+      "id": "ancestor-heads-only",
+      "key": "c",
+      "label": "Accept only an older reviewed head that is an ancestor of the newest head and whose record reads done (narrower)",
+      "lose": "A head on a rebased or unrelated line still refuses."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), written by triage 11 (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "a",
+  "ref": "coordinator relay 10:35 CST Nov 18",
+  "replied": "2026-11-18T11:08:00-06:00",
+  "reply": "Closed. You picked a (accept any reviewed head that has its own record). Routed to the coordinator, who confirmed at 11:07 CST it is building a as planned under step fix-check-other-records.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Fix check on an older reviewed head",
+  "shown": [
+    {
+      "id": "any-reviewed-head",
+      "key": "a",
+      "label": "Accept any reviewed head that has its own record"
+    },
+    {
+      "id": "keep-line-134",
+      "key": "b",
+      "label": "Keep line 134, drop the case and close the step"
+    },
+    {
+      "id": "ancestor-heads-only",
+      "key": "c",
+      "label": "Accept only an older reviewed head that is an ancestor of the newest head and whose record reads done (recommended by the coordinator)"
+    }
+  ],
+  "status": "closed",
+  "title": "May the merge tool accept a fix check that names an older reviewed head, instead of the newest record's head?",
+  "why": "The coordinator and the consultant found that the newest-only rule rests on a consultant pick of 15:05 CST Nov 15, not on your ruling, so a lands your lost work fast, as you asked at 10:15 CST; c narrows it and costs more build time. Recommended by the coordinator, relayed, not owner-typed."
+}

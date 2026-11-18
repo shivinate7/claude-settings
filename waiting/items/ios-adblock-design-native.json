@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-17T19:49:45-06:00",
+  "checked_with": "session_013NEJL1gw6EdrSyvHkTUEx6",
+  "context": "Goal: close the open gaps in the ios-adblock compliance scorecard (your 19:38 CST pick: add the shoot file and a token file).\nProblem (goal): the screenshot tool needs a web address and page routes, and ios-adblock has no web pages (the extension has no popup or options page; the iPhone screens are native SwiftUI), so your pick cannot be built as written and you choose how.\nBased on (read): bin/shoot lines 61-62 need baseUrl and routes; ios-adblock has no .html, .css or .scss; the iPhone UI is ios/App/AdBlockApp.swift (ios-adblock lane, relayed by the coordinator 19:49 CST; not read by triage).\nBased on (ruling): uniform-over-variants (owner, 2026-10-27 12:51 CDT), which rules out teaching the Design check about native repos.\nDeparts from: main has no shoot file and no token file in ios-adblock \u2014 a change adds both, as dead placeholders or as working files from simulator screenshots.\nWaiting on: nothing stopped; the lane built nothing and waits for this pick.",
+  "home": "ios-adblock lane (session_013NEJKzK1Tenht43Uyj5RDE); your 19:38 CST pick on the Design item",
+  "id": "ios-adblock-design-native",
+  "kind": "decision",
+  "n": 947,
+  "options": [
+    {
+      "gain": "The Design check reads pass now.",
+      "how": "A lane adds shoot.json (baseUrl localhost, route \"/\") and a tokens.json that restates the SwiftUI system styles.",
+      "id": "placeholder-files",
+      "key": "a",
+      "label": "Add a placeholder shoot.json and a tokens.json now",
+      "lose": "Both files are dead, and the screenshot tool fails if it is ever run."
+    },
+    {
+      "gain": "The files work and describe the real screens.",
+      "how": "A lane takes screenshots with `xcrun simctl io screenshot` (the simulator route), adds a shoot.json that points at them if the tool can take that, and a tokens file read from the SwiftUI code.",
+      "id": "mac-simulator-lane",
+      "key": "b",
+      "label": "A Mac lane adds simulator screenshots and working files (recommended)",
+      "lose": "It needs the Mac and a larger lane, and Design stays out until it lands."
+    }
+  ],
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "b",
+  "ref": "coordinator message 19:49 CST Nov 17, relaying the ios-adblock lane (session_013NEJKzK1Tenht43Uyj5RDE)",
+  "repo": "shivinate7/ios-adblock",
+  "short": "ios-adblock Design files for a native app",
+  "shown": [
+    {
+      "id": "placeholder-files",
+      "key": "a",
+      "label": "Add a placeholder shoot.json and a tokens.json now"
+    },
+    {
+      "id": "mac-simulator-lane",
+      "key": "b",
+      "label": "A Mac lane adds simulator screenshots and working files (recommended)"
+    }
+  ],
+  "status": "open",
+  "title": "The ios-adblock Design check wants web-page files, but the app is native SwiftUI: which way should the files be made?",
+  "why": "b makes files that work; a makes dead files only to turn a check green. Recommended by the ios-adblock lane, not owner-typed."
+}

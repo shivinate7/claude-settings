@@ -2,6 +2,7 @@
   "added": "2026-11-13T18:50:00-06:00",
   "closed": "2026-11-13T18:51:29-06:00",
   "context": "Goal: merge the waiting PRs in a few combined PRs, so each group costs one CI run.\nProblem (rule): 17 of 33 waiting PRs append lines to docs/debts/notes.md (runner 10's read). Two appends at the same spot clash in git. Your ruling own-767-a says no hand conflict fixes, so such a PR is left out of its group; that splits groups and costs CI runs.\nBased on (read): runner 10's read via the coordinator, unchecked by triage.\nDeparts from: ruling own-767-a-combined-pr \u2014 a adds one narrow exception (notes.md only, no line removed); b keeps the ruling.\nMeanwhile: the lanes leave such PRs out of their groups, as in b.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "ruling own-767-a-combined-pr; step combined-pr-recipe; lanes combine-g1 to combine-g4",
   "id": "pick-notes-md-append-exception",
   "kind": "decision",

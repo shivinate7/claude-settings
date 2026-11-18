@@ -2,6 +2,7 @@
   "added": "2026-11-13T23:36:30-06:00",
   "closed": "2026-11-14T05:41:00Z",
   "context": "Goal: finished chats are archived so the session list shows only live work, with nothing lost.\nProblem (rule): the archive sweep sorts sessions by what happened to their PR. About 373 sessions have no PR and no branch that the sweep could find (class UNKNOWN, item 800's sweep). Archiving is hard to undo for a chat you still wanted, so the rule needs your word. Plan part 7 says to archive an idle session whose PR merged or closed, or whose work is on an archive branch with no open PR, and to keep the rest; it does not cover these.\nBased on (read): the consultant's count and options, relayed 23:35 CST; unchecked by triage. Plan part 7 (read by triage).\nDeparts from: main's sweep rule (plan part 7) \u2014 a archives these after a transcript read finds no PR or branch named; b keeps them.\nMeanwhile: these sessions are kept; nothing is archived.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "plan part 7 (archive sweep); step archive-sweep-runs-per-merge; page item 800",
   "id": "pick-archive-no-pr-sessions",
   "kind": "decision",

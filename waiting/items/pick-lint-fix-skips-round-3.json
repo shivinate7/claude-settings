@@ -2,6 +2,7 @@
   "added": "2026-11-13T18:39:00Z",
   "closed": "2026-11-13T18:51:29-06:00",
   "context": "Goal: reviews end as soon as a change is proven safe.\nProblem (rule): R9 says a guard or check change that passes round 1 is done, and only one fixed under a fix check waits for round 3. On #3185, round 1 passed, then lint-only edits (no finding fixed) went under a fix verifier, and `merge --reviewed` now says it owes the final round. The coordinator first told the lane it was done, then corrected to the tool's reading: round 3 runs. R9 does not say whether a lint-only fix counts as 'fixed under a fix check'. It needs your word.\nBased on (ruling): R9 (your 15:44 CST Nov 10, pick 471 a); your 11:40 CST Nov 13 words 'do we still force round 3 reviews on certain items? ... that shouldnt be teh case anymore'.\nBased on (read): the coordinator's report on #3185.\nDeparts from: main \u2014 the tool counts any fix check as a fixed change; a counts a lint-only fix as not fixed.\nMeanwhile: lanes follow the tool's reading (round 3 runs). Not blocking.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "ruling R9 (pick 471 a); steps rounds-rules-one-record, merge-reviewed-cursor",
   "id": "pick-lint-fix-skips-round-3",
   "kind": "decision",

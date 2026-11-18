@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-18T17:37:18.515Z",
+  "choice": "b",
+  "item": "tier-one-lane-tests-only",
+  "label": "B: Tests-only changes merge on passing checks alone, as the solo rule says",
+  "n": 959,
+  "note": "",
+  "optionId": "checks-alone"
+}

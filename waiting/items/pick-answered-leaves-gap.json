@@ -2,6 +2,7 @@
   "added": "2026-11-13T19:00:00Z",
   "closed": "2026-11-13T19:26:08Z",
   "context": "Goal: answered items leave the page.\nProblem (rule): R18's relay check (`covers`) is unbuilt until stage 4, so closing a routed answer at routing leaves it with no counted grant route until then.\nBased on (read): restart-plan R18 point 5; your reply on item answered-leaves-page: 'relayed grants can just stay running'.\nDeparts from: main \u2014 page_grant refuses every closed item; the lane closes at routing and adds no rule 4.\nMeanwhile: the lane builds a. Undo: land rule 4 later.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "steps answered-leaves-page, roadmap-push-refusal-says-fetch; restart-plan R18 point 5",
   "id": "pick-answered-leaves-gap",
   "kind": "decision",

@@ -2,6 +2,7 @@
   "added": "2026-11-15T00:25:55-06:00",
   "closed": "2026-11-16T05:06:30Z",
   "context": "Goal: the letters fix and the item-251 relay reach the right repo.\nProblem (goal): the quote you pasted at 00:22 CST (\"The coordinator wrote 'pick a' for its fix ... In item 251 that is option b, since a is 100 rows only\") does not name the repo. Item 251 on this page is a different item (mailaudit: retire a write-budget record), so the note came from another repo's triage, and triage reads no other repo.\nBased on (read): your 00:22 CST message, relayed by the consultant at 00:26 CST; this page's item 251, read by triage.\nDeparts from: main \u2014 adds a one-line question; nothing on main changes.\nMeanwhile: the letters fix lane (step option-keys-match-chat) proceeds; nothing else waits. The consultant sends that repo's triage the line \"item 251 takes b by its label\" once you name the repo.\nWhy yours: only you know which repo's triage session wrote the note you pasted; the quote names no repo, and this session reads no other repo's pages.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step option-keys-match-chat; ruling own-label-pick-taken-by-label",
   "id": "ask-repo-of-item-251-note",
   "kind": "task",

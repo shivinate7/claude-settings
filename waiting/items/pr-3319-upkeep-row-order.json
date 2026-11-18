@@ -2,6 +2,7 @@
   "added": "2026-11-15T12:43:47-06:00",
   "closed": "2026-11-16T04:58:30Z",
   "context": "Goal: land PR #3319 on current main.\nProblem (rule): merging main conflicts in the upkeep rows list (about line 1867). The PR adds the unreadable_check_fields row and main adds the DRIFT_LINE row, both before \"done without check\". The SKILL.md bullet list conflicts the same way. Either order changes a check's output order. The consultant's order of 12:00 CST Nov 15 reserves any check-behaviour conflict for the consultant or the owner.\nBased on (read): the lane's read of the conflict.\nDeparts from: main \u2014 adds the PR's upkeep row before main's.\nMeanwhile: nothing is pushed; PR #3319 stays at its old head.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "PR #3319; step step-done-check-field",
   "id": "pr-3319-upkeep-row-order",
   "kind": "decision",

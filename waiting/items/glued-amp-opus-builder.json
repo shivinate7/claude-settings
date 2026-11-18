@@ -2,6 +2,7 @@
   "added": "2026-11-15T14:36:06-06:00",
   "closed": "2026-11-16T19:43:00Z",
   "context": "Goal: land the long port of #2015 and #2156 without losing work.\nProblem (money): the port is long (about 10,000 test rows touched); the lane offers an Opus builder for it. Opus above the Sonnet ceiling needs your grant for this spawn.\nBased on (ruling): the roles rule roles-sonnet-is-the-ceiling: Sonnet is the ceiling except on your grant for the spawn named.\nDeparts from: main \u2014 builders run Sonnet; this one would run Opus for this one lane.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "own-716-b-keep-2156-glued-amp",
   "kind": "decision",
   "n": 898,

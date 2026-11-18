@@ -2,6 +2,7 @@
   "added": "2026-11-13T19:10:00-06:00",
   "closed": "2026-11-13T18:51:29-06:00",
   "context": "Goal: the rule file says what you ruled: a red main is held only until the revert merges.\nProblem (rule): PR #3304 changes CLAUDE.md line 54 (rule git-red-main-reverts) to say a red main is held \"until the revert merges\", as you picked on 772 a. A rule-file edit needs your named yes before it merges. Lane lint passed and the round 1 record is a Sonnet PASS (record 6868600207), per the coordinator; unchecked by triage. The coordinator names only CLAUDE.md line 54; whether the ci-hygiene SKILL.md line 61 edit from 772 a is in the same PR is unchecked.\nBased on (ruling): own-772-a-revert-merges-lines and own-745-b-resume-at-revert.\nDeparts from: main \u2014 CLAUDE.md line 54 today says the hold lasts until the revert's run on main is green; the PR changes it to when the revert merges.\nMeanwhile: the PR stays out of the combined PR until your answer.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "PR #3304; ruling own-772-a-revert-merges-lines; ruling own-745-b-resume-at-revert; step red-main-owner-two-picks",
   "id": "act-merge-3304-rule-line",
   "kind": "decision",

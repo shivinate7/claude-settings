@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-18T17:04:47.081Z",
+  "choice": "a",
+  "item": "reviewer-eval-cases",
+  "label": "A: Keep only true reviewer misses; rescore once per batch on main's tip (recommended by the consultant)",
+  "n": 968,
+  "note": "",
+  "optionId": "true-misses-once-per-batch"
+}

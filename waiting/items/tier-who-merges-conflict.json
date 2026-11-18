@@ -1,0 +1,49 @@
+{
+  "added": "2026-11-17T22:00:36-06:00",
+  "closed": "2026-11-18T11:38:00-06:00",
+  "context": "Goal: every pull request gets the review depth its kind of change needs, set by one table, with no gap where two rules disagree.\nProblem (rule): decision session-tiers (the session roles) says the coordinator and triage never merge, while your 00:50 CST Nov 15 ruling (own-tiny-fixes-b) lets them merge their own pull requests under the standing merge role, and both stand as written, so only you can say which governs.\nBased on (read): the plan plan on branch lane/pr-template-risk-tiers (docs/plans/pr-template-risk-tiers.md, read from main commit 69ab998832, 21:38 CST Nov 17): the two texts conflict.\nBased on (notes): the audit of this session (not rechecked): the merge tool in use already lets a standing session merge its own green pull request with one passing sonnet record.\nDeparts from: main \u2014 session-tiers says they never merge and the standing role lets them merge their own \u2014 one reading is picked (a or b).\nWaiting on: nothing is stopped; step pr-template-risk-tiers waits on your pick, then a test-author writes the template-check cases and a builder lands them.",
+  "home": "step pr-template-risk-tiers",
+  "id": "tier-who-merges-conflict",
+  "kind": "decision",
+  "n": 958,
+  "options": [
+    {
+      "gain": "The rule matches what the merge tool does today.",
+      "how": "One later ruling governs; the earlier bullet is rewritten in place.",
+      "id": "own-prs-merge",
+      "key": "a",
+      "label": "They merge their own pull requests under the standing role; session-tiers is reworded to say so (recommended)",
+      "lose": "The never-merge sentence is gone for the coordinator and triage."
+    },
+    {
+      "gain": "The older bullet stands as written.",
+      "how": "Their pull requests go to a batch runner.",
+      "id": "never-merge",
+      "key": "b",
+      "label": "They never merge; the standing role is removed",
+      "lose": "The standing merge role and the work built on it stop."
+    }
+  ],
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "a",
+  "ref": "owner chat 19:45 CST Nov 17 (relayed by the consultant): land the verification article's findings; PR template lines and risk tiers by change",
+  "replied": "2026-11-18T11:38:00-06:00",
+  "reply": "Closed. You picked a: the coordinator and triage merge their own pull requests under the standing role, and decision session-tiers is reworded to say so. Filed on step pr-template-risk-tiers.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Tier table: may the coordinator and triage merge their own pull requests?",
+  "shown": [
+    {
+      "id": "own-prs-merge",
+      "key": "a",
+      "label": "They merge their own pull requests under the standing role; session-tiers is reworded to say so (recommended)"
+    },
+    {
+      "id": "never-merge",
+      "key": "b",
+      "label": "They never merge; the standing role is removed"
+    }
+  ],
+  "status": "closed",
+  "title": "Which of two standing rules says whether the coordinator and triage merge?",
+  "why": "a matches the later ruling and the running tool; b removes a role that is in use. Recommended by triage, not owner-typed."
+}

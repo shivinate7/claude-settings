@@ -1,5 +1,7 @@
 {
   "added": "2026-11-15T23:38:30-06:00",
+  "closeReason": "Consultant takes it (relayed 09:56 CST Nov 17): your ruling on item 476 c already rules it.",
+  "closed": "2026-11-17T15:57:00Z",
   "context": "Goal: the git-after-cd guard fix (PR #2099) reaches main, or is dropped on purpose.\nProblem (rule): PR #2099 refuses a `cd` into a missing folder followed by `git add -A` and a commit, but a test on main expects that to be allowed; a guard's verdict is yours to set, and the lane that asked is archived (rule roles-review-cap-three, decision guard-guards-mistakes-only).\nBased on (notes): the archived lane git-write-after-failed-cd asked this on 2026-11-10 and recommended keeping the refusal: bash runs the add and commit in the starting folder, which is the failure the lane was opened to stop. The transcript ends with no answer; no ruling or decision names #2099 (searched roadmap/rulings and docs/decisions).\nDeparts from: main \u2014 a test on main expects a cd into a missing folder then `git add -A` and commit to be allowed; this refuses it and re-points that test.\nMeanwhile: #2099 stays a draft; PRs #2144 and #2191 build on it and wait; the coordinator holds it.",
   "holds": "PR #2099 and the two pull requests built on it (#2144, #2191) wait for this answer.",
   "home": "git-write-after-failed-cd",
@@ -47,7 +49,7 @@
       "label": "Allow it, as the test on main expects"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "Should PR #2099 keep refusing a commit after a failed cd, even though a test on main expects it allowed?",
   "why": "The lane's own recommendation; bash runs the add and commit in the starting folder, the failure the lane was opened to stop."
 }

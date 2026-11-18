@@ -2,6 +2,7 @@
   "added": "2026-11-15T14:36:06-06:00",
   "closed": "2026-11-16T19:31:26Z",
   "context": "Goal: one answer for a missing reread_check on the hu_copy_check row.\nProblem (rule): #2015 expects deny for a missing reread_check; main's row says it fails open. Needs your word because the two disagree. The stake is a rule: what a check does when its input is missing.\nBased on (measured): the lane's read of both rows (not checked by triage).\nDeparts from: main \u2014 fails open today; option b would deny.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "holds": "The lane's #2156 merge, the curl x?a=1&b=2 case, review and the draft PR wait on this answer.",
   "home": "check-tail-amp-tidy",
   "kind": "decision",

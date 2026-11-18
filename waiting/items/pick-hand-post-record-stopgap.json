@@ -2,6 +2,7 @@
   "added": "2026-11-13T20:19:39Z",
   "closed": "2026-11-13T20:27:30Z",
   "context": "Goal: every merged PR carries a review record the merge tool really posted and read back.\nProblem (rule): `merge --review-record` printed \"nothing was posted\" for #3226 (head 29e2b9461) and for #3192 and others, so their lanes hand-posted the exact lines the tool printed, through the GitHub tool with the footer (#3226: comment 6863843498, 14:18 CST, read back at that head). The coordinator and batch runner 10 agreed this as a stopgap. You have not ruled on hand-posting. The cure is PR #3235 (record read-back fix), which the runner puts in the earliest batch. A second sighting: under `verdict` the tool's \"nothing was posted\" line is hidden and only PASS shows; the log has it (lane mutate-sweep-control, #3226).\nBased on (read): the coordinator's and runner 10's messages, 14:18 and 14:42 CST Nov 13; triage has read neither the comments nor #3235.\nDeparts from: main \u2014 the tool posts the record; this lets a lane post the tool's printed lines by hand until #3235 lands.\nMeanwhile: lanes keep hand-posting under the stopgap; nothing typed, only the tool's printed lines.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step review-record-failed-post; PR #3235",
   "id": "pick-hand-post-record-stopgap",
   "kind": "decision",

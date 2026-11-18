@@ -1,0 +1,60 @@
+{
+  "added": "2026-11-18T11:42:00-06:00",
+  "context": "Goal: the roadmap tabs of the banchi, q_max and joyous pages stop being blank.\nProblem (rule): Runner 11 built the three blocks but no session may publish them, and ruling c126 says each repo's own orchestrator writes its page, so only you can name a publisher for three pages that have no orchestrator.\nBased on (notes): the coordinator relay at 11:41 CST says runner 11 built the three blocks (build passed 03:17 CST, files in its scratchpad) and runner 12 declined at 11:40 CST (page-writer work, no page data or tooling, an outward act not granted to it).\nBased on (ruling): ruling c126, read from my handoff and the coordinator's relay, not reread today: each repo's own orchestrator writes its page, and triage 11 writes only the claude-settings page.\nDeparts from: ruling c126 \u2014 each repo's own orchestrator writes its page \u2014 one session is named to write three pages that have no orchestrator.\nWaiting on: nothing stopped; the three pages stay blank until you pick, and the coordinator acts next on your answer.",
+  "home": "step roadmap-blank-pages",
+  "kind": "decision",
+  "n": 970,
+  "options": [
+    {
+      "gain": "The three pages are published now, by the session that holds the files and the build knowledge.",
+      "how": "Runner 11 publishes the blocks once, as a one-off.",
+      "id": "runner-11-publishes",
+      "key": "a",
+      "label": "Runner 11 publishes the three blocks it built (recommended by the coordinator)",
+      "lose": "A session beyond ruling c126 writes three private pages."
+    },
+    {
+      "gain": "The pages are published now, by the session with the page tooling.",
+      "how": "Triage 11 takes runner 11's files and publishes them with the page tooling it holds.",
+      "id": "triage-publishes",
+      "key": "b",
+      "label": "Triage 11 publishes the three blocks",
+      "lose": "Triage 11 goes beyond ruling c126 and writes three pages it does not own."
+    },
+    {
+      "gain": "Matches ruling c126 exactly.",
+      "how": "Each repo gets its own orchestrator, which writes its own page.",
+      "id": "start-orchestrators",
+      "key": "c",
+      "label": "You name or start one orchestrator session per repo",
+      "lose": "Three sessions to start, and the pages stay blank until they run."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), written by triage 11 (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "a",
+  "ref": "coordinator relay 11:41 CST Nov 18; step roadmap-blank-pages",
+  "replied": "2026-11-18T12:02:00-06:00",
+  "reply": "Runner 11 answered at 12:01 CST. Yes, the blocks were built from each repo's roadmap branch in git at 03:17 CST, and a live check at 12:00 CST shows all three branch tips unchanged, so nothing needs rebuilding: the publish writes git as it stands, and no git export of the other accounts' artifacts is needed first. Not a chicken-and-egg problem. One more fact: only banchi names a page (a waiting-page artifact); q_max and joyous name none, so for those two a page may first have to be made, which is part of the choice. Whether any of the three pages holds question items is not read yet; runner 11 can read banchi's database if you want.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Publisher of three repo roadmap pages",
+  "shown": [
+    {
+      "id": "runner-11-publishes",
+      "key": "a",
+      "label": "Runner 11 publishes the three blocks it built (recommended by the coordinator)"
+    },
+    {
+      "id": "triage-publishes",
+      "key": "b",
+      "label": "Triage 11 publishes the three blocks"
+    },
+    {
+      "id": "start-orchestrators",
+      "key": "c",
+      "label": "You name or start one orchestrator session per repo"
+    }
+  ],
+  "status": "open",
+  "title": "Who publishes the roadmap blocks for the banchi, q_max and joyous pages?",
+  "why": "a publishes now with the session that holds the files, and it is a one-off; b and c cost a session beyond c126 or three new sessions. The coordinator also recommends a and put the same question to you in chat."
+}

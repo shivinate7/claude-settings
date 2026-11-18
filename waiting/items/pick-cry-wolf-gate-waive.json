@@ -2,6 +2,7 @@
   "added": "2026-11-13T22:19:00-06:00",
   "closed": "2026-11-14T04:25:30Z",
   "context": "Goal: a session that waits on CI subscribes to the PR first, so a finished run wakes it at once (incident: #3302 woke its waiter about 4 minutes late; the consultant's account, unchecked).\nProblem (rule): the step says to count, before the warning ships, how often a ready mark comes in a session that merges without waiting, because that is how often the warning would cry wolf. That count is not made. Only you can waive a step's own ship gate (rule verification-cry-wolf-guard-is-spent).\nBased on (read): the step note (roadmap/data/steps/ci-wait-subscribes-first.json) names the count as a gate.\nBased on (read): the hook only warns, never refuses, fails open on any unreadable input, and costs one transcript read per ready mark (docs/decisions/ci-wait-subscribes-first.md, per the lane; triage did not read it).\nBased on (unmeasured): the cry-wolf rate. No count exists. Also unmeasured: whether a PreToolUse warning reaches the model at all; the lane's record says so.\nDeparts from: main \u2014 main has no warning on a ready mark and a rule that names only check-ins; PR #3346 adds a warn-only hook and rewrites the rule to name the subscription first.\nMeanwhile: PR #3346 (head cc3dc9ef59c7) stays draft; runner 10 owns the ready mark and merge; the lane starts nothing else.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step ci-wait-subscribes-first; ruling own-ci-wait-subscribe-guard; PR #3346 (draft)",
   "id": "pick-cry-wolf-gate-waive",
   "kind": "decision",

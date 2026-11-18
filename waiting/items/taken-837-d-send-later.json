@@ -2,6 +2,7 @@
   "added": "2026-11-15T00:23:00-06:00",
   "closed": "2026-11-16T19:41:00Z",
   "context": "Goal: you see and can overrule every pick a session takes for you (\"Nothing can't be undone don't wait on me\", your 20:18 CST Nov 14 words; and your 00:11 CST Nov 15 question where the picks went).\nProblem (rule): the coordinator took this pick for you under your 20:18 words, not typed by you. It was none of the options posted (a, b, c); triage added d from its words.\nBased on (ruling): coord-837-d-send-later-session-waits. Unmeasured: how many sessions wait with create_trigger or ScheduleWakeup (the trigger list at 18:41 CST Nov 14 held 2 one-shot, 0 recurring). How the Stop check tells a session wait from an event wait is unbuilt and unread.\nDeparts from: main - the Stop check reads only the tool name; the pick makes it tell session waits from event waits.\nMeanwhile: the pick stands and the work under it continues. Undo: say Overrule; the ruling reopens. An answer of Keep closes this with no act.\nTAKEN FOR YOU: your item 837, option d (added from the coordinator's words): send_later only for a session's own waits; the four tools (send_later, create_trigger, CronCreate, ScheduleWakeup) stay for event waits a session cannot poll. Taken by coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) at 20:20 CST Nov 14.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "ruling coord-837-d-send-later-session-waits; step ci-wait-stop-needs-checkin",
   "id": "taken-837-d-send-later",
   "kind": "decision",

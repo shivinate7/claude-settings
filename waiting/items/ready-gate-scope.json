@@ -2,6 +2,7 @@
   "added": "2026-11-15T18:15:05-06:00",
   "closed": "2026-11-16T09:26:19Z",
   "context": "Goal: a ready PR does not sit waiting behind other work to merge.\nProblem (rule): session-tiers.md line 114, Batch runner bullet, says the runner \"marks ready only while no job is queued\". Your 18:10 CST Nov 15 words (relayed by the consultant, not read as typed): \"in general things shouldnt have had to wait for other stuff behind to merge imagine sand shifting through multiple strainers in a sense man cmon we\u2019ve talked abt this\". Whether that overturns the gate fully or only for unrelated PRs is not settled; runner 10 keeps its gate meanwhile (coordinator told it).\nBased on (measured): runner 10 14:12 CST Nov 15: the gate cost 53 to 81 min from mark to merge, n=3, limit was the CI queue (relayed).\nBased on (ruling): own-ready-pr-no-queue-wait (relayed, filed 345d86753).\nDeparts from: main \u2014 the runner marks ready only while no job is queued; this changes when it may mark.\nA related fact: #3341's red ready run came from a stale merge ref (parents 685fa1631 + ec3aa9a22 before the revert), not from the gate (coordinator measured, n=1).",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "ruling own-ready-gate-unrelated-prs; step ready-no-queue-wait",
   "kind": "decision",
   "lastAnswer": {

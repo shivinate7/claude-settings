@@ -1,0 +1,24 @@
+{
+  "added": "2026-11-17T19:49:45-06:00",
+  "checked_with": "session_013NEJL1gw6EdrSyvHkTUEx6",
+  "command": {
+    "mac": "In your checkout of shivinate7/ios-adblock on this Mac, run `git fetch origin ios-swift6` and `git checkout FETCH_HEAD` (PR 179, expected head f11375792c6b9cbddd08d4fca25e062d48e61e45; print `git rev-parse HEAD` and stop if it differs). Then run `cd ios && xcodegen generate`, then `make native-check`, and then build the app and each extension scheme named in ios/project.yml with xcodebuild for a simulator. Change no file and commit nothing. Report each command's exit code, the number of Swift 6 concurrency errors, and each error's file and line, especially in ios/App/ListUpdate.swift and the extensions."
+  },
+  "context": "Goal: ios-adblock builds under Swift 6, as you picked at 19:38 CST Nov 17.\nProblem (goal): Swift 6 may stop the app and its extensions from building, and only a Mac can show it.\nBased on (read): the ios-adblock lane's draft changes one line, SWIFT_VERSION \"6.0\" in ios/project.yml; its Mac steps are `cd ios && xcodegen generate`, then `make native-check`, plus an app and extension build (coordinator relay, 19:49 CST; not run by triage).\nDeparts from: main sets SWIFT_VERSION 5.0 \u2014 the draft sets 6.0 and a Mac run reports what breaks.\nTried first: no Mac, Xcode or computer folder is reachable from the cloud (coordinator measured 19:40 CST, list_computer_folders returned no folders), so the run is yours.\nMeanwhile: nothing else waits on it; the lane holds the draft until the errors come back.\nWhy yours: it runs on your Mac with Xcode.",
+  "home": "ios-adblock lane draft PR 179 (branch ios-swift6, head f11375792c6b9cbddd08d4fca25e062d48e61e45); decision, your 19:38 CST pick on the Swift 6 item",
+  "id": "act-mac-ios-adblock-swift6-build",
+  "kind": "task",
+  "n": 946,
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "ref": "coordinator message 19:49 CST Nov 17, relaying the ios-adblock lane (session_013NEJKzK1Tenht43Uyj5RDE)",
+  "repo": "shivinate7/ios-adblock",
+  "short": "Mac: build ios-adblock under Swift 6",
+  "status": "open",
+  "steps": [
+    "Open a Claude Code session on your Mac with your ios-adblock checkout reachable.",
+    "Paste the command below and send it. It reads and builds only; it changes no file.",
+    "Paste its reply into this item's note box, then press Done. Triage relays it to the coordinator and the ios-adblock lane."
+  ],
+  "title": "Paste one prompt into a Mac session to build ios-adblock under Swift 6 and report the errors",
+  "why": "Your pick on the Swift 6 question (move to 6, tested on the Mac first) cannot go ready until the build has run on a Mac; the cloud has none."
+}

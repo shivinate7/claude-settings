@@ -2,6 +2,7 @@
   "added": "2026-11-15T13:31:39-06:00",
   "closed": "2026-11-16T07:43:39Z",
   "context": "Goal: Slow CI jobs (Windows, mutation, macOS) stop running on every push to main and run once a day.\nProblem (goal): you already allowed slow checks to run later, but only you can say whether the Windows and mutation tests leave the push to main along with macOS.\nBased on (ruling): own-880-free-slots (your words, 11:52 CST Nov 15: \"free as many slots as u can if stuff can be ran later that works for me\"). It supersedes drop-nightly-schedule (done 16:01 CST Nov 14, which dropped the nightly run).\nBased on (measured): Windows-only failures on 4 of 5 red pushes to main (Nov 13 to 15); about 4,700 runner minutes a day freed, before macOS (unmeasured); n=5 push runs, 3 days.\nDeparts from: main \u2014 adds one daily run at 02:47 CST and takes the Windows, mutation and macOS jobs off every push.\nPR #3540 is the built change; the coordinator read it live at 13:31 CST.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "holds": "The merge of PR #3540 waits on this answer.",
   "home": "push-daily-slow-legs",
   "kind": "decision",

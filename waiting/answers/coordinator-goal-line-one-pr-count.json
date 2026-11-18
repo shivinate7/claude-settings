@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-18T17:58:34.774Z",
+  "choice": "b",
+  "item": "coordinator-goal-line-one-pr-count",
+  "label": "B: Keep line 1 as written: classify every orphan and close those with a merged replacement",
+  "n": 950,
+  "note": "use a haiku workflow as a first step to keep it cheaper the sorting/sifting at least",
+  "optionId": "classify-and-close"
+}

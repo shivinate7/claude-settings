@@ -1,0 +1,50 @@
+{
+  "added": "2026-11-17T20:06:34-06:00",
+  "closed": "2026-11-18T12:00:00-06:00",
+  "context": "Goal: the lane lint brings main into a lane's pull request, so runner 10's ready mark moves no head (your ruling on item 925 d).\nProblem (rule): the auto-mode allow entry \"Merge Tool Read Checks\" (settings.json; docs/decisions/auto-mode-owner-acts.md line 88) says `--lane-lint` only reads and posts one comment, in any session, and the change makes it push a merge commit to the pull request branch when that head is in the caller's checkout; your ruling own-lane-lint-allow-b (2026-11-15 11:30 CST) covers that entry and that act only, so a push is a variant and needs your word.\nBased on (ruling): own-lane-lint-allow-b (owner, 2026-11-15 11:30 CST).\nBased on (measured): pull request #3552 at live head cf739ee02 had a sonnet round-1 review that failed on this (lane lane-lint-merges-main, 20:06 CST Nov 17, not re-run by triage).\nDeparts from: main \u2014 `--lane-lint` only reads and posts one comment \u2014 a change makes it push a merge commit to a pull request branch.\nWaiting on: the lane fixes the review's other findings and does not touch the entry; its review record cannot be posted until a review passes.",
+  "home": "decision auto-mode-owner-acts; draft PR #3552",
+  "id": "lane-lint-push-needs-flag",
+  "kind": "decision",
+  "n": 951,
+  "options": [
+    {
+      "gain": "Your ruling on item 925 d works as built, with no flag.",
+      "how": "The entry and the decision text change so the push needs no prompt. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo",
+      "id": "amend-entry",
+      "key": "a",
+      "label": "Amend the allow entry and auto-mode-owner-acts so `--lane-lint` may push the main-in merge to the caller's own lane branch",
+      "lose": "An auto-allowed call now writes to a branch.",
+      "widens": true
+    },
+    {
+      "gain": "The allow entry stays true.",
+      "how": "The entry stays as ruled; the main-in flow passes the new flag and the flag is asked each time.",
+      "id": "new-flag",
+      "key": "b",
+      "label": "The push needs a new flag, `--lane-lint <pr> --merge-main`, outside the entry, so each push asks (recommended)",
+      "lose": "One more prompt per lane, and the 925 d flow must pass the flag."
+    }
+  ],
+  "owner": "lane lane-lint-merges-main (session_013NEJL1uUQEETTstgfB51pW), posted by triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "b",
+  "ref": "lane lane-lint-merges-main message 20:06 CST Nov 17",
+  "replied": "2026-11-18T12:00:00-06:00",
+  "reply": "Closed. You picked a: the allow entry and decision auto-mode-owner-acts are amended so --lane-lint may push the main-in merge to the caller's own lane branch. Routed to lane lane-lint-merges-main.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Lane lint pushing a merge commit: flag or amend",
+  "shown": [
+    {
+      "id": "amend-entry",
+      "key": "a",
+      "label": "Amend the allow entry and auto-mode-owner-acts so `--lane-lint` may push the main-in merge to the caller's own lane branch"
+    },
+    {
+      "id": "new-flag",
+      "key": "b",
+      "label": "The push needs a new flag, `--lane-lint <pr> --merge-main`, outside the entry, so each push asks (recommended)"
+    }
+  ],
+  "status": "closed",
+  "title": "A change makes the lane lint push a merge commit to the lane's branch, but your allow entry says it only reads: should the push have its own flag or should the entry change?",
+  "why": "b keeps your allow entry exactly as you ruled it, and a widens an auto-allowed call to write to a branch. Recommended by the lane, not owner-typed."
+}

@@ -2,6 +2,7 @@
   "added": "2026-11-12T23:04:00Z",
   "closed": "2026-11-13T19:45:46Z",
   "context": "Goal: a message you repeat is never missed by the repeat checker, and never blocks a session for nothing.\nProblem (rule): when the model errors or answers in the wrong shape, the lane keeps the message unchecked so the next stop sends it again; no ruling covers this.\nBased on (read): main marks a message checked after one try, answer or not.\nDeparts from: main checks each message once \u2014 the change checks again at each stop until the model gives a usable answer.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step judge-replay-corpus",
   "id": "repeat-judge-retry",
   "kind": "decision",

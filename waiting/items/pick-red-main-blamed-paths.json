@@ -2,6 +2,7 @@
   "added": "2026-11-13T18:57:00Z",
   "closed": "2026-11-13T19:26:08Z",
   "context": "Goal: main stays stable while 70 or more asks run at once, at the most outcome speed (restart-plan.md:766-767).\nProblem (rule): merging onto a red main is what decision no-merge-onto-red-main stops; letting some lanes merge changes it, so it needs your word.\nBased on (ruling): no-merge-onto-red-main.md:5 refuses a merge while main's newest completed run is red; line 23 records Oct 13-14, 14 red runs in a row.\nBased on (read): bisect and revert land in #3152's act 3 (its design, line 7), so the blamed path is not known today.\nBased on (measured): a full CI run takes 33 to 38 min (restart-plan.md:268).\nDeparts from: main \u2014 every merge halts while main is red; this lets lanes off the blamed paths merge.\nMeanwhile: main keeps the halt; #3152 builds the blame step either way. Item 745 asks the separate question of when merges resume.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "decision no-merge-onto-red-main; PR #3152 (R42 part 2)",
   "id": "pick-red-main-blamed-paths",
   "kind": "decision",

@@ -2,6 +2,7 @@
   "added": "2026-11-13T23:30:40-06:00",
   "closed": "2026-11-14T05:32:00Z",
   "context": "Goal: a mistake fixed in one place gets fixed everywhere it applies, without you having to notice.\nProblem (goal): you asked for a judge that asks \"where else does this apply?\" (your 23:26 CST words; ruling own-shared-savings-widened). Pass 1, a read-only look by one lane, found 8 gaps (now filed as steps; only 10 of 99 rules were checked against code). Pass 2 is the judge itself, and how it runs costs something either way. The consultant asked you this in chat at 23:31 CST; this item is the same question on the page, and an answer in chat closes it.\nBased on (premise): the consultant's account of pass 1 and its two options, relayed 23:31 CST; unchecked by triage. Ruling own-shared-savings-widened. Triage's note: rule outcomes-mechanize-rules lets a recurring timer exist only when its record shows it costs less than it saves, so option b needs that proof; the cost of option a (one model call per such merge) is unmeasured, and you said at 22:52 that the model hooks are not working well.\nDeparts from: main \u2014 nothing runs a judge on landed rulings today; a adds a judge on each merged rule, guard or ruling change; b adds a weekly sweep like pass 1.\nMeanwhile: pass 2 does not start. Pass 1's eight gaps go ahead as steps.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step shared-job-finder; ruling own-shared-savings-widened; ruling R29",
   "id": "pick-shared-savings-pass-2",
   "kind": "decision",

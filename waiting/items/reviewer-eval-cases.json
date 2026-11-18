@@ -1,0 +1,61 @@
+{
+  "added": "2026-11-18T10:53:25-06:00",
+  "closed": "2026-11-18T11:07:00-06:00",
+  "context": "Goal: a reviewer eval, a fixed set of past reviewer misses plus clean controls that is rescored when the reviewer model or prompt changes, as the Claude Code blog advises.\nProblem (money): you named pull request 3624 and the hand-written-record pull requests as reviewer misses, but the plan and its refuter found that a hand-written record is a session's own mistake and 3624 was likely red on its own CI, and every scored run costs money, so only you can say which cases count and how much to spend.\nBased on (read): the consultant's reading of review-log-hand-form, which names a session typing the comment, and of merge/test_merge.py, which main left unchanged between 3624's base and its merge.\nBased on (notes): the plan and the refuter's reading, relayed by the consultant at 10:53 CST Nov 18, not rechecked by triage.\nDeparts from: main \u2014 there is no reviewer eval \u2014 this adds one, with the case set and rescore rule you pick.\nWaiting on: nothing stopped; an Explore agent mines cases and no paid run starts until you pick.",
+  "home": "step review-layer-recall-eval",
+  "kind": "decision",
+  "n": 968,
+  "options": [
+    {
+      "gain": "It measures what the reviewer actually missed, at about a third of the runs.",
+      "how": "A case needs a PASS review record, a defect in the diff and the pull request's own CI green. Hand-written-record and CI-miss cases are dropped. Rescore once per batch, only on the role row each case routes to. You grant a baseline spend; cost is measured on the first run.",
+      "id": "true-misses-once-per-batch",
+      "key": "a",
+      "label": "Keep only true reviewer misses; rescore once per batch on main's tip (recommended by the consultant)",
+      "lose": "Pull request 3624 and the hand-written cases leave the set."
+    },
+    {
+      "gain": "It matches your brief.",
+      "how": "The set holds 3624 and the hand-written-record pull requests beside the true misses.",
+      "id": "keep-owner-named-cases",
+      "key": "b",
+      "label": "Keep the cases you named as well",
+      "lose": "It scores the reviewer on mistakes it could not see, and costs more."
+    },
+    {
+      "gain": "No drift goes unseen.",
+      "how": "Each edit to the reviewer's instruction file triggers a scored run.",
+      "id": "rescore-every-edit",
+      "key": "c",
+      "label": "Rescore on every reviewer edit",
+      "lose": "Cost on each of many edits; the file had 92 edits since Oct 18."
+    }
+  ],
+  "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ), written by triage 11 (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "a",
+  "ref": "consultant relay 10:53 CST Nov 18 (slug reviewer-eval-cases)",
+  "replied": "2026-11-18T11:07:00-06:00",
+  "reply": "Closed. You picked a: true reviewer misses only, rescored once per batch on main's tip, with a baseline spend (cost measured on the first run). Routed to the consultant and step review-layer-recall-eval.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Reviewer eval: which cases, how often",
+  "shown": [
+    {
+      "id": "true-misses-once-per-batch",
+      "key": "a",
+      "label": "Keep only true reviewer misses; rescore once per batch on main's tip (recommended by the consultant)"
+    },
+    {
+      "id": "keep-owner-named-cases",
+      "key": "b",
+      "label": "Keep the cases you named as well"
+    },
+    {
+      "id": "rescore-every-edit",
+      "key": "c",
+      "label": "Rescore on every reviewer edit"
+    }
+  ],
+  "status": "closed",
+  "title": "Which past cases should the reviewer eval score, and how often should it be rescored?",
+  "why": "a scores only what the reviewer could have caught and bounds the spend; b scores unfair cases and c costs the most. Recommended by the consultant, relayed, not owner-typed."
+}

@@ -2,6 +2,7 @@
   "added": "2026-11-14T18:50:00-06:00",
   "closed": "2026-11-15T01:59:39Z",
   "context": "Goal: the standing merge grant says one thing about a clean merge of main, so a session never reads two answers.\nProblem (rule): your ruling 846 a (18:30 CST Nov 14) made a clean merge of main take no fix verifier in line 18 of the standing merge grant. Line 19 still says \"Runner 10 also gives each new head a fix verifier and a fresh review log.\" Line 19 calls that runner 10's own practice, not your words. The ruling covers line 18's sentence only, so the coordinator may not widen it to line 19. Only you can say whether line 19 follows.\nBased on (ruling): own-846-a-clean-merge-main-no-verifier covers \"that sentence only\" (a roadmap record, read by triage).\nBased on (read): line 19 of docs/decisions/standing-merge-grant.md on main and PR #3433 head cf089dd20c3d (the lane's note): the coordinator's read, unverified by triage.\nDeparts from: main (line 19 says every new head gets a fix verifier) \u2014 line 19 gets the same clean-merge exception as line 18.\nMeanwhile: PR #3433 (line 18 only) goes on to runner 10; nothing else waits. The coordinator recommends a (named at 18:48 CST).",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "decision standing-merge-grant (lines 18 and 19); ruling own-846-a-clean-merge-main-no-verifier; PR #3433",
   "id": "pick-grant-line-19-clean-merge",
   "kind": "decision",

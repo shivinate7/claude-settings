@@ -2,6 +2,7 @@
   "added": "2026-11-13T18:55:26-06:00",
   "closed": "2026-11-14T01:59:13Z",
   "context": "Goal: every PR has one session as its owner, and combined PRs still merge.\nProblem (rule): PR #3231 adds a check that fails any PR whose commits name more than one session (\"25 sessions ... rebuild the lane as one new PR\"). Your ruling own-767-a lets a PR combine several reviewed lanes, so a combined PR carries many sessions by design and would fail the check once it is on main. Combine-g1's lane lint on PR #3313 (head 25d4be445) already failed on it at 18:54 CST (the coordinator's read, unchecked by triage). The coordinator's undoable pick: combine-g1 rebuilds without #3231 as combine-g1b, so #3231 waits for your word. The check's own reason was an incident: PRs #1166 and #2366 went to two sessions.\nBased on (read): the coordinator's report and the step's record.\nDeparts from: main \u2014 main has no such check; #3231 adds it. a exempts combined PRs, b reads only a PR's own lane commits, c drops the check.\nMeanwhile: #3231 does not merge; the combined PR is built without it.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "PR #3231; step one-owner-per-pr; ruling own-767-a-combined-pr; PR #3313 (combine-g1)",
   "id": "pick-one-owner-vs-combined",
   "kind": "decision",

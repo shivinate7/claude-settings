@@ -2,6 +2,7 @@
   "added": "2026-11-13T23:59:58-06:00",
   "closed": "2026-11-14T06:21:45Z",
   "context": "Goal: a lane brief tells the lane who to message, and the ids it names do not go stale.\nProblem (rule): two of your rules disagree. R22 (your words 19:19 CST Nov 10, after a respawn left old session ids everywhere) says point 3: a page item, brief or handoff names a lane slug or role, never a session id. The roadmap branch's CLAUDE.md roster header says: \"Lane briefs name these ids. Triage rewrites a line when a role changes hands.\" So one tells briefs to carry ids and the other forbids it. The new check in PR #3352 (brief-ids-in-roster) and its record, docs/decisions/brief-ids-in-roster.md, state both and settle neither. The roster line is triage's own file; triage will not edit it without your word.\nBased on (read): ruling R22 point 3 (read by triage); the roster header in the roadmap CLAUDE.md (read by triage); lane brief-ids-from-roster's note, 00:05 CST, unchecked.\nDeparts from: main \u2014 the check lets a brief carry an id that is in the roster; a keeps that (the ids in the roster, rewritten by triage on a respawn); b makes briefs name a slug or role only.\nMeanwhile: nothing changes; PR #3352 states both and is not blocked on this.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "ruling R22 (point 3); roadmap branch CLAUDE.md, Standing sessions; PR #3352; docs/decisions/brief-ids-in-roster.md",
   "id": "pick-brief-ids-vs-slugs",
   "kind": "decision",

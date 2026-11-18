@@ -2,6 +2,7 @@
   "added": "2026-11-13T22:38:00-06:00",
   "closed": "2026-11-14T04:44:00Z",
   "context": "Goal: a session on your Mac creates sessions as freely as a cloud one, and the fix is the right one, not a guess (lane local-autonomy-equals-cloud).\nProblem (goal): the lane does not know your Mac's permission mode or what the confirm card says when a session asks you before creating a session. The Mac check you ran answered the rest (the session has an id; your settings file is the repo's file; no default mode set), but a session cannot see the mode indicator or the card. Only you can read them. The answers settle whether the lane's last commit (set the default permission mode to auto) is the fix, or whether an allow entry for one named tool is.\nBased on (read): the Mac session's own reply to item 802 (unchecked by triage); the lane's message 22:28 CST.\nDeparts from: main \u2014 main sets no default permission mode; the lane's draft sets it to auto, or adds one allow entry, depending on your answers.\nMeanwhile: the lane holds both options and changes nothing.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step local-session-id-measure; lane local-autonomy-equals-cloud (session_013NEJL2xbx9cwQLXuRSA66d)",
   "id": "act-mac-read-mode-and-card",
   "kind": "task",

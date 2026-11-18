@@ -2,6 +2,7 @@
   "added": "2026-11-13T19:09:00Z",
   "closed": "2026-11-13T19:26:08Z",
   "context": "Goal: the feedback guard counts a repeated heading with the same time and quote as one message, and still blocks a missed owner send.\nProblem (rule): round 3 judged PR #3218's net safety value negative. It closes a false alarm but a [page], [repo] or grant [page] item under the second copy skips the owner-send check, which main blocked once. A negative-net change is parked with no fix lane until you decide.\nBased on (probe): reviewer probes on scratch copies of main and head with one owner record and no send; the gap is in hooks/feedback_guard.py:969, 989, 993.\nBased on (ruling): decision hold-unsafe-after-round-3; R9 keeps the net-value test only for an unclear case that cannot finish.\nDeparts from: main \u2014 a held change gets no fix lane; this lets one fix lane run.\nMeanwhile: the PR stays parked, not handed in; the lane works its other steps.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "decision hold-unsafe-after-round-3; step inbox-dup-heading-merge",
   "id": "pick-dup-heading-fix-lane",
   "kind": "decision",

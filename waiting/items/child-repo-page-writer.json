@@ -1,0 +1,61 @@
+{
+  "added": "2026-11-18T03:21:00-06:00",
+  "closed": "2026-11-18T03:21:30-06:00",
+  "context": "Goal: the Status tab summaries (the roadmap block) that the build session made for the banchi, q_max and joyous pages reach those pages.\nProblem (rule): the rule that the triage session always writes a repo's page (decision owner-feedback-inbox) has no named triage session for these three repos; the coordinator and the child-repo batch runner 12 both say they do not know one, and only you can name a writer or start one.\nBased on (read): runner 12's 03:19 CST Nov 18 word, relayed by the coordinator, that it does not know the writer; triage 11's 03:17 CST word that it writes only the claude-settings page.\nBased on (read): the build session (runner 11) says all three blocks built and passed, at 03:18 CST Nov 18; banchi has steps, q_max and joyous have none because their roadmap branches hold no steps (a true read, not a failure).\nDeparts from: main \u2014 adds a page writer for three child repos.\nWaiting on: the three pages stay without a Status tab; the coordinator carries your pick to runner 11 and triage 11 acts next.",
+  "home": "step roadmap-blank-pages (the Status tab of banchi, q_max and joyous)",
+  "kind": "decision",
+  "n": 961,
+  "options": [
+    {
+      "gain": "One writer, blocks already built, the three pages get a Status tab soon.",
+      "how": "Runner 11 copies the three built files to a path triage 11 can read; triage 11 splices each into its repo's page and publishes it.",
+      "id": "triage-11-writes-all-three",
+      "key": "a",
+      "label": "Triage 11 splices and publishes all three blocks",
+      "lose": "One session now writes in other repos' pages."
+    },
+    {
+      "gain": "Matches the rule for each repo.",
+      "how": "The coordinator starts a standing triage session for banchi, q_max and joyous; each splices its own block.",
+      "id": "one-triage-per-repo",
+      "key": "b",
+      "label": "Start one triage session for each repo",
+      "lose": "Three new standing sessions to run and keep alive."
+    },
+    {
+      "gain": "No new writer and no cross-repo writes.",
+      "how": "Nothing is published; runner 11 keeps the files.",
+      "id": "hold-blocks",
+      "key": "c",
+      "label": "Hold the blocks until each repo has a triage session",
+      "lose": "The three pages stay without a Status tab until sessions exist."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), written by triage 11 (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "a",
+  "ref": "coordinator relay 03:20 CST Nov 18; runner 11 relay 03:18 CST Nov 18",
+  "replied": "2026-11-18T03:21:30-06:00",
+  "reply": "Withdrawn by triage 11: an earlier owner ruling (c126, 12:15 CDT Oct 27) already says each page has one writer, the orchestrator in that repo, and triage writes only the project's own page. Nothing to pick. The coordinator carries the three built blocks to each repo's own orchestrator.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Child repo page writer",
+  "shown": [
+    {
+      "id": "triage-11-writes-all-three",
+      "key": "a",
+      "label": "Triage 11 splices and publishes all three blocks"
+    },
+    {
+      "id": "one-triage-per-repo",
+      "key": "b",
+      "label": "Start one triage session for each repo"
+    },
+    {
+      "id": "hold-blocks",
+      "key": "c",
+      "label": "Hold the blocks until each repo has a triage session"
+    }
+  ],
+  "status": "closed",
+  "title": "Who writes the waiting pages of banchi, q_max and joyous?",
+  "why": "a uses the blocks already built and keeps one writer; b and c leave the pages empty longer or add sessions. The coordinator also recommends a."
+}

@@ -28,7 +28,8 @@
       "lose": "Main's two rules change, though no real case needs it."
     }
   ],
-  "owner": "triage (session_013NEJL19M4Jwh49tAdowQXp)",
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "a",
   "ref": "retrospective 12:21 CST Nov 13 (audit of 33 rulings, main fccff95e)",
   "replied": "2026-11-16T05:12:00Z",
   "reply": "Here is the prompt to paste into a Claude Code session on your Mac, started in your degen checkout (add ios-adblock if you want it covered too). It reads only and changes nothing:\n\nIn this checkout, read only, change and post nothing. 1) Find which lock a Mac session uses when it merges: search the merge tool and hooks for GitLock and GhLock and say which one runs on a Mac outside the cloud. 2) Find the simulator drive path (skills/ios-apps and the simulator tool) and say whether a drive that reuses an already booted simulator takes a lease. For each of the two, quote file and line, and say whether it matches (a) main's rule (GitLock only in the cloud, else GhLock; a reuse takes no lease) or (b) the owner's Nov 12 words (a Mac uses GitLock; every drive takes a lease). If both versions would give the same result on this Mac, say so. Report in 10 lines.\n\nPaste its report into this item's note and I rule from facts. Until then main's rules stand and nothing waits on this.",
@@ -48,5 +49,5 @@
   ],
   "status": "open",
   "title": "Two things you said on Nov 12 disagree with main's rules today. Whose word wins on each?",
-  "why": "A ruling that conflicts with a main decision needs your word."
+  "why": "Main's rules are the newer ones, nothing waits on this, and no real case needs your Nov 12 words to win."
 }

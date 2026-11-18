@@ -1,5 +1,6 @@
 {
   "added": "2026-11-15T18:58:41-06:00",
+  "closeReason": "Your pick a is on main: PR #3569 (notes: freeze the old file, one file per new note) merged 10:16 CST Nov 17, read on GitHub by triage 10. Closed on that read; the lane's own confirmation is pending.",
   "context": "Goal: stop notes.md inserts and edits from making drafts dirty on GitHub.\nProblem (rule): your pick on item 903 a (one file per note) read literally moves all 2304 old notes, which deletes docs/debts/notes.md and gives every open branch that edits it a modify/delete conflict (the plan's proxy: up to 1537 unmerged branches touch it; the order's figure is about 132 drafts; unmeasured). It also needs 280 renames of slugs over 32 characters, 55 duplicate merges and 8 slug-less lines named by hand. The lane's plan (Plan agent opus; a refuter opus said \"revise\", its revisions taken in) keeps the old file and puts only NEW notes in docs/notes/<slug>.md, which departs from a literal 903 a.\nBased on (measured): docs/debts/notes.md is 2313 lines, 2304 notes; main's notes.md churn since Nov 8: 71 of 140 first-parent merges touched it (+2358/-1554) (lane's read, not checked by triage).\nBased on (ruling): item 903 a.\nDeparts from: main and from 903 a read literally \u2014 old notes stay in one file, new notes go one file each.\nThe refuter's cheaper alternative, not recommended: one file sorted by slug with a sorted-check. It still clashes on neighbouring inserts and drops your pick.\nThe lane takes the refuter's other revisions without asking: per-slug copy counts at merge base and head, refuse an added line with no key, docs/notes/README.md defines the format, a 32-character cap check, and a fix at docs/decisions/guard-remedy-not-to-owner.md:133.\nStep notes-sightings-expiry (PR #1619, doing) builds on the one-line note format; its order against this lane is the coordinator's.",
   "home": "item 903 / lane notes-one-file-each",
   "kind": "decision",
@@ -39,7 +40,7 @@
       "label": "Move all 2304 old notes to their own files now"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "May the notes lane keep the 2304 old notes in one file and give only new notes their own files?",
   "why": "It removes the conflict at once, and migrating the old notes later is its own step."
 }

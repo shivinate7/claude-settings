@@ -2,6 +2,7 @@
   "added": "2026-11-13T18:02:00Z",
   "closed": "2026-11-13T18:29:53-06:00",
   "context": "Goal: a session waiting on CI hears about a red job quickly.\nIn plain words: today a waiting session checks CI on a timer. GitHub cannot start anything when one job of a run fails (the lane read the docs), so there are two routes.\nRoute 1 (build now): at each check-in the session asks GitHub for the run's state (`merge --run-state <pr>`) and sees the first red job at once. It still learns only at the check-in, not the second the job fails. No CI file changes.\nRoute 2 (later): add a small extra job per CI job in checks.yml that runs when its job fails and wakes the session. Faster, but it edits checks.yml, which three other lanes edit (conflict risk), costs extra runner minutes (unmeasured), and needs #2980 first.\nProblem (goal): which to build first.\nBased on (ruling): decision ci-wait-reads-run-status; your CI-speed words 11:34 and 11:36 CST Nov 13.\nDeparts from: main \u2014 main has no first-red-job read; a adds route 1 now and route 2 after #2980.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step lane-lint-once-fail-fast",
   "id": "pick-first-red-job-read",
   "kind": "decision",

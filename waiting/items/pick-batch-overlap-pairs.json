@@ -2,6 +2,7 @@
   "added": "2026-11-13T20:14:19Z",
   "closed": "2026-11-13T20:15:30Z",
   "context": "Goal: no lane waits on a conflicting neighbour in the batch.\nProblem (rule): batch runner 10's pairwise check found lanes that touch the same files: merge/merge.py (#3231, #3175, #3235, #3049, #3230), hooks/guard.py (#3223, #2691), checks.yml (#3216, #3250), shoot (#3214 against #2716 and #2717). Your standing grant lets the runner merge main into a handed-in branch only. Merging one lane's head into another lane's branch is a different act, so it needs your word.\nBased on (read): runner 10's message 14:13 CST, relayed by the coordinator 14:22 CST; decision standing-merge-grant. Your words 14:13 CST, relayed: \"batch overlaps pre-addressed so no lane waits\". Option a makes the second PR of a pair wait one batch, so it fits those words only in part.\nBased on (ruling): step post-batch-conflict-merge (done): after a batch merges, each lane PR that now conflicts gets one main merge and a hunks-only review. No past ruling found that covers a lane-to-lane merge.\nDeparts from: main \u2014 the runner merges only main into a branch; option b also lets it merge a neighbour lane's head.\nMeanwhile: the coordinator keeps going; no pair rides one batch until you answer.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "decision standing-merge-grant; skill ci-hygiene step 8",
   "id": "pick-batch-overlap-pairs",
   "kind": "decision",

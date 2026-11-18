@@ -1,0 +1,79 @@
+{
+  "added": "2026-11-17T19:51:18-06:00",
+  "context": "Goal: guards that block only real mistakes, so a refusal is never a false alarm you have to type override past.\nProblem (rule): today every guard blocks from the day it ships, so a false alarm shows up only after it has cost a session, and the team's verification article uses a log-only stage first; this changes how guards ship, so it is your call.\nBased on (read): the verification article (https://claude.dev/blog/how-the-claude-code-team-thinks-about-verification/): a gate with off, observe and enforce modes, and a let-through after two blocks in a session (triage read it through a page summary, not word for word).\nBased on (ruling): outcomes-mechanize-rules in CLAUDE.md: watching must cost less than what it watches, and a log needs a named reader.\nDeparts from: main \u2014 every guard blocks from the day it ships \u2014 b adds a log-only stage for new guards.\nWaiting on: nothing stopped; step guard-stages-observe is blocked until you pick.",
+  "home": "step guard-stages-observe",
+  "id": "guard-stages-observe",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-18T02:01:49Z",
+    "choice": "none",
+    "note": "can we do keep guards blocking but maybe also star t logigng into potentially a review mode chjeck in on the review log?"
+  },
+  "n": 948,
+  "options": [
+    {
+      "gain": "No new mode and no new log.",
+      "how": "No change; false alarms are found by use and culled later.",
+      "id": "enforce-only",
+      "key": "a",
+      "label": "Keep guards blocking from the first day",
+      "lose": "A false alarm costs you before anyone sees it."
+    },
+    {
+      "gain": "The false-alarm rate is known before a guard blocks.",
+      "how": "A new guard logs what it would have blocked, read on demand by the session that built it, and starts blocking after a named reading; no let-through.",
+      "id": "observe-new-guards",
+      "key": "b",
+      "label": "New guards run log-only first, then block",
+      "lose": "A new guard does not block at first; a log with a named reader to keep."
+    },
+    {
+      "gain": "A session is never stuck on a wrong guard.",
+      "how": "As b, and a session is let through after two refusals of the same guard so it is never stuck.",
+      "id": "observe-and-let-through",
+      "key": "c",
+      "label": "Log-only stage and a let-through after two blocks",
+      "lose": "A mistaken act passes after two refusals, which is the act a guard exists to stop."
+    },
+    {
+      "gain": "Guards keep blocking from the first day, and a named reader finds false alarms, with no new process.",
+      "how": "No stage change. Each refusal is already written to the guard log, which lint/guard_log_report.py reads; triage reads it at each roadmap review and files each false alarm as a debt or a guard fix. In a cloud session that report reads n/a, so the first act is to find where the log lives for a cloud container.",
+      "id": "block-and-review-log",
+      "key": "d",
+      "label": "Keep guards blocking, and read the guard log on a schedule (recommended)",
+      "lose": "A false alarm still blocks once before it is seen; whether cloud sessions write a readable log is unmeasured."
+    }
+  ],
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "d",
+  "ref": "owner chat 19:45 CST Nov 17 (relayed by the consultant): review the two blogs and land their findings",
+  "replied": "2026-11-18T02:10:00Z",
+  "reply": "Read at 20:10 CST Nov 17 by triage 11; still open. Your idea is now option d: guards keep blocking, and the guard log is read on a schedule. Each refusal is already written to the guard log (lint/guard_log_report.py reads it), so the new part is a named reader, which is triage at each roadmap review. One gap: in a cloud session that report reads n/a, so I have not measured where a cloud container's log lives. Pick d, or another option.",
+  "repo": "shivinate7/claude-settings",
+  "short": "New guards: observe before they block?",
+  "shown": [
+    {
+      "id": "enforce-only",
+      "key": "a",
+      "label": "Keep guards blocking from the first day"
+    },
+    {
+      "id": "observe-new-guards",
+      "key": "b",
+      "label": "New guards run log-only first, then block"
+    },
+    {
+      "id": "observe-and-let-through",
+      "key": "c",
+      "label": "Log-only stage and a let-through after two blocks"
+    },
+    {
+      "id": "block-and-review-log",
+      "key": "d",
+      "label": "Keep guards blocking, and read the guard log on a schedule (recommended)"
+    }
+  ],
+  "status": "open",
+  "title": "Should a new guard first run in a log-only stage before it blocks, as the Claude Code team does?",
+  "why": "d is your idea: guards keep blocking, and a named reader checks the log, which fits the rule that a log needs a reader and costs no new process; b holds a new guard back. Recommended by triage, not owner-typed."
+}

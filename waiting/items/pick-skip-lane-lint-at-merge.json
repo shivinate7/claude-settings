@@ -2,6 +2,7 @@
   "added": "2026-11-13T21:02:00-06:00",
   "closed": "2026-11-14T03:04:00Z",
   "context": "Goal: a merge that checks what is unproven and does not repeat what CI already proved.\nProblem (rule): decision lanes-run-no-full-ci-job (your item 27 a, 2026-10-27) says the batch runner runs lane lint on each lane head before the join and refuses a red lane. Lane lint took about 17 min in one lane's run (your paste 20:36; one sample). If the head's all-jobs-passed check is green, the full run already ran lint, so lane lint may repeat work. Changing it changes a ruling, so it needs your word.\nBased on (read): the ruling text above, read by triage; the consultant's audit, unchecked by triage.\nDeparts from: main \u2014 the merge runs lane lint every time; this makes it skip when the head's all-jobs-passed check is green.\nMeanwhile: lane lint runs as it does today.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "decision lanes-run-no-full-ci-job; step merge-tool-audit",
   "id": "pick-skip-lane-lint-at-merge",
   "kind": "decision",

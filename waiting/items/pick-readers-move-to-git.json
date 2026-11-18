@@ -1,9 +1,15 @@
 {
-  "added": "2026-11-13T18:15:00Z",
+  "added": "2026-11-17T20:10:00Z",
+  "closed": "2026-11-17T20:22:00Z",
   "context": "Goal: your answers reach sessions from the place you ruled is home.\nProblem (rule): the answer check (page_grant.py) and the settings.json Relayed Grant entry read answers fetched from the page database today. With git as home (your 730 a), they should read git. A settings entry takes your word.\nBased on (ruling): page-git-is-home; decision waiting-data-in-repo (your Nov 2 14:58 CST words).\nDeparts from: main \u2014 readers fetch answers from the page database; a moves them to git. Degen and Home copies refresh last (your 12:12 CST words).\nMeanwhile: step page-one-store-answers stays blocked; nothing else waits.",
   "home": "step page-one-store-answers",
   "id": "pick-readers-move-to-git",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-17T20:19:00Z",
+    "choice": "c",
+    "note": "c) Move both readers to git, name the settings.json entry, and let a git copy of your answer count as a grant. Gain: one source for answers, readable by every session. Lose: a session-written file becomes a grant source, which draft #2971 guards against forged writes. is my answer (owner chat 14:19 CST Nov 17, relayed by the consultant)."
+  },
   "n": 734,
   "options": [
     {
@@ -21,10 +27,22 @@
       "key": "b",
       "label": "Keep reading the page database",
       "lose": "The readers keep depending on one account's page, against git being home."
+    },
+    {
+      "gain": "Both readers move, with every file named, and a git copy of your answer counts as your grant.",
+      "how": "page_grant.py and the settings.json Relayed Grant entry both read the git copy of your answers (waiting/answers/<slug>.json on the roadmap branch). A git copy of an answer then counts as a grant, as the page copy does today (decision relayed-grant-read-from-page counts only the page). It lands after step page-data-one-store (draft PR #3212), with draft #2971 guarding the git copy.",
+      "id": "both-to-git-counts",
+      "key": "c",
+      "label": "Move both readers to git, name the settings.json entry, and let a git copy of your answer count as a grant",
+      "lose": "A settings entry changes, and the grant reader accepts a second place for your word. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
     }
   ],
-  "owner": "triage (session_013NEJL19M4Jwh49tAdowQXp)",
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "a",
   "ref": "coordinator 12:14 CST Nov 13, retrospective's git-home plan",
+  "replied": "2026-11-17T20:22:00Z",
+  "reply": "Answered c at 14:19 CST in chat, relayed by the consultant. Closed 14:22 CST by triage 11. The consultant builds it after step page-data-one-store (draft PR #3212) and draft #2971 land.",
   "repo": "shivinate7/claude-settings",
   "short": "Read answers from git, not the page database?",
   "shown": [
@@ -37,9 +55,14 @@
       "id": "keep-db",
       "key": "b",
       "label": "Keep reading the page database"
+    },
+    {
+      "id": "both-to-git-counts",
+      "key": "c",
+      "label": "Move both readers to git, name the settings.json entry, and let a git copy of your answer count as a grant"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "Should the answer check and the Relayed Grant entry read your answers from git instead of from the page database?",
-  "why": "A settings entry and the answer check change; both need your word."
+  "why": "A matches your git-is-home ruling and widens nothing; C also lets a git copy count as a grant, which widens what the shared grant reader accepts, so it is never the recommended pick."
 }

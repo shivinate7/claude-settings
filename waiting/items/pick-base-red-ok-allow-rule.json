@@ -32,11 +32,12 @@
     }
   ],
   "owner": "lane merge-base-red-ok-refresh (session_013NEJKzyVUbeFsmoQeuaUP2); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "recommended": "a",
   "ref": "lane report 18:37 CST Nov 13",
   "reply": "Answered 786 c (19:21 CST Nov 13), filed as ruling own-786-c-base-red-ok-settings. The same PR rewrites the two decision sentences that say entries never cover --base-red-ok, and gets a guard review. Kept open with your answer on the page until the lane fetches it; nothing for you to do.",
   "repo": "shivinate7/claude-settings",
   "short": "PR 3097: allow rule for --base-red-ok, and where?",
   "status": "open",
   "title": "May a merge allow rule cover --base-red-ok, so a red-main revert never stops for a prompt? If so, where does it live?",
-  "why": "Decision auto-mode-owner-acts says allow entries never cover this flag; the PR does the opposite, and a repo test forbids the settings.json form."
+  "why": "Options b and c pre-approve a flag that lifts a check, against decision auto-mode-owner-acts; a is the only one that changes no decision or test."
 }

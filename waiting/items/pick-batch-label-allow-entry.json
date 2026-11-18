@@ -22,11 +22,12 @@
     }
   ],
   "owner": "lane batch-label-setter (session_013NEJKz9DMAhnNimZfuBt2L); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "recommended": "a",
   "ref": "lane batch-label-setter, 14:12 CST Nov 13; replaces item 618 on the new command name",
   "reply": "Answered 759 b (18:24 CST Nov 13), filed as ruling own-759-b-label-allow-entry. Kept open with your answer on the page until the lane fetches it; nothing for you to do.",
   "repo": "shivinate7/claude-settings",
   "short": "Allow-list entry for merge --batch-label?",
   "status": "open",
   "title": "Should the auto-mode allow list get an entry for the new `merge --batch-label` write?",
-  "why": "An allow entry for a write widens what the merge tool may do without a prompt; the old 618 pick no longer matches the command."
+  "why": "Option b adds an allow-list entry for a shared tool, which your rule says a repo should not push; option a costs at most one prompt the first time."
 }

@@ -2,6 +2,7 @@
   "added": "2026-11-13T20:56:00-06:00",
   "closed": "2026-11-14T02:52:30Z",
   "context": "Goal: a merge tool whose every gate stops a real mistake and costs less than it saves.\nProblem (goal): merge/merge.py has 337 commits in 8 days, 4,617 lines, and 27 debts name it (the consultant's count; unchecked by triage). Gates are fixed one misfire at a time, and nobody has read the whole. Whether it is stale is unmeasured.\nBased on (measured): the consultant's counts above, unchecked; your 20:49 CST chat.\nDeparts from: main \u2014 adds one read-only audit; no gate changes until you pick from its table.\nMeanwhile: the tool keeps running as it is; the wave plan does not wait on this.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step merge-tool-audit",
   "id": "pick-merge-tool-audit",
   "kind": "decision",

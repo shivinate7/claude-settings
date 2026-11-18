@@ -1,0 +1,55 @@
+{
+  "added": "2026-11-18T01:34:30Z",
+  "checked_with": "session_013NEJL1gw6EdrSyvHkTUEx6",
+  "closed": "2026-11-18T01:40:00Z",
+  "context": "Goal: close the open gaps in the ios-adblock compliance scorecard.\nProblem (rule): the Design check reads out for ios-adblock because it has no .claude/shoot.json and no token file, and the app has little screen UI, so you decide whether Design applies to this repo.\nBased on (read): the Design probe shows 5 gaps; the ui-copy row is a known gap for every repo.\nDeparts from: main has no shoot file and no token file in ios-adblock \u2014 a change adds both, or marks Design not applicable here.\nWaiting on: nothing stopped; the other ios-adblock pull requests are not blocked.",
+  "home": "ios-adblock lane (session_013NEJKzK1Tenht43Uyj5RDE), PR on the compliance scorecard",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-18T01:38:53Z",
+    "choice": "b",
+    "note": ""
+  },
+  "n": 945,
+  "options": [
+    {
+      "gain": "No dead files, and the scorecard reads true.",
+      "how": "The scorecard drops the Design group for this repo. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo",
+      "id": "design-na",
+      "key": "a",
+      "label": "Mark Design not applicable for ios-adblock",
+      "lose": "A screen added later starts with no check; the shared probe is made to accept this repo.",
+      "widens": true
+    },
+    {
+      "gain": "Design reads in shape, and a later screen is checked from day one.",
+      "how": "A lane adds both files so the Design group reads in shape.",
+      "id": "design-files",
+      "key": "b",
+      "label": "Add .claude/shoot.json and a token file now (recommended)",
+      "lose": "Two files for screens that barely exist."
+    }
+  ],
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "b",
+  "ref": "coordinator message 19:27 and 19:28 CST Nov 17, relaying the ios-adblock lane",
+  "replied": "2026-11-18T01:40:00Z",
+  "reply": "Saved b at 19:38 CST Nov 17 (add .claude/shoot.json and a token file now). Closed 19:40 CST by triage 11. Triage tells the coordinator, who routes it to the ios-adblock lane.",
+  "repo": "shivinate7/ios-adblock",
+  "short": "ios-adblock: does the Design group apply",
+  "shown": [
+    {
+      "id": "design-na",
+      "key": "a",
+      "label": "Mark Design not applicable for ios-adblock"
+    },
+    {
+      "id": "design-files",
+      "key": "b",
+      "label": "Add .claude/shoot.json and a token file now (recommended)"
+    }
+  ],
+  "status": "closed",
+  "title": "Does the Design group apply to the ios-adblock iPhone content blocker?",
+  "why": "b keeps the repo changing to fit the shared tool, as you ruled; a widens the tool. Recommended by triage, not owner-typed."
+}

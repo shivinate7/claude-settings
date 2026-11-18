@@ -2,6 +2,7 @@
   "added": "2026-11-14T01:27:00-06:00",
   "closed": "2026-11-14T21:07:00Z",
   "context": "Goal: a revert of a broken commit on main lets merges resume without a full test run of the old, broken tree.\nProblem (rule): your 745 b (13:20 CST Nov 13) says merges resume when the revert merges; your 812 a (23:38 CST Nov 13) says the red-main check judges only runs that ran the tests. For a revert whose push run is skipped, the two disagree, and the live check follows 812 a. It needs your word which one governs here.\nBased on (ruling): own-745-b-resume-at-revert and own-812-a-judge-suite-runs, both read by triage.\nBased on (measured, lane's own probe, relayed): a reviewer probed runs [skipped, failed, green]; the check printed \"latest completed run is red\". Unchecked by triage. The 812 a number about skipped runs (2 of 302) is flagged unmeasured on the ruling.\nDeparts from: main \u2014 the check reads the newest run that ran the tests, so a skipped revert run leaves main red; b makes the revert's merge lift red even when its run was skipped; c adds a CI write by the merge tool.\nMeanwhile: nothing waits. `--base-red-ok` lifts it today; the lane files the wrong remedy text as a debt in PR #3384 whichever you pick.\nGoes against: b is the only option that loosens a check. No repo asked for it. It follows your own 745 b.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step merge-flow-after-anthropic; rulings own-745-b-resume-at-revert and own-812-a-judge-suite-runs; PR #3384",
   "id": "pick-revert-skipped-run-red-main",
   "kind": "decision",

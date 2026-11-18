@@ -1,5 +1,7 @@
 {
   "added": "2026-11-16T13:47:00-06:00",
+  "closeReason": "Consultant takes it (relayed 09:56 CST Nov 17): option c, no grade. The coordinator also asked you in chat; if you answer there, that answer rules.",
+  "closed": "2026-11-17T15:57:00Z",
   "context": "Goal: the highest-grade PRs reach main first, in one wave, then the next grade when none is left.\nProblem (rule): that idea needs a grade on each PR, and PRs carry none. Your pick that only lanes that are ready or one step from it bring main in already stands without a grade, so this question is only for the extra idea. It needs your word because it adds a new grade to every PR, or reuses one.\nBased on (measured): triage read the roadmap record at 13:46 CST Nov 16: of 2,227 steps, 66 carry a `priority` field (now 32, next 28, later 1, low 5); every step has a `phase` and an `order`; 230 steps carry a `pr` field, so a PR reaches a grade only through its step. Most open PRs have no step (332 pulls with no step at the last recount).\nBased on (read): the coordinator read no grade on any PR (relayed 13:46 CST).\nDeparts from: main \u2014 PRs have no grade and merge in the order they are ready; the options set a grade or leave it.\nMeanwhile: lanes that are ready or near ready bring main in as you picked; nothing waits on this answer.",
   "home": "rewrite-merge-decisions-for-lane-merge",
   "kind": "decision",
@@ -52,7 +54,7 @@
       "label": "No grade: the pick you already made is enough"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "If PRs are brought to main together by priority grade, which grade should the system use?",
   "why": "Triage recommends c: your pick already keeps the ready queue clean; a grade would need a field on every PR and most PRs have no step. It is triage's recommendation, not owner-typed."
 }

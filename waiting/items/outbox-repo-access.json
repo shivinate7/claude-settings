@@ -2,6 +2,7 @@
   "added": "2026-11-12T22:01:00Z",
   "closed": "2026-11-13T19:45:46Z",
   "context": "Goal: the gather reads every child repo once, so no finding about claude-settings is missed.\nProblem (rule): the lane can see claude-settings only; tile-windows, session-mailbox, joyous, ios-adblock, adblock-lists, inbox-engine, advisor, Brewer-KYC, mailaudit-data, frag-head-beta and note-scrape were never swept.\nBased on (measured): the lane's GitHub scope is claude-settings only (the gather plan, 2026-11-12).\nDeparts from: main \u2014 adds read-only access for one session to 11 repos.\nWhy yours: a session reaches another repo only with your yes, and a cloud attach may show you a card to confirm.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step outbox-aggregate-plan",
   "id": "outbox-repo-access",
   "kind": "task",

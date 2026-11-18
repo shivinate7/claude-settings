@@ -2,6 +2,7 @@
   "added": "2026-11-15T03:19:30-06:00",
   "closed": "2026-11-15T17:39:05Z",
   "context": "This item asks how often a PR must carry a Rules checked line. It does not block the PR.\nGoal: a changed decision record is never left with a stale rule sentence, without a required line on edits that never needed one.\nProblem (rule): PR 3492 makes a changed decision record need either each citing rule sentence changed or one line in the PR body, \"Rules checked: <record> \u2014 no change\". The lane measured that 90 of 135 main merges in the last 20 days that touched a record left CLAUDE.md unchanged. That is an upper bound by commit. A required line would fire on most record edits, so the cost lands on you and on every lane; whether to accept it is your call.\nBased on (read): PR 3492 body and lane hand-in, relayed by the coordinator at 03:19 CST Nov 15; triage read no history.\nBased on (measured): 90 of 135 record-touching main merges in 20 days left CLAUDE.md unchanged (lane's count, upper bound by commit; triage did not re-run it).\nDeparts from: main \u2014 adds a required PR-body line, or a rule-sentence change, on a PR that changes a decision record; today nothing is required.\nWho recommends what: nobody has recommended an option; no star.\nMeanwhile: PR 3492 is not held on this answer.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "PR 3492 (merged d274f5ec); step aligned-check-agents-skills carries the note (follow-up lane session_013NEJL2QjJLfn1yAkPQmzr9)",
   "kind": "decision",
   "lastAnswer": {

@@ -2,6 +2,7 @@
   "added": "2026-11-15T23:20:33-06:00",
   "closed": "2026-11-16T19:43:00Z",
   "context": "Goal: the child repos merge fast without spending Mac minutes you do not need.\nProblem (money): main skips macOS on a push, so with each lane merged alone a Mac break can reach main untested; running macOS on those pushes costs more Mac minutes and a change to each repo's checks.yml.\nBased on (notes): the consultant relayed this at 23:19 CST Nov 15; I did not measure the Mac minutes.\nDeparts from: main \u2014 main skips macOS on a push; option b keeps macOS on for a push whose head lacked the base tip.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step ci-batch-mac-runner and the child repos' checks.yml",
   "kind": "decision",
   "n": 909,

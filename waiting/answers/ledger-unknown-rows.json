@@ -1,0 +1,8 @@
+{
+  "at": "2026-11-18T17:04:47.081Z",
+  "choice": "none",
+  "item": "ledger-unknown-rows",
+  "label": "none of these",
+  "n": 962,
+  "note": "it's very possible that some prs have no owner anymore like they'd been archived or just stale or forgotten etc, how would that stop you from knowing what all the PRs are and/or having coordinator list the sessions? coordinator should know how many sessions are under it? "
+}

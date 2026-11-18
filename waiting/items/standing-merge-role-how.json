@@ -1,0 +1,72 @@
+{
+  "added": "2026-11-17T21:00:30Z",
+  "closed": "2026-11-18T01:06:10Z",
+  "context": "Goal: each session merges its own pull request with the merge tool, as you ruled.\nProblem (rule): This triage session cannot merge its own pull request, because the merge tool refuses a cloud session that has no merge role recorded, and the safety classifier denied my recording one myself, so only your word can say how this session gets the role.\nBased on (measured): triage 11, 15:00 CST Nov 17: the merge tool refused \"this session may not merge\"; the file that records a session's merge role does not exist in this container; recording it with the tool's role flag was denied by the auto-mode classifier as undermining oversight. I did not work around it.\nBased on (ruling): own-everyone-merges (owner, 2026-11-16 12:58 CST, everyone merges: each session merges its own pull request with the merge tool)\nDeparts from: main \u2014 a merge role is recorded only by a flag each session runs itself \u2014 a lets triage record it once on your word; b makes a start-up hook record it; c keeps handing pull requests to a runner.\nWaiting on: nothing stopped; pull requests this session opens wait for a runner to merge them until you pick; I do not record the role myself.",
+  "home": "step standing-merge-role-on-resume",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-18T01:05:00Z",
+    "choice": "b",
+    "note": "Typed in chat to triage 11, 19:05 CST Nov 17: pick b, a start-up hook records the role in every new container; explicit grant to land it and merge it into main ASAP; plus a standing grant that triage may merge its own green pull requests."
+  },
+  "n": 942,
+  "options": [
+    {
+      "gain": "Triage merges its own green pull request today.",
+      "how": "You pick a on this page. I then record the standing role once and merge only my own green pull requests.",
+      "id": "allow-once",
+      "key": "a",
+      "label": "Let this triage session record its standing role once, on your word",
+      "links": [
+        {
+          "label": "Waiting page",
+          "url": "https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx"
+        }
+      ],
+      "lose": "The next restarted session asks again."
+    },
+    {
+      "gain": "Every restarted standing session can merge its own pull request with no word from you.",
+      "how": "A start-up hook records the standing role for sessions tagged as triage, coordinator or consultant, with a test first and a review round.",
+      "id": "hook-records",
+      "key": "b",
+      "label": "A start-up hook records the standing role for standing sessions (recommended)",
+      "lose": "A guard-path change that needs review rounds before it lands; until then a restarted session cannot merge."
+    },
+    {
+      "gain": "No change.",
+      "how": "Triage opens pull requests and a batch runner merges them, as it does now.",
+      "id": "hand-to-runner",
+      "key": "c",
+      "label": "Keep handing pull requests to a runner",
+      "lose": "Goes against your ruling that everyone merges; the runner queue grows."
+    }
+  ],
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "b",
+  "ref": "owner chat 14:57 CST Nov 17 (relayed by the consultant); merge tool refusal and classifier denial 15:00 CST Nov 17",
+  "replied": "2026-11-18T01:06:10Z",
+  "reply": "Answered b in chat at 19:05 CST Nov 17 (not typed on the page). Closed 19:06 CST by triage 11. The role is recorded for this session now (merge tool, 19:05 CST, on your standing grant). The start-up hook is a lane built tonight, with a test first and review rounds; I merge it on its own green run under your grant. Until it lands, a restarted session records the role by hand.",
+  "repo": "shivinate7/claude-settings",
+  "short": "How triage gets its merge role",
+  "shown": [
+    {
+      "id": "allow-once",
+      "key": "a",
+      "label": "Let this triage session record its standing role once, on your word"
+    },
+    {
+      "id": "hook-records",
+      "key": "b",
+      "label": "A start-up hook records the standing role for standing sessions (recommended)"
+    },
+    {
+      "id": "hand-to-runner",
+      "key": "c",
+      "label": "Keep handing pull requests to a runner"
+    }
+  ],
+  "status": "closed",
+  "title": "Triage cannot merge its own pull request: how should a standing session get its merge role?",
+  "why": "b fixes it for every restarted standing session without asking you each time; a is the quickest for this one session. Recommended by triage, not owner-typed."
+}

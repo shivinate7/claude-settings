@@ -2,6 +2,7 @@
   "added": "2026-11-13T19:59:09Z",
   "closed": "2026-11-13T20:27:30Z",
   "context": "Goal: the git copy of the waiting page is never older than your last save.\nProblem (goal): you asked \"shd me hitting send on an artifact be another update trigger\". Today Send already wakes the page's writer (triage); the git copy is exported only when triage chooses to, so it can read old (item 747 did for about 15 minutes).\nBased on (ruling): your item 593 a ruled the copy timely, not real time; PR #3212 stamps the copy with its age. This option goes beyond that ruling.\nBased on (read): the retrospective's take: yes. The writer exports on that wake. No timer, no new process.\nDeparts from: main \u2014 the copy is exported when triage runs an export, with a stated age; option a exports at each Send.\nMeanwhile: the stated age shows how old the copy is. Cost per Send (a few reads and one commit on the roadmap branch) is unmeasured.",
+  "dismissed": "2026-11-17T20:04:20Z",
   "home": "step page-one-store-fixes; item 593 a (ruling ow-13-q-max-past-rates-a)",
   "id": "pick-send-is-export-trigger",
   "kind": "decision",

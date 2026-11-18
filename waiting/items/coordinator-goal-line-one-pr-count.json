@@ -1,0 +1,62 @@
+{
+  "added": "2026-11-17T20:00:43-06:00",
+  "closed": "2026-11-18T12:01:00-06:00",
+  "context": "Goal: the coordinator's goal, line 1, must be measurable and reachable.\nProblem (goal): 490 pull requests are open in claude-settings and only 31 have a live lane or runner 10, so no live session can name a mover for the rest and line 1 cannot be finished as written, so you choose what it counts.\nBased on (measured): audit agent at 19:56 CST Nov 17 from the pull request list and the merge ledger (claude-settings only): of the 388 the ledger sorts, 31 have a live lane or runner 10 and 357 have none (233 ready drafts older than 3 days: 190; 63 need a lane lint; 28 record bad; 16 record stale; 11 fix check on sonnet; 5 other), plus 102 more on the ledger's no-record line; the sessions list was page 1 only (88 rows), so some may have a lane past it (coordinator, 20:00 CST, not re-run by triage).\nBased on (measured): the coordinator's read-only classifier (a sonnet agent, 20:10 CST Nov 17, own clone, main at 69ab99883) tested the open pull requests no live lane owns, called orphans here (377, an upper bound since 20 held ones could not be dropped): none is identical to main, none is empty, none lacks a merge base; 372 have at least half their added lines absent from main and 5 have 10 to 50% absent, so no sign any of it landed under another hash and option b has no mechanical close; each would need a human read (coordinator relay, 20:11 CST, not re-run by triage).\nDeparts from: your coordinator goal as typed 19:48 CST, whose line 1 says every open pull request its lanes opened is merged, closed as replaced, or waiting with a named mover, so it counts all of them \u2014 a change counts only those a live lane or runner holds.\nWaiting on: nothing stopped; the coordinator keeps working on the rest of the goal.",
+  "home": "coordinator's goal line 1; plans/stale-drafts-2026-11-13.md; decision stalled-steps",
+  "id": "coordinator-goal-line-one-pr-count",
+  "kind": "decision",
+  "n": 950,
+  "options": [
+    {
+      "gain": "The goal is reachable.",
+      "how": "The orphans stay open under the existing stalled-steps decision and plans/stale-drafts-2026-11-13.md.",
+      "id": "count-live-only",
+      "key": "a",
+      "label": "Count only pull requests a live lane or runner holds (31 now)",
+      "lose": "357 orphans stay open with no mover."
+    },
+    {
+      "gain": "The open list shrinks and tells the truth.",
+      "how": "The coordinator's subagents sort every orphan (replaced by a merged pull request, still needed, unknown) and close only those with a named merged replacement, one each.",
+      "id": "classify-and-close",
+      "key": "b",
+      "label": "Keep line 1 as written: classify every orphan and close those with a merged replacement",
+      "lose": "Very large work, and it closes other lanes' pull requests (reopenable)."
+    },
+    {
+      "gain": "The goal is reachable now and the orphan list becomes real.",
+      "how": "Line 1 counts the 31 now; the coordinator's subagents sort the orphans without closing anything and file the list to triage; nothing closes without its named merged replacement and your page answer.",
+      "id": "count-live-and-read-orphans",
+      "key": "c",
+      "label": "Do a now, and sort the orphans read-only for the stale-drafts step (recommended)",
+      "lose": "The orphans stay open for now."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), posted by triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "c",
+  "ref": "coordinator message 20:00 CST Nov 17",
+  "replied": "2026-11-18T12:01:00-06:00",
+  "reply": "Closed. You picked b: keep line 1 as written, classify every orphan open pull request and close those with a merged replacement. Your note: use a haiku workflow as a first step to keep the sorting and sifting cheaper. Routed to the coordinator.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Coordinator goal: which open PRs count",
+  "shown": [
+    {
+      "id": "count-live-only",
+      "key": "a",
+      "label": "Count only pull requests a live lane or runner holds (31 now)"
+    },
+    {
+      "id": "classify-and-close",
+      "key": "b",
+      "label": "Keep line 1 as written: classify every orphan and close those with a merged replacement"
+    },
+    {
+      "id": "count-live-and-read-orphans",
+      "key": "c",
+      "label": "Do a now, and sort the orphans read-only for the stale-drafts step (recommended)"
+    }
+  ],
+  "status": "closed",
+  "title": "Your coordinator goal says every open pull request its lanes opened is merged, closed as replaced, or waiting with a named mover. Which pull requests should that count?",
+  "why": "c makes the goal reachable now and does the sorting b needs without closing anything first; b's large closing work waits for your answer on the list. Recommended by the coordinator, not owner-typed."
+}

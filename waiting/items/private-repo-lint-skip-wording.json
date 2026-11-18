@@ -1,0 +1,67 @@
+{
+  "added": "2026-11-18T00:12:20Z",
+  "closed": "2026-11-18T00:12:50Z",
+  "context": "Goal: the setup pull requests for the joyous and ios-adblock repos merge through the merge tool.\nProblem (rule): The merge tool's lane lint finds no touched CI run for these two private repos because they run no hosted CI, and the only skip your ruling allows needs a green rollup run, so the consultant's new wording as a skip reason needs your word before runner 12 can merge.\nBased on (ruling): own-lint-skip-green-rollup-a (owner, 2026-11-13 21:01 CST, lint skipped only on a green all-jobs-passed rollup run)\nBased on (notes): coordinator, 18:11 CST Nov 17: the consultant offered the wording \"repo runs no hosted CI (decision private-repos-no-ci); no touched run will come\" as a skip; the consultant says it is not an owner grant.\nDeparts from: main \u2014 a lint skip needs a green rollup run on the head \u2014 a lets these two private repos skip with the no-hosted-CI wording; b keeps the rule and the two pull requests wait for a tool change; c adds a hosted check to those repos.\nWaiting on: runner 12 holds both pull requests until you pick; the coordinator works on the rest.",
+  "home": "merge tool lane lint",
+  "kind": "decision",
+  "n": 943,
+  "options": [
+    {
+      "gain": "Both pull requests merge now.",
+      "how": "You pick a on this page. The merge tool then accepts the no-hosted-CI wording as a skip reason for these two repos.",
+      "id": "accept-wording",
+      "key": "a",
+      "label": "Accept the no-hosted-CI wording as a lint skip reason",
+      "links": [
+        {
+          "label": "Waiting page",
+          "url": "https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx"
+        }
+      ],
+      "lose": "A new skip reason with no run behind it. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    },
+    {
+      "gain": "Your rule holds: every skip is backed by a green run.",
+      "how": "Runner 12 holds both pull requests until the merge tool reads a repo that runs no hosted CI.",
+      "id": "keep-rule",
+      "key": "b",
+      "label": "Keep the green-rollup rule and wait for a tool change (recommended)",
+      "lose": "Both pull requests wait on a tool change."
+    },
+    {
+      "gain": "A real run backs each merge.",
+      "how": "A hosted check is added to each repo, and its green run backs the skip.",
+      "id": "add-check",
+      "key": "c",
+      "label": "Add a hosted check to those two repos",
+      "lose": "New hosted CI in private repos, which costs money."
+    }
+  ],
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ), filed for the coordinator",
+  "recommended": "b",
+  "ref": "coordinator message 18:11 CST Nov 17 (relayed; not owner-typed)",
+  "reply": "Withdrawn by the coordinator at 18:12 CST Nov 17, before you saw it. Your private-repos ruling (owner, 11:20 CST Nov 16) already lets private repos merge with no CI run, so the lane lint passes on local steps alone. The tool on the stable line lacks the fix that reads this, so the refusal clears when stable moves. Nothing for you to pick.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Lint skip wording for private repos",
+  "shown": [
+    {
+      "id": "accept-wording",
+      "key": "a",
+      "label": "Accept the no-hosted-CI wording as a lint skip reason"
+    },
+    {
+      "id": "keep-rule",
+      "key": "b",
+      "label": "Keep the green-rollup rule and wait for a tool change (recommended)"
+    },
+    {
+      "id": "add-check",
+      "key": "c",
+      "label": "Add a hosted check to those two repos"
+    }
+  ],
+  "status": "closed",
+  "title": "Can two private repos skip the lane lint with the no-hosted-CI wording?",
+  "why": "b keeps your ruling whole at the cost of a wait; a is quickest. Recommended by the coordinator, not owner-typed."
+}
