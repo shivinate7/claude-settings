@@ -3466,7 +3466,10 @@ def refuse_incomplete_tree(wt, head, base, tree=None):
         raise UnknownStop("\n".join([f"the lint of {head[:9]} against {base} is unknown, not a pass: the lint worktree lacks {', '.join(missing)}, so no step ran.",
                                      "Run again. If it keeps happening, the lint worktree made for this head is incomplete. --lint-unknown-ok does not lift this. " + LANE_LINT_REMEDY]))
 
-SWEEP = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "janitor", "sweep.py"))  # the one home of the sweep, named in the disk refusal
+def landed_sweep():
+    """The landed sweep, `<config dir>/janitor/sweep.py`, read at call time. merge runs from a temp tree launch.py deletes at the end, so a path from this file's own __file__ is gone by the time the owner reads it."""
+    from shared_names import config_dir  # hooks/shared_names.py, the one home of the config dir, on sys.path from the top of this file
+    return os.path.join(config_dir(), "janitor", "sweep.py")
 
 def refuse_full_disk(root):
     """Refuse a lane lint when a drive it writes to is under the guard's full disk floor, min(5% of the drive, 5 GiB) (decision machine-load-brake): the
@@ -3490,7 +3493,7 @@ def refuse_full_disk(root):
         print("merge: the free disk read as unknown, so the lane lint goes ahead" if not full else "merge: a free disk read as unknown", file=sys.stderr)
     if full:
         raise Stop(f"the lane lint makes a full checkout, and the machine is full ({', '.join(full)}). Free space first: "
-                   f"`python3 {shlex.quote(SWEEP)} --root {shlex.quote(str(root))} --confirm` "
+                   f"`python3 {shlex.quote(landed_sweep())} --root {shlex.quote(str(root))} --confirm` "
                    "(decision machine-load-brake, the lane lint refuses at the full disk floor in a cloud session too).")
 
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_tests=False, mutate_run=True, pre_join=False):
