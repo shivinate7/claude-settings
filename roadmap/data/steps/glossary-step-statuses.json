@@ -1,15 +1,15 @@
 {
-  "id": "glossary-step-statuses",
-  "title": "GLOSSARY.md names the step statuses: blocked, folded, and no second name for todo",
-  "status": "ready",
-  "repo": "shivinate7/claude-settings",
-  "phase": "next",
-  "lane": "session_013NEJL475DP95wLmQcdZh57",
-  "owner": "coordinator",
-  "blockedBy": [],
-  "why": "Owner 12:11 CST Nov 13, item 583 a: \"ensure this is above board how we operate our glossary\". GLOSSARY.md on main has no row for step statuses; the roadmap build knows blocked, queued and folded (PR #2825), and queued is listed like todo, which is two names for one thing.",
-  "source": "page item 583 (pick-roadmap-status-names), owner note 12:11 CST Nov 13",
-  "note": "Owner picked c on page item 735 (typed on the page 14:49 CST Nov 17): fold 'queued' into 'blocked', each step naming the step it waits behind. Routed to the coordinator 14:55 CST. Scope: the 22 queued steps become blocked, each naming its blocker step; build.py and the glossary rows drop queued; draft PR #3195 is rewritten to drop queued. CORRECTED 14:58 CST (coordinator relay, lane glossary-step-statuses): main's roadmap build has no blocked-nag and no row that reads blockedBy, so the nag guard I wrote into this note had nothing to guard; the lane builds the fold only, its PR body names the false premise. A blocked-step nag row is a separate step, filed only if the owner wants it. Lane: record-writer or builder per the lane; lint/check_glossary.py must pass. Not started.",
-  "updatedAt": "2026-11-17T14:53:53-06:00",
-  "pr": 3195
+ "id": "glossary-step-statuses",
+ "title": "GLOSSARY.md names the step statuses: blocked, folded, and no second name for todo",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL475DP95wLmQcdZh57",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Owner 12:11 CST Nov 13, item 583 a: \"ensure this is above board how we operate our glossary\". GLOSSARY.md on main has no row for step statuses; the roadmap build knows blocked, queued and folded (PR #2825), and queued is listed like todo, which is two names for one thing.",
+ "source": "page item 583 (pick-roadmap-status-names), owner note 12:11 CST Nov 13",
+ "note": "Owner picked c on page item 735 (typed on the page 14:49 CST Nov 17): fold 'queued' into 'blocked', each step naming the step it waits behind. Routed to the coordinator 14:55 CST. Scope: the 22 queued steps become blocked, each naming its blocker step; build.py and the glossary rows drop queued; draft PR #3195 is rewritten to drop queued. CORRECTED 14:58 CST (coordinator relay, lane glossary-step-statuses): main's roadmap build has no blocked-nag and no row that reads blockedBy, so the nag guard I wrote into this note had nothing to guard; the lane builds the fold only, its PR body names the false premise. A blocked-step nag row is a separate step, filed only if the owner wants it. Lane: record-writer or builder per the lane; lint/check_glossary.py must pass. Not started. Owner picked a on page item 941 (saved on the page 19:29 CST Nov 17): all 22 queued steps become blocked, each note naming what it waits on, linked to a blocking step only where one exists; the 3 finished waits go to todo. This replaces the earlier scope line that each step names its blocker step. Not yet routed to the coordinator.",
+ "updatedAt": "2026-11-17T19:31:48-06:00",
+ "pr": 3195
 }
