@@ -1,0 +1,1 @@
+- loading-line-ten-seconds-hang: while `meta` is held, up to 10 s of "Loading the items waiting on you…" with the tab count showing N items can read as a hang. The design reviewer suggests a hint at about 3 s. Real store timing is unmeasured. Found in the waiting-page-sorting lane. Decision: roles-findings-are-debts-or-notes.

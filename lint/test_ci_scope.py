@@ -555,7 +555,7 @@ class Scope(unittest.TestCase):
     # `code` and `shoot` and no other flag in true_set (checks_guard is outside ALL; the cases below pin it).
     # An unrelated code change leaves `shoot` off.
     def test_shoot_edit_turns_on_only_the_shoot_suite(self):
-        for p in ("bin/shoot", "lint/test_shoot.mjs", "testing/skip-locally-fail-in-ci.mjs", ".github/shoot/package-lock.json",
+        for p in ("bin/shoot", "lint/test_shoot.mjs", "testing/skip-locally-fail-in-ci.mjs", "testing/page_session_role_sort.test.mjs", ".github/shoot/package-lock.json",
                   "actions/playwright-setup/action.yml"):
             with self.subTest(path=p):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"code", "shoot"})

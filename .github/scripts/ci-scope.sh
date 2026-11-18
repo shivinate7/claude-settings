@@ -77,7 +77,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       # bin/duo-fold: macOS only (bash 3.2 script for the iPhone Duo). Its suite runs in the shell-macos job.
       bin/duo-fold|lint/test_duo_fold.sh) on="$on $S code " ;;
       # bin/shoot: its suite installs Playwright and Chromium, so only these paths run it.
-      bin/shoot|lint/test_shoot.mjs|testing/skip-locally-fail-in-ci.mjs) on="$on code shoot " ;;
+      bin/shoot|lint/test_shoot.mjs|testing/skip-locally-fail-in-ci.mjs|testing/page_session_role_sort.test.mjs) on="$on code shoot " ;;
       # actions/playwright-setup has four callers: checks-shoot and checks-waiting-page (shoot), checks-guard and checks-guard-2 (checks_guard). Both guard jobs also
       # install the Playwright that .github/shoot pins (package-dir), so that dir takes this arm too. Set checks_guard
       # directly: the guard flag would also start the guard suites, which this action does not touch. A .md edit runs none of the four jobs.
