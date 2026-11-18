@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Scores each review layer's recall against the incident fixture and prints one JSON report.
 
-  python3 lint/review_layer_recall.py --fixture <fixture.json> [--findings <findings.json>] [--line]
+  python3 lint/review_layer_recall.py --fixture <fixture.json> [--findings <verdicts.json>] [--line]
 
-The report shape is in the docstring of lint/test_review_layer_recall.py. A findings file is a
+The report shape is in the docstring of lint/test_review_layer_recall.py. A verdicts file is a
 JSON list of {"pr", "layer", "verdict"} rows. A layer's recall is "measured" only when every
 incident whose answer key names the layer has a PASS or FAIL row of that layer; a layer with no
 incidents, a missing row, or a row whose verdict is anything else reads "unknown", never 0.
@@ -60,17 +60,18 @@ def line(result):
 def main(argv):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--fixture", required=True)
-    parser.add_argument("--findings", dest="findings")
+    parser.add_argument("--findings", dest="verdicts", metavar="VERDICTS",
+                        help="JSON list of verdict rows (the flag keeps its name; the rows are verdicts)")
     parser.add_argument("--line", action="store_true")
     args = parser.parse_args(argv)
     try:
         fixture = load(args.fixture)
-        rows = load(args.findings) if args.findings else []
+        rows = load(args.verdicts) if args.verdicts else []
     except (OSError, ValueError) as exc:
         print("review_layer_recall: cannot read input: %s" % exc, file=sys.stderr)
         return 2
     if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
-        print("review_layer_recall: cannot read input: findings are not a list of objects", file=sys.stderr)
+        print("review_layer_recall: cannot read input: verdicts are not a list of objects", file=sys.stderr)
         return 2
     result = report(fixture, rows)
     print(line(result) if args.line else json.dumps(result, indent=2))
