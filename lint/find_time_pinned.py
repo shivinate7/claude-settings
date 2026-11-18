@@ -685,6 +685,17 @@ def scan_python(text):
         infos[key] = (tainted, helpers, [k for k, _ in kids])
         return infos[key]
 
+    outers = {}
+
+    def collect_outers(root, outer):
+        """Record the helper names each scope inherits, so a lookup by scope reads the same taint visit() does."""
+        outers[id(root)] = outer
+        _, helpers, kids = scope_info(root, outer)
+        for kid in kids:
+            collect_outers(kid, frozenset(helpers))
+
+    collect_outers(tree, frozenset())
+
     parents = {}
     for n in ast.walk(tree):
         for child in ast.iter_child_nodes(n):
@@ -767,7 +778,8 @@ def scan_python(text):
         root = parents.get(id(loop))
         while root is not None and not isinstance(root, (ast.FunctionDef, ast.AsyncFunctionDef)):
             root = parents.get(id(root))
-        tainted = scope_taint(root if root is not None else tree)
+        root = root if root is not None else tree
+        tainted = scope_info(root, outers.get(id(root), frozenset()))[0]
 
         def clock_term(t):
             return isinstance(t, ast.Compare) and holds_clock(t, tainted)
