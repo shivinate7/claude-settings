@@ -1,0 +1,1 @@
+- opus-grant-expires-stale-text: Stale text: decision opus-grant-expires opens with "on the owner's grant in chat", which ignores step grants.

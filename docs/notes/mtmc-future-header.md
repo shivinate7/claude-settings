@@ -1,0 +1,1 @@
+- mtmc-future-header: (#1447 message-time-matches-clock) a dated future header ("Meeting, 2026-11-12 09:00 CST:") is refused at any distance; the decision's false-alarm list omits it.

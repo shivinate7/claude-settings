@@ -1,0 +1,1 @@
+- builder-stale-staged-test: a builder's worktree kept a stale test file staged after a fetch moved HEAD. First sighting. A debt after a second incident.

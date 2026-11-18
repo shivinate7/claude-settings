@@ -1,0 +1,1 @@
+- loop-clears-known-vars: `for` and `if` clear known variables, so a loop form is allowed while its literal twin is denied. Fix: keep the known variables through loops.

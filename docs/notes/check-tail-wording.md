@@ -1,0 +1,1 @@
+- check-tail-wording: (on #1803) hooks/guard.py:98 and lint/rule_mechanisms.json:369 say "tail or head", but the code counts any later stage; CHECK_TAIL_REASON (hooks/guard_stream.py:502) names a lost verdict, not a masked exit.

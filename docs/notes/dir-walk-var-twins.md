@@ -1,0 +1,1 @@
+- dir-walk-var-twins: `{ cd "$R"; } | cmd; act`, `R=<d>; cd "$R" 2>/dev/null || cd sub`, and `cd -` after a failed cd read stale on head and None on main; each literal twin is stale on main too.

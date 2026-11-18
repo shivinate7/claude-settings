@@ -1,0 +1,1 @@
+- notification-markup-edge-cases: extended (coordinator Nov 8 14:58 CST): the no-self-written-notification check refuses a tag in an indented code block, in a link target, or in a bare table cell.

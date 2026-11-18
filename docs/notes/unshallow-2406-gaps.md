@@ -1,0 +1,1 @@
+- unshallow-2406-gaps: (#2406, merged) no test for a failed --unshallow fetch; the cost line omits the one-time fetch; usage does not say the unreadable-read unknown is never lifted; a ref target with --base skips the check; a `base == "main"` literal.

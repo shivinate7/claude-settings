@@ -1,0 +1,1 @@
+- cdvar-command-text-redundant: (#2379) _command_text looks redundant since 847 (mutant `R=B; R=A cd "$R"` still green).

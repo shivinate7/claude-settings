@@ -1,0 +1,1 @@
+- mtmc-offset-two-homes: (#1447) _STAMP_OFFSET_HOURS copies offsets that local_time.py owns (one home).

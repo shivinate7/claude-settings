@@ -1,0 +1,1 @@
+- three-way-apply-not-compared: a diff applied with a 3-way merge is not compared against the new base before the push.

@@ -292,30 +292,33 @@ add("floor step-up: Workflow reviewer with a fix verifier and a model in a varia
 add("floor step-up: Workflow reviewer with a fix verifier and a spread is allowed, the static read skips it", "allow",
     tool="Workflow", script=_step_flow("'%s. Re-check the diff.'" % FIX_VERIFIER, "agentType: 'reviewer', ...opts"))
 
-# ---- Step-up, a reviewer whose brief carries the guard marker (decision agent-model-cap, the `1 guard` round row, sonnet).
-# A reviewer on a guard or check change runs Sonnet on any round, so the step-up refuses a guard-marked reviewer below
-# Sonnet: on Haiku, on a blank model, or with no model. The marker counts only at the start of a line outside a fence.
-# A guard-marked reviewer on a later round keeps its round reason. The marker is typed here, as FIX_VERIFIER is, so a rename
-# of the constant cannot quietly change what these cases pin.
-# Failure classes: a false allow (a guard-marked reviewer on Haiku, a blank model or no model reviews a guard change on
-# Haiku); a false refusal (a fenced or mid-line marker, a non-reviewer, or a reviewer on Sonnet is refused).
+# ---- Step-up, a reviewer whose brief carries the guard marker (decision agent-model-cap, the `1 guard` round row). That row
+# is haiku, so the step-up refuses no model below Haiku for a guard-marked first-round reviewer. These cases read this
+# checkout's record (GUARD_RECORD_CFG), not the live pointer the default config reads. A guard-marked reviewer on a later
+# round keeps its round reason. The marker is typed here, as FIX_VERIFIER is, so a rename of the constant cannot quietly
+# change what these cases pin.
+# Failure class: a false refusal (a guard-marked reviewer on Haiku, on a blank model or with no model is refused at the step-up).
 GUARD_LINE = "Guard or check: yes"
 GUARD_REASON = "Reviewer round 1 on a guard or check change runs on Sonnet. Spawn it with model sonnet."
 GUARD_BRIEF = GUARD_LINE + "\nCheck the guard diff."
-add("floor step-up: reviewer with the guard marker on haiku is denied, and names Sonnet", "deny", STEP_UP,
-    tool="Agent", prompt=GUARD_BRIEF, model="haiku", subagent_type="reviewer", carries=(GUARD_REASON,), lacks=("Opus",))
-add("floor step-up: reviewer with the guard marker and a blank model is denied, and names Sonnet", "deny", STEP_UP,
-    tool="Agent", prompt=GUARD_BRIEF, model="  ", subagent_type="reviewer", carries=(GUARD_REASON,), lacks=("Opus",))
-add("floor step-up: reviewer with the guard marker and no model is denied, and names Sonnet", "deny", STEP_UP,
-    tool="Agent", prompt=GUARD_BRIEF, subagent_type="reviewer", carries=(GUARD_REASON,), lacks=("Opus",))
-add("floor step-up: reviewer with Round 1 of 3 and the guard marker on line two, on haiku, is denied", "deny", STEP_UP,
-    tool="Agent", prompt="Round 1 of 3. Check the guard diff.\n" + GUARD_LINE, model="haiku", subagent_type="reviewer",
-    carries=(GUARD_REASON,))
-add("floor step-up: reviewer with the guard marker at the end of a 400-line brief, on haiku, is denied", "deny", STEP_UP,
-    tool="Agent", prompt="Check the diff.\n" * 399 + GUARD_LINE, model="haiku", subagent_type="reviewer",
-    carries=(GUARD_REASON,))
-add("floor step-up: Workflow reviewer with the guard marker on haiku is denied", "deny", STEP_UP,
-    tool="Workflow", script=_step_flow("'%s. Check the guard diff.'" % GUARD_LINE, "agentType: 'reviewer', model: 'haiku'"))
+GUARD_RECORD_CFG = os.path.join(ROOT, "guardrecord")
+write(os.path.join(GUARD_RECORD_CFG, "CLAUDE.md"), "@%s/CLAUDE.md\n" % slash(REPO))
+add("floor step-up: reviewer with the guard marker on haiku is allowed (its 1 guard row is haiku)", "allow",
+    tool="Agent", config=GUARD_RECORD_CFG, prompt=GUARD_BRIEF, model="haiku", subagent_type="reviewer")
+add("floor step-up: reviewer with the guard marker and a blank model is allowed", "allow",
+    tool="Agent", config=GUARD_RECORD_CFG, prompt=GUARD_BRIEF, model="  ", subagent_type="reviewer")
+add("floor step-up: reviewer with the guard marker and no model is allowed (its role pins haiku)", "allow",
+    tool="Agent", config=GUARD_RECORD_CFG, env={"CLAUDE_CODE_SUBAGENT_MODEL": None}, prompt=GUARD_BRIEF,
+    subagent_type="reviewer")
+add("floor step-up: reviewer with Round 1 of 3 and the guard marker on line two, on haiku, is allowed", "allow",
+    tool="Agent", config=GUARD_RECORD_CFG, prompt="Round 1 of 3. Check the guard diff.\n" + GUARD_LINE, model="haiku",
+    subagent_type="reviewer")
+add("floor step-up: reviewer with the guard marker at the end of a 400-line brief, on haiku, is allowed", "allow",
+    tool="Agent", config=GUARD_RECORD_CFG, prompt="Check the diff.\n" * 399 + GUARD_LINE, model="haiku",
+    subagent_type="reviewer")
+add("floor step-up: Workflow reviewer with the guard marker on haiku is allowed", "allow",
+    tool="Workflow", config=GUARD_RECORD_CFG,
+    script=_step_flow("'%s. Check the guard diff.'" % GUARD_LINE, "agentType: 'reviewer', model: 'haiku'"))
 add("floor step-up: reviewer with the guard marker on sonnet is allowed", "allow",
     tool="Agent", prompt=GUARD_BRIEF, model="sonnet", subagent_type="reviewer")
 add("floor step-up: reviewer with Round 1 of 3 and no guard marker on haiku is allowed", "allow",

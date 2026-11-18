@@ -1,0 +1,1 @@
+- scpr-powershell-undocumented: (#2038 stamp-check-page-and-roadmap-r2) the code also judges PowerShell (SHELL_TOOLS), but the decision and the docstring say Bash, and no case covers PowerShell.

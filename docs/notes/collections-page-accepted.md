@@ -1,0 +1,1 @@
+- collections-page-accepted: `collections: ["page"]` passes layout.py (:298) and export_page.py would export into the page folder (:507), while `--rebuild --collections` refuses `page` (:584).

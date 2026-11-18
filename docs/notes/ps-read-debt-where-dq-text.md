@@ -1,0 +1,1 @@
+- ps-read-debt-where-dq-text: in the same debt, the Where line omits `_dq_text` (hooks/guard_frozen.py), which round 3 named as part of the root cause with `_read_word`. Fix: add it.
