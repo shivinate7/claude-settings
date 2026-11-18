@@ -1058,8 +1058,9 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 
 <!-- The one list of top-level item fields. The page warns on a field outside it, and the guard (rule item-field-rendered) refuses a write of one.
      Add a field here when the page draws it. A key inside options or steps is not listed.
+     The one exception is holdsLane, a machine flag the page does not draw (owner ruling own-773-a-machine-flag-field).
      `stands` is inert: the page never reads it, but 54 closed items carry it and the guard must still pass their writes. -->
-<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "stops", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "recommended", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "replied", "lastAnswer", "lane", "waits", "repo", "checked_with", "closed", "dismissed", "shown"]</script>
+<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "holdsLane", "stops", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "recommended", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "replied", "lastAnswer", "lane", "waits", "repo", "checked_with", "closed", "dismissed", "shown"]</script>
 
 <!-- The roadmap build writes only this block (skills/roadmap/build.py --block). The page writer replaces it on each publish
      (splice.py) and keeps designData. Empty, the Status tab says the plan is unknown. -->
