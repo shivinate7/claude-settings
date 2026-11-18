@@ -125,7 +125,7 @@
 # (a SIGKILL from merge's timeout reaches only ci-job: it leaves the folder in TMPDIR and may leave verdict children running). Each `not run` line,
 # the summary and each CI step's `start: <name>` line on stderr (before it runs, so a caller sees which CI step is running)
 # are one print.
-import concurrent.futures, os, re, shutil, subprocess, sys, tarfile, tempfile, threading
+import concurrent.futures, os, re, shlex, shutil, subprocess, sys, tarfile, tempfile, threading
 BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
@@ -546,12 +546,17 @@ def plan(step, pr, values, top, lint=False, pinned=False, dry=False):
             # lint keeps its exit code; a stale pin exits 3 here and is a pin note under --lint.
             clone = pin_source()
             head, why = stable_head(clone) if clone and not dry else (None, None)
-            if why:
-                ref = SETTINGS_PIN.fullmatch(uses(step)).group(2)
+            ref = SETTINGS_PIN.fullmatch(uses(step)).group(2)
+            fetch_note = ""
+            if why and not lint:
                 return "unknown", "pin %s of ste-lint: cannot judge it against the stable branch: %s" % (
                     ref[:7] if is_sha(ref) else ref, why), None, None, None
+            if why:
+                # Under --lint a pin is only a note and the fetch cannot change the lint's exit: run the lint, print the reason.
+                fetch_note = "echo %s >&2\n" % shlex.quote("note: pin %s of ste-lint not judged against the stable branch: %s" % (
+                    ref[:7] if is_sha(ref) else ref, why))
             env = {"STE_CHANGED_CLONE": clone or "", "STE_CHANGED_COMPARE_TO": head or "", **({PIN_NOTE_ENV: "1"} if lint else {})}
-            return "run", ('rc=0; STE_CHANGED_ONLY=lint "%s" "%s" || rc=$?\n'
+            return "run", fetch_note + ('rc=0; STE_CHANGED_ONLY=lint "%s" "%s" || rc=$?\n'
                            'drift=0; STE_CHANGED_ONLY=pins "%s" "%s" || drift=$?\n'
                            'if [ "$rc" -ne 0 ]; then exit "$rc"; fi\nexit "$drift"\n') % (
                 slashed(lint_ste), values["base"], slashed(ste), values["base"]), shell_argv(None), env, None
