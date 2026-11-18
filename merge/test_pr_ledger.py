@@ -75,10 +75,10 @@ def event(name, hours_ago, action="labeled"):
 
 class LedgerHost(tm.PullsHost):
     """PullsHost that also serves each pull request's label events (`issues/<n>/events`), on both seams: pages() and gh's answer.
-    `event_reads` keeps the number of each events list read, in order. The clock is NOW (Host.now)."""
+    `event_reads` keeps the number of each events list read, in order. The clock is NOW (Host.now). `check_rows` maps a head sha to its check runs."""
 
-    def __init__(self, pulls, comments=(), events=None, count_gh=False, **reads):
-        super().__init__(pulls, {}, comments=comments, count_gh=count_gh, **reads)
+    def __init__(self, pulls, comments=(), events=None, count_gh=False, check_rows=None, **reads):
+        super().__init__(pulls, check_rows or {}, comments=comments, count_gh=count_gh, **reads)
         self.events, self.event_reads = events or {}, []
         self.now = lambda: NOW
 
@@ -305,6 +305,18 @@ class NextActShapes(LedgerCase):
         self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} done: ", "control: #7's record does not read done at the live head")
         act, owner, red = self.next_part(out, 7)
         self.assertEqual(act, "batch", f"#7 is done at the live head with a lane-lint PASS, so its act is batch:\n{out}")
+        self.assertEqual(owner, "batch runner", f"#7's act is batch, so its owner is the batch runner:\n{out}")
+        self.assertFalse(red, f"#7 is done 3 h ago, inside the 24 h limit, and its line reads RED:\n{out}")
+
+    def test_a_done_record_whose_lint_is_skipped_reads_batch(self):
+        # A green control: the all-jobs-passed rollup is green on the live head, so the lint is skipped and the record stays done. A mutant that
+        # marks the lint missing in that branch reads lane lint here, and this case goes red.
+        rollup = tm.batch_run(tm.merge.ROLLUP_JOB, "completed", "success")
+        out = self.reviewed(LedgerHost([pull(7)], comments=[record(7, 3)], check_rows={LIVE: [rollup]}))
+        self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} done: .*; lint skipped: ",
+                         "control: #7's green rollup on the live head does not skip the lint:\n" + out)
+        act, owner, red = self.next_part(out, 7)
+        self.assertEqual(act, "batch", f"#7 is done at the live head and its rollup skips the lint, so its act is batch:\n{out}")
         self.assertEqual(owner, "batch runner", f"#7's act is batch, so its owner is the batch runner:\n{out}")
         self.assertFalse(red, f"#7 is done 3 h ago, inside the 24 h limit, and its line reads RED:\n{out}")
 
