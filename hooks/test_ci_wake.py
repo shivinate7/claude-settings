@@ -24,6 +24,8 @@ Decision ci-wait-reads-run-status, section "The CI wake-up":
 - One watcher runs per PR. A second watcher for the same PR exits 0 with no output and no watch.
   A killed watcher, or a finished one, releases the PR.
 - Any uncaught error exits 2 with one "unknown" line, never exit 1.
+- A repo with no active workflow wakes once, exit 2, with one CI line on the head sha7. That line is
+  what closes the CI wait in the transcript. An unreadable workflow list writes no such line.
 
 Decision ci-wait-reads-run-status ("CI waits read the run status"): the hook never runs
 `gh run watch` (one watch made 131 API calls in 60 s). `watch_run` reads `gh run view <id> --json
@@ -714,6 +716,15 @@ def expect_verdict(label, res, verdict, names_in=(), names_out=()):
 
 def expect_silent(label, res):
     check("%s: exit 0, no output" % label, res.rc == 0 and not res.hung and res.lines == [], why(res))
+
+
+def expect_closing_line(label, res):
+    """A repo with no active workflow wakes once: exit 2, and one CI line on the head sha7. The line reaches the
+    transcript only through that exit-2 wake. Its verdict word is not checked here: the Stop cases read whether
+    the line closes the CI wait."""
+    v = verdict_of(res)
+    check("%s: exit 2, one CI line on sha7 (the wake line)" % label,
+          res.rc == 2 and not res.hung and v is not None and v[1] == SHA7, why(res))
 
 
 def expect_no_watch(label, res):
@@ -1578,9 +1589,9 @@ def case_wrong_repo_every_gh_call_names_the_pr_repo():
 
 
 def case_repo_without_ci_starts_no_watch():
-    """A repo with no active workflow starts no watch: silent, exit 0, no run read. The rows: no repo
-    flag (the incident form), no workflows, and only a disabled workflow. The --repo rows also check
-    that the hook asked the PR's repo for its workflows."""
+    """A repo with no active workflow starts no watch: it wakes once with its CI line (exit 2, on the head
+    sha7), and makes no run read. The rows: no repo flag (the incident form), no workflows, and only a
+    disabled workflow. The --repo rows also check that the hook asked the PR's repo for its workflows."""
     rows = (
         ("no repo flag, no workflows", "gh pr ready 7", [], False),
         ("--repo, no workflows", "gh pr ready 7 --repo " + REPO_HOME, [], True),
@@ -1591,7 +1602,7 @@ def case_repo_without_ci_starts_no_watch():
         label = "no CI, %s" % name
         fx = fixture([pr(7, repo=REPO_HOME)], [], cwd_repo=REPO_HOME, workflows=workflows)
         res = run_hook(bash(command), fx, extra={"CI_WAKE_DEADLINE": "4"})
-        expect_silent(label, res)
+        expect_closing_line(label, res)
         expect_no_watch(label, res)
         check("%s: no run list or run view call" % label,
               count(res, "run", "list") == 0 and count(res, "run", "view") == 0, why(res))
@@ -1616,7 +1627,9 @@ def case_workflows_but_no_run_on_head_still_says_no_run_yet():
 
 def case_failed_workflow_read_is_not_no_workflows():
     """Pins existing behaviour (a control). A failed `gh workflow list` read is not "no workflows": the watch
-    runs as it does today, so a red run still wakes the session with its failing jobs. Rows: exit 1, non-JSON."""
+    runs as it does today, so a red run still wakes the session with its failing jobs. Rows: exit 1, non-JSON.
+    The red verdict is the only line: verdict_of needs exactly one, so a closing line written beside it fails
+    here. An unknown read writes no closing line."""
     for name, switch in (("exit 1", "error"), ("non-JSON", "garbage")):
         label = "workflow list %s, red run (control)" % name
         fx = fixture([pr(214, repo=REPO_APP)], [in_repo(RED, REPO_APP)], cwd_repo=REPO_APP,
@@ -1627,10 +1640,11 @@ def case_failed_workflow_read_is_not_no_workflows():
 
 
 def case_empty_workflow_list_is_no_workflows():
-    """A repo with no workflow starts no watch. The answer that shows it is gh 2.89.0's, probed on
-    shivinate7/session-mailbox (REST total_count 0, no .github/workflows): `gh workflow list --json id` writes
-    0 bytes to stdout and exits 0. It does not write "[]". A repo with a workflow prints a JSON list. An empty
-    answer is no workflow, so the hook must not read it as unknown and watch. Rows: no repo flag, --repo."""
+    """A repo with no workflow starts no watch, and wakes once with its CI line. The answer that shows it is
+    gh 2.89.0's, probed on shivinate7/session-mailbox (REST total_count 0, no .github/workflows): `gh workflow
+    list --json id` writes 0 bytes to stdout and exits 0. It does not write "[]". A repo with a workflow prints
+    a JSON list. An empty answer is no workflow, so the hook must not read it as unknown and watch. Rows: no
+    repo flag, --repo."""
     rows = (
         ("no repo flag", "gh pr ready 7", False),
         ("--repo", "gh pr ready 7 --repo " + REPO_HOME, True),
@@ -1644,7 +1658,7 @@ def case_empty_workflow_list_is_no_workflows():
             check("%s: the list reads -R %s" % (label, REPO_HOME),
                   any(GH.strip_repo(c)[:2] == ["workflow", "list"] and GH.repo_of(c) == REPO_HOME
                       for c in res.calls), why(res))
-        expect_silent(label, res)
+        expect_closing_line(label, res)
         expect_no_watch(label, res)
         check("%s: no run list or run view call" % label,
               count(res, "run", "list") == 0 and count(res, "run", "view") == 0, why(res))
