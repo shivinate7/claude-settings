@@ -5,10 +5,17 @@
 
 Decision test-strategy-reset, point 2: no test waits on a fixed sleep or a wall-clock bound. This
 tool lists the tests that do. It fixes none, and it writes nothing. Each finding has one category:
-- sleep: a real wait in a test file.
+- sleep: a real wait in a test file. Not a poll interval: a `sleep` in a Python loop that has both a
+  condition and a cap is a wait-cap. A condition is a while-test term other than a bare `True` and a
+  clock comparison, or an `if` in the body that returns or breaks and tests something
+  other than a clock. A cap is a clock compared in the while test or in such an `if`, or, when the while
+  test holds the condition, in an `if` that only raises or fails, or
+  `range(<literal>)` in a `for`. A bare sleep, `while True` with no exit, a condition with no cap, a cap
+  with no condition and a sleep after the loop stay sleep.
 - elapsed-assert: an assert that reads a wall-clock reading or a difference of two.
 - test-cap: a per-test or per-suite time limit.
-- wait-cap: a fixed time bound on a wait for a condition or a child process (a hang guard).
+- wait-cap: a fixed time bound on a wait for a condition or a child process, or the poll interval of such
+  a capped wait loop (a hang guard).
   Kept apart because it may be fine. The plan decides case by case.
 
 Scanned: test files only. Python is `test_*.py`, `*_test.py`, `conftest.py` or any `.py` under a
@@ -56,7 +63,8 @@ Exit 0: nothing listed, nothing unread (kept findings alone leave it 0). Exit 1:
 the root cannot be read, or nothing listed but some file unread, so the result is unknown.
 With `--check` the listing is the same, but the exit is 1 only when a sleep or an elapsed-assert is listed,
 2 when only an unread file remains, and 0 when nothing else is listed: a wait-cap or a test-cap is a hang
-guard the owner keeps (item 345), so it never fails the check.
+guard the owner keeps (item 345), so it never fails the check. Its summary counts hang guards apart and leaves
+them out of the time-pinned total and the file count.
 Python only: an `.elapsed` attribute in an assert is an elapsed-assert, also inside a helper call under a bound
 (`to_ms(r.elapsed) < 100`, `assertLess(to_ms(r.elapsed), 100)`). An exact `==` or `assertEqual` on it is a value
 check, so it is not listed. JS and Swift list no `.elapsed` read, only a clock call or a name that holds one.
@@ -640,6 +648,113 @@ def scan_python(text):
                     changed = True
         return tainted
 
+    parents = {}
+    for n in ast.walk(tree):
+        for child in ast.iter_child_nodes(n):
+            parents[id(child)] = n
+
+    def terms_of(test):
+        """The terms of a loop or if test, with `and` and `or` flattened."""
+        if isinstance(test, ast.BoolOp):
+            return [t for v in test.values for t in terms_of(v)]
+        return [test]
+
+    def own_nodes(stmts):
+        """Every node under stmts, not entering a nested function, lambda or class."""
+        todo = list(stmts)
+        while todo:
+            node = todo.pop()
+            yield node
+            for child in ast.iter_child_nodes(node):
+                if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                    todo.append(child)
+
+    def exits(ifnode, in_inner_loop=False):
+        """True when the if's own branch ends the wait normally: a `return`, or a `break` of the wait loop. A
+        raise or a fail only stops a hang, so it is no exit. A `break` inside a nested loop leaves that loop, so
+        the walk reads that loop's body for a `return` only. Its `else` is read in full. in_inner_loop is True
+        when the if itself sits in a loop nested in the wait loop: then a `break` in its branch is no exit."""
+        def leaves(stmts, in_inner_loop):
+            for n in stmts:
+                if isinstance(n, ast.Return) or (isinstance(n, ast.Break) and not in_inner_loop):
+                    return True
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                    continue
+                if isinstance(n, (ast.While, ast.For, ast.AsyncFor)):
+                    if leaves(n.body, True) or leaves(n.orelse, in_inner_loop):
+                        return True
+                    continue
+                for field in ("body", "orelse", "finalbody"):
+                    if leaves(getattr(n, field, None) or [], in_inner_loop):
+                        return True
+                if isinstance(n, ast.Try) and any(leaves(h.body, in_inner_loop) for h in n.handlers):
+                    return True
+                if hasattr(ast, "Match") and isinstance(n, ast.Match) and any(leaves(c.body, in_inner_loop) for c in n.cases):
+                    return True
+            return False
+        return leaves(ifnode.body, in_inner_loop)
+
+    def stops(ifnode):
+        """True when the if's own branch raises or fails the test: it ends a hang, not the wait."""
+        for n in own_nodes(ifnode.body):
+            if isinstance(n, ast.Raise):
+                return True
+            if isinstance(n, ast.Call) and (n.func.attr if isinstance(n.func, ast.Attribute)
+                                            else getattr(n.func, "id", "")) == "fail":
+                return True
+        return False
+
+    def poll_loop_of(start):
+        """The nearest loop whose body holds start in its own scope, or None. A loop's `else` is not its body."""
+        child, node = start, parents.get(id(start))
+        while node is not None and not isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            if isinstance(node, (ast.While, ast.For, ast.AsyncFor)) and child in node.body:
+                return node
+            child, node = node, parents.get(id(node))
+        return None
+
+    def is_hang_guard_poll(call):
+        """A sleep in a loop that has both a condition and a clock or count cap is a hang guard, not a fixed
+        wait (decision test-practices P5). A condition is a while-test term that is neither `True` nor a clock
+        comparison, or an if in the body that returns or breaks and tests something other than a clock. A cap
+        is a clock comparison in the while test or in such an if, or `range(<literal>)` in a for. An if in a
+        nested loop ends the wait only by a `return`. An if that only raises or fails is never the condition.
+        Its clock comparison is a cap only when the while test holds the condition. So a `while True` poll that
+        breaks on its condition and only fails at its deadline is listed as sleep, though it is a real poll: a
+        known limit."""
+        loop = poll_loop_of(call)
+        if loop is None:
+            return False
+        root = parents.get(id(loop))
+        while root is not None and not isinstance(root, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            root = parents.get(id(root))
+        tainted = scope_taint(root if root is not None else tree)
+
+        def clock_term(t):
+            return isinstance(t, ast.Compare) and holds_clock(t, tainted)
+
+        def always_true(t):
+            return isinstance(t, ast.Constant) and bool(t.value)
+
+        all_ifs = [n for n in own_nodes(loop.body) if isinstance(n, ast.If)]
+        ifs = [n for n in all_ifs if exits(n, poll_loop_of(n) is not loop)]
+        has_cond = any(not all(clock_term(t) or always_true(t) for t in terms_of(i.test)) for i in ifs)
+        cap = any(clock_term(t) for i in ifs for t in terms_of(i.test))
+        if isinstance(loop, ast.While):
+            terms = terms_of(loop.test)
+            while_cond = any(not (clock_term(t) or always_true(t)) for t in terms)
+            has_cond = has_cond or while_cond
+            cap = cap or any(clock_term(t) for t in terms)
+            if while_cond:
+                cap = cap or any(clock_term(t) for i in all_ifs if i not in ifs and stops(i)
+                                 for t in terms_of(i.test))
+        else:
+            it = loop.iter
+            cap = cap or (isinstance(it, ast.Call) and isinstance(it.func, ast.Name) and it.func.id == "range"
+                          and bool(it.args) and not it.keywords and all(py_number(a) for a in it.args))
+        return has_cond and cap
+
     found = set()
     decorator_calls = {id(d) for n in ast.walk(tree)
                        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
@@ -650,7 +765,8 @@ def scan_python(text):
         if names & PY_SLEEPS:
             if not (isinstance(first, ast.Constant) and not isinstance(first.value, bool)
                     and isinstance(first.value, (int, float)) and first.value == 0):
-                found.add((call.lineno, "sleep"))  # sleep(0) is a yield, not a wait
+                # sleep(0) is a yield, not a wait. A poll interval of a capped wait loop is a hang guard.
+                found.add((call.lineno, "wait-cap" if is_hang_guard_poll(call) else "sleep"))
         capped = bool(names & PY_MARK_CAP) or (id(call) in decorator_calls and bool(names & PY_DECORATOR_CAP))
         if names & PY_SIGNAL_CAP and not (
                 names & {"signal.alarm"} and isinstance(first, ast.Constant) and first.value == 0):
@@ -1283,10 +1399,20 @@ def main(argv=None):
             print(f"{f['path']}:{f['line']}: {f['category']}: {f['text']}")
         for u in unread:
             print(f"UNREAD {u['path']}: {u['reason']}")
-        nfiles = len({f["path"] for f in findings})
-        print(f"{len(findings)} time-pinned in {nfiles} files (sleep {counts['sleep']}, "
-              f"elapsed-assert {counts['elapsed-assert']}, test-cap {counts['test-cap']}, "
-              f"wait-cap {counts['wait-cap']}); {len(unread)} unread" + (f"; kept {kept_total}" if kept_total else ""))
+        kept = f"; kept {kept_total}" if kept_total else ""
+        if args.check:
+            # --check allows a hang guard (a wait-cap or a test-cap), so the summary counts it apart.
+            pinned = [f for f in findings if f["category"] in CHECK_FAILS]
+            nfiles = len({f["path"] for f in pinned})
+            print(f"{len(pinned)} time-pinned in {nfiles} files (sleep {counts['sleep']}, "
+                  f"elapsed-assert {counts['elapsed-assert']}, calendar 0); hang guards "
+                  f"{counts['test-cap'] + counts['wait-cap']} (allowed; check each cap sits well above the run); "
+                  f"{len(unread)} unread{kept}")
+        else:
+            nfiles = len({f["path"] for f in findings})
+            print(f"{len(findings)} time-pinned in {nfiles} files (sleep {counts['sleep']}, "
+                  f"elapsed-assert {counts['elapsed-assert']}, test-cap {counts['test-cap']}, "
+                  f"wait-cap {counts['wait-cap']}); {len(unread)} unread{kept}")
     if args.check:
         # A wait-cap or a test-cap is a hang guard the owner keeps (item 345), so it never fails the check.
         if any(f["category"] in CHECK_FAILS for f in findings):
