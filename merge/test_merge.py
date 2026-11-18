@@ -1515,13 +1515,17 @@ class ConfirmIdleLanes(Env):
 
     def test_an_unreadable_keep_list_reads_unknown_after_a_fresh_merge(self):
         # keepSessions is a bare string, not a list of {id, reason} rows: the report reads unknown, never an empty keep list.
+        # The owner's goal (11:49 CST, Nov 18, line 2): `merge --idle-lanes` never ends in a bare "unknown" with no command that
+        # fixes it. So the unknown line is followed by one owed line that names `merge --idle-lanes` as the fixing command.
         rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE, keep="session_a"))
         self.assert_landed(rc, out, err)  # scope: the merge landed
-        self.assertEqual([line for line in out + err if OWED_WORD.search(line)], [], "scope: the owed path ran, not the fresh read: %r" % (out + err))
         unknown = [line for line in out + err if line.startswith("unknown (")]
         self.assertEqual(len(unknown), 1, "the fresh read printed no unknown line for a malformed keepSessions: %r" % (out + err))
         self.assertFalse([line for line in out if ARCHIVE_SUMMARY.match(line) or line.startswith("session_")],
                          "a lane line or summary printed beside the unknown: %r" % out)
+        fixers = [line for line in out + err if OWED_WORD.search(line) and "merge --idle-lanes" in line]
+        self.assertEqual(len(fixers), 1, "a malformed keepSessions after a fresh merge printed no owed line naming the fixing command: %r"
+                         % (out + err))
 
     def test_no_check_line_for_a_lane_whose_session_is_still_running(self):
         # The lane's session row reads running in the stale file, so the lane is still working and the fallback names it to no one.

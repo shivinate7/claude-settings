@@ -20,6 +20,7 @@ lane unknown, never clear. The record branch is read from origin/roadmap, as a m
 Each case runs merge.py as a subprocess in a roadmap fixture checkout, the way bin/merge runs it. The fixture is the
 roadmap suite's make_repo (skills/roadmap/test_build.py), imported and not copied.
 """
+import datetime
 import json
 import os
 import pathlib
@@ -60,6 +61,9 @@ DOING_HOLD = "hold (step %s still doing under this lane; set the step's status t
 # The joint line for one lane: its stale draft PRs to close, their branches to archive, then the lane's session id.
 JOINT = "joint (close #%d; archive archive/%s; archive lane %s)"
 MIXED_TWO = "merge: 2 lanes to archive, 1 held. Run get_session on each lane line alone, then archive it; never archive a hold line."
+# A line names its fix when it names the command to run again once the file is fixed, or the step to take first. The owner's goal
+# (11:49 CST, Nov 18, line 2): `merge --idle-lanes` never ends in a bare "unknown" with no command that fixes it.
+FIX_NAMED = re.compile(r"merge --idle-lanes|read (?:it|the live file|the file) again")
 
 # Made in setUpModule, not at import, so a helper that imports this file leaks no folder.
 RUN_FOLDER = None
@@ -193,7 +197,10 @@ class IdleLanesCli(unittest.TestCase):
         roadmap.git(self.repo, "commit", "-q", "-m", "drop every step")
         self.publish([lane("session_x", "x")])
         code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
-        self.assertEqual(out.splitlines(), ["unknown (the record branch has no steps)"], "out: %r, err: %r" % (out, err))
+        unknown = out.splitlines()
+        self.assertEqual(len(unknown), 1, "out: %r, err: %r" % (out, err))
+        self.assertTrue(unknown[0].startswith("unknown (the record branch has no steps"), "out: %r" % out)
+        self.assertRegex(unknown[0], FIX_NAMED, "the empty record's unknown line names no fix: %r" % out)
         self.assertEqual(code, 1, "an empty record exits %d, so a caller reads the list as read: %s" % (code, err))
         self.assertNotRegex(out, SUMMARY_LINE)
 
@@ -636,9 +643,89 @@ class IdleLanesCli(unittest.TestCase):
             with self.subTest(replacedBy=bad):
                 self.publish([lane("session_a", "c1")], landed=[self.closed_row(7, "lane/c1", head, replacedBy=bad)])
                 code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
-                self.assertEqual(out.splitlines(), ["unknown (1 landedPulls rows skipped)"],
-                                 "a non-int replacedBy is not skipped: out: %r, err: %r" % (out, err))
+                unknown = out.splitlines()
+                self.assertEqual(len(unknown), 1, "a non-int replacedBy is not skipped: out: %r, err: %r" % (out, err))
+                self.assertTrue(unknown[0].startswith("unknown (1 landedPulls rows skipped"), "out: %r" % out)
+                self.assertRegex(unknown[0], FIX_NAMED, "the skipped landedPulls row's unknown line names no fix: %r" % out)
                 self.assertEqual(code, 1, "a skipped landedPulls row exits %d, so a caller reads the list as read: %s" % (code, err))
+
+    def fresh_repo(self, index):
+        """A roadmap fixture of its own, so a shape that breaks its repo cannot touch the next shape's."""
+        root = os.path.join(self.tmp.name, "shape-%d" % index)
+        os.mkdir(root)
+        repo = roadmap.make_repo(root, steps={"c1": dict(roadmap.STEP, order=1, status="done")})
+        roadmap.git(repo, "remote", "add", "origin", "git@github.com:owner/fixture.git")
+        return repo
+
+    def hand_run_shapes(self):
+        """(name, prepare(repo, live)) for each bad file or repo that the hand run reads as unknown, then the stale file as the
+        control: its unknown line already names the step to take (read it again)."""
+        def readable(**changes):
+            """The file's text for a readable file with one lane, with `changes` set; a None value leaves its key out."""
+            value = {"readAt": roadmap.iso_ago(5), "threads": [], "pulls": [], "items": [], "sessions": [lane("session_a", "c1")]}
+            value.update(changes)
+            return json.dumps({k: v for k, v in value.items() if v is not None})
+
+        def write(live, text):
+            pathlib.Path(live).write_text(text, encoding="utf-8")
+
+        def unlink_origin(repo):
+            roadmap.git(repo, "remote", "remove", "origin")
+
+        def empty_record(repo):
+            roadmap.git(repo, "rm", "-rq", "roadmap/data/steps")
+            roadmap.git(repo, "commit", "-q", "-m", "drop every step")
+
+        def main_renamed(repo):
+            roadmap.git(repo, "branch", "-m", "main", "trunk")
+        return [
+            ("the file is missing", lambda repo, live: None),
+            ("the file is not JSON", lambda repo, live: write(live, "{")),
+            ("the file is a JSON list", lambda repo, live: write(live, "[]")),
+            ("readAt is not an ISO time", lambda repo, live: write(live, readable(readAt="yesterday"))),
+            ("readAt has no time zone", lambda repo, live: write(live, readable(readAt=datetime.datetime.now().isoformat()))),
+            ("readAt is in the future", lambda repo, live: write(live, readable(readAt=roadmap.iso_ago(-60)))),
+            ("the file has no sessions list", lambda repo, live: write(live, readable(sessions=None))),
+            ("the file has no pulls list", lambda repo, live: write(live, readable(pulls=None))),
+            ("the file has no items list", lambda repo, live: write(live, readable(items=None))),
+            ("the file has no threads list", lambda repo, live: write(live, readable(threads=None))),
+            ("an items row is not an object", lambda repo, live: write(live, readable(items=["junk"]))),
+            ("keepSessions is a bare string", lambda repo, live: write(live, readable(keepSessions="session_a"))),
+            ("a session row is not an object", lambda repo, live: write(live, readable(
+                sessions=[lane("session_a", "c1"), "junk"]))),
+            ("a pull row is not an object", lambda repo, live: write(live, readable(pulls=["junk"]))),
+            ("a landedPulls row is not an object", lambda repo, live: write(live, readable(landedPulls=["junk"]))),
+            ("a lane's unarchived_epoch is below 0", lambda repo, live: write(live, readable(
+                sessions=[dict(lane("session_a", "c1"), unarchived_epoch=-5)]))),
+            ("a lane's status bucket is not an enum name", lambda repo, live: write(live, readable(
+                sessions=[lane("session_a", "c1", bucket="BOGUS")]))),
+            ("the repo has no GitHub name", lambda repo, live: (unlink_origin(repo), write(live, readable()))),
+            ("an archive slug holds a slash", lambda repo, live: write(live, readable(
+                sessions=[archived("session_x", "c1", "a/b")]))),
+            ("an archive slug holds a NUL", lambda repo, live: write(live, readable(
+                sessions=[archived("session_n", "c1", "a\x00b")]))),
+            ("the record branch has no steps", lambda repo, live: (empty_record(repo), write(live, readable()))),
+            ("main is renamed away", lambda repo, live: (main_renamed(repo), write(live, readable()))),
+            ("the record branch is missing", lambda repo, live: (roadmap.git(repo, "checkout", "-q", "main"),
+                                                                roadmap.git(repo, "branch", "-D", "roadmap"),
+                                                                write(live, readable()))),
+            ("control: the file is stale", lambda repo, live: write(live, readable(readAt=roadmap.iso_ago(120)))),
+        ]
+
+    def test_every_unknown_line_of_a_hand_run_names_its_fix(self):
+        # The owner's goal (11:49 CST, Nov 18, line 2): `merge --idle-lanes` never ends in a bare "unknown" with no command that
+        # fixes it. Each shape is one bad file or repo. Scope: the hand run prints an unknown line for it, so the shape reaches the
+        # unknown path. Then every unknown line names its fix (FIX_NAMED). The stale file is the control and already passes.
+        for index, (name, prepare) in enumerate(self.hand_run_shapes()):
+            with self.subTest(shape=name):
+                repo = self.fresh_repo(index)
+                live = os.path.join(self.tmp.name, "live-%d.json" % index)
+                prepare(repo, live)
+                code, out, err = self.run_merge("--idle-lanes", "--live", live, cwd=repo)
+                unknown = [line for line in out.splitlines() if line.startswith("unknown (")]
+                self.assertTrue(unknown, "scope: the hand run printed no unknown line for this shape: out %r, err %r" % (out, err))
+                bare = [line for line in unknown if not FIX_NAMED.search(line)]
+                self.assertEqual(bare, [], "an unknown line names no fix: %r (out %r)" % (bare, out))
 
     def test_idle_lanes_starts_no_fetch_or_ls_remote_when_origin_holds_the_record_branch(self):
         # The read is local. GIT_TRACE logs every git command this run starts, so a fetch or ls-remote shows up in it.
