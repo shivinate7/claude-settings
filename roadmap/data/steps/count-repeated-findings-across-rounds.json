@@ -1,0 +1,14 @@
+{
+ "id": "count-repeated-findings-across-rounds",
+ "title": "Count the findings a reviewer repeats from one review round to the next, per change",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Goal v4 row 3 (f) of triage 11, set by the owner 12:11 CST Nov 18: blog practice f, count findings repeated across review rounds. Owner ruling 19:45 CST Nov 17 (relayed by the consultant): land the verification article's findings. No step existed for (f) until now.",
+ "source": "triage 11 goal v4 row 3 (f); owner 19:45 CST Nov 17 via the consultant",
+ "note": "Start with a prior-work search: step review-layer-recall-eval (practice a) may already count what each round catches; extend its home, build no second one (rule building-one-home-per-capability). Mistake it stops: a round that re-reports a finding the last round raised and the fix did not close. Harm: wasted rounds, and the three-round cap spent on the same finding. Read first: the review records posted as PR comments (record form in decision pr-review-record). Measure with a count over merged PRs before any rule changes; say unmeasured until then. A change to a review round needs the owner's grant. Ends as a landed check or rule, or an owner pick on a named question.",
+ "updatedAt": "2026-11-18T14:00:49-06:00"
+}
