@@ -22,8 +22,8 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from test_windows_split import CHECKS, DELTA_CLAUSES, MACOS_JOBS, RECORDS_ONLY_CONDITION, WRONG_DELTA_FORMS, all_jobs, eval_with, yaml_scalar  # noqa: E402  the one home of the checks.yml path
-from all_jobs_passed_rules import (ALL_JOBS_PASSED_USES, all_problems, child_problems, ci_done_problems, needs_of,  # noqa: E402  the one home of the rules
+from test_windows_split import CHECKS, MACOS_JOBS, RECORDS_ONLY_CONDITION, WRONG_DELTA_FORMS, all_jobs, eval_with, yaml_scalar  # noqa: E402  the one home of the checks.yml path
+from all_jobs_passed_rules import (ALL_JOBS_PASSED_USES, DELTA_CLAUSES, all_problems, child_problems, ci_done_problems, needs_of,  # noqa: E402  the one home of the rules
                                    needs_problems, off_problems, scope_if_problems, scope_skips_problems, shape_problems, split_jobs, step_with,
                                    steps_problems, steps_part)
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the job parser
