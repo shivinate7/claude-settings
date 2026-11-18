@@ -4812,11 +4812,11 @@ def _read_memory():
     return None
 
 
-def _read_disk():
-    """(GB free, GB total) of the drive that holds the home folder, 2**30 bytes to the GB. A cloud session reads "/",
-    where df "available" (f_bavail, the free that shutil reports) is what a start can use."""
+def _read_disk(path=None):
+    """(GB free, GB total) of the drive that holds `path`, the home folder when none is given, 2**30 bytes to the GB.
+    The lane lint calls it bare and so reads the home drive in every session."""
     import shutil
-    usage = shutil.disk_usage("/" if is_cloud() else os.path.expanduser("~"))
+    usage = shutil.disk_usage(path or os.path.expanduser("~"))
     return usage.free / GIB, usage.total / GIB
 
 
@@ -4832,7 +4832,8 @@ def read_load() -> dict:
         except Exception:
             out[key] = None
     try:
-        out["disk_free_gb"], out["disk_total_gb"] = _read_disk()
+        # A cloud start reads "/": df "available" (f_bavail, the free that shutil reports) is what it can use.
+        out["disk_free_gb"], out["disk_total_gb"] = _read_disk("/" if is_cloud() else None)
     except Exception:
         out["disk_free_gb"] = out["disk_total_gb"] = None
     return out
@@ -4945,7 +4946,7 @@ def lane_session_hit(payload, tool: str) -> tuple:
 
 
 def load_full(reading, disk_only=False) -> list:
-    """The readings over the full line, as text, or []. An unread or malformed reading counts as normal. `disk_only`
+    """The readings over the full point, as text, or []. An unread or malformed reading counts as normal. `disk_only`
     leaves memory out, as a cloud start does."""
     if not isinstance(reading, dict):
         return []
