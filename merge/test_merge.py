@@ -18204,6 +18204,14 @@ class ReviewFixBase(ReviewEnv):
         self.assert_refused(rc, out, err)
         self.assertIn("restarts the review", err, "the refusal of a record that posts round 1 alone is not the restart refusal:\n" + err)
 
+    def test_a_base_an_older_record_names_is_refused_when_a_newer_fix_verifier_failed_from_it(self):
+        # control: the newer record's fix check FAILed from the head the older record names, so that head starts no fix check. A fix check after a
+        # FAIL gets the fresh full review (the fix-verifier rule of the review-record decision), not a fix verifier from the same start
+        older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        newest = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, fix=(fix_verifier_line(verdict="FAIL", head=self.EARLIER_HEAD),)))
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(older, newest))
+        self.assert_refused(rc, out, err)
+
     def test_a_newest_earlier_record_with_a_passing_fix_line_accepts_its_head_as_the_base(self):
         # owner, page item 741: the newest record's fix check passed, so a further fix check from its head is accepted; the new head is a plain commit
         fixed = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, fix=(fix_verifier_line(head=self.EARLIER_HEAD),))
