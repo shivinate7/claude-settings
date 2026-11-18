@@ -83,8 +83,8 @@ class FinderCase(unittest.TestCase):
     def put(self, rel, text):
         put(self.root, rel, text)
 
-    def report(self):
-        proc = run(self.root, "--json")
+    def report(self, *extra):
+        proc = run(self.root, "--json", *extra)
         self.assertIn(proc.returncode, (0, 1), proc.stdout + proc.stderr)
         return proc.returncode, json.loads(proc.stdout)
 
@@ -913,21 +913,23 @@ class PollLoopTest(FinderCase):
     with no condition, or with no cap, is a fixed wait and stays sleep. Each case pins the sleep line, not
     the loop line."""
 
-    def listed(self, text, needle):
+    def listed(self, text, needle, *extra):
         """The categories the finder gives the sleep line, and the exit code. Scope first (P7): the fixture is
         read and the line has a finding at all."""
         self.put(POLL_PATH, text)
-        code, out = self.report()
+        code, out = self.report(*extra)
         line = lineno(text, needle)
         cats = {cat for path, ln, cat in self.rows(out) if ln == line}
         self.assertTrue(cats, "scope: the sleep at line %d is not listed at all" % line)
         return code, cats
 
     def assert_wait_cap(self, text, needle):
-        code, cats = self.listed(text, needle)
+        # The default run exits 1 on any listed row. A wait-cap is a hang guard, so --check, which fails only
+        # on a sleep, an elapsed-assert or an unread file, is the route that must exit 0 for it.
+        code, cats = self.listed(text, needle, "--check")
         self.assertEqual(cats, {"wait-cap"},
                          "the poll interval is listed as %s, not wait-cap (a hang guard)" % sorted(cats))
-        self.assertEqual(code, 0, "a poll interval listed as wait-cap is counted as time-pinned (exit %d)" % code)
+        self.assertEqual(code, 0, "a poll interval listed as wait-cap fails --check (exit %d)" % code)
 
     def assert_sleep(self, text, needle):
         _, cats = self.listed(text, needle)
