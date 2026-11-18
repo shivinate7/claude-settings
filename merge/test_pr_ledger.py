@@ -352,8 +352,10 @@ class NextActShapes(LedgerCase):
 
     def test_a_granted_round_4_at_1000_h_is_not_red(self):
         grant = ("Grant: #7, item 444 a, owner, 2026-11-10 12:00 CST",)
-        # a grant parses only with its granted round recorded, and a final round that did not pass on a guard change with its net value owed reads open
-        rounds = tm.REVIEW_FAILED_THREE + ("Round 4: reviewer, opus, PASS",)
+        # Ruling own-572-a-ledger-by-age-only (the ledger's age-only limits) gives a lane act no age limit. A passing round 4 ends the review,
+        # so the fixture ends in a FAIL: a failed final round on a guard change owes its net value and reads open, and its act stays
+        # lane round 4. A grant parses only with its granted round recorded.
+        rounds = tm.REVIEW_FAILED_THREE + ("Round 4: reviewer, opus, FAIL",)
         out = self.reviewed(LedgerHost([pull(7)], comments=[record(7, 1000, rounds=rounds, grant=grant, guard="yes")]))
         self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} open: ", "control: #7's record does not read open at the live head")
         act, red = self.next_act(out, 7)
