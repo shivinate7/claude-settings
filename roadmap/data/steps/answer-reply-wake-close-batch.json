@@ -1,16 +1,16 @@
 {
-  "id": "answer-reply-wake-close-batch",
-  "title": "The answer-needs-reply wake skips a routed none answer, and --close-batch never closes an open lane item on a plain pick",
-  "status": "todo",
-  "pr": 3264,
-  "repo": "shivinate7/claude-settings",
-  "phase": "next",
-  "owner": "coordinator",
-  "blockedBy": [
-    "close-writes-receipt-answer-gone"
-  ],
-  "source": "coordinator 00:36 CST Nov 15, from the #3264 lane report (not re-read by the coordinator or triage)",
-  "note": "Fix for two findings from #3264, after it merges. (1) stale_pages.py ~lines 820-830: answer-needs-reply prints every wake for a routed none answer with a clear direction; skip it when routed_answer(item, at). (2) stale_pages.py ~line 952 and SKILL.md ~line 477: an open item with a lane and a plain pick closes through --close-batch and deletes answers/<id>, against decision relayed-grant-read-from-page (fail-safe: no grant counted). Finding (2) is a candidate debt: a hole in a hard rule that Claude could hit when closing items; the #3264 hand-in records it in the repo debt store. Red test first for each.",
-  "why": "Filed 00:38 CST Nov 15 from the coordinator's relay of the lane report; line numbers are the lane's, not read by triage. Blocked by close-writes-receipt-answer-gone (#3264, open draft). | 01:05 CST Nov 15, coordinator 01:02 relay (lane's read of review comment 6890499387, not read by triage): findings (1) and (2) above are this step's note, checked present. Findings (3) to (9) are notes, not debts (rule roles-findings-are-debts-or-notes: a note becomes a debt after a real incident; none read as one to triage, which read no code): (3) no keep-answer / no-filed helper for first routing; (4) --reply is demanded for a clear direction; (5) dead routed-skip branch in stale_pages.py near line 806; (6) a --done close keeps lane, holdsLane and waits on the item; (7) park and overturn are not refused; (8) filed is withheld at routing; (9) prose lag: stale_pages.py line 108 and hooks/test_question_form.py near lines 2059 and 2081 say the page draws holdsLane (decision item-field-rendered's amendment in #3264, ruling own-773-a-machine-flag-field, makes holdsLane a named machine flag). Line numbers are the lane's. Fix step scope: take them with (1) and (2) only if the lane that builds this step reads them as one change; otherwise each stays a note.",
-  "updatedAt": "2026-11-15T00:38:00-06:00"
+ "id": "answer-reply-wake-close-batch",
+ "title": "The answer-needs-reply wake skips a routed none answer, and --close-batch never closes an open lane item on a plain pick",
+ "status": "todo",
+ "pr": 3264,
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "coordinator",
+ "blockedBy": [
+  "close-writes-receipt-answer-gone"
+ ],
+ "source": "coordinator 00:36 CST Nov 15, from the #3264 lane report (not re-read by the coordinator or triage)",
+ "note": "Fix for two findings from #3264, after it merges. (1) stale_pages.py ~lines 820-830: answer-needs-reply prints every wake for a routed none answer with a clear direction; skip it when routed_answer(item, at). (2) stale_pages.py ~line 952 and SKILL.md ~line 477: an open item with a lane and a plain pick closes through --close-batch and deletes answers/<id>, against decision relayed-grant-read-from-page (fail-safe: no grant counted). Finding (2) is a candidate debt: a hole in a hard rule that Claude could hit when closing items; the #3264 hand-in records it in the repo debt store. Red test first for each. 10:25 CST Nov 18: PR 3264 merged (c7f17e38c8, REST); these findings are still open and not built.",
+ "why": "Filed 00:38 CST Nov 15 from the coordinator's relay of the lane report; line numbers are the lane's, not read by triage. Blocked by close-writes-receipt-answer-gone (#3264, open draft). | 01:05 CST Nov 15, coordinator 01:02 relay (lane's read of review comment 6890499387, not read by triage): findings (1) and (2) above are this step's note, checked present. Findings (3) to (9) are notes, not debts (rule roles-findings-are-debts-or-notes: a note becomes a debt after a real incident; none read as one to triage, which read no code): (3) no keep-answer / no-filed helper for first routing; (4) --reply is demanded for a clear direction; (5) dead routed-skip branch in stale_pages.py near line 806; (6) a --done close keeps lane, holdsLane and waits on the item; (7) park and overturn are not refused; (8) filed is withheld at routing; (9) prose lag: stale_pages.py line 108 and hooks/test_question_form.py near lines 2059 and 2081 say the page draws holdsLane (decision item-field-rendered's amendment in #3264, ruling own-773-a-machine-flag-field, makes holdsLane a named machine flag). Line numbers are the lane's. Fix step scope: take them with (1) and (2) only if the lane that builds this step reads them as one change; otherwise each stays a note.",
+ "updatedAt": "2026-11-18T10:25:51-06:00"
 }
