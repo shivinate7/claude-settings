@@ -2514,6 +2514,7 @@ UNFETCHABLE = "3c5a9e0b7d1f4824a6e9c0d5b7f1a2e4c8d6b9f0"  # 40 hex, in no clone 
 ZIZMOR_LENIENT = "echo 'fixture zizmor: lenient'\nexit 0\n"  # stands in for actions/zizmor/run.sh, which runs pipx
 ZIZMOR_STRICT = "echo 'fixture zizmor: strict'\nexit 1\n"
 STE_RUN_STUB = "#!/usr/bin/env bash\necho 'fixture ste-lint: pinned'\nexit 0\n"  # stands in for actions/ste-lint/run.sh at a pin
+STE_FAIL_STUB = "#!/usr/bin/env bash\necho 'fixture ste-lint: pinned'\nexit 1\n"  # the same pin, whose lint fails
 
 
 def git_in(repo, *args):
@@ -2949,6 +2950,34 @@ class PinnedHarness(Job):
         rc, lines, text = self.run_step(ste, "--step", "STE lint", "--base", "origin/main", env=self.unreachable_origin_env())
         self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), "a stale pin judged after a failed stable fetch did not read unknown, never PASS\n" + text)
         self.assertIn("Could not resolve host", text, "the unknown line does not print the fetch's reason\n" + text)
+
+    def stale_pin_and_a_dead_fetch(self, run_sh):
+        """The pin's run.sh is run_sh, and origin's stable branch holds the source's HEAD, one commit past the pin, so the pin is
+        stale. The caller runs its step with unreachable_origin_env(), so that stable fetch fails. -> the pin's sha."""
+        pin = self.add_ste_lint(run_sh=run_sh)  # this copy's HEAD is one commit past the pin
+        self.publish_stable(git_in(self.source, "rev-parse", "HEAD"))  # origin's stable is past the pin
+        self.pin_child("ste-lint", pin)
+        return pin
+
+    def test_a_stale_pin_under_lint_with_a_failed_stable_fetch_still_runs_the_lint_and_passes_on_its_verdict(self):
+        """The harm this stops: under --lint a failed stable fetch made the step unknown, so the lint never ran. Drift is only a
+        note under --lint and the fetch cannot change the lint's exit, so the lint runs, its own PASS stands, and the fetch's
+        reason prints."""
+        pin = self.stale_pin_and_a_dead_fetch(STE_RUN_STUB)  # the pin's run.sh prints a marker and exits 0
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        rc, lines, text = self.run_step(ste, "--lint", "--base", "origin/main", env=self.unreachable_origin_env())
+        self.assertIn("Could not resolve host", text, "precondition: the stable fetch did not fail, so the case proves nothing\n" + text)
+        self.assertIn("fixture ste-lint: pinned", text, "--lint did not run the lint of the pin after the stable fetch failed\n" + text)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "--lint did not PASS on the lint's own verdict after the stable fetch failed\n" + text)
+
+    def test_a_stale_pin_under_lint_with_a_failed_stable_fetch_still_fails_on_a_failing_lint(self):
+        """The twin of the case above: the lint's own FAIL reaches the verdict, so that PASS is the lint's and not a forced one."""
+        pin = self.stale_pin_and_a_dead_fetch(STE_FAIL_STUB)  # the pin's run.sh prints a marker and exits 1
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        rc, lines, text = self.run_step(ste, "--lint", "--base", "origin/main", env=self.unreachable_origin_env())
+        self.assertIn("Could not resolve host", text, "precondition: the stable fetch did not fail, so the case proves nothing\n" + text)
+        self.assertIn("fixture ste-lint: pinned", text, "--lint did not run the lint of the pin after the stable fetch failed\n" + text)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "--lint did not FAIL on the lint's own failing verdict after the stable fetch failed\n" + text)
 
     def test_a_stale_pin_with_an_origin_that_has_no_stable_branch_still_exits_three_under_step(self):  # the control
         pin = self.add_ste_lint()  # this copy's HEAD is one commit past the pin, so the pin differs from it
