@@ -291,7 +291,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        folder an earlier segment makes (mkdir with its parent present or with -p, git clone,
                        git init, git worktree add) counts as present. After `&&`, or `|| exit`, nothing more runs, so that passes. A `|| return` does not end
                        the shell outside a function, so the write after it is judged.
-                       A git read passes.
+                       A git read passes. A forced push after such a cd is reported by force-push's own ask
+                       (ask-alone when chained), which comes first.
                        (commit-refuses-conflict-markers; ruling own-476-c-refuse-cd-missing-folder)
   red-run              deny. A `git commit` with no push after it, or a `git push` whose range (the one
                        conflict-markers reads, less the commits the default base holds) has a non-merge commit that adds lines to a test path and has no
@@ -5558,6 +5559,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if kind in ("red-run", "red-run-commit"):
         red_reason, red_shown = red_run_reason(matched, kind == "red-run-commit")
         refuse(tool, "deny", "red-run", red_reason, red_shown)
+    elif matched and kind == "cd" and PENDING_ASK and PENDING_ASK[0][0] == "force-push":
+        # A forced push after a failed cd already asks (its folder is unknown), and the ask names the push. Let
+        # settle_ask report that, so a forced push is named first (it also denies when chained: rule ask-alone).
+        pass
     elif matched:
         markers_reason = (CONFLICT_MARKERS_CHAIN_REASON if kind == "chain" else
                           CONFLICT_MARKERS_CD_REASON if kind == "cd" else
