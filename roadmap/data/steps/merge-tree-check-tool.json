@@ -1,9 +1,10 @@
 {
  "id": "merge-tree-check-tool",
  "title": "One tool answers whether a head merges clean with main and another head",
- "status": "queued",
+ "status": "blocked",
  "repo": "shivinate7/claude-settings",
  "why": "Triage (2026-11-11 08:49 CST) checked #2378 and #1166 against main with `T=$(git merge-tree ... | head -1) && echo clean`, which reads head's exit code, so two conflicted merges read clean. Two builders then hit conflicts their briefs called clean. Harm: wasted lanes and wrong briefs. Fix: a `merge --merge-check <pr> [--with <sha>]` read mode (or a bin script) that prints clean or the conflicted files from merge-tree's own exit, and hand-over briefs cite it. INCIDENT 21:40 CST Nov 14 (coordinator 21:38, runner 10's read; triage read none): a #3242 ready run was lost, 50 min, on a conflict in merge/merge.py that a merge-tree read against main and the other ready PRs before the mark would have shown. Want (coordinator): runner 10 reads a merge-tree of each head against main and the ready PRs before a mark. This step's tool (one answer to \"does this head merge clean with main and another head\") is the home for that read; the runner uses it before the mark. Kin: release-pairwise-clash (release set), lane-lint-names-clashing-open-pr. Filed as an extension here, not a new step (rule building-one-home-per-capability).",
  "source": "triage mistake, 2026-11-11 08:51 CST",
- "updatedAt": "2026-11-14T21:40:00-06:00"
+ "note": "Blocked (lane glossary-step-statuses, 19:38 CST Nov 17, owner page item 941 a): waits on nothing named; it was queued with no wait recorded.",
+ "updatedAt": "2026-11-17T19:38:10-06:00"
 }

@@ -1,10 +1,10 @@
 {
  "id": "lint-runs-allow-suite-on-record-flag",
  "title": "The lane lint runs the allow-entry suite when merge/merge.py gains a record flag",
- "status": "queued",
+ "status": "blocked",
  "repo": "shivinate7/claude-settings",
  "why": "Coordinator guard candidate, low, 04:42 CST Nov 15 (relayed; unproven). On #3488 the lane lint passed (comment 6892744053, relayed) but the ready run 43704347843 went red in checks-hooks, step 'Auto-mode allow entry suite', hooks/test_auto_mode_allow.py test_covers_names_each_record_flag: merge/merge.py names --accepted and the settings.json autoMode.allow entry 'Merge Review Record' does not. Harm: a green lane lint over a red ready run costs a draft-back and a fix round. Fix: the lane lint runs that suite when merge/merge.py gains a record flag. Past rulings checked: none found. No existing step covered it (grep of roadmap steps for allow-entry, allow entry suite and test_auto_mode_allow, 04:43 CST: review-record-allow-entry is done and covers the entry itself, not the lint).",
  "source": "coordinator 04:42 CST Nov 15, relayed by triage",
- "note": "Low. Open.",
- "updatedAt": "2026-11-15T04:45:00-06:00"
+ "note": "Blocked (lane glossary-step-statuses, 19:38 CST Nov 17, owner page item 941 a): waits on nothing named; the note says only Low, Open. Low. Open.",
+ "updatedAt": "2026-11-17T19:38:10-06:00"
 }

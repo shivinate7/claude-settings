@@ -1,10 +1,10 @@
 {
  "id": "lint-checks-before-fix-check",
  "title": "A lane runs the CI lint checks before it posts a fix check on a hand-resolved merge",
- "status": "queued",
+ "status": "blocked",
  "repo": "shivinate7/claude-settings",
  "why": "Lane lesson via the coordinator, 05:37 CST Nov 15 (relayed; the lane's account, not checked by triage). Three failed fix checks on #2787 each came from a defect of the lane's hand-resolved merge: cost pins, silent-undo, STE. Harm: each failed fix check counts as a review round (step review-fix-check-round), so a defect the CI lint checks would have read burns the three-round cap and forces a replacing PR (#3482). Idea (the lane's): run the CI lint checks (check_cost_pins, check_silent_undo, the STE check) on the merged head before a fix check is posted. Nearest steps, not the same: lane-lint-checks-from-batch (lane lint judges added lines with the batch's check scripts) and mixed-merge-resolver (who resolves a mixed conflict); neither runs the lint checks before a fix check (grep of roadmap steps for hand-resolved, pre-fix-check, fix check, 05:39 CST). Unmeasured: how often a hand-resolved merge fails a lint check; one incident (#2787, three times). Past rulings checked: none found.\n\n09:28 CST Nov 15 (coordinator 09:27 CST, relayed): the lane on #3503 queued \"lint-before-review\" (run the lane lint checks before a review round) and says its own lane lint failed on two causes (step spec lists, Cost pins) after a fix check had already passed; the PR body says a third fix check followed. Second sighting of the family (first: #2787). Sighting only, no new step. The check set and its cost stay unmeasured.\n\n09:42 CST Nov 15 (coordinator, relayed): sighting only. On #3492 the lane lint failed flag-free at 09:29 CST on \"Unknown-read contract (guard + session_start)\" (caseF4 and caseF6 wrote to stderr) and passed on re-run; see step unknown-read-lint-flake. Cause unmeasured.",
  "source": "lane sim-lease-gaps via coordinator 05:37 CST Nov 15, relayed by triage",
- "note": "Low. Open. One incident, three fix checks on #2787; the check set and its cost are unmeasured.",
- "updatedAt": "2026-11-15T09:42:00-06:00"
+ "note": "Blocked (lane glossary-step-statuses, 19:38 CST Nov 17, owner page item 941 a): waits on nothing named; the note says Low, Open, with one incident and the check set and its cost unmeasured. Low. Open. One incident, three fix checks on #2787; the check set and its cost are unmeasured.",
+ "updatedAt": "2026-11-17T19:38:10-06:00"
 }

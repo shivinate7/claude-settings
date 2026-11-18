@@ -1,10 +1,10 @@
 {
  "id": "ready-check-names-tree",
  "title": "The ready-check read should name which tree it read",
- "status": "queued",
+ "status": "blocked",
  "repo": "shivinate7/claude-settings",
  "why": "Coordinator guard candidate, low, 04:29 CST Nov 15 (relayed; unproven). On #3255 the draft step stopped with 'the ready checks of 28283425c against main are unknown, not a pass: cannot read the workflow: no workflow file in the tree has a checks-rest job'. A stale PR tree (1132 commits behind main, predating the job, per the coordinator) and a bad config read the same. Harm: a session cannot tell whether to merge main in or fix the config. Fix: the unknown line names the tree it read. Past rulings checked: none found. No existing step covered it (grep of roadmap steps, 04:30 CST).",
  "source": "coordinator 04:29 CST Nov 15, relayed by triage",
- "note": "Low. Open.",
- "updatedAt": "2026-11-15T04:30:00-06:00"
+ "note": "Blocked (lane glossary-step-statuses, 19:38 CST Nov 17, owner page item 941 a): waits on nothing named; the note says only Low, Open. Low. Open.",
+ "updatedAt": "2026-11-17T19:38:10-06:00"
 }
