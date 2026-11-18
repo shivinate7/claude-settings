@@ -1471,7 +1471,7 @@ class Host:
     def holds_head_gh(self, head, other):
         """True when the commit or branch `other` contains `head`: GitHub's compare of head...other reads ahead or identical. Any failed read raises Stop.
         One gh call per read, and it never touches the clone, so the callers that must not fetch use it: the lane Stop hook (lint/report_guard.py reads
-        clean_merges_after), the join and the fix verifier. The lost-work rows read holds_head, which is local git."""
+        clean_merges_after), the join, the fix verifier and the batch brake (batch_running). The lost-work rows read holds_head, which is local git."""
         c, out = self.api(f"compare/{head}...{other}")
         try:
             if c:
@@ -2108,7 +2108,7 @@ class Host:
         for d in others:
             parts = self.busy_parts(d, names, self.batch_brake or {})
             # held only when the busy head does not hold this head, or this head is behind the base tip: that run never tested what this merge lands
-            if parts and not (self.holds_head(head, d["head"]["sha"]) and self.holds_head(base, head)):
+            if parts and not (self.holds_head_gh(head, d["head"]["sha"]) and self.holds_head_gh(base, head)):
                 blockers.append(f"#{d['number']} ({d['head']['ref']}) " + "; ".join(parts))
         return blockers
 
