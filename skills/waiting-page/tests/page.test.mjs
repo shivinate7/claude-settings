@@ -6306,7 +6306,7 @@ async function sinkSendInView(t, { width, anchored = false }) {
   const took = reads(rd).map(([when, post]) => `${when} ${post[B].top}`).join(", ");
   assert.ok(reads(rd).every(([, post]) => Math.abs(post[B].top - rd.pre[S].top) <= 2), `the open card below did not take the sent card's top ${rd.pre[S].top}: ${took}`);
 }
-async function sinkSendLastInTier(t, { width, anchored = false }) {
+async function sinkSendLastInSection(t, { width, anchored = false }) {
   const sent = mk("sink-last", 4, { context: LONG });
   // Nothing in a later tier: a stood pick there would go with the Send. The card is tall enough to scroll to the band.
   const page = await openSend(t, { items: [...HOLDS, ...LEADS, sent], width, height: 800, scheme: "light", anchored, sentMove: "sink" }); if (!page) return;
@@ -6326,7 +6326,7 @@ for (const width of [1280, 390]) {
     await sinkSendInView(t, { width });
   });
   test(`answered-sink: a sent card last in its tier: nothing above it moves on screen, at ${width} wide (SENT_MOVE sink)`, async (t) => {
-    await sinkSendLastInTier(t, { width });
+    await sinkSendLastInSection(t, { width });
   });
 }
 // The two 390 cases again with the browser's scroll anchoring on. The cases above keep it off, so they stay as they are.
@@ -6334,7 +6334,7 @@ test("answered-sink: a sent card in view, with scroll anchoring on: the open car
   await sinkSendInView(t, { width: 390, anchored: true });
 });
 test("answered-sink: a sent card last in its tier, with scroll anchoring on: nothing above it moves on screen, at 390 wide (SENT_MOVE sink)", async (t) => {
-  await sinkSendLastInTier(t, { width: 390, anchored: true });
+  await sinkSendLastInSection(t, { width: 390, anchored: true });
 });
 
 // Scroll anchoring stays on in the cases below: they test what a reader's browser does with the page's own compensation. A card in view
@@ -7115,7 +7115,7 @@ async function openStatus(page) {
 // Whether any visible or hidden text of the page matches (a yes or no, so a red run does not print the page).
 const shows = async (page, re) => re.test(await page.locator("body").textContent());
 const waitingShape = (page) => page.evaluate(() => ({
-  tiers: [...document.querySelectorAll("section.tier")].map((s) => [s.id, [...s.querySelectorAll("article.card")].map((c) => c.id)]),
+  sections: [...document.querySelectorAll("section.tier")].map((s) => [s.id, [...s.querySelectorAll("article.card")].map((c) => c.id)]),
   bar: document.getElementById("barStatus").textContent,
   send: document.getElementById("send").textContent,
 }));
@@ -7141,7 +7141,7 @@ test("with no roadmap data the Status tab says unknown with a reason, and the wa
   const shipped = await open(t, { items, dbExtra: LEAK }); if (!shipped) return; // PAGE as shipped: its roadmap block is empty
   const built = await open(t, { pageHtml: mergedPage("--no-roadmap"), items, dbExtra: LEAK }); // ROADMAP_DATA = null
   const before = await waitingShape(shipped);
-  assert.ok(before.tiers.length > 0 && before.send, "the waiting part drew nothing: " + JSON.stringify(before));
+  assert.ok(before.sections.length > 0 && before.send, "the waiting part drew nothing: " + JSON.stringify(before));
   assert.deepEqual(await waitingShape(built), before, "the roadmap block changed the waiting part");
   assert.equal(await statusTab(built).count(), 1, "the page has no Status tab (role=tab, name Status)");
   assert.equal(await statusTab(built).isVisible(), true, "the tab row hides Status when no item has a design");
@@ -8075,7 +8075,7 @@ test("the Live work header shows when the acts were read", async (t) => {
 
 // The roadmap page (skills/roadmap/page/index.html) and this page draw one open pull request's act row with the same text.
 const ROADMAP_BUILT = path.join(HERE, "..", "..", "roadmap", "tests", "built_index.py");
-function roadmapPage(live) {
+function builtRoadmapHtml(live) {
   const r = spawnSync(process.env.PYTHON || "python3", [ROADMAP_BUILT, "--live", JSON.stringify(live)], { encoding: "utf8", maxBuffer: 1 << 28 });
   assert.equal(r.status, 0, "the roadmap page build failed: " + (r.stderr || r.error));
   return r.stdout;
@@ -8097,7 +8097,7 @@ test("the roadmap page and this page draw one open pull request's act row with t
     ledger: { readAt: new Date().toISOString(), rows: [{ number: 8, act: "batch", owner: "batch runner", ageHours: 30, red: true, blockedOn: null }] },
   };
   const waiting = await liveStatus(t, over); if (!waiting) return;
-  const plan = await openRoadmap(t, roadmapPage(liveFile(over))); if (!plan) return;
+  const plan = await openRoadmap(t, builtRoadmapHtml(liveFile(over))); if (!plan) return;
   assert.equal(await actRow(waiting, "Pull eight").count(), 1, "scope: this page draws no row for open pull request #8");
   assert.equal(await plan.locator("#live li", { hasText: "Pull eight" }).count(), 1, "scope: the roadmap page draws no row for open pull request #8");
   const here = await rowText(actRow(waiting, "Pull eight")), there = await rowText(plan.locator("#live li", { hasText: "Pull eight" }));
