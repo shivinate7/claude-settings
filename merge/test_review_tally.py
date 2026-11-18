@@ -255,7 +255,7 @@ class EdgeStates(TallyCase):
     def test_the_full_one_off_counts_are_read_whole(self):
         # Round 1 of the one-off count (Nov 14-18): Haiku 37 PASS of 183 records, Sonnet 61 PASS of 141. Past one page of 100 comments.
         haiku = [comment(i, i, record(i, HAIKU_PASS if i <= 37 else HAIKU_FAIL), EARLY) for i in range(1, 184)]
-        sonnet = [comment(i, i, record(i, SONNET_PASS if i <= 61 else SONNET_FAIL), EARLY) for i in range(184, 325)]
+        sonnet = [comment(i, i, record(i, SONNET_PASS if i - 183 <= 61 else SONNET_FAIL), EARLY) for i in range(184, 325)]
         out = self.tally(haiku + sonnet, "--split", SPLIT)
         self.assertEqual(rounds(out, SECTION_BEFORE, 1, "haiku"), (37, 146), f"all 183 Haiku records counted: {out}")
         self.assertEqual(rounds(out, SECTION_BEFORE, 1, "sonnet"), (61, 80), f"all 141 Sonnet records counted: {out}")
