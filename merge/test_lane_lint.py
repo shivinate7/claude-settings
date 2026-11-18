@@ -5621,6 +5621,16 @@ class MergedLintTree(LaneFixture):
         self.assertEqual(self.head(batch), head, "the integration PR's lint pushed over its head: " + text)
         self.assert_comments_name(head, text)
 
+    def test_an_integration_pr_the_checkout_holds_behind_main_pushes_nothing(self):
+        """The batch runner's position: the checkout holds the integration head, so the ancestry clause allows the push and only the integration
+        clause of lane_lint's push condition keeps it back. Red on merge.py with `not is_integration_pr(info)` deleted (a scratch copy)."""
+        head = self.integration_head_behind_main()
+        self.use_ci_job(PASSING, 0)
+        rc, text, _ = self.lint_once("--lane-lint", "7", at_head=False)
+        self.assertEqual(self.head(merge.integration_branch(INTEGRATION_NAME)), head, "the integration PR's lint pushed over the head its checkout holds: " + text)
+        self.assertEqual(rc, 0, text)
+        self.assert_comments_name(head, text)
+
     def test_a_stacked_pr_on_release_behind_its_base_pushes_nothing(self):
         head, release = self.stacked_pr_on_release()
         self.assertFalse(self.contains(head, release), "precondition: the head holds its base's new tip, so the case probes nothing")
@@ -5697,6 +5707,20 @@ class MergedLintTree(LaneFixture):
     def checkout_holds(self, sha):
         """True when the lane checkout's HEAD holds commit `sha`."""
         return subprocess.run(["git", "-C", self.co, "merge-base", "--is-ancestor", sha, "HEAD"], capture_output=True).returncode == 0
+
+    def integration_head_behind_main(self):
+        """A batch integration PR (PR 7) whose head is one commit above feat, while main moves past feat. The caller's checkout holds that head:
+        the batch runner's position at its pre-join lint, so the ancestry clause allows a push and only the integration clause keeps it back.
+        -> the integration head's sha."""
+        self.behind_main()
+        batch = merge.integration_branch(INTEGRATION_NAME)
+        head = self.commit_on(batch, {"integration/batch.txt": "integration 7\n"}, "origin/feat")
+        self.host.branch, self.host.body = batch, self.integration_body()
+        self.assert_integration_scope()
+        self.assertFalse(self.contains(head, self.head("main")), "precondition: the integration head holds origin/main's new tip, so the case probes nothing")
+        self.check_out(head)
+        self.assertTrue(self.checkout_holds(head), "precondition: the checkout does not hold the integration head, so the case probes nothing")
+        return head
 
     def assert_lints_as_today(self, old, rc, text):
         """A pull request that gets no merge lints as it does without one: rc 0, a PASS line naming its head, origin's branch left at that head,
