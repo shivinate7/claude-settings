@@ -2252,8 +2252,8 @@ def claim_only(root, cfgrel, base, linted, live):
 
 PAGE_SUBJECT = "Rebuild the records page"  # the subject of a page-only commit (commit_claim with no trailer)
 _GENERATOR = "python3 lint/" + os.path.basename(RECORDS) + " --records-only"  # the records generator's command, as run_records starts it, without the tool's own path
-_STAMP_CLAIM = "node actions/stamp/" + os.path.basename(STAMP) + " --claim"  # the claim's command, as node_stamp starts it
-VERIFIED_CLAIM = f"Verified: {_STAMP_CLAIM}; {_GENERATOR} -> both exited 0"  # do_claim and rebuild_records ran before the commit, and each raises Stop on a nonzero exit
+_CLAIM_COMMAND = "node actions/stamp/" + os.path.basename(STAMP) + " --claim"  # the claim's command, as node_stamp starts it; glossary-ok: STAMP is the existing constant for the tool path
+VERIFIED_CLAIM = f"Verified: {_CLAIM_COMMAND}; {_GENERATOR} -> both exited 0"  # do_claim and rebuild_records ran before the commit, and each raises Stop on a nonzero exit
 VERIFIED_PAGE = f"Verified: {_GENERATOR} -> exited 0 and changed the records page"  # a page-only commit exists only when rebuild_records changed the tree
 
 def page_only(wt, sha, strict=False):
