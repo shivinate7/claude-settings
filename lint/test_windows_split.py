@@ -542,6 +542,14 @@ COMMENT_DELTA_CLAUSE = "needs.scope.outputs.skip_comment_delta == 'true'"
 RECORD_DELTA_CLAUSE = "needs.scope.outputs.skip_record_delta == 'true'"
 DELTA_CLAUSES = {"checks": (COMMENT_DELTA_CLAUSE, RECORD_DELTA_CLAUSE), "checks-hooks": (RECORD_DELTA_CLAUSE,),
                  "checks-rest": (RECORD_DELTA_CLAUSE,)}
+# Each (job, if expression) is a form the job must not take. The rules of both test files read this list, so one rule cannot accept
+# a form the other refuses.
+UNNAMED_CLAUSE = "needs.scope.outputs.checks_macos == 'true'"
+WRONG_DELTA_FORMS = (("checks-hooks", f"{RECORDS_ONLY_CONDITION} || {COMMENT_DELTA_CLAUSE}"),
+                     ("checks", f"{RECORDS_ONLY_CONDITION} || {RECORD_DELTA_CLAUSE} || {COMMENT_DELTA_CLAUSE}"),
+                     ("checks", f"{RECORDS_ONLY_CONDITION} || {COMMENT_DELTA_CLAUSE}"),
+                     ("checks", f"{RECORDS_ONLY_CONDITION} || {COMMENT_DELTA_CLAUSE} || {RECORD_DELTA_CLAUSE} || {UNNAMED_CLAUSE}"),
+                     ("checks-rest", f"{RECORDS_ONLY_CONDITION} || {COMMENT_DELTA_CLAUSE} || {RECORD_DELTA_CLAUSE}"))
 
 
 def scope_named_steps():
@@ -1268,12 +1276,7 @@ class WindowsSplit(unittest.TestCase):
         jobs = all_jobs(self.text)
         for name in DELTA_CLAUSES:
             self.assertEqual(job_check_problems(name, jobs[name]), [], f"{name}'s named delta form is refused")
-        records, comment, record = RECORDS_ONLY_CONDITION, COMMENT_DELTA_CLAUSE, RECORD_DELTA_CLAUSE
-        other = "needs.scope.outputs.checks_macos == 'true'"
-        refused = (("checks-hooks", f"{records} || {comment}"), ("checks", f"{records} || {record} || {comment}"),
-                   ("checks", f"{records} || {comment}"), ("checks", f"{records} || {comment} || {record} || {other}"),
-                   ("checks-rest", f"{records} || {comment} || {record}"))
-        for name, expr in refused:
+        for name, expr in WRONG_DELTA_FORMS:
             with self.subTest(job=name, if_=expr):
                 job = {**jobs[name], "if": "${{ " + expr + " }}"}
                 self.assertTrue(job_check_problems(name, job), f"{name} takes {expr!r}, a form it does not name, and passes")

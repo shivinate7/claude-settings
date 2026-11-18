@@ -22,7 +22,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from test_windows_split import CHECKS, DELTA_CLAUSES, MACOS_JOBS, RECORDS_ONLY_CONDITION, all_jobs, eval_with, yaml_scalar  # noqa: E402  the one home of the checks.yml path
+from test_windows_split import CHECKS, DELTA_CLAUSES, MACOS_JOBS, RECORDS_ONLY_CONDITION, WRONG_DELTA_FORMS, all_jobs, eval_with, yaml_scalar  # noqa: E402  the one home of the checks.yml path
 from all_jobs_passed_rules import (ALL_JOBS_PASSED_USES, all_problems, child_problems, ci_done_problems, needs_of,  # noqa: E402  the one home of the rules
                                    needs_problems, off_problems, scope_if_problems, scope_skips_problems, shape_problems, split_jobs, step_with,
                                    steps_problems, steps_part)
@@ -211,14 +211,29 @@ class PushOffRollup(unittest.TestCase):
     its skip is never read there. The rule (off_problems) refused every job-level if on a needed job, which the push guard is not.
     Synthetic files: one Windows job, needed by all-jobs-passed, with the if under test."""
 
-    def rollup_text(self, job_if):
-        lines = ["jobs:", "  checks-windows:", "    runs-on: windows-latest", "    needs: scope"]
+    def rollup_text(self, job_if, name="checks-windows"):
+        lines = ["jobs:", f"  {name}:", "    runs-on: windows-latest", "    needs: scope"]
         if job_if is not None:
             lines.append(f"    if: {job_if}")
         lines += ["    steps:", "      - run: echo ok", "  all-jobs-passed:", "    runs-on: ubuntu-latest",
                   "    if: ${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}",
-                  "    needs:", "      - checks-windows", "    steps:", "      - run: echo ok"]
+                  "    needs:", f"      - {name}", "    steps:", "      - run: echo ok"]
         return "\n".join(lines) + "\n"
+
+    def test_each_named_delta_form_passes_the_rollup_rules(self):
+        # Scope first: the named forms exist. Named failure: a lint job's named delta form is refused, so all-jobs-passed reads its skip as red.
+        self.assertTrue(DELTA_CLAUSES, "no named delta forms: this case would prove nothing")
+        for name, clauses in DELTA_CLAUSES.items():
+            with self.subTest(job=name):
+                form = " || ".join((RECORDS_ONLY_CONDITION, *clauses))
+                self.assertEqual(off_problems(self.rollup_text("${{ " + form + " }}", name)), [], f"{name}'s named delta form is refused")
+
+    def test_each_wrong_delta_form_is_refused_by_the_rollup_rules(self):
+        # Control, green on the old rules too: a form the job does not name is refused. A rule that accepts it fails here.
+        for name, expr in WRONG_DELTA_FORMS:
+            with self.subTest(job=name, if_=expr):
+                self.assertTrue(off_problems(self.rollup_text("${{ " + expr + " }}", name)),
+                                f"{name} takes {expr!r}, a form it does not name, and the rollup rules pass it")
 
     def test_a_needed_job_whose_job_level_if_is_the_push_guard_passes_the_rollup_rules(self):
         # Named failure on the old rules: the push guard is a job-level if on a needed job, so the rule refuses it.
