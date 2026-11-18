@@ -1,0 +1,14 @@
+{
+  "id": "round1-haiku-xhigh",
+  "title": "Round-1 reviewers run Haiku at xhigh for every change, guard or check included",
+  "status": "blocked",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "",
+  "owner": "consultant",
+  "blockedBy": [],
+  "why": "Owner, 19:45 CST Nov 17, relayed by the consultant: round-1 reviewers on Haiku are intended; run them at xhigh for every change, guard or check included.",
+  "source": "owner chat via the consultant, 19:45 CST Nov 17 (inbox fb-1945-1)",
+  "note": "Waits on the consultant landing the change in decision agent-model-cap. Triage reads the decision's round rows from main and files the merge. Proof: the round rows on main. Not built by triage.",
+  "updatedAt": "2026-11-17T20:30:23-06:00"
+}
