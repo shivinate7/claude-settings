@@ -18201,9 +18201,9 @@ class ReviewFixBase(ReviewEnv):
         self.assert_refused_for_start(rc, out, err)
 
     def test_a_base_an_older_record_names_is_accepted_only_when_the_new_record_carries_its_rounds(self):
-        # "as long as the rounds it lists are carried": the older record lists a FAIL round 1 and a PASS round 2. A new record that posts both
-        # rounds as the older record has them is accepted from that head. One that posts round 1 as PASS rewrites a round, and is refused.
-        # One that posts round 1 alone restarts the review, and the restart refusal stops it first.
+        # The older record names the base and holds a FAIL entry, then a PASS entry. A new record that repeats both entries as the older record
+        # holds them starts a fix check from that head. One that turns the FAIL entry into a PASS rewrites an entry the older record carries, so it
+        # is refused. One that holds a single PASS entry is a restart, and the restart refusal stops it first.
         two_rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")
         comments = (review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=two_rounds)),
                     review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)))
@@ -18273,9 +18273,9 @@ class ReviewFixBase(ReviewEnv):
         self.assert_refused_for_start(rc, out, err)
 
     def test_a_base_an_older_review_log_names_is_refused_when_another_earlier_log_naming_it_is_not_carried(self):
-        # Every earlier log that names the base must have its rounds carried, not only the newest one that names it. The first names the base with a
-        # FAILed round 1, the second with a PASSed round 1, and the newest names another head. The new log carries round 1 PASS, which the second log
-        # has. The control gives the first log round 1 PASS too, so every log that names the base has the round the new log carries.
+        # Each earlier record that names the base must have its entries carried, not only the newest one that names it. The first names the base with a
+        # FAIL entry, the second with a PASS entry, and the newest names another head. The new record carries a PASS entry, which the second record
+        # holds. So the FAIL entry in the first record alone refuses the start. The control gives the first record a PASS entry too.
         second = review_comment(2, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
         newest = review_comment(3, 7, record_text(head=self.LATER_HEAD, rounds=REVIEW_PASS))
         same_first = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
