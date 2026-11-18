@@ -1,0 +1,1 @@
+- train-seconds-long-unmeasured: "seconds-long checks" in the Fold checks bullet is a relayed claim, not measured by the lane. Decision: session-tiers.
