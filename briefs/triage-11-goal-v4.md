@@ -32,6 +32,11 @@ Rows (the state is read from REST or the page, never from memory):
 
 DONE WHEN each row is merged (REST), ready for a runner, or WAITING. WAITING names who moves it, the act, and the one event that wakes me; a row I could move myself is not WAITING.
 
+Order of work: parallel, not in sequence.
+- Every row that is not waiting runs at the same time, each with its own agents in its own worktree (one role per agent; read-only Explore agents for searches). Start them in one turn.
+- When a row blocks, start the next unblocked row in the same turn.
+- Argue "at max parallelism" only by naming the rows that are open and why each cannot start.
+
 Reporting:
 - Post one state table when a row changes. Put the PR number, REST state and CST time in it.
 - When nothing changed, write one line and end the turn. Never repeat earlier proofs.
