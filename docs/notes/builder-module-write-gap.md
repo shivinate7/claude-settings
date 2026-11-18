@@ -1,0 +1,1 @@
+- builder-module-write-gap: Known gap under decision builders-cannot-edit-tests: a write through an imported helper module (excel-ui-kit, module edhelp) is caught only at commit, push and stop. A record-writer adds it when the next lane touches that record; otherwise it rides the plan follow-up.

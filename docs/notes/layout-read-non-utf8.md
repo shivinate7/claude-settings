@@ -1,1 +1,1 @@
-- layout-read-non-utf8: `_read` in lint/layout.py does not map a non-UTF-8 extras file to a LayoutError, so `lost_work_branches` (merge/merge.py) raises a traceback there instead of reading unknown. Loud, not clear; unlikely in normal work.
+- layout-read-non-utf8: `_read` in lint/layout.py does not map a non-UTF-8 extras file to a LayoutError, so `lost_work_branches` (merge/merge.py) raises a traceback there instead of reading unknown. Loud, not clear; unlikely in normal work. Seen: 2026-11-17 x1

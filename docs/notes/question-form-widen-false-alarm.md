@@ -1,0 +1,1 @@
+- question-form-widen-false-alarm: A note under decision question-form, not a debt. The question-form hook flagged PR 2593's option a as widening a shared tool; it does not, since cloud gh writes stay refused and the option only routes the wake through the MCP tool.

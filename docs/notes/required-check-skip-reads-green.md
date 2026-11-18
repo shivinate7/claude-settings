@@ -1,0 +1,1 @@
+- required-check-skip-reads-green: A required check other than all-jobs-passed that only skipped reads green by design; docs-only PRs need that. No repo names one today.

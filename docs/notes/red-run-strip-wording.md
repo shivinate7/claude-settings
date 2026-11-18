@@ -1,0 +1,1 @@
+- red-run-strip-wording: The docstring and the record say list markers strip 'from both ends'. But `-` and `+` strip only at the start (lint/check_red_run.py:122).
