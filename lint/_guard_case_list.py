@@ -9,18 +9,64 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import tempfile
+import time
 
 # The fields that make the payload a case sends to the guard, and the environment it runs in.
 KEY_FIELDS = ("tool", "raw", "cwd", "env_path", "session", "config", "transcript", "agent_id", "agent_type",
               "event", "stop_active", "no_root", "env", "guard", "temp", "tool_input")
 CLOCK_VALUE = re.compile(r"\b1[5-9]\d{8}(?:\d{3})?(?:\.\d+)?\b")  # epoch seconds or milliseconds, with a fraction
+CLOCK_WINDOW = 86400  # seconds: only a value this near the run's clock varies from run to run, a fixed epoch in a case does not
 MEMORY_ADDRESS = re.compile(r"0x[0-9a-f]{6,}")  # a repr of an object
 LOCAL_PORT = re.compile(r"\b(127\.0\.0\.1|localhost):\d+\b")  # a fake server a section starts on a free port
 # The pids after `kill` or `pkill -P`, which a section takes from a process it starts, and a process group as -pid.
-# Pid 0 and pid 1 (init) stay, with their minus: a case pins them.
-KILL_PIDS = re.compile(r"(\bp?kill(?:\s+(?:-[\w-]*|--))*)((?:\s+-?\d+)+)")
+# Pid 0 and pid 1 (init) stay, with their minus: a case pins them. Another pid reads as its class (own, live or gone),
+# since a guard allows a pid the session started and refuses one it did not, so two such cases are not one payload.
+KILL_PIDS = re.compile(r"(\bp?kill(?:\s+(?:-[sn]\s+\w+|-[\w-]*|--))*)((?:\s+-?\d+)+)")
 PID = re.compile(r"(-?)(\d+)")
+
+
+def _parents():
+    """{pid: parent pid} of the running processes, or None when `ps` cannot be read (Windows has none)."""
+    if os.name == "nt":
+        return None
+    try:
+        done = subprocess.run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True, timeout=30)
+        if done.returncode == 0:
+            return {int(a): int(b) for a, b in (ln.split() for ln in done.stdout.splitlines() if ln.strip())}
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return None
+
+
+_TABLE = [None]  # the last read of the process table
+
+
+def pid_class(pid):
+    """own: a descendant of this process (a process the section started). live: another running process. gone: no such
+    process. any: the class cannot be read here (no `ps`, or Windows), so the pid reads as one class. The table is read
+    again when it lacks the pid, since a section starts its processes while it loads."""
+    table = _TABLE[0]
+    if table is None or pid not in table:
+        table = _TABLE[0] = _parents()
+    if table is None:
+        return "any"
+    if pid not in table:
+        return "gone"
+    me, seen = os.getpid(), set()
+    while pid in table and pid not in seen:
+        if pid == me:
+            return "own"
+        seen.add(pid)
+        pid = table[pid]
+    return "live"
+
+
+def _clock_word(match):
+    value = float(match.group(0))
+    seconds = value / 1000 if value >= 1e11 else value
+    return "<CLOCK>" if abs(seconds - time.time()) < CLOCK_WINDOW else match.group(0)
 
 
 def normalise(text, run_folders):
@@ -34,11 +80,12 @@ def normalise(text, run_folders):
     # The longest folder first: the run's root sits inside the folder of all roots, which sits inside the temp folder.
     for folder, word in sorted(set(words), key=lambda pair: -len(pair[0])):
         text = text.replace(folder, word)
-    for pattern, word in ((CLOCK_VALUE, "<CLOCK>"), (MEMORY_ADDRESS, "<ADDR>")):
-        text = pattern.sub(word, text)
+    text = CLOCK_VALUE.sub(_clock_word, text)
+    text = MEMORY_ADDRESS.sub("<ADDR>", text)
     text = LOCAL_PORT.sub(lambda m: m.group(1) + ":<PORT>", text)
     return KILL_PIDS.sub(lambda m: m.group(1) + PID.sub(
-        lambda n: n.group(0) if int(n.group(2)) < 2 else n.group(1) + "<PID>", m.group(2)), text)
+        lambda n: n.group(0) if int(n.group(2)) < 2 else "%s<PID:%s>" % (n.group(1), pid_class(int(n.group(2)))),
+        m.group(2)), text)
 
 
 def case_key(case, run_folders):
@@ -48,9 +95,17 @@ def case_key(case, run_folders):
 
 def write_listing(path, cases, run_folders):
     """Write one row {name, tool, expected, key} for each case to path, as JSON. A name that holds a run value reads
-    normalised too, so it is the same in every run. -> the row count."""
-    rows = [{"name": normalise(c["name"], run_folders), "tool": c["tool"], "expected": c["expected"], "key": case_key(c, run_folders)}
-            for c in cases]
+    normalised too, so it is the same in every run. A key is never shared by two verdicts. -> the row count."""
+    keys = [case_key(c, run_folders) for c in cases]
+    # One key must not stand for two verdicts: a payload that two cases hold with another verdict each (a case whose
+    # state is no part of its payload, such as a process a section starts) gets its verdict in the key. Cases that
+    # share a payload and a verdict share a key, which the comparison reads as one.
+    verdicts = {}
+    for c, key in zip(cases, keys):
+        verdicts.setdefault(key, set()).add(c["expected"])
+    keys = [key + "-" + c["expected"] if len(verdicts[key]) > 1 else key for c, key in zip(cases, keys)]
+    rows = [{"name": normalise(c["name"], run_folders), "tool": c["tool"], "expected": c["expected"], "key": key}
+            for c, key in zip(cases, keys)]
     with open(path, "w", encoding="utf-8") as f:
         json.dump(rows, f, indent=0)
     return len(rows)

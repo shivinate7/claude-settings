@@ -4,7 +4,7 @@ that pins it in one go and pass (decision guard-cases-from-base).
 
     python3 lint/check_guard_cases_from_base.py --base origin/main
 
-Run it in a repository. It lists the cases of the base's tests/guard (from `git archive`) and of the head's, each
+Run it in a repository. It lists the cases of the merge base of --base and HEAD (from `git archive`) and of the head's, each
 with this checkout's runner (hooks/test_guard.py under GUARD_LIST), so the two lists differ only by their section
 files. It matches each base case to a head case by key, the hash of its payload, and prefers the one of the same
 name. A name alone is no match: a case may be renamed. Lines it prints:
@@ -124,10 +124,12 @@ def compare(base_rows, head_rows):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--base", required=True, help="the base ref, such as origin/main")
+    parser.add_argument("--base", required=True, help="the base ref, such as origin/main; the check reads its merge base with HEAD")
     args = parser.parse_args(argv)
     try:
         repo = git(["rev-parse", "--show-toplevel"], os.getcwd()).strip()
+        # The cases the branch started from, not the base's newest: a base that moved on is no loosening by the head.
+        fork = git(["merge-base", args.base, "HEAD"], repo).strip()
         with tempfile.TemporaryDirectory(prefix="guard-cases-") as scratch:
             results = {}
 
@@ -138,7 +140,7 @@ def main(argv=None):
                     results[label] = exc
 
             threads = [threading.Thread(target=run, args=(label, ref)) for label, ref in
-                       (("base", args.base), ("head", "HEAD"))]
+                       (("base", fork), ("head", "HEAD"))]
             for thread in threads:
                 thread.start()
             for thread in threads:
@@ -146,7 +148,7 @@ def main(argv=None):
             for label in ("base", "head"):
                 if isinstance(results[label], Unknown):
                     raise results[label]
-            waived = waived_names(repo, args.base)
+            waived = waived_names(repo, fork)
     except Unknown as exc:
         print("UNKNOWN %s" % exc)
         return 1
