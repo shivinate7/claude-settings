@@ -1,0 +1,10 @@
+{
+ "id": "qmax-1440-pics-parked",
+ "at": "2026-11-08T11:05:08-06:00",
+ "title": "Item 428 (q_max past-rates bar at 1440 width, pictures) is parked for a q_max session that builds.",
+ "ruling": "Owner, 11:05 CST Nov 8, item 428 (qmax-pastrates-bar-1440-pics, the past-rates bar at 1440 px): no pick; park the whole question and answer it in a q_max session that actually builds, not now. His reason: q_max has a filter and pill reshuffle going on already.",
+ "quote": "i thin q_max has a whole filter/pill reshuffle going on anyways at the moment so this entire thing can be parked and addressed at a q_max session that actually builds rather than resolving it now",
+ "source": "waiting/answers/qmax-pastrates-bar-1440-pics.json; outbox old line 736",
+ "status": "open",
+ "supersedes_none": "unread: triage has not read this ruling against main's records yet; nothing it replaces is named."
+}

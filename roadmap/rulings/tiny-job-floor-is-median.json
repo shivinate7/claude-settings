@@ -1,0 +1,10 @@
+{
+ "id": "tiny-job-floor-is-median",
+ "at": "2026-11-12T15:26:23-06:00",
+ "title": "Item 587 a: the tiny-job time-limit floor is the median of all computed limits, no fixed number.",
+ "ruling": "Owner page save, 15:26 CST Nov 12, item 587 (pick-tiny-job-floor), pick a: the floor on a tiny job's time limit is the median of all computed limits, not a fixed number.",
+ "source": "waiting/answers/pick-tiny-job-floor.json; outbox old line 954",
+ "status": "open",
+ "supersedes_none": "unread: triage has not read this ruling against main's records yet; nothing it replaces is named.",
+ "step": "time-limits-end-hangs-only"
+}

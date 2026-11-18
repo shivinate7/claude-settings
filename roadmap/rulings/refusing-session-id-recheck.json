@@ -1,0 +1,11 @@
+{
+ "id": "refusing-session-id-recheck",
+ "at": "2026-11-12T15:22:18-06:00",
+ "title": "Item 591 a, with doubt: the refusing session id may be wrong; the retrospective session checks.",
+ "ruling": "Owner page save, 15:22 CST Nov 12, item 591 (pick-brief-role-labels), pick a, with a note doubting the session id the refusal names and sending the question to the retrospective session, which has context. Retrospective asked 15:24 CST; item 591 reopens if it finds a reason against.",
+ "quote": "idk if refusing session id is correct either? message retrospective it has soem context on this",
+ "source": "waiting/answers/pick-brief-role-labels.json; outbox old line 951",
+ "status": "open",
+ "supersedes_none": "unread: triage has not read this ruling against main's records yet; nothing it replaces is named.",
+ "step": "lane-finds-triage"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "one-term-lint-warn-only",
+ "at": "2026-11-12T11:59:44-06:00",
+ "title": "Item 533 a: add a warn-only lint for two terms used for one thing.",
+ "ruling": "Owner page save, 11:59 CST Nov 12, item 533 (note-one-term-check, a check for two terms that name one thing), pick a: build a lint that only warns. The debt note one-term-per-meaning-unchecked gets that as its Fix line.",
+ "source": "waiting/answers/note-one-term-check.json; outbox old line 808",
+ "status": "open",
+ "supersedes_none": "unread: triage has not read this ruling against main's records yet; nothing it replaces is named.",
+ "step": "notes-keep-reverify"
+}

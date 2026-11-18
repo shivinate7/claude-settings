@@ -1,0 +1,10 @@
+{
+ "id": "runner-repos-parallel-park",
+ "at": "2026-11-13T19:21:41-06:00",
+ "title": "Item 782: park the guard stack; nothing built, nothing closed.",
+ "ruling": "Owner page save, 19:21 CST Nov 13 (the outbox says 19:23), item 782 (pick-guard-small-meaning), act park. The guard stack stays parked: nothing built, nothing closed; lane runner-repos-in-parallel-rest idles. It is neither a drop nor a keep.",
+ "source": "waiting/answers/pick-guard-small-meaning.json; outbox old line 1335",
+ "status": "open",
+ "supersedes_none": "unread: triage has not read this ruling against main's records yet; nothing it replaces is named.",
+ "step": "runner-repos-in-parallel"
+}

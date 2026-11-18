@@ -1,0 +1,11 @@
+{
+ "id": "failed-extra-round-held",
+ "at": "2026-11-12T15:46:25-06:00",
+ "title": "Item 625 a: a change whose granted extra review round fails is held, and the hold is flagged to the owner at once.",
+ "ruling": "Owner page save, 15:46 CST Nov 12, item 625 (granted-round-fail-holds), pick a: a change whose granted extra round fails is held. His condition: it must be flagged to him and not sit idle unseen. So the hold puts an owner page item up at once (drop, restart, merge). Red test first.",
+ "quote": "as long as its flagged to me and doesn't go to sleep idling quietlky",
+ "source": "waiting/answers/granted-round-fail-holds.json; outbox old line 970",
+ "status": "open",
+ "supersedes_none": "unread: triage has not read this ruling against main's records yet; nothing it replaces is named.",
+ "step": "review-fix-check-round"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "scope-moves-four-accepted",
+ "at": "2026-11-12T11:59:44-06:00",
+ "title": "Items 534, 535, 536 and 538 a: all four rule moves out of the global CLAUDE.md are accepted.",
+ "ruling": "Owner page save, 11:59 CST Nov 12, items 534 (scope-output), 535 (scope-git), 536 (scope-verification) and 538 (scope-building), pick a on each: all four moves of a rule group out of the global CLAUDE.md are accepted. Re-check notes carried: for 538 only the 47-word guards-need-incidents rule fits a hooks and lint rule file; for 534 agent text still needs a plain-writing rule. (Item 537 is not in this save.)",
+ "source": "waiting/answers/scope-output.json, scope-git.json, scope-verification.json, scope-building.json; outbox old line 809",
+ "status": "open",
+ "supersedes_none": "unread: triage has not read this ruling against main's records yet; nothing it replaces is named.",
+ "step": "global-claude-md-scope-audit"
+}

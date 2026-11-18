@@ -1,0 +1,10 @@
+{
+ "id": "c107-probe-done-no-report",
+ "at": "2026-11-13T19:42:37-06:00",
+ "title": "Item 751 (step c107 card probe): marked Done with no probe report; the item stays open.",
+ "ruling": "Owner page save, 19:42 CST Nov 13, item 751 (act-mac-c107-card-probe, the probe of whether an orchestrator starts lanes with no click): marked Done, with no probe report. His note says some sessions work. The item stays open. (Item 737 from the same outbox line has no answers file and is not filed here.)",
+ "quote": "weird none of these worked yet just typing saying some sessions does work? but anywyas fhe report of ur probe is :",
+ "source": "waiting/answers/act-mac-c107-card-probe.json; outbox old line 1408",
+ "status": "open",
+ "supersedes_none": "unread: triage has not read this ruling against main's records yet; nothing it replaces is named."
+}

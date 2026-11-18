@@ -1,0 +1,10 @@
+{
+ "id": "page-checks-full-fix-revived",
+ "at": "2026-11-12T15:26:23-06:00",
+ "title": "Item 616 b: revive PR 1533's full fix and drop the narrow one.",
+ "ruling": "Owner page save, 15:26 CST Nov 12, item 616 (pick-page-checks-narrow), pick b: the owner overruled the narrow fix. The lane revives PR 1533's full fix, brings it up to date with main and sends it to review. Branch page-checks-reach-triage-narrow is dropped.",
+ "source": "waiting/answers/pick-page-checks-narrow.json; outbox old line 953",
+ "status": "open",
+ "supersedes_none": "unread: triage has not read this ruling against main's records yet; nothing it replaces is named.",
+ "step": "page-checks-reach-triage"
+}

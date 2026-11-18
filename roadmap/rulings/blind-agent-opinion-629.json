@@ -1,0 +1,11 @@
+{
+ "id": "blind-agent-opinion-629",
+ "at": "2026-11-13T10:57:51-06:00",
+ "title": "Item 629: none of the options; ask an independent blind agent its opinion.",
+ "ruling": "Owner page save, 10:57 CST Nov 13, item 629 (guard-line-after-dash), answer none of these: ask an independent blind agent for its opinion. The lane was told 10:58 CST.",
+ "quote": "ask an independent blidn agent its opionon",
+ "source": "waiting/answers/guard-line-after-dash.json; outbox old line 1147",
+ "status": "open",
+ "supersedes_none": "unread: triage has not read this ruling against main's records yet; nothing it replaces is named.",
+ "step": "habit-is-not-a-guard"
+}

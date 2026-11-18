@@ -1,0 +1,11 @@
+{
+ "id": "paused-session-prs-revived",
+ "at": "2026-11-12T15:28:18-06:00",
+ "title": "Item 604 a: a PR from a paused session is revived as a lane, never closed.",
+ "ruling": "Owner page save, 15:28 CST Nov 12, item 604 (pick-qmax-backlog-read), pick a: batch runner 11 reads the q_max PRs. His note says many q_max PRs came from sessions whose work was paused. So a paused-session PR is revived as a lane and never closed, and each verdict says whether the work was paused. (Item 605 is a separate answer, 15:46 CST, not filed here.)",
+ "quote": "i thought a lot of q_max prs were from sessions that had their work paused",
+ "source": "waiting/answers/pick-qmax-backlog-read.json; outbox old line 952",
+ "status": "open",
+ "supersedes_none": "unread: triage has not read this ruling against main's records yet; nothing it replaces is named.",
+ "step": "pr-backlog-clear"
+}

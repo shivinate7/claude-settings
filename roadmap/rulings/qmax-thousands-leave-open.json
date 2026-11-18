@@ -1,0 +1,10 @@
+{
+ "id": "qmax-thousands-leave-open",
+ "at": "2026-11-06T16:53:19-06:00",
+ "title": "Item 252 (q_max report text, thousands): build whichever form is built now and leave the question open.",
+ "ruling": "Owner, 16:53 CST Nov 6, item 252 (qmax-report-text-thousands, how q_max report text shows thousands): no pick among the options; keep whichever form is built for now and leave the question open and deferred. It waits for the next q_max build session (q_max D-632).",
+ "quote": "pick whichever is built for now and leave the question open/deferred",
+ "source": "waiting/answers/qmax-report-text-thousands.json; outbox old line 734",
+ "status": "open",
+ "supersedes_none": "unread: triage has not read this ruling against main's records yet; nothing it replaces is named."
+}

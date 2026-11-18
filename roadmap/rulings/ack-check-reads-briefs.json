@@ -1,0 +1,10 @@
+{
+ "id": "ack-check-reads-briefs",
+ "at": "2026-11-12T15:22:18-06:00",
+ "title": "Item 644 b: the past-ruling check also reads lane briefs and agent messages.",
+ "ruling": "Owner page save, 15:22 CST Nov 12, item 644 (pick-check-briefs-too), pick b: the check that a pick acknowledges a past ruling also reads lane briefs and agent messages. The known limit of PR 2932 becomes work. The lane was told 15:24 CST.",
+ "source": "waiting/answers/pick-check-briefs-too.json; outbox old line 950",
+ "status": "open",
+ "supersedes_none": "unread: triage has not read this ruling against main's records yet; nothing it replaces is named.",
+ "step": "pick-ack-past-ruling"
+}

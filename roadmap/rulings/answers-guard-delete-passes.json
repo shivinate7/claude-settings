@@ -1,0 +1,10 @@
+{
+ "id": "answers-guard-delete-passes",
+ "at": "2026-11-12T15:46:25-06:00",
+ "title": "Item 635 a: the answers-file guard lets a delete pass and refuses set, update and str_replace.",
+ "ruling": "Owner page save, 15:46 CST Nov 12, item 635 (answers-guard-allows-delete), pick a: allow a delete. The guard refuses set, update and str_replace on the answers files; a delete passes. This is the widening option, which the owner picked over his earlier shared-tool ruling. PR 2971 still waits on item 636.",
+ "source": "waiting/answers/answers-guard-allows-delete.json; outbox old line 969",
+ "status": "open",
+ "supersedes_none": "unread: triage has not read this ruling against main's records yet; nothing it replaces is named.",
+ "step": "answers-session-write-guard"
+}
