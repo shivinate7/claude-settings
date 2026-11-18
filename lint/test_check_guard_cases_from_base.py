@@ -309,7 +309,7 @@ class GuardCasesFromBase(unittest.TestCase):
         self.assertNotEqual(keys["fixture epoch early"], keys["fixture epoch late"],
                             "two cases that differ only by a fixed epoch share one key")
 
-    def test_deny_and_allow_on_one_payload_keep_their_keys_apart(self):
+    def test_refuse_and_allow_on_one_payload_keep_their_keys_apart(self):
         """Red with no verdict suffix on a shared key (lint/_guard_case_list.py): the deny and the allow case hold one
         payload, so only the suffix keeps their keys apart. Without it, a rename of the deny case reads as a drop from
         deny to allow, since the lowest verdict of the shared key is the allow case."""
@@ -319,32 +319,33 @@ class GuardCasesFromBase(unittest.TestCase):
         self.assertNotEqual(keys["fixture shared deny"], keys["fixture shared allow"],
                             "a deny and an allow case on one payload share one key")
 
-    def test_deny_to_allow_flip_reads_red(self):
+    def test_refuse_to_allow_flip_reads_red(self):
         """Red on pass-all: the flipped verdict reads green. The case is edited; its name and payload stay."""
         self.assert_red("red", "fixture flip")
 
-    def test_deny_to_ask_reads_red(self):
+    def test_refuse_to_ask_reads_red(self):
         """Red on pass-all: the verdict drops from deny to ask, and that reads green."""
         self.assert_red("red", "fixture to ask")
 
-    def test_removed_deny_case_reads_red(self):
+    def test_removed_refuse_case_reads_red(self):
         """Red on pass-all, and on red-all, which flags only the case that stays and so never names the removed one."""
         self.assert_red("red", "fixture removed")
 
     def test_removed_kill_case_reads_red(self):
-        """Red on the commit before the pid class joined the key (5005dd4502), where the two kill cases share one key.
-        The removed own-pid case then reads as a rename of the live one, and no RED names it."""
+        """Red with no stand-in: the head drops the own-pid kill case. Its key carries the pid's class, so no head row
+        matches it by name or key, and RED names it. Without the class the two kill cases share one key, the removed
+        case reads as a rename of the live one, and no RED names it."""
         self.assert_red("red", "fixture kill own")
 
     def test_unchanged_kill_cases_read_green(self):
         """Control, red on red-all and on pid-runner: the two kill cases keep their payloads, so neither reads red."""
         self.assert_green("green", "fixture kill own", "fixture kill live")
 
-    def test_tightening_allow_to_deny_passes(self):
+    def test_tightening_allow_to_refuse_passes(self):
         """Control, red on red-all: it flags the tightened case, and a tightening must read green."""
         self.assert_green("green", "fixture tighten")
 
-    def test_ask_to_deny_passes(self):
+    def test_ask_to_refuse_passes(self):
         """Control, red on red-all: an ask that becomes a deny is a tightening, and reads green."""
         self.assert_green("green", "fixture ask to deny")
 
@@ -357,7 +358,7 @@ class GuardCasesFromBase(unittest.TestCase):
         self.assert_green("green", "fixture rename old", "fixture rename new")
 
     def test_loosening_with_exact_trailer_passes(self):
-        """Control, red on red-all: the green control beside test_deny_to_allow_flip_reads_red. The same flip, with
+        """Control, red on red-all: the green control beside test_refuse_to_allow_flip_reads_red. The same flip, with
         its exact trailer, reads green."""
         self.assert_green("green", "fixture waived")
 
