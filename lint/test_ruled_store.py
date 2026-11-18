@@ -113,6 +113,18 @@ def run_folder():
     if not _RUN:
         _RUN.append(_test_temp.run_folder())
     return _RUN[0]
+
+
+def visible_repo(name, visibility):
+    """A repo folder under this run's temp folder whose layout extras file holds `visibility`, the key that
+    lint/layout.py reads."""
+    root = os.path.join(run_folder(), name)
+    os.makedirs(os.path.join(root, ".claude"), exist_ok=True)
+    with open(os.path.join(root, ".claude", "layout-extras.json"), "w", encoding="utf-8") as handle:
+        json.dump({"kinds": {}, "visibility": visibility}, handle)
+    return root
+
+
 HEADER = "rulings not on main: %d open (%d with no supersedes read yet), newest first"
 DST_CDT = "2026-11-01T01:30:00-05:00"  # 06:30 UTC, the first 01:30 before the clocks go back
 DST_CST = "2026-11-01T01:10:00-06:00"  # 07:10 UTC, after the change: later, though its text sorts first
@@ -516,6 +528,20 @@ class ScopeTests(unittest.TestCase):
         self.assertEqual(len(problems), 1, "a visibility typo: want one problem, got %r" % problems)
         self.assertTrue(names(problems[0], "scope") and "privat" in problems[0],
                         "the problem does not name scope and the bad visibility: %r" % problems[0])
+
+    def test_a_refused_scope_keeps_its_ruling_in_scope_in_a_public_repo(self):
+        import layout  # lint/layout.py, the one reader of the visibility key
+        public = visible_repo("refused-scope-public", "public")
+        self.assertEqual(layout.caution(public)["level"], "public", "scope control: the repo does not read as public")
+        valid = fixture.entry("valid-private", scope={"visibility": "private"})
+        self.assertEqual(ruled_store.check_entry(valid), [], "scope control: a valid private scope has a problem")
+        self.assertFalse(ruled_store.in_scope(valid, public),
+                         "scope control: a private ruling is in scope in a public repo")
+        refused = fixture.entry("refused", scope={"visibility": "private", "repos": "oops"})
+        self.assertNotEqual(ruled_store.check_entry(refused), [],
+                            "scope control: check_entry accepts the refused scope")
+        self.assertTrue(ruled_store.in_scope(refused, public),
+                        "a ruling whose scope check_entry refuses left the store's scope in a public repo")
 
 
 class SessionLinesTests(RepoCase):
