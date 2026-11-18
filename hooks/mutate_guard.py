@@ -2163,7 +2163,7 @@ MUTATIONS = [
      "        elif full in removed:\n",
      "        elif False:\n",
      "guard", "folder rm 1,"),
-    # A folder is read even after a file ask is taken: this is the pre-fix gate that hid the folder.
+    # A folder removal is read even when a file ask is taken first.
     ("scratchpad-owner: a folder removal is skipped once a file ask is taken",
      "        elif full in removed:\n",
      "        elif full in removed and not taken:\n",
