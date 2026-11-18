@@ -230,7 +230,7 @@ class NextActShapes(LedgerCase):
         self.assertFalse(red, f"#9 is a draft with no record, and its line reads RED:\n{out}")
 
     def test_an_idle_draft_past_80_h_is_not_red(self):
-        # Ruling own-572-a-ledger-by-age-only (the ledger's age-only limits) gives every lane act no age limit, so an idle draft is never RED by age.
+        # Ruling own-572-a-ledger-by-age-only (23:10 CST Nov 15) gives every lane act no age limit, so an idle draft is never RED by age.
         out = self.reviewed(LedgerHost([pull(9, draft=True, hours_ago=80)]))
         act, red = self.next_act(out, 9)
         self.assertEqual(act, "lane round 1", f"#9 is a draft with no record, so its act is lane round 1:\n{out}")
@@ -365,7 +365,7 @@ class NextActShapes(LedgerCase):
 
     def test_a_granted_round_4_at_1000_h_is_not_red(self):
         grant = ("Grant: #7, item 444 a, owner, 2026-11-10 12:00 CST",)
-        # Ruling own-572-a-ledger-by-age-only (the ledger's age-only limits) gives every lane act no age limit. A passing granted round ends
+        # Ruling own-572-a-ledger-by-age-only (23:10 CST Nov 15) gives every lane act no age limit. A passing granted round ends
         # the review, so the fixture ends in a FAIL: a failed final round on a guard change owes its net value and reads open, and its lane
         # act has no limit. A grant parses only with its granted round recorded.
         rounds = tm.REVIEW_FAILED_THREE + ("Round 4: reviewer, opus, FAIL",)
@@ -395,7 +395,7 @@ class NextActGaps(LedgerCase):
         self.assertFalse(red, f"#7 waits on debt:merge-flake, which has no limit of its own, and its line reads RED:\n{out}")
 
     def test_a_pr_blocked_on_a_red_pr_reads_red(self):
-        # Ruling own-572-a-ledger-by-age-only (the ledger's age-only limits) keeps an age limit on the batch acts alone, so the blocker
+        # Ruling own-572-a-ledger-by-age-only (23:10 CST Nov 15) keeps an age limit on the batch acts alone, so the blocker
         # is a done record that has waited past one batch cycle.
         out = self.reviewed(LedgerHost([pull(7, base="feat5", hours_ago=5), pull(5, hours_ago=2)], comments=[record(5, 30), lint(5)]))
         self.assertEqual(self.next_act(out, 5), ("batch", True),
@@ -419,7 +419,7 @@ class NextActGaps(LedgerCase):
                           commits={LIVE: [], tm.SOURCE_HEAD: []}, trees={LIVE: tm.SOURCE_TREE, tm.SOURCE_HEAD: tm.SOURCE_TREE})
 
     def test_a_replacement_carries_its_source_open_record_and_reads_the_round_owed(self):
-        # Red on a merge.py that drops the carried record: the replacement then reads lane round 1, the round owed with no record of its own.
+        # Red on a merge.py that drops the carried record: the replacement then reads the act of a draft with no record, not the act of the open record.
         source = [record(6, 3, rounds=("Round 1: reviewer, sonnet, FAIL",), head=tm.SOURCE_HEAD)]
         out = self.reviewed(self.carry_host(draft=False, source=source))
         self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} open: carried from #6 by tree",
@@ -440,7 +440,7 @@ class NextActGaps(LedgerCase):
         self.assertFalse(red, f"#7 is done 3 h ago, inside the 24 h limit, and its line reads RED:\n{out}")
 
     def test_a_draft_replacement_with_no_readable_source_record_reads_lane_round_1(self):
-        # Nothing carries when #6's list holds no record that parses, so the draft has no record of its own and its act is lane round 1.
+        # Nothing carries when #6's list holds no record that parses, so the draft reads as a draft with no record of its own.
         for label, source in (("no comment", []), ("a comment that is no record", [tm.review_comment(1, tm.REPLACES_SOURCE, "Looks good to me.\n")])):
             with self.subTest(source=label):
                 out = self.reviewed(self.carry_host(draft=True, source=source))
