@@ -28,7 +28,7 @@ in a cloud session with the batch-runner role or with none; the shim's comment l
 start, and one mutate stub start where the run starts. Its times are unmeasured since the batch-build cases were removed.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
-import ast, atexit, contextlib, importlib.util, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, threading, time, unittest, unittest.mock, uuid
+import ast, atexit, contextlib, importlib.util, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, threading, time, types, unittest, unittest.mock, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -40,6 +40,7 @@ import test_merge as tm  # noqa: E402  the git half's fixture and fakes; importi
 from test_merge import LANE_LINT_MARKER, NOT_OWNER, lint_comment  # noqa: E402  the lint comment's one form, in test_merge.py (decision lanes-run-no-full-ci-job)
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import merge  # noqa: E402
+import guard  # noqa: E402  the full-disk floor's constants: hooks/guard.py LOAD_FULL_DISK_SHARE and LOAD_FULL_DISK_GB
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
@@ -5965,6 +5966,237 @@ class ReplacedDocs(unittest.TestCase):
     def test_session_roles_does_not_say_combined_pull_request(self):
         self.assertFalse("combined pull request" in self.closes_bullet(),
                          "the session-tiers bullet that says a pull request closes as replaced still says combined pull request")
+
+
+GIB = 2 ** 30  # shutil.disk_usage counts bytes; the guard's floor counts GB of 2**30 bytes
+DISK_GIB = 926  # the drive the cases read, unless a case names another size
+REFUSE_GIB = 3.0  # free on DISK_GIB: under the floor of 5 GiB
+
+
+def full_floor_gib(total_gib):
+    """The guard's full floor on a drive of `total_gib` GiB: free space under min(LOAD_FULL_DISK_SHARE percent of the total, LOAD_FULL_DISK_GB) is full."""
+    return min(total_gib * guard.LOAD_FULL_DISK_SHARE / 100.0, guard.LOAD_FULL_DISK_GB)
+
+
+class LaneLintDiskFloor(LaneFixture):
+    """`merge --lane-lint` on a drive under the guard's full floor. The refusal comes before any worktree is made, in a cloud session and in a
+    local one, and it names the full sweep of the lane's checkout. The reading is shutil.disk_usage, the reader the guard and the janitor use."""
+
+    @staticmethod
+    def under(path, folder):
+        """True when `path`, resolved, is `folder` or lies inside it."""
+        base = os.path.realpath(folder)
+        return os.path.commonpath([os.path.realpath(path), base]) == base
+
+    @contextlib.contextmanager
+    def disk_reading(self, free_gib=None, total_gib=DISK_GIB, error=None, tmp=None):
+        """Patch shutil.disk_usage for every path: `free_gib` free of `total_gib` GiB, or `error` raised on each read. `tmp` = (folder, free_gib)
+        gives a path under `folder` its own reading, the drive the temp folder sits on; every other path reads `free_gib`."""
+        def usage(free):
+            return types.SimpleNamespace(total=int(total_gib * GIB), used=int((total_gib - free) * GIB), free=int(free * GIB))
+        def reading(path):
+            if tmp is not None and self.under(path, tmp[0]):
+                return usage(tmp[1])
+            return usage(free_gib)
+        if error is not None:
+            patch = unittest.mock.patch.object(shutil, "disk_usage", side_effect=error)
+        else:
+            patch = unittest.mock.patch.object(shutil, "disk_usage", side_effect=reading)
+        with patch:
+            yield
+
+    @contextlib.contextmanager
+    def worktree_adds(self):
+        """Record each `git worktree add` that merge runs inside the block. -> the list, filled with each call's argv after `git`."""
+        adds = []
+        real = merge.git  # Env.setUp's wrapper: the spy chains on it
+        def git(cwd, *a, **k):
+            if a[:2] == ("worktree", "add"):
+                adds.append(a)
+            return real(cwd, *a, **k)
+        with unittest.mock.patch.object(merge, "git", git):
+            yield adds
+
+    def refusal_run(self, cloud, free_gib, total_gib=DISK_GIB):
+        """`merge 7 --lane-lint` with `free_gib` free on a `total_gib` drive, the lint stubbed to PASS. -> (rc, output, worktree adds)."""
+        self.assertLess(free_gib, full_floor_gib(total_gib), "the case reads %s GiB, not under the full floor; it proves nothing" % free_gib)
+        self.use_ci_job(PASSING, 0)
+        with self.disk_reading(free_gib=free_gib, total_gib=total_gib), self.worktree_adds() as adds:
+            rc, text = self.run_lane("--lane-lint", "7", cloud=cloud)
+        return rc, text, adds
+
+    def assert_refused_before_any_tree(self, rc, text, adds, free_gib, total_gib=DISK_GIB):
+        floor = full_floor_gib(total_gib)
+        self.assertEqual(rc, 1, "the lane lint went ahead with %s GiB free of %d GiB, under the full floor of %s GiB: %s"
+                         % (free_gib, total_gib, floor, text))
+        self.assertRegex(text, r"(?i)\bdisk\b", "the disk refusal does not name the disk: " + text)
+        self.assertEqual(adds, [], "the refused lane lint made a worktree before it refused: %r" % (adds,))
+        self.assertEqual(self.lint_calls(), [], "the refused lane lint ran the lint anyway: " + text)
+
+    def test_a_full_disk_refuses_a_cloud_lane_lint_before_any_worktree(self):
+        rc, text, adds = self.refusal_run(cloud=True, free_gib=REFUSE_GIB)
+        self.assert_refused_before_any_tree(rc, text, adds, REFUSE_GIB)
+
+    def test_a_full_disk_refuses_a_local_lane_lint_before_any_worktree(self):
+        rc, text, adds = self.refusal_run(cloud=False, free_gib=REFUSE_GIB)
+        self.assert_refused_before_any_tree(rc, text, adds, REFUSE_GIB)
+
+    def test_the_full_disk_refusal_names_the_full_sweep_of_this_checkout(self):
+        _, text, _ = self.refusal_run(cloud=True, free_gib=REFUSE_GIB)
+        match = re.search(r"sweep\.py --root (\S+) --confirm", text)
+        self.assertIsNotNone(match, "the disk refusal names no full sweep, `sweep.py --root <repo> --confirm`: " + text)
+        self.assertEqual(match.group(1), self.co, "the sweep the refusal names is for %s, not this checkout" % match.group(1))
+
+    def test_a_small_drive_refuses_under_its_five_percent_share(self):
+        """On a 40 GiB drive the floor is the 5% share, 2 GiB, which is the smaller term: 1.2 GiB free is full."""
+        rc, text, adds = self.refusal_run(cloud=True, free_gib=1.2, total_gib=40)
+        self.assert_refused_before_any_tree(rc, text, adds, 1.2, total_gib=40)
+
+    def test_fifty_gib_free_goes_ahead_in_a_cloud_and_a_local_session(self):  # the control
+        self.use_ci_job(PASSING, 0)
+        for cloud in (True, False):
+            with self.subTest(cloud=cloud), self.disk_reading(free_gib=50):
+                rc, out = self.lint_run("--lane-lint", "7", cloud=cloud)
+                self.assertEqual(rc, 0, "50 GiB free on a %d GiB drive was refused: %s" % (DISK_GIB, out))
+                self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_three_gib_free_on_a_small_drive_goes_ahead_because_the_share_is_the_smaller_term(self):  # the control of the share case
+        self.assertGreater(3.0, full_floor_gib(40), "the control reads under the full floor; it proves nothing")
+        self.use_ci_job(PASSING, 0)
+        with self.disk_reading(free_gib=3.0, total_gib=40):
+            rc, out = self.lint_run("--lane-lint", "7", cloud=True)
+        self.assertEqual(rc, 0, "3 GiB free on a 40 GiB drive was refused, though its floor is %s GiB: %s" % (full_floor_gib(40), out))
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def unknown_disk_run(self, cloud):
+        """The disk read fails. -> (rc, output) of the lane lint, which must go ahead and say so."""
+        self.use_ci_job(PASSING, 0)
+        with self.disk_reading(error=OSError("no disk reading")):
+            rc, out = self.lint_run("--lane-lint", "7", cloud=cloud)
+        self.assertEqual(rc, 0, "an unreadable disk refused the lane lint: " + out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assertRegex(out, r"(?i)disk[^\n]*unknown|unknown[^\n]*disk",
+                         "an unreadable disk printed no line that says disk and unknown: " + out)
+
+    def test_an_unreadable_disk_reads_unknown_in_a_cloud_session_and_goes_ahead(self):
+        self.unknown_disk_run(cloud=True)
+
+    def test_an_unreadable_disk_reads_unknown_in_a_local_session_and_goes_ahead(self):
+        self.unknown_disk_run(cloud=False)
+
+    def test_memory_at_ninety_nine_percent_with_ample_disk_goes_ahead(self):  # the control: the floor reads the disk alone
+        """The lane lint refuses on the disk only. The guard's whole-load reading (read_load, which reads memory too) would refuse 99% memory,
+        so this control is red on a lane lint that takes that reading."""
+        self.use_ci_job(PASSING, 0)
+        with self.disk_reading(free_gib=50), unittest.mock.patch.object(guard, "_read_memory", return_value=99.0):
+            reading = guard.read_load()
+            self.assertEqual(reading.get("memory_pct"), 99.0, "the memory reading is not the 99%% this control sets: %r" % (reading,))
+            self.assertTrue(guard.load_full(reading), "the whole-load check does not refuse 99%% memory, so this control proves nothing: %r" % (reading,))
+            for cloud in (True, False):
+                with self.subTest(cloud=cloud):
+                    rc, out = self.lint_run("--lane-lint", "7", cloud=cloud)
+                    self.assertEqual(rc, 0, "99% memory with 50 GiB free on the disk refused the lane lint: " + out)
+                    self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_a_full_temp_drive_refuses_a_cloud_lane_lint_while_home_has_room(self):
+        """The lint tree lands under the temp folder (add_worktree's mkdtemp). That drive is full and home's drive has room, so the lane lint
+        must refuse before it makes the tree. A check that reads only home's drive would pass, so the case fills the temp drive."""
+        temp = tempfile.mkdtemp(prefix="full-temp-", dir=RUN_FOLDER)
+        self.use_ci_job(PASSING, 0)
+        with unittest.mock.patch.object(tempfile, "tempdir", temp), unittest.mock.patch.dict(os.environ, {"TMPDIR": temp}), \
+                self.disk_reading(free_gib=50, tmp=(temp, REFUSE_GIB)), self.worktree_adds() as adds:
+            self.assertEqual(os.path.realpath(tempfile.gettempdir()), os.path.realpath(temp),
+                             "the lint tree would not land under the temp folder: %s" % tempfile.gettempdir())
+            self.assertFalse(self.under(os.path.expanduser("~"), temp), "home sits under the full temp folder, so home reads full too")
+            home_free, home_total = guard._read_disk()
+            self.assertEqual(guard.load_full({"disk_free_gb": home_free, "disk_total_gb": home_total}), [],
+                             "home's drive reads %.1f GB free, under its floor, so this case does not isolate the temp drive" % home_free)
+            temp_usage = shutil.disk_usage(temp)
+            self.assertNotEqual(guard.load_full({"disk_free_gb": temp_usage.free / GIB, "disk_total_gb": temp_usage.total / GIB}), [],
+                                "the temp drive reads %.1f GB free, not under its floor, so this case proves nothing" % (temp_usage.free / GIB))
+            rc, text = self.run_lane("--lane-lint", "7", cloud=True)
+        self.assertEqual(rc, 1, "the lane lint read home's drive alone, which had 50 GiB free, and went ahead while the temp folder's drive "
+                                "held %s GiB, under its floor: %s" % (REFUSE_GIB, text))
+        self.assertRegex(text, r"(?i)\bdisk\b", "the refusal does not name the disk: " + text)
+        self.assertEqual(adds, [], "the lane lint made a tree under the full temp folder before it refused: %r" % (adds,))
+        self.assertEqual(self.lint_calls(), [], "the refused lane lint ran the lint anyway: " + text)
+
+    # The cases below load merge.py as a fresh process does: from a copy of the repo's tree, after the case sets the config dir. A fix may
+    # read CLAUDE_CONFIG_DIR at import or at the refusal, and both cases still hold. launch.py runs merge.py from a temp tree it deletes at the end.
+
+    def merge_tree_copy(self):
+        """A copy of this repo's tree in a temp folder of this run, laid out as launch.py lays its tree (merge-fresh-*/tree). -> the tree's path.
+        The copy has no .git, no .claude (other checkouts) and no bytecode. The case deletes the folder."""
+        folder = tempfile.mkdtemp(prefix="merge-fresh-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, folder, True)
+        tree = os.path.join(folder, "tree")
+        shutil.copytree(REPO, tree, ignore=shutil.ignore_patterns(".git", ".claude", "__pycache__"))
+        self.assertTrue(os.path.isfile(os.path.join(tree, "merge", "merge.py")), "the copied tree holds no merge/merge.py: " + tree)
+        return tree
+
+    def load_merge_from(self, tree):
+        """merge.py as a fresh process loads it from `tree`: its __file__ is in `tree`, and the import runs now. sys.path is put back, because
+        merge.py puts its own hooks folder first on it."""
+        saved = list(sys.path)
+        try:
+            spec = importlib.util.spec_from_file_location("merge_from_tree_" + uuid.uuid4().hex, os.path.join(tree, "merge", "merge.py"))
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        finally:
+            sys.path[:] = saved
+        return module
+
+    def refusal_from(self, module):
+        """The refusal of `module`'s refuse_full_disk on a drive with REFUSE_GIB free: the call lane_lint makes first. -> the refusal's text."""
+        self.assertLess(REFUSE_GIB, full_floor_gib(DISK_GIB), "the case reads %s GiB, not under the full floor; it proves nothing" % REFUSE_GIB)
+        with self.disk_reading(free_gib=REFUSE_GIB), self.assertRaises(module.Stop) as caught:
+            module.refuse_full_disk(self.co)
+        return str(caught.exception)
+
+    @staticmethod
+    def named_sweep(text):
+        """The sweep the refusal names: the path before `--root` in `python3 <sweep> --root <root> --confirm`, unquoted. None when it names none."""
+        match = re.search(r"python3 ('[^']*'|\S+) --root", text)
+        return shlex.split(match.group(1))[0] if match else None
+
+    @staticmethod
+    def landed_sweep_in(config):
+        """Put the landed sweep in the config dir `config`, where the install lands janitor/. -> its path."""
+        landed = os.path.join(config, "janitor", "sweep.py")
+        tm.put(landed, "# the landed sweep, a fixture of this case\n")
+        return landed
+
+    def assert_names_landed_sweep(self, text, landed, tree):
+        """The refusal names `landed`, and that file is still there once the run's tree is deleted."""
+        named = self.named_sweep(text)
+        self.assertIsNotNone(named, "the disk refusal names no sweep: " + text)
+        self.assertEqual(os.path.realpath(named), os.path.realpath(landed),
+                         "the refusal names %s, not the landed sweep %s (the path comes from merge.py's own __file__)" % (named, landed))
+        shutil.rmtree(tree, True)  # launch.py's finally: the run's tree is gone when the run ends
+        self.assertTrue(os.path.isfile(named), "the sweep the refusal names is gone once the run's tree is deleted: " + named)
+
+    def test_a_refusal_from_a_temp_tree_names_the_landed_sweep_under_the_config_dir(self):
+        """The refusal names the landed sweep, not a file in the temp tree that launch.py deletes when the run ends."""
+        landed = self.landed_sweep_in(self.cfg)
+        tree = self.merge_tree_copy()
+        self.assertEqual(os.environ.get("CLAUDE_CONFIG_DIR"), self.cfg, "the case does not set the config dir it names")  # scope first
+        module = self.load_merge_from(tree)
+        self.assertTrue(self.under(module.__file__, tree), "merge.py did not load from the temp tree: %s" % module.__file__)
+        self.assert_names_landed_sweep(self.refusal_from(module), landed, tree)
+
+    def test_with_no_config_dir_the_refusal_from_a_temp_tree_names_the_landed_sweep_under_home_claude(self):
+        """The default config dir is ~/.claude, which install.sh and janitor/GUIDE.md use. HOME and USERPROFILE point at a fixture home, so the
+        case never reads the real one."""
+        home = tempfile.mkdtemp(prefix="home-", dir=RUN_FOLDER)
+        landed = self.landed_sweep_in(os.path.join(home, ".claude"))
+        tree = self.merge_tree_copy()
+        with unittest.mock.patch.dict(os.environ, {"HOME": home, "USERPROFILE": home}):
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            self.assertEqual(os.path.realpath(os.path.expanduser("~")), os.path.realpath(home), "the case would read the real home")  # scope first
+            module = self.load_merge_from(tree)
+            self.assertTrue(self.under(module.__file__, tree), "merge.py did not load from the temp tree: %s" % module.__file__)
+            text = self.refusal_from(module)
+        self.assert_names_landed_sweep(text, landed, tree)
 
 
 if __name__ == "__main__":
