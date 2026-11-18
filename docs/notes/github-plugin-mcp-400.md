@@ -1,0 +1,1 @@
+- github-plugin-mcp-400: in cloud sessions the github plugin's MCP server fails to connect (400 "Authorization header is badly formatted"); the owner removed a stale github plugin on his Mac Nov 11; cloud tools mcp__github__* work.

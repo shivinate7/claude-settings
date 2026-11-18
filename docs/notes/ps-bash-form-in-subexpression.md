@@ -1,0 +1,1 @@
+- ps-bash-form-in-subexpression: the PowerShell bash-form check does not refuse a bash-only form inside `$( )` in a double-quoted string or an `@"` here-string, since the walk blanks both, as in "T: $(gh pr view 12 --json title | jq -r .title)" (hooks/question_form.py `_ps_bash_form`). Decision: act-in-place Seen: 2026-11-17 x1

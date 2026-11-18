@@ -551,12 +551,19 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         told = [s for s in sentences(hook_role_line()) if self.is_no_parent_merge(s)]
         self.assertTrue(told, "no affirmative sentence says a session with no parent merges its own PR under the merge grant")
 
-    # decision session-tiers: only a solo or one-lane session the owner started merges its own PR, so its sentence names that shape
-    def test_the_no_parent_merge_sentence_names_solo_or_one_lane(self):
-        told = [s for s in sentences(hook_role_line()) if self.is_no_parent_merge(s)]
-        self.assertTrue(told, "no affirmative sentence says a session with no parent merges its own PR under the merge grant")
-        for sentence in told:
-            self.assertIn("solo or one-lane", sentence, "the no-parent merge sentence does not name solo or one-lane: %r" % sentence)
+    # Ruling own-lanes-merge-claude-settings-prs (owner, 11:12 CST Nov 15, 2026) and roles-pick-mode-from-request: the session the owner
+    # starts with no parent is a coordinator for a standing build, else a lane. A lane merges only its own ready PR, and marks it ready once
+    # in the role form (ruling Q2, decision draft-until-reviewed, owner, 12:58 CST Nov 16, 2026).
+    def test_the_no_parent_sentence_names_the_coordinator_or_a_lane(self):
+        told = [s for s in sentences(hook_role_line()) if "no parent_session_id" in s]
+        self.assertEqual(len(told), 1, "expected one sentence naming no parent_session_id, found %d: %r" % (len(told), told))
+        sentence = told[0]
+        self.assertIn("standing build", sentence, "the no-parent sentence does not name a standing build: %r" % sentence)
+        self.assertIn("coordinator", sentence.lower(), "the no-parent sentence names no coordinator: %r" % sentence)
+        self.assertIn("lane", sentence, "the no-parent sentence names no lane: %r" % sentence)
+        self.assertNotIn("solo", sentence.lower(), "the no-parent sentence still names a solo session: %r" % sentence)
+        self.assertNotIn("one-lane", sentence, "the no-parent sentence still names a one-lane session: %r" % sentence)
+        self.assertFalse(self.says_coordinator_merges(sentence), "the no-parent sentence says a coordinator merges: %r" % sentence)
 
     def hand_off_sentence(self):
         """The tier line's one sentence that hands a branch to the batch runner. Asserts that scope before any content."""
@@ -582,8 +589,10 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         sentence = merge_role_sentence(hook_role_line())
         self.assertIn("resume", sentence.lower(), sentence)
 
-    def test_the_tier_line_does_not_say_once(self):
-        self.assertNotRegex(hook_role_line(), r"(?i)\bonce\b")
+    # ruling Q2 (decision draft-until-reviewed, owner, 12:58 CST Nov 16, 2026): a lane marks its own draft PR ready once. The role record is
+    # still taken again after a resume, so every other "once" in the line stays out.
+    def test_the_tier_line_does_not_say_once_except_in_ready_once(self):
+        self.assertNotRegex(re.sub(r"(?i)\bready once\b", "", hook_role_line()), r"(?i)\bonce\b")
 
     def test_the_merge_role_sentence_is_found_by_its_edges(self):
         # The helper cuts at ". ": from the one before `merge --role` to the one after it, or to the line's ends.
@@ -614,6 +623,74 @@ class SessionStartMergeRoleTests(unittest.TestCase):
                                            "runner (list_sessions, tag cs-build:batch-runner, same repo) and never merges."))
         self.assertTrue(self.names_a_lane("A lane session (tag cs-build:lane) hands its reviewed branch, head and PR to the batch "
                                           "runner and never merges."))
+
+    # ---- the lane's own merge (ruling own-lanes-merge-claude-settings-prs, 11:12 CST Nov 15, 2026): a lane runs merge --role lane --step
+    # for its own step and merges only its own ready PR. It marks its own draft PR ready once, in the role form (ruling Q2, decision
+    # draft-until-reviewed, owner, 12:58 CST Nov 16, 2026).
+    @staticmethod
+    def get_session_before_lane_role(sentence):
+        """True when get_session is named before the lane role command in the sentence."""
+        get, role = sentence.find("get_session"), sentence.find("merge --role lane --step")
+        return 0 <= get < role
+
+    @staticmethod
+    def only_own_ready_pr(sentence):
+        """True when the sentence limits the lane's merge to its own ready pull request."""
+        return re.search(r"\bonly\b[^.;]*\bown\b[^.;]*\bready\b", sentence) is not None
+
+    @staticmethod
+    def lane_never_merges(sentence):
+        """True when the sentence names a lane and says it never merges."""
+        return SessionStartMergeRoleTests.names_a_lane(sentence) and re.search(r"\bnever merges\b", sentence, re.IGNORECASE) is not None
+
+    @staticmethod
+    def ready_form(sentence):
+        """True when the sentence holds the lane's own ready mark in the role form, `merge --role lane --step <slug> <pr> --ready` (the slug and
+        the pr are one token each), and says the mark is once."""
+        return re.search(r"merge --role lane --step \S+ \S+ --ready", sentence) is not None and re.search(r"\bready once\b", sentence) is not None
+
+    def lane_role_sentence(self):
+        """The one sentence that names `merge --role lane --step`. Asserts that scope before any content."""
+        found = [s for s in sentences(hook_role_line()) if "merge --role lane --step" in s]
+        self.assertEqual(len(found), 1, "expected one sentence naming merge --role lane --step, found %d: %r" % (len(found), found))
+        return found[0]
+
+    def test_the_lane_role_sentence_runs_get_session_first(self):
+        self.assertTrue(self.get_session_before_lane_role(self.lane_role_sentence()),
+                        "the lane role sentence does not run get_session before merge --role lane --step")
+
+    def test_the_lane_role_sentence_limits_the_merge_to_its_own_ready_pr(self):
+        self.assertTrue(self.only_own_ready_pr(self.lane_role_sentence()), "the lane role sentence does not limit the merge to its own ready PR")
+
+    def test_the_lane_role_sentence_marks_its_own_draft_ready_once_in_the_role_form(self):
+        sentence = self.lane_role_sentence()
+        self.assertTrue(self.ready_form(sentence),
+                        "the lane role sentence does not mark its own draft ready once with merge --role lane --step <slug> <pr> --ready: %r" % sentence)
+        self.assertFalse(self.binds(sentence, r"\b(?:never|not|no)\b", r"--ready"), "the lane role sentence says a lane never runs --ready: %r" % sentence)
+
+    def test_no_sentence_of_the_role_line_says_a_lane_never_merges(self):
+        told = [s for s in sentences(hook_role_line()) if self.lane_never_merges(s)]
+        self.assertEqual(told, [], "the tier line still says a lane never merges: %r" % told)
+
+    # green controls (P2): the helpers pass a sentence built like the lane rule, and reject its wrong forms
+    def test_the_lane_helpers_pass_the_rule_and_reject_its_wrong_forms(self):
+        rule = ("A lane runs get_session, then ~/.claude/bin/merge --role lane --step <slug>, and may merge only its own ready PR; "
+                "it marks its own draft PR ready once with merge --role lane --step <slug> <pr> --ready.")
+        self.assertTrue(self.get_session_before_lane_role(rule), "the get_session order is not read")
+        self.assertFalse(self.get_session_before_lane_role("A lane runs ~/.claude/bin/merge --role lane --step <slug>, then get_session."),
+                         "a get_session after the role command is read as first")
+        self.assertTrue(self.only_own_ready_pr(rule), "the own ready PR limit is not read")
+        self.assertFalse(self.only_own_ready_pr("A lane may merge any ready PR; never --ready."), "a merge with no own-PR limit is read as limited")
+        self.assertTrue(self.ready_form(rule), "the role form of the own ready mark is not read")
+        self.assertFalse(self.ready_form("A lane runs merge --role lane --step <slug> <pr> --ready."), "a ready mark with no once is read as the once form")
+        self.assertFalse(self.ready_form("A lane marks its own draft PR ready once with merge --confirm <pr>."),
+                         "a ready once with no role form is read as the role form")
+        self.assertTrue(self.binds("A lane may merge only its own ready PR; never --ready.", r"\b(?:never|not|no)\b", r"--ready"),
+                        "the never --ready negation is not read")
+        self.assertFalse(self.binds("A lane may run --ready on its own PR.", r"\b(?:never|not|no)\b", r"--ready"),
+                         "a permission to run --ready is read as a negation")
+        self.assertTrue(self.lane_never_merges("A lane session never merges its own PR."), "a lane that never merges is not read")
+        self.assertFalse(self.lane_never_merges("A lane session merges only its own ready PR."), "a lane that merges is read as never merging")
 
     # batch-runner-start-names-idle-lanes: the scope comes first, so a missing sentence fails the scope, never passes empty
     def test_one_sentence_of_the_role_line_names_the_idle_lanes_command(self):
@@ -714,6 +791,337 @@ class SessionStartMergeRoleTests(unittest.TestCase):
                          "a second session subject is accepted")
         self.assertFalse(self.runner_subject_only("A session tagged cs-build:batch-runner, and a solo session does too, runs `x`."),
                          "a solo session subject is accepted")
+
+
+# The SessionStart roster block (decision brief-ids-in-roster). Its rows are the Standing sessions rows of CLAUDE.md on the
+# roadmap ref. The row shape is the one section 43300 of tests/guard writes. That section lives in the guard runner's
+# globals, which this module cannot import, so the rows are built here too (a copy with that stated reason).
+ROSTER_REPO_NAME = "example-org/roster-fixture"  # the origin's owner and name: the repo tag the block prints
+ROSTER_COORD_ID = "session_01RosterCoordAa0001"
+ROSTER_TRIAGE_ID = "session_01RosterTriageBb0002"
+ROSTER_RUNNER_ID = "session_013RosterRunnerCc0003"
+ROSTER_LANE_ID = "session_01RosterLaneOutside9"  # a lane's id on a notes line, which is no row
+ROSTER_CONSULTANT_ID = "session_01RosterConsultantFf0006"  # the consultant: a standing row, no tier tag (session-tiers)
+ROSTER_ARBITER_ID = "session_01RosterArbiterEe0005"  # the arbiter: a row, but no standing merge role (session-tiers)
+# (role word the block must print, the row's id) for each of the three rows the default fixture holds.
+ROSTER_ROWS_ASSERTED = (("coordinator", ROSTER_COORD_ID), ("triage", ROSTER_TRIAGE_ID),
+                        ("batch runner 10", ROSTER_RUNNER_ID))
+ROSTER_RECORD_HEAD = ("## Standing sessions\n\nThis roster is the one record of who holds each standing session.\n\n")
+ROSTER_PLACEHOLDER = ('- Coordinator (starts every other session, holds lane state, talks with the owner): '
+                      '"<session title>", <session id>, since <date and time>.')
+
+
+def roster_row(role, title, sid):
+    return '- %s (a standing session): "%s", %s, since 2026-11-10 14:29 CST.' % (role, title, sid)
+
+
+def roster_record(rows):
+    """CLAUDE.md with a Standing sessions section holding `rows`, then a lane notes section that names a lane's id."""
+    return ("# Fixture\n\nThe rules of this repo live beside this file.\n\n" + ROSTER_RECORD_HEAD + "\n".join(rows)
+            + "\n\n## Lane notes\n\nThe lane for step roster-at-start is " + ROSTER_LANE_ID + ". It is not on the roster.\n")
+
+
+DEFAULT_ROSTER_ROWS = [roster_row("Coordinator", "coordinator", ROSTER_COORD_ID),
+                       roster_row("Triage", "triage", ROSTER_TRIAGE_ID),
+                       roster_row("Batch runner", "batch runner 10", ROSTER_RUNNER_ID)]
+# Full size: every tier the record names. Only the coordinator, triage and consultant rows hold the standing merge role.
+STANDING_ROSTER_ROWS = [roster_row("Coordinator", "claude settings coordinator", ROSTER_COORD_ID),
+                        roster_row("Triage", "cs triage: claude-settings", ROSTER_TRIAGE_ID),
+                        roster_row("Consultant", "owner's voice", ROSTER_CONSULTANT_ID),
+                        roster_row("Batch runner", "batch runner 10", ROSTER_RUNNER_ID),
+                        roster_row("Arbiter", "arbiter", ROSTER_ARBITER_ID)]
+
+
+class SessionStartRosterTests(SessionStartAgentWorktreeNoticeTests):
+    """The roster block prints each standing session of the repo's roadmap record with its role, the repo tag, its id, and
+    the source. Status is from the record, not live, and the block names list_sessions for the live status. No roster
+    record prints one line that says so. The read uses no network and starts no process but the git read.
+    The start hook also records the standing merge role of the session's own row, in a cloud session only. Those cases read
+    the role back through merge/merge.py, the reader the merge's confirm uses."""
+
+    def setUp(self):
+        super().setUp()
+        origin = os.path.join(self.root, "example-org", "roster-fixture.git")
+        os.makedirs(os.path.dirname(origin))
+        answer = subprocess.run([VCS, "init", "-q", "--bare", origin], capture_output=True, text=True, timeout=60)
+        if answer.returncode != 0:
+            sys.exit("fixture setup failed: git init --bare: %s" % answer.stderr.strip())
+        vcs(self.primary, "remote", "add", "origin", origin)
+
+    def git_in(self, args, text=None):
+        # Bytes, not text mode: Windows text mode writes each LF as CRLF, and mktree would read a CR in the name.
+        answer = subprocess.run([VCS, "-C", self.primary, *IDENT, *args],
+                                input=None if text is None else text.encode("utf-8"), capture_output=True, timeout=60)
+        if answer.returncode != 0:
+            sys.exit("fixture setup failed: %s %s: %s"
+                     % (VCS, " ".join(args), answer.stderr.decode("utf-8", "replace").strip()))
+        return answer.stdout.decode("utf-8").strip()
+
+    def record_commit(self, text):
+        """The commit of a record whose only file is CLAUDE.md `text`. No ref moves."""
+        blob = self.git_in(["hash-object", "-w", "--stdin"], text)
+        tree = self.git_in(["mktree"], "100644 blob %s\tCLAUDE.md\n" % blob)
+        return self.git_in(["commit-tree", tree, "-m", "roster record"])
+
+    def put_record(self, text):
+        """Point refs/remotes/origin/roadmap at a commit whose only file is CLAUDE.md `text`. The checkout's branch and
+        files stay as they were: the record is read, never checked out."""
+        vcs(self.primary, "update-ref", "refs/remotes/origin/roadmap", self.record_commit(text))
+
+    def block_lines(self, lines):
+        """The lines that name the default fixture's first row, so a block with none fails here, not later."""
+        return [line for line in lines if ROSTER_COORD_ID in line]
+
+    def assert_one_roster_line_saying_none(self, lines):
+        named = [line for line in lines if re.search(r"roster", line, re.IGNORECASE)]
+        self.assertEqual(len(named), 1, "expected one roster line when there is no roster record, got %r" % named)
+        self.assertRegex(named[0], r"\b(no|not|none|missing)\b",
+                         "the roster line does not say there is no roster record: %r" % named[0])
+
+    def test_the_block_prints_one_line_per_row_with_its_role_repo_tag_and_id(self):
+        self.put_record(roster_record(DEFAULT_ROSTER_ROWS))
+        lines = self.run_hook()
+        self.assertEqual(self.last_stderr, "", "the hook printed on stderr: %r" % self.last_stderr)
+        for role, sid in ROSTER_ROWS_ASSERTED:
+            with self.subTest(row=sid):
+                named = [line for line in lines if sid in line]
+                self.assertEqual(len(named), 1, "expected one line that names %s, got %r" % (sid, named))
+                self.assertIn(ROSTER_REPO_NAME, named[0], "the row's line lacks the repo tag: %r" % named[0])
+                self.assertIn(role, named[0].lower(), "the row's line lacks its role %r: %r" % (role, named[0]))
+
+    def test_a_lane_id_on_a_lane_notes_line_is_not_printed_as_a_row(self):
+        self.put_record(roster_record(DEFAULT_ROSTER_ROWS))
+        lines = self.run_hook()
+        self.assertTrue(self.block_lines(lines), "the roster block is not printed, so no row can be judged")
+        self.assertEqual([line for line in lines if ROSTER_LANE_ID in line], [],
+                         "a lane's notes-line id is printed as a roster row")
+
+    def test_the_block_names_the_roadmap_standing_sessions_section_as_its_source(self):
+        self.put_record(roster_record(DEFAULT_ROSTER_ROWS))
+        lines = self.run_hook()
+        self.assertTrue(self.block_lines(lines), "the roster block is not printed, so no source line can be judged")
+        self.assertTrue(any("roadmap" in line.lower() and "Standing sessions" in line for line in lines),
+                        "no line names the roadmap record's Standing sessions section as the source: %r" % lines)
+
+    def test_the_block_says_status_is_from_the_record_and_not_live(self):
+        self.put_record(roster_record(DEFAULT_ROSTER_ROWS))
+        lines = self.run_hook()
+        self.assertTrue(self.block_lines(lines), "the roster block is not printed, so no status line can be judged")
+        self.assertTrue(any(re.search(r"status", line, re.IGNORECASE) and re.search(r"record", line, re.IGNORECASE)
+                            and re.search(r"not\s+live", line, re.IGNORECASE) for line in lines),
+                        "no line says the status is from the record and not live: %r" % lines)
+
+    def test_the_block_tells_the_session_to_run_list_sessions_for_live_status(self):
+        self.put_record(roster_record(DEFAULT_ROSTER_ROWS))
+        lines = self.run_hook()
+        self.assertTrue(self.block_lines(lines), "the roster block is not printed, so no list_sessions line can be judged")
+        self.assertTrue(any("list_sessions" in line and "live" in line.lower() for line in lines),
+                        "no line tells the session to run list_sessions for live status: %r" % lines)
+
+    def test_no_roster_record_prints_one_line_that_says_so_and_exits_zero(self):
+        lines = self.run_hook()
+        self.assertEqual(self.last_stderr, "", "the hook printed on stderr: %r" % self.last_stderr)
+        self.assert_one_roster_line_saying_none(lines)
+
+    def test_a_record_with_no_standing_sessions_section_prints_the_same_one_line(self):
+        self.put_record("# Notes\n\nNo roster is kept in this repo yet.\n")
+        lines = self.run_hook()
+        self.assertEqual(self.last_stderr, "", "the hook printed on stderr: %r" % self.last_stderr)
+        self.assert_one_roster_line_saying_none(lines)
+
+    def test_an_empty_roster_of_placeholders_prints_no_row_and_the_one_line(self):
+        self.put_record(roster_record([ROSTER_PLACEHOLDER]))
+        lines = self.run_hook()
+        self.assertEqual([line for line in lines if "<session" in line], [],
+                         "a template placeholder is printed as a roster row")
+        self.assert_one_roster_line_saying_none(lines)
+
+    def test_a_full_roster_prints_a_line_for_each_of_its_five_rows(self):
+        full = DEFAULT_ROSTER_ROWS + [roster_row("Batch runner", "batch runner, claude-settings", "session_01RosterBatchDd0004"),
+                                      roster_row("Arbiter", "arbiter", ROSTER_ARBITER_ID)]
+        self.put_record(roster_record(full))
+        lines = self.run_hook()
+        self.assertEqual(self.last_stderr, "", "the hook printed on stderr: %r" % self.last_stderr)
+        for sid in ("session_01RosterBatchDd0004", ROSTER_ARBITER_ID, ROSTER_COORD_ID, ROSTER_RUNNER_ID):
+            with self.subTest(row=sid):
+                named = [line for line in lines if sid in line]
+                self.assertEqual(len(named), 1, "expected one line that names %s, got %r" % (sid, named))
+
+    def net_shims(self):
+        """A folder of gh and curl stubs, each of which appends its name to a marker file and fails, and the marker's path.
+        A hook run with the folder first on PATH shows any call to either in the marker."""
+        shims = os.path.join(self.root, "netshims")
+        marker = os.path.join(self.root, "network-calls.txt")
+        os.makedirs(shims)
+        for name in ("gh", "curl"):
+            path = os.path.join(shims, name)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("#!/bin/sh\necho %s >> '%s'\nexit 1\n" % (name, marker))
+            os.chmod(path, 0o755)
+        return shims, marker
+
+    def test_the_roster_read_calls_no_gh_or_curl(self):
+        self.put_record(roster_record(DEFAULT_ROSTER_ROWS))
+        shims, marker = self.net_shims()
+        lines = self.run_hook(path_dir=shims)
+        self.assertTrue(self.block_lines(lines), "the roster block is not printed, so the network check proves nothing")
+        self.assertFalse(os.path.exists(marker), "the roster read started gh or curl")
+
+    # The standing merge role the start hook records. merge/merge.py compares the role file's session with the env value as
+    # it is (CLAUDE_CODE_REMOTE_SESSION_ID, cse_<x>), while the roster names the record id session_<x> (hooks/override.py).
+    # The cases read the role back through merge/merge.py, so they hold whatever file form the hook writes.
+
+    @staticmethod
+    def cloud_env(sid):
+        """The CLAUDE_CODE_REMOTE_SESSION_ID value of record id `sid`: its session_ form with the cse_ prefix."""
+        return "cse_" + sid[len("session_"):]
+
+    def role_file(self):
+        return os.path.join(self.config, "state", "merge-role.json")
+
+    def forget_role_file(self):
+        try:
+            os.remove(self.role_file())
+        except FileNotFoundError:
+            pass
+
+    def write_role_file(self, sid, role):
+        """A role file as merge/merge.py writes it, for record id `sid`: the raw env value and the role."""
+        os.makedirs(os.path.dirname(self.role_file()), exist_ok=True)
+        with open(self.role_file(), "w", encoding="utf-8") as handle:
+            json.dump({"session": self.cloud_env(sid), "role": role}, handle)
+
+    def merge_role_of(self, sid):
+        """The role merge/merge.py reads for a cloud session of record id `sid` (None: a session with no id), from the config dir
+        the hook wrote to. None when it reads none."""
+        merge_dir = os.path.join(HERE, "..", "merge")
+        if merge_dir not in sys.path:
+            sys.path.insert(0, merge_dir)
+        import merge as merge_tool  # noqa: E402  merge/merge.py, the reader the merge's own confirm uses
+        env = {"CLAUDE_CODE_REMOTE": "true", "CLAUDE_CONFIG_DIR": self.config}
+        if sid is not None:
+            env["CLAUDE_CODE_REMOTE_SESSION_ID"] = self.cloud_env(sid)
+        with mock.patch.dict(os.environ, env):
+            if sid is None:
+                os.environ.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)  # the test runner may itself be a cloud session
+            return merge_tool.read_merge_role()
+
+    def start_as(self, sid, source="startup", remote="true", **kwargs):
+        """The start hook run as record id `sid`, sent through the env's cse_ value. None sends no record id."""
+        env_value = None if sid is None else self.cloud_env(sid)
+        return self.run_hook(remote=remote, remote_session_id=env_value, source=source, **kwargs)
+
+    def assert_records_standing(self, sid, msg):
+        role = self.merge_role_of(sid)
+        self.assertEqual(role, "standing", "%s: the merge tool reads %r" % (msg, role))
+
+    def test_a_cloud_start_records_the_standing_role_of_a_coordinator_row(self):
+        # The payload's session_id is a local UUID, not a record id, so the role must come from the env's record id.
+        self.put_record(roster_record(STANDING_ROSTER_ROWS))
+        lines = self.start_as(ROSTER_COORD_ID)
+        self.assertEqual(self.last_stderr, "", "the hook printed on stderr: %r" % self.last_stderr)
+        self.assertTrue(self.block_lines(lines), "scope: the roster block is not printed, so the role's source is unproven")
+        self.assert_records_standing(ROSTER_COORD_ID, "a cloud start as the coordinator row did not record the standing role")
+
+    def test_a_triage_or_consultant_row_records_the_standing_role(self):
+        self.put_record(roster_record(STANDING_ROSTER_ROWS))
+        for sid in (ROSTER_TRIAGE_ID, ROSTER_CONSULTANT_ID):
+            with self.subTest(row=sid):
+                self.start_as(sid)
+                self.assert_records_standing(sid, "a cloud start as a standing row did not record the standing role")
+
+    def test_a_resume_records_the_standing_role_as_a_startup_does(self):
+        self.put_record(roster_record(STANDING_ROSTER_ROWS))
+        self.assertNotEqual(self.merge_role_of(ROSTER_TRIAGE_ID), "standing", "scope: the role is recorded before the resume")
+        self.start_as(ROSTER_TRIAGE_ID, source="resume")
+        self.assert_records_standing(ROSTER_TRIAGE_ID, "a resume did not record the standing role a startup records")
+
+    def test_a_batch_runner_or_arbiter_row_records_no_standing_role(self):
+        self.put_record(roster_record(STANDING_ROSTER_ROWS))
+        self.start_as(ROSTER_COORD_ID)  # control: the same roster records the coordinator's standing role
+        self.assert_records_standing(ROSTER_COORD_ID, "control: the coordinator row did not record the standing role")
+        for sid in (ROSTER_RUNNER_ID, ROSTER_ARBITER_ID):
+            with self.subTest(row=sid):
+                self.forget_role_file()
+                self.start_as(sid)
+                self.assertNotEqual(self.merge_role_of(sid), "standing",
+                                    "a start as a row that holds no standing role recorded the standing role")
+
+    def test_a_lane_id_or_a_start_with_no_record_id_records_no_standing_role(self):
+        self.put_record(roster_record(STANDING_ROSTER_ROWS))
+        self.start_as(ROSTER_COORD_ID)  # control
+        self.assert_records_standing(ROSTER_COORD_ID, "control: the coordinator row did not record the standing role")
+        self.forget_role_file()
+        self.assertIn(ROSTER_LANE_ID, self.git_in(["show", "refs/remotes/origin/roadmap:CLAUDE.md"]),
+                      "scope: the lane's id is not on the record")
+        self.start_as(ROSTER_LANE_ID)  # the lane's id sits on a notes line, which is no row
+        self.assertNotEqual(self.merge_role_of(ROSTER_LANE_ID), "standing", "a lane id that is no roster row recorded the standing role")
+        self.start_as(None)
+        self.assertNotEqual(self.merge_role_of(None), "standing", "a start with no record id recorded the standing role")
+
+    def test_a_local_session_with_a_coordinator_row_records_no_standing_role(self):
+        self.put_record(roster_record(STANDING_ROSTER_ROWS))
+        self.start_as(ROSTER_COORD_ID)  # control: a cloud start records it
+        self.assert_records_standing(ROSTER_COORD_ID, "control: the coordinator row did not record the standing role")
+        self.forget_role_file()
+        self.start_as(ROSTER_COORD_ID, remote=None)  # a local session: the merge role is a cloud role (merge/merge.py)
+        self.assertNotEqual(self.merge_role_of(ROSTER_COORD_ID), "standing", "a local start recorded the standing role")
+
+    def test_no_roadmap_ref_records_no_standing_role(self):
+        self.put_record(roster_record(STANDING_ROSTER_ROWS))
+        self.start_as(ROSTER_COORD_ID)  # control
+        self.assert_records_standing(ROSTER_COORD_ID, "control: the coordinator row did not record the standing role")
+        self.forget_role_file()
+        vcs(self.primary, "update-ref", "-d", "refs/remotes/origin/roadmap")  # the empty state: no record to read
+        lines = self.start_as(ROSTER_COORD_ID)
+        self.assert_one_roster_line_saying_none(lines)  # scope: the hook read no roster
+        self.assertNotEqual(self.merge_role_of(ROSTER_COORD_ID), "standing",
+                            "a start with no roadmap record recorded the standing role")
+
+    def test_a_demoted_session_loses_the_standing_role_on_its_next_start(self):
+        self.write_role_file(ROSTER_COORD_ID, "standing")  # a file an earlier start wrote, before the roster dropped the row
+        self.put_record(roster_record([row for row in STANDING_ROSTER_ROWS if ROSTER_COORD_ID not in row]))
+        self.assertEqual(self.merge_role_of(ROSTER_COORD_ID), "standing", "scope: the earlier role file does not hold the role")
+        lines = self.start_as(ROSTER_COORD_ID)
+        self.assertTrue([line for line in lines if ROSTER_TRIAGE_ID in line], "scope: the roster block is not printed")
+        self.assertNotEqual(self.merge_role_of(ROSTER_COORD_ID), "standing",
+                            "a session the roster no longer names kept the standing role on its start")
+
+    def test_the_start_hook_leaves_a_batch_runner_role_file_alone(self):
+        self.put_record(roster_record(STANDING_ROSTER_ROWS))
+        self.start_as(ROSTER_COORD_ID)  # control
+        self.assert_records_standing(ROSTER_COORD_ID, "control: the coordinator row did not record the standing role")
+        self.write_role_file(ROSTER_RUNNER_ID, "batch-runner")  # the file `merge --role batch-runner` writes in a batch runner
+        self.assertEqual(self.merge_role_of(ROSTER_RUNNER_ID), "batch-runner", "scope: the batch runner's file is not read before the start")
+        self.start_as(ROSTER_RUNNER_ID)
+        self.assertEqual(self.merge_role_of(ROSTER_RUNNER_ID), "batch-runner",
+                         "a start that is not standing changed a batch runner's role file")
+
+    def test_the_standing_role_write_calls_no_gh_or_curl(self):
+        self.put_record(roster_record(STANDING_ROSTER_ROWS))
+        shims, marker = self.net_shims()
+        lines = self.start_as(ROSTER_COORD_ID, path_dir=shims)
+        self.assertTrue(self.block_lines(lines), "scope: the roster block is not printed")
+        self.assert_records_standing(ROSTER_COORD_ID, "a start with gh and curl on PATH did not record the standing role")
+        self.assertFalse(os.path.exists(marker), "the standing role write started gh or curl")
+
+    def test_a_stale_roadmap_ref_records_no_role_until_the_ref_is_fetched(self):
+        # The hook reads the roadmap ref the checkout last fetched and never fetches it (hooks/own_session.py), so a start on a
+        # stale ref fails closed. The install refresh fetches the ref; a start after that records the role.
+        stale = roster_record([row for row in STANDING_ROSTER_ROWS if ROSTER_COORD_ID not in row])
+        self.put_record(stale)
+        fresh = self.record_commit(roster_record(STANDING_ROSTER_ROWS))
+        vcs(self.primary, "push", "-q", "origin", fresh + ":refs/heads/roadmap")
+        self.put_record(stale)  # the push moved the tracking ref, so the checkout holds the stale record again
+        self.assertNotIn(ROSTER_COORD_ID, self.git_in(["show", "refs/remotes/origin/roadmap:CLAUDE.md"]),
+                         "scope: the checkout's own record already names the coordinator")
+        self.start_as(ROSTER_COORD_ID)
+        self.assertNotEqual(self.merge_role_of(ROSTER_COORD_ID), "standing",
+                            "a start on a stale roadmap ref recorded the role before the ref was fetched")
+        self.put_record(roster_record(STANDING_ROSTER_ROWS))  # the refresh fetched the record: the ref holds the remote's rows
+        self.start_as(ROSTER_COORD_ID)
+        self.assert_records_standing(ROSTER_COORD_ID,
+                                     "a start on a fetched roadmap ref did not record the standing role")
 
 
 class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
@@ -847,9 +1255,11 @@ class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
         self.assert_no_live_pin_line(session_cwd=link)
 
 
-# The waiting page behind main (rule page-stale). A repo whose extras name a waiting page prints one line
-# when the stamp an allowed publish wrote, <git common dir>/waiting-page-built, holds a blob sha other than
-# main's page.html. Main is origin/main of the claude-settings clone that the config's CLAUDE.md names, the
+# The waiting page behind main (rule page-stale). A repo whose extras name a waiting page prints one line when a stamp
+# exists and none equals main's page.html blob sha. The stamps are the record file on origin/roadmap and the local stamp
+# <git common dir>/waiting-page-built, which alone counts while the record file is missing or unreadable. A stamp equal
+# to main's blob, or no stamp at all, prints nothing.
+# Main is origin/main of the claude-settings clone that the config's CLAUDE.md names, the
 # checkout the guard's stale_pages reads, not the session's own repo. The page text here is a stand-in: the
 # hook compares blob shas and never reads the text.
 WAITING_URL = "https://claude.ai/artifact/sspage"
@@ -2417,6 +2827,94 @@ class SessionStartRoleFileTests(SessionStartAgentWorktreeNoticeTests):
         matchers = [e.get("matcher", "") for e in runs]
         self.assertTrue(any(re.fullmatch(m or ".*", "clear") for m in matchers),
                         "no SessionStart entry that runs session_start.sh fires on clear: matchers %r" % (matchers,))
+
+
+class SessionStartRolePickTests(unittest.TestCase):
+    """The tier line's "No parent" sentence tells a session with no parent which role to pick: lane for one line of work,
+    coordinator for a standing build (rule roles-pick-mode-from-request; decision session-tiers, the session roles). Solo and
+    one lane collapsed into lane, so that sentence names neither, and the Session roles bullet of that record names each role
+    word the sentence names. It reads the hook's text and the record's text, so no repo fixture is built."""
+
+    SESSION_ROLES_RECORD = os.path.join(HERE, "..", "docs", "decisions", "session-tiers.md")
+    ROLE_BULLET = "- **Session roles**"  # the bullet that opens the session roles in that record
+    ROLE_WORDS = ("coordinator", "lane")  # the role words the No parent sentence is checked for
+    SOLO_SHAPES = (("solo", r"\bsolo\b"), ("one lane", r"\bone[ -]lane\b"))  # the shapes that collapsed into lane
+
+    @staticmethod
+    def names(text, pattern):
+        """True when the regex matches the text, ignoring case. The pattern carries its own word edges."""
+        return re.search(pattern, text, re.IGNORECASE) is not None
+
+    @staticmethod
+    def no_parent_sentences(line):
+        """The sentences of the line that start with "No parent". A sentence that only contains those words does not count."""
+        return [s for s in sentences(line) if re.match(r"No parent\b", s) is not None]
+
+    @staticmethod
+    def session_roles_bullets(text):
+        """The lines of the text that start with the Session roles bullet. An indented sub-bullet does not start with it."""
+        return [line for line in text.splitlines() if line.startswith(SessionStartRolePickTests.ROLE_BULLET)]
+
+    def no_parent_sentence(self):
+        """The one sentence of the tier line that starts "No parent". Asserts that scope before any content."""
+        found = self.no_parent_sentences(hook_role_line())
+        self.assertEqual(len(found), 1, "expected one sentence starting No parent, found %d: %r" % (len(found), found))
+        return found[0]
+
+    def session_roles_bullet(self):
+        """The one Session roles bullet of the session roles record. Asserts that scope before any content."""
+        with open(self.SESSION_ROLES_RECORD, encoding="utf-8") as handle:
+            found = self.session_roles_bullets(handle.read())
+        self.assertEqual(len(found), 1, "expected one Session roles bullet in the session roles record, found %d: %r" % (len(found), found))
+        return found[0]
+
+    # decision session-tiers (the session roles): solo and one lane collapsed into lane, so the No parent sentence names neither
+    def test_the_no_parent_sentence_names_neither_solo_nor_one_lane(self):
+        sentence = self.no_parent_sentence()
+        for word, pattern in self.SOLO_SHAPES:
+            with self.subTest(word=word):
+                self.assertFalse(self.names(sentence, pattern), "the No parent sentence names %r: %r" % (word, sentence))
+
+    # rule roles-pick-mode-from-request: a standing build picks coordinator, else lane
+    def test_the_no_parent_sentence_names_coordinator_lane_and_standing_build(self):
+        sentence = self.no_parent_sentence()
+        for word in ("coordinator", "lane", "standing build"):
+            with self.subTest(word=word):
+                self.assertTrue(self.names(sentence, r"\b%s\b" % word), "the No parent sentence does not name %r: %r" % (word, sentence))
+
+    # decision session-tiers (the session roles): each role word the sentence names is one the record's bullet names too
+    def test_every_role_word_the_no_parent_sentence_names_is_in_the_session_roles_bullet(self):
+        bullet = self.session_roles_bullet()
+        sentence = self.no_parent_sentence()
+        named = [word for word in self.ROLE_WORDS if self.names(sentence, r"\b%s\b" % word)]
+        self.assertTrue(named, "the No parent sentence names no role word: %r" % sentence)
+        for word in named:
+            with self.subTest(word=word):
+                self.assertTrue(self.names(bullet, r"\b%s\b" % word), "the Session roles bullet does not name %r" % word)
+
+    # green control for the scope the cases above share: exactly one sentence of the real tier line starts No parent
+    def test_one_sentence_of_the_role_pick_line_starts_no_parent(self):
+        found = self.no_parent_sentences(hook_role_line())
+        self.assertEqual(len(found), 1, "expected one sentence starting No parent, found %d: %r" % (len(found), found))
+
+    # green control: the anchor takes the sentence that starts with the words, not one that only contains them
+    def test_the_no_parent_finder_takes_only_a_sentence_that_starts_with_no_parent(self):
+        line = "A x. No parent: pick lane. A solo session with no parent_session_id merges."
+        self.assertEqual(self.no_parent_sentences(line), ["No parent: pick lane."])
+
+    # green control: the bullet finder takes the top-level bullet and not an indented sub-bullet with the same words
+    def test_the_bullet_finder_takes_only_a_top_level_session_roles_bullet(self):
+        self.assertEqual(self.session_roles_bullets("- **Other** text.\n"), [])
+        self.assertEqual(self.session_roles_bullets("- **Session roles** (owner) text.\n  - **Session roles** sub.\n"),
+                         ["- **Session roles** (owner) text."])
+
+    # green control: the word predicate flags each shape and passes a sentence that names lane for one line of work
+    def test_the_names_predicate_flags_each_shape_and_passes_a_lane_sentence(self):
+        self.assertTrue(self.names("Pick SOLO.", r"\bsolo\b"))
+        self.assertTrue(self.names("A one-lane session.", r"\bone[ -]lane\b"))
+        lane = "Pick lane for one line of work, or coordinator for a standing build."
+        self.assertFalse(self.names(lane, r"\bone[ -]lane\b"))
+        self.assertFalse(self.names(lane, r"\bsolo\b"))
 
 
 if __name__ == "__main__":

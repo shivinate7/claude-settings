@@ -1,0 +1,1 @@
+- llrcc-revert-claim-relint: (#2382 lane-lint-runs-comment-check, decision lanes-run-no-full-ci-job) merge/merge.py claim_only needs a Record-claim trailer, but relayed_head_holds accepts the tool's `Revert "Claim record numbers"`; after a failed claim and its revert, a rejoin reads `no lint` and needs one more `merge --lane-lint`. Cost only.

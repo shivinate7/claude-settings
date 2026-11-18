@@ -164,14 +164,18 @@ def token_start(text: str, index: int) -> bool:
     return index == 0 or (text[index - 1] in TOKEN_BOUNDARY and text[index - 2:index - 1] != "`")
 
 
-def quote_advance(text: str, index: int, quote: str):
+def quote_advance(text: str, index: int, quote: str, line_comments: bool = False):
     """Step the walk over `text[index]`: (width consumed, the quote open after it). An escaped
-    pair is one step of width 2. A contraction is the caller's to skip (`is_contraction`)."""
+    pair is one step of width 2. A contraction is the caller's to skip (`is_contraction`).
+    `line_comments` (PowerShell text only) opens state `#` at a token-start `#`; it ends at the
+    newline, so a quote inside the comment opens nothing past its line."""
     char = text[index]
     powershell = is_powershell(text)
     if quote == BLIND:
         return 1, BLIND
     if quote and powershell:
+        if quote == "#":
+            return 1, ("" if char == "\n" else quote)
         if quote == "<#":
             return (2, "") if text.startswith("#>", index) else (1, quote)
         if quote[0] == "@":
@@ -187,6 +191,8 @@ def quote_advance(text: str, index: int, quote: str):
     if powershell:
         if char == "`":
             return 2, ""
+        if line_comments and char == "#" and token_start(text, index):
+            return 1, "#"
         opener = token_start(text, index) and HERE_OPEN.match(text, index)
         if token_start(text, index) and text.startswith("<#", index):
             return 2, ("<#" if text.find("#>", index + 2) >= 0 else BLIND)
@@ -202,16 +208,18 @@ def quote_advance(text: str, index: int, quote: str):
     return 1, ""
 
 
-def walk_quotes(text: str):
+def walk_quotes(text: str, line_comments: bool = False):
     """Yield (index, char, quote open before it) over `text`, one step at a time. A contraction
     that bash never closes is text, as in `_split_reading`'s second reading. BLIND text yields as
-    unquoted."""
+    unquoted. With `line_comments`, a PowerShell `#` line comment yields as quote `#` through its
+    newline; the default reads no line comment, since `split_segments` already drops line comments
+    before this walk sees them."""
     quote, index = "", 0
     while index < len(text):
         if not quote and text[index] == "'" and is_contraction(text, index):
             width, after = 1, ""
         else:
-            width, after = quote_advance(text, index, quote)
+            width, after = quote_advance(text, index, quote, line_comments)
         yield index, text[index], ("" if quote == BLIND else quote)
         quote, index = after, index + width
 
@@ -1168,6 +1176,11 @@ _MAIN_HEADER = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 # `git checkout main` move a branch and keep every file, so they pass. `git checkout <path>`
 # overwrites a file from the index, so it is refused.
 
+# The git subcommands that change a repository or the tree. Some read in one form (`stash list`, `tag -l`,
+# `config --get`): a reader of this list counts those as writes (debt stamp-read-false-alarms).
+GIT_WRITES = ("commit", "push", "add", "tag", "merge", "rebase", "reset", "restore", "checkout", "switch", "stash",
+              "cherry-pick", "apply", "am", "rm", "mv", "clean", "pull", "revert", "init", "clone", "config")
+
 # `git` reads these options before the subcommand, and each one takes a value.
 GIT_OPT_WITH_VALUE = {
     "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path",
@@ -1495,7 +1508,7 @@ def _read_cd_variable(known, segment: str, move: str, ran: bool) -> str:
     return read if isinstance(read, str) and read else move
 
 
-def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False, made=frozenset()):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
@@ -1511,14 +1524,20 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
     leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
     worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
-    a segment in it gets None, and its own `cd` moves nothing. Off by default, so a rule that
-    fails closed on an untrusted `cd` keeps doing so."""
+    a segment in it gets None, and its own `cd` moves nothing. A failed cd then `|| exit`
+    ends the shell: every later segment gets None. A `return` does not: outside a function bash reports an error and
+    the next command runs. A brace group after the `||` is not read. Off by
+    default, so a rule that fails closed on an untrusted `cd` keeps doing so.
+    `made` holds normalized folders an earlier segment of the same call makes (a mkdir, a clone): a `cd`
+    into one is read as one that works, though the folder is missing at check time. Empty by default."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
     known = {}         # the variables the shell holds: plain assignments that ran here (`_track_variables`)
     doubt = False      # the last cd may have failed in an `&&` chain: a segment after it may not run
     unsure = False     # the last segment may have failed or not run: an assignment after its `&&` may not run
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
+    bail = False       # a failed cd ended in `||`: an `exit` next ends the shell
+    gone = False       # the shell has ended: nothing after runs
     last_end = ""      # the operator that ended the last non-empty segment
     for at, segment in enumerate(segments[:number + 1]):
         marks = [(index, char) for index, char, quote in walk_quotes(segment) if not quote and char in "()"]
@@ -1527,9 +1546,11 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         closes = sum(1 for _, char in marks if char == ")")
         end = ends[at] if at < len(ends) else ""
         if at == number:
-            return None if skipping else where
+            return None if skipping or gone else where
         if not segment.strip():
             continue   # an operator at end of line then the newline leaves an empty part: it changes nothing
+        if gone:
+            continue
         if skipping:
             last_end = end
             skipping = end in ("&&", "|")
@@ -1543,6 +1564,12 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         move = _segment_cd_move(tokens) if tokens else None
         before = last_end
         last_end = end
+        if bail and before == "||" and not stack and tokens:
+            word = resolve_command(tokens)
+            gone = word is not None and basename(tokens[word]) == "exit"
+            if gone:
+                continue
+        bail = False
         piped = "|" in (end, before)
         if move is not None and not is_powershell(segment) and piped:
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
@@ -1564,10 +1591,11 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                 where = None
             else:
                 target = shell_abs(move or "~", where)
-                if target and os.path.isdir(target):
+                if target and (os.path.isdir(target) or os.path.normpath(target) in made):
                     where = target
                 elif target and failed_cd_stays:
                     skipping = end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops
+                    bail = end == "||"
                     old = prev   # a failed cd leaves the folder `cd -` goes back to alone
                 else:
                     where = None
@@ -2086,12 +2114,15 @@ def _vetoed() -> bool:
         return True  # a veto that cannot be read is a veto: the refusal stands
 
 
-def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None, on_lift=None) -> None:
+def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None, on_lift=None,
+           continue_on_lift: bool = False):
     """Print a deny or an ask and exit, unless an owner override lifts it (decision
     owner-override). A lifted act prints nothing, so the normal permission flow runs. The
     veto runs before the override is taken, so a call that also holds a never-lifted act spends no override.
     spawn_role is set only on the Opus spawn refusal, the one refusal an Opus override may lift.
-    on_lift, when set, runs once when an override lifts the act, so a rule may keep state only for an act that lands."""
+    on_lift, when set, runs once when an override lifts the act, so a rule may keep state only for an act that lands.
+    continue_on_lift makes a lifted act return True instead of exiting, so the caller can judge the next rule of a
+    group (the lane start's rules); any other outcome exits as before."""
     vetoed = _vetoed()
     if not vetoed:
         try:  # an import or read failure is no override: the refusal stands
@@ -2106,6 +2137,8 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
             if lifted in override.LIFTS:
                 if on_lift:
                     on_lift()
+                if continue_on_lift:
+                    return True
                 sys.exit(0)
     record(tool, decision, rule, matched)
     try:  # the line the owner types to lift this refusal, or the words that none does; last in the reason

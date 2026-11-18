@@ -1,0 +1,1 @@
+- stale-pages-write-unchecked: `stale_pages.py --write` does not re-check its own output (review round 1, PR #1779; skills/waiting-page/stale_pages.py).

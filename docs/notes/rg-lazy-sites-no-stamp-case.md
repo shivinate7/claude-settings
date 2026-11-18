@@ -1,0 +1,1 @@
+- rg-lazy-sites-no-stamp-case: the lazy load sites question_form, route_match and _load_guard in report_guard have no stamped test case.

@@ -1,0 +1,1 @@
+- page-test-no-origin: skills/waiting-page/tests/merged_page.py adds no origin remote, so the waiting-page test helper cannot build the "no live lane" state; the roadmap helper does (built_index.py line 45). Found in the Status tab build (draft PR 3649), coordinator 09:12 CST Nov 18.

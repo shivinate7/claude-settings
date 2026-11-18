@@ -396,6 +396,14 @@ class StepFields(BriefCase):
         invented = sorted(set(PATH.findall(out)) - allowed)
         self.assertEqual(invented, [], "the brief names a file that no input holds")
 
+    def test_prior_work_placeholder_prints_and_the_tool_fills_no_search(self):
+        out = self.build(self.make_repo(step=step_doc()))
+        prior = [line.strip() for line in out.splitlines() if line.strip().startswith("Prior work:")]
+        self.assertEqual(len(prior), 1, "the brief has %d Prior work lines, want one placeholder for the coordinator"
+                         % len(prior))
+        self.assertRegex(prior[0], r"^Prior work:\s*<[^>]+>$",
+                         "the Prior work line is not a placeholder the coordinator fills: %r" % prior[0])
+
 
 class StoreStates(BriefCase):
 
@@ -632,10 +640,18 @@ class SpawnBriefHead(BriefCase):
 
     def test_spawn_brief_from_the_block_passes_the_real_guard_with_each_marker(self):
         block = self.block()
-        for marker in ("Guard or check: yes", "Fix check", "Round 2 of 3"):
-            reason = guard_reason(self.config, spawn_brief(block, marker))
-            self.assertEqual(reason, "", "the real guard refused a sonnet reviewer whose first line is %r: %s"
-                             % (marker, reason[:200]))
+        # A guard-marked reviewer runs the round-1 model, per decision `agent-model-cap`; a sonnet spawn with only that marker is refused.
+        for marker, model in (("Guard or check: yes", "haiku"), ("Fix check", "sonnet"), ("Round 2 of 3", "sonnet")):
+            with self.subTest(marker=marker, model=model):
+                reason = guard_reason(self.config, spawn_brief(block, marker), model=model)
+                self.assertEqual(reason, "", "the real guard refused a %s reviewer whose first line is %r: %s"
+                                 % (model, marker, reason[:200]))
+
+    def test_the_real_guard_refuses_a_sonnet_reviewer_whose_first_line_is_the_guard_marker(self):
+        reason = guard_reason(self.config, spawn_brief(self.block(), "Guard or check: yes"), model="sonnet")
+        self.assertTrue(reason.startswith("agent-role-model:"),
+                        "the guard marker lifted a sonnet reviewer above the `1 guard` row, which is haiku: %r"
+                        % reason[:200])
 
     def test_the_real_guard_refuses_the_same_spawn_without_a_marker(self):
         reason = guard_reason(self.config, spawn_brief(self.block()))

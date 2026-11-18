@@ -1,0 +1,1 @@
+- span-delete-after-edit-verb: a step does not refuse a span after Delete or Remove when an earlier edit verb is in the same sentence, as in "Find the lane, then delete it with `merge --drop 5`" (hooks/question_form.py SPAN_EDIT_VERB). Decision: act-in-place Seen: 2026-11-17 x1

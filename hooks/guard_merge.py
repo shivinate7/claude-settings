@@ -14,17 +14,17 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 from guard_core import (
-    SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
+    SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, GIT_WRITES, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
     REPLAY_MARKS, command_indexes, dir_before_segment, heredoc_heads, inline_script, inner_commands, own_heredoc_bodies, resolve_command, resolve_default_base, segment_tokens, split_segments,
-    is_cloud, strip_heredoc_bodies, strip_redirections,
+    is_cloud, shell_abs, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import BUILD_TAG, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import opens_fence, BUILD_TAG, CONSULTANT_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_BRIEF_MARKER, LANE_GRANT_MARKER, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags, repo_tag_names  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
 from guard_push_delete import (
-    ARCHIVE_COPY_SUFFIX, ARCHIVE_PREFIX, DEFAULT_BRANCH_FALLBACK, push_calls, push_destinations, push_refspecs,
+    ARCHIVE_COPY_SUFFIX, ARCHIVE_PREFIX, DEFAULT_BRANCH_FALLBACK, push_calls, push_destinations, push_is_plain, push_refspecs,
     push_target,
 )
 
@@ -255,11 +255,14 @@ def uses_merge_tool(where: str) -> bool:
 
 
 def pinned_required(where: str):
-    """The repo's pinned `merge.requiredChecks` list, when it is a non-empty list of names; else None,
-    and the batch read takes the names from the branch protection."""
+    """The repo's pinned `merge.requiredChecks`: the string "none", or a non-empty list of names; else None,
+    and the batch read takes the names from the branch protection. "none" is the merge tool's value for a repo
+    that requires no check (decision private-repos-no-ci), so a head with no check and no run reads green here too."""
     for config in _merge_configs(where) if where else ():
         merge = config["merge"]
         names = merge.get("requiredChecks") if isinstance(merge, dict) else None
+        if names == "none":
+            return names
         if isinstance(names, list) and names and all(isinstance(k, str) and k for k in names):
             return names
     return None
@@ -402,6 +405,32 @@ READY_PAGE_UNKNOWN_REASON = (
     "(decision guard-hooks-fail-closed, a guard that cannot run its read refuses)"
 )
 
+READY_PAGE_BEHIND_REASON = (
+    "Rule (Git, guard-hooks-fail-closed): the records page on the head of this pull request could not be read, so it is "
+    "unknown whether it is stale: %s. The merge tool the guard loaded is behind origin/main, and a tool that old can "
+    "fail this read. A read that cannot run refuses the ready mark. "
+    "Remedy: from the claude-settings clone, run merge/install_from_main.sh (the reinstall from main), then retry. "
+    "(decision guard-hooks-fail-closed, a guard that cannot run its read refuses)"
+)
+
+
+def merge_tool_behind_main() -> bool:
+    """True when the checkout that holds the loaded merge tool is behind origin/main (its HEAD is an ancestor of
+    origin/main and not equal to it). Any read that fails is False: the plain unknown reason then stands."""
+    module = merge_module()
+    path = getattr(module, "__file__", None)
+    if not path:
+        return False
+    root = os.path.dirname(os.path.dirname(os.path.realpath(path)))
+    ref = resolve_default_base(root) or "origin/main"  # the short ref name already holds the remote
+    if not ref.startswith("origin/"):
+        return False
+    head, tip = _git(root, "rev-parse", "HEAD"), _git(root, "rev-parse", ref)
+    if not head or not tip or head.returncode or tip.returncode or head.stdout.strip() == tip.stdout.strip():
+        return False
+    ancestor = _git(root, "merge-base", "--is-ancestor", "HEAD", ref)
+    return ancestor is not None and ancestor.returncode == 0
+
 
 def ready_page_calls(tool: str, tool_input: dict, command: str):
     """[(selector, repo)], one per call in this tool call that marks a pull request ready. The shell form is read by
@@ -449,7 +478,8 @@ def ready_page_hit(tool: str, tool_input: dict, command: str, where: str):
             remedy = merge_module().stale_page_remedy(int(detail))
             return READY_PAGE_STALE_REASON % (detail, remedy), "ready on a stale page #" + detail
         if state == "unknown":
-            return READY_PAGE_UNKNOWN_REASON % cap_safe(detail, 200), "ready, page read unknown"
+            reason = READY_PAGE_BEHIND_REASON if merge_tool_behind_main() else READY_PAGE_UNKNOWN_REASON
+            return reason % cap_safe(detail, 200), "ready, page read unknown"
     return None
 
 
@@ -737,6 +767,13 @@ CONFLICT_MARKERS_CHAIN_REASON = (
     "the guard cannot read, so it cannot be checked for conflict markers before this push sends it. "
     "Remedy: run the push in a call of its own, after the commit has landed."
 )
+CONFLICT_MARKERS_CD_REASON = (
+    "Rule (Git, conflict-markers; decision commit-refuses-conflict-markers, decision refuse-git-after-missing-cd; "
+    "ruling own-476-c-refuse-cd-missing-folder): "
+    "the cd before this git write names a folder that does not exist, so the cd failed and the shell stays in the "
+    "current folder. The write would land in the current folder's repository, which is not the one you named. "
+    "Remedy: check the folder path, or join the cd to the git command with `&&`, then retry."
+)
 RED_RUN_PUSH_REASON = (
     "Rule (Git, red-run; decision red-run-trailer-on-test-commits): this push would send test commits with no "
     "valid Red-run trailer: {flagged}. Remedy: {fix}"
@@ -768,6 +805,8 @@ OCTOPUS_PUSH_REASON = (
     "Rule (Git, octopus-push; decision octopus-push-refused): this push would send {sha}, a merge commit of more than two parents. "
     "Remedy: redo that merge as a chain of two-parent merges, then retry the push."
 )
+OCTOPUS_PUSH_STALE = (" The remote's tracking refs could not be refreshed, so a merge the remote already holds may show as new."
+                      " Run `git fetch <remote>` and push again. If that merge is still listed, redo it as two-parent merges.")
 _READ_VERBS = ("status", "diff", "log", "show")
 _CONTINUE_VERBS = ("merge", "rebase", "cherry-pick")
 _CONFLICT_VERBS = ("merge", "pull", "rebase", "cherry-pick", "am")
@@ -895,7 +934,7 @@ def _red_run_module():
     """lint/check_red_run.py, imported from the lint folder beside this file's folder, the one home of the
     rule. It waits for the first push that needs it, and raises ImportError in a copy of the hooks with no lint
     folder beside it. The caller reads that as no hit."""
-    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    lint = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
     import check_red_run
@@ -1018,37 +1057,61 @@ def _remote_refs(where, remote):
     return "--remotes=" + remote
 
 
-def _octopus_hit(segment, stripped, cwd, args):
-    """Return the short sha of the first merge of more than two parents that a `git push` would send,
-    else ''. The range is what the push adds to the remote: the source ref, less every ref of the pushed
-    remote, so an octopus that a remote ref already holds (a merge of origin/main brings one in) is not
-    sent. A destination named like the default branch is skipped before any read: push-main asks about
-    that push, and a deny from here would win over the ask. One `git rev-list` for each ref, and one
-    `git config` more for a remote named by a URL or a path (`_remote_refs`)."""
-    for where, source, _dest, _tracking, remote, _memo in _push_refs(
-            segment, stripped, cwd, args, DEFAULT_BRANCH_FALLBACK):
-        done = _git(where, "rev-list", "--merges", "--parents", source, "--not", _remote_refs(where, remote), "--")
-        if done is None or done.returncode != 0:
-            continue
-        for line in done.stdout.splitlines():
-            fields = line.split()
-            if len(fields) > 3:
-                return fields[0][:12]
+def _octopus_in_range(where, source, refs):
+    """The short sha of the first merge of more than two parents in `source` less `refs`, else ''. A failed read is ''."""
+    done = _git(where, "rev-list", "--merges", "--parents", source, "--not", refs, "--")
+    if done is None or done.returncode != 0:
+        return ""
+    for line in done.stdout.splitlines():
+        fields = line.split()
+        if len(fields) > 3:
+            return fields[0][:12]
     return ""
 
 
-def octopus_push_hit(stripped: str, cwd: str, read_verb) -> str:
-    """Return the short sha of the first merge of more than two parents that a `git push` in the command
-    would send, else ''. Each segment is judged from its own command word. A push whose destination is
-    unnamed reads its source's range all the same. `read_verb("push", args)` is true for a dry run, which
-    sends nothing."""
+def _octopus_hit(segment, stripped, cwd, args):
+    """Return `(sha, stale)`: the short sha of the first merge of more than two parents that a `git push` would send,
+    else `("", False)`. The range is what the push adds to the remote: the source ref, less every ref of the pushed
+    remote, so an octopus that a remote ref already holds (a merge of origin/main brings one in) is not
+    sent. A clone's tracking refs can lag the remote, and a lagging ref hides an octopus the remote holds. So on a
+    hit, and only then, the tracking refs of a configured remote are refreshed once (`git_reads.fetch_remote`, once per
+    directory and remote in the call) and the range is read again; the refusal stands only when the hit survives. A
+    refresh that fails or times out keeps the refusal, with `stale` True so the reason says so. A destination named
+    like the default branch is skipped before any read: push-main asks about that push, and a deny from here would
+    win over the ask. One `git rev-list` for each ref, one `git config` more for a remote named by a URL or a path
+    (`_remote_refs`), and on a hit one `git fetch` of a plain remote name (a URL or a path has no tracking refs)."""
+    refreshed = {}
+    for where, source, _dest, _tracking, remote, _memo in _push_refs(
+            segment, stripped, cwd, args, DEFAULT_BRANCH_FALLBACK):
+        refs = _remote_refs(where, remote)
+        sha = _octopus_in_range(where, source, refs)
+        if not sha:
+            continue
+        if refs == "--remotes":
+            return sha, False
+        key = (where, remote)
+        if key not in refreshed:
+            import git_reads  # the one home of a git call and its timeout
+            refreshed[key] = git_reads.fetch_remote(where, remote)
+            sha = _octopus_in_range(where, source, refs)
+            if not sha:
+                continue
+        return sha, not refreshed[key]
+    return "", False
+
+
+def octopus_push_hit(stripped: str, cwd: str, read_verb):
+    """Return `(sha, stale)` as `_octopus_hit` does for the first merge of more than two parents that a `git push` in
+    the command would send, else `("", False)`. Each segment is judged from its own command word. A push whose
+    destination is unnamed reads its source's range all the same. `read_verb("push", args)` is true for a dry run,
+    which sends nothing."""
     for segment in split_segments(stripped):
         call = git_call_of(segment) if segment.strip() else None
         if call is not None and call[0] == "push" and not read_verb("push", call[1]):
-            sha = _octopus_hit(segment, stripped, cwd, call[1])
+            sha, stale = _octopus_hit(segment, stripped, cwd, call[1])
             if sha:
-                return sha
-    return ""
+                return sha, stale
+    return "", False
 
 
 def _untracked_names(where, specs):
@@ -1224,7 +1287,8 @@ def _commit_red_run(args, bodies, check_red_run, top, read_adds):
 
 def _chain_safe(segment):
     """True when the segment cannot change the tree a later commit reads: a git add, a git read,
-    `true`, `false`, `cd` (the root already resolves through a cd) or a plain `VAR=value`. A commit is judged on its own, so
+    `true`, `false`, `cd` (the root already resolves through a cd), `mkdir` (git tracks no empty folder) or a plain
+    `VAR=value`. A commit is judged on its own, so
     the caller never asks about one."""
     call = git_call_of(segment)
     if call is not None:
@@ -1233,6 +1297,8 @@ def _chain_safe(segment):
     if tokens and all(ASSIGNMENT.match(token) for token in tokens) and not set(segment) & set("`("):
         return True   # a plain `VAR=value` runs nothing; a substitution could, so it stays unsafe
     index = resolve_command(tokens) if tokens else None
+    if index is not None and basename(tokens[index]) == "mkdir":
+        return not set(segment) & set("`(")   # a substitution in its operands could run anything
     return index is not None and basename(tokens[index]) in ("true", "false", "cd")
 
 
@@ -1265,10 +1331,92 @@ def _repo_of(repos, where):
     return repos[where]
 
 
+def _after_missing_cd(segments, number, cwd, ends, made=frozenset()):
+    """True when a `cd` ahead of `segments[number]` named a folder that is missing now and the segment still runs: the
+    shell stayed where it was. The walk that reads a failed cd as staying (`failed_cd_stays`) and the one that does
+    not trust it (None) differ only there, so a folder in the first and None in the second marks that cd. A folder in
+    `made` (`_made_folders`) is read as present."""
+    return (dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True, made=made) is not None
+            and dir_before_segment(segments, number, cwd, ends, made=made) is None)
+
+
+_MKDIR_VALUE_FLAGS = ("-m", "--mode", "--context")
+_CLONE_VALUE_FLAGS = ("-b", "--branch", "-o", "--origin", "-c", "--config", "-u", "--upload-pack", "-j", "--jobs",
+                      "--depth", "--reference", "--reference-if-able", "--separate-git-dir", "--template", "--filter",
+                      "--shallow-since", "--shallow-exclude", "--server-option", "--bundle-uri", "--ref-format")
+_WORKTREE_ADD_VALUE_FLAGS = ("-b", "-B", "--reason")
+_INIT_VALUE_FLAGS = ("-b", "--initial-branch", "--template", "--separate-git-dir", "--object-format", "--ref-format")
+
+
+def _operands(args, value_flags):
+    """The operands of a command's args: a flag is skipped, and so is the value of one in `value_flags`. After `--`
+    every arg is an operand."""
+    found, skip, ended = [], False, False
+    for arg in args:
+        if skip:
+            skip = False
+        elif ended or not arg.startswith("-") or arg == "-":
+            found.append(arg)
+        elif arg == "--":
+            ended = True
+        else:
+            skip = arg in value_flags
+    return found
+
+
+def _made_folders(segments, number, cwd, ends):
+    """The normalized folders that a segment ahead of `segments[number]` makes: a `mkdir`'s operands, a `git clone`'s
+    target (git's default name when none is given), a `git init`'s folder and a `git worktree add`'s path, each with its
+    parents. A `mkdir`'s parents count only with `-p`; without it the folder counts only when its parent is present
+    (a folder on disk, or one made earlier), because the mkdir fails otherwise. Each is resolved against the folder its own segment runs in. Parsing only: no process is
+    spawned."""
+    made = set()
+    for at in range(number):
+        tokens = segment_tokens(segments[at]) if segments[at].strip() else None
+        index = resolve_command(tokens) if tokens else None
+        if index is None:
+            continue
+        paths, call, parents = [], git_call_of(segments[at]), True
+        if basename(tokens[index]) == "mkdir":
+            paths = _operands(tokens[index + 1:], _MKDIR_VALUE_FLAGS)
+            parents = any(arg == "--parents" or re.match(r"-[a-zA-Z]*p", arg) for arg in tokens[index + 1:])
+        elif call is not None and call[0] == "clone":
+            operands = _operands(call[1], _CLONE_VALUE_FLAGS)
+            if len(operands) > 1:
+                paths = [operands[1]]
+            elif operands:
+                default = operands[0].rstrip("/").rsplit("/", 1)[-1].rsplit(":", 1)[-1]
+                paths = [default[:-4] if default.endswith(".git") else default]
+        elif call is not None and call[0] == "init":
+            paths = _operands(call[1], _INIT_VALUE_FLAGS)[:1]
+        elif call is not None and call[0] == "worktree" and call[1][:1] == ["add"]:
+            paths = _operands(call[1][1:], _WORKTREE_ADD_VALUE_FLAGS)[:1]
+        if not paths:
+            continue
+        base = dir_before_segment(segments, at, cwd, ends, failed_cd_stays=True, made=frozenset(made))
+        c_target = _segment_git_c_target(tokens) if call is not None else None
+        if c_target is not None:
+            base = _absolute(c_target, base or "")
+        for path in paths:
+            target = shell_abs(path, base)
+            while target and os.path.isabs(target):
+                target = os.path.normpath(target)
+                if target in made or os.path.dirname(target) == target:
+                    break
+                parent = os.path.dirname(target)
+                if not parents and parent not in made and not os.path.isdir(parent):
+                    break   # a mkdir without -p fails when its parent is missing, so nothing is made
+                made.add(target)
+                target = os.path.dirname(target) if parents else None
+    return frozenset(made)
+
+
 def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
     """Return `(kind, file)` for the first commit or push that would carry all three conflict markers
-    in one file, else `('', '')`. The kind is `commit`, `push`, or `chain` (a push after a commit the
-    guard could not judge; the file is then `git push`). A push that carries no marker but sends a test
+    in one file, else `('', '')`. The kind is `commit`, `push`, `chain` (a push after a commit the
+    guard could not judge; the file is then `git push`), or `cd` (a git write, any verb in `GIT_WRITES`, after a `cd`
+    into a folder that is missing now and that no earlier segment makes (`_made_folders`), which the shell survives:
+    the file is then `git <verb>`; the reason prints no folder, ruling own-476-c-refuse-cd-missing-folder). A push that carries no marker but sends a test
     commit with no valid Red-run trailer returns `('red-run', (found, last, rewritten))` (`_red_run_found`); a caller that
     passes no `is_test_rel` reads no red-run hit. A lone commit (no push after it in the call) that adds test lines with no
     valid trailer in its `-m` returns `('red-run-commit', (found, 'new', False))` (`_commit_red_run`). Each segment is judged from its own command word. `raw` is the
@@ -1289,6 +1437,11 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
             continue
         call = calls[number]
         before, heads_before = heads_before, heads_before + len(heredoc_heads(segment)[0])
+        if call is not None and call[0] in GIT_WRITES and _segment_git_c_target(segment_tokens(segment) or []) is None:
+            if (_after_missing_cd(segments, number, cwd, ends)
+                    and _after_missing_cd(segments, number, cwd, ends, _made_folders(segments, number, cwd, ends))
+                    and _repo_of(repos, dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True)) is not None):
+                return "cd", "git " + call[0]
         if call is not None and call[0] == "push":
             if blind_commit and (blind_triplet or conflict_step):
                 return "chain", "git push"
@@ -1371,8 +1524,13 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
     return "", ""
 
 
-# ---- merge --role: the tier is read from this session's own get_session record
-ROLE_TIERS = ("batch-runner",)
+# ---- merge --role: the role is read from this session's own get_session record
+ROLE_TIERS = ("batch-runner", "lane", "standing")  # glossary-ok: ROLE_TIERS is the existing name; merge.py MERGE_ROLES names the same roles
+LOCAL_ROLE_TIERS = ("batch-runner",)  # glossary-ok: the name a test reads; the roles a local role file may name (merge.py LOCAL_MERGE_ROLES), the lane role is a cloud role only
+ROLE_WITH_STEP = "lane"  # the role whose call also names a step (--step), proved by a cs-step tag of the own record
+STANDING_ROLE = "standing"  # ruling own-tiny-fixes-b: a standing session, not a batch runner, merges its own pull request
+STANDING_HOLDERS = ("coordinator", "triage", CONSULTANT_TAG.split(":", 1)[1])  # the cs-build tags that prove the standing session role (decision session-tiers)  # glossary-ok: session-tiers is the decision
+LANE_MERGE_REPO = "shivinate7/claude-settings"  # the one repo whose lanes hold the lane merge role; agrees with merge.py LANE_MERGE_REPO, which this module cannot import
 ROLE_TAG_PREFIX = BUILD_TAG
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
@@ -1406,7 +1564,7 @@ def merge_tool_args(segment: str):
 
 
 def role_call_of(segment: str):
-    """Return the tier word after the role flag when the segment runs the merge tool with it, else None.
+    """Return the role word after the role flag when the segment runs the merge tool with it, else None.
 
     A role flag with no value gives ''.
     """
@@ -1421,6 +1579,18 @@ def role_call_of(segment: str):
     return None
 
 
+def role_step_of(segment: str) -> str:
+    """The value after the step flag when the segment runs the merge tool with it (`--step X` or `--step=X`), else ''. The last flag wins, as argparse reads it."""
+    rest = merge_tool_args(segment) or []
+    step = ""
+    for at, arg in enumerate(rest):
+        if arg == "--step":
+            step = rest[at + 1] if at + 1 < len(rest) else ""
+        elif arg.startswith("--step="):
+            step = arg[len("--step="):]
+    return step
+
+
 def _own_session_read(transcript: str, own_id: str, created: bool = False):
     """(tags, tagged_after): the own-record read of hooks/own_session.py, without the parent id."""
     # `created` counts a create_session call as a record too: rule lane-one-topic reads a lane by its start.
@@ -1433,24 +1603,70 @@ def _own_get_session_tags(transcript: str, session_id: str):
     return _own_session_read(transcript, session_id)[0]
 
 
+def _nested_segments(text: str, depth: int = 0):
+    """Yield (segment, too_deep) for each non-blank segment of `text`, then for each script a segment hands on (inner_commands, the one reader of
+    `bash -c`, `$(...)` and the other wrappers), down to MERGE_NEST_DEPTH, and for each command substitution of `text`. A script nested deeper, or text whose
+    substitutions nest too deep to cut, is yielded whole, with too_deep True."""
+    try:
+        from guard_env import _substitutions  # the one cut of `$(...)`, backtick and process substitutions outside single quotes
+        found, deep = _substitutions(text)
+        texts = [part for part, _in_message in found]
+    except Exception:
+        texts, deep = [text], True   # an unreadable cut is read whole and judged as a refusal where it holds the flag
+    if deep:
+        yield text, True
+    for part in texts:
+        for segment in split_segments(part):
+            if not segment.strip():
+                continue
+            yield segment, False
+            tokens = segment_tokens(segment)
+            for script in (inner_commands(tokens) if tokens else []):
+                if depth >= MERGE_NEST_DEPTH:
+                    yield script, True
+                else:
+                    yield from _nested_segments(script, depth + 1)
+
+
+def _tags_name_lane_merge_repo(tags) -> bool:
+    """True when a cs-repo tag of the own record names LANE_MERGE_REPO: the only repo whose lanes hold the lane merge role. Own tags only, no REST read."""
+    return any(repo_tag_names(tag, LANE_MERGE_REPO) for tag in tags)
+
+
 def role_proof_hit(stripped: str, transcript: str) -> str:
     """Return the matched call when a segment runs the merge tool with a role the own record does not
     prove, else ''. Fails closed inside the clause: any error in the reads is a refusal, because the
-    allow rule has no classifier behind it and the guard-wide crash path fails open."""
-    for segment in split_segments(stripped):
-        tier = role_call_of(segment) if segment.strip() else None
-        if tier is None:
+    allow rule has no classifier behind it and the guard-wide crash path fails open.
+    A script a wrapper hands on (`bash -c`, `$(...)`: _nested_segments) is judged as a top-level call is; one nested deeper than
+    MERGE_NEST_DEPTH that holds a role flag is refused."""
+    if "--role" not in stripped:   # the cheap filter: every spelling of the flag holds this text, so no other call is cut or read
+        return ""
+    for segment, too_deep in _nested_segments(stripped):
+        if too_deep:
+            if "--role" in segment:
+                return "merge role in a deep wrapper"
+            continue
+        role = role_call_of(segment)
+        if role is None:
             continue
         try:  # cost: one transcript read, only on a role-flag call
             from override import remote_session_id
             own_id = remote_session_id()
             if own_id and transcript:
+                if role == STANDING_ROLE:  # a tag set after the record may have changed the role, so that record proves nothing
+                    tags, tagged_after = _own_session_read(transcript, own_id)
+                    if tags is not None and not tagged_after and any(ROLE_TAG_PREFIX + r in tags for r in STANDING_HOLDERS):
+                        continue
+                    return "merge role " + role
                 tags = _own_get_session_tags(transcript, own_id)
-                if tier in ROLE_TIERS and tags is not None and ROLE_TAG_PREFIX + tier in tags:
-                    continue
+                if role in ROLE_TIERS and tags is not None and ROLE_TAG_PREFIX + role in tags:  # glossary-ok: ROLE_TIERS is the existing name
+                    step = role_step_of(segment)
+                    # a lane's step must be a cs-step tag of its own record, exactly, and its record must name the lane-merge repo
+                    if role != ROLE_WITH_STEP or (step and STEP_TAG + step in tags and _tags_name_lane_merge_repo(tags)):
+                        continue
         except Exception:
             pass
-        return "merge role " + tier
+        return "merge role " + role
     return ""
 
 
@@ -1740,7 +1956,7 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int, local_se
                     continue
                 import session_role
                 judged, record = session_role.local_judgement(local_session)
-                if not judged or (record and record["role"] in ROLE_TIERS and repo and record.get("repo") == repo):  # glossary-ok: ROLE_TIERS is the existing name
+                if not judged or (record and record["role"] in LOCAL_ROLE_TIERS and repo and record.get("repo") == repo):  # glossary-ok: LOCAL_ROLE_TIERS is the existing name
                     continue
                 return True
             from override import remote_session_id
@@ -1756,18 +1972,122 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int, local_se
     return False
 
 
+LANE_READY_REASON = (
+    "merge-role-proof: this session's own record is a claude-settings lane's. A lane marks only its own pull request ready, once, "
+    "through the merge tool: the tool's role flag with its own step, then the pull request number and the ready flag, on a pull request whose head is that step's branch. "
+    "Any other ready mark waits for the batch runner (list_sessions, tag cs-build:batch-runner, same cs-repo). "
+    "(decision session-tiers, a session's role decides which merge acts it may run)"  # glossary-ok: session-tiers is the decision's file name
+)
+
+
+def lane_ready_hit(stripped: str, transcript: str) -> str:
+    """Return a label when a cloud session whose own newest get_session record carries cs-build:lane and a cs-repo tag naming LANE_MERGE_REPO runs the
+    merge tool's ready mark, else ''. A call is let through only when it names the lane role and a --step that is a cs-step tag of that record, and the pull
+    request it names has a head that is one of lane_head_refs of that step (_lane_ready_own_pr). A batch runner, a lane of another repo or with no cs-repo tag, a session with another or no cs-build tag, and a
+    session with no readable record are not judged here: the repo proof
+    (repo_proof_hit) still judges each. A script a wrapper hands on is read as a top-level call is (_nested_segments); one nested deeper
+    than MERGE_NEST_DEPTH that holds the flag counts as a call. Cost: one parse per merge-tool segment, one transcript read when a ready flag is found,
+    and one pull request read when the call names the lane role."""
+    if not is_cloud() or "--ready" not in stripped:   # the cheap filter: a call with no ready flag reads no transcript
+        return ""
+    for segment, too_deep in _nested_segments(stripped):
+        if too_deep:
+            called = "--ready" in segment
+        else:
+            rest = merge_tool_args(segment)
+            try:
+                called = rest is not None and "--ready" in _command_words(rest)
+            except Exception:
+                called = True   # an unreadable merge-tool segment fails closed, as the other clauses do
+        if not called:
+            continue
+        if _own_record_is_lane(transcript) and (too_deep or not _lane_ready_own_pr(segment, transcript)):
+            return "merge --ready from a lane"
+    return ""
+
+
+def _lane_ready_own_pr(segment: str, transcript: str) -> bool:
+    """True when the merge-tool call in `segment` is a lane's ready mark of its own pull request: the lane role with a step that is a cs-step tag of the own
+    record, the ready flag without --confirm, a pull request number, and a head on that number in LANE_MERGE_REPO that is one of lane_head_refs of the step.
+    The read is the merge tool's own Host, so the guard and the tool read a head alike. Any failure is False: an unread pull request is refused."""
+    try:
+        bare = merge_tool_args(strip_redirections(segment))
+        if bare is None:
+            return False
+        flags = _merge_flags(_command_words(bare))
+        if flags.role != ROLE_WITH_STEP or not flags.step or not flags.ready or flags.confirm or not str(flags.pr or "").isdigit():
+            return False
+        from override import remote_session_id
+        own_id = remote_session_id()
+        tags = _own_get_session_tags(transcript, own_id) if own_id and transcript else None
+        if tags is None or STEP_TAG + flags.step not in tags:
+            return False
+        module = merge_module()
+        if module is None:
+            return False
+        with module.shared_deadline(MERGE_READ_TIMEOUT):
+            info = module.Host(repo=LANE_MERGE_REPO).pr(int(flags.pr))
+        return info["branch"] in lane_head_refs(flags.step)
+    except Exception:
+        return False
+
+
+def _own_record_is_lane(transcript: str) -> bool:
+    """True when the own newest get_session record in `transcript` carries cs-build:lane and a cs-repo tag naming LANE_MERGE_REPO. No id, no transcript,
+    no record and a failed read are False: the callers refuse only a session that proves it is a claude-settings lane, and the repo proof judges the rest."""
+    try:
+        from override import remote_session_id
+        own_id = remote_session_id()
+        tags = _own_get_session_tags(transcript, own_id) if own_id and transcript else None
+    except Exception:
+        return False
+    return tags is not None and LANE_TAG in tags and _tags_name_lane_merge_repo(tags)
+
+
+def lane_mcp_ready_hit(tool: str, tool_input, transcript: str) -> str:
+    """Return a label when a cloud session whose own record is a claude-settings lane's (_own_record_is_lane) marks a pull request ready through the MCP update tool (draft false), else ''.
+    Only a draft of exactly False counts: a title edit, no draft field and draft true mark nothing ready. The refusal is LANE_READY_REASON, as for
+    lane_ready_hit. Cost: none for another tool; one transcript read for a draft-false update."""
+    if tool != READY_PAGE_MCP_TOOL or not is_cloud() or not isinstance(tool_input, dict) or tool_input.get("draft") is not False:
+        return ""
+    return "update_pull_request draft false from a lane" if _own_record_is_lane(transcript) else ""
+
+
 # ---- the record branch's one writer: only the triage session pushes to it (rule roadmap-one-writer)
 RECORD_WRITER_TIER = "triage"
 DEFAULT_RECORD_BRANCH = "roadmap"
-RECORD_REASON = (
-    "roadmap-one-writer: the repo's record branch has one writer, the triage session, and this session's own "
-    "record does not prove it is triage. Send the step change to the triage session (list_sessions, tag "
-    "cs-build:triage, same cs-repo). If this session is triage: run get_session (no argument) alone in its "
+RECORD_CITE = (
     "own turn, then retry. Before this session asks the owner to push a commit, run `git fetch origin <record "
     "branch>`, then `git merge-base --is-ancestor <commit> origin/<record branch>`: exit 0 means the commit is "
     "already there, so ask the owner only when it is not. "
     "(decision session-tiers, the triage session is the only writer of the record branch)"  # glossary-ok: session-tiers is the decision's file name
 )
+RECORD_REASON = (
+    "roadmap-one-writer: the repo's record branch has one writer, the triage session, and this session's own "
+    "record does not prove it is triage. Send the step change to the triage session (list_sessions, tag "
+    "cs-build:triage, same cs-repo). A lane may push only its own roadmap/outbox/<slug>-handoff.md, as plain commits that "
+    "each add or change that file alone, with no force, lease or tags. If the lane's push was refused for that "
+    "form: fetch the record branch's origin tip (a single-branch clone widens its fetch refspec first), then rebase "
+    "the commits onto that tip, with no merge commit, since a pull's merge commit is refused. Make each commit in its "
+    "own call first, then retry the handoff push in a later call: a push chained after a commit is read before that "
+    "commit exists. If this session is triage: run get_session (no argument) alone in its "
+    + RECORD_CITE
+)
+
+
+def _own_proved_tags(transcript: str):
+    """The tags of the own newest get_session record when no set_session_tags call follows it, else None.
+    Fails closed: no cloud id (a local session), no transcript or any read error is None."""
+    try:
+        from override import remote_session_id
+        own_id = remote_session_id()
+        if own_id and transcript:
+            tags, tagged_after = _own_session_read(transcript, own_id)
+            if tags is not None and not tagged_after:
+                return tags
+    except Exception:
+        pass
+    return None
 
 
 def _own_role_proved(transcript: str, role: str, session_id: str = "", root=None) -> bool:
@@ -1851,12 +2171,73 @@ def _push_calls(segment: str, script: str, cwd: str):
                     yield from _push_calls(part, each, inner_cwd)
 
 
+HANDOFF_SLUG =re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")  # no `/` and no `.`, so a slug is one plain file-name part
+HANDOFF_PATH = re.compile(r"roadmap/outbox/(" + HANDOFF_SLUG.pattern + r")-handoff\.md")
+
+
+def _lane_handoff_holds(args, where: str, overrides, root: str, destination, tags) -> bool:
+    """True when a lane's push of `args` to the record branch sends only commits that each change one path
+    against their parent, that path is roadmap/outbox/<slug>-handoff.md in every commit, the change is an add
+    or a modify, and the slug is the lane's own: a slug of one of its cs-step tags, else its checkout's branch
+    with a leading `lane/` cut. The range is the commits from the record branch's origin tip to the pushed
+    source, read per commit, so a file added in one commit and removed in a later one is seen. Fails closed:
+    a force, a lease of any form, `--force-if-includes`, a `+` refspec, a delete, a mirror, `--tags`,
+    `--follow-tags`, an unnamed remote or source, no origin tip, an unreadable range, a merge or root commit,
+    a rename, a delete or an empty range is False. Cost: two git processes, `rev-list --parents` for the
+    range and one `diff-tree --stdin` for every commit's paths (a `symbolic-ref` follows only when no cs-step
+    tag names the slug)."""
+    named = push_refspecs(args)  # None for a mirror, `--all`, a delete or a tags-only push
+    if named is None or not named[0] or destination is None or not push_is_plain(args):
+        return False
+    remote, specs = named
+    if len(specs) > 1:
+        return False
+    source = specs[0].partition(":")[0] if specs else "HEAD"
+    if not source or source.startswith("-"):
+        return False
+    walk = _git(root, "rev-list", "--parents", "refs/remotes/" + remote + "/" + destination + ".." + source, "--")
+    if walk is None or walk.returncode != 0:
+        return False
+    commits = []
+    for line in walk.stdout.splitlines():
+        fields = line.split()
+        if len(fields) != 2:  # a root commit (1 field) or a merge (3 or more) hides its paths from diff-tree
+            return False
+        commits.append(fields[0])
+    if not commits:
+        return False
+    done = _git(root, "diff-tree", "--stdin", "--no-commit-id", "--no-renames", "-r", "--name-status",
+                stdin="\n".join(commits) + "\n")
+    if done is None or done.returncode != 0:
+        return False
+    changes = [line.split("\t") for line in done.stdout.splitlines() if line.strip()]
+    if not changes or any(len(change) != 2 or change[0] not in ("A", "M") for change in changes):
+        return False
+    slugs = set()
+    for change in changes:
+        found = HANDOFF_PATH.fullmatch(change[1])
+        if not found:
+            return False
+        slugs.add(found.group(1))
+    if len(slugs) != 1:  # every commit names the one own handoff path
+        return False
+    slug = slugs.pop()
+    if slug in [str(t)[len(ARCHIVE_STEP_PREFIX):].strip() for t in tags if str(t).startswith(ARCHIVE_STEP_PREFIX)]:
+        return True
+    branch = _git(root, "symbolic-ref", "-q", "--short", "HEAD")
+    if branch is None or branch.returncode != 0:
+        return False
+    return branch.stdout.strip() in lane_head_refs(slug)
+
+
 def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb, session_id: str = "") -> str:
     """Return the matched push when a segment pushes to the checkout's record branch, or to the default
-    name `roadmap`, and the own record does not prove the triage tier, else ''. `record_branch_of(root)`
-    reads the checkout's branch (lint/layout.py); a read error means the default. `read_verb(subcommand,
-    args)` is guard.py's own test for a dry run, which moves nothing. The proof is read only after a push
-    reaches the branch. `session_id` is the hook payload's id, which a local session's role file is read for."""
+    name `roadmap`, and the own record proves neither the triage role nor a lane's own handoff push, else ''.
+    `record_branch_of(root)` reads the checkout's branch (lint/layout.py); a read error means the default.
+    `read_verb(subcommand, args)` is guard.py's own test for a dry run, which moves nothing. The proof is
+    read only after a push reaches the branch. `session_id` is the hook payload's id, which a local session's
+    role file is read for. Triage is allowed with no diff read. A lane is allowed only for its own handoff
+    file (`_lane_handoff_holds`), which reads the pushed range's paths in two git processes."""
     for segment in split_segments(stripped):
         for args, where, overrides in _push_calls(segment, stripped, cwd):
             if read_verb("push", args):
@@ -1867,9 +2248,16 @@ def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of
                 record = record_branch_of(root)
             except Exception:
                 record = DEFAULT_RECORD_BRANCH
-            if {record, DEFAULT_RECORD_BRANCH} & set(push_destinations(args, where, overrides)) and (
-                    not _own_role_proved(transcript, RECORD_WRITER_TIER, session_id, root)):  # glossary-ok: RECORD_WRITER_TIER is the existing name
-                return "git push to the record branch"
+            destinations = push_destinations(args, where, overrides)
+            if not {record, DEFAULT_RECORD_BRANCH} & set(destinations):
+                continue
+            if _own_role_proved(transcript, RECORD_WRITER_TIER, session_id, root):  # glossary-ok: RECORD_WRITER_TIER is the existing name
+                continue
+            tags = _own_proved_tags(transcript)
+            if (tags is not None and LANE_TAG in tags and len(destinations) == 1 and root
+                    and _lane_handoff_holds(args, where, overrides, root, destinations[0], tags)):
+                continue
+            return "git push to the record branch"
     return ""
 
 
@@ -1903,11 +2291,14 @@ def trust_card_hit(tool: str, transcript: str) -> str:
 # ---- archive_session: a lane closes only after its records pull request has left the open list
 ARCHIVE_TOOL = "mcp__claude-code-remote__archive_session"
 ARCHIVE_LANE_TAG = LANE_TAG
-ARCHIVE_STEP_PREFIX, ARCHIVE_REPO_PREFIX = "cs-step:", "cs-repo:"
+ARCHIVE_STEP_PREFIX, ARCHIVE_REPO_PREFIX = STEP_TAG, REPO_TAG
+ARCHIVE_CITE = (
+    "(decision session-tiers, a lane closes only after its records pull request has landed)"
+)
 ARCHIVE_NO_RECORD_REASON = (
     "this session's or this agent's transcript holds no get_session record of the target, so the guard cannot tell whether "
-    "the target is a lane with records still to land. Run get_session on the target alone, in its own turn, "
-    "then retry. (decision session-tiers, a lane closes only after its records pull request has landed)"
+    "the target is a lane with records still to land. Run get_session on each target in one message, "
+    "then archive them in the next message. " + ARCHIVE_CITE
 )
 ARCHIVE_OPEN_REASON = (
     "the lane's records pull request is still open, so closing the lane now strands its records. Wait until "
@@ -1915,22 +2306,73 @@ ARCHIVE_OPEN_REASON = (
 )
 ARCHIVE_TAGS_REASON = (
     "the target's record is a lane with no cs-step tag or no cs-repo tag, so the guard cannot find its "
-    "records pull request. Fix the lane's tags, run get_session on the target alone, then retry. (decision session-tiers, a lane closes only after its records pull request has landed)"
+    "records pull request. Fix the lane's tags, run get_session on each target in one message, then archive them in the next message. " + ARCHIVE_CITE
 )
+# A template: {remedy} is archive_read_remedy's wording.
 ARCHIVE_READ_REASON = (
-    "the open pull requests of the lane's repo could not be read, so the guard cannot tell whether its "
-    "records have landed. Retry once gh answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
+    "the open pull requests of the lane's repo could not be read, so the guard cannot tell whether its "  # glossary-ok: session-tiers is the decision's file name
+    "records have landed. {remedy} (decision session-tiers, a lane closes only after its records pull request has landed)"  # glossary-ok: session-tiers is the decision's file name
 )
 ARCHIVE_NO_PR_REASON = (
     "a branch of the lane is ahead of its repo's default branch and has no pull request that covers it, so closing "
     "the lane now strands that work. Either open a pull request for that branch and hand it to the batch runner, or "
-    "push an archive copy of it under archive/, then retry. "
-    "(decision session-tiers, a lane closes only after its records pull request has landed)"
+    "push an archive copy of it under archive/, then retry. If the branch was archived under another name, push one "
+    "more copy under the stranded branch's own name, archive/<branch> (archive/<branch>-<n> when that is taken), at the branch tip, then retry. "
+    + ARCHIVE_CITE
 )
+# A template, as ARCHIVE_READ_REASON.
 ARCHIVE_BRANCH_READ_REASON = (
-    "the lane's branches or their pull requests could not be read, so the guard cannot tell whether any work of "
-    "the lane is stranded. Retry once gh answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
+    "the lane's branches or their pull requests could not be read, so the guard cannot tell whether any work of "  # glossary-ok: session-tiers is the decision's file name
+    "the lane is stranded. {remedy} (decision session-tiers, a lane closes only after its records pull request has landed)"  # glossary-ok: session-tiers is the decision's file name
 )
+
+
+_ATTACH_STATUSES = (403, 404)  # the answers of a repo this session cannot read: 403 for an unattached repo (measured), 404 for one gh cannot find
+
+
+def archive_read_remedy(repo, status) -> str:
+    """The remedy of an unreadable archive read. Only a 403 or 404 on the read of `repo` names its add_repo act; every other
+    failure (a 500, a timeout, no gh, text that is not JSON, a shape the read does not know) says to retry. The one home of the wording."""
+    if repo and status in _ATTACH_STATUSES:
+        # Push access, not read: a lane that archives must push an archive/ branch, so a read-only attach would only move the refusal.
+        return "This session cannot read that repo until it is attached: add_repo " + repo + " access push, then retry."
+    return "Retry once gh answers."
+
+
+_HTTP_TAIL = re.compile(r"\bHTTP (\d{3})\)?\s*\Z")  # the end of a failed `gh api` reply: "gh: <message> (HTTP 403)"
+
+
+def _http_status(out: str):
+    """The HTTP status that a failed gh reply ends with, or None."""
+    match = _HTTP_TAIL.search(out)
+    return int(match.group(1)) if match else None
+
+
+class _GhReadFailed(RuntimeError):
+    """A gh read failed. `status` is the HTTP status gh printed, None when the read failed another way (a reply that is no JSON, a shape the read does not know)."""
+
+    def __init__(self, message: str, status=None):
+        super().__init__(message)
+        self.status = status
+
+
+class _ArchiveReadFailed(Exception):
+    """A gh read of the branch arm failed in `repo` with HTTP `status` (None when it has none), so archive_hit can word the remedy."""
+
+    def __init__(self, repo: str, status=None):
+        super().__init__(repo)
+        self.repo, self.status = repo, status
+
+
+def _read_status(module, exc):
+    """The HTTP status of a failed read, or None. A network error (NetStop, a rate limit included) has none: it is no answer about the repo."""
+    if isinstance(exc, (_ArchiveReadFailed, _GhReadFailed)):
+        return exc.status
+    if module is not None and isinstance(exc, module.Stop) and not isinstance(exc, module.NetStop):
+        return _http_status(str(exc))  # Host.pages raises a Stop whose message ends with the failed reply
+    return None
+
+
 ARCHIVE_STRANDED_MATCH = "archive of a lane with a branch that has no pull request"
 _REPO_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 # A source URL on github.com (https, ssh or scp form, an optional www., any case, an optional path after owner/name): `repo`
@@ -1945,14 +2387,14 @@ _CONTAINED = ("behind", "identical")  # a compare of base...head where the head 
 
 
 def _read_json(host, rel: str, what: str):
-    """The parsed JSON of one REST read of `host`; a failed read or a reply that is not JSON raises RuntimeError."""
+    """The parsed JSON of one REST read of `host`; a failed read or a reply that is not JSON raises _GhReadFailed."""
     code, out = host.api(rel)
     try:
         if code:
             raise ValueError(out)
         return json.loads(out)
     except ValueError as e:
-        raise RuntimeError("the " + what + " read failed: " + str(e))
+        raise _GhReadFailed("the " + what + " read failed: " + str(e), _http_status(out) if code else None)
 
 
 def _compare_status(module, host, base: str, head: str, missing_ok: bool = False):
@@ -1966,7 +2408,7 @@ def _compare_status(module, host, base: str, head: str, missing_ok: bool = False
             raise ValueError(out)
         return str(json.loads(out)["status"])
     except (ValueError, KeyError, TypeError) as e:
-        raise RuntimeError("the compare read failed: " + str(e))
+        raise _GhReadFailed("the compare read failed: " + str(e), _http_status(out) if code else None)
 
 
 def _head_landed(module, repo: str, row) -> bool:
@@ -1978,6 +2420,15 @@ def _head_landed(module, repo: str, row) -> bool:
     if base != str(row["base"]["repo"]["default_branch"]):
         return False
     return _compare_status(module, module.Host(repo=repo), base, sha) in _CONTAINED
+
+
+def open_pull_rows(module, repo: str):
+    """The open pull request rows of `repo`, every page, read through the merge tool's page reader `module` with the
+    session's token. The one home of this read: rules lane-closes-after-records and lane-step-dup call it. A repo the
+    session has not attached is not read. On the archive caller's 403 or 404 the refusal names the add_repo access push
+    (owner, page item 937 b, 14:20 CST Nov 17); step_pr_hit keeps its own STEP_PR_READ_REASON. A failed read raises. The caller holds the one shared deadline over the read (a nested
+    shared_deadline would reset it). Cost: one gh call per page."""
+    return module.Host(repo=repo).pages("pulls", fields={"state": "open"})
 
 
 def _branch_repos(ccr, tag_repos):
@@ -2057,7 +2508,7 @@ def _stranded_branch(module, ccrs, tag_repos, slugs, open_rows) -> bool:
     branch field, an empty list or map, or only null values names none. A branch field that is not a map, and a
     value that is neither null nor a string, are shapes the read does not know, so they raise. A 404 on the compare
     means the branch is not in that repo, so it is skipped in that repo. Any other failed read raises, and
-    archive_hit refuses on it. The caller holds one shared deadline over all the reads here (a nested
+    archive_hit refuses on it, naming the repo whose read failed (_ArchiveReadFailed). The caller holds one shared deadline over all the reads here (a nested
     shared_deadline would reset it). `open_rows` is each repo's open pull request list, already read. Every pull
     request read of a repo is judged together, so a replacement on another branch of the lane is in hand."""
     branches, repos = [], list(tag_repos)
@@ -2075,40 +2526,44 @@ def _stranded_branch(module, ccrs, tag_repos, slugs, open_rows) -> bool:
     branches = list(dict.fromkeys(branches))
     defaults = {}
     for repo in repos:
-        host = module.Host(repo=repo)
-        owner = repo.split("/")[0]
-        pool = [row for row in open_rows.get(repo, []) if _on_lane_form(str(row["head"]["ref"]), slugs)]
-        pending = []  # (branch, tip or None, rows) of each branch ahead of the default: judged once every row is read
+        try:
+            host = module.Host(repo=repo)
+            owner = repo.split("/")[0]
+            pool = [row for row in open_rows.get(repo, []) if _on_lane_form(str(row["head"]["ref"]), slugs)]
+            pending = []  # (branch, tip or None, rows) of each branch ahead of the default: judged once every row is read
 
-        def ahead(branch):
-            """True when `branch` is not the default or an archive copy, and its compare with the default reads ahead."""
-            if repo not in defaults:
-                defaults[repo] = str(_read_json(host, "", "repo")["default_branch"])
-            if branch.startswith("archive/") or branch == defaults[repo]:
-                return False
-            return _compare_status(module, host, defaults[repo], branch, missing_ok=True) in _AHEAD
+            def ahead(branch):
+                """True when `branch` is not the default or an archive copy, and its compare with the default reads ahead."""
+                if repo not in defaults:
+                    defaults[repo] = str(_read_json(host, "", "repo")["default_branch"])
+                if branch.startswith("archive/") or branch == defaults[repo]:
+                    return False
+                return _compare_status(module, host, defaults[repo], branch, missing_ok=True) in _AHEAD
 
-        for branch in branches:
-            if ahead(branch):
-                rows = host.pages("pulls", fields={"state": "all", "head": owner + ":" + branch})
-                pool += rows
-                pending.append((branch, None, rows))
-        seen = set(branches)
-        for slug in slugs:
-            for form in lane_head_refs(slug):
-                for ref in host.pages("git/matching-refs/heads/" + form):
-                    name = str(ref["ref"])[len("refs/heads/"):]
-                    if name in seen or not _on_lane_form(name, [slug]):
-                        continue
-                    seen.add(name)
-                    # The branch exists (the refs read just listed it), so an open pull request covers it before any
-                    # default-branch read; its tip is on the row already in hand.
-                    rows = host.pages("pulls", fields={"state": "all", "head": owner + ":" + name})
+            for branch in branches:
+                if ahead(branch):
+                    rows = host.pages("pulls", fields={"state": "all", "head": owner + ":" + branch})
                     pool += rows
-                    if not _is_open(rows) and ahead(name):
-                        pending.append((name, str(ref["object"]["sha"]), rows))
-        if any(not _covered(module, host, branch, tip, rows, pool) for branch, tip, rows in pending):
-            return True
+                    pending.append((branch, None, rows))
+            seen = set(branches)
+            for slug in slugs:
+                for form in lane_head_refs(slug):
+                    for ref in host.pages("git/matching-refs/heads/" + form):
+                        name = str(ref["ref"])[len("refs/heads/"):]
+                        if name in seen or not _on_lane_form(name, [slug]):
+                            continue
+                        seen.add(name)
+                        # The branch exists (the refs read just listed it), so an open pull request covers it before any
+                        # default-branch read; its tip is on the row already in hand.
+                        rows = host.pages("pulls", fields={"state": "all", "head": owner + ":" + name})
+                        pool += rows
+                        if not _is_open(rows) and ahead(name):
+                            pending.append((name, str(ref["object"]["sha"]), rows))
+            if any(not _covered(module, host, branch, tip, rows, pool) for branch, tip, rows in pending):
+                return True
+        except (Exception, SystemExit) as exc:
+            raise _ArchiveReadFailed(repo, _read_status(module, exc)) from exc
+
     return False
 
 
@@ -2173,6 +2628,8 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
         return "archive of a lane with no step or repo tag", ARCHIVE_TAGS_REASON
     lanes = [c for c in ccrs if isinstance(c, dict) and isinstance(c.get("tags"), list) and ARCHIVE_LANE_TAG in c["tags"]]
     reading_branches = False  # picks the reason a failed read refuses with
+    reading = None  # the repo whose read is under way, the one an unreadable read's remedy may name
+    module = None
     try:  # cost, all under one shared MERGE_READ_TIMEOUT: one paged gh REST read per cs-repo tag (one in practice), through
         # the merge tool's page reader; one compare read per open draft of the lane; per repo, one matching-refs read per
         # slug form (a paged read); and, for each branch the records name, one repo read per repo, one compare read per
@@ -2185,7 +2642,8 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
         open_rows = {}
         with module.shared_deadline(MERGE_READ_TIMEOUT):
             for repo in repos:
-                rows = open_rows[repo] = module.Host(repo=repo).pages("pulls", fields={"state": "open"})
+                reading = repo
+                rows = open_rows[repo] = open_pull_rows(module, repo)
                 for row in rows:
                     ref = str(row["head"]["ref"])
                     slug = next((s for s in slugs if ref in lane_head_refs(s)), None)
@@ -2193,12 +2651,15 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
                         continue
                     if slug:
                         return "archive of lane " + slug + " with open pull request " + str(row.get("number", "?")), ARCHIVE_OPEN_REASON
-            reading_branches = True
+            reading_branches, reading = True, None
             stranded = _stranded_branch(module, lanes, repos, slugs, open_rows)
-    except (Exception, SystemExit):
+    except (Exception, SystemExit) as exc:
+        if isinstance(exc, _ArchiveReadFailed):
+            reading = exc.repo
+        remedy = archive_read_remedy(reading, _read_status(module, exc))
         if reading_branches:
-            return "archive with an unreadable branch read", ARCHIVE_BRANCH_READ_REASON
-        return "archive with an unreadable pull request list", ARCHIVE_READ_REASON
+            return "archive with an unreadable branch read", ARCHIVE_BRANCH_READ_REASON.format(remedy=remedy)
+        return "archive with an unreadable pull request list", ARCHIVE_READ_REASON.format(remedy=remedy)
     if stranded:
         return ARCHIVE_STRANDED_MATCH, ARCHIVE_NO_PR_REASON
     return None
@@ -2206,7 +2667,8 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
 
 # ---- send_message: a lane brief goes to a lane of its own topic (rule lane-one-topic)
 BRIEF_TOOL = "mcp__claude-code-remote__send_message"
-LANE_BRIEF_MARKER = "Lane brief:"  # the first non-blank line of a brief (after its Grant line, if any) starts `Lane brief: <step>. Topic: <topic>.`
+# The first non-blank line of a brief (after its Grant line, if any) starts `Lane brief: <step>. Topic: <topic>.`
+# (LANE_BRIEF_MARKER, shared_names).
 TOPIC_TAG_PREFIX = TOPIC_TAG
 _MARKDOWN_LEAD = r"[#*_>\s]*"  # a brief may open with markdown: a heading, bold, a quote
 _BRIEF_MARKER_LINE = re.compile(_MARKDOWN_LEAD + re.escape(LANE_BRIEF_MARKER), re.IGNORECASE)
@@ -2322,6 +2784,214 @@ def brief_hit(tool: str, tool_input, transcript: str):
     return topic_hit(first, tags)
 
 
+# ---- one lane per step (rule lane-step-dup)
+STEP_DUP_TAIL = " (decision session-tiers, a step has one lane)"  # glossary-ok: session-tiers is the decision's file name
+STEP_DUP_REASON = (
+    "session %s is live and carries cs-step:%s in the same repo, so this would start a second lane on one step. "
+    "Send the work to that session with send_message instead." + STEP_DUP_TAIL
+)
+STEP_DUP_UNKNOWN_REASON = (
+    "this session's transcript does not prove that no other live session carries cs-step:%s in this repo: it holds "
+    "no whole list_sessions read (a read with no cursor, then reads that each pass the last session id of the page "
+    "before as after_id, the last with has_more false, none with tags or mine), the brief's target has no current "
+    "record, or the subject has no cs-repo tag. Run list_sessions in its own turn that way, run get_session on the "
+    "target alone, check that the target or the new lane carries a cs-repo tag, then retry." + STEP_DUP_TAIL
+)
+
+
+STEP_PR_REASON = (
+    "open pull request #%(pr)s of this repo has the head of step %(step)s, so a lane already holds the step. Send the work to "
+    "that lane, or say in the brief that it `continues #%(pr)s` or `replaces #%(pr)s`, then retry." + STEP_DUP_TAIL
+)
+STEP_PR_READ_REASON = (
+    "the open pull requests of this repo, or the subject's record, could not be read, so the guard cannot tell whether "
+    "a lane pull request holds cs-step:%s. Retry once gh answers and the target has a current record." + STEP_DUP_TAIL
+)
+_STEP_CONTINUES = re.compile(r"\b(?:continues|replaces)\s+#(\d+)", re.IGNORECASE)  # a brief that names the pull request it takes over
+
+
+def _tag_values(tags, prefix: str):
+    """The lower-cased, non-empty values of the tags that start with `prefix`, stripped."""
+    return [v.lower() for v in (str(t)[len(prefix):].strip() for t in tags if str(t).startswith(prefix)) if v]
+
+
+def _step_call(tool: str, tool_input):
+    """(steps, target) of a lane brief (a send_message whose first non-blank line after any Grant line is `Lane brief:
+    <step>. Topic: <topic>.`) or of a create_session tagged cs-step:<step>, else None. Steps are lower case; `target`
+    is the brief's session id, None for a create."""
+    if not isinstance(tool_input, dict):
+        return None
+    if tool == BRIEF_TOOL:
+        message = tool_input.get("message")
+        lines = [line.strip() for line in message.splitlines() if line.strip()] if isinstance(message, str) else []
+        if lines and lines[0].startswith(LANE_GRANT_MARKER):
+            lines = lines[1:]
+        found = _BRIEF_LINE.match(lines[0]) if lines and _BRIEF_MARKER_LINE.match(lines[0]) else None
+        return ([found.group("step").lower()], tool_input.get("session_id")) if found else None
+    if tool == CREATE_SESSION_TOOL:
+        tags = tool_input.get("tags")
+        steps = _tag_values(tags, ARCHIVE_STEP_PREFIX) if isinstance(tags, list) else []
+        return (steps, None) if steps else None
+    return None
+
+
+def _step_subject(tool_input, transcript: str, target):
+    """(tags, mine) of the subject of a step call: the create's own tags, or the target's newest record in the
+    transcript, and the steps that subject carries. Raises ValueError when a brief's target has no current record."""
+    if target is None:
+        return tool_input["tags"], []
+    tags, tagged_after = _own_session_read(transcript, target, created=True) \
+        if transcript and isinstance(target, str) and target else (None, False)
+    if tags is None or tagged_after:
+        raise ValueError("no current record of the target")
+    return tags, _tag_values(tags, ARCHIVE_STEP_PREFIX)
+
+
+def step_dup_hit(tool: str, tool_input, transcript: str):
+    """Return (matched, reason) when this call would put a second live session on a step, else None. The call is a lane
+    brief or a create_session tagged cs-step:<step> (_step_call). It is refused when another live session, not the
+    brief's target, carries that step and shares a cs-repo tag with the subject (_step_subject); the reason names that
+    session. A brief to a target that carries the step itself starts no new lane, so it passes before any list read.
+    Steps and tags match without case. A session is live unless its newest row in the transcript's list_sessions reads
+    is archived (own_session.list_sessions_read). A session an earlier create_session of this transcript started and no
+    archive_session names is live too, when no list row shows it (own_session.created_sessions). A carrier on any page, whole read or not, is refused. With no
+    carrier found, no whole list read, a brief whose target has no current record, or a subject with no cs-repo tag is
+    refused too: unknown is never an allow, and the guard-wide crash path fails open, so any error here is a refusal.
+    Known limit: only this transcript is read, so a session another transcript started after its newest list read is not seen.
+    Cost: one transcript read per brief or create with a step, plus one for the target's record; no file written, no
+    process, no extra tool call."""
+    call = _step_call(tool, tool_input)
+    if call is None:
+        return None
+    steps, target = call
+    try:
+        subject, mine = _step_subject(tool_input, transcript, target)
+        steps = [s for s in steps if s not in mine]
+        if not steps:
+            return None
+        repos = set(_tag_values(subject, ARCHIVE_REPO_PREFIX))
+        if not repos:
+            raise ValueError("no cs-repo tag")
+        rows, whole = own_session.list_sessions_read(transcript)
+        live = [(sid, tags) for sid, (tags, archived) in rows.items() if not archived]
+        # A session a create_session of this transcript started is no row unless a later read showed it; a row,
+        # archived or not, is newer than the create and decides.
+        live += [(sid, tags) for sid, tags in own_session.created_sessions(transcript).items() if sid not in rows]
+        for sid, tags in live:
+            if sid == target:
+                continue
+            for step in steps:
+                if step in _tag_values(tags, ARCHIVE_STEP_PREFIX) and repos & set(_tag_values(tags, ARCHIVE_REPO_PREFIX)):
+                    return "lane step " + step + " carried by " + sid, STEP_DUP_REASON % (sid, step)
+        if not whole:
+            raise ValueError("no whole list read")
+    except (Exception, SystemExit):
+        return "lane step with no proof", STEP_DUP_UNKNOWN_REASON % steps[0]
+    return None
+
+
+def step_pr_hit(tool: str, tool_input, transcript: str):
+    """Return (matched, reason) when this call would start a second lane on a step an open lane pull request holds, else
+    None (rule lane-step-dup, part two). The call is a step call (_step_call). An open pull request in a cs-repo of the
+    subject whose head is lane_head_refs(step) refuses it, and the reason names the pull request. The brief's own text
+    (the message of a brief, the prompt of a create) lifts it when it says `continues #N` or `replaces #N` and N is
+    such an open pull request, whichever the list reads first; any other N lifts nothing. A brief to a target that carries the step passes too. The
+    read is open_pull_rows, the one reader lane-closes-after-records uses. A failed read, a repo tag that is no
+    owner/name, or a brief target with no current record is a refusal: the guard-wide crash path fails open.
+    Cost: one paged gh read per cs-repo tag, for each step call."""
+    call = _step_call(tool, tool_input)
+    if call is None:
+        return None
+    steps, target = call
+    text = tool_input.get("message" if tool == BRIEF_TOOL else "prompt")
+    taken = set(_STEP_CONTINUES.findall(text)) if isinstance(text, str) else set()
+    try:
+        subject, mine = _step_subject(tool_input, transcript, target)
+        steps = [s for s in steps if s not in mine]
+        if not steps:
+            return None
+        module = merge_module()
+        if module is None:
+            raise RuntimeError("the merge tool could not be loaded")
+        first = None
+        for repo in dict.fromkeys(_tag_values(subject, ARCHIVE_REPO_PREFIX)):
+            if not _REPO_NAME.fullmatch(repo):
+                raise ValueError("not an owner/name repo tag")
+            with module.shared_deadline(MERGE_READ_TIMEOUT):
+                pulls = open_pull_rows(module, repo)
+            for row in pulls:
+                ref = str(row["head"]["ref"]).lower()
+                for step in steps:
+                    if ref in lane_head_refs(step):
+                        if str(row.get("number")) in taken:
+                            return None
+                        first = first or (row, step)
+        if first:
+            row, step = first
+            return ("lane step " + step + " has open pull request " + str(row.get("number", "?")),
+                    STEP_PR_REASON % {"pr": row.get("number", "?"), "step": step})
+    except (Exception, SystemExit):
+        return "lane step with an unreadable pull request list", STEP_PR_READ_REASON % steps[0]
+    return None
+
+
+# ---- a build spawn names the prior work it searched (rule spawn-searches-existing-builds)
+# The line is `Prior work: #N (state) | <branch> | none found`, on a line of its own, with some text after the colon. The
+# text is not checked against GitHub: the guard reads the brief only. A line inside a ``` fence is a quoted example and
+# does not count. The marker matches without case, after optional markdown lead characters.
+PRIOR_WORK_LINE = "Prior work:"
+PRIOR_WORK_REASON = (
+    "this build spawn has no `Prior work:` line with text after it. Search the open and closed pull requests, the "
+    "branches and main for an existing build first, then add one line to the brief: `Prior work: #N (state) | <branch> "
+    "| none found`. A bare `Prior work:` line does not count. "
+    "(decision spawn-searches-existing-builds, a build spawn names the prior work it searched)"
+)
+# The colon may sit outside bold (`**Prior work**: x`), and a numbered-list lead (`1. `) may come before the marker.
+_PRIOR_WORK_LINE = re.compile(
+    r"[-#*_>\s]*(?:\d+[.)]\s+)?[-#*_>\s]*" + re.escape(PRIOR_WORK_LINE[:-1]) + r"[*_]*:[ \t*_]*(?P<text>\S.*)?$",
+    re.IGNORECASE)
+# An unfilled template placeholder (`<what you searched>`) names nothing.
+_PLACEHOLDER = re.compile(r"<[^<>]*>")
+
+
+def prior_work_named(text) -> bool:
+    """True when `text` has a Prior work line with text after the marker, outside a fence. Text that is only angle-bracket
+    placeholders does not count."""
+    if not isinstance(text, str):
+        return False
+    fenced = False
+    for line in text.split("\n"):
+        if opens_fence(line.strip()):
+            fenced = not fenced
+            continue
+        found = None if fenced else _PRIOR_WORK_LINE.match(line.rstrip())
+        if found and found.group("text") and _PLACEHOLDER.sub("", found.group("text")).strip(" \t|,;"):
+            return True
+    return False
+
+
+def prior_work_lane_hit(tool: str, tool_input):
+    """Return (matched, reason) when a lane start or a lane brief names no prior work, else None. A lane start is a
+    create_session that tags a lane (its prompt). A lane brief is a send_message whose first non-blank line after any
+    Grant line starts the Lane brief marker (its message), read as _step_call reads it. Pure text work: no read, no file.
+    The Agent side of the rule is guard.prior_work_agent_hit."""
+    if not isinstance(tool_input, dict):
+        return None
+    if tool == BRIEF_TOOL:
+        message = tool_input.get("message")
+        lines = [line.strip() for line in message.splitlines() if line.strip()] if isinstance(message, str) else []
+        if lines and lines[0].startswith(LANE_GRANT_MARKER):
+            lines = lines[1:]
+        if not (lines and _BRIEF_MARKER_LINE.match(lines[0])):
+            return None
+        text, matched = message, "lane brief with no Prior work line"
+    elif is_lane_create_session(tool, tool_input):
+        text, matched = tool_input.get("prompt"), "lane start with no Prior work line"
+    else:
+        return None
+    return None if prior_work_named(text) else (matched, PRIOR_WORK_REASON)
+
+
 # ---- A lane brief names a slug or a role, never a session id (rule brief-ids-in-roster)
 # A session id as a brief types it, in any case. SESSION_ID_RE (guard_shared_tree) is a full match, so this scans: the id
 # is `session_`, a digit, then letters and digits, so a parameter name such as `session_id` is no id, and a `.md`, a dot or
@@ -2331,7 +3001,10 @@ _DATA_QUOTES = "`\""  # an id with one of these right before it and right after 
 # A line that opens a brief: an optional markdown lead, then Grant: or Lane brief:. The lead is _MARKDOWN_LEAD plus the
 # list dash, which the other readers of the lead do not take.
 _BRIEF_LEAD = r"[-#*_>\s]*"
-_BRIEF_OPENER = re.compile(_BRIEF_LEAD + r"(?:" + re.escape(LANE_GRANT_MARKER) + r"|(?i:" + re.escape(LANE_BRIEF_MARKER) + r"))")
+# The standing sessions' briefs open with a role word (decision brief-ids-in-roster): `Brief:`, `Triage brief:`, `Batch runner brief:`.
+ROLE_BRIEF_MARKERS = ("Brief:", "Triage brief:", "Batch runner brief:")
+_BRIEF_OPENER = re.compile(_BRIEF_LEAD + r"(?:" + re.escape(LANE_GRANT_MARKER) + r"|(?i:"
+                           + "|".join(re.escape(m) for m in (LANE_BRIEF_MARKER,) + ROLE_BRIEF_MARKERS) + r"))")
 BRIEF_ID_REASON = (
     "this brief names a session id. A hand-typed id can wake the wrong session or none. Name the lane's slug or the "
     "session's role instead, and the lane looks the id up in the roster. "
@@ -2351,10 +3024,10 @@ def _bare_ids_in(text: str) -> list[str]:
 
 
 def brief_roster_hit(tool: str, tool_input, cwd: str):
-    """Return (matched, reason) when a lane brief names a bare session id, else None. Read: a create_session that tags a
-    lane (its prompt), and a send_message with a line that starts LANE_GRANT_MARKER or LANE_BRIEF_MARKER (its message). An
-    id inside backticks or double quotes is data and passes. The send_message target is not judged. No git read and no
-    file written: the text alone decides. Fails open on any error in the read. `cwd` is unused; the call site passes it."""
+    """Return (matched, reason) when a session brief names a bare session id, else None. Read: a create_session that tags a
+    lane (its prompt), and a send_message with a line that starts LANE_GRANT_MARKER, LANE_BRIEF_MARKER or a role-word
+    marker (ROLE_BRIEF_MARKERS), whatever session it goes to (its message). An id inside backticks or double quotes is
+    data and passes. The send_message target is judged by target_roster_hit. No git read and no file written: the text alone decides. Fails open on any error in the read. `cwd` is unused; the call site passes it."""
     if not isinstance(tool_input, dict):
         return None
     if tool == BRIEF_TOOL:
@@ -2373,7 +3046,91 @@ def brief_roster_hit(tool: str, tool_input, cwd: str):
         return None
     if not bare:
         return None
-    return "lane brief naming " + ", ".join(sorted(set(bare))), BRIEF_ID_REASON
+    return "session brief naming " + ", ".join(sorted(set(bare))), BRIEF_ID_REASON
+
+
+# ---- A send_message goes to an id the roster knows (rule target-id-in-roster)
+TARGET_ROSTER_REASON = (
+    "the target session id is in no roster source: not in the Standing sessions rows of the roadmap record, and not in "
+    "what your own list_sessions, get_session and create_session results show for this repo. A hand-typed id can wake "
+    "the wrong session or none. {rows} Copy the id from a row, or run list_sessions (every page, tag cs-repo:<owner>/<name>) "
+    "and take it from there, then send again. "
+    "(decision brief-ids-in-roster, every session knows the right ids from the harness)"
+)
+TARGET_UNKNOWN_LINE = ("target-id-in-roster: the roster is unknown (the roadmap record and the transcript could not be "
+                       "read), so the target session id is not checked")
+
+
+def _parent_targets():
+    """PARENT_TARGETS of lint/layout.py, the one home of the send targets that name the parent."""
+    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import layout
+    return layout.PARENT_TARGETS
+
+
+def _sender_facts(transcript: str, own_id):
+    """(slugs, parent, made) from one read of the sender's transcript. slugs: the owner/name repos named by the cs-repo
+    tags of the sender's own newest record, lowercased, or None when that record is unread or carries none. The
+    checkout's origin is not used: a session may coordinate one repo from another's checkout, so only its own record
+    says which repo its sessions belong to. parent: the parent_session_id of that record, or None. made: the lanes
+    the sender created, {id: tags}. Each is empty or None when the transcript does not read."""
+    if not (own_id and transcript):
+        return None, None, {}
+    try:
+        tags, parent, made = own_session.own_record_and_created(transcript, own_id)
+    except Exception:
+        return None, None, {}
+    slugs = {t[len(REPO_TAG):].lower() for t in tags or () if isinstance(t, str) and t.startswith(REPO_TAG)}
+    return slugs or None, parent, made
+
+
+def target_roster_hit(tool: str, tool_input, cwd: str, transcript: str = ""):
+    """Return (matched, reason) when a send_message names a target session id that is in no roster source, else None.
+    The parent alias (layout.PARENT_TARGETS) passes with no read. The roster is the Standing sessions rows of the
+    roadmap record (own_session.roster_rows), the sender's parent id (parent_session_id of its own get_session record),
+    every lane the sender created whatever its cs-repo tag, and every id the sender's own transcript shows from
+    list_sessions, get_session and create_session with a cs-repo tag of the sender's repo (the cs-repo tags of its own
+    record; with none read, every sighting counts). A lane has no row, so it counts only when the sender saw or made
+    it. The reason prints the record's rows and never the target. Cost: one local git read of the record, two
+    transcript reads (own_session.own_record_and_created, own_session.sessions_seen), on a send_message only; no
+    network, no file. Fails open with one stderr line when neither source reads, and on any error: the roster is advice
+    about an id."""
+    if tool != BRIEF_TOOL or not isinstance(tool_input, dict):
+        return None
+    target = tool_input.get("session_id")
+    if not isinstance(target, str) or not target:
+        return None
+    try:
+        from override import remote_session_id
+        if target in _parent_targets():
+            return None
+        text = own_session.roster_record(cwd)
+        rows = own_session.roster_rows(text) if text is not None else None
+        slugs, parent, made = _sender_facts(transcript, remote_session_id())
+        seen = None
+        if isinstance(transcript, str) and transcript:
+            seen = own_session.sessions_seen(transcript)
+        if rows is None and seen is None:
+            print(TARGET_UNKNOWN_LINE, file=sys.stderr)
+            return None
+        known = {row[2] for row in rows or ()} | set(made)
+        if parent:
+            known.add(parent)
+        known |= {sid for sid, tags in seen or () if (slugs is None or any(repo_tag_names(t, s) for t in tags for s in slugs))}
+        if target in known:
+            return None
+        if rows is None:
+            listing = "The roadmap record could not be read."
+        elif not rows:
+            listing = "The roadmap record holds no standing session rows."
+        else:
+            listing = "The standing sessions: " + "; ".join(
+                "%s%s %s" % (role, " " + title if title else "", sid) for role, title, sid in rows) + "."
+        return "send_message to a session id in no roster source", TARGET_ROSTER_REASON.format(rows=listing)
+    except Exception:
+        return None
 
 
 # ---- send_message: a header stamp matches the clock (rule message-time-matches-clock)

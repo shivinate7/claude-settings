@@ -38,6 +38,7 @@ PAGE_URL = "https://claude.ai/artifact/" + PAGE_ID
 PAGE_CODE_URL = "https://claude.ai/code/artifact/" + PAGE_ID
 NOTES_ID = "Nq3hT8sVc2YbK5wD"
 NOTES_URL = "https://claude.ai/artifact/" + NOTES_ID
+OUTLOOK_URL = "https://claude.ai/artifact/Ol5rU9pWq2Xb7Nc4"  # the waiting page's link in another account
 OTHER_URL = "https://claude.ai/artifact/Zz9Qq1Ww2Ee3Rr4T"  # an artifact link that the registry does not hold
 ITEM_ID = "review-fix-check-go"
 ITEM_N = 231
@@ -106,15 +107,15 @@ def verdict(choice, note=None):
 def registry():
     """The repo's registry: a notes page that is not exported, and the waiting page last."""
     return [
-        {"id": "notes", "url": NOTES_URL, "role": "notes", "account": "main", "export": False},
-        {"id": "waiting", "url": PAGE_URL, "role": "waiting-page", "account": "main"},
+        {"id": "notes", "role": "notes", "export": False, "links": [{"account": "main", "url": NOTES_URL}]},
+        {"id": "waiting", "role": "waiting-page", "export": "waiting", "links": [{"account": "main", "url": PAGE_URL}]},
     ]
 
 
 def full_registry():
     """Full size: 24 entries before the waiting page, which stays last."""
-    many = [{"id": "entry-%02d" % n, "url": "https://claude.ai/artifact/Entry%02dAbCdEfGh0" % n,
-             "role": "notes-%02d" % n, "account": "main", "export": False} for n in range(1, 25)]
+    many = [{"id": "entry-%02d" % n, "role": "notes-%02d" % n, "export": False,
+             "links": [{"account": "main", "url": "https://claude.ai/artifact/Entry%02dAbCdEfGh0" % n}]} for n in range(1, 25)]
     return many + registry()[1:]
 
 
@@ -154,13 +155,17 @@ class Base(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)  # test-temp-standard: never the system temp dir
         self.addCleanup(self.tmp.cleanup)
 
-    def repo(self, artifacts=None, extras=True):
-        """A repo root with its extras file. `artifacts` replaces the default registry; extras=False leaves the file out."""
+    def repo(self, artifacts=None, extras=True, old_key=None):
+        """A repo root with its extras file. `artifacts` replaces the default registry; extras=False leaves the file out.
+        `old_key` writes the old top-level "waiting-page" key too, as a repo that predates the registry holds it."""
         root = tempfile.mkdtemp(prefix="repo-", dir=self.tmp.name)
         if extras:
             registry_list = registry() if artifacts is None else artifacts
             # lint/layout.py refuses an extras file with no "kinds" object, so the fixture carries an empty one.
-            write_text(os.path.join(root, EXTRAS), json.dumps({"kinds": {}, "artifacts": registry_list}))
+            data = {"kinds": {}, "artifacts": registry_list}
+            if old_key is not None:
+                data["waiting-page"] = old_key
+            write_text(os.path.join(root, EXTRAS), json.dumps(data))
         return root
 
     def new_fetch(self):
@@ -405,6 +410,29 @@ class NotCounted(Base):
     def test_page_url_is_another_registry_entry(self):
         r = self.check(self.repo(), self.pair(), page=NOTES_URL)
         self.assertNotCounted(r, "page URL is a registry entry that is not the waiting page")
+
+    def test_page_url_with_an_empty_links_entry_and_the_old_key_counted(self):
+        """A waiting entry with links [] reads the old top-level "waiting-page" key as its one link, as lint/layout.py
+        is_waiting_page_url does. A grant on that page counts."""
+        entries = registry()
+        entries[1] = dict(entries[1], links=[])
+        r = self.check(self.repo(artifacts=entries, old_key=PAGE_URL), self.pair(), pick="a")
+        self.assertCounted(r, verdict("a"))
+
+    def test_page_url_with_an_empty_links_entry_and_no_old_key_not_counted(self):
+        """Control: the same entry with no old key holds no link, so no page URL is the registered waiting page."""
+        entries = registry()
+        entries[1] = dict(entries[1], links=[])
+        r = self.check(self.repo(artifacts=entries), self.pair(), pick="a")
+        self.assertNotCounted(r, "page URL is not the registered waiting page")
+
+    def test_page_url_that_is_another_account_link_of_the_page_counted(self):
+        """The waiting entry holds one link per account. The link of another account is
+        the waiting page too, so a grant made from that account counts."""
+        entries = registry()
+        entries[1] = dict(entries[1], links=[{"account": "main", "url": PAGE_URL}, {"account": "outlook", "url": OUTLOOK_URL}])
+        r = self.check(self.repo(artifacts=entries), self.pair(), page=OUTLOOK_URL, pick="a")
+        self.assertCounted(r, verdict("a"))
 
     def test_choice_not_an_option_key(self):
         r = self.check(self.repo(), self.pair(answer_fields={"choice": "z"}))

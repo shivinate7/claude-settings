@@ -17,10 +17,10 @@ import json
 import os
 import re
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 PLUGIN = ".claude-plugin/plugin.json"
 MARKET = ".claude-plugin/marketplace.json"
 FAIL = "check_mod_versions: FAIL: "

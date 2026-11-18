@@ -1,0 +1,1 @@
+- loop-var-literal-idioms: a part-word `$f` in a loop body (`echo "== $f =="`) and `$HOME` or `$D` in a for list stay literal, as on main, because _resolve_loops runs before _resolve_vars.

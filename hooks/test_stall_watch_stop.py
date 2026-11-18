@@ -3023,5 +3023,34 @@ def CI97_branch_named_wait_closes_on_a_merge_of_any_pr():
     return expect_silent(wait + [merge_bin(CI_PR)]) + ["control: " + p for p in expect_block(wait, pr="my-branch")]
 
 
+def paused_job(job_id, command):
+    """A Bash call started with run_in_background that runs `command`, and its result."""
+    cid = "toolu_" + job_id
+    return [call(cid, command, background=True), started(cid, job_id, win_path(job_id), False)]
+
+
+@case
+def S30_leading_pause_is_quiet_time_at_stop():
+    """S30. `sleep 600; echo done` idle 350 s is not listed: its pause adds 600 s to the 300 s quiet time.
+    Controls, run first: a command with no pause at 350 s is listed, and the same pause at 950 s is listed"""
+    base = new_dir()
+    problems = []
+    steps = [
+        ("control, no pause at 350 s", "echo done", "sctl350", 350, True),
+        ("pause of 600 s at 350 s", "sleep 600; echo done", "spz350", 350, False),
+        ("pause of 600 s at 950 s", "sleep 600; echo done", "spz950", 950, True),
+    ]
+    for label, command, job_id, idle, want_listed in steps:
+        output_file(base, job_id, idle)
+        rc, out, err = run_stop(transcript(paused_job(job_id, command)), base)
+        problems += expect(rc == 0, f"{label}: exit {rc}, want 0: {err.strip()[:200]}")
+        msg = system_message(out, problems)
+        if want_listed:
+            problems += [f"{label}: {p}" for p in listed_once(msg, job_id)]
+        else:
+            problems += expect(msg == "", f"{label}: listed as quiet, want no listing: {msg!r}")
+    return problems
+
+
 if __name__ == "__main__":
     sys.exit(run_cases(CASES))

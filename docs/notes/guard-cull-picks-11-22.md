@@ -1,0 +1,1 @@
+- guard-cull-picks-11-22: Cull picks, coordinator 11:22 CST Nov 12 (reversible), for lane guard-false-alarm-cull: delete the Recovered/Handoff-gave report line check and the Departs-from dash separator check; the both-sides check stays.

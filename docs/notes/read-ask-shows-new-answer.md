@@ -1,0 +1,1 @@
+- read-ask-shows-new-answer: A read ask answered before the ship time still shows "New answer" in the read list. Source: the #2559 design review.

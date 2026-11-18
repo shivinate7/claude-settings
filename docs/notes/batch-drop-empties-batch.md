@@ -1,0 +1,1 @@
+- batch-drop-empties-batch: (#2378 fix-lane round 3, sonnet) merge.py L4209/L4303/L4463 print a `--batch-drop` that empties the batch (the next refusal names the way out); L4231 comment is stale; the `--blame` route needs a completed failed Actions run, which a draft batch lacks unless one is dispatched.

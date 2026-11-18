@@ -1,0 +1,1 @@
+- local-checks-deleted-source-pass: (same source, #2536 PR body) a deleted source file whose test is left reads PASS.

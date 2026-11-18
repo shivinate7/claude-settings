@@ -1,0 +1,1 @@
+- question-form-none-refusal: Triage 19:58 CST Nov 12: guard question-departs (hooks/question_form.py NO_CHANGE) refused "adds a push-target line (Push to: <branch> or none)" because the word "none" sat inside a quoted literal on the change side. Workaround: reword.

@@ -76,7 +76,7 @@ the desktop app has none.
   newest pointer for the same project dir (none when that session has no handoff); with no
   pointer, the newest handoff whose PreCompact state `repo` is that dir; with none, says
   "no handoff". It also names the new session's own handoff. Every reorient then sweeps
-  unusable pointers and stale .dir and .reread records (sweep()).
+  unusable pointers and stale .dir, .reread and .audit records (sweep()).
   Spec: docs/decisions/precompact-handoff.md, item 8.
 
 Compaction check (no mode; hooks/daily_note.py calls it at SessionStart): cc_version_check()
@@ -99,7 +99,7 @@ import shutil
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 try:
     from shared_names import config_dir  # noqa: E402  the one home of the config dir
 except ImportError:  # a copy by need: the hook lands before its sibling in an install, and must still build its digest
@@ -112,7 +112,7 @@ DIGEST_CAP = 60_000
 DIGEST_SINCE_CAP = 200_000
 REFUSED_MAX_LINES = 50
 REFUSED_MAX_CHARS = 200
-# A .dir or .reread record this old has no live session: Claude Code deletes a transcript after
+# A .dir, .reread or .audit record this old has no live session: Claude Code deletes a transcript after
 # cleanupPeriodDays (default 30), so no session that old can resume. The record sets no value.
 STALE_AGE = 30 * 86400
 NUDGE_FLOOR = 200_000
@@ -194,7 +194,7 @@ def required_sections():
     when the prompt cannot be read: the check then fails open."""
     path = prompt_path()
     if not os.path.exists(path):
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "precompact_handoff_prompt.md")
+        path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "precompact_handoff_prompt.md")
     return _marker_names(path)
 
 
@@ -411,6 +411,12 @@ def reread_flag_path(session_id):
     return os.path.join(config_dir(), "state", "handoff", "%s.reread" % session_id)
 
 
+def audit_flag_path(session_id):
+    """The flag reread_check --post-compact sets beside the reread flag: the handoff audit
+    (prompt step 3) is still owed. Defined here so SessionEnd and sweep can drop it."""
+    return os.path.join(config_dir(), "state", "handoff", "%s.audit" % session_id)
+
+
 def record_dir(session_id, cwd):
     """Record the session's project dir in <sid>.dir, so the fork fallback finds a session
     that never compacted. Every handoff hook that runs for a session calls this."""
@@ -438,7 +444,7 @@ def recorded_dir(session_id):
 
 def run_session_end(payload):
     """SessionEnd: record the dir for any reason. Only reason `clear` leaves a pointer to
-    the old session, and drops that session's re-read flag."""
+    the old session, and drops that session's re-read and audit flags."""
     session_id = payload.get("session_id", "")
     if not session_id:
         return 0
@@ -446,10 +452,11 @@ def run_session_end(payload):
     record_dir(session_id, cwd)
     if payload.get("reason") != "clear":
         return 0
-    try:
-        os.remove(reread_flag_path(session_id))
-    except OSError:
-        pass
+    for flag in (reread_flag_path(session_id), audit_flag_path(session_id)):
+        try:
+            os.remove(flag)
+        except OSError:
+            pass
     os.makedirs(pointer_dir(), exist_ok=True)
     path = os.path.join(pointer_dir(), "%s.json" % session_id)
     tmp = path + ".tmp"
@@ -497,7 +504,7 @@ def pointers():
 
 def sweep(cwd):
     """Drop records no session can use: a malformed pointer, a pointer for this dir whose
-    session has no handoff, and a .dir or .reread record older than STALE_AGE. Another dir's
+    session has no handoff, and a .dir, .reread or .audit record older than STALE_AGE. Another dir's
     pointer stays: that dir can be mid-/clear. Each failed delete is logged."""
     for path, (sid, pcwd) in pointers().items():
         if sid is None or (same_dir(pcwd, cwd) and not os.path.isfile(handoff_path(sid))):
@@ -507,7 +514,7 @@ def sweep(cwd):
     for name in os.listdir(sdir) if os.path.isdir(sdir) else []:
         base, ext = os.path.splitext(name)
         path = os.path.join(sdir, name)
-        if ext in (".dir", ".reread") and "." not in base and os.path.isfile(path):
+        if ext in (".dir", ".reread", ".audit") and "." not in base and os.path.isfile(path):
             try:
                 old = now - os.path.getmtime(path) > STALE_AGE
             except OSError:
@@ -634,8 +641,6 @@ READ_MCP_WORDS = ("get", "list", "read", "query", "search", "view")
 # A whole name segment that makes an MCP tool a writer or a sender, whatever else its name says.
 WRITE_MCP_WORDS = ("write", "create", "update", "delete", "send", "set", "post", "add", "remove", "merge", "push",
                    "resolve", "submit", "edit", "put", "patch", "run", "trigger", "reply", "comment", "fork")
-GIT_WRITES = ("commit", "push", "add", "tag", "merge", "rebase", "reset", "restore", "checkout", "switch", "stash",
-              "cherry-pick", "apply", "am", "rm", "mv", "clean", "pull", "revert", "init", "clone", "config")
 SHELL_WRITES = ("rm", "mv", "cp", "touch", "mkdir", "tee", "chmod", "ln", "install", "truncate", "dd")
 
 
@@ -721,7 +726,7 @@ def _shell_reads(command):
     if not isinstance(command, str):
         return True
     for segment in guard_core.split_segments(command):
-        if any(sub in GIT_WRITES for sub, _rest in guard_core.git_calls(segment)):
+        if any(sub in guard_core.GIT_WRITES for sub, _rest in guard_core.git_calls(segment)):
             return False
         tokens = guard_core.segment_tokens(segment) or []
         at = guard_core.resolve_command(tokens) if tokens else None
@@ -754,7 +759,7 @@ def backed_premises(transcript, need, handoff):
             isinstance(pair, (list, tuple)) and len(pair) == 2 and isinstance(pair[0], str)
             and isinstance(pair[1], (list, tuple)) for pair in need):
         return None
-    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    lint = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lint")
     if lint not in sys.path:
         sys.path.insert(0, lint)
     try:
@@ -1495,7 +1500,7 @@ def cc_version_check(env=None, config=None):
             CC_TAIL))[:CC_MAX_LINE]
     blob, key = found
     facts = cc_facts(blob)
-    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", CC_BASELINE),
+    with open(os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", CC_BASELINE),
               encoding="utf-8") as f:
         base = json.load(f)
     changes = []

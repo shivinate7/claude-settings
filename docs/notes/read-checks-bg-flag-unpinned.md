@@ -1,0 +1,1 @@
+- read-checks-bg-flag-unpinned: no test pins that the new background-run sentence carries no flag; a settings copy with `--confirm` inside the wrapped form passes all four cases, and only the Never covers sentence, kept, would contradict it (hooks/test_auto_mode_allow.py, READ_CHECKS_BACKGROUND). Decision: auto-mode-owner-acts Seen: 2026-11-17 x1

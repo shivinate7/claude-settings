@@ -1,0 +1,1 @@
+- feedback-readback-query-ignored: The feedback Stop hook counts a read-back only from the page copy, so an ArtifactData `query` with no out_dir is not counted. It refused page items 496 and 499 after the coordinator read each back in an earlier turn. It seems to read only the current turn for a read-back. Possible false alarm. Overlaps degen-d1-d2-mailbox-read-backs.

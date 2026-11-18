@@ -1,0 +1,1 @@
+- item-606-guard-skill-ask: global-claude-md-scope-audit 15:47 CST Nov 12: Owner page save 15:46 CST Nov 12: item 606 none: "message retrospective for its thoughts on this i lean towards C maybe?" (c: a guard-building skill holding both guard rules). Retrospective asked 15:47 CST; item stays open for a reword.

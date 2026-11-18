@@ -1,0 +1,1 @@
+- mutate-walk-suites-copy: WALK_SUITES in hooks/test_mutate_ci.py is a hard-coded copy (rule building-allow-list-is-the-constant). Fix: import the constant the mutation report uses (#2430).

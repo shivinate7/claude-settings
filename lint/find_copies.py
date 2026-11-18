@@ -32,7 +32,7 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 MAX_BYTES = 1_000_000
@@ -46,7 +46,7 @@ SKIP_NAMES = re.compile(r"^(LICENSE|LICENCE|NOTICE|COPYING)(\..*)?$|^\.git(ignor
 TEMPLATE_DIRS = {"examples", "templates"}  # a parent file here is meant to be copied, so it is no copy
 OWN_FILES = {".github/pull_request_template.md"}  # each repo keeps its own, so the same path is no copy
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build"}
-DEFAULT_PARENT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_PARENT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 
 
 def list_files(root):

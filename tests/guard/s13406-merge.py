@@ -411,6 +411,7 @@ STAMPDIR = os.path.join(ROOT, "stamp_dir")           # stamp.json is a folder: i
 STAMPLIST = os.path.join(ROOT, "stamp_list")         # stamp.json is JSON, not an object, and holds "merge"
 STAMPLINK = os.path.join(ROOT, "stamp_link", "into")  # a symlink from outside into STAMPREPO/hooks
 STAMPIGNORE = os.path.join(ROOT, "stamp_ignore")     # stamp.json whose merge block ignores the `sync` check
+STAMPNOCHECK = os.path.join(ROOT, "stamp_no_checks")  # stamp.json pins requiredChecks "none", and a workflows folder holds one workflow file
 
 
 def _build_stamp_repos():
@@ -421,6 +422,10 @@ def _build_stamp_repos():
         "method": "merge", "requiredChecks": ["checks"], "deadlineMinutes": 30, "deleteBranch": True,
         "ignoreChecks": [{"name": "sync", "reason": "the sync job is advisory"}]}}
     make_repo(STAMPIGNORE, {".github/stamp.json": json.dumps(ignoring) + "\n"})
+    nochecks = {"defaultBranch": "main", "kinds": [], "merge": {
+        "method": "merge", "requiredChecks": "none", "deadlineMinutes": 30, "deleteBranch": True}}
+    make_repo(STAMPNOCHECK, {".github/stamp.json": json.dumps(nochecks) + "\n",
+                             ".github/workflows/ci.yml": "name: ci\non: push\n"})
     make_repo(STAMPNONE, {".github/dependabot.yml": "version: 2\n", "hooks/keep": "x\n"})
     make_repo(STAMPNOBLOCK, {".github/stamp.json": json.dumps({"defaultBranch": "main", "kinds": []}) + "\n"})
     make_repo(STAMPBAD, {".github/stamp.json": '{"defaultBranch": "main", "merge": {"method": \n'})
@@ -431,7 +436,7 @@ def _build_stamp_repos():
         os.symlink(os.path.join(STAMPREPO, "hooks"), STAMPLINK, target_is_directory=True)
 
 
-lazy_fixture([STAMPREPO, STAMPNONE, STAMPNOBLOCK, STAMPBAD, STAMPDIR, STAMPLIST, STAMPLINK, STAMPIGNORE],
+lazy_fixture([STAMPREPO, STAMPNONE, STAMPNOBLOCK, STAMPBAD, STAMPDIR, STAMPLIST, STAMPLINK, STAMPIGNORE, STAMPNOCHECK],
              _build_stamp_repos)
 add("merge-batch: the merge tool of the host is allowed past an ignored running workflow on another ready pr", "allow",
     tool="mcp__github__merge_pull_request", cwd=STAMPIGNORE, pullNumber=1, repo="x", owner="y",
@@ -439,6 +444,45 @@ add("merge-batch: the merge tool of the host is allowed past an ignored running 
 # A pinned merge.requiredChecks list is the required list: STAMPREPO pins `checks`, the protection says `gate`, so only the pin counts.
 add("merge-batch: a pinned merge.requiredChecks list is the required list, so a pending `gate` check on pr 2 does not block", "allow",
     tool="mcp__github__merge_pull_request", cwd=STAMPREPO, pullNumber=1, repo="x", owner="y", env_path=GHPINNED + os.pathsep + PY_PATH)
+# A pinned requiredChecks "none" names no required check, so a head with no check and no run reads green here too
+# (decision private-repos-no-ci, merge.requiredChecks "none" for a repo that requires no check). The workflows folder
+# is what makes that head unsettled when the pin is not read, so this case fails on that defect alone.
+add("merge-checks: the merge tool of the host reads a head with no check and no run as green when requiredChecks is none", "allow",
+    silent=True, tool="mcp__github__merge_pull_request", cwd=STAMPNOCHECK, pullNumber=12, repo="x", owner="y",
+    env_path=GHEMPTY + os.pathsep + PY_PATH)
+# Under none the tool reads no CI run at all (decision private-repos-no-ci), so a failed check row on the head holds nothing.
+# The failed head is the one GHRED reports, which the deny case above refuses under a listed check.
+add("merge-checks: the merge tool of the host allows a failed head when requiredChecks is none, which reads no CI run", "allow",
+    silent=True, tool="mcp__github__merge_pull_request", cwd=STAMPNOCHECK, pullNumber=12, repo="x", owner="y",
+    env_path=GHRED + os.pathsep + PY_PATH)
+# A setup pull request: main's checkout pins a list, and the pull request's own head (branch feat, pull request 12) pins none. The guard reads
+# the head's stamp from its commit, as the merge tool does. The head has no check and no run, so it is green under the head's none.
+STAMPHEAD = os.path.join(ROOT, "stamp_head")  # main's checkout pins checks; branch feat, the head of pull request 12, pins none
+GHHEADNONE = os.path.join(ROOT, "ghheadnone")  # the head of pull request 12 is feat: no check and no workflow run reported on it
+
+
+def _build_stamp_head():
+    listed = {"defaultBranch": "main", "kinds": [], "merge": {
+        "method": "merge", "requiredChecks": ["checks"], "deadlineMinutes": 30, "deleteBranch": True}}
+    # The workflows folder is what makes a head with no check and no run unsettled when the pin is not read (as STAMPNOCHECK's does).
+    make_repo(STAMPHEAD, {".github/stamp.json": json.dumps(listed) + "\n", ".github/workflows/ci.yml": "name: ci\non: push\n", "hooks/keep": "x\n"})
+    none = {"defaultBranch": "main", "kinds": [], "merge": dict(listed["merge"], requiredChecks="none")}
+    run_vcs(STAMPHEAD, "checkout", "-q", "-b", "feat")
+    write(os.path.join(STAMPHEAD, ".github", "stamp.json"), json.dumps(none) + "\n")
+    run_vcs(STAMPHEAD, "add", "-A")
+    run_vcs(STAMPHEAD, *IDENT, "commit", "-q", "-m", "setup: requiredChecks none")
+    head = run_vcs(STAMPHEAD, "rev-parse", "HEAD").stdout.strip()
+    run_vcs(STAMPHEAD, "checkout", "-q", "main")
+    make_fake_gh(GHHEADNONE, "main", checks=[], runs=[], head_sha=head)
+
+
+lazy_fixture([STAMPHEAD, GHHEADNONE], _build_stamp_head)
+add("merge-checks: the merge tool of the host reads a setup head's none stamp over main's pinned list, so no check and no run is green", "allow",
+    silent=True, tool="mcp__github__merge_pull_request", cwd=STAMPHEAD, pullNumber=12, repo="x", owner="y",
+    env_path=GHHEADNONE + os.pathsep + PY_PATH)
+# The control: the same checkout pins a list, and a head with no check and no run is refused on it, so the case above is not a blanket allow.
+add("merge-checks: the merge tool of the host still denies a head with no check and no run when the pinned list names a check", "deny", "merge-checks",
+    tool="mcp__github__merge_pull_request", cwd=STAMPHEAD, pullNumber=12, repo="x", owner="y", env_path=GHEMPTY + os.pathsep + PY_PATH)
 
 _BARE_GUARD = dict(env_path=GREEN_ON, config=MERGECFG)
 # ASK: the repo uses the merge tool, and the call skips it.
@@ -518,7 +562,13 @@ LANE_TAGS = ["cs-build:lane", "cs-repo:o/r"]
 RUNNER_TAGS = ["cs-build:batch-runner", "cs-repo:o/r"]
 COORD_TAGS = ["cs-build:coordinator", "cs-repo:o/r"]
 TRIAGE_TAGS = ["cs-build:triage", "cs-repo:o/r"]  # the record branch's one writer (roadmap-one-writer)
+# decision session-tiers, ruling own-tiny-fixes-b: a standing session is a coordinator, a triage or a consultant (the guard's STANDING_HOLDERS).
+ARBITER_TAGS = ["cs-build:arbiter", "cs-repo:o/r"]
+CONSULTANT_TAGS = ["cs-build:consultant", "cs-repo:o/r"]
 MERGE_SHIM = "~/.claude/bin/merge"
+# A lane's proof, for `--role lane` and the lane `--ready` refusal, needs this repo tag beside cs-build:lane: no lane role file exists
+# in another repo (ruling own-lanes-merge-claude-settings-prs).
+CS_REPO_TAG = "cs-repo:" + ARCH_REPO_SETTINGS
 
 
 def role_use(tool_id, name, tool_input=None):
@@ -599,18 +649,36 @@ CREATE_SESSION = "mcp__claude-code-remote__create_session"
 ROLE_NEW = "session_ROLENEW01"  # the id a create_session call starts, and a send_message names
 
 
-def role_create_call(tool_id, tags, session=ROLE_NEW, plain=False, key="id"):
+def role_create_call(tool_id, tags, session=ROLE_NEW, plain=False, key="id", body=None):
     """One paired create_session call that starts `session` with `tags`. Its result names the new id: as
-    JSON {`key`: ...} when `plain` is False, else as plain text. Each shape has its own fixture."""
-    body = "Created session " + session + "." if plain else json.dumps({key: session})
+    JSON {`key`: ...} when `plain` is False, else as plain text. Each shape has its own fixture. `body`, when given,
+    is the result text as it stands, for a shape the other options do not build."""
+    if body is None:
+        body = "Created session " + session + "." if plain else json.dumps({key: session})
     return [role_use(tool_id, CREATE_SESSION, {"title": "a lane session", "tags": list(tags)}),
             role_result(tool_id, body)]
+
+
+def stepdup_row(sid, status, tags):
+    """One list_sessions row: the keys the tool returns for a session, with `tags` as a list."""
+    return {"id": sid, "title": "a lane session", "session_status": status, "tags": list(tags)}
+
+
+def stepdup_list(tool_id, rows, more=False, args=None, cut=False):
+    """One list_sessions call and its result: `rows` in one wrapped record. `more` sets has_more, a read that is not the
+    last page. `args` is the call's input: an after_id cursor makes the read a page of a chain. `cut` drops the end of
+    the result, so the text is not a whole record."""
+    body = role_wrapped(json.dumps({"ccr": {"data": list(rows), "has_more": more}}))
+    return [role_use(tool_id, LIST_SESSIONS, dict(args or {})), role_result(tool_id, body[:-40] if cut else body)]
 
 
 # lane-one-topic: a lane on topic icons, and an older lane with two steps and no topic.
 STEP_TOPIC_TAGS = ["cs-build:lane", "cs-step:icon-a", "cs-topic:icons", "cs-repo:o/r"]
 STEP_OLD_TAGS = ["cs-build:lane", "cs-step:icon-a", "cs-step:icon-b", "cs-repo:o/r"]
 STEP_COLORS_TAGS = ["cs-build:lane", "cs-step:colors-a", "cs-topic:colors", "cs-repo:o/r"]
+# A whole list_sessions read with one live lane on another step, icon-a. It carries no session on the steps the
+# lane-step-dup briefs below name (icon-b, colors-a, lane-start-settings), so the read finds no carrier.
+LIST_NO_CARRIER = stepdup_list("l1", [stepdup_row("session_ROLELIST01", "SESSION_STATUS_RUNNING", STEP_TOPIC_TAGS)])
 
 
 # lane-closes-after-records: the tags of the target's record. A lane names its step slug and its repo.
@@ -624,6 +692,8 @@ ARCH_TRIAGE_TAGS = ["cs-build:triage", "cs-repo:o/r"]
 # A target that is no lane, yet carries a step slug and a repo: a read of its open list would find a slug.
 ARCH_TRIAGE_SLUG_TAGS = ["cs-build:triage", "cs-step:" + ARCHIVE_SLUG, "cs-repo:o/r"]
 ARCH_UNTAGGED_TAGS = ["cs-repo:o/r"]
+# A lane with its step and no cs-repo tag: the guard has no repo to read, so its refusal has no repo to name.
+ARCH_LANE_NO_REPO_TAGS = ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG]
 # The branch read: a lane tagged for both repos of the incident, and the sources its session started on.
 ARCH_INC_TAGS = ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_SETTINGS, "cs-repo:" + ARCH_REPO_QMAX]
 ARCH_QMAX_SOURCE = {"git_repository": {"url": "https://github.com/" + ARCH_REPO_QMAX}}
@@ -708,11 +778,18 @@ ROLE_LINES = {
     "archive-triage-slug": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_TRIAGE_SLUG_TAGS),
     "archive-no-target": role_call("r0", RUNNER_TAGS),
     "archive-own-lane": role_call("r0", LANE_TAGS),
+    "archive-lane-no-repo": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_LANE_NO_REPO_TAGS),
     "archive-stale-then-lane": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_UNTAGGED_TAGS)
                                + role_target_call("t2", ARCH_LANE_TAGS),
     # merge-confirm-repo shapes (section 5h): a lane that names o/a, a runner that names claude-settings, a runner whose
     # only repo is a child's, and an own record with no tags at all.
     "repo-o-a": role_call("g1", ["cs-build:lane", "cs-repo:o/a"]),
+    # Lane shapes for the lane `--ready` and draft-false refusals: a lane that also names claude-settings is judged; a lane of
+    # another repo, or with no repo tag, is not.
+    "repo-lane-o-a-settings": role_call("g1", ["cs-build:lane", "cs-repo:o/a", CS_REPO_TAG]),
+    "repo-lane-claude-settings": role_call("g1", ["cs-build:lane", CS_REPO_TAG]),
+    "repo-lane-degen": role_call("g1", ["cs-build:lane", "cs-repo:shivinate7/degen"]),
+    "repo-lane-none": role_call("g1", ["cs-build:lane"]),
     "repo-runner-claude-settings": role_call("g1", ["cs-build:batch-runner", "cs-repo:shivinate7/claude-settings"]),
     "repo-runner-children": role_call("g1", ["cs-build:batch-runner", "cs-repo:shivinate7/mailaudit"]),
     "repo-empty-tags": role_call("g1", []),
@@ -729,6 +806,17 @@ ROLE_LINES = {
     "step-old-lane-retagged": role_target_call("t1", STEP_OLD_TAGS) + role_tag_call("t2", session=ROLE_OTHER),
     # A create_session result that names the new id as {"session_id": ...}, not {"id": ...}.
     "step-create-session-id": role_create_call("c1", STEP_TOPIC_TAGS, key="session_id"),
+    # The lane-step-dup shapes: a brief that names a step needs a whole list read first (section 42900). Each is a
+    # lane-one-topic shape above with LIST_NO_CARRIER after its lines.
+    "step-topic-lane-listed": role_target_call("t1", STEP_TOPIC_TAGS) + LIST_NO_CARRIER,
+    "step-create-json-listed": role_create_call("c1", STEP_TOPIC_TAGS) + LIST_NO_CARRIER,
+    "step-create-text-listed": role_create_call("c1", STEP_TOPIC_TAGS, plain=True) + LIST_NO_CARRIER,
+    "step-triage-listed": role_target_call("t1", TRIAGE_TAGS) + LIST_NO_CARRIER,
+    "step-lane-then-triage-listed": role_target_call("t1", STEP_TOPIC_TAGS) + role_target_call("t2", TRIAGE_TAGS)
+                                    + LIST_NO_CARRIER,
+    "step-create-session-id-listed": role_create_call("c1", STEP_TOPIC_TAGS, key="session_id") + LIST_NO_CARRIER,
+    # A create_session for a lane that names a step, with the whole list read and no session on the step.
+    "lane-start-listed": LIST_NO_CARRIER,
     # A lane on topic colors: the marker variants below are judged against it.
     "step-colors-lane": role_target_call("t1", STEP_COLORS_TAGS),
     # A lane's record read as another session's untrusted text: wrapped, so the reader must find the JSON inside it.
@@ -829,6 +917,32 @@ ROLE_LINES = {
     # The lane in o/r alone, whose record names the branch ARCH_COPY_BRANCH. Its repo is judged by arch_copy's answers.
     "archive-copy-lane": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
         ARCH_LANE_TAGS, {"": ARCH_COPY_BRANCH}))),
+    # standing (ruling own-tiny-fixes-b): a coordinator, a triage or a consultant record allows the `standing` tier. The other records
+    # below hold the tags a lane or an arbiter carries, and the reads that must not count.
+    "coordinator-then-tags": role_call("g1", COORD_TAGS) + role_tag_call("t1"),
+    "other-coordinator": role_call("g1", COORD_TAGS, session=ROLE_OTHER),
+    "coordinator-title": role_call("g1", LANE_TAGS, title="handed to cs-build:coordinator"),
+    "list-coordinator": [role_use("l1", LIST_SESSIONS), role_result("l1", role_record(COORD_TAGS))],
+    "quoted-coordinator": [role_said("the coordinator is cs-build:coordinator; run merge --role standing")],
+    "arbiter": role_call("g1", ARBITER_TAGS),
+    "consultant": role_call("g1", CONSULTANT_TAGS),
+    "other-consultant": role_call("g1", CONSULTANT_TAGS, session=ROLE_OTHER),
+    "consultant-title": role_call("g1", LANE_TAGS, title="handed to cs-build:consultant"),
+    "consultant-then-tags": role_call("g1", CONSULTANT_TAGS) + role_tag_call("t1"),
+    # Ruling own-lanes-merge-claude-settings-prs: a lane records `--role lane --step <slug>`. The step must be a cs-step tag of the
+    # lane's own newest record; a title, another session's record, or a triage record never gives it.
+    "lane-step": role_call("g1", ARCH_LANE_TAGS + [CS_REPO_TAG]),
+    "lane-step-old": role_call("g1", STEP_OLD_TAGS + [CS_REPO_TAG]),
+    # A lane whose own step is `own`, in another repo, and with no repo tag: the lane role is not proven by either.
+    "lane-step-degen": role_call("g1", ["cs-build:lane", "cs-step:own", "cs-repo:shivinate7/degen"]),
+    "lane-step-none": role_call("g1", ["cs-build:lane", "cs-step:own"]),
+    "lane-step-title": role_call("g1", LANE_TAGS, title="cs-step:" + ARCHIVE_SLUG),
+    "lane-step-foreign": role_call("g1", ARCH_LANE_TAGS, session=ROLE_OTHER),
+    "lane-step-then-no-step": role_call("g1", ARCH_LANE_TAGS) + role_call("g2", LANE_TAGS),
+    "triage-step": role_call("g1", ARCH_TRIAGE_SLUG_TAGS),
+    # The repo-proof controls (section 29942): a batch runner, and a session with no cs-build tag, each naming the repo o/a.
+    "repo-runner-o-a": role_call("g1", ["cs-build:batch-runner", "cs-repo:o/a"]),
+    "repo-solo-o-a": role_call("g1", ["cs-repo:o/a"]),
 }
 
 
@@ -942,6 +1056,119 @@ role_refuse("a lone quote inside a string does not hide the real call",
 role_refuse("a lone quote in a comment does not hide the call on the next line",
           "echo done # it's\n" + MERGE_SHIM + " --role batch-runner", role_path("lane"))
 
+# Ruling own-tiny-fixes-b: a standing session, a coordinator, a triage or a consultant, records the `standing` tier, so it may merge
+# its own pull request. Only the own newest record with a coordinator, triage or consultant tag allows it. The refusal never names
+# the tier word or the role flag: a lane must not learn which tier passes.
+STANDING_ROLE = "standing"
+
+
+def standing_refuse(name, command, transcript, env=ROLE_ENV, **kw):
+    """A `merge --role standing` the guard refuses. The reason names its rule, never the role flag and never the tier word."""
+    sh("merge-role-proof: " + name, command, "deny", rule=ROLE_RULE, lacks=ROLE_FLAG + (STANDING_ROLE,),
+       transcript=transcript, env=env, cwd=NOGIT, **kw)
+
+
+def standing_allow(name, command, transcript, env=ROLE_ENV, **kw):
+    """A `merge --role standing` the guard lets through silently."""
+    sh("merge-role-proof: " + name, command, "allow", silent=True, transcript=transcript, env=env, cwd=NOGIT, **kw)
+
+
+STANDING_CMD = MERGE_SHIM + " --role " + STANDING_ROLE
+standing_allow("a coordinator records standing: its own record names cs-build:coordinator", STANDING_CMD, role_path("coordinator"))
+standing_allow("a triage records standing: its own record names cs-build:triage", STANDING_CMD, role_path("triage"))
+standing_allow("a consultant records standing: its own record names cs-build:consultant", STANDING_CMD, role_path("consultant"))
+for _standing_prefix in ("", "cd somewhere && "):
+    for _standing_form in (MERGE_SHIM, "bin/merge", "python3 merge/merge.py", "python3 merge/launch.py"):
+        _standing_cmd = _standing_prefix + _standing_form + " --role " + STANDING_ROLE
+        standing_allow(_standing_cmd + " allows a coordinator's own record", _standing_cmd, role_path("coordinator"))
+        standing_allow(_standing_cmd + " allows a triage's own record", _standing_cmd, role_path("triage"))
+        standing_allow(_standing_cmd + " allows a consultant's own record", _standing_cmd, role_path("consultant"))
+# A lane, an arbiter, a batch runner, or a record with no standing tag is refused. The arbiter stays refused until its tag is confirmed
+# (debt arbiter-merge-tag-unknown).
+standing_refuse("a lane that records standing is refused", STANDING_CMD, role_path("lane"))
+standing_refuse("an arbiter that records standing is refused", STANDING_CMD, role_path("arbiter"))
+standing_refuse("a consultant tag on another session does not allow standing", STANDING_CMD, role_path("other-consultant"))
+standing_refuse("a title that holds cs-build:consultant does not allow standing", STANDING_CMD, role_path("consultant-title"))
+standing_refuse("a consultant tag set after the read is stale: the own record no longer proves standing", STANDING_CMD,
+                role_path("consultant-then-tags"))
+standing_refuse("a batch runner that records standing is refused: the runner tier stays its own", STANDING_CMD, role_path("runner"))
+standing_refuse("a session with no cs-build tag that records standing is refused", STANDING_CMD, role_path("untagged"))
+standing_refuse("a coordinator tag on another session does not allow standing", STANDING_CMD, role_path("other-coordinator"))
+standing_refuse("a title that holds cs-build:coordinator does not allow standing", STANDING_CMD, role_path("coordinator-title"))
+standing_refuse("a title that holds cs-build:triage does not allow standing", STANDING_CMD, role_path("triage-title"))
+standing_refuse("a list_sessions result that holds the coordinator tags does not allow standing", STANDING_CMD,
+                role_path("list-coordinator"))
+standing_refuse("a user message that quotes cs-build:coordinator does not allow standing", STANDING_CMD,
+                role_path("quoted-coordinator"))
+standing_refuse("a coordinator tag set after the read is stale: the own record no longer proves standing", STANDING_CMD,
+                role_path("coordinator-then-tags"))
+standing_refuse("a triage tag set after the read is stale: the own record no longer proves standing", STANDING_CMD,
+                role_path("triage-then-tags"))
+standing_refuse("the newest own record wins: a triage record then a newer lane record is refused", STANDING_CMD,
+                role_path("triage-then-lane"))
+standing_allow("the newest own record wins: a lane record then a newer triage record allows standing", STANDING_CMD,
+               role_path("lane-then-triage"))
+standing_refuse("no get_session record in the transcript is refused", STANDING_CMD, role_path("no-record"))
+standing_refuse("a get_session result whose text is not JSON is refused", STANDING_CMD, role_path("not-json"))
+standing_refuse("a transcript that cannot be read is refused", STANDING_CMD, role_path("unreadable"))
+standing_refuse("a payload with no transcript_path is refused", STANDING_CMD, None)
+standing_refuse("with no session id in the env, no record matches, so a standing record is refused", STANDING_CMD,
+                role_path("coordinator"), env=None)
+
+# Ruling own-lanes-merge-claude-settings-prs (owner, 11:12 CST Nov 15, 2026): a cloud lane records `--role lane --step <slug>`.
+# The step must be a cs-step tag of the lane's own newest record. A title, another session's record, and a triage record never give it.
+LANE_ROLE = MERGE_SHIM + " --role lane --step " + ARCHIVE_SLUG
+role_allow("a lane records its own step: --role lane --step <its cs-step slug> allows", LANE_ROLE, role_path("lane-step"))
+role_allow("a lane's second cs-step tag allows the step it names: the full-size record", MERGE_SHIM + " --role lane --step icon-b",
+           role_path("lane-step-old"))
+role_allow("the = form of --role and --step allows as the space form does", MERGE_SHIM + " --role=lane --step=" + ARCHIVE_SLUG,
+           role_path("lane-step"))
+role_refuse("a lane with no --step is refused", MERGE_SHIM + " --role lane", role_path("lane-step"))
+role_refuse("a lane's --step that its record does not carry is refused", MERGE_SHIM + " --role lane --step other-step",
+            role_path("lane-step"))
+role_refuse("a --step that is a prefix of the lane's cs-step tag is refused", MERGE_SHIM + " --role lane --step lane-closes",
+            role_path("lane-step"))
+role_refuse("a lane with no cs-step tag is refused: the empty state", LANE_ROLE, role_path("lane"))
+role_refuse("a step named only in the lane's title does not allow", LANE_ROLE, role_path("lane-step-title"))
+role_refuse("a step on another session's record does not allow", LANE_ROLE, role_path("lane-step-foreign"))
+role_refuse("the newest own record has no step, so an older lane record's step does not allow", LANE_ROLE,
+            role_path("lane-step-then-no-step"))
+role_refuse("a batch runner record is refused for the lane role, even with a step tag", LANE_ROLE, role_path("runner"))
+role_refuse("a coordinator record is refused for the lane role", LANE_ROLE, role_path("coordinator"))
+role_refuse("a triage record that carries a step is refused for the lane role", LANE_ROLE, role_path("triage-step"))
+role_refuse("a step in quotes is one argument, not the --step flag", MERGE_SHIM + ' --role lane "--step ' + ARCHIVE_SLUG + '"',
+            role_path("lane-step"))
+role_refuse("a lane's --role lane with its step is refused outside a cloud session", LANE_ROLE, role_path("lane-step"), env=None)
+# The scanner respects strings and comments for the lane's call too, as it does for the batch runner's above.
+role_allow("a comment opener inside a string does not hide a lane's --role lane --step call", 'echo "# note" && ' + LANE_ROLE,
+           role_path("lane-step"))
+role_allow("a multi-line quoted string before a lane's --role lane --step call does not hide it", 'echo "first\nline" && ' + LANE_ROLE,
+           role_path("lane-step"))
+role_allow("a lone quote in a comment does not hide a lane's --role lane --step call on the next line",
+           "echo done # it's\n" + LANE_ROLE, role_path("lane-step"))
+role_allow("a quoted lane --role lane --step form is text", "echo '" + LANE_ROLE + "'", role_path("lane-step"))
+for _lane_prefix in ("", "cd somewhere && "):
+    for _lane_form in (MERGE_SHIM, "bin/merge", "python3 merge/merge.py", "python3 merge/launch.py"):
+        _lane_cmd = _lane_prefix + _lane_form + " --role lane --step " + ARCHIVE_SLUG
+        role_allow(_lane_cmd + " allows its own step", _lane_cmd, role_path("lane-step"))
+        role_refuse(_lane_cmd + " is refused on a record with no cs-step tag", _lane_cmd, role_path("lane"))
+        # The lane role is proven only by a record that also names claude-settings. A lane of another repo, or with no repo tag, is refused.
+        _own_cmd = _lane_prefix + _lane_form + " --role lane --step own"
+        role_refuse(_own_cmd + " is refused on a degen lane's own step", _own_cmd, role_path("lane-step-degen"))
+        role_refuse(_own_cmd + " is refused on a lane with no repo tag", _own_cmd, role_path("lane-step-none"))
+# A role flag inside a wrapper is judged as the top-level call is: `bash -c` and `$(...)` run the merge tool, so their inner command is read
+# (guard_core.inner_commands, the one reader of the wrappers). The lane's own step may run inside a wrapper, and is pinned allowed here, the
+# shape the fix keeps. Another step, and the batch runner's role, are refused inside one. These are red on the current guard, which reads
+# only top-level segments.
+LANE_OTHER_CMD = MERGE_SHIM + " --role lane --step other-step"
+role_allow("a lane's own step inside bash -c is judged as the top-level call and allowed", 'bash -c "' + LANE_ROLE + '"', role_path("lane-step"))
+role_allow("a lane's own step inside a command substitution is judged as the top-level call and allowed", "echo $(" + LANE_ROLE + ")",
+           role_path("lane-step"))
+role_refuse("a lane's other step inside bash -c is refused", 'bash -c "' + LANE_OTHER_CMD + '"', role_path("lane-step"))
+role_refuse("a lane's other step inside a command substitution is refused", "echo $(" + LANE_OTHER_CMD + ")", role_path("lane-step"))
+role_refuse("a batch-runner role inside bash -c is refused on a lane record", 'bash -c "' + MERGE_SHIM + ' --role batch-runner"',
+            role_path("lane-step"))
+
 
 # =========================================================================== 5e-2. the record branch's one writer
 #
@@ -965,9 +1192,12 @@ LANE_TRANSCRIPT = role_path("lane")
 TRIAGE_TRANSCRIPT = role_path("triage")
 
 
-def record_refuse(name, command, transcript, cwd=PUSHFEAT, env=ROLE_ENV, **kw):
-    """A git push the guard refuses under roadmap-one-writer. The reason names the rule, never the push."""
-    sh("roadmap-one-writer: " + name, command, "deny", rule=RECORD_RULE, carries=RECORD_CARRIES, lacks=RECORD_LACKS,
+def record_refuse(name, command, transcript, cwd=PUSHFEAT, env=ROLE_ENV, carries=(), **kw):
+    """A git push the guard refuses under roadmap-one-writer. The reason names the rule, never the push.
+    `carries` is the caller's own fragments, added to RECORD_CARRIES, which every record refusal holds."""
+    more = (carries,) if isinstance(carries, str) else tuple(carries)
+    sh("roadmap-one-writer: " + name, command, "deny", rule=RECORD_RULE,
+       carries=RECORD_CARRIES + more, lacks=RECORD_LACKS,
        transcript=transcript, env=env, cwd=cwd, **kw)
 
 
@@ -1102,6 +1332,50 @@ record_allow("a commit message that names a push to roadmap is text",
              VCS + ' commit -m "' + VCS + ' push origin roadmap"', LANE_TRANSCRIPT)
 
 
+def _push_case(command, cwd, transcript, path):
+    """The guard's payload for one Bash push call, judged with the stand-in git first on PATH (`path`)."""
+    return {"raw": None, "tool": "Bash", "cwd": cwd, "session": None, "env_path": path, "config": None,
+            "agent_id": None, "tool_input": {"command": command}, "transcript": transcript, "env": ROLE_ENV}
+
+
+def _push_cost_problems(rows, log, path):
+    """The problems the push cost table `rows` shows, as a list that is empty when every row holds. A row is
+    (label, tail, want) or (label, tail, want, cwd): the git spawns of `tail`, by subcommand, must equal `want`, and
+    a row with no cwd runs in PUSHFEAT. The stand-in git on `path` logs each spawn to `log`. The fixtures a row
+    names are built by its caller, before this runs."""
+    problems = []
+
+    def spawn_kinds(command, cwd):
+        if os.path.exists(log):
+            os.remove(log)
+        decide(_push_case(command, cwd, LANE_TRANSCRIPT, path))
+        lines = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
+        kinds = {}
+        for line in lines:
+            words = line.split()
+            # The guard runs git as `git -C <dir> <subcommand>`, so the subcommand follows the -C pair.
+            while len(words) >= 2 and words[0] in ("-C", "-c"):
+                words = words[2:]
+            word = words[0] if words else ""
+            kinds[word] = kinds.get(word, 0) + 1
+        return kinds, lines
+
+    for label, tail, want, *cwd in rows:
+        kinds, lines = spawn_kinds(VCS + " " + tail, cwd[0] if cwd else PUSHFEAT)
+        if kinds != want:
+            problems.append("%s: git spawns %s, want %s" % (label, sorted(kinds.items()), sorted(want.items())))
+        # Nothing contacts the remote through ls-remote or push, and a push reads no remote's refs. A fetch is not
+        # banned here: a row's want counts it, and only an octopus-push hit has one (section 17974).
+        for reach in ("ls-remote", "push", "remote"):
+            if reach in kinds:
+                problems.append("%s: git spawns %r, which contacts or names the remote" % (label, reach))
+        if label == "a bare push" and not any("push.default" in line for line in lines):
+            problems.append("a bare push: no read of push.default")
+        if label == "a HEAD push" and any("push.default" in line for line in lines):
+            problems.append("a HEAD push: reads push.default, which it must not")
+    return problems
+
+
 def record_push_cost_case():
     """roadmap-one-writer's stated cost (session-tiers, the Cost line): per `git push` call, one
     `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
@@ -1112,10 +1386,11 @@ def record_push_cost_case():
     branch (`symbolic-ref`, the agent test), one `git for-each-ref` of the tracking refs, and, when those refs show no
     update, one more `git for-each-ref` of the local branches (the all-agent test). A glob refspec reads the URL and
     the same two for-each-ref reads, and no branch. A local-path origin stops after the URL read. No push spawns
-    `ls-remote`, `fetch` or `push`. A stray push (rule push-stray-branch: an implied destination off the
+    `ls-remote` or `push`. A stray push (rule push-stray-branch: an implied destination off the
     upstream) adds one `git rev-parse --verify -q` of the destination's remote-tracking ref. The octopus-push
     rule (decision octopus-push-refused) adds one `git rev-list` for each pushed ref whose destination is not
-    main or master, with or without a remote-tracking ref. The conflict-markers
+    main or master, with or without a remote-tracking ref. On a hit under a configured remote's name, it adds one
+    `git fetch` of that remote and one more `git rev-list` (section 17974 pins the counts). The conflict-markers
     push check (decision commit-refuses-conflict-markers) runs one `git diff --check` for each base it reads, in
     order: the remote-tracking ref, then the upstream, then the default base (a three-dot range, so git
     finds the merge base itself). A push with a tracking ref reads one base. A push with no tracking ref
@@ -1134,28 +1409,7 @@ def record_push_cost_case():
     log, path = _stand_in_git("rwcost")
     if path is None:
         return False, "no git on PATH"
-    problems = []
-
-    def case_of(command, cwd, transcript):
-        return {"raw": None, "tool": "Bash", "cwd": cwd, "session": None, "env_path": path, "config": None,
-                "agent_id": None, "tool_input": {"command": command}, "transcript": transcript, "env": ROLE_ENV}
-
-    def spawn_kinds(command, cwd):
-        if os.path.exists(log):
-            os.remove(log)
-        decide(case_of(command, cwd, LANE_TRANSCRIPT))
-        lines = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
-        kinds = {}
-        for line in lines:
-            words = line.split()
-            # The guard runs git as `git -C <dir> <subcommand>`, so the subcommand follows the -C pair.
-            while len(words) >= 2 and words[0] in ("-C", "-c"):
-                words = words[2:]
-            word = words[0] if words else ""
-            kinds[word] = kinds.get(word, 0) + 1
-        return kinds, lines
-
-    for label, tail, want, *cwd in (
+    problems = _push_cost_problems((
         ("a refspec push to lane/foo", "push origin lane/foo",
          {"rev-parse": 1, "symbolic-ref": 1, "diff": 1, "rev-list": 1, "log": 1}),
         ("a HEAD push", "push origin HEAD",
@@ -1190,24 +1444,13 @@ def record_push_cost_case():
         # RR_DOCS is built in section 43400, which loads after this one.
         ("a push of a docs-only commit, no test path", "push origin topic",
          {"config": 1, "diff": 1, "rev-list": 1, "rev-parse": 1, "symbolic-ref": 1, "log": 1}, RR_DOCS),
-    ):
-        kinds, lines = spawn_kinds(VCS + " " + tail, cwd[0] if cwd else PUSHFEAT)
-        if kinds != want:
-            problems.append("%s: git spawns %s, want %s" % (label, sorted(kinds.items()), sorted(want.items())))
-        # Nothing contacts the remote: the push-main and push-all-main reads are local, and a push reads no remote's refs.
-        for reach in ("ls-remote", "fetch", "push", "remote"):
-            if reach in kinds:
-                problems.append("%s: git spawns %r, which contacts or names the remote" % (label, reach))
-        if label == "a bare push" and not any("push.default" in line for line in lines):
-            problems.append("a bare push: no read of push.default")
-        if label == "a HEAD push" and any("push.default" in line for line in lines):
-            problems.append("a HEAD push: reads push.default, which it must not")
+    ), log, path)
     unreadable = role_path("unreadable")
     for tail in ("push origin lane/foo", "push origin HEAD", "push"):
-        got, _reason = decide(case_of(VCS + " " + tail, PUSHFEAT, unreadable))
+        got, _reason = decide(_push_case(VCS + " " + tail, PUSHFEAT, unreadable, path))
         if got != "allow":
             problems.append("%s with an unreadable transcript: %s, want allow" % (tail, got))
-    got, _reason = decide(case_of(VCS + " push origin roadmap", PUSHFEAT, unreadable))
+    got, _reason = decide(_push_case(VCS + " push origin roadmap", PUSHFEAT, unreadable, path))
     if got != "deny":
         problems.append("a push to roadmap with an unreadable transcript: %s, want deny" % got)
     if problems:

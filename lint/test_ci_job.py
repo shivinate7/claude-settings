@@ -21,6 +21,7 @@ ParallelLint: --lint runs its lint steps at once (CI_JOB_LINT_WORKERS, else the 
 lines and each step's log lines in workflow order, and treats an install step as a barrier. Overlap is proven by rendezvous.
 LocalActionUnderLint: --lint runs a local uses: action only when the read of its action.yml before any step runs accepts it; FAIL beats unknown, and each refusal
 names its file, line or value and runs no step. A plain run never runs one.
+OwnLogPrune: ci-job removes its own ci-job-* logs over one day old when it starts, and keeps the rest.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -32,6 +33,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -398,7 +400,10 @@ class StepSelect(Job):
 
 
 class SteAction(Job):
-    """The checks STE step is a `uses:` action. ci-job runs bin/ste-changed in its place (one home: run.sh)."""
+    """The checks STE step is a `uses:` action. ci-job runs bin/ste-changed in its place (one home: run.sh).
+    The lint refuses no sentence for its length, so the fail path's fixture is a double negative (STE013)."""
+
+    NEGATIVE = "This step is not unsafe."
 
     def branch_with(self, text):
         def git(*a):
@@ -413,8 +418,8 @@ class SteAction(Job):
             f.write("# T\n\n" + text + "\n")
         git("commit", "-qam", "change")
 
-    def test_an_over_long_sentence_in_a_changed_md_fails_the_lint_run(self):
-        self.branch_with(" ".join(["word"] * 40) + " end.")
+    def test_a_double_negative_in_a_changed_md_fails_the_lint_run(self):
+        self.branch_with(self.NEGATIVE)
         rc, lines, out = self.run_job(step("STE lint", uses="$/actions/ste-lint"),
                                       args=("--lint", "--base", "origin/main"))
         self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
@@ -426,7 +431,7 @@ class SteAction(Job):
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
 
     def test_with_no_base_the_ste_step_runs_against_origin_main(self):
-        self.branch_with(" ".join(["word"] * 40) + " end.")
+        self.branch_with(self.NEGATIVE)
         rc, lines, out = self.run_job(step("STE lint", uses="$/actions/ste-lint"), args=("--lint",))
         self.assertEqual((rc, self.verdicts(lines)), (1, ["base:", "FAIL"]), out)
 
@@ -856,6 +861,7 @@ class LintMode(unittest.TestCase):
         # so no action name is copied here.
         ci_job = load_ci_job()
         want, name, inside = [], None, False
+        failure_only = False
         with open(CHECKS, encoding="utf-8") as f:
             for line in f:
                 if re.match(r"^  [\w-]+:\s*$", line):
@@ -865,11 +871,16 @@ class LintMode(unittest.TestCase):
                 m = re.match(r"^      - name: (.*?)\s*$", line)
                 if m:
                     name = m.group(1)
+                    failure_only = False
+                if re.match(r"^        if: .*failure\(\)", line):
+                    failure_only = True  # the red-job wake step runs only after a failed job: a lint run reads it `not run` (decision ci-wait-reads-run-status)
                 m = re.match(r"^        run: (python3 (?:lint|actions)/\S+\.py\b.*|bin/ste-changed\b.*|"
                              r"pipx run [\w.-]+==[\w.]+ [^|&;]*)$", line)
                 if m and "mutate" not in m.group(1):
                     want.append(name)
                 m = re.match(r"^        uses: (\S+)(?: #.*)?\s*$", line)
+                if failure_only:
+                    m = None  # a failure()-only step is no lint step
                 if m and (ci_job.KNOWN_ACTION.fullmatch(m.group(1)) or ci_job.LOCAL_ACTION.fullmatch(m.group(1))):
                     want.append(name)  # a known action, or this repo's own local action: ci-job plans each as a lint step
         self.assertGreater(len(want), 20)
@@ -1038,6 +1049,15 @@ class NotRunLines(Job):
         self.assertEqual(by_step(lines), {"Checkout": "not run", "Setup node": "not run", "Python lint": "PASS",
                                           "Make lint-py": "not run", "Make gen-check": "not run"}, out)
         self.assertIn("summary: ran 1 of 5 steps", lines, out)
+
+    def test_a_failure_only_step_is_not_run_and_never_unknown(self):
+        # The red-job wake step (`if: failure()`, a local action) runs only after a red job. A green local lint run
+        # never reaches it, so it reads `not run`, not `unknown` (decision ci-wait-reads-run-status).
+        wake = step("Wake the batch runner (red job)", uses="$/actions/ci-done-comment",
+                    **{"if": "${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}"})
+        rc, lines, out = self.run_job(self.DEGEN[2], wake, args=("--lint",))
+        self.assertEqual(by_step(lines)["Wake the batch runner (red job)"], "not run", out)
+        self.assertEqual(rc, 0, out)
 
     def test_plan_under_lint_prints_the_same_not_run_lines_with_would_run_counts(self):
         code, lines, out = plan_lint(self.root, workflow(*self.DEGEN))
@@ -2602,8 +2622,8 @@ class PinnedHarness(Job):
         git_in(self.source, "checkout", "-qb", "symlinked", self.pin_a)
         write_lf(os.path.join(self.source, "CLAUDE.md"), "rules\n")
         git_in(self.source, "add", "CLAUDE.md")
-        blob = subprocess.run(["git", "-C", self.source, "hash-object", "-w", "--stdin"], input="CLAUDE.md", check=True,
-                              env=ENV, capture_output=True, text=True).stdout.strip()
+        blob = subprocess.run(["git", "-C", self.source, "hash-object", "-w", "--stdin"], input=b"CLAUDE.md", check=True,
+                              env=ENV, capture_output=True).stdout.decode("utf-8").strip()
         git_in(self.source, "update-index", "--add", "--cacheinfo", "120000,%s,AGENTS.md" % blob)
         git_in(self.source, "commit", "-qm", "AGENTS.md is a symlink to CLAUDE.md")
         sha = git_in(self.source, "rev-parse", "HEAD")
@@ -2935,6 +2955,47 @@ class WindowsShell(unittest.TestCase):
     def test_off_windows_the_shell_is_path_bash(self):
         self.assertEqual(self.ci_job.shell_argv(None, nt=False), [shutil.which("bash"), "-e"])
         self.assertEqual(self.ci_job.shell_argv("python", nt=False), ["python3"])
+
+
+class OwnLogPrune(Job):
+    """bin/ci-job removes its own ci-job-* logs over one day old when it starts. Each run names its log in the fixture
+    TMPDIR, as a real run does. A ci-job log 12 hours old, a log of another name and the run's own log must stay."""
+
+    def setUp(self):
+        super().setUp()
+        self.tmp = os.path.join(self.root, "tmp")
+        os.makedirs(self.tmp)
+        self.env = {"VERDICT_LOG": "", "TMPDIR": self.tmp, "TMP": self.tmp, "TEMP": self.tmp}  # no caller log: ci-job names its own
+
+    def ci_logs(self):
+        return sorted(n for n in os.listdir(self.tmp) if n.startswith("ci-job-"))
+
+    def age(self, path, hours):
+        stamp = time.time() - hours * 3600
+        os.utime(path, (stamp, stamp))
+        return path
+
+    def plant(self, name, hours):
+        path = os.path.join(self.tmp, name)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("kept\n")
+        return self.age(path, hours)
+
+    def test_a_log_over_a_day_old_is_pruned_when_the_next_run_starts(self):
+        rc, _, out = self.run_job(step("ok", "true"), env=self.env)
+        self.assertEqual(rc, 0, out)
+        first = self.ci_logs()
+        self.assertEqual(len(first), 1, "scope: the first run must name one ci-job log under the fixture TMPDIR, got %r" % first)
+        stale = self.age(os.path.join(self.tmp, first[0]), 48)
+        kept = self.plant("ci-job-lane-kept.log", 12)
+        other = self.plant("other-tool.log", 48)
+        rc, _, out = self.run_job(step("ok", "true"), env=self.env)
+        self.assertEqual(rc, 0, out)
+        self.assertFalse(os.path.exists(stale), "a ci-job log 48 hours old must be pruned when the next ci-job run starts")
+        self.assertTrue(os.path.exists(kept), "a ci-job log 12 hours old must stay")
+        self.assertTrue(os.path.exists(other), "a log whose name is not ci-job-* must stay")
+        own = [n for n in self.ci_logs() if n not in (first[0], "ci-job-lane-kept.log")]
+        self.assertEqual(len(own), 1, "the second run must leave its own log, got %r" % own)
 
 
 if __name__ == "__main__":

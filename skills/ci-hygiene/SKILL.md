@@ -119,8 +119,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    gets no fix lane until the owner decides.
    Until the cutover, no merge to main while a batch's run is in progress. The owner is included. Decision
    `no-merge-during-batch-ci` (no merge while a batch runs) holds the rule. A merge needs a green
-   run on the current base (decision `merge-needs-current-base`). A head that lacks the base tip is
-   refused, except a small move.
+   run, or a lane-lint PASS on a pending one, and a clean merge with the base tip (decision
+   `merge-needs-current-base`). The head need not hold the tip.
    Ready express lanes share one express batch, ahead of every other lane (decision `express-batch`).
    "No conflicts" does not prove the lanes work together. A green integration run does not prove that
    no line was lost either. Run `lint/check_silent_undo.py` before the merge. First run `git fetch origin <base>`. Then pass `--upstream origin/<base>`, the PR's base branch, `--head <head SHA>`, the PR's head commit, and `--strict`, as CI does. Without `--strict`, a local run exits 0 on UNKNOWN, so a skipped check reads as clean.
@@ -158,6 +158,11 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    PASS fix verifier, a merge whose second parent is not on main. The first fix verifier on a log with
    no Fix check line meets no merge-shape test, so the verifier's read is the check there. The lane never works around the refusal. A FAIL starts a
    new lane at round 1.
+   **Lanes bring main in only on conflict; the merge tool does one main-in at merge time and keeps the green run
+   (needs #3481 and #3552 on main)** (owner, 2026-11-17 14:20 CST, page item 925 `main-in-once-before-lint`,
+   pick d; rule d, decision `merge-needs-current-base`).
+   Coordinator's reading, not the owner's: until both are on main, rule d is not in force and ruling
+   `own-923-c-ready-lanes-bring-main-in` stands.
    Until the cutover, every repo except degen and home batches across sessions too (`git-integration-branch-merge`).
 9. **Wait without loops.** Wait for the CI-wake notice that follows `gh pr ready`. A push starts no
    notice. Run `merge <pr> --ready` first. When it exits 0 with the line "stays a draft (", in cloud mark ready by MCP `update_pull_request` `draft: false` (route
@@ -176,7 +181,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 11. **No CI on a draft.** Run the PR workflow on `opened`, `synchronize`, `reopened` and
     `ready_for_review`. Skip every job while the PR is a draft. The rollup job skips too. Its `if:`
     is `always() && !github.event.pull_request.draft`. A fan-in job with `if: always()` needs its own
-    draft guard, or it fails on a draft. Read "Before you skip a required job". Decision
+    draft guard, or it fails on a draft. Read "Before you skip a job". Decision
     `draft-until-reviewed` (every PR opens as a draft) holds the rule. A draft cannot merge, so it
     needs no check. Only the integration PR goes ready, once (step 8).
     A workflow that also has `on: push` for all branches still runs on a draft branch.
@@ -205,19 +210,27 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     PR 293 (the Windows merge-test slice), is the case for it. A CI step's `if:` names only its own
     scope flag, or a non-PR event (step 19).
 17. **Slice tests on a slow platform.** On PRs, run a platform-specific test slice. Run the full suite
-    on main and nightly, except on macOS (R61): every macOS run takes the slice, and a push to main
+    in the daily run, except on macOS (R61): every macOS run takes the slice, and a push to main
     starts no macOS job (a job-level `github.event_name != 'push'`, since a step-level skip still starts
-    the runner). The nightly skips when main's head has a green push run and the newest completed
-    nightly is green (the `nightly-skip` job), and `scope` waits on that job, so nothing is cancelled.
+    the runner). Slow legs run daily (owner item 880, 11:53 CST Nov 15). A push runs the Linux fast jobs
+    only. The Windows and mutation jobs run in the one daily scheduled run, a pull request and a
+    manual run. The macOS jobs run on a manual run, and on a daily that runs, never on a pull request or a push (owner,
+    01:33 CST Nov 16: "turn off all mac runs for now"). The lane-touched-tests workflow has no macOS leg either. `all-jobs-passed` does not need them. When the newest completed daily is green and `push-skip` proved every push run since it, the
+    newest at this head, the daily skips (the `nightly-skip` job). `scope` waits on that job,
+    so nothing is cancelled.
 18. **Profile before you refactor test setup.** Compare setup time to test-body time. If the saving is
     under 20%, stop.
 19. **Run one scope job first.** Make it a cheap Linux job named `scope`. Every other job needs it.
-    A scope skip sits on the CI step that runs the suite or lint. The three macOS jobs also carry
-    the flag in a job-level `if:`, because a step-level skip still starts a runner and bills its setup
+    A scope skip sits on the CI step that runs the suite or lint. The three macOS jobs carry their
+    event guard (daily and dispatch only) and the flag in a job-level `if:`, because a step-level skip still starts a runner and bills its setup
     minutes (step 13), macOS most. Decision `same-check-kinds` (every repo runs the same check kinds)
-    and decision `main-branch-protection` (the required checks on main) hold the rule. Unless
-    `scope-skips` names it, the rollup fails a skipped job.
-    Apart from those three, a job-level `if:` holds only the draft guard. A job that runs only off pull
+    and decision `main-branch-protection` (the branch protection on main) hold the rule. The rollup fails a
+    skipped job it needs, and it does not need the macOS jobs.
+    Apart from those three and the push-off jobs (the Windows and mutation jobs, whose job-level `if:` is
+    `github.event_name != 'push'` alone, with the draft guard on a shard), a job-level `if:` holds only the draft guard, or the records-only condition
+    `needs.scope.outputs.records_only_skip != 'true'`. That condition stands alone, or joins a shard's
+    draft guard as `(draft guard) && it`, or joins the guard of `ci-done`, or joins a push-off job's guard as `(push guard) && it`. A records-only run skips those
+    jobs. The rollup reads that all-skipped run as green on the output `true` alone. A job that runs only off pull
     requests, such as a push-only job, also skips at its CI steps. A job-level trigger guard would
     skip a needed job on every PR, and the rollup would fail on it. Each scoped CI step's `if:` names
     its scope flag and `|| github.event_name != 'pull_request'`, so push, nightly and dispatch runs
@@ -246,22 +259,23 @@ Fork PRs run code you did not write. Apply these to a public repo. See `snippets
 - Keep one CI run per batch (step 8). Free minutes do not remove queue time. Each run costs `gh`
   calls on the shared token.
 
-## Before you skip a required job
+## Before you skip a job
 
-Branch protection decides what counts as passing. Decision `same-check-kinds` (every repo runs the
-same check kinds) sets the rule. Branch protection requires one check: the `all-jobs-passed` rollup.
-That job lists every other job in `needs:`, and its `if:` holds `always()`. The rollup fails a
+Branch protection requires no status check (ruling `own-all-jobs-passed-removed`, 2026-11-15 19:08 CST).
+Decision `same-check-kinds` (every repo runs the same check kinds) sets the rule for the rollup. The
+`all-jobs-passed` rollup still runs. It lists every other job in `needs:`, and its `if:` holds `always()`. The rollup fails a
 needed job that failed, was cancelled or was skipped, unless `scope-skips` names the skip. Without
 the rollup, a skipped job reads as passing. So a scoped-out suite skips at its CI step, and its job
 still runs and passes (step 19).
 The rollup skips on a draft, and a draft cannot merge (step 11). Read the protection rule first:
 `snippets.md`, section 3b.
 
-The required check names live in the branch protection. `merge.requiredChecks` in
-`.github/stamp.json` says `"protection"`, so `merge` reads them from there. A repo that pins a list
-in `stamp.json` instead must keep it equal to the protection. `merge` refuses a disagreement. A
-rename edits the protection. A PUT on the protection API replaces the whole rule. It drops any field
-you leave out (decision `main-branch-protection`, the required checks on main).
+The branch protection names no required check. `merge.requiredChecks` in
+`.github/stamp.json` says `"protection"` for a repo that names its checks there, so `merge` reads the names from there. On claude-settings `main` it says `"none"`, and `merge` reads no names. A pinned list in
+`stamp.json` stops `merge` when it differs from a non-empty list in the ruleset, or in classic protection
+when the ruleset names none, and the refusal names both sets. An empty or unreadable list does not stop
+`merge`: the pinned list stays in force, and an unreadable one is said aloud. A rename edits the protection. A PUT on the protection API replaces the whole rule. It drops any field
+you leave out (decision `main-branch-protection`, the branch protection on main).
 
 ## Docs
 
@@ -327,8 +341,8 @@ n/a where an item says so. A no is a finding. A read that cannot run is unknown,
    job-level `if:` skips it on every `pull_request` event, such as a nightly-only or push-only job. A
    PR can then never turn it red. Read that job's `if:`. A job off `needs:` that can run on a PR is a no.
    A job with a scope flag in its job-level `if:` stays in `needs:`, and `scope-skips` names it with that flag.
-3. Does branch protection require exactly one check, `all-jobs-passed`? Read
-   `gh api repos/<owner>/<repo>/branches/main/protection`, and count `required_status_checks.checks`.
+3. Does branch protection require no status check (ruling `own-all-jobs-passed-removed`, 2026-11-15 19:08 CST)? Read
+   `gh api repos/<owner>/<repo>/branches/main/protection`, and count `required_status_checks.checks`. It must be zero.
    A 403 is unknown.
 4. Do the PR triggers include `opened`, `synchronize`, `reopened` and `ready_for_review`? Read each
    `on: pull_request: types:` line.
@@ -346,8 +360,11 @@ n/a where an item says so. A no is a finding. A read that cannot run is unknown,
     `jobs:` in each workflow.
 11. Is there no `pull_request_target` that checks out the PR head? Run
     `grep -n "pull_request_target" .github/workflows/*.yml`. For each hit, read its `ref:`.
-12. Does every job-level `if:` hold only the draft guard, the guard of `ci-done`, or the scope flag and
-    event guard of a job that `scope-skips` names? Run `grep -n "^    if:" .github/workflows/*.yml`.
+12. Does every job-level `if:` hold only the draft guard, the guard of `ci-done`, the records-only
+    condition (alone, as `(draft guard) && it`, or in the guard of `ci-done`), the push-off guard of a
+    Windows or mutation job (`github.event_name != 'push'`, alone or with the draft guard and the
+    records-only condition), or the scope flag and event guard of a job that `scope-skips` names?
+    Run `grep -n "^    if:" .github/workflows/*.yml`.
     Any other scope flag or trigger guard at job level is a finding. It skips a needed job. A job that
     no rollup needs is judged by items 1 and 2 instead, so do not flag it here.
 13. If sessions wait on this repo's CI, is the last job `ci-done`, with `needs:` every other job and a

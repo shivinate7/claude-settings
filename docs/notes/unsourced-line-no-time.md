@@ -1,0 +1,1 @@
+- unsourced-line-no-time: 15:46 CST Nov 13, item 7 (coordinator 15:46): the coordinator knows no ruling by the name "review_log_hit refuses every send"; the line in the #2806 notes stays unsourced and gets no time.

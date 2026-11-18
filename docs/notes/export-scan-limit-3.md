@@ -1,0 +1,1 @@
+- export-scan-limit-3: toy vendor forms (sk-a1-b2, ghp-a1-b2, sk-uat-a1, sk-qa-a1, API_KEY=a1-b2-c3-d4, token=dev-token-a1) pass; the environment-word list lacks uat, qa, demo, ci, int, beta and production. Fix: none until a real incident. Decision: waiting-data-in-repo.

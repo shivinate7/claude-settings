@@ -1,0 +1,1 @@
+- slug-check-reader-row: Two items from #1920. (a) A row says 'only gh_edit_hit reads it', but key_named_hit and reworked_hit read it too. (b) The CI step name 'Record slug length' is stale now that the step also refuses a duplicate notes slug.

@@ -1,0 +1,1 @@
+- ledger-pr-3154-close-now: 13:42 CST Nov 13 (coordinator): ledger PR #3154 at head 3ed334e7c reads close-now for 1826, 1987, 2822, 3177 and 2829 (448 rows). #2829 still carries open owner item 730. Runner 10 has the five.

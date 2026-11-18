@@ -1,0 +1,1 @@
+- delete-list-mail-wait-notes: 06:23 CST Nov 13, delete list for a session on the owner's computer (standing grant: last commit on an archive branch): origin branch mail-wait-notes. Its last commit, 7fb5ea4e2, is on archive/mail-wait-notes (retrospective). The cloud refuses branch deletes.

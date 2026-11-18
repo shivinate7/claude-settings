@@ -113,6 +113,17 @@ def new_dir():
     return tempfile.mkdtemp(dir=SCRATCH)
 
 
+def wait_until(cond, secs):
+    """Poll cond until it holds or secs pass. Return whether it held. This bound is the only wait."""
+    deadline = time.monotonic() + secs
+    while True:
+        if cond():
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.2)  # the poll interval of a condition wait; secs only ends a failed wait
+
+
 def shells():
     found = ["/bin/sh"]
     for extra in ("/bin/bash", "/bin/zsh"):
@@ -277,16 +288,19 @@ def run_rewritten(command, shell="/bin/sh", timeout=40, mark=None, env=None, qui
     return rc, text, secs, cmd
 
 
+def flag_value(cmd, flag):
+    """The word after ` flag ` in a rewrite, read by the shell lexer. The one home of that parse. The
+    wrapper writes `;` straight after some values, so a lexer that splits punctuation off reads the value
+    as one token. A missing flag gives None."""
+    tail = cmd.split(" %s " % flag, 1)
+    if len(tail) != 2:
+        return None
+    return shlex.shlex(tail[1], posix=True, punctuation_chars=True).get_token()
+
+
 def job_files(cmd):
-    """The LOG and BEAT paths a rewrite names, read off its --log and --beat flags. The one home of
-    that parse. The wrapper writes `;` straight after the beat path, so a lexer that splits punctuation
-    off reads the path as one token. A missing flag gives None."""
-    def flag_value(flag):
-        tail = cmd.split(" %s " % flag, 1)
-        if len(tail) != 2:
-            return None
-        return shlex.shlex(tail[1], posix=True, punctuation_chars=True).get_token()
-    return flag_value("--log"), flag_value("--beat")
+    """The LOG and BEAT paths a rewrite names, read off its --log and --beat flags. A missing flag gives None."""
+    return flag_value(cmd, "--log"), flag_value(cmd, "--beat")
 
 
 def stall_problems(rc, text, secs, sleep_args=None):
@@ -410,6 +424,146 @@ def healthy_printer_no_stall():
     problems += expect(text == "tick0\ntick1\ntick2\ntick3\n", f"output {text!r}")
     reap()
     return problems
+
+
+@posix_case
+def leading_pause_then_command_is_no_stall():
+    """3b2. a leading `sleep 6` then `; echo done`, at quiet 2: the pause is a known silent wait, so no STALL, exit 0
+    (a 600 s pause then merge --lane-lint got a failure notice at 300 s while the job ran)"""
+    rc, text, _secs, _cmd = run_rewritten("sleep 6; echo done")
+    problems = expect(rc == 0, f"exit {rc}, want 0")
+    problems += expect("STALL:" not in text, "a STALL report came during a leading pause")
+    problems += expect(text == "done\n", f"output {text!r}")
+    reap()
+    return problems
+
+
+@posix_case
+def leading_pause_then_and_chain_is_no_stall():
+    """3b3. the same wait chained with `&&`"""
+    rc, text, _secs, _cmd = run_rewritten("sleep 6 && echo done")
+    problems = expect(rc == 0, f"exit {rc}, want 0")
+    problems += expect("STALL:" not in text, "a STALL report came during a leading pause")
+    reap()
+    return problems
+
+
+@posix_case
+def silence_after_the_leading_pause_still_stalls():
+    """3b4. a `sleep 3; sleep 30` job: the allowance is the first pause's own length, so the silent second one stalls"""
+    rc, text, _secs, _cmd = run_rewritten("sleep 3; sleep 30")
+    problems = expect(rc == 3, f"exit {rc}, want 3")
+    problems += expect("STALL:" in text, "no STALL after the wait's own length")
+    reap()
+    return problems
+
+
+@posix_case
+def a_later_pause_gets_no_allowance():
+    """3b5. `true; sleep 30` at quiet 2: a trailing pause with no command after it gets no allowance, so this stalls within about 4 s"""
+    rc, text, secs, _cmd = run_rewritten("true; sleep 30")
+    problems = stall_problems(rc, text, secs, sleep_args="sleep 30")
+    reap()
+    return problems
+
+
+def quiet_window(command, want, exact=False):
+    """Problems with the quiet window a rewrite gives its watcher: one --quiet flag, and its value at least
+    `want` seconds, or exactly `want` when exact. The value is read as a float, so `inf` reads too."""
+    n = command.count(" --quiet ")
+    problems = expect(n == 1, f"{n} --quiet flags in the rewrite, want 1")
+    if n != 1:
+        return problems
+    raw = flag_value(command, "--quiet")
+    try:
+        quiet = float(raw)
+    except (TypeError, ValueError):
+        return problems + [f"--quiet is {raw!r}, not a number"]
+    if exact:
+        return problems + expect(quiet == want, f"quiet window {raw} s, want {want} s")
+    return problems + expect(quiet >= want, f"quiet window {raw} s, want {want} s or more")
+
+
+@posix_case
+def cd_then_pause_gets_a_window_of_600_seconds():
+    """3b7. `cd DIR && sleep 600 && echo done` gets a quiet window of 600 s or more. Control, run first:
+    `sleep 600; echo done` gets one"""
+    problems = ["control: " + p for p in quiet_window(rewrite("sleep 600; echo done")[0], 600)]
+    problems += quiet_window(rewrite("cd %s && sleep 600 && echo done" % new_dir())[0], 600)
+    return problems
+
+
+@posix_case
+def pause_after_a_list_item_gets_a_window_of_600_seconds():
+    """3b8. `echo a; sleep 600; echo b` gets a quiet window of 600 s or more. Control, run first:
+    `sleep 600; echo done` gets one"""
+    problems = ["control: " + p for p in quiet_window(rewrite("sleep 600; echo done")[0], 600)]
+    problems += quiet_window(rewrite("echo a; sleep 600; echo b")[0], 600)
+    return problems
+
+
+@posix_case
+def unreadable_pause_gets_a_window_of_600_seconds():
+    """3b9. `sleep $X; echo done` gets a quiet window of 600 s or more: the guard allows a background pause
+    followed by a command, whatever its length. Control, run first: `sleep 600; echo done` gets one"""
+    problems = ["control: " + p for p in quiet_window(rewrite("sleep 600; echo done")[0], 600)]
+    problems += quiet_window(rewrite("sleep $X; echo done")[0], 600)
+    return problems
+
+
+@posix_case
+def five_minutes_and_thirty_seconds_gets_their_sum():
+    """3b10. `sleep 5m 30s; cmd` gets a quiet window of 330 s or more: GNU sleep adds its operands, so the
+    pause is 330 s. Control, run first: `sleep 330; cmd` gets one"""
+    problems = ["control: " + p for p in quiet_window(rewrite("sleep 330; cmd")[0], 330)]
+    problems += quiet_window(rewrite("sleep 5m 30s; cmd")[0], 330)
+    return problems
+
+
+@posix_case
+def quoted_hash_before_a_pause_gets_its_window():
+    """3b11. `echo '# x'; sleep 600; echo b`: a `#` in quotes is text, so the pause after it gets a window of
+    600 s or more. Control, run first: `sleep 600; echo done` gets one"""
+    problems = ["control: " + p for p in quiet_window(rewrite("sleep 600; echo done")[0], 600)]
+    problems += quiet_window(rewrite("""echo '# x'; sleep 600; echo b""")[0], 600)
+    return problems
+
+
+@posix_case
+def lone_quote_before_a_pause_gets_its_window():
+    """3b12. `echo "it's"; sleep 600; echo b`: a lone quote in text does not hide the pause after it, so it gets
+    a window of 600 s or more. Control, run first: `sleep 600; echo done` gets one"""
+    problems = ["control: " + p for p in quiet_window(rewrite("sleep 600; echo done")[0], 600)]
+    problems += quiet_window(rewrite("""echo "it's"; sleep 600; echo b""")[0], 600)
+    return problems
+
+
+@posix_case
+def sleep_text_in_quotes_comments_or_a_heredoc_is_no_pause():
+    """3b13. `sleep 600` written as text gets no allowance: inside quotes, after a `#`, or in a heredoc body.
+    Each keeps the base window of 2 s. Control, run first: a real pause, `sleep 600; echo done`, gets 600 s or more"""
+    problems = ["control: " + p for p in quiet_window(rewrite("sleep 600; echo done")[0], 600)]
+    texts = [
+        'echo "sleep 600; x"',
+        "echo x # sleep 600; echo y",
+        "cat <<'EOF'\nsleep 600; x\nEOF\necho b",
+    ]
+    for text in texts:
+        problems += [f"{text.splitlines()[0]!r}: {p}" for p in quiet_window(rewrite(text)[0], 2, exact=True)]
+    return problems
+
+
+@case
+def wait_helper_heartbeat_is_inside_the_quiet_time():
+    """3b6. bin/wait-until and bin/wait-pid beat every HEARTBEAT_DEFAULT s, under the watcher's default quiet
+    time, so a wait through them is a known wait that never goes silent long enough to stall"""
+    sys.path.insert(0, HERE)
+    import wait_common
+    spec = importlib.util.spec_from_file_location("stall_watch_under_test", MODULE)
+    sw = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sw)
+    return expect(wait_common.HEARTBEAT_DEFAULT < sw.DEFAULT_QUIET,
+                  f"heartbeat {wait_common.HEARTBEAT_DEFAULT} s is not under the quiet time {sw.DEFAULT_QUIET} s")
 
 
 def exit_code_passes_through():
@@ -681,15 +835,15 @@ def job_problems(shell, template, pidfiles=()):
     before = alive(below)
     for pid in listed:  # one at a time, in line order: the parent dies first and starts nothing more
         kill_all([pid])
-    time.sleep(0.5)
-    deadline = time.monotonic() + 2.5
-    while True:
+
+    def leftover():
         left = {pid: args for pid, _ppid, args in process_table() if mark in args}
         for pid in alive(before):
             left.setdefault(pid, args_of.get(pid, ""))
-        if not left or time.monotonic() > deadline:
-            break
-        time.sleep(0.1)
+        return left
+
+    wait_until(lambda: not leftover(), 2.5)
+    left = leftover()
     if left:
         pid, args = next(iter(left.items()))
         problems.append(f"stopping pids {','.join(map(str, listed))} leaves the job running: "
@@ -784,7 +938,10 @@ def nested_pipeline_line_lists_every_member_and_inner_shell():
 @posix_case
 def sequence_never_starts_its_next_command_after_the_stop():
     """18. a; b: after the line is stopped, b never starts"""
-    return shape_problems([("a; b", "sleep 30.@MARK@; touch @NEVER@")])
+    return shape_problems([
+        ("a; b, sleep", "sleep 30.@MARK@; touch @NEVER@"),
+        ("a; b, python sleep", shlex.quote(PY) + " -c 'import time; time.sleep(30)' @MARK@; touch @NEVER@"),
+    ])
 
 
 @posix_case
@@ -827,9 +984,7 @@ def reap_ends_a_job_that_no_report_names():
         problems += expect(m is not None, "report names no pid=")
         PIDS.clear()  # as when a report names the wrong pid: only the mark is left to find the job
         reap()
-        deadline = time.monotonic() + 2.5
-        while alive(job) and time.monotonic() < deadline:
-            time.sleep(0.1)
+        wait_until(lambda: not alive(job), 2.5)
         problems += expect(not alive(job), f"reap() left the job running: pids {alive(job)}")
     finally:
         kill_all(alive(job))  # the job must not outlive a failing case
@@ -849,15 +1004,15 @@ def log_keeps_growing_after_watcher_exits():
         reap()
         return problems + ["report names no log="]
     log = m.group(1)
-    deadline = time.monotonic() + 15
-    body = ""
-    while time.monotonic() < deadline:
-        if os.path.exists(log):
-            with open(log, encoding="utf-8", errors="replace") as f:
-                body = f.read()
-            if "second" in body:
-                break
-        time.sleep(0.2)
+
+    def log_text():
+        if not os.path.exists(log):
+            return ""
+        with open(log, encoding="utf-8", errors="replace") as f:
+            return f.read()
+
+    wait_until(lambda: "second" in log_text(), 15)
+    body = log_text()
     problems += expect("first" in body, "log lacks the output printed before the stall")
     problems += expect("second" in body, "log lacks output printed after the watcher exited")
     reap()
@@ -1405,17 +1560,6 @@ def beat_file_is_removed_when_the_job_ends():
     problems += expect(not os.path.exists(beat), f"beat file {beat} is still there after the job ended")
     problems += expect(not os.path.exists(log), f"LOG {log} is still there after the job ended")
     return problems
-
-
-def wait_until(cond, secs):
-    """Poll cond until it holds or secs pass. Return whether it held. This bound is the only wait."""
-    deadline = time.monotonic() + secs
-    while True:
-        if cond():
-            return True
-        if time.monotonic() >= deadline:
-            return False
-        time.sleep(0.2)
 
 
 def stall_then_end_problems(shell):

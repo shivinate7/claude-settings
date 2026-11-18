@@ -1,0 +1,1 @@
+- hold-on-batch-only-picks: 15:35 CST Nov 13 (coordinator): hold, not reversal: the picks on #3260, #3175, #3240 and the 7 sweep rows are on hold pending runner 10's combined-PR build path. Close nothing batch-only meanwhile.

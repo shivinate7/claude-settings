@@ -309,6 +309,22 @@ def git_reads_origin_one_segment_case():
     return False, "origin_slug('https://host/r') reads %r, want None (no owner segment)" % (got,)
 
 
+def git_reads_origin_windows_drive_case():
+    """A backslash Windows drive origin is a path, not an scp host:path, so origin_slug reads its owner and name."""
+    got = _load_git_reads().origin_slug(r"D:\x\example-org\roster-fixture.git")
+    if got == "example-org/roster-fixture":
+        return True, r"a backslash drive origin, D:\x\example-org\roster-fixture.git, reads example-org/roster-fixture"
+    return False, "origin_slug(D:\\x\\example-org\\roster-fixture.git) reads %r, want example-org/roster-fixture" % (got,)
+
+
+def git_reads_origin_drive_mixed_separators_case():
+    """A C:/ origin whose path also holds backslashes is a path. The scp arm keeps one segment, so origin_slug reads None."""
+    got = _load_git_reads().origin_slug(r"C:/x\example-org\roster-fixture.git")
+    if got == "example-org/roster-fixture":
+        return True, r"a C:/ origin with backslashes, C:/x\example-org\roster-fixture.git, reads example-org/roster-fixture"
+    return False, "origin_slug(C:/x\\example-org\\roster-fixture.git) reads %r, want example-org/roster-fixture" % (got,)
+
+
 def _branch_delete_in(where, branch):
     """Claude's `git branch -D <branch>` in `where`, decided by the guard under its own config folder. Returns
     (decision, reason, config folder); the folder holds the guard.log that the call wrote."""

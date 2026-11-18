@@ -1,0 +1,1 @@
+- merge-confirm-python-bin-form: (#1166) hooks/guard_merge.py:965-970 merge_tool_args reads python only for merge.py or launch.py, so `python3 bin/merge 5 --confirm` and `python3 ~/.claude/bin/merge 5 --confirm` go unjudged. The note merge-confirm-forms-unjudged covers only bare `python3 merge.py`. Not widened by #1166.

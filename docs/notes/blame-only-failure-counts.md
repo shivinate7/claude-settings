@@ -1,0 +1,1 @@
+- blame-only-failure-counts: (#2378 builder try 3) only a run that concluded "failure" counts for `--blame`; timed_out and cancelled are refused.
