@@ -108,11 +108,11 @@
                           Cost: one call per 100 open PRs and one per page of repo comments; no per-PR call, no file, no new process or timer.
   merge --review-tally --since ISO [--split ISO]
                           counts review outcomes from the review records: one list read of the repo's issue comments from --since (ISO is
-                          `YYYY-MM-DDTHH:MM:SSZ`). A pull request counts from its first record that holds a reviewer `Round 1:` line. Each round counts
+                          `YYYY-MM-DDTHH:MM:SSZ`). A pull request counts from its first record that holds a reviewer line for the first round. Each round counts
                           once per pull request, from the first record that holds a reviewer line of it, so a later record that reprints the earlier
                           rounds adds nothing. A design-reviewer line is no round and starts nothing. A record that names another pull request is not
-                          counted on the thread it is posted on. Per section: a line per round and model (`round 1, haiku: PASS 37, FAIL 146`),
-                          `round 1 FAIL, then round 2: PASS n, FAIL n, none n` (a round 2 that is PARTIAL, or absent, is none), then `unknown: n`, the
+                          counted on the thread it is posted on. Per section: a line per round and model (`round N, haiku: PASS 37, FAIL 146`),
+                          the follow-up of a first-round FAIL: second-round `PASS n, FAIL n, none n` (a second round that is PARTIAL, or absent, is none), then `unknown: n`, the
                           records parse_review refuses. A refused record is counted unknown, and later valid records of its pull request still count.
                           With --split a pull request lands in `before the split` or `after the split` by when its starting record was posted;
                           without it, one `all` section. A failed read prints `unknown` on stderr and exits 1, with no count. Stands alone; takes no lock, merges and posts nothing.
@@ -5863,12 +5863,12 @@ def audit_prs(h):
 
 def review_tally(h, since, split=None):
     """-> the lines of `merge --review-tally`: the review outcomes in the records posted since `since`, one section per `split` side, or one `all` section.
-    One list read (issue_comments), so the cost is that read: no file, no timer. A pull request starts at its first record that holds a reviewer Round 1
+    One list read (issue_comments), so the cost is that read: no file, no timer. A pull request starts at its first record that holds a reviewer line for the first round
     line. A record that parse_review refuses counts as unknown and is skipped: it starts nothing and drops nothing, so a later valid record still counts.
     A record whose PR line names another pull request is not counted on the thread it is posted on (own_records reads the PR line the same way). Each round
     counts once per pull request, from the first record at or after the start that holds a reviewer line of it, since a later record reprints the earlier
     rounds. A design-reviewer line is no round and starts nothing. The section is by the created time of the starting record, or of the first record when
-    none starts; a time the read did not give is unknown. Round 2 that is PARTIAL or missing reads as none in the round 1 FAIL follow-up."""
+    none starts; a time the read did not give is unknown. A second round that is PARTIAL or missing reads as none in the follow-up of a first-round FAIL."""
     records = h.issue_comments(since)[0]
     cut = iso_time(split) if split else None
     names = ("before the split", "after the split") if split else ("all",)
