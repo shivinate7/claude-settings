@@ -2203,7 +2203,8 @@ def case_past_ruling_owner_row_after_a_long_table_reaches_the_line():
 
 
 # Owner ruling sentences that do not all fit are taken newest date stamp first (question_form._owner_sentences). So a
-# newer ruling beats an older one that sits earlier in the section, and an undated one sorts after the dated ones.
+# newer ruling beats an older one that sits earlier in the section, and an undated one sorts after the dated ones, so
+# it is the one dropped when the newer ruling fills the budget.
 NEWEST_LEAD = "Owner ruling, 2026-11-17 19:45 CST: keep the new review budget"
 OLDER_LEAD = "Owner ruling, 2026-11-16 09:00 CST: keep the old review budget"
 UNDATED_LEAD = "Owner ruling: keep the undated review budget"
@@ -2227,15 +2228,17 @@ def case_past_ruling_owner_sentences_newest_date_first():
     if not callable(fn):
         return
     cap = question_form.RULING_EXTRA_CAP  # the budget is read from the module, never copied
-    older = _sized_sentence(OLDER_LEAD, cap * 7 // 10)
-    undated = _sized_sentence(UNDATED_LEAD, cap // 2)
-    newer = _sized_sentence(NEWEST_LEAD, cap * 37 // 100)
+    newer = _sized_sentence(NEWEST_LEAD, cap // 2)
+    older = _sized_sentence(OLDER_LEAD, cap * 55 // 100)
+    undated = _sized_sentence(UNDATED_LEAD, cap * 52 // 100)
     section = _filler(900) + " " + older + " " + undated + " " + newer
     check("past rulings newest first: the fixture puts the three owner sentences past INDEX_CAP",
           min(section.index(s) for s in (older, undated, newer)) > question_form.INDEX_CAP,
           "offset %d" % section.index(older))
-    check("past rulings newest first: the two dated sentences together are over RULING_EXTRA_CAP",
+    check("past rulings newest first: the older and newer dated sentences together are over RULING_EXTRA_CAP",
           len(older) + len(newer) > cap, "%d characters" % (len(older) + len(newer)))
+    check("past rulings newest first: the undated sentence does not fit beside the newer dated one",
+          1 + len(newer) + 1 + len(undated) > cap, "%d characters" % (len(newer) + len(undated)))
     check("past rulings newest first: the older dated sentence comes first in the section",
           section.index(older) < section.index(newer), "fixture order")
     record_id, candidates = _past_cap_candidates("past-owner-newest-first", section, fn)
@@ -2249,8 +2252,8 @@ def case_past_ruling_owner_sentences_newest_date_first():
           text[-200:])
     check("past rulings newest first: the older dated owner sentence is dropped, as it does not fit beside the newer",
           older not in text, text[-200:])
-    check("past rulings newest first: the undated owner sentence sorts after the dated ones, and is kept when they "
-          "leave room", undated in text, text[-200:])
+    check("past rulings newest first: the undated owner sentence sorts after the dated ones, so it is dropped when "
+          "the newer one fills the budget", undated not in text, text[-200:])
 
 
 # The owner's rulings not yet on main (the ruled store) sit on origin/roadmap. past_rulings puts each open entry first,
