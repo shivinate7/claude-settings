@@ -911,7 +911,7 @@ jobs:
         run: python3 hooks/test_checks_never_raise.py
 
       - name: Session start notice suite
-        if: ${{ (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || github.event_name != 'pull_request' }}
         run: python3 hooks/test_session_start.py
 
       - name: Start check suite
