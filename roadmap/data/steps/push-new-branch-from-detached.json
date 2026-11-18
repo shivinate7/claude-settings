@@ -1,0 +1,14 @@
+{
+ "id": "push-new-branch-from-detached",
+ "title": "The push rule and its guard text name `git push origin HEAD:<branch>`, which fails for a new branch from a detached worktree",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator, 07:56 CST Nov 18: a designer agent's push `git push origin HEAD:<branch>` failed when it created a new branch from a detached worktree; it needed `HEAD:refs/heads/<branch>`. An agent worktree is often detached, so Claude is likely to hit this again.",
+ "source": "coordinator 07:56 CST Nov 18, relayed to triage 11",
+ "note": "Not built; not read in the code. Next: find the push rule and guard text that print `HEAD:<branch>` (the agent push form: lint/test_agent_push_form.py is one place to look) and change them to `HEAD:refs/heads/<branch>`, test-author first (a push from a detached worktree to a new branch must pass). Mover: a lane after the coordinator's say-so.",
+ "updatedAt": "2026-11-18T07:57:40-06:00"
+}
