@@ -27,6 +27,19 @@ Limits: a pure rename of a test file reads as a delete and an add, so it needs `
 branch that merged a newer main carries main's commits in the range, and the CLI judges each like the rest. The
 guard's push check leaves out the commits the default base holds.
 
+Verified line, observe mode (the CLI only): each non-merge, non-revert commit also says how it was verified:
+
+    Verified: <command> -> <verdict>                a command that ran, and its verdict, in free text
+    Verified: none: <reason>                        no command ran; the reason is not empty
+
+A commit with no valid Verified line prints `check_red_run: OBSERVE: <sha> <subject>: no valid Verified line`, and the
+exit code stays 0: only a Red-run gap sets exit 1. The rollout reads git's trees, never the disk: it judges a commit
+only when <head>'s check file holds VERIFIED_ROLLOUT and so does that commit's parent's, so a repo whose check file
+lacks the marker (a child repo's installed copy) judges nothing, and a commit from before the marker landed is not
+judged. `gaps` and `judge`, which the push guard calls, never read a Verified line. A Verified read that git cannot
+finish prints one OBSERVE line and keeps the exit code at what the Red-run read gave. Renaming the check file turns the
+Verified read off.
+
 Exit 0: clean. Exit 1: a commit is named with its short sha, subject and test path. Exit 2: UNKNOWN, because git
 could not read the range or no base was given. Unknown is never 0 here: a green exit on an unread range would hide a gap.
 """
@@ -40,6 +53,9 @@ SELF_REL = "lint/check_red_run.py"
 RED = re.compile(r"^Red-run: \S.*? -> (\d+) failed on [0-9a-fA-F]{7,64}\s*$")
 REVERT = re.compile(r"^This reverts commit [0-9a-fA-F]{7,64}\.?\s*$", re.MULTILINE)
 NONE = re.compile(r"^Red-run: none: \s*\S.*$")
+VERIFIED = re.compile(r"^Verified: \S.*? -> \S.*$")
+VERIFIED_NONE = re.compile(r"^Verified: none: \s*\S.*$")
+VERIFIED_ROLLOUT = "verified-trailer-rollout-1"  # a check file that holds this string reads Verified lines (git grep of a rev's file)
 FIELD = "\x1f"
 START = "\x01"  # opens each commit in the log output, so a commit's header and its file rows split apart
 MAX_PATHS = 5
@@ -78,6 +94,11 @@ def has_trailer(message):
     return False
 
 
+def has_verified(message):
+    """True when a line of the message is a valid Verified line: a command with `->` and a verdict, or none with a reason."""
+    return any(VERIFIED.match(line.rstrip()) or VERIFIED_NONE.match(line.rstrip()) for line in message.splitlines())
+
+
 def commits(root, base, head, exclude, is_test_rel):
     """The non-merge commits of base..head, minus those `exclude` holds, oldest first, as (sha, parent, subject,
     message, test paths it adds). One `git log --numstat` reads the range and each commit's files. Raises Unknown
@@ -104,6 +125,26 @@ def commits(root, base, head, exclude, is_test_rel):
     return found
 
 
+def rollout_landed(root, rev):
+    """True when the check file at `rev` holds VERIFIED_ROLLOUT. Git's tree is read, never the disk. A missing file is False."""
+    r = _nowindow.run(["git", "grep", "-q", "-F", "-e", VERIFIED_ROLLOUT, rev, "--", SELF_REL],
+                      cwd=root, capture_output=True, encoding="utf-8", errors="replace")
+    if r.returncode > 1:
+        raise Unknown("git grep failed: " + r.stderr.strip())
+    return r.returncode == 0
+
+
+def verified_gaps(root, rows, head="HEAD"):
+    """One OBSERVE line per commit of `rows` (the rows `commits` read) with no valid Verified line. Judges nothing when
+    head's check file lacks the rollout marker. A commit is judged only when its parent's check file holds it too; a revert
+    is not judged. Raises Unknown when git cannot say."""
+    if not rows or not rollout_landed(root, head):
+        return []
+    return ["check_red_run: OBSERVE: %s %s: no valid Verified line" % (sha[:7], subject)
+            for sha, parent, subject, message, _paths in rows
+            if parent is not None and not REVERT.search(message) and not has_verified(message) and rollout_landed(root, parent)]
+
+
 def check_landed(root, rev):
     return bool(git(root, "ls-tree", "--name-only", rev, "--", SELF_REL).strip())
 
@@ -121,7 +162,7 @@ def pending_gap(message, paths):
     return ("new", message.strip().split("\n", 1)[0], _shown(paths))
 
 
-def judge(root, base, head="HEAD", exclude="", *, is_test_rel=None, tip=None, pending=()):
+def judge(root, base, head="HEAD", exclude="", *, is_test_rel=None, tip=None, pending=(), rows=None):
     """(found, last) for the commits of base..head, minus those `exclude` holds. `found` is one (short sha,
     subject, test paths shown) per commit that adds test lines with no valid trailer, and `last` the short sha of
     the newest commit read. Raises Unknown when git cannot say.
@@ -131,13 +172,14 @@ def judge(root, base, head="HEAD", exclude="", *, is_test_rel=None, tip=None, pe
     A shell call may hold commits that have not landed. `tip` is (message or None, extra test paths) for an amend of
     head's commit: the message replaces the commit's own, None keeps it, and the paths are the test lines the amend
     stages besides. `pending` holds a (message, test paths) for each new commit the call makes. Both are judged like
-    a landed commit, and the pending ones show as sha `new`."""
+    a landed commit, and the pending ones show as sha `new`. `rows` is the list `commits` returned for the same range, so a
+    caller that reads more than one check from it runs one git log."""
     if is_test_rel is None:
         import guard  # is_test_rel is the one home of what a test path is (hooks/guard.py)
         is_test_rel = guard.is_test_rel
     found, rollout, last = [], None, ""
     tip_sha = git(root, "rev-parse", head + "^{commit}").strip() if tip is not None else ""
-    for sha, parent, subject, message, paths in commits(root, base, head, exclude, is_test_rel):
+    for sha, parent, subject, message, paths in (rows if rows is not None else commits(root, base, head, exclude, is_test_rel)):
         last = sha[:7]
         if sha == tip_sha:
             if tip[0] is not None:
@@ -159,9 +201,9 @@ def judge(root, base, head="HEAD", exclude="", *, is_test_rel=None, tip=None, pe
     return found, last
 
 
-def gaps(root, base, head="HEAD", exclude="", *, is_test_rel=None, tip=None, pending=()):
+def gaps(root, base, head="HEAD", exclude="", *, is_test_rel=None, tip=None, pending=(), rows=None):
     """One line per commit that adds test lines with no valid trailer (see `judge`). Raises Unknown when git cannot say."""
-    found, _last = judge(root, base, head, exclude, is_test_rel=is_test_rel, tip=tip, pending=pending)
+    found, _last = judge(root, base, head, exclude, is_test_rel=is_test_rel, tip=tip, pending=pending, rows=rows)
     return ["check_red_run: FAIL: %s %s: adds lines to %s with no valid Red-run trailer" % row for row in found]
 
 
@@ -181,11 +223,17 @@ def main(args):
         print("check_red_run: UNKNOWN, no base: pass --base <sha> or set BASE_SHA")
         return 2
     try:
-        bad = gaps(root, base)
+        import guard  # is_test_rel is the one home of what a test path is (hooks/guard.py)
+        rows = commits(root, base, "HEAD", "", guard.is_test_rel)  # one git log serves both reads
+        bad = gaps(root, base, rows=rows)
     except Unknown as err:
         print("check_red_run: UNKNOWN, " + str(err))
         return 2
-    for line in bad:
+    try:
+        observed = verified_gaps(root, rows)
+    except Unknown as err:  # observe mode fails nothing: an unread Verified line never sets the exit code
+        observed = ["check_red_run: OBSERVE: the Verified line read could not run, so it is unknown: " + str(err)]
+    for line in bad + observed:
         print(line)
     if bad:
         print("\n".join(REMEDY))

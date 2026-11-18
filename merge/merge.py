@@ -111,6 +111,17 @@
                           review record's last round and verdict, and the lane-lint state at that head. Then the gh calls of each route. It stops, with
                           the remaining count, the limit and the reset time, when the GitHub API budget is under a tenth (decision gh-api-budget).
                           Cost: one call per 100 open PRs and one per page of repo comments; no per-PR call, no file, no new process or timer.
+  merge --review-tally --since ISO [--split ISO]
+                          counts review outcomes from the review records: one list read of the repo's issue comments from --since (ISO is
+                          `YYYY-MM-DDTHH:MM:SSZ`). A pull request counts from its first record that holds a reviewer line for the first round. Each round counts
+                          once per pull request, from the first record that holds a reviewer line of it, so a later record that reprints the earlier
+                          rounds adds nothing. A design-reviewer line is no round and starts nothing. A record that names another pull request is not
+                          counted on the thread it is posted on. Per section: a line per round and model (`round N, haiku: PASS 37, FAIL 146`),
+                          the follow-up of a first-round FAIL: second-round `PASS n, FAIL n, none n` (a second round that is PARTIAL, or absent, is none), then `unknown: n`, the
+                          records parse_review refuses. A refused record is counted unknown, and later valid records of its pull request still count.
+                          With --split a pull request lands in `before the split` or `after the split` by when its starting record was posted;
+                          without it, one `all` section. A failed read prints `unknown` on stderr and exits 1, with no count. Stands alone; takes no lock, merges and posts nothing.
+                          Cost: the one comment list read (one call per 100 comments); no file, process or timer.
   merge --touches [--run RUN_ID|URL] [--case TEXT ...] [--file PATH ...]
                           one line per open PR that touches a named file (a changed file of that path) or holds a named case in a `+` line of its
                           patch: `#N HEADREF SHA9 draft|ready: file PATH; case TEXT`. With --run, the run's failing log lines name the cases
@@ -2256,6 +2267,10 @@ def claim_only(root, cfgrel, base, linted, live):
     return True
 
 PAGE_SUBJECT = "Rebuild the records page"  # the subject of a page-only commit (commit_claim with no trailer)
+_GENERATOR = "python3 lint/" + os.path.basename(RECORDS) + " --records-only"  # the records generator's command, as run_records starts it, without the tool's own path
+_CLAIM_COMMAND = "node actions/stamp/" + os.path.basename(STAMP) + " --claim"  # the claim's command, as node_stamp starts it; glossary-ok: STAMP is the existing constant for the tool path
+VERIFIED_CLAIM = f"Verified: {_CLAIM_COMMAND}; {_GENERATOR} -> both exited 0"  # do_claim and rebuild_records ran before the commit, and each raises Stop on a nonzero exit
+VERIFIED_PAGE = f"Verified: {_GENERATOR} -> exited 0 and changed the records page"  # a page-only commit exists only when rebuild_records changed the tree
 
 def page_only(wt, sha, strict=False):
     """-> the parent of `sha` when it is a page-only commit: one parent, the subject PAGE_SUBJECT, and the records page alone changed. Else None,
@@ -2368,8 +2383,9 @@ def identity(wt):
 def commit_claim(wt, trailer):
     """One commit for the claim and the rebuilt records page. No trailer: the page alone."""
     git(wt, "add", "-A")
-    msg = ["-m", "Claim record numbers", "-m", trailer] if trailer else ["-m", PAGE_SUBJECT,
-           "-m", f"Drops-lines: {RECORDS_PAGE} -- a generated page, rebuilt by the generator"]  # the silent-undo check reads the rebuilt page as generated
+    # One last paragraph holds each trailer, so git reads Record-claim and Drops-lines beside the Verified line (lint/check_red_run.py).
+    msg = ["-m", "Claim record numbers", "-m", trailer + "\n" + VERIFIED_CLAIM] if trailer else ["-m", PAGE_SUBJECT,
+           "-m", f"Drops-lines: {RECORDS_PAGE} -- a generated page, rebuilt by the generator\n" + VERIFIED_PAGE]  # the silent-undo check reads the rebuilt page as generated
     c, out = git(wt, *identity(wt), "commit", "-q", *msg)
     if c:
         raise Stop("cannot commit the claim " + STAMP_RUN_CITE + ": " + out)
@@ -5896,6 +5912,56 @@ def audit_prs(h):
                      f"review: {review}; lint: {lint_state(lints.get(n, []), sha)}")
     return lines or ["no open pull requests."], [f"{method} {route}: {count}" for (method, route), count in sorted(h.route_counts.items())]
 
+def review_tally(h, since, split=None):
+    """-> the lines of `merge --review-tally`: the review outcomes in the records posted since `since`, one section per `split` side, or one `all` section.
+    One list read (issue_comments), so the cost is that read: no file, no timer. A pull request starts at its first record that holds a reviewer line for the first round
+    line. A record that parse_review refuses counts as unknown and is skipped: it starts nothing and drops nothing, so a later valid record still counts.
+    A record whose PR line names another pull request is not counted on the thread it is posted on (own_records reads the PR line the same way). Each round
+    counts once per pull request, from the first record at or after the start that holds a reviewer line of it, since a later record reprints the earlier
+    rounds. A design-reviewer line is no round and starts nothing. The section is by the created time of the starting record, or of the first record when
+    none starts; a time the read did not give is unknown. A second round that is PARTIAL or missing reads as none in the follow-up of a first-round FAIL."""
+    records = h.issue_comments(since)[0]
+    cut = iso_time(split) if split else None
+    names = ("before the split", "after the split") if split else ("all",)
+    tallies = {name: {"rounds": {}, "follow": [0, 0, 0], "unknown": 0} for name in names}
+    for n in sorted(records):
+        rows = []  # (the record, or None for a refused one; created time); a record that names another pull request is left out
+        for body, created, _updated in records[n]:
+            own = own_records(n, [body])
+            if own:
+                rows.append((own[0], created))
+            elif parse_review(body) is None:
+                rows.append((None, created))
+        if not rows:
+            continue
+        start = next((i for i, (rec, _c) in enumerate(rows) if rec and any(r[0] == 1 and r[1] == REVIEW_ROLES[0] for r in rec["rounds"])), None)
+        when = iso_time(rows[start or 0][1])
+        if split and when is None:
+            tallies[names[0]]["unknown"] += 1
+            continue
+        t = tallies[names[1] if split and when >= cut else names[0]]
+        t["unknown"] += sum(1 for rec, _c in rows if rec is None)
+        if start is None:
+            continue
+        seen, first = set(), {}
+        for rec, _c in (row for row in rows[start:] if row[0]):
+            mine = [(i, model.lower(), verdict) for i, role, model, verdict in rec["rounds"] if role == REVIEW_ROLES[0]]
+            for i, model, verdict in mine:
+                if i not in seen:
+                    counts = t["rounds"].setdefault((i, model), {})
+                    counts[verdict] = counts.get(verdict, 0) + 1
+                    first.setdefault(i, verdict)
+            seen |= {i for i, _m, _v in mine}
+        if first.get(1) == "FAIL":
+            t["follow"][{"PASS": 0, "FAIL": 1}.get(first.get(2), 2)] += 1
+    out = []
+    for name, t in tallies.items():
+        out.append(name)
+        out += [f"round {i}, {model}: PASS {c.get('PASS', 0)}, FAIL {c.get('FAIL', 0)}" for (i, model), c in sorted(t["rounds"].items())]
+        out.append("round 1 FAIL, then round 2: PASS {}, FAIL {}, none {}".format(*t["follow"]))
+        out.append(f"unknown: {t['unknown']}")
+    return out
+
 def reviewed_lines(h, cfgrel=None, live=None):
     """-> (lines, ok) of `merge --reviewed` (see reviewed_read, which holds the gh cost of one repo): its lines, then its two number lines, then, with `live`
     (the publisher's live-work file), the lost-work rows (lost_work_rows); ok is False when a row reads unknown. `--root` runs this once per root, so the
@@ -6498,6 +6564,19 @@ def release_check(root, h, numbers, lints, root_why=None, cfgrel=None):
     return [f"#{n} FAIL: {'; '.join(why)}" if why else f"#{n} PASS" + (RELEASE_LINT_UNKNOWN_NOTE if lints[n][1] == "UNKNOWN-AT-CAP" else "")
             for n, why in verdicts], not any(why for _, why in verdicts)
 
+def iso_time(text):
+    """-> the aware datetime of a UTC time `YYYY-MM-DDTHH:MM:SSZ`, or None when `text` is not one (a timestamp the read did not give is None too)."""
+    try:
+        return datetime.datetime.fromisoformat(text[:-1] + "+00:00") if text and text.endswith("Z") else None
+    except ValueError:
+        return None
+
+def iso_arg(text):
+    """argparse type of --since and --split: a UTC time `YYYY-MM-DDTHH:MM:SSZ`, kept as the text."""
+    if not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", text, re.ASCII) or iso_time(text) is None:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a UTC time like 2026-11-14T00:00:00Z")
+    return text
+
 def pr_arg(text):
     """argparse type of a pull request number (--release-check, --blame): digits only."""
     if not text.isdigit():
@@ -6893,6 +6972,9 @@ def build_parser():
     p.add_argument("--out", default=None, metavar="FILE", help="with --ledger: write the ledger here (nothing is written when a read stopped)")
     p.add_argument("--verdicts", default=None, metavar="FILE", help="with --ledger: the verdicts file, a tab-separated header row PR, verdict, kind, step, head, reason, then one row per sorted pull request")
     p.add_argument("--subsumed", default=None, metavar="FILE", help="with --ledger: optional, lines of `PR step group record age_h n=<count> subsumed_by=<list>`; fills each row's subsumed_by")
+    p.add_argument("--review-tally", action="store_true", help="count review outcomes (rounds per model, how the round 1 FAILs went, unknown records) from one read of the review records since --since; takes no lock, writes nothing")
+    p.add_argument("--since", type=iso_arg, default=None, metavar="ISO", help="with --review-tally: read the issue comments updated from this UTC time, YYYY-MM-DDTHH:MM:SSZ")
+    p.add_argument("--split", type=iso_arg, default=None, metavar="ISO", help="with --review-tally: tally the pull requests whose starting record was posted before this time apart from those after it")
     p.add_argument("--audit-prs", action="store_true", help="one line per open pull request (head, draft, review verdict, lint state) from two bulk reads, then the gh calls of each route; takes no lock, writes nothing")
     p.add_argument("--root", action="append", default=[], metavar="DIR", help="with --reviewed: a repo checkout to list, in place of the working directory's; repeat it for each repo")
     p.add_argument("--release-check", nargs="+", action="extend", type=pr_arg, metavar="N", help="one line per pull request: PASS, or FAIL and the reasons (open, review record done at the live head and unedited, lint verdict, clean merge, stack); a missing line is a FAIL; takes no lock, merges nothing")
@@ -6932,6 +7014,13 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--touches stands alone")  # any other option set, a mode flag or not
         if not (a.run or a.case or a.file):
             p.error("--touches needs --run, --case or --file")
+    if (a.since is not None or a.split is not None) and not a.review_tally:
+        p.error("--since and --split go with --review-tally")
+    if a.review_tally:
+        if a.since is None:
+            p.error("--review-tally needs --since")
+        if any(v != p.get_default(k) for k, v in vars(a).items() if k not in ("review_tally", "since", "split", "repo_dir")):  # -C names the checkout, not a second mode
+            p.error("--review-tally stands alone")
     if a.lint and not a.release_check:
         p.error("--lint goes with --release-check")
     if a.release_check:
@@ -6969,7 +7058,7 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error(f"argument pr: invalid int value: {a.pr!r}")
     if a.audit_prs and any(v != p.get_default(k) for k, v in vars(a).items() if k not in ("audit_prs", "repo_dir")):  # -C names the checkout to audit, not a second mode
         p.error("--audit-prs stands alone")
-    if a.idle_lanes or a.touches or a.release_check or a.audit_prs:
+    if a.idle_lanes or a.touches or a.release_check or a.audit_prs or a.review_tally:
         pass  # stands alone: checked above
     elif a.fast_checks:  # the read-only pre-ready run: no lock, no push, no ready mark
         if a.pr is None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record or a.lane_lint or a.ready:
@@ -7038,6 +7127,15 @@ def main(argv, host=None, lock=None, hosts=None):
             if unknown:
                 print("merge: " + " ".join(unknown.split()), file=sys.stderr)
                 return 1
+            return 0
+        if a.review_tally:  # before the role check and any lock: it reads, merges and posts nothing
+            try:
+                lines = review_tally(host or Host(cwd=a.repo_dir), a.since, a.split)
+            except (Stop, OSError) as e:  # an OSError is a read whose program cannot start (no gh): unknown, never a traceback or a count
+                why = " ".join(str(e).split())
+                print("merge: " + (why if why.startswith("unknown") else f"unknown ({why}) {UNKNOWN_CITE}"), file=sys.stderr)
+                return 1
+            say(*lines)
             return 0
         if a.audit_prs:  # before the role check and any lock: it reads, merges and posts nothing
             lines, counts = audit_prs(host or Host(cwd=a.repo_dir))

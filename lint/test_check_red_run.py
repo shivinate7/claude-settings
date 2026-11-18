@@ -13,6 +13,15 @@ path is one that hooks/guard.py is_test_rel judges. When HEAD holds lint/check_r
 parent tree lacks it predates the check, so it is not judged. A repo without the file at HEAD gets no such
 exemption: every non-merge commit that is not a revert is judged.
 
+A commit also carries a Verified line, which says how the commit was verified:
+
+    Verified: <command> -> <verdict>              a command that ran, and its verdict
+    Verified: none: <reason>                      no command ran; the reason is not empty
+
+Observe mode: a commit with no valid Verified line prints a gap line, and the exit code stays 0. Only a
+Red-run gap sets exit 1. A merge and a revert are not judged. A repo whose HEAD does not carry the Verified
+rollout judges no Verified line.
+
 Each case builds a fixture repo under this run's folder (lint/_test_temp.py): a base commit, then
 change commits on top. The check runs as the copy at lint/check_red_run.py in that repo. The cwd and
 --root cases run the module by its path, from another directory. CHECK_RED_RUN_UNDER_TEST overrides the
@@ -38,6 +47,33 @@ PRODUCT_REL = "src/widgets.py"
 PRODUCT_TEXT = "def widget():\n    return 1\n"
 TEST_TEXT = "def test_widget():\n    assert widget() == 1\n"
 GOOD = "Red-run: python3 lint/test_widgets.py -> 2 failed on abc1234"
+VERIFIED = "Verified: python3 lint/test_widgets.py -> PASS"  # the default Verified line of a fixture commit
+GADGET_PATH = "src/gadget.py"
+GADGET_TEXT = "def gadget():\n    return 2\n"
+PRE_ROLLOUT_CHECK = "# the check file before the Verified rollout\n"  # a check file with no Verified rollout in it
+ROLLOUT_MARKER = "verified-trailer-rollout-1"  # the string a check file holds once the Verified rollout landed
+# Runs lint/check_red_run.py by path. A `fail` run makes the git call named by argv[2] exit 128, a read git cannot
+# finish. A `count` run counts that call's starts. A grep counts only when it names the check file: that is a Verified read.
+PROBE = (
+    "import importlib.util, subprocess, sys\n"
+    "spec = importlib.util.spec_from_file_location('check_red_run', sys.argv[1])\n"
+    "module = importlib.util.module_from_spec(spec)\n"
+    "spec.loader.exec_module(module)\n"
+    "watch, mode = sys.argv[2], sys.argv[3]\n"
+    "real, starts = module._nowindow.run, []\n"
+    "def watched(argv):\n"
+    "    return argv[:2] == ['git', watch] and (watch != 'grep' or module.SELF_REL in argv)\n"
+    "def run(argv, *args, **kwargs):\n"
+    "    if watched(argv):\n"
+    "        starts.append(argv)\n"
+    "        if mode == 'fail':\n"
+    "            return subprocess.CompletedProcess(argv, 128, '', 'fatal: simulated failure of git ' + watch)\n"
+    "    return real(argv, *args, **kwargs)\n"
+    "module._nowindow.run = run\n"
+    "rc = module.main(sys.argv[4:])\n"
+    "print('PROBE_EXIT=%d' % rc)\n"
+    "print('PROBE_STARTS=%d' % len(starts))\n"
+)
 # Every commit carries this block, as real commits do. A check that wants Red-run as the last
 # trailer fails here, not on the first real commit.
 ATTRIBUTION = ["Co-Authored-By: Claude <noreply@anthropic.com>",
@@ -92,8 +128,9 @@ class Fixture(unittest.TestCase):
         self.serial += 1
         return "lint/test_widgets_%d.py" % self.serial
 
-    def commit(self, subject, files, red=None):
-        """Write files (a None value deletes one), commit them, return the full sha. `red` is the Red-run line."""
+    def commit(self, subject, files, red=None, verified=VERIFIED):
+        """Write files (a None value deletes one), commit them, return the full sha. `red` is the Red-run line.
+        `verified` is the Verified line: the default is a valid one, and None leaves the line out."""
         for rel, text in files.items():
             path = os.path.join(self.tree, *rel.split("/"))
             if text is None:
@@ -104,16 +141,17 @@ class Fixture(unittest.TestCase):
                 f.write(text)
         if files:
             self.git("add", "--", *files)  # only the named paths join the commit
-        body = ([red] if red else []) + ATTRIBUTION
+        body = ([red] if red else []) + ([verified] if verified else []) + ATTRIBUTION
         self.git("commit", "-q", "--allow-empty", "--cleanup=verbatim", "-F", "-",
                  input=subject + "\n\n" + "\n".join(body) + "\n")
         return self.git("rev-parse", "HEAD")
 
-    def base(self, files=None, check=True):
-        """The base commit the check diffs from. check=False builds a parent tree from before the check landed."""
+    def base(self, files=None, check=True, check_text=None):
+        """The base commit the check diffs from. check=False builds a parent tree from before the check landed.
+        check_text, when set, is the check file's text in place of the current module."""
         files = dict(files or {})
         if check:
-            files[CHECK_REL] = read_module()
+            files[CHECK_REL] = read_module() if check_text is None else check_text
         self.base_sha = self.commit("fixture base", files)
         self.assertEqual(self.has_file(self.base_sha, CHECK_REL), check)
 
@@ -435,6 +473,273 @@ class CheckCase(Fixture):
         rel = self.new_test_path()
         found = self.pending_judge("add widget tests\n", rel)
         self.assertEqual(found, [["new", "add widget tests", rel]], "a pending plain test commit is not one gap row")
+
+
+class VerifiedCase(Fixture):
+    """Cases for the Verified line: each commit says how it was verified. In observe mode a gap prints and the exit
+    code stays 0. A case that expects a listing also lists an untrailered control commit, so a red shows the listing
+    missing, never a crash. A control is green on the old code too and says so in its docstring."""
+
+    def names_verified(self, out, sha):
+        """True when an output line says Verified and names the commit by its short sha."""
+        return any("Verified" in line and sha[:7] in line for line in out.splitlines())
+
+    def assertListed(self, out, sha, subject):
+        """Scope before subject: a line says Verified and names the commit by short sha. Then that line names the subject."""
+        lines = [line for line in out.splitlines() if "Verified" in line and sha[:7] in line]
+        self.assertTrue(lines, "no Verified line names %s:\n%s" % (sha[:7], out))
+        self.assertIn(subject, lines[0], "the Verified line for %s does not name its subject:\n%s" % (sha[:7], out))
+
+    def assertNotListed(self, out, sha, why):
+        self.assertFalse(self.names_verified(out, sha), "%s:\n%s" % (why, out))
+
+    def test_commit_without_a_verified_line_is_listed_and_exit_stays_zero(self):
+        self.base()
+        sha = self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT}, verified=None)
+        rc, out = self.lint()
+        self.assertEqual(rc, 0, "observe mode: a Verified gap must leave the exit code at 0:\n" + out)
+        self.assertListed(out, sha, "change widget product")
+
+    def test_test_commit_with_a_red_run_and_no_verified_line_keeps_exit_zero(self):
+        self.base()
+        rel = self.new_test_path()
+        sha = self.commit("add widget tests", {rel: TEST_TEXT}, red=GOOD, verified=None)
+        rc, out = self.lint()
+        self.assertEqual(rc, 0, "a Verified gap must not set the exit code when the Red-run line is valid:\n" + out)
+        self.assertListed(out, sha, "add widget tests")
+
+    def test_verified_command_and_verdict_passes(self):
+        self.base()
+        passing = self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT},
+                              verified="Verified: python3 lint/test_widgets.py -> PASS")
+        control = self.commit("change gadget product", {GADGET_PATH: GADGET_TEXT}, verified=None)
+        rc, out = self.lint()
+        self.assertEqual(rc, 0, out)
+        self.assertListed(out, control, "change gadget product")  # control: the range does produce a listing
+        self.assertNotListed(out, passing, "a commit with a Verified command and verdict is listed as a gap")
+
+    def test_verified_none_with_a_reason_passes(self):
+        self.base()
+        passing = self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT},
+                              verified="Verified: none: re-points widget fixtures")
+        control = self.commit("change gadget product", {GADGET_PATH: GADGET_TEXT}, verified=None)
+        rc, out = self.lint()
+        self.assertEqual(rc, 0, out)
+        self.assertListed(out, control, "change gadget product")  # control: the range does produce a listing
+        self.assertNotListed(out, passing, "a commit with Verified none and a reason is listed as a gap")
+
+    def test_bare_verified_none_is_listed(self):
+        self.base()
+        made = []
+        for n, verified in enumerate(("Verified: none", "Verified: none:", "Verified: none:   ")):
+            subject = "change gadget %d" % n
+            sha = self.commit(subject, {"src/gadget_%d.py" % n: "def gadget_%d():\n    return %d\n" % (n, n)}, verified=verified)
+            made.append((sha, subject, verified))
+        rc, out = self.lint()
+        self.assertEqual(rc, 0, out)
+        for sha, subject, verified in made:
+            with self.subTest(verified=verified):
+                self.assertListed(out, sha, subject)
+
+    def test_merge_commit_is_not_judged(self):
+        self.base()
+        self.git("checkout", "-q", "-b", "side")
+        side = self.commit("change gadget product", {GADGET_PATH: GADGET_TEXT}, verified=None)
+        self.git("checkout", "-q", "main")
+        self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT})
+        merged = self.merge("side")
+        rc, out = self.lint()
+        self.assertEqual(rc, 0, out)
+        self.assertListed(out, side, "change gadget product")  # control: the side commit is judged
+        self.assertNotListed(out, merged, "a merge commit is listed as a Verified gap")
+
+    def test_revert_commit_is_not_judged(self):
+        self.base()
+        self.commit("change gadget product", {GADGET_PATH: GADGET_TEXT}, verified=None)
+        self.git("revert", "--no-edit", "HEAD")
+        reverted = self.git("rev-parse", "HEAD")
+        self.assertIn("This reverts commit ", self.git("log", "-1", "--format=%B"))  # scope: the case is a revert
+        control = self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT}, verified=None)
+        rc, out = self.lint()
+        self.assertEqual(rc, 0, out)
+        self.assertListed(out, control, "change widget product")  # control: a plain commit in the range is judged
+        self.assertNotListed(out, reverted, "a revert commit is listed as a Verified gap")
+
+    def test_verified_check_starts_at_the_commit_after_the_landing(self):
+        """The landing commit's parent holds a check file with no Verified rollout. The file alone does not start the check."""
+        self.base(check_text=PRE_ROLLOUT_CHECK)
+        landing = self.commit("land the Verified check", {CHECK_REL: read_module()}, verified=None)
+        self.assertTrue(self.has_file(self.base_sha, CHECK_REL))  # the landing commit's parent holds a check file
+        later = self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT}, verified=None)
+        self.assertTrue(self.has_file(landing, CHECK_REL))  # the next commit's parent holds the check too
+        rc, out = self.lint()
+        self.assertEqual(rc, 0, out)
+        self.assertListed(out, later, "change widget product")
+        self.assertNotListed(out, landing, "the landing commit's parent has no Verified rollout, yet the landing commit is listed")
+
+    def test_every_untrailered_commit_in_a_long_range_is_listed(self):
+        """Full-size state: 25 commits with no Verified line, each one a gap."""
+        self.base()
+        shas = [self.commit("change part %d" % i, {"src/part_%d.py" % i: "def part():\n    return %d\n" % i}, verified=None)
+                for i in range(25)]
+        rc, out = self.lint()
+        self.assertEqual(rc, 0, out)
+        missing = [sha[:7] for sha in shas if not self.names_verified(out, sha)]
+        self.assertEqual(missing, [], "Verified gaps not listed, of %d commits:\n%s" % (len(shas), out))
+
+    def test_empty_range_lists_nothing(self):
+        """Empty state, a control green on the old code too: a range with no commits prints no sha."""
+        self.base()
+        rc, out = self.lint()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual([line for line in out.splitlines() if re.search(r"\b[0-9a-f]{7,40}\b", line)], [], out)
+
+    def test_repo_without_the_check_judges_no_verified_line(self):
+        """A control, green on the old code too: a repo whose HEAD lacks the check file gets no Verified line, so child repos stay off."""
+        self.base(check=False)
+        sha = self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT}, verified=None)
+        rc, out = self.lint(script=MODULE, cwd=self.tree)
+        self.assertEqual(rc, 0, out)
+        self.assertNotListed(out, sha, "a repo whose HEAD lacks the check lists a Verified gap")
+
+    def gap_rows(self, base):
+        """The rows `gaps` returns for the fixture repo, the call the push guard makes (hooks/guard_merge.py)."""
+        probe = ("import importlib.util, sys\n"
+                 "spec = importlib.util.spec_from_file_location('check_red_run', sys.argv[1])\n"
+                 "module = importlib.util.module_from_spec(spec)\n"
+                 "spec.loader.exec_module(module)\n"
+                 "for line in module.gaps(sys.argv[2], sys.argv[3]):\n"
+                 "    print(line)\n")
+        done = subprocess.run([sys.executable, "-c", probe, MODULE, self.tree, base],
+                              capture_output=True, text=True, encoding="utf-8", errors="replace", env=GIT_ENV)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return done.stdout.splitlines()
+
+    def test_push_guard_gaps_name_no_verified_line(self):
+        """A control, green on the old code too: `gaps`, which the push guard calls in every repo, lists no Verified gap.
+        Only main() reports a Verified gap, in observe mode."""
+        self.base()
+        self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT}, verified=None)
+        self.assertEqual(self.gap_rows(self.base_sha), [], "gaps() lists a Verified gap, which the push guard would read")
+
+    def run_probe(self, watch, mode, args=None):
+        """Run the check by MODULE path in the fixture repo, under PROBE. Returns (exit code, output, starts of `watch`).
+        The probe's result lines must print, so a crash is never read as an exit code. Not the fixture's disk copy: a
+        case that commits the check file without the marker overwrites that copy."""
+        argv = ["--base", self.base_sha] if args is None else args
+        done = subprocess.run([sys.executable, "-c", PROBE, MODULE, watch, mode, *argv], cwd=self.tree,
+                              capture_output=True, text=True, encoding="utf-8", errors="replace", env=GIT_ENV)
+        out = done.stdout + done.stderr
+        exits = re.findall(r"^PROBE_EXIT=(\d+)$", out, re.M)
+        starts = re.findall(r"^PROBE_STARTS=(\d+)$", out, re.M)
+        self.assertTrue(exits and starts, "the probe printed no result, so it crashed:\n" + out)
+        return int(exits[0]), out, int(starts[0])
+
+    def test_unread_verified_read_exits_zero_with_one_observe_line(self):
+        """A Verified read git cannot finish prints one OBSERVE line and exits 0, not the Unknown exit 2."""
+        self.base()
+        self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT}, verified=None)  # the Verified read judges this commit
+        rc, out, starts = self.run_probe("grep", "fail")
+        self.assertGreaterEqual(starts, 1, "the simulated failure never reached the Verified read:\n" + out)  # scope before subject
+        self.assertEqual(rc, 0, "observe mode: an unread Verified line must leave the exit code at 0:\n" + out)
+        observe = [line for line in out.splitlines() if "OBSERVE" in line]
+        self.assertEqual(len(observe), 1, "one OBSERVE line for the unread Verified read:\n" + out)
+        self.assertIn("the Verified line read could not run", observe[0], out)
+
+    def test_unread_verified_read_keeps_the_red_run_exit_one(self):
+        """A Red-run gap keeps exit 1 when the Verified read cannot finish, and the OBSERVE line joins the FAIL line.
+        The Verified read's Unknown does not raise that exit to 2."""
+        self.base()
+        self.commit("add widget tests", {self.new_test_path(): TEST_TEXT}, verified=None)  # no Red-run line: a Red-run gap
+        rc, out, starts = self.run_probe("grep", "fail")
+        self.assertGreaterEqual(starts, 1, "the simulated failure never reached the Verified read:\n" + out)  # scope before subject
+        self.assertTrue(any("check_red_run: FAIL" in line for line in out.splitlines()), "the Red-run gap is not named:\n" + out)
+        self.assertEqual(rc, 1, "a Red-run gap keeps the exit at 1 when the Verified read cannot run:\n" + out)
+        observe = [line for line in out.splitlines() if "OBSERVE" in line]
+        self.assertEqual(len(observe), 1, "one OBSERVE line for the unread Verified read:\n" + out)
+
+    def test_unread_red_run_read_still_exits_two(self):
+        """Control for the observe cases: a Red-run read git cannot finish still exits 2, as UNKNOWN."""
+        self.base()
+        self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT}, verified=None)
+        rc, out, starts = self.run_probe("log", "fail")
+        self.assertGreaterEqual(starts, 1, "the simulated failure never reached the Red-run read:\n" + out)  # scope before subject
+        self.assertEqual(rc, 2, "a Red-run read git cannot finish must exit 2:\n" + out)
+        self.assertIn("check_red_run: UNKNOWN", out, out)
+
+    def test_empty_range_starts_no_git_grep(self):
+        """Empty state, a control. The Cost of decision verified-trailer (Verified line): an empty
+        range starts no git grep."""
+        self.base()
+        rc, out, starts = self.run_probe("grep", "count")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(starts, 0, "an empty range starts %d git grep; the Cost says 0" % starts)
+
+    def test_verified_read_starts_one_git_grep_and_one_per_unverified_commit(self):
+        """Control. The Cost of decision verified-trailer: one git grep for HEAD, then one for the
+        parent of each commit with no valid line that is not a revert. Three such commits, one verified commit and its
+        revert: 1 + 3."""
+        self.base()
+        for i in range(3):
+            self.commit("change part %d" % i, {"src/part_%d.py" % i: "def part():\n    return %d\n" % i}, verified=None)
+        self.commit("change part 3", {"src/part_3.py": "def part():\n    return 3\n"})  # a valid line: no git grep
+        self.git("revert", "--no-edit", "HEAD")  # a revert: not judged, so no git grep
+        rc, out, starts = self.run_probe("grep", "count")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(starts, 1 + 3, "the Verified read starts %d git grep; the Cost says 1 + 3" % starts)
+
+    def test_full_size_range_starts_one_git_grep_per_commit_plus_one(self):
+        """Full-size state, a control: 25 unverified commits start 1 + 25 git grep."""
+        self.base()
+        for i in range(25):
+            self.commit("change part %d" % i, {"src/part_%d.py" % i: "def part():\n    return %d\n" % i}, verified=None)
+        rc, out, starts = self.run_probe("grep", "count")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(starts, 1 + 25, "the Verified read starts %d git grep; the Cost says 1 + 25" % starts)
+
+    def test_head_without_the_marker_starts_one_git_grep(self):
+        """Control. The Cost of decision verified-trailer: a HEAD without the marker starts one git grep."""
+        self.base()
+        self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT}, verified=None)
+        dropped = self.commit("drop the Verified rollout", {CHECK_REL: PRE_ROLLOUT_CHECK}, verified=None)
+        self.assertNotIn(ROLLOUT_MARKER, self.git("show", dropped + ":" + CHECK_REL), "fixture: HEAD still holds the marker")
+        rc, out, starts = self.run_probe("grep", "count")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(starts, 1, "a HEAD without the marker starts %d git grep; the Cost says 1" % starts)
+
+    def test_head_without_the_marker_judges_nothing_over_a_parent_that_has_it(self):
+        """HEAD lacks the marker and its parent holds it: no commit is judged. The control is the same range with HEAD
+        holding the marker, which lists both commits. Red on a check that drops the HEAD gate."""
+        self.base()
+        self.git("checkout", "-q", "-b", "keep")
+        held = self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT}, verified=None)  # its parent holds the marker
+        kept = self.commit("change gadget product", {GADGET_PATH: GADGET_TEXT}, verified=None)  # HEAD holds the marker
+        rc, out, _starts = self.run_probe("grep", "count")
+        self.assertEqual(rc, 0, out)
+        self.assertListed(out, held, "change widget product")  # control: with the marker at HEAD, the parent's commit is judged
+        self.assertListed(out, kept, "change gadget product")
+        self.git("checkout", "-q", "-b", "drop", held)
+        dropped = self.commit("drop the Verified rollout", {CHECK_REL: PRE_ROLLOUT_CHECK}, verified=None)  # HEAD lacks the marker
+        self.assertNotIn(ROLLOUT_MARKER, self.git("show", dropped + ":" + CHECK_REL), "fixture: HEAD still holds the marker")
+        self.assertIn(ROLLOUT_MARKER, self.git("show", held + ":" + CHECK_REL), "fixture: the parent lost the marker")
+        rc, out, _starts = self.run_probe("grep", "count")
+        self.assertEqual(rc, 0, out)
+        self.assertNotListed(out, dropped, "a HEAD without the marker is judged over a parent that holds it")
+        self.assertNotListed(out, held, "a commit is judged when HEAD lacks the marker")
+
+    def test_root_commit_is_not_judged_and_its_child_is_listed(self):
+        """A root commit has no parent, so it is not judged. The commit on it is judged: the root holds the marker.
+        The child's listing is the control: an empty listing cannot pass the root check."""
+        self.base()
+        self.git("checkout", "-q", "--orphan", "new-history")
+        self.git("rm", "-r", "-q", "--cached", "--", ".")  # the root commit holds only the check file, which it names
+        root = self.commit("start a new history", {CHECK_REL: read_module()}, verified=None)
+        self.assertEqual(self.git("log", "-1", "--format=%P", root), "", "fixture: the root commit has a parent")  # scope
+        child = self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT}, verified=None)
+        rc, out, _starts = self.run_probe("grep", "count")
+        self.assertEqual(rc, 0, out)
+        self.assertListed(out, child, "change widget product")
+        self.assertNotListed(out, root, "a root commit is judged, so it is listed as a Verified gap")
 
 
 if __name__ == "__main__":

@@ -10,6 +10,8 @@ disallowedTools: mcp__claude-code-remote__*
 You are a builder. You implement the task in your brief, in your own git worktree, and you do
 the work yourself. In a fresh worktree, run the repo's setup command before any test, such as a dependency install. Before you stop for any reason, including a question, commit your work. Push only to the branch the brief names, as `git push origin HEAD:<branch>`, never your worktree's own branch. With no branch named, commit, push nothing, and report under Input Needed that the brief names no branch. Leave your worktree clean. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it. A later agent end removes your worktree after 30 idle minutes. Unfinished work on your own branch is fine.
 
+Each commit you make carries a Verified line in its message: `Verified: <command> -> <verdict>` names the command that proved the commit and its result, such as `Verified: python3 lint/test_widgets.py -> PASS`. When no command ran, write `Verified: none: <reason>`. `lint/check_red_run.py` reads the line in observe mode. A commit with no valid line is printed and fails nothing. The check reads that the line is there, not that it is true, so the reviewer reads each one.
+
 Before you name a new file, function, record or term, check `GLOSSARY.md` beside the global `CLAUDE.md`. Use its term, never a name from its "Not" cell.
 
 One home per shared piece (`building-one-home-per-capability`). Before you build a component,
