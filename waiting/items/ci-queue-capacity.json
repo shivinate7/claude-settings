@@ -1,0 +1,84 @@
+{
+  "added": "2026-11-18T15:04:11-06:00",
+  "context": "Goal: CI runs start within a few minutes, so a ready pull request merges on the day it is handed in.\nProblem (money): a started CI job waits a median 21.7 minutes in the queue (p90 38.2, max 69.0), and a ready pull request waited 69 to 174 minutes from its ready mark to merge today; fixing it by capacity costs money or cuts CI coverage, so only you can pick.\nBased on (measured): batch runner 10's read of 9 checks runs, 14:53 CST: 208 started jobs; Windows jobs wait a median 28.4 min (67 jobs), Ubuntu jobs 12.9 (141 jobs); about 12 heavy runs an hour of 214 to 504 runner-minutes each; at most 36 jobs ran at once, so the cap is at least 36 (its value is unmeasured). Not re-measured by triage.\nDeparts from: main \u2014 every pull request run starts 33 to 35 jobs, 13 of them on Windows, and no record names a capacity or concurrency limit \u2014 this question adds a capacity choice.\nWaiting on: nothing is stopped; a read-only measure of the draft-run share and of whether other repos share the runners is running now; batch runner 10 reads your answer.",
+  "home": "step ci-queue-measure",
+  "kind": "decision",
+  "n": 975,
+  "options": [
+    {
+      "gain": "No money or CI coverage is spent on a guess.",
+      "how": "A read-only measure of the draft-run share and of whether other repos share the runners finishes; then batch runner 10 asks you again.",
+      "id": "measure-first",
+      "key": "a",
+      "label": "Measure first, then ask again (recommended)",
+      "lose": "The queue stays as it is for a few more hours."
+    },
+    {
+      "gain": "Shorter waits for every job.",
+      "how": "The account moves CI jobs to larger paid runners.",
+      "id": "larger-runners",
+      "key": "b",
+      "label": "Pay for larger runners",
+      "lose": "Money; the amount is unmeasured."
+    },
+    {
+      "gain": "One repo cannot starve the others.",
+      "how": "One repo can run only so many jobs at once.",
+      "id": "per-repo-cap",
+      "key": "c",
+      "label": "Cap concurrent jobs per repo",
+      "lose": "This repo's own runs queue longer at peak."
+    },
+    {
+      "gain": "The longest waiters (Windows jobs wait a median 28.4 min) go away.",
+      "how": "A pull request run drops some of its 13 Windows jobs.",
+      "id": "fewer-windows-jobs",
+      "key": "d",
+      "label": "Run fewer Windows jobs on each pull request run",
+      "lose": "Less Windows test coverage on each pull request run."
+    },
+    {
+      "gain": "No spend and no lost coverage.",
+      "how": "Nothing is touched.",
+      "id": "no-change",
+      "key": "e",
+      "label": "No change",
+      "lose": "Ready pull requests keep waiting 1 to 3 hours to merge."
+    }
+  ],
+  "owner": "batch runner 10 (session_013NEJL2f1YCYsvLdpFqtWP3)",
+  "recommended": "a",
+  "ref": "batch runner 10 message 15:05 CST Nov 18, consultant approved 15:04 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "CI queue wait: capacity choice",
+  "shown": [
+    {
+      "id": "measure-first",
+      "key": "a",
+      "label": "Measure first, then ask again (recommended)"
+    },
+    {
+      "id": "larger-runners",
+      "key": "b",
+      "label": "Pay for larger runners"
+    },
+    {
+      "id": "per-repo-cap",
+      "key": "c",
+      "label": "Cap concurrent jobs per repo"
+    },
+    {
+      "id": "fewer-windows-jobs",
+      "key": "d",
+      "label": "Run fewer Windows jobs on each pull request run"
+    },
+    {
+      "id": "no-change",
+      "key": "e",
+      "label": "No change"
+    }
+  ],
+  "status": "open",
+  "title": "A started CI job waits a median 21.7 minutes in the queue: spend money, cut coverage, or measure more first?",
+  "why": "a spends nothing until the draft-run share and the runner sharing are known; b to d each cost money or coverage on a guess. Recommended by batch runner 10, not owner-typed."
+}
