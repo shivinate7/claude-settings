@@ -3290,10 +3290,10 @@ def mutate_run_check(wt):
             env["MUTATE_SHARD"] = shard
         plan.append((job, body, cap, env, shard or "1/1"))
 
-    def progress(line):  # a closed or broken stdout (BrokenPipeError, an OSError) must not end the shard: a progress line never changes a verdict
+    def progress(line):  # a closed stdout raises ValueError and a broken pipe raises OSError; either must not end the shard, as a lost progress line never changes a verdict
         try:
             say(line)
-        except OSError:
+        except (OSError, ValueError):
             pass
 
     def run_one(job, body, cap, env, label):
