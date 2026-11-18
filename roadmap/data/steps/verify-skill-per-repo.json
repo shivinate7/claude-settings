@@ -1,7 +1,7 @@
 {
   "id": "verify-skill-per-repo",
   "title": "A verify skill per repo that drives the real thing, claude-settings hooks first",
-  "status": "todo",
+  "status": "ready",
   "repo": "shivinate7/claude-settings",
   "phase": "next",
   "lane": "",
@@ -9,7 +9,7 @@
   "blockedBy": [],
   "why": "Owner, 19:45 CST Nov 17 (relayed by the consultant): review the Claude Code team blogs https://claude.dev/blog/how-the-claude-code-team-thinks-about-verification/ and https://claude.dev/blog/solving-code-review-at-anthropic/ and land their findings. Triage read both through a page summary, not word for word. Finding: Verification blog: run the change end to end, codified in a `verify` skill under .claude/skills/ that Claude runs before committing; running the app matters more than tests.",
   "source": "owner words 19:45 CST Nov 17 via the consultant; blogs read through a page summary",
-  "note": "Harm if missing: our rule says a green check proves only its fixtures, yet most lanes (the standing-merge-role hook lane included) are proven by fixture tests alone. Brief: test-author first writes a case that starts a fresh cloud container's hook and reads the recorded role (red on a build without the hook); builder writes the skill for claude-settings hooks only; other repos follow as their own steps. Proof command: the skill's own run through `verdict` in a fresh clone. Not built.",
-  "updatedAt": "2026-11-17T20:27:48-06:00",
+  "note": "Test-author (haiku) 6ee3fabe5a on lane/verify-skill-per-repo-tests, 21:05 CST: two cases in hooks/test_session_start.py (SessionStartRosterTests): a standing row on a cloud start writes the merge role file (RED on main 69ab998832: no file at fresh-home/.claude/state/merge-role.json), and a batch-runner row writes none (green control). Green on the hook PR 3639 head 16a8d0355c (2 ran). Full file on main: 166 ran, only the standing case fails. It runs the real hooks/session_start.sh. Mutant step not run (no build). Note: 3639's roster-class tail will conflict with these cases at merge. Next: builder writes the verify skill for claude-settings hooks (the skill's own run through verdict in a fresh clone); other repos follow as their own steps. Leftover test-author scratch copies under .claude/worktrees for the janitor sweep.",
+  "updatedAt": "2026-11-17T21:05:33-06:00",
   "ask": "Lane brief: a verify skill that drives the real thing, claude-settings hooks first.\nGoverning: rule verification-green-proves-only-its-fixtures. Harm: lanes such as the standing-merge-role hook lane are proven by fixture tests alone.\n1. test-author first: a case that starts a fresh cloud container's session-start hook and reads the recorded merge role; red on a build without the hook.\n2. builder: write the skill for claude-settings hooks only. Other repos follow as their own steps.\n3. reviewer.\nProof command: the skill's own run through `~/.claude/bin/verdict` in a fresh clone. Report cap: 25 lines. Prior work: PR 3639 (the hook this skill would have proven)."
 }
