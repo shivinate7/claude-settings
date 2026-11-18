@@ -15,7 +15,9 @@ install.sh
 package.json
 landed-dirs.txt
 docs/decisions/agent-model-cap.md
+docs/decisions/brief-ids-in-roster.md
 skills/impeccable/SKILL.md
+bin/lane-start
 bin/sim-lease
 bin/sim-test
 actions/ci-alarm/events.json
