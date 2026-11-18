@@ -1,0 +1,14 @@
+{
+ "id": "check-judged-by-main-copy",
+ "title": "A guard or check file that a PR changes is judged by main's copy, not the PR's",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner, 19:45 CST Nov 17 (relayed by the consultant): review the Claude Code team blogs https://claude.dev/blog/how-the-claude-code-team-thinks-about-verification/ and https://claude.dev/blog/solving-code-review-at-anthropic/ and land their findings. Triage read both through a page summary, not word for word. Finding: Verification blog: if a change can modify the check that judges it, the check is broken; review rules are read from the base branch.",
+ "source": "owner words 19:45 CST Nov 17 via the consultant; blogs read through a page summary",
+ "note": "Harm if missing: a lane that edits a guard or lint file could pass its own lane lint with the weaker copy. Not measured: triage has not read whether merge --lane-lint and the reviewer read the PR's copy. Brief: first an Explore read answers that (read-only, Audit marker); then test-author writes a red case where a PR weakens a check and still passes; builder fixes. Proof command: the red case green through `verdict`. Home: decision guard-guards-mistakes-only for the harm bound.",
+ "updatedAt": "2026-11-17T19:50:53-06:00"
+}

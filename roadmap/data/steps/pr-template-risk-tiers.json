@@ -1,0 +1,14 @@
+{
+ "id": "pr-template-risk-tiers",
+ "title": "PR template lines Testing, Risk, How to revert, and review tiers set by the change",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner, 19:45 CST Nov 17 (relayed by the consultant): review the Claude Code team blogs https://claude.dev/blog/how-the-claude-code-team-thinks-about-verification/ and https://claude.dev/blog/solving-code-review-at-anthropic/ and land their findings. Triage read both through a page summary, not word for word. Finding: Code-review blog: the change sets the tier, not the author (low none, medium one human, high two; CI paths always a human); PR template adds Testing, Risk, How to revert.",
+ "source": "owner words 19:45 CST Nov 17 via the consultant; blogs read through a page summary",
+ "note": "Harm if missing: lane PRs carry no stated revert path and our review depth does not follow risk. Brief: record-writer first drafts the template lines and a tier table against decision roles-review-cap-three and pr-review-record; the tier table is an owner choice, so it goes to a page item before any guard is built. Proof: template file on main and the owner's pick. Not built.",
+ "updatedAt": "2026-11-17T19:50:53-06:00"
+}

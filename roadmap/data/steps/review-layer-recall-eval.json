@@ -1,0 +1,14 @@
+{
+ "id": "review-layer-recall-eval",
+ "title": "Measure what each review layer catches: reviewer, refuter, fix verifier and design reviewer scored against past incidents",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner, 19:45 CST Nov 17 (relayed by the consultant): review the Claude Code team blogs https://claude.dev/blog/how-the-claude-code-team-thinks-about-verification/ and https://claude.dev/blog/solving-code-review-at-anthropic/ and land their findings. Triage read both through a page summary, not word for word. Finding: Verification blog: score reviewers against past incidents with one-sentence answer keys and merged changes as controls; measure raw, post-verification and final recall separately. Code-review blog: past incidents become an eval set that scores every reviewer change; one tuned primary reviewer beats stacking a second expensive one.",
+ "source": "owner words 19:45 CST Nov 17 via the consultant; blogs read through a page summary",
+ "note": "Harm if missing: we stack four review layers with no measure of what each catches, so a layer that adds cost and no catches stays. Brief: test-author first writes the eval fixture (incident list from reverts and red-main reverts, answer keys, merged controls) red on main; builder then makes the scorer run; report per-layer recall and cost. Proof command: the scorer's own run through `verdict`, plus the report file. Home to use: decision pr-review-record. Not built; no overlap found by grep of roadmap steps.",
+ "updatedAt": "2026-11-17T19:50:53-06:00"
+}
