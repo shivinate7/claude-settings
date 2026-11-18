@@ -114,7 +114,7 @@ def wp_populate(folder):
     os.makedirs(os.path.join(folder, "hooks"), exist_ok=True)
     copy_guard_family(os.path.join(folder, "hooks"))
     for rel in ("lint/layout.py", "lint/layout.json", "skills/waiting-page/stale_pages.py",
-                "skills/waiting-page/splice.py"):
+                "skills/waiting-page/splice.py", "skills/waiting-page/page.html"):
         dest = os.path.join(folder, *rel.split("/"))
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         shutil.copy(os.path.join(REPO, *rel.split("/")), dest)
