@@ -7957,10 +7957,14 @@ test("merged_page.py --live hands its JSON to the build as the live file", () =>
 // A case passes only the keys it changes; JSON.stringify drops an undefined key, so { pulls: undefined } builds a file with no pulls list.
 const LIVE_READ = "2026-11-10T12:00:00Z";
 const liveFile = (over = {}) => ({ readAt: LIVE_READ, branches: [], sessions: [], ...over });
-async function liveStatus(t, over) {
-  const page = await open(t, { pageHtml: mergedPage("--live", JSON.stringify(liveFile(over))) });
+// The live file's text as given: a case that needs a value JSON cannot carry (NaN, Infinity) writes it in by hand.
+async function liveStatusText(t, text) {
+  const page = await open(t, { pageHtml: mergedPage("--live", text) });
   if (page) await openStatus(page);
   return page;
+}
+async function liveStatus(t, over) {
+  return liveStatusText(t, JSON.stringify(liveFile(over)));
 }
 const PULL_ONLY = { pulls: [{ number: 7, title: "Lane pull seven", branch: "lane-seven" }] };
 
@@ -8047,6 +8051,57 @@ test("an acts-unknown ledger gives its reason once, at the list head, and no row
   const times = live.split("ledger").length - 1;
   assert.equal(times, 1, `the ledger's reason shows ${times} times in Live work, not once at the list head: ${live}`);
 });
+
+// ---------------------------------------------------------------- acts: a lane unknown row's reason, and a non-finite or negative age (step status-tab-next-act)
+// The pinned reason of a skipped sessions row, as the page shows it: the build's laneWhy with its "unknown (...)" wrapper taken off.
+const SKIPPED_ROW_REASON = "a session row was skipped";
+const DRAFT_SEVEN = { number: 7, title: "Draft seven", branch: "feat-seven", draft: true };
+const HOLD_SEVEN = { number: 7, act: "lane round 1", owner: "lane", ageHours: 2, red: false, blockedOn: null };
+const draftOver = (sessions) => ({ pulls: [DRAFT_SEVEN], sessions, ledger: { readAt: new Date().toISOString(), rows: [HOLD_SEVEN] } });
+// The two places a lane unknown row gives its reason: the title of its span, and the page's Lane holds line.
+async function laneReasons(page) {
+  const row = actRow(page, "Draft seven");
+  assert.equal(await row.count(), 1, "scope: the Status tab draws no row for draft #7");
+  const span = row.locator("span.unk[title]").filter({ hasText: "lane unknown" });
+  assert.equal(await span.count(), 1, "the row of #7 has no lane unknown span with a reason: " + (await rowText(row)));
+  const why = page.locator("p.prwhy").filter({ hasText: "Lane holds unknown" });
+  assert.equal(await why.count(), 1, "the Status tab has no Lane holds line for draft #7");
+  return { title: (await span.first().getAttribute("title")) || "", why: (await why.first().textContent()).replace(/\s+/g, " ") };
+}
+
+// Item 2 (red): one sessions row the build skips makes the lane hold unknown. The reason says a row was skipped, not that the list is missing.
+test("a draft reads lane unknown with the skipped-row reason when a sessions row is skipped, never the missing-list reason", async (t) => {
+  const page = await liveStatus(t, draftOver([{ id: "s2" }])); if (!page) return;
+  const { title, why } = await laneReasons(page);
+  assert.ok(title.includes(SKIPPED_ROW_REASON), `the lane unknown of #7 gives the title ${JSON.stringify(title)}, not the skipped-row reason`);
+  assert.doesNotMatch(title, /sessions list/, `the lane unknown of #7 says the sessions list is missing: ${title}`);
+  assert.ok(why.includes(SKIPPED_ROW_REASON), `the Lane holds line gives no skipped-row reason: ${why}`);
+  assert.doesNotMatch(why, /sessions list/, `the Lane holds line says the sessions list is missing: ${why}`);
+});
+
+// The control: with no sessions list at all, the reason still says the list is missing.
+test("control: a draft reads lane unknown with the missing-list reason when the sessions list is missing", async (t) => {
+  const page = await liveStatus(t, draftOver(undefined)); if (!page) return;
+  const { title, why } = await laneReasons(page);
+  assert.match(title, /no sessions list/, `the lane unknown of #7 with no sessions list gives the title ${JSON.stringify(title)}`);
+  assert.match(why, /no sessions list/, `the Lane holds line with no sessions list says: ${why}`);
+});
+
+// Item 3: JSON.stringify writes NaN and Infinity as null, so the literal goes into the text by hand. A negative age is no age either.
+const ageText = (literal) => JSON.stringify(liveFile({ pulls: ACT_PULLS, ledger: { readAt: new Date().toISOString(), rows: [ACT_ROWS[0], { ...ACT_ROWS[1], ageHours: "@AGE@" }, ACT_ROWS[2]] } })).replace('"@AGE@"', literal);
+for (const [name, literal] of [["NaN", "NaN"], ["Infinity", "Infinity"], ["minus Infinity", "-Infinity"], ["minus 3 hours", "-3"]]) {
+  test(`an ageHours of ${name} reads act unknown on its row, and the Status tab never prints NaN or Infinity`, async (t) => {
+    const page = await liveStatusText(t, ageText(literal)); if (!page) return;
+    assert.equal(await actRow(page, "Pull eight").count(), 1, "scope: the Status tab draws no row for open pull request #8");
+    const seven = await rowText(actRow(page, "Pull seven"));
+    assert.match(seven, /waited 3 hours/, "control: #7 has a finite age and does not read 'waited 3 hours': " + seven);
+    const eight = await rowText(actRow(page, "Pull eight"));
+    assert.match(eight, /act unknown/, `the row of #8 has ageHours ${name} and does not read 'act unknown': ${eight}`);
+    assert.doesNotMatch(eight, /waited/, `the row of #8 has ageHours ${name} and prints a wait: ${eight}`);
+    const live = (await page.locator("details.live").textContent()).replace(/\s+/g, " ");
+    assert.doesNotMatch(live, /NaN|Infinity/, `the Status tab prints ${name} as an age: ${live}`);
+  });
+}
 
 test("the Status tab lists a red open pull request before the others", async (t) => {
   const page = await liveStatus(t, actsOver()); if (!page) return;
