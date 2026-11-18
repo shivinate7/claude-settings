@@ -1,0 +1,1 @@
+- frozen-loop-var-literal: guard_frozen: a `$HOME` or `$D` in a `for` list stays literal, because `_resolve_loops` runs before `_resolve_vars`. Fix: resolve vars before loops.

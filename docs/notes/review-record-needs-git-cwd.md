@@ -1,0 +1,1 @@
+- review-record-needs-git-cwd: `merge --review-record` run from /home/user printed "not in a git checkout"; it ran from /home/user/claude-settings. A cwd-dependent read.

@@ -1,0 +1,1 @@
+- merge-reviewed-30-min-limit: one `merge --reviewed` read hit its 30-minute background limit and returned nothing (g1 docs combine, 12:02 CST). Becomes a debt after a second sighting.

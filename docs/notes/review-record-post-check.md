@@ -1,0 +1,1 @@
+- review-record-post-check: notes: (a) REASON_MAY_NAME["pr-review-record"] = ("haiku",) exempts the whole rule, not only the echoed line. (b) The comment at hooks/guard_merge.py:333 still calls parse_review the one home.

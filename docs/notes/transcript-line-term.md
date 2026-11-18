@@ -1,0 +1,1 @@
+- transcript-line-term: (#2561 round 1) new comments say "record" for a transcript line (GLOSSARY term "transcript line").

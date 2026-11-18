@@ -1,0 +1,1 @@
+- cite-parser-count-as-item: the parser can read a count after a separator as an item when the count's unit word is not in its list.

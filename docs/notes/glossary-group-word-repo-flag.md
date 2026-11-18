@@ -1,0 +1,1 @@
+- glossary-group-word-repo-flag: GLOSSARY.md has no entry for "group word" or "repo flag".

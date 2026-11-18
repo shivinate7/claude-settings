@@ -1,0 +1,1 @@
+- hooks-stamp-parent-head: install.sh stamps `git rev-parse HEAD` of the source with no check that the source is its own git tree; a source with no .git inside a parent repo would stamp the parent's HEAD (GIT_SRC is the existing guard). Fix: check the source's toplevel first.

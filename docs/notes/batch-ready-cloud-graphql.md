@@ -1,0 +1,1 @@
+- batch-ready-cloud-graphql: (debt) in the cloud the real Host cannot send GraphQL, so to_draft and ready always refuse; every drop of a ready batch prints "return to draft by hand, then --ready", which adds a lint and a CI cancel on top of the restart. `--ready` also skips draft_step's records-page rebuild, so a stale page is refused later at `merge --confirm`.
