@@ -1,0 +1,1 @@
+- code-check-precommit-rename: in a pre-commit run, an unstaged new file makes a rename read as a plain delete; CI is not affected.

@@ -20,7 +20,7 @@ Coordinator's reading, not the owner's: until both are on main, rule d is not in
 
 - Based on (ruling): owner, 2026-11-17 14:20 CST, page item 925 `main-in-once-before-lint`, pick d, item closed 14:27 CST. His words: "Lanes bring main in only on conflict; the merge tool does one main-in at merge time and keeps the green run (needs #3481 and #3552 on main)."
 - Based on (ruling): owner, 2026-11-16 13:46 CST, page item 923 pick c, typed in the coordinator's chat, ruling `own-923-c-ready-lanes-bring-main-in`: ready lanes, or lanes one step from ready, bring main in after each merge. Ruling c was never filed to a record on main.
-- Open, not built: a grade by priority that would bring some PRs to main together (page item 924). No grade is defined, so nothing here tiers a lane.
+- Closed, nothing to build: no grade by priority for lane PRs (page item 924, option c, no grade; the consultant closed it at 09:57 CST, 2026-11-17). Nothing tiers a lane. A lane brings main in only as this record says: under ruling `own-923-c-ready-lanes-bring-main-in` until rule d is in force.
 
 Why: branch protection on `main` has `strict` false, so GitHub reports BEHIND only when `strict` is on (`main-branch-protection`). The tool's own reads are the gate.
 

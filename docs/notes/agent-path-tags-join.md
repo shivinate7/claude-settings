@@ -1,0 +1,1 @@
+- agent-path-tags-join: hooks/guard_merge.py _deciding_tags joins lane records from the main and agent files, so an agent's old topic can pass when the main file holds a fresh topic (low odds; archive_hit uses the same join).

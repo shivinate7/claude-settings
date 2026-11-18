@@ -290,6 +290,9 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_report_guard_remedy.py
 
+      - name: Stop-hook correction tail suite
+        run: python3 lint/test_report_guard_correction.py
+
       - name: Stop-hook review-record fixture suite
         if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_rules == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_report_guard_review.py
@@ -372,6 +375,10 @@ jobs:
       - name: Scope detector fixture suite
         if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_ci_scope.py
+
+      - name: install.sh shard pins
+        if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
+        run: python3 lint/test_install_src_shards.py
 
       - name: Green head reader fixture suite
         run: python3 lint/test_green_head.py

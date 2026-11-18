@@ -1,0 +1,1 @@
+- eskf-gaps: (#2372 export-scan-key-false-alarms) the wider user-part limit has no owner ruling; mutants no row kills (VENDOR_KEY, VALUE_END, the IPv6 clause of URL_HOST_START, JS_BOOLEANS); text after a boolean-run closer is ignored; export_page.py docs still say URL credentials refuse "on any host"; the debt file cites stale head f71e12a04.
