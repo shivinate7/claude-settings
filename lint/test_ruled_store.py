@@ -543,6 +543,25 @@ class ScopeTests(unittest.TestCase):
         self.assertTrue(ruled_store.in_scope(refused, public),
                         "a ruling whose scope check_entry refuses left the store's scope in a public repo")
 
+    def test_an_unreadable_layout_keeps_the_ruling_in_scope_without_raising(self):
+        import layout  # lint/layout.py, the one reader of the visibility key
+        private = visible_repo("unreadable-layout-private", "private")
+        valid = fixture.entry("valid-private", scope={"visibility": "private"})
+        self.assertTrue(ruled_store.in_scope(valid, private),
+                        "scope control: a private ruling is not in scope in a private repo")
+        bad_path = os.path.join(run_folder(), "unreadable-layout.json")
+        with open(bad_path, "w", encoding="utf-8") as handle:
+            handle.write("{bad")
+        with mock.patch.object(layout, "LAYOUT_PATH", bad_path):
+            with self.assertRaises(layout.LayoutError,
+                                   msg="scope control: the bad layout file does not raise LayoutError"):
+                layout.layout()
+            try:
+                kept = ruled_store.in_scope(valid, private)
+            except Exception as exc:
+                self.fail("in_scope raised %s on an unreadable layout file: %s" % (type(exc).__name__, exc))
+        self.assertTrue(kept, "in_scope hid a private ruling while the layout file is unreadable")
+
     def test_a_repos_that_is_not_a_list_is_refused(self):
         listed = fixture.entry("listed", scope={"repos": ["example-owner/example-repo"]})
         self.assertEqual(ruled_store.check_entry(listed), [], "scope control: a list of repo names has a problem")
