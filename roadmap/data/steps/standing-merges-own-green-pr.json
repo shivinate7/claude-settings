@@ -11,6 +11,6 @@
  ],
  "why": "Owner, 19:05 CST Nov 17, typed in chat to triage 11: 'you have a standing grant from me to you triage that you may do merges on your own green pull requests'. Main (merged PR 3474, decision session-tiers) lets the standing role merge only its own docs-only or rule-text PR, at most 40 added lines and 3 files, none touching code or a guard path (merge/merge.py standing_refusal, STANDING_MAX_LINES, STANDING_MAX_FILES). So a triage-opened code PR still goes to runner 10 even with the role recorded.",
  "source": "owner chat to triage 11, 19:05 CST Nov 17; read of PR 3474 body by triage 19:12 CST",
- "note": "Not built. Departs from: main, where the standing role refuses a PR that touches code or a guard path. Changes the bound for the triage tag only (the owner named triage); coordinator and consultant stay as today until the owner says. Needs a test-author first, a reviewer, and the grant recorded in session-tiers in the owner's words with the time. Waits on the start-up hook lane (step standing-merge-role-on-resume) only so both do not edit merge/merge.py at once.",
- "updatedAt": "2026-11-17T19:10:29-06:00"
+ "note": "Not built. Departs from: main, where the standing role refuses a PR that touches code or a guard path. Changes the bound for the triage tag only (the owner named triage); coordinator and consultant stay as today until the owner says. Needs a test-author first, a reviewer, and the grant recorded in CLAUDE.md (the ruling home), in the owner's words with the time; a rule-text change, flagged at merge (decision claude-md-change-is-flagged). Waits on the start-up hook lane (step standing-merge-role-on-resume) only so both do not edit merge/merge.py at once.",
+ "updatedAt": "2026-11-17T19:13:21-06:00"
 }
