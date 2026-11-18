@@ -1,0 +1,1 @@
+- cd-oldpwd-pwd-assigned: `OLDPWD=/etc; cd /usr; cd "$OLDPWD"` (and PWD) reads the assigned value, but bash resets both on cd. Fix: drop OLDPWD and PWD from the tracked variables after a cd.

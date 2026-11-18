@@ -1,0 +1,1 @@
+- docs-debts-write-refused: An agent's new-file Write in docs/debts was refused, so #2748's debts stayed as notes; possible false alarm, check which guard refused.

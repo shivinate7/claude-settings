@@ -1,0 +1,1 @@
+- touches-one-line-per-job: one parsed line accounts for a whole failed job, and `ERROR: [Errno 2] ...` parses as a case. Fix: parse each failed case line, and skip error lines that name no case.

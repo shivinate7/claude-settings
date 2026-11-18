@@ -1,0 +1,1 @@
+- frozen-loop-body-quadratic: guard_frozen: `_loop_body` is quadratic over unclosed `for` heads. Fix: one linear pass.

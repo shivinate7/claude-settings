@@ -1,0 +1,1 @@
+- recommended-list-update-multi: What: an update with ranked:false plus a list `recommended` is refused if the stored item is multi. Where: unverified (the page writer's update path). Retire: the update is accepted, or the refusal names the reason and the way out, proved by a test with a stored multi item.

@@ -1,0 +1,1 @@
+- write-run-forms-unread: run shapes the check does not read: `./f.py`, `(python3 f.py)`, `uv run python f.py`, `npx node f.js`, `python3 < f.py`, `printf > f.py && python3 f.py` (main allowed them too). Fix: add each shape as a test row, then read it.

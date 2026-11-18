@@ -1,0 +1,1 @@
+- pcap-republish-hold-stale: the waiting-page SKILL.md republish hold can be stale when the live page lags.

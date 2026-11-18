@@ -56,7 +56,7 @@ import json
 import os
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
@@ -197,7 +197,9 @@ NONE_DIRECTION_RULE = (
 WIDENING_TEMPLATE = (
     "This call sets options. An option that widens what a shared tool accepts (a second accepted form, an allow-list "
     "entry, a per-repo exception) must carry `%s: true`, the JSON boolean true, not the string \"true\". Block an unmarked widening option, and name its option key in "
-    "the reason. An option that only names a repo, or changes a repo to fit the shared tool, is not widening. A marked "
+    "the reason. An option that only names a repo, or changes a repo to fit the shared tool, is not widening. "
+    "Widening means a shared tool is made so that one repo's differing form passes. "
+    "Never flag a change to the shared tool that every repo gets alike, with no repo named as its reason. A marked "
     "option passes this rule. When unsure, allow."
 )
 

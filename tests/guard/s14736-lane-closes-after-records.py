@@ -18,7 +18,13 @@ FAMILY = "lane-closes-after-records"
 ARCHIVE_TOOL = "mcp__claude-code-remote__archive_session"
 ARCHIVE_RULE = "lane-closes-after-records"
 ARCHIVE_NAMED = ("archive_session",)  # the refusal never names the tool, so it never invites the same act
-ARCHIVE_STEER = ("get_session", "alone", ("retry", "Retry"))  # the remedy: get_session on the target alone, then retry
+ARCHIVE_STEER = ("get_session on each target in one message", "archive them in the next message")  # the remedy: a batch
+ARCHIVE_OLD_STEER = ("alone", "in its own turn")  # the one-target-at-a-time remedy the steer no longer names
+# The refusal reasons, each told apart by a fragment: the open-pull-request reason, the read-failure reason, and the
+# no-record reason. A case pins its own reason and not the other's.
+ARCHIVE_OPEN_PIN = ("still open",)
+ARCHIVE_READ_PIN = ("could not be read",)
+ARCHIVE_NO_RECORD_PIN = ("holds no get_session record of the target",)
 ARCHIVE_OWNER = "5c2e7d1a-0000-4000-8000-00000000a7c1"  # the calling session's payload id, which an override names
 AGENT_NO_REMOTE = "agent-no-remote-tools"  # the rule id the refusal names; the agent-remote-tools section reads it too
 
@@ -28,20 +34,20 @@ def fake_gh_path(folder):
     return folder + os.pathsep + PY_PATH
 
 
-def archive_refuse(name, transcript, env_path, carries=(), lacks=(), agent_id=None):
+def archive_refuse(name, transcript, env_path, carries=(), lacks=(), agent_id=None, target=ROLE_OTHER):
     """An archive_session of the target the guard refuses. The reason names its rule, never the tool. `lacks`
     adds fragments the reason must not hold, so a case can tell one refusal reason from another. `agent_id`, when
-    given, makes the call an agent's, as the harness sends it."""
+    given, makes the call an agent's, as the harness sends it. `target` is the session the archive names."""
     more = (lacks,) if isinstance(lacks, str) else tuple(lacks)
     add("lane-closes-after-records: " + name, "deny", rule=ARCHIVE_RULE, tool=ARCHIVE_TOOL, cwd=NOGIT,
         lacks=ARCHIVE_NAMED + more, carries=carries, transcript=transcript, env=ROLE_ENV, env_path=env_path,
-        session_id=ROLE_OTHER, agent_id=agent_id)
+        session_id=target, agent_id=agent_id)
 
 
-def archive_allow(name, transcript, env_path, agent_id=None):
-    """An archive_session of the target the guard lets through silently. `agent_id` as in archive_refuse."""
+def archive_allow(name, transcript, env_path, agent_id=None, target=ROLE_OTHER):
+    """An archive_session of the target the guard lets through silently. `agent_id` and `target` as in archive_refuse."""
     add("lane-closes-after-records: " + name, "allow", tool=ARCHIVE_TOOL, cwd=NOGIT, silent=True,
-        transcript=transcript, env=ROLE_ENV, env_path=env_path, session_id=ROLE_OTHER, agent_id=agent_id)
+        transcript=transcript, env=ROLE_ENV, env_path=env_path, session_id=target, agent_id=agent_id)
 
 
 def agent_archive_refuse(name, transcript, env_path, agent_id):
@@ -77,10 +83,143 @@ archive_allow("a wrapped record of a non-lane target (cs-build:triage) is allowe
 # No record of the target: the guard cannot tell it is no lane, so it refuses and steers to get_session. The
 # gh here has no open slug pull request, so a guard that skips the record and reads gh alone would allow.
 archive_refuse("no record of the target in the transcript is refused, and the remedy steers to get_session",
-               role_path("archive-no-target"), fake_gh_path(ARCHCLOSED), carries=ARCHIVE_STEER)
+               role_path("archive-no-target"), fake_gh_path(ARCHCLOSED), carries=ARCHIVE_STEER, lacks=ARCHIVE_OLD_STEER)
 # The calling session's own lane record is not the target's: a lane-tagged own record does not stand for it.
 archive_refuse("an own lane record with no record of the target is refused, and the remedy steers to get_session",
-               role_path("archive-own-lane"), fake_gh_path(ARCHCLOSED), carries=ARCHIVE_STEER)
+               role_path("archive-own-lane"), fake_gh_path(ARCHCLOSED), carries=ARCHIVE_STEER, lacks=ARCHIVE_OLD_STEER)
+
+# The steer names a batch: get_session on each target in one message, then archive them in the next message. The
+# guard pairs each result to its call by tool_use_id and reads each target's newest record, so a batch's targets are
+# judged on their own records. Both transcript shapes are pinned: one line per block, as the harness writes a message,
+# and one line holding a whole message. Each builder keeps the own record and the three messages in that order.
+ARCH_BATCH_TARGETS = (ROLE_OTHER, "session_ARCHBATCH2", "session_ARCHBATCH3")  # three lane sessions closed together
+ARCH_STEER_DIR = os.path.join(ROOT, "archsteer")  # the batch and steer transcripts, one folder of their own
+
+
+def one_message(lines):
+    """One JSONL line that holds the content blocks of every line in `lines`: a message whose several calls share a line."""
+    first = json.loads(lines[0])
+    content = [block for line in lines for block in json.loads(line)["message"]["content"]]
+    return json.dumps({"type": first["type"], "message": {"role": first["message"]["role"], "content": content}})
+
+
+def arch_result_text(target, wrapped):
+    """The lane record of `target` as its get_session result holds it: bare, or inside the nonce wrapper that a read of
+    another session's text comes back in."""
+    body = role_record(ARCH_LANE_TAGS, target)
+    return role_wrapped(body) if wrapped else body
+
+
+def arch_batch_transcript(count, one_line, wrapped=False):
+    """The own record, then `count` get_session calls for the first targets in one message, their results in the next,
+    and the archive call of every target in the one after. `one_line` writes each message as one line. `wrapped` puts
+    each result inside its nonce wrapper."""
+    gets = [role_use("b%d" % i, GET_SESSION, {"session_id": t}) for i, t in enumerate(ARCH_BATCH_TARGETS[:count], 1)]
+    results = [role_result("b%d" % i, arch_result_text(t, wrapped)) for i, t in enumerate(ARCH_BATCH_TARGETS[:count], 1)]
+    archives = [role_use("a%d" % i, ARCHIVE_TOOL, {"session_id": t}) for i, t in enumerate(ARCH_BATCH_TARGETS, 1)]
+    lines = role_call("r0", RUNNER_TAGS)
+    for message in (gets, results, archives):
+        lines += [one_message(message)] if one_line else message
+    return lines
+
+
+def arch_same_message_transcript(one_line):
+    """The own record, the get_session calls of the first two targets in one message, their wrapped results in the next,
+    then the third target's get_session and its archive in one message. The transcript ends there: a result comes after
+    the call that asked for it, so when the archive is checked the transcript holds no record of the third target yet."""
+    gets = [role_use("b%d" % i, GET_SESSION, {"session_id": t}) for i, t in enumerate(ARCH_BATCH_TARGETS[:2], 1)]
+    results = [role_result("b%d" % i, arch_result_text(t, True)) for i, t in enumerate(ARCH_BATCH_TARGETS[:2], 1)]
+    last = [role_use("b3", GET_SESSION, {"session_id": ARCH_BATCH_TARGETS[2]}),
+            role_use("a3", ARCHIVE_TOOL, {"session_id": ARCH_BATCH_TARGETS[2]})]
+    lines = role_call("r0", RUNNER_TAGS)
+    for message in (gets, results, last):
+        lines += [one_message(message)] if one_line else message
+    return lines
+
+
+ARCH_STEER_FIXTURES = {
+    "archive-batch-lines": arch_batch_transcript(3, False),
+    "archive-batch-one-line": arch_batch_transcript(3, True),
+    "archive-batch-absent-lines": arch_batch_transcript(2, False),
+    "archive-batch-absent-one-line": arch_batch_transcript(2, True),
+    "archive-batch-wrapped-lines": arch_batch_transcript(3, False, wrapped=True),
+    "archive-batch-wrapped-one-line": arch_batch_transcript(3, True, wrapped=True),
+    "archive-batch-wrapped-absent-lines": arch_batch_transcript(2, False, wrapped=True),
+    "archive-batch-wrapped-absent-one-line": arch_batch_transcript(2, True, wrapped=True),
+    "archive-batch-wrapped-same-message-lines": arch_same_message_transcript(False),
+    "archive-batch-wrapped-same-message-one-line": arch_same_message_transcript(True),
+    # A lane whose record names a step and no repo: the tags reason, and the steer it carries.
+    "archive-tags-no-repo": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG]),
+}
+
+
+def archive_steer_path(name):
+    """The transcript fixture for one batch or steer case."""
+    return os.path.join(ARCH_STEER_DIR, name + ".jsonl")
+
+
+def write_archive_steer_transcripts():
+    """Write each batch or steer transcript as JSONL, one line per entry."""
+    os.makedirs(ARCH_STEER_DIR, exist_ok=True)
+    for name, lines in ARCH_STEER_FIXTURES.items():
+        with open(archive_steer_path(name), "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+
+
+lazy_fixture([archive_steer_path(name) for name in ARCH_STEER_FIXTURES], write_archive_steer_transcripts)
+
+# The premise: a batch of get_session calls in one message, their results in the next, and the archives in the one
+# after. Each target's archive is allowed, its lane record having been read. Green on the old code: these pin the
+# behaviour the steer will name, so a batch is safe to tell a session to run.
+for shape, fixture in (("one line per block", "archive-batch-lines"), ("one line per message", "archive-batch-one-line")):
+    for index, target in enumerate(ARCH_BATCH_TARGETS, 1):
+        archive_allow("a batch of three get_session calls in one message, archived in the next (%s): target %d of 3 is allowed"
+                      % (shape, index), archive_steer_path(fixture), fake_gh_path(ARCHCLOSED), target=target)
+# The scope of the same batch: each target's open pull request refuses its archive, which only holds when each target's
+# lane record was read from the batch. A reader that found no record would refuse with the no-record reason instead.
+for index, target in enumerate(ARCH_BATCH_TARGETS, 1):
+    archive_refuse("a batch of three get_session calls in one message, archived in the next: target %d of 3 is refused for its open pull request"
+                   % index, archive_steer_path("archive-batch-lines"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN,
+                   lacks=ARCHIVE_NO_RECORD_PIN + ARCHIVE_READ_PIN, target=target)
+# A target whose get_session is absent from the batch still denies: the third target of two get_session calls has no record.
+archive_refuse("a batch of two get_session calls in one message, then the archive of a third target with none, is refused (one line per block)",
+               archive_steer_path("archive-batch-absent-lines"), fake_gh_path(ARCHCLOSED), carries=ARCHIVE_NO_RECORD_PIN,
+               lacks=ARCHIVE_OPEN_PIN, target=ARCH_BATCH_TARGETS[2])
+archive_refuse("a batch of two get_session calls in one message, then the archive of a third target with none, is refused (one line per message)",
+               archive_steer_path("archive-batch-absent-one-line"), fake_gh_path(ARCHCLOSED), carries=ARCHIVE_NO_RECORD_PIN,
+               lacks=ARCHIVE_OPEN_PIN, target=ARCH_BATCH_TARGETS[2])
+# The same batch with each result inside its nonce wrapper, as a read of another session's text comes back. The reader
+# takes the wrapper block by block, so each target's record is read from its own result in both transcript shapes.
+# Green on arrival: the current reader already takes the wrapper, so these pin the steer's batch for the real shape.
+for shape, fixture in (("one line per block", "archive-batch-wrapped-lines"), ("one line per message", "archive-batch-wrapped-one-line")):
+    for index, target in enumerate(ARCH_BATCH_TARGETS, 1):
+        archive_allow("a batch of three wrapped get_session calls in one message, archived in the next (%s): target %d of 3 is allowed"
+                      % (shape, index), archive_steer_path(fixture), fake_gh_path(ARCHCLOSED), target=target)
+# The scope of the wrapped batch: each target's open pull request refuses its archive, which holds only when each wrapped
+# record was read for its own target.
+for index, target in enumerate(ARCH_BATCH_TARGETS, 1):
+    archive_refuse("a batch of three wrapped get_session calls in one message, archived in the next: target %d of 3 is refused for its open pull request"
+                   % index, archive_steer_path("archive-batch-wrapped-lines"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN,
+                   lacks=ARCHIVE_NO_RECORD_PIN + ARCHIVE_READ_PIN, target=target)
+# A wrapped target whose get_session is absent from the batch still denies, in both transcript shapes.
+archive_refuse("a batch of two wrapped get_session calls in one message, then the archive of a third target with none, is refused (one line per block)",
+               archive_steer_path("archive-batch-wrapped-absent-lines"), fake_gh_path(ARCHCLOSED), carries=ARCHIVE_NO_RECORD_PIN,
+               lacks=ARCHIVE_OPEN_PIN, target=ARCH_BATCH_TARGETS[2])
+archive_refuse("a batch of two wrapped get_session calls in one message, then the archive of a third target with none, is refused (one line per message)",
+               archive_steer_path("archive-batch-wrapped-absent-one-line"), fake_gh_path(ARCHCLOSED), carries=ARCHIVE_NO_RECORD_PIN,
+               lacks=ARCHIVE_OPEN_PIN, target=ARCH_BATCH_TARGETS[2])
+# A target's get_session in the same message as its archive: the result comes after the archive, so no record of the target
+# is read when the archive is checked. The two earlier targets' wrapped reads are in the transcript, and the refusal is for the third.
+archive_refuse("a wrapped get_session of a target in the same message as its archive, with no result yet, is refused (one line per block)",
+               archive_steer_path("archive-batch-wrapped-same-message-lines"), fake_gh_path(ARCHCLOSED), carries=ARCHIVE_NO_RECORD_PIN,
+               lacks=ARCHIVE_OPEN_PIN, target=ARCH_BATCH_TARGETS[2])
+archive_refuse("a wrapped get_session of a target in the same message as its archive, with no result yet, is refused (one line per message)",
+               archive_steer_path("archive-batch-wrapped-same-message-one-line"), fake_gh_path(ARCHCLOSED), carries=ARCHIVE_NO_RECORD_PIN,
+               lacks=ARCHIVE_OPEN_PIN, target=ARCH_BATCH_TARGETS[2])
+# The tags reason names the same batch steer: fix the tags, then get_session on each target in one message, then archive.
+archive_refuse("a lane whose record has no cs-repo tag is refused, and the remedy names one message, then the next",
+               archive_steer_path("archive-tags-no-repo"), fake_gh_path(ARCHCLOSED),
+               carries=ARCHIVE_STEER + ("no cs-step tag or no cs-repo tag",), lacks=ARCHIVE_OLD_STEER)
 # A read that cannot run refuses: a broken gh, and a missing gh.
 archive_refuse("a lane whose open pull requests cannot be read is refused", role_path("archive-lane"),
                fake_gh_path(GHBROKEN))
@@ -95,10 +234,6 @@ archive_refuse("a target read untagged, then tagged lane, is refused: the newest
 archive_refuse("a payload with no transcript_path is refused", None, fake_gh_path(ARCHOPEN))
 # The containment read. An open draft lane pull request whose head is already in main has landed through the integration
 # pull request, so it no longer blocks the archive. Only a draft is released; a read that fails refuses, and says so.
-# The two refusal reasons are told apart by a fragment each: the open-pull-request reason says "still open", and the
-# read-failure reason says "could not be read". A case pins its own reason and not the other's.
-ARCHIVE_OPEN_PIN = ("still open",)
-ARCHIVE_READ_PIN = ("could not be read",)
 archive_allow("an open draft lane pull request whose head is behind main is allowed: its commits have landed",
               role_path("archive-lane"), fake_gh_path(ARCHDRAFT_BEHIND))
 archive_allow("an open draft lane pull request whose head is identical to main is allowed: its commits have landed",
@@ -128,7 +263,6 @@ archive_refuse("a lane's record in the real wrapper, the nonce on both tags, is 
                role_path("archive-wrapped-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_READ_PIN)
 # Fail closed: a wrapper that does not close with its own nonce, has no closing tag, or has text after the JSON gives
 # no record of the target. The lane's open pull request is not judged on a record that was never read.
-ARCHIVE_NO_RECORD_PIN = ("holds no get_session record of the target",)
 archive_refuse("a closing tag with another nonce than the opening tag's is no record of the target",
                role_path("archive-wrapped-nonce-close"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_NO_RECORD_PIN,
                lacks=ARCHIVE_OPEN_PIN)
@@ -156,11 +290,19 @@ archive_refuse("a get_session result whose content is an int before the lane's r
 # The branch read. The record's current_branches names each branch of the lane. A branch that is ahead of its repo's
 # default branch, on no pull request in any state, refuses the archive. The refusal names that shape, never a branch.
 # Each repo answers for itself: a 404 on a compare means the branch is not in that repo, and any other failed read refuses.
-ARCHIVE_NOPR_PIN = ("has no pull request",)
+# The stranded-branch remedy also covers a branch archived under another name: one more copy under the stranded branch's
+# own name, archive/<branch> (or archive/<branch>-<n> when taken), at the branch tip, then retry. Every stranded refusal names it.
+ARCHIVE_NOPR_REMEDY = ("another name", "the stranded branch's own name")
+ARCHIVE_NOPR_PIN = ("has no pull request",) + ARCHIVE_NOPR_REMEDY
 ARCHIVE_NO_BRANCH = (ARCH_BRANCH, ARCH_BRANCH_OTHER, "could not be read")  # a no-pull-request refusal names neither branch
 ARCHIVE_READ_LACKS = (ARCHIVE_NOPR_PIN[0], ARCH_BRANCH)  # a read-failure refusal is not the no-pull-request one
 archive_refuse("an incident lane: its branch is ahead of main in q_max, on no pull request, and claude-settings has no such branch: refused",
                role_path("archive-inc"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+# The numbered copy and the branch tip are two parts of the remedy. This case pins each on its own, so a refusal that
+# drops either one goes red here and names that one fragment.
+ARCHIVE_NOPR_FRAGMENTS = ("has no pull request", "archive/<branch>-<n>", "taken", "at the branch tip")
+archive_refuse("an incident lane: the stranded-branch refusal names the numbered copy for when the exact name is taken, and the branch tip",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_NOPR_FRAGMENTS, lacks=ARCHIVE_NO_BRANCH)
 archive_refuse("a lane whose branch has no pull request, while another branch of its repo has an open one: refused",
                role_path("archive-inc"), fake_gh_path(ARCHINC_OTHERPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
 archive_refuse("a lane with two branches, the first on an open pull request and the second on none: refused for the second",

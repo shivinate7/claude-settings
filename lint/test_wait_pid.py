@@ -23,6 +23,8 @@ The macOS path (`ps`, not /proc) has no product seam, so those cases run the hel
 a fake `ps` first on PATH. The fake sends the ownership reads (`ppid=`, `comm=`) to the real `ps`.
 """
 import ast
+import contextlib
+import io
 import os
 import re
 import shlex
@@ -36,6 +38,7 @@ import time
 import unittest
 import uuid
 from collections import namedtuple
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -183,6 +186,38 @@ def fake_ps(folder, mode):
     return folder
 
 
+FAKE_BEAT = "wait-test: still waiting"
+
+
+class FakeClock:
+    """Stands in for the time module in wait_common: a sleep moves the clock on, so no test waits."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, secs):
+        self.now += secs
+
+
+def wait_loop_output(ends_at):
+    """Run wait_common.wait_loop on a fake clock. Its step returns 0 once ends_at seconds have passed,
+    and it beats every second. Return (return code, stdout)."""
+    sys.path.insert(0, HOOKS)
+    try:
+        import wait_common
+    finally:
+        sys.path.remove(HOOKS)
+    out = io.StringIO()
+    with mock.patch.object(wait_common, "time", FakeClock()), contextlib.redirect_stdout(out):
+        code = wait_common.wait_loop("wait-test", lambda elapsed: 0 if elapsed >= ends_at else None,
+                                     0, 1.0, lambda s: "still waiting %d s" % s,
+                                     lambda s: "timed out", poll=0.25)
+    return code, out.getvalue()
+
+
 def load_stall_watch_tests():
     """hooks/test_stall_watch.py, the one home of the stall-watch hook runner. The import makes its
     own scratch folder, removed when this process exits."""
@@ -303,7 +338,7 @@ class T(unittest.TestCase):
         untagged PPID-1 stub. `wait-pid <that pid>` must wait for the job and exit 0."""
         stall = load_stall_watch_tests()
         env = {k: v for k, v in os.environ.items() if k != TAG}
-        job = "env %s=%s sleep %s; echo done" % (TAG, SESSION, LIFE)   # `; echo` keeps a stub shell above the job
+        job = "env %s=%s tail -f /dev/null; echo done" % (TAG, SESSION)   # never ends, and no planned pause: `; echo` keeps a stub shell above the job
         rc, text, _secs, _cmd = stall.run_rewritten(job, shell="/bin/sh", env=env)
         for line in text.splitlines():   # the wrapper exits on a stall, before its own `rm -f LOG`
             log = stall.LOG_RE.search(line) if line.startswith("Log: ") else None
@@ -414,6 +449,21 @@ class T(unittest.TestCase):
         r = self.assertWaitsUntilKilled(self.own_child(), delay=3.2, heartbeat="1")
         beats = [l for l in r.out.splitlines() if l.startswith(HEARTBEAT_LINE)]
         self.assertGreaterEqual(len(beats), 1, r.out)
+
+    def test_wait_loop_prints_a_heartbeat_each_beat_on_a_fake_clock(self):
+        """wait_common.wait_loop prints `prog: still ...` every beat seconds. On a fake clock, a wait that
+        outlasts one beat returns 0 and prints at least one such line. No real clock: nothing waits."""
+        code, out = wait_loop_output(ends_at=3.0)
+        self.assertEqual(code, 0, out)
+        beats = [l for l in out.splitlines() if l.startswith(FAKE_BEAT)]
+        self.assertGreaterEqual(len(beats), 1, out)
+
+    def test_wait_loop_prints_no_heartbeat_before_the_first_beat(self):
+        """Control for the beat case: a wait that ends before its first beat prints no heartbeat line, so
+        the line comes from the beat timer and not from each poll."""
+        code, out = wait_loop_output(ends_at=0.5)
+        self.assertEqual(code, 0, out)
+        self.assertEqual([l for l in out.splitlines() if l.startswith(FAKE_BEAT)], [], out)
 
 
 def tearDownModule():

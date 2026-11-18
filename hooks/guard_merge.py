@@ -405,6 +405,32 @@ READY_PAGE_UNKNOWN_REASON = (
     "(decision guard-hooks-fail-closed, a guard that cannot run its read refuses)"
 )
 
+READY_PAGE_BEHIND_REASON = (
+    "Rule (Git, guard-hooks-fail-closed): the records page on the head of this pull request could not be read, so it is "
+    "unknown whether it is stale: %s. The merge tool the guard loaded is behind origin/main, and a tool that old can "
+    "fail this read. A read that cannot run refuses the ready mark. "
+    "Remedy: from the claude-settings clone, run merge/install_from_main.sh (the reinstall from main), then retry. "
+    "(decision guard-hooks-fail-closed, a guard that cannot run its read refuses)"
+)
+
+
+def merge_tool_behind_main() -> bool:
+    """True when the checkout that holds the loaded merge tool is behind origin/main (its HEAD is an ancestor of
+    origin/main and not equal to it). Any read that fails is False: the plain unknown reason then stands."""
+    module = merge_module()
+    path = getattr(module, "__file__", None)
+    if not path:
+        return False
+    root = os.path.dirname(os.path.dirname(os.path.realpath(path)))
+    ref = resolve_default_base(root) or "origin/main"  # the short ref name already holds the remote
+    if not ref.startswith("origin/"):
+        return False
+    head, tip = _git(root, "rev-parse", "HEAD"), _git(root, "rev-parse", ref)
+    if not head or not tip or head.returncode or tip.returncode or head.stdout.strip() == tip.stdout.strip():
+        return False
+    ancestor = _git(root, "merge-base", "--is-ancestor", "HEAD", ref)
+    return ancestor is not None and ancestor.returncode == 0
+
 
 def ready_page_calls(tool: str, tool_input: dict, command: str):
     """[(selector, repo)], one per call in this tool call that marks a pull request ready. The shell form is read by
@@ -452,7 +478,8 @@ def ready_page_hit(tool: str, tool_input: dict, command: str, where: str):
             remedy = merge_module().stale_page_remedy(int(detail))
             return READY_PAGE_STALE_REASON % (detail, remedy), "ready on a stale page #" + detail
         if state == "unknown":
-            return READY_PAGE_UNKNOWN_REASON % cap_safe(detail, 200), "ready, page read unknown"
+            reason = READY_PAGE_BEHIND_REASON if merge_tool_behind_main() else READY_PAGE_UNKNOWN_REASON
+            return reason % cap_safe(detail, 200), "ready, page read unknown"
     return None
 
 
@@ -900,7 +927,7 @@ def _red_run_module():
     """lint/check_red_run.py, imported from the lint folder beside this file's folder, the one home of the
     rule. It waits for the first push that needs it, and raises ImportError in a copy of the hooks with no lint
     folder beside it. The caller reads that as no hit."""
-    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    lint = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
     import check_red_run
@@ -2168,10 +2195,13 @@ def trust_card_hit(tool: str, transcript: str) -> str:
 ARCHIVE_TOOL = "mcp__claude-code-remote__archive_session"
 ARCHIVE_LANE_TAG = LANE_TAG
 ARCHIVE_STEP_PREFIX, ARCHIVE_REPO_PREFIX = STEP_TAG, REPO_TAG
+ARCHIVE_CITE = (
+    "(decision session-tiers, a lane closes only after its records pull request has landed)"
+)
 ARCHIVE_NO_RECORD_REASON = (
     "this session's or this agent's transcript holds no get_session record of the target, so the guard cannot tell whether "
-    "the target is a lane with records still to land. Run get_session on the target alone, in its own turn, "
-    "then retry. (decision session-tiers, a lane closes only after its records pull request has landed)"
+    "the target is a lane with records still to land. Run get_session on each target in one message, "
+    "then archive them in the next message. " + ARCHIVE_CITE
 )
 ARCHIVE_OPEN_REASON = (
     "the lane's records pull request is still open, so closing the lane now strands its records. Wait until "
@@ -2179,7 +2209,7 @@ ARCHIVE_OPEN_REASON = (
 )
 ARCHIVE_TAGS_REASON = (
     "the target's record is a lane with no cs-step tag or no cs-repo tag, so the guard cannot find its "
-    "records pull request. Fix the lane's tags, run get_session on the target alone, then retry. (decision session-tiers, a lane closes only after its records pull request has landed)"
+    "records pull request. Fix the lane's tags, run get_session on each target in one message, then archive them in the next message. " + ARCHIVE_CITE
 )
 # A template: %s is the lane's cs-repo repos, comma-separated.
 ARCHIVE_READ_REASON = (
@@ -2190,8 +2220,9 @@ ARCHIVE_READ_REASON = (
 ARCHIVE_NO_PR_REASON = (
     "a branch of the lane is ahead of its repo's default branch and has no pull request that covers it, so closing "
     "the lane now strands that work. Either open a pull request for that branch and hand it to the batch runner, or "
-    "push an archive copy of it under archive/, then retry. "
-    "(decision session-tiers, a lane closes only after its records pull request has landed)"
+    "push an archive copy of it under archive/, then retry. If the branch was archived under another name, push one "
+    "more copy under the stranded branch's own name, archive/<branch> (archive/<branch>-<n> when that is taken), at the branch tip, then retry. "
+    + ARCHIVE_CITE
 )
 # A template, as ARCHIVE_READ_REASON.
 ARCHIVE_BRANCH_READ_REASON = (

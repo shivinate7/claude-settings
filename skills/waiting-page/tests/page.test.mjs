@@ -1277,6 +1277,79 @@ for (const width of [430, 390, 360]) {
   });
 }
 
+// ---------------------------------------------------------------- long unbroken words in the Questions tab
+
+// A word with no space or hyphen has no break point, so it must wrap inside its box or it widens the page. Each fixture puts one such
+// word in one place the Questions tab sets text in a box: the Lands in line (.dest), a thread reply in an answered line (.thread .reply)
+// and an option's trade-off text (.opt .tr).
+const UNBROKEN = "x".repeat(90);
+const WRAP_DEST = mk("wrap-dest", 41, { home: "PR #2906; step " + UNBROKEN });
+const WRAP_TR = mk("wrap-tr", 42, { options: [{ ...opt("a", "Red"), gain: UNBROKEN }, opt("b", "Blue")] });
+// A closed item is one line in the Answered section, folded until Show answer opens its reply. open() waits for the first item's card,
+// so DECISION stays on the page.
+const WRAP_REPLY = mk("wrap-reply", 43, { status: "closed", closed: "2026-11-09T15:00:00Z", home: "step:ask-phase-out", reply: UNBROKEN });
+// box: the element that holds the word, found by its text, so a page that drops the word fails at the scope check, not as "no overflow".
+const WRAP_LINE = { what: "the Lands in line", items: [WRAP_DEST], box: ".dest" };
+const WRAP_REPLY_CASE = { what: "the thread reply in an answered line", items: [DECISION, WRAP_REPLY], open: WRAP_REPLY, box: "#tier-answered .thread .reply" };
+const WRAP_TRADE = { what: "the option's trade-off text", items: [WRAP_TR], box: ".opt .tr div > span:not(.s)" };
+// The filed line of an opened answer reads "The record stays in <home>.", so a 90-character home is the unbroken word in .askc .thread .filed.
+// Measured on the build with that home: the page is 717 px wide at 360, 390 and 430 px with .hometag shown, and the viewport width with it
+// hidden. The tag's nowrap text (666 px) gives the tag a 684 px box, so its row .ahead is 684 px wide and runs past its line. .hometag's
+// overflow hidden does not stop this: the tag's box is still 684 px, and .ahead takes that width. The tag's width is another lane's
+// (page-home-tag-cut-off), so this measure hides it and reads only the filed line.
+const WRAP_FILED = mk("wrap-filed", 44, { status: "closed", closed: "2026-11-09T15:00:00Z", home: UNBROKEN });
+const WRAP_FILED_CASE = { what: "the filed line of an opened answer", items: [DECISION, WRAP_FILED], open: WRAP_FILED, box: "#tier-answered .thread .filed", hide: ".hometag" };
+async function openWrap(t, c, { width = 1280, scheme = "light" } = {}) {
+  const page = await open(t, { items: c.items, viewport: { width, height: 900 }, scheme }); if (!page) return null;
+  if (c.open) {
+    await mustHave(page, `#tier-answered #lrow-${c.open.id}`, `Show answer on the line of No. ${c.open.n}`);
+    await page.click(`#tier-answered #lrow-${c.open.id}`);
+  }
+  return page;
+}
+
+for (const c of [WRAP_LINE, WRAP_REPLY_CASE, WRAP_TRADE, WRAP_FILED_CASE]) {
+  for (const width of [360, 390, 430]) {
+    for (const scheme of ["light", "dark"]) {
+      test(`${c.what} with an unbroken 90-character word never widens the Questions tab, at ${width} wide, ${scheme} scheme`, async (t) => {
+        const page = await openWrap(t, c, { width, scheme }); if (!page) return;
+        const box = page.locator(c.box).filter({ hasText: UNBROKEN });
+        assert.equal(await box.count(), 1, `no ${c.what} holds the unbroken word`);
+        // c.hide: elements taken out of the page for this measure, such as the home tag another lane owns.
+        if (c.hide) await page.evaluate((sel) => document.querySelectorAll(sel).forEach((e) => { e.style.display = "none"; }), c.hide);
+        const { sw, iw } = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth }));
+        assert.ok(sw <= iw, `${c.what} widens the page to ${sw} px on a ${iw} px screen`);
+      });
+    }
+  }
+}
+
+test("the Lands in line with a 90-character word computes overflow-wrap: anywhere and min-width: 0", async (t) => {
+  const page = await openWrap(t, WRAP_LINE); if (!page) return;
+  await mustHave(page, ".dest", `the Lands in line of No. ${WRAP_DEST.n}`);
+  const cs = await page.locator(".dest").first().evaluate((e) => ({ wrap: getComputedStyle(e).overflowWrap, min: getComputedStyle(e).minWidth }));
+  assert.equal(cs.wrap, "anywhere", `the Lands in line's overflow-wrap is ${cs.wrap}, not anywhere`);
+  assert.equal(cs.min, "0px", `the Lands in line's min-width is ${cs.min}, not 0px`);
+});
+
+test("the thread reply with a 90-character word computes overflow-wrap: anywhere and min-width: 0", async (t) => {
+  const page = await openWrap(t, WRAP_REPLY_CASE); if (!page) return;
+  await mustHave(page, ".thread .reply", `the reply of No. ${WRAP_REPLY.n}`);
+  const cs = await page.locator(".thread .reply").first().evaluate((e) => ({ wrap: getComputedStyle(e).overflowWrap, min: getComputedStyle(e).minWidth }));
+  assert.equal(cs.wrap, "anywhere", `the thread reply's overflow-wrap is ${cs.wrap}, not anywhere`);
+  assert.equal(cs.min, "0px", `the thread reply's min-width is ${cs.min}, not 0px`);
+});
+
+test("the option's trade-off text with a 90-character word computes overflow-wrap: anywhere and min-width: 0", async (t) => {
+  const page = await openWrap(t, WRAP_TRADE); if (!page) return;
+  // Scope first: the one trade-off text that holds the unbroken word, so a page that drops it fails by name.
+  const span = page.locator(".opt .tr div > span:not(.s)").filter({ hasText: UNBROKEN });
+  assert.equal(await span.count(), 1, `no trade-off text holds the unbroken word of No. ${WRAP_TR.n}`);
+  const cs = await span.evaluate((e) => ({ wrap: getComputedStyle(e).overflowWrap, min: getComputedStyle(e).minWidth }));
+  assert.equal(cs.wrap, "anywhere", `the trade-off text's overflow-wrap is ${cs.wrap}, not anywhere`);
+  assert.equal(cs.min, "0px", `the trade-off text's min-width is ${cs.min}, not 0px`);
+});
+
 test("an item that is not a look question never warns about pictures, with or without a named design", async (t) => {
   const plain = mk("not-a-look", 37, { options: LOOK_OPTS.map(({ design, ...o }) => o), pick: "a" });
   const named = mk("names-a-design", 38, { options: LOOK_OPTS, pick: "a" });
@@ -2320,6 +2393,282 @@ test("a group with one new member is new as a whole, so a seen item in its tier 
   assert.notEqual(await seenOf(page, older), "true", "a group with a new member is marked seen");
   assert.notEqual(await seenOf(page, newer), "true", "the new member is marked seen");
   assert.deepEqual(await idsInSection(page, "calm"), ["g-new", "g-old", "g-solo"], "the seen solo sits above the group in Whenever");
+});
+
+// ---------------------------------------------------------------- repo sub-groups inside each tier (session-role-sort-notes, sections 1 to 5)
+// Inside each tier, one sub-group per repo: a section role="group" labelled by its head (a letter tile, the repo name, the count).
+// This repo is meta/page `repo` (owner/name) when set, else the item repo whose name part matches identity.name, ignoring case.
+// Only the repo sub-groups are tested here. The `stops` key and its sort wait on an owner answer, so no case sorts by stops.
+// Names start "repo sub-groups:"; a control (green on the old code) starts "repo sub-groups control:".
+const SAMPLE = { identity: { name: "sample-repo" } };
+const inRepo = (id, n, repo, over = {}) => mk(id, n, { repo, ...over });
+// The sub-groups of one tier, in page order: each head's text with its whitespace removed (the tile, the name, the count) and the cards in it.
+// null when the tier is not on the page; [] when it draws no sub-group.
+const repoGroups = (page, k) => page.evaluate((key) => {
+  const section = document.getElementById("tier-" + key);
+  if (!section) return null;
+  return [...section.querySelectorAll('[role="group"][aria-labelledby]')].map((g) => {
+    const head = document.getElementById(g.getAttribute("aria-labelledby"));
+    return { head: head ? head.textContent.replace(/\s+/g, "") : "", cards: [...g.querySelectorAll("article.card")].map((c) => c.id.slice(5)) };
+  });
+}, k);
+const headsOf = (groups) => groups.map((g) => g.head);
+const cardsOf = (groups) => groups.map((g) => g.cards);
+// The chip runs of one tier row on the rail, in order: each run's name, its first child's text with the whitespace removed (the tile and the name), and its chips.
+// null when the row is not on the rail; [] when the row has no runs.
+const railRuns = (page, k) => page.evaluate((key) => {
+  const head = document.querySelector(`#rail a.ov-head[href="#tier-${key}"]`);
+  const row = head && head.closest(".ov-tier");
+  if (!row) return null;
+  return [...row.querySelectorAll('[role="group"][aria-label]')].map((g) => ({
+    name: g.getAttribute("aria-label"),
+    first: g.firstElementChild ? g.firstElementChild.textContent.replace(/\s+/g, "") : "",
+    chips: [...g.querySelectorAll(".nchip")].map((c) => c.id.slice(2)),
+  }));
+}, k);
+// The seen dividers of each sub-group, in page order: "w" when a divider shows its words, "sr" when only a screen reader hears them.
+const dividersIn = (page, k) => page.evaluate((key) => {
+  const section = document.getElementById("tier-" + key);
+  if (!section) return null;
+  return [...section.querySelectorAll('[role="group"][aria-labelledby]')].map((g) => [...g.querySelectorAll(".seenhead")].map((d) => (d.querySelector(".sr") ? "sr" : "w")));
+}, k);
+
+// Case 1: this repo first, then each other repo at the place of its first item. Beta's first item outranks alpha's, so place and A to Z differ.
+test("repo sub-groups: inside a tier, this repo comes first and each other repo sits at the place of its first item", async (t) => {
+  const items = [
+    inRepo("own-1", 1, "acme/sample-repo", { rank: 9 }), inRepo("beta-1", 2, "acme/beta", { rank: 0 }),
+    inRepo("alpha-1", 3, "acme/alpha", { rank: 1 }), inRepo("alpha-2", 4, "acme/alpha", { rank: 2 }),
+    inRepo("own-2", 5, "acme/sample-repo", { rank: 10 }),
+  ];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 3, `tier-calm draws ${groups.length} repo sub-groups, not one per repo (3)`);
+  assert.deepEqual(cardsOf(groups), [["own-1", "own-2"], ["beta-1"], ["alpha-1", "alpha-2"]], "the sub-groups are not this repo first, then each repo at its first item's place");
+});
+
+// Case 1, full size: six repos and twelve items. Each repo is whole, this repo is first, and the rest follow their first items.
+test("repo sub-groups: a tier of six repos and twelve items keeps each repo whole, this repo first and the rest in first-item order", async (t) => {
+  const others = ["hotel", "golf", "foxtrot", "echo", "delta"]; // by rank, their first items are 0, 1, 2, 3, 4
+  const items = []; let n = 1;
+  others.forEach((name, i) => { for (const r of [i, i + 10]) items.push(inRepo(`${name}-${r}`, n++, `acme/${name}`, { rank: r })); });
+  for (const r of [20, 21]) items.push(inRepo(`own-${r}`, n++, "acme/sample-repo", { rank: r }));
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 6, `tier-calm draws ${groups.length} repo sub-groups, not one per repo (6)`);
+  assert.deepEqual(cardsOf(groups), [["own-20", "own-21"], ["hotel-0", "hotel-10"], ["golf-1", "golf-11"], ["foxtrot-2", "foxtrot-12"], ["echo-3", "echo-13"], ["delta-4", "delta-14"]], "the six sub-groups are not this repo first, then the others in first-item order");
+});
+
+// Case 1, tie: two other repos whose first items agree on every key. Their order is A to Z, not the order the items were stored in.
+test("repo sub-groups: other repos whose first items tie on every key sit A to Z", async (t) => {
+  // Both other items carry n 2: no key the sort reads tells them apart, so only the repo name can.
+  const items = [inRepo("own-1", 1, "acme/sample-repo", { added: at(1) }), inRepo("zeta-1", 2, "acme/zeta", { added: at(1) }), inRepo("alpha-1", 2, "acme/alpha", { added: at(1) })];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 3, `tier-calm draws ${groups.length} repo sub-groups, not 3`);
+  assert.deepEqual(cardsOf(groups), [["own-1"], ["alpha-1"], ["zeta-1"]], "tied repos are not in A to Z order");
+});
+
+// Case 1, own repo: meta/page `repo` decides it. Another repo with the same name part is not this repo.
+test("repo sub-groups: the page's own repo is the meta/page repo when set, so another repo with the same name part is not this repo", async (t) => {
+  const items = [inRepo("own-cock", 1, "acme/cockpit", { rank: 9 }), inRepo("other-cock", 2, "other/cockpit", { rank: 0 }), inRepo("alpha-1", 3, "acme/alpha", { rank: 1 })];
+  const page = await open(t, { items, meta: { identity: { name: "cockpit" }, repo: "acme/cockpit" } }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 3, `tier-calm draws ${groups.length} repo sub-groups, not 3: other/cockpit is folded into this repo or dropped`);
+  assert.deepEqual(cardsOf(groups), [["own-cock"], ["other-cock"], ["alpha-1"]], "other/cockpit sits with this repo, or this repo is not first");
+});
+
+// Case 1, own repo: no meta/page repo, so the item whose name part matches identity.name, ignoring case, is this repo. A bare name counts too.
+test("repo sub-groups: with no meta/page repo, this repo is the item whose name part matches identity.name, ignoring case, and a bare name counts", async (t) => {
+  const items = [inRepo("own-case", 1, "acme/Sample-Repo", { rank: 5 }), inRepo("beta-1", 2, "acme/beta", { rank: 0 }), inRepo("own-bare", 3, "sample-repo", { rank: 7 })];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 2, `tier-calm draws ${groups.length} repo sub-groups, not 2`);
+  assert.deepEqual(cardsOf(groups), [["own-case", "own-bare"], ["beta-1"]], "the matching items are not this repo's sub-group, first");
+});
+
+// Case 2: a tier with this repo and another draws a head for each. The tile is the first letter, the count is the sub-group's cards.
+test("repo sub-groups: a tier holding this repo and another draws one sub-head per repo: a letter tile, the repo name and the count", async (t) => {
+  const items = [inRepo("own-1", 1, "acme/sample-repo", { rank: 0 }), inRepo("own-2", 2, "acme/sample-repo", { rank: 1 }), inRepo("beta-1", 3, "acme/beta", { rank: 2 })];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 2, `tier-calm draws ${groups.length} repo sub-groups, not 2`);
+  assert.deepEqual(headsOf(groups), ["Ssample-repo2", "Bbeta1"], "a sub-head does not read the tile, the repo name and the count");
+});
+
+// Case 2, control: the single-repo tier is the page as it is today. Its cards come first, so a head drawn here would be the only change.
+test("repo sub-groups control: a tier holding only this repo draws no sub-head and keeps today's card order", async (t) => {
+  const items = [inRepo("own-2", 2, "acme/sample-repo", { rank: 1 }), inRepo("own-1", 1, "acme/sample-repo", { rank: 0 })];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), ["own-1", "own-2"], "the tier's cards are not in today's order");
+  const groups = await repoGroups(page, "calm");
+  assert.equal(groups.length, 0, `tier-calm draws ${groups.length} sub-head(s) for this repo alone, not 0`);
+});
+
+// Case 2: a tier with only another repo keeps its head, so the owner sees whose the items are.
+test("repo sub-groups: a tier holding only another repo keeps its head, so the owner sees whose it is", async (t) => {
+  const items = [inRepo("beta-due", 1, "acme/beta", { by: "2030-11-30T12:00:00Z" }), inRepo("own-calm", 2, "acme/sample-repo")];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "due");
+  assert.ok(groups, "tier-due is not on the page");
+  assert.equal(groups.length, 1, `tier-due draws ${groups.length} repo sub-groups, not 1`);
+  assert.deepEqual(headsOf(groups), ["Bbeta1"], "the Upcoming tier's head does not read the other repo's tile, name and count");
+});
+
+// Case 3: an item with no repo field sits under this repo's name, so its sub-group has this repo's head.
+test("repo sub-groups: an item with no repo field sits under this repo's name", async (t) => {
+  const items = [mk("no-repo-item", 1, { rank: 0 }), inRepo("beta-1", 2, "acme/beta", { rank: 1 })];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 2, `tier-calm draws ${groups.length} repo sub-groups, not 2`);
+  assert.deepEqual(cardsOf(groups), [["no-repo-item"], ["beta-1"]], "the item with no repo field is not under this repo's sub-group");
+  assert.deepEqual(headsOf(groups), ["Ssample-repo1", "Bbeta1"], "the item with no repo field has no head with this repo's name");
+});
+
+// Case 4: a group whose members sit in two repos is one sub-group. Which repo it sits under is the sort's to set, so the case does not check it.
+test("repo sub-groups: a group whose members sit in two repos stays in one sub-group", async (t) => {
+  const items = [
+    inRepo("g-own", 1, "acme/sample-repo", { group: "pair", rank: 5 }), inRepo("g-beta", 2, "acme/beta", { group: "pair", rank: 6 }),
+    inRepo("beta-solo", 3, "acme/beta", { rank: 0 }), inRepo("own-solo", 4, "acme/sample-repo", { rank: 7 }),
+  ];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 2, `tier-calm draws ${groups.length} repo sub-groups, not 2`);
+  const withOwn = groups.filter((g) => g.cards.includes("g-own")), withBeta = groups.filter((g) => g.cards.includes("g-beta"));
+  assert.equal(withOwn.length, 1, `g-own is in ${withOwn.length} sub-groups, not 1`);
+  assert.deepEqual(withBeta, withOwn, "the group splits: g-beta is not in the sub-group that holds g-own");
+});
+
+// Case 5: the seen divider repeats inside each sub-group that has seen items. Its words show on the first divider of the page only.
+test("repo sub-groups: the seen divider repeats inside each repo sub-group, and its words show once on the page", async (t) => {
+  const items = [
+    inRepo("own-seen", 1, "acme/sample-repo", { added: at(5) }), inRepo("own-new", 2, "acme/sample-repo", { added: at(20) }),
+    inRepo("beta-seen", 3, "acme/beta", { added: at(6) }), inRepo("beta-new", 4, "acme/beta", { added: at(21) }),
+    sentItem(),
+  ];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 2, `tier-calm draws ${groups.length} repo sub-groups, not 2`);
+  const dividers = await dividersIn(page, "calm");
+  assert.deepEqual(dividers.map((d) => d.length), [1, 1], `the seen divider is not once per repo sub-group: ${JSON.stringify(dividers)}`);
+  assert.deepEqual(dividers.flat(), ["w", "sr"], "the seen divider's words do not show once on the page: the first divider shows them and each later one is for screen readers only");
+});
+
+// Case 6: the heads are fixed at load. Sending the last card of one repo removes that repo's head and no other.
+test("repo sub-groups: sending the last card of one repo removes only that repo's head, and the head left stays until reload", async (t) => {
+  const alpha = inRepo("alpha-1", 1, "acme/alpha", { rank: 0 });
+  const items = [alpha, inRepo("own-1", 2, "acme/sample-repo", { rank: 1 }), inRepo("own-2", 3, "acme/sample-repo", { rank: 2 })];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const before = await repoGroups(page, "calm");
+  assert.ok(before, "tier-calm is not on the page");
+  assert.equal(before.length, 2, `tier-calm draws ${before.length} repo sub-groups before the send, not 2`);
+  await choose(page, alpha, "a");
+  await send(page);
+  await waitAnswered(page, [alpha.id]);
+  await card(page, alpha).locator(".receipt").waitFor();
+  assert.equal(await sectionOf(page, alpha), "tier-answered", `No. ${alpha.n} did not move to the Answered section after its Send`);
+  const after = await repoGroups(page, "calm");
+  assert.equal(after.length, 1, `after the last alpha card was sent, tier-calm draws ${after.length} repo sub-groups, not 1`);
+  assert.deepEqual(headsOf(after), ["Ssample-repo2"], "sending the last alpha card changed this repo's head, or did not remove alpha's");
+});
+
+// Case 7: each repo's chip run in a tier row starts with its tile and name. The run keeps the order of the tier's cards.
+test("repo sub-groups: the rail row of a tier with two repos starts each repo's chip run with its tile and name", async (t) => {
+  const items = [inRepo("own-1", 1, "acme/sample-repo", { rank: 1 }), inRepo("alpha-1", 2, "acme/alpha", { rank: 0 }), inRepo("own-2", 3, "acme/sample-repo", { rank: 2 })];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const runs = await railRuns(page, "calm");
+  assert.ok(runs, "the rail has no Whenever row");
+  assert.equal(runs.length, 2, `the Whenever row holds ${runs.length} repo chip runs, not 2`);
+  assert.deepEqual(runs.map((r) => r.first), ["Ssample-repo", "Aalpha"], "a repo's chip run does not start with its tile and name");
+  assert.deepEqual(runs.map((r) => r.chips), [["own-1", "own-2"], ["alpha-1"]], "the chip runs do not follow the tier's card order");
+});
+
+// Case 7: the Answered section and its rail row draw one sub-group per repo, this repo first, newest first inside each.
+// Cites step answered-sections-by-repo (the Answered section and its rail row, one sub-group per repo, this repo first) and page item 212
+// (taken by lane page-answered-sink).
+test("repo sub-groups answered: the Answered section and its rail row draw one sub-group per repo, this repo first, newest first inside each", async (t) => {
+  const items = [inRepo("ans-own", 1, "acme/sample-repo"), inRepo("ans-alpha", 2, "acme/alpha"), inRepo("ans-beta", 3, "acme/beta"), inRepo("ans-own2", 4, "acme/sample-repo")];
+  const answers = { ...answerOf(items[0], "a", { at: "2026-10-26T09:00:00Z" }), ...answerOf(items[1], "a", { at: "2026-10-28T09:00:00Z" }), ...answerOf(items[2], "a", { at: "2026-10-27T09:00:00Z" }), ...answerOf(items[3], "a", { at: "2026-10-29T09:00:00Z" }) };
+  const page = await open(t, { items, meta: SAMPLE, answers }); if (!page) return;
+  const groups = await answeredGroups(page);
+  assert.ok(groups, "the Answered section is not on the page");
+  assert.deepEqual(cardsOf(groups), [["ans-own2", "ans-own"], ["ans-alpha"], ["ans-beta"]], "the Answered sub-groups are not this repo first, then each repo at its first answer's place, newest first inside each");
+  const runs = await railRuns(page, "answered");
+  assert.ok(runs, "the rail has no Answered row");
+  assert.deepEqual(runs.map((r) => r.chips), [["ans-own2", "ans-own"], ["ans-alpha"], ["ans-beta"]], "the Answered rail row does not draw the same repo runs");
+});
+
+// Answered by repo (the designer's questions-sorted-answered mockup): the Answered section draws one sub-group per repo, this repo first,
+// then each other repo at its first answer's place, newest first inside each. The rail's Answered row draws the same runs.
+// Names start "repo sub-groups answered:".
+const ansLine = (n, repo, sent) => mk("ans-" + n, n, { status: "closed", closed: sent, lastAnswer: { choice: "a", at: sent, note: "" }, repo, reply: "Filed.", home: "step " + n });
+// The mockup's six answers. Flat newest first is 61 59 60 58 55 57; this repo's three come first, then ledger-app's two, then trail-notes' one.
+const ANS_REPOS = [
+  ansLine(61, "acme/sample-repo", "2026-11-15T16:40:00Z"), ansLine(59, "acme/sample-repo", "2026-11-15T14:05:00Z"),
+  ansLine(55, "acme/sample-repo", "2026-11-14T21:00:00Z"), ansLine(60, "acme/ledger-app", "2026-11-15T11:00:00Z"),
+  ansLine(57, "acme/ledger-app", "2026-11-14T15:00:00Z"), ansLine(58, "acme/trail-notes", "2026-11-15T09:00:00Z"),
+];
+// The sub-groups of the Answered section, in page order: each head's text with its whitespace removed (the tile, the name, the count) and
+// the lines in it, by number. null when the section is not on the page.
+const answeredGroups = (page) => page.evaluate(() => {
+  const section = document.getElementById("tier-answered");
+  if (!section) return null;
+  return [...section.querySelectorAll('[role="group"][aria-labelledby]')].map((g) => {
+    const head = document.getElementById(g.getAttribute("aria-labelledby"));
+    return { head: head ? head.textContent.replace(/\s+/g, "") : "", cards: [...g.querySelectorAll("article.askc, article.card")].map((c) => c.id.replace(/^(line|item)-/, "")) };
+  });
+});
+
+test("repo sub-groups answered: the Answered section draws one sub-group per repo, this repo first, newest first inside each", async (t) => {
+  const page = await open(t, { items: [DECISION, ...ANS_REPOS], meta: SAMPLE }); if (!page) return;
+  const groups = await answeredGroups(page);
+  assert.ok(groups, "the Answered section is not on the page");
+  assert.equal(groups.length, 3, `the Answered section draws ${groups.length} repo sub-groups, not one per repo (3)`);
+  assert.deepEqual(cardsOf(groups), [["61", "59", "55"], ["60", "57"], ["58"]], "the Answered sub-groups are not this repo first, then each repo at its first answer's place, newest first inside each");
+});
+
+test("repo sub-groups answered: the Answered section line says This repo first.", async (t) => {
+  const page = await open(t, { items: [DECISION, ...ANS_REPOS], meta: SAMPLE }); if (!page) return;
+  const line = page.locator("#tier-answered .rsub");
+  assert.equal(await line.count(), 1, "the Answered section has no section line");
+  assert.match(await line.textContent(), /This repo first\./, "the Answered section line does not say This repo first.");
+});
+
+test("repo sub-groups answered: the rail's Answered row draws one run per repo, each with its tile and name", async (t) => {
+  const page = await open(t, { items: [DECISION, ...ANS_REPOS], meta: SAMPLE }); if (!page) return;
+  const runs = await railRuns(page, "answered");
+  assert.ok(runs, "the rail has no Answered row");
+  assert.equal(runs.length, 3, `the Answered row holds ${runs.length} repo runs, not 3`);
+  assert.deepEqual(runs.map((r) => r.first), ["Ssample-repo", "Lledger-app", "Ttrail-notes"], "a repo's run in the Answered row does not start with its tile and name");
+  assert.deepEqual(runs.map((r) => r.chips), [["ans-61", "ans-59", "ans-55"], ["ans-60", "ans-57"], ["ans-58"]], "the Answered row's runs do not follow the answered order inside each repo");
+});
+
+// Case 8: inside a repo's sub-group the order stays: an arrival first, then new before seen, then rank, then age.
+test("repo sub-groups: inside a repo's sub-group the order stays: an arrival first, then new before seen, rank, and newest first", async (t) => {
+  const items = [
+    inRepo("own-1", 9, "acme/sample-repo", { added: at(1), rank: 0 }),
+    inRepo("a-seen", 1, "acme/alpha", { added: at(5), rank: 0 }), inRepo("a-r2", 2, "acme/alpha", { added: at(20), rank: 2 }),
+    inRepo("a-r1", 3, "acme/alpha", { added: at(25), rank: 1 }), inRepo("a-old", 4, "acme/alpha", { added: at(15) }),
+    inRepo("a-young", 5, "acme/alpha", { added: at(22) }), sentItem(),
+  ];
+  const page = await open(t, { items, meta: SAMPLE }); if (!page) return;
+  const arrival = inRepo("a-arrival", 6, "acme/alpha", { added: at(28), rank: 9 });
+  await page.evaluate((it) => window.__putItem(it), arrival);
+  await card(page, arrival).waitFor();
+  const groups = await repoGroups(page, "calm");
+  assert.ok(groups, "tier-calm is not on the page");
+  assert.equal(groups.length, 2, `tier-calm draws ${groups.length} repo sub-groups, not 2`);
+  const alpha = groups.find((g) => g.cards.includes("a-r1"));
+  assert.ok(alpha, "no sub-group holds alpha's cards");
+  assert.deepEqual(alpha.cards, ["a-arrival", "a-r1", "a-r2", "a-young", "a-old", "a-seen"], "alpha's sub-group does not keep arrival, new before seen, rank, then newest first");
 });
 
 // ---------------------------------------------------------------- a reply or a step since the last visit

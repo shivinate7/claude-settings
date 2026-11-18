@@ -1,0 +1,1 @@
+- export-scan-limit-8: password=!0 and !1 as a bare value pass. Fix: none until a real incident. Decision: waiting-data-in-repo.

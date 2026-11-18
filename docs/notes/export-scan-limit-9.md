@@ -1,0 +1,1 @@
+- export-scan-limit-9: "postgres://admin:"+"S3cretX9"+"@"+h, a secret split across literals with no spaces, passes (attacker-only). Fix: none until a real incident. Decision: waiting-data-in-repo.

@@ -3,6 +3,16 @@
 # In a git tree it also patches the platform's Stop-hook script once so its unpushed nudge skips a merged branch; it says so when the patch is not applied.
 # Outside a git tree or without git, prints only the tier line. Always exits 0, nothing on stderr.
 
+# A cloud install links this script through .cs-current. Run its real file, so each sibling read below belongs to the
+# generation this process started in (decision install-hooks-whole). The re-run sees its own real path, so it runs once.
+ss_self=$0
+while [ -L "$ss_self" ]; do
+  ss_to=$(readlink "$ss_self") || break
+  case "$ss_to" in /*) ss_self=$ss_to ;; *) ss_self="$(dirname "$ss_self")/$ss_to" ;; esac
+done
+if [ "$ss_self" != "$0" ] && ss_real=$(cd "$(dirname "$ss_self")" 2>/dev/null && pwd -P) && [ -f "$ss_real/$(basename "$ss_self")" ] && command -v sh >/dev/null 2>&1; then
+  exec sh "$ss_real/$(basename "$ss_self")" "$@"
+fi
 input=$(cat 2>/dev/null)
 cwd=$(printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
 [ -n "$cwd" ] || cwd=$(pwd)
@@ -187,6 +197,12 @@ if command -v python3 >/dev/null 2>&1; then
   if [ -f "$ro_script" ]; then
     ro_lines=$(python3 "$ro_script" roster-lines "$toplevel" 2>/dev/null)
     [ -n "$ro_lines" ] && printf '%s\n' "$ro_lines"
+    # The standing merge role (decision session-tiers): a cloud session whose id is a coordinator, triage or consultant row of
+    # that roster gets state/merge-role.json, so `merge <pr> --confirm` needs no hand step; the file is removed when the roster
+    # no longer names it. A local read of the same ref, never a fetch; one more python start, in a cloud session only.
+    if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
+      python3 "$ro_script" merge-role "$toplevel" >/dev/null 2>&1
+    fi
   fi
 fi
 

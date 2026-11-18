@@ -1,0 +1,1 @@
+- asmc-debt-text-wrong: (#2442) debt review-record-model-not-served says review_state reads any posted Haiku record as done; a fix check already reads open, and only round 2 or 3 stays open. Fix its text. Also: the debt's first sentence says "round 2/3", but the check now reads round 4 too; and the fix commit adds no test of its own, because main's FOUR case covers it.

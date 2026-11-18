@@ -1,0 +1,1 @@
+- mrml-noise-and-get: (#2492) a red verdict may list a re-run that does not clear it (noise); base_state reads r["event"] where r.get("event") would match the line above.

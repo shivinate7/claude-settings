@@ -1,0 +1,1 @@
+- train-pre-flight-two-names: the same bullet's "Pre-merge reads" is a second name for the wave plan's "Pre-flight row" (`plans/wave-plan-2026-11-13.md`, on the record branch). Pick one. Decision: session-tiers.
