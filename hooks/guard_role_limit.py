@@ -9,10 +9,11 @@ should not, does not, isn't allowed to or is not permitted to, then merge, push 
 lane or your may sit between mark and ready), unless the same sentence or the same line names a ruling or a decision
 id. A role is a named session (triage, a runner with a number, a lane with a number or a slug, and the plural lanes) or
 the second person: the text goes to another session, so "you cannot merge" limits its reader.
-Three forms pass. A conditional: the sentence opens a clause with "if" before the limit (If you cannot push, stop and
-report). The second person in an Agent or Task prompt: that text briefs the agent's own run, so "You must not push"
-limits no session's role. A limit that states its cause after the act: a colon or "because" in the rest of the
-sentence (The lane cannot push: the proxy returns 403). A limit in double or single quotes, a blockquote, a code span
+Three forms pass. A conditional: an "if" opens a clause before the limit, in its sentence and on its line (If you
+cannot push, stop and report). The second person in an Agent or Task prompt: that text briefs the agent's own run, so
+"You must not push" limits no session's role. A limit that states its cause after the act, in the rest of its sentence
+on its line: a colon with a space and words after it, or "because" (The lane cannot push: the proxy returns 403). A
+colon with no space after it, as in a clock time or a URL, is no cause. A limit in double or single quotes, a blockquote, a code span
 or a closed fenced block is quoted text, and passes. A quote, code span or fence that never closes is plain text. A
 cite is any hyphenated slug in backticks, whether or not a record holds it. The guard reads a cause and a cite for
 their presence, never for their truth.
@@ -43,8 +44,9 @@ _ACT = (r"(?:merge|push|mark\s+(?:(?:it|them|the|its|own|lane|your|their|a|any|p
 LIMIT = re.compile(r"\b%s\s+%s\s+%s\b" % (_ROLE, _NOT, _ACT), re.IGNORECASE)
 # A cite: an id in backticks, or the word ruling or decision with an id after it.
 CITE = re.compile(r"`%s`|\b(?:ruling|decision)\s+`?%s" % (_SLUG, _SLUG), re.IGNORECASE)
-# A limit that states its cause: a colon or because after the act, before a semicolon or the sentence end.
-_CAUSE = re.compile(r"^[^;]*?(?::\s*\S|\bbecause\s+\S)", re.IGNORECASE)
+# A limit that states its cause: after the act and before a semicolon, a colon with a space and words after it, or
+# because. A colon with no space after it (a clock time 18:43, a URL) states no cause.
+_CAUSE = re.compile(r"^[^;]*?(?::[ \t]+\S|\bbecause[ \t]+\S)", re.IGNORECASE)
 _IF_CLAUSE = re.compile(r"\bif\b", re.IGNORECASE)
 _SENTENCE_END = re.compile(r"[.!?]+(?=\s|\Z)|\n[ \t]*\n")
 
@@ -136,6 +138,12 @@ def _line_span(text, start, end):
     return text.rfind("\n", 0, start) + 1, (text.find("\n", end) if "\n" in text[end:] else len(text))
 
 
+def _clause_span(masked, start, end):
+    """The offsets of the limit's clause: the part of its sentence that sits on its own line."""
+    (s_low, s_high), (l_low, l_high) = _sentence_span(masked, start, end), _line_span(masked, start, end)
+    return max(s_low, l_low), min(s_high, l_high)
+
+
 def role_limit_hit(tool: str, tool_input):
     """The matched text of the first uncited limit on a role in this send or spawn, else None."""
     if tool not in ROLE_LIMIT_TOOLS or not isinstance(tool_input, dict):
@@ -148,7 +156,9 @@ def role_limit_hit(tool: str, tool_input):
         start, end = found.span()
         if tool in SPAWN_PROMPT_TOOLS and found.group("role").lower() == "you":
             continue
-        low, high = _sentence_span(masked, start, end)
+        # The conditional and cause tests read the limit's clause only: its sentence, cut at the line ends, since a
+        # bullet list with no periods is one sentence.
+        low, high = _clause_span(masked, start, end)
         if _IF_CLAUSE.search(masked[low:start]) or _CAUSE.match(masked[end:high]):
             continue
         for low, high in (_sentence_span(masked, start, end), _line_span(text, start, end)):

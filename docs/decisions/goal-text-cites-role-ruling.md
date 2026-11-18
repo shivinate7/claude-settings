@@ -12,7 +12,7 @@ Coordinator brief for the lane that builds PR #3635, 2026-11-18. The guard judge
 - A role is triage (or a triage session), the batch runner, runner and a number (`Runner 10`, `Runner #10`), the coordinator, a lane or lanes (with a number or a branch slug too), the consultant or the arbiter. The second person (you) counts, because the text goes to another session.
 - A cite is an id in backticks, or the word ruling or decision with an id after it. An id is a hyphenated slug.
 - Words may sit between mark and ready (`mark its own PR ready`, `mark the lane PR ready`, `mark your PR ready`).
-- Three forms pass with no cite. A conditional: an "if" opens a clause before the limit in its sentence (`If you cannot push, stop and report.`). The second person in an Agent or Task prompt: that text briefs the agent's own run, so `You must not push.` limits no session's role. A limit that states its cause: a colon or "because" follows the act in its sentence, before any semicolon (`The lane cannot push: the cloud proxy returns 403.`). A second-person limit in a send or a create_session prompt, with no "if", no cause and no cite, is still refused.
+- Three forms pass with no cite. A conditional: an "if" opens a clause before the limit, in its sentence and on its line (`If you cannot push, stop and report.`). The second person in an Agent or Task prompt: that text briefs the agent's own run, so `You must not push.` limits no session's role. A limit that states its cause: a colon with a space and words after it, or "because", follows the act in its sentence and on its line, before any semicolon (`The lane cannot push: the cloud proxy returns 403.`). A colon with no space after it, as in a clock time or a URL, is no cause. A second-person limit in a send or a create_session prompt, with no "if", no cause and no cite, is still refused.
 - Quoted text is not a statement. A limit in double or single quotes, a blockquote, a code span or a closed fenced block passes. A quote, a code span or a fence that never closes is plain text.
 - Out of scope: every other tool, a limit whose subject is no role, a grant (can merge, may push), and a verb outside the three.
 
@@ -28,7 +28,7 @@ Why: a limit on a role is a claim about a ruling. A cite lets the reader check t
 
 Recorded limit: any hyphenated slug in backticks counts as a cite, whether or not a record holds it. The guard checks that a cite is present, not that it is true; a reader still checks the id.
 
-Recorded limit: a cause is read for its presence, not its truth. Any colon or "because" after the act passes the limit, so a writer can pass a limit with a made-up cause. The guard stops the mistake of a limit with no source, not a writer who invents one. Likewise an "if" earlier in the sentence passes the limit, whatever the clause says.
+Recorded limit: a cause is read for its presence, not its truth. Any colon with a space after it, or any "because", after the act on the limit's line passes the limit, so a writer can pass a limit with a made-up cause. A label colon later on the same line, such as `Triage cannot merge, Runner 10: owns the queue`, passes too. The guard stops the mistake of a limit with no source, not a writer who invents one. Likewise an "if" earlier in the sentence and on the same line passes the limit, whatever the clause says. A newline ends the clause, so a cause or an "if" on another line never counts.
 
 Kind: process
 Home: hooks/guard_role_limit.py
