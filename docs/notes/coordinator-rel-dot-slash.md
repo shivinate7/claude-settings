@@ -1,1 +1,0 @@
-- coordinator-rel-dot-slash: hooks/guard.py `coordinator_rel_ok` refuses an MCP write to `./docs/todo.md` but passes `docs/todo.md`. Rare false alarm. Fix: normalize the path first.

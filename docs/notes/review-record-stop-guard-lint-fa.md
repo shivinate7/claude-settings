@@ -1,1 +1,0 @@
-- review-record-stop-guard-lint-fa: the review-record Stop guard reads a lint PASS as a review claim.

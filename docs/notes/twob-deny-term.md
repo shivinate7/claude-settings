@@ -1,1 +1,0 @@
-- twob-deny-term: (#1583) docs/decisions/two-worktrees-one-branch.md line 5 says "the deny"; write "the refusal" (glossary).

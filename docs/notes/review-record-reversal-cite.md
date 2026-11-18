@@ -1,1 +1,0 @@
-- review-record-reversal-cite: docs/decisions/pr-review-record.md reverses "posts nothing" and cites no owner ruling for it. Fix: cite the ruling, or mark the change as the coordinator's. Not a hold.

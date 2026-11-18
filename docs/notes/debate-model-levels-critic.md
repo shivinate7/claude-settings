@@ -1,0 +1,1 @@
+- debate-model-levels-critic: docs/.../debate-model-tiers.md says "Critic:" where the stale-cite check reads "Refuter:"; its owner renames it.

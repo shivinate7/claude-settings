@@ -1,1 +1,0 @@
-- fix-check-brief-merge-base: fix-check briefs diff against the merge base.
