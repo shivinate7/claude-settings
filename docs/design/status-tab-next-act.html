@@ -221,7 +221,7 @@ function actLine(p, s, firstRed, labels) {
   }
   parts.push("owner " + esc(shownOwner(p, s)), "waited " + span(p.age * 36e5));
   const mark = p.red
-    ? `<span class="tag ic redm" role="img" aria-label="Red: ${esc(p.why)}" title="Red: ${esc(p.why)}">${RED_GLY}</span><span class="tag redw" title="${esc(p.why)}">red</span>`
+    ? (P.red === "mark" ? `<span class="tag ic redm" role="img" aria-label="Red: ${esc(p.why)}" title="Red: ${esc(p.why)}">${RED_GLY}</span>` : `<span class="tag redw" title="${esc(p.why)}">red</span>`)
     : "";
   if (!lab && p.red && firstRed) lab = "red row, " + NAME[P.red];
   if (!lab && !p.red && labels.act) { lab = "next act, owner, age"; labels.act = false; }
