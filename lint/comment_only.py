@@ -3,16 +3,17 @@
 
     python3 lint/comment_only.py OLD_REF NEW_REF PATH [PATH ...]
 
-Exit 0 when every PATH holds the same code at OLD_REF and NEW_REF once its comments are stripped, and for Python its
-docstrings too. Exit 1 in every other case: a code change, a path that is not .py or .sh, a path missing at either ref,
+Exit 0 when every PATH holds the same code at OLD_REF and NEW_REF once its comments are stripped. A docstring is code,
+since suites read its text. Exit 1 in every other case: a code change, a path that is not .py or .sh, a path missing at either ref,
 a file that does not parse, an unreadable ref. An unread file is never comment-only, so the caller keeps its suites on.
 Used by .github/scripts/ci-scope.sh to skip the code suites for a comment-only delta from a fully green head.
 
-Python compares the `tokenize` tokens, with each comment and each docstring (found with `ast`) dropped. A shebang and an
+Python compares the `tokenize` tokens, with each comment dropped. A shebang and an
 encoding cookie are comments to the tokenizer but pick the interpreter and the text decoder, so they stay. Shell strips
 the comment spans that lint/check_comment_narration.py shell_comment_spans finds, the one scan that reads a `#` in a string,
 a parameter expansion or a heredoc body as data. A line holding only a comment is dropped, and a trailing comment
-takes the blank before it.
+takes the blank before it. A comment line that follows a line ending in a `\\` continuation is code: it ends the command,
+so the line after it runs as a new command. It leaves a marker line in its place.
 """
 import ast
 import bisect
@@ -29,41 +30,22 @@ import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_
 import check_comment_narration as narration  # noqa: E402  the one home of the shell comment scan
 
 COOKIE = re.compile(r"coding[:=]\s*[-\w.]+")
+CONTINUATION = re.compile(r"(?<!\\)(?:\\\\)*\\$")  # an odd run of backslashes ends the line: the next line joins it
+CONTINUED_COMMENT = "# comment after a continuation"  # stands in for the dropped comment line, so adding or removing one reads as code
 
 
 def py_code(data):
-    """The (type, text) tokens of Python source with comments, blank-line tokens and docstrings dropped.
-    Raises narration.Unread when the source does not parse."""
+    """The (type, text) tokens of Python source with comments and blank-line tokens dropped. A docstring stays: it is a string
+    token, and suites read its text. Raises narration.Unread when the source does not parse."""
     try:
-        tree = ast.parse(data)
+        ast.parse(data)
         tokens = list(tokenize.tokenize(io.BytesIO(data).readline))
     except (SyntaxError, ValueError, tokenize.TokenError) as e:
         raise narration.Unread("cannot read: %s" % e)
-    docs = []
-    for node in ast.walk(tree):
-        body = getattr(node, "body", None)
-        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and body:
-            doc = body[0]
-            if isinstance(doc, ast.Expr) and isinstance(doc.value, ast.Constant) and isinstance(doc.value.value, str):
-                docs.append((doc.lineno, doc.col_offset, doc.end_lineno))
-
-    def in_docstring(tok):
-        row, col = tok.start
-        byte_col = len(tok.line[:col].encode("utf-8")) if tok.line else col
-        return any(first <= row <= last and (row > first or byte_col >= start_col) for first, start_col, last in docs)
-
     out = []
-    after_doc = False
     for tok in tokens:
         if tok.type in (tokenize.ENCODING, tokenize.NL):
             continue
-        if tok.type == tokenize.STRING and in_docstring(tok):
-            after_doc = True
-            continue
-        if after_doc and tok.type == tokenize.NEWLINE:
-            after_doc = False
-            continue
-        after_doc = False
         if tok.type == tokenize.COMMENT:
             if tok.start[0] == 1 and tok.string.startswith("#!") or tok.start[0] <= 2 and COOKIE.search(tok.string):
                 out.append((tok.type, tok.string))
@@ -94,6 +76,8 @@ def sh_code(path, data):
         if n in hit:
             line = line.rstrip()
             if not line:
+                if lines and CONTINUATION.search(lines[-1]):
+                    lines.append(CONTINUED_COMMENT)
                 continue
         lines.append(line)
     return lines

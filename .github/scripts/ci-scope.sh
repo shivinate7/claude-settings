@@ -23,7 +23,7 @@
 # BASE_SHA, HEAD_REF, GREEN_HEAD (optional: the sha green-head.sh prints, the pull request's newest earlier fully green head; a push may carry one too), PR_HEAD
 # (optional: the pull request's head sha; HEAD when unset). GREEN_HEAD turns the 14 job and suite flags off on a pull request or a push when it is an
 # ancestor of PR_HEAD and every path of the delta from it to PR_HEAD is docs/records.md, a .md file under docs/decisions, docs/notes or docs/debts,
-# or a .py or .sh file that lint/comment_only.py reads as a change to comments and docstrings only; the lint flags keep their whole-PR values and
+# or a .py or .sh file that lint/comment_only.py reads as a change to comments only (a docstring is code); the lint flags keep their whole-PR values and
 # mutation_report is false. The delta needs one path at least. Any unreadable read: no skip.
 # The last output lines are records_only_skip=true|false (true exactly in that case, and it stops every suite job), then skip_comment_delta and
 # skip_record_delta: true only on such a skip, when the delta holds a comment-only code file, or a file of those three record folders. The jobs that
@@ -222,7 +222,8 @@ case "$on" in *" code "*) case "$on" in *" guard "*) on="$on checks_guard " ;; e
 # its GREEN_HEAD is the caller's word, and the ancestor and delta reads below hold it. A schedule, a dispatch and every other case keep
 # their flags.
 # The delta must hold a path, and each path must be docs/records.md, a .md file in a record folder (docs/decisions, docs/notes, docs/debts),
-# or a comment-only .py or .sh file (lint/comment_only.py; never this script or green-head.sh, which stay fail-safe). An empty delta, any other path,
+# or a comment-only .py or .sh file (lint/comment_only.py; never this script, green-head.sh or the three files that judge it: lint/comment_only.py,
+# lint/check_comment_narration.py and hooks/_nowindow.py, which would vouch for their own change). An empty delta, any other path,
 # an unreadable one or a head that is not an ancestor keeps `on`.
 # The delta runs to PR_HEAD, the pull request's own head: HEAD in CI is the merge commit, which also holds every base change since.
 # PR_HEAD counts only when it is a full hex sha, a commit, and an ancestor of HEAD; otherwise the delta runs to HEAD.
@@ -244,7 +245,7 @@ if { [ "$whole_read" = 1 ] || [ "${EVENT:-}" = push ]; } && [[ "${GREEN_HEAD:-}"
     case "$f" in
       docs/records.md) ;;
       docs/decisions/*.md|docs/notes/*.md|docs/debts/*.md) skip_record=true ;;
-      .github/scripts/ci-scope.sh|.github/scripts/green-head.sh) delta_ok=false ;;
+      .github/scripts/ci-scope.sh|.github/scripts/green-head.sh|lint/comment_only.py|lint/check_comment_narration.py|hooks/_nowindow.py) delta_ok=false ;;
       *.py|*.sh) set -- "$@" "$f"; skip_comment=true ;;
       *) delta_ok=false ;;
     esac
