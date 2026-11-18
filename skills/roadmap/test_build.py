@@ -1088,6 +1088,29 @@ class LedgerActs(UpkeepFixture):
             self.assertEqual(row[7].get("act"), "lane unknown", f"#7's sessions are unread and it reads act {row[7].get('act')!r}, not 'lane unknown'")
             self.assertEqual(row[7].get("owner"), "unknown", f"#7's sessions are unread and it reads owner {row[7].get('owner')!r}, not 'unknown'")
 
+    def test_a_draft_a_lane_holds_reads_lane_unknown_when_its_sessions_row_is_skipped_never_no_live_lane(self):
+        # The holding lane's row has tags as text, not a list, so live_work skips it and never sees the lane's step.
+        draft = self.draft(7, "feat-seven", title="Draft seven")
+        ledger = {"readAt": self.FRESH, "rows": [ledger_row(7, "lane round 1", owner="lane")]}
+        held = session_row("session_test01", "SESSION_STATUS_RUNNING", self.REPO, "cs-step:feat-seven", status_bucket=BUCKET_WORKING)
+        skipped = dict(held, id="session_test02", tags="cs-step:feat-seven")
+        with self.subTest(sessions="control: the same lane, well-formed, is seen"):
+            self.publish_read([draft], ledger, sessions=[held])
+            row = self.baked(self.build())
+            self.assertEqual(sorted(row), [7], "scope: the baked pulls are the one draft")
+            self.assertEqual(row[7].get("act"), "lane round 1", f"control: #7 has a live lane and reads act {row[7].get('act')!r}, not 'lane round 1'")
+        with self.subTest(sessions="the holding lane's row is skipped"):
+            self.publish_read([draft], ledger, sessions=[skipped])
+            page = self.build()
+            live = build_info(page)["live"]
+            self.assertEqual(sorted(self.baked(page)), [7], "scope: the baked pulls are the one draft")
+            self.assertTrue(any(s.startswith("session ") for s in live.get("skipped") or []),
+                            "scope: the sessions row was not skipped: %r" % (live.get("skipped"),))
+            row = self.baked(page)
+            self.assertEqual(row[7].get("act"), "lane unknown",
+                             f"#7's lane holds its branch in a sessions row the build skipped, and #7 reads act {row[7].get('act')!r}, not 'lane unknown'")
+            self.assertEqual(row[7].get("owner"), "unknown", f"#7's lane holds its branch in a skipped row, and #7 reads owner {row[7].get('owner')!r}, not 'unknown'")
+
     def test_a_ledger_of_500_pulls_bakes_the_act_of_each(self):
         # Full size (test-practices P8): 500 open pulls, each with a ledger row.
         count = 500
