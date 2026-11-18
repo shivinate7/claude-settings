@@ -907,10 +907,12 @@ def straddling_body():
 
 class CutStream(unittest.TestCase):
     """A pytest run that exits 0 and stops before its summary reads FAIL, with `cut` in the note.
-    Rule: the argv is pytest's (`pytest`, or `python -m pytest`), and no line starts with pytest's summary: `=` bars
-    around ` in <N>s`, or the bare `<counts> in <N>s` that `-q` prints. Where the header sits does not matter.
-    Colour codes are ignored. A run that is not pytest is never cut, even when it prints pytest's header or progress
-    lines, so `print('noisy')` still reads PASS. A header quoted mid-line is no header. Other runners are not covered."""
+    Rule: the argv is pytest's (`pytest`, or `python -m pytest`), the argv has `-q` or the output has pytest's header
+    (`=` bars around `test session starts` at a line start), and no line starts with pytest's summary: `=` bars around
+    ` in <N>s`, or the bare `<counts> in <N>s` that `-q` prints. Where the header sits does not matter. Colour codes
+    are ignored. A pytest run with neither `-q` nor a header is never cut. A run that is not pytest is never cut, even
+    when it prints pytest's header or progress lines, so `print('noisy')` reads PASS. A header quoted mid-line is no
+    header. Other runners are not covered."""
     check = Skips.check  # one home for a fixture's run and its timeout
     assert_pass = Skips.assert_pass
     assert_skip = Skips.assert_skip
@@ -1015,7 +1017,7 @@ class CutStream(unittest.TestCase):
                 self.assert_pass(r)
 
     def test_non_pytest_progress_run_with_no_summary_is_pass(self):
-        """Progress lines with no summary are a cut only under pytest's argv. Any other command reads PASS."""
+        """A command that is not pytest is never cut, even with progress lines and no summary."""
         self.assert_pass(self.check(printing(PROGRESS * 3)))
 
     def test_one_mib_equals_line_finishes_under_the_bound(self):
@@ -1036,11 +1038,13 @@ class CutStream(unittest.TestCase):
                 self.assertIn(r.stdout.split()[:1], (["PASS"], ["FAIL"]), r.stdout[:300])
 
     def test_header_quoted_mid_line_is_no_header(self):
+        """A pytest run with no `-q` and a quoted header is not cut: the quoted text is no header."""
         body = "note: the pytest header is '=== test session starts ===' here\n" + PROGRESS * 3
-        self.assert_pass(self.check(printing(body)))
+        self.assert_pass(self.pytest_case(body))
 
     def test_silent_run_is_not_cut(self):
-        self.assert_pass(self.check(printing("")))
+        """A pytest run with no output, no `-q` and no header is not cut. `pytest --version` has neither, so it reads PASS."""
+        self.assert_pass(self.pytest_case(""))
 
     def test_header_then_log_truncated_under_verdict_keeps_log_unreadable(self):
         code = ("import os\n"
