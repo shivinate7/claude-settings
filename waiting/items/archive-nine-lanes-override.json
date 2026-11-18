@@ -1,0 +1,58 @@
+{
+  "added": "2026-11-18T14:18:31-06:00",
+  "context": "Goal: finished lane sessions that sit idle are archived, so they stop costing spend and clutter.\nProblem (rule): you said in chat at 14:12 CST that the coordinator has your explicit permission to archive seven finished lane sessions, but the hook that guards archives reads only a typed `override`, so all seven stay refused and only you can type it.\nBased on (read): the coordinator's relay of 14:17 CST Nov 18; at 14:15 CST it checked that two more lanes have their branches already on main.\nDeparts from: main \u2014 the archive hook accepts only a typed override, not your words in chat \u2014 your typed override lets the nine archives go through.\nWaiting on: nothing else is stopped; the coordinator archives the seven lanes plus the two whose work is already on main when you type the word; a tenth lane's work was replaced by a newer ruling, and archiving it is optional.",
+  "home": "step idle-lane-archive",
+  "id": "archive-nine-lanes-override",
+  "kind": "decision",
+  "n": 973,
+  "options": [
+    {
+      "gain": "One typed line archives all nine finished lanes.",
+      "how": "Type `override 15m` in the coordinator's chat; the coordinator archives the seven lanes you named and the two whose branches are on main.",
+      "id": "override-15m",
+      "key": "a",
+      "label": "Type `override 15m` in the coordinator's chat (recommended)",
+      "links": [
+        {
+          "label": "Coordinator's chat",
+          "url": "https://claude.ai/code/session_013NEJL1gw6EdrSyvHkTUEx6"
+        }
+      ],
+      "lose": "For 15 minutes the coordinator may do any act the guards would refuse, not only the archives."
+    },
+    {
+      "gain": "Only the named archives are allowed.",
+      "how": "Type `override` once for each archive, at the moment the coordinator tries it.",
+      "id": "override-each",
+      "key": "b",
+      "label": "Type `override` once for each archive",
+      "links": [
+        {
+          "label": "Coordinator's chat",
+          "url": "https://claude.ai/code/session_013NEJL1gw6EdrSyvHkTUEx6"
+        }
+      ],
+      "lose": "Up to nine typed lines, and the lanes stay idle until you type them."
+    }
+  ],
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "a",
+  "ref": "coordinator relay 14:17 CST Nov 18: your 14:12 CST permission to archive seven lanes",
+  "repo": "shivinate7/claude-settings",
+  "short": "Type override to archive nine lanes?",
+  "shown": [
+    {
+      "id": "override-15m",
+      "key": "a",
+      "label": "Type `override 15m` in the coordinator's chat (recommended)"
+    },
+    {
+      "id": "override-each",
+      "key": "b",
+      "label": "Type `override` once for each archive"
+    }
+  ],
+  "status": "open",
+  "title": "Will you type an override so the coordinator can archive nine finished lane sessions?",
+  "why": "You already gave your word in chat, but the hook reads only a typed override; a is one line, b allows only the archives. Recommended by triage, not owner-typed."
+}
