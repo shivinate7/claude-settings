@@ -1,0 +1,14 @@
+{
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "updatedAt": "2026-11-18T10:23:47-06:00",
+ "source": "triage 11, own mistake; owner frustration relayed by the consultant 10:22 CST Nov 18",
+ "id": "guard-question-checks-past-rulings",
+ "title": "Posting an owner question first reads the decision record for a past ruling on the same topic",
+ "why": "Item 965 (round-1 model) was posted although the owner ruled Haiku at 19:45 CST Nov 15, and it gave the wrong date; the consultant caught it at 10:21 CST Nov 18.",
+ "note": "Own mistake. Guard idea: a page item whose Based-on (ruling) cites a time must match a record in docs/decisions or the page answers; an item with no ruling line searches decision titles for its home. Next: a lane brief with a test-author first; mover: the coordinator's say-so."
+}

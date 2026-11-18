@@ -1,0 +1,14 @@
+{
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "updatedAt": "2026-11-18T10:23:47-06:00",
+ "source": "triage 11, own mistake; owner frustration relayed by the consultant 10:22 CST Nov 18",
+ "id": "guard-send-message-no-placeholder",
+ "title": "A session message with a placeholder or a future time is refused before it is sent",
+ "why": "Triage 11 sent messages stamped ahead of the clock twice on Nov 17 and 18.",
+ "note": "Own mistake, 09:15 CST Nov 18. Guard: refuse a send_message whose body holds a bracketed stamp later than now-central, or text like HH:MM. Next: a lane brief with a test-author first (two cases: a future stamp and a placeholder both refuse); mover: whoever takes the lane after the coordinator's say-so."
+}

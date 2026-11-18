@@ -1,0 +1,14 @@
+{
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "updatedAt": "2026-11-18T10:23:47-06:00",
+ "source": "triage 11, own mistake; owner frustration relayed by the consultant 10:22 CST Nov 18",
+ "id": "guard-waits-on-pr-read-rest",
+ "title": "A written claim that work waits on a named PR is backed by a REST read of that PR",
+ "why": "Triage 11 wrote that the J notes waited on PR 3569, which had merged at 10:16 CST Nov 17.",
+ "note": "Own mistake, in the README of plans/outbox-drain-2026-11-17, since fixed. Guard idea: a record that says it waits on a PR carries that PR's REST state and a time. Next: decide whether rule verification-counts-from-rest already covers it; if not, a lane brief with a test-author first; mover: the coordinator's say-so."
+}
