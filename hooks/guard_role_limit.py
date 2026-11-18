@@ -3,10 +3,13 @@
 guard.py is the only entry point, and it runs these checks in its fixed order. Other files reach these names
 through `guard`. The one rule here is goal-text-cites-role-ruling (decision goal-text-cites-role-ruling).
 
-The send_message tool and SendMessage carry a message. The rule refuses a sentence that holds a role, then cannot,
-can't, can not, may not or must not, then merge, push or mark ready, unless the same sentence or the same line names
-a ruling or a decision id. A limit in double quotes, a blockquote, a code span or a closed fenced block is quoted
-text, and passes. A quote, code span or fence that never closes is plain text.
+The send_message tool and SendMessage carry a message. The Agent tool and create_session carry a prompt. The rule
+refuses a sentence that holds a role, then cannot, can't, can not, won't, may not, must not or isn't allowed to, then
+merge, push or mark ready, unless the same sentence or the same line names a ruling or a decision id. A role is a
+named session (triage, a runner with a number, a lane with a number or a slug, and the plural lanes) or the second
+person: the text goes to another session, so "you cannot merge" limits its reader. A limit in double or single
+quotes, a blockquote, a code span or a closed fenced block is quoted text, and passes. A quote, code span or fence
+that never closes is plain text. A cite is any hyphenated slug in backticks, whether or not a record holds it.
 Cost: one pass over the message text, with no process, no file and no clock. It never raises: a message that is not
 a string passes.
 """
@@ -15,15 +18,20 @@ import re
 from guard_merge import BRIEF_TOOL
 from shared_names import opens_fence
 
-ROLE_LIMIT_TOOLS = (BRIEF_TOOL, "SendMessage")
+CREATE_SESSION_TOOL = "mcp__claude-code-remote__create_session"
+# Each tool and the field that carries its text: a send holds a message, a spawn or a session start holds a prompt.
+ROLE_LIMIT_FIELDS = {BRIEF_TOOL: "message", "SendMessage": "message", "Agent": "prompt", CREATE_SESSION_TOOL: "prompt"}
+ROLE_LIMIT_TOOLS = tuple(ROLE_LIMIT_FIELDS)
 QUOTED = "\x01"  # stands in for each character of quoted text, so no limit or sentence end is read inside it
 
-_ROLE = r"(?:triage|(?:batch )?runner \d+|batch runner|coordinator|lane|consultant|arbiter)"
-_NOT = r"(?:cannot|can['’]t|can not|may not|must not)"
+# An id is a hyphenated slug. A lane is named by a number or a slug, and a cite is a slug.
+_SLUG = r"[a-z0-9]+(?:-[a-z0-9]+)+"
+_ROLE = (r"(?:triage(?: session)?|(?:(?:batch )?runner #?\d+)|batch runner|coordinator|lanes?(?: (?:\d+|%s))?"
+         r"|consultant|arbiter|you)" % _SLUG)
+_NOT = r"(?:cannot|can['’]t|can not|won['’]t|may not|must not|(?:is|are)(?: not|n['’]t) allowed to)"
 _ACT = r"(?:merge|push|mark\s+(?:(?:it|them|the|its|a|any|prs?|pull|requests?|#?\d+)\s+)*ready)"
 LIMIT = re.compile(r"\b%s\s+%s\s+%s\b" % (_ROLE, _NOT, _ACT), re.IGNORECASE)
-# A cite: an id in backticks, or the word ruling or decision with an id after it. An id is a hyphenated slug.
-_SLUG = r"[a-z0-9]+(?:-[a-z0-9]+)+"
+# A cite: an id in backticks, or the word ruling or decision with an id after it.
 CITE = re.compile(r"`%s`|\b(?:ruling|decision)\s+`?%s" % (_SLUG, _SLUG), re.IGNORECASE)
 _SENTENCE_END = re.compile(r"[.!?]+(?=\s|\Z)|\n[ \t]*\n")
 
@@ -31,7 +39,7 @@ ROLE_LIMIT_REASON = (
     "This message states a limit on a session's role and cites no ruling or decision for it. A limit with no source "
     "can be wrong, and a session that reads it may drop work its own rulings let it do. Name the ruling or decision "
     "the limit rests on in the same sentence or on the same line: a decision id in backticks, or the word ruling or "
-    "decision and then its id. Or leave the limit out. To pass on someone's words, put them in double quotes or a "
+    "decision and then its id. Or leave the limit out. To pass on someone's words, put them in quotes or a "
     "code span. Rule goal-text-cites-role-ruling (decision goal-text-cites-role-ruling, a limit on a session's role "
     "cites its ruling).")
 
@@ -42,8 +50,12 @@ def _blank(chars, start, end):
             chars[index] = QUOTED
 
 
+_SINGLE_CLOSER = re.compile(r"(?<=\S)['’](?!\w)")
+
+
 def _mask_inline(line, offset, chars):
-    """Mask the closed code spans and closed double quotes of one line. An opener with no closer on the line is text."""
+    """Mask the closed code spans and closed quotes of one line. An opener with no closer on the line is text. A single
+    quote opens only where no word character comes before it, so an apostrophe in don't or runner 10's opens none."""
     i = 0
     while i < len(line):
         c = line[i]
@@ -59,6 +71,9 @@ def _mask_inline(line, offset, chars):
         elif c in '"“':
             close = line.find('"' if c == '"' else "”", i + 1)
             end = close + 1 if close > 0 else -1
+        elif c in "'‘" and not (i and (line[i - 1].isalnum() or line[i - 1] == "_")):
+            closer = _SINGLE_CLOSER.search(line, i + 1)
+            end = closer.end() if closer else -1
         if end > 0:
             _blank(chars, offset + i, offset + end)
             i = end
@@ -109,10 +124,10 @@ def _line_span(text, start, end):
 
 
 def role_limit_hit(tool: str, tool_input):
-    """The matched text of the first uncited limit on a role in this send, else None."""
+    """The matched text of the first uncited limit on a role in this send or spawn, else None."""
     if tool not in ROLE_LIMIT_TOOLS or not isinstance(tool_input, dict):
         return None
-    text = tool_input.get("message")
+    text = tool_input.get(ROLE_LIMIT_FIELDS[tool])
     if not isinstance(text, str) or not text:
         return None
     masked = _masked(text)
