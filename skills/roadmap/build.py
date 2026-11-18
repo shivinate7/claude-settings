@@ -971,7 +971,7 @@ def ledger_read(raw):
     row for a number wins."""
     skipped = []
     if not isinstance(raw, dict):
-        return {}, None, "unknown (the live file has no ledger: the acts were not read)", skipped
+        return {}, None, "unknown (the live file has no ledger, so no act is known)", skipped
     at = raw.get("readAt")
     if zoned_time(at) is None:
         return {}, None, "unknown (the ledger's readAt is not an ISO time with a zone: %r)" % (at,), skipped
