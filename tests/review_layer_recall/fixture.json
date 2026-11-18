@@ -1,0 +1,99 @@
+{
+  "about": "Eval fixture for the review-layer recall scorer. Incidents are reverts and red-main reverts on main. Each names the PR the revert undid, the review layer that should have caught it, and a one-line answer key. Controls are merged PRs that no revert names. The layer is the author's judgment from the revert message, the changed files and the PR title. It is not a recorded review verdict.",
+  "read": "2026-11-17 CST. Reverts from git log on main (subjects and 'This reverts commit' lines). PRs from REST commits/<sha>/pulls or pulls/<n>. Controls from REST pulls/<n>, with commits checked against every reverted commit.",
+  "layers": ["reviewer", "refuter", "fix_verifier", "design_reviewer"],
+  "incidents": [
+    {
+      "pr": 38,
+      "reverted": "215a236815",
+      "reverts": ["edf661032a"],
+      "layer": "reviewer",
+      "basis": "revert subject and changed files",
+      "answer_key": "A PR that dropped the counts from the verification rule and fixed the report gate was partly reverted in CLAUDE.md; the reviewer should check that the rule edit and the gate change agree."
+    },
+    {
+      "pr": 512,
+      "reverted": "7f41368639",
+      "reverts": ["18ec5d71c0"],
+      "layer": "reviewer",
+      "basis": "revert message",
+      "answer_key": "A shared is_git_work_tree import broke the mutant trees in hooks/mutate_guard.py and the Windows CI scope flag; the reviewer should check a shared import against the mutant copy list and the Windows scope."
+    },
+    {
+      "pr": 690,
+      "reverted": "a34066dbe2",
+      "reverts": ["8055ce7b7e"],
+      "layer": "reviewer",
+      "basis": "revert subject and changed files",
+      "answer_key": "A five-line teardown change in lint/test_check_mod_versions.py, meant to stop a git gc race, was reverted; the reviewer should check that the change fixes the race it names."
+    },
+    {
+      "pr": 936,
+      "reverted": "b8a0b5bd18",
+      "reverts": ["9e25c54728"],
+      "layer": "reviewer",
+      "basis": "revert message",
+      "answer_key": "A WIP commit deleted most of the builder's agent-role-model clause with no explanation; the reviewer should flag a deletion that the commit does not explain."
+    },
+    {
+      "pr": 1082,
+      "reverted": "6a24bef61b",
+      "reverts": ["7c19b3145a"],
+      "layer": "reviewer",
+      "basis": "revert subject and changed files",
+      "answer_key": "A 13-line test in hooks/test_guard.py that allowed a generator chain over a staged page was reverted; the reviewer should check the test's expected verdict against the guard rule."
+    },
+    {
+      "pr": 2236,
+      "reverted": "450b737bb",
+      "reverts": ["6c184ad22f"],
+      "layer": "fix_verifier",
+      "basis": "revert message",
+      "answer_key": "A scan-comment fix's length and strength claim was false, and its fix check found it; the fix verifier should check each claim in a fix before the merge."
+    },
+    {
+      "pr": 3389,
+      "reverted": "08ce22cc46",
+      "reverts": ["6253b146a2", "2173f4d212", "bb1eec5fb1"],
+      "layer": "reviewer",
+      "basis": "revert subject and changed files",
+      "answer_key": "A default permission-mode change to auto, in settings and in the install script, rode in a PR about launcher role files; the reviewer should flag the default as out of scope."
+    },
+    {
+      "pr": 3435,
+      "reverted": "2d33883009",
+      "reverts": ["38082ba61f"],
+      "layer": "refuter",
+      "basis": "revert message",
+      "answer_key": "The touchWidths wording edited lines that open #2716 and #2717 also edit; the refuter should test the premise that no other open lane owns those lines."
+    },
+    {
+      "pr": 3542,
+      "reverted": null,
+      "reverts": ["91ab71af93"],
+      "layer": "reviewer",
+      "basis": "revert message",
+      "answer_key": "Adding merge --ready to permissions.allow turned the CloudAllow test red on three CI jobs; the reviewer should run the allow-list change against CloudAllow."
+    },
+    {
+      "pr": 3596,
+      "reverted": null,
+      "reverts": ["c868f93daf", "695ee9aeaf"],
+      "layer": "reviewer",
+      "basis": "revert message and PR title",
+      "answer_key": "An auto-mode allow for a lane's own merge turned main red, and its test file had to be restored; the reviewer should check the allow rule against hooks/test_auto_mode_allow.py before the merge."
+    }
+  ],
+  "controls": [
+    {"pr": 2817, "merge_sha": "bdb344526a4d243ca4c9d295a39b9a9be80d9619", "merged_at": "2026-11-16T21:04:44Z", "title": "merge --idle-lanes flags a lane whose handoff is not on the record branch"},
+    {"pr": 2848, "merge_sha": "a752de196d9a61d1cc86f1def335c6d1ca37e32a", "merged_at": "2026-11-17T21:48:32Z", "title": "Archiving scope: whoever starts a session archives it; a lane pushes its handoff to the record branch"},
+    {"pr": 2917, "merge_sha": "1d611b6f051c675d8c3680f47691719a4dcd219e", "merged_at": "2026-11-16T20:04:14Z", "title": "A lane may push its own handoff file to the record branch"},
+    {"pr": 3293, "merge_sha": "72220a23af10393fceab5bf7602f4a0083eebc13", "merged_at": "2026-11-16T15:45:52Z", "title": "A builder resolves a test merge conflict; a check proves no test was lost"},
+    {"pr": 3362, "merge_sha": "0585146e3567115b681f59aacdce743997b11811", "merged_at": "2026-11-16T15:15:01Z", "title": "After a compaction, refuse writes and replies until an Audit: agent has run"},
+    {"pr": 3449, "merge_sha": "ce341560d954a1ab2ebf9773d1ad6c1ea7ea7147", "merged_at": "2026-11-16T21:29:35Z", "title": "Writer lists comment threads awaiting its reply at each wake"},
+    {"pr": 3530, "merge_sha": "107b66764211f5c8b53d280f65880dc1a8e0b59f", "merged_at": "2026-11-16T18:38:15Z", "title": "Export keeps all six waiting collections append-only"},
+    {"pr": 3536, "merge_sha": "d80b387908ed8d05dd7639651eeae1664c642936", "merged_at": "2026-11-16T17:39:01Z", "title": "Saved comment: a cut owner ends in an ellipsis"},
+    {"pr": 3550, "merge_sha": "92ca82f302cd3cb52a138f793557094504982c3d", "merged_at": "2026-11-17T22:00:51Z", "title": "Cloud refresh switches a whole install generation by one link rename"},
+    {"pr": 3553, "merge_sha": "a1d216e78b76cad337ab285924ad01f96f09a11e", "merged_at": "2026-11-16T20:23:42Z", "title": "A can't claim needs a probe"}
+  ]
+}
