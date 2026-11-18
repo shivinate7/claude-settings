@@ -1,14 +1,14 @@
 {
  "id": "page-artifacts-section-newest-first",
- "title": "Question: which 'artifacts' section of the page should sort newest to oldest, and does an earlier step already claim it",
+ "title": "Inside each section of the waiting page (Blocking, Whenever, Answered and the rest), items sort newest first",
  "status": "todo",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
  "owner": "coordinator",
  "blockedBy": [],
- "why": "Owner 14:40 CST Nov 18, in session chat: 'why is the artifacts sections not sub sorted by newest to oldest? isn't that part of the work this artifact had done to it?'",
- "source": "owner session chat 2026-11-18T14:42:50-06:00",
- "note": "Triage 11 could not find a section named Artifacts in skills/waiting-page/page.html (it has newest-first order on tiers, Answered, rulings, asks). Asked the owner which section. Do not build until named.",
- "updatedAt": "2026-11-18T14:42:50-06:00"
+ "why": "Owner 14:49 CST Nov 18, in session chat: the sections he means are the ones on the page, such as Answered and Blocking; their sub-sections should be sorted by newness. He asked whether that was part of the page's earlier work.",
+ "source": "owner session chat 14:40 and 14:49 CST Nov 18",
+ "note": "Page rule today (skill waiting-page; page.html line 1394, owner ruling page-newest-first, 2026-11-12 21:37 CST): newest first inside a tier, but rank leads, and inside a tier new items come before seen ones. Measured 14:50 CST from triage's copy of the page items (not the live page): Blocking has 7 open items, none ranked; Whenever has 25 open, 2 ranked (n 240 added Nov 4, n 324 added Nov 7), so those two sit above newer items. Seen-versus-new order also overrides date. Not measured: how the Answered section orders its groups on the live page. Options for the owner: clear the two ranks (triage can do it); or drop rank and the new-first split so each section is pure newest first (page change, designer first). Triage asked the owner in chat.",
+ "updatedAt": "2026-11-18T14:50:16-06:00"
 }
