@@ -1,11 +1,11 @@
 {
   "title": "A resumed or restarted standing session has a merge role, so it can merge its own PR",
   "why": "Measured 15:00 CST Nov 17 in triage 11's container: no merge role record exists (~/.claude/state/merge-role.json absent), so merge --confirm refuses 'this session may not merge'. Recording it by hand was denied by the auto-mode classifier.",
-  "note": "Merged: pull request 3639 by REST (merged 21:49:30 CST Nov 17, state closed and merged true, head 16a8d0355c). Merged by triage 11 under the standing role and the owner's 19:05 CST grant, after round 1 (sonnet, head 6c48fd4994) and two fix checks (sonnet, heads 32f4a31d37 and 16a8d0355c), lane lint PASS on the live head (438.5 s) and a green run on main before it (a9b6f78f3a). The afterMerge step `bash merge/install_from_main.sh` failed with exit 127 because it ran from the roadmap-branch checkout, which has no merge/ folder; the merge landed and stays. Records on main: session-tiers bullet, debt new-standing-first-start-no-role, note standing-mirror-fetch-unread. Open: whether a brand-new standing session's first start records a role (debt, unverified). The red case for the real hook is on lane/verify-skill-per-repo-tests (step verify-skill-per-repo).",
+  "note": "Merged: pull request 3639 by REST (merged 21:49:30 CST Nov 17, state closed and merged true, head 16a8d0355c). Merged by triage 11 under the standing role and the owner's 19:05 CST grant, after round 1 (sonnet, head 6c48fd4994) and two fix checks (sonnet, heads 32f4a31d37 and 16a8d0355c), lane lint PASS on the live head (438.5 s) and a green run on main before it (a9b6f78f3a). The afterMerge step `bash merge/install_from_main.sh` failed with exit 127 because it ran from the roadmap-branch checkout, which has no merge/ folder; the merge landed and stays. Records on main: session-tiers bullet, debt new-standing-first-start-no-role, note standing-mirror-fetch-unread. Open: whether a brand-new standing session's first start records a role (debt, unverified). The red case for the real hook is on lane/verify-skill-per-repo-tests (step verify-skill-per-repo). Main went red from this merge (run 44233095720, job install.sh checkout-detection suite: caseM10, caseM11, caseM18 counted one WARN, the intended roadmap WARN made two). Fix: PR 3644 (three test lines in hooks/test_install_src.sh), merged 00:06:57 CST Nov 18, merge commit 3c2d7cbbcc3e, read from REST (coordinator relay 00:07 CST). Main's push run 44248959763 on that commit was queued then; main reads red until it finishes green.",
   "order": 947,
   "phase": "now",
   "owner": "coordinator",
   "lane": "",
   "status": "done",
-  "updatedAt": "2026-11-17T21:50:53-06:00"
+  "updatedAt": "2026-11-18T00:07:49-06:00"
 }
