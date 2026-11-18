@@ -1019,6 +1019,63 @@ add("source control: an empty list keeps the builder's scope line through the sa
     fn=empty_list_check)
 
 
+# CWD LAYOUT: the hook fills the note rules from the layout of the payload's cwd, not from this checkout. A cwd with
+# no extras file gets the legacy old-notes path. A cwd whose layout does not read gets no note line at all.
+NO_EXTRAS_OLD_NOTES = "debts/notes.md"  # the old notes file of a repo with no extras file (the legacy path)
+CHECKOUT_OLD_NOTES = "docs/debts/notes.md"  # this checkout's old notes file: a cwd's brief never names it
+UNREADABLE_EXTRAS = '{"rolled-out": true, "kinds": {"notes": {"path": "docs/elsewhere"}}}\n'  # moves a layout kind
+
+
+def note_lines(text):
+    """The lines of the brief that carry a note rule: the note form, the note file name, or the old-file rule."""
+    return [line for line in text.split("\n") if NOTE_FORM in line or NOTE_FILE in line or "deletes only" in line]
+
+
+def no_extras_old_file_check():
+    """A cwd with no extras file: the brief names the old notes file at debts/notes.md, and never this checkout's
+    docs/debts/notes.md."""
+    text, problem = brief_in(repo_tree())
+    if problem:
+        return problem
+    scope = scope_check("builder")(text)  # scope before the subject
+    if scope:
+        return scope
+    if not same_line(text, "file " + NO_EXTRAS_OLD_NOTES + " takes", "deletes only"):
+        return "no line of the brief holds 'file %s takes' and 'deletes only'" % NO_EXTRAS_OLD_NOTES
+    if CHECKOUT_OLD_NOTES in text:
+        return "the brief names %s, this checkout's old notes file, not the cwd's" % CHECKOUT_OLD_NOTES
+    return None
+
+
+def unreadable_layout_check():
+    """A cwd whose extras file makes layout.kinds() raise: the brief gets no note line. The fixture is shown to make
+    layout.kinds() raise first, so the case cannot pass on a fixture that reads fine."""
+    root = repo_tree(extras=UNREADABLE_EXTRAS)
+    sys.path.append(LINT_DIR)
+    import layout  # noqa: E402  the one home of where records live (lint/layout.py)
+    try:
+        layout.kinds(root)
+    except layout.LayoutError:
+        pass
+    else:
+        return "the fixture does not make layout.kinds raise, so the case would prove nothing"
+    text, problem = brief_in(root)
+    if problem:
+        return problem
+    scope = scope_check("builder")(text)  # scope before the subject
+    if scope:
+        return scope
+    lines = note_lines(text)
+    if lines:
+        return "a cwd whose layout does not read gets %d note line(s), want none: %r" % (len(lines), lines[0][:90])
+    return None
+
+
+add("cwd layout: a cwd with no extras file gets the legacy old notes path, not this checkout's", "custom",
+    fn=no_extras_old_file_check)
+add("cwd layout: a cwd whose layout does not read gets no note line", "custom", fn=unreadable_layout_check)
+
+
 def main():
     try:
         return run_cases()
