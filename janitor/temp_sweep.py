@@ -10,7 +10,7 @@ folder's own mtime. No transcript, an unreadable one, or a future mtime means ke
 process is live (`<config dir>/sessions/*.json`) keeps its folder, and so does any folder when the
 sessions folder or the session reader (hooks/guard_core.py) cannot be read. The step touches only
 direct children of `<root>/<project>/`; a link is never followed or removed. `<Temp>` is TEMP, else
-LOCALAPPDATA/Temp. `<base>` is tempfile.gettempdir() and the fixed `/tmp` (a Mac's $TMPDIR is not
+LOCALAPPDATA/Temp, read on Windows only. `<base>` is tempfile.gettempdir() and the fixed `/tmp` (a Mac's $TMPDIR is not
 `/tmp`, yet Claude Code also keeps scratch there). The POSIX root is the base's child `claude-<uid>`
 by exact name, so `claude-<uid>-old` is never reached. One folder reached by two bases counts once.
 
@@ -43,6 +43,10 @@ def _is_link(path):
 
 
 def temp_claude_root():
+    """The Windows root, or None off Windows: TEMP and LOCALAPPDATA name a Windows folder, so a POSIX
+    run never reads them."""
+    if os.name != "nt":
+        return None
     temp = os.environ.get("TEMP")
     if not temp and os.environ.get("LOCALAPPDATA"):
         temp = os.path.join(os.environ["LOCALAPPDATA"], "Temp")
