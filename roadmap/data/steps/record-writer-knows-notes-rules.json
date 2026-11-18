@@ -1,14 +1,14 @@
 {
  "id": "record-writer-knows-notes-rules",
  "title": "The agent that writes notes knows the notes rules, and a pre-copy check runs the notes lints, so a notes PR does not fail lane lint on wording",
- "status": "todo",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
- "owner": "triage",
+ "owner": "coordinator",
  "blockedBy": [],
  "why": "Owner, 11:01 CST Nov 18 (relayed by the consultant): PR 3548's five notes had to be split into one file each under docs/notes by a record-writer; it would have been better if what built them already knew the rule, so lint fails less. My own 342 J notes failed runner 10's lane lint four times (slug form and the retired name 'subagent'; glossary names in file names, 'owner's word' and 36 STE hits; one stale cite) before PR 3647 merged 10:56:50 CST Nov 18.",
  "source": "owner relay 11:01 CST Nov 18; runner 10 relay 10:57 CST Nov 18 (its tip: run check_glossary, ste_lint and stale_cites on a notes folder before it is copied)",
- "note": "Not built. Prior work searched 11:01 CST: agents/record-writer.md on main says nothing about notes or their lints; steps notes-new-only-layout and notes-slug-unique cover layout and slug uniqueness, not what a writer must know. Done when: (1) the record-writer agent file and the brief template say: one file per note, first line '- <file name>: text', no glossary avoided names in file names, no retired names, STE wording; (2) one named command runs check_glossary, ste_lint and stale_cites on a notes folder before it is copied or pushed. Next: a lane brief with a test-author first (a notes file with two bullets, a banned glossary word in a file name, and 'subagent' each fail the pre-copy command); mover: the coordinator's say-so. 11:04 CST Nov 18: owner (relay 11:04 CST): PR 3548 predates the one-file-per-note rule (PR 3569 merged 10:16 CST Nov 17), so its lane could not have known; the consultant adds one line to the instructions every agent gets, and the owner says ensure it is done MECHANICALLY. So a prose line is the fallback only. Mechanical part: a check on a notes write or copy (a file under docs/notes that is not one bullet with the '- <file name>:' first line fails before it is pushed), with one home: decision notes-merge-union (one file per note) and the existing notes checks in hooks/test_feedback_inbox.py; extend them, build no second check.",
- "updatedAt": "2026-11-18T11:04:29-06:00"
+ "note": "Not built. Prior work searched 11:01 CST: agents/record-writer.md on main says nothing about notes or their lints; steps notes-new-only-layout and notes-slug-unique cover layout and slug uniqueness, not what a writer must know. Done when: (1) the record-writer agent file and the brief template say: one file per note, first line '- <file name>: text', no glossary avoided names in file names, no retired names, STE wording; (2) one named command runs check_glossary, ste_lint and stale_cites on a notes folder before it is copied or pushed. Next: a lane brief with a test-author first (a notes file with two bullets, a banned glossary word in a file name, and 'subagent' each fail the pre-copy command); mover: the coordinator's say-so. 11:04 CST Nov 18: owner (relay 11:04 CST): PR 3548 predates the one-file-per-note rule (PR 3569 merged 10:16 CST Nov 17), so its lane could not have known; the consultant adds one ... 11:39 CST Nov 18: in build, coordinator (relay 11:37 CST): test-author first, branch notes-rules-mechanical; it first checks whether an existing notes check already enforces the one-line form and stops if so.",
+ "updatedAt": "2026-11-18T11:38:14-06:00"
 }
