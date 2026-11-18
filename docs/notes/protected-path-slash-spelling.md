@@ -1,1 +1,1 @@
-- protected-path-slash-spelling: an entry spelled `sub//deep/` is not normalised and protects nothing; one entry with no why drops the whole list, extras-file protection included (documented fail-open). Decision: protected-path.
+- protected-path-slash-spelling: an entry spelled `sub//deep/` is not normalised and protects nothing; one entry with no why drops the whole list, extras-file protection included (documented fail-open). Decision: protected-path. Seen: 2026-11-18 x1
