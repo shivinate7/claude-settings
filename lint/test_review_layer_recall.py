@@ -17,6 +17,7 @@ file is a JSON list of {"pr": int, "layer": str, "verdict": "PASS" | "FAIL" | "P
 layer on an incident's PR counts as caught. A PARTIAL row, a null, or any other value makes its layer
 unknown, never a miss, and a row never counts for another layer. An incident labelled "unknown" or "ci" counts
 in n.incidents and in no layer's of. Cost stays unknown: the review record stores no cost.
+With --line the scorer prints one text line of the same per-layer recall instead of the JSON report.
 """
 import json
 import os
@@ -53,17 +54,20 @@ def load_fixture():
         return json.load(fh)
 
 
-def run_scorer(test, run, rows, fixture_path):
-    """Runs the scorer on one fixture and the verdict rows, and returns its parsed report. The one home of a scorer run."""
+def run_scorer(test, run, rows, fixture_path, line=False):
+    """Runs the scorer on one fixture and the verdict rows, and returns its parsed report, or with line=True its stdout text. The one home of a scorer run."""
     if not os.path.isfile(SCORER):
         test.fail(SCORER_MISSING)
     verdicts = os.path.join(run, "verdicts.json")
     with open(verdicts, "w", encoding="utf-8") as fh:
         json.dump(rows, fh)
+    command = [sys.executable, SCORER, "--fixture", fixture_path, "--findings", verdicts]
     proc = subprocess.run(
-        [sys.executable, SCORER, "--fixture", fixture_path, "--findings", verdicts],
+        command + (["--line"] if line else []),
         capture_output=True, text=True, timeout=SCORER_TIMEOUT, cwd=ROOT, env=clean_env())
     test.assertEqual(proc.returncode, 0, "scorer exited %d" % proc.returncode)
+    if line:
+        return proc.stdout
     try:
         return json.loads(proc.stdout)
     except ValueError:
@@ -249,11 +253,11 @@ class ScorerRules(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.run, ignore_errors=True)
 
-    def score(self, incidents, rows, name):
+    def score(self, incidents, rows, name, line=False):
         path = os.path.join(self.run, name + ".json")
         with open(path, "w", encoding="utf-8") as fh:
             json.dump({"about": "inline scorer case", "layers": list(LAYERS), "incidents": incidents, "controls": []}, fh)
-        return run_scorer(self, self.run, rows, path)
+        return run_scorer(self, self.run, rows, path, line=line)
 
     def test_a_partly_covered_layer_reads_unknown_not_measured(self):
         incidents = [incident(101, "reviewer"), incident(102, "reviewer"), incident(103, "reviewer")]
@@ -319,6 +323,16 @@ class ScorerRules(unittest.TestCase):
         self.assertEqual(recall["of"], 3, "reviewer's of is not its three incidents")
         self.assertEqual(recall["status"], "measured", "a fully covered layer with FAILs reads %r, not measured" % (recall,))
         self.assertEqual(recall["caught"], 2, "a fully covered layer with two FAILs reads %r, not caught 2" % (recall,))
+
+    def test_line_flag_prints_one_line_and_a_layer_with_no_verdict_rows_reads_unknown(self):
+        # Control in the same run: reviewer has a FAIL row, so it reads measured 1/1 on the line.
+        incidents = [incident(701, "reviewer"), incident(702, "refuter")]
+        rows = [{"pr": 701, "layer": "reviewer", "verdict": "FAIL"}]
+        text = self.score(incidents, rows, "line-flag", line=True)
+        lines = text.splitlines()
+        self.assertEqual(len(lines), 1, "--line printed %d lines, not one: %r" % (len(lines), text))
+        self.assertIn("reviewer 1/1", lines[0], "--line does not read the measured reviewer layer as 1/1: %r" % (lines[0],))
+        self.assertIn("refuter unknown/1", lines[0], "--line does not read the refuter layer with no verdict rows as unknown/1: %r" % (lines[0],))
 
 
 if __name__ == "__main__":
