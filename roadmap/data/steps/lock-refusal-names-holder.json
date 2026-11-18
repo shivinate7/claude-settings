@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Owner 14:52 CST Nov 18 (relayed by batch runner 10): 'it should print the holder'. The consultant gave it to runner 10 at 14:47 CST.",
  "source": "batch runner 10 relay (stamped 15:01 CST, read at 14:59 CST); owner 14:52 CST Nov 18",
- "note": "Sites: merge/merge.py, two refusals (about lines 982 and 1090 on main); the refusal at about line 861 already names the holder through holder_text. Red tests pushed on branch lock-refusal-names-holder (59e985f538); a builder is running. Decision merge-lock needs its Held bullet updated. Guard or check: yes (a refusal text of the merge tool). Not read by triage.",
- "updatedAt": "2026-11-18T15:00:01-06:00"
+ "note": "Sites: merge/merge.py, two refusals (about lines 982 and 1090 on main); the refusal at about line 861 already names the holder through holder_text. Red tests pushed on branch lock-refusal-names-holder (59e985f538); a builder is running. Decision merge-lock needs its Held bullet updated. Guard or check: yes (a refusal text of the merge tool). Not read by triage. Runner 10 notes on PR 3674 (head 563ee82f9b), relayed 16:22 CST Nov 18, not checked by triage; non-blocking, no action from the runner: (1) the `own` argument at merge/merge.py:1104 (GhLock.acquire) has no test; (2) the Held bullet in docs/decisions/merge-lock.md does not say that a failed message fetch gives plain text.",
+ "updatedAt": "2026-11-18T16:22:02-06:00"
 }
