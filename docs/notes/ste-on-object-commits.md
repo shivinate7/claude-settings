@@ -1,0 +1,1 @@
+- ste-on-object-commits: docs committed through git object commands (hash-object, commit-tree) skip the STE lint until the lane lint; a 38-word sentence got that far. Note: plumbing commits are rare in normal work, and the lane lint still caught it. Related step role-guard-plumbing-bypass.

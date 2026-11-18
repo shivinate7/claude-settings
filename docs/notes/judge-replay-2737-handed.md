@@ -1,0 +1,1 @@
+- judge-replay-2737-handed: judge-replay-corpus 17:03 CST Nov 12: Coordinator 17:02 CST Nov 12: #2737 handed to runner 10, head c7bd316f9d (independent of the #2733 chain). Lane names as unruled: the judge-replay retry, the 20-item cap, the judging/mark split. Triage asked the lane for the question lines before posting.

@@ -54,6 +54,7 @@ class Launch(unittest.TestCase):
         self.release("v1")
         sh(self.work, "git", "remote", "add", "origin", self.bare, env=self.env)
         sh(self.work, "git", "push", "-q", "origin", "main", env=self.env)
+        sh(self.work, "git", "push", "-q", "origin", "main:refs/heads/stable", env=self.env)
         self.co = self.clone("co")
 
     def rewrite(self, target):
@@ -64,14 +65,18 @@ class Launch(unittest.TestCase):
         # Signing is on, as in a real checkout, so the import above is what keeps these commits off the signer.
         put(self.cfg, f'[user]\n\tname = t\n\temail = t@t\n[commit]\n\tgpgsign = true\n[tag]\n\tgpgsign = true\n[url "{target.replace(os.sep, "/")}"]\n\tinsteadOf = {URL}\n')
 
-    def release(self, tag):
+    def release(self, tag, stable=True):
         # The stub prints its tag and, when ARGS_FILE is set, records the arguments it received.
+        # stable=True moves origin's stable with main, so a case that expects the released tag still
+        # checks the head the launcher fetches; stable=False leaves stable where it was.
         put(os.path.join(self.work, "merge", "merge.py"), "import os, sys\nprint('RAN %s')\n"
             "f = os.environ.get('ARGS_FILE')\nif f: open(f, 'w').write(repr(sys.argv[1:]))\n" % tag)
         sh(self.work, "git", "add", "-A", env=self.env)
         sh(self.work, "git", "commit", "-q", "-m", tag, env=self.env)
         if tag != "v1":
             sh(self.work, "git", "push", "-q", "origin", "main", env=self.env)
+            if stable:
+                sh(self.work, "git", "push", "-q", "origin", "main:refs/heads/stable", env=self.env)
 
     def clone(self, name):
         d = os.path.join(self.t, name)
@@ -127,6 +132,48 @@ class Launch(unittest.TestCase):
         self.assertEqual((rc, out.strip()), (0, "RAN v2"), err)
         self.assertIn(self.head(self.work)[:12], err)  # prints the SHA it ran
         self.assertNotIn("WARNING", err)
+
+    def test_runs_origin_stable_not_main(self):
+        # The launcher runs the stable branch, the commit sessions install from (restart-plan R42 part 2).
+        v1 = self.head(self.work)  # setUp pushed stable at v1
+        self.release("v2", stable=False)  # main moves on; stable stays at v1
+        self.assertEqual(sh(self.bare, "git", "rev-parse", "refs/heads/stable"), v1, "FIXTURE stable is not v1")
+        rc, out, err = self.merge()
+        self.assertEqual((rc, out.strip()), (0, "RAN v1"), err)
+        self.assertIn(v1[:12], err)  # prints the SHA of stable it ran
+
+    def drop_stable(self):
+        """Origin holds no stable branch. Returns after proving it: the launcher's fetch of stable finds no ref."""
+        sh(self.bare, "git", "update-ref", "-d", "refs/heads/stable", env=self.env)
+        probe = subprocess.run(["git", "rev-parse", "-q", "--verify", "refs/heads/stable"], cwd=self.bare,
+                               env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertNotEqual(probe.returncode, 0, "FIXTURE origin still has a stable branch")
+
+    def test_no_stable_runs_origin_main_not_the_checkout(self):
+        # With no stable branch on origin, the launcher runs origin's main, not the checkout's own tree.
+        # The checkout is still at v1 here, so the run must print RAN v2.
+        self.drop_stable()
+        self.release("v2", stable=False)
+        rc, out, err = self.merge()
+        self.assertEqual((rc, out.strip()), (0, "RAN v2"), err)
+
+    def test_no_stable_warns_and_names_stable(self):
+        # The fallback is never silent: one warning names stable.
+        self.drop_stable()
+        self.release("v2", stable=False)
+        rc, out, err = self.merge()
+        named = [line for line in err.splitlines() if "stable" in line]
+        self.assertEqual(len(named), 1, "want one warning line naming stable, got %r" % err)
+
+    def test_ref_main_runs_origin_main_not_stable_and_warns_nothing(self):
+        # CLAUDE_SETTINGS_REF=main, the recovery, runs origin's main with no WARN, even while origin's stable sits behind it.
+        v1 = self.head(self.work)  # setUp pushed stable at v1
+        self.release("v2", stable=False)  # main moves on to v2; stable stays at v1
+        self.assertEqual(sh(self.bare, "git", "rev-parse", "refs/heads/stable"), v1, "FIXTURE stable is not v1")
+        self.assertNotEqual(self.head(self.work), v1, "FIXTURE main is not past stable")
+        rc, out, err = self.merge(CLAUDE_SETTINGS_REF="main")
+        self.assertEqual((rc, out.strip()), (0, "RAN v2"), err)
+        self.assertNotIn("WARN", err)
 
     def test_dirty_checkout_untouched(self):
         self.release("v2")

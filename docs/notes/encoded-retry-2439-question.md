@@ -1,0 +1,1 @@
+- encoded-retry-2439-question: (lane encoded-retry) #2439's open question lists no cost for Narrow (it stores command text, which may hold a secret) and no recommendation.

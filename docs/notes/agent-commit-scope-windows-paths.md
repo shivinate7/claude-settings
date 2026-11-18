@@ -1,0 +1,1 @@
+- agent-commit-scope-windows-paths: (lane agent-commit-file-scope, #2334 round 3 limits, coordinator 04:09 CST Nov 10) no test for drive-letter or 8.3 temp paths; an 8.3 top-level folder on Windows is unhandled; `realpath` is unguarded; the `/c/Users` Git Bash path form is not named.

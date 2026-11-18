@@ -1,0 +1,1 @@
+- write-run-inline-js-path: inline `fs.writeFileSync(path.join(process.cwd(),'tests','a.test.js'))` is allowed on head and main, but the decision implies it is judged. Fix: resolve a path.join of string parts to a path before the test-path match, or narrow the decision text.

@@ -1,0 +1,1 @@
+- roster-fifth-lane-no-triage: lane-finds-triage 13:52 CST Nov 12: Coordinator 13:52 CST Nov 12: fifth lane this hour could not find triage or runner 10 in list_sessions; #2709 is the fix, with runner 10.

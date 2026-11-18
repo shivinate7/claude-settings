@@ -1,0 +1,1 @@
+- filed-no-home-folds: (#2559 round 1) a filed item with no home folds to a "No home named" line (page.html:1996, :2006), while an ask with no home stays a full card (:2455); pick 480 a says only a routed item folds. Not changed in #2559.

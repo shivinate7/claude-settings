@@ -1,0 +1,1 @@
+- node-heredoc-assigned-var: A node heredoc written through an assigned `$F` is allowed, as on main, and no test pins it (PR #1186).

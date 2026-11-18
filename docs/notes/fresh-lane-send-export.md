@@ -1,0 +1,1 @@
+- fresh-lane-send-export: 14:33 CST Nov 13 (coordinator): fresh lane session_013NEJL388SYPn5XUPacp8rS (page-one-store-send-export, Sonnet medium); the old lane page-one-store-git-home is too long to continue and keeps #3212. Triage (writer) answered how a Send reaches it and what runs the export.

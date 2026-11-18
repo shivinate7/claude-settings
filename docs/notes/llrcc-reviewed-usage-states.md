@@ -1,0 +1,1 @@
+- llrcc-reviewed-usage-states: (#2382, decision pr-review-record) the `--reviewed` usage text (merge.py:25) and merge/README (~line 146) omit the states `no lint`, `lint fail`, `lint unknown`.

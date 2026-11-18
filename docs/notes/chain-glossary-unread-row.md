@@ -1,0 +1,1 @@
+- chain-glossary-unread-row: "chain" (review chain) has no GLOSSARY.md entry; the unread log row names the pointer path for every cause, so a missing PR line, a failed read and a tool not loaded look alike.

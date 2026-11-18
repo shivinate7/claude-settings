@@ -1,0 +1,1 @@
+- branch-worktree-prunable-holder: a prunable holder, whose path is missing, still counts, so `git worktree add -f <same path> <branch>` is refused. The remedy is `git worktree prune`, which asks (hooks/guard_branch_worktree.py). Fix: skip a prunable holder. Not a hold.

@@ -1,0 +1,1 @@
+- rr-merge-restamps-old: `ruled_store.py check` reads the store log with merges diffed against the first parent. A `git pull` merge, a rebase or a cherry-pick pushed to the store ref re-stamps old entries and flags them (a false alarm only). Decision: ruled-store-one-home. Fix: none until seen.

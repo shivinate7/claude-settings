@@ -13,15 +13,15 @@ QD_WHY = "Why yours: a session on your computer was asked first and none could r
 
 
 def qd_item(**over):
-    item = {"id": QD_DOC, "kind": "decision", "status": "open", "title": "Which CI job runs the stamp check?",
+    item = {"id": QD_DOC, "n": 928, "kind": "decision", "status": "open", "title": "Which CI job runs the stamp check?",
             "context": oj_ctx(), "options": OJ_OPTIONS, "pick": "a",
             "why": "The lint job already holds the other format checks."}
     item.update(over)
-    return {k: v for k, v in item.items() if v is not None}
+    return with_shown({k: v for k, v in item.items() if v is not None})
 
 
 def qd(name, expected, item, action="set", **extra):
-    kw = dict(action=action, collection="items", doc_id=QD_DOC, data=item)
+    kw = dict(action=action, collection="items", doc_id=QD_DOC, data=with_shown(item))
     kw.update(extra)
     add("question departs: " + name, expected, "question-departs" if expected == "deny" else None,
         tool="ArtifactData", cwd=PQ_REPO, **{"url": PQ_URL, **kw})
@@ -59,7 +59,7 @@ qd("a closed decision with the chat answer and no Departs from line is allowed",
 qd("a closed decision with the form and no Departs from line is allowed", "allow",
    qd_item(status="closed", context=oj_ctx(departs=None)))
 qd("a task with a Why yours line and no Departs from line is allowed", "allow",
-   {"id": QD_DOC, "kind": "task", "status": "open", "title": "Merge the batch", "steps": ["Open Terminal"],
+   {"id": QD_DOC, "n": 928, "kind": "task", "status": "open", "title": "Merge the batch", "steps": ["Open Terminal"],
     "context": QD_WHY})
 qd("a note with the form and no Departs from line is allowed", "allow",
    qd_item(kind="note", context=oj_ctx(departs=None)))

@@ -1,0 +1,1 @@
+- answered-approved-ruled-anywhere: "approved" and "ruled" count as claim words anywhere in a sentence, so "Option b was ruled out in item 803." refuses (hooks/answered_claims.py, CLAIM_WORD, line 45). Decision: `answered-claims-match-page` (a claim that a waiting-page item is answered matches the page).

@@ -335,6 +335,17 @@ html{scrollbar-gutter:stable;overflow-y:scroll;overflow-x:hidden}
 .live a{color:var(--accent-ink);text-decoration:none}
 .live a:hover{text-decoration:underline}
 .live h4{margin:0;padding:8px 12px 4px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);border-top:1px solid var(--line)}
+/* Each open pull request's next act: the list head holds the per-owner counts; a red row has the red edge and a red mark. */
+.live h4.prh{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px}
+.live h4.prh .cts{text-transform:none;letter-spacing:0;font-weight:400}
+.live h4.prh .cts .rd{color:var(--bad);font-weight:600}
+.live .prwhy{padding:0 12px 8px;font-weight:600}
+.live li .act{display:block;font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.live li .act b{color:var(--ink);font-weight:600}
+.live li .act .tag{margin-right:6px;vertical-align:1px}
+.live li.red{box-shadow:inset 3px 0 0 var(--bad)}
+.live li .tag.redm{background:var(--bad-soft);color:var(--bad)}
+.live .rg.unk{display:inline-block;width:11px;height:11px;vertical-align:-1px;border:2px dashed var(--warn);border-radius:50%}
 .tag.st-blocked{color:var(--bad);background:var(--bad-soft)}
 .tag.st-working{color:var(--accent-ink);background:var(--accent-soft)}
 .tag.st-review_ready{color:var(--good);background:var(--good-soft)}
@@ -1025,11 +1036,50 @@ function unavailable(){
 })();
 /* Live work: each thread's state and the open pull requests, and a state tag on each step a thread names. */
 (() => {
+/* Open pull requests with each next act (step status-tab-lists-coord-prs). The build bakes `act`, `owner`, `ageHours` and `red` on each pull from the
+   live file's ledger (build.py live_ledger); this only draws them. A pull with no act reads "act unknown", never blank. `span` turns milliseconds into
+   "3 hours". The same code is in skills/waiting-page/page.html: each page is one file with its own script, so the two cannot share it. */
+const PR_RED_GLY = '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6.5" fill="currentColor"/><path d="M7 3.4v4.4" stroke="var(--surface)" stroke-width="1.9" stroke-linecap="round"/><circle cx="7" cy="10.3" r="1.1" fill="var(--surface)"/></svg>';
+function prActs(w, pulls, day, span) {
+  const known = !w.ledgerWhy, ring = '<span class="rg unk" aria-hidden="true"></span>';
+  const unwrap = (r) => String(r).replace(/^unknown \(([\s\S]*)\)$/, "$1");
+  const missing = (p) => !known || typeof p.act !== "string" || !p.act || p.act === "act unknown";
+  const red = (p) => known && !missing(p) && p.red === true;
+  const rows = [...pulls.filter(red), ...pulls.filter((p) => !red(p))];
+  const owner = (p) => (typeof p.owner === "string" && p.owner ? p.owner : "unknown");
+  const laneWhy = unwrap(w.laneWhy || "the build gave no reason");
+  const line = (p) => {
+    if (missing(p)) return `<span class="act"><span class="unk">${ring} act unknown${known ? ": " + esc(p.actWhy || "no ledger row for this pull request") : ""}</span></span>`;
+    const lane = p.act === "lane unknown", mark = red(p) ? `<span class="tag ic redm" role="img" aria-label="Red" title="Red">${PR_RED_GLY}</span>` : "";
+    const parts = [lane ? `<span class="unk" title="${esc(laneWhy)}">${ring} lane unknown</span>` : `<b>${esc(p.act)}</b>`, "owner " + esc(owner(p))];
+    if (typeof p.ageHours === "number" && Number.isFinite(p.ageHours) && p.ageHours >= 0) parts.push("waited " + span(p.ageHours * 36e5));
+    return `<span class="act">${mark}${parts.join(", ")}</span>`;
+  };
+  let cts = "";
+  if (rows.length && !known) cts = '<span class="cts unk">owners unknown</span>';
+  else if (rows.length) {
+    const by = {};
+    rows.forEach((p) => { const o = missing(p) ? "unknown" : owner(p); by[o] = (by[o] || 0) + 1; });
+    const nred = rows.filter(red).length;
+    const list = Object.entries(by).sort((a, b) => (a[0] === "unknown") - (b[0] === "unknown") || b[1] - a[1] || a[0].localeCompare(b[0])).map(([o, n]) => `${esc(o)} ${n}`).join(", ");
+    cts = `<span class="cts">${nred ? `<span class="rd">${nred} red</span>; ` : ""}${list}</span>`;
+  }
+  const at = w.ledgerAt ? day(w.ledgerAt) : "";
+  const why = !known ? `<p class="asof unk prwhy">Every act is unknown: ${esc(unwrap(w.ledgerWhy))}.</p>`
+    : rows.some((p) => p.act === "lane unknown") ? `<p class="asof unk prwhy">Lane holds unknown: ${esc(laneWhy)}.</p>` : "";
+  return {
+    head: `<h4 class="prh"><span>Open pull requests</span>${cts}</h4>${why}`,
+    asof: !at ? "" : known ? `acts read <span class="num">${esc(at)}</span>` : `<span class="unk">${ring} acts read <span class="num">${esc(at)}</span></span>`,  // no time: the list head's reason says it
+    rows, line, red,
+  };
+}
   const b = window.ROADMAP_BUILD || {}, w = b.live || {}, el = document.getElementById('live'), box = document.getElementById('phases');
   if(!el) return;
   const NAME = {blocked:'Waiting on you', working:'Working', review_ready:'Ready for review', failed:'Failed', stopped:'Stopped', done:'Done'};
   const when = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); };
   const link = (url, text) => /^https?:\/\//.test(url || '') ? `<a href="${esc(url)}" target="_blank" rel="noopener">${text}</a>` : text;
+  // The same text as the waiting page's span(): this page has no copy of it to call (each page is one file).
+  const spanOf = ms => { const h = Math.round(Math.abs(ms) / 36e5); if(h < 1) return 'under an hour'; if(h < 24) return h + (h === 1 ? ' hour' : ' hours'); const d = Math.round(h / 24); return d + (d === 1 ? ' day' : ' days'); };
   if(!Array.isArray(w.pulls)){
     el.innerHTML = `<summary><span class="lh">Live work</span><span class="unk">${esc(w.read || 'unknown (this page was not built by build.py)')}</span></summary>`;
     return;
@@ -1037,15 +1087,15 @@ function unavailable(){
   const threads = Array.isArray(w.threads) ? w.threads : null;
   const open = (threads || []).filter(t => t.state !== 'done'), done = threads ? threads.length - open.length : 0;
   const counts = Object.keys(NAME).filter(k => k !== 'done').map(k => [k, open.filter(t => t.state === k).length]).filter(([, n]) => n);
-  const pulls = w.pulls || [], branches = w.branches || [];
+  const pulls = w.pulls || [], branches = w.branches || [], pr = prActs(w, pulls, when, spanOf);
   el.innerHTML = `<summary><span class="lh">Live work</span>${counts.map(([k, n]) => `<span class="tag st-${k}">${n} ${esc(NAME[k].toLowerCase())}</span>`).join('')}`
     // The panel loads folded, so a missing threads list must show in the summary, not only in the body.
     + (threads ? '' : `<span class="tag unk">threads unknown</span>`)
     + `<span>${pulls.length} open pull request${pulls.length === 1 ? '' : 's'}</span>`
-    + `<span class="asof">read <span class="num">${esc(String(w.read).startsWith('unknown') ? w.read : when(w.read))}</span></span></summary>`
+    + `<span class="asof">read <span class="num">${esc(String(w.read).startsWith('unknown') ? w.read : when(w.read))}</span>${pr.asof ? "; " + pr.asof : ""}</span></summary>`
     + `<h4>Threads</h4><ul>${!threads ? `<li><span></span><span class="unk">Thread count: ${esc(w.threadsWhy || 'unknown (the live file has no threads list)')}</span></li>` : open.length ? open.map(t => `<li><span><span class="tag st-${esc(t.state)}">${esc(NAME[t.state])}</span></span><span>${esc(t.title)}<span class="nm">${[t.step ? 'step ' + t.step : '', t.pr || '', t.lastActivity ? 'active ' + when(t.lastActivity) : ''].filter(Boolean).map(esc).join(', ')}</span></span></li>`).join('') : '<li><span></span><span>No thread is open.</span></li>'}</ul>`
     + (done ? `<p class="asof" style="padding:4px 12px">${done} done thread${done === 1 ? '' : 's'} not shown.</p>` : '')
-    + `<h4>Open pull requests</h4><ul>${pulls.length ? pulls.map(p => `<li><span class="num">#${p.number}${p.draft ? ' draft' : ''}</span><span>${link(p.url, esc(p.title))}<span class="nm">${[p.branch || '', p.checks ? 'checks ' + p.checks : ''].filter(Boolean).map(esc).join(', ')}</span></span></li>`).join('') : '<li><span></span><span>No pull request is open.</span></li>'}</ul>`
+    + `${pr.head}<ul>${pulls.length ? pr.rows.map(p => `<li${pr.red(p) ? ' class="red"' : ''}><span class="num">#${p.number}${p.draft ? ' draft' : ''}</span><span>${link(p.url, esc(p.title))}<span class="nm">${[p.branch || '', p.checks ? 'checks ' + p.checks : ''].filter(Boolean).map(esc).join(', ')}</span>${pr.line(p)}</span></li>`).join('') : '<li><span></span><span>No pull request is open.</span></li>'}</ul>`
     + (branches.length ? `<h4>Branches with no open pull request</h4><ul>${branches.map(r => `<li><span class="num">${esc(when(r.updatedAt))}</span><span class="nm">${esc(r.name)}</span></li>`).join('')}</ul>` : '')
     + (w.skipped && w.skipped.length ? `<p class="asof unk" style="padding:4px 12px">Skipped, wrong shape in the live file: ${esc(w.skipped.join(', '))}</p>` : '');
   if(!box) return;

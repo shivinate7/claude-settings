@@ -13,7 +13,8 @@ clean. With no argument it also compares the guard's role lists with the role ta
 Exits 1 and names each file that sets a Haiku model, each agent file whose `model:` pin names a different
 family than its role's row in the role table (pin_row_problem), each agent body that states the agent's own
 model in fixed text or gives a report header a model slot with no line that names the source (body_problems),
-each agent file that can reach the claude-code-remote server (session_tools_problem: frontmatter
+each agent file with no `model:` pin, or an empty one (pin_missing_problem: it would run on the session model; skill files
+carry no pin and are exempt), each agent file that can reach the claude-code-remote server (session_tools_problem: frontmatter
 `disallowedTools` must name the whole server, or `tools` must be an allow-list with no entry for it), and the model record
 docs/decisions/agent-model-cap.md when its `lane` row's effort cell does not start
 with the guard's LANE_EFFORT.
@@ -24,8 +25,8 @@ import os
 import re
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
 sys.path.insert(0, os.path.join(ROOT, "hooks"))
 from tool_lists_test import tokens, unread_list  # noqa: E402  the one reader of tool lists (hooks/tool_lists_test.py)
@@ -74,12 +75,8 @@ def haiku_model(text: str) -> str:
 
 
 def scalar(raw: str) -> str:
-    """A frontmatter value without its quotes or a trailing ` # comment`."""
-    raw = raw.strip()
-    if raw[:1] in ("'", '"'):
-        close = raw.find(raw[0], 1)
-        return raw[1:close] if close > 0 else raw[1:]
-    return re.split(r"\s#", raw, maxsplit=1)[0].strip()
+    """A frontmatter value without its quotes or a trailing ` # comment`; "" for a comment-only or null value."""
+    return _guard.frontmatter_scalar(raw)
 
 
 def pin_row_problem(text: str, table) -> str:
@@ -95,6 +92,14 @@ def pin_row_problem(text: str, table) -> str:
         return ""
     return "model pin %r does not equal the role table's row %r for role %r (the pin must name the row's model)" % (
         pin, row, name)
+
+
+def pin_missing_problem(text: str) -> str:
+    """Why the agent file has no usable `model:` pin, or "" when it has one. Every agent file pins its role's model."""
+    keys = _guard.frontmatter_keys(frontmatter(text) or [])
+    if scalar(keys.get("model", "")):
+        return ""
+    return "frontmatter has no `model:` pin, or an empty one (every agent file pins its role's model)"
 
 
 def session_tools_problem(text: str) -> str:
@@ -192,6 +197,17 @@ def role_list_problems() -> list:
     return list(_guard.role_list_drift(ROOT))
 
 
+def round_row_problems() -> list:
+    """One line per round row of the model record whose model the guard cannot rank (the guard's role_round_drift) and per malformed review
+    row (review_policy_drift), each named by the record's path, and one line when the record holds its role table and no round row (a missing table, or a header with no row): the guard then reads
+    no round row and runs on its fallback. [] when the record cannot be read: role_list_problems reports that as unknown."""
+    record = os.path.join(ROOT, LANE_RECORD)
+    lines = ["%s: %s." % (record, line) for line in _guard.role_round_drift(ROOT) + _guard.review_policy_drift(ROOT)]
+    if _guard.role_model_table(ROOT) is not None and _guard.role_round_table(ROOT) is None:
+        lines.append("%s: the record holds no round row, so the guard runs on its built-in fallback." % record)
+    return lines
+
+
 def main(argv) -> int:
     files = argv or sorted(
         glob.glob(os.path.join(ROOT, "agents", "*.md"))
@@ -215,7 +231,7 @@ def main(argv) -> int:
             print("%s: frontmatter sets a model below Sonnet. Sonnet is the floor." % path)
             bad = 1
         elif os.path.basename(os.path.dirname(path)) == "agents":
-            for problem in (pin_row_problem(text, table), session_tools_problem(text)):
+            for problem in (pin_missing_problem(text), pin_row_problem(text, table), session_tools_problem(text)):
                 if problem:
                     print("%s: %s." % (path, problem))
                     bad = 1
@@ -223,7 +239,7 @@ def main(argv) -> int:
                 print("%s:%d: %s" % (path, line, problem))
                 bad = 1
     if not argv:  # the role lists belong to the whole repository, so a run on named files leaves them alone
-        for line in role_list_problems():
+        for line in role_list_problems() + round_row_problems():
             print(line)
             bad = 1
     return bad

@@ -1,0 +1,1 @@
+- round-two-skip-misread: A round 1 reviewer wrote "Round 2 skips" on a guard change. The merge tool needs rounds 1-3 in order for a guard or check change, so the record read "open". Briefs should say that a guard change always runs 3 rounds.

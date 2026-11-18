@@ -164,14 +164,18 @@ def token_start(text: str, index: int) -> bool:
     return index == 0 or (text[index - 1] in TOKEN_BOUNDARY and text[index - 2:index - 1] != "`")
 
 
-def quote_advance(text: str, index: int, quote: str):
+def quote_advance(text: str, index: int, quote: str, line_comments: bool = False):
     """Step the walk over `text[index]`: (width consumed, the quote open after it). An escaped
-    pair is one step of width 2. A contraction is the caller's to skip (`is_contraction`)."""
+    pair is one step of width 2. A contraction is the caller's to skip (`is_contraction`).
+    `line_comments` (PowerShell text only) opens state `#` at a token-start `#`; it ends at the
+    newline, so a quote inside the comment opens nothing past its line."""
     char = text[index]
     powershell = is_powershell(text)
     if quote == BLIND:
         return 1, BLIND
     if quote and powershell:
+        if quote == "#":
+            return 1, ("" if char == "\n" else quote)
         if quote == "<#":
             return (2, "") if text.startswith("#>", index) else (1, quote)
         if quote[0] == "@":
@@ -187,6 +191,8 @@ def quote_advance(text: str, index: int, quote: str):
     if powershell:
         if char == "`":
             return 2, ""
+        if line_comments and char == "#" and token_start(text, index):
+            return 1, "#"
         opener = token_start(text, index) and HERE_OPEN.match(text, index)
         if token_start(text, index) and text.startswith("<#", index):
             return 2, ("<#" if text.find("#>", index + 2) >= 0 else BLIND)
@@ -202,16 +208,18 @@ def quote_advance(text: str, index: int, quote: str):
     return 1, ""
 
 
-def walk_quotes(text: str):
+def walk_quotes(text: str, line_comments: bool = False):
     """Yield (index, char, quote open before it) over `text`, one step at a time. A contraction
     that bash never closes is text, as in `_split_reading`'s second reading. BLIND text yields as
-    unquoted."""
+    unquoted. With `line_comments`, a PowerShell `#` line comment yields as quote `#` through its
+    newline; the default reads no line comment, since `split_segments` already drops line comments
+    before this walk sees them."""
     quote, index = "", 0
     while index < len(text):
         if not quote and text[index] == "'" and is_contraction(text, index):
             width, after = 1, ""
         else:
-            width, after = quote_advance(text, index, quote)
+            width, after = quote_advance(text, index, quote, line_comments)
         yield index, text[index], ("" if quote == BLIND else quote)
         quote, index = after, index + width
 
@@ -382,6 +390,7 @@ WRAPPER_VALUE_FLAGS = {
 # them. Their value flags sit here so `_wrapper_flags` skips the same way.
 WRAPPER_VALUE_FLAGS.update({
     "stdbuf": {"-i", "-o", "-e"}, "caffeinate": {"-t", "-w"},
+    "ionice": {"-c", "--class", "-n", "--classdata", "-p", "--pid", "-P", "--pgid", "-u", "--uid"},
     "flock": {"-w", "-E", "--timeout", "--conflict-exit-code"},
     "docker": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
     "podman": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
@@ -1046,6 +1055,27 @@ def _feeds_data(header: str, scripts: bool) -> bool:
     return fed
 
 
+def own_heredoc_bodies(segment: str, raw: str, before: int):
+    """Return the bodies of the heredocs whose headers sit inside this segment, in order. A heredoc
+    of another command (`cat <<A && git commit -F - <<B`) is not the message.
+
+    `before` is the count of headers in the segments ahead of this one. Raw is walked as the
+    shell reads it (_split_heredocs): each header outside quotes and comments takes the next body
+    in turn, and a body line is never read for headers. This segment takes the bodies `before`
+    onward, one per header it holds, so two commits with the same text each take their own body.
+    Raw is walked twice, bash's reading and the contraction reading, as split_segments does, and
+    the bodies of both are judged: a lone `'` can hide a header from one reading, never both.
+    """
+    count = len(heredoc_heads(segment)[0])
+    if not count:
+        return []
+    texts = []
+    for contractions_are_text in (False, True):   # bash's reading, then the contraction reading
+        found = [body for _, body, _ in _split_heredocs(raw, contractions_are_text)[1]]
+        texts.extend(found[before:before + count])
+    return list(dict.fromkeys(texts))   # the readings often agree: judge each body once
+
+
 def strip_heredoc_bodies(cmd: str, shells_only: bool = False, per_body: bool = False) -> str:
     """Drop the body of every heredoc, and keep every header line. `shells_only` keeps a body
     only when a shell reads it, for a rule that judges shell lines. One body that runs keeps every body in
@@ -1145,6 +1175,11 @@ _MAIN_HEADER = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 # Judge the BEHAVIOUR of a git call, not the text beside it. `git checkout -b name` and
 # `git checkout main` move a branch and keep every file, so they pass. `git checkout <path>`
 # overwrites a file from the index, so it is refused.
+
+# The git subcommands that change a repository or the tree. Some read in one form (`stash list`, `tag -l`,
+# `config --get`): a reader of this list counts those as writes (debt stamp-read-false-alarms).
+GIT_WRITES = ("commit", "push", "add", "tag", "merge", "rebase", "reset", "restore", "checkout", "switch", "stash",
+              "cherry-pick", "apply", "am", "rm", "mv", "clean", "pull", "revert", "init", "clone", "config")
 
 # `git` reads these options before the subcommand, and each one takes a value.
 GIT_OPT_WITH_VALUE = {
@@ -1302,6 +1337,10 @@ def pathspec_from_file_flag(arg: str) -> bool:
 # spaced form are read, because git takes either. This one stays a raw-text regex: it is outside
 # this fix's scope (the recorded debt named only `_run_dir`'s `cd`/`git -C` reading).
 GIT_WORK_TREE_RE = re.compile(r"--work-tree(?:=|\s+)(['\"]?)([^'\";&|\s]+)\1")
+# A git-dir entry that shows a replay in progress: its staged change is git's copy plus what the agent
+# resolved. A MERGE_MSG without MERGE_HEAD is a `cherry-pick -n` or `revert -n`. The one home: the builder-diff
+# read (hooks/guard.py) and the red-run commit read (hooks/guard_merge.py) both ask it.
+REPLAY_MARKS = ("CHERRY_PICK_HEAD", "REVERT_HEAD", "SQUASH_MSG", "MERGE_MSG", "rebase-merge", "rebase-apply")
 
 
 CD_WORDS = ("cd", "chdir", "pushd", "set-location", "push-location")
@@ -1469,7 +1508,7 @@ def _read_cd_variable(known, segment: str, move: str, ran: bool) -> str:
     return read if isinstance(read, str) and read else move
 
 
-def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False, made=frozenset()):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
@@ -1485,14 +1524,20 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
     leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
     worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
-    a segment in it gets None, and its own `cd` moves nothing. Off by default, so a rule that
-    fails closed on an untrusted `cd` keeps doing so."""
+    a segment in it gets None, and its own `cd` moves nothing. A failed cd then `|| exit`
+    ends the shell: every later segment gets None. A `return` does not: outside a function bash reports an error and
+    the next command runs. A brace group after the `||` is not read. Off by
+    default, so a rule that fails closed on an untrusted `cd` keeps doing so.
+    `made` holds normalized folders an earlier segment of the same call makes (a mkdir, a clone): a `cd`
+    into one is read as one that works, though the folder is missing at check time. Empty by default."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
     known = {}         # the variables the shell holds: plain assignments that ran here (`_track_variables`)
     doubt = False      # the last cd may have failed in an `&&` chain: a segment after it may not run
     unsure = False     # the last segment may have failed or not run: an assignment after its `&&` may not run
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
+    bail = False       # a failed cd ended in `||`: an `exit` next ends the shell
+    gone = False       # the shell has ended: nothing after runs
     last_end = ""      # the operator that ended the last non-empty segment
     for at, segment in enumerate(segments[:number + 1]):
         marks = [(index, char) for index, char, quote in walk_quotes(segment) if not quote and char in "()"]
@@ -1501,9 +1546,11 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         closes = sum(1 for _, char in marks if char == ")")
         end = ends[at] if at < len(ends) else ""
         if at == number:
-            return None if skipping else where
+            return None if skipping or gone else where
         if not segment.strip():
             continue   # an operator at end of line then the newline leaves an empty part: it changes nothing
+        if gone:
+            continue
         if skipping:
             last_end = end
             skipping = end in ("&&", "|")
@@ -1517,6 +1564,12 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         move = _segment_cd_move(tokens) if tokens else None
         before = last_end
         last_end = end
+        if bail and before == "||" and not stack and tokens:
+            word = resolve_command(tokens)
+            gone = word is not None and basename(tokens[word]) == "exit"
+            if gone:
+                continue
+        bail = False
         piped = "|" in (end, before)
         if move is not None and not is_powershell(segment) and piped:
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
@@ -1538,10 +1591,11 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                 where = None
             else:
                 target = shell_abs(move or "~", where)
-                if target and os.path.isdir(target):
+                if target and (os.path.isdir(target) or os.path.normpath(target) in made):
                     where = target
                 elif target and failed_cd_stays:
                     skipping = end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops
+                    bail = end == "||"
                     old = prev   # a failed cd leaves the folder `cd -` goes back to alone
                 else:
                     where = None
@@ -2060,12 +2114,15 @@ def _vetoed() -> bool:
         return True  # a veto that cannot be read is a veto: the refusal stands
 
 
-def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None, on_lift=None) -> None:
+def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None, on_lift=None,
+           continue_on_lift: bool = False):
     """Print a deny or an ask and exit, unless an owner override lifts it (decision
     owner-override). A lifted act prints nothing, so the normal permission flow runs. The
     veto runs before the override is taken, so a call that also holds a never-lifted act spends no override.
     spawn_role is set only on the Opus spawn refusal, the one refusal an Opus override may lift.
-    on_lift, when set, runs once when an override lifts the act, so a rule may keep state only for an act that lands."""
+    on_lift, when set, runs once when an override lifts the act, so a rule may keep state only for an act that lands.
+    continue_on_lift makes a lifted act return True instead of exiting, so the caller can judge the next rule of a
+    group (the lane start's rules); any other outcome exits as before."""
     vetoed = _vetoed()
     if not vetoed:
         try:  # an import or read failure is no override: the refusal stands
@@ -2080,6 +2137,8 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
             if lifted in override.LIFTS:
                 if on_lift:
                     on_lift()
+                if continue_on_lift:
+                    return True
                 sys.exit(0)
     record(tool, decision, rule, matched)
     try:  # the line the owner types to lift this refusal, or the words that none does; last in the reason
@@ -2324,7 +2383,7 @@ FIND_EXEC_ACTIONS = ("-exec", "-execdir", "-ok", "-okdir")
 
 def wrapped_commands(tokens, at: int, strict: bool = False):
     """The command texts the runner at `tokens[at]` starts, else []. Read: `docker|podman exec`,
-    `kubectl exec ... --`, `find -exec ... ;`, `su -c`, `flock FILE`, `stdbuf`, `unbuffer`,
+    `kubectl exec ... --`, `find -exec ... ;`, `su -c`, `flock FILE`, `stdbuf`, `ionice`, `unbuffer`,
     `caffeinate`, `watch`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as
     `sh -c`. `watch` joins its words with spaces and hands the line to `sh -c`, so its text is that
     line.
@@ -2354,7 +2413,7 @@ def wrapped_commands(tokens, at: int, strict: bool = False):
         rest, skip = rest[1:], 1   # the container
     elif word == "flock":
         skip = 1   # the lock file
-    elif word not in ("stdbuf", "unbuffer", "caffeinate"):
+    elif word not in ("stdbuf", "ionice", "unbuffer", "caffeinate"):
         return []
     index, flags = _wrapper_flags(word, rest, 0)
     if strict and word in ("docker", "podman"):

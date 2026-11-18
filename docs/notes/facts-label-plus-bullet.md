@@ -1,0 +1,1 @@
+- facts-label-plus-bullet: the `facts` check's FACTS_LABEL leaves out the `+` list mark and `[Facts]:`, so `+ Facts: pr 1 open` reads 0 claims and exits 0. Found in the fix check of lane state-facts-check; no `+` bullets in docs/. Decision: facts-line-checks-state. Fix: add `+` to the mark set. Seen: 2026-11-17 x1

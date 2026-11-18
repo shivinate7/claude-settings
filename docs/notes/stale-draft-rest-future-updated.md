@@ -1,0 +1,1 @@
+- stale-draft-rest-future-updated: a REST `updated_at` dated after the build run reads fresh and the draft drops silently (`draft_table` in `skills/roadmap/build.py`). The commit side reads a future time as unknown, the REST side does not. It needs over 12 hours of clock skew. Fix: read a negative REST age as unknown. From the round 1 read on sonnet, probed. Seen: 2026-11-17 x1

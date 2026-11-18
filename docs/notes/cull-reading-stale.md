@@ -1,0 +1,1 @@
+- cull-reading-stale: meta/cull.json's newest reading is Oct 26 (main at #614). Since batch 8 (Nov 4) main gained 2,938 commits and about 104,000 lines in 521 files, mostly guard and merge-tool code and tests. CLAUDE.md is 3,822 words by wc -w at ddaa393c, against 3,031 in the Oct 26 reading (method may differ). Fix: a fresh cull reading at the next batch merge.

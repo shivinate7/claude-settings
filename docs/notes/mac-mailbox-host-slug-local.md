@@ -1,0 +1,1 @@
+- mac-mailbox-host-slug-local: (item 488) the Mac's mailbox address is pc/macbook-pro-2-local/...; the host slug keeps "-local". Unknown whether it matches the name the Claude app shows.

@@ -5,7 +5,8 @@ Run it from the repository root:
 
     python hooks/test_guard.py
 
-GUARD_TESTS=windows-slice runs only the cases tagged for Windows (see WINDOWS_SHAPE below); unset
+GUARD_TESTS=windows-slice runs only the cases tagged for Windows (see WINDOWS_SHAPE below);
+GUARD_TESTS=macos-slice runs only the cases that reach a darwin arm (see MACOS_REACH); unset
 runs every case. Any other value stops the run before a case runs.
 
 GUARD_FAMILY=<name> runs only one family of cases (FAMILIES, at the top of this file). An unknown
@@ -22,7 +23,8 @@ every case, so CI can split the suite across jobs and drop none. A malformed val
 before a case runs.
 
 GUARD_SECTION_DIR=<folder> reads the section files from that folder instead of tests/guard/. A folder with no
-section file, or with two that share a `# section <n>` number, stops the run before any case.
+section file, or with a set that lint/_guard_sections.py faults (two files that share a `# section <n>` number,
+or a name whose number disagrees with its header), stops the run before any case.
 
 Each case drives the guard as Claude Code drives it: one JSON object on stdin, and the decision read
 back off stdout. An empty stdout is an allow. Anything else is parsed for permissionDecision.
@@ -75,6 +77,7 @@ from precompact_handoff import PREMISE_KINDS  # noqa: E402,F401  the one home of
 import precompact_handoff as ph  # noqa: E402,F401  the one home of the handoff and flag paths
 import local_time  # noqa: E402,F401  the one home of the inbox paths
 import mutate_shared  # noqa: E402,F401  module_files: every module a copied guard may import
+import _guard_sections  # noqa: E402  the one home of the section folder, header read and faults
 
 # Assembled, so this file never holds the token whole.
 ENV = "." + "env"
@@ -86,8 +89,13 @@ os.environ["CLAUDE_CODE_SUBAGENT_MODEL"] = "sonnet"
 CASES = []
 
 # GUARD_TESTS=windows-slice keeps only the cases tagged "windows": the ones that reach Windows-only
-# guard code. Unset or empty keeps every case. Any other value stops the run before a case runs.
-GUARD_TESTS_MODES = ("", "windows-slice")
+# guard code. GUARD_TESTS=macos-slice keeps only the cases tagged "macos": the ones that reach a darwin
+# arm (MACOS_REACH). Unset or empty keeps every case. Any other value stops the run before a case runs.
+GUARD_TESTS_MODES = ("", "windows-slice", "macos-slice")
+# The tag each slice keeps. The windows slice also keeps the log checks in WINDOWS_CHECKERS. The macOS
+# slice also keeps each log check whose family reaches a darwin arm. A log check has no session, so only
+# a case reaches the session row.
+SLICE_TAG = {"windows-slice": "windows", "macos-slice": "macos"}
 
 # GUARD_FAMILY=<name> keeps only the cases of one family, so a change to one rule runs in that
 # family's time. A case takes the family of the nearest FAMILY line above it (one per section),
@@ -106,6 +114,7 @@ FAMILIES = {
     "kill": "machine-wide kills and detached launches",
     "stream": "live streams, narrating commands, ln -s, waiter loops and background end conditions",
     "write": "the silent write",
+    "readonly-shell-write": "a read-only agent's shell write: a redirect, tee, touch or mktemp, in the shell or inside an ssh command, is refused; its own scratchpad, the null devices, the reads, a writing role and a call with no agent pass",
     "push-delete": "push and delete",
     "linked-node-modules": "a dependency install or a recursive delete through a node_modules that is a link",
     "env": "environment files",
@@ -113,14 +122,20 @@ FAMILIES = {
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "hook-bypass": "a git commit, merge or push that skips the git hooks: core.hooksPath on the command or in the environment, --no-verify, and -n on commit; the mutation tool's own exemption",
     "merge": "merge into main, draft pull requests and the merge guard",
+    "lane-may-mark-ready": "a lane marks its own lane PR ready with --role lane --step <its step> <pr> --ready: allowed when the head is the step's branch, refused for another branch or an unreadable pull request; the --confirm rules pass or refuse as before",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, while a branch of the lane is ahead of its repo's default branch with no pull request, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
+    "lane-step-dup":"one live session per step (part one): a create_session tagged cs-step:<slug>, or a send_message brief naming that step, is refused when another live session in the cs-repo carries the step, and names that session; a session an earlier create_session of the transcript started counts as live until an archive_session names it; an archived carrier, a near-miss step, a carrier in another repo, a target that carries the step, and a whole list read that finds none pass; a list read that is not whole, or cannot be read, is refused",
+    "lane-step-dup-pr": "one open lane pull request per step (part two): a create_session tagged cs-step:<slug>, or a brief naming it, is refused while an open pull request in the cs-repo has the slug as its head (lane/<slug> counts), and names that pull request; `continues #N` or `replaces #N` in the brief passes when #N is that open pull request; a closed or merged pull request, or one on another slug, passes; a pull request read that cannot run is refused; a lane start or lane brief with no `Prior work:` line is refused (rule spawn-searches-existing-builds)",
+    "brief-ids-in-roster": "a lane start (a create_session that tags a lane, whatever its prompt opens with) or a send_message with a Grant or Lane brief line anywhere in it (after a markdown lead), or with a Brief, Triage brief or Batch runner brief line (the standing sessions), is refused when it names a bare session id, roster id or not, since a brief names a slug or a role and the lane looks the id up; an id with a backtick or a double quote on both sides passes. The check reads no roster, so a repo with none is judged the same",
+    "target-id-in-roster": "a send_message whose target session_id is not in the sender's roster is refused: the roster is the Standing sessions rows of the repo's roadmap record, plus the ids the sender's own transcript shows from list_sessions, get_session and create_session results tagged with its cs-repo; the refusal prints the record's rows. A target that is a record row, or a listed id tagged with the sender's repo, passes. An override lifts it. With neither source readable it allows and prints one stderr line that says the roster is unknown",
     "message-time-matches-clock": "a send_message whose first non-blank line opens with a header stamp (a label of 1 to 4 words, then a comma, a colon or a spaced dash, then H:MM or HH:MM with optional seconds, then CST or CDT in any case) is refused when the stamp is wrong for the clock: a CST or CDT label that is not the clock's zone, a dated stamp more than 1 minute ahead, or an undated stamp 2 to 60 minutes ahead; an undated stamp more than 60 minutes ahead, or behind the clock, passes; a stamp later in the message, mid-line, on a status line, or on another tool passes. A dated ISO instant with an offset more than 1 minute ahead is refused too in `added` of an ArtifactData write to collection items (a whole instant, or a time fragment such as T20:24:00Z), `updatedAt` of a Write to a roadmap step file, each instant an Edit or MultiEdit writes to a roadmap step file (with or without a key), and the last literal `updatedAt` key in a Bash command (bare, quoted, or followed by `]`; then `:`, `=` or jq's `|=`; then a single- or double-quoted value); a time in prose, another field or collection, or a value with no offset passes",
     "sendmessage-session-id": "SendMessage whose to starts session_: refused, since a session_ id is not an agent name and delivery to one is unmeasured; mcp__claude-code-remote__send_message takes the session_id. Any other to, and that tool, pass this rule",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "records-page-ready": "a ready pull request whose head holds a stale records page is refused, on the MCP draft:false call and on gh pr ready in each form; a current, non-default, claim-holding, behind-the-base, empty, undo, draft, title-only or non-merge-tool call is allowed; a read that cannot run, or an ancestry unknown in a shallow clone, is refused unknown, and the unknown reason names no --confirm",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "octopus-push": "a git push whose range adds a merge commit of more than two parents is refused, with a two-parent remedy; a push that writes main keeps its push-main ask",
+    "red-run": "a git push judged on the test commits it sends: a test commit with no valid Red-run trailer (missing, malformed, or a none trailer with no colon) is refused; a valid red-run or none trailer, a push of docs only, a merge or rebase onto main, an empty push and an unreadable range pass; the refusal names only commit and push, and the check runs one git log and no diff per push",
     "cite": "cite by id",
     "scratchpad-message": "a git commit whose -F message file sits in a session scratchpad: an agent's call is refused in every flag form, through a link into the scratchpad, and an orchestrator's call, a heredoc, -m and a gh body file pass",
     "frozen": "frozen paths",
@@ -144,7 +159,7 @@ FAMILIES = {
     "item-field-rendered": "the page writer: a write names only item fields the page renders (the itemFields block of page.html)",
     "page-item-design": "the page writer: a design picture that misses its focus, its state or its height is refused at write, and an allowed publish of the waiting page records the published file",
     "rule9": "rule 9, the agent model floor",
-    "role-model": "agent-role-model: a spawn's model against its role's row in the decision table, the missing-model default, and the fail-open read",
+    "role-model": "agent-role-model: a spawn's model against its role's row in the decision table, the missing-model default, and the fail-open read; a builder or test-author spawn with no `Prior work:` line is refused (rule spawn-searches-existing-builds), and a reviewer or Explore spawn passes",
     "mask-script": "mask_script lexemes",
     "simulator": "the simulator boot and hold rules",
     "rm-var": "every case named rm-var, wherever it sits",
@@ -158,8 +173,12 @@ FAMILIES = {
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "load-brake": "the machine-load brake: busy and full on start calls, full on an agent's or a lane session's shell or file write (a lane session's own record tags cs-build:lane), the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
     "agent-remote-tools": "an agent's call to an outward claude-code-remote tool is refused; the session's own call, an agent_type with no agent_id, and the read tools keep their verdict",
+    "start-session-audit": "the one PostToolUse command for start_session: a start below the floor (haiku) or with an unread handoff prints the stop line (interrupt_session or archive_session), the audit reuses guard.floor_hit, and any other start prints nothing",
+    "ci-wait-cap": "the CI-wait cap: a send_later whose message says it waits on CI (the word CI or checks, PR run or PR runs, workflow run or workflow runs, check run, pipeline, or GitHub Actions) is refused past the cap in cap_minutes(), by delay_minutes (a number or a digit string) or an at time (with or without an offset); a call that is not about CI, a CI call at the cap, and a copy whose data file moves the limit are judged against that cap",
     "workflow-args": "a Workflow call whose args is, or holds as an array or object value, a placeholder (an all-caps word with an underscore, or __X__) is refused, naming it and the fix; an absent, empty or real args passes, and so does a short all-caps word or a sentence with an env var name",
-    "sections": "the section files: a set the loader refuses (no section file, two files with one number, a log check appended after the LOG_CHECKS_EXTRA join) stops a run before any case",
+    "sections": "the section files: a set the loader refuses (no section file, two files with one number, a name whose number disagrees with its header, a log check appended after the LOG_CHECKS_EXTRA join) stops a run before any case",
+    "fg-bash-while-bg": "a foreground Bash call that can run long (a test, lint, merge, build or install, or a time limit over 60000 ms) is refused while this session's background command or agent runs; the run_in_background form, a quick read and a call with no background work pass",
+    "review-log": "a PR comment whose first line is the review marker: refused when merge/merge.py parse_review refuses its body (review-log-form), and when a 40-hex sha on its Head or Fix check line does not resolve in the call's checkout (review-log-sha); the add and update comment tools, a body with no marker, and a check that cannot run pass",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -349,6 +368,114 @@ def windows_shaped(*parts):
     return WINDOWS_SHAPE.search(text) is not None
 
 
+# GUARD_TESTS=macos-slice keeps only the cases tagged "macos": the ones that reach a darwin arm. Each row
+# names an arm by file and function, with the cases that reach it. macos_arm_problems() holds the rows to
+# the arms the ast scan finds in hooks/, so an arm with no row fails the run before any case runs.
+# The macOS-only arms, by kind: a sys.platform test that holds on darwin, the else of one that does not,
+# and a ps, lsof or launchctl argument list. Each arm is read in a hooks module the guard suite reaches.
+MACOS_COMMANDS = ("ps", "lsof", "launchctl")
+MACOS_REACH = {
+    ("hooks/guard.py", "_read_memory"): lambda family, session: family == "load-brake",
+    ("hooks/guard_rm_var.py", "_rm_real"): lambda family, session: family == "rm-var",
+    ("hooks/proc_env.py", "_entries"): lambda family, session: session is not None,
+    ("hooks/git_reads.py", "_process_start_ms"): lambda family, session: family in ("kill", "branch-worktree"),
+    ("hooks/guard_kill.py", "_process_parents"): lambda family, session: family == "kill",
+    ("hooks/guard_kill.py", "_pid_cwd"): lambda family, session: family == "kill",
+    ("hooks/guard_kill.py", "_ps_ppid"): lambda family, session: family == "kill",
+    ("hooks/guard_kill.py", "session_root_pid"): lambda family, session: family == "kill",
+}
+
+
+def macos_reached(family, session):
+    return any(reach(family, session) for reach in MACOS_REACH.values())
+
+
+def _mentions_sys_platform(node):
+    return any(isinstance(n, ast.Attribute) and n.attr == "platform"
+               and isinstance(n.value, ast.Name) and n.value.id == "sys" for n in ast.walk(node))
+
+
+def _platform_truth(test):
+    """What a sys.platform test says when sys.platform is darwin: True or False, or None when the test reads
+    a name other than sys, which this scan does not evaluate."""
+    if {n.id for n in ast.walk(test) if isinstance(n, ast.Name)} - {"sys"}:
+        return None
+
+    class DarwinSys:
+        platform = "darwin"
+
+    expr = ast.fix_missing_locations(ast.Expression(body=test))
+    try:
+        return bool(eval(compile(expr, "<platform test>", "eval"), {"sys": DarwinSys}, {}))
+    except Exception:
+        return None
+
+
+def _product_reach():
+    """The hooks modules the guard suite reaches: guard.py and every hooks module it imports, read with the ast.
+    Test files are not product code, so they are left out."""
+    hooks = os.path.dirname(os.path.abspath(__file__))
+    modules = {n[:-3] for n in os.listdir(hooks) if n.endswith(".py") and not n.startswith("test_")}
+    reach, todo = set(), ["guard"]
+    while todo:
+        module = todo.pop()
+        if module in reach:
+            continue
+        reach.add(module)
+        with open(os.path.join(hooks, module + ".py"), encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names = {a.name.split(".")[0] for a in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                names = {node.module.split(".")[0]}
+            else:
+                continue
+            todo.extend((names & modules) - reach)
+    return reach
+
+
+def darwin_arms():
+    """(file, function) of each macOS-only arm in a hooks module the guard reaches. The ast reads the code, so a
+    string or a comment that names darwin, ps or lsof is not an arm."""
+    found = set()
+    hooks = os.path.dirname(os.path.abspath(__file__))
+    for module in sorted(_product_reach()):
+        name = module + ".py"
+        path = os.path.join(hooks, name)
+        with open(path, encoding="utf-8") as f:
+            tree = ast.parse(f.read(), filename=path)
+        parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+
+        def owner(node):
+            while node in parents and not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                node = parents[node]
+            return getattr(node, "name", "<module>")
+
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.If, ast.IfExp)) and _mentions_sys_platform(node.test):
+                truth = _platform_truth(node.test)
+                if truth or (truth is False and node.orelse):
+                    found.add(("hooks/" + name, owner(node)))
+            if isinstance(node, (ast.List, ast.Tuple)) and node.elts \
+                    and isinstance(node.elts[0], ast.Constant) and node.elts[0].value in MACOS_COMMANDS:
+                found.add(("hooks/" + name, owner(node)))
+    return found
+
+
+def macos_arm_problems():
+    """What is wrong with MACOS_REACH against the darwin arms in hooks/: an arm with no row, a row that names
+    no arm, and a row that reaches no case."""
+    arms = darwin_arms()
+    rows = set(MACOS_REACH)
+    problems = ["untagged darwin arm %s::%s: add a row to MACOS_REACH" % arm for arm in sorted(arms - rows)]
+    problems += ["MACOS_REACH row %s::%s names no darwin arm in hooks/" % row for row in sorted(rows - arms)]
+    units = [(c["family"], c["session"]) for c in CASES] + [(LOG_FAMILY.get(label), None) for label, _ in LOG_CHECKS]
+    problems += ["MACOS_REACH row %s::%s reaches no case or log check" % row for row in sorted(rows)
+                 if not any(MACOS_REACH[row](family, session) for family, session in units)]
+    return problems
+
+
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
         session=None, carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
         agent_type=None, event=None, stop_active=False, windows=False, transcript=None,
@@ -411,6 +538,8 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "family": _family(name),
         "windows": bool(windows or session is not None or windows_shaped(
             tool, raw, cwd, env_path, config, *tool_input.values())),
+        # Tagged for GUARD_TESTS=macos-slice: the case reaches a darwin arm (MACOS_REACH).
+        "macos": macos_reached(_family(name), session),
     })
 
 
@@ -450,26 +579,16 @@ SECTION_DIR = os.path.join(HERE, "..", "tests", "guard")
 
 
 def load_sections(section_dir):
-    """Run each section file of section_dir here, in n order. No file, or two files with one n, stops the run."""
-    found = []
-    for name in (sorted(os.listdir(section_dir)) if os.path.isdir(section_dir) else []):
-        if not name.endswith(".py"):
-            continue
-        path = os.path.join(section_dir, name)
-        with open(path, encoding="utf-8") as f:
-            text = f.read()
-        head = re.match(r"# section (\d+)\n", text)
-        if not head:
-            sys.exit("fixture setup failed: %s has no `# section <n>` first line" % path)
-        found.append((int(head.group(1)), path, text))
-    if not found:
+    """Run each section file of section_dir here, in n order. No file, or a set the shared loader faults, stops the run."""
+    sections = _guard_sections.read(section_dir)
+    if not sections:
         sys.exit("fixture setup failed: no section file in %s, so the run would hold no case" % section_dir)
-    numbers = [n for n, _, _ in found]
-    for n in sorted(set(numbers)):
-        if numbers.count(n) > 1:
-            sys.exit("fixture setup failed: section number %d is on %d section files" % (n, numbers.count(n)))
-    for _, path, text in sorted(found):
-        exec(compile(text, path, "exec"), globals())
+    faults = _guard_sections.faults(sections)
+    if faults:
+        sys.exit("\n".join("fixture setup failed: %s %s" % (os.path.join(section_dir, name), message)
+                           for name, message in faults))
+    for name, _, text in sorted(sections, key=lambda section: section[1]):
+        exec(compile(text, os.path.join(section_dir, name), "exec"), globals())
 
 
 load_sections(os.environ.get("GUARD_SECTION_DIR") or SECTION_DIR)
@@ -486,6 +605,7 @@ if UNJOINED:
 NO_SYMLINK = "a symlink needs a privilege this Windows run does not hold, so this check does not run here"
 EMPTY_SECTIONS_LABEL = "sections: a run with no section file stops before any case"
 DUPLICATE_SECTIONS_LABEL = "sections: two section files with one number stop the run before any case"
+NAME_NUMBER_LABEL = "sections: a section file named for another number than its header stops the run before any case"
 LATE_APPEND_LABEL = "sections: a log check appended after the join stops the run before any case"
 
 
@@ -535,14 +655,16 @@ def build_empty(folder):
     """A folder with no section file in it."""
 
 
-def build_two_with_one_number(folder):
-    """Every real section file, copied in, and one more file that claims the number of the first section."""
-    # A copy, not a link: a symlink needs a privilege the Windows run does not hold.
-    for name in os.listdir(SECTION_DIR):
-        if name.endswith(".py"):
-            shutil.copyfile(os.path.join(SECTION_DIR, name), os.path.join(folder, name))
-    with open(os.path.join(folder, "s00442-second.py"), "w", encoding="utf-8") as f:
-        f.write("# section 442\n")
+def build_with_extra(extra_name, extra_text):
+    """A builder: every real section file, copied in, and one more file, `extra_name`, holding `extra_text`."""
+    def build(folder):
+        # A copy, not a link: a symlink needs a privilege the Windows run does not hold.
+        for name in os.listdir(SECTION_DIR):
+            if name.endswith(".py"):
+                shutil.copyfile(os.path.join(SECTION_DIR, name), os.path.join(folder, name))
+        with open(os.path.join(folder, extra_name), "w", encoding="utf-8") as f:
+            f.write(extra_text)
+    return build
 
 
 def build_late_append(folder):
@@ -556,8 +678,10 @@ def build_late_append(folder):
 
 for _label, _check in (
         (EMPTY_SECTIONS_LABEL, section_refusal_check(build_empty, "no section file in")),
-        (DUPLICATE_SECTIONS_LABEL, section_refusal_check(build_two_with_one_number,
+        (DUPLICATE_SECTIONS_LABEL, section_refusal_check(build_with_extra("s00442-second.py", "# section 442\n"),
                                                          "section number 442 is on 2 section files")),
+        (NAME_NUMBER_LABEL, section_refusal_check(build_with_extra("s99997-wrong.py", "# section 99998\n"),
+                                                  "name number 99997 disagrees with its header, section 99998")),
 ):
     LOG_FAMILY[_label] = "sections"
     LOG_CHECKS = LOG_CHECKS + ((_label, _check),)
@@ -679,15 +803,24 @@ SKIP = "skip"
 def run_cases():
     mode = os.environ.get("GUARD_TESTS", "")
     if mode not in GUARD_TESTS_MODES:
-        say("GUARD_TESTS=%r: want unset or 'windows-slice'. Nothing ran." % mode)
+        say("GUARD_TESTS=%r: want unset, 'windows-slice' or 'macos-slice'. Nothing ran." % mode)
         return 2
+    problems = macos_arm_problems()
+    if problems:
+        for problem in problems:
+            say("macos arm check FAIL: " + problem)
+        return 1
+    tag = SLICE_TAG.get(mode)
     fam = GUARD_FAMILY
-    cases = [c for c in CASES if (not mode or c["windows"]) and (not fam or c["family"] == fam)]
+    cases = [c for c in CASES if (not tag or c[tag]) and (not fam or c["family"] == fam)]
     logs = [(label, check) for label, check in LOG_CHECKS
-            if (not mode or check in WINDOWS_CHECKERS) and (not fam or LOG_FAMILY.get(label) == fam)]
+            if (not mode or (tag == "windows" and check in WINDOWS_CHECKERS)
+                or (tag == "macos" and check not in WINDOWS_CHECKERS
+                    and macos_reached(LOG_FAMILY.get(label), None)))
+            and (not fam or LOG_FAMILY.get(label) == fam)]
     total = len(cases) + len(logs)
     if mode and not total:
-        say("GUARD_TESTS=windows-slice: no case is tagged. Nothing ran.")
+        say("GUARD_TESTS=%s: no case is tagged. Nothing ran." % mode)
         return 2
     # One list, so a shard takes its share of the log checks too, and the shards stay disjoint.
     picked = shard_of(cases + logs, GUARD_SHARD)

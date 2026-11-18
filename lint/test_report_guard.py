@@ -37,11 +37,14 @@ import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (on
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 import test_refusal_note as hook_base  # noqa: E402  the route-rows seam name and fixture (one home, hooks/test_refusal_note.py)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
-# The correction step's words (decision guard-remedy-not-to-owner, shared tails). A refusal holds none of them; the
-# record holds both. Lower case, to match a lowered reason or record.
-CORRECTION_STEP = ("post only the corrected lines", "never send the report again")
+# The shared correction tail (decision guard-remedy-not-to-owner). Each reply refusal but
+# a missing report ends with it. Read with getattr, so a build without it fails on the assert that names it, not on
+# the import.
+CORRECTION_TAIL = getattr(RG, "CORRECTION_TAIL", "")
 RUN_FOLDER = _test_temp.run_folder()  # the new cases take their temp folders from it, never from the system temp dir
 
 # Isolation. Every spawned guard inherits this process's environment (env=None, or a copy
@@ -271,11 +274,13 @@ def run_config_report(hook, env=None):
 
 # The one home of the landing-turn drive: one human message, one Bash call (a git write unless the
 # caller names another command), then the reply, run through main() as the Stop hook.
-def landed_run(folder, reply, command="git commit -m x"):
+def landed_run(folder, reply, command="git commit -m x", cwd=None):
     records = [human("do the task"), tool_use_msg("Bash", {"command": command}), tool_result_msg(),
                assistant_text(reply)]
     path = write_transcript(records, folder)
     hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
+    if cwd is not None:  # the repo the hook reads its waiting page from (the Pick guard)
+        hook["cwd"] = cwd
     return run_guard(REPORT_GUARD, hook)
 
 
@@ -889,6 +894,196 @@ class DoneFormatAndCiteTests(unittest.TestCase):
         self.assertEqual(run_guard(REPORT_GUARD, hook).stdout.strip(), "")
 
 
+class PlainFormTests(unittest.TestCase):
+    """A bare id, a UTC time and a contradiction with no Input Needed question, in report_guard.py's Stop hook,
+    for landed turns only (rules speak-cite-id-plus-gloss, style-time-central-24h, output-bring-decisions-as-question)."""
+
+    DONE = "> **Done** BUILT guard, PR #226\n"
+    SAMPLE = (
+        "Refusal: a guard refused the rm-var run as frozen-path (guard.log 20:34:33 UTC). "
+        "Contradiction: #2015's own rows contradict each other: s02747:941 (env -vC, want ask) against :943 "
+        "(env -vC, want deny). The builder reports both and picks neither.")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
+        self.addCleanup(self.tmp.cleanup)
+        # A repo with no waiting page. The Pick guard reads the page from the hook's cwd, so a question case names
+        # this repo, never the checkout the tests run in.
+        self.bare = os.path.join(self.tmp.name, "bare")
+        os.makedirs(os.path.join(self.bare, ".git"))
+
+    def verdict(self, reply, cwd=None):
+        run = landed_run(self.tmp.name, reply, cwd=cwd)
+        self.assertEqual(run.returncode, 0)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def report(self, deviations, needed="none"):
+        return (self.DONE + "> **Deviations** " + deviations + "\n> **Input Needed** " + needed
+                + "\n> **Next** none")
+
+    def assert_blocked(self, reply, *needles):
+        out = self.verdict(reply)
+        self.assertIsNotNone(out, "no block for: " + reply)
+        self.assertEqual(out.get("decision"), "block")
+        for needle in needles:
+            self.assertIn(needle, out["reason"])
+
+    def assert_allowed(self, reply, cwd=None):
+        self.assertIsNone(self.verdict(reply, cwd), "a false block for: " + reply)
+
+    def assert_no_block(self, reply, cwd=None):
+        # A systemMessage note is no block. Only a decision stops the reply.
+        out = self.verdict(reply, cwd) or {}
+        self.assertNotIn("decision", out, "a block for: %s: %s" % (reply, out.get("reason")))
+
+    def test_pf_red_sample_trips_all_three(self):
+        self.assert_blocked(self.report(self.SAMPLE), "'#2015'", "style-time-central-24h",
+                            "output-bring-decisions-as-question", "speak-cite-id-plus-gloss")
+
+    def test_pf_red_bare_ids_block(self):
+        rows = [
+            ("Tracked as #2015 for now.", "'#2015'"),
+            ("#2015's own rows disagree.", "'#2015'"),                       # "own rows" is no gloss
+            ("See s02747:941 for the refusal.", "'s02747:941'"),
+            ("Row s02747:941 (env -vC, want ask) is wrong.", "'s02747:941'"),  # a command is no gloss
+            ("The rows contradict each other: s02747:941 differs.", "'s02747:941'"),
+        ]
+        for prose, needle in rows:
+            with self.subTest(prose=prose):
+                self.assert_blocked(prose + "\n\n" + self.DONE + "> **Next** none", needle)
+
+    def test_pf_allowed_glossed_ids(self):
+        rows = [
+            "#2015, check-tail filter, is open.",
+            "Row s02747:941, the env -vC refusal, is wrong.",
+            "The check-tail filter (#2015) is open.",
+            "Merged PR #2015 and pull request #2016.",
+            "See tests/guard/s43500-lane-start-pass.py and `#2015` and sha d1234567.",
+        ]
+        for prose in rows:
+            with self.subTest(prose=prose):
+                self.assert_allowed(prose + "\n\n" + self.DONE + "> **Next** none")
+
+    def test_pf_allowed_pr_ref_in_done_item(self):
+        # reports-done-format makes the writer cite a PR as #N, so a Done item may hold a bare #N.
+        self.assert_allowed("> **Done**\n> - BUILT the guard, #226\n> - OTHER swept branches, #227\n> **Next** none")
+
+    def test_pf_red_hash_id_in_deviations_blocks_with_done_present(self):
+        # The Done-item exemption must not leak to the Deviations item.
+        self.assert_blocked(self.DONE + "> **Deviations** #2015 broke\n> **Next** none", "'#2015'")
+
+    def test_pf_red_utc_time_blocks(self):
+        rows = [
+            ("The guard refused it at 20:34:33 UTC.", "20:34:33 UTC"),
+            ("It ran at 20:34 UTC.", "20:34 UTC"),
+            ("It ran at 20:34 GMT.", "20:34 GMT"),
+            ("Logged 2026-11-17T20:34:33Z by the hook.", "20:34:33Z"),
+            ("It ran at UTC 20:34.", "UTC 20:34"),
+        ]
+        for prose, needle in rows:
+            with self.subTest(prose=prose):
+                self.assert_blocked(prose + "\n\n" + self.DONE + "> **Next** none", needle, "style-time-central-24h")
+
+    def test_pf_allowed_central_times_and_offsets(self):
+        rows = [
+            "It ran at 14:34 CST and again at 15:10 CDT.",
+            "Local time: 2026-11-17 09:10 CST (UTC-06:00).",      # an offset is no time
+            "The log line `20:34:33 UTC` shows it.",
+            "```\n20:34:33 UTC refused\n```",
+            "Never show UTC to the owner.",
+        ]
+        for prose in rows:
+            with self.subTest(prose=prose):
+                self.assert_allowed(prose + "\n\n" + self.DONE + "> **Next** none")
+
+    def test_pf_red_contradiction_without_question_blocks(self):
+        rows = [
+            "Contradiction: the two rows disagree.",
+            "The builder reports both rows and picks neither.",
+            "The builder picked neither row.",
+        ]
+        for deviations in rows:
+            with self.subTest(deviations=deviations):
+                self.assert_blocked(self.report(deviations), "output-bring-decisions-as-question")
+
+    def test_pf_allowed_contradiction_with_a_question(self):
+        # A contradiction with an Input Needed question passes with no block at all. The run names a repo with no
+        # waiting page, so the Pick guard can only note the question, never block it.
+        rows = [
+            "Which row stands, the ask or the deny?",
+            "Pick one:\n> A: ask (my pick)\n> B: deny\n> Departs from: main keeps both rows as written — the owner "
+            "picks which one stands",
+        ]
+        for needed in rows:
+            with self.subTest(needed=needed):
+                self.assert_no_block(self.report("Contradiction: the two rows disagree.", needed), self.bare)
+
+    def test_pf_allowed_no_contradiction_words(self):
+        self.assert_allowed(self.report("none"))
+        # The word outside Deviations is no claim.
+        self.assert_allowed("Contradiction: noted in prose above.\n\n" + self.report("none"))
+
+    def test_pf_allowed_contradiction_none_found(self):
+        # A Deviations line that says there is no contradiction claims none, so Input Needed owes no question.
+        rows = [
+            "Contradiction: none found.",
+            "No contradiction: rows agree.",
+        ]
+        for deviations in rows:
+            with self.subTest(deviations=deviations):
+                self.assert_allowed(self.report(deviations))
+
+    def test_pf_red_bare_id_forms_block(self):
+        # PR#N and lane#N are ids with no gloss, and so is a #N with a hyphen after it. "Rows in #N" blocks too:
+        # "in" passes only for a built-in ref. "needs review" after the id says nothing about it.
+        rows = [
+            "PR#2015 is open.",
+            "lane#2015 is open.",
+            "#2015-check-tail filter is open.",
+            "Rows in #2015 disagree.",
+            "Blocked on #2015, needs review.",
+        ]
+        for prose in rows:
+            with self.subTest(prose=prose):
+                self.assert_blocked(prose + "\n\n" + self.DONE + "> **Next** none", "2015", "speak-cite-id-plus-gloss")
+
+    def test_pf_red_utc_forms_block(self):
+        rows = ["Logged 20:34 Z.", "It ran at 20:34 utc."]
+        for prose in rows:
+            with self.subTest(prose=prose):
+                self.assert_blocked(prose + "\n\n" + self.DONE + "> **Next** none", "20:34", "style-time-central-24h")
+
+    def test_pf_red_contradiction_forms_block(self):
+        rows = [
+            "Contradiction - the two rows disagree.",
+            "Contradiction — the two rows disagree.",
+            "The builder chose neither row.",
+            "Choose neither row.",
+        ]
+        for deviations in rows:
+            with self.subTest(deviations=deviations):
+                self.assert_blocked(self.report(deviations), "output-bring-decisions-as-question")
+
+    def test_pf_allowed_pr_ref_lists_and_labels(self):
+        # A #N after PR or PRs, or in a list of PR numbers, names a PR. A colon after PR is no break in that.
+        rows = [
+            "Merged PRs #2015, #2016.",
+            "Merged PR #2015 and #2016.",
+            "PR: #2015 merged.",
+        ]
+        for prose in rows:
+            with self.subTest(prose=prose):
+                self.assert_allowed(prose + "\n\n" + self.DONE + "> **Next** none")
+
+    def test_pf_allowed_resolved_contradiction(self):
+        # A contradiction whose choice is already made leaves no owner question to ask.
+        self.assert_allowed(self.report("Contradiction: resolved to ask per the rule."))
+
+    def test_pf_allowed_lone_quote_in_code_before_gloss(self):
+        # A lone quote inside a code span does not end the span, so the gloss after the span still counts.
+        self.assert_allowed("D12 `<75 x's>`, short titles for records is set.\n\n" + self.DONE + "> **Next** none")
+
+
 class DoneNamesModelsTests(unittest.TestCase):
     """reports-done-names-models, in report_guard.py's Stop hook."""
 
@@ -896,19 +1091,31 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
         self.addCleanup(self.tmp.cleanup)
 
-    def stop(self, records, reply, agent_model="sonnet"):
-        """Run the Stop hook over the turn's records, with the reply as its last text. Return its verdict or None."""
+    def stop(self, records, reply, agent_model="sonnet", agents_dir=None):
+        """Run the Stop hook over the turn's records, with the reply as its last text. Return its verdict or None.
+        `agents_dir` is a fixture agents folder for the guard's file pins; unset, the guard reads the repository's."""
         records = records + [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
                              assistant_text(reply)]
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
         env = dict(os.environ)
         env.pop("CLAUDE_CODE_SUBAGENT_MODEL", None)  # an unset spawn reads the agent file's pin, not this
+        env.pop("REPORT_GUARD_AGENTS_DIR", None)  # the repository's agents folder, unless a case names a fixture one
         if agent_model:
             env["CLAUDE_CODE_SUBAGENT_MODEL"] = agent_model
+        if agents_dir:
+            env["REPORT_GUARD_AGENTS_DIR"] = agents_dir
         run = run_guard(REPORT_GUARD, hook, env=env)
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def unpinned_agents(self):
+        """A fixture agents folder whose builder has no model pin: a spawn with no model and no pin resolves to ''."""
+        folder = os.path.join(self.tmp.name, "fixture-agents")
+        os.makedirs(folder)
+        with open(os.path.join(folder, "builder.md"), "w", encoding="utf-8") as handle:
+            handle.write("---\nname: builder\n---\nbody\n")
+        return folder
 
     def verdict(self, reply, spawns, denied=(), running=(), agent_model="sonnet"):
         records = [human("do the task")]
@@ -989,9 +1196,9 @@ class DoneNamesModelsTests(unittest.TestCase):
     RUNNING_NEXT = "> **Next** reviewer round 1 running; Unstarted: none"
 
     @staticmethod
-    def file_pin(role):
-        """The model: key of agents/<role>.md's frontmatter, read from the file the way the guard reads it."""
-        with open(os.path.join(HERE, "..", "agents", role + ".md"), encoding="utf-8") as f:
+    def file_pin(role, folder=os.path.join(HERE, "..", "agents")):
+        """The model: key of <folder>/<role>.md's frontmatter, read from the file the way the guard reads it."""
+        with open(os.path.join(folder, role + ".md"), encoding="utf-8") as f:
             front = f.read().split("---")[1].splitlines()
         for line in front:
             key, _, value = line.partition(":")
@@ -1155,20 +1362,26 @@ class DoneNamesModelsTests(unittest.TestCase):
     def test_dm_red_earlier_unresolved_spawn_hides_window_mismatch_blocks(self):
         # An earlier builder with no resolvable model is '' in the transcript's map. That must not switch off
         # the builder check for the window's builder, which ran opus.
-        self.assertEqual(self.file_pin("builder"), "", "agents/builder.md pins a model, so no spawn is unresolved")
+        # Re-pointed, the coordinator's ruling of 20:38 CST Nov 9 (step builder-model-pin): a builder with no pin is
+        # ruled out in the repository, so this case reads an unpinned fixture folder through REPORT_GUARD_AGENTS_DIR.
+        folder = self.unpinned_agents()
+        self.assertEqual(self.file_pin("builder", folder), "", "fixture error: the builder fixture pins a model")
         records = self.turn_records(earlier=[self.BUILDER_NO_MODEL], window=[self.BUILDER_OPUS])
         out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none",
-                        agent_model=None)
+                        agent_model=None, agents_dir=folder)
         self.assertIsNotNone(out, "Done named builder sonnet against a window builder that ran opus, and passed")
         self.assertIn("'builder sonnet' matches no builder spawn, which ran opus", out["reason"])
 
     def test_dm_red_earlier_unresolved_spawn_hides_window_wrong_model_blocks(self):
         # The mirror: the window's builder ran sonnet, and Done names opus. The earlier unresolved spawn must
         # not let that wrong name pass.
-        self.assertEqual(self.file_pin("builder"), "", "agents/builder.md pins a model, so no spawn is unresolved")
+        # Re-pointed, the coordinator's ruling of 20:38 CST Nov 9 (step builder-model-pin): a builder with no pin is
+        # ruled out in the repository, so this case reads an unpinned fixture folder through REPORT_GUARD_AGENTS_DIR.
+        folder = self.unpinned_agents()
+        self.assertEqual(self.file_pin("builder", folder), "", "fixture error: the builder fixture pins a model")
         records = self.turn_records(earlier=[self.BUILDER_NO_MODEL], window=[self.BUILDER_SONNET])
         out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder opus)\n> **Next** Unstarted: none",
-                        agent_model=None)
+                        agent_model=None, agents_dir=folder)
         self.assertIsNotNone(out, "Done named builder opus against a window builder that ran sonnet, and passed")
         self.assertIn("'builder opus' matches no builder spawn, which ran sonnet", out["reason"])
 
@@ -1273,21 +1486,22 @@ class NoResendTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
 
-    def test_nr_red_each_refusal_holds_no_correction_tail(self):
+    def test_nr_each_refusal_carries_the_correction_tail(self):
         rows = [
-            # Catches: the label-word refusal carries the correction tail.
+            # Catches: the label-word refusal lacks the correction tail.
             ("label words", "> **Done** fixed it in abc123\n> **Next** none", ()),
-            # Catches: the model-name refusal carries the correction tail.
+            # Catches: the model-name refusal lacks the correction tail.
             ("model names", "> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none",
              (self.BUILDER,)),
-            # Catches: the Unstarted refusal carries the correction tail.
+            # Catches: the Unstarted refusal lacks the correction tail.
             ("Unstarted line", "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** merge",
              (self.BUILDER,)),
-            # Catches: the cite-gloss refusal carries the correction tail.
+            # Catches: the cite-gloss refusal lacks the correction tail.
             ("cite gloss", "Per D12.\n\n> **Done** BUILT guard, PR #5\n> **Next** none", ()),
-            # Catches: a joined refusal carries the correction tail.
+            # Catches: a joined refusal lacks the correction tail.
             ("label words and cite gloss", "Per D12.\n\n> **Done** fixed it\n> **Next** none", ()),
         ]
+        self.assertTrue(CORRECTION_TAIL, "report_guard holds no shared CORRECTION_TAIL constant")
         for name, reply, spawns in rows:
             with self.subTest(refusal=name):
                 out = self.verdict(reply, spawns)
@@ -1295,22 +1509,23 @@ class NoResendTests(unittest.TestCase):
                 reason = out["reason"].lower()
                 self.assertIn("decision guard-remedy-not-to-owner", reason)
                 self.assertNotIn("send the report now", reason)
-                for phrase in CORRECTION_STEP:
-                    self.assertNotIn(phrase, reason, "the refusal carries the correction tail: %r" % phrase)
+                self.assertIn(CORRECTION_TAIL, out["reason"], "the refusal lacks the shared correction tail")
                 self.assertEqual(reason.count("rule reports-order-of-labels"), 1)
                 self.assertIn("rule reports-order-of-labels", reason)
 
     def test_nr_missing_report_block_keeps_the_reply(self):
         out = self.verdict("All done.")
         self.assertIn("does not end with the report", out["reason"])
-        self.assertNotIn("post only the corrected lines", out["reason"].lower())
+        self.assertTrue(CORRECTION_TAIL, "report_guard holds no shared CORRECTION_TAIL constant")
+        self.assertNotIn(CORRECTION_TAIL, out["reason"], "a missing-report block carries the correction tail")
 
     def test_nr_missing_report_with_bare_cite_never_forbids_the_report(self):
-        # Catches: the block asks for the report and also says never send it.
+        # Catches: the block asks for the report and also carries the correction tail, which bars a resend.
         out = self.verdict("Per D12.\n\nAll done.")
         self.assertIn("'D12'", out["reason"])
         self.assertIn("does not end with the report", out["reason"])
-        self.assertNotIn("never send the report again", out["reason"].lower())
+        self.assertTrue(CORRECTION_TAIL, "report_guard holds no shared CORRECTION_TAIL constant")
+        self.assertNotIn(CORRECTION_TAIL, out["reason"], "a missing-report block carries the correction tail")
 
     def test_nr_correction_only_follow_up_passes(self):
         # The follow-up holds only the corrected lines, with no report. It runs as a rewrite.
@@ -1321,7 +1536,7 @@ class NoResendTests(unittest.TestCase):
 
 
 class RewriteAfterMissingReportTests(unittest.TestCase):
-    """The rewrite after a missing-report block is checked once for model names and the Unstarted line."""
+    """The rewrite after a missing-report block is checked once for model names, the Unstarted line and the plain-form faults."""
 
     BUILDER = {"subagent_type": "builder", "prompt": "build it"}
     GOOD = "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none"
@@ -1376,6 +1591,25 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.missing_report_block()
         self.assertIsNone(self.stop(self.GOOD, True))
         self.assertIsNone(self.stop(self.GOOD, True))
+
+    def test_rw_red_rewrite_runs_the_plain_form_checks(self):
+        # The rewrite is the report the owner reads, so the plain-form checks apply to it as they do to a first report.
+        contradiction = ("> **Done** BUILT the guard, PR #5 (builder sonnet)\n"
+                         "> **Deviations** Contradiction: the two rows disagree.\n"
+                         "> **Input Needed** none\n> **Next** Unstarted: none")
+        rows = [
+            ("Tracked as #2015 for now.\n\n" + self.GOOD, "2015", "speak-cite-id-plus-gloss"),
+            ("Logged 20:34 Z.\n\n" + self.GOOD, "20:34", "style-time-central-24h"),
+            (contradiction, "Contradiction", "output-bring-decisions-as-question"),
+        ]
+        for reply, needle, rule in rows:
+            with self.subTest(reply=reply):
+                self.missing_report_block()
+                out = self.stop(reply, True)
+                self.assertIsNotNone(out, "the rewrite passed with no block: " + reply)
+                self.assertEqual(out["decision"], "block")
+                self.assertIn(needle, out["reason"])
+                self.assertIn(rule, out["reason"])
 
     def earlier_round_records(self, reply):
         """A turn whose reviewer ran before the owner's second message, on its file pin (haiku), and whose
@@ -1488,6 +1722,15 @@ class CompactionCarryTests(unittest.TestCase):
         for name in names:
             self.assertIn(name, out["reason"])
 
+    def assertOnlyMissing(self, out, name):
+        """A block whose reason says the line `name` has not landed, and names no other carry line."""
+        self.assertBlocksNaming(out)
+        self.assertIn("no %s line has landed since" % name, out["reason"],
+                      "the refusal does not say %r is missing" % name)
+        for other in ("Recovered", "Handoff gave"):
+            if other != name:
+                self.assertNotIn("%s line" % other, out["reason"], "the refusal names %r, which is not missing" % other)
+
     def test_cc_red_landed_turn_after_compaction_without_line_blocks(self):
         # Catches: a landed turn after a compaction passes with no Recovered line.
         self.assertBlocksForRecovered(self.stop(self.compacted_turn(REPORT_NO_LINE)))
@@ -1498,6 +1741,8 @@ class CompactionCarryTests(unittest.TestCase):
             "Recovered: none\n\n" + REPORT_NO_LINE,
             # Catches: a word that ends in "recovered:" is read as the line.
             "> **Done** BUILT abc123\n> **Deviations** Unrecovered: P3 ruling\n> **Next** ship it",
+            # Catches: a Done-item line above the report blockquote counts, when only the blockquote may hold it.
+            "- OTHER: Recovered: x (git)\n\n" + REPORT_NO_LINE,
         ]
         for reply in rows:
             with self.subTest(reply=reply):
@@ -1651,16 +1896,22 @@ class CompactionCarryTests(unittest.TestCase):
 
     def test_cc_red_handoff_gave_missing_blocks(self):
         # Catches: a Recovered line with no Handoff gave line passes.
-        self.assertBlocksNaming(self.stop(self.compacted_turn(report_lines("Recovered: none"))), "Handoff gave")
+        out = self.stop(self.compacted_turn(report_lines("Recovered: none")))
+        self.assertBlocksNaming(out, "Handoff gave")
+        self.assertOnlyMissing(out, "Handoff gave")
 
     def test_cc_red_recovered_missing_with_handoff_present_blocks(self):
         # Catches: a Handoff gave line with no Recovered line passes.
-        self.assertBlocksNaming(self.stop(self.compacted_turn(report_lines("Handoff gave: none"))))
+        out = self.stop(self.compacted_turn(report_lines("Handoff gave: none")))
+        self.assertBlocksNaming(out)
+        self.assertOnlyMissing(out, "Recovered")
 
     def test_cc_red_handoff_line_outside_the_blockquote_blocks(self):
-        # Catches: a Handoff gave line above the report blockquote counts for the current reply.
-        reply = "Handoff gave: none\n\n" + report_lines("Recovered: none")
-        self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), "Handoff gave")
+        # Catches: a Handoff gave line above the report blockquote counts for the current reply, plain or as a Done item.
+        for above in ("Handoff gave: none", "- OTHER: Handoff gave: none"):
+            with self.subTest(above=above):
+                reply = above + "\n\n" + report_lines("Recovered: none")
+                self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), "Handoff gave")
 
     def test_cc_green_both_lines_with_sources_pass(self):
         rows = [
@@ -1821,6 +2072,51 @@ class CompactionCarryTests(unittest.TestCase):
         self.assertBlocksNaming(out)
         self.assertIn("Recovered line", out["reason"])
 
+    def test_cc_red_both_lines_missing_join_with_and(self):
+        # Catches: the refusal joins the two missing lines with "or", which reads as either one being enough.
+        out = self.stop(self.compacted_turn(REPORT_NO_LINE))
+        self.assertBlocksNaming(out, "no Recovered line and no Handoff gave line has landed since")
+
+    def test_cc_green_other_done_item_lines_count(self):
+        # Catches: a Done item tagged OTHER, "- OTHER: Recovered:" or "- OTHER: Handoff gave:", is not read as its line.
+        reply = "> **Done** BUILT abc123\n> - OTHER: Recovered: x (git)\n> - OTHER: Handoff gave: x\n> **Next** ship it"
+        out = self.stop(self.compacted_turn(reply))
+        self.assertIsNone(out, "a Done item tagged OTHER does not count: %r" % (out,))
+
+    def test_cc_green_built_and_recorded_done_item_lines_count(self):
+        # Catches: a Done item tagged BUILT or RECORDED, "- BUILT: Recovered:" or "- RECORDED: Handoff gave:", is not read as its line.
+        reply = ("> **Done** BUILT abc123\n> - BUILT: Recovered: x from PR #978 (git)\n"
+                 "> - RECORDED: Handoff gave: x from PR #978\n> **Next** ship it")
+        out = self.stop(self.compacted_turn(reply))
+        self.assertIsNone(out, "a Done item tagged BUILT or RECORDED does not count: %r" % (out,))
+
+    def test_cc_red_tags_outside_the_done_kinds_do_not_count(self):
+        # Catches: a bullet tagged NOTE or DONE, which is no Done kind, is read as its carry line.
+        rows = [
+            (report_lines("Recovered: x (git)", "NOTE: Handoff gave: x"), "Handoff gave"),
+            (report_lines("DONE: Recovered: x (git)", "Handoff gave: x"), "Recovered"),
+        ]
+        for reply, name in rows:
+            with self.subTest(reply=reply):
+                self.assertOnlyMissing(self.stop(self.compacted_turn(reply)), name)
+
+    def test_cc_red_fenced_carry_lines_above_the_report_do_not_count(self):
+        # Catches: "Recovered:" and "Handoff gave:" inside a code fence above the report count as carry lines.
+        reply = "```\nRecovered: x (git)\nHandoff gave: x\n```\n\n" + REPORT_NO_LINE
+        self.assertBlocksForRecovered(self.stop(self.compacted_turn(reply)))
+
+    def test_cc_red_mid_item_recovered_text_is_not_a_carry_line(self):
+        # Catches: a backticked or mid-sentence "recovered:" after a Done-item tag is read as the Recovered line.
+        for item in ("- OTHER: built the `Recovered:` check", "- OTHER: the janitor recovered: 3 files from git"):
+            with self.subTest(item=item):
+                reply = "> **Done** BUILT abc123\n> **Deviations**\n> %s\n> Handoff gave: none\n> **Next** ship it" % item
+                self.assertOnlyMissing(self.stop(self.compacted_turn(reply)), "Recovered")
+
+    def test_cc_red_other_tag_with_no_bullet_is_not_a_carry_line(self):
+        # Catches: an OTHER tag at line start, with no bullet, is read as a Done item's Handoff gave line.
+        reply = "> **Done** BUILT abc123\n> **Deviations**\n> Recovered: x (git)\n> OTHER: Handoff gave: x\n> **Next** ship it"
+        self.assertOnlyMissing(self.stop(self.compacted_turn(reply)), "Handoff gave")
+
 
 class CompactionCarryCostTests(unittest.TestCase):
     """The compaction-carry check reads the transcript it already opens: no process, and no file
@@ -1886,6 +2182,7 @@ class PickGuardTests(unittest.TestCase):
 
     PAGE = "https://claude.ai/artifact/waitpage1"
     OTHER = "https://claude.ai/artifact/otherrepo9"
+    GMAIL = "https://claude.ai/artifact/gmailpage2"  # the waiting page's link in another account, a second link of one page
     # The line a pick carries in its Input Needed item (rule question-departs): what is on main, and what changes.
     DEPARTS_LINE = "Departs from: lint/report_guard.py pick check — it also needs a Departs from line"
     PICK_BARE = ("> **Done** OTHER read the code\n"
@@ -1960,6 +2257,54 @@ class PickGuardTests(unittest.TestCase):
     def test_pk_green_page_write_without_link_passes(self):
         # The writer's items write is the send. It reaches the page without a link in the reply, so no link is needed.
         self.assertIsNone(self.verdict(self.PICK, [self.page_set()]))
+
+    def two_link_repo(self):
+        """A repo whose waiting page entry holds two account links, one page: the current link and the gmail link."""
+        repo = os.path.join(self.tmp.name, "two-links")
+        os.makedirs(os.path.join(repo, ".git"))
+        os.makedirs(os.path.join(repo, ".claude"))
+        entry = {"id": "queue", "role": "waiting-page", "export": "waiting",
+                 "links": [{"account": "current", "url": self.PAGE}, {"account": "gmail", "url": self.GMAIL}]}
+        with open(os.path.join(repo, ".claude", "layout-extras.json"), "w") as f:
+            json.dump({"kinds": {}, "artifacts": [entry]}, f)
+        return repo
+
+    def test_pk_green_page_write_to_the_gmail_link_passes(self):
+        # Catches: an items write to the waiting page's link in another account refused as a write to another page,
+        # because the pick check compares the write to the first link only. Any link of the waiting page is the page.
+        repo = self.two_link_repo()
+        out = self.verdict(self.PICK, [self.page_set(self.GMAIL)], repo=repo)
+        self.assertIsNone(out, "an items write to the waiting page's gmail link was refused: %r" % out)
+
+    def test_pk_green_page_write_to_the_current_link_passes_in_a_two_link_repo(self):
+        # Control: the first link still passes when the entry holds a second link.
+        repo = self.two_link_repo()
+        self.assertIsNone(self.verdict(self.PICK, [self.page_set()], repo=repo))
+
+    def test_pk_red_page_write_to_a_link_the_page_does_not_hold_blocks_in_a_two_link_repo(self):
+        # Catches: any artifact link passing as the waiting page once the entry holds two links.
+        repo = self.two_link_repo()
+        self.assertIsNotNone(self.verdict(self.PICK, [self.page_set(self.OTHER)], repo=repo))
+
+    def test_pk_red_page_write_on_another_host_blocks(self):
+        # Catches: a URL on another host passing as the waiting page, because the write is matched on its artifact id alone.
+        out = self.verdict(self.PICK, [self.page_set("https://evil.example/artifact/waitpage1")])
+        self.assertIsNotNone(out, "an items write to a URL on another host, naming the waiting page's id, was accepted")
+
+    def test_pk_red_page_write_with_an_extra_path_segment_blocks(self):
+        # Catches: a claude.ai URL with a segment before the id passing as the waiting page, because only the last segment is compared.
+        out = self.verdict(self.PICK, [self.page_set("https://claude.ai/artifact/OTHER/waitpage1")])
+        self.assertIsNotNone(out, "an items write to a claude.ai URL with an extra path segment was accepted as the waiting page")
+
+    def test_pk_green_page_write_to_the_code_form_of_the_page_passes(self):
+        # Control: the /code/ form of the page's own link is the same page.
+        out = self.verdict(self.PICK, [self.page_set("https://claude.ai/code/artifact/waitpage1")])
+        self.assertIsNone(out, "an items write to the /code/ form of the waiting page was refused: %r" % out)
+
+    def test_pk_green_page_write_with_a_trailing_slash_passes(self):
+        # Control: a trailing slash on the page's own link is the same page.
+        out = self.verdict(self.PICK, [self.page_set("https://claude.ai/artifact/waitpage1/")])
+        self.assertIsNone(out, "an items write to the waiting page's link with a trailing slash was refused: %r" % out)
 
     def test_pk_red_agent_calls_do_not_count(self):
         # An agent's box and write do not count. With no link in the reply, the pick still blocks
@@ -2808,6 +3153,25 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                 out = self.lane(peer_msg("pick?"), assistant_text(self.reply(body)))
                 self.assert_blocked(out, "Lane pick guard", "its parent")
 
+    def test_ln_red_consultant_with_parent_is_owner_facing(self):
+        # Catches: a session tagged cs-build:consultant that has a parent id read as a lane, so its question
+        # to the owner is refused for not going to a parent.
+        record = self.lane_record(tags=("cs-build:consultant",))
+        bare = self.make_repo("bare-consultant", page=False)
+        out = self.stop([*record, human("decide"), *self.box(), assistant_text(self.reply(self.PICK))],
+                        env_id=self.LANE_ENV, repo=bare)
+        self.assertIsNone(out)
+        out = self.stop([*record, human("decide"), assistant_text(self.reply(self.QUESTION))], env_id=self.LANE_ENV)
+        self.assert_blocked(out, "Pick guard")
+        self.assertNotIn("Lane pick guard", out.get("reason", ""))
+
+    def test_ln_red_lane_and_consultant_tags_together_stay_a_lane(self):
+        # Catches: the consultant exemption widened past its bug, so a record with the lane tag too passes
+        # a question that main refuses.
+        record = self.lane_record(tags=("cs-build:lane", "cs-build:consultant"))
+        out = self.stop([*record, peer_msg("pick?"), assistant_text(self.reply(self.PROMISE))], env_id=self.LANE_ENV)
+        self.assert_blocked(out, "Lane pick guard", "its parent")
+
     def test_ln_red_box_or_items_write_blocks(self):
         # Catches: a lane's box or items write read as its send. Neither passes a lane.
         for label, act in (("box", self.box()), ("items", self.items_write("set"))):
@@ -3099,29 +3463,45 @@ class ConfigReportTests(unittest.TestCase):
 
 
 class RemovedBudgetKeysTests(unittest.TestCase):
-    """load_config says so when a config still sets a removed word-budget key (plain-prose-lint)."""
+    """load_config says so when a config still sets a removed budget key, and the key changes no result
+    (plain-prose-lint: the lint never counts words)."""
 
     def load(self, data):
         import contextlib
         import io
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        with open(os.path.join(tmp.name, ".ste.json"), "w", encoding="utf-8") as f:
+        folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, folder, True)
+        with open(os.path.join(folder, ".ste.json"), "w", encoding="utf-8") as f:
             json.dump(data, f)
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
-            cfg = ste_lint.load_config(tmp.name)
+            cfg = ste_lint.load_config(folder)
         return cfg, err.getvalue()
 
     def test_removed_budget_keys_print_a_notice_each(self):
-        for key in ("max_words_procedural", "max_words_descriptive"):
+        for key in ("max_words", "max_words_procedural", "max_words_descriptive"):
             with self.subTest(key=key):
                 _cfg, err = self.load({key: 20})
                 self.assertIn(key, err)
+                self.assertIn("removed and ignored", err)
+
+    def test_the_notice_does_not_name_max_words_as_the_live_budget(self):
+        for key in ("max_words", "max_words_procedural", "max_words_descriptive"):
+            with self.subTest(key=key):
+                _cfg, err = self.load({key: 20})
+                self.assertNotIn("The budget is max_words", err)
+
+    def test_max_words_in_config_changes_no_finding(self):
+        text = "This step is not unsafe. " + plain_words(10)
+        cfg, _err = self.load({"max_words": 5})
+        with_key = sorted(f.code for f in ste_lint.Linter(cfg).check_text("t.md", text))
+        without = sorted(f.code for f in ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG)).check_text("t.md", text))
+        self.assertIn("STE013", without, "the control sentence was not linted")
+        self.assertEqual(with_key, without)
 
     def test_a_current_key_prints_no_notice(self):
-        cfg, err = self.load({"max_words": 20})
-        self.assertEqual(cfg["max_words"], 20)
+        cfg, err = self.load({"mode": "descriptive"})
+        self.assertEqual(cfg["mode"], "descriptive")
         self.assertEqual(err, "")
 
 
@@ -3133,112 +3513,93 @@ class SentenceSplitBoldTests(unittest.TestCase):
         linter = ste_lint.Linter(config)
         return linter.check_text("t.md", text)
 
-    def test_19_bold_split_sentences_each_under_limit_no_ste001(self):
-        text = (
-            "**First short sentence.** Second short sentence that alone is well "
-            "under the limit for this test case and it stays clear plain short "
-            "words here for every reader who checks the count today.\n"
-        )
-        # Each sentence alone is under the 30-word budget. Joined as
-        # one sentence (the pre-patch behavior), the word count would exceed it.
-        findings = self.lint(text)
-        codes = [f.code for f in findings]
-        self.assertNotIn("STE001", codes)
+    def test_19_a_sentence_end_inside_bold_still_splits(self):
+        parts = ste_lint.split_sentences("**First short sentence.** Second short sentence.", in_list=False)
+        self.assertEqual(len(parts), 2, "the sentence end inside bold did not split")
+        self.assertEqual(parts[1][1], "Second short sentence.")
 
-    def test_20_plain_thirty_one_word_sentence_still_ste001(self):
-        words = ["word"] * 31
-        text = " ".join(words).capitalize() + ".\n"
-        findings = self.lint(text)
-        codes = [f.code for f in findings]
-        self.assertIn("STE001", codes)
+    def test_20_a_plain_thirty_one_word_sentence_gives_no_ste001(self):
+        # The control sentence shows the text was linted before no STE001 is read from it.
+        codes = [f.code for f in self.lint(plain_words(31).rstrip() + " This step is not unsafe.\n")]
+        self.assertIn("STE013", codes, "the control sentence was not linted")
+        self.assertNotIn("STE001", codes)
 
 
 class DoubleBacktickMaskTests(unittest.TestCase):
     """A two-backtick code span is one span (MASK_PATTERNS in lint/ste_lint.py).
 
-    The tests guard that a double-backtick span is masked as code, so its text is not linted and a
-    backtick inside it does not hide the prose after it. They also guard that an unclosed
-    double-backtick run is literal text: it opens no span, so the prose before a later code span
-    is still linted, and that code span is still masked.
+    The probe is STE013, a double negative, which fires on "not unsafe" in prose and never inside code.
+    Each case pairs a control, which shows the text is linted, with the masked case. The tests guard
+    that a double-backtick span is masked as code, so its text is not linted and a backtick inside it
+    does not hide the prose after it. They also guard that an unclosed double-backtick run is literal
+    text: it opens no span, so the prose before a later code span is still linted, and that code span
+    is still masked.
     """
-
-    LONG_TAIL = ("The reviewer reads every changed line of the test file before the branch is pushed, "
-                 "then checks each new case against the old commit and records the failing run in the trailer")
 
     def codes(self, text):
         linter = ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG))
         return [f.code for f in linter.check_text("t.md", text)]
 
     def test_backtick_inside_double_backtick_span_does_not_hide_the_next_sentence(self):
-        single = "Write the span as `a b` in the note. " + self.LONG_TAIL + " with `code` at the end.\n"
-        self.assertIn("STE001", self.codes(single), "fixture sentence is not over budget")
-        double = "Write the span as ``a ` b`` in the note. " + self.LONG_TAIL + " with `code` at the end.\n"
-        self.assertIn("STE001", self.codes(double),
+        single = "Write the span as `a b` in the note. This step is not unsafe. Then `code` at the end.\n"
+        self.assertIn("STE013", self.codes(single), "fixture sentence is not linted")
+        double = "Write the span as ``a ` b`` in the note. This step is not unsafe. Then `code` at the end.\n"
+        self.assertIn("STE013", self.codes(double),
                       "a backtick inside a double-backtick span hides the sentence after it")
 
     def test_double_backtick_span_content_is_not_linted(self):
-        words = " ".join(["word"] * 31)
-        self.assertIn("STE001", self.codes("Run " + words + " now.\n"), "fixture sentence is not over budget")
-        self.assertNotIn("STE001", self.codes("Run ``" + words + "`` now.\n"),
+        self.assertIn("STE013", self.codes("Run not unsafe now.\n"), "fixture sentence is not linted")
+        self.assertNotIn("STE013", self.codes("Run ``not unsafe`` now.\n"),
                          "text inside a double-backtick span is linted as prose")
 
-    def test_double_backtick_span_without_inner_backtick_adds_no_finding(self):
-        self.assertNotIn("STE001", self.codes("Set the flag ``a b`` and then stop the pump now.\n"),
-                         "a double-backtick span with no backtick inside adds a finding")
+    def test_double_backtick_span_without_inner_backtick_is_not_linted(self):
+        self.assertIn("STE013", self.codes("Set the flag not unsafe and then stop the pump now.\n"),
+                      "fixture sentence is not linted")
+        self.assertNotIn("STE013", self.codes("Set the flag ``a b not unsafe`` and then stop the pump now.\n"),
+                         "a double-backtick span with no backtick inside is linted as prose")
 
     def test_unclosed_double_backtick_run_does_not_hide_prose_before_a_code_span(self):
         # The `` run has no closing run of two, so it is literal text and opens no span.
-        words = " ".join(["word"] * 31)
-        self.assertIn("STE001", self.codes("Run status and " + words + ", then `file`.\n"),
-                      "fixture sentence is not over budget")
-        self.assertIn("STE001", self.codes("Run ``status and " + words + ", then `file`.\n"),
+        self.assertIn("STE013", self.codes("Run status and not unsafe, then `file`.\n"),
+                      "fixture sentence is not linted")
+        self.assertIn("STE013", self.codes("Run ``status and not unsafe, then `file`.\n"),
                       "an unclosed double-backtick run hides the words before a later code span")
 
     def test_unclosed_double_backtick_run_does_not_lint_a_later_code_span_as_prose(self):
         # The run is literal, so the single-backtick span after it is valid and its words stay masked.
-        words = " ".join(["word"] * 31)
-        self.assertIn("STE001", self.codes("Run status then " + words + " now.\n"),
-                      "fixture sentence is not over budget")
-        self.assertNotIn("STE001", self.codes("Run ``status then `" + words + "` now.\n"),
+        self.assertIn("STE013", self.codes("Run status then not unsafe now.\n"), "fixture sentence is not linted")
+        self.assertNotIn("STE013", self.codes("Run ``status then `not unsafe` now.\n"),
                          "an unclosed double-backtick run makes a later code span read as prose")
 
     def test_lone_backtick_before_a_double_span_does_not_hide_the_words_before_it(self):
         # The lone backtick is an unclosed run, so it is literal and opens no span. The `` span after
-        # it is masked, and the 31 words before it stay prose.
-        words = " ".join(["word"] * 31)
-        self.assertIn("STE001", self.codes("Use " + words + " ``x`` now.\n"), "fixture sentence is not over budget")
-        self.assertIn("STE001", self.codes("Use ` then " + words + " ``x`` now.\n"),
+        # it is masked, and the words before it stay prose.
+        self.assertIn("STE013", self.codes("Use not unsafe ``x`` now.\n"), "fixture sentence is not linted")
+        self.assertIn("STE013", self.codes("Use ` then not unsafe ``x`` now.\n"),
                       "a lone backtick before a double-backtick span hides the words before it")
 
     def test_two_backtick_run_inside_a_three_backtick_run_does_not_close_the_span(self):
         # The ``` run is not a closing run of two, so the span runs on to the `` after the words and
         # the words stay inside it.
-        words = " ".join(["word"] * 31)
-        self.assertIn("STE001", self.codes("Use " + words + " now.\n"), "fixture sentence is not over budget")
-        self.assertNotIn("STE001", self.codes("Use ``x ``` " + words + " `` now.\n"),
+        self.assertIn("STE013", self.codes("Use not unsafe now.\n"), "fixture sentence is not linted")
+        self.assertNotIn("STE013", self.codes("Use ``x ``` not unsafe `` now.\n"),
                          "a two-backtick run inside a three-backtick run closes the span early")
 
     def test_single_backtick_span_content_is_not_linted(self):
-        words = " ".join(["word"] * 31)
-        self.assertIn("STE001", self.codes("Run " + words + " now.\n"), "fixture sentence is not over budget")
-        self.assertNotIn("STE001", self.codes("Run `" + words + "` now.\n"),
+        self.assertIn("STE013", self.codes("Run not unsafe now.\n"), "fixture sentence is not linted")
+        self.assertNotIn("STE013", self.codes("Run `not unsafe` now.\n"),
                          "text inside a single-backtick span is linted as prose")
-
-    def test_single_backtick_span_budget_is_thirty_words(self):
-        base = ("Set the flag `a b` and then the reviewer checks every changed line in the test file "
-                "before the branch is pushed to the shared remote today for the crew now")
-        self.assertIn("STE001", self.codes(base + " again.\n"), "fixture: a 31-word sentence is not over budget")
-        self.assertNotIn("STE001", self.codes(base + ".\n"), "a 30-word sentence with one span is over budget")
 
 
 class DecisionGlossCollapseTests(unittest.TestCase):
-    """STE001 must not count the words a gloss tool inserts after a citation
-    (lint/ste_lint.py build_gloss_pattern). A hermetic fixture folder stands
-    in for a real `docs/decisions/`, so this needs no other repository.
+    """The gloss tool writes a citation's title after its id. The masker drops that title for every
+    rule and for --stats (lint/ste_lint.py build_gloss_pattern), so a double negative in a title the
+    tool wrote fires nothing once collapsed, and the title's words are not counted. A hermetic fixture
+    folder stands in for a real `docs/decisions/`, so this needs no other repository.
     """
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)  # test-temp-standard: this run's folder
         self.decisions_dir = os.path.join(self.tmp.name, "decisions")
         os.makedirs(self.decisions_dir)
         self.addCleanup(self.tmp.cleanup)
@@ -3256,49 +3617,47 @@ class DecisionGlossCollapseTests(unittest.TestCase):
         linter = ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG))
         return linter.check_text("t.md", text)
 
-    def test_genuinely_long_sentence_without_citation_still_ste001(self):
-        self.write_entry("d-001.md", "D-001", "A short title")
-        words = ["word"] * 31
-        text = " ".join(words).capitalize() + ".\n"
-        codes = [f.code for f in self.lint(text, use_gloss=True)]
-        self.assertIn("STE001", codes)
+    def stats_words(self, text, use_gloss):
+        pattern = ste_lint.build_gloss_pattern(self.decisions_dir) if use_gloss else None
+        ste_lint.set_gloss_pattern(pattern)
+        return ste_lint.file_stats(text, dict(ste_lint.DEFAULT_CONFIG))["words"]
 
-    def test_gloss_only_overflow_is_not_ste001_once_collapsed(self):
-        self.write_entry("d-001.md", "D-001", "A title of exactly six whole words")
-        text = (
-            "The team agreed today that this long sentence about D-001, A title "
-            "of exactly six whole words still carries plenty of authored words "
-            "for the sentence count today at the main site now.\n")
+    def test_gloss_text_the_tool_wrote_is_not_linted_once_collapsed(self):
+        self.write_entry("d-001.md", "D-001", "A title that is not unsafe")
+        text = "The team agreed today about D-001, A title that is not unsafe, and it stays plain.\n"
         uncollapsed = [f.code for f in self.lint(text, use_gloss=False)]
-        self.assertIn("STE001", uncollapsed, "fixture sentence was not actually over budget")
+        self.assertIn("STE013", uncollapsed, "fixture title is not linted without the gloss")
         collapsed = [f.code for f in self.lint(text, use_gloss=True)]
-        self.assertNotIn("STE001", collapsed)
+        self.assertNotIn("STE013", collapsed)
+
+    def test_gloss_text_the_tool_wrote_is_not_counted_by_stats_once_collapsed(self):
+        self.write_entry("d-001.md", "D-001", "The rule that holds for every site")
+        text = "All sites follow D-001, The rule that holds for every site today.\n"
+        self.assertEqual(self.stats_words(text, use_gloss=False), 12,
+                         "fixture line is not 12 words without the gloss")
+        self.assertEqual(self.stats_words(text, use_gloss=True), 5,
+                         "gloss text the tool wrote is counted by --stats")
 
     def test_wrong_gloss_for_a_real_id_is_not_collapsed(self):
-        self.write_entry("d-001.md", "D-001", "A title of exactly six whole words")
-        text = (
-            "The team agreed today that this long sentence about D-001, some "
-            "text that is not entry one real title still carries plenty of "
-            "authored words for the count today at the main site now.\n")
+        self.write_entry("d-001.md", "D-001", "A title that is not unsafe")
+        text = "The team agreed today about D-001, some text that is not unsafe, and it stays plain.\n"
         codes = [f.code for f in self.lint(text, use_gloss=True)]
-        self.assertIn("STE001", codes)
+        self.assertIn("STE013", codes)
 
     def test_reversed_entry_gloss_suffix_also_collapses(self):
-        self.write_entry("d-001.md", "D-001", "A title of exactly six whole words")
-        self.write_entry("d-002.md", "D-002", "The newer rule", body="reverses: D-001\n")
-        text = (
-            "The team agreed that this sentence about D-001, A title of exactly six "
-            "whole words (reversed by D-002, The newer rule) still carries plenty of "
-            "words for the whole crew today and for the late shift too.\n")
+        self.write_entry("d-001.md", "D-001", "A title that is not unsafe")
+        self.write_entry("d-002.md", "D-002", "The newer rule is not unsafe", body="reverses: D-001\n")
+        text = ("The team agreed that this sentence about D-001, A title that is not unsafe "
+                "(reversed by D-002, The newer rule is not unsafe) still stays plain.\n")
         uncollapsed = [f.code for f in self.lint(text, use_gloss=False)]
-        self.assertIn("STE001", uncollapsed, "fixture sentence was not actually over budget")
+        self.assertIn("STE013", uncollapsed, "fixture titles are not linted without the gloss")
         codes = [f.code for f in self.lint(text, use_gloss=True)]
-        self.assertNotIn("STE001", codes)
+        self.assertNotIn("STE013", codes)
 
     def test_heading_gloss_trigger_word_does_not_force_procedural_mode(self):
         # D-448's real title in q_max, "The operator tiers run themselves", carries
-        # `run`, a `PROCEDURAL_HEADINGS` trigger word. The sentence limit is one number now, so
-        # the mode shows through STE015, a rule that reads procedural text only. The body holds a
+        # `run`, a `PROCEDURAL_HEADINGS` trigger word. The mode shows through STE015, a rule that
+        # reads procedural text only. The body holds a
         # condition after its instruction: STE015 fires in procedural mode, never in descriptive.
         self.write_entry("d-001.md", "D-001", "The operator tiers run themselves")
         body = (
@@ -3366,7 +3725,7 @@ class DecisionGlossCollapseTests(unittest.TestCase):
 
 class PromotedRuleTests(unittest.TestCase):
     """Plain-prose lint (decisions/plain-prose-lint.md): a rule either blocks or does not exist,
-    and six advisory codes are the one exception. Three rules block: STE001, STE011, STE013.
+    and six advisory codes are the one exception. Two rules block: STE011, STE013.
     Six are advisory: STE003, STE007, STE008, STE009, STE015, STE017 are
     warnings that the linter reports and no guard ever blocks on. Each case here proves a rule
     fires at its severity, the thing a table-row edit alone cannot prove. STE006 and STE018 are
@@ -3441,16 +3800,24 @@ class PromotedRuleTests(unittest.TestCase):
         findings = self.lint("This sentence uses a semicolon; and continues here.\n")
         self.assertEqual(findings, [])
 
-    def test_semicolon_joined_pair_over_budget_still_trips_ste001(self):
-        # split_sentences only splits at . ! ?, never at ;. A semicolon-joined pair
-        # that together cross the word budget is one sentence to the counter, and
-        # must still trip STE001.
+    def test_semicolon_joined_pair_over_the_old_budget_gives_no_ste001(self):
+        # split_sentences only splits at . ! ?, never at ;. A semicolon-joined 32-word pair is one
+        # sentence, and the lint never counts words, so it gives no STE001.
         text = ("w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12 w13; "
-                "w14 w15 w16 w17 w18 w19 w20 w21 w22 w23 w24 w25 w26 w27 w28 w29 w30 w31 w32.\n")
-        findings = self.lint(text)
-        self.assertIn("STE001", [f.code for f in findings])
+                "w14 w15 w16 w17 w18 w19 w20 w21 w22 w23 w24 w25 w26 w27 w28 w29 w30 w31 w32. "
+                "This step is not unsafe.\n")
+        codes = [f.code for f in self.lint(text)]
+        self.assertIn("STE013", codes, "the control sentence was not linted")
+        self.assertNotIn("STE001", codes)
 
-    def test_errors_are_exactly_the_three_blocking_codes_and_warnings_the_six_advisory_ones(self):
+    def test_ste001_is_no_rule(self):
+        self.assertNotIn("STE001", ste_lint.RULES, "STE001 is still a rule")
+
+    def test_the_error_rules_are_exactly_ste011_and_ste013(self):
+        errors = sorted(code for code, rule in ste_lint.RULES.items() if rule.severity == "error")
+        self.assertEqual(errors, ["STE011", "STE013"])
+
+    def test_errors_are_exactly_the_two_blocking_codes_and_warnings_the_six_advisory_ones(self):
         severities = {code: rule.severity for code, rule in ste_lint.RULES.items()}
         self.assertEqual({c for c, s in severities.items() if s == "error"}, set(ERROR_CODES))
         self.assertEqual({c for c, s in severities.items() if s == "warning"}, set(ADVISORY_CODES))
@@ -3885,8 +4252,8 @@ class RewriteStampTests(unittest.TestCase):
                 self.assertBlocks(self.run_stop(repo, done_reply(done)), name, "2026-10-28", "18:44")
 
 
-# These errors fail CI's STE lint on changed lines (plain-prose-lint):
-ERROR_CODES = ("STE001", "STE011", "STE013")
+# These errors fail CI's STE lint on changed lines (plain-prose-lint). No sentence length is one.
+ERROR_CODES = ("STE011", "STE013")
 # These six are advisory: reported as warnings, never a failed run.
 ADVISORY_CODES = ("STE003", "STE007", "STE008", "STE009", "STE015", "STE017")
 # One input per advisory code. Each holds that code's finding and no error finding, and none is
@@ -3908,88 +4275,73 @@ def plain_words(n):
 
 # One input per kept error code: (file suffix, text).
 KEPT_SAMPLES = {
-    "STE001": (".md", plain_words(31)),
     "STE011": (".md", "In conclusion, the plan works.\n"),
     "STE013": (".md", "This step is not unsafe.\n"),
 }
 
 
 def run_lint_cli(text, suffix=".md"):
-    """ste_lint.py at its defaults on a file holding text: (exit code, parsed JSON)."""
-    with tempfile.TemporaryDirectory() as d:
-        path = os.path.join(d, "t" + suffix)
+    """ste_lint.py at its defaults on a file holding text: (exit code, parsed JSON). The file's folder
+    is made in this run's folder (test-temp-standard)."""
+    folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+    try:
+        path = os.path.join(folder, "t" + suffix)
         with open(path, "w", encoding="utf-8") as f:
             f.write(text)
         run = subprocess.run([sys.executable, os.path.join(HERE, "ste_lint.py"), "--no-color",
                               "--format", "json", path], capture_output=True, text=True, timeout=15)
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
     return run.returncode, json.loads(run.stdout)
 
 
-class OneSentenceBudgetTests(unittest.TestCase):
-    """One sentence budget of 30 words, procedural or descriptive. No separate procedural limit
-    of 20 or descriptive limit of 25 exists."""
+class OneSentenceLengthTests(unittest.TestCase):
+    """No sentence length limit: a sentence of any length gives no STE001, procedural or descriptive.
+    The lint never counts words."""
 
     def lint(self, text, mode):
         config = dict(ste_lint.DEFAULT_CONFIG)
         config["mode"] = mode
         return ste_lint.Linter(config).check_text("t.md", text)
 
-    def test_b01_26_to_30_words_pass_in_both_modes(self):
-        for mode in ("descriptive", "procedural"):
-            for n in (26, 30):
+    def test_b01_no_sentence_length_gives_ste001_in_any_mode(self):
+        for mode in ("descriptive", "procedural", "auto"):
+            for n in (26, 31, 200):
                 with self.subTest(mode=mode, words=n):
-                    self.assertNotIn("STE001", [f.code for f in self.lint(plain_words(n), mode)])
+                    codes = [f.code for f in self.lint(plain_words(n).rstrip() + " This step is not unsafe.\n", mode)]
+                    self.assertIn("STE013", codes, "the control sentence was not linted")
+                    self.assertNotIn("STE001", codes)
 
-    def test_b02_31_words_error_in_both_modes_and_name_the_limit(self):
-        # The message states the one limit.
-        for mode in ("descriptive", "procedural"):
-            with self.subTest(mode=mode):
-                hit = [f for f in self.lint(plain_words(31), mode) if f.code == "STE001"]
-                self.assertTrue(hit)
-                self.assertEqual(hit[0].severity, "error")
-                self.assertRegex(hit[0].message, r"\b30\b")
+    def test_b03_the_cli_passes_long_sentences_in_a_procedural_file_and_a_descriptive_file(self):
+        # The advisory STE008 on the last line shows the file was linted. No STE001 may sit beside it.
+        for label, head in (("descriptive", ""), ("procedural", "<!-- ste: procedural -->\n\n")):
+            for n in (31, 200):
+                with self.subTest(file=label, words=n):
+                    rc, data = run_lint_cli(head + plain_words(n).rstrip() + " They'd finished the work.\n")
+                    self.assertEqual([f["code"] for f in data["findings"]], ["STE008"])
+                    self.assertEqual(rc, 0)
 
-    def test_b03_the_cli_passes_26_words_in_a_procedural_file_and_a_descriptive_file(self):
-        for label, text in (("descriptive", plain_words(26)),
-                            ("procedural", "<!-- ste: procedural -->\n\n" + plain_words(26))):
-            with self.subTest(file=label):
-                rc, data = run_lint_cli(text)
-                self.assertEqual(data["findings"], [])
-                self.assertEqual(rc, 0)
-
-    def test_b04_the_cli_fails_31_words_in_a_procedural_file_and_a_descriptive_file(self):
-        for label, text in (("descriptive", plain_words(31)),
-                            ("procedural", "<!-- ste: procedural -->\n\n" + plain_words(31))):
-            with self.subTest(file=label):
-                rc, data = run_lint_cli(text)
-                self.assertEqual([f["code"] for f in data["findings"]], ["STE001"])
-                self.assertEqual(rc, 1)
-
-
-    # building-scanner-respects-strings: text a scanner can misread must not move the boundary.
-    # (label, template, filler words that make the sentence exactly 30 words)
+    # building-scanner-respects-strings: text a scanner can misread must not hide the prose after it.
+    # Each trap is followed by a sentence the lint must read (STE013) and a control that is clean.
     TRAPS = [
         ("comment openers inside inline code",
-         'Run `x = "/* a */"` then `y = "// b"` and `z = "# c"` before you read %s.', 21),
+         'Run `x = "/* a */"` then `y = "// b"` and `z = "# c"` before you read this. %s'),
         ("a lone double quote and a JSX-style apostrophe",
-         'The 5" pipe and <p>Don\'t</p> stay in the line so please read %s.', 18),
+         'The 5" pipe and <p>Don\'t</p> stay in the line so please read on. %s'),
     ]
 
-    def test_b07_scanner_traps_do_not_move_the_boundary(self):
-        for label, template, fit in self.TRAPS:
-            for filler, flagged in ((fit, False), (fit + 1, True)):
-                with self.subTest(trap=label, filler=filler):
-                    text = template % " ".join(["word"] * filler)
-                    codes = [f.code for f in self.lint(text, "descriptive")]
-                    self.assertEqual("STE001" in codes, flagged)
+    def test_b07_scanner_traps_do_not_hide_the_sentence_after_them(self):
+        for label, template in self.TRAPS:
+            for sentence, flagged in (("This step is not unsafe.", True), ("This step is safe.", False)):
+                with self.subTest(trap=label, sentence=sentence):
+                    codes = [f.code for f in self.lint(template % sentence, "descriptive")]
+                    self.assertEqual("STE013" in codes, flagged)
 
-    def test_b08_a_fenced_multiline_template_literal_adds_no_words(self):
-        fence = ("```js\nconst s = `line one " + " ".join(["word"] * 20)
-                 + "\nline two // keep /* keep */`;\n```\n\n")
-        for n, flagged in ((30, False), (31, True)):
-            with self.subTest(words=n):
-                codes = [f.code for f in self.lint(fence + plain_words(n), "descriptive")]
-                self.assertEqual("STE001" in codes, flagged)
+    def test_b08_a_fenced_multiline_template_literal_adds_no_finding(self):
+        fence = ("```js\nconst s = `line one This step is not unsafe.\n"
+                 "line two // keep /* keep */`;\n```\n\n")
+        codes = [f.code for f in self.lint(fence + "This step is not unsafe.\n", "descriptive")]
+        self.assertEqual(codes, ["STE013"])
 
 
 class AdvisoryCodesTests(unittest.TestCase):
@@ -4027,7 +4379,7 @@ class AdvisoryCodesTests(unittest.TestCase):
 
 
 class KeptErrorCodesTests(unittest.TestCase):
-    """STE001, STE011 and STE013 are errors."""
+    """STE011 and STE013 are errors."""
 
     def test_k01_each_kept_code_is_an_error_and_the_cli_exits_one(self):
         for code, (suffix, text) in KEPT_SAMPLES.items():
@@ -4099,25 +4451,28 @@ class SourceProseLintTests(unittest.TestCase):
         self.assertEqual([f.code for f in findings], [])
 
     def test_72_reported_line_numbers_match_source(self):
-        rows = [
-            # Catches: a long sentence across comment lines is not reported.
-            ("\n".join("# " + w for w in ["word"] * 31) + "\n", None),
-            # Catches: a reported line number points at the wrong source line.
-            ("x = 1\n"
-             "# a short first comment line\n"
-             "# and this comment run keeps going to make the sentence long enough "
-             "that it holds more than thirty words in total across these comment lines "
-             "of the sample file for the test\n",
-             {2, 3}),
-        ]
-        for text, allowed_lines in rows:
-            with self.subTest(allowed_lines=allowed_lines):
-                findings = self.check("sample.py", text)
-                self.assertIn("STE001", [f.code for f in findings])
-                if allowed_lines is not None:
-                    lines = {f.line for f in findings}
-                    self.assertNotIn(1, lines)
-                    self.assertTrue(lines and lines.issubset(allowed_lines))
+        # Catches: a reported line number points at the wrong source line.
+        text = ("x = 1\n"
+                "# a short first comment line\n"
+                "# this comment line says this step is not unsafe\n")
+        lines = {f.line for f in self.check("sample.py", text) if f.code == "STE013"}
+        self.assertEqual(lines, {3}, "the double negative is not reported on its own source line")
+
+    def test_78_a_sentence_split_across_comment_lines_is_one_sentence(self):
+        # Catches: the consecutive-comment join is off, so a double negative split across two
+        # comment lines is never read as one sentence and gives no STE013.
+        one_line = "x = 1\n# This step is not unsafe.\n"
+        self.assertIn(("STE013", 2), [(f.code, f.line) for f in self.check("sample.py", one_line)],
+                      "the control comment was not linted")
+        split = "x = 1\n# This step is not\n# unsafe.\n"
+        self.assertIn(("STE013", 2), [(f.code, f.line) for f in self.check("sample.py", split)],
+                      "the double negative split across two comment lines is not one sentence")
+
+    def test_77_a_long_comment_sentence_gives_no_ste001(self):
+        text = "\n".join("# " + w for w in ["word"] * 31) + "\n# This step is not unsafe.\n"
+        codes = [f.code for f in self.check("sample.py", text)]
+        self.assertIn("STE013", codes, "the control comment was not linted")
+        self.assertNotIn("STE001", codes)
 
     def test_73_hash_inside_shell_quotes_is_not_a_comment(self):
         # No unquoted '#' exists on this line. A scanner that finds '#' without
@@ -4296,18 +4651,50 @@ class UICopyRoundTwoTests(unittest.TestCase):
                                              "launch</button>;\n"), ["STE011"])
 
     def test_114_many_generics_lint_in_linear_time(self):
-        import time
-        lines = []
-        for i in range(600):
-            lines.append("const f%d = <T extends X>(a: T): T => a;" % i)
-            lines.extend(["const v%d_%d = %d;" % (i, j, j) for j in range(7)])
-        lines.append("const y = <p>In order to go.</p>;")
-        text = "\n".join(lines) + "\n"
-        self.assertGreaterEqual(len(lines), 4800)
-        started = time.monotonic()
-        codes = self.check("a.tsx", text)
-        self.assertLess(time.monotonic() - started, 2.0)
-        self.assertEqual(codes, ["STE011"])
+        def build(generics):
+            lines = []
+            for i in range(generics):
+                lines.append("const f%d = <T extends X>(a: T): T => a;" % i)
+                lines.extend(["const v%d_%d = %d;" % (i, j, j) for j in range(7)])
+            lines.append("const y = <p>In order to go.</p>;")
+            return "\n".join(lines) + "\n"
+
+        def check_counted(text):
+            # Steps are the line events the trace sees in lint/ste_lint.py while the check runs. No clock is
+            # read, so machine load cannot move the count.
+            linter_file = ste_lint._jsx_copy.__code__.co_filename
+            steps = [0]
+
+            def count_line(frame, event, arg):
+                if event == "line":
+                    steps[0] += 1
+                return count_line
+
+            def trace_call(frame, event, arg):
+                return count_line if frame.f_code.co_filename == linter_file else None
+
+            previous = sys.gettrace()
+            sys.settrace(trace_call)
+            try:
+                codes = self.check("a.tsx", text)
+            finally:
+                sys.settrace(previous)
+            return codes, steps[0]
+
+        small, large = build(600), build(2400)
+        self.assertGreaterEqual(small.count("\n"), 4800)
+        small_codes, small_steps = check_counted(small)
+        large_codes, large_steps = check_counted(large)
+        self.assertEqual(small_codes, ["STE011"])
+        self.assertEqual(large_codes, ["STE011"])
+        # Scope first: the trace must have seen at least one step per input line, or the ratio below proves nothing.
+        self.assertGreaterEqual(small_steps, small.count("\n"),
+                                "the trace counted fewer steps than input lines: it missed lint/ste_lint.py")
+        # Four times the lines take about four times the steps. A Python scan to the end of the file for each
+        # generic makes the steps grow as the square, which the 8x bound catches. A str.find scan to the end
+        # adds one step per generic, so this count does not see it. The bound is for Python-level scans only.
+        ratio = large_steps / small_steps
+        self.assertLess(ratio, 8, "4x the lines took %.1fx the steps: the check is not linear" % ratio)
 
 
 class TurnReaderTests(unittest.TestCase):
@@ -4655,15 +5042,16 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         out, _ = self.stop(self.decided, RELAY, answer=bogus)
         self.assertIn("Unvetted guard", self.reason(out), out)
 
-    def test_a_relayed_question_costs_one_git_process_and_one_model_call(self):
+    # Two git starts: the one this claim already counted, and the ruled store's ls-tree (one start when the roadmap ref is absent).
+    def test_a_relayed_question_costs_two_git_processes_and_one_model_call(self):
         self.stop(self.ci, RELAY, answer=tcj.ALLOW)
         self.assertEqual(len(self.model_calls()), 1)
-        self.assertEqual(self.git_starts(), 1)
+        self.assertEqual(self.git_starts(), 2)
 
-    def test_a_prose_question_costs_one_git_process_and_one_model_call(self):
+    def test_a_prose_question_costs_two_git_processes_and_one_model_call(self):
         self.stop(self.ci, PROSE_Q, answer=tcj.ALLOW)
         self.assertEqual(len(self.model_calls()), 1)
-        self.assertEqual(self.git_starts(), 1)
+        self.assertEqual(self.git_starts(), 2)
 
     def test_an_unvetted_line_elsewhere_in_the_reply_does_not_skip_the_check(self):
         out, _ = self.stop(self.decided, UNVETTED + "\n" + RELAY, answer=REFUSE_APPS)
@@ -4816,6 +5204,35 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         first = 'Answered, the owner wrote "no.'
         self.assert_blocked(first + '\nHe then said "yes" later.', first)
 
+    def test_an_red_session_answering_its_questions_passes(self):
+        # Catches: a session that answered another session's questions reads as an owner's answer, so the line is blocked.
+        self.assert_allowed("I sent triage 9 my comments on its draft goal and answered its four questions:")
+
+    def test_an_red_proposed_end_condition_passes(self):
+        # Catches: "answered" in a should-clause, a condition a goal proposes and nobody has met, is read as a claim.
+        self.assert_allowed("- The goal should end once the 20 open comment threads are answered or closed, "
+                            "without reading the other 55.")
+
+    def test_an_red_guard_name_and_negated_claim_pass(self):
+        # Catches: the guard's own name, "the answered guard", is read as a claim, because the first use of the
+        # word has no negator in its clause.
+        self.assert_allowed("- A test-author on the answered guard's false alarm: it refused my two lines that were "
+                            "not claims you had answered anything.")
+
+    def test_an_red_builder_fixing_the_guard_passes(self):
+        # Catches: a fix that flags the guard's own name, "the answered guard", or the word after "claim", so a line
+        # that describes the guard and its claim check is blocked as a claim that the owner or an item was answered.
+        self.assert_allowed("A Sonnet builder is fixing the answered guard so it flags only a claim that you or an item "
+                            "were answered, not other uses of the word.")
+
+    def test_an_green_item_number_is_a_source_and_passes(self):
+        # Catches: a fix that stops counting "item <n>" as a source, which decision answered-needs-source lists.
+        self.assert_allowed("Item 870 is answered.")
+
+    def test_an_green_owner_claim_with_a_condition_word_still_blocks(self):
+        # Catches: a fix that exempts every line with a condition word such as "once", not only a proposed condition.
+        self.assert_blocked("The owner answered it once the call ended.", "The owner answered it once the call ended.")
+
     def test_an_red_fence_marker_mid_line_opens_no_fence(self):
         # Catches: a ``` inside a line, and not at its start, opens a fence that hides the lines after it.
         self.assert_blocked("Typed ``` in the middle, then answered.\nThe next line answered too.",
@@ -4866,7 +5283,163 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         self.assertIn("inline code span", refusal,
                       "the refusal text does not name the inline code span route: %r" % refusal)
 
+    def test_an_red_owner_answer_claims_block_under_the_new_exemptions(self):
+        # Red on the guard's newer exemptions: a first-person clause, "claim", a modal and its own printed name.
+        # Each row claims that the owner or an item was answered and cites no source, so each must block.
+        rows = [
+            # Catches: a first-person clause ("I think") exempts an unsourced owner answer.
+            "I think the owner answered it.",
+            # Catches: a first-person clause ("I believe") exempts an unsourced answer by another person.
+            "I believe they answered it.",
+            # Catches: a first-person clause ("I was told") exempts an unsourced owner answer.
+            "I was told the owner answered it.",
+            # Catches: a first-person act with an object exempts a claim that Claude answered for the owner.
+            "I answered the item for him.",
+            # Catches: the word "claim" in the clause exempts an answer that is stated as a claim.
+            "We claim he answered.",
+            # Catches: the word "claims" in the clause exempts an unsourced owner answer.
+            "Claude claims the owner answered it.",
+            # Catches: a modal in the clause exempts a past answer stated as fact.
+            "The owner must have answered it already.",
+            # Catches: a modal in the clause exempts an unsourced answer, though a later clause closes the item.
+            "The owner should have answered it, so the item is closed.",
+            # Catches: the guard's printed name exempts a line that claims the owner answered questions.
+            "The owner answered guard questions.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_an_red_answered_as_a_modifier_passes(self):
+        # Must pass: "answered" here modifies "page item", so the line claims nothing. A rule about a future item.
+        # Catches: an adjective "answered" before a noun is read as a claim, so a rule about a page item is refused.
+        self.assert_allowed("- When an answered page item isn't on main, check open PRs first, then start a builder.")
+
+    def test_an_red_first_person_clause_naming_the_owner_blocks(self):
+        # Red on the first-person exemption: the owner is named as "the user" or by name, and neither is in the
+        # owner-word list, so the clause before the word is read as Claude's own act.
+        rows = [
+            # Catches: a first-person clause ("I believe") exempts an unsourced owner answer naming "the user".
+            "I believe the user answered them.",
+            # Catches: a first-person clause exempts an unsourced owner answer that names the owner by his first name.
+            "I wrote the brief and Shivam answered all four.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_an_red_modal_claim_of_a_past_answer_blocks(self):
+        # Red on the modal exemption: a modal in the clause exempts a claim with no owner word before the word. Each row
+        # states an answer as fact and cites no source.
+        rows = [
+            # Catches: a modal exempts an answer stated as fact, with "It" as the subject.
+            "It may be answered already.",
+            # Catches: a modal exempts an answer stated as fact, with "The decision" as the subject.
+            "The decision must have been answered already.",
+            # Catches: a modal and a first-person verb exempt an answer stated as fact.
+            "I would say it was answered.",
+            # Catches: a modal exempts an answer whose owner is named after the word, outside the clause.
+            "That would have been answered by the owner.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_an_red_claim_noun_before_an_owner_answer_blocks(self):
+        # Red on the "claim" exemption: "that claim" in the clause exempts the whole clause, so an owner answer stated
+        # after it in the same clause passes.
+        line = "That claim is stale because the owner answered the item."
+        self.assert_blocked(line, line)
+
+    def test_an_red_proposed_condition_on_items_or_questions_passes(self):
+        # Red on the owner-word list: "items" or "question" in a should-clause reads a proposed stop or end condition as
+        # an owner's answer. A goal or a rule that names the condition claims nothing.
+        rows = [
+            # Catches: "items" in a should-clause makes a proposed end condition read as an owner answer.
+            "The goal should end once the open items are answered.",
+            # Catches: "question" in a should-clause makes a proposed stop condition read as an owner answer.
+            "A lane should stop after the question is answered.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_red_writer_at_the_start_of_a_longer_word_blocks(self):
+        # Red on the writer's word boundary: "I" or "we" at the start of a longer word ("Items", "Issue", "Wednesday's",
+        # "Weekly") reads as Claude's own act, so an "and" before the word lets an unsourced owner answer pass.
+        rows = [
+            # Catches: "I" at the start of "Items" reads as the writer, so an unsourced answer passes.
+            "Items were sent and answered it.",
+            # Catches: "I" at the start of "Issue" reads as the writer, so an unsourced answer passes.
+            "Issue 4 was opened and answered the same day.",
+            # Catches: "We" at the start of "Wednesday's" reads as the writer, so an unsourced answer passes.
+            "Wednesday's questions were sent and answered the same day.",
+            # Catches: "We" at the start of "Weekly" reads as the writer, so an unsourced answer passes.
+            "Weekly questions were sent and answered the same day.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_an_red_only_before_the_answered_verb_passes(self):
+        # Red on the adverb list: "only" is not in ADVERBS, and the -ly pattern needs three letters before "ly", so
+        # "only" is no adverb. A first-person act with "only" before the verb then reads as an owner claim.
+        rows = [
+            # Catches: "only" after "I" drops the first-person act, so Claude's own answer is refused.
+            "I only answered it.",
+            # Catches: "only" after "We" drops the first-person act, so Claude's own answer is refused.
+            "We only answered the questions.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_an_red_duly_before_the_answered_verb_passes(self):
+        # Red on the adverb list: "duly" has two letters before "ly", and the -ly pattern needs three, so "duly" is no
+        # adverb. A first-person act with "duly" before the verb then reads as an owner claim.
+        # Catches: "duly" after "I" drops the first-person act, so Claude's own answer is refused.
+        self.assert_allowed("I duly answered it.")
+
+    def test_an_red_joint_subject_with_and_i_or_we_blocks(self):
+        # Red on the joint subject: a person word, then "and I" or "and we", reads as the writer's own act, so an unsourced
+        # owner answer passes. The first-person act checks the object and the words after the verb for a person, never the
+        # words before the writer. The reason must name the check, so a block from another guard cannot satisfy a row.
+        rows = [
+            # Catches: "Shivam and I still" passes as the writer's own act, with "still" read as the adverb.
+            "Shivam and I still answered the questions.",
+            # Catches: "Shivam and I" passes as the writer's own act, with a page item as the object.
+            "Shivam and I answered the page items.",
+            # Catches: "The owner and I" passes as the writer's own act, with a count before the object noun.
+            "The owner and I answered the four questions.",
+            # Catches: "The owner and we ourselves" passes as the writer's own act, with "we ourselves" read as the writer.
+            "The owner and we ourselves answered the items.",
+            # Catches: "Shivam and I myself" passes as the writer's own act, with "I myself" read as the writer.
+            "Shivam and I myself answered the questions.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line, "answered-needs-source")
+
     # Green: these pass before the verdict exists too. Each guards against a false alarm.
+
+    def test_an_green_first_person_answer_passes_beside_the_red_rows(self):
+        # Control for the red tests above, green on the same commit. A whole-word writer with "and", a listed adverb
+        # and an -ly adverb still pass, so a fix that drops one of those paths goes red here, not only in the red rows.
+        rows = [
+            # Catches: a whole-word "We" before "and" stops passing when the writer's word boundary is checked.
+            "We sent it and answered it.",
+            # Catches: a first-person act with "and" stops passing when the writer's word boundary is checked.
+            "I sent the brief and answered it.",
+            # Catches: a listed adverb before the verb stops passing when the adverb slot changes.
+            "I already answered it.",
+            # Catches: an -ly adverb stops passing when the -ly pattern is swapped for a fixed list.
+            "I quickly answered it.",
+            # Catches: a first-person act with no adverb stops passing in the same fix.
+            "I answered it.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
 
     def test_an_green_each_source_cites_the_word(self):
         rows = [
@@ -5440,8 +6013,9 @@ class PendingRefusalTests(unittest.TestCase):
                 order = RG.session_wording(reason)
                 checks = (
                     ("the block does not say when a refused tool clears", "clears when" in reason),
+                    # The shared correction tail says "Post only", which is no clearing claim, so it is stripped first.
                     ("the block says 'only' about clearing, which is false: other forms clear a tool too",
-                     not re.search(r"\bonly\b", reason, re.I)),
+                     not re.search(r"\bonly\b", reason.replace(CORRECTION_TAIL, ""), re.I)),
                     ("the block does not give the Input Needed clearing form", "under Input Needed" in reason),
                     ("the block does not give the phrase clearing form `<tool_name>`: refusal was right",
                      "`<tool_name>`: refusal was right" in reason),
@@ -5861,7 +6435,7 @@ class PassClaimCitesVerdictTests(unittest.TestCase):
 
     def test_control_a_path_token_is_no_claim_word(self):
         with self.subTest(item="a path token"):
-            self.assert_passes(self.report("Files: tests/guard/s42900-pass-claim-send.py"))
+            self.assert_passes(self.report("Files: tests/guard/s43700-pass-claim-send.py"))
         with self.subTest(item="the same line with a claim"):
             self.assert_blocked(self.report("Files: lint passed."))
 
@@ -6036,6 +6610,66 @@ class PassClaimCitesVerdictTests(unittest.TestCase):
         self.assertIsNotNone(out, "not refused")
         self.assertEqual(out.get("decision"), "block", out)
         self.assertEqual(os.listdir(cfg), [], "the refused run wrote a file")
+
+
+# The cost of one Stop (the past-ruling check, which reads the ruled store and the roadmap through git and makes one model
+# call). A reply that relays questions makes one past-ruling model call for all of them, and two git processes: the
+# ruled-store ls-tree and the roadmap cat-file. A reply with no question starts nothing. A refusal adds no file under
+# the config dir.
+
+TWO_QUESTIONS = RELAY + "\n\n" + "Should the caps stay at 2x?"  # two different questions, not one repeated
+
+
+class CostTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.decided = tcj.make_repo("cost-decided", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+        cls.ci = tcj.CI_REPO  # a roadmap ref, so the two git processes are the ruled-store ls-tree and the roadmap cat-file
+
+    def stop(self, repo, reply, answers, earlier=()):
+        """One Stop after the owner's message: the `earlier` replies, then `reply`, the one the hook reads."""
+        folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+        texts = list(earlier) + [reply]
+        path = write_transcript([human("decide")] + [assistant_text(text) for text in texts], folder)
+        hook = json.dumps({"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False,
+                           "cwd": repo})
+        return cost_probe.run_hook(REPORT_GUARD, hook, folder, answers)
+
+    def test_a_reply_with_no_question_starts_nothing(self):
+        run = self.stop(self.ci, DONE_ONLY, [[{"ok": True}, None]])
+        self.assertEqual((run["models"], run["children"], run["files"]), ([], [], []))
+
+    def test_a_reply_with_one_question_costs_one_model_call_and_two_git_reads(self):
+        run = self.stop(self.ci, RELAY, [[{"ok": True}, None]])
+        self.assertEqual(len(run["models"]), 1, "one question, one past-ruling call; got %r" % run["models"])
+        self.assertEqual(cost_probe.names(run["children"]), ["git", "git"],
+                         "two children, the ruled-store ls-tree and the roadmap cat-file; got %r" % run["children"])
+        self.assertEqual(run["files"], [], "an allow writes no file")
+
+    def test_two_relayed_questions_cost_one_model_call_and_two_git_reads(self):
+        run = self.stop(self.ci, TWO_QUESTIONS, [[{"ok": True}, None]])
+        self.assertEqual(len(run["models"]), 1, "both questions share one past-ruling call; got %r" % run["models"])
+        self.assertEqual(cost_probe.names(run["children"]), ["git", "git"],
+                         "two children, the ruled-store ls-tree and the roadmap cat-file; got %r" % run["children"])
+        self.assertEqual(run["files"], [], "an allow writes no file")
+
+    def test_a_refused_relayed_question_blocks_once_and_writes_no_file(self):
+        run = self.stop(self.decided, RELAY, [[json.loads(REFUSE_APPS), None]])
+        self.assertEqual(len(run["models"]), 1)
+        self.assertEqual(json.loads(run["out"]).get("decision"), "block", "the ruling blocks the Stop once")
+        self.assertEqual(run["files"], [], "a past-ruling block writes no file under the config dir")
+
+    def test_a_question_in_an_earlier_reply_costs_one_model_call_and_two_git_reads(self):
+        run = self.stop(self.ci, DONE_ONLY, [[{"ok": True}, None]], earlier=[RELAY])
+        self.assertEqual(len(run["models"]), 1,
+                         "the question in an earlier reply is judged once; got %r" % run["models"])
+        self.assertEqual(cost_probe.names(run["children"]), ["git", "git"],
+                         "two children, the ruled-store ls-tree and the roadmap cat-file; got %r" % run["children"])
+        self.assertEqual(run["files"], [], "an allow writes no file")
+
+    def test_replies_with_no_question_since_the_owner_message_start_nothing(self):
+        run = self.stop(self.ci, DONE_ONLY, [[{"ok": True}, None]], earlier=[DONE_ONLY])
+        self.assertEqual((run["models"], run["children"], run["files"]), ([], [], []))
 
 
 if __name__ == "__main__":

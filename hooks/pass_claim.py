@@ -58,7 +58,7 @@ CODE_SPAN_RE = re.compile(r"`[^`\n]*`|\"[^\"\n]*\"|“[^”\n]*”")
 SENTENCE_RE = re.compile(r"(?<=[.!?;])\s+|\n")
 TOKEN_RE = re.compile(r"[a-z0-9]+(?:['’][a-z]+)?|[,;:/|()—–]|\s[-–—]{1,2}\s")
 # A path-like token, one with a slash touching a word character or a file extension, holds no claim word: in
-# "tests/guard/s42900-pass-claim-send.py" the "pass" is dropped, and the other words stay, so "Lint/tests passed." still
+# "tests/guard/s43700-pass-claim-send.py" the "pass" is dropped, and the other words stay, so "Lint/tests passed." still
 # claims. A spaced slash is a clause break.
 PATH_RE = re.compile(r"\S*\w/\S*|\S*/\w\S*|\S*\w\.[a-z][a-z0-9]{0,4}\b\S*", re.I)
 # A singular check noun before "pass" names a run, not a result: "a second lint pass". "Lint passes" claims, and so

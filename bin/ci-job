@@ -5,14 +5,25 @@
 # --lint runs only the job's fast lint and check steps, chosen from the step commands in the workflow, never a
 # list: a step whose whole run: is `python3 lint/<script>.py ...`, `python3 actions/<script>.py ...`,
 # `bin/ste-changed ...` or a pinned `pipx run <tool>==<version> ...` (the pin read from the workflow), one command
-# per line, no `&&`, `|` or `;`. A mutation script (a name with "mutate") and every other command (hooks/ suites,
-# bash, unpinned pipx, other uses:) is left out with one `not run` line naming the step and why, except a `uses:` of
-# this repo's own action (`$/actions/...`, `./actions/...`) it cannot run: that prints one unknown line. After the
+# per line, no `&&`, `|` or `;`. A CI step with a `python3 hooks/test_<name>.py` or `python3 merge/test_<name>.py` line, with
+# arguments or other lines around it, runs whole, as CI runs it, only when the one selector, `hooks/mutate_guard.py --lint-suites <base>`,
+# picks that suite for a file of the diff <base>...HEAD. The selector follows imports: a suite is picked for a change to any
+# module that a module it loads imports. A picked suite that fails is FAIL. A line before the suite that fails, so the
+# shell never reaches the suite, makes the CI step unknown: ci-job echoes a marker right before a top-level first suite
+# line (preamble_marked; not under pwsh) and reads a failure with no marker in the log as the preamble's. A selector that
+# cannot run, or runs past its 60 s limit (SELECTOR_LIMIT), is unknown on each such CI step, exit 2. With no base or no
+# pick, the CI step is `not run`. The job scope is the linted job only: the suites picked for the CI steps of another job
+# print one `not run` line per job, naming the job and those suites, and run nowhere here. Cost: one selector process per
+# lane lint (one git diff, one git ls-files, one parse of each tracked test_*.py and of each module they reach, once for
+# the whole diff), plus one process per picked CI step. A mutation script (a name with "mutate")
+# and every other command (bash, unpinned pipx, other uses:) is left out with one `not run` line naming the step and why, except a `uses:` of
+# this repo's own action (`$/actions/<name>`, `./actions/<name>`), which runs only when the read of its action.yml below accepts it, else prints one unknown line. After the
 # last step, one line counts the steps run out of the job's total (--plan: "would run"). Neither it nor a `not run`
 # line starts with FAIL or unknown or moves the exit code: merge.py's lane lint reads those two words.
 # An install CI step is a run: whose every line is one install command (INSTALL_CMD: a lockfile install, or type
 # generation such as `npx astro sync`), since a lint step that reads generated files fails on a bare checkout. --lint
-# runs it, in order, only when a later lint step will run; its if: and env read as any step's. An install that fails
+# runs it, in order, only when a later lint step will run, or a later local action passes local_ready (its uses: step and
+# the read of its action.yml before any step runs, below); its if: and env read as any step's. An install that fails
 # or is unknown prints unknown, never FAIL (the tree, not the change, is at fault), and each later lint step prints
 # unknown naming it and does not run. Three `uses:` it runs in place, each by its one home: actions/ste-lint as
 # `bin/ste-changed <base>` (shared with the action through actions/ste-lint/run.sh), actions/code-check as its
@@ -25,11 +36,26 @@
 # unknown and names the paths it looked at. The code-check step's line names
 # the code_check.py that ran. When every failure code_check.py reports is a pinned tool that could not start, the
 # step is unknown; any other failure makes it FAIL, its reason naming the tools that could not start.
+# A local `uses:` that is none of those three runs only under --lint, from the tree under test's own actions/<name>/action.yml. The
+# `uses:` step's own if: and continue-on-error: read as a run: step's do (a false if: is skipped, an unreadable one or a continue-on-error is
+# unknown), and after a failed install the action reads unknown naming it. A uses: step with its own env: is unknown naming the env, since
+# CI hands that env to the action's steps and this runner does not. A read of action.yml before any step runs refuses the action unless:
+# runs.using is composite; every step is a `shell: bash` run: (no uses:, no working-directory); the only expression in a run: is
+# `${{ github.action_path }}`, read as the relative folder actions/<name> (the quotes around that one token drop); and every run: line is
+# a lint command, as above. A refusal runs no step, and its one unknown line names the file, the line or the expression. Each step then
+# runs as a workflow step does (its if:, env:, shell), with GITHUB_WORKSPACE set to the top level, and the first FAIL ends the action, as
+# in CI. The action prints one line: FAIL when a step fails (a probe's exit 1 and exit 2 both read FAIL, since CI is red on both), else
+# unknown when a step is unknown, else PASS. A step whose env needs the PR body (github.event.pull_request.body) is unknown, since this
+# runner has no PR body: an action with such a step reads unknown after its other steps ran, and a FAIL of those still wins. The real
+# two-step actions/claude-md-cites reads unknown for another reason: its second step's run: holds
+# `HEAD_SHA="$(git ...)"` and `export HEAD_SHA`, which are not lint commands, so the read refuses the whole action, names that first line,
+# and runs none of its steps. Cost: one bin/verdict and one shell per step, in order on the main thread, never in the worker pool; one
+# `git rev-parse` of the base per run with a base.
 # --lint with no --base takes origin/main as CI does and says so
 # in one line, because a run that skipped the pull-request steps read as a pass. With no origin/main, one unknown
 # line names each pull-request step it skips, and each such lint step (its if: reads true on a pull-request run) prints
 # unknown, not skipped. A lint CI step whose if: reads false on a pull-request run (it runs only off one) prints
-# skipped and does not fail. A --lint run that runs no lint CI step prints one unknown line and exits 2, never 0. A lane runs `merge --lane-lint <pr>`, which runs this mode, before it
+# skipped and does not fail. A --lint run in which no lint CI step and no picked suite CI step ran prints one unknown line and exits 2, never 0. A lane runs `merge --lane-lint <pr>`, which runs this mode, before it
 # joins a batch. Use it with a job such as checks.
 # Workflow: the one file in .github/workflows/ at the git top level of the current folder that holds the job
 # (checks.yml, check.yml, any name), unless --workflow names one. No file, or more than one, is unknown.
@@ -41,7 +67,9 @@
 # it leaves out prints `not run`, which is no verdict.
 # A step's `if:` reads every needs.scope.outputs flag (== 'true' or != 'false') as true, !cancelled(), always() and success() as true,
 # and github.event_name == 'pull_request' as true only with a base. ${{ github.base_ref }} is --base without
-# its remote; ${{ github.event.pull_request.head.sha }} is HEAD. Any other expression makes the step unknown.
+# its remote; ${{ github.event.pull_request.head.sha }} is CI_JOB_HEAD_SHA when it is set and not blank (the lane lint sets it to the
+# pushed head, since its HEAD is a merge commit), else HEAD; ${{ github.event.pull_request.base.sha }} is the commit of --base. No step's env gets
+# CI_JOB_HEAD_SHA. Any other expression makes the step unknown.
 # Each step's env sets GITHUB_BASE_REF to that value (the step's own env: wins), as GitHub does on a pull-request run; with no --base it is unset, as off one.
 # A tool is missing when a line's command is not on PATH, or the step exits 127.
 # --step NAME (repeatable) runs only the steps with those names, of any kind, each as a plain run (never with --lint, which
@@ -63,7 +91,7 @@
 # not match the sha pattern, so it runs the local copy. A SIGKILL from merge's timeout skips the cleanup and leaves the
 # export in TMPDIR: one export per run, about 24 MB at worst.
 # --plan prints each step's verdict-to-be and runs nothing. Output of each run: $VERDICT_LOG, else one new
-# temp log per call, named on the last line. Exit: 1 if a step fails, else 2 if one is unknown, else 0.
+# temp log per call, named on the last line. A run that makes its own log first removes ci-job-*.log files over 1 day old from the temp folder (one scandir). Exit: 1 if a step fails, else 2 if one is unknown, else 0.
 # CI checks out with fetch-depth: 0. When the job's checkout step says so and the clone is shallow, ci-job first
 # runs `git fetch --unshallow` once (--plan only says so); a failed fetch is one unknown line. Cost: one git fetch,
 # only when shallow.
@@ -87,7 +115,7 @@
 # (a SIGKILL from merge's timeout reaches only ci-job: it leaves the folder in TMPDIR and may leave verdict children running). Each `not run` line,
 # the summary and each CI step's `start: <name>` line on stderr (before it runs, so a caller sees which CI step is running)
 # are one print.
-import concurrent.futures, os, re, shutil, subprocess, sys, tarfile, tempfile, threading
+import concurrent.futures, os, re, shutil, subprocess, sys, tarfile, tempfile, threading, time
 BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
@@ -97,6 +125,10 @@ from pin_note import ENV as PIN_NOTE_ENV, MARKER as PIN_NOTE_MARKER  # noqa: E40
 from action_pin import pin_regex  # noqa: E402  the one home of the sha pin's pattern (hooks/action_pin.py)
 from workflow_steps import job_block, job_workflow, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
 
+SELECTOR_LIMIT = 60  # seconds the --lint-suites selector may run (about 10 s on this repo's 123 suites) before it reads unknown
+PREAMBLE_MARK = "ci-job-preamble-done"
+PREAMBLE_DONE = "echo; echo " + PREAMBLE_MARK  # the line preamble_marked adds right before a CI step's first suite line; the bare echo ends a preamble line that has no newline, so the mark lands at line start
+SUITE_LINE = re.compile(r"python3 ((?:hooks|merge)/test_[\w.-]+\.py)(?: [^|&;`<>]*)?")  # a CI step's suite line, arguments allowed
 USAGE = "usage: ci-job <job> [--workflow <file>] [--base <ref>] [--plan] [--lint] [--pinned] [--step NAME]..."
 EXPR = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
 BUILTINS = {"cd", "echo", "printf", "test", "[", "[[", "export", "set", "exit", "if", "then", "else", "elif", "fi",
@@ -171,7 +203,8 @@ def condition(text, pr):
     expr = re.sub(r"needs\.scope\.outputs\.[\w-]+\s*(?:==\s*'true'|!=\s*'false')", " T ", expr)  # a flag reads as true
     expr = re.sub(r"github\.event_name\s*==\s*'pull_request'", " T " if pr else " F ", expr)
     expr = re.sub(r"github\.event_name\s*!=\s*'pull_request'", " F " if pr else " T ", expr)
-    expr = re.sub(r"\b(?:cancelled|always|success|failure)\(\)", lambda x: " F " if x.group(0) in ("cancelled()", "failure()") else " T ", expr)
+    expr = re.sub(r"github\.event\.pull_request\.draft", " F ", expr)  # a lint run reads a ready pull request
+    expr = re.sub(r"\b(?:cancelled|always|success|failure)\(\)", lambda x:" F " if x.group(0) in ("cancelled()", "failure()") else " T ", expr)
     expr = expr.replace("&&", " and ").replace("||", " or ").replace("!", " not ")
     if not re.fullmatch(r"[\sTF()]*(?:(?:and|or|not)[\sTF()]*)*", expr):
         return None
@@ -214,12 +247,7 @@ def commands(script):
 def missing_in_log(log, start, script):
     """Each command the step's shell reported as not found, from this run's part of the log. A 127 that
     an `if`, a `!` or `|| true` swallowed still lands there, so the step is unknown, not PASS."""
-    try:
-        with open(log, "rb") as f:
-            f.seek(start)
-            text = f.read().decode("utf-8", "replace")
-    except OSError:
-        return []
+    text = log_text(log, start)
     lead = re.escape(script)
     found = re.findall(r"^%s: (?:line \d+: )?(\S+): command not found$" % lead, text, re.M)
     found += re.findall(r"^%s: \d+: (\S+): not found$" % lead, text, re.M)
@@ -231,6 +259,9 @@ LINT_CMD = re.compile(r"(?:python3 (?:lint|actions)/[\w./-]+\.py|bin/ste-changed
 INSTALL_CMD = re.compile(r"(?:npm ci|(?:pnpm|yarn) install --(?:frozen-lockfile|immutable)|(?:python3 -m )?pip install(?: -[-\w]+)* -r [^\s|&;`<>$()]+"
                          r"|npx(?: --no-install)? [\w@./-]+ (?:sync|generate))(?: [^|&;`<>$()]*)?")
 RUNNER_UNSET = {"GH_TOKEN", "GITHUB_TOKEN", "ZIZMOR_PATHS"}  # absent from a runner step's env unless its env: or the zizmor with: sets them
+# The pushed head, when HEAD is not it: merge.py's lane lint runs this in a merge commit of the base and the head. Kept from each step's env,
+# so a step that runs ci-job on its own fixture repo reads that repo's HEAD.
+HEAD_SHA_ENV = "CI_JOB_HEAD_SHA"
 KNOWN_ACTION = re.compile(r"(?:\S*/)?actions/(ste-lint|code-check|zizmor)(?:@\S*)?")
 SHA_PIN = pin_regex(("code-check", "zizmor"))  # a uses: pinned to a commit of this repo's action
 LOCAL_ACTION = re.compile(r"[$.]/actions/\S+")  # this repo's own action: a check --lint should run
@@ -347,8 +378,13 @@ def is_lint(step):
     if known_action(step):
         return True
     lines = run_lines(step)
-    return bool(lines) and all(LINT_CMD.fullmatch(ln) and "mutate" not in ln.split()[
-        1 if ln.startswith("python3") else 2 if ln.startswith("pipx") else 0] for ln in lines)
+    return bool(lines) and all(lint_line(ln) for ln in lines)
+
+
+def lint_line(ln):
+    """True when the run: line is one lint command and not a mutation script."""
+    return bool(LINT_CMD.fullmatch(ln)) and "mutate" not in ln.split()[
+        1 if ln.startswith("python3") else 2 if ln.startswith("pipx") else 0]
 
 
 def run_lines(step):
@@ -384,6 +420,16 @@ def could_not_start(log, start):
     errors = re.findall(r"^::error title=code-check::(.*)$", text, re.M)
     unstarted = sorted(set(e for e in errors if re.match(r"\S+ could not start: ", e)))
     return unstarted, bool(errors) and len(unstarted) == len(set(errors))
+
+
+def if_held(step, pr):
+    """(state, why) when the step's if: stops it: unknown for an if: this runner cannot read, skipped for one that reads false. None when it runs."""
+    cond = condition(step_key(step, "if"), pr)
+    if cond is None:
+        return "unknown", "an if: this runner cannot read: %s" % step_key(step, "if")
+    if not cond:
+        return "skipped", "a pull-request step: pass --base to run it" if not pr else "a step that runs only off a pull request"
+    return None
 
 
 def plan(step, pr, values, top, lint=False, pinned=False):
@@ -429,12 +475,9 @@ def plan(step, pr, values, top, lint=False, pinned=False):
         return "run", '"%s" "%s"' % (slashed(os.path.join(BIN, "ste-changed")), values["base"]), shell_argv(None), {PIN_NOTE_ENV: "1"} if lint else {}, None
     if step_key(step, "uses") is not None:
         return "not run locally", "an action (uses: %s); CI runs it" % step_key(step, "uses").split(" #")[0], None, None, None
-    cond = condition(step_key(step, "if"), pr)
-    if cond is None:
-        return "unknown", "an if: this runner cannot read: %s" % step_key(step, "if"), None, None, None
-    if not cond:
-        why = "a pull-request step: pass --base to run it" if not pr else "a step that runs only off a pull request"
-        return "skipped", why, None, None, None
+    held = if_held(step, pr)
+    if held:
+        return held[0], held[1], None, None, None
     body = run_body(step)
     if body is None:
         return "unknown", "no run: and no uses:", None, None, None
@@ -452,11 +495,132 @@ def plan(step, pr, values, top, lint=False, pinned=False):
     argv = shell_argv(shell)
     if argv is None:
         return "unknown", no_shell(SHELLS[shell][0]), None, None, None
-    need = [argv[0]] + (commands(body) if shell in (None, "bash", "sh") else [])
+    # A CI step with a suite scans only its suite lines: a preamble tool in a block the shell skips must not refuse it,
+    # and one the shell reaches and cannot find still reads unknown, from missing_in_log.
+    scanned = "\n".join(ln for ln in run_lines(step) if SUITE_LINE.fullmatch(ln)) if suite_paths(step) else body
+    need = [argv[0]] + (commands(scanned) if shell in (None, "bash", "sh") else [])
     gone = sorted({w for w in need if not shutil.which(w)})
     if gone:
         return "unknown", "tool missing: %s" % ", ".join(gone), None, None, None
     return "run", body, argv, env, step_key(step, "working-directory")
+
+
+ACTION_FOLDER = re.compile(r"[$.]/(actions/[\w-]+)")  # a local uses: this runner can read: one folder directly under actions/
+ACTION_PATH = re.compile(r'"\$\{\{\s*github\.action_path\s*\}\}([^"\s$`]*)"|\$\{\{\s*github\.action_path\s*\}\}')  # the quoted token, rest of path in group 1, or the bare one
+
+
+def action_steps(top, step):
+    """([(name, step text)], None): the steps of a local uses: action, each laid out and expanded as a workflow step.
+    (None, why) when it refuses the action. It reads every step before any runs, so a refused action runs nothing."""
+    ref = uses(step)
+    m = ACTION_FOLDER.fullmatch(ref)
+    if not m:
+        return None, "uses: %s is not a folder directly under actions/, which this runner cannot read" % ref
+    folder = m.group(1)
+    rel = folder + "/action.yml"
+    try:
+        with open(os.path.join(top, rel), encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except (OSError, UnicodeError) as e:
+        return None, "cannot read %s in the tree under test: %s" % (rel, getattr(e, "strerror", None) or e)
+    # A comment above step depth (under three spaces) would end the steps list below: drop it. A deeper one is a step's own
+    # text, or sits above the first `    - `: the layout check below skips it, and step_blocks drops what comes before a step.
+    lines = [ln for ln in lines if not (ln.strip().startswith("#") and len(ln) - len(ln.lstrip()) < 3)]
+    runs = next((i for i, ln in enumerate(lines) if re.fullmatch(r"runs:\s*", ln)), None)
+    body = []
+    for ln in lines[runs + 1:] if runs is not None else []:
+        if ln.strip() and not ln.startswith(" "):
+            break
+        body.append(ln)
+    using = next((m.group(1) for m in (re.fullmatch(r"  using:\s*(\S+)\s*", ln) for ln in body) if m), None)
+    if using != "composite":
+        return None, "%s has runs.using: %s, and only composite runs here" % (rel, using)
+    header = next((i for i, ln in enumerate(body) if re.fullmatch(r"  steps:\s*", ln)), None)
+    raw = []
+    for ln in body[header + 1:] if header is not None else []:
+        if ln.strip() and not ln.startswith("   "):
+            break
+        raw.append(ln)
+    first = next((ln for ln in raw if ln.strip() and not ln.lstrip().startswith("#")), "")
+    if not first:
+        return None, "%s has no steps, so a pass would prove nothing" % rel
+    if not first.startswith("    - "):
+        return None, "%s lays its steps out other than `    - ` under runs: steps:, which this runner cannot read" % rel
+    # Two more spaces give the layout step_blocks and step_key read: steps at six spaces, keys at eight.
+    out = []
+    for n, st in enumerate(step_blocks("".join(("  " + ln if ln.strip() else ln) + "\n" for ln in raw)), 1):
+        name = step_key(st, "name") or "step %d" % n
+        why = None
+        if step_key(st, "uses") is not None:
+            why = "uses %s, and --lint runs no action inside an action" % step_key(st, "uses").split(" #")[0]
+        elif step_key(st, "working-directory") is not None:
+            why = "sets working-directory, which the relative action path does not survive"
+        elif step_key(st, "shell") != "bash":
+            why = "has shell: %s, and only bash runs here" % step_key(st, "shell")
+        elif run_body(st) is None:
+            why = "has no run:"
+        if why:
+            return None, "%s: step %r %s" % (rel, name, why)
+        st = ACTION_PATH.sub(lambda x: folder + (x.group(1) or ""), st)
+        left = EXPR.search(run_body(st))
+        if left:
+            return None, "%s: step %r: run: holds an expression this runner cannot read: %s" % (rel, name, left.group(0))
+        bad = next((ln for ln in run_lines(st) if not lint_line(ln)), None)
+        if bad is not None or not run_lines(st):
+            return None, "%s: step %r: %s is not a lint command" % (rel, name, "`%s`" % bad if bad is not None else "an empty run:")
+        out.append((name, st))
+    return out, None
+
+
+def local_ready(step, top, base):
+    """(steps, None) when a local uses: action will start; (None, (state, why)) when its uses: step or the read of its
+    action.yml before any step runs stops it. The one home of that read: an install before the action runs only when it passes."""
+    # The uses: step's own continue-on-error: and if: read as plan() reads a run: step's.
+    if step_key(step, "continue-on-error") not in (None, "false"):
+        return None, ("unknown", "continue-on-error: this runner reads no step as allowed to fail")
+    held = if_held(step, bool(base))
+    if held and held[0] == "skipped" and not base and condition(step_key(step, "if"), True) is not False:
+        held = "unknown", "a pull-request step, skipped for want of a base (pass --base)"
+    if held:
+        return None, held
+    env = step_env(step)
+    if env:
+        return None, ("unknown", "env %s: CI hands a uses: step's env to the action's steps, and this runner does not"
+                      % ", ".join(sorted(env)))
+    steps, why = action_steps(top, step)
+    return (steps, None) if steps is not None else (None, ("unknown", why))
+
+
+def local_action(name, step, ctx, log, dry, ready):
+    """(state, the action's one line, True when a step ran or would run). ready: local_ready()'s result for the step.
+    state: FAIL, unknown, PASS, skipped, or would run (--plan). FAIL beats unknown, and the first FAIL ends the action, as in CI."""
+    top, base, values, _ = ctx
+    steps, held = ready
+    if held:
+        return held[0], held[1], False
+    parts, states, started = [], [], False
+    for sname, st in steps:
+        state, detail, shell, env, cwd = plan(st, bool(base), values, top, True)
+        if state == "skipped" and not base and condition(step_key(st, "if"), True) is not False:
+            state, detail = "unknown", "a pull-request step, skipped for want of a base (pass --base)"
+        if state == "run":
+            started = True
+            if dry:
+                state = "would run"
+            else:
+                state, detail = run_step(sname, st, False, detail, shell, {**env, "GITHUB_WORKSPACE": top}, cwd, ctx, log)
+                # verdict names a run's shell and its temp script, which differ on every run: name the step's own lines instead
+                detail = re.sub(r"^(PASS|SKIP|FAIL) .*? (?=(?:rc=\d+ )?\(\d+\.\d+s\))",
+                                lambda m: "%s %s " % (m.group(1), " ; ".join(run_lines(st))), detail, count=1)
+                parts.append("%s: %s" % (sname, detail))
+        else:
+            parts.append("%s: %s: %s" % (sname, state, detail))
+        states.append(state)
+        if state == "FAIL":
+            break
+    final = ("FAIL" if "FAIL" in states else "unknown" if "unknown" in states else
+             ("would run" if dry else "PASS") if started else "skipped")
+    return final, "; ".join(parts), started
 
 
 ERR_LOCK = threading.Lock()  # a parallel run writes stderr from several threads: one whole line at a time
@@ -480,14 +644,16 @@ def lint_workers():
     return max(1, min(os.cpu_count() or 1, 4))
 
 
-def run_step(name, step, install, detail, shell, env, cwd, ctx, log):
+def run_step(name, step, install, detail, shell, env, cwd, ctx, log, suite=False):
     """Run one step through bin/verdict, its output appended to `log`: (state, the step's one line). ctx: (top, base,
-    values, pinned). A parallel step gets a log of its own, so the reads from its start offset see only its output."""
+    values, pinned). A parallel step gets a log of its own, so the reads from its start offset see only its output.
+    suite: a CI step picked for its suite line, run whole, with the preamble marker (preamble_marked)."""
     top, base, values, pinned = ctx
     err_line("start: %s\n" % name)
     with tempfile.NamedTemporaryFile("w", suffix=".ps1" if shell[0] == "pwsh" else ".sh", delete=False,
                                      encoding="utf-8", newline="\n") as f:
-        f.write("$ErrorActionPreference = 'stop'\n" + detail if shell[0] == "pwsh" else detail)
+        marked = preamble_marked(detail, shell[0]) if suite else None
+        f.write("$ErrorActionPreference = 'stop'\n" + detail if shell[0] == "pwsh" else marked or detail)
         script = f.name
     try:
         start = os.path.getsize(log) if os.path.exists(log) else 0
@@ -495,7 +661,7 @@ def run_step(name, step, install, detail, shell, env, cwd, ctx, log):
         with _nowindow.Popen([sys.executable, os.path.join(BIN, "verdict"), *shell, script],
                              cwd=os.path.join(top, cwd) if cwd else top, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, text=True,
-                             env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF", PIN_NOTE_ENV}},
+                             env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF", PIN_NOTE_ENV, HEAD_SHA_ENV}},
                                   **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}),
                                   **env, "VERDICT_LOG": log}) as proc:
             for line in proc.stdout:  # relay each heartbeat at once: the stall watch reads this job's output
@@ -505,6 +671,7 @@ def run_step(name, step, install, detail, shell, env, cwd, ctx, log):
                     kept.append(line)
         rc = proc.returncode
         gone = missing_in_log(log, start, script)
+        preamble_ran = not marked or bool(re.search(r"(?m)^%s\r?$" % PREAMBLE_MARK, log_text(log, start)))
         unstarted, only = could_not_start(log, start) if known_action(step) == "code-check" else ([], False)
     finally:
         os.remove(script)
@@ -522,6 +689,8 @@ def run_step(name, step, install, detail, shell, env, cwd, ctx, log):
         state = "FAIL" if rc else "SKIP" if first.startswith("SKIP ") else "PASS"
         if install and state == "FAIL":  # the tree at fault, not the change: unknown, never FAIL
             state, first = "unknown", "install failed, so each lint step after it is unknown; " + first
+        elif state == "FAIL" and not preamble_ran:  # the same rule for a line before the suite of a CI step: the tree at fault
+            state, first = "unknown", "a line before the suite failed, so the suite did not run; " + first
         if unstarted:
             first = "%s; also tool missing (%s)" % (first, "; ".join(unstarted))
         notes = pin_notes(log, start) if state == "PASS" and known_action(step) == "ste-lint" else []
@@ -544,6 +713,56 @@ def append_log(src, dst, name):
     except OSError:
         pass  # the copy is in; the folder's removal at the end of the run takes what is left
     return False
+
+
+def suite_paths(step):
+    """The suites a CI step runs: the path of each of its run: lines that is `python3 hooks|merge/test_<name>.py`, with
+    arguments allowed. Any other line of the step stays in it, so a picked step runs whole, as CI runs it."""
+    return [m.group(1) for ln in run_lines(step) if (m := SUITE_LINE.fullmatch(ln))]
+
+
+def log_text(log, start):
+    """This run's part of the log: from byte `start` on; empty when the log cannot be read."""
+    try:
+        with open(log, "rb") as f:
+            f.seek(start)
+            return f.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+
+
+def preamble_marked(body, shell):
+    """The CI step's run: body with PREAMBLE_DONE right before its first suite line, when a command line comes before it.
+    The marker prints only when the shell reaches the suite line, so a failure with no marker in the log is the preamble's
+    (a failed `[ -d x ] || npm ci`), and one after it is the suite's, even when a preamble block is skipped. None, so the
+    CI step's failure reads as the suite's, when no command line precedes the suite line; when the suite line is indented,
+    not plainly at the script's top level; when the line before it ends in `\\`, `&&`, `||` or `|`, so a marker would join that command list; and
+    under pwsh, where a native command that fails does not stop the script, so a marker cannot show the preamble passed."""
+    lines = body.splitlines()
+    first = next((i for i, ln in enumerate(lines) if SUITE_LINE.fullmatch(ln.strip())), None)
+    before = [ln for ln in lines[:first or 0] if ln.strip() and not ln.strip().startswith("#")]
+    if shell == "pwsh" or not before or lines[first][:1].isspace() or before[-1].rstrip().endswith(("\\", "&&", "|")):  # "|" also ends "||"
+        return None
+    return "\n".join(lines[:first] + [PREAMBLE_DONE] + lines[first:]) + "\n"
+
+
+LOG_KEEP = 86400  # a run with no $VERDICT_LOG removes the ci-job-*.log files in the temp folder that are over a day old
+
+
+def prune_own_logs(folder, now=None):
+    """Remove each regular ci-job-*.log in FOLDER whose mtime is over a day old. Errors are skipped; a fresh log (a parallel run's) stays."""
+    now = time.time() if now is None else now
+    try:
+        with os.scandir(folder) as it:
+            for e in it:
+                try:
+                    if (e.name.startswith("ci-job-") and e.name.endswith(".log") and e.is_file(follow_symlinks=False)
+                            and now - e.stat(follow_symlinks=False).st_mtime > LOG_KEEP):
+                        os.remove(e.path)
+                except OSError:
+                    pass
+    except OSError:
+        pass
 
 
 def main(argv):
@@ -582,7 +801,8 @@ def main(argv):
             return 2
     try:
         with open(workflow, encoding="utf-8") as f:
-            block = job_block(f.read(), job)
+            text = f.read()
+        block = job_block(text, job)
     except OSError as e:
         print("unknown  cannot read the workflow: %s" % e)
         return 2
@@ -606,24 +826,57 @@ def main(argv):
             base = "origin/main"
             print("base: origin/main (default; pass --base to change)")
         else:
-            idle = {"base": "", "github.base_ref": "", "github.event.pull_request.head.sha": ""}
+            idle = {"base": "", "github.base_ref": "", "github.event.pull_request.head.sha": "", "github.token": ""}
             unread = [step_key(st, "name") or ("step %d" % n) for n, st in enumerate(step_blocks(block), 1)
                       if is_lint(st) and plan(st, False, idle, top)[0] == "skipped"]
             if unread:
                 print("unknown         no base resolved (origin/main is absent; pass --base), so these pull-request "
                       "steps are skipped: %s" % ", ".join(unread))
                 no_base = True
+    base_sha = git("rev-parse", "--verify", "-q", base + "^{commit}", cwd=top) if base else None
     values = {"base": base or "", "github.base_ref": base.split("/", 1)[1] if base and "/" in base else (base or ""),
-              "github.event.pull_request.head.sha": git("rev-parse", "HEAD", cwd=top) or ""}
+              "github.event.pull_request.head.sha": os.environ.get(HEAD_SHA_ENV, "").strip() or git("rev-parse", "HEAD", cwd=top) or "",
+              **({"github.event.pull_request.base.sha": base_sha} if base_sha else {}),  # a base that does not resolve leaves the expression unread
+              "github.token": ""}  # no runner token here (RUNNER_UNSET): a step that maps it into GH_TOKEN reads gh's own login
     log = os.environ.get("VERDICT_LOG")
     if not log and not dry:
+        prune_own_logs(tempfile.gettempdir())
         fd, log = tempfile.mkstemp(prefix="ci-job-%s-" % re.sub(r"[^\w-]", "_", job), suffix=".log")
         os.close(fd)
     tally = {"FAIL": 0, "unknown": int(no_base)}
     unshallow(block, top, dry, tally)
-    kind = ["lint" if is_lint(st) else "install" if is_install(st) else "" for st in steps] if lint else [""] * len(steps)
-    planned = [plan(st, bool(base), values, top, lint) if k else None for st, k in zip(steps, kind)]
-    runs = [k == "lint" and p[0] == "run" for k, p in zip(kind, planned)]  # an install runs only if a lint step after it does
+    kind = ["lint" if is_lint(st) else "install" if is_install(st) else "local" if LOCAL_ACTION.fullmatch(uses(st)) else ""
+            for st in steps] if lint else [""] * len(steps)
+    suites = [suite_paths(st) if lint and not k else [] for st, k in zip(steps, kind)]  # each step's suite lines
+    elsewhere = {}  # each other job: the suites of its CI steps, which this run does not run
+    if lint and base:
+        for other in re.findall(r"^  ([\w-]+):\s*$", text.split("\njobs:", 1)[-1], re.M):
+            found = {path for st in step_blocks(job_block(text, other)) for path in suite_paths(st)} if other != job else set()
+            if found:
+                elsewhere[other] = found
+    picked, why = None, "no base to read a diff"
+    if base and (any(suites) or elsewhere):  # one selector process for the CI steps with a suite in every job
+        why = "the selector did not run"
+        try:
+            done = _nowindow.run([sys.executable, os.path.join(os.path.dirname(BIN), "hooks", "mutate_guard.py"),
+                                  "--lint-suites", base], cwd=top, capture_output=True, text=True, encoding="utf-8",
+                                 stdin=subprocess.DEVNULL, timeout=SELECTOR_LIMIT)
+            if done.returncode == 0:
+                picked = set(done.stdout.split())
+            else:
+                why = ((done.stdout + done.stderr).strip().splitlines() or ["exit %d with no message" % done.returncode])[-1]
+        except subprocess.TimeoutExpired:
+            why = "the selector ran past %d s and was stopped" % SELECTOR_LIMIT
+        except OSError as e:
+            why = str(e)
+    for i, found in enumerate(suites):  # a step with a picked suite runs as a lint step does
+        if picked is not None and picked.intersection(found):
+            kind[i] = "suite"
+    planned = [plan(st, bool(base), values, top, lint) if k not in ("", "local") else None for st, k in zip(steps, kind)]
+    runs = [k == "lint" and p[0] == "run" for k, p in zip(kind, planned)]  # the lint steps the pool may queue
+    ready = [local_ready(st, top, base) if k == "local" else (None, None) for st, k in zip(steps, kind)]
+    # An install runs only if a lint step after it runs, or a local action after it that local_ready lets start.
+    starts = [r or s is not None for r, (s, _) in zip(runs, ready)]
     ran, ran_lint, blocker = 0, 0, None  # blocker: the install step that did not finish
     ctx = (top, base, values, pinned)
     workers = lint_workers() if lint and not dry else 1
@@ -636,15 +889,32 @@ def main(argv):
             name = names[n - 1]
             if wanted and name not in wanted:
                 continue
-            if lint and not kind[n - 1]:
-                if LOCAL_ACTION.fullmatch(uses(step)):
-                    tally["unknown"] += 1
-                    print("%-15s %s: --lint cannot run this repo's action %s" % ("unknown", name, uses(step)))
-                else:
-                    print("%-15s %s: --lint runs only lint and install steps; %s" % (
-                        "not run", name, "this is an action (uses: %s)" % uses(step) if uses(step) else "its run: is neither a lint nor an install command"))
+            if suites[n - 1] and base and picked is None:  # the selector could not run: never a pass with no suite run
+                tally["unknown"] += 1
+                print("%-15s %s: --lint could not select suites: %s" % ("unknown", name, why))
                 continue
-            if kind[n - 1] == "install" and (blocker or not any(runs[n:])):
+            if lint and "failure()" in (step_key(step, "if") or "") and condition(step_key(step, "if"), True) is False:  # the red-job wake step: a green lint run never reaches it (decision ci-wait-reads-run-status)
+                print("%-15s %s: runs only after a failed job; a lint run has none" % ("not run", name))
+                continue
+            if kind[n - 1] == "local":  # one line for the whole action, run here in order, never in the pool
+                if blocker:  # a step after a failed install runs nothing, as a lint step does
+                    tally["unknown"] += 1
+                    print("%-15s %s: --lint did not run it: install step %s did not finish" % ("unknown", name, blocker))
+                    continue
+                state, line, started = local_action(name, step, ctx, log, dry, ready[n - 1])
+                ran += started
+                ran_lint += started
+                print("%-15s %s" % (state, name) if state == "would run" else "%-15s %s: %s" % (state, name, line))
+                if state in ("FAIL", "unknown"):
+                    tally[state] += 1
+                continue
+            if lint and not kind[n - 1]:
+                print("%-15s %s: --lint runs only lint and install steps; %s" % (
+                    "not run", name, "this is an action (uses: %s)" % uses(step) if uses(step) else
+                    "this is a suite the diff does not pick%s" % ("" if base else " (no base to read a diff)") if suites[n - 1]
+                    else "its run: is neither a lint nor an install command"))
+                continue
+            if kind[n - 1] == "install" and (blocker or not any(starts[n:])):
                 print("%-15s %s: %s" % ("not run", name, "install step %s did not finish" % blocker if blocker
                                         else "no lint step after it will run"))
                 continue
@@ -664,7 +934,7 @@ def main(argv):
                 blocker = blocker or (name if kind[n - 1] == "install" and state == "unknown" else None)
                 continue
             ran += 1
-            ran_lint += kind[n - 1] == "lint"
+            ran_lint += kind[n - 1] in ("lint", "suite")  # a picked suite step that ran is a lint run too
             if dry:
                 print("%-15s %s" % ("would run", name))
                 continue
@@ -683,7 +953,7 @@ def main(argv):
                     kept_logs = True
                 first = first.replace(own, log)  # the verdict line names the log that stays
             else:
-                state, first = run_step(name, step, install, detail, shell, env, cwd, ctx, log)
+                state, first = run_step(name, step, install, detail, shell, env, cwd, ctx, log, kind[n - 1] == "suite")
             tally["FAIL" if state == "FAIL" else "unknown"] += state not in ("PASS", "SKIP")
             blocker = blocker or (name if install and state == "unknown" else None)
             print("%-15s %s: %s" % (state, name, first))
@@ -697,6 +967,11 @@ def main(argv):
         print("%-15s no lint CI step %s: %d of the job's %d steps are lint CI steps, and each one is skipped, not run, or unknown" % (
             "unknown", "would run" if dry else "ran", sum(k == "lint" for k in kind), len(steps)))
     if lint:
+        for other, found in elsewhere.items():  # one line per job: picked, but each CI step belongs to a job this run is not
+            if picked is not None and picked.intersection(found):
+                print("%-15s job %s: picked %s; job %s runs them, not %s" % ("not run", other, ", ".join(sorted(picked & found)), other, job))
+        if picked is None and elsewhere and not any(suites):
+            print("%-15s suites of other jobs: --lint could not select them: %s" % ("not run", why))
         print("summary: %s %d of %d steps" % ("would run" if dry else "ran", ran, len(steps)))
     if not dry:
         print("log=%s" % log)

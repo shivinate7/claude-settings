@@ -1,0 +1,1 @@
+- hold-unsafe-net-sentence-uncited: Line 13 of docs/decisions/hold-unsafe-after-round-3.md has a new net-value sentence with no cite. It sits under the owner's 2026-10-15 bullet. Mark it as the lane's reading (#2181).

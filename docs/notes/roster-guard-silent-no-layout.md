@@ -1,0 +1,1 @@
+- roster-guard-silent-no-layout: The roster check target_roster_hit in hooks/guard_merge.py has a blanket except that returns None with no stderr line, so a missing layout.py turns the rule off silently.

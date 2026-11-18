@@ -1,0 +1,1 @@
+- thread-pills-to-holds: (#2534) the failed and stopped thread pills could move from --due to --holds.

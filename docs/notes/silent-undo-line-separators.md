@@ -1,0 +1,1 @@
+- silent-undo-line-separators: lint/check_silent_undo.py counts() splits with splitlines(), but changed() and branch_only_lines split on "\n", so a dropped branch-own line holding FF, VT, FS, NEL, U+2028/2029 or a lone CR flags its fragments as lost. Fix: also add each changed line's splitlines() pieces to the set.

@@ -1,0 +1,1 @@
+- install-hooks-whole-imprecise: docs/decisions/install-hooks-whole.md says 'no report_guard call reaches them'. But review_record_problem (lint/report_guard.py ~2592) calls guard_merge.merge_module, which reads __file__ (settings_roots). In a stamped copy the first root is the guard.d folder. The verdict is the same as on main. Fix: reword the note (#2454 round 2-3 reviewers).

@@ -1,0 +1,1 @@
+- send-to-page-writer-unguarded: 12:08 CST Nov 13, gap (sighting): retro asked the owner a question that decision waiting-data-in-repo already answers, by send_message to the page writer (item 730), and the past-ruling guard did not read it. The guard reads replies, not sends to the page writer; this step covers it.

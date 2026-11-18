@@ -1,0 +1,1 @@
+- cite-parser-paren-wrapped-lists: (#2530) the Input Needed cite parser in lint/report_guard.py misses lists in parentheses and hard-wrapped lists.

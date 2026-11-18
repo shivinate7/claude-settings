@@ -16,8 +16,9 @@ output style load in each session on each repo.
 - **Acts the cloud refuses** (owner, 2026-10-30 16:20 CDT; changed by Cockpit item 219 a,
   2026-11-04 17:44 CST, and its follow-up pick a, 17:55 CST; until withdrawn). When any repo's
   coordinator asks, a session on Shivam's computer may do three acts. It may move main to the shared
-  ruleset (owner, 2026-11-11 16:43 CST, ruling r): only the all-jobs-passed check required, and
-  deletion and force-push of main blocked. The ruleset may also let the repository admin role skip
+  ruleset (owner, 2026-11-11 16:43 CST, ruling r): no status check required (owner, 2026-11-15 19:08
+  CST, ruling `own-all-jobs-passed-removed`: "all jobs passed has been removed as a status requirement"),
+  and deletion and force-push of main blocked. The ruleset may also let the repository admin role skip
   the checks on pull requests only (owner, 16:49 CST, "yes with bypass"; coordinator-relayed). It may remove main's old branch protection
   only after step merge-reads-ruleset (the merge tool reads main's ruleset) has merged, and only once
   the ruleset is on; the grant covers no removal before that step lands. (restart-plan R45, ruling c, owner 19:49 CST Nov 11; the plan says the step lands before any sweep removes old protection) It may delete a branch whose last commit is on the default branch or on an archive
@@ -26,4 +27,30 @@ output style load in each session on each repo.
   13:19 CST). An owner yes to merge a named pull request, which a coordinator (tag `cs-build:coordinator`)
   relays to its batch runner, is the owner's grant for that merge. The batch runner merges it with the merge tool,
   under every merge check (`settings.json` `autoMode.allow`, entry "Relayed Merge Yes"; decision
-  `auto-mode-owner-acts`). A relayed yes covers no other act and no other session.
+  `auto-mode-owner-acts`). A relayed yes covers no other act and no other session. The owner's
+  consultant (tag `cs-build:consultant`) may also relay a yes to a batch runner (entry "Consultant
+  Relayed Merge Yes"). The entry has two paths. Direct: the owner typed `i want the allow rule` in batch
+  runner 12's chat at 11:18 CST on 2026-11-15, which covers a consultant relay to the batch runner.
+  Through triage: the consultant relayed at 11:31 CST, through the coordinator, that the owner typed "a" at
+  11:29 CST. The incident path ran from the owner to the consultant, to triage, to the runner.
+  The owner's own typed words do not name the triage hop. A yes that started at triage with no consultant is
+  not covered. The yes binds to the head the pull request had when the consultant relayed it. That binding
+  rests on the runner passing that head as `--head`, and on the classifier reading the chat. The merge tool
+  accepts a live head that equals the `--head` passed, or sits on it with only a Record-claim commit,
+  its revert or a page-only commit. It does not check that `--head` against the relay.
+  `relayed_head_holds` in `merge/merge.py` reads no review record.
+- **Lane draft PR** (owner, 2026-11-12 17:19 CST; changed by owner, 12:58 CST Nov 16, "No now everyone merges",
+  ruling Q2). Any lane that a coordinator or another lane started may open its own draft PR. It marks that PR
+  ready once, by the merge tool, after its last review and lane lint, and never marks another PR ready. Source:
+  decision `draft-until-reviewed` (every PR opens as a draft).
+- **Main merge into handed-in branches** (owner, 2026-11-13 13:12 CST; until withdrawn; changed by owner,
+  23:40 CST, waiting-page item 806 d). The batch runner may push a plain merge of main into a PR that a lane
+  has handed in, with no clock rule. A lane that pushes again to a handed-in branch says so first. No rebase,
+  no force push. A conflict that changes behaviour goes back to the coordinator. Each new head gets a fix
+  verifier and a fresh review log, except a clean merge of main, which takes none (decision `pr-review-record`,
+  the review record). Source: decision `standing-merge-grant`.
+- **Overlaps between lane branches** (owner, 2026-11-13 14:17 CST, typed in runner 10's chat: "you have a
+  standing grant to act on overlaps by me, owner"). The batch runner may act on overlaps between lane branches.
+  Runner 10 reads that as a plain merge of one lane's head into another lane's branch, under the limits of the
+  bullet above. The owner has not confirmed that reading. Source: decision `standing-merge-grant`.
+- **Merge in any repo** (owner, 2026-11-15 23:43 CST): any session may merge a PR in any of the owner's repos with the merge tool, under every merge check. The grant covers that wording only (ruling own-913-a-merge-any-repo-grant-line, owner, 2026-11-16 13:34 CST).

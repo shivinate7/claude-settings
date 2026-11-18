@@ -1,0 +1,1 @@
+- live-json-rebuild-pending: Rebuild of the live file started 22:47 CST Nov 13 by a Sonnet agent, into scratchpad file live_new.json (read-only). Triage commits it after reading the agent's counts.

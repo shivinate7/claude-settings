@@ -13,7 +13,7 @@ TN_COMMAND = CMD_BOTH_SHELLS  # the {powershell, mac} command of the 14:47 rulin
 
 
 def tn_task(**over):
-    task = {"id": "stale-branch-deletes", "kind": "task", "status": "open", "title": "Delete the stale branches",
+    task = {"id": "stale-branch-deletes", "n": 928, "kind": "task", "status": "open", "title": "Delete the stale branches",
             "context": TN_CTX, "steps": TN_STEPS, "command": TN_COMMAND}
     task.update(over)
     return {k: v for k, v in task.items() if v is not None}
@@ -39,7 +39,9 @@ tn("an update that carries kind task, context and a Why yours line is allowed", 
 tn("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
 tn("an update of the rank only is allowed", "allow", {"rank": 3}, action="update")
 # The form lines keep this case on the task rule; the question form reads them (OJ_FORM).
-tn("a decision is not judged", "allow", tn_task(kind="decision", context=OJ_FORM + "\n" + QD_LINE + "\n" + TN_CTX))
+tn("a decision is not judged", "allow",
+   with_shown(tn_task(kind="decision", context=OJ_FORM + "\n" + QD_LINE + "\n" + OJ_WAIT + "\n" + TN_CTX,
+                      options=[dict(o) for o in PQ_OPTIONS], recommended="a", why="A keeps the port as it is.")))
 tn("an items set to another artifact is allowed", "allow", tn_task(), url="https://claude.ai/artifact/other")
 add("task names its check: a batch with a task that has no Why yours line is denied", "deny", "task-names-check",
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
