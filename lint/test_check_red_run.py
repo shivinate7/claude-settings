@@ -50,6 +50,7 @@ GOOD = "Red-run: python3 lint/test_widgets.py -> 2 failed on abc1234"
 VERIFIED = "Verified: python3 lint/test_widgets.py -> PASS"  # the default Verified line of a fixture commit
 GADGET_PATH = "src/gadget.py"
 GADGET_TEXT = "def gadget():\n    return 2\n"
+PRE_ROLLOUT_CHECK = "# the check file before the Verified rollout\n"  # a check file with no Verified rollout in it
 # Every commit carries this block, as real commits do. A check that wants Red-run as the last
 # trailer fails here, not on the first real commit.
 ATTRIBUTION = ["Co-Authored-By: Claude <noreply@anthropic.com>",
@@ -122,11 +123,12 @@ class Fixture(unittest.TestCase):
                  input=subject + "\n\n" + "\n".join(body) + "\n")
         return self.git("rev-parse", "HEAD")
 
-    def base(self, files=None, check=True):
-        """The base commit the check diffs from. check=False builds a parent tree from before the check landed."""
+    def base(self, files=None, check=True, check_text=None):
+        """The base commit the check diffs from. check=False builds a parent tree from before the check landed.
+        check_text, when set, is the check file's text in place of the current module."""
         files = dict(files or {})
         if check:
-            files[CHECK_REL] = read_module()
+            files[CHECK_REL] = read_module() if check_text is None else check_text
         self.base_sha = self.commit("fixture base", files)
         self.assertEqual(self.has_file(self.base_sha, CHECK_REL), check)
 
@@ -541,15 +543,16 @@ class VerifiedCase(Fixture):
         self.assertNotListed(out, reverted, "a revert commit is listed as a Verified gap")
 
     def test_verified_check_starts_at_the_commit_after_the_landing(self):
-        self.base(check=False)
-        landing = self.commit("land the red-run check", {CHECK_REL: read_module()}, verified=None)
-        self.assertFalse(self.has_file(self.base_sha, CHECK_REL))  # the landing commit's parent lacks the check
+        """The landing commit's parent holds a check file with no Verified rollout. The file alone does not start the check."""
+        self.base(check_text=PRE_ROLLOUT_CHECK)
+        landing = self.commit("land the Verified check", {CHECK_REL: read_module()}, verified=None)
+        self.assertTrue(self.has_file(self.base_sha, CHECK_REL))  # the landing commit's parent holds a check file
         later = self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT}, verified=None)
-        self.assertTrue(self.has_file(landing, CHECK_REL))  # the next commit's parent has the check
+        self.assertTrue(self.has_file(landing, CHECK_REL))  # the next commit's parent holds the check too
         rc, out = self.lint()
         self.assertEqual(rc, 0, out)
         self.assertListed(out, later, "change widget product")
-        self.assertNotListed(out, landing, "the landing commit's parent lacks the check, yet the landing commit is listed")
+        self.assertNotListed(out, landing, "the landing commit's parent has no Verified rollout, yet the landing commit is listed")
 
     def test_every_untrailered_commit_in_a_long_range_is_listed(self):
         """Full-size state: 25 commits with no Verified line, each one a gap."""
