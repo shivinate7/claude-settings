@@ -67,16 +67,20 @@ def cite_form(cwd):
         return None
 
 
-def note_rules():
-    """The note rules for the brief, each filled from this checkout's layout. They come from
+def note_rules(cwd):
+    """The note rules for the brief, each filled from the layout of the session's repo at `cwd`. They come from
     check_record_slugs.AGENT_FORM_RULES, the list that check prints on a refusal: the brief holds no copy of the text.
-    Raises when the list or the layout cannot be read."""
+    Empty when that repo's layout has no notes kind or cannot be read. Raises when the list cannot be read."""
     lint = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lint")
     sys.path.append(lint)  # appended: a module already in sys.modules wins
     import check_record_slugs  # noqa: E402
     import layout  # noqa: E402  the one home of where records live
-    root = os.path.dirname(lint)
-    return [layout.fill_note_paths(root, rule) for rule in check_record_slugs.AGENT_FORM_RULES]
+    try:
+        if "notes" not in layout.kinds(cwd):
+            return []
+        return [layout.fill_note_paths(cwd, rule) for rule in check_record_slugs.AGENT_FORM_RULES]
+    except layout.LayoutError:  # a repo whose layout does not read gets no note line, never the hook's own paths
+        return []
 
 
 def build(agent_type, form=None, notes=()):
@@ -102,7 +106,7 @@ def main():
         cwd = data.get("cwd") if isinstance(data, dict) else None
         form = cite_form(cwd) if isinstance(cwd, str) and cwd else None
         try:
-            notes = note_rules()
+            notes = note_rules(cwd) if isinstance(cwd, str) and cwd else ()
         except Exception as e:  # the rest of the brief still goes out; one stderr line says the note rules did not
             notes = ()
             print(f"agent_brief: note rules not read: {e}", file=sys.stderr)

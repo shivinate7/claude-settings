@@ -514,6 +514,18 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertEqual(rc, 1, out)
         self.assertEqual(flagged(out), [NOTE % SLUG_LONG], out)
 
+    def test_refused_long_note_name_prints_the_note_form_rule_and_not_the_old_file(self):
+        self.roll_out()
+        self.commit_base()
+        self.put(NOTE % SLUG_LONG, NOTE_TEXT % SLUG_LONG)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        rules = [line for line in out.splitlines() if line.startswith("check_record_slugs: note rule: ")]
+        self.assertTrue(any(NOTE_DIR + "/" in line and NOTE_FORM in line for line in rules), out)
+        self.remedy_names_note_folder(out)
+        self.assertNotIn(OLD_NOTES, out)
+
     def test_note_file_without_a_slug_line_is_refused(self):
         self.roll_out()
         self.commit_base()

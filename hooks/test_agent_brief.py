@@ -48,6 +48,8 @@ sys.path.insert(0, HERE)
 import guard  # noqa: E402  the one reader of agent frontmatter keys (guard.frontmatter_keys), not a copy of it here
 import guard_core  # noqa: E402  the one home of the refuter role's name (REFUTER_ROLE), read below and never typed here
 from tool_lists_test import tokens, unread_list  # noqa: E402  the one reader of tool lists (hooks/tool_lists_test.py)
+sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # appended: a module already in sys.modules wins
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 
 CWD = "/tmp/agent-brief-test"
 MISSING = object()  # payload() leaves agent_type out of the JSON when this is passed
@@ -110,13 +112,13 @@ INJECT_ERROR = (  # runs the hook with json.loads and json.dumps raising, to for
 CASES = []
 
 
-def payload(agent_type=MISSING):
+def payload(agent_type=MISSING, cwd=CWD):
     """One SubagentStart payload, shaped as the docs: session_id, transcript_path, cwd,
     permission_mode, hook_event_name, agent_id, agent_type. `agent_type` MISSING drops the key."""
     body = {
         "session_id": "abc123",
-        "transcript_path": CWD + "/transcript.jsonl",
-        "cwd": CWD,
+        "transcript_path": cwd + "/transcript.jsonl",
+        "cwd": cwd,
         "permission_mode": "default",
         "hook_event_name": "SubagentStart",
         "agent_id": "a1b2c3",
@@ -168,6 +170,36 @@ def context_for(stdin_text):
     if rc != 0:
         return None, "exit %d: %s" % (rc, err.strip()[:120])
     return context_of(out)
+
+
+RUN_FOLDER = None  # made on the first request of the run, so an import leaks no folder (test-temp-standard)
+
+
+def repo_tree(extras=None, stamp=None):
+    """A repo-shaped folder in this run's folder: its layout extras file when `extras` is text, its .github/stamp.json
+    when `stamp` is a dict. The hook reads both through the payload's cwd. main() removes the run folder."""
+    global RUN_FOLDER
+    if RUN_FOLDER is None:
+        RUN_FOLDER = _test_temp.run_folder()
+    root = tempfile.mkdtemp(prefix="brief-tree-", dir=RUN_FOLDER)
+    if extras is not None:
+        write_under(root, ".claude/layout-extras.json", extras)
+    if stamp is not None:
+        write_under(root, ".github/stamp.json", json.dumps(stamp))
+    return root
+
+
+def write_under(root, rel, text):
+    """Write `text` to `rel` under `root`, making its folders."""
+    path = os.path.join(root, *rel.split("/"))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+
+def brief_in(root, agent_type="builder"):
+    """Run the hook with `root` as the payload's cwd. Return (additionalContext, None), or (None, problem)."""
+    return context_for(payload(agent_type, cwd=root))
 
 
 def has_line(text, *parts):
@@ -542,16 +574,7 @@ CITE_STAMP = {
 
 def brief_for_stamp(stamp):
     """Run the hook in a repo whose .github/stamp.json holds `stamp`. Return (text, problem)."""
-    root = tempfile.mkdtemp(prefix="agent-brief-cite-")
-    try:
-        os.makedirs(os.path.join(root, ".github"))
-        with open(os.path.join(root, ".github", "stamp.json"), "w", encoding="utf-8") as fh:
-            json.dump(stamp, fh)
-        body = json.loads(payload("builder"))
-        body["cwd"] = root
-        return context_for(json.dumps(body))
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
+    return brief_in(repo_tree(stamp=stamp))
 
 
 def cite_form_check():
@@ -825,7 +848,7 @@ add("refuter: agent_brief's READ_ONLY set holds the refuter role", "custom", fn=
 
 # NOTE RULES: the brief gives every agent the rules that check_record_slugs.AGENT_FORM_RULES holds, one list that the
 # check prints and the brief reads. An entry holds {folder} (the note folder, with its slash) and {old} (the old notes
-# file). Both come from this checkout's layout, read as the check reads it. NOTE_FORM and NOTE_FILE are the spec's own
+# file). Both come from the layout of the payload's cwd, read as the hook reads it. NOTE_FORM and NOTE_FILE are the spec's own
 # words, pinned here. The stand-in cases run the hook with a changed and an added list, so a rule that the list changes
 # must reach the brief, and the note form that the list dropped must leave it.
 LINT_DIR = os.path.join(REPO_ROOT, "lint")
@@ -836,12 +859,13 @@ CHANGED_RULE = "SENTINEL rule changed in the list: the note folder is {folder}" 
 EXTRA_RULE = "SENTINEL rule added to the list: the old notes file {old} takes deletes only"  # added, with no edit
 
 
-def layout_paths():
-    """(note folder with its slash, old notes file, None) from this checkout's layout, or (None, None, problem)."""
+def layout_paths(cwd):
+    """(note folder with its slash, old notes file, None) from the layout of `cwd`, the repo the payload names, or
+    (None, None, problem). The hook fills its rules from that same layout."""
     sys.path.append(LINT_DIR)
     try:
         import layout  # noqa: E402  the one home of where records live (lint/layout.py)
-        return layout.path(REPO_ROOT, "notes") + "/", layout.path(REPO_ROOT, "debt-notes"), None
+        return layout.path(cwd, "notes") + "/", layout.path(cwd, "debt-notes"), None
     except Exception as exc:  # a layout that does not read is a red case, never a crash at import
         return None, None, "lint/layout.py does not read: %s" % exc
 
@@ -861,12 +885,12 @@ def load_note_rules():
     return list(rules), None
 
 
-FOLDER, OLD_NOTES, LAYOUT_PROBLEM = layout_paths()
+FOLDER, OLD_NOTES, LAYOUT_PROBLEM = layout_paths(CWD)
 NOTE_RULES, RULES_PROBLEM = load_note_rules()
 
 
 def render(template):
-    """A rule as the brief shows it: the note folder and the old notes file filled in."""
+    """A rule as the brief shows it: the note folder and the old notes file of the payload's cwd, filled in."""
     return template.replace("{folder}", FOLDER).replace("{old}", OLD_NOTES)
 
 
@@ -995,7 +1019,107 @@ add("source control: an empty list keeps the builder's scope line through the sa
     fn=empty_list_check)
 
 
+# CWD LAYOUT: the hook fills the note rules from the layout of the payload's cwd, not from this checkout. A cwd with
+# no extras file gets the legacy old-notes path. A cwd whose layout does not read gets no note line at all.
+NO_EXTRAS_OLD_NOTES = "debts/notes.md"  # the old notes file of a repo with no extras file (the legacy path)
+CHECKOUT_OLD_NOTES = "docs/debts/notes.md"  # this checkout's old notes file: a cwd's brief never names it
+UNREADABLE_EXTRAS = '{"rolled-out": true, "kinds": {"notes": {"path": "docs/elsewhere"}}}\n'  # moves a layout kind
+
+
+def note_lines(text):
+    """The lines of the brief that carry a note rule: the note form, the note file name, or the old-file rule."""
+    return [line for line in text.split("\n") if NOTE_FORM in line or NOTE_FILE in line or "deletes only" in line]
+
+
+def no_extras_old_file_check():
+    """A cwd with no extras file: the brief names the old notes file at debts/notes.md, and never this checkout's
+    docs/debts/notes.md."""
+    text, problem = brief_in(repo_tree())
+    if problem:
+        return problem
+    scope = scope_check("builder")(text)  # scope before the subject
+    if scope:
+        return scope
+    if not same_line(text, "file " + NO_EXTRAS_OLD_NOTES + " takes", "deletes only"):
+        return "no line of the brief holds 'file %s takes' and 'deletes only'" % NO_EXTRAS_OLD_NOTES
+    if CHECKOUT_OLD_NOTES in text:
+        return "the brief names %s, this checkout's old notes file, not the cwd's" % CHECKOUT_OLD_NOTES
+    return None
+
+
+def unreadable_layout_check():
+    """A cwd whose extras file makes layout.kinds() raise: the brief gets no note line. The fixture is shown to make
+    layout.kinds() raise first, so the case cannot pass on a fixture that reads fine."""
+    root = repo_tree(extras=UNREADABLE_EXTRAS)
+    sys.path.append(LINT_DIR)
+    import layout  # noqa: E402  the one home of where records live (lint/layout.py)
+    try:
+        layout.kinds(root)
+    except layout.LayoutError:
+        pass
+    else:
+        return "the fixture does not make layout.kinds raise, so the case would prove nothing"
+    text, problem = brief_in(root)
+    if problem:
+        return problem
+    scope = scope_check("builder")(text)  # scope before the subject
+    if scope:
+        return scope
+    lines = note_lines(text)
+    if lines:
+        return "a cwd whose layout does not read gets %d note line(s), want none: %r" % (len(lines), lines[0][:90])
+    return None
+
+
+add("cwd layout: a cwd with no extras file gets the legacy old notes path, not this checkout's", "custom",
+    fn=no_extras_old_file_check)
+add("cwd layout: a cwd whose layout does not read gets no note line", "custom", fn=unreadable_layout_check)
+
+
+# NOTE RULES UNREAD: a check_record_slugs that will not import. The hook fails open for the note rules alone: the brief
+# still goes out with its scope and no note line, and one stderr line says the rules were not read.
+BROKEN_NOTE_LIST = "import sys\nsys.modules['check_record_slugs'] = None\n"  # an import of the name raises ImportError
+
+
+def note_rules_unread_check():
+    """A check_record_slugs that will not import: the hook exits 0, prints the brief with its scope and no note line,
+    and its one stderr line starts `agent_brief: note rules not read`."""
+    if not os.path.exists(HOOK):
+        return "the hook file is missing: %s" % HOOK
+    result = run_hook_after(BROKEN_NOTE_LIST, payload("builder"))
+    if result.returncode != 0:
+        return "exit %d when check_record_slugs will not import, want 0: %s" % (result.returncode,
+                                                                                 last_stderr_line(result))
+    text, problem = context_of(result.stdout)
+    if problem:
+        return "the brief did not go out when check_record_slugs will not import: %s" % problem
+    scope = scope_check("builder")(text)  # scope before the subject
+    if scope:
+        return scope
+    lines = note_lines(text)
+    if lines:
+        return "a brief whose note rules did not read holds %d note line(s), want none: %r" % (len(lines), lines[0][:90])
+    err = result.stderr.strip().splitlines() if result.stderr.strip() else []
+    if len(err) != 1:
+        return "want one stderr line, got %d" % len(err)
+    if not err[0].startswith("agent_brief: note rules not read"):
+        return "stderr line is %r, want it to start 'agent_brief: note rules not read'" % err[0][:120]
+    return None
+
+
+add("note rules unread: a check_record_slugs that will not import leaves the brief out with no note line",
+    "custom", fn=note_rules_unread_check)
+
+
 def main():
+    try:
+        return run_cases()
+    finally:
+        if RUN_FOLDER is not None:
+            shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
+
+
+def run_cases():
     failed = 0
     for case in CASES:
         note = dispatch(case)

@@ -159,9 +159,7 @@ NOTE_README = "README.md"  # the note folder's own description: not a note
 CLIP = 60  # characters of a refused line that a message shows
 
 
-def note_dir(root):
-    """The note folder of `root` with its trailing slash. Raises layout.LayoutError when the layout cannot be read."""
-    return layout.path(root, "notes") + "/"
+note_dir = layout.note_dir  # the one home is lint/layout.py; kept here for the callers that read it from this check
 
 
 def note_files(files, folder):
@@ -277,6 +275,7 @@ def main(args):
         # Unknown is red in CI, and red anywhere once a section fault has printed: that fault is a verdict already.
         return 1 if os.environ.get("CI") or sections else 0
     bad = too_long(files, dirs + (folder,)) + too_long(note_files(renamed, folder), (folder,))
+    bad_long_note = [f for f in bad if f.startswith(folder)]
     for f in bad:
         print("check_record_slugs: FAIL: slug over %d characters: %s" % (MAX, f))
     for f, why in bad_form:
@@ -290,9 +289,11 @@ def main(args):
                   % f)
     for line in new_lines:
         print("check_record_slugs: FAIL: %s: %s" % (NEW_NOTE_REFUSAL % folder, line[:CLIP]))
-    if new_lines or bad_form:
+    if new_lines:  # the old file's rule is for a refused line in it only: any other refusal must not name that file
         for rule in AGENT_FORM_RULES:
             print("check_record_slugs: note rule: " + layout.fill_note_paths(ROOT, rule))
+    elif bad_form or bad_long_note:
+        print("check_record_slugs: note rule: " + layout.fill_note_paths(ROOT, AGENT_FORM_RULES[0]))
     for f, how in feel:
         print("check_record_slugs: FAIL: feel-fix debt %s with no device check: %s"
               % ("deleted" if how == "deleted" else "lost its Feel line", f))
