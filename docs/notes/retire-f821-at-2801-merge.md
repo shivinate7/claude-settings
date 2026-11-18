@@ -1,0 +1,1 @@
+- retire-f821-at-2801-merge: At #2801's merge, after green CI: retire debt guard-split-f821-lint-gap with a Retire-run line (lane guard-tables-per-section via coordinator 11:03 CST Nov 12).

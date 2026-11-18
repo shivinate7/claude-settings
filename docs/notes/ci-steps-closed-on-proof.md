@@ -1,0 +1,1 @@
+- ci-steps-closed-on-proof: Via lane ci-steps-proof-read, relayed by the coordinator at 00:11 CST Nov 14 (triage did not re-read main 8e9f2b153): ci-merge-install-cap and test-file-in-ci were closed with their proofs (file lines in the step notes).

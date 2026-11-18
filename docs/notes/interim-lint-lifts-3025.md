@@ -1,0 +1,1 @@
+- interim-lint-lifts-3025: Coordinator 19:56 CST Nov 12 (process-only): reopened from the batch 113 close. The interim "lane-lint before confirm" lifts now that #3025 is on main. Runner 10 confirms on the next batch that the skip fires; the step closes on that yes.

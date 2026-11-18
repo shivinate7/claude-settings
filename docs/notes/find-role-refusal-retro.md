@@ -1,0 +1,1 @@
+- find-role-refusal-retro: lane-finds-triage 15:35 CST Nov 12: Retrospective 15:25 CST Nov 12: PR #2709 refuses a brief that lacks the role names and never refuses a session id; ids come from the roster. Item 591 reply corrected 15:34 CST. Gap: the roster wake is unbuilt (PR #2709 notes), so a lane reads the roster when it sends.

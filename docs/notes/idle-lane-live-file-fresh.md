@@ -1,0 +1,1 @@
+- idle-lane-live-file-fresh: Triage 01:13 CST Nov 13, scope settled with the lane (PR #3108): the live file counts as fresh when its readAt is after the merge commit's time (not the merge base's). The pass runs only when the merge lands on the default branch. In a repo whose origin has no roadmap ref it prints nothing (no pass there).

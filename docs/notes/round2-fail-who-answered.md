@@ -1,0 +1,1 @@
+- round2-fail-who-answered: 13:38 CST Nov 13, coordinator asked who answered the round-2-FAIL question and whether it is the owner's word: triage answered it (triage pick at 13:3x CST, the existing small-fix rule), not the owner. The coordinator put it to the owner as an open point at 13:34.

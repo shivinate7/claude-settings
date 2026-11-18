@@ -1,0 +1,1 @@
+- roster-timing-tests-no-triage: lane-finds-triage 14:37 CST Nov 12: Incident 14:36 CST Nov 12 (lane timing-tests #2933, via coordinator): the lane paged 200 sessions and found no triage or batch runner; one more case for #2709's find-role fix.

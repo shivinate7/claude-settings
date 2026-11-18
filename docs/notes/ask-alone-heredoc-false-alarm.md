@@ -1,0 +1,1 @@
+- ask-alone-heredoc-false-alarm: (note, for step guard-false-alarm-cull) the ask-alone guard refused a python3 heredoc that only wrote text (page-item JSON, then this note), because the text quoted a push of every branch; it reads words inside a string as a chained push command. Twice at 16:03-16:04 CST Nov 10. Worked around with the Write tool and by rewording.

@@ -1,0 +1,1 @@
+- subagent-worktree-refused: agent-worktree-add-in-tool-dir 15:35 CST Nov 12: Sighting 15:28 CST Nov 12 (coordinator, R42 part 2 lane, #2889): its test-author found `git worktree add` and EnterWorktree both refused for a subagent, so it could not make its own checkout for a red run; red-first proofs then share trees. This step covers it.

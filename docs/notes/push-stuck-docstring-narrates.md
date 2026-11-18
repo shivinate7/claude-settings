@@ -1,0 +1,1 @@
+- push-stuck-docstring-narrates: (#2513) the `push_stuck_compare_case` docstring narrates a fixed bug (building-comments-say-why).

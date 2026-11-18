@@ -1,0 +1,1 @@
+- cannot-claim-unread-read: Triage 20:24 CST Nov 12: a report's "Why yours" said "my list of your computer folders shows no Mac connected" before list_computer_folders had run; the check ran after and was empty. The cannot-claim guard did not flag a claim that cites a read the session had not made.

@@ -1,0 +1,1 @@
+- mac-once-3021-on-main: 16:00 CST Nov 13 (consultant): #3278 merged at 21:59 UTC (ab27336489, its read); #3021 (R61, macOS once) is on main. This step can close once main's next push run shows no macOS jobs; triage checks at the next batch review. Not closed yet.

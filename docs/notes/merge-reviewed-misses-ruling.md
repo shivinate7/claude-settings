@@ -1,0 +1,1 @@
+- merge-reviewed-misses-ruling: (debt; lane grant-reaches-lanes, #2517, coordinator 04:14 CST Nov 10) `merge --reviewed` prints "docs-only change, no round owed" for #2517, but the PR adds a decision that files an owner ruling, which owes the short round (decision docs-only-prs-skip-review). The tool cannot see a ruling record, so a ruling PR can merge with no review.

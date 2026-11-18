@@ -1,0 +1,1 @@
+- blocked-prompt-no-coordinator: (note for stage 3, coordinator 02:52 CST) a lane whose agent waits on an owner permission prompt reads "blocked" in get_session, but nothing tells its coordinator. Cost: about 5 h on #1099 (lane 2YRQ) and 3 h on #2542 (lane 4VY5), both on a scratchpad-owner prompt. Same family as stall-watch-agents.
