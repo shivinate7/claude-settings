@@ -132,6 +132,12 @@ def session_row(sid, status, *tags, status_bucket=None):
     return row
 
 
+def ledger_row(number, act, owner="batch runner", age=2.0, red=False, blocked_on=None):
+    """One row of the ledger, as `merge --reviewed --json` prints it (decision pr-ledger): the pull, its next act, the act's
+    owner, its age in hours, RED, and the pull it is blocked on (None when none)."""
+    return {"number": number, "act": act, "owner": owner, "ageHours": age, "red": red, "blockedOn": blocked_on}
+
+
 def headers_of(pairs=None):
     """A response's headers as urlopen gives them: an email Message, so a name reads in any case."""
     message = email.message.Message()
@@ -674,9 +680,9 @@ class UpkeepFixture(Fixture):
         self.use_origin(self.SLUG)
         self.origin_set = set()  # branches whose refs/remotes/origin/ ref a case set, dropped or broke
 
-    def publish(self, sessions=None, pulls=(), threads=(), read_at=None, items=None, landed=None):
-        """Write the --live file. threads=_ABSENT leaves the threads key out. The sessions, items and landedPulls keys
-        appear only when given, and landed is written
+    def publish(self, sessions=None, pulls=(), threads=(), read_at=None, items=None, landed=None, ledger=None):
+        """Write the --live file. threads=_ABSENT leaves the threads key out. The sessions, items, landedPulls and ledger keys
+        appear only when given, and landed and ledger are written
         as given (a case may send a value that is not a list). readAt is five minutes old by default."""
         value = {"readAt": read_at or iso_ago(5)}
         if threads is not _ABSENT:
@@ -688,6 +694,8 @@ class UpkeepFixture(Fixture):
             value["items"] = items
         if landed is not None:
             value["landedPulls"] = landed
+        if ledger is not None:
+            value["ledger"] = ledger
         self.write_live(value)
         return value
 
@@ -940,6 +948,95 @@ class UpkeepFixture(Fixture):
         """Scope check: main holds no Step trailer, so a landed mark in the case must come from a landedPulls row."""
         trailers = git(self.repo, "log", "main", "--format=%(trailers:key=Step,valueonly)").strip()
         self.assertEqual(trailers, "", "main holds a Step trailer, so the case would not show the landedPulls read")
+
+
+class LedgerActs(UpkeepFixture):
+    """The ledger's acts on the live file's pulls (decision pr-ledger, part 3b). The publisher puts `merge --reviewed --json`
+    whole under the live file's `ledger` key: {readAt, rows: [{number, act, owner, ageHours, red, blockedOn}]}. build.py reads
+    it in its own function beside live_work, and bakes each pull row with its act, owner, ageHours and red. A ledger that is
+    stale or whose readAt is not an ISO time reads every act unknown with the ledger's reason. A pull with no ledger row reads
+    `act unknown`. A draft that no live lane holds reads `no live lane` (owner coordinator), and `lane unknown` when the
+    sessions list is unread."""
+
+    def build(self):
+        page, _ = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        return page
+
+    def baked(self, page):
+        """{number: the baked pull row}, as the page lists them."""
+        return {p.get("number"): p for p in build_info(page)["live"]["pulls"]}
+
+    def acts(self, page):
+        """{number: the baked act}. A row with no act key reads None."""
+        return {n: row.get("act") for n, row in self.baked(page).items()}
+
+    def test_a_ledger_that_is_unread_or_stale_reads_every_act_unknown_and_an_unrelated_skip_does_not(self):
+        pulls = [{"number": 3, "title": "three", "branch": "feat-three"}, {"number": 9, "title": "nine", "branch": "feat-nine"}]
+        rows = [ledger_row(3, "batch"), ledger_row(9, "lane round 2", owner="lane")]
+        cases = {
+            "no readAt": {"rows": rows},
+            "readAt not a time": {"readAt": "yesterday", "rows": rows},
+            "readAt 90 minutes old": {"readAt": iso_ago(90), "rows": rows},
+        }
+        for name, ledger in cases.items():
+            with self.subTest(ledger=name):
+                self.publish(sessions=[], pulls=pulls, ledger=ledger)
+                acts = self.acts(self.build())
+                self.assertEqual(sorted(acts), [3, 9], "scope: the baked pulls are the two open pulls")
+                for n in (3, 9):
+                    self.assertTrue(str(acts[n]).startswith("unknown (") and "ledger" in str(acts[n]),
+                                    f"#{n} reads act {acts[n]!r} with this ledger, not unknown with the ledger's reason")
+        with self.subTest(unrelated="a landedPulls row is skipped"):
+            # The skipped landedPulls row makes the stale reading unknown (staleWhy), which must not blank the acts.
+            self.publish(sessions=[], pulls=pulls, ledger={"readAt": iso_ago(5), "rows": rows}, landed=[{"branch": "feat-old"}])
+            page = self.build()
+            self.assertIn("landedPulls", str(build_info(page)["live"].get("staleWhy")),
+                          "control: the skipped landedPulls row did not make the live reading unknown")
+            acts = self.acts(page)
+            self.assertEqual(acts.get(3), "batch", f"#3 reads act {acts.get(3)!r} with a skipped landedPulls row in the file, not the ledger's 'batch'")
+            self.assertEqual(acts.get(9), "lane round 2", f"#9 reads act {acts.get(9)!r} with a skipped landedPulls row in the file, not the ledger's 'lane round 2'")
+
+    def test_a_pull_with_no_ledger_row_reads_act_unknown_never_blank_or_none(self):
+        pulls = [{"number": 3, "title": "three", "branch": "feat-three"}, {"number": 9, "title": "nine", "branch": "feat-nine"}]
+        for name, rows in (("one pull has no row", [ledger_row(9, "batch")]), ("the ledger is empty", [])):
+            with self.subTest(ledger=name):
+                self.publish(sessions=[], pulls=pulls, ledger={"readAt": iso_ago(5), "rows": rows})
+                acts = self.acts(self.build())
+                self.assertEqual(sorted(acts), [3, 9], "scope: the baked pulls are the two open pulls")
+                self.assertEqual(acts[3], "act unknown", f"#3 has no ledger row and reads act {acts[3]!r}, not 'act unknown'")
+                if rows:
+                    self.assertEqual(acts[9], "batch", f"#9 has a ledger row with act batch and reads act {acts[9]!r}")
+
+    def test_a_draft_no_live_lane_holds_reads_no_live_lane_a_lane_holds_does_not_and_unread_sessions_read_lane_unknown(self):
+        draft = self.draft(7, "feat-seven", title="Draft seven")
+        ledger = {"readAt": iso_ago(5), "rows": [ledger_row(7, "lane round 1", owner="lane")]}
+        lane = session_row("session_test01", "SESSION_STATUS_RUNNING", self.REPO, "cs-step:feat-seven", status_bucket=BUCKET_WORKING)
+        with self.subTest(sessions="no session holds the branch"):
+            self.publish(sessions=[], pulls=[draft], ledger=ledger)
+            row = self.baked(self.build())
+            self.assertEqual(sorted(row), [7], "scope: the baked pulls are the one draft")
+            self.assertEqual(row[7].get("act"), "no live lane", f"#7 is a draft no live lane holds and reads act {row[7].get('act')!r}, not 'no live lane'")
+            self.assertEqual(row[7].get("owner"), "coordinator", f"#7 reads owner {row[7].get('owner')!r}, not coordinator")
+            self.assertIs(row[7].get("red"), False, f"#7 is a draft no live lane holds, and its red is {row[7].get('red')!r}, not False")
+        with self.subTest(sessions="a live lane holds the branch"):
+            self.publish(sessions=[lane], pulls=[draft], ledger=ledger)
+            row = self.baked(self.build())
+            self.assertEqual(row[7].get("act"), "lane round 1", f"#7 has a live lane and reads act {row[7].get('act')!r}, not its ledger act 'lane round 1'")
+            self.assertEqual(row[7].get("owner"), "lane", f"#7 has a live lane and reads owner {row[7].get('owner')!r}")
+        with self.subTest(sessions="the sessions list is unread"):
+            self.publish(sessions=None, pulls=[draft], ledger=ledger)
+            row = self.baked(self.build())
+            self.assertEqual(row[7].get("act"), "lane unknown", f"#7's sessions are unread and it reads act {row[7].get('act')!r}, not 'lane unknown'")
+
+    def test_a_ledger_of_500_pulls_bakes_the_act_of_each(self):
+        # Full size (test-practices P8): 500 open pulls, each with a ledger row.
+        count = 500
+        pulls = [{"number": n, "title": "pull %d" % n, "branch": "feat-%d" % n} for n in range(1, count + 1)]
+        self.publish(sessions=[], pulls=pulls, ledger={"readAt": iso_ago(5), "rows": [ledger_row(n, "batch") for n in range(1, count + 1)]})
+        acts = self.acts(self.build())
+        self.assertEqual(len(acts), count, "scope: the baked pulls are the %d open pulls" % count)
+        missing = [n for n, act in acts.items() if act != "batch"]
+        self.assertEqual(missing, [], "%d of %d baked pulls do not read act 'batch' (first: %s)" % (len(missing), count, missing[:3]))
 
 
 class LandedPulls(UpkeepFixture):
