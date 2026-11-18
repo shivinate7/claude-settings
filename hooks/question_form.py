@@ -2323,7 +2323,8 @@ def _ruled_candidates(roots, unknown, words):
     """The open entries of the ruled store (lint/ruled_store.py, the one reader) whose ruling shares a word with the
     question (`words`, the step rulings' word test), as
     `ruled:<id>: <ruling> (owner <at>; open, not on main; supersedes <refs>)`, the most shared words first and the
-    newest first among equal counts, at most RULED_TOP. An unchecked entry (supersedes_none starts with "unread") ends
+    newest first among equal counts, at most RULED_TOP. An entry whose `scope.visibility` differs from the repo's
+    (roots[0], read by lint/layout.py) is left out before the cap. An unchecked entry (supersedes_none starts with "unread") ends
     with " (unchecked, not law)". The store is read from the first root that has one: the repo, else the
     claude-settings checkout. No store anywhere adds "ruled store (absent)"; a store git failed to read adds
     "ruled store (unreadable: git)"."""
@@ -2339,7 +2340,7 @@ def _ruled_candidates(roots, unknown, words):
     for root in roots:
         entries, state = ruled_store.read_store(root)
         if state == "ok":
-            opened = ruled_store.open_entries(entries, root)
+            opened = [e for e in ruled_store.open_entries(entries, root) if ruled_store.in_scope(e, roots[0])]
             lines = []
             scored = [(len(_words(str(e.get("ruling", ""))) & words), e) for e in opened]
             newest = sorted((pair for pair in scored if pair[0]), key=lambda pair: ruled_store.entry_instant(pair[1]),
