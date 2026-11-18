@@ -878,9 +878,9 @@ def waiter_verdict(segments, background: bool) -> str:
 
 WAITER_REASON = (
     "a pause between polls turns waiting into a loop of turns that each print a word. "
-    "Remedy: wait for the CI-wake notice that follows gh pr ready. "
-    "To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`, with TIME an ISO-8601 instant "
-    "that has a zone. To wait on one pid, use `bin/wait-pid PID [--timeout SECS]`. "
+    "Remedy: to wait, then run a command, use `bin/wait-until TIME [--timeout SECS]`, with TIME an ISO-8601 "
+    "instant that has a zone, then run the command. To wait for CI, wait for the CI-wake notice that "
+    "follows gh pr ready. To wait on one pid, use `bin/wait-pid PID [--timeout SECS]`. "
     "To wait for another condition, run the long command in the background and wait for its completion "
     "notice. In the background, one pause of any length followed by a command is allowed, and so is a "
     "loop whose test orders the date output against a literal time of the same kind: date +%s against an "

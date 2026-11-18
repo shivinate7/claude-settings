@@ -5,7 +5,7 @@
 A test must not fail on runner speed. CI runs a job only when its suites' files change, runs OS-independent suites on ubuntu only, and splits a near-cap job's slowest suite by family (a `ci-hygiene` step).
 
 1. A skipped test reports SKIP with a count, never PASS. The fail-closed test list comes from the guard modules on disk.
-2. No test times a run on a local device. Fixed sleeps and wall-clock bounds are in P5 of decision test-practices (no sleep or clock in a test). One test
+2. No test times a run on a local device. Timed waits follow P5 of decision test-practices: no fixed sleep, hang guards allowed, and a verdict that depends on elapsed time uses a synthetic clock. One test
    checks that the code follows a speed best practice, such as a count of calls or cache hits.
 3. One shared set of fixtures: one git template, and one fake each for `gh`, `claude` and `xcrun`.
 4. The pure-parse guard families run in one Python process. The cases that need a real hook process stay as subprocess cases.

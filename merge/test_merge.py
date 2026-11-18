@@ -1841,9 +1841,10 @@ class ScopedRepo:
 
     @staticmethod
     def turned_on(flags):
-        """The job and suite flags that are on. Not mutation_report (it is set only for a batch branch), and not the lint_* flags: merge
-        counts no lint as a job, since every merge runs the lints anyway (ci-job checks --lint)."""
-        return sorted(k for k, v in flags.items() if k != "mutation_report" and not k.startswith("lint_") and v != "false")
+        """The job and suite flags that are on. Not mutation_report (it is set only for a batch branch), not the lint_* flags: merge
+        counts no lint as a job, since every merge runs the lints anyway (ci-job checks --lint), and not the doc_* flags, which a prose
+        change sets and the express check lets through."""
+        return sorted(k for k, v in flags.items() if k != "mutation_report" and not k.startswith(("lint_", "doc_")) and v != "false")
 
     @staticmethod
     def lints_on(flags):
@@ -5453,7 +5454,7 @@ class GhHalf(Env):
 OLD_RUN, NEW_RUN, CI_RUN = 41368432206, 41368432483, 41368432300
 MID_RUN = 41368432350  # a run of the same workflow between OLD_RUN and NEW_RUN
 
-class NoneRequiredChecks(Env):
+class NoneRequiredChecks(ScopedRepo, Env):
     """merge.requiredChecks "none": the base names no required check, so the head reads from the checks and runs it has. Each case
     runs through the fake gh, as GhHalf does. Borrows GhHalf's helpers, as SilentWait does, so GhHalf's tests do not run twice."""
     set, calls, gh_host, go = GhHalf.set, GhHalf.calls, GhHalf.gh_host, GhHalf.go
@@ -5472,10 +5473,12 @@ class NoneRequiredChecks(Env):
         self.assertEqual((host.checks(7, warn=False, sha=head), host.runs(head)), ({}, []), "the fixture's head holds a check or a run")
         self.assertEqual(host.head_state(7), "green")
 
-    def test_a_red_check_row_on_the_head_still_reads_red(self):
+    def test_a_red_check_row_on_the_head_reads_green_under_none(self):
+        # Under none the tool reads no CI run at all (decision private-repos-no-ci), so a failed check row holds nothing.
         self.set(checks_seq=[[("checks", "fail", "https://x/y")]])
-        state = self.none_host().head_state(7)
-        self.assertTrue(state.startswith("red: checks: fail"), state)
+        host = self.none_host()
+        self.assertTrue(host.checks(7, warn=False, sha=host.pr(7)["head"]), "scope: the head reads no check row")
+        self.assertEqual(host.head_state(7), "green")
 
     def test_confirm_does_not_stop_on_required_checks_when_none_is_set(self):
         self.set(checks_seq=[[]])
@@ -5484,14 +5487,187 @@ class NoneRequiredChecks(Env):
         self.assertIn(MERGE_CALL, self.calls())
         self.assertNotIn("branches/main/protection", self.calls(), "under requiredChecks none, the confirm read the base's branch protection")
 
-    def test_a_pending_run_with_no_workflow_folder_refuses_at_once_under_none(self):
-        # The base has no workflow folder, so the run's file cannot be read. A run whose file cannot be read holds the head.
+    def test_a_pending_run_with_no_workflow_folder_does_not_hold_the_merge_under_none(self):
+        # Under none the tool reads no CI run at all (decision private-repos-no-ci), so a run still pending holds nothing.
         self.set(checks_seq=[[]], runs_seq=[[("docs", "in_progress", "")]])
+        host = self.none_host()
+        self.assertTrue(host.run_state(host.pr(7)["head"])[1], "scope: the head's run does not read pending")
         rc, out = self.go(required="none")
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls())
+        self.assertEqual(self.paused, [], "the pending run waited before the merge")
+
+    def test_an_old_red_run_on_the_head_does_not_refuse_the_merge_under_none(self):
+        # Under none the tool reads no CI run at all (decision private-repos-no-ci), so a red run left on the head
+        # from before its workflows were disabled holds nothing.
+        self.set(checks_seq=[[]], runs_seq=[[("checks", "completed", "failure")]])
+        host = self.none_host()
+        self.assertTrue(host.run_state(host.pr(7)["head"])[0], "scope: the head's run does not read red")
+        rc, out = self.go(required="none")
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls())
+
+    def test_an_old_red_run_on_the_head_still_refuses_under_a_listed_check(self):  # control: green on the old code
+        self.set(checks_seq=[[("checks", "pass", "")]], runs_seq=[[("checks", "completed", "failure")]])
+        rc, out = self.go(required=["checks"])
         self.assertEqual(rc, 1, out)
-        self.assertIn("a check is pending: workflow docs", out)
-        self.assertEqual(self.paused, [], "the pending run waited before it refused")
+        self.assertIn("not green", out)
         self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_red_main_run_does_not_refuse_the_merge_under_none(self):
+        # Under none the tool reads no CI run at all (decision private-repos-no-ci), main's runs included.
+        push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})  # only a workflow file on main is judged
+        self.set(checks_seq=[[]], base_runs=[main_run(901, "failure")], base_jobs={"901": [main_job("scope", "success"), main_job("checks", "failure", 20)]})
+        rc, out = self.go(required="none")
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls())
+
+    def test_a_red_main_run_still_refuses_the_merge_under_a_listed_check(self):  # control: green on the old code
+        push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})
+        self.set(base_runs=[main_run(901, "failure")], base_jobs={"901": [main_job("scope", "success"), main_job("checks", "failure", 20)]})
+        rc, out = self.go(required=["checks"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("latest completed run is red", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def run_main_with_gh_host(self, *args, required="protection"):
+        """merge.main with no host argument, so main reads the required checks from the config of the base, as in production. The gh host of
+        this case stands in for the Host main builds. -> (rc, stdout and stderr together)."""
+        host = self.gh_host(required=required)
+        out, err = io.StringIO(), io.StringIO()
+        cwd = os.getcwd()
+        os.chdir(self.co)
+        try:
+            with unittest.mock.patch.object(merge, "Host", lambda **kw: host), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = merge.main(list(args), lock=self.lock)
+        finally:
+            os.chdir(cwd)
+        return rc, out.getvalue() + err.getvalue()
+
+    def test_a_setup_pr_whose_head_stamp_says_none_merges_with_no_flag(self):
+        # A setup PR (decision private-repos-no-ci) whose own head stamp says "none" lints and merges from that
+        # stamp, with no flag. Main still pins protection, and that protection requires a check the head does not run.
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="protection"))))
+        self.on("feat", {".github/stamp.json": json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="none")))})
+        self.set(contexts=["checks"], checks_seq=[[]])
+        self.assertEqual(self.gh_host(required="protection").required_names(), ["checks"], "scope: main's protection does not require checks")
+        rc, out = self.run_main_with_gh_host("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls())
+
+    def test_a_setup_pr_whose_head_stamp_sets_a_bad_deadline_is_refused(self):
+        # The head's stamp is the one main reads, so its deadline is validated too: the only reader of merge.deadlineMinutes is the config check.
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="protection"))))
+        self.on("feat", {".github/stamp.json": json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="none", deadlineMinutes=0)))})
+        self.set(contexts=["checks"], checks_seq=[[]])
+        rc, out = self.run_main_with_gh_host("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("deadlineMinutes", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_head_stamp_that_is_not_none_does_not_replace_the_base_stamp(self):
+        # Only a setup PR's own head stamp that says "none" counts (decision private-repos-no-ci). A head stamp
+        # that names other checks is not the config, so main's stamp decides, and it names checks.
+        put_base_config(self, complete_config())
+        self.on("feat", {".github/stamp.json": json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=["gate"])))})
+        head = sh(self.other, "git", "rev-parse", "feat")
+        self.assertEqual(json.loads(sh(self.other, "git", "show", f"{head}:.github/stamp.json"))["merge"]["requiredChecks"], ["gate"], "scope: the head's stamp does not name gate")
+        self.assertEqual(json.loads(sh(self.other, "git", "show", "origin/main:.github/stamp.json"))["merge"]["requiredChecks"], ["checks"], "scope: main's stamp does not name checks")
+        cfg = merge.load_config(self.co, "main", merge.DEFAULT_CONFIG, head=head, branch="feat")
+        self.assertEqual(cfg["merge"]["requiredChecks"], ["checks"], "a head stamp with requiredChecks ['gate'] replaced main's stamp")
+
+    def base_fields_stamp(self):
+        """Main's stamp, with each merge field that a setup head's stamp must not replace set off its default, so a case sees each one come from main."""
+        return json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="protection", method="squash", deleteBranch=False,
+                                                  standingGrant=False, afterMerge=["make release"],
+                                                  ignoreChecks=[{"name": "lint", "reason": "a known flake"}],
+                                                  keepBranches=["release"], readyChecks=["check invariants"])))
+
+    def assert_base_fields(self, m, source):
+        """-> each merge field that main's stamp sets (base_fields_stamp) reads as main sets it. `source` names the stamp that must not replace it."""
+        kept = (("standingGrant", False), ("afterMerge", ["make release"]), ("ignoreChecks", [{"name": "lint", "reason": "a known flake"}]),
+                ("keepBranches", ["release"]), ("readyChecks", ["check invariants"]), ("deleteBranch", False), ("method", "squash"))
+        for field, want in kept:
+            with self.subTest(field=field):
+                self.assertEqual(m.get(field), want, f"the {source} replaced main's merge.{field}")
+
+    def head_setup_config(self, head_merge):
+        """Put main's base_fields_stamp on origin, then commit `head_merge` as the feat branch's stamp. -> the head sha, read from the other clone."""
+        put_base_config(self, self.base_fields_stamp())
+        self.on("feat", {".github/stamp.json": json.dumps(dict(CONFIG, merge=head_merge))})
+        return sh(self.other, "git", "rev-parse", "feat")
+
+    def test_a_setup_head_none_stamp_still_sets_required_checks(self):  # control: green on the old code
+        head = self.head_setup_config({"requiredChecks": "none"})
+        cfg = merge.load_config(self.co, "main", merge.DEFAULT_CONFIG, head=head, branch="feat")
+        self.assertEqual(cfg["merge"]["requiredChecks"], "none", "a setup head's none stamp did not set requiredChecks")
+
+    def test_a_setup_head_none_stamp_keeps_each_field_of_main_merge_block(self):
+        # A PR never loosens its own gate (decision private-repos-no-ci). The head's stamp sets requiredChecks
+        # only, so every other merge field is main's.
+        head = self.head_setup_config({"requiredChecks": "none"})
+        self.assertEqual(json.loads(sh(self.other, "git", "show", f"{head}:.github/stamp.json"))["merge"], {"requiredChecks": "none"}, "scope: the head's stamp sets more than requiredChecks")
+        self.assertIs(json.loads(sh(self.other, "git", "show", "origin/main:.github/stamp.json"))["merge"]["standingGrant"], False, "scope: main's stamp does not set standingGrant false")
+        cfg = merge.load_config(self.co, "main", merge.DEFAULT_CONFIG, head=head, branch="feat")
+        self.assertEqual(cfg["merge"]["requiredChecks"], "none", "scope: the head's none stamp was not the config")
+        self.assert_base_fields(cfg["merge"], "head's none stamp")
+
+    def test_a_setup_head_none_stamp_sets_no_base_field_of_its_own(self):
+        # A PR never loosens its own gate (decision private-repos-no-ci). The head sets values for the base's
+        # fields too, and none of them reaches the config: only requiredChecks comes from the head.
+        head = self.head_setup_config({"requiredChecks": "none", "method": "rebase", "deleteBranch": True, "standingGrant": True,
+                                       "afterMerge": ["make nothing"], "keepBranches": ["other"]})
+        self.assertEqual(json.loads(sh(self.other, "git", "show", f"{head}:.github/stamp.json"))["merge"]["method"], "rebase", "scope: the head's stamp does not set method")
+        cfg = merge.load_config(self.co, "main", merge.DEFAULT_CONFIG, head=head, branch="feat")
+        self.assertEqual(cfg["merge"]["requiredChecks"], "none", "scope: the head's none stamp was not the config")
+        self.assert_base_fields(cfg["merge"], "head's own stamp")
+
+    def requiredChecks_at(self, ref):
+        """-> requiredChecks as the stamp at `ref` (a commit, or origin/main) says it, read from the other clone."""
+        return json.loads(sh(self.other, "git", "show", f"{ref}:.github/stamp.json"))["merge"].get("requiredChecks")
+
+    def test_a_none_head_stamp_the_pr_did_not_change_yields_to_main(self):
+        # A PR never loosens its own gate (decision private-repos-no-ci). The base said "none" when the PR was cut,
+        # and the PR left it there. Main says "protection" now, so main's stamp decides.
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="none"))))
+        self.on("feat", {"docs/notes.md": "a note\n"})  # the PR's own change: its stamp still says none
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="protection"))), takes_head=False)
+        head = sh(self.other, "git", "rev-parse", "feat")
+        base = sh(self.other, "git", "merge-base", head, "origin/main")
+        self.assertEqual(self.requiredChecks_at(base), "none", "scope: the merge base does not say none")
+        self.assertEqual(self.requiredChecks_at(head), "none", "scope: the head does not say none")
+        self.assertEqual(self.requiredChecks_at("origin/main"), "protection", "scope: main does not say protection")
+        cfg = merge.load_config(self.co, "main", merge.DEFAULT_CONFIG, head=head, branch="feat")
+        self.assertEqual(cfg["merge"]["requiredChecks"], "protection", "the head's none stamp, which the PR did not change, replaced main's stamp")
+
+    def test_a_none_head_stamp_the_pr_changed_still_counts_over_a_protection_base(self):  # control: green on the old code
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="protection"))))
+        self.on("feat", {".github/stamp.json": json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="none")))})  # the PR changes it
+        head = sh(self.other, "git", "rev-parse", "feat")
+        base = sh(self.other, "git", "merge-base", head, "origin/main")
+        self.assertEqual(self.requiredChecks_at(base), "protection", "scope: the merge base does not say protection")
+        self.assertEqual(self.requiredChecks_at(head), "none", "scope: the head does not say none")
+        cfg = merge.load_config(self.co, "main", merge.DEFAULT_CONFIG, head=head, branch="feat")
+        self.assertEqual(cfg["merge"]["requiredChecks"], "none", "a none stamp the PR changed did not set requiredChecks")
+
+    def test_head_read_does_not_take_an_unchanged_none_stamp_over_main(self):
+        # The guard reads the head through head_read, which takes the same stamp rule as load_config. The base said "none" when the PR was cut
+        # and says "protection" now, so the head reads as its checks and runs say: none, so pending.
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="none"))))
+        self.on("feat", {"docs/notes.md": "a note\n"})
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="protection"))), takes_head=False)
+        self.set(checks_seq=[[]])
+        sh(self.co, "git", "fetch", "-q", "origin")  # head_read reads the stamp in the checkout gh runs in: the head must be there
+        head = sh(self.other, "git", "rev-parse", "feat")
+        self.assertEqual(self.requiredChecks_at(head), "none", "scope: the head does not say none")
+        self.assertEqual(self.requiredChecks_at("origin/main"), "protection", "scope: main does not say protection")
+        cwd = os.getcwd()
+        os.chdir(self.co)
+        try:
+            verdict, detail = self.gh_host().head_read(7)
+        finally:
+            os.chdir(cwd)
+        self.assertEqual(verdict, "pending", f"the head's unchanged none stamp read the head green over main's protection ({detail!r})")
 
     def test_a_blocked_pull_request_under_none_refuses_and_names_the_branch_protection(self):
         # GitHub reads the pull request BLOCKED: the base's branch protection still requires a check that this head does not report.
@@ -6628,15 +6804,17 @@ class ReadyUsage(unittest.TestCase):
         self.assert_names_the_close("\n".join(lines[start:end]), "the module docstring")
 
 
-def put_base_config(env, text):
-    """Commit `text` as .github/stamp.json on origin's main from the other clone. env.co keeps its local checkout."""
+def put_base_config(env, text, takes_head=True):
+    """Commit `text` as .github/stamp.json on origin's main from the other clone. env.co keeps its local checkout. takes_head=False leaves the
+    PR branch where it is, so a case can move main past a branch that holds the stamp as it was when the branch was cut."""
     o = env.other
     sh(o, "git", "fetch", "-q", "origin")
     sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
     put(os.path.join(o, ".github/stamp.json"), text)
     sh(o, "git", "commit", "-qam", "base config")
     sh(o, "git", "push", "-q", "origin", "main")
-    head_takes_base(env)
+    if takes_head:
+        head_takes_base(env)
 
 def head_takes_base(env):
     """Merge origin's main into the PR branch, as a lane does before its run, so a setup push to main is not a moved base (merge-needs-current-base)."""
@@ -9618,16 +9796,15 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.rev("origin/main^2"), pushed, "the merge did not take the head that was pushed")
         self.assert_healed_merge(out, main_tip, before)
 
-    def test_under_none_a_red_head_refuses_before_any_push(self):
-        # A control: base already reads the head's own checks before it rebuilds or pushes anything, and the heal must keep that order.
+    def test_under_none_a_red_head_does_not_refuse_the_heal_and_merge(self):
+        # Under none the tool reads no CI run at all (decision private-repos-no-ci), so a red run on the head holds no heal.
         self.set_required("none")
         self.drop_pending_record()
         self.on("feat", {"docs/records.md": page("ghost")})
-        self.host.state = "red: checks: fail"  # the head's own run failed
-        refs_before = self.refs()
-        rc, out = self.run_merge_once("7", "--confirm")
-        self.assert_refused_untouched(rc, out, refs_before)
-        self.assertIn("not green", out)
+        self.host.state = "red: checks: fail"  # an old run on the head, which none does not read
+        rc, out = self.run_merge_once("7", "--confirm")  # one run: the case pins the single confirm, as the heal case above does
+        self.assertEqual(rc, 0, "under none a red run on the head refused the heal and merge:\n" + out)
+        self.assertNotIn("not green", out)
 
     def test_under_none_a_base_that_moves_after_the_heal_push_refuses_and_keeps_the_page_commit(self):
         self.set_required("none")
@@ -14345,8 +14522,10 @@ class ExpressPath(ScopedRepo, Env):
     SILENT_PRELUDE = "exit 0\n"  # for stub_scope: exits 0 and writes no flag
     JOB_FLAGS_OFF = ('checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos '
                      'pointer_windows checks_guard code mods guard sweep shoot')  # the script's JOBS and suite names, minus the lint flags
-    ALL_OFF_PRELUDE = ('for n in %s %s; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 0\n' % (JOB_FLAGS_OFF, scope_line("LINTS")))  # for stub_scope: every flag off, the lint flags too, exits 0
-    NO_LINT_PRELUDE = ('for n in %s; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 0\n' % JOB_FLAGS_OFF)  # for stub_scope: every job and suite flag off, no lint flag written, exits 0
+    ALL_OFF_PRELUDE = ('for n in %s %s %s; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 0\n'
+                       % (JOB_FLAGS_OFF, scope_line("LINTS"), scope_line("DOCS")))  # for stub_scope: every flag off, the lint and doc flags too, exits 0
+    NO_LINT_PRELUDE = ('for n in %s %s; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 0\n'
+                       % (JOB_FLAGS_OFF, scope_line("DOCS")))  # for stub_scope: every job, suite and doc flag off, no lint flag written, exits 0
 
     def setUp(self):
         super().setUp()
@@ -14356,16 +14535,42 @@ class ExpressPath(ScopedRepo, Env):
         """origin/roadmap holds rulings/<id>.json for each id. The branch is made after co's clone, so a read that does not fetch it sees no entry."""
         self.on("roadmap", {f"roadmap/rulings/{i}.json": json.dumps({"id": i}) + "\n" for i in ids}, start="main")
 
-    def stub_scope(self, prelude, branch="feat"):
-        """ci-scope.sh is main's, with `prelude` put in after its shebang line, committed to `branch`. Only an insertion: the silent-undo
-        check reads no removed line. On main, feat then merges it: the classifier runs origin/main's copy, and a head that touches the
+    def stub_scope(self, prelude, branch="feat", drop=None):
+        """ci-scope.sh is main's, with `prelude` put in after its shebang line, committed to `branch`. Without `drop` it only inserts: the
+        silent-undo check reads no removed line. `drop` names one `NAME="..."` line of the script to remove as well (asserted: exactly one).
+        On main, feat then merges it: the classifier runs origin/main's copy, and a head that touches the
         script turns every flag on through main's own arm, so the head must not diff the script against main."""
         with open(SCOPE_SCRIPT, encoding="utf-8") as f:
             first, rest = f.read().split("\n", 1)
+        if drop:
+            lines = rest.split("\n")
+            kept = [ln for ln in lines if not ln.startswith(f'{drop}="')]
+            self.assertEqual(len(lines) - len(kept), 1, f"ci-scope.sh has no single {drop}= line to drop")
+            rest = "\n".join(kept)
         self.on(branch, {".github/scripts/ci-scope.sh": first + "\n" + prelude + rest})
         if branch == "main":
             o = self.other
             sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
+
+    def stub_flags_prelude(self, on=(), doc_on=()):
+        """A stub ci-scope.sh body for stub_scope: every job, suite, lint and doc flag the script names, off (the names come from the
+        script's own lines, so they cannot drift), then `true` for each name in `on` and `doc_on`, written last so it wins. A name the
+        script does not yet name is written too, so the stub stands in for the script the express reader reads."""
+        off = " ".join([self.JOB_FLAGS_OFF, scope_line("LINTS"), scope_line("DOCS")])
+        lines = ['for n in %s; do echo "$n=false" >> "$GITHUB_OUTPUT"; done' % off]
+        if on or doc_on:
+            lines.append('for n in %s; do echo "$n=true" >> "$GITHUB_OUTPUT"; done' % " ".join(list(on) + list(doc_on)))
+        return "\n".join(lines) + "\nexit 0\n"
+
+    def assert_doc_flags_on(self, *names):
+        """The scope assert, before a doc case relies on it (P7): the real ci-scope.sh writes each named doc flag as true, and turns on
+        no job and no suite for the fixture's feat."""
+        rc, flags = self.scope_run()
+        self.assertEqual(rc, 0, "the real ci-scope.sh exits %d on the fixture's feat" % rc)
+        for n in names:
+            self.assertIn(n, flags, "the real ci-scope.sh writes no %s line for the fixture: %r" % (n, flags))
+            self.assertEqual(flags[n], "true", "the real ci-scope.sh sets %s off for the fixture: %r" % (n, flags))
+        self.assertEqual(self.turned_on(flags), [], "the fixture is not prose-only: the real ci-scope.sh turns on %r" % self.turned_on(flags))
 
     def test_scope_run_finds_bash_through_resolve_program(self):
         """A bare `bash` on a Windows runner is the WSL stub in System32, which exits 1 on any script (decision
@@ -14525,6 +14730,60 @@ class ExpressPath(ScopedRepo, Env):
         self.assertIn("lint_ruling_kind", self.lints_on(flags), "the decision record no longer sets its lint flag: %r" % flags)
         self.assertIn("code", self.turned_on(flags), "the code path no longer turns the code job on beside a lint flag: %r" % flags)
 
+    def test_a_prose_pr_across_two_doc_groups_merges(self):
+        """A rules file and a docs file set two doc flags and no job flag: the express check reads the doc flags as prose and merges."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.on("feat", {"CLAUDE.md": "# Rules\n", "docs/shared.md": "one\ntwo\nthree\nfour\nsix\n"})
+        self.assert_doc_flags_on("doc_rules", "doc_other")
+        calls = self.record_express()
+        rc, out = self.run_express()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertEqual(calls, [None, None], "express_refusal should run once per run (the claim run, the merge run) and return None on a pass: %r" % (calls,))
+
+    def test_a_doc_flag_on_is_no_job_for_express(self):
+        """A script that turns only a doc flag on: express reads it as prose and merges. The doc flags pick which .md-reading steps of
+        the pull request's own run start, and express relies on those steps, so a doc flag never refuses a diff."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope(self.stub_flags_prelude(doc_on=("doc_decisions",)), branch="main")
+        rc_scope, flags = self.scope_run(base=True)
+        self.assertEqual(rc_scope, 0, "the stub scope script does not exit 0: %d" % rc_scope)
+        self.assertEqual(flags.get("doc_decisions"), "true", "the stub does not turn doc_decisions on, so the case proves nothing: %r" % flags)
+        self.on("feat", {"docs/decisions/x.md": record("pending", "x")})
+        calls = self.record_express()
+        rc, out = self.run_express()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertEqual(calls, [None, None], "express_refusal should run once per run (the claim run, the merge run) and return None on a pass: %r" % (calls,))
+
+    def test_a_job_flag_beside_a_doc_flag_refuses_and_names_only_the_job_flag(self):
+        """A script that turns checks_windows and doc_any on: the refusal names checks_windows, and does not name doc_any, a doc flag."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope(self.stub_flags_prelude(on=("checks_windows",), doc_on=("doc_any",)), branch="main")
+        rc_scope, flags = self.scope_run(base=True)
+        self.assertEqual(rc_scope, 0, "the stub scope script does not exit 0: %d" % rc_scope)
+        self.assertEqual((flags.get("checks_windows"), flags.get("doc_any")), ("true", "true"),
+                         "the stub does not turn both flags on, so the case proves nothing: %r" % flags)
+        self.on("feat", {"CLAUDE.md": "# Rules\n"})
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "checks_windows", "CLAUDE.md")
+        self.assertNotIn("doc_any", out, "the refusal names doc_any, a doc flag, as a job: %s" % out)
+
+    def test_a_script_that_writes_no_doc_flag_is_refused_as_unknown(self):
+        """Control: a script whose ALL names the doc flags, and that writes none of them, is refused as unknown. On main the reader
+        reports the name it cannot expand; once the doc flags are named, it reports each one missing. Either way the refusal holds."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope('ALL="$JOBS $LINTS $DOCS"\nfor n in %s %s; do echo "$n=false" >> "$GITHUB_OUTPUT"; done\nexit 0\n'
+                        % (self.JOB_FLAGS_OFF, scope_line("LINTS")), branch="main")
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "unknown", "wrote no flag for")
+
     def test_a_code_file_in_the_pr_is_refused(self):
         self.store(self.RULINGS)
         self.host.body = "Ruling: r55\n"
@@ -14585,6 +14844,36 @@ class ExpressPath(ScopedRepo, Env):
         before = self.refs()
         rc, out = self.run_express()
         self.assert_refused(rc, out, before, "unknown", *scope_line("LINTS").split())
+
+    def assert_main_script_lacks(self, name):
+        """The scope assert, before a case relies on it (P7): origin/main's ci-scope.sh has no `NAME="` line, and its ALL line still names
+        $NAME, so the reader meets the name with no line behind it."""
+        script = sh(self.other, "git", "show", "origin/main:.github/scripts/ci-scope.sh")
+        self.assertIsNone(re.search(r'^%s="' % name, script, re.M), f"origin/main's ci-scope.sh still has a {name}= line")
+        every = re.search(r'^ALL="([^"]*)"', script, re.M)
+        self.assertIsNotNone(every, "origin/main's ci-scope.sh has no ALL line")
+        self.assertIn("$" + name, every.group(1).split(), f"origin/main's ALL line does not name ${name}")
+
+    # The real DOCS= line is removed on main, not a prelude added: ALL still names $DOCS, so the reader cannot tell which doc flags the
+    # script names, and it refuses as unknown. Named failure: a script with a missing DOCS= line is read as naming no doc flag, and passes.
+    def test_a_scope_script_with_no_docs_line_is_refused_naming_docs(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope("", branch="main", drop="DOCS")
+        self.assert_main_script_lacks("DOCS")
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "unknown", "$DOCS", "the script has no DOCS= line")
+
+    # The same for the LINTS= line: ALL names $LINTS and the script has no LINTS= line, so the refusal names LINTS.
+    def test_a_scope_script_with_no_lints_line_is_refused_naming_lints(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope("", branch="main", drop="LINTS")
+        self.assert_main_script_lacks("LINTS")
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "unknown", "$LINTS", "the script has no LINTS= line")
 
     def test_a_missing_store_entry_is_refused(self):
         self.store(self.RULINGS)
@@ -15510,7 +15799,7 @@ def role_tuple_in_source(text, name):
     return None
 
 
-class NoneLaneLint(CloudSession):
+class NoneLaneLint(ScopedRepo, CloudSession):
     """`merge --lane-lint <pr>` under merge.requiredChecks "none" (decision private-repos-no-ci: a repo with no CI names no check). The config is
     written to origin's main, so the lint reads "none" as a run in production does. A lane head with no check run has no touched job, so the
     lint reads no draft run and the local lint decides. A case scripts the head's check runs (FakeHost.draft_rows, read by the real judge) and the
@@ -15567,6 +15856,18 @@ class NoneLaneLint(CloudSession):
         self.assertIn("is unknown, not a pass", text, "a named check list let a head with no touched job through without the unknown refusal: " + text)
         self.assertIn("no `touched` job", text, "the unknown refusal does not name the missing touched job: " + text)
         self.assertEqual(self.host.posted, [], "an unknown lint posted a PASS comment")
+
+    def test_a_setup_lane_head_whose_stamp_says_none_takes_the_lint_with_no_draft_run(self):
+        # A setup PR (decision private-repos-no-ci) whose own head stamp says "none" lints from that stamp. Main still
+        # pins protection, so the lint reads the base's stamp and would wait on a draft run of lane-touched-tests that this head never has.
+        self.lane_head("protection", [])
+        self.on("feat", {".github/stamp.json": json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks="none")))})
+        self.host.draft_rows = {self.head("feat"): []}
+        self.assertFalse(merge.is_integration_pr(self.host.pr(7)), "precondition: pull request 7 is an integration PR, so the lane path does not run")
+        with self.local_lint_answers("pass"):
+            rc, text = self.lane_lint_run()
+        self.assertEqual(check_run_reads(self.host.draft_reads), [], "the lane lint read the check runs of the head, so it read the base's stamp, not the head's: " + text)
+        self.assertEqual(rc, 0, text)
 
     def test_a_failing_lint_step_under_none_with_no_check_run_still_fails_and_names_the_step(self):
         self.lane_head("none", [])

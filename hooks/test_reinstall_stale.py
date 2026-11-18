@@ -6,17 +6,26 @@ Run it from the repository root:
 
     python3 hooks/test_reinstall_stale.py
 
-WHAT IT PROVES. In a cloud session the hook reads the install record, makes at most one `git ls-remote`
-of the recorded ref, and then does one of three things: stays silent when the tip is the recorded sha,
-reinstalls once with the recorded installer when the tip moved, or prints one unknown line when the read
-or the record fails. An installer that exits non-zero prints one failure line and is not retried. A restart
-line appears only for a changed path that a new session must read again, and a local diff that cannot run
-prints a restart unknown line.
+WHAT IT PROVES. In a cloud session a prompt makes no network call. The hook compares the record with the local
+origin/main (or the record's ref) tracking ref, and it acts only on a trigger: a local ref that moved past the
+record. It refreshes once per new head. A behind pin gets a stale line
+that states its commit count. Each action reads the record, then either stays silent when the tip is the recorded
+sha, reinstalls once with the recorded installer, or prints one unknown line when the record or the local ref is
+missing. An installer that exits non-zero prints one failure line and is not retried. A restart line appears only
+for a changed path that a new session must read again, and a local diff that cannot run prints a restart unknown
+line.
 After an installer run the hook reads the record again. A record that still names the old sha prints one line that
 the reinstall did not reach the tip, never a reinstall line. The installer gets the record's ref, and a hook input
 that no SessionStart entry fires on. At its timeout the installer gets SIGTERM before SIGKILL, and its child goes
 with it.
 The hook never names `main` itself, and it is wired once, under UserPromptSubmit.
+
+THE PIN AND THE SHARED CLONE. The live pin is a detached checkout, a linked worktree behind a symlink. Its refs are
+read through the worktree's common config, so a current pin is silent and a behind pin gets a verdict, never unknown.
+A behind pin gets one stale line that states its commit count, and the pin refresh (merge/install_from_main.sh) runs
+once per head. The clone the global rules file points at is read the same way, and a behind one gets a stale line
+that names it. No prompt reads origin: decision stale-install-cost, no network lookup on prompts. The refresh
+triggers are session start, a resume, and a local origin/main ref move.
 
 THE SEAM. Each fixture is a bare origin, a seed that pushes to it, and a source clone at the recorded sha,
 all under the run folder. HOME and CLAUDE_CONFIG_DIR point into the run folder, so the real ~/.claude is
@@ -49,11 +58,15 @@ HOOK = os.path.join(HERE, "stale_install.py")
 SETTINGS = os.path.join(REPO, "settings.json")
 REAL_GIT = shutil.which("git") or "git"
 RECORD = ".claude-settings-install.json"
+SEEN_NAME = ".claude-settings-refresh-seen"
 PAYLOAD = json.dumps({"hook_event_name": "UserPromptSubmit", "session_id": "test-session", "prompt": "hi"})
+# The git subcommands that reach origin. A prompt makes none of them.
+NETWORK = ("ls-remote", "fetch", "clone", "pull")
 HOOK_GUARD = 60  # seconds: stops a hook that never returns, so a broken build fails instead of hanging CI
 SHORT = 7
 REINSTALL = "claude-settings: reinstalled hooks at %s (was %s)"
 UNKNOWN = "claude-settings: install freshness unknown ("
+PREFIX = "claude-settings: "
 RESTART = "claude-settings: restart needed for:"
 RESTART_UNKNOWN = "claude-settings: restart check unknown (could not diff %s..%s)"
 NOT_REACHED = "claude-settings: reinstall did not reach %s (record at %s)"
@@ -63,12 +76,13 @@ GIT_LOCATORS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECT
                 "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_PREFIX")
 HOOK_ENV_DROP = GIT_LOCATORS + ("CLAUDE_CODE_REMOTE", "CLAUDE_CONFIG_DIR", "CLAUDE_SETTINGS_FETCH_TIMEOUT",
                                 "CLAUDE_SETTINGS_REF", "CLAUDE_SETTINGS_REINSTALL_TIMEOUT", "CS_HOOK_INPUT",
-                                "GIT_SHIM_LS_REMOTE", "GIT_SHIM_DIFF", "STUB_EXIT", "STUB_RECORD_SHA")
+                                "GIT_SHIM_LS_REMOTE", "GIT_SHIM_DIFF", "STUB_EXIT", "STUB_RECORD_SHA",
+                                "STUB_REFRESH_COUNTER")
 HOOK_ONLY = {"hooks/config_watch.py": "pass  # tweak\n"}
 COST_TERMS = (
     ("the process starts", r"(?i)process(?:es)? starts?|python starts?|starts? (?:one|a|1) python"),
-    ("the network reads", r"(?i)network reads?|ls-remote"),
-    ("the frequency", r"(?i)per turn|each turn|every turn"),
+    ("the network calls per prompt", r"(?i)network calls?[^\n]{0,80}per prompt|per prompt[^\n]{0,80}network calls?"),
+    ("the frequency", r"(?i)per prompt|per turn|each turn|every turn"),
     ("no timer", r"(?i)\bno timers?\b"),
     ("no long-lived process", r"(?i)\bno long-lived\b"),
 )
@@ -93,7 +107,7 @@ exec "$GIT_SHIM_REAL" "$@"
 # Stands in for install.sh: counts each run, logs the CLAUDE_SETTINGS_REF and CS_HOOK_INPUT it saw, fetches origin
 # as the real installer does, and writes the install record when STUB_WRITE_RECORD is set. When STUB_EXIT is set it
 # exits with that code first, before the fetch and the record. When STUB_RECORD_SHA is set it writes that sha and
-# exits 0 with no fetch: an installer whose fetch failed while the hook's ls-remote worked.
+# exits 0 with no fetch: an installer whose fetch failed after the hook's trigger reached it.
 STUB = r'''#!/bin/sh
 here=$(cd "$(dirname "$0")" && pwd -P)
 printf '%s\n' "$*" >> "$STUB_COUNTER"
@@ -128,6 +142,21 @@ wait "$grand"
 '''
 
 
+# Stands in for merge/install_from_main.sh, the pin refresh. It counts each run and moves nothing: the pin and the
+# record stay where they are, so a second prompt on the same head finds the same behind pin.
+REFRESH_STUB = r'''#!/bin/sh
+printf '%s\n' "$*" >> "$STUB_REFRESH_COUNTER"
+'''
+
+# Stands in for a pin refresh that fails. It counts the run, then checks out the head it is given. A checkout that
+# tracked changes block exits 1 before the move; a checkout that gets past the move exits 1 after it.
+REFRESH_FAIL_STUB = r'''#!/bin/sh
+printf '%s\n' "$*" >> "$STUB_REFRESH_COUNTER"
+git checkout -q --detach "$1" || exit 1
+exit 1
+'''
+
+
 def settings_text(**changes):
     data = {"model": "sonnet-a", "effortLevel": "low", "permissions": {"allow": ["Bash(ls)"]}}
     data.update(changes)
@@ -155,6 +184,24 @@ def read_text(path):
             return handle.read()
     except (OSError, UnicodeDecodeError):
         return ""
+
+
+# A string that names the main branch as a word: "main", "refs/heads/main", "origin/main" or ":-main".
+# A word inside a longer name, such as install_from_main.sh or __main__, does not match.
+MAIN_REF = re.compile(r"(?<![\w.])(?:refs/heads/|origin/|:-)?main(?![\w.-])")
+
+
+def code_string_nodes(tree):
+    """The str constants of the code. A docstring is prose, so it is left out. The parse is ast's, so a comment
+    never reads as code."""
+    prose = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                prose.add(id(first.value))
+    return [node for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in prose]
 
 
 def write_file(path, text, mode=None):
@@ -210,9 +257,11 @@ class Fixture:
         self.git_log = os.path.join(self.root, "git-calls.txt")
         self.env_log = os.path.join(self.root, "installer-env.txt")
         self.marks = os.path.join(self.root, "installer-marks.txt")
+        self.refresh_counter = os.path.join(self.root, "refresh-runs.txt")
         self.grand_path = os.path.join(self.root, "installer-child.pid")
         self.lock_path = os.path.join(self.config, ".claude-settings-install.lock")
         self.record_path = os.path.join(self.config, RECORD)
+        self.seen_path = os.path.join(self.config, SEEN_NAME)
         self.source = None
         self.ref = "main"
         for folder in (self.home, self.config, self.shim_dir, self.seed):
@@ -256,7 +305,8 @@ class Fixture:
                    GIT_SHIM_REAL=REAL_GIT, GIT_SHIM_LOG=self.git_log,
                    GIT_CONFIG_GLOBAL=self.gitconfig, GIT_CONFIG_NOSYSTEM="1",
                    STUB_COUNTER=self.counter, STUB_REF=self.ref, STUB_WRITE_RECORD="1",
-                   STUB_ENV_LOG=self.env_log, STUB_MARK=self.marks, STUB_GRAND=self.grand_path)
+                   STUB_ENV_LOG=self.env_log, STUB_MARK=self.marks, STUB_GRAND=self.grand_path,
+                   STUB_REFRESH_COUNTER=self.refresh_counter)
         if cloud:
             env["CLAUDE_CODE_REMOTE"] = "true"
         if ls_remote:
@@ -301,6 +351,12 @@ class Fixture:
         self.git("-C", self.seed, "commit", "-q", "--allow-empty", "-m", "next")
         self.git("-C", self.seed, "push", "-q", "origin", branch)
         return self.sha(self.seed, "HEAD")
+
+    def child_commit(self, rev):
+        """A commit on top of `rev`, written into the source's objects and held by no ref: the clone can read it, and
+        no fetch moves a ref to it."""
+        tree = self.sha(self.source, rev + "^{tree}")
+        return self.git("-C", self.source, "commit-tree", tree, "-p", rev, "-m", "unreffed").strip()
 
     def changed(self, old, new):
         return sorted(self.git("-C", self.seed, "diff", "--name-only", old, new).split())
@@ -383,13 +439,17 @@ class Fixture:
             return []
 
 
-def behind(name, changes=HOOK_ONLY, layout="checkout", ref="main"):
-    """A cloud fixture whose record holds the base sha while origin has moved on by one commit."""
+def behind(name, changes=HOOK_ONLY, layout="checkout", ref="main", fetch=True):
+    """A cloud fixture whose record holds the base sha while origin has moved on by one commit. The source then
+    fetches, which moves its local ref: that move is the trigger a prompt acts on. `fetch=False` leaves it unmoved."""
     fx = Fixture(name)
     old = fx.base
     fx.clone(layout)
     fx.write_record(ref, old)
-    return fx, old, fx.advance(changes)
+    new = fx.advance(changes)
+    if fetch:
+        fx.git("-C", fx.source, "fetch", "-q", "origin")
+    return fx, old, new
 
 
 def current(name, ref="main", branches=()):
@@ -398,6 +458,93 @@ def current(name, ref="main", branches=()):
     fx.clone()
     fx.write_record(ref, fx.base)
     return fx
+
+
+COMMITS_BEHIND = re.compile(r"(\d+) commits? behind|behind by (\d+) commits?")
+
+
+def commits_behind(line):
+    """The commit count a line states as behind, or None when it states none."""
+    found = COMMITS_BEHIND.search(line)
+    return int(found.group(1) or found.group(2)) if found else None
+
+
+def refresh_runs(fx):
+    """Each run of the pin refresh stub so far. The counter keeps every turn's runs."""
+    try:
+        with open(fx.refresh_counter, encoding="utf-8") as handle:
+            return [line.rstrip("\n") for line in handle if line.strip()]
+    except OSError:
+        return []
+
+
+def install_refresh(fx, text=REFRESH_STUB):
+    """Puts the refresh stub where the record's source keeps merge/install_from_main.sh."""
+    write_file(os.path.join(fx.source, "merge", "install_from_main.sh"), text, mode=0o755)
+
+
+def detached(name, behind_by=0):
+    """A cloud fixture whose record source is a clone detached at the recorded sha, as the live pin is kept.
+    The source's origin is a plain clone's, so the read of it cannot fail for a layout reason. origin moves on
+    by `behind_by` commits."""
+    fx = Fixture(name)
+    old = fx.base
+    fx.clone()
+    fx.git("-C", fx.source, "checkout", "-q", "--detach", old)
+    fx.write_record("main", old)
+    for _ in range(behind_by):
+        fx.advance({})
+    return fx, old
+
+
+def linked_pin(name, behind_by=0):
+    """A cloud fixture whose record source is the live pin's link: <clone>-live, a symlink to <clone>-live-<12 hex>,
+    a locked worktree detached at the recorded sha, as install_from_main.sh makes it. origin moves on by
+    `behind_by` commits."""
+    fx = Fixture(name)
+    old = fx.base
+    fx.clone()
+    pin = fx.source + "-live-" + old[:12]
+    fx.git("-C", fx.source, "worktree", "add", "--detach", pin, old)
+    fx.git("-C", fx.source, "worktree", "lock", "--reason", "claude-settings live pin", pin)
+    link = fx.source + "-live"
+    os.symlink(pin, link)
+    fx.source = link
+    fx.write_record("main", old)
+    for _ in range(behind_by):
+        fx.advance({})
+    return fx, old, pin
+
+
+def shared_behind(name, behind_by=0):
+    """A cloud fixture whose record source is current, plus the clone the global rules file points at. That clone
+    is made before origin moves on by `behind_by` commits, so it is behind by that many."""
+    fx = Fixture(name)
+    shared = os.path.join(fx.home, "shared", "claude-settings")
+    os.makedirs(os.path.dirname(shared))
+    fx.git("clone", "-q", fx.origin, shared)
+    base = fx.base
+    for _ in range(behind_by):
+        fx.advance({})
+    fx.git("-C", shared, "fetch", "-q", "origin")
+    fx.clone()
+    fx.write_record("main", fx.origin_tip("main"))
+    write_file(os.path.join(fx.config, "CLAUDE.md"), "@%s/CLAUDE.md\n" % shared)
+    return fx, shared, base
+
+
+def no_trigger_worst(name):
+    """A cloud fixture with no trigger that makes the most reads: the record is ahead of the local origin/main ref, so
+    the prompt reads ancestry, and the clone the global rules file points at is current with its own origin ref. The
+    record is ahead of the ref, so no trigger fires. The clone's count is zero, so no flag fires either."""
+    fx, shared, base = shared_behind(name)
+    fx.write_record("main", fx.child_commit(base))
+    return fx, shared
+
+
+def network_reads(fx):
+    """Each network read the last hook run made: a lookup or a fetch of origin."""
+    return [name for name in fx.subcommands() if name in NETWORK]
 
 
 def read_pid(path):
@@ -455,7 +602,10 @@ class StaleInstall(unittest.TestCase):
             self.assertIn(name, restarts[0], "restart line does not name %r: %r" % (name, restarts[0]))
         self.assertEqual(len(run.lines), 2, "output beyond the reinstall and restart lines: %r" % run.lines)
 
-    # Behind origin: one reinstall, one read, the recorded installer.
+    # A prompt reads no origin (decision stale-install-cost). The refresh triggers are a local origin/main ref
+    # move, and session start, whose SessionStart fetch this hook does not run.
+
+    # Behind origin, after a local fetch: one reinstall, no lookup, the recorded installer.
 
     def test_behind_origin_reinstalls_once_and_names_both_shas(self):
         fx, old, new = behind(self._testMethodName)
@@ -464,8 +614,7 @@ class StaleInstall(unittest.TestCase):
         self.assertEqual(run.lines, [REINSTALL % (new[:SHORT], old[:SHORT])],
                          "want the reinstall line; stderr: %s" % run.tail())
         self.assertEqual(fx.installer_runs(), ["--cloud"], "want one installer run, with --cloud")
-        self.assertEqual([argv[-1] for argv in fx.ls_remote_calls()], ["refs/heads/main"],
-                         "the read did not name the recorded ref, or made more than one read")
+        self.assertEqual(fx.ls_remote_calls(), [], "the prompt looked up origin: %r" % fx.subcommands())
 
     def test_second_turn_after_reinstall_is_silent(self):
         fx, old, new = behind(self._testMethodName)
@@ -473,29 +622,27 @@ class StaleInstall(unittest.TestCase):
         self.assertEqual(fx.record_sha(), new, "scope: turn 1 did not reinstall; the record still holds the old sha")
         run = fx.run_hook()
         self.assertEqual(run.lines, [], "turn 2 printed %r, want silence" % run.lines)
-        self.assertEqual(len(fx.ls_remote_calls()), 1, "turn 2 made %d ls-remote reads, want 1"
-                         % len(fx.ls_remote_calls()))
+        self.assertEqual(network_reads(fx), [], "turn 2 read origin: %r, want none" % fx.subcommands())
         self.assertEqual(len(fx.installer_runs()), 1, "turn 2 ran the installer again")
 
-    # Current: one read, no fetch or clone, silence.
+    # Current: no read of origin on the prompt, silence.
 
-    def test_current_makes_one_ls_remote_and_no_install(self):
+    def test_current_prompt_makes_no_network_read_and_no_install(self):
         fx = current(self._testMethodName)
         self.assertEqual(fx.origin_tip("main"), fx.record_sha(), "scope: origin and the record differ")
         run = fx.run_hook()
-        self.assertEqual(fx.subcommands(), ["ls-remote"],
-                         "git calls were %r, want one ls-remote and no fetch or clone" % fx.subcommands())
+        self.assertEqual(network_reads(fx), [], "a current prompt read origin: %r, want none" % fx.subcommands())
         self.assertEqual(run.lines, [], "current install printed %r, want silence" % run.lines)
         self.assertEqual(fx.installer_runs(), [], "current install ran the installer")
 
-    def test_current_on_stable_reads_the_recorded_ref(self):
+    def test_current_stable_record_ignores_a_moved_main(self):
         fx = current(self._testMethodName, ref="stable", branches=("stable",))
         fx.advance(HOOK_ONLY)
+        fx.git("-C", fx.source, "fetch", "-q", "origin")
         self.assertEqual(fx.origin_tip("stable"), fx.record_sha(), "scope: stable is not the recorded sha")
         self.assertNotEqual(fx.origin_tip("main"), fx.record_sha(), "scope: main did not move on")
         run = fx.run_hook()
-        self.assertEqual([argv[-1] for argv in fx.ls_remote_calls()], ["refs/heads/stable"],
-                         "ls-remote reads did not name only the recorded ref")
+        self.assertEqual(network_reads(fx), [], "a prompt read origin: %r, want none" % fx.subcommands())
         self.assertEqual(run.lines, [], "current install on stable printed %r, want silence" % run.lines)
         self.assertEqual(fx.installer_runs(), [], "current install on stable ran the installer")
 
@@ -510,31 +657,32 @@ class StaleInstall(unittest.TestCase):
         self.assertEqual(fx.git_calls(), [], "git ran outside a cloud session: %r" % fx.git_calls())
         self.assertEqual(fx.installer_runs(), [], "the installer ran outside a cloud session")
 
-    # The read cannot run: one unknown line, no install.
+    # A hanging or failing origin is not read on a prompt, so it cannot stall one or print an unknown line.
 
-    def test_ls_remote_timeout_reports_unknown_and_installs_nothing(self):
-        fx, old, new = behind(self._testMethodName)
+    def test_hanging_origin_is_not_read_on_a_prompt(self):
+        fx, old, new = behind(self._testMethodName, fetch=False)
+        self.assertNotEqual(fx.origin_tip("main"), fx.record_sha(), "scope: origin is not ahead of the record")
         run = fx.run_hook(ls_remote="hang", timeout="1")
-        self.assertEqual(len(fx.ls_remote_calls()), 1, "the hook made %d ls-remote reads, want 1"
-                         % len(fx.ls_remote_calls()))
-        self.assert_unknown(run)
-        self.assertEqual(fx.installer_runs(), [], "the installer ran after a timed-out read")
+        self.assertEqual(network_reads(fx), [], "a prompt read origin: %r, want none" % fx.subcommands())
+        self.assertEqual(run.lines, [], "a hanging origin printed %r, want silence" % run.lines)
+        self.assertEqual(fx.installer_runs(), [], "the installer ran on a prompt with no trigger")
 
-    def test_ls_remote_failure_reports_unknown_and_installs_nothing(self):
-        fx, old, new = behind(self._testMethodName)
+    def test_failing_origin_is_not_read_on_a_prompt(self):
+        fx, old, new = behind(self._testMethodName, fetch=False)
+        self.assertNotEqual(fx.origin_tip("main"), fx.record_sha(), "scope: origin is not ahead of the record")
         run = fx.run_hook(ls_remote="fail")
-        self.assertEqual(len(fx.ls_remote_calls()), 1, "the hook made %d ls-remote reads, want 1"
-                         % len(fx.ls_remote_calls()))
-        self.assert_unknown(run)
-        self.assertEqual(fx.installer_runs(), [], "the installer ran after a failed read")
+        self.assertEqual(network_reads(fx), [], "a prompt read origin: %r, want none" % fx.subcommands())
+        self.assertEqual(run.lines, [], "a failing origin printed %r, want silence" % run.lines)
+        self.assertEqual(fx.installer_runs(), [], "the installer ran on a prompt with no trigger")
 
-    def test_unknown_ref_reports_unknown_and_installs_nothing(self):
+    # A local ref that names no branch of origin's is unknown, and no read of origin is made to find out.
+
+    def test_unknown_ref_reports_unknown_without_a_read(self):
         fx, old, new = behind(self._testMethodName, ref="nope")
         self.assertNotIn("refs/heads/nope", fx.git("-C", fx.origin, "for-each-ref", "--format=%(refname)"),
                          "scope: origin has a branch named nope")
         run = fx.run_hook()
-        self.assertEqual([argv[-1] for argv in fx.ls_remote_calls()], ["refs/heads/nope"],
-                         "the hook did not read the recorded ref")
+        self.assertEqual(network_reads(fx), [], "a prompt read origin: %r, want none" % fx.subcommands())
         self.assert_unknown(run)
         self.assertEqual(fx.installer_runs(), [], "the installer ran for an unknown ref")
 
@@ -631,6 +779,32 @@ class StaleInstall(unittest.TestCase):
                          "want one failure line; stderr: %s" % run.tail())
         self.assertEqual(fx.installer_runs(), ["--cloud"], "want one installer run, with --cloud")
 
+    # A failed reinstall is not retried for the same head, and a later prompt on that head still reports the install as
+    # stale. A fixture installer that exits 1 stands in for a reinstall that cannot run (a held lock, a mirror that
+    # cannot refresh).
+
+    def test_failed_reinstall_runs_once_per_head_and_later_prompts_stay_stale(self):
+        fx, old, new = behind(self._testMethodName)
+        self.assertNotEqual(fx.origin_tip("main"), fx.record_sha(), "scope: origin is not ahead of the record")
+        fx.run_hook(stub_exit="1")
+        self.assertEqual(fx.installer_runs(), ["--cloud"], "scope: the first prompt did not run the installer once")
+        run = fx.run_hook(stub_exit="1")
+        self.assertEqual(fx.installer_runs(), ["--cloud"],
+                         "the failed reinstall ran %d times for one head, want once" % len(fx.installer_runs()))
+        self.assertTrue(run.lines, "the second prompt on the same head printed nothing: the stale install went silent")
+
+    def test_failed_reinstall_is_tried_again_when_a_new_head_arrives(self):
+        fx, old, new = behind(self._testMethodName)
+        fx.run_hook(stub_exit="1")
+        self.assertEqual(fx.installer_runs(), ["--cloud"], "scope: the first prompt did not run the installer once")
+        newer = fx.advance(HOOK_ONLY)
+        fx.git("-C", fx.source, "fetch", "-q", "origin")
+        self.assertEqual(fx.git("-C", fx.source, "rev-parse", "refs/remotes/origin/main").strip(), newer,
+                         "scope: the local origin/main ref did not move to the newer head")
+        fx.run_hook(stub_exit="1")
+        self.assertEqual(len(fx.installer_runs()), 2,
+                         "a new head ran the installer %d times in all, want 2" % len(fx.installer_runs()))
+
     # The local diff cannot run: the reinstall still happens, and the restart line says the check is unknown.
 
     def test_failed_local_diff_prints_restart_unknown_line(self):
@@ -660,11 +834,11 @@ class StaleInstall(unittest.TestCase):
         fx.write_record("main", old)
         fx.lane_commit("lane-x")
         new = fx.advance(HOOK_ONLY)
+        fx.git("-C", fx.source, "fetch", "-q", "origin")
         self.assertEqual(fx.git("-C", fx.source, "rev-parse", "--abbrev-ref", "HEAD").strip(), "lane-x",
                          "scope: the source is not on the lane branch")
         run = fx.run_hook()
-        self.assertEqual([argv[-1] for argv in fx.ls_remote_calls()], ["refs/heads/main"],
-                         "the read did not name only the recorded ref")
+        self.assertEqual(fx.ls_remote_calls(), [], "the prompt looked up origin: %r" % fx.git_calls())
         self.assertEqual(run.lines, [REINSTALL % (new[:SHORT], old[:SHORT])],
                          "want the reinstall line; stderr: %s" % run.tail())
         self.assertEqual(fx.installer_runs(), ["--cloud"], "want one installer run, with --cloud")
@@ -682,6 +856,92 @@ class StaleInstall(unittest.TestCase):
         self.assertEqual(fx.installer_runs(), ["--cloud"], "scope: want one installer run, with --cloud")
         self.assertEqual(run.lines, [NOT_REACHED % (new[:SHORT], old[:SHORT])],
                          "want one line that the reinstall did not reach the tip; stderr: %s" % run.tail())
+
+    # The installer leaves the record past the target the hook read: origin moved on again before the installer ran. The
+    # record holds the target, so the reinstall reached it. The hook prints a reinstalled line and the restart line, and
+    # never "did not reach". The fixture writes the record sha itself, as the installer's record would hold it.
+
+    def test_record_past_the_target_reads_as_reinstalled(self):
+        fx, old, new = behind(self._testMethodName, changes={"CLAUDE.md": "# Rules v2\n"})
+        past = fx.child_commit(new)
+        self.assertEqual(fx.sha(fx.source, past + "^"), new, "scope: the commit past the target does not build on it")
+        self.assertEqual(fx.git("-C", fx.source, "rev-parse", "refs/remotes/origin/main").strip(), new,
+                         "scope: the local origin/main ref is not the target")
+        run = fx.run_hook(record_sha=past)
+        self.assertEqual(fx.record_sha(), past, "scope: the installer did not leave the record past the target")
+        self.assertEqual(fx.git("-C", fx.source, "rev-parse", "refs/remotes/origin/main").strip(), new,
+                         "scope: the installer moved the local origin/main ref")
+        self.assertFalse([line for line in run.lines if "did not reach" in line],
+                         "the record holds the target, yet the hook says the reinstall did not reach it: %r"
+                         % run.lines)
+        reinstalled = [line for line in run.lines if line.startswith(PREFIX + "reinstalled hooks at ")]
+        self.assertEqual(len(reinstalled), 1, "want one reinstalled line, got %r; stderr: %s"
+                         % (run.lines, run.tail()))
+        self.assertTrue(reinstalled[0].endswith("(was %s)" % old[:SHORT]),
+                        "the reinstalled line does not name the old sha: %r" % reinstalled[0])
+        restarts = [line for line in run.lines if line.startswith(RESTART)]
+        self.assertEqual(len(restarts), 1, "want one restart line, got %r" % restarts)
+        self.assertIn("CLAUDE.md", restarts[0], "the restart line does not name CLAUDE.md: %r" % restarts[0])
+        self.assertEqual(len(run.lines), 2, "output beyond the reinstalled and restart lines: %r" % run.lines)
+
+    # The record holds a commit the local origin ref has not reached. The record covers the ref by ancestry, so the
+    # prompt is silent and runs no installer.
+
+    def test_record_ahead_of_the_local_ref_is_silent_with_no_install(self):
+        fx = current(self._testMethodName)
+        ahead = fx.child_commit(fx.base)
+        fx.write_record("main", ahead)
+        self.assertEqual(fx.sha(fx.source, ahead + "^"), fx.base, "scope: the record does not build on the local ref")
+        self.assertNotEqual(fx.git("-C", fx.source, "rev-parse", "refs/remotes/origin/main").strip(), ahead,
+                            "scope: the record is not ahead of the local origin/main ref")
+        run = fx.run_hook()
+        self.assertEqual(run.lines, [], "a record ahead of the local ref printed %r, want silence" % run.lines)
+        self.assertEqual(fx.installer_runs(), [], "a record ahead of the local ref ran the installer")
+
+    # A prompt with no trigger writes no file. The seen file records a head that a reinstall, a pin refresh or a clone
+    # flag acted on, so a prompt that acts on none of them leaves the config dir as it was. This is the worst no-trigger
+    # prompt: the record ahead of the local ref, and the shared clone current.
+
+    def test_no_trigger_prompt_writes_no_seen_file(self):
+        fx, shared = no_trigger_worst(self._testMethodName)
+        self.assertNotEqual(fx.git("-C", fx.source, "rev-parse", "refs/remotes/origin/main").strip(), fx.record_sha(),
+                            "scope: the record is not ahead of the local origin/main ref")
+        self.assertEqual(fx.sha(shared, "HEAD"), fx.sha(shared, "refs/remotes/origin/main"),
+                         "scope: the shared clone is not current with its own origin ref")
+        self.assertFalse(os.path.exists(fx.seen_path), "scope: the seen file exists before the prompt")
+        before = sorted(os.listdir(fx.config))
+        fx.run_hook()
+        self.assertFalse(os.path.exists(fx.seen_path), "a no-trigger prompt wrote the seen file")
+        self.assertEqual(sorted(os.listdir(fx.config)), before,
+                         "a no-trigger prompt wrote a file in the config dir")
+
+    # A no-trigger prompt makes at most four git reads, and none of them reaches origin. The worst one is the one the
+    # helper builds: the ancestry read of the local ref, then the shared clone's ref and its count.
+
+    def test_no_trigger_prompt_makes_at_most_four_git_calls_and_no_network_read(self):
+        fx, shared = no_trigger_worst(self._testMethodName)
+        self.assertNotEqual(fx.git("-C", fx.source, "rev-parse", "refs/remotes/origin/main").strip(), fx.record_sha(),
+                            "scope: the record is not ahead of the local origin/main ref")
+        fx.run_hook()
+        calls = fx.subcommands()
+        self.assertTrue(calls, "scope: the prompt made no git call, so the count proves nothing")
+        self.assertLessEqual(len(calls), 4, "a no-trigger prompt made %d git calls, want at most 4: %r"
+                             % (len(calls), calls))
+        self.assertEqual(network_reads(fx), [], "a no-trigger prompt read origin: %r" % calls)
+
+    # The seen file keeps the last twenty heads. It starts with twenty-five older heads, so a reinstall on a new head
+    # both adds one and drops the oldest six. The expected list is written out here, not read from the hook.
+
+    def test_seen_file_keeps_the_last_twenty_heads(self):
+        fx, old, new = behind(self._testMethodName)
+        older = ["install:%040x" % number for number in range(1, 26)]
+        write_file(fx.seen_path, "".join(key + "\n" for key in older))
+        self.assertEqual(read_text(fx.seen_path).splitlines(), older,
+                         "scope: the seen file does not start with the 25 older heads")
+        fx.run_hook()
+        self.assertEqual(fx.installer_runs(), ["--cloud"], "scope: the new head did not run the installer once")
+        self.assertEqual(read_text(fx.seen_path).splitlines(), older[6:] + ["install:" + new],
+                         "the seen file does not hold the last 20 heads, newest last")
 
     # The installer's environment: the record's ref, and a hook input that no SessionStart entry fires on.
 
@@ -731,14 +991,201 @@ class StaleInstall(unittest.TestCase):
         self.assertFalse(pid_alive(grand), "the installer's child survived the timeout: the group was not signalled")
 
 
+    # The trigger: a local origin/main ref move. It reads no origin on the prompt itself; the refresh it starts is the
+    # only network work.
+
+    def test_local_ref_move_triggers_the_refresh_with_no_lookup(self):
+        fx, old, new = behind(self._testMethodName)
+        self.assertEqual(fx.git("-C", fx.source, "rev-parse", "refs/remotes/origin/main").strip(), new,
+                         "scope: the local origin/main ref did not move")
+        run = fx.run_hook(ls_remote="fail")
+        self.assertEqual(fx.installer_runs(), ["--cloud"],
+                         "the local ref move did not refresh: installer runs %r, want one --cloud run"
+                         % fx.installer_runs())
+        self.assertEqual(run.lines, [REINSTALL % (new[:SHORT], old[:SHORT])],
+                         "want the reinstall line; stderr: %s" % run.tail())
+        self.assertEqual(fx.ls_remote_calls(), [], "the prompt looked up origin: %r" % fx.git_calls())
+
+    def test_prompt_with_no_trigger_reads_no_origin(self):
+        fx, old, new = behind(self._testMethodName, fetch=False)
+        self.assertEqual(fx.git("-C", fx.source, "rev-parse", "refs/remotes/origin/main").strip(), old,
+                         "scope: the local origin/main ref moved without a fetch")
+        run = fx.run_hook()
+        self.assertEqual(network_reads(fx), [], "a prompt with no trigger read origin: %r, want none"
+                         % fx.subcommands())
+        self.assertEqual(run.lines, [], "a prompt with no trigger printed %r, want silence" % run.lines)
+        self.assertEqual(fx.installer_runs(), [], "a prompt with no trigger ran the installer")
+
+    # The live pin: a detached checkout. A local ref move refreshes it once per head, and its stale line states the
+    # commit count from the local objects, so the prompt itself reads nothing.
+
+    def test_behind_pin_stale_line_names_its_commit_count(self):
+        fx, old = detached(self._testMethodName, behind_by=24)
+        self.assertEqual(fx.git("-C", fx.source, "rev-parse", "--abbrev-ref", "HEAD").strip(), "HEAD",
+                         "scope: the source is not detached")
+        counted = int(fx.git("-C", fx.seed, "rev-list", "--count", "%s..%s" % (old, fx.origin_tip("main"))))
+        self.assertEqual(counted, 24, "scope: the pin is not 24 commits behind origin")
+        fx.git("-C", fx.source, "fetch", "-q", "origin")
+        install_refresh(fx)
+        run = fx.run_hook()
+        stale = [line for line in run.lines if line.startswith(PREFIX) and commits_behind(line) is not None]
+        self.assertEqual(len(stale), 1, "want one line that states the commits behind, got %r; stderr: %s"
+                         % (run.lines, run.tail()))
+        self.assertEqual(commits_behind(stale[0]), 24, "the stale line states %r commits behind, want 24: %r"
+                         % (commits_behind(stale[0]), stale[0]))
+
+    def test_behind_pin_refreshes_once_per_head(self):
+        fx, old = detached(self._testMethodName, behind_by=24)
+        install_refresh(fx)
+        fx.git("-C", fx.source, "fetch", "-q", "origin")
+        fx.run_hook()
+        self.assertEqual(len(refresh_runs(fx)), 1, "the local ref move ran the pin refresh %d times, want 1"
+                         % len(refresh_runs(fx)))
+        fx.run_hook()
+        self.assertEqual(network_reads(fx), [], "a prompt with no trigger read origin: %r" % fx.subcommands())
+        self.assertEqual(len(refresh_runs(fx)), 1, "a prompt with no trigger ran the pin refresh again: %d runs in all, "
+                         "want 1" % len(refresh_runs(fx)))
+        fx.advance({})
+        fx.git("-C", fx.source, "fetch", "-q", "origin")
+        fx.run_hook()
+        self.assertEqual(len(refresh_runs(fx)), 2, "a new head ran the pin refresh %d times in all, want 2"
+                         % len(refresh_runs(fx)))
+
+    # A failed pin refresh marks its head as tried. A later prompt on that head reruns nothing, and it must not go silent.
+
+    def test_pin_move_blocked_by_tracked_changes_stays_stale_on_later_prompts(self):
+        fx, old = detached(self._testMethodName)
+        fx.advance({"CLAUDE.md": "# Rules v2\n"})
+        fx.git("-C", fx.source, "fetch", "-q", "origin")
+        write_file(os.path.join(fx.source, "CLAUDE.md"), "# local edit\n")
+        self.assertTrue(fx.git("-C", fx.source, "status", "--porcelain", "--untracked-files=no").strip(),
+                        "scope: the pin has no tracked change")
+        install_refresh(fx, REFRESH_FAIL_STUB)
+        fx.run_hook()
+        self.assertEqual(fx.git("-C", fx.source, "rev-parse", "HEAD").strip(), old,
+                         "scope: the pin moved despite its tracked change")
+        self.assertEqual(len(refresh_runs(fx)), 1,
+                         "scope: the first prompt ran the pin refresh %d times, want 1" % len(refresh_runs(fx)))
+        run = fx.run_hook()
+        self.assertTrue(run.lines, "the second prompt on the same head printed nothing: the failed pin move went silent")
+        self.assertEqual(len(refresh_runs(fx)), 1,
+                         "a later prompt reran the pin refresh: %d runs in all, want 1" % len(refresh_runs(fx)))
+
+    def test_installer_failure_after_the_pin_moved_stays_stale_on_later_prompts(self):
+        fx, old = detached(self._testMethodName)
+        new = fx.advance({"CLAUDE.md": "# Rules v2\n"})
+        fx.git("-C", fx.source, "fetch", "-q", "origin")
+        install_refresh(fx, REFRESH_FAIL_STUB)
+        fx.run_hook()
+        self.assertEqual(fx.git("-C", fx.source, "rev-parse", "HEAD").strip(), new,
+                         "scope: the pin did not move to the head before the installer failed")
+        self.assertEqual(len(refresh_runs(fx)), 1,
+                         "scope: the first prompt ran the pin refresh %d times, want 1" % len(refresh_runs(fx)))
+        run = fx.run_hook()
+        self.assertTrue(run.lines, "the second prompt on the same head printed nothing: the failed install went silent")
+        self.assertEqual(len(refresh_runs(fx)), 1,
+                         "a later prompt reran the pin refresh: %d runs in all, want 1" % len(refresh_runs(fx)))
+
+    # A linked worktree as the live pin is kept: its refs read through the common config, so no verdict is unknown.
+
+    def test_linked_pin_current_is_silent_with_no_read(self):
+        fx, old, pin = linked_pin(self._testMethodName)
+        self.assertTrue(os.path.isfile(os.path.join(pin, ".git")),
+                        "scope: the pin's .git is not a file: no linked worktree")
+        self.assertEqual(os.path.realpath(fx.source), os.path.realpath(pin),
+                         "scope: the source link does not reach the pin")
+        self.assertEqual(fx.origin_tip("main"), fx.record_sha(), "scope: origin and the record differ")
+        run = fx.run_hook()
+        self.assertEqual(run.lines, [], "current linked pin printed %r, want silence; stderr: %s"
+                         % (run.lines, run.tail()))
+        self.assertEqual(network_reads(fx), [], "a prompt read origin: %r, want none" % fx.subcommands())
+
+    def test_linked_pin_behind_gets_a_verdict_not_unknown(self):
+        fx, old, pin = linked_pin(self._testMethodName)
+        new = fx.advance(HOOK_ONLY)
+        fx.git("-C", fx.source, "fetch", "-q", "origin")
+        self.assertTrue(os.path.isfile(os.path.join(pin, ".git")),
+                        "scope: the pin's .git is not a file: no linked worktree")
+        self.assertEqual(fx.git("-C", fx.source, "rev-parse", "refs/remotes/origin/main").strip(), new,
+                         "scope: the local origin/main ref did not move")
+        install_refresh(fx)
+        run = fx.run_hook()
+        unknown = [line for line in run.lines if line.startswith(UNKNOWN)]
+        self.assertEqual(unknown, [], "the behind linked pin reads as unknown: %r; stderr: %s"
+                         % (unknown, run.tail()))
+        self.assertTrue(run.lines, "the behind linked pin printed no verdict line")
+
+    # origin has no stable: the pin follows local main (merge/install_from_main.sh, pin_commit), so the check reads local
+    # main and gives a verdict. It reads no origin/main here, which holds the old commit.
+
+    def test_missing_origin_stable_reads_local_main_for_a_verdict(self):
+        fx, old = detached(self._testMethodName)
+        fx.write_record("stable", old)
+        new = fx.advance(HOOK_ONLY)
+        fx.git("-C", fx.source, "fetch", "-q", fx.origin, "+refs/heads/main:refs/heads/main")
+        self.assertNotIn("refs/heads/stable", fx.git("-C", fx.origin, "for-each-ref", "--format=%(refname)"),
+                         "scope: origin has a stable branch")
+        self.assertNotIn("refs/remotes/origin/stable", fx.git("-C", fx.source, "for-each-ref", "--format=%(refname)"),
+                         "scope: the source has a local origin/stable")
+        self.assertEqual(fx.git("-C", fx.source, "rev-parse", "refs/heads/main").strip(), new,
+                         "scope: local main did not move to the new commit")
+        self.assertEqual(fx.git("-C", fx.source, "rev-parse", "refs/remotes/origin/main").strip(), old,
+                         "scope: origin/main moved too, so local main is not the only new ref")
+        install_refresh(fx)
+        run = fx.run_hook()
+        unknown = [line for line in run.lines if "unknown" in line]
+        self.assertEqual(unknown, [], "the stable record reads as unknown with origin/stable absent: %r; stderr: %s"
+                         % (unknown, run.tail()))
+        self.assertEqual(refresh_runs(fx), [new],
+                         "the check did not act on local main's tip: pin refresh runs %r, want one at %s"
+                         % (refresh_runs(fx), new[:SHORT]))
+        self.assertIn(1, [commits_behind(line) for line in run.lines],
+                      "no line states the commits behind local main: %r" % run.lines)
+
+    # The clone the global rules file points at: its own local origin/main ref, against its HEAD.
+
+    def test_behind_shared_clone_is_flagged_with_its_commit_count(self):
+        fx, shared, base = shared_behind(self._testMethodName, behind_by=2)
+        self.assertEqual(fx.sha(shared, "HEAD"), base, "scope: the shared clone is not at the base")
+        self.assertNotEqual(fx.sha(shared, "refs/remotes/origin/main"), base,
+                            "scope: the shared clone's local origin/main ref did not move")
+        self.assertEqual(fx.record_sha(), fx.origin_tip("main"), "scope: the record is not current")
+        run = fx.run_hook()
+        flagged = [line for line in run.lines if os.path.realpath(shared) in line and commits_behind(line) is not None]
+        self.assertEqual(len(flagged), 1, "want one line that flags the shared clone with its commits behind, got %r; "
+                         "stderr: %s" % (run.lines, run.tail()))
+        self.assertEqual(commits_behind(flagged[0]), 2, "the shared clone's line states %r commits behind, want 2: %r"
+                         % (commits_behind(flagged[0]), flagged[0]))
+        outside = [argv for argv in fx.git_calls() if any(REPO in arg for arg in argv)]
+        self.assertEqual(outside, [], "the hook ran git on a clone outside the fixture: %r" % outside)
+
+    def test_shared_clone_at_the_tip_is_not_flagged(self):
+        fx, shared, base = shared_behind(self._testMethodName, behind_by=0)
+        self.assertEqual(fx.sha(shared, "HEAD"), fx.origin_tip("main"), "scope: the shared clone is not at the tip")
+        run = fx.run_hook()
+        self.assertEqual(run.lines, [], "a current shared clone and record printed %r, want silence" % run.lines)
+
+    def test_shared_check_reads_no_origin_on_a_prompt(self):
+        fx, shared, base = shared_behind(self._testMethodName, behind_by=2)
+        fx.run_hook()
+        self.assertEqual(network_reads(fx), [], "the prompt read origin: %r, want none" % fx.subcommands())
+
+
 class HookFile(unittest.TestCase):
     """Static reads of the hook source and of settings.json. The behaviour cases above prove the rest."""
 
-    def test_hook_source_has_no_literal_main_ref(self):
+    def test_hook_names_main_only_as_the_pin_fallback_constant(self):
         text = read_text(HOOK)
         self.assertTrue(text.strip(), "scope: %s has no text to read" % HOOK)
         for needle in ("refs/heads/main", ":-main"):
             self.assertNotIn(needle, text, "the hook names %r literally" % needle)
+        tree = ast.parse(text)
+        allowed = {id(node.value) for node in tree.body if isinstance(node, ast.Assign)
+                   and any(isinstance(target, ast.Name) and target.id == "PIN_FALLBACK_BRANCH" for target in node.targets)
+                   and isinstance(node.value, ast.Constant) and node.value.value == "main"}
+        named = [(node.lineno, node.value) for node in code_string_nodes(tree)
+                 if id(node) not in allowed and MAIN_REF.search(node.value)]
+        self.assertEqual(named, [], "the hook names main in code outside PIN_FALLBACK_BRANCH: %r" % named)
 
     def test_hook_is_wired_once_under_user_prompt_submit(self):
         with open(SETTINGS, encoding="utf-8") as handle:

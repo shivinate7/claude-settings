@@ -13,6 +13,7 @@ Output names pinned (the `scope` job re-exports them as job outputs):
   LINT_FLAGS lint_red_run, lint_plan_refuter, lint_ruling_kind, lint_comment_narration (the four pull-request lint steps of
              the `checks` job; LintStepScope and LintStepWorkflow pin them)
   records_only_skip  true exactly when the records-only shortcut forced the 13 flags off (RecordsOnlyPush pins it)
+  DOC_FLAGS  doc_decisions, doc_rules, doc_skills, doc_agents, doc_glossary, doc_map, doc_other, doc_any (DocGroups pins them)
 
 Run with:  python3 lint/test_ci_scope.py -v
 """
@@ -59,9 +60,10 @@ def git(cwd, *a):
 
 
 def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref="", green=None,
-        green_sibling=False, green_head=None, contents=None, facts=None, merged=None):
+        green_sibling=False, green_head=None, contents=None, facts=None, merged=None, moves=None):
     """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit. `head_ref` is HEAD_REF,
-    empty when not given, so no HEAD_REF of the caller's environment reaches the script.
+    empty when not given, so no HEAD_REF of the caller's environment reaches the script. `moves` maps an old path to its new
+    one, or to None for a delete: the old path is in the base, and a move keeps the content, so git sees a rename.
     `green` (a list of paths) is the pull request's earlier head, committed before the head commit, so the whole diff against
     the base holds it too. `green_sibling` puts that earlier head on a branch off the base instead: a commit HEAD does not
     descend from. GREEN_HEAD is the earlier head's sha (empty when there is none) unless `green_head` gives another value.
@@ -72,6 +74,7 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
     (git diff --name-only --no-renames GREEN_HEAD HEAD), `delta_pr_head` (the same to the head commit) and `ancestor`
     (GREEN_HEAD is an ancestor of HEAD)."""
     contents = contents or {}
+    moves = moves or {}
     with tempfile.TemporaryDirectory(dir=RUN_DIR) as d:
         git(d, "init", "-q")
         git(d, "config", "user.email", "t@t")
@@ -85,12 +88,17 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
         with open(os.path.join(HERE, "..", "landed-dirs.txt")) as f:
             real = f.read()
         open(os.path.join(d, "landed-dirs.txt"), "w").write(real if landed is None else chr(10).join(landed) + chr(10))
-        for p in existing:  # in the base commit, so the head commit modifies them
+        for p in list(existing) + list(moves):  # in the base commit, so the head commit modifies, moves or deletes them
             os.makedirs(os.path.dirname(os.path.join(d, p)), exist_ok=True)
             open(os.path.join(d, p), "w").write("old\n")
         git(d, "add", "-A")
         git(d, "commit", "-qm", "base")
         sha = git(d, "rev-parse", "HEAD")
+        for old, new in moves.items():
+            os.remove(os.path.join(d, old))
+            if new is not None:
+                os.makedirs(os.path.dirname(os.path.join(d, new)), exist_ok=True)
+                open(os.path.join(d, new), "w").write("old\n")
         def write(names):
             for p in names:
                 full = os.path.join(d, p)
@@ -440,10 +448,22 @@ class Scope(unittest.TestCase):
                 self.assertEqual(run([p]).get("mods"), "true")
         self.assertEqual(run(["README.md", "mods/plain-diff/check.mjs"]).get("mods"), "true")
 
-    def test_a_mods_only_diff_sets_the_mod_jobs_and_no_other_flag(self):
+    # A non-.md path under mods/ also sets `code`: the whole-tree readers (retired names, retired repo, glossary, hook catalog) run on
+    # `code` or a doc flag, so a mods-only pull request must start them. A .md path under mods/ keeps `code` off.
+    def test_a_mods_only_diff_sets_the_mod_jobs_code_and_no_other_flag(self):
         got = run(["mods/plain-diff/check.mjs"])
-        self.assertFlags(got, want_true=["mods"] + self.MOD_JOBS,
-                         want_false=[n for n in ALL if n not in ["mods"] + self.MOD_JOBS])
+        self.assertFlags(got, want_true=["mods", "code"] + self.MOD_JOBS,
+                         want_false=[n for n in ALL if n not in ["mods", "code"] + self.MOD_JOBS])
+
+    def test_a_non_md_mods_path_sets_code(self):
+        for p in ("mods/x/y/z.mjs", "mods/x/data.json", "mods/x/y/check.test.mjs"):
+            with self.subTest(path=p):
+                self.assertEqual(run([p])["code"], "true", f"{p} does not set code, so the whole-tree readers skip it")
+
+    def test_a_md_path_under_mods_keeps_code_off(self):
+        for p in ("mods/x/README.md", "mods/x/y/notes.md"):
+            with self.subTest(path=p):
+                self.assertEqual(run([p])["code"], "false", f"{p} sets code")
 
     def test_a_docs_only_diff_leaves_the_mods_flag_off(self):
         self.assertEqual(run(["README.md", "decisions/some-record.md"]).get("mods"), "false")
@@ -464,7 +484,7 @@ class Scope(unittest.TestCase):
     def test_each_mods_arm_starts_the_windows_and_macos_jobs(self):
         for p in self.MOD_ARMS:
             with self.subTest(path=p, edit=True):
-                code_arm = p.startswith("lint/") or p == ".gitignore"
+                code_arm = p.startswith("lint/") or (p.startswith("mods/") and not p.endswith(".md")) or p == ".gitignore"
                 want = {"mods", "checks_windows", "checks_macos"} | ({"code"} if code_arm else set())
                 self.assertEqual(self.true_set(run([p], existing=[p])), want,
                                  msg=f"{p}: the mods arm must start the CI step and both mod jobs, and keep code")
@@ -887,6 +907,19 @@ class RecordsOnlyPush(unittest.TestCase):
                 self.assertSkipFlag(got, False)
                 for n in JOB_FLAGS + DERIVED_FLAGS + STEP_FLAGS:
                     self.assertEqual(got.get(n), "true", f"a {event} run turns {n} off: {got}")
+
+    # The records-only skip drops the 13 job and suite flags and keeps the doc_* flags: the Hook catalog, Glossary and Retired repo
+    # steps read them on a records-only push. The facts and the skip are read before the doc flags (P7).
+    def test_records_only_skip_keeps_the_doc_flags(self):
+        whole = self.whole_pr(self.CODE + [self.RECORDS])
+        self.assertEqual(whole.get("code"), "true", f"scope: the whole PR diff must turn code on: {whole}")
+        self.assertEqual(whole.get("doc_any"), "true", f"scope: the whole PR diff must set doc_any: {whole}")
+        facts = {}
+        got = run([self.RECORDS], green=self.CODE, facts=facts)
+        self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+        self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta from GREEN_HEAD to HEAD is not docs/records.md alone: {facts}")
+        self.assertSkipFlag(got, True)
+        self.assertEqual(differing(got, whole, DOC_FLAGS), [], f"the records-only skip moved a doc flag off the whole PR diff: {got}")
 
 
 # The job-level half of the wider skip. A job that holds its steps back with a step-level if still starts a runner, so the skip
@@ -1347,6 +1380,164 @@ class LintStepWorkflow(unittest.TestCase):
     def test_the_silent_undo_check_stays_on_the_pull_request_condition_only(self):
         raw = self.step_if("Silent undo check")
         self.assertEqual(conjuncts(raw), {"github.event_name == 'pull_request'"}, f"the Silent undo check's if: is {raw!r}")
+
+
+# The doc groups. ci-scope.sh sets one doc_<group> flag per group, and a docs-only step's scope condition reads the flags of the
+# groups it reads (lint/test_checks_step_scope.py DOC_STEPS). The flags are not job flags: no doc flag turns a job on.
+DOC_GROUPS = ("decisions", "rules", "skills", "agents", "glossary", "map", "other", "any")
+DOC_FLAGS = ["doc_" + g for g in DOC_GROUPS]
+# Each docs-only path with the groups it sets. Explicit, so the script is checked against this table, not against doc_groups.
+DOC_CASES = [
+    ("docs/decisions/x.md", {"decisions", "any"}),
+    ("docs/decisions/sub/x.md", {"decisions", "any"}),  # a nested path: bash's `*` matches `/`, so the arm still holds
+    ("skills/foo/SKILL.md", {"skills", "any"}),
+    ("skills/a/b/c.md", {"skills", "any"}),
+    ("agents/x.md", {"agents", "any"}),
+    ("agents/x/y.md", {"any"}),  # the empty agents/*/*.md arm: deleted, it falls to agents/*.md and sets doc_agents
+    ("CLAUDE.md", {"rules", "any"}),
+    (".claude/CLAUDE.md", {"rules", "any"}),
+    (".claude/rules/x.md", {"any"}),  # no group arm names it: `any` only
+    ("AGENTS.md", {"any"}),  # no group arm names it: `any` only
+    ("output-styles/shiv-stylisms.md", {"rules", "any"}),
+    ("GLOSSARY.md", {"glossary", "any"}),
+    ("README.md", {"glossary", "any"}),
+    ("docs/map/x.md", {"map", "any"}),
+    ("docs/debts/x.md", {"other", "any"}),
+    ("docs/notes.md", {"other", "any"}),
+    ("mods/x/README.md", {"other", "any"}),
+    ("mods/x/y/README.md", {"any"}),  # the empty mods/*/*/*.md arm: deleted, it falls to mods/*/README.md and sets doc_other
+    ("unlisted/x.md", {"any"}),
+]
+
+
+def doc_groups(path):
+    """The doc groups a path sets, by the rules of ci-scope.sh: every .md is in `any`, and a path in no other group sets `any` only.
+    Read by lint/test_checks_step_scope.py to check the names a step's entry reads against the flags its `if:` reads."""
+    if not path.endswith(".md"):
+        return set()
+    g = {"any"}
+    if path.startswith("docs/decisions/"):
+        g.add("decisions")
+    elif path in ("CLAUDE.md", ".claude/CLAUDE.md") or path.startswith("output-styles/"):
+        g.add("rules")
+    elif path.startswith("skills/"):
+        g.add("skills")
+    elif path.startswith("agents/") and "/" not in path[len("agents/"):]:
+        g.add("agents")
+    elif path in ("GLOSSARY.md", "README.md"):
+        g.add("glossary")
+    elif path.startswith("docs/map/"):
+        g.add("map")
+    elif path.startswith("docs/") or (path.startswith("mods/") and path.count("/") == 2 and path.endswith("/README.md")):
+        g.add("other")
+    return g
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class DocGroups(unittest.TestCase):
+    """The doc_* flags: each exists, is true for its paths and false for the others, and leaves `code` and every job flag alone.
+    Each case is an edit to a tracked file (existing), so a new file under a landed dir (agents/, skills/) sets code by its own rule."""
+
+    def assertDocFlags(self, got, want, path):
+        for f in DOC_FLAGS:
+            self.assertIn(f, got, f"output {f} missing for {path}: {got}")
+        for g in DOC_GROUPS:
+            self.assertEqual(got["doc_" + g], "true" if g in want else "false", f"doc_{g} for {path}: {got}")
+
+    def assertJobFlagsOff(self, got, path):
+        for n in ALL:
+            self.assertIn(n, got, f"output {n} missing for {path}: {got}")
+            self.assertEqual(got[n], "false", f"{n} set by {path}: {got}")
+
+    def assertDocFlagsOn(self, got, what):
+        for f in DOC_FLAGS:
+            self.assertIn(f, got, f"output {f} missing for {what}: {got}")
+            self.assertEqual(got[f], "true", f"{f} for {what}: {got}")
+
+    def test_each_doc_flag_is_true_for_its_paths_and_false_for_the_rest(self):
+        for path, want in DOC_CASES:
+            with self.subTest(path=path):
+                self.assertDocFlags(run([path], existing=[path]), want, path)
+
+    def test_a_decision_doc_sets_doc_decisions_and_doc_any_only(self):
+        got = run(["docs/decisions/x.md"], existing=["docs/decisions/x.md"])
+        self.assertDocFlags(got, {"decisions", "any"}, "docs/decisions/x.md")
+
+    def test_a_docs_notes_change_sets_doc_other_and_doc_any_only(self):
+        got = run(["docs/notes.md"], existing=["docs/notes.md"])
+        self.assertDocFlags(got, {"other", "any"}, "docs/notes.md")
+
+    # A move keeps the content, so git reads it as a rename. --no-renames lists the old path, which sets doc_decisions; the new
+    # path sets only doc_any. Named failure: a diff that shows only the new name of a move sets no doc_decisions.
+    def test_a_move_out_of_docs_decisions_sets_doc_decisions_through_the_old_path(self):
+        path = "docs/decisions/x.md"
+        got = run([], moves={path: "unlisted/moved.md"})  # no `paths`: the moved file keeps its content
+        self.assertDocFlags(got, {"decisions", "any"}, f"{path} moved to unlisted/moved.md")
+        self.assertJobFlagsOff(got, f"{path} moved to unlisted/moved.md")
+
+    # Named failure: a diff that drops deleted files (--diff-filter) sets no doc flag for a decision doc that is removed.
+    def test_a_delete_of_a_decision_doc_sets_doc_decisions(self):
+        path = "docs/decisions/x.md"
+        got = run([], moves={path: None})
+        self.assertDocFlags(got, {"decisions", "any"}, f"deleted {path}")
+        self.assertJobFlagsOff(got, f"deleted {path}")
+
+    # Control, the fail-safe: the doc arms match a lower-case .md only. An upper-case .MD name falls to the catch-all arm, so every
+    # flag is on. That is a false alarm, never a skipped step. It is not a DOC_CASES row: that loop expects a docs-only change.
+    def test_an_upper_case_md_name_takes_the_fail_safe_arm(self):
+        path = "docs/decisions/x.MD"
+        got = run([path], existing=[path])
+        self.assertDocFlags(got, set(DOC_GROUPS), path)
+        for n in ALL:
+            self.assertEqual(got.get(n), "true", f"{n} is off for {path}, so the catch-all arm no longer covers it: {got}")
+
+    def test_a_new_decision_doc_sets_its_flags_and_no_job_flag(self):
+        # docs/decisions is in no landed dir, so a new file there sets nothing but its doc flags.
+        got = run(["docs/decisions/new.md"])
+        self.assertDocFlags(got, {"decisions", "any"}, "docs/decisions/new.md")
+        self.assertJobFlagsOff(got, "docs/decisions/new.md")
+
+    def test_every_doc_flag_is_true_on_push_schedule_and_dispatch(self):
+        for ev in ("push", "schedule", "workflow_dispatch"):
+            with self.subTest(event=ev):
+                self.assertDocFlagsOn(run(["docs/decisions/x.md"], event=ev), f"event {ev}")
+
+    def test_every_doc_flag_is_true_on_an_unreadable_diff(self):
+        for base in ("0" * 40, ""):
+            with self.subTest(base=base):
+                self.assertDocFlagsOn(run(["docs/decisions/x.md"], base=base), "an unreadable diff")
+
+    def test_every_doc_flag_is_true_when_the_scope_script_or_the_workflow_changes(self):
+        for p in (".github/scripts/ci-scope.sh", ".github/workflows/checks.yml"):
+            with self.subTest(path=p):
+                self.assertDocFlagsOn(run([p]), p)
+
+    def test_a_docs_only_change_leaves_code_false_whatever_its_doc_flags(self):
+        for path, _ in DOC_CASES:
+            with self.subTest(path=path):
+                got = run([path], existing=[path])
+                self.assertIn("code", got, got)
+                self.assertEqual(got["code"], "false", f"{path} set code: {got}")
+        # Control: a code change still sets code, so the check above can fail.
+        self.assertEqual(run(["hooks/guard.py"])["code"], "true")
+
+    def test_a_docs_only_change_turns_no_job_or_suite_flag_on(self):
+        for path in ("docs/decisions/x.md", "docs/notes.md"):
+            with self.subTest(path=path):
+                self.assertJobFlagsOff(run([path], existing=[path]), path)
+
+    # Empty state: a diff with no paths reads as unreadable, so every doc flag is on (the fail-safe).
+    def test_an_empty_diff_sets_every_doc_flag(self):
+        self.assertDocFlagsOn(run([]), "an empty diff")
+
+    # Full size: a diff of many docs files sets the union of their groups and no job flag. The three rule and agent files are
+    # edits (existing), since a new file under agents/ sets code by its own rule.
+    def test_a_full_size_docs_diff_sets_the_union_of_its_groups(self):
+        existing = ["agents/x.md", "CLAUDE.md", "docs/decisions/x.md"]
+        paths = [f"docs/notes/{i}.md" for i in range(60)] + existing
+        got = run(paths, existing=existing)
+        self.assertDocFlags(got, {"other", "decisions", "rules", "agents", "any"}, "a 63-file docs diff")
+        self.assertJobFlagsOff(got, "a 63-file docs diff")
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")
