@@ -28,8 +28,8 @@
   "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
   "recommended": "b",
   "ref": "coordinator message 19:49 CST Nov 17, relaying the ios-adblock lane (session_013NEJKzK1Tenht43Uyj5RDE)",
-  "replied": "2026-11-18T14:42:33-06:00",
-  "reply": "Closed on your pick b (14:41 CST): a Mac lane adds simulator screenshots and working shoot and token files for ios-adblock. Routed to the coordinator to start that lane.",
+  "replied": "2026-11-18T14:47:44-06:00",
+  "reply": "Closed on your pick b (14:41 CST), but it cannot start yet: at 14:46 CST the coordinator ran list_computer_folders and it returned no folder and none under cannot_be_used, so no computer serves a folder to this session. To unblock, you add a folder in the Claude desktop app (Settings, Claude Code, Remote Control), or ios-adblock's own orchestrator starts the Mac lane. Nothing is built until one of those happens.",
   "repo": "shivinate7/ios-adblock",
   "short": "ios-adblock Design files for a native app",
   "shown": [
