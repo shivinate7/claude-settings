@@ -1143,92 +1143,122 @@ LOG_CHECKS_EXTRA.append(("role-model: shared_names' REVIEW_GUARD_MARKER is the r
 FIXTURELESS_CHECKS.add(review_guard_marker_check)
 REVIEW_GUARD_MARKER = "Guard or check: yes"  # the review record's line; see the header above
 GUARD_NO_LINE = "Guard or check: no"
+# The record's `1 guard` row is sonnet in this fixture, so the marker cases below test how the marker is read (the line
+# start, the blanks, the fence, the boundary) whatever row the live record holds. The live row is haiku since the owner's
+# ruling of 2026-11-17 19:45 CST, and section K reads the live record. ROUND_TABLE_HEAD is the header of a round table; it is
+# defined here, ahead of section J, which reads it too.
+ROUND_TABLE_HEAD = "| Role | Round | Model | Effort |\n|---|---|---|---|\n"
+ROLE_GUARD_SONNET_CFG = role_config("guardsonnet", role_table(
+    "guardsonnet", ROLE_TABLE_RULES + "\n" + ROUND_TABLE_HEAD + "| reviewer | 1 guard | sonnet | xhigh |\n"))
+
+
+def guard_row_allow(name, role, model, prompt, tool="Agent", env=None):
+    """role_model_allow on the sonnet `1 guard` fixture."""
+    role_model_allow(name, role, model, prompt, tool=tool, config=ROLE_GUARD_SONNET_CFG, env=env)
+
+
+def guard_row_refuse(name, role, model, prompt, tool="Agent", carries=(ROLE_REMEDY,), lacks=ROLE_LACKS, env=None):
+    """role_model_refuse on the sonnet `1 guard` fixture."""
+    role_model_refuse(name, role, model, prompt, tool=tool, config=ROLE_GUARD_SONNET_CFG, carries=carries, lacks=lacks,
+                      env=env)
+
+
+def workflow_guard_row_allow(name, script):
+    """workflow_allow on the sonnet `1 guard` fixture."""
+    add(name, "allow", tool="Workflow", config=ROLE_GUARD_SONNET_CFG, script=script)
+
+
+def workflow_guard_row_refuse(name, script, rule="agent-model-cap", carries=(), lacks=()):
+    """workflow_refuse on the sonnet `1 guard` fixture."""
+    add(name, "deny", rule, tool="Workflow", config=ROLE_GUARD_SONNET_CFG, carries=carries, lacks=lacks, script=script)
+
+
 
 # A reviewer on Sonnet passes with the marker at a line start: on line 1 or later, on any round, with text after it on
 # its line, and as a whole brief. A Haiku reviewer with the marker is refused at the step-up, below.
-role_model_allow("role-model: reviewer on sonnet with the guard marker on line 1 is allowed", "reviewer", "sonnet",
+guard_row_allow("role-model: reviewer on sonnet with the guard marker on line 1 is allowed", "reviewer", "sonnet",
                  REVIEW_GUARD_MARKER + "\nCheck the guard diff.")
-role_model_allow("role-model: reviewer on sonnet with the guard marker on line 3 is allowed", "reviewer", "sonnet",
+guard_row_allow("role-model: reviewer on sonnet with the guard marker on line 3 is allowed", "reviewer", "sonnet",
                  "Check the diff.\nThe lane is c204.\n" + REVIEW_GUARD_MARKER)
-role_model_allow("role-model: reviewer on sonnet on Round 1 with the guard marker is allowed (round 1 runs on Sonnet "
+guard_row_allow("role-model: reviewer on sonnet on Round 1 with the guard marker is allowed (round 1 runs on Sonnet "
                  "for a guard diff)", "reviewer", "sonnet", "Round 1 of 3. Check the guard diff.\n" + REVIEW_GUARD_MARKER)
-role_model_allow("role-model: reviewer on sonnet with text after the guard marker on its line is allowed (it starts "
+guard_row_allow("role-model: reviewer on sonnet with text after the guard marker on its line is allowed (it starts "
                  "with the marker)", "reviewer", "sonnet", REVIEW_GUARD_MARKER + ". The diff edits the guard.")
-role_model_allow("role-model: reviewer on sonnet whose whole brief is the guard marker is allowed", "reviewer", "sonnet",
+guard_row_allow("role-model: reviewer on sonnet whose whole brief is the guard marker is allowed", "reviewer", "sonnet",
                  REVIEW_GUARD_MARKER)
-role_model_allow("role-model: reviewer on sonnet with the guard marker at the end of a 400-line brief is allowed",
+guard_row_allow("role-model: reviewer on sonnet with the guard marker at the end of a 400-line brief is allowed",
                  "reviewer", "sonnet", "Check the diff.\n" * 399 + REVIEW_GUARD_MARKER)
-role_model_allow("role-model: reviewer on sonnet as a Task with the guard marker is allowed", "reviewer", "sonnet",
+guard_row_allow("role-model: reviewer on sonnet as a Task with the guard marker is allowed", "reviewer", "sonnet",
                  REVIEW_GUARD_MARKER + "\nCheck the guard diff.", tool="Task")
 # A guard-marked first-round reviewer below its `1 guard` row (sonnet) is refused at the step-up. The reason is a literal
 # here, never read from the guard, and it names the row's model.
 add("role-model: reviewer on haiku with the guard marker is denied at the step-up (its 1 guard row is sonnet)",
-    "deny", STEP_UP, tool="Agent", config=ROLE_REAL_CFG,
+    "deny", STEP_UP, tool="Agent", config=ROLE_GUARD_SONNET_CFG,
     carries=("Reviewer round 1 on a guard or check change runs on Sonnet. Spawn it with model sonnet.",),
     **role_input("reviewer", "haiku", REVIEW_GUARD_MARKER + "\nCheck the guard diff."))
 # A marker line may start with leading blanks: the brief table's line-start rows allow them, and a brief indents its
 # template line. The first-pass brief is the case, since only the marker lifts Sonnet there.
-role_model_allow("role-model: reviewer on sonnet on Round 1 with the guard marker after two spaces is allowed", "reviewer",
+guard_row_allow("role-model: reviewer on sonnet on Round 1 with the guard marker after two spaces is allowed", "reviewer",
                  "sonnet", "Round 1 of 3. Check the guard diff.\n  " + REVIEW_GUARD_MARKER)
-role_model_allow("role-model: reviewer on sonnet on Round 1 with the guard marker after four spaces is allowed", "reviewer",
+guard_row_allow("role-model: reviewer on sonnet on Round 1 with the guard marker after four spaces is allowed", "reviewer",
                  "sonnet", "Round 1 of 3. Check the guard diff.\n    " + REVIEW_GUARD_MARKER)
-role_model_allow("role-model: reviewer on sonnet on Round 1 with the guard marker after a tab is allowed", "reviewer",
+guard_row_allow("role-model: reviewer on sonnet on Round 1 with the guard marker after a tab is allowed", "reviewer",
                  "sonnet", "Round 1 of 3. Check the guard diff.\n\t" + REVIEW_GUARD_MARKER)
 
 # A reviewer on Sonnet is refused with no marker, with `no` as the value, with the marker mid-line, or in lowercase.
-role_model_refuse("role-model: reviewer on sonnet with Guard or check: no is denied", "reviewer", "sonnet",
+guard_row_refuse("role-model: reviewer on sonnet with Guard or check: no is denied", "reviewer", "sonnet",
                   "Check the docs diff.\n" + GUARD_NO_LINE)
-role_model_refuse("role-model: reviewer on sonnet on Round 1 with Guard or check: no is denied (round 1 stays on the row)",
+guard_row_refuse("role-model: reviewer on sonnet on Round 1 with Guard or check: no is denied (round 1 stays on the row)",
                   "reviewer", "sonnet", "Round 1 of 3. Check the docs diff.\n" + GUARD_NO_LINE)
-role_model_refuse("role-model: reviewer on sonnet with the guard marker mid-line is denied", "reviewer", "sonnet",
+guard_row_refuse("role-model: reviewer on sonnet with the guard marker mid-line is denied", "reviewer", "sonnet",
                   "Check the diff. " + REVIEW_GUARD_MARKER)
 # The boundary read takes the character at the marker's length from the line start, so a mid-line marker can put a space
 # there. It must still lift nothing. The case above reads `r` there and would pass a startswith swapped for `in`.
-role_model_refuse("role-model: reviewer on sonnet with the guard marker mid-line, a space at the boundary offset, is denied",
+guard_row_refuse("role-model: reviewer on sonnet with the guard marker mid-line, a space at the boundary offset, is denied",
                   "reviewer", "sonnet", "Review the " + REVIEW_GUARD_MARKER)
 # A model the table does not rank sits above every row, so the marker lifts it no more than a Round N line does.
-role_model_refuse("role-model: reviewer on an unranked model with the guard marker is denied (claude-mystery-9 is above "
+guard_row_refuse("role-model: reviewer on an unranked model with the guard marker is denied (claude-mystery-9 is above "
                   "the row)", "reviewer", "claude-mystery-9", REVIEW_GUARD_MARKER + "\nCheck the guard diff.")
 # A fenced block is quoted text, as cite-by-id reads it, so a marker line inside one is no marker. A fence that closes
 # before the marker line leaves the marker a line of the brief, so it counts.
-role_model_refuse("role-model: reviewer on sonnet whose only guard marker line sits inside a ``` fence is denied",
+guard_row_refuse("role-model: reviewer on sonnet whose only guard marker line sits inside a ``` fence is denied",
                   "reviewer", "sonnet", "Check the docs diff.\n" + MD_FENCE + "\n" + REVIEW_GUARD_MARKER + "\n" + MD_FENCE)
-role_model_allow("role-model: reviewer on sonnet whose guard marker follows a closed ``` fence is allowed", "reviewer",
+guard_row_allow("role-model: reviewer on sonnet whose guard marker follows a closed ``` fence is allowed", "reviewer",
                  "sonnet", "Check the guard diff.\n" + MD_FENCE + "\nsome code\n" + MD_FENCE + "\n" + REVIEW_GUARD_MARKER)
-role_model_refuse("role-model: reviewer on sonnet with the guard marker in lowercase is denied (case-sensitive)",
+guard_row_refuse("role-model: reviewer on sonnet with the guard marker in lowercase is denied (case-sensitive)",
                   "reviewer", "sonnet", REVIEW_GUARD_MARKER.lower())
 # The marker is `yes` with the end of the line, a space, a tab, a CR or a full stop after it. A `|`, a `-` or a letter after yes (the
 # template line `Guard or check: yes|no`, `yesterday`, `yes-ish`) is not that value, so those lift nothing.
-role_model_refuse("role-model: reviewer on sonnet with the template line Guard or check: yes|no is denied",
+guard_row_refuse("role-model: reviewer on sonnet with the template line Guard or check: yes|no is denied",
                   "reviewer", "sonnet", "Check the docs diff.\nGuard or check: yes|no")
-role_model_refuse("role-model: reviewer on sonnet with Guard or check: yesterday is denied",
+guard_row_refuse("role-model: reviewer on sonnet with Guard or check: yesterday is denied",
                   "reviewer", "sonnet", "Check the docs diff.\nGuard or check: yesterday")
-role_model_refuse("role-model: reviewer on sonnet with Guard or check: yes-ish is denied",
+guard_row_refuse("role-model: reviewer on sonnet with Guard or check: yes-ish is denied",
                   "reviewer", "sonnet", "Check the docs diff.\nGuard or check: yes-ish")
-role_model_allow("role-model: reviewer on sonnet with Guard or check: yes alone on its line is allowed",
+guard_row_allow("role-model: reviewer on sonnet with Guard or check: yes alone on its line is allowed",
                  "reviewer", "sonnet", "Check the guard diff.\n" + REVIEW_GUARD_MARKER)
-role_model_allow("role-model: reviewer on sonnet with Guard or check: yes and a trailing space is allowed",
+guard_row_allow("role-model: reviewer on sonnet with Guard or check: yes and a trailing space is allowed",
                  "reviewer", "sonnet", "Check the guard diff.\n" + REVIEW_GUARD_MARKER + " \nThe lane is c204.")
-role_model_allow("role-model: reviewer on sonnet with Guard or check: yes then a parenthesis is allowed",
+guard_row_allow("role-model: reviewer on sonnet with Guard or check: yes then a parenthesis is allowed",
                  "reviewer", "sonnet", "Check the guard diff.\n" + REVIEW_GUARD_MARKER + " (`hooks/`)")
-role_model_allow("role-model: reviewer on sonnet with Guard or check: yes then a full stop is allowed",
+guard_row_allow("role-model: reviewer on sonnet with Guard or check: yes then a full stop is allowed",
                  "reviewer", "sonnet", "Check the guard diff.\n" + REVIEW_GUARD_MARKER + ".")
-role_model_allow("role-model: reviewer on sonnet with Guard or check: yes then a tab and text is allowed",
+guard_row_allow("role-model: reviewer on sonnet with Guard or check: yes then a tab and text is allowed",
                  "reviewer", "sonnet", "Check the guard diff.\n" + REVIEW_GUARD_MARKER + "\tThe diff edits the guard.")
 # A CRLF brief ends every line `\r\n`, so its marker line ends `yes\r`. The CR after yes is a line end, not text after it.
-role_model_allow("role-model: reviewer on sonnet with a CRLF brief whose Guard or check: yes line ends CR is allowed",
+guard_row_allow("role-model: reviewer on sonnet with a CRLF brief whose Guard or check: yes line ends CR is allowed",
                  "reviewer", "sonnet", "Check the guard diff.\r\n" + REVIEW_GUARD_MARKER + "\r\nThe lane is c204.\r\n")
 # The blanks allowance does not make an indented template line a value: `yes|no` after the blanks is not yes.
-role_model_refuse("role-model: reviewer on sonnet with the indented template line Guard or check: yes|no is denied",
+guard_row_refuse("role-model: reviewer on sonnet with the indented template line Guard or check: yes|no is denied",
                   "reviewer", "sonnet", "Check the docs diff.\n    Guard or check: yes|no")
 # The blanks allowance does not reach into a fence: an indented marker line inside one is quoted text, as before.
-role_model_refuse("role-model: reviewer on sonnet whose only indented guard marker line sits inside a ``` fence is denied",
+guard_row_refuse("role-model: reviewer on sonnet whose only indented guard marker line sits inside a ``` fence is denied",
                   "reviewer", "sonnet", "Check the docs diff.\n" + MD_FENCE + "\n  " + REVIEW_GUARD_MARKER + "\n" + MD_FENCE)
 # A bulleted marker does not start its line: the allowance is for blanks only, so the `-` ahead of the marker still refuses.
-role_model_refuse("role-model: reviewer on sonnet with a bulleted Guard or check: yes is denied", "reviewer", "sonnet",
+guard_row_refuse("role-model: reviewer on sonnet with a bulleted Guard or check: yes is denied", "reviewer", "sonnet",
                   "Check the docs diff.\n- " + REVIEW_GUARD_MARKER)
 # The refusal names the marker beside the Round N of 3 remedy, as a reviewer's second way past its row.
-role_model_refuse("role-model: reviewer on sonnet with no marker is denied, and names the guard marker beside the "
+guard_row_refuse("role-model: reviewer on sonnet with no marker is denied, and names the guard marker beside the "
                   "Round N of 3 remedy", "reviewer", "sonnet", "Check the guard diff.",
                   carries=(ROLE_REMEDY, ROUND_MARKER, REVIEW_GUARD_MARKER) + FREE_ROUND_MARKERS)
 # Opus stays refused under agent-model-cap, marker or not.
@@ -1244,12 +1274,12 @@ role_model_refuse("role-model: Explore on sonnet with the guard marker and no Au
 
 # A Workflow agent() call faces the same reading: a reviewer on Sonnet with the marker at a line start passes, and the
 # marker mid-line, a `no` value, or Opus does not.
-workflow_allow("role-model: Workflow reviewer on sonnet with the guard marker on line 1 is allowed",
+workflow_guard_row_allow("role-model: Workflow reviewer on sonnet with the guard marker on line 1 is allowed",
                _step_flow("'%s. Check the guard diff.'" % REVIEW_GUARD_MARKER, "agentType: 'reviewer', model: 'sonnet'"))
-workflow_refuse("role-model: Workflow reviewer on sonnet with the guard marker mid-line is denied under agent-role-model",
+workflow_guard_row_refuse("role-model: Workflow reviewer on sonnet with the guard marker mid-line is denied under agent-role-model",
                 _step_flow("'Check the guard diff. %s'" % REVIEW_GUARD_MARKER, "agentType: 'reviewer', model: 'sonnet'"),
                 rule=ROLE_RULE, carries=(ROLE_REMEDY,), lacks=ROLE_LACKS)
-workflow_refuse("role-model: Workflow reviewer on sonnet with Guard or check: no is denied under agent-role-model",
+workflow_guard_row_refuse("role-model: Workflow reviewer on sonnet with Guard or check: no is denied under agent-role-model",
                 _step_flow("'%s. Check the docs.'" % GUARD_NO_LINE, "agentType: 'reviewer', model: 'sonnet'"),
                 rule=ROLE_RULE, carries=(ROLE_REMEDY,), lacks=ROLE_LACKS)
 workflow_refuse("role-model: Workflow reviewer on opus with the guard marker is denied under agent-model-cap",
@@ -1259,7 +1289,6 @@ workflow_refuse("role-model: Workflow reviewer on opus with the guard marker is 
 # ---- J: the round rows, one home (decision agent-model-cap). The record's round table names the model each round runs on, and
 # the guard reads it, so a changed row changes the verdict with no code edit. A record with no round row, or no record at all,
 # keeps the verdicts the role row and the step-up give.
-ROUND_TABLE_HEAD = "| Role | Round | Model | Effort |\n|---|---|---|---|\n"
 ROUND_HAIKU_TWO_POINTER = role_table("roundhaiku", ROLE_TABLE_RULES + "\n" + ROUND_TABLE_HEAD + "| reviewer | 2 | haiku | high |\n")
 ROUND_HAIKU_TWO_CFG = role_config("roundhaiku", ROUND_HAIKU_TWO_POINTER)
 # Case 3: the record's second-round row names haiku, so a second-round reviewer on haiku is allowed. Without that row, the
