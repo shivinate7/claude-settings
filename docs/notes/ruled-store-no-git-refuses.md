@@ -1,0 +1,1 @@
+- ruled-store-no-git-refuses: A store-only unreadable read refuses a question main passes (no git on PATH and a non-git folder).

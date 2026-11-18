@@ -1,0 +1,1 @@
+- rr-log-date-not-topo: `_recent_files` reads the store log with `--reverse` but no `--topo-order`, so a child dated before its parent on a fork-and-merge can be applied first. Then an entry minutes old that a pure rename moved can escape. It needs a skewed clock. Fix idea: add `--topo-order`. Decision: ruled-store-one-home.

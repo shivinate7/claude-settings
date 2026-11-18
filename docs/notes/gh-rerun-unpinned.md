@@ -1,0 +1,1 @@
+- gh-rerun-unpinned: no test pins that `gh run rerun` is allowed in the cloud. Fix: add an allow case.

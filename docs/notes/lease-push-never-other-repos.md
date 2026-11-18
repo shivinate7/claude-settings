@@ -1,0 +1,1 @@
+- lease-push-never-other-repos: the Never covers of Own Branch Lease Push name no other owners' repos, unlike Own CI Run Cancel; Own CI Run Cancel excludes no release or deploy workflow. Low harm: own branch, old tip on the PR timeline; a cancelled run can be re-run. Decision: auto-mode-owner-acts.

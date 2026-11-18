@@ -1,0 +1,1 @@
+- scm-unshallow-once: (#2410) "unshallow once" is untrue after a failed fetch (head_holds retries).

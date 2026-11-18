@@ -1,0 +1,1 @@
+- check-tail-scope: (on #1803) `ste-changed origin/main | tail && git commit` still passes, because check-tail reads only `lint/*.py` scripts. Not a regression from main.

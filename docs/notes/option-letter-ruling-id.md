@@ -1,0 +1,1 @@
+- option-letter-ruling-id: guard option-letter-keys refused a page item whose context named a ruling as "R44 A" (a ruling id with its picked letter), reading the "A" as an option key. Possible false alarm; triage reworded it.

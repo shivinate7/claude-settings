@@ -1,0 +1,1 @@
+- lint-unknown-ok-no-comment: (#2382) `merge --lint-unknown-ok` posts no PR comment.
