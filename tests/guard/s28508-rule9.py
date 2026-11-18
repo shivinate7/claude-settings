@@ -292,9 +292,8 @@ add("floor step-up: Workflow reviewer with a fix verifier and a model in a varia
 add("floor step-up: Workflow reviewer with a fix verifier and a spread is allowed, the static read skips it", "allow",
     tool="Workflow", script=_step_flow("'%s. Re-check the diff.'" % FIX_VERIFIER, "agentType: 'reviewer', ...opts"))
 
-# ---- Step-up, a reviewer whose brief carries the guard marker (decision agent-model-cap, the `1 guard` round row). The owner
-# ruling of 2026-11-17 19:45 CST sets that row to haiku: a round 1 reviewer runs Haiku on every change, a guard or check
-# change included. So the step-up refuses no model below Haiku for a guard-marked round 1 reviewer. These cases read this
+# ---- Step-up, a reviewer whose brief carries the guard marker (decision agent-model-cap, the `1 guard` round row). That row
+# is haiku, so the step-up refuses no model below Haiku for a guard-marked first-round reviewer. These cases read this
 # checkout's record (GUARD_RECORD_CFG), not the live pointer the default config reads. A guard-marked reviewer on a later
 # round keeps its round reason. The marker is typed here, as FIX_VERIFIER is, so a rename of the constant cannot quietly
 # change what these cases pin.

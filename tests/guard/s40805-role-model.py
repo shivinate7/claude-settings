@@ -1144,8 +1144,8 @@ FIXTURELESS_CHECKS.add(review_guard_marker_check)
 REVIEW_GUARD_MARKER = "Guard or check: yes"  # the review record's line; see the header above
 GUARD_NO_LINE = "Guard or check: no"
 # The record's `1 guard` row is sonnet in this fixture, so the marker cases below test how the marker is read (the line
-# start, the blanks, the fence, the boundary) whatever row the live record holds. The live row is haiku since the owner's
-# ruling of 2026-11-17 19:45 CST, and section K reads the live record. ROUND_TABLE_HEAD is the header of a round table; it is
+# start, the blanks, the fence, the boundary) whatever row the live record holds. The live row is haiku (decision
+# agent-model-cap), and section K reads the live record. ROUND_TABLE_HEAD is the header of a round table; it is
 # defined here, ahead of section J, which reads it too.
 ROUND_TABLE_HEAD = "| Role | Round | Model | Effort |\n|---|---|---|---|\n"
 ROLE_GUARD_SONNET_CFG = role_config("guardsonnet", role_table(
@@ -1336,11 +1336,12 @@ add("role-model: no decision record still refuses a round 2 reviewer on haiku at
     **role_input("reviewer", "haiku", "Round 2 of 3. Re-check the diff."))
 
 
-# ---- K: the live record's `1 guard` row (owner ruling 2026-11-17 19:45 CST: a round 1 reviewer runs Haiku at xhigh on every
-# change, a guard or check change included). These cases read this checkout's record, so the row the ruling changes decides
-# them: they are red while that row reads sonnet and green once it reads haiku. Section I holds the marker's own reading, on a
-# sonnet fixture, so it holds whatever the live row says. The Haiku and no-model allows are in section 28508's step-up block.
-# A round 1 reviewer on Sonnet is refused with the marker, with or without a Round 1 line: the marker lifts nothing above Haiku.
+# ---- K: the live record's `1 guard` row (decision agent-model-cap: haiku at xhigh). These cases read this checkout's record,
+# so that row decides them: each refusal below holds only while the row reads haiku. Section I holds the marker's own
+# reading, on a sonnet fixture, so it holds whatever the live row says. The Haiku and no-model allows are in section
+# 28508's step-up block.
+# A first-round reviewer on Sonnet is refused with the marker, with or without the brief's round line: the marker lifts
+# nothing above Haiku.
 role_model_refuse("role-model: round 1 reviewer on sonnet with the guard marker is denied (the live 1 guard row is haiku)",
                   "reviewer", "sonnet", REVIEW_GUARD_MARKER + "\nCheck the guard diff.")
 role_model_refuse("role-model: round 1 reviewer on sonnet with a Round 1 line and the guard marker is denied (the live 1 guard row "
@@ -1356,7 +1357,7 @@ role_model_allow("role-model: round 2 reviewer on sonnet with the guard marker i
                  "reviewer", "sonnet", "Round 2 of 3. Check the guard diff.\n" + REVIEW_GUARD_MARKER)
 role_model_allow("role-model: fix check reviewer on sonnet with the guard marker on line two is allowed (the fix verifier row is "
                  "sonnet)", "reviewer", "sonnet", "Fix check. Confirm the fix to the named finding.\n" + REVIEW_GUARD_MARKER)
-# The refusal of a round 1 reviewer with no marker names no marker lift: the marker lifts nothing above Haiku, so naming it
+# The refusal of a first-round reviewer with no marker names no marker lift: the marker lifts nothing above Haiku, so naming it
 # sends the agent back to the same refusal.
 role_model_refuse("role-model: round 1 reviewer on sonnet with no marker is denied, and its remedy names no guard marker lift",
                   "reviewer", "sonnet", "Check the guard diff.", carries=(ROLE_REMEDY, ROUND_MARKER) + FREE_ROUND_MARKERS,
