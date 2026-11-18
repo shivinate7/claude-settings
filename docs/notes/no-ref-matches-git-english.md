@@ -1,0 +1,1 @@
+- no-ref-matches-git-english: bin/ci-job NO_REF matches git's English text (read under LC_ALL=C), and "has no origin to fetch" is also the reason when `rev-parse --git-path` or `remote get-url` fails for another cause (old git, dubious ownership), so the clone's HEAD judges a pin then. Decision: lanes-run-no-full-ci-job (the lane-check decision). Fix: none until seen.

@@ -4339,7 +4339,7 @@ def pre_ready_rows(wt, n, base, checks, pre):
     rows, states, lines, log = [], [], [], []
     for job, group in ready_job_groups(checks).items():
         raw = []
-        args = [job, "--pinned", *[a for _, bare in group for a in ("--step", bare)], "--base", f"origin/{base}"]
+        args = [job, *[a for _, bare in group for a in ("--step", bare)], "--base", f"origin/{base}"]
         state, job_lines, job_log, _ = ci_job_run(wt, *args, raw=raw)
         states.append(state)
         lines += job_lines

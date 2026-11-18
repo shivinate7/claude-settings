@@ -253,7 +253,7 @@ class Checks:
             return
         states, lines, log = [], [], []
         for job, group in merge.ready_job_groups(self.steps).items():
-            args = [job, "--pinned", *[a for _, bare in group for a in ("--step", bare)], "--base", BASE]
+            args = [job, *[a for _, bare in group for a in ("--step", bare)], "--base", BASE]
             job_state, job_lines, job_log, _ = merge.ci_job_run(wt, *args)
             states.append(job_state)
             lines += job_lines

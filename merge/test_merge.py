@@ -6997,8 +6997,9 @@ class ConfigFile(Env):
         self.assertIn("main is not the default branch (trunk)", out)
 
 class ReadyChecksRun(unittest.TestCase):
-    """The draft step's ready checks run through ci-job with --pinned: a child's pin names a claude-settings commit, so the
-    check runs that commit's harness, never the local copy's. The argv keeps its step names and base as before."""
+    """The draft step's ready checks run through ci-job with no pin flag: ci-job runs each --step at the pin of its own uses:
+    line (decision action-pins-follow-sessions), so a child's pin names a claude-settings commit and the check runs that
+    commit's harness, never the local copy's. The argv keeps its step names and base as before (ruling own-727-a-pin-tree-drop-pinned)."""
 
     @classmethod
     def setUpClass(cls):
@@ -7022,16 +7023,15 @@ class ReadyChecksRun(unittest.TestCase):
             merge.run_ready_checks(wt, 7, "main", checks)
         return calls
 
-    def test_the_ready_checks_run_ci_job_with_pinned(self):
+    def test_the_ready_checks_run_ci_job_without_a_pinned_flag(self):
         calls = self.ci_job_calls(["check invariants"])
         self.assertEqual(len(calls), 1, calls)  # precondition: one ci-job run for the one ready check
-        self.assertIn("--pinned", calls[0], "the ready checks did not pass --pinned to ci-job: %s" % calls[0])
+        self.assertNotIn("--pinned", calls[0], "the ready checks still pass --pinned, which ci-job no longer takes: %s" % calls[0])
 
-    def test_the_ready_checks_keep_their_step_names_and_base(self):  # the control: the argv --pinned joins is unchanged
+    def test_the_ready_checks_keep_their_step_names_and_base(self):
         calls = self.ci_job_calls(["check invariants", "records page"])
         self.assertEqual(len(calls), 1, calls)
-        argv = [a for a in calls[0][2:] if a != "--pinned"]
-        self.assertEqual(argv, ["checks", "--step", "check invariants", "--step", "records page", "--base", "origin/main"], calls[0])
+        self.assertEqual(calls[0][2:], ["checks", "--step", "check invariants", "--step", "records page", "--base", "origin/main"], calls[0])
 
 class ClaimSkipped(Env):
     """A base with no stamp kinds: the claim and the numbering check are skipped, and stamp.mjs never runs."""
@@ -23821,12 +23821,12 @@ class DraftReady(CloudSession):
 
     @contextlib.contextmanager
     def ready_check_answers(self, checks_state):
-        """merge.ci_job_run answers a ready check (its --pinned run) with LINT_STATES[checks_state]. The temp tree lives in this run's folder.
-        Yields the --pinned calls the run made, so a case reads whether a ready check ran."""
+        """merge.ci_job_run answers a ready check (its --step run) with LINT_STATES[checks_state]. The temp tree lives in this run's folder.
+        Yields the ready-check calls the run made, so a case reads whether a ready check ran."""
         ran = []
 
         def answer(wt, *args, **kw):
-            if "--pinned" in args:
+            if "--step" in args:  # a ready check names its steps; the lane lint's run names none
                 ran.append(args)
                 self.check_reads.append((sh(wt, "git", "rev-parse", "HEAD^{tree}"), self.lane_pushes()))  # the tree the check reads, and the lane's pushes before it
                 if checks_state == "pass" and kw.get("raw") is not None:  # ci-job prints one PASS line per step it ran: a declared step with no line reads unknown
