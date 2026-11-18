@@ -38,10 +38,17 @@ cp -r "$here" "$pin/actions/push-skip" && cp -r "$root/lint" "$pin/lint" \
 python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import test_all_jobs_passed as t; sys.stdout.write(t.CHILD_GOOD)' "$root/lint" \
   > "$caller/.github/workflows/checks.yml" || { echo "FAIL - fixture: lint/test_all_jobs_passed.py did not give CHILD_GOOD"; exit 1; }
 
-# The macOS caller: this repo's checks.yml. Its macOS jobs run on a schedule and a dispatch only (owner, 01:33 CST Nov 16), so its
-# scope-skips map is empty: it names no job and only opts in to the records-only read.
-[ "$(grep -c "^          scope-skips: '{}'$" "$root/.github/workflows/checks.yml")" -eq 1 ] && ok "static: checks.yml's scope-skips map is empty" \
-  || no "static: checks.yml's scope-skips map is not the one empty map"
+# The macOS caller: this repo's checks.yml. Its macOS jobs run on a schedule and a dispatch only (owner, 01:33 CST Nov 16), and its
+# scope-skips map names each fast Windows job with the flags its job-level if reads (R62 and R63). checks-rest is a suite job the map
+# does not name, and checks-windows-rest is one it names. The readback is the rules reader's, so the cases below rest on it.
+readback=$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import all_jobs_passed_rules as r; import test_windows_split as t
+text = open(sys.argv[2], encoding="utf-8").read()
+named = r.scope_skips_map(text)
+fast = all(sorted(named.get(n, [])) == sorted(f) for n, f in t.FAST_WINDOWS_JOBS.items()) and sorted(named) == sorted(t.FAST_WINDOWS_JOBS)
+jobs = t.all_jobs(text)
+print("same" if fast and "checks-rest" in jobs and "checks-rest" not in named and "checks-windows-rest" in named else sorted(named))' "$root/lint" "$root/.github/workflows/checks.yml") || readback=""
+[ "$readback" = "same" ] && ok "static: checks.yml's scope-skips map names each fast Windows job, and checks-rest is no name in it" \
+  || no "static: checks.yml's scope-skips map is not the fast-job map, or checks-rest is named: $readback"
 macos_caller="$work/macos_caller"
 mkdir -p "$macos_caller/.github/workflows"
 cp "$root/.github/workflows/checks.yml" "$macos_caller/.github/workflows/checks.yml" \
@@ -126,7 +133,8 @@ def skipped_jobs(jobs, skipped):
 
 
 ALL_JOBS, MACOS = caller_jobs()
-SUITE = "checks-windows-rest"  # a suite job of checks.yml that no macOS rule names
+SUITE = "checks-rest"  # a suite job of checks.yml that no macOS rule names, and the scope-skips map does not name: its skip is a gap
+NAMED = "checks-windows-rest"  # a suite job the scope-skips map names: its skip is intended
 CASES = {
     "green_batch": (batch_reads(), {}),
     "green_lane": (lane_reads(), {}),
@@ -136,10 +144,11 @@ CASES = {
     "dispatch": (lane_reads(), {"EVENT": "workflow_dispatch"}),
 }
 if case.startswith("macos"):  # the macOS cases read the caller's own jobs, so the suite job they refuse must be one of them
-    assert SUITE in ALL_JOBS, "checks-windows-rest is not a job of checks.yml, so the refusal case would probe the wrong job"
+    assert SUITE in ALL_JOBS and NAMED in ALL_JOBS, "checks-rest or checks-windows-rest is not a job of checks.yml, so a macOS case would probe the wrong job"
 CASES["macos_skipped_batch"] = (batch_reads(skipped_runs(ALL_JOBS, MACOS)), {})
 CASES["macos_skipped_lane"] = (lane_reads(skipped_jobs(ALL_JOBS, MACOS)), {})
 CASES["macos_and_suite_skipped_batch"] = (batch_reads(skipped_runs(ALL_JOBS, MACOS | {SUITE})), {})
+CASES["macos_and_named_skipped_batch"] = (batch_reads(skipped_runs(ALL_JOBS, MACOS | {NAMED})), {})
 # The scope-skips proof: the mapped caller names lint, so a skipped lint is proven only by the same run's scope job. Each case without a
 # passing scope job, and each skipped job the map does not name, must stay a gap.
 CASES["map_batch_proven"] = (batch_reads([run(ROLLUP), run("scope"), run("lint", "skipped"), run("test-mac")]), {})
@@ -192,6 +201,7 @@ pinned dispatch false
 pinned macos_skipped_batch true "$macos_caller"
 pinned macos_skipped_lane true "$macos_caller"
 pinned macos_and_suite_skipped_batch false "$macos_caller"
+pinned macos_and_named_skipped_batch true "$macos_caller"
 pinned map_batch_proven true "$mapped"
 pinned map_batch_scope_failed false "$mapped"
 pinned map_batch_scope_absent false "$mapped"

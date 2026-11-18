@@ -43,8 +43,8 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
-from test_windows_split import ALL_JOBS_PASSED_JOB, CHECKS, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB, all_jobs, eval_if  # noqa: E402  the one home of the checks.yml reader
-from all_jobs_passed_rules import FAN_IN, needs_of, split_jobs  # noqa: E402  the one home of the needs reader
+from test_windows_split import ALL_JOBS_PASSED_JOB, CHECKS, FAST_WINDOWS_JOBS, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB, all_jobs, eval_if  # noqa: E402  the one home of the checks.yml reader
+from all_jobs_passed_rules import FAN_IN, needs_of, scope_skips_map, split_jobs  # noqa: E402  the one home of the needs reader
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the job parser
 import test_all_jobs_passed as all_jobs_home  # noqa: E402  the one home of the child workflow fixtures (CHILD_GOOD)
 
@@ -72,6 +72,8 @@ NEEDED_JOBS, OFF_ON_PR, _SPLIT_PROBLEMS = split_jobs(CHECKS_TEXT)
 BOOKKEEPING = {"scope", ALL_JOBS_PASSED_JOB, FAN_IN, PUSH_SKIP_JOB, NIGHTLY_SKIP_JOB}
 SUITE_JOBS = sorted(name for name in NEEDED_JOBS if name not in BOOKKEEPING)
 SCOPE_JOB = "scope"  # the job that reads the scope flags; a scope skip needs its run to have succeeded
+NAMED_SUITE_JOBS = set(scope_skips_map(CHECKS_TEXT))  # the jobs the scope-skips map names: a skip of one is intended
+UNNAMED_SUITE_JOB = "checks-rest"  # a suite job the map does not name: a skip of it is a gap
 ALL_RUN_JOBS = sorted(all_jobs(CHECKS_TEXT))  # every job of checks.yml is one check run on a pull request run
 
 
@@ -442,8 +444,9 @@ class SuiteRunsOfTheHead(LiveHead):
         self.assertEqual(value, "false", "every suite job skipped and all-jobs-passed failed, so the rollup refused the skips: skip=false")
 
     def test_one_suite_job_skipped_among_successes_does_not_skip_the_push(self):
-        name = "checks-windows-rest"
+        name = UNNAMED_SUITE_JOB
         self.assertIn(name, SUITE_JOBS, "%s is not a suite job of checks.yml, so this case probes the wrong job" % name)
+        self.assertNotIn(name, NAMED_SUITE_JOBS, "%s is named in scope-skips, so its skip is intended and proves nothing here" % name)
         value, _ = self.skip_on(ready_head_runs({name: {"conclusion": "skipped"}}))
         self.assertEqual(value, "false", "%s skipped on the ready run while the other suites succeeded: skip=false" % name)
 
@@ -474,12 +477,32 @@ class SuiteRunsOfTheHead(LiveHead):
         value, _ = self.skip_on(runs)
         self.assertEqual(value, "false", "%s was re-run and the newer run failed, so the older success stands for nothing: skip=false" % name)
 
-    def test_every_suite_job_of_checks_yml_is_required_for_the_skip(self):
+    def test_every_fast_windows_job_is_named_in_scope_skips(self):
+        # Scope first: a skip of a fast Windows job is intended only when the map names it.
+        self.assertEqual(sorted(set(FAST_WINDOWS_JOBS) - NAMED_SUITE_JOBS), [],
+                         "scope-skips does not name these fast Windows jobs, so their skip on a ready run reads as a gap")
+
+    def test_a_fast_windows_job_skipped_with_its_scope_run_passing_skips_the_push(self):
+        for name in sorted(FAST_WINDOWS_JOBS):
+            with self.subTest(job=name):
+                self.assertIn(name, NAMED_SUITE_JOBS, "%s is not named in scope-skips, so this case probes nothing" % name)
+                value, _ = self.skip_on(ready_head_runs({name: {"conclusion": "skipped"}}))
+                self.assertEqual(value, "true", "%s is named in scope-skips and skipped while the scope run passed: skip=true" % name)
+
+    def test_a_fast_windows_job_skipped_with_its_scope_run_failed_does_not_skip_the_push(self):
+        for name in sorted(FAST_WINDOWS_JOBS):
+            with self.subTest(job=name):
+                value, _ = self.skip_on(ready_head_runs({name: {"conclusion": "skipped"}, SCOPE_JOB: {"conclusion": "failure"}}))
+                self.assertEqual(value, "false", "%s is skipped and the scope run failed, so the map proves no skip: skip=false" % name)
+
+    def test_every_suite_job_not_named_in_scope_skips_is_required_for_the_skip(self):
         self.assertTrue(SUITE_JOBS, "the reader derived no suite job from checks.yml, so this case would prove nothing")
         for name in SUITE_JOBS:
+            if name in NAMED_SUITE_JOBS:
+                continue
             with self.subTest(job=name):
                 value, _ = self.skip_on(ready_head_runs({name: {"conclusion": "skipped"}}))
-                self.assertEqual(value, "false", "%s is a suite job, but skipping it still gives skip=true" % name)
+                self.assertEqual(value, "false", "%s is a suite job the map does not name, but skipping it still gives skip=true" % name)
 
     def test_the_macos_jobs_are_no_suite_job_of_checks_yml(self):
         # Named failure: a macOS job is a suite job, so a skipped macOS job on a ready run is a gap the push must not skip over.
@@ -692,7 +715,7 @@ class MacosJobsOffBatchHead(LiveHead):
                 self.assertEqual(value, "true", "%s is skipped on the ready run and is no suite job of the head: skip=true" % name)
 
     def test_a_skipped_suite_job_beside_the_skipped_macos_jobs_is_refused(self):
-        name = "checks-windows-rest"
+        name = UNNAMED_SUITE_JOB
         self.assertIn(name, SUITE_JOBS, "%s is not a suite job of checks.yml, so this case probes the wrong job" % name)
         value, _ = self.skip_on(ready_head_runs({name: {"conclusion": "skipped"}}))
         self.assertEqual(value, "false", "%s was skipped on the ready run and is a suite job: skip=false" % name)
@@ -712,11 +735,11 @@ class MacosJobsCallerWorkspace(LiveHead):
     scope-skips map, and a caller with that file still proves the skip from its suite jobs alone."""
 
     def caller(self):
-        """A calling workspace whose checks.yml is this repo's."""
+        """A calling workspace whose checks.yml is this repo's, with the scope-skips input taken off: the caller names no map."""
         caller = os.path.join(RUN_FOLDER, "caller-%s" % uuid.uuid4().hex)
         os.makedirs(os.path.join(caller, ".github", "workflows"))
         with open(os.path.join(caller, ".github", "workflows", "checks.yml"), "w", encoding="utf-8") as handle:
-            handle.write(CHECKS_TEXT)
+            handle.write(re.sub(r"^          scope-skips: .*\n", "", CHECKS_TEXT, count=1, flags=re.M))
         return caller
 
     def test_a_caller_with_no_scope_skips_input_skips_the_push_when_the_macos_jobs_never_ran(self):
@@ -758,7 +781,7 @@ class MacosJobsOffMergedPullRequest(LiveHead):
                 self.assertEqual(value, "true", "%s is skipped on the newest run and is no suite job of the head: skip=true" % name)
 
     def test_a_skipped_suite_job_beside_the_skipped_macos_jobs_runs(self):
-        name = "checks-windows-rest"
+        name = UNNAMED_SUITE_JOB
         self.assertIn(name, SUITE_JOBS, "%s is not a suite job of checks.yml, so this case probes the wrong job" % name)
         _, fake = self.fake_for({name: {"conclusion": "skipped", "steps": []}})
         value, _ = self.skip_on(fake=fake)
