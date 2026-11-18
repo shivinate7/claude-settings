@@ -142,6 +142,14 @@ def unchecked_feel_debts(root, moved):
     return out
 
 
+# The note rules an agent must follow, one list for the refusal below and the SubagentStart brief (hooks/agent_brief.py
+# imports it). {folder} is the note folder with its slash, {old} the old notes file; layout.fill_note_paths fills both.
+# The first entry holds the note form, and the refusal for a bad new note prints it.
+AGENT_FORM_RULES = (
+    "A new or edited note is its own file, {folder}<slug>.md, one line `- <slug>: <text>`: the slug is the file name, "
+    "32 characters or fewer, and not digits only.",
+    "The old notes file {old} takes deletes only: add no line to it and edit none.",
+)
 NOTE_LINE = re.compile(r"^- ([a-z0-9-]+): +\S")  # the one line a note file holds: `- <slug>: <text>`, text not empty
 DIGITS = re.compile(r"[0-9]+")  # a digits-only slug reads as an old `note:<digits>` ref (hooks/feedback_guard.py)
 NOTE_README = "README.md"  # the note folder's own description: not a note
@@ -278,8 +286,10 @@ def main(args):
             print("check_record_slugs: FAIL: a note file holds one line `- <slug>: <text>`, its slug the file name: %s"
                   % f)
     for line in new_lines:
-        print("check_record_slugs: FAIL: a new or edited note is its own file, %s<slug>.md, as `- <slug>: <text>`: %s"
-              % (folder, line[:CLIP]))
+        print("check_record_slugs: FAIL: a new or edited note line is refused: %s" % line[:CLIP])
+    if new_lines or bad_form:
+        for rule in AGENT_FORM_RULES:
+            print("check_record_slugs: note rule: " + layout.fill_note_paths(ROOT, rule))
     for f, how in feel:
         print("check_record_slugs: FAIL: feel-fix debt %s with no device check: %s"
               % ("deleted" if how == "deleted" else "lost its Feel line", f))
