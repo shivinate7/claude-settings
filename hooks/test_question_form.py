@@ -2176,6 +2176,32 @@ def case_past_ruling_owner_sentences_added_text_is_capped():
           len(text) <= question_form.INDEX_CAP + question_form.RULING_EXTRA_CAP, "%d characters" % len(text))
 
 
+# A markdown table row is judged alone. Run on together, the rows of a long table form one unit bigger than a record's
+# whole ruling budget, and an owner ruling in the table's last row would be lost with that unit.
+TABLE_FILLER_ROWS = 90  # joined, these rows run well past one record's whole ruling budget
+
+
+def case_past_ruling_owner_row_after_a_long_table_reaches_the_line():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("past rulings table: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    rows = ["| a%d | b | c |" % i for i in range(TABLE_FILLER_ROWS)]
+    rows.append("| last | owner ruling 2026-11-17 19:45 CST | keep | ... |")
+    section = "B" * 790 + ". \n" + "\n".join(rows)
+    record_id, candidates = _past_cap_candidates("past-owner-table-row", section, fn)
+    lines = _record_lines(candidates, record_id)
+    check("past rulings table: the decision record is a candidate (scope)", bool(lines), str(candidates)[:200])
+    if not lines:
+        return
+    text = _record_text(candidates, record_id)
+    check("past rulings table: the owner ruling row past INDEX_CAP, after a long table, reaches the record's line",
+          "owner ruling 2026-11-17 19:45" in text, text[-200:])
+    check("past rulings table: the record adds no more than INDEX_CAP plus RULING_EXTRA_CAP characters",
+          len(text) <= question_form.INDEX_CAP + question_form.RULING_EXTRA_CAP, "%d characters" % len(text))
+
+
 # The owner's rulings not yet on main (the ruled store) sit on origin/roadmap. past_rulings puts each open entry first,
 # ahead of the decision records, and names what it supersedes. The pointer is patched to the fixture repo, so the cases
 # pass whichever checkout past_rulings reads the store from.
@@ -3785,6 +3811,7 @@ def main():
                  case_past_ruling_owner_sentence_inside_the_cap_reaches_the_line,
                  case_past_ruling_section_without_owner_sentence_is_cut_at_the_cap,
                  case_past_ruling_owner_sentences_added_text_is_capped,
+                 case_past_ruling_owner_row_after_a_long_table_reaches_the_line,
                  case_ruled_store_first_and_carries_supersedes, case_ruled_store_absent_is_only_unknown,
                  case_ruled_store_words_filter_leaves_out_an_unrelated_entry,
                  case_ruled_store_caps_matching_entries_at_eight_newest_first,
