@@ -1,0 +1,14 @@
+{
+ "id": "ledger-1561-leftovers-filed",
+ "title": "The Nov 10 01:07 CST ruling is filed in decision pr-ledger and old draft 1561's leftovers are one note on main",
+ "status": "done",
+ "repo": "shivinate7/claude-settings",
+ "phase": "done",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator, 07:28 CST Nov 18: old draft #1561 (replaced by #2845) blocked archiving its lane until its one unfiled finding and its leftovers reached main.",
+ "source": "coordinator 07:28 CST Nov 18, relayed to triage 11",
+ "note": "PR 3646 (branch triage-pr1561-leftovers, no step: filed by branch, coordinator pick 01:02 CST Nov 18) merged 08:05:23 CST Nov 18 as 9def3ee7b, merged by shivinate7 (REST: merged true, head 0d1154853b09, 2 files). docs/decisions/pr-ledger.md line 26 now holds the 2026-11-10 01:07 CST ruling in place of the 13:54 CST line; docs/notes/pr1561-leftovers-may-be-dead.md holds the leftovers, marked may be dead, not diffed. The merge tool's prose judge called both unbacked (no cited text); the note admits no diff was run. Lane lint PASS on the final head (473.9 s).",
+ "updatedAt": "2026-11-18T08:06:11-06:00"
+}
