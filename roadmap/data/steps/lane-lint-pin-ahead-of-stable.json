@@ -1,0 +1,14 @@
+{
+  "id": "lane-lint-pin-ahead-of-stable",
+  "title": "Lane lint: a tool pin ahead of the stable branch passes only when main has reached it (pull request 3551)",
+  "status": "blocked",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "",
+  "owner": "consultant",
+  "blockedBy": [],
+  "why": "Owner ruling on item 727 pick a (11:57 CST Nov 15): a pin is compared to the stable branch head. Pull request 3551 also passes any ahead pin; round 1 (haiku) found an unmerged lane commit passes as a pin.",
+  "source": "consultant relay 21:45 CST Nov 17, lane lane-lint-runs-local-tools; bin/ste-changed lines 112-114",
+  "note": "Blocked on the owner's pick, page item 954 (a ahead passes only if main reached it, recommended; b any ahead passes, widens; c ruling as written). The consultant fixes the round-1 finding on a failed stable fetch meanwhile. Not built by triage.",
+  "updatedAt": "2026-11-17T21:44:25-06:00"
+}
