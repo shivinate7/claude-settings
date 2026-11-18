@@ -22,8 +22,10 @@ characters or fewer, and not digits only. Use no name from the Not cell of `GLOS
 file name. Never add or edit a note in the old file `docs/debts/notes.md`. Commit your files, then
 run these from the repo root, each through `~/.claude/bin/verdict`:
 `python3 lint/check_record_slugs.py` (no file arguments; with arguments it checks length only),
-`python3 lint/check_glossary.py`, `python3 lint/ste_lint.py <your folder>` and
-`python3 lint/stale_cites.py --range origin/main...HEAD`.
+`python3 lint/check_glossary.py` and `python3 lint/ste_lint.py <your folder>`.
+
+For every record you write, notes included, commit your files, then run
+`python3 lint/stale_cites.py --range origin/main...HEAD` from the repo root, through `~/.claude/bin/verdict`.
 
 When you rewrite, keep every fact. Drop words, never facts. Follow
 `speak-rewrite-superseded-in-place` (rewrite superseded text in place, keep only what is true
