@@ -846,10 +846,10 @@ lb_add("an agent's session tool that writes nothing reads no load under the wors
 lb_add("a Bash call whose agent_id is malformed reads no load under the worst reading",
        lb_no_read_check("Bash", {"command": "echo hi"}, agent="not an id!"))
 
-# CLOUD. Decision machine-load-brake, "Cloud sessions" (owner ruling 2026-11-18 14:45 CST). With CLAUDE_CODE_REMOTE=true
-# a new Agent, Task or Workflow start is refused at a full disk: free under the full point, read from guard.py at each
-# case, never copied here. Memory and busy never brake a cloud start. A running agent or lane session is never stopped,
-# and reads no load. The allowed calls run end to end, so their file writes are checked too (nothing reaches guard.log).
+# CLOUD. With CLAUDE_CODE_REMOTE=true, a new Agent, Task or Workflow start is refused at a full disk: free space under
+# the full point, which each case reads from guard.py rather than copying. A cloud lane that fills the disk makes its
+# writes fail, so the start is what gets stopped. Memory and busy never brake a cloud start. A running agent or lane is
+# never stopped, and reads no load. Allowed calls run end to end, so their file writes are checked too.
 LB_CLOUD = "true"
 LB_SWEEP = re.compile(r"sweep\.py")   # the sweep command a refusal names (the-janitor-is-one-machine-wide-sweep)
 LB_WAIT = re.compile(r"wait", re.I)   # and it never tells the session to wait
