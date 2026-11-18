@@ -22,6 +22,10 @@ the hook prints one JSON object on stdout and exits 0:
   case: `Builder` and `explore` get the scope and the line set of their role.
 - When the payload's cwd holds a .github/stamp.json whose cite.form is set, one brief line
   carries the form of every kind, in kind order. A cite.pattern with no cite.form adds no line.
+- Each note rule that check_record_slugs.AGENT_FORM_RULES holds reaches every type's context, rendered
+  with the note folder and the old notes file from lint/layout.py. The note form sits on one line, and the
+  old notes file line says it takes deletes only. A changed or added rule in that list reaches the brief
+  with no edit to the hook.
 - Junk or empty stdin, or an internal error: no output on stdout, exit 0, and at most one stderr
   line that starts `agent_brief:`. The hook fails open.
 
@@ -296,6 +300,8 @@ def line_set_check(expected, staged=False):
         rules = [line for line in text.split("\n") if not line.startswith("- Scope")]
         if staged:
             rules = [line for line in rules if STAGED_KEY not in line]
+        noted = rendered_rules()  # the note rules have their own cases below, so a line that holds one is left out here
+        rules = [line for line in rules if not any(rule in line for rule in noted)]
         if rules == expected:
             return None
         if len(rules) != len(expected):
@@ -815,6 +821,178 @@ def refuter_read_only_check():
 add("refuter: guard_core.REFUTER_ROLE names the role, the one home the refuter cases read",
     "custom", fn=refuter_name_check)
 add("refuter: agent_brief's READ_ONLY set holds the refuter role", "custom", fn=refuter_read_only_check)
+
+
+# NOTE RULES: the brief gives every agent the rules that check_record_slugs.AGENT_FORM_RULES holds, one list that the
+# check prints and the brief reads. An entry holds {folder} (the note folder, with its slash) and {old} (the old notes
+# file). Both come from this checkout's layout, read as the check reads it. NOTE_FORM and NOTE_FILE are the spec's own
+# words, pinned here. The stand-in cases run the hook with a changed and an added list, so a rule that the list changes
+# must reach the brief, and the note form that the list dropped must leave it.
+LINT_DIR = os.path.join(REPO_ROOT, "lint")
+NOTE_RULES_NAME = "AGENT_FORM_RULES"  # the list's name in check_record_slugs.py
+NOTE_FORM = "- <slug>: <text>"  # the form a note line takes (decision notes-merge-union)
+NOTE_FILE = "<slug>.md"  # a note file, named by its slug
+CHANGED_RULE = "SENTINEL rule changed in the list: the note folder is {folder}"  # a stand-in value, not a note rule
+EXTRA_RULE = "SENTINEL rule added to the list: the old notes file {old} takes deletes only"  # added, with no edit
+
+
+def layout_paths():
+    """(note folder with its slash, old notes file, None) from this checkout's layout, or (None, None, problem)."""
+    sys.path.append(LINT_DIR)
+    try:
+        import layout  # noqa: E402  the one home of where records live (lint/layout.py)
+        return layout.path(REPO_ROOT, "notes") + "/", layout.path(REPO_ROOT, "debt-notes"), None
+    except Exception as exc:  # a layout that does not read is a red case, never a crash at import
+        return None, None, "lint/layout.py does not read: %s" % exc
+
+
+def load_note_rules():
+    """(the list's entries, None) from check_record_slugs, or (None, problem). A missing list is a red case."""
+    sys.path.append(LINT_DIR)
+    try:
+        module = importlib.import_module("check_record_slugs")
+    except Exception as exc:
+        return None, "check_record_slugs does not load: %s" % exc
+    rules = getattr(module, NOTE_RULES_NAME, None)
+    if rules is None:
+        return None, "check_record_slugs has no %s list, the one home of the note rules" % NOTE_RULES_NAME
+    if not isinstance(rules, (tuple, list)) or not all(isinstance(r, str) and r.strip() for r in rules):
+        return None, "%s is not a list of text entries" % NOTE_RULES_NAME
+    return list(rules), None
+
+
+FOLDER, OLD_NOTES, LAYOUT_PROBLEM = layout_paths()
+NOTE_RULES, RULES_PROBLEM = load_note_rules()
+
+
+def render(template):
+    """A rule as the brief shows it: the note folder and the old notes file filled in."""
+    return template.replace("{folder}", FOLDER).replace("{old}", OLD_NOTES)
+
+
+def rendered_rules():
+    """The list's rules as the brief renders them, or none while the list or the layout does not read."""
+    if LAYOUT_PROBLEM or RULES_PROBLEM:
+        return []
+    return [render(rule) for rule in NOTE_RULES]
+
+
+def same_line(text, *parts):
+    """True when one line of text holds every part, in any order."""
+    return any(all(part in line for part in parts) for line in text.split("\n"))
+
+
+def stand_in_prelude(rules):
+    """Source that puts a stand-in check_record_slugs, whose list holds `rules`, in sys.modules before the hook runs."""
+    return ("import sys, types\n"
+            "_stand_in = types.ModuleType('check_record_slugs')\n"
+            "_stand_in.%s = %r\n"
+            "sys.modules['check_record_slugs'] = _stand_in\n" % (NOTE_RULES_NAME, tuple(rules)))
+
+
+def stand_in_context(rules, agent_type="builder"):
+    """(additionalContext, None) from the hook run with a stand-in check_record_slugs, or (None, problem)."""
+    if not os.path.exists(HOOK):
+        return None, "the hook file is missing: %s" % HOOK
+    result = run_hook_after(stand_in_prelude(rules), payload(agent_type))
+    if result.returncode != 0:
+        return None, "exit %d with a stand-in check_record_slugs: %s" % (result.returncode, last_stderr_line(result))
+    return context_of(result.stdout)
+
+
+def note_form_check(agent_type):
+    """Build a check: the brief for `agent_type` has its scope line, and one line holds the note file in the note
+    folder and the note form."""
+    def check():
+        if LAYOUT_PROBLEM:
+            return LAYOUT_PROBLEM
+        text, problem = context_for(payload(agent_type))
+        if problem:
+            return problem
+        scope = scope_check(agent_type if isinstance(agent_type, str) else "general")(text)  # scope before the subject
+        if scope:
+            return scope
+        if not same_line(text, FOLDER + NOTE_FILE, NOTE_FORM):
+            return "no line of the brief holds both %r and %r" % (FOLDER + NOTE_FILE, NOTE_FORM)
+        return None
+    return check
+
+
+def old_notes_check():
+    """The brief's old notes file line names the old notes file and says it takes deletes only, on one line."""
+    if LAYOUT_PROBLEM:
+        return LAYOUT_PROBLEM
+    text, problem = context_for(payload("builder"))
+    if problem:
+        return problem
+    if not same_line(text, OLD_NOTES, "deletes only"):
+        return "no line of the brief holds both %r and 'deletes only'" % OLD_NOTES
+    return None
+
+
+def list_reaches_brief_check():
+    """The builder's brief carries every rule that the list holds, rendered: the list is the source of the text."""
+    if LAYOUT_PROBLEM:
+        return LAYOUT_PROBLEM
+    if RULES_PROBLEM:
+        return RULES_PROBLEM
+    text, problem = context_for(payload("builder"))
+    if problem:
+        return problem
+    for rule in rendered_rules():
+        if rule not in text:
+            return "the brief lacks a rule the list holds: %r" % rule[:90]
+    return None
+
+
+def changed_rule_check():
+    """A changed rule in the list reaches the brief, and the note form that the list dropped leaves it: the brief
+    reads the list, and holds no copy of the text."""
+    if LAYOUT_PROBLEM:
+        return LAYOUT_PROBLEM
+    text, problem = stand_in_context([CHANGED_RULE])
+    if problem:
+        return problem
+    if render(CHANGED_RULE) not in text:
+        return "the changed rule is not in the brief: the brief does not read check_record_slugs.%s" % NOTE_RULES_NAME
+    if same_line(text, FOLDER + NOTE_FILE, NOTE_FORM):
+        return "the brief still holds the note form after the list dropped it: the line is copied, not read"
+    return None
+
+
+def new_rule_check():
+    """A rule added to the list reaches the brief with no edit to the hook."""
+    if LAYOUT_PROBLEM:
+        return LAYOUT_PROBLEM
+    text, problem = stand_in_context([CHANGED_RULE, EXTRA_RULE])
+    if problem:
+        return problem
+    for template in (CHANGED_RULE, EXTRA_RULE):
+        if render(template) not in text:
+            return "a rule of the list is not in the brief: %r" % render(template)[:90]
+    return None
+
+
+def empty_list_check():
+    """Control, green on the old code: an empty list still gives the builder its scope line through the same runner."""
+    text, problem = stand_in_context([])
+    if problem:
+        return problem
+    return scope_check("builder")(text)
+
+
+for _t in TYPES + ["Plan", MISSING]:
+    add("note form: %s gets the note form on one line" % (_t if isinstance(_t, str) else "a missing type"),
+        "custom", fn=note_form_check(_t))
+add("note form: the old notes file line names its path and says it takes deletes only", "custom",
+    fn=old_notes_check)
+add("source: the builder's brief carries every rule that check_record_slugs.%s holds" % NOTE_RULES_NAME,
+    "custom", fn=list_reaches_brief_check)
+add("source: a changed rule in the list reaches the brief, and the note form it replaces is gone", "custom",
+    fn=changed_rule_check)
+add("source: a rule added to the list reaches the brief with no edit", "custom", fn=new_rule_check)
+add("source control: an empty list keeps the builder's scope line through the same runner", "custom",
+    fn=empty_list_check)
 
 
 def main():
