@@ -15340,8 +15340,8 @@ class StandingMergeRole(CloudSession):
     """Ruling own-tiny-fixes-b: a standing session (a coordinator, a triage or a consultant, decision session-tiers)
     records the `standing` merge role and merges its OWN pull request through the merge tool, on green. The gate sits after the pull request
     read and before the lock or any claim. The pull request is this session's own when its body names this session's link. CI is green.
-    A docs-only pull request with no guard path needs no record. Any other pull request needs one passing Sonnet review record on the live
-    head. No pull request is bounded by line or file counts. The batch runner is not judged by this gate. A refusal names no tier word and no command."""
+    A docs-only pull request with no guard path needs no record. Any other pull request needs one passing reviewer record on the live
+    head, whatever its model (owner, pick A). No pull request is bounded by line or file counts. The batch runner is not judged by this gate. A refusal names no tier word and no command."""
 
     def own_pr(self, changed, body=OWN_PR_BODY):
         """Make pull request 7 a case's pull request: its body is `body`, its files are `changed`, and this session records standing."""
@@ -15374,13 +15374,27 @@ class StandingMergeRole(CloudSession):
         self.assertEqual(self.refs(), refs, "the refused run took the lock or pushed a claim")
         return err
 
-    def assert_passing_sonnet_record(self, body, changed):
-        """P7, the scope before the gate reads it: `body` is one passing Sonnet record on the live head, and `changed` holds a code path
-        (not a doc). A case that passes calls this first, so its red comes from the gate alone."""
+    def assert_passing_record(self, body, changed):
+        """P7, the scope before the gate reads it: `body` is one passing reviewer record on the live head, whatever its model, and `changed`
+        holds a code path (not a doc). A case that passes calls this first, so its red comes from the gate alone."""
         rec = merge.parse_review(body)
         self.assertIsNotNone(rec, "the case's review record does not parse")
         self.assertEqual(merge.review_state(rec, self.head())[0], "done", "the case's review record is not a passing record on the live head")
         self.assertTrue(any(not merge.is_doc(p) for p, _, _ in changed), "the case holds no code path")
+
+    def assert_standing_merges(self, changed, body):
+        """The gate lets `body` through: the case's pull request is this session's own (own_pr), `changed` holds a code path, and one passing
+        reviewer record on the live head is served. The case commits its files first."""
+        self.assert_passing_record(body, changed)
+        self.assert_standing_merge_served(body)
+
+    def assert_standing_merge_served(self, body):
+        """Serve `body` as pull request 7's record, then `merge 7 --confirm --head <live head>` as a standing session must merge. A refusal
+        fails by its own line: stderr's first line can be a stamp warning, and the refusal is the last line."""
+        self.scripted_records(body)
+        rc, out, err = self.standing_confirm()
+        self.assertEqual(rc, 0, (err.strip().splitlines() or [out])[-1])
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
 
     # ---- the writer and the reader: standing is a merge role, recorded like the batch runner's
     def test_a_standing_role_is_recorded_like_a_batch_runner_role(self):
@@ -15422,16 +15436,16 @@ class StandingMergeRole(CloudSession):
         self.own_pr([("docs/notes.md", "modified", 1)], body="Small edit.\n")
         self.assert_standing_refused()
 
-    # ---- a code pull request, guard paths included, merges under standing with one passing Sonnet
-    # record on the live head. Without that record it is refused, whatever its size.
-    def test_an_own_code_pr_with_no_passing_sonnet_record_is_refused_under_standing(self):
+    # ---- a code pull request, guard paths included, merges under standing with one passing reviewer
+    # record on the live head, whatever its model. Without that record it is refused, whatever its size.
+    def test_an_own_code_pr_with_no_passing_record_is_refused_under_standing(self):
+        # control, case 3 (owner, pick A): no record, and no record that passes on the live head, whatever its model
         head = self.head()
         records = {
             "no record": None,
-            "a haiku record": record_text(head=head, rounds=("Round 1: reviewer, haiku, PASS",)),
-            "an opus record": record_text(head=head, rounds=("Round 1: reviewer, opus, PASS",)),
             "a sonnet record on an old head": record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS),
             "a failing sonnet record": record_text(head=head, rounds=("Round 1: reviewer, sonnet, FAIL",)),
+            "a failing haiku record": record_text(head=head, rounds=("Round 1: reviewer, haiku, FAIL",)),
         }
         for name, body in records.items():
             for changed in ([("tools/note.py", "added", 1)],
@@ -15443,7 +15457,7 @@ class StandingMergeRole(CloudSession):
 
     def test_an_own_guard_path_pr_with_no_review_log_is_refused_under_standing(self):
         # the model record is a doc under docs/, yet a guard path (decision agent-model-cap); hooks/ is a guard path too.
-        # A guard path is a code change, so it needs a passing Sonnet record, and this one has none.
+        # A guard path is a code change, so it needs a passing reviewer record, and this one has none.
         for path in ("docs/decisions/agent-model-cap.md", "hooks/rules.md"):
             with self.subTest(path=path):
                 self.own_pr([(path, "modified", 1)])
@@ -15451,14 +15465,14 @@ class StandingMergeRole(CloudSession):
                 self.assert_standing_refused()
 
     def test_an_own_guard_path_pr_with_a_passing_sonnet_record_merges_under_standing(self):
-        # a guard path is code, so one passing Sonnet record on the live head is its proof
+        # a guard path is code, so one passing reviewer record on the live head is its proof
         paths = ("hooks/rules.md", "merge/x.py", "settings.json")  # the model record fails the stamp check as a stub; the no-record case covers it
         self.commit_files(paths)
         changed = [(p, "modified", 1) for p in paths]
         self.own_pr(changed)
         body = record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, PASS",), guard="yes")
         self.assertTrue(merge.guard_hits([p for p, _, _ in changed]), "the case's paths hold no guard path")  # the scope, before the gate reads it
-        self.assert_passing_sonnet_record(body, changed)
+        self.assert_passing_record(body, changed)
         self.scripted_records(body)
         rc, out, err = self.standing_confirm()
         self.assertEqual(rc, 0, out + err)
@@ -15471,7 +15485,7 @@ class StandingMergeRole(CloudSession):
         self.host.state = "red: checks: fail"  # the head reads red, as the red-head cases above set it (head_state reads this)
         self.assert_standing_refused()
 
-    # ---- one passing Sonnet record on the live head is the proof for a code pull request
+    # ---- one passing reviewer record on the live head is the proof for a code pull request, whatever its model
     def test_an_own_code_pr_whose_round_one_failed_and_a_sonnet_fix_verifier_passed_merges_under_standing(self):
         # the fail-then-fix cycle: a failed haiku review followed by a passing sonnet fix verifier ends review
         self.commit_feat({"tools/note.py": "X = 1\n"})
@@ -15481,10 +15495,32 @@ class StandingMergeRole(CloudSession):
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(getattr(self.host, "merged", False), out + err)
 
-    def test_an_own_code_pr_whose_haiku_round_one_passed_alone_is_refused_under_standing(self):
+    def test_an_own_code_pr_whose_haiku_round_two_passed_after_a_round_one_fail_merges_under_standing(self):
+        # re-pointed from the refused "haiku round one passed alone" case (owner, pick A): the pass that ends review is the gate's, whatever its model
+        self.commit_feat({"tools/note.py": "X = 1\n"})
+        changed = [("tools/note.py", "added", 1)]
+        self.own_pr(changed)
+        self.assert_standing_merges(changed, record_text(head=self.head(), rounds=("Round 1: reviewer, haiku, FAIL", "Round 2: reviewer, haiku, PASS")))
+
+    def test_an_own_code_pr_with_a_passing_haiku_round_one_record_merges_under_standing(self):
+        # case 1 (owner, pick A): a round-one haiku pass ends review, and the gate reads the pass, not its model
+        self.commit_feat({"tools/note.py": "X = 1\n"})
+        changed = [("tools/note.py", "added", 1)]
+        self.own_pr(changed)
+        self.assert_standing_merges(changed, record_text(head=self.head(), rounds=("Round 1: reviewer, haiku, PASS",)))
+
+    def test_an_own_code_pr_with_a_passing_opus_round_one_record_merges_under_standing(self):
+        # re-pointed from the refused "an opus record" subtest (owner, pick A): the gate reads the pass, not its model
+        self.commit_feat({"tools/note.py": "X = 1\n"})
+        changed = [("tools/note.py", "added", 1)]
+        self.own_pr(changed)
+        self.assert_standing_merges(changed, record_text(head=self.head(), rounds=("Round 1: reviewer, opus, PASS",)))
+
+    def test_an_own_code_pr_whose_sonnet_round_failed_and_a_haiku_fix_verifier_passed_is_refused_under_standing(self):
+        # control (owner item 444 a; the pick A ruling keeps fix checks on sonnet): a haiku fix check PASS does not end review
         self.commit_feat({"tools/note.py": "X = 1\n"})
         self.own_pr([("tools/note.py", "added", 1)])
-        self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, haiku, FAIL", "Round 2: reviewer, haiku, PASS")))
+        self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, FAIL",), fix=(fix_verifier_line(model="haiku"),)))
         self.assert_standing_refused()
 
     def test_an_own_code_pr_whose_three_rounds_all_failed_is_refused_under_standing(self):
@@ -15494,12 +15530,19 @@ class StandingMergeRole(CloudSession):
         self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, haiku, FAIL", "Round 2: reviewer, sonnet, FAIL", "Round 3: reviewer, sonnet, FAIL")))
         self.assert_standing_refused()
 
+    def test_an_own_code_pr_whose_final_round_failed_on_haiku_is_refused_under_standing(self):
+        # control, case 4 (owner, pick A): a failed final round is no pass, whatever its model
+        self.commit_feat({"tools/note.py": "X = 1\n"})
+        self.own_pr([("tools/note.py", "added", 1)])
+        self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, haiku, FAIL", "Round 2: reviewer, haiku, FAIL", "Round 3: reviewer, haiku, FAIL")))
+        self.assert_standing_refused()
+
     def test_an_own_code_pr_with_a_passing_sonnet_record_merges_under_standing(self):
         self.commit_feat({"tools/note.py": "X = 1\n"})
         changed = [("tools/note.py", "added", 1)]
         self.own_pr(changed)
         body = record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, PASS",))
-        self.assert_passing_sonnet_record(body, changed)
+        self.assert_passing_record(body, changed)
         self.scripted_records(body)
         rc, out, err = self.standing_confirm()
         self.assertEqual(rc, 0, out + err)
@@ -15529,31 +15572,38 @@ class StandingMergeRole(CloudSession):
         body = record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, PASS",))
         self.assertGreater(len(changed), files, "the case does not exceed the file bound")  # the scope, before the gate reads it
         self.assertGreater(sum(a for _, _, a in changed), lines, "the case does not exceed the line bound")
-        self.assert_passing_sonnet_record(body, changed)
+        self.assert_passing_record(body, changed)
         self.scripted_records(body)
         rc, out, err = self.standing_confirm()
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(getattr(self.host, "merged", False), out + err)
 
-    # ---- the gate refuses: rule text needs one Sonnet review record on the live head
+    # ---- the gate refuses: rule text needs one passing reviewer record on the live head, and no record is refused
     def test_a_rule_text_pr_with_no_review_log_is_refused_under_standing(self):
         self.own_pr([("CLAUDE.md", "modified", 1)])
         self.scripted_records()
         self.assert_standing_refused()
 
-    def test_a_rule_text_pr_whose_record_is_not_sonnet_is_refused_under_standing(self):
-        self.own_pr([("CLAUDE.md", "modified", 1)])
-        for model in ("haiku", "opus"):
-            with self.subTest(model=model):
-                self.scripted_records(record_text(head=self.head(), rounds=(f"Round 1: reviewer, {model}, PASS",)))
-                self.assert_standing_refused()
+    def test_a_rule_text_pr_with_a_passing_haiku_record_merges_under_standing(self):
+        # re-pointed from the refused non-sonnet case (owner, pick A): the gate reads the pass, not its model
+        self.commit_feat({"CLAUDE.md": "Rule text.\n"})
+        changed = [("CLAUDE.md", "modified", 1)]
+        self.own_pr(changed)
+        self.assert_standing_merges(changed, record_text(head=self.head(), rounds=("Round 1: reviewer, haiku, PASS",)))
+
+    def test_a_rule_text_pr_with_a_passing_opus_record_merges_under_standing(self):
+        # re-pointed from the refused non-sonnet case (owner, pick A): the gate reads the pass, not its model
+        self.commit_feat({"CLAUDE.md": "Rule text.\n"})
+        changed = [("CLAUDE.md", "modified", 1)]
+        self.own_pr(changed)
+        self.assert_standing_merges(changed, record_text(head=self.head(), rounds=("Round 1: reviewer, opus, PASS",)))
 
     def test_a_rule_text_pr_whose_sonnet_record_names_an_old_head_is_refused_under_standing(self):
         self.own_pr([("CLAUDE.md", "modified", 1)])
         self.scripted_records(record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
         self.assert_standing_refused()
 
-    # ---- no size bound: a pull request past docs needs a passing sonnet record; a docs-only one needs none.
+    # ---- no size bound: a pull request past docs needs a passing reviewer record; a docs-only one needs none.
     RULE_PATHS = ("CLAUDE.md", "agents/a.md", "agents/b.md", "skills/b/SKILL.md", "skills/c/SKILL.md")
     DOC_PATHS = ("docs/a.md", "docs/b.md", "docs/c.md", "docs/d.md", "docs/e.md")
 
@@ -15572,7 +15622,7 @@ class StandingMergeRole(CloudSession):
             self.assertNotIn(named, err.lower(), f"the refusal names {named}")
 
     def test_a_large_rule_text_pr_with_a_sonnet_record_merges_under_standing(self):
-        # no size bound: a passing sonnet record is the gate
+        # no size bound: a passing reviewer record is the gate
         paths = self.RULE_PATHS
         self.commit_files(paths)
         self.own_pr(self.spread(paths, 400))
