@@ -1,7 +1,7 @@
 {
   "id": "status-tab-lists-coord-prs",
   "title": "The page's Status tab shows each open lane PR with its next act from REST, and the open-PR map plan is retired",
-  "status": "doing",
+  "status": "done",
   "repo": "shivinate7/claude-settings",
   "phase": "next",
   "lane": "",
@@ -9,6 +9,6 @@
   "blockedBy": [],
   "why": "Owner, 19:04 CST Nov 17, relayed by the coordinator: the coordinator's PR list should live on the artifact or the roadmap branch. Consultant, 19:12 CST Nov 17, asked for this step (the answer on the table). The list was plans/open-pr-map-2026-11-15.md on roadmap, section Coordinator, and was out of date: two of its five PRs had merged (triage read 19:04 CST).",
   "source": "owner 19:04 CST Nov 17 via coordinator; consultant 19:12 CST Nov 17, relayed to triage 11",
-  "note": "Home: decision pr-ledger; code pr_next_act in merge/merge.py (PR 2845, merged 07:24 CST Nov 18). Built: PR 3649 (Status tab next act) merged 12:44:34 CST Nov 18 (REST: merged, head 29ae974799). Published 12:57 CST Nov 18: the ledger (`merge --reviewed --json`, 472 rows, read 12:50 CST) sits under live-file key `ledger` (commit 6ee51cf870), and live page version 122 shows it (503 acts baked, 51 read 'act unknown'); survival test passed (899 items on the first page, 93 answers, design data equal). The ledger goes stale at 13:50 CST. Act (c) done 12:59 CST: ruling consultant-no-step-per-open-pr rewritten in place, this note, plans/coordinator-picks-2026-11-16.md line 19, and plans/open-pr-map-2026-11-15.md deleted. Left: the coordinator's done checks (baked pull rows with no act = 0 and equal to the REST open count; retirement greps; screen verdict). Owner may change the scope: page item status-tab-pr-list-scope. Look item: status-tab-row-look.",
-  "updatedAt": "2026-11-18T12:59:00-06:00"
+  "note": "Home: decision pr-ledger; code pr_next_act in merge/merge.py. Built: PR 3649 merged 12:44:34 CST Nov 18. Published: page v123 at about 13:19 CST Nov 18 (live file commit ddfdd5f99a: 472 REST open PRs, ledger 472 rows read 13:09:53 CST). Coordinator's done checks 13:22 CST: baked pull rows 472, equal to REST, 0 without an act; open-PR map file 404 on roadmap; screen verdict PASS at 1280 and 390, light and dark. The ledger goes stale 14:09 CST. Follow-up: status-stall-tx-overflow-390. Owner may change the scope: page item status-tab-pr-list-scope.",
+  "updatedAt": "2026-11-18T13:23:00-06:00"
 }

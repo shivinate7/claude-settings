@@ -1,0 +1,14 @@
+{
+  "id": "status-stall-tx-overflow-390",
+  "title": "At 390 px the page scrolls 18 px sideways from one stalled-band step row",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "",
+  "owner": "triage",
+  "blockedBy": [],
+  "why": "Coordinator done check 13:22 CST Nov 18 on page v123: scrollWidth 408 against width 390, light and dark, from the `.tx` button of one stalled-band step row (333 px wide, right edge 408).",
+  "source": "coordinator relay 13:22 CST Nov 18",
+  "note": "Cause the coordinator read: skills/waiting-page/page.html:503 styles `.stall li .tx` with no `min-width: 0` and no `overflow-wrap`; line 540 `.now li .tx` has `min-width: 0`. A screen change: designer first (decision design-agents), design reviewer after. Check at 390 and 1280, light and dark. Screenshots: /tmp/claude-0/-home-user/bbca4ee1-2939-52bd-bdac-0311a4df2389/scratchpad/status-390-light.png.",
+  "updatedAt": "2026-11-18T13:23:00-06:00"
+}
