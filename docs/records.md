@@ -22,7 +22,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `roles-orchestrator-never-builds` | A lane builds a short list of edits itself when nothing can run in parallel, whoever started it. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-one-role-per-agent` | Each agent is one role: builder, reviewer, designer, design reviewer, refuter, or Explore, never two. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-model-per-role-table` | A workflow agent takes the builder or reviewer role through `agentType`. | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-sonnet-is-the-ceiling` | Sonnet is the ceiling, except Plan, the built-in advisor (`advisorModel`), the designer, the design reviewer, the refuter, and a builder's third try (`roles-third-round-steps-up`), which run Opus. | [`CLAUDE.md`](../CLAUDE.md) |
+| `roles-sonnet-is-the-ceiling` | Sonnet is the ceiling, except Plan, the built-in advisor (`advisorModel`), the designer, the design reviewer, and the refuter, which run Opus. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-plan-gets-refuter` | After a Plan agent returns, a refuter gets the task brief and the plan, word for word, and nothing else. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-opus-shaped-say-so` | When a task is Opus-shaped (long-horizon, whole-codebase, or many-hour autonomous work), say so in one line before you dispatch, name why, and offer the switch. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-opus-override-guarded` | Owner raises Opus. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -30,7 +30,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `roles-each-layer-proves-once` | Each layer proves a change once. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-review-cap-three` | A change gets at most three review rounds. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-findings-are-debts-or-notes` | A known gap is a debt only if Claude is likely to hit it in normal work. | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-third-round-steps-up` | Third try: Opus. | [`CLAUDE.md`](../CLAUDE.md) |
+| `roles-third-round-steps-up` | Third try: Sonnet, high effort (owner item 893); an Opus third try stays allowed. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-resume-by-name` | Resume a dead agent by name, never fresh. | [`CLAUDE.md`](../CLAUDE.md) |
 | `parallelism-each-own-checkout` | Fan tasks out to agents now, each in its own checkout. | [`CLAUDE.md`](../CLAUDE.md) |
 | `parallelism-own-lane-orchestrator` | A read-only workflow agent shares the caller's checkout. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -392,6 +392,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `cost-pins-line-range-suffix` | `LINE_SUFFIX` drops only a trailing `:digits`. | [`docs/debts/cost-pins-line-range-suffix.md`](../docs/debts/cost-pins-line-range-suffix.md) |
 | `cost-pins-time-noun-missing` | `COST_NOUN` has `times` but not `time`, so a count before the singular noun passes unflagged. | [`docs/debts/cost-pins-time-noun-missing.md`](../docs/debts/cost-pins-time-noun-missing.md) |
 | `cost-pins-verb-past-tense` | `WORK_VERB` has no past tense, so a count after a past verb passes unflagged. | [`docs/debts/cost-pins-verb-past-tense.md`](../docs/debts/cost-pins-verb-past-tense.md) |
+| `decision-claims-unchecked` | A decision can say what `merge/merge.py` does ("enforces", "refuses", "prints") with no check that runs the named function. | [`docs/debts/decision-claims-unchecked.md`](../docs/debts/decision-claims-unchecked.md) |
 | `departs-word-list-limits` | `question-departs` reads a no-change word in the first clause of the change side. | [`docs/debts/departs-word-list-limits.md`](../docs/debts/departs-word-list-limits.md) |
 | `design-branch-deleted-unmerged` | An unmerged design branch was deleted, and its mockup is on no ref. | [`docs/debts/design-branch-deleted-unmerged.md`](../docs/debts/design-branch-deleted-unmerged.md) |
 | `duo-fold-pin-bump-stale-clone` | `duo_fold_fetch_hinge` skips the clone when `$work/hinge/.git` exists, then runs `git checkout` of the pinned sha. | [`docs/debts/duo-fold-pin-bump-stale-clone.md`](../docs/debts/duo-fold-pin-bump-stale-clone.md) |
@@ -448,6 +449,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `merge-silent-exit` | Twice on 2026-10-20 (#527 in the afternoon, #538 at 00:08 CDT on 10-21), the background shell that ran `bin/merge <pr> --confirm` exited rc 1 mid-wait and printed no reason. | [`docs/debts/merge-silent-exit.md`](../docs/debts/merge-silent-exit.md) |
 | `merge-stale-texts-and-cites` | `merge/merge.py` still cites and prints removed things. | [`docs/debts/merge-stale-texts-and-cites.md`](../docs/debts/merge-stale-texts-and-cites.md) |
 | `mutate-guard-split` | `checks-mutate-guard` runs every guard mutant in one job, 4 at a time. | [`docs/debts/mutate-guard-split.md`](../docs/debts/mutate-guard-split.md) |
+| `new-standing-first-start-no-role` | A brand-new standing session's first start likely records no merge role. | [`docs/debts/new-standing-first-start-no-role.md`](../docs/debts/new-standing-first-start-no-role.md) |
 | `nowindow-bin-no-fallback` | bin/verdict, bin/ste-changed, bin/ci-job and merge/launch.py import hooks/_nowindow.py with no fallback, so a copy-mode install that lands bin/ before hooks/ makes them fail. | [`docs/debts/nowindow-bin-no-fallback.md`](../docs/debts/nowindow-bin-no-fallback.md) |
 | `nowindow-ctrl-c-orphans` | With CREATE_NO_WINDOW the child gets its own hidden console, so Ctrl-C may not reach grandchildren. | [`docs/debts/nowindow-ctrl-c-orphans.md`](../docs/debts/nowindow-ctrl-c-orphans.md) |
 | `nowindow-fallback-silent` | A hook that falls back to plain subprocess says nothing, so the popups return unseen. | [`docs/debts/nowindow-fallback-silent.md`](../docs/debts/nowindow-fallback-silent.md) |
@@ -487,6 +489,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `refresh-no-main-fallback` | When origin has no `stable` branch, an existing cloud clone or mirror keeps its old files with a WARN, and the own-checkout fetch leaves the checkout as it is. | [`docs/debts/refresh-no-main-fallback.md`](../docs/debts/refresh-no-main-fallback.md) |
 | `refusal-route-around-guard` | A test-author gets a refusal on an Edit of a path, then writes the same file with Bash and Python. | [`docs/debts/refusal-route-around-guard.md`](../docs/debts/refusal-route-around-guard.md) |
 | `refusal-settle-reads` | When the refusals file holds a row with a `tool_use_id`, each Stop reads the whole transcript and every `<session>/subagents/*.jsonl` file, to tell an agent's refused call from the orchestrator's. | [`docs/debts/refusal-settle-reads.md`](../docs/debts/refusal-settle-reads.md) |
+| `repeat-bullet-opener` | A conflict resolution can leave two copies of one bullet in a decision file, with different detail. | [`docs/debts/repeat-bullet-opener.md`](../docs/debts/repeat-bullet-opener.md) |
 | `repeat-dup-item-id-wrong-home` | Two blocks stamped in the same minute can share an item id. | [`docs/debts/repeat-dup-item-id-wrong-home.md`](../docs/debts/repeat-dup-item-id-wrong-home.md) |
 | `report-guard-carried-review` | After PR #3388 (the merge tool carries a review log and a lane-lint PASS to a replacement PR by tree sha), the lane Stop hook still reads only a PR's own issue comments. | [`docs/debts/report-guard-carried-review.md`](../docs/debts/report-guard-carried-review.md) |
 | `retire-run-footer-refused` | `lint/check_debt_retire.py` reads `Retire-run:` only from the PR body's last paragraph. | [`docs/debts/retire-run-footer-refused.md`](../docs/debts/retire-run-footer-refused.md) |
