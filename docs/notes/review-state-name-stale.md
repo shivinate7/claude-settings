@@ -1,0 +1,1 @@
+- review-state-name-stale: (#2563 fix check) lint/report_guard.py:2582 comment and lint/test_report_guard_review.py:15 docstring still say review_state; the function is live_review_state.

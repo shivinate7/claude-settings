@@ -1,0 +1,1 @@
+- build-null-order: roadmap/build.py upkeep crashes with a TypeError when a step has "order": null. Triage wrote one by copying keys, and commit b6a868058 went in with the crash. Fix: treat a null order as missing, or refuse a step with null fields.

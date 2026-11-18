@@ -293,6 +293,21 @@ strings refuses all build-folder deletes, defaults included. A later reap and
 the daily sweep delete trash names a child left. The checks are in decision
 `build-dirs-reaped-at-agent-end` (build folders are reaped at agent end).
 
+## What cleans what
+
+Each tool removes its own leftovers when it starts, so a cloud session with no
+daily sweep stays clean too. The sweep above is the backstop, not the only cleaner.
+
+| Leftover | Cleaned by | When | Age or condition |
+| --- | --- | --- | --- |
+| `verdict-*.log` in the temp folder | `bin/verdict` | start of a run with no `VERDICT_LOG` | over 1 day old, and the first line is its own header |
+| `ci-job-*.log` in the temp folder | `bin/ci-job` | start of a run with no `VERDICT_LOG` | over 1 day old |
+| `ci-job-lint-*` folder and `ci-job-pin-*` trees | `bin/ci-job` | exit | the run's own, always |
+| `merge-wt-*` tree of a finished run | `merge/merge.py` | exit | the run's own, always |
+| `merge-wt-*` tree of a dead run | `merge/merge.py` (`add_worktree`) | job start | lock reason `merge tool, pid N` with N dead |
+| test run folder `<pid>-<uuid>` | `lint/_test_temp.py` | job start (the next test run) | pid dead and over 1 hour old; pid alive and over 1 day old |
+| session scratch `<temp>/claude/...` (Windows) and `<tmp>/claude-<uid>/...` (POSIX) | `janitor/temp_sweep.py`, through `janitor/sweep.py` | each sweep, on every OS | transcript idle over 24 hours, and no live session |
+
 ## How you opt out
 
 Write `.claude/janitor.json` at the root of your repository:

@@ -1,0 +1,1 @@
+- decision-watch-merge-tools-copy: (#2513) hooks/decision_watch.py keeps its own one-entry `MERGE_TOOLS` list.

@@ -1,0 +1,1 @@
+- frozen-path-settings-unfrozen: the frozen-path guard refused a project .claude/settings.json write that its own is_frozen calls unfrozen; possible false alarm. Guard: frozen-path.

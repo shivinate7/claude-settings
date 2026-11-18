@@ -38,6 +38,11 @@ THE CONTRACT THE CASES PIN (the builder meets it):
   then ok is False. Each stopped read's why line goes to stderr.
 - The command line: `merge --reviewed --live FILE --ledger [--out FILE] --verdicts FILE [--subsumed FILE]` (build_parser). A stopped read exits 1
   and writes no --out.
+- A state-f branch that shares no history with main has no merge base, so `git diff --name-only BASE...TIP` fails. That is no stopped read: its row
+  stays, its `files` are every path its tip holds (the row has no key to mark an empty list, and LEDGER_FIELDS is pinned), and the ledger writes.
+  A branch with a merge base keeps `files` as the paths it changes against it. A files read that fails for any other reason stops the ledger as unknown.
+  A shallow checkout cuts history, so there a merge-base exit 1 proves nothing: a branch that shares history with main reads "no merge base" too. A
+  ledger read in a shallow checkout stops as unknown (hooks/git_reads.is_shallow is the one probe), never as a no-merge-base branch with its whole tip tree.
 - Cost: no gh call beyond the review read's own: the live file, git and the branch fetch add none.
 
 Each case runs reviewed_block over a PullsHost (merge/test_merge.py, imported, not copied) on one roadmap checkout whose origin is a local bare repo
@@ -52,6 +57,7 @@ import os
 import pathlib
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -61,6 +67,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import merge  # noqa: E402  merge/merge.py, the review read under test
 import test_merge as tm  # noqa: E402  PullsHost, batch_pull, batch_run, review_comment, lint_of: the one home, imported not copied
+import git_reads  # noqa: E402  hooks/git_reads.py, on sys.path since merge.py loads: the one home of the shallow probe (is_shallow)
 sys.path.insert(1, str(HERE.parent / "lint"))
 sys.path.insert(2, str(HERE.parent / "skills" / "roadmap"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
@@ -82,6 +89,9 @@ BRANCH_ROW = re.compile(r"^lost-work branch (\S+) \(f\): (.+); owner (\S+)$")
 BRANCH = "claude/ecstatic-euler-capib9"  # the incident branch: pushed, one commit ahead of main, no pull request (state f)
 BRANCH_FILE = "docs/plans/r42-part2-design.md"
 BRANCH_TEXT = "R42 part 2 design\n"
+NO_BASE = "restart-plan"  # a branch with a history of its own: it shares no commit with main, so `git diff main...tip` has no merge base
+NO_BASE_FILES = {"README.md": "# r\n", BRANCH_FILE: BRANCH_TEXT, "docs/plans/second.md": "second\n"}  # README.md is byte-equal to main's: a two-dot diff would leave it out
+NO_BASE_NAMES = (NO_BASE, "updatedat-not-future", "merge-lock/stable") + tuple("claude/no-base-%02d" % i for i in range(10))  # 13 branches: the incident's count
 VERDICT_COLUMNS = ("PR", "verdict", "kind", "step", "head", "reason")  # the verdicts.tsv header row
 LEDGER_FIELDS = {"pr", "step", "state", "group", "review_log", "age_h", "commits_not_on_main", "subsumed_by", "files", "verdict", "sorted"}
 COMMIT_MINUTES = 48 * 60  # a commit's default age on the host's clock: two days, past the six-hour floor of a branch (state f)
@@ -165,10 +175,13 @@ class LostWorkFixture(unittest.TestCase):
 
     def commit_on(self, parent, files=None, message="work", minutes=COMMIT_MINUTES):
         """A commit on `parent` that adds `files` (path -> text) to its tree, or keeps the parent's tree when `files` is None. Its committer date is
-        `minutes` before the host's clock, so a branch's age (state f) is set by the case and never by the real clock. -> its sha."""
+        `minutes` before the host's clock, so a branch's age (state f) is set by the case and never by the real clock. With `parent` None it is a
+        root commit that shares no history with main, and its tree holds `files` alone (`files` is then required). -> its sha."""
+        if parent is None and not files:
+            raise ValueError("a root commit needs files: its tree holds nothing else")
         if files:
             index = {"GIT_INDEX_FILE": str(pathlib.Path(self.tmp.name) / "index")}
-            roadmap.git(self.repo, "read-tree", parent, env=index)
+            roadmap.git(self.repo, "read-tree", *(["--empty"] if parent is None else [parent]), env=index)
             for path, text in files.items():
                 source = pathlib.Path(self.tmp.name) / "blob"
                 source.write_text(text, encoding="utf-8")
@@ -178,7 +191,30 @@ class LostWorkFixture(unittest.TestCase):
         else:
             tree = roadmap.git(self.repo, "rev-parse", parent + "^{tree}").strip()
         dated = _test_git.apply({"GIT_COMMITTER_DATE": iso_before(minutes)})
-        return roadmap.git(self.repo, "commit-tree", tree, "-p", parent, "-m", message, env=dated).strip()
+        return roadmap.git(self.repo, "commit-tree", tree, *(["-p", parent] if parent else []), "-m", message, env=dated).strip()
+
+    def git_rc(self, *args, where=None):
+        """-> (exit code, stdout) of a git read in this checkout (or in the repo at `where`) that may fail: roadmap.git raises on a failure, and a scope
+        check reads the code."""
+        try:
+            return 0, roadmap.git(where or self.repo, *args)
+        except subprocess.CalledProcessError as e:
+            return e.returncode, e.stdout
+
+    def use_shallow_checkout(self, branch):
+        """Swap the checkout the cases read (self.repo, which host() and in_checkout() follow) for a `--depth 1` clone of origin, as a CI checkout is cut,
+        and fetch the branches into the lost-work refs as the ledger does (its own fetch repeats it, with no change). Fails the case by scope unless the
+        clone is shallow and `git merge-base` of main and `branch` reads exit 1 there, though origin's full history gives that pair a merge base: the cut
+        is then the only reason the read says "no merge base". The clone is under the case's folder, which teardown removes."""
+        clone = pathlib.Path(self.tmp.name) / "shallow"
+        roadmap.git(self.tmp.name, "clone", "-q", "--depth", "1", "--branch", "main", "file://%s" % self.bare, str(clone))  # file://: a plain path ignores --depth
+        roadmap.git(clone, "fetch", "-q", "origin", "+refs/heads/*:%s*" % merge.LOST_WORK_REFS)
+        self.assertIs(git_reads.is_shallow(str(clone)), True, "scope: the clone of origin is not shallow, so the shallow read is not the one under test")
+        full = self.git_rc("merge-base", "refs/heads/main", "refs/heads/" + branch, where=self.bare)[0]
+        self.assertEqual(full, 0, "scope: %s has no merge base with main in origin's full history (git merge-base exit %r), so it is no shared-history branch" % (branch, full))
+        cut = self.git_rc("merge-base", merge.LOST_WORK_REFS + "main", merge.LOST_WORK_REFS + branch, where=clone)[0]
+        self.assertEqual(cut, 1, "scope: the shallow clone still finds a merge base for %s (git merge-base exit %r), so its cut hides nothing" % (branch, cut))
+        self.repo = clone
 
     def push_branch(self, name, sha):
         """Push branch `name` to origin at `sha`, and list it in the live file's branches, as the publisher does. No pull request is opened."""
@@ -1040,6 +1076,102 @@ class LostWorkLedger(LostWorkFixture):
         self.assertEqual(row["state"], "f", "the ledger row for %s names state %r, not f: %r" % (BRANCH, row["state"], row))
         self.assertEqual(row["files"], [BRANCH_FILE], "the files of %s are not the paths it changes: %r" % (BRANCH, row))
 
+    # A branch with no merge base: its history shares no commit with main (the lost-work branches restart-plan, updatedat-not-future and
+    # merge-lock/stable), so `git diff --name-only BASE...TIP` fails with "no merge base". The row keeps its place and its files are every path
+    # its tip holds (the row schema has no key to mark an empty list, and LEDGER_FIELDS is pinned), so the ledger still writes.
+
+    def no_base_branch(self, name=NO_BASE, files=None):
+        """Push branch `name` as a root commit, one that shares no history with main. -> its sha. Fails the case by scope when the fixture's branch
+        has a merge base with main, since then the read under test never runs."""
+        sha = self.commit_on(None, files or NO_BASE_FILES)
+        self.push_branch(name, sha)
+        code, _out = self.git_rc("merge-base", "main", sha)
+        self.assertEqual(code, 1, "scope: %s has a merge base with main (git merge-base exit %r), so the no-merge-base read is not the one under test" % (name, code))
+        return sha
+
+    def test_a_branch_with_no_merge_base_does_not_stop_the_ledger(self):
+        self.no_base_branch()
+        self.publish()
+        rows, count, ok = self.ledger(self.host(), self.verdict_file())
+        self.assertEqual([row.get("pr") for row in rows], [NO_BASE], "scope: the ledger has no row for %s alone: %r" % (NO_BASE, rows))
+        self.assertEqual(count, "unsorted: 1", "a branch with no merge base stops the ledger: the count line is %r, not one unsorted row" % count)
+        self.assertIs(ok, True, "a branch with no merge base leaves the ledger ok %r: its files read stopped the whole ledger" % ok)
+
+    def test_a_branch_with_no_merge_base_lists_every_file_of_its_tip(self):
+        self.no_base_branch()
+        self.publish()
+        rows, _count, _ok = self.ledger(self.host(), self.verdict_file())
+        row = row_of(rows, NO_BASE)
+        self.assertIsNotNone(row, "scope: no ledger row for %s, a branch with no merge base: %r" % (NO_BASE, rows))
+        self.assertEqual(row["state"], "f", "scope: the ledger row for %s names state %r, not f: %r" % (NO_BASE, row["state"], row))
+        self.assertEqual(sorted(row["files"]), sorted(NO_BASE_FILES), "the files of %s, a branch with no merge base, are not every path its tip holds: %r" % (NO_BASE, row))
+
+    def test_a_branch_with_shared_history_keeps_only_the_paths_it_changes_beside_one_with_no_merge_base(self):
+        self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
+        self.no_base_branch()
+        self.publish()
+        rows, _count, _ok = self.ledger(self.host(), self.verdict_file())
+        self.assertEqual([row.get("pr") for row in rows], [BRANCH, NO_BASE], "scope: the ledger rows are not %s and %s: %r" % (BRANCH, NO_BASE, rows))
+        self.assertEqual(row_of(rows, BRANCH)["files"], [BRANCH_FILE], "the files of %s, which has a merge base, are not the paths it changes against it: %r" % (BRANCH, rows))
+
+    def test_the_ledger_writes_every_row_when_thirteen_branches_have_no_merge_base(self):
+        self.pr(7, log="done", at=361)
+        self.lane("session_a")
+        self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
+        for name in NO_BASE_NAMES:
+            self.no_base_branch(name, {"README.md": "# r\n", "docs/plans/%s.md" % name.replace("/", "-"): name + "\n"})
+        self.publish()
+        rows, count, ok = self.ledger(self.host(), self.verdict_file(self.verdict(7)))
+        self.assertEqual([row.get("pr") for row in rows], [7, BRANCH, *sorted(NO_BASE_NAMES)],
+                         "scope: the ledger rows are not #7, %s and the 13 branches with no merge base: %r" % (BRANCH, [row.get("pr") for row in rows]))
+        self.assertEqual(count, "unsorted: 14", "13 branches with no merge base stop the ledger: the count line is %r, not 14 unsorted rows" % count)
+        self.assertIs(ok, True, "13 branches with no merge base leave the ledger ok %r" % ok)
+
+    def test_a_files_read_that_fails_for_another_reason_still_reads_the_ledger_unknown(self):
+        tip = self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT})
+        self.push_branch(BRANCH, tip)
+        self.publish()
+        _rows, clean, clean_ok = self.ledger(self.host(), self.verdict_file())
+        self.assertEqual((clean, clean_ok), ("unsorted: 1", True), "scope: the ledger of %s alone does not read clean before the break: %r" % (BRANCH, (clean, clean_ok)))
+        self.break_files_read(tip)
+        rows, count, ok = self.ledger(self.host(), self.verdict_file())
+        self.assertEqual([row.get("pr") for row in rows], [BRANCH], "scope: the ledger has no row for %s: %r" % (BRANCH, rows))
+        self.assertEqual(count, "unsorted: unknown-read", "a failed files read of a branch that has a merge base gives the count line %r, not unknown-read" % count)
+        self.assertIs(ok, False, "a failed files read of a branch that has a merge base leaves the ledger ok %r" % ok)
+
+    def break_files_read(self, sha):
+        """Make `git diff` fail in this checkout for a reason other than a missing merge base: an invalid diff.renames value. Every other read of the
+        ledger (for-each-ref, rev-list, fetch) ignores it. Fails the case by scope unless the diff of the branch tip `sha` fails while its merge base still reads."""
+        roadmap.git(self.repo, "config", "diff.renames", "bogus")
+        self.assertEqual(self.git_rc("merge-base", "main", sha)[0], 0, "scope: %s has no merge base with main, so its diff would fail for that reason" % sha[:9])
+        self.assertNotEqual(self.git_rc("diff", "--name-only", "main..." + sha)[0], 0, "scope: git diff still reads with diff.renames bogus, so no read is broken")
+
+    # A shallow checkout (a CI clone at --depth 1): the cut hides the commit a branch forked from, so a branch that DOES share history with main reads
+    # `git merge-base` exit 1 and `git diff main...tip` "no merge base", the same as the branches above. The two cannot be told apart there, so the
+    # read is unknown: the ledger stops (hooks/git_reads.is_shallow), and never writes the whole tip tree as the files of a branch.
+
+    def branch_beside_a_longer_main(self):
+        """Move main on origin from the fixture's commit A to A-B-C (as the host's remote moves, by origin), and push BRANCH as one commit on A: a branch
+        that shares history with main and holds BRANCH_FILE. -> the branch's sha."""
+        fork = self.main
+        top = self.commit_on(self.commit_on(fork, {"docs/main-b.md": "b\n"}, "main b"), {"docs/main-c.md": "c\n"}, "main c")
+        roadmap.git(self.repo, "push", "-q", "origin", "%s:refs/heads/main" % top)
+        self.main = top
+        sha = self.commit_on(fork, {BRANCH_FILE: BRANCH_TEXT})
+        self.push_branch(BRANCH, sha)
+        return sha
+
+    def test_a_shallow_checkout_reads_a_branch_with_shared_history_unknown_in_the_ledger(self):
+        self.branch_beside_a_longer_main()
+        self.publish()
+        _rows, clean, clean_ok = self.ledger(self.host(), self.verdict_file())  # control: the full checkout reads the same branch clean
+        self.assertEqual((clean, clean_ok), ("unsorted: 1", True), "scope: the ledger of %s in the full checkout does not read clean before the cut: %r" % (BRANCH, (clean, clean_ok)))
+        self.use_shallow_checkout(BRANCH)
+        rows, count, ok = self.ledger(self.host(), self.verdict_file())
+        self.assertEqual([row.get("pr") for row in rows], [BRANCH], "scope: the shallow ledger has no row for %s alone: %r" % (BRANCH, rows))
+        self.assertIs(ok, False, "a shallow checkout leaves the ledger ok %r: %s shares history with main, and the cut made its files read a no-merge-base branch" % (ok, BRANCH))
+        self.assertEqual(count, "unsorted: unknown-read", "a shallow checkout gives the count line %r, not unknown-read" % count)
+
     def test_the_ledger_reads_the_live_file_once_as_the_batch_review_does(self):
         self.pr(7, log="done", at=361)
         self.lane("session_a")
@@ -1179,6 +1311,43 @@ class LostWorkLedger(LostWorkFixture):
         self.assertFalse(path.exists(), "--ledger wrote %s though the subsumed file was missing" % path)
         self.assertTrue(any("the subsumed file was not read" in line for line in err), "the why line of the missing subsumed file is not on stderr: %r" % err)
         self.assertEqual(out[-1:], ["unsorted: unknown-read"], "the count line of a missing subsumed file is not unknown-read: %r" % out[-1:])
+
+    def test_a_branch_with_no_merge_base_in_the_cli_exits_zero_and_writes_the_out_file(self):
+        self.no_base_branch()
+        self.publish()
+        rc, out, err, path = self.run_cli(self.host())
+        self.assertEqual(rc, 0, "a branch with no merge base makes --ledger exit %r, not 0 (stderr %r)" % (rc, err))
+        self.assertTrue(path.exists(), "--ledger wrote no %s though the only read that stopped was the files of a branch with no merge base" % path)
+        self.assertEqual([row["pr"] for row in json.loads(path.read_text(encoding="utf-8"))["rows"]], [NO_BASE], "the --out file has no row for %s: %r" % (NO_BASE, path))
+        self.assertEqual(out[-1:], ["unsorted: 1"], "the count line of the ledger of %s alone is not unsorted: 1: %r" % (NO_BASE, out[-1:]))
+
+    def test_a_failed_files_read_for_another_reason_in_the_cli_exits_one_and_writes_no_out(self):
+        tip = self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT})
+        self.push_branch(BRANCH, tip)
+        self.publish()
+        _rc, clean_out, _err, path = self.run_cli(self.host())
+        self.assertEqual((clean_out[-1:], path.exists()), (["unsorted: 1"], True), "scope: the ledger of %s alone does not write clean before the break: %r" % (BRANCH, clean_out[-1:]))
+        path.unlink()
+        self.break_files_read(tip)
+        rc, out, err, path = self.run_cli(self.host())
+        self.assertEqual(rc, 1, "a failed files read of a branch that has a merge base makes --ledger exit %r, not 1" % rc)
+        self.assertFalse(path.exists(), "--ledger wrote %s though the files read of a branch that has a merge base failed" % path)
+        self.assertEqual(out[-1:], ["unsorted: unknown-read"], "the count line of a failed files read is not unknown-read: %r" % out[-1:])
+        self.assertTrue(any(line.startswith("lost-work ledger row %s: git could not read" % BRANCH) for line in err), "the why line of the failed files read of %s is not on stderr: %r" % (BRANCH, err))
+
+    def test_a_shallow_checkout_in_the_cli_exits_one_writes_no_out_and_says_why_on_stderr(self):
+        self.branch_beside_a_longer_main()
+        self.publish()
+        rc, clean_out, _err, path = self.run_cli(self.host())  # control: the full checkout writes the ledger of the same branch
+        self.assertEqual((rc, clean_out[-1:], path.exists()), (0, ["unsorted: 1"], True), "scope: the ledger of %s in the full checkout does not write clean before the cut: %r" % (BRANCH, (rc, clean_out[-1:])))
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["rows"][0]["files"], [BRANCH_FILE], "scope: the full checkout does not list %s alone as the files of %s" % (BRANCH_FILE, BRANCH))
+        path.unlink()
+        self.use_shallow_checkout(BRANCH)
+        rc, out, err, path = self.run_cli(self.host())
+        self.assertEqual(rc, 1, "a shallow checkout makes --ledger exit %r, not 1: the cut made %s, which shares history with main, read as a branch with no merge base" % (rc, BRANCH))
+        self.assertFalse(path.exists(), "--ledger wrote %s from a shallow checkout, with the whole tip tree as the files of %s" % (path, BRANCH))
+        self.assertEqual(out[-1:], ["unsorted: unknown-read"], "the count line of a shallow checkout is not unknown-read: %r" % out[-1:])
+        self.assertTrue(any(BRANCH in line for line in err), "no why line on stderr names %s, the row a shallow checkout left unread: %r" % (BRANCH, err))
 
 
 if __name__ == "__main__":

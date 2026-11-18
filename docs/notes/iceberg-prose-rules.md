@@ -1,0 +1,1 @@
+- iceberg-prose-rules: iceberg's "condition first" and "numbers, not 'fast'" prose rules are ste-lint candidates if an incident shows the need; no incident is recorded, so no port (decision building-guard-needs-incident).

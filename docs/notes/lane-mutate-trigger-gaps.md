@@ -1,0 +1,1 @@
+- lane-mutate-trigger-gaps: the trigger omits hooks/guard.py, hooks/test_guard.py and bin/sim-lease. Fix: add them to the trigger, or state why each is out.

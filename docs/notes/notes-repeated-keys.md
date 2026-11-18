@@ -1,0 +1,1 @@
+- notes-repeated-keys: docs/debts/notes.md has about 21 repeated keys. Fold target: note note-id-dup-lint.

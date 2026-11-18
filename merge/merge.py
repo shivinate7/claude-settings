@@ -39,8 +39,8 @@
                           sha. Posts nothing: the lane posts it as a PR comment. --fix-check adds the optional `Fix check:` line after
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
                           unless HEAD is the Head of the newest earlier record on the PR, read from the PR's issue comments since the PR opened, and that record
-                          has no Fix check line or a PASS one (owner item 741); after a PASS one, when SHA is a merge commit (a fix after a merge of main), that record reads done and SHA's first
-                          parent is HEAD and its second parent is on the base, with no edit beyond git's own merge (a merge that conflicts may edit its conflicted paths only).
+                          has no Fix check line or a PASS one (owner item 741); after a PASS one, when SHA is a merge commit (a fix after a merge of main), that record reads done and HEAD is an ancestor of SHA
+                          (the fix verifier reviews every commit since HEAD) and SHA's second parent is on the base, with no edit beyond git's own merge (a merge that conflicts may edit its conflicted paths only).
                           The fix check's MODEL must be sonnet (exit 2 otherwise), and a reviewer's later rounds must equal their round row's model.
                           The first round takes its row's model (the `1 guard` row with --guard yes, else the `1 other` row), or `unknown`; a first-round model
                           below its row prints with a stderr flag and is not refused.
@@ -2927,8 +2927,31 @@ def open_worktree(root, info, base):
     """Fetch, check that the head is the one gh named, and make a detached worktree there."""
     return add_worktree(root, fetch_pr_head(root, info, base)["head"])
 
+MERGE_LOCK = re.compile(r"merge tool, pid (\d+)")
+
+
+def sweep_dead_trees(root):
+    """Remove each locked worktree of ROOT in the temp folder whose lock reason is `merge tool, pid N` with N dead: a merge run that died left it.
+    The tree is this tool's own, so it is dropped with force, as drop_worktree does. A live pid, an unreadable pid and any other lock stay."""
+    c, out = git(root, "worktree", "list", "--porcelain")
+    if c:
+        return
+    temp = os.path.realpath(tempfile.gettempdir())
+    path = None
+    for line in out.splitlines():
+        if line.startswith("worktree "):
+            path = os.path.realpath(line[len("worktree "):])
+        elif line.startswith("locked") and path:
+            m = MERGE_LOCK.fullmatch(line[len("locked"):].strip())
+            tmp = os.path.dirname(path)
+            if (m and os.path.basename(path) == "tree" and os.path.basename(tmp).startswith("merge-wt-")
+                    and os.path.dirname(tmp) == temp and not pid_alive(int(m.group(1)))):
+                drop_worktree(root, tmp, path)
+
+
 def add_worktree(root, head):
     """Make a detached, locked worktree at `head`. -> (tmp, wt). The one home of the temporary tree: open_worktree and lane_lint call it."""
+    sweep_dead_trees(root)
     tmp = os.path.realpath(tempfile.mkdtemp(prefix="merge-wt-"))  # /var is a symlink on macOS
     wt = os.path.join(tmp, "tree")
     c, out = git(root, "worktree", "add", "-q", "--detach", "--lock", "--reason", f"merge tool, pid {os.getpid()}", wt, head)  # a locked tree survives the janitor sweep
@@ -3238,6 +3261,7 @@ def ci_job_run(wt, *args, notes=None, raw=None, head_sha=None, pr_body=None):
 
 MUTATE_JOB, MUTATE_STEP = "checks-mutate-guard", "Guard mutation test"  # the old one-job head: its job and step, whose run: line and timeout-minutes the lint reads. A sharded head names each step MUTATE_STEP + ", shard i/M", one job each
 MUTATE_TEST_FILE = re.compile(r"hooks/mutate_[^/]*\.(?:py|mjs)")
+MUTATE_HEARTBEAT_SECONDS = 60  # gap between the running lines of one shard run; read at call time. A shard runs many minutes and its stdout is captured, so without them the lint is silent
 MUTATE_SKIPPED = "mutation test run skipped here: it runs at the lane's hand-off lint"  # printed wherever the lint skips the run: a pre-join lint whose hand-off PASS names the head
 
 def mutate_report_counts(out):
@@ -3290,7 +3314,7 @@ def mutate_run_check(wt):
             raise Stop(f"the head's checks.yml has no job with the step for shard {', '.join(absent) or 'numbers in 1 to ' + str(total)} of the mutation test (shard N of {total} absent), so its mutation test run cannot start. {LANE_LINT_REMEDY}")
         steps = [(shards[n][0], shards[n][1], f"{n}/{total}") for n in range(1, total + 1)]
     else:
-        steps = [(MUTATE_JOB, next((st for st in step_blocks(job_block(text, MUTATE_JOB)) if step_key(st, "name") == MUTATE_STEP), None), None)]
+        steps = [(MUTATE_JOB, next((st for st in step_blocks(job_block(text, MUTATE_JOB)) if step_key(st, "name") == MUTATE_STEP), None), None)]  # shard None: its progress lines label it 1/1
     caps = job_caps([text])
     plan = []  # every run is read before the first starts, so a job whose run or cap cannot be read stops the lint with no run made
     for job, step, shard in steps:
@@ -3303,23 +3327,43 @@ def mutate_run_check(wt):
             if step_env(step).get("MUTATE_SHARD") != shard:
                 raise Stop(f"the step for shard {shard} of job {job} in the head's checks.yml does not set MUTATE_SHARD to {shard}, so its mutation test run cannot start. {LANE_LINT_REMEDY}")
             env["MUTATE_SHARD"] = shard
-        plan.append((job, body, cap, env))
+        plan.append((job, body, cap, env, shard or "1/1"))
 
-    def run_one(job, body, cap, env):
+    def progress(line):  # a closed stdout raises ValueError and a broken pipe raises OSError; either must not end the shard, as a lost progress line never changes a verdict
+        try:
+            say(line)
+        except (OSError, ValueError):
+            pass
+
+    def run_one(job, body, cap, env, label):
         start = time.monotonic()
         start_error = ""
+        tag = f"mutation test shard {label}"
+        progress(f"{tag}: start, job {job}, cap {cap} min")
+        stop, interval = threading.Event(), MUTATE_HEARTBEAT_SECONDS
+        def heartbeat():  # the runner's stdout is captured, so these lines are the only sign a long shard is alive; no mutant id, as none is read here
+            while not stop.wait(interval):
+                progress(f"{tag}: running, {round(time.monotonic() - start)} s")
+        beat = threading.Thread(target=heartbeat, name="mutate-heartbeat", daemon=True)
         try:
+            beat.start()
             c, out = sh(shlex.split(body), cwd=wt, env=env, timeout=cap * 60, live_stderr=True)
         except subprocess.TimeoutExpired:
             c, out = None, ""
         except (OSError, ValueError) as e:  # the command could not start (no such program, not executable, a bad quote): a FAIL, never a traceback or a pass
             c, out, start_error = None, "", f"{type(e).__name__}: {e}"
+        finally:  # every path ends the thread, so none outlives the call or prints after the end line
+            stop.set()
+            if beat.is_alive():  # a thread that never started cannot be joined
+                beat.join()
+        if start_error:
+            progress(f"{tag}: did not start")
+            return "mutation test run did not start", [f"the mutation test command could not start ({start_error}), so no mutation test run was made"]
         wall = round(time.monotonic() - start) if c is not None else cap * 60
         counts = mutate_report_counts(out)
         killed, survived, unknown, unread, tally, wrong = counts or (0, 0, 0, 0, False, 0)
+        progress(f"{tag}: end, {wall} s, killed {killed}, survived {survived}, unknown {unknown}")
         failures = []
-        if start_error:
-            return "mutation test run did not start", [f"the mutation test command could not start ({start_error}), so no mutation test run was made"]
         if c is None or wall > cap * 60:
             failures.append(f"the mutation test run took {wall} s, past the {cap}-minute cap of job {job}")
         if counts is None:
@@ -3340,8 +3384,8 @@ def mutate_run_check(wt):
         return f"mutation test run {wall} s, killed {killed}, survived {survived}, unknown {unknown}, {'fail' if failures else 'pass'}", failures
 
     summaries = []
-    for job, body, cap, env in plan:
-        summary, failures = run_one(job, body, cap, env)
+    for job, body, cap, env, label in plan:
+        summary, failures = run_one(job, body, cap, env, label)
         if not sharded:
             return summary, failures
         summaries.append(f"{job}: {summary}")
@@ -6007,13 +6051,13 @@ def reviewed_ledger(h, live, verdicts, subsumed=None, notes=None, cfgrel=None):
     pull request in two states is one row, its states joined by a comma. The keys are LEDGER_FIELDS. step is the step whose head ref the ref names,
     else the verdicts file's step; group is that step (the plan's step group). review_log is the newest review log's state, or `none`. age_h is the hours
     since the head commit, and commits_not_on_main its commits the base lacks, both from local git; files are the paths it changes against its merge base
-    (`git diff --name-only BASE...HEAD`). subsumed_by is read_subsumed's list for the pull request, empty with no `subsumed` file. A pull request row is
+    (`git diff --name-only BASE...HEAD`), or every path of its tip when `git merge-base` exits 1 (no merge base). subsumed_by is read_subsumed's list for the pull request, empty with no `subsumed` file. A pull request row is
     sorted when `verdicts` (read_verdicts) gives it a verdict in LEDGER_VERDICTS at the first 12 characters of its live head, and its verdict then names
     that word; a branch row has no verdict row to match, so it is unsorted. count_line is `unsorted: N` over every row, or LEDGER_UNKNOWN when any read
     stopped: the verdicts file, the subsumed file, the lost-work rows (an unknown row, such as a failed branch fetch), the fetch of the pull request
     heads, or a git read of a row. A count over rows a read left out would read as clear. ok is False when a read stopped. `notes`, when a list is given,
     gains the why line of each stopped read. Cost: reviewed_read's gh calls and lost_work_rows' reads, then git only: one fetch of the pull request
-    heads, and three git reads per row; no gh call, no new file."""
+    heads, and three git reads per row (a fourth and fifth only on a failed diff); no gh call, no new file."""
     facts, found, whys = {}, [], []
     _lines, pulls, _totals = reviewed_read(h, cfgrel, facts)
     rows, read_ok = lost_work_rows(h, pulls, facts, live, found)
@@ -6045,8 +6089,19 @@ def reviewed_ledger(h, live, verdicts, subsumed=None, notes=None, cfgrel=None):
             age = round(max(0.0, (h.now() - int(when)) / 3600), 1) if not code and when.isdigit() else None
         else:
             review_log, ahead, age = "none", entries[0]["ahead"], round(entries[0]["age_h"], 1)
+        # A branch with no merge base (exit 1) has no `base...sha` diff: every path of its tip is what it changes. Any other failed read stays a stop.
+        # A shallow clone cuts history, so there exit 1 may be the cut, not a missing base: only a full clone (is_shallow False) may list the tip.
         code, names = git(root, "diff", "--name-only", f"{base}...{sha}")
-        if code or ahead is None or age is None:
+        cut = False
+        if code and git(root, "merge-base", base, sha)[0] == 1:
+            import git_reads  # hooks/git_reads.py, on sys.path from the top of this file
+            if git_reads.is_shallow(root) is False:
+                code, names = git(root, "ls-tree", "-r", "--name-only", sha)
+            else:
+                cut = True
+                whys.append(f"lost-work ledger row {pr}: git found no merge base with {h.base}, and this clone is shallow or could not say, so the cut may hide it {READ_CITE}")
+                read_ok = False
+        if not cut and (code or ahead is None or age is None):
             whys.append(f"lost-work ledger row {pr}: git could not read its commits ahead of {h.base}, its age or its files {READ_CITE}")
             read_ok = False
         word = mark[0] if mark and isinstance(pr, int) and mark[0] in LEDGER_VERDICTS and mark[1] == sha[:12] and not verdicts_why else ""
@@ -7001,9 +7056,10 @@ def main(argv, host=None, lock=None, hosts=None):
                     ok = plain or (len(parents) == 2 and h.holds_head_gh(parents[1], info["base"]))
                     if ok and plain and ancestor(h.cwd or ".", last["head"], a.head) is False:  # the verifier reads Head..head, so a head that git reads as not holding the Head is refused (real fix commits may lie between). Unknown keeps the rule that held before: a plain head takes the fix check
                         ok = False
-                    if ok and not plain and parents[0] != a.fix_check[0]:  # clean merges of main may sit between the Head and the last merge: the record survives them
+                    if ok and not plain and parents[0] != a.fix_check[0]:  # the start may be the earlier reviewed Head with any commits after it (owner, page item 949 A): git's ancestry decides, and the fix diff reads every commit since that Head. When git cannot tell, the old walk over clean merges of main decides
                         try:
-                            ok = clean_merges_after(h, a.fix_check[0], parents[0], info["base"])
+                            descends = ancestor(h.cwd or ".", a.fix_check[0], a.head)
+                            ok = clean_merges_after(h, a.fix_check[0], parents[0], info["base"]) if descends is None else descends
                         except (Stop, subprocess.TimeoutExpired, OSError) as e:
                             print(f"merge: --fix-check: whether only clean merges of main sit between {a.fix_check[0][:9]} and {a.head[:9]} is unknown ({' '.join(str(e).split())[:300]}), so the fix verifier is refused. " + REVIEW_CITE, file=sys.stderr)
                             return 2
@@ -7020,7 +7076,7 @@ def main(argv, host=None, lock=None, hosts=None):
                             print(f"merge: --fix-check: whether {a.head[:9]} is git's own merge of the base is unknown ({unread}), so the fix verifier is refused. Fetch both parents of that head into this checkout, then run again. " + REVIEW_CITE, file=sys.stderr)
                             return 2
                 if not ok:
-                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line or a PASS one. After a PASS one, a head that is a plain commit must descend from that Head, and a head that is a merge must be a merge of the base into that Head, and the log must read done, with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
+                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line or a PASS one. After a PASS one, the head must descend from that Head (the fix verifier reviews every commit since it). A head that is a merge must also be a merge of the base, and the log must read done, with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant, accepted=a.accepted).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)

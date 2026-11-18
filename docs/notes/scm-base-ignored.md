@@ -1,0 +1,1 @@
+- scm-base-ignored: (#2410) cross_measure ignores each PR's base, so a main PR and a release-base PR of one session may false-conflict. Debt only if a repo with release bases appears.

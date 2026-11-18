@@ -1,0 +1,1 @@
+- live-unknown-strays-zero: (#2534) Strays and the "entries skipped" row read 0 when the whole live read is unknown; they should read unknown.

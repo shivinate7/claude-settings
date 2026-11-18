@@ -1,0 +1,1 @@
+- export-scan-limit-5: automations_v3_review and camelCase key names still false-alarm. Fix: none until a real incident. Decision: waiting-data-in-repo.

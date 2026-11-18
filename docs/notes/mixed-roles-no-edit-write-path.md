@@ -1,0 +1,1 @@
+- mixed-roles-no-edit-write-path: #1521 has no Edit or Write case for the second product path.

@@ -1,0 +1,1 @@
+- hooks-lag-shallow-count: after a depth-1 mirror refresh plus a partial failure, the lag line can read "1 commits behind" while the true count is larger, because history is cut. Fix: say "at least N" when the history is shallow.
