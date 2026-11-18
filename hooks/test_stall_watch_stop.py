@@ -3035,12 +3035,9 @@ def CI97_branch_named_wait_closes_on_a_merge_of_any_pr():
 
 NO_CI_REPO = "%s/no-ci-repo" % CI_OWNER  # a repo with no active workflow, as the fake gh answers for it
 HAS_CI_REPO = "%s/%s" % (CI_OWNER, CI_REPO)  # a repo with a workflow
-WITH_WORKFLOW = ('[{"id":1}]\n', 0, "")  # the default answer: a call that names no repo, or a repo not in the rows
-
-
-def ready_in(repo, number=CI_PR):
-    """A Bash call of `gh pr ready -R <repo> <number>`: the call names the PR's repo."""
-    return ready(command="gh pr ready -R %s %s" % (repo, number))
+EMPTY_LIST = (0, "", "")  # gh 2.89.0 for a repo with no workflow: exit 0, 0 bytes on stdout, no "[]"
+NO_WORKFLOWS_JSON = (0, "[]\n", "")
+WITH_WORKFLOW = (0, '[{"id":1}]\n', "")  # the default answer: a repo with a workflow
 
 
 def repo_flag(args):
@@ -3048,14 +3045,30 @@ def repo_flag(args):
     return args[args.index("-R") + 1] if "-R" in args else None
 
 
-def workflow_list_gh(answers, default):
-    """A stand-in for ci_wake.gh. It answers a call by the repo its -R names, else by default. Each answer is
-    (rc, stdout, stderr). Return (gh, calls): calls collects the args of each call."""
+def asked_workflow_list(calls, repo):
+    """True when the check asked gh for the workflow list of repo (None: the call named no repo)."""
+    return any(c[:2] == ["workflow", "list"] and repo_flag(c) == repo for c in calls)
+
+
+def pr_body(repo, number=CI_PR):
+    """The REST pull request that gh api answers for a PR of repo, with the fields ci_wake reads."""
+    return {"number": int(number), "draft": False, "head": {"ref": "my-branch", "sha": CI_SHA},
+            "html_url": "https://github.com/%s/pull/%s" % (repo, number), "state": "open"}
+
+
+def ci_wake_gh(answers, pr_repo):
+    """A stand-in for ci_wake.gh. The PR lives in pr_repo, so its REST read answers that PR. `workflow list`
+    answers by the repo its -R names, from answers, each answer (rc, stdout, stderr) as gh returns it. Every
+    other call answers an empty run list. Return (gh, calls): calls collects the args of each call."""
     calls = []
 
     def gh(args, cwd, timeout=None):
         calls.append(list(args))
-        return answers.get(repo_flag(args), default)
+        if args[:1] == ["api"]:
+            return 0, json.dumps(pr_body(pr_repo)), ""
+        if args[:2] == ["workflow", "list"]:
+            return answers.get(repo_flag(args), WITH_WORKFLOW)
+        return 0, "[]\n", ""
     return gh, calls
 
 
@@ -3068,91 +3081,106 @@ def gh_repo_unset():
         yield
 
 
-def stop_with_workflow_list(path, answers, default):
-    """Run the Stop check in this process, with ci_wake's gh read answered by workflow_list_gh. Return (rc, out,
-    calls): the exit code, what the check printed, and the gh calls it made."""
-    gh, calls = workflow_list_gh(answers, default)
-    with gh_repo_unset(), mock.patch.object(ci_wake, "gh", gh):
-        rc, out, _, _ = stop_in_process(path)
-    return rc, out, calls
-
-
-def asked_workflow_list(calls, repo):
-    """True when the check asked gh for the workflow list of repo (None: the call named no repo)."""
-    return any(c[:2] == ["workflow", "list"] and repo_flag(c) == repo for c in calls)
-
-
-def no_ci_spy(answer, asked):
-    """Stands in for ci_wake.no_workflows. It records the repo it is asked for in asked, and answers answer."""
-    def spy(cwd, repo):
-        asked.append(repo)
-        return answer
-    return spy
+def ci_wake_wake_line(command, answers, pr_repo=NO_CI_REPO):
+    """Run ci_wake in this process on one PostToolUse call of command, as the harness runs it. The PR is in
+    pr_repo. Return (rc, stderr, gh calls). The wake line is the stderr of an exit-2 run: exit 2 wakes the
+    session, and its stderr shows in the transcript (the module's contract). The deadline is 0, so no wait
+    sleeps, and each run takes its own lock folder."""
+    payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": new_dir()}
+    gh, calls = ci_wake_gh(answers, pr_repo)
+    held = []
+    err = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", write_through=True)
+    env = {"CI_WAKE_DEADLINE": "0", "CI_WAKE_LOCK_DIR": new_dir()}
+    try:
+        with gh_repo_unset(), mock.patch.dict(os.environ, env), mock.patch.object(ci_wake, "gh", gh), \
+                mock.patch.object(ci_wake, "HELD", held), \
+                mock.patch.object(sys, "stdin", io.StringIO(json.dumps(payload))), \
+                mock.patch.object(sys, "stdout", io.StringIO()), mock.patch.object(sys, "stderr", err):
+            rc = ci_wake.main()
+    except Exception as e:  # a crash of the hook reads as a missing wake line, and names its cause
+        rc = "raised %s: %s" % (type(e).__name__, e)
+    finally:
+        for fd in held:
+            os.close(fd)
+    return rc, err.buffer.getvalue().decode("utf-8", "replace"), calls
 
 
 @case
-def CI98_no_ci_check_is_the_shared_no_workflows_read():
-    """CI98. the CI wait asks ci_wake.no_workflows, the one home of the no-CI read, for the PR's repo. Scope first:
-    the shared check is asked for the repo that gh pr ready -R names. Subject: the check says no workflow, so the
-    Stop prints nothing. Control: the check says the repo has one, so the Stop blocks and names the PR. A copy of
-    the check inside stall_watch never asks the shared one, so it fails the scope line"""
-    path = transcript([prompt("merge when green"), ready_in(NO_CI_REPO)])
-    asked = []
-    with gh_repo_unset(), mock.patch.object(ci_wake, "no_workflows", no_ci_spy(True, asked)):
-        rc, out, _, _ = stop_in_process(path)
-    problems = expect(asked == [NO_CI_REPO], f"scope: the shared check was asked {asked!r}, want [{NO_CI_REPO!r}]")
+def CI98_no_ci_wake_line_closes_the_wait_and_the_stop_starts_no_process():
+    """CI98. a `gh pr ready` in a repo with no active workflow: ci_wake writes its wake line, exit 2 on stderr, and
+    that line closes the CI wait in the transcript. Scope first: ci_wake read the workflow list of the PR's repo.
+    Subject: the Stop prints nothing for the transcript with the wake line, and starts no process. Control: the same
+    transcript without the wake line still blocks, and names the PR"""
+    command = "gh pr ready -R %s %s" % (NO_CI_REPO, CI_PR)
+    rc, wake, calls = ci_wake_wake_line(command, {NO_CI_REPO: EMPTY_LIST})
+    problems = expect(asked_workflow_list(calls, NO_CI_REPO),
+                      f"scope: ci_wake did not read the workflow list of {NO_CI_REPO}: {calls!r}")
     if problems:
         return problems
+    problems += expect(rc == 2 and wake.strip() != "",
+                       f"ci_wake wrote no wake line (rc={rc}, stderr {wake[:200]!r})")
+    if problems:
+        return problems
+    spies = []
+    rc, out, _, _ = stop_in_process(transcript([prompt("merge when green"), ready(command=command), prompt(wake.strip())]),
+                                    spies)
     problems += expect(rc == 0, f"exit {rc}, want 0")
-    problems += expect(out.strip() == "",
-                       f"subject: the Stop blocked a repo the shared check reads as no workflow: {out[:200]!r}")
-    with gh_repo_unset(), mock.patch.object(ci_wake, "no_workflows", no_ci_spy(False, [])):
-        rc, out, _, _ = stop_in_process(path)
+    problems += expect(out.strip() == "", f"subject: the wake line did not close the wait, the Stop blocked: {out[:200]!r}")
+    problems += expect(spies == [], f"subject: the Stop made calls it must not make: {spies}")
+    _, out, _, _ = stop_in_process(transcript([prompt("merge when green"), ready(command=command)]))
     return problems + ["control: " + p for p in block_problems(out)]
 
 
 @case
-def CI99_no_ci_repo_opens_no_wait_on_empty_or_empty_list_answers():
-    """CI99. a repo with no active workflow opens no wait. The answers are gh's: 0 bytes on stdout with exit 0 (gh
-    2.89.0, probed on shivinate7/session-mailbox, which has no workflow), and "[]". Rows: the PR's repo named by -R,
-    with each answer; and the incident form with no repo flag, which reads the folder's repo. Scope first: the check
-    asked gh for the workflow list of that repo. Subject: the Stop prints nothing"""
+def CI99_no_ci_repo_wake_line_closes_the_wait_on_empty_or_empty_list_answers():
+    """CI99. a repo with no active workflow closes its CI wait. The answers are gh's: 0 bytes on stdout with exit 0
+    (gh 2.89.0, probed on shivinate7/session-mailbox, which has no workflow), and "[]". Rows: the PR's repo named by
+    -R, with each answer; and the form with no repo flag, where ci_wake reads the PR's own repo from its url. Scope
+    first: the workflow list of that repo was read. Subject: the wake line, in the transcript, closes the wait"""
     rows = (
-        ("empty stdout, -R", ready_in(NO_CI_REPO), {NO_CI_REPO: ("", 0, "")}, NO_CI_REPO),
-        ("[], -R", ready_in(NO_CI_REPO), {NO_CI_REPO: ("[]\n", 0, "")}, NO_CI_REPO),
-        ("empty stdout, no repo flag", ready(), {None: ("", 0, "")}, None),
+        ("empty stdout, -R", "gh pr ready -R %s %s" % (NO_CI_REPO, CI_PR), {NO_CI_REPO: EMPTY_LIST}),
+        ("[], -R", "gh pr ready -R %s %s" % (NO_CI_REPO, CI_PR), {NO_CI_REPO: NO_WORKFLOWS_JSON}),
+        ("empty stdout, no repo flag", "gh pr ready %s" % CI_PR, {NO_CI_REPO: EMPTY_LIST}),
     )
     problems = []
-    for label, command, answers, repo in rows:
-        path = transcript([prompt("merge when green"), command])
-        rc, out, calls = stop_with_workflow_list(path, answers, default=WITH_WORKFLOW)
-        if not asked_workflow_list(calls, repo):
-            problems.append(f"{label}: scope: no workflow list read for {repo or 'the folder repo'}, calls {calls!r}")
+    for label, command, answers in rows:
+        rc, wake, calls = ci_wake_wake_line(command, answers)
+        if not asked_workflow_list(calls, NO_CI_REPO):
+            problems.append(f"{label}: scope: no workflow list read for {NO_CI_REPO}, calls {calls!r}")
             continue
-        problems += [f"{label}: {p}" for p in expect(rc == 0, f"exit {rc}, want 0")]
+        if rc != 2 or wake.strip() == "":
+            problems.append(f"{label}: ci_wake wrote no wake line (rc={rc}, stderr {wake[:200]!r})")
+            continue
+        _, out, _, _ = stop_in_process(transcript([prompt("merge when green"), ready(command=command), prompt(wake.strip())]))
         if out.strip():
-            problems.append(f"{label}: subject: the Stop blocked a repo with no workflow: {out[:200]!r}")
+            problems.append(f"{label}: subject: the wake line did not close the wait, the Stop blocked: {out[:200]!r}")
     return problems
 
 
 @case
-def CI100_a_workflow_or_an_unreadable_answer_still_opens_the_wait():
-    """CI100. control: a repo with workflows, and a failed or non-JSON workflow list, still open the wait and block
-    with the PR named, as they do today. Rows: one workflow; seven workflows (full size); exit 1 and non-JSON, read
-    from the repo with no workflow, so only an answer read as no workflows could hide the wait. Green on the old
-    code: it shows the check is live, so CI99 cannot pass by silence alone"""
+def CI100_a_workflow_or_an_unreadable_answer_leaves_the_wait_open():
+    """CI100. control: a repo with workflows, and a failed or non-JSON workflow list, write no closing wake line. The
+    watch ends unknown, an unknown line leaves the wait open, and the Stop still blocks with the PR named. Rows: one
+    workflow; seven workflows (full size); exit 1 and non-JSON, read from the repo with no workflow, so only an answer
+    read as no workflows could hide the wait. Green on the old code too: the wait is open there as well"""
     seven = json.dumps([{"id": n} for n in range(1, 8)]) + "\n"
     rows = (
-        ("one workflow", ready_in(HAS_CI_REPO), {HAS_CI_REPO: ('[{"id":1}]\n', 0, "")}),
-        ("seven workflows", ready_in(HAS_CI_REPO), {HAS_CI_REPO: (seven, 0, "")}),
-        ("exit 1", ready_in(NO_CI_REPO), {NO_CI_REPO: ("", 1, "HTTP 401: Bad credentials\n")}),
-        ("non-JSON", ready_in(NO_CI_REPO), {NO_CI_REPO: ("<html>not json</html>\n", 0, "")}),
+        ("one workflow", HAS_CI_REPO, {HAS_CI_REPO: (0, '[{"id":1}]\n', "")}),
+        ("seven workflows", HAS_CI_REPO, {HAS_CI_REPO: (0, seven, "")}),
+        ("exit 1", NO_CI_REPO, {NO_CI_REPO: (1, "", "HTTP 401: Bad credentials\n")}),
+        ("non-JSON", NO_CI_REPO, {NO_CI_REPO: (0, "<html>not json</html>\n", "")}),
     )
     problems = []
-    for label, command, answers in rows:
-        path = transcript([prompt("merge when green"), command])
-        rc, out, _ = stop_with_workflow_list(path, answers, default=WITH_WORKFLOW)
-        problems += [f"{label}: exit {rc}, want 0"] if rc != 0 else []
+    for label, repo, answers in rows:
+        command = "gh pr ready -R %s %s" % (repo, CI_PR)
+        rc, wake, calls = ci_wake_wake_line(command, answers, pr_repo=repo)
+        if not asked_workflow_list(calls, repo):
+            problems.append(f"{label}: scope: no workflow list read for {repo}, calls {calls!r}")
+            continue
+        records = [prompt("merge when green"), ready(command=command)]
+        if wake.strip():
+            records.append(prompt(wake.strip()))
+        _, out, _, _ = stop_in_process(transcript(records))
         problems += [f"{label}: control: {p}" for p in block_problems(out)]
     return problems
 
