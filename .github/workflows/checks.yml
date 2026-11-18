@@ -1150,6 +1150,10 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_review_policy.py
 
+      - name: Merge tool review tally fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 merge/test_review_tally.py
+
       - name: Merge launcher fixture suite (bin/merge)
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_cmd.py
