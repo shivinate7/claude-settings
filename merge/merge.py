@@ -2911,8 +2911,31 @@ def open_worktree(root, info, base):
     """Fetch, check that the head is the one gh named, and make a detached worktree there."""
     return add_worktree(root, fetch_pr_head(root, info, base)["head"])
 
+MERGE_LOCK = re.compile(r"merge tool, pid (\d+)")
+
+
+def sweep_dead_trees(root):
+    """Remove each locked worktree of ROOT in the temp folder whose lock reason is `merge tool, pid N` with N dead: a merge run that died left it.
+    The tree is this tool's own, so it is dropped with force, as drop_worktree does. A live pid, an unreadable pid and any other lock stay."""
+    c, out = git(root, "worktree", "list", "--porcelain")
+    if c:
+        return
+    temp = os.path.realpath(tempfile.gettempdir())
+    path = None
+    for line in out.splitlines():
+        if line.startswith("worktree "):
+            path = os.path.realpath(line[len("worktree "):])
+        elif line.startswith("locked") and path:
+            m = MERGE_LOCK.fullmatch(line[len("locked"):].strip())
+            tmp = os.path.dirname(path)
+            if (m and os.path.basename(path) == "tree" and os.path.basename(tmp).startswith("merge-wt-")
+                    and os.path.dirname(tmp) == temp and not pid_alive(int(m.group(1)))):
+                drop_worktree(root, tmp, path)
+
+
 def add_worktree(root, head):
     """Make a detached, locked worktree at `head`. -> (tmp, wt). The one home of the temporary tree: open_worktree and lane_lint call it."""
+    sweep_dead_trees(root)
     tmp = os.path.realpath(tempfile.mkdtemp(prefix="merge-wt-"))  # /var is a symlink on macOS
     wt = os.path.join(tmp, "tree")
     c, out = git(root, "worktree", "add", "-q", "--detach", "--lock", "--reason", f"merge tool, pid {os.getpid()}", wt, head)  # a locked tree survives the janitor sweep
