@@ -1,0 +1,1 @@
+- train-bullet-dense: the "Rolling combine train" bullet and its sub-bullets are about 14 lines of dense prose; the template pointer in `skills/project-ops/templates/operating-model.md` restates scope facts and sits after the Lane bullet, not by the Batch runner bullet. Decision: session-tiers.
