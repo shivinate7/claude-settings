@@ -825,7 +825,7 @@ add("refuter: agent_brief's READ_ONLY set holds the refuter role", "custom", fn=
 
 # NOTE RULES: the brief gives every agent the rules that check_record_slugs.AGENT_FORM_RULES holds, one list that the
 # check prints and the brief reads. An entry holds {folder} (the note folder, with its slash) and {old} (the old notes
-# file). Both come from this checkout's layout, read as the check reads it. NOTE_FORM and NOTE_FILE are the spec's own
+# file). Both come from the layout of the payload's cwd, read as the hook reads it. NOTE_FORM and NOTE_FILE are the spec's own
 # words, pinned here. The stand-in cases run the hook with a changed and an added list, so a rule that the list changes
 # must reach the brief, and the note form that the list dropped must leave it.
 LINT_DIR = os.path.join(REPO_ROOT, "lint")
@@ -836,12 +836,13 @@ CHANGED_RULE = "SENTINEL rule changed in the list: the note folder is {folder}" 
 EXTRA_RULE = "SENTINEL rule added to the list: the old notes file {old} takes deletes only"  # added, with no edit
 
 
-def layout_paths():
-    """(note folder with its slash, old notes file, None) from this checkout's layout, or (None, None, problem)."""
+def layout_paths(cwd):
+    """(note folder with its slash, old notes file, None) from the layout of `cwd`, the repo the payload names, or
+    (None, None, problem). The hook fills its rules from that same layout."""
     sys.path.append(LINT_DIR)
     try:
         import layout  # noqa: E402  the one home of where records live (lint/layout.py)
-        return layout.path(REPO_ROOT, "notes") + "/", layout.path(REPO_ROOT, "debt-notes"), None
+        return layout.path(cwd, "notes") + "/", layout.path(cwd, "debt-notes"), None
     except Exception as exc:  # a layout that does not read is a red case, never a crash at import
         return None, None, "lint/layout.py does not read: %s" % exc
 
@@ -861,12 +862,12 @@ def load_note_rules():
     return list(rules), None
 
 
-FOLDER, OLD_NOTES, LAYOUT_PROBLEM = layout_paths()
+FOLDER, OLD_NOTES, LAYOUT_PROBLEM = layout_paths(CWD)
 NOTE_RULES, RULES_PROBLEM = load_note_rules()
 
 
 def render(template):
-    """A rule as the brief shows it: the note folder and the old notes file filled in."""
+    """A rule as the brief shows it: the note folder and the old notes file of the payload's cwd, filled in."""
     return template.replace("{folder}", FOLDER).replace("{old}", OLD_NOTES)
 
 
