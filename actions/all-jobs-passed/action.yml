@@ -2,7 +2,8 @@ name: All jobs passed
 description: >
   Fan-in check with two checks. It fails when any needed job failed, was cancelled or was skipped,
   and, when `workflow` is set, when the calling workflow's wiring breaks the fan-in rules. A skipped job passes only
-  when `scope-skips` names it and its scope flags are false. The caller job
+  when `scope-skips` names it and its scope flags are false, or, with `scope-skips` set, when the scope job succeeded and
+  its `records_only_skip` output is "true". The caller job
   MUST set `needs: [...]` and `if: always()`; without `always()` GitHub skips this job when a
   needed job fails, and a skipped required check reads as green.
 inputs:
@@ -16,7 +17,8 @@ inputs:
   scope-skips:
     description: >
       Optional. One JSON line {job: [scope flag, ...]}: a skipped job named there passes when the scope job succeeded and each listed
-      flag in needs.scope.outputs is exactly "false". Empty, a skipped job fails.
+      flag in needs.scope.outputs is exactly "false". A set value also passes every skipped job when the scope job succeeded and
+      needs.scope.outputs.records_only_skip is exactly "true". Empty, a skipped job fails.
     required: false
     default: ''
 runs:

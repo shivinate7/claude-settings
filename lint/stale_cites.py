@@ -165,7 +165,7 @@ import subprocess
 import sys
 
 sys.dont_write_bytecode = True  # the cost contract: a run writes no file, so no .pyc for the import below
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import layout  # noqa: E402  the one home of where a repo keeps its decisions (lint/layout.py)
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds (hooks/precompact_handoff.py)
@@ -434,7 +434,7 @@ def read_diff(diff_args, head=None, base=None):
     return removed, renamed, modified, added, added_markdown_lines(patch)
 
 
-PY_FACTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "skills", "plain-english-map",
+PY_FACTS = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "skills", "plain-english-map",
                         "scripts", "lib", "py-facts.py")
 _py_facts = []
 
@@ -906,7 +906,7 @@ class ValueReader:
 
 
 # The rows file as a repo path, for a read at head. Derived from the one home of its path, never copied.
-ROWS_AT_HEAD = os.path.relpath(route_match.ROUTE_ROWS_FILE, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+ROWS_AT_HEAD = os.path.relpath(route_match.ROUTE_ROWS_FILE, os.path.join(os.path.dirname(os.path.realpath(__file__)),
                                                                        "..")).replace(os.sep, "/")
 HTML_COMMENT = re.compile(r"<!--.*?-->")
 # Text in straight or curly double quotes, or a bare file path (a folder part and an extension): a mention, no claim.

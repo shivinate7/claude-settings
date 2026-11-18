@@ -11,7 +11,7 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # a runner other than `python agent_brief.py` still finds guard_core
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # a runner other than `python agent_brief.py` still finds guard_core
 try:
     from guard_core import REFUTER_ROLE  # noqa: E402  the one home of the refuter role's name
 except Exception as e:  # fail open, as the docstring says: READ_ONLY and SCOPE need the name, so stop here with exit 0

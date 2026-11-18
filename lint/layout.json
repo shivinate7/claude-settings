@@ -30,6 +30,10 @@
       "path": "docs/debts/notes.md",
       "set": "core"
     },
+    "notes": {
+      "path": "docs/notes",
+      "set": "optional"
+    },
     "plans": {
       "path": "docs/plans",
       "set": "core",

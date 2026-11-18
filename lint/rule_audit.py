@@ -75,7 +75,7 @@ import re
 import subprocess
 import sys
 from typing import List
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
 except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
@@ -86,7 +86,7 @@ NODE_TEST_STUB = ('data:text/javascript,import{registerHooks}from"node:module";r
                   'if(u==="node:test")return{format:"module",source:"export function test(n){console.log(\'LISTED \'+JSON.stringify(n))}",'
                   'shortCircuit:true};return n(u,c)}})')
 NODE_LIST_TIMEOUT = 10
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 # Paths relative to the repo root, so a fixture test reads the same list under its own root.
 RULE_FILES = ["CLAUDE.md", os.path.join("output-styles", "shiv-stylisms.md")]
 MAP_FILE = os.path.join(ROOT, "lint", "rule_mechanisms.json")

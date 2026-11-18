@@ -1,0 +1,1 @@
+- stall-pause-mutants-survive: Round 2 of the sleep-wait lane (PR #3558, head 6659f06146) left three mutants alive, each on its own: the clock loop, the under-25 s sleep and two sleeps. Not re-run here. Decision: stall-watch (a stalled background command is reported, never stopped). Fix: a test case per check in `hooks/test_stall_watch.py`.
