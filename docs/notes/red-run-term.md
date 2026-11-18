@@ -1,0 +1,1 @@
+- red-run-term: (#2431) "red run" in session-tiers.md and merge.py should read "failed run" (glossary).

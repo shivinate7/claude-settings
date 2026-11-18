@@ -1,0 +1,1 @@
+- caps-pr-glosses: (#2557 round 3) docs/decisions/ci-job-caps.md:18 cites pull requests 2268, 2164, 2276 and 2551 by number with no plain name (rule speak-cite-id-plus-gloss).

@@ -1,0 +1,1 @@
+- slug-length-step-name: Lane notes-fix-guard-1, two notes: (a) slug-check-reader-row: a row says "only gh_edit_hit reads it", but key_named_hit and reworked_hit read it too. (b) slug-length-step-name: the CI step name "Record slug length" is stale now that the step also refuses a duplicate notes slug.

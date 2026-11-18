@@ -1,0 +1,1 @@
+- export-scan-limit-1: closer-form password:!0)abc or password:!0}hunter2 passes the boolean-run rule. Fix: none until a real incident. Decision: waiting-data-in-repo.

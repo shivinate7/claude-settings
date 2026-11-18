@@ -1,0 +1,1 @@
+- ask-lane-clause: (#2559 design review) mockup notes section 2 folds a lane item with a lastAnswer; the build keeps its full card (builder named the departure in c3ce4ce4f). No ruling moves it; pick 480 a covers routed items only.

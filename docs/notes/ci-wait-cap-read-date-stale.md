@@ -1,0 +1,1 @@
+- ci-wait-cap-read-date-stale: hooks/ci_wait_cap.json `read` date has no staleness check; register it with R28 upkeep when built (from lane ci-wait-cap-55).

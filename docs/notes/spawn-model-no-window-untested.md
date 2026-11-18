@@ -1,0 +1,1 @@
+- spawn-model-no-window-untested: a role the report names with no spawn in the window is now checked against earlier models, with no test either way.
