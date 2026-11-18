@@ -1,4 +1,4 @@
-"""Review-layer recall eval: fixture-shape cases (green) and scorer-report cases (red until the scorer exists).
+"""Review-layer recall eval: fixture-shape cases, scorer-report cases on the committed fixture, and scorer rules on inline fixtures.
 
 The fixture is tests/review_layer_recall/fixture.json: committed data, no network. The scorer is
 lint/review_layer_recall.py, run as
@@ -14,7 +14,9 @@ and it prints one JSON report:
 `of` is the number of incidents whose answer key names the layer. Recall is "measured" only when the
 findings hold a verdict for each of those incidents. Otherwise it is "unknown", never 0. A findings
 file is a JSON list of {"pr": int, "layer": str, "verdict": "PASS" | "FAIL" | "PARTIAL"}; a FAIL by a
-layer on an incident's PR counts as caught. Cost stays unknown: the review record stores no cost.
+layer on an incident's PR counts as caught. A PARTIAL row, a null, or any other value makes its layer
+unknown, never a miss, and a row never counts for another layer. An incident labelled "unknown" counts
+in n.incidents and in no layer's of. Cost stays unknown: the review record stores no cost.
 """
 import json
 import os
@@ -42,6 +44,23 @@ SHA_FULL = re.compile(r"[0-9a-f]{40}")
 def load_fixture():
     with open(FIXTURE, encoding="utf-8") as fh:
         return json.load(fh)
+
+
+def run_scorer(test, run, rows, fixture_path):
+    """Runs the scorer on one fixture and the findings rows, and returns its parsed report. The one home of a scorer run."""
+    if not os.path.isfile(SCORER):
+        test.fail(SCORER_MISSING)
+    findings = os.path.join(run, "findings.json")
+    with open(findings, "w", encoding="utf-8") as fh:
+        json.dump(rows, fh)
+    proc = subprocess.run(
+        [sys.executable, SCORER, "--fixture", fixture_path, "--findings", findings],
+        capture_output=True, text=True, timeout=SCORER_TIMEOUT, cwd=ROOT, env=clean_env())
+    test.assertEqual(proc.returncode, 0, "scorer exited %d" % proc.returncode)
+    try:
+        return json.loads(proc.stdout)
+    except ValueError:
+        test.fail("scorer stdout is not one JSON report")
 
 
 def clean_env():
@@ -121,7 +140,7 @@ class FixtureShape(unittest.TestCase):
 
 
 class ScorerReport(unittest.TestCase):
-    """Red until the scorer exists: the scorer's report, with n and recall taken from the fixture."""
+    """The scorer's report on the committed fixture, with n and recall taken from the fixture."""
 
     def setUp(self):
         self.run = _test_temp.run_folder()
@@ -130,19 +149,7 @@ class ScorerReport(unittest.TestCase):
         shutil.rmtree(self.run, ignore_errors=True)
 
     def scorer_report(self, rows):
-        if not os.path.isfile(SCORER):
-            self.fail(SCORER_MISSING)
-        findings = os.path.join(self.run, "findings.json")
-        with open(findings, "w", encoding="utf-8") as fh:
-            json.dump(rows, fh)
-        proc = subprocess.run(
-            [sys.executable, SCORER, "--fixture", FIXTURE, "--findings", findings],
-            capture_output=True, text=True, timeout=SCORER_TIMEOUT, cwd=ROOT, env=clean_env())
-        self.assertEqual(proc.returncode, 0, "scorer exited %d" % proc.returncode)
-        try:
-            return json.loads(proc.stdout)
-        except ValueError:
-            self.fail("scorer stdout is not one JSON report")
+        return run_scorer(self, self.run, rows, FIXTURE)
 
     def test_report_names_every_layer_with_n_from_the_fixture(self):
         fixture = load_fixture()
@@ -180,6 +187,93 @@ class ScorerReport(unittest.TestCase):
             report["layers"]["design_reviewer"]["recall"],
             {"status": "unknown", "caught": None, "of": 0},
             "design reviewer recall is not unknown at n=0")
+
+
+def incident(pr, layer):
+    """One incident for an inline fixture. The scorer reads only its PR and its layer."""
+    return {"pr": pr, "reverted": "1234567", "reverts": ["7654321"], "layer": layer,
+            "basis": "revert message", "answer_key": "Scorer case: the scorer reads the PR and the layer only."}
+
+
+class ScorerRules(unittest.TestCase):
+    """Scorer rules on small inline fixtures. Each case states the rule it proves and the recall it expects."""
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+
+    def tearDown(self):
+        shutil.rmtree(self.run, ignore_errors=True)
+
+    def score(self, incidents, rows, name):
+        path = os.path.join(self.run, name + ".json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"about": "inline scorer case", "layers": list(LAYERS), "incidents": incidents, "controls": []}, fh)
+        return run_scorer(self, self.run, rows, path)
+
+    def test_a_partly_covered_layer_reads_unknown_not_measured(self):
+        incidents = [incident(101, "reviewer"), incident(102, "reviewer"), incident(103, "reviewer")]
+        rows = [{"pr": 101, "layer": "reviewer", "verdict": "FAIL"}, {"pr": 102, "layer": "reviewer", "verdict": "PASS"}]
+        recall = self.score(incidents, rows, "partly-covered")["layers"]["reviewer"]["recall"]
+        self.assertEqual(recall["of"], 3, "reviewer's of is not its three incidents")
+        self.assertEqual(recall["status"], "unknown", "a layer with PR 103 missing a verdict reads %r, not unknown" % (recall,))
+        self.assertIsNone(recall["caught"], "a layer with PR 103 missing a verdict reads %r, not caught null" % (recall,))
+
+    def test_a_non_verdict_row_reads_unknown_never_caught_zero_of_one(self):
+        for bad in ("PARTIAL", None, "MAYBE", 7):
+            with self.subTest(verdict=bad):
+                rows = [{"pr": 201, "layer": "fix_verifier", "verdict": bad}]
+                recall = self.score([incident(201, "fix_verifier")], rows, "non-verdict")["layers"]["fix_verifier"]["recall"]
+                self.assertEqual(recall["of"], 1, "fix_verifier's of is not its one incident")
+                self.assertEqual(recall["status"], "unknown", "a %r verdict row reads %r, not unknown" % (bad, recall))
+                self.assertIsNone(recall["caught"], "a %r verdict row reads %r, not caught null" % (bad, recall))
+
+    def test_one_partial_row_beside_a_fail_and_a_pass_reads_unknown(self):
+        incidents = [incident(301, "reviewer"), incident(302, "reviewer"), incident(303, "reviewer")]
+        rows = [{"pr": 301, "layer": "reviewer", "verdict": "FAIL"},
+                {"pr": 302, "layer": "reviewer", "verdict": "PASS"},
+                {"pr": 303, "layer": "reviewer", "verdict": "PARTIAL"}]
+        recall = self.score(incidents, rows, "partial-beside-valid")["layers"]["reviewer"]["recall"]
+        self.assertEqual(recall["of"], 3, "reviewer's of is not its three incidents")
+        self.assertEqual(recall["status"], "unknown", "a PARTIAL row beside a FAIL and a PASS reads %r, not unknown" % (recall,))
+        self.assertIsNone(recall["caught"], "a PARTIAL row beside a FAIL and a PASS reads %r, not caught null" % (recall,))
+
+    def test_a_pass_row_on_a_one_incident_layer_reads_measured_caught_zero(self):
+        # Control beside the non-verdict cases: a valid PASS is a real miss, so the unknown rule does not hide misses.
+        rows = [{"pr": 401, "layer": "refuter", "verdict": "PASS"}]
+        recall = self.score([incident(401, "refuter")], rows, "pass-control")["layers"]["refuter"]["recall"]
+        self.assertEqual(recall["of"], 1, "refuter's of is not its one incident")
+        self.assertEqual(recall["status"], "measured", "a PASS row reads %r, not measured" % (recall,))
+        self.assertEqual(recall["caught"], 0, "a PASS row reads %r, not caught 0" % (recall,))
+
+    def test_a_verdict_row_for_one_layer_never_credits_another(self):
+        incidents = [incident(501, "reviewer"), incident(502, "fix_verifier")]
+        rows = [{"pr": 501, "layer": "fix_verifier", "verdict": "FAIL"}, {"pr": 502, "layer": "reviewer", "verdict": "FAIL"}]
+        report = self.score(incidents, rows, "cross-layer")
+        reviewer = report["layers"]["reviewer"]["recall"]
+        fix = report["layers"]["fix_verifier"]["recall"]
+        self.assertEqual(reviewer["of"], 1, "reviewer's of is not its one incident")
+        self.assertEqual(reviewer["status"], "unknown", "a fix_verifier FAIL on PR 501 credits the reviewer layer: %r" % (reviewer,))
+        self.assertEqual(fix["of"], 1, "fix_verifier's of is not its one incident")
+        self.assertEqual(fix["status"], "unknown", "a reviewer FAIL on PR 502 credits the fix_verifier layer: %r" % (fix,))
+
+    def test_a_fail_row_on_its_own_layer_credits_that_layer_control(self):
+        # Control beside the cross-layer case: the same PR, on its own layer, is caught.
+        incidents = [incident(501, "reviewer"), incident(502, "fix_verifier")]
+        rows = [{"pr": 501, "layer": "reviewer", "verdict": "FAIL"}]
+        reviewer = self.score(incidents, rows, "own-layer")["layers"]["reviewer"]["recall"]
+        self.assertEqual(reviewer["of"], 1, "reviewer's of is not its one incident")
+        self.assertEqual(reviewer["status"], "measured", "a reviewer FAIL on its own incident reads %r, not measured" % (reviewer,))
+        self.assertEqual(reviewer["caught"], 1, "a reviewer FAIL on its own incident reads %r, not caught 1" % (reviewer,))
+
+    def test_a_fully_covered_layer_with_a_fail_reads_measured_and_caught(self):
+        incidents = [incident(601, "reviewer"), incident(602, "reviewer"), incident(603, "reviewer")]
+        rows = [{"pr": 601, "layer": "reviewer", "verdict": "FAIL"},
+                {"pr": 602, "layer": "reviewer", "verdict": "PASS"},
+                {"pr": 603, "layer": "reviewer", "verdict": "FAIL"}]
+        recall = self.score(incidents, rows, "fully-covered")["layers"]["reviewer"]["recall"]
+        self.assertEqual(recall["of"], 3, "reviewer's of is not its three incidents")
+        self.assertEqual(recall["status"], "measured", "a fully covered layer with FAILs reads %r, not measured" % (recall,))
+        self.assertEqual(recall["caught"], 2, "a fully covered layer with two FAILs reads %r, not caught 2" % (recall,))
 
 
 if __name__ == "__main__":
