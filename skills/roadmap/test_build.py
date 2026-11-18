@@ -1181,7 +1181,7 @@ class LedgerActs(UpkeepFixture):
     NO_NAME_WHY = "unknown (the repo's GitHub name could not be read)"
 
     def test_a_draft_with_no_branch_key_reads_lane_unknown_and_a_branch_a_live_lane_holds_keeps_its_act(self):
-        # The branch key is optional (skills/roadmap/SKILL.md, the pull row). With no branch, no lane's hold can be told, so the
+        # The branch key is optional (the roadmap skill's pull row). With no branch, no lane's hold can be told, so the
         # draft reads lane unknown, never no live lane. The control's branch is the one the live lane holds.
         ledger = {"readAt": self.FRESH, "rows": [ledger_row(5, "lane round 1", owner="lane")]}
         lane = session_row("session_test01", "SESSION_STATUS_RUNNING", self.REPO, "cs-step:foo", status_bucket=BUCKET_WORKING)
