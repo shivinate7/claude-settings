@@ -38,7 +38,7 @@ session transcripts, not a repo.
 | Shared trees | `$PY $P/lint/compliance_probes.py hooks $P` prints the diff of the live `settings.json` hooks (`$CLAUDE_CONFIG_DIR/settings.json` when set and not empty, else `~/.claude/settings.json`) against the parent clone's (Hooks, below); a clone with no `settings.json` is n/a. For in shape and out, the line after the verdict names the trusted copy and the live file read: `trusts: clone (<root>/settings.json); live (~/.claude/settings.json) is the copy checked`, or `live (<dir>/settings.json)` when the variable is set | exit 0. The live hooks equal the clone's, less `SessionStart` |
 | Shared trees | `.claude/launch.json`, dev scripts, `git ls-files '*playwright*.config.*'`, dev server config | each checkout can set its own port and data; each `webServer` has reuse off or absent, or on (any value that can be true, such as `!process.env.CI`) with a wired `globalSetup` that refuses another checkout; port strict (`--strictPort` or `strictPort: true`); no Playwright config: n/a |
 | Git | `gh pr list --state merged --limit 20` and `git log --first-parent --no-merges --oneline -20 origin/main` | main moves only by PR |
-| Git | `gh api repos/{owner}/{repo}/branches/main/protection`, and `merge.requiredChecks` in `.github/stamp.json` | the answer is known. A 404 is a known answer: no protection. `"protection"` is the right value (decision main-branch-protection, the protection holds the one list): no comparison. When `requiredChecks` is a list, the protection's `required_status_checks.contexts` equal it, else `merge` refuses. No `stamp.json`: no comparison |
+| Git | `gh api repos/{owner}/{repo}/branches/main/protection`, and `merge.requiredChecks` in `.github/stamp.json` | the answer is known. A 404 is a known answer: no protection. `"none"` is the right value on main (decision main-branch-protection): the merge tool reads no check, so no comparison. `"protection"` is also valid (the protection holds the list): no comparison. When `requiredChecks` is a list, the protection's `required_status_checks.contexts` equal it, else `merge` refuses. No `stamp.json`: no comparison |
 | Git | records folders, and `$PY $P/lint/compliance_probes.py slugs <child root>` | one file per record, one folder per kind, no added slug over 32 characters |
 | Git | `check_silent_undo.py --history` | no lost lines |
 | Verification | `ci-hygiene` skill on `.github/workflows/` | no top finding |
@@ -50,7 +50,7 @@ session transcripts, not a repo.
 | Building | designs in `docs/` or `plans/` with no record | each design has a record, or is marked abandoned |
 | Speak plainly | `` grep -rnE -e "\bD-?[0-9]+\b" -e "\b[Dd]ecision [a-z0-9]+(-[a-z0-9]+)+" -e "\brecord [a-z0-9]+(-[a-z0-9]+)+" -e "\bD ?\`[a-z0-9]+(-[a-z0-9]+)*\`" --include=*.md . `` finds numbered ids (D12, D-570), keyword cites (Decision draft-until-reviewed) and a D before a backtick slug. `grep -rnwF -f <(basename -s .md decisions/*.md) --include=*.md .` finds bare slugs. `grep -rnE -e "#[0-9]+\b" -e "\b[Ll]ane [0-9]+\b" -e "\b[0-9a-f]{7,40}\b" --include=*.md .` finds PR, issue, lane and commit ids (skip hex words with no digit). Run all from the records parent | each cited id has a short plain name beside it |
 | Output | `ste_lint` totals on the child's `*.md` | 0 errors |
-| Output | none: known gap. CI's STE step reads Markdown only, so UI copy gets no sentence-length, bloat or double-negative check. The Design probe counts the UI files | report the gap with its count; do not build a UI linter |
+| Output | none: known gap. CI's STE step reads Markdown only, so UI copy gets no bloat or double-negative check (STE011, STE013). The Design probe counts the UI files | report the gap with its count; do not build a UI linter |
 | Style | none: `output-styles/shiv-stylisms.md` governs replies, a session act | `n/a (session)` |
 | Reports | none: `report_guard.py` covers it | `parent-covered` |
 
@@ -195,7 +195,7 @@ A bare `rule:<id>` with no "known exemption" never passes a departure. Text is c
 `$PY $P/lint/compliance_probes.py restates .` finds a child unit that copies the text of a claude-settings
 record. A child names the record and keeps only what applies to its repo (decision child-cites-not-copies).
 The fix goes in the child: replace the copy with the record's name.
-It reads the same files and units as Supersede. It reads the records from the decisions folder of the
+It reads the units of Supersede's files, plus `docs/rules/**/*.md`, the shared rule files and the layout's rules folder. It reads the records from the decisions folder of the
 parent clone, never the child's own. It holds no copy of them. Before it compares, it drops headings, `Kind:`,
 `Plan:` and `Home:` lines, HTML comments, code spans, numbers and time zones, on both sides. Quoted text is read.
 
@@ -208,9 +208,26 @@ An item names the file, the line and the record. It never prints record text.
 | --- | --- |
 | 0 | `restates: in shape - M file(s) read`, or `restates: n/a - this is claude-settings` |
 | 1 | `restates: out - N line(s) to read in M file(s)`, one item line per hit |
-| 2 | `restates: unknown`: the records folder cannot be read or holds no record, a tracked file of the child cannot be read, or a code fence is still open at the end of a file |
+| 2 | `restates: unknown`: the records folder cannot be read or holds no record, a rule file of the child or its layout cannot be read, or a code fence is still open at the end of a file |
 
 Child CI runs the same probe through the action `actions/claude-md-cites`, after `actions/checkout`.
+
+## Aligned
+
+`$PY $P/lint/compliance_probes.py aligned .` runs in a pull request, with `BASE_SHA` set (the action sets it to the base branch).
+`HEAD_SHA` defaults to `HEAD`. `PR_BODY` defaults to the body in the event file that `GITHUB_EVENT_PATH` names. It finds a record and a rule unit that cites it moving apart. Either the record changes and no citing unit
+does, or a citing unit changes and its record does not. A unit cites a record by its slug alone in a
+code span, or by the `<!-- rule:X -->` anchor the record's `Home:` line names. A PR body line
+`Rules checked: <record> — no change` clears one record (decision child-cites-not-copies). It reads one
+`git diff` and writes nothing. The fix goes in the PR: change the unit, or add the line to the PR body and push a commit.
+
+| Exit | Group line |
+| --- | --- |
+| 0 | `aligned: in shape - ...` |
+| 1 | `aligned: out - N line(s) to read in M file(s)`, one item line per hit: record, file and line |
+| 2 | `aligned: unknown`: `BASE_SHA` is missing, the diff cannot be read, a record or rule file cannot be read, or a gap is found and no PR body can be read |
+
+Child CI runs it as the second step of `actions/claude-md-cites`, on `pull_request` runs only.
 
 ## Hooks
 

@@ -1,0 +1,1 @@
+- sighting-ten-ci-job-caps: Sighting 10, 09:06 CST Nov 13: both of triage's picks on mutation-tests-for-cost (08:00 and 09:05 CST) missed decision ci-job-caps (owner 12:11 CST Nov 10: raise time limits generously in the interim). The lane found it. Triage had searched only roadmap/rulings, not docs/decisions on main, for time limits.

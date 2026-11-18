@@ -1,0 +1,1 @@
+- time-pinned-marker-jsx-text: the time-pinned finder (lint/find_time_pinned.py) reads `// time-pinned-ok: <reason>` inside JSX text on a .tsx sleep line as a keep marker. It hides a finding that main lists. Only someone who types marker text in JSX text on purpose hits it. Fix: none yet; the JS masker (`mask_js`) has no JSX-text mode.

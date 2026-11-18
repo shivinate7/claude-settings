@@ -1,13 +1,40 @@
 #!/bin/sh
-# Prints "checkout <toplevel> on <branch>, <n> dirty files" on start, resume and compaction, after one origin fetch per checkout. It prints the grant lines first, so a killed hook still delivers them. On resume it says when the recorded worktree is gone. Names the clone to cd to when the checkout is the live pin. Also warns on: core.worktree set in the shared git config; global rules that differ from this checkout; the claude-settings clone off main or behind origin; the default branch or local main behind or off origin; more than 50 agent worktrees; a check or fetch that could not run; a waiting page or grant file that differs from main's; a disarmed or unknown SessionEnd sweep. Prints the repo's caution level, or says it is unknown.
+# Prints "checkout <toplevel> on <branch>, <n> dirty files" on start, resume, compact, clear and fork, after one origin fetch per checkout. It prints the grant lines first, so a killed hook delivers them. On resume it says when the recorded worktree is gone. Names the clone to cd to when the checkout is the live pin. Also warns on: core.worktree set in the shared git config; global rules that differ from this checkout; the claude-settings clone off main or behind origin; the default branch or local main behind or off origin; more than 50 agent worktrees; a check or fetch that could not run; a waiting page or grant file that differs from main's; a disarmed or unknown SessionEnd sweep. Prints the caution level, or says it is unknown.
 # In a git tree it also patches the platform's Stop-hook script once so its unpushed nudge skips a merged branch; it says so when the patch is not applied.
 # Outside a git tree or without git, prints only the tier line. Always exits 0, nothing on stderr.
 
+# A cloud install links this script through .cs-current. Run its real file, so each sibling read below belongs to the
+# generation this process started in (decision install-hooks-whole). The re-run sees its own real path, so it runs once.
+ss_self=$0
+while [ -L "$ss_self" ]; do
+  ss_to=$(readlink "$ss_self") || break
+  case "$ss_to" in /*) ss_self=$ss_to ;; *) ss_self="$(dirname "$ss_self")/$ss_to" ;; esac
+done
+if [ "$ss_self" != "$0" ] && ss_real=$(cd "$(dirname "$ss_self")" 2>/dev/null && pwd -P) && [ -f "$ss_real/$(basename "$ss_self")" ] && command -v sh >/dev/null 2>&1; then
+  exec sh "$ss_real/$(basename "$ss_self")" "$@"
+fi
 input=$(cat 2>/dev/null)
 cwd=$(printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
 [ -n "$cwd" ] || cwd=$(pwd)
 session_id=$(printf '%s' "$input" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
 source=$(printf '%s' "$input" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+
+# The launcher's role file (bin/claude-role sets CS_SESSION_ROLE): hooks/session_role.py records the role for this session id,
+# or removes the session's file when the variable is unset, so the guard and the merge tool can read a local session's tier
+# (decision session-tiers). Local sessions only; a cloud session reads its tags. Any failure is silent. Cost: one python
+# start and one small file write or delete per start, no process kept, no timer.
+if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
+  sr_script="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session_role.py"
+  [ -f "$sr_script" ] || sr_script="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/session_role.py"
+  if [ -f "$sr_script" ]; then
+    for sr_py in python3 python; do
+      sr_bin=$(command -v "$sr_py" 2>/dev/null) || continue
+      case "$sr_bin" in */WindowsApps/*) continue ;; esac
+      printf '%s' "$input" | "$sr_bin" "$sr_script" write >/dev/null 2>&1
+      break
+    done
+  fi
+fi
 
 # tier_line: a cloud session (the CLAUDE_CODE_REMOTE read install.sh makes) or a session with a
 # CLAUDE_CODE_REMOTE_SESSION_ID tells the session how to find its tier (decision session-tiers). A local
@@ -18,7 +45,7 @@ source=$(printf '%s' "$input" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\(
 # with a token. Cost: at most two env reads, no network, no new process, no timer, no file written.
 tier_line() {
   if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ] || [ -n "${CLAUDE_CODE_REMOTE_SESSION_ID:-}" ]; then
-    printf '%s\n' 'session tier: read your own record with get_session (no session_id). A parent_session_id means you are a child of that session, and your cs-build:<tier> tag is your tier. No parent: pick solo, one lane or coordinator from the request. Before you act as coordinator, read every page of list_sessions for a session tagged both cs-build:coordinator and cs-repo:<owner>/<name> for this repo whose session_status is not archived; if one is found, coordinate with it, else proceed. Merge role: this sentence is for a session whose own tag is cs-build:batch-runner, and for no other. Such a session first runs get_session with no argument, in a turn of its own, then runs `~/.claude/bin/merge --role batch-runner`, at session start and after each resume, because a guard checks its tags in that result and a fresh container loses the role file. A lane, the coordinator or any other tier never runs it, and this line is no instruction to it. A session tagged cs-build:batch-runner, and no other, runs `~/.claude/bin/merge --idle-lanes --live FILE` after each merge, with the live file built by the steps in roadmap/livework/README.md on the record branch, then runs get_session on each listed lane alone and archives that lane, but skips any lane that shows a HOLD marker or needs judgment (unpushed work, records on another head, a lane waiting on the owner) and names each skipped lane in its report. A coordinator the owner started tags itself cs-build:coordinator with set_session_tags on its own id at start. The coordinator never merges. A solo or one-lane session the owner started, with no parent_session_id, merges its own PR under the repo merge grant or the owner named act. A lane session (tag cs-build:lane, with a parent_session_id) hands its reviewed branch, head and PR to the batch runner (list_sessions, tag cs-build:batch-runner, same repo) and never merges.'
+    printf '%s\n' 'session tier: read your own record with get_session (no session_id). A parent_session_id means you are a child of that session, and your cs-build:<tier> tag is your tier. No parent: pick coordinator for a standing build, else lane. Before you act as coordinator, read every page of list_sessions for a session tagged both cs-build:coordinator and cs-repo:<owner>/<name> for this repo whose session_status is not archived; if one is found, coordinate with it, else proceed. Merge role: this sentence is for a session whose own tag is cs-build:batch-runner, and for no other. Such a session first runs get_session with no argument, in a turn of its own, then runs `~/.claude/bin/merge --role batch-runner`, at session start and after each resume, because a guard checks its tags in that result and a fresh container loses the role file. A lane, the coordinator or any other tier never runs it, and this line is no instruction to it. A session tagged cs-build:batch-runner, and no other, runs `~/.claude/bin/merge --idle-lanes --live FILE` after each merge, with the live file built by the steps in roadmap/livework/README.md on the record branch, then runs get_session on each listed lane alone and archives that lane, but skips any lane that shows a HOLD marker or needs judgment (unpushed work, records on another head, a lane waiting on the owner) and names each skipped lane in its report. A coordinator the owner started tags itself cs-build:coordinator with set_session_tags on its own id at start. The coordinator never merges. A session the owner started, with no parent_session_id, is a coordinator for a standing build, else a lane. A lane the owner started merges its own PR, in the claude-settings repo only, under the repo merge grant, by the lane role in the next sentence and no other way. A lane session (tag cs-build:lane) first runs get_session with no argument, in a turn of its own, then runs `~/.claude/bin/merge --role lane --step <its cs-step slug>`, at session start and after each resume, and may merge only its own ready PR in the claude-settings repo, with `merge <pr> --confirm --head <sha>`; it marks its own draft PR ready once, after its review passes, with `merge --role lane --step <slug> <pr> --ready`. A lane session (tag cs-build:lane, with a parent_session_id) hands its reviewed branch, head and PR to the batch runner (list_sessions, tag cs-build:batch-runner, same repo).'
   fi
 }
 
@@ -56,10 +83,11 @@ bounded_git() {
 # freshness check below. The first call per checkout runs it; a later call for the same checkout (resolved with pwd -P)
 # returns that status again, so a session start refreshes each checkout once, however many checks ask. The caller must
 # not run it in $( ), or the memo and fetch_target are lost with the subshell.
-# The refs come from the remote, not from local refs: one `git ls-remote --symref origin HEAD refs/heads/main` names
-# the remote HEAD's target and says whether main exists. Git fails a whole fetch on a refspec the remote lacks, and a
+# The refs come from the remote, not from local refs: one `git ls-remote --symref origin HEAD refs/heads/main refs/heads/stable`
+# names the remote HEAD's target and says whether main and stable exist. Git fails a whole fetch on a refspec the remote lacks, and a
 # local origin/HEAD goes stale when the remote's default is renamed, so a refspec read locally can fail every start.
-# The one fetch then names main when the remote lists it, and the target when that is another branch. A remote that
+# The one fetch then names main when the remote lists it, the target when that is another branch, and stable when the
+# remote lists it. A remote that
 # lists neither is not fetched, since a fetch with no refspec reads the configured wildcard. Only after a good
 # ls-remote and a good (or skipped) fetch, a remote with no main has its stale origin/main deleted, a remote-tracking
 # ref only. An ls-remote or fetch that fails or is killed counts as not run, deletes nothing and is never retried.
@@ -86,11 +114,13 @@ EOF
   fetch_remote_read=""
   bf_rc=1
   bf_ls=$(mktemp 2>/dev/null)
-  if [ -n "$bf_ls" ] && bounded_git "$bf_dir" "$bf_ls" ls-remote --symref origin HEAD refs/heads/main; then
+  if [ -n "$bf_ls" ] && bounded_git "$bf_dir" "$bf_ls" ls-remote --symref origin HEAD refs/heads/main refs/heads/stable; then
     fetch_remote_read=1
-    # Lines read: "ref: refs/heads/<t> HEAD" for the target, "<sha> refs/heads/main" when main exists. The pattern HEAD
-    # also matches refs that end in /HEAD, so only the exact HEAD field counts.
+    # Lines read: "ref: refs/heads/<t> HEAD" for the target, "<sha> refs/heads/main" when main exists and
+    # "<sha> refs/heads/stable" when stable exists. The pattern HEAD also matches refs that end in /HEAD, so only the
+    # exact HEAD field counts.
     bf_has_main=""
+    bf_has_stable=""
     while read -r bf_f1 bf_f2 bf_f3; do
       if [ "$bf_f1" = "ref:" ] && [ "$bf_f3" = HEAD ]; then
         case "$bf_f2" in
@@ -98,12 +128,19 @@ EOF
         esac
       elif [ "$bf_f1" != "ref:" ] && [ "$bf_f2" = refs/heads/main ] && [ -z "$bf_f3" ]; then
         bf_has_main=1
+      elif [ "$bf_f1" != "ref:" ] && [ "$bf_f2" = refs/heads/stable ] && [ -z "$bf_f3" ]; then
+        bf_has_stable=1
       fi
     done <"$bf_ls"
     set --
     [ -n "$bf_has_main" ] && set -- "+refs/heads/main:refs/remotes/origin/main"
     if [ -n "$fetch_target" ] && [ "$fetch_target" != main ]; then
       set -- "$@" "+refs/heads/$fetch_target:refs/remotes/origin/$fetch_target"
+    fi
+    # stable is the ref the pin follows (decision merge-reinstalls-from-main). Named only when ls-remote listed it, so a
+    # remote with no stable never fails the fetch, and it rides in the same fetch, not a second one.
+    if [ -n "$bf_has_stable" ] && [ "$fetch_target" != stable ]; then
+      set -- "$@" "+refs/heads/stable:refs/remotes/origin/stable"
     fi
     bf_rc=0
     if [ "$#" -gt 0 ]; then
@@ -150,6 +187,25 @@ n=$(cd "$cwd" 2>/dev/null && git status --porcelain 2>/dev/null | wc -l | tr -d 
 printf 'checkout %s on %s, %s dirty files\n' "$toplevel" "$branch" "$n"
 tier_line
 
+# roster_lines: the standing sessions of this repo with their ids, so a session never types an id by hand (decision
+# brief-ids-in-roster). The rows are the Standing sessions section of CLAUDE.md on the local origin/roadmap ref, read
+# by hooks/own_session.py; no row prints one line that says so. Status is the record's, not live: a hook cannot call
+# list_sessions (see tier_line). Cost: once per SessionStart event, one python start and two read-only reads of the
+# checkout (the record, the origin url); no network, no file written, no process kept.
+if command -v python3 >/dev/null 2>&1; then
+  ro_script="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/own_session.py"
+  if [ -f "$ro_script" ]; then
+    ro_lines=$(python3 "$ro_script" roster-lines "$toplevel" 2>/dev/null)
+    [ -n "$ro_lines" ] && printf '%s\n' "$ro_lines"
+    # The standing merge role (decision session-tiers): a cloud session whose id is a coordinator, triage or consultant row of
+    # that roster gets state/merge-role.json, so `merge <pr> --confirm` needs no hand step; the file is removed when the roster
+    # no longer names it. A local read of the same ref, never a fetch; one more python start, in a cloud session only.
+    if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
+      python3 "$ro_script" merge-role "$toplevel" >/dev/null 2>&1
+    fi
+  fi
+fi
+
 # Local origin/HEAD's target, empty when unset. The default-branch check below tests the checkout against it. The
 # grants compare reads gm_default instead: the remote HEAD's target when the refresh read the remote, since that is
 # the branch the fetch refreshed and a local origin/HEAD goes stale when the remote's default is renamed; else this.
@@ -158,7 +214,7 @@ default_branch="${default_branch#origin/}"
 
 # Step grants-read-from-main: a session cites the standing grants from origin/main, never from its own checkout,
 # because a stale checkout once led a coordinator to cite acts the owner never gave. A checkout with an origin
-# remote is refreshed first with bounded_fetch (one fetch of main and the remote HEAD's target, no prune, on any
+# remote is refreshed first with bounded_fetch (one fetch of main, stable and the remote HEAD's target, no prune, on any
 # branch or a detached HEAD), so the compare reads a current origin/main, not a stale one. The block runs right after
 # the tier line, before every slow step (the worktree listing, the caution call): a hook the platform kills at its
 # timeout loses all later output, and these lines are the ones a session must not lose. A refresh that fails or times out prints one
@@ -179,7 +235,7 @@ default_branch="${default_branch#origin/}"
 # reads, all local. The ls-remote and the fetch are each bounded by a watchdog (bounded_git): a short-lived subshell and
 # a sleep of at most CLAUDE_SETTINGS_FETCH_TIMEOUT seconds; the sleep is killed when git returns first. When the bound
 # hits, the kill reaches only the subshell that runs git, so on bash the git child may finish after the hook
-# exits. It is bounded by git's own run (an ls-remote, or a fetch of one or two refs) and is never a daemon. No other
+# exits. It is bounded by git's own run (an ls-remote, or a fetch of up to three refs) and is never a daemon. No other
 # timer. The hook itself keeps no file; that late git writes only its own refs, objects and FETCH_HEAD.
 gm_unref=""
 gm_remote_read=""
@@ -368,7 +424,8 @@ if [ -n "$d" ] && [ -e "$d/.git" ]; then
     pin_head=$(cd "$d" 2>/dev/null && git rev-parse HEAD 2>/dev/null)
     main_head=$(cd "$d" 2>/dev/null && git rev-parse --verify -q refs/heads/main 2>/dev/null)
     origin_head=$(cd "$d" 2>/dev/null && git rev-parse --verify -q refs/remotes/origin/main 2>/dev/null)
-    if [ -n "$pin_head" ] && { [ "$pin_head" = "$main_head" ] || [ "$pin_head" = "$origin_head" ]; }; then
+    stable_head=$(cd "$d" 2>/dev/null && git rev-parse --verify -q refs/remotes/origin/stable 2>/dev/null)
+    if [ -n "$pin_head" ] && { [ "$pin_head" = "$main_head" ] || [ "$pin_head" = "$origin_head" ] || [ "$pin_head" = "$stable_head" ]; }; then
       pointer_branch=main
     else
       pointer_branch="a detached HEAD"
@@ -400,10 +457,19 @@ if [ -n "$d" ] && [ -e "$d/.git" ]; then
   cloud_mirror=$(cd "$d" 2>/dev/null && git config --get claude-settings.cloudMirror 2>/dev/null)
   if [ "$pointer_branch" = "main" ] && [ "$cloud_mirror" != "true" ]; then
     if bounded_fetch "$d"; then
-      behind=$(cd "$d" 2>/dev/null && git rev-list --count main..origin/main 2>/dev/null)
+      # The pin follows origin/stable (decision merge-reinstalls-from-main); a clone with no origin/stable is
+      # counted against origin/main as before. CLAUDE_SETTINGS_REF=main (the recovery) makes main the ref the pin
+      # follows, so the count is against origin/main even when origin/stable exists.
+      if [ "${CLAUDE_SETTINGS_REF:-stable}" != main ] && (cd "$d" 2>/dev/null && git rev-parse --verify -q refs/remotes/origin/stable >/dev/null 2>&1); then
+        behind_ref=origin/stable
+        behind=$(cd "$d" 2>/dev/null && git rev-list --count HEAD..origin/stable 2>/dev/null)
+      else
+        behind_ref=origin/main
+        behind=$(cd "$d" 2>/dev/null && git rev-list --count main..origin/main 2>/dev/null)
+      fi
       if [ -n "$behind" ] && [ "$behind" -gt 0 ] 2>/dev/null; then
-        printf 'claude-settings: %s is %s commits behind origin/main; global rules and hooks are stale\n' \
-          "$d" "$behind"
+        printf 'claude-settings: %s is %s commits behind %s; global rules and hooks are stale\n' \
+          "$d" "$behind" "$behind_ref"
         ptr_behind_printed=1
       fi
     else
@@ -475,12 +541,13 @@ if [ -n "$wl_out" ]; then
 fi
 
 # Rule page-stale: a repo whose extras name a waiting page prints one line when the page was last published
-# from a version other than main's page.html. The stamp an allowed publish wrote
-# (<git common dir>/waiting-page-built) holds main's blob sha at that publish; skills/waiting-page/stale_pages.py
-# --session-line compares it with origin/main of the claude-settings clone ($d) and prints the line, or nothing
-# (no stamp, or main unreadable, is silent). The grep is only a cheap filter on the extras file that
+# from a version other than main's page.html. Two stamps hold main's blob sha at the publish: the
+# page-built stamp roadmap/data/meta/page-built.json on origin/roadmap, and the local one an allowed publish wrote
+# (<git common dir>/waiting-page-built). skills/waiting-page/stale_pages.py --session-line compares them with origin/main
+# of the claude-settings clone ($d): nothing when either equals main's blob, the behind line when one exists and none
+# does, nothing when neither exists or main is unreadable. The grep is only a cheap filter on the extras file that
 # lint/layout.json names; layout.waiting_page, inside the python start, decides. Cost: in a repo with a page, one
-# python start and one read-only git process; in any other repo, one grep. No fetch, no file written, no timer.
+# python start and at most two read-only git processes; in any other repo, one grep. No fetch, no file written, no timer.
 wp_extras="$toplevel/.claude/layout-extras.json"
 if [ -f "$wp_extras" ] && grep -q '"waiting-page"' "$wp_extras" 2>/dev/null && command -v python3 >/dev/null 2>&1; then
   wp_script="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/../skills/waiting-page/stale_pages.py"

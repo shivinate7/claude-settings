@@ -69,6 +69,9 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -77,7 +80,9 @@ GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(HERE, "guard.py")
 SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(REPO, "settings.json")
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(REPO, "lint"))
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 ROOT = _test_temp.run_folder()
 atexit.register(shutil.rmtree, ROOT, ignore_errors=True)
 STUB_DIR = os.path.join(ROOT, "stub")
@@ -200,7 +205,8 @@ def record_branch_checkout():
     git(repo, "checkout", "-q", "-b", "main")
     os.makedirs(os.path.join(repo, ".claude"))
     with open(os.path.join(repo, ".claude", "layout-extras.json"), "w", encoding="utf-8") as f:
-        json.dump({"kinds": {}, "artifacts": [{"id": "queue", "url": PAGE_URL, "role": "waiting-page", "account": "current"}]}, f)
+        json.dump({"kinds": {}, "artifacts": [{"id": "queue", "role": "waiting-page", "export": "waiting",
+                                               "links": [{"account": "current", "url": PAGE_URL}]}]}, f)
     git(repo, "add", ".claude/layout-extras.json")
     git(repo, "commit", "-q", "-m", "extras")
     git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
@@ -351,6 +357,8 @@ PROBLEM_LINE = "Problem (risk): the change touches the guard, so it needs your w
 BASED_LINES = ("Based on (read): the diff changes one rule",)
 # The line a question to the owner carries (rule question-departs): what is on main, and what changes.
 DEPARTS_LINE = "Departs from: lint/stamp.py:run_stamp — the stamp check moves to the lint job"
+# The line a waiting-page decision carries after Departs from: what is stopped until his answer, and who acts next.
+WAITING_LINE = "Waiting on: the change waits until your answer; the session acts next."
 
 
 def good_options():
@@ -419,8 +427,9 @@ def good_page_item(mark=PAGE_MARK, **over):
     """A waiting-page decision that passes the form. `mark` rides in option a's gain, so a case finds the item
     in the prompt. `over` replaces fields, for a case that changes one. Its options carry ids and `shown` (see
     with_frozen_fields), so a case that replaces `options` gets a matching `shown` too."""
-    context = "\n".join((GOAL_LINE, PROBLEM_LINE, *BASED_LINES, DEPARTS_LINE))
-    item = {"kind": "decision", "title": "Ship the change today?", "status": "open", "context": context,
+    context = "\n".join((GOAL_LINE, PROBLEM_LINE, *BASED_LINES, DEPARTS_LINE, WAITING_LINE))
+    item = {"n": 928, "kind": "decision", "title": "Ship the change today?", "status": "open", "context": context,
+            "recommended": "a", "why": "A ships the change today, and nothing else waits on it.",
             "options": [{"key": "a", "label": "Ship it", "gain": "The change lands today. " + mark,
                          "lose": "Nobody reads it first."},
                         {"key": "b", "label": "Hold it", "gain": "A reviewer reads it first.",
@@ -442,7 +451,7 @@ TASK_FLAG = '{"ok": false, "reason": "a step that replaces text quotes the whole
 def good_task_item(step=GOOD_TASK_STEP, **over):
     """A task item that passes question_form.item_hit: its Why yours line in `context`, and one step. `over`
     replaces fields, for a case that changes one."""
-    item = {"kind": "task", "title": "Set the guard skip", "status": "open", "context": TASK_WHY, "steps": [step]}
+    item = {"n": 928, "kind": "task", "title": "Set the guard skip", "status": "open", "context": TASK_WHY, "steps": [step]}
     item.update(over)
     return item
 
@@ -955,7 +964,7 @@ def relative_item_repo():
 
 def apps_item():
     """A waiting-page decision on the apps question: it passes item_hit, and its text lists the APPS record."""
-    context = "\n".join((APPS_GOAL, APPS_PROBLEM, APPS_BASED[0], DEPARTS_LINE))
+    context = "\n".join((APPS_GOAL, APPS_PROBLEM, APPS_BASED[0], DEPARTS_LINE, WAITING_LINE))
     options = [
         {"key": "a", "label": "Keep the apps", "gain": "Calls into the repo stay straightforward. " + PAGE_MARK,
          "lose": "An unused app keeps its access."},
@@ -1385,6 +1394,44 @@ def case_widening_rule_names_the_mark():
     check("widening key: WIDENING_RULE contains WIDENS_KEY", bool(rule) and bool(key) and key in rule, cause)
 
 
+def widening_sentences(prompt):
+    """The lowercase sentences of a judged prompt's widening slot. [] when the slot is absent."""
+    region = widening_region(prompt, "PAGE_PROMPT") or ""
+    return [s for s in re.split(r"[.\n]", region.lower()) if s.strip()]
+
+
+def widening_pin(sentences, *groups):
+    """True when one sentence holds at least one word from each group."""
+    return any(all(any(w in s for w in group) for group in groups) for s in sentences)
+
+
+# A change to the shared tool that every repo gets alike is not widening, so the judge never flags it. Widening is a
+# form, allow entry or exception made so that one repo's differing form passes (decision uniform-over-variants: one
+# shared tool for every repo). The judge reads both in its widening slot, so the cases read that slot.
+def case_widening_rule_spares_a_tool_wide_change_with_no_repo_named():
+    r = run_hook(page_input("set", good_page_item()), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    sentences = widening_sentences(prompt)
+    check("widening slot: the judged prompt carries the widening slot after the question-format prompt",
+          bool(sentences), prompt[:200])
+    check("widening: a sentence never flags a tool-wide change with no repo named as its reason",
+          widening_pin(sentences, ("never flag", "not flag", "not widen"), ("tool-wide", "every repo", "alike"),
+                       ("no repo", "names no", "repo named", "without a repo")),
+          sentences or prompt[:200])
+
+
+def case_widening_rule_says_widening_is_a_form_that_passes_one_repos_variant():
+    r = run_hook(page_input("set", good_page_item()), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    sentences = widening_sentences(prompt)
+    check("widening slot: the judged prompt carries the widening slot after the question-format prompt",
+          bool(sentences), prompt[:200])
+    check("widening: a sentence says widening is a form, allow entry or exception made so that one repo's differing form passes",
+          widening_pin(sentences, ("widen",), ("form", "allow", "exception"), ("differ", "variant"),
+                       ("pass", "accept", "through")),
+          sentences or prompt[:200])
+
+
 def case_fail_open():
     for label, inp, kwargs in (
         ("a model failure on a spawn", spawn_input("builder", model="sonnet"), {"model_fail": True}),
@@ -1470,7 +1517,7 @@ CI_CHAT_OPTIONS = [
      "description": "Gain: the milestone run stops ending at its cap. Lose: each run takes longer."},
     {"label": "Keep the cap",
      "description": "Gain: nothing changes on main. Lose: the milestone run may end at its cap again."}]
-CI_PAGE_CONTEXT = "\n".join((CI_GOAL, CI_PROBLEM, CI_BASED[0], DEPARTS_LINE))
+CI_PAGE_CONTEXT = "\n".join((CI_GOAL, CI_PROBLEM, CI_BASED[0], DEPARTS_LINE, WAITING_LINE))
 CI_PAGE_OPTIONS = [
     {"key": "a", "label": "Raise the cap", "gain": "The milestone run stops ending at its cap.",
      "lose": "Each run takes longer and uses more minutes."},
@@ -1716,6 +1763,90 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
           "Unvetted:" in r.reason(), detail(r))
 
 
+# The cost of one fire of the judged tools: a question, a page write, an Agent spawn, and the two Opus reads.
+# A judged question or page write makes one model call, and its one child is the roadmap read, `git`. A tool
+# this hook does not judge, or a read of the page, starts nothing. The opus pair (opus_ask, then opus_scope, which
+# the local_time row's grant calls) makes one call each, and the two timeouts fit that row.
+
+class CostTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.folder = os.path.join(ROOT, "cost")  # a subfolder of this run's ROOT: the run removes ROOT, not this
+        os.makedirs(cls.folder, exist_ok=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.folder, ignore_errors=True)
+
+    def fire(self, stdin_text, answers=None):
+        folder = tempfile.mkdtemp(dir=self.folder)
+        return cost_probe.run_hook(HOOK, stdin_text, folder, answers)
+
+    def test_a_tool_this_hook_does_not_judge_starts_nothing(self):
+        run = self.fire(json.dumps({"session_id": SID_A, "tool_name": "Bash", "tool_input": {"command": "ls"}}))
+        self.assertEqual((run["code"], run["models"], run["children"], run["files"], run["out"]), (0, [], [], [], ""))
+
+    def test_a_read_of_the_page_starts_nothing(self):
+        run = self.fire(page_input("get", None, doc_id="c133", cwd=CI_REPO))
+        self.assertEqual((run["code"], run["models"], run["children"], run["files"]), (0, [], [], []))
+
+    def test_an_agent_spawn_costs_one_model_call_and_no_git_read(self):
+        # An Agent spawn has no question unit, so the past-ruling read (the one git read) never runs, even in a repo.
+        spawn = {"session_id": SID_A, "cwd": CI_REPO, "tool_name": "Agent",
+                 "tool_input": {"subagent_type": "builder", "model": "sonnet", "description": "build",
+                                "prompt": "Build the parser."}}
+        run = self.fire(json.dumps(spawn), [[json.loads(ALLOW), None]])
+        self.assertEqual((run["code"], len(run["models"])), (0, 1), "one spawn, one model call; got %r" % run["models"])
+        self.assertEqual(run["children"], [], "an Agent spawn starts no child, so no git read; got %r" % run["children"])
+        self.assertEqual(run["files"], [], "an allowed spawn writes no file; got %r" % run["files"])
+
+    def test_a_judged_page_write_costs_one_model_call_and_two_git_reads(self):
+        item = good_page_item(title="Raise the CI milestone job cap?", context=CI_PAGE_CONTEXT, options=CI_PAGE_OPTIONS)
+        run = self.fire(page_input("set", item, doc_id="c133", cwd=CI_REPO), [[json.loads(ALLOW), None]])
+        self.assertEqual(len(run["models"]), 1, "one judged write, one model call; got %r" % run["models"])
+        self.assertEqual(cost_probe.names(run["children"]), ["git", "git"],
+                         "the two children are the ruled-store ls-tree and the roadmap cat-file; got %r" % run["children"])
+        self.assertEqual(run["files"], [], "an allow writes no file")
+
+    def test_a_judged_question_costs_one_model_call_and_two_git_reads(self):
+        box = good_box(goal=CI_GOAL, problem=CI_PROBLEM, based=CI_BASED, options=CI_CHAT_OPTIONS)
+        run = self.fire(question_input(box=box, cwd=CI_REPO), [[json.loads(ALLOW), None]])
+        self.assertEqual(len(run["models"]), 1, "one judged question, one model call; got %r" % run["models"])
+        self.assertEqual(cost_probe.names(run["children"]), ["git", "git"],
+                         "the two children are the ruled-store ls-tree and the roadmap cat-file; got %r" % run["children"])
+        self.assertEqual(run["files"], [], "an allowed question writes no file; got %r" % run["files"])
+
+    def test_a_refused_page_write_adds_the_guard_log_line_and_no_other_file(self):
+        item = good_page_item(title="Raise the CI milestone job cap?", context=CI_PAGE_CONTEXT, options=CI_PAGE_OPTIONS)
+        run = self.fire(page_input("set", item, doc_id="c133", cwd=CI_REPO), [[{"ok": False, "reason": "no"}, None]])
+        self.assertEqual(len(run["models"]), 1)
+        self.assertEqual(cost_probe.names(run["children"]), ["git", "git"],
+                         "a refused write reads the ruled store and the roadmap as an allow does: two git children; got %r"
+                         % run["children"])
+        self.assertEqual(run["files"], ["guard.log"], "a refusal writes the guard log only; got %r" % run["files"])
+
+    def test_the_opus_ask_and_scope_cost_one_call_each_and_fit_the_local_time_row(self):
+        import call_judge
+        import decision_watch
+        ask = cost_probe.CountingModel(({"ok": True}, None))
+        with cost_probe.children() as started, mock.patch.object(decision_watch, "invoke_model", ask):
+            granted = call_judge.opus_ask("send opus judges")
+        self.assertTrue(granted)
+        self.assertEqual(len(ask.kwargs), 1, "the owner's ask makes one call")
+        self.assertEqual(ask.kwargs[0]["timeout"], call_judge.OPUS_ASK_TIMEOUT)
+        scope = cost_probe.CountingModel(({"ok": True, "roles": ["Explore"]}, None))
+        with cost_probe.children() as more, mock.patch.object(decision_watch, "invoke_model", scope):
+            roles = call_judge.opus_scope("send opus judges", ["an earlier prompt"])
+        self.assertEqual(roles, ["Explore"])
+        self.assertEqual(len(scope.kwargs), 1, "the scope read makes one call")
+        self.assertEqual(scope.kwargs[0]["timeout"], call_judge.OPUS_SCOPE_TIMEOUT)
+        self.assertEqual((started.argvs, more.argvs), ([], []), "neither read starts a child")
+        row = cost_probe.settings_timeout("local_time.py", "UserPromptSubmit")
+        self.assertIsNotNone(row, "settings.json has a UserPromptSubmit row for local_time.py")
+        self.assertLess(call_judge.OPUS_ASK_TIMEOUT + call_judge.OPUS_SCOPE_TIMEOUT, row,
+                        "the two reads, back to back, end before the row's hook timeout")
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -1732,6 +1863,8 @@ def main():
                  case_widening_set_holds_rule_once, case_widening_batch_holds_rule_once,
                  case_widening_absent_without_options, case_widening_refusal_names_the_option,
                  case_widening_fair_option_passes_code_path, case_widening_rule_names_the_mark,
+                 case_widening_rule_spares_a_tool_wide_change_with_no_repo_named,
+                 case_widening_rule_says_widening_is_a_form_that_passes_one_repos_variant,
                  case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
@@ -1746,6 +1879,8 @@ def main():
             case()
         except Exception as exc:
             check(case.__name__, False, "raised %s: %s" % (type(exc).__name__, exc))
+    if not cost_probe.run_class(CostTests):
+        FAILED.append("CostTests")
     print("FAIL: %d failed" % len(FAILED) if FAILED else "all checks passed")
     return 1 if FAILED else 0
 

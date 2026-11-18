@@ -1,0 +1,1 @@
+- artifact-guard-item-626: artifact-guard-matcher-names 14:00 CST Nov 12: owner page item 626 asks for one captured Mac db_write and one publish_files call (does the page url ride tool_input.url; leading slash, capital, file_path in an op; batch atomic on one bad op). No-url refusal not built meanwhile.

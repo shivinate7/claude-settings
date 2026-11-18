@@ -94,6 +94,10 @@ OUTSIDE = {
     ("own_session", "own_session_read"): "raises OSError on a transcript that is missing, by design; every caller in "
                                          "guard.py and guard_merge.py reads it inside a try that fails closed, and the "
                                          "direct callers are fuzzed, so a caller that lets the error out is still found",
+    ("own_session", "created_sessions"): "raises OSError on a transcript that is missing, by design; its one caller, "
+                                         "step_dup_hit, reads it inside a try that fails closed, and that caller is fuzzed",
+    ("own_session", "list_sessions_read"): "raises OSError on a transcript that is missing, by design; its one caller, "
+                                           "step_dup_hit, reads it inside a try that fails closed, and that caller is fuzzed",
 }
 
 RUN = _test_temp.run_folder()
@@ -300,6 +304,30 @@ def tokens_of(text):
     return found if found is not None else guard.segment_tokens("echo")
 
 
+LANE_START_REPO_TAGS = ("cs-repo:shivinate7/claude-settings", "cs-repo:o/r")
+LANE_START_URL = "https://github.com/shivinate7/claude-settings"
+
+
+def lane_start_hits_for(rng, text, env):
+    """The hits lane_start_hits returns for a drawn lane start: a list of (rule, reason, matched) strings, one per broken
+    rule, in judge order. Nine draws in ten are a create_session with the lane tag and drawn fields, so most lists hold
+    rules; the rest are a call with no lane tag and hold none, which refuse_lane_start must pass through."""
+    if rng.random() < 0.1:
+        return guard.lane_start_hits(guard.CREATE_SESSION_TOOL, {"tags": [text], "prompt": text}, env.cwd, env.transcript)
+    tags = ["cs-build:lane", rng.choice(LANE_START_REPO_TAGS + (text,))]
+    if rng.random() < 0.5:
+        tags.append("cs-step:" + rng.choice(("fuzz-step", text)))
+    tool_input = {
+        "tags": tags,
+        "effort": rng.choice((guard.LANE_EFFORT, "high", text)),
+        "prompt": rng.choice(("Grant: fuzz owner words, 13:19 CST Nov 10\n" + text, text, "/effort medium")),
+        "title": rng.choice(("Lane fuzz-step: do it", text)),
+        "model": rng.choice(("sonnet", "haiku", text)),
+        "source_url": rng.choice((LANE_START_URL, None, text)),
+    }
+    return guard.lane_start_hits(guard.CREATE_SESSION_TOOL, tool_input, env.cwd, env.transcript)
+
+
 def value_for(fn, name, param, rng, text, env, state):
     """One argument for a parameter, from its name and annotation. `state` builds shared inputs lazily."""
     annotation = "" if param.annotation is inspect.Parameter.empty else str(param.annotation)
@@ -307,6 +335,8 @@ def value_for(fn, name, param, rng, text, env, state):
         return guard.rm_var_hits(text, env.cwd)
     if fn.__name__ == "rm_after_cd_reason" and name == "hits":
         return guard.rm_after_cd_hits(text)
+    if fn.__name__ == "refuse_lane_start" and name == "hits":   # the typed list lane_start_hits returns, never a string
+        return lane_start_hits_for(rng, text, env)
     if fn.__name__ == "role_write_hit" and name == "target":   # a builder's workflow edit reaches the workflow check
         return rng.choice((WORKFLOW_TARGET, text, env.cwd))
     if name in CALLABLES:

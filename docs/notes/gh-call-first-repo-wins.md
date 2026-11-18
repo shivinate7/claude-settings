@@ -1,0 +1,1 @@
+- gh-call-first-repo-wins: hooks/guard_merge.py gh_call_of (~lines 93-99) moves repo flags to the end, and the first one wins. `gh pr -R a/b merge 5 --repo=c/d` reads a/b, where gh uses c/d (the last flag wins). It needs two different repos in one call, so Claude is unlikely to write it. Main has the same behaviour for a flag before the verb.

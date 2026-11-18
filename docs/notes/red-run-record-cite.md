@@ -1,0 +1,1 @@
+- red-run-record-cite: Record item 1a cites 457071b62 for `(mutant: code_check.py:266 ...)`. The text is in 29816b9f5.

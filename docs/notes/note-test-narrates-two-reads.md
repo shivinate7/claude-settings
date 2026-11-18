@@ -1,0 +1,1 @@
+- note-test-narrates-two-reads: lint/test_check_silent_undo.py, about lines 2930 and 2941, says the base path is "read a second time" and "read twice", but the code now reads once.

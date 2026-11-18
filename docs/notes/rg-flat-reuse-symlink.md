@@ -1,0 +1,1 @@
+- rg-flat-reuse-symlink: lint/report_guard.py:199-211 (_loaded_hooks_dir): after a flat-loaded script loads shared_names first, a later import of report_guard stays flat, as on main. In a symlinked local install, realpath(origin) differs from realpath(HOOKS_DIR), so reuse returns None and costs one extra 64 KB read. The verdict does not change.

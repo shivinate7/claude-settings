@@ -1,0 +1,1 @@
+- mrml-head-is-newest-run: (#2492 merge-red-main-latest-run) "the base's head" means the newest run's commit on the page read, not the git tip; if the tip has no run yet, a re-run tests an older commit.

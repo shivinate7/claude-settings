@@ -1,0 +1,1 @@
+- archive-refusal-names-branch: guard lane-closes-after-records refused an archive three times without naming the stranded branch; it expects archive/<full branch name> (archive/lane/<slug>), the coordinator pushed archive/<slug>. The refusal should name the stranded branch and the archive ref it expects. A debt only if it repeats.

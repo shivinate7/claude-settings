@@ -1,0 +1,1 @@
+- rounds-step-waits-3144: 11:43 CST Nov 13 (live read, after the retrospective's correction): the lane finished 19:42 CST Nov 12. Its PR #2888 (head dc99d6a7c) is in batch 133; PR #3144 (head 16dba8c11, open, not merged, clean). The step waits on the batch merge, not on a lane. Stays doing until #3144 merges.

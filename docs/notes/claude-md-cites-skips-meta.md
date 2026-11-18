@@ -1,0 +1,1 @@
+- claude-md-cites-skips-meta: From lane child-cites-joyous: the claude-md-cites probe skips a paragraph whose first line starts Kind:, Plan: or Home:, so a copy there passes; it reads decision records only, so a root CLAUDE.md rule with no record passes.

@@ -1,0 +1,1 @@
+- rg-cost-tests-set-count: test_report_guard.py cost tests count opened files as a set, so repeat reads pass unseen. Only lint/test_report_guard_stamped.py pins the count (stop-run cases).

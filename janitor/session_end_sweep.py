@@ -5,8 +5,9 @@ Reads one JSON object on stdin (the SessionEnd hook payload: `cwd` is the ending
 working directory). Resolves the git repository that `cwd` sits in -- the PRIMARY checkout, not
 a linked worktree's own path, see `git_reads.primary_checkout`'s own docstring for why that
 distinction matters -- and runs `janitor/sweep.py <that root> --confirm --session-end` there. The
-run judges branches and worktrees in that repository only, stops proven orphans machine-wide like
-the scheduled job, and skips the loose-process report. Always exits 0.
+run judges branches and worktrees in that repository only, stops proven dead-rooted servers rooted in
+that repository only, and skips the loose-process report. Other repositories' dead servers wait for
+the daily job. Always exits 0.
 
 FAILS OPEN, ON PURPOSE. This script's own job is to let the session end; it is never the thing
 that decides whether a branch or a worktree is reapable. Every way this script itself can go
@@ -34,7 +35,7 @@ import subprocess
 import sys
 import time
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
 import git_reads  # noqa: E402
@@ -151,7 +152,7 @@ def remaining_sweep_timeout_seconds(elapsed_seconds):
 # THE SCRATCHPAD REAP (decision agent-end-reap-stops-what-a-finished-agent-left). A server a lane
 # agent left behind sits in the session's scratchpad, parent init, holding the session's tag in its
 # exec environment. It is stopped here, at session end, and not at agent end: the session and its
-# agents share one scratchpad and no agent tag exists, so an agent-end reap would stop a live server
+# agents share one scratchpad and no agent marker existed, so an agent-end reap would stop a live server
 # of the session or of a sibling lane. Its own two reads (one `ps`, one cwd table) are bounded so
 # the sweep below still gets the time that remains; any failed read keeps.
 REAP_PS_TIMEOUT_SECONDS = 5

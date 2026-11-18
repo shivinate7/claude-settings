@@ -1,0 +1,1 @@
+- ste-push-chain-refuse-rate: (#1755) a commit and push in one call are refused when any in-scope file is staged or dirty, even with clean prose, since no lint can run before the commit lands. The decision accepts one retry; the refusal rate is unmeasured. Same class as note conflict-markers-chain-clean-refuse. A debt after a real incident.

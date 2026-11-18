@@ -98,6 +98,8 @@ EOF
 # run_script <case> <name> <script> [VAR=value ...]: runs a script in an empty environment from the
 # case's cwd, with output in <case>/out-<name>.txt. Sets rc to its exit code and secs to its wall
 # time. Output goes to a file, so a child left running cannot hold a pipe open.
+# The temp roots are a case's own empty root, not the production list: the suite's checkout sits
+# under the run folder, which is under the system temp dir, and install.sh skips a clone there.
 run_script() {
   rs_c=$1
   rs_n=$2
@@ -107,6 +109,7 @@ run_script() {
   ( cd "$rs_c/cwd" && env -i PATH="$rs_c/bin:$BASE_PATH" HOME="$rs_c/home" \
       CLAUDE_CONFIG_DIR="$rs_c/cfg" TMPDIR="$rs_c/tmp" GIT_CEILING_DIRECTORIES="$rs_c/cwd" \
       CLAUDE_SETTINGS_SEARCH_ROOTS="$rs_c/roots" CLAUDE_SETTINGS_RAW="$DEAD_RAW" \
+      CLAUDE_SETTINGS_TEMP_ROOTS="$rs_c/no-such-temp-root" \
       HTTPS_PROXY="$DEAD_PROXY" https_proxy="$DEAD_PROXY" $rs_extra \
       timeout 90 bash "$rs_s" < /dev/null > "$rs_c/out-$rs_n.txt" 2>&1 )
   rc=$?
@@ -156,9 +159,11 @@ fetch_asked() {
   grep -qF -- '--max-time 20' "$1/curl.log" 2>/dev/null && grep -qF -- "$DEAD_RAW/install.sh" "$1/curl.log" 2>/dev/null
 }
 
-# The checksums of the install's agents and settings, in a stable order.
+# The checksums of the install's agents and settings, in a stable order. A cloud install lands each file as a
+# link through ~/.claude/.cs-current (decision install-hooks-whole), so find -L follows the link to the file it
+# names. Without -L, -type f skips every link and the snapshot reads empty.
 snapshot() {
-  ( cd "$1/cfg" 2>/dev/null && find agents settings.json -type f 2>/dev/null | sort | while IFS= read -r f; do cksum "$f"; done )
+  ( cd "$1/cfg" 2>/dev/null && find -L agents settings.json -type f 2>/dev/null | sort | while IFS= read -r f; do cksum "$f"; done )
 }
 
 # ---- a: checkout under a search root, no network: installs, one verdict line says installed ----
@@ -525,6 +530,85 @@ print("KEEP " + keep)
 print("OWN " + _test_temp.run_folder(root))
 PY
 
+# ---- v: with no CLAUDE_SETTINGS_RAW, the raw install.sh is fetched from the stable branch, not main ----
+caseV() {
+  name="v: with no CLAUDE_SETTINGS_RAW, the raw install.sh is fetched from the stable branch, not main"
+  c=$(new_case caseV)
+  add_checkout "$c"
+  fake_curl "$c" fail
+  # An empty CLAUDE_SETTINGS_RAW is unset for the script's ${VAR:-default}, so the default RAW applies.
+  run_setup "$c" v "CLAUDE_SETTINGS_RAW="
+  if ! grep -qF "raw.githubusercontent.com/shivinate7/claude-settings/stable/install.sh" "$c/curl.log" 2>/dev/null; then
+    bad "$name" "the raw install.sh was not fetched from the stable branch; curl was called with: $(brief "$c/curl.log")"
+  else
+    ok "$name"
+  fi
+}
+
+# stable_404_curl <case>: a fake curl that answers 404 (exit 22, as curl -f does) for the stable branch's install.sh, and
+# serves a stub install.sh for main's, which writes agents/builder.md so the setup reads installed. Every call's argv goes
+# to <case>/curl.log. The setup then fetches main's install.sh and says the stable 404 once, in one WARN line naming stable.
+stable_404_curl() {
+  printf '#!/bin/sh\nmkdir -p "$CLAUDE_CONFIG_DIR/agents" && : > "$CLAUDE_CONFIG_DIR/agents/builder.md"\n' > "$1/served-install.sh"
+  cat > "$1/bin/curl" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >> "$1/curl.log"
+case "\$*" in
+  *"/stable/install.sh"*) exit 22 ;;
+  *"/main/install.sh"*)
+    out=""; prev=""
+    for a in "\$@"; do [ "\$prev" = -o ] && out="\$a"; prev="\$a"; done
+    cp "$1/served-install.sh" "\$out" ;;
+  *) exit 7 ;;
+esac
+EOF
+  chmod +x "$1/bin/curl"
+}
+
+# ---- vf1: with the stable branch's install.sh a 404, the setup fetches main's install.sh instead ----
+caseVF1() {
+  name="vf1: with the stable branch's install.sh a 404, the setup fetches main's install.sh instead"
+  c=$(new_case caseVF1)
+  stable_404_curl "$c"
+  run_setup "$c" vf1 "CLAUDE_SETTINGS_RAW="
+  if ! grep -qF "raw.githubusercontent.com/shivinate7/claude-settings/main/install.sh" "$c/curl.log" 2>/dev/null; then
+    bad "$name" "no fetch of main's install.sh after the stable 404; curl was called with: $(brief "$c/curl.log")"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- vf2: the same 404 is said once, in a WARN line naming stable, and the setup still installs ----
+caseVF2() {
+  name="vf2: with the stable branch's install.sh a 404, the setup says so in one WARN line naming stable and still installs"
+  c=$(new_case caseVF2)
+  stable_404_curl "$c"
+  run_setup "$c" vf2 "CLAUDE_SETTINGS_RAW="
+  warns=$(grep -c 'WARN.*stable' "$c/out-vf2.txt" 2>/dev/null)
+  if [ "${warns:-0}" -ne 1 ]; then
+    bad "$name" "want one WARN line naming stable, got ${warns:-0}: $(brief "$c/out-vf2.txt")"
+  elif ! grep -q '^claude-settings setup: installed$' "$c/out-vf2.txt"; then
+    bad "$name" "the setup did not install after the fallback: $(verdict_text "$c/out-vf2.txt")"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- vref: with CLAUDE_SETTINGS_REF=main, the setup fetches main's install.sh and never stable's ----
+caseVREF() {
+  name="vref: with CLAUDE_SETTINGS_REF=main, the setup fetches main's install.sh and never stable's"
+  c=$(new_case caseVREF)
+  fake_curl "$c" fail
+  run_setup "$c" vref "CLAUDE_SETTINGS_RAW= CLAUDE_SETTINGS_REF=main"
+  if grep -qF "raw.githubusercontent.com/shivinate7/claude-settings/stable/install.sh" "$c/curl.log" 2>/dev/null; then
+    bad "$name" "the stable branch's install.sh was fetched under CLAUDE_SETTINGS_REF=main; curl was called with: $(brief "$c/curl.log")"
+  elif ! grep -qF "raw.githubusercontent.com/shivinate7/claude-settings/main/install.sh" "$c/curl.log" 2>/dev/null; then
+    bad "$name" "no fetch of main's install.sh under CLAUDE_SETTINGS_REF=main; curl was called with: $(brief "$c/curl.log")"
+  else
+    ok "$name"
+  fi
+}
+
 caseSweep() {
   name="sweep: the first request of a run removes an old sibling run folder and keeps a new one"
   sroot="$RUN/sweep-root"
@@ -571,6 +655,10 @@ run caseIII
 run caseIVa
 run caseIVb
 run caseIVc
+run caseV
+run caseVF1
+run caseVF2
+run caseVREF
 run caseSweep
 
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"

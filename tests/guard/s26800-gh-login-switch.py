@@ -37,9 +37,9 @@ gl("a gh command after a semicolon, with no switch, is denied", "deny", "cd x; g
 gl("a gh command after a pipe, with no switch, is denied", "deny",
    "printf '{}' | gh api -X PUT repos/shivinate7/claude-settings/branches/main/protection --input -",
    "'{}' | gh api -X PUT repos/shivinate7/claude-settings/branches/main/protection --input -")
-gl("a gh api piped to jq, with no switch, is denied", "deny",
+gl("a gh api piped to a parser, with no switch, is denied", "deny",
    "gh api repos/shivinate7/claude-settings/branches/main/protection | jq .",
-   "gh api repos/shivinate7/claude-settings/branches/main/protection | jq .")
+   "gh api repos/shivinate7/claude-settings/branches/main/protection | ConvertFrom-Json")
 gl("a gh api split by line continuations, with no switch, is denied", "deny",
    "gh api -X PATCH \\\n  repos/shivinate7/claude-settings/branches/main/protection/required_status_checks \\\n  -f strict=true",
    "gh api -X PATCH `\n  repos/shivinate7/claude-settings/branches/main/protection/required_status_checks `\n  -f strict=true")
@@ -117,8 +117,9 @@ gl("ssemwal-cdc on a repo not under shivinate7 in powershell only is allowed", "
 
 # A decision is not judged: it carries the command, with the form lines and gain and lose, and no switch.
 wp_write("gh login switch: a decision that holds a gh command with no switch is not judged", "allow", "gh-login-switch",
-         {"id": GL_DOC, "kind": "decision", "status": "open", "title": "Protect main on claude-settings?",
-          "context": OJ_FORM + "\n" + QD_LINE + "\nThe branch rule needs admin, and the active login decides who can run it.",
+         {"id": GL_DOC, "n": 928, "kind": "decision", "status": "open", "title": "Protect main on claude-settings?",
+          "recommended": "b", "why": "Waiting costs nothing; the login decides who runs it.",
+          "context": OJ_FORM + "\n" + QD_LINE + "\n" + OJ_WAIT + "\nThe branch rule needs admin, and the active login decides who can run it.",
           "command": {"powershell": GL_PATCH, "mac": GL_PATCH},
           "options": [{"key": "a", "label": "Apply the rule", "how": "Run the command the item holds.",
                        "gain": "g", "lose": "l"},

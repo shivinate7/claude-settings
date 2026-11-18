@@ -1,0 +1,1 @@
+- batch-ready-moved-lane: (debt) `--ready` with no PR list refuses when a frozen lane's branch moved after the freeze, though batch/NAME still holds the frozen head (merge/merge.py, `--ready` in batch_build). False alarm; the only way out is `--batch-drop` (rebuild plus CI restart). Any lane push after hand-off hits it.

@@ -1,0 +1,1 @@
+- facts-fact-word-false-alarm: `Fact: the sky is blue.` in a record with no State exits 1 as a label gap. No such line in the 232 real records. Decision: facts-line-checks-state. Fix: none until seen. Seen: 2026-11-17 x1

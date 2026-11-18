@@ -1,0 +1,1 @@
+- shell-tools-two-homes: (#2480) SHELL_TOOLS is declared twice, in precompact_handoff.py and guard_core.py.

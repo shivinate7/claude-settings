@@ -4,10 +4,11 @@
 
 Question: where does a Stop refusal's remedy live when the owner sees the refusal in chat? Ruling: coordinator, 2026-11-07 12:26 CST, option 1a, answering owner ask `ask-mw6pwif5wv` (a past-ruling refusal that reached the owner).
 
-- Each refusal from `lint/report_guard.py` (the Stop hook that checks each reply) opens with one owner line: one plain sentence that names the check and cites this record, `guard-remedy-not-to-owner`.
+- Each refusal from `lint/report_guard.py` (the Stop hook that checks each reply) opens with one owner line, except a notes fix (R14; not built; step `notes-fix-no-owner-line`): one plain sentence that names the check and cites this record, `guard-remedy-not-to-owner`.
 - The steps live under that check's heading in `## Steps per check`.
 - No verdict changes. Only the text moves.
 - Scope: Stop refusals only. `hooks/question_form.py` keeps its own text, `DEPARTS_REASON` included. A Stop refusal shows only the miss that `departs_hit` names.
+- R14, the owner's ruling on notes fixes (2026-11-10 16:22 CST, "fixed my notes question: yes"): a Stop refusal about a session's own notes (feedback log, handoff) is fixed with no line to the owner, since the reply did not change. guard.log still records it. Not built yet. Step `notes-fix-no-owner-line` builds it. Its builder first confirms that a Stop can end with no text.
 
 ## Incident, risk and cost
 
@@ -64,7 +65,7 @@ Text: `ANSWERED_REASON`, rule `answered-needs-source` (a claim of "answered" nee
 
 ### Recovered guard (any reply whose report shape holds)
 
-Text: two inline facts in `recovered_problem`. The two line forms below live here only.
+Text: two inline facts in `recovered_problem`. The two line forms below live here only. The refusal states each form with its `none` variant. It adds that a label counts where it starts an item in the report blockquote, also after a bullet and a Done-item tag.
 
 - If a compaction came before this report, and the report has no carry line since, add the missing line under Deviations, inside the report's blockquote:
   - `Recovered: <each fact, with its source: git, page or digest>`, or `Recovered: none`.
@@ -129,7 +130,7 @@ Text: `HAND_OFF_NO_CITE`, `HAND_OFF_NO_DATE`, two inline forms, and `HAND_OFF_TA
 Text: `refusal_reason`. Decision `refusals-reach-the-owner` (a refused tool reaches the owner).
 
 - Add an Input Needed line "allow `<tool_name>`?" for each tool. Put the tool's name in place of `<tool_name>`.
-- Add a line in the repo's debt notes file (`notes.md`) that names the tool.
+- Add one file in the repo's notes folder (`docs/notes/` here) that names the tool.
 - Or, if the refusal was right, write "`<tool_name>`: refusal was right" on one line, with the tool's full name in place of the placeholder.
 - A built-in tool, such as Edit or Bash, goes in backticks. An MCP tool goes by its full name.
 
@@ -167,14 +168,32 @@ Text: `HOLD_REASON`. Decision `session-tiers` (the duties of the triage session,
 
 ### Cite-gloss guard (landed turns)
 
-Text: inline, in the main check.
+Text: inline, in `plain_form_reasons`. Rule `speak-cite-id-plus-gloss` (an id carries a plain name on first use).
 
-- A record id appears with no short gloss after it. Write the id, then a few plain words that say what it is, like "D12, short titles for records".
+- An id appears with no short gloss: a record id like `D12`, a `#N` of 3 to 5 digits, or a session ref like `s02747:941`. Write the id, then a few plain words that say what it is, like "D12, short titles for records" or "#2015, check-tail filter".
+- For a `#N` or a session ref, two words that start with a letter must follow the id. "(env -vC, want ask)" is no gloss, and neither is "#2015's own rows".
+- A `#N` needs no gloss right after "PR", "PRs", "pull request", "issue", "commit", "by" or "via", or anywhere in the Done item, where a PR is cited as `#N`.
+- "in #N" passes only after a listed past participle, like "built in #1300", which the mistake guard asks for. "Rows in #1300" still needs a gloss. `PR_WORD_BEFORE_RE` holds the list.
+
+### Time guard (landed turns)
+
+Text: `PLAIN_TIME_REASON`. Rule `style-time-central-24h` (times are US Central, 24-hour, with the zone).
+
+- A clock time carries UTC, GMT or a trailing Z, like "20:34:33 UTC". Give the time in US Central on the 24-hour clock with CST or CDT, like "14:34 CST". Read it with `~/.claude/bin/now-central`.
+- Times in code spans, fences and URLs are not checked. "UTC-06:00", an offset, is no time.
+
+### Contradiction guard (landed turns)
+
+Text: `PLAIN_CONTRADICTION_REASON`. Rule `output-bring-decisions-as-question` (a choice for the owner is a question with options).
+
+- Deviations says "Contradiction:", "Contradiction —" (a dash), or "pick neither" or "choose neither" in any tense, like "picked neither" or "chose neither". Input Needed holds no question: no sentence ending in "?" and no pick with options.
+- "Contradiction: resolved", "Contradiction: settled", "Contradiction: none" and "No contradiction:" claim no open choice, so they pass. "Contradiction: none of" is still a claim.
+- Add the question to Input Needed, with options and a recommendation, or drop the Contradiction line from Deviations.
 
 ## Shared tails
 
-- Every refusal opens with the owner line from `owner_line()`, which cites this record, and ends with ` (rule reports-order-of-labels)`. That rule says the report's four labels go in order: Done, Deviations, Input Needed, Next. On the rewrite after a refusal, a triage hold alone has no tail.
-- Correction rule, no text in any refusal: after any refusal but a missing report, post only the corrected lines, as a short correction. Never send the report again. The owner has read the report before a refusal lands, so a resent report doubles it. A missing report asks for the report itself, and its reply carries every other fix too.
+- Every refusal, except a notes fix (R14; not built; step `notes-fix-no-owner-line`), opens with the owner line from `owner_line()`, which cites this record, and ends with ` (rule reports-order-of-labels)`, then, from a reply guard, the correction line below. That rule says the report's four labels go in order: Done, Deviations, Input Needed, Next. On the rewrite after a refusal, a triage hold gets the tail too.
+- Correction rule: every refusal of a reply but a missing report ends with one shared line, "Post only the missing or corrected lines. Do not resend the reply." (owner, 2026-11-17 09:30 CST). `report_guard.emit_stop` writes it, so each reply guard that prints through it carries the line, and a new guard needs no work. The correction line is not the owner line, so a session's own notes refusal still carries it, and the notes fix (not built; step `notes-fix-no-owner-line`; see the ruling) drops only the owner line. The owner has read the report before a refusal lands, so a resent report doubles it. A missing report asks for the report itself, and its reply carries every other fix too, so it gets no line.
 - The system message notes (`NO_PAGE_NOTE`, the hand-off guard's UNKNOWN lines and the route flags) and the stderr lines are not refusals. They never stop a reply, and they fall outside this record.
 
 Kind: process

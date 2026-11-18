@@ -1,0 +1,1 @@
+- line-reply-drops-date: Waiting page line reply drops the date: `lineReply` calls `fmt(x, false)`, so an Oct 25 filing reads as today ("Filed 22:00 CDT."); the ask-phase-out mockup does the same. Show the date when it is not today. Source: the #2559 design review.

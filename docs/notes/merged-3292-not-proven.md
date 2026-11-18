@@ -1,0 +1,1 @@
+- merged-3292-not-proven: 18:08 CST Nov 13: merged in combined PR #3292 (the gate fix; coordinator 18:09). NOT yet proven: main's push run 43531841828 and PR run 43531825238 were in progress and unread at 18:09 CST. Close this step when a docs-only PR run reads green at all-jobs-passed; until then it stays doing. Step nightly-skip-draft-guard is the follow-up.

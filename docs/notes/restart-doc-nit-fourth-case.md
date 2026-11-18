@@ -1,0 +1,1 @@
+- restart-doc-nit-fourth-case: 18:04 CST Nov 13, fourth case (lane macos-reach-rows-test-red, PR #3289): a corrective round 1 record after a wrong-model round 1 (haiku, not Sonnet) is refused as a restart; the only exit is a new branch and PR. See step reviewer-round-1-model-vs-marker. The coordinator rode #3289 as a member of #3292 instead. Lane's account, unchecked by triage.

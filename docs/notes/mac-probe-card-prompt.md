@@ -1,0 +1,1 @@
+- mac-probe-card-prompt: 13:38 CST Nov 13, lane c107 (session_013NEJKyuJw2o7P39yhrng4r): owner pick 744 b acted on, no repo change, no PR. Mac probe prompt filed on the page as an owner act (paste into a Mac Code session in Bypass mode, answer its card y/n lines); its report goes to the coordinator. Stays ready until the probe reports. Docs name no setting that removes the card.

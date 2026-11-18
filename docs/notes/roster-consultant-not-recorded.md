@@ -1,0 +1,1 @@
+- roster-consultant-not-recorded: the project-ops roster template (skills/project-ops/templates/roster.md) has a consultant row, but the session-tiers decision gives the consultant no roster line. The consultant join waits on lane lane-merges-own-pr-code. PR #3474 has landed. Fix: decide the consultant's roster line when the lane lands. Decision: session-tiers (session roles).

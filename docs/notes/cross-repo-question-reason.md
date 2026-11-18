@@ -1,0 +1,1 @@
+- cross-repo-question-reason: The last bullet of 'The ruling' in docs/decisions/cross-repo-question-checked.md says the refusal reason names the page's own repo. But guard.py prints the generic PAGE_REASONS text, and `matched` goes only to guard.log. Fix: show `matched` in the reason, or correct the sentence (#2229).

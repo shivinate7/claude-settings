@@ -1,0 +1,1 @@
+- records-page-first-parent-case: no case or mutant pins a failed first-parent read (probed: refused, not a hole). Fix: add one red case.

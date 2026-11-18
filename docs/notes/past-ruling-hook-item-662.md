@@ -1,0 +1,1 @@
+- past-ruling-hook-item-662: guard-reads-ruled-store 16:09 CST Nov 12: Sighting 16:09 CST Nov 12: page write of item 662 passed the past-ruling hook though R55 and batch-freeze-lane-set settle it; only the report-time guard caught it (second case after item 651).

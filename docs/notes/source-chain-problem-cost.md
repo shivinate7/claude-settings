@@ -1,0 +1,1 @@
+- source-chain-problem-cost: source_chain_problem lists the repo's comments since the source PR opened, so a long-lived source pages many lists; a per-issue read would be cheaper.
