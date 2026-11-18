@@ -1,0 +1,1 @@
+- roadmap-skill-lane-writer: skills/roadmap/SKILL.md:46-47 says the coordinator writes a step's lane field; triage does now. Record-writer fix.

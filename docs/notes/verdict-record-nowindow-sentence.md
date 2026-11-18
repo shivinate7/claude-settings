@@ -1,0 +1,1 @@
+- verdict-record-nowindow-sentence: docs/decisions/background-check-through-verdict.md on #2301 and #2321 lost #2276's sentence that guard.py imports `_nowindow.py` with no fallback. The sentence is not on main and the old #2301 head already lacked it, but hooks/guard.py still imports `_nowindow` with no try, so it may still be true; restore it if so.

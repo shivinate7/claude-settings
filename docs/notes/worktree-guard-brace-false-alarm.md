@@ -1,0 +1,1 @@
+- worktree-guard-brace-false-alarm: (#2559 design review) the worktree guard refused a plain heredoc that writes a JS render script to the scratchpad; any `{ a: 1, b: 2 }` in the text tripped it, read as shell brace expansion. Possible false alarm; the design review rendered nothing.

@@ -1,0 +1,1 @@
+- draft-pr-gh-api-limits: #2284, notes: (1) named limits: a `gh api` POST to pulls, and update_pull_request with draft:false, still open a ready PR unchecked. (2) The draft refusal text says to add --draft to the gh command even when the MCP tool was called.

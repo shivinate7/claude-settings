@@ -1,0 +1,1 @@
+- frozen-loop-type-drop: guard_frozen: `_resolve_loops` drops the PosixScript type. Latent. Fix: keep the type through the loop pass.

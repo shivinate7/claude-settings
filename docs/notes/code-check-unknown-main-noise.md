@@ -1,0 +1,1 @@
+- code-check-unknown-main-noise: without --main, every run prints "unknown: main"; noise only.

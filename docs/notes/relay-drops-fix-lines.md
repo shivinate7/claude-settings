@@ -1,0 +1,1 @@
+- relay-drops-fix-lines: twice today (#2444 and #2447 notes) the coordinator's relay said "each with a Fix line" and carried none, so triage wrote the Fix lines itself. Fix: the feedback guard refuses a send_message that says "Fix line" with no line opening "Fix:".

@@ -4,7 +4,7 @@
 
 Owner, 2026-10-27 12:51 CDT, topic t18 (one home, then variants): when a repo differs from a shared format, the repo changes to match it. The shared tool never grows a second accepted form to fit one repo.
 
-- An option that widens what a shared tool accepts is a second accepted form, an allow-list entry or a per-repo exception. It carries "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo" and is never the recommended option. Rule `style-question-form` holds the text.
+- An option that widens what a shared tool accepts is a second accepted form, an allow-list entry or a per-repo exception. Widening means that a shared tool is made so that one repo's differing form passes. Ruling (item 734 (widening means one repo), owner 14:19 CST Nov 17): never flag a change to the shared tool that every repo gets alike, with no repo named as its reason. Such an option carries "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo" and is never the recommended option. Rule `style-question-form` (the question-form style rule) holds the text.
 - On the waiting page (skill `waiting-page`), such an option carries `widens: true`. Its card shows the label.
 - Guard rule `uniform-pick` (`hooks/question_form.py`, run by `hooks/guard.py`) refuses an `ArtifactData` set or update to `items` whose `recommended` (old name `pick`) names an option with `widens: true`. It reads each write in a batch and data read from `file_path`.
   - It judges only a call whose `url` is this repo's waiting page (`layout.waiting_page`), and only an item of kind `decision` or with no kind.

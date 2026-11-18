@@ -1,0 +1,1 @@
+- ompr-remotes-unpinned: (#2366) no test pins `--remotes=<remote>`; a mutant that always reads all remotes passes octopus-push.

@@ -106,6 +106,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        this session. (a-kill-by-pid-needs-an-owned-pid)
   detached-launch      deny. A command that starts a process and detaches it from the session.
   wsl-allow-list       deny. A `wsl` call outside the fixed list of test commands. (wsl-allow-list)
+  review-log-form, review-log-sha  deny. A PR comment (the add and update tools, a Bash gh pr comment or gh api body) whose
+                       first line is the review log marker and whose body merge/merge.py parse_review refuses, or
+                       whose Head or Fix check sha names no commit in the call's checkout. (review-log-hand-form)
   live-stream, waiter  deny. A command that follows a stream with no end, or polls with sleep.
   verdict-pipe         deny. A `verdict` stage piped into another command: the exit is the last
                        stage's, and a filter can cut verdict's FAIL line.
@@ -113,6 +116,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   check-tail           deny. A named check piped into tail or head. (background-check-through-verdict)
   check-timeout        deny. A `merge --lane-lint` run in the foreground, or in the background under a
                        time limit below its bound. (background-check-through-verdict)
+  fg-bash-while-bg     deny. A foreground call that can run long (a test, lint, merge, build or install, or a time
+                       limit over 60000 ms), while this session has a background command or agent running, read from
+                       the transcript. A call from an agent, a missing transcript and a failed read allow.
+                       (fg-bash-while-bg)
   playwright-browsers-path, playwright-install
                        deny. (playwright-browsers-path, playwright-install-once)
   rm-var-unguarded     deny. A recursive delete under an unguarded variable.
@@ -378,7 +385,7 @@ Other tools, in `judge` order:
                        cannot read is skipped, and an unread brief is judged as an empty brief.
                        (agent-model-cap)
   agent-model-floor, roles-third-round-steps-up
-                       deny. A spawn below the model floor, or a third round on the wrong model. A
+                       deny. A spawn below the model floor, or a reviewer's later round on the wrong model. A
                        start_session call never reaches this hook: settings.json lists it in no PreToolUse
                        matcher, so hooks/start_session_audit.py checks its floor and handoff after the call.
                        The Workflow scan is static. It reads string-literal `model` and
@@ -595,7 +602,7 @@ if sys.path[:1] != [_HERE]:
 
 # The rule families in import order: each one imports only guard_core and the families before it.
 _FAMILY_MODULES = ("guard_branch_worktree", "guard_shared_tree", "guard_pointer",
-                   "guard_push_delete", "guard_merge", "guard_frozen", "guard_env",
+                   "guard_push_delete", "guard_merge", "guard_review_log", "guard_frozen", "guard_env",
                    "guard_kill", "guard_argv", "guard_stream", "guard_rm_var", "guard_mask_script", "guard_wsl")
 # guard.py and each guard_*.py the installer copies carry `INSTALL_ID = "<id>"`, one value per install
 # run, stamped at copy time in place of the whole commented placeholder line below. A file with no such line is a placeholder
@@ -609,7 +616,23 @@ _FAMILY_MODULES = ("guard_branch_worktree", "guard_shared_tree", "guard_pointer"
 # last, so the replace of this one file switches the whole set: a load sees the old set or the new
 # set, never a mix, however long the install stalls between two files. No folder, or a repo copy
 # with no stamp, loads the modules beside this file.
-_SET_DIR = os.path.join(_HERE, "guard.d", str(globals().get("INSTALL_ID", "")))
+# _HERE is a realpath taken after this file was read, so a cloud generation switch in between puts it in
+# the new generation while this file's stamp is still the old one. A generation folder is named by its
+# install id (installs/<id>/hooks), so when the folder beside the realpath has no set for our stamp, the
+# set is in the sibling generation that stamp names, never the new generation's set (a mixed load).
+def _set_dir_for(here, install_id):
+    own = os.path.join(here, "guard.d", install_id)
+    if os.path.isdir(own):
+        return own
+    gens = os.path.dirname(os.path.dirname(here))
+    if os.path.basename(gens) == "installs":
+        stamped = os.path.join(gens, install_id, "hooks", "guard.d", install_id)
+        if os.path.isdir(stamped):
+            return stamped
+    return own
+
+
+_SET_DIR = _set_dir_for(_HERE, str(globals().get("INSTALL_ID", "")))
 if "INSTALL_ID" in globals() and os.path.isdir(_SET_DIR):
     sys.path.insert(0, _SET_DIR)
 _PLACEHOLDER = None
@@ -681,6 +704,8 @@ while True:
             BRIEF_ID_REASON, BRIEF_TOPIC_REASON, STEP_DUP_REASON,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
+        _loading = "guard_review_log"
+        from guard_review_log import review_log_hit
         _loading = "guard_frozen"
         from guard_frozen import (
             FROZEN_REASON, MUTATING_COMMAND, _holds_frozen, _resolve_vars, _shell_write_hit, interpreter_may_write,
@@ -703,9 +728,10 @@ while True:
         from guard_argv import PROCESS_ARGS_REASON, process_args_hit
         _loading = "guard_stream"
         from guard_stream import (
-            BACKGROUND_END_REASON, CHECK_TAIL_REASON, CHECK_TIMEOUT_TEMPLATE, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
+            BACKGROUND_END_REASON, CHECK_TAIL_REASON, CHECK_TIMEOUT_TEMPLATE, FG_BACKGROUND_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
             NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, UV_VALUE_FLAGS, VERDICT_PIPE_REASON, WAITER_REASON,
-            background_end_hit, check_tail_hit, check_timeout_hit, check_timeout_limit_text, live_stream_hit, ln_descends_hit,
+            background_end_hit, background_work_running, check_tail_hit, check_timeout_hit, check_timeout_limit_text, fg_long_hit,
+            live_stream_hit, ln_descends_hit,
             loop_condition_polls_a_pattern, narrated_tail_hit, verdict_pipe_hit, waiter_verdict,
         )
         _loading = "guard_rm_var"
@@ -4101,12 +4127,10 @@ def step_up_reason(prompt: str, role, model, rounds=None) -> str:
             return "Reviewer fix verifier runs on %s. Spawn it with model %s." % (want.capitalize(), want)
     if role == "reviewer" and review_guard_marked(prompt):
         want = role_round_model(rounds, role, "1", "guard")
-        if want and (not model or (named is not None and named < ROLE_MODEL_RANK.index(want))):
+        # A blank model runs the reviewer's role row (its agent file pins haiku), so it is below only a row above haiku.
+        if want and ((not model and ROLE_MODEL_RANK.index(want) > 0)
+                     or (named is not None and named < ROLE_MODEL_RANK.index(want))):
             return "Reviewer round 1 on a guard or check change runs on %s. Spawn it with model %s." % (want.capitalize(), want)
-    if role == "builder" and builder_third_round(prompt):
-        want = role_round_model(rounds, role, "3")
-        if want and (named is None or named < ROLE_MODEL_RANK.index(want)):
-            return "Builder round 3 runs on %s. Spawn it with model %s." % (want.capitalize(), want)
     return ""
 
 
@@ -4139,8 +4163,9 @@ ROLE_MODEL_REASON = (
     "field, or name the role's model%s. (decision agent-model-cap)"
 )
 # A reviewer has a second way past its row, so only its refusal names it. Rounds come from the constant at call time.
-ROLE_REVIEWER_ROUND_REMEDY = (", or, when this brief is for review round %s, open its first line with a `Round N of 3` marker (%s)"
-                              ", or, when it is for a guard or check diff, start a line with `%s`")
+ROLE_REVIEWER_ROUND_REMEDY = ", or, when this brief is for review round %s, open its first line with a `Round N of 3` marker (%s)"
+# Named only while the `1 guard` row sits above the reviewer's row: at the reviewer's own row the marker lifts nothing.
+ROLE_REVIEWER_GUARD_REMEDY = ", or, when it is for a guard or check diff, start a line with `%s`"
 ROLE_REVIEWER_FIX_CHECK_REMEDY = (", or, when this brief is a fix check, open its first line with the `%s` marker, "
                                   "or with `Round N of 3 (fix check)` (N = %s)")
 # Last sentence of a reviewer's refusal. It says the first review runs on the role's model only while the first round has no row above the reviewer's row.
@@ -4202,14 +4227,13 @@ def role_model_table(pointer_root):
 # model of each round: the key is (role, round, kind), the round a number or "fix verifier", the kind "guard" for a
 # first-round brief with the guard marker and "other" for every other brief. role_round_table is the one reader; the merge tool
 # reads it through the guard's helpers. A row the record lacks, or one whose model has no rank, falls back to
-# ROLE_ROUND_FALLBACK (sonnet for a reviewer's `1 guard`, later rounds and fix verifier, opus for the builder's third try; no `1 other` entry). Cost: one more read of the record per spawn.
+# ROLE_ROUND_FALLBACK (haiku for a reviewer's `1 guard`, sonnet for later rounds and fix verifier, no row for the builder's third try, which runs its role row, sonnet (owner item 893); no `1 other` entry). Cost: one more read of the record per spawn.
 ROLE_ROUND_HEADER = ["role", "round", "model", "effort"]
 ROLE_ROUND_CELL = re.compile(r"(\d+|fix verifier)(?:\s+(guard|other))?$")
 ROLE_ROUND_FIX = "fix verifier"
 ROLE_ROUND_EXACT = ("2",)  # the second round above its row is refused at the step-up, where no override lifts it; a later round above its row falls to the Opus ceiling
 ROLE_ROUND_FALLBACK = dict([(("reviewer", n, "other"), "sonnet") for n in ROLE_REVIEWER_FREE_ROUNDS]
-                           + [(("reviewer", "1", "guard"), "sonnet"), (("reviewer", ROLE_ROUND_FIX, "other"), "sonnet"),
-                              (("builder", "3", "other"), "opus")])
+                           + [(("reviewer", "1", "guard"), "haiku"), (("reviewer", ROLE_ROUND_FIX, "other"), "sonnet")])
 
 
 def _role_record_text(pointer_root):
@@ -4605,8 +4629,10 @@ def role_model_one(tool_input):
                 extra = ROLE_EXPLORE_AUDIT_REMEDY % EXPLORE_AUDIT_MARKER
             if role == "reviewer":
                 free = reviewer_free_rounds(rounds, row)
-                extra = ROLE_REVIEWER_ROUND_REMEDY % (" or ".join(free), ", ".join("`Round %s of 3`" % n for n in free),
-                                                    REVIEW_GUARD_MARKER)
+                extra = ROLE_REVIEWER_ROUND_REMEDY % (" or ".join(free), ", ".join("`Round %s of 3`" % n for n in free))
+                guard_row = role_round_model(rounds, role, "1", "guard")
+                if guard_row and ROLE_MODEL_RANK.index(guard_row) > ROLE_MODEL_RANK.index(row):
+                    extra += ROLE_REVIEWER_GUARD_REMEDY % REVIEW_GUARD_MARKER
                 extra += ROLE_REVIEWER_FIX_CHECK_REMEDY % (FIX_CHECK_MARKER, " or ".join(free))  # glossary-ok: the line keeps its names; only the rounds came from the rows
             if tool_input.get(BRIEF_UNREAD):
                 extra += ", or " + BRIEF_LITERAL_REMEDY
@@ -4834,8 +4860,7 @@ def opus_spawn_hit(tool: str, tool_input) -> tuple:
     """(model, role, brief_unread) of the first spawn in an Agent, Task or Workflow call that sets Opus with no standing grant,
     else ("", "", False). `role` is the role the spawn names, "" for none. `brief_unread` is the spawn's BRIEF_UNREAD.
     A standing grant
-    is the role Plan, designer, design-reviewer or refuter, a builder whose brief holds the third-round marker (the same marker
-    step_up_hit reads), or an Explore whose brief's first non-blank line carries EXPLORE_AUDIT_MARKER (decision agent-model-cap).
+    is the role Plan, designer, design-reviewer or refuter, a builder whose brief holds the third-round marker (builder_third_round reads it), or an Explore whose brief's first non-blank line carries EXPLORE_AUDIT_MARKER (decision agent-model-cap).
     Any other spawn above its role's model is refused (decision agent-model-cap), a reviewer on Opus too. The refusal is liftable by an override, so never_lifted does not read it."""
     for spawn in spawn_inputs(tool, tool_input):
         if opus_without_grant(spawn):
@@ -5252,6 +5277,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = check_tail_hit(stripped, background)
     if matched:
         refuse(tool, "deny", "check-tail", CHECK_TAIL_REASON, matched)
+    # The long foreground call is read first, so a foreground lane lint under background work gets this refusal and
+    # its rerun then meets check-timeout's limit. Only a call that can run long reads the transcript.
+    if not background and not agent:
+        matched = fg_long_hit(split_segments(stripped), timeout_ms)
+        if matched and background_work_running(transcript):
+            refuse(tool, "deny", "fg-bash-while-bg", FG_BACKGROUND_REASON, matched)
     matched = check_timeout_hit(stripped, background, timeout_ms)
     if matched:
         refuse(tool, "deny", "check-timeout", CHECK_TIMEOUT_TEMPLATE % check_timeout_limit_text(), matched)
@@ -7574,7 +7605,7 @@ def judge(payload) -> None:
     if floor_model:
         refuse(tool, "deny", "agent-model-floor", MODEL_FLOOR_REASON, floor_model)
 
-    # 9b. Step-up: a reviewer's second round on Sonnet, a builder's third on Opus. A reviewer's third round passes here on
+    # 9b. Step-up: a reviewer's second round on Sonnet. A builder's third try has no step-up: it runs Sonnet, its role row (owner item 893). A reviewer's third round passes here on
     # Sonnet or Opus; the Opus ceiling (9d, opus_spawn_hit) then refuses Opus unless an override lifts it.
     step_up = step_up_hit(tool, tool_input)
     if step_up:
@@ -7651,6 +7682,14 @@ def judge(payload) -> None:
     if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:
         refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "create_pull_request without draft")
 
+    # A review log comment the merge tool cannot read, or one that names a sha the checkout does not hold (rules
+    # review-log-form and review-log-sha). One literal refuse() per rule: lint/rule_audit.py reads only string-literal rule ids.
+    review = review_log_hit(tool, tool_input, cwd)
+    if review and review[0] == "review-log-form":
+        refuse(tool, "deny", "review-log-form", review[1], review[2])
+    if review and review[0] == "review-log-sha":
+        refuse(tool, "deny", "review-log-sha", review[1], review[2])
+
     # A SendMessage addressed to a cloud session id (rule sendmessage-session-id).
     if tool == "SendMessage":
         target = tool_input.get("to")
@@ -7715,7 +7754,11 @@ def judge(payload) -> None:
         if rule == "item-field-rendered":
             if str(matched).endswith(question_form.PAGE_ONLY_MARK):
                 refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-page-only"], matched)
+            if str(matched).endswith(question_form.N_MARK):
+                refuse(tool, "deny", "item-field-rendered", question_form.n_lead(matched) + question_form.PAGE_REASONS["item-n-number"], matched)
             refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-rendered"], matched)
+        if rule == "stops-named-in-holds":
+            refuse(tool, "deny", "stops-named-in-holds", question_form.PAGE_REASONS["stops-named-in-holds"], matched)
         if rule == "question-checked-with-repo":
             refuse(tool, "deny", "question-checked-with-repo", question_form.PAGE_REASONS["question-checked-with-repo"], matched)
         if rule == "option-labels-match-chat":

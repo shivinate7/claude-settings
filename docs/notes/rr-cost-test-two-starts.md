@@ -1,0 +1,1 @@
+- rr-cost-test-two-starts: `lint/test_ruled_store.py` proves the 2 git starts of `ruled_entries` only; `check`'s 4 were counted by GIT_TRACE, unpinned. Only git 2.43 was run for `--diff-merges=first-parent`; 2.31 to 2.42 are unknown.
