@@ -489,6 +489,35 @@ class CheckEntryTests(unittest.TestCase):
                         % problems[0])
 
 
+class ScopeTests(unittest.TestCase):
+    """The optional `scope` key: which repos a ruling governs. check_entry refuses a scope it cannot read. The shape
+    that passes is a control, green on the old reader, which ignores scope. The refusals are the red cases."""
+
+    def test_a_scope_naming_visibility_or_repos_passes_check_entry(self):
+        for scope in ({"visibility": "private"}, {"visibility": "public"},
+                      {"repos": ["example-owner/example-repo"]}):
+            with self.subTest(scope=scope):
+                problems = ruled_store.check_entry(fixture.entry("scoped", scope=scope))
+                self.assertEqual(problems, [], "a valid scope %r has a problem: %r" % (scope, problems))
+
+    def test_an_unknown_scope_key_is_refused(self):
+        problems = ruled_store.check_entry(fixture.entry("odd-key", scope={"colour": "red"}))
+        self.assertEqual(len(problems), 1, "an unknown scope key: want one problem, got %r" % problems)
+        self.assertTrue(names(problems[0], "scope") and "colour" in problems[0],
+                        "the problem does not name scope and its unknown key: %r" % problems[0])
+
+    def test_a_scope_that_is_not_an_object_is_refused(self):
+        problems = ruled_store.check_entry(fixture.entry("text-scope", scope="private"))
+        self.assertEqual(len(problems), 1, "a text scope: want one problem, got %r" % problems)
+        self.assertTrue(names(problems[0], "scope"), "the problem does not name scope: %r" % problems[0])
+
+    def test_a_visibility_other_than_public_or_private_is_refused(self):
+        problems = ruled_store.check_entry(fixture.entry("typo", scope={"visibility": "privat"}))
+        self.assertEqual(len(problems), 1, "a visibility typo: want one problem, got %r" % problems)
+        self.assertTrue(names(problems[0], "scope") and "privat" in problems[0],
+                        "the problem does not name scope and the bad visibility: %r" % problems[0])
+
+
 class SessionLinesTests(RepoCase):
     def test_no_store_and_no_open_entry_print_nothing(self):
         absent = self.make_repo("absent", main={"README.md": "main\n"})
