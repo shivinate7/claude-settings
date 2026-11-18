@@ -1242,6 +1242,8 @@ def _fg_tokens_hit(tokens, depth: int) -> str:
     tokens = _fg_clean(tokens)
     for start in command_indexes(tokens):
         at = _fg_skip_ionice(tokens, _skip_uv_run(tokens, start))
+        if at >= len(tokens):   # a redirect-only segment (`> out.txt`) leaves no command word, like check_stage reads it
+            continue
         hit = _fg_word_hit(tokens, at)
         if hit:
             return hit
