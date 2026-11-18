@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-18T13:27:21-06:00",
+  "context": "Goal: after a merge, the idle-lane report never ends in a bare \"unknown\" with no command that fixes it.\nProblem (goal): the draft PR 3667 (the change that sweeps idle sessions after each merge) prints \"Fix what it names, then read the live file again\", which names a step and not a command, and a fresh list that mixes lane lines with an unknown lane exits cleanly with no line owed; only you can say whether that meets your goal line that the idle-lanes report never ends in a bare \"unknown\" with no command that fixes it.\nBased on (read): the coordinator's reading of merge/merge.py lines 6816-6832 and 6883 on the PR's latest version, which passed its second review, relayed 13:26 CST Nov 18.\nDeparts from: main \u2014 the post-merge report may end in an unknown with no fixing command \u2014 the built text names the step, and option a also adds a command and an owed line for the mixed case.\nWaiting on: nothing is stopped; the coordinator proceeds on its own reading, and a builder lands your pick on draft PR 3667 or in a follow-up step.",
+  "home": "step archive-sweep-runs-per-merge",
+  "id": "idle-lanes-unknown-names-command",
+  "kind": "decision",
+  "n": 971,
+  "options": [
+    {
+      "gain": "Every unknown ends with a command you can run, and the mixed case can no longer pass silently.",
+      "how": "The owed line names `merge --idle-lanes --live FILE` for each unknown, and a fresh list that mixes lane lines with a per-lane unknown owes a line instead of exiting 0.",
+      "id": "name-command",
+      "key": "a",
+      "label": "Name the command and owe a line in the mixed case, on draft PR 3667 (recommended)",
+      "lose": "Another round on draft PR 3667, which already passed round 2."
+    },
+    {
+      "gain": "Draft PR 3667 can merge as it stands.",
+      "how": "Keep the built text, which names the step, and file the command and the mixed case as a follow-up step.",
+      "id": "accept-follow-up",
+      "key": "b",
+      "label": "Accept the built text now and file the command and the mixed case as a follow-up",
+      "lose": "Until the follow-up lands, an unknown can end without a fixing command."
+    }
+  ],
+  "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
+  "recommended": "a",
+  "ref": "coordinator relay 13:26 CST Nov 18: reviewer notes on draft PR 3667 and the goal line 2 question",
+  "repo": "shivinate7/claude-settings",
+  "short": "Idle-lanes unknown: name the command?",
+  "shown": [
+    {
+      "id": "name-command",
+      "key": "a",
+      "label": "Name the command and owe a line in the mixed case, on draft PR 3667 (recommended)"
+    },
+    {
+      "id": "accept-follow-up",
+      "key": "b",
+      "label": "Accept the built text now and file the command and the mixed case as a follow-up"
+    }
+  ],
+  "status": "open",
+  "title": "Should the idle-lanes report name the command that fixes an unknown?",
+  "why": "Your goal line says an unknown always comes with a fixing command; a closes both gaps while the lane is still open, and b ships sooner but leaves them. Recommended by triage, not owner-typed."
+}
