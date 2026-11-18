@@ -25597,7 +25597,7 @@ class StaleMergeTrees(unittest.TestCase):
 
 
 class VerifiedLine(RecordsEnv):
-    """The claim commit and the records-page commit each carry a Verified line (the Verified trailer, lint/check_red_run.py)."""
+    """The claim commit and the records-page commit each carry a Verified line (lint/check_red_run.py)."""
 
     def test_claim_commit_carries_a_verified_line(self):
         info = self.host.pr(7)
