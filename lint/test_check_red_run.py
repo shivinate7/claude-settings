@@ -636,7 +636,7 @@ class VerifiedCase(Fixture):
         return int(exits[0]), out, int(starts[0])
 
     def test_unread_verified_read_exits_zero_with_one_observe_line(self):
-        """A Verified read git cannot finish prints one OBSERVE line and exits 0. Red on e6d5f62: there its Unknown exits 2."""
+        """A Verified read git cannot finish prints one OBSERVE line and exits 0, not the Unknown exit 2."""
         self.base()
         self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT}, verified=None)  # the Verified read judges this commit
         rc, out, starts = self.run_probe("grep", "fail")
@@ -648,7 +648,7 @@ class VerifiedCase(Fixture):
 
     def test_unread_verified_read_keeps_the_red_run_exit_one(self):
         """A Red-run gap keeps exit 1 when the Verified read cannot finish, and the OBSERVE line joins the FAIL line.
-        Red on e6d5f62: there the Verified read's Unknown exits 2 instead."""
+        The Verified read's Unknown does not raise that exit to 2."""
         self.base()
         self.commit("add widget tests", {self.new_test_path(): TEST_TEXT}, verified=None)  # no Red-run line: a Red-run gap
         rc, out, starts = self.run_probe("grep", "fail")
@@ -659,7 +659,7 @@ class VerifiedCase(Fixture):
         self.assertEqual(len(observe), 1, "one OBSERVE line for the unread Verified read:\n" + out)
 
     def test_unread_red_run_read_still_exits_two(self):
-        """Control, green on e6d5f62 too: a Red-run read git cannot finish still exits 2, as UNKNOWN."""
+        """Control for the observe cases: a Red-run read git cannot finish still exits 2, as UNKNOWN."""
         self.base()
         self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT}, verified=None)
         rc, out, starts = self.run_probe("log", "fail")
@@ -668,7 +668,7 @@ class VerifiedCase(Fixture):
         self.assertIn("check_red_run: UNKNOWN", out, out)
 
     def test_empty_range_starts_no_git_grep(self):
-        """Empty state, a control green on e6d5f62 too. The Cost of decision verified-trailer (Verified line): an empty
+        """Empty state, a control. The Cost of decision verified-trailer (Verified line): an empty
         range starts no git grep."""
         self.base()
         rc, out, starts = self.run_probe("grep", "count")
@@ -676,7 +676,7 @@ class VerifiedCase(Fixture):
         self.assertEqual(starts, 0, "an empty range starts %d git grep; the Cost says 0" % starts)
 
     def test_verified_read_starts_one_git_grep_and_one_per_unverified_commit(self):
-        """Control, green on e6d5f62 too. The Cost of decision verified-trailer: one git grep for HEAD, then one for the
+        """Control. The Cost of decision verified-trailer: one git grep for HEAD, then one for the
         parent of each commit with no valid line that is not a revert. Three such commits, one verified commit and its
         revert: 1 + 3."""
         self.base()
@@ -689,7 +689,7 @@ class VerifiedCase(Fixture):
         self.assertEqual(starts, 1 + 3, "the Verified read starts %d git grep; the Cost says 1 + 3" % starts)
 
     def test_full_size_range_starts_one_git_grep_per_commit_plus_one(self):
-        """Full-size state, a control green on e6d5f62 too: 25 unverified commits start 1 + 25 git grep."""
+        """Full-size state, a control: 25 unverified commits start 1 + 25 git grep."""
         self.base()
         for i in range(25):
             self.commit("change part %d" % i, {"src/part_%d.py" % i: "def part():\n    return %d\n" % i}, verified=None)
@@ -698,7 +698,7 @@ class VerifiedCase(Fixture):
         self.assertEqual(starts, 1 + 25, "the Verified read starts %d git grep; the Cost says 1 + 25" % starts)
 
     def test_head_without_the_marker_starts_one_git_grep(self):
-        """Control, green on e6d5f62 too. The Cost of decision verified-trailer: a HEAD without the marker starts one git grep."""
+        """Control. The Cost of decision verified-trailer: a HEAD without the marker starts one git grep."""
         self.base()
         self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT}, verified=None)
         dropped = self.commit("drop the Verified rollout", {CHECK_REL: PRE_ROLLOUT_CHECK}, verified=None)
@@ -729,7 +729,7 @@ class VerifiedCase(Fixture):
 
     def test_root_commit_is_not_judged_and_its_child_is_listed(self):
         """A root commit has no parent, so it is not judged. The commit on it is judged: the root holds the marker.
-        Control, green on e6d5f62 too."""
+        The child's listing is the control: an empty listing cannot pass the root check."""
         self.base()
         self.git("checkout", "-q", "--orphan", "new-history")
         self.git("rm", "-r", "-q", "--cached", "--", ".")  # the root commit holds only the check file, which it names
