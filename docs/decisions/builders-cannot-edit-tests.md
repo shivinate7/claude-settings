@@ -31,7 +31,7 @@ An unreadable state logs `role-diff-unread` and is allowed. A second stop with a
 
 **Cost.** Git reads only, plus the objects `merge-tree` writes, plus one `ast` parse per conflicted test path and parent at commit, push and stop (unmeasured). No timer and no long-lived process. Each commit, push and stop costs one reflog read, three rev-parse calls, one diff and one untracked list (unmeasured). Commits of the builder's own add one rev-list, and one parent read and one diff each (unmeasured). A merge commit or a merge in progress adds one `merge-tree`, and one `rev-parse --show-prefix` when it left a conflict. A conflicted test path adds one parent read and three `show` calls, and the write tool adds one `merge-tree` for a test path it would refuse (unmeasured). The check starts no timer and no process. `rev-parse` runs on each refused test-author product write, and `merge-tree` runs once per such write while MERGE_HEAD exists (unmeasured). Each rebase in the reflog adds one ancestry check, and two diffs while HEAD holds it. A log line is written only for an offence, a logged change or an unread state. `merge-tree --write-tree` needs git 2.38 or newer: older git reads a merge as unread.
 
-**Measure.** `GUARD_FAMILY=builder-refuse hooks/test_guard.py`: 369 cases, all green.
+**Measure.** `GUARD_FAMILY=builder-refuse hooks/test_guard.py`: 428 cases, all green.
 
 ## Roles
 
