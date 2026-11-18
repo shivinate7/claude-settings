@@ -5722,6 +5722,22 @@ class MergedLintTree(LaneFixture):
         self.assertTrue(self.checkout_holds(head), "precondition: the checkout does not hold the integration head, so the case probes nothing")
         return head
 
+    def behind_main_head_outside_checkout(self):
+        """Main moves past the head, and the lane checkout is at origin/main: another lane's history, which the head is not in. -> (the head, origin/main's new tip)."""
+        old, tip = self.behind_main()
+        self.check_out(tip)
+        self.assertFalse(self.checkout_holds(old), "precondition: the checkout holds the head, so the case probes nothing")
+        return old, tip
+
+    def assert_pass_says_main_in_not_pushed(self, text, reason):
+        """A PASS whose push of the merge into main was skipped says so on its one PASS line: the words `main-in not pushed`, then the reason class.
+        -> that PASS line."""
+        lines = pass_lines(text)
+        self.assertEqual(len(lines), 1, "the lint did not print one PASS line: " + text)
+        self.assertIn("main-in not pushed", lines[0], "the PASS line does not say the merge into main was not pushed: " + text)
+        self.assertIn(reason, lines[0], "the PASS line does not give the reason %r for the skipped push: %s" % (reason, text))
+        return lines[0]
+
     def assert_lints_as_today(self, old, rc, text):
         """A pull request that gets no merge lints as it does without one: rc 0, a PASS line naming its head, origin's branch left at that head,
         and any comment on it naming that head."""
@@ -5767,9 +5783,7 @@ class MergedLintTree(LaneFixture):
                          "the lint's merge commit is not the pushed commit: " + text)
 
     def test_a_pr_whose_head_is_not_in_the_checkout_pushes_nothing_and_names_its_head(self):
-        old, tip = self.behind_main()
-        self.check_out(tip)  # origin/main: another lane's history, which the head is not in
-        self.assertFalse(self.checkout_holds(old), "precondition: the checkout holds the head, so the case probes nothing")
+        old, _ = self.behind_main_head_outside_checkout()
         self.use_ci_job(PASSING, 0)
         rc, text, _ = self.lint_once("--lane-lint", "7", at_head=False)
         self.assertEqual(self.head("feat"), old, "a PR whose head is not in the checkout moved origin's branch: " + text)
@@ -5779,6 +5793,22 @@ class MergedLintTree(LaneFixture):
         self.assertIn(old[:9], lines[0], "the PASS line does not name the head: " + text)
         self.assertEqual(len(self.host.posted), 1, "the PASS posted %d comments, want one: %s" % (len(self.host.posted), text))
         self.assertIn(f"Head: {old}", self.host.posted[0][1].splitlines(), "the lane-lint comment does not name the head: " + text)
+
+    def test_a_pass_with_the_head_outside_the_checkout_says_main_in_not_pushed_and_why(self):
+        old, _ = self.behind_main_head_outside_checkout()
+        self.use_ci_job(PASSING, 0)
+        rc, text, _ = self.lint_once("--lane-lint", "7", at_head=False)
+        self.assertEqual(rc, 0, text)
+        line = self.assert_pass_says_main_in_not_pushed(text, "checkout does not hold the head")
+        self.assertIn(old[:9], line, "the PASS line does not name the head: " + text)
+
+    def test_an_integration_pr_pass_behind_main_says_main_in_not_pushed_and_why(self):
+        head = self.integration_head_behind_main()
+        self.use_ci_job(PASSING, 0)
+        rc, text, _ = self.lint_once("--lane-lint", "7", at_head=False)
+        self.assertEqual(rc, 0, text)
+        line = self.assert_pass_says_main_in_not_pushed(text, "integration PR")
+        self.assertIn(head[:9], line, "the PASS line does not name the integration head: " + text)
 
     def test_a_pr_whose_head_is_the_checkout_head_pushes_its_merge_commit(self):  # the control: the lane's own checkout
         old, tip = self.behind_main()
@@ -5820,6 +5850,29 @@ class MergedLintTree(LaneFixture):
         self.use_ci_job(PASSING, 0)
         rc, text = self.run_lane("--lane-lint", "7")
         self.assert_lints_as_today(old, rc, text)
+
+    def test_a_pass_whose_default_branch_cannot_be_read_still_passes_and_pushes_nothing(self):
+        old, _ = self.behind_main()
+        self.check_out(old)  # the caller's checkout holds the head: the one gate that reads the default branch
+        self.assertTrue(self.checkout_holds(old), "precondition: the checkout does not hold the head, so the lint never reads the default branch and the case probes nothing")
+        tm.sh(self.co, "git", "config", "remote.origin.followRemoteHEAD", "never")  # a fetch must not recreate origin/HEAD under the case
+        tm.sh(self.co, "git", "remote", "set-head", "origin", "-d")  # no origin/HEAD: default_branch falls back to the gh read
+        self.assertNotEqual(subprocess.run(["git", "-C", self.co, "rev-parse", "--verify", "-q", "refs/remotes/origin/HEAD"], capture_output=True).returncode, 0,
+                            "precondition: origin/HEAD is still set, so default_branch never reads gh and the case probes nothing")
+        faulted = self.fault_git("repos/{owner}/{repo}", (1, "gh: Not Found (HTTP 404)"))  # the gh read fails: host_default_branch raises Stop
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.run_lane("--lane-lint", "7", at_head=False)
+        self.assertTrue(faulted, "scope: the default branch read did not run, so the case probes nothing: " + text)
+        self.assertEqual(rc, 0, "a lint whose default branch cannot be read stopped instead of passing: " + text)
+        self.assertEqual(self.head("feat"), old, "a lint whose default branch cannot be read pushed over the head: " + text)
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
+        self.assert_lint_merge(runs[0]["head"], old, "main")
+        lines = pass_lines(text)
+        self.assertEqual(len(lines), 1, "the lint printed %d PASS lines, want one: %s" % (len(lines), text))
+        self.assertIn(old[:9], lines[0], "the PASS line does not name the head: " + text)
+        self.assertEqual(len(self.host.posted), 1, "the PASS posted %d comments, want one: %s" % (len(self.host.posted), text))
+        self.assertIn(f"Head: {old}", self.host.posted[0][1].splitlines(), "the lane-lint comment does not name the head: " + text)
 
 
 class ReplacedAtHandIn(LaneFixture):
