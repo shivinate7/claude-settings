@@ -1,0 +1,1 @@
+- protected-find-exec-copy-out: `find fixtures -name '*.csv' -exec cp {} /tmp/ \;` is refused, though a copy out is allowed (hooks/guard_frozen.py `writes_to`). Decision: protected-path.

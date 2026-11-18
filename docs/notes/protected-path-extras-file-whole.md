@@ -1,0 +1,1 @@
+- protected-path-extras-file-whole: a repo with a list refuses every session edit of its extras file. A hand edit of its artifacts registry is then a false alarm (hooks/guard_frozen.py `_protected_why`). The owner's override covers it; no repo has a list. Found in round 3 of the port. Decision: protected-path.

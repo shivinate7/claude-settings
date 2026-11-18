@@ -1,0 +1,1 @@
+- protected-path-no-mutants: hooks/mutate_guard.py runs only hooks/test_guard.py cases, so no case in hooks/test_guard_protected.py kills a mutant (hooks/mutate_guard.py). Decision: protected-path. Fix: step:mutate-guard-split
