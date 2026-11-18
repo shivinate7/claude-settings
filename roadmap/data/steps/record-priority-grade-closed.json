@@ -1,0 +1,15 @@
+{
+ "id": "record-priority-grade-closed",
+ "title": "Record the priority grade question as closed, no grade",
+ "status": "done",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "01:02 CST Nov 18 (coordinator relay, read by triage): PR #3633 merged 00:41:12 CST Nov 18 (coordinator read REST; triage read the closed-PR list at 01:00 CST: merged true, merged_at 06:41:12Z). Branch record-priority-grade-closed matches no step id; filed by branch. First-commit time not read.",
+ "source": "Coordinator relays 00:51, 01:01 and 01:02 CST Nov 18; REST closed-PR list 01:00 CST",
+ "note": "Done. PR #3633 merged 00:41:12 CST Nov 18 by runner 10, no flag. Filed by branch name, no roadmap step (coordinator pick 01:02 CST Nov 18, not an owner ruling; undone by refiling).",
+ "updatedAt": "2026-11-18T01:02:46-06:00",
+ "pr": 3633
+}
