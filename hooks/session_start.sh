@@ -3,6 +3,16 @@
 # In a git tree it also patches the platform's Stop-hook script once so its unpushed nudge skips a merged branch; it says so when the patch is not applied.
 # Outside a git tree or without git, prints only the tier line. Always exits 0, nothing on stderr.
 
+# A cloud install links this script through .cs-current. Run its real file, so each sibling read below belongs to the
+# generation this process started in (decision install-hooks-whole). The re-run sees its own real path, so it runs once.
+ss_self=$0
+while [ -L "$ss_self" ]; do
+  ss_to=$(readlink "$ss_self") || break
+  case "$ss_to" in /*) ss_self=$ss_to ;; *) ss_self="$(dirname "$ss_self")/$ss_to" ;; esac
+done
+if [ "$ss_self" != "$0" ] && ss_real=$(cd "$(dirname "$ss_self")" 2>/dev/null && pwd -P) && [ -f "$ss_real/$(basename "$ss_self")" ] && command -v sh >/dev/null 2>&1; then
+  exec sh "$ss_real/$(basename "$ss_self")" "$@"
+fi
 input=$(cat 2>/dev/null)
 cwd=$(printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
 [ -n "$cwd" ] || cwd=$(pwd)
@@ -35,7 +45,7 @@ fi
 # with a token. Cost: at most two env reads, no network, no new process, no timer, no file written.
 tier_line() {
   if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ] || [ -n "${CLAUDE_CODE_REMOTE_SESSION_ID:-}" ]; then
-    printf '%s\n' 'session tier: read your own record with get_session (no session_id). A parent_session_id means you are a child of that session, and your cs-build:<tier> tag is your tier. No parent: pick coordinator for a standing build, else lane. Before you act as coordinator, read every page of list_sessions for a session tagged both cs-build:coordinator and cs-repo:<owner>/<name> for this repo whose session_status is not archived; if one is found, coordinate with it, else proceed. Merge role: this sentence is for a session whose own tag is cs-build:batch-runner, and for no other. Such a session first runs get_session with no argument, in a turn of its own, then runs `~/.claude/bin/merge --role batch-runner`, at session start and after each resume, because a guard checks its tags in that result and a fresh container loses the role file. A lane, the coordinator or any other tier never runs it, and this line is no instruction to it. A session tagged cs-build:batch-runner, and no other, runs `~/.claude/bin/merge --idle-lanes --live FILE` after each merge, with the live file built by the steps in roadmap/livework/README.md on the record branch, then runs get_session on each listed lane alone and archives that lane, but skips any lane that shows a HOLD marker or needs judgment (unpushed work, records on another head, a lane waiting on the owner) and names each skipped lane in its report. A coordinator the owner started tags itself cs-build:coordinator with set_session_tags on its own id at start. The coordinator never merges. A solo or one-lane session the owner started, with no parent_session_id, merges its own PR under the repo merge grant or the owner named act. A lane session (tag cs-build:lane, with a parent_session_id) hands its reviewed branch, head and PR to the batch runner (list_sessions, tag cs-build:batch-runner, same repo) and never merges.'
+    printf '%s\n' 'session tier: read your own record with get_session (no session_id). A parent_session_id means you are a child of that session, and your cs-build:<tier> tag is your tier. No parent: pick coordinator for a standing build, else lane. Before you act as coordinator, read every page of list_sessions for a session tagged both cs-build:coordinator and cs-repo:<owner>/<name> for this repo whose session_status is not archived; if one is found, coordinate with it, else proceed. Merge role: this sentence is for a session whose own tag is cs-build:batch-runner, and for no other. Such a session first runs get_session with no argument, in a turn of its own, then runs `~/.claude/bin/merge --role batch-runner`, at session start and after each resume, because a guard checks its tags in that result and a fresh container loses the role file. A lane, the coordinator or any other tier never runs it, and this line is no instruction to it. A session tagged cs-build:batch-runner, and no other, runs `~/.claude/bin/merge --idle-lanes --live FILE` after each merge, with the live file built by the steps in roadmap/livework/README.md on the record branch, then runs get_session on each listed lane alone and archives that lane, but skips any lane that shows a HOLD marker or needs judgment (unpushed work, records on another head, a lane waiting on the owner) and names each skipped lane in its report. A coordinator the owner started tags itself cs-build:coordinator with set_session_tags on its own id at start. The coordinator never merges. A session the owner started, with no parent_session_id, is a coordinator for a standing build, else a lane. A lane the owner started merges its own PR, in the claude-settings repo only, under the repo merge grant, by the lane role in the next sentence and no other way. A lane session (tag cs-build:lane) first runs get_session with no argument, in a turn of its own, then runs `~/.claude/bin/merge --role lane --step <its cs-step slug>`, at session start and after each resume, and may merge only its own ready PR in the claude-settings repo, with `merge <pr> --confirm --head <sha>`; it marks its own draft PR ready once, after its review passes, with `merge --role lane --step <slug> <pr> --ready`. A lane session (tag cs-build:lane, with a parent_session_id) hands its reviewed branch, head and PR to the batch runner (list_sessions, tag cs-build:batch-runner, same repo).'
   fi
 }
 
@@ -176,6 +186,19 @@ n=$(cd "$cwd" 2>/dev/null && git status --porcelain 2>/dev/null | wc -l | tr -d 
 
 printf 'checkout %s on %s, %s dirty files\n' "$toplevel" "$branch" "$n"
 tier_line
+
+# roster_lines: the standing sessions of this repo with their ids, so a session never types an id by hand (decision
+# brief-ids-in-roster). The rows are the Standing sessions section of CLAUDE.md on the local origin/roadmap ref, read
+# by hooks/own_session.py; no row prints one line that says so. Status is the record's, not live: a hook cannot call
+# list_sessions (see tier_line). Cost: once per SessionStart event, one python start and two read-only reads of the
+# checkout (the record, the origin url); no network, no file written, no process kept.
+if command -v python3 >/dev/null 2>&1; then
+  ro_script="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/own_session.py"
+  if [ -f "$ro_script" ]; then
+    ro_lines=$(python3 "$ro_script" roster-lines "$toplevel" 2>/dev/null)
+    [ -n "$ro_lines" ] && printf '%s\n' "$ro_lines"
+  fi
+fi
 
 # Local origin/HEAD's target, empty when unset. The default-branch check below tests the checkout against it. The
 # grants compare reads gm_default instead: the remote HEAD's target when the refresh read the remote, since that is
@@ -512,12 +535,13 @@ if [ -n "$wl_out" ]; then
 fi
 
 # Rule page-stale: a repo whose extras name a waiting page prints one line when the page was last published
-# from a version other than main's page.html. The stamp an allowed publish wrote
-# (<git common dir>/waiting-page-built) holds main's blob sha at that publish; skills/waiting-page/stale_pages.py
-# --session-line compares it with origin/main of the claude-settings clone ($d) and prints the line, or nothing
-# (no stamp, or main unreadable, is silent). The grep is only a cheap filter on the extras file that
+# from a version other than main's page.html. Two stamps hold main's blob sha at the publish: the
+# page-built stamp roadmap/data/meta/page-built.json on origin/roadmap, and the local one an allowed publish wrote
+# (<git common dir>/waiting-page-built). skills/waiting-page/stale_pages.py --session-line compares them with origin/main
+# of the claude-settings clone ($d): nothing when either equals main's blob, the behind line when one exists and none
+# does, nothing when neither exists or main is unreadable. The grep is only a cheap filter on the extras file that
 # lint/layout.json names; layout.waiting_page, inside the python start, decides. Cost: in a repo with a page, one
-# python start and one read-only git process; in any other repo, one grep. No fetch, no file written, no timer.
+# python start and at most two read-only git processes; in any other repo, one grep. No fetch, no file written, no timer.
 wp_extras="$toplevel/.claude/layout-extras.json"
 if [ -f "$wp_extras" ] && grep -q '"waiting-page"' "$wp_extras" 2>/dev/null && command -v python3 >/dev/null 2>&1; then
   wp_script="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/../skills/waiting-page/stale_pages.py"
