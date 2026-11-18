@@ -8103,6 +8103,18 @@ for (const [name, literal] of [["NaN", "NaN"], ["Infinity", "Infinity"], ["minus
   });
 }
 
+// Item 2: a ledger row of the wrong shape (here a NaN age) reads act unknown with its reason on its row. The finite row beside it reads its act and no reason.
+test("an ageHours of NaN reads act unknown with the wrong-shape reason on its row, and the finite row reads no reason", async (t) => {
+  const page = await liveStatusText(t, ageText("NaN")); if (!page) return;
+  assert.equal(await actRow(page, "Pull eight").count(), 1, "scope: the Status tab draws no row for open pull request #8");
+  const seven = await rowText(actRow(page, "Pull seven"));
+  assert.match(seven, /lane round 2/, "control: #7 has a finite row and does not read its act 'lane round 2': " + seven);
+  assert.doesNotMatch(seven, /wrong shape/, "control: #7 has a finite row and carries the wrong-shape reason: " + seven);
+  const eight = await rowText(actRow(page, "Pull eight"));
+  assert.match(eight, /act unknown: its ledger row has the wrong shape/,
+    `the row of #8 has ageHours NaN and does not read 'act unknown: its ledger row has the wrong shape': ${eight}`);
+});
+
 test("the Status tab lists a red open pull request before the others", async (t) => {
   const page = await liveStatus(t, actsOver()); if (!page) return;
   const order = await page.locator("details.live li").allTextContents();

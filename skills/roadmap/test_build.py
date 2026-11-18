@@ -1252,6 +1252,20 @@ class LedgerActs(UpkeepFixture):
                 self.assertIsNotNone(match, "scope: the built page has no ROADMAP_BUILD block")
                 self.assertIsNone(re.search(r"\b(NaN|-?Infinity)\b", match.group(1)), f"the page's build block carries {name} for ageHours, which a renderer prints")
 
+    def test_a_ledger_row_of_the_wrong_shape_bakes_its_reason_as_act_why_and_a_pull_with_no_row_bakes_none(self):
+        # The reason a wrong-shaped row reads is baked as actWhy, and each page shows it after "act unknown". The rows beside it are the controls.
+        pulls = [{"number": n, "title": "pull %d" % n, "branch": "feat-%d" % n} for n in (3, 5, 9)]
+        self.publish_read(pulls, {"readAt": self.FRESH, "rows": [ledger_row(3, "batch", age=float("nan")), ledger_row(9, "batch", age=2.0)]})
+        row = self.baked(self.build())
+        self.assertEqual(sorted(row), [3, 5, 9], "scope: the baked pulls are the three open pulls")
+        self.assertEqual(row[9].get("act"), "batch", f"control: #9 has a finite age and reads act {row[9].get('act')!r}, not 'batch'")
+        self.assertNotIn("actWhy", row[9], f"control: #9 has a ledger row of the right shape and carries actWhy {row[9].get('actWhy')!r}")
+        self.assertEqual(row[5].get("act"), "act unknown", f"control: #5 has no ledger row and reads act {row[5].get('act')!r}, not 'act unknown'")
+        self.assertNotIn("actWhy", row[5], f"control: #5 has no ledger row and carries actWhy {row[5].get('actWhy')!r}")
+        self.assertEqual(row[3].get("act"), "act unknown", f"#3 has ageHours NaN and reads act {row[3].get('act')!r}, not 'act unknown'")
+        self.assertEqual(row[3].get("actWhy"), "its ledger row has the wrong shape",
+                         f"#3 has ageHours NaN and its actWhy is {row[3].get('actWhy')!r}, not 'its ledger row has the wrong shape'")
+
 
 class LandedPulls(UpkeepFixture):
     """Landed marks from the live file's landedPulls rows (closed or merged lane pulls). A row marks its step when its

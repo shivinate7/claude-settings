@@ -160,6 +160,17 @@ for (const [name, literal] of [["NaN", "NaN"], ["Infinity", "Infinity"], ["minus
   });
 }
 
+// Item 2: a ledger row of the wrong shape (here a NaN age) reads act unknown with its reason on its row. The finite row beside it reads its act and no reason.
+test("an ageHours of NaN reads act unknown with the wrong-shape reason on its row, and the finite row reads no reason", async (t) => {
+  const page = await open(t, builtPage({ liveText: ageLive("NaN") })); if (!page) return;
+  const seven = (await page.locator("#live li", { hasText: "Pull seven" }).textContent()).replace(/\s+/g, " ");
+  assert.match(seven, /lane round 2/, "control: #7 has a finite row and does not read its act 'lane round 2': " + seven);
+  assert.doesNotMatch(seven, /wrong shape/, "control: #7 has a finite row and carries the wrong-shape reason: " + seven);
+  const eight = (await page.locator("#live li", { hasText: "Pull eight" }).textContent()).replace(/\s+/g, " ");
+  assert.match(eight, /act unknown: its ledger row has the wrong shape/,
+    `the row of #8 has ageHours NaN and does not read 'act unknown: its ledger row has the wrong shape': ${eight}`);
+});
+
 // ---------------------------------------------------------------- live work: a live file with no threads list (lane live-build-threads-optional)
 // The thread count reads unknown, never 0. The open pull request still shows, and still holds its step live.
 test("a live file with no threads list shows its open pull request, and the thread count reads unknown", async (t) => {
