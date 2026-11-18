@@ -321,13 +321,17 @@ def _write_data(entry, cwd=""):
 # chat box the mark is the words below in an option's label or description, and such an option's label
 # never carries (Recommended). Read at the same ArtifactData call.
 WIDENS_TEXT = "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo"
-WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts: the owner ruled that "
-                 "a repo changes to fit a shared tool, never the tool to fit a repo. Make `recommended` (or `pick`, "
+WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts, so that one repo's "
+                 "differing form passes: the owner ruled that "
+                 "a repo changes to fit a shared tool, never the tool to fit a repo. A change to the shared tool "
+                 "that every repo gets alike, with no repo named as its reason, is not widening. Make `recommended` (or `pick`, "
                  "its old name, where the item still uses it) an option where the repo changes to match the "
                  "shared format. When every option widens, add an option that does not widen and "
                  "recommend that one.")
-CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool accepts: the owner ruled that a "
-                      "repo changes to fit a shared tool, never the tool to fit a repo. Recommend an option "
+CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool accepts, so that one repo's "
+                      "differing form passes: the owner ruled that a "
+                      "repo changes to fit a shared tool, never the tool to fit a repo. A change to the shared tool "
+                      "that every repo gets alike, with no repo named as its reason, is not widening. Recommend an option "
                       "where the repo changes to match the shared format, and give the widening option no "
                       "(Recommended) label.")
 # Older sessions still write these words in chat; the mark keeps refusing them. No card, rule text or
