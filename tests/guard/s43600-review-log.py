@@ -1,5 +1,5 @@
 # section 43600
-FAMILY = "review-record"
+FAMILY = "review-log"
 #
 # The review record a PR comment carries (decision pr-review-record). A comment whose first line is exactly the marker
 # is a record, and merge/merge.py parse_review reads it. A body that parse_review refuses is a record the merge tool
@@ -86,7 +86,7 @@ def _rvw_git(where, *args, when=None):
 def _rvw_merge_parse():
     """merge/merge.py's parse_review, loaded from its file: the one home of the record's form."""
     import importlib.util
-    spec = importlib.util.spec_from_file_location("review_record_under_test", os.path.join(REPO, "merge", "merge.py"))
+    spec = importlib.util.spec_from_file_location("review_log_under_test", os.path.join(REPO, "merge", "merge.py"))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.parse_review

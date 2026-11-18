@@ -3807,7 +3807,7 @@ GUARD_MODULE_FAMILIES = {
     "hooks/guard_merge.py": ["merge"],
     "hooks/guard_mask_script.py": ["mask-script"],
     "hooks/guard_argv.py": ["argv"],
-    "hooks/guard_review_log.py": ["review-record"],
+    "hooks/guard_review_log.py": ["review-log"],
     # hooks/guard.py holds the rules that no guard_<x>.py module owns. A mutant of it meets six families that read those rules.
     "hooks/guard.py": ["write", "paths", "diff", "model-cap", "cite", "hook-bypass"],
 }
