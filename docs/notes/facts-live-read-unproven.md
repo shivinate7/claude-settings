@@ -1,0 +1,1 @@
+- facts-live-read-unproven: the live GitHub read in `probe_facts` ran in no test against GitHub itself, only a local stub. Decision: facts-line-checks-state.

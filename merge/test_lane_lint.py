@@ -2350,6 +2350,71 @@ class CrossMeasure(LaneFixture):
                 self.assertEqual(pass_lines(text), [], "a lane PR on branch %s printed a PASS line: %s" % (branch, text))
                 self.assertEqual(lints, 0, "the ci-job lint ran past the FAIL on branch %s: %s" % (branch, text))
 
+    LOCK_LOSS = (1, "error: cannot lock ref 'refs/remotes/origin/main': is at %s but expected %s" % ("a" * 40, "b" * 40))  # git's text when another fetch moved the ref
+    REFUSED = (1, "fatal: the remote end hung up unexpectedly")  # a failed fetch that is no lock loss
+
+    def script_all_refs_fetch(self, replies):
+        """Each `git fetch` of every branch head (the refspec fetch_branch_heads runs) takes the next of `replies`: a (rc, text) pair is
+        that fetch's answer, and a fetch past the list, or a reply of None, runs for real. Every other git call runs for real, and a
+        retry pause is not waited for. -> the argv of each such fetch, in order."""
+        real_git = merge.git
+        all_heads = "+refs/heads/*:refs/remotes/origin/*"
+        fetches = []
+
+        def scripted(cwd, *a, input=None):
+            if a[:2] == ("fetch", "-q") and all_heads in a:
+                fetches.append(list(a))
+                reply = replies[len(fetches) - 1] if len(fetches) <= len(replies) else None
+                if reply is not None:
+                    return reply
+            return real_git(cwd, *a, input=input)
+
+        for patch in (unittest.mock.patch.object(merge, "git", scripted), unittest.mock.patch.object(time, "sleep", lambda seconds: None)):
+            patch.start()
+            self.addCleanup(patch.stop)
+        return fetches
+
+    def own_lane_with_one_more_pr(self):
+        """The lane's head and PR 8 of the same lane: the cross-measure picks PR 8, so it fetches every branch head."""
+        self.own_writes({"own-b.txt": "lane 7\n"})
+        self.pr_writes(8, {"elsewhere.txt": "lane 8\n"}, lane_body(OWN))
+        self.assertTrue(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is not in this lane, so no fetch of every branch head runs")
+        self.use_ci_job(PASSING, 0)
+
+    def test_a_ref_lock_loss_on_the_fetch_of_every_branch_head_is_retried_once_and_the_lint_goes_on(self):
+        """The cross-measure's fetch of every branch head loses the ref lock to another lint's fetch. That one error is retried once,
+        and the lint goes on to its ci-job run."""
+        self.own_lane_with_one_more_pr()
+        fetches = self.script_all_refs_fetch([self.LOCK_LOSS, None])
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertGreaterEqual(len(fetches), 1, "precondition: the fetch of every branch head never ran, so the lock loss was not injected: " + text)
+        self.assertEqual(rc, 0, "a lock loss on the fetch of every branch head refused the lane instead of a retry: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, "the lane did not pass after the retry: " + text)
+        self.assertEqual(lints, 1, "the ci-job lint did not run once after the retry: " + text)
+        self.assertEqual(len(fetches), 2, "the fetch of every branch head ran %d time(s) after one lock loss, want 2: the loss was not retried once" % len(fetches))
+
+    def test_a_fetch_of_every_branch_head_that_fails_for_another_reason_is_not_retried_and_the_lane_stops_unknown(self):  # the control
+        self.own_lane_with_one_more_pr()
+        fetches = self.script_all_refs_fetch([self.REFUSED, None])
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertGreaterEqual(len(fetches), 1, "precondition: the fetch of every branch head never ran, so the failure was not injected: " + text)
+        self.assertEqual(len(fetches), 1, "a fetch of every branch head that failed for another reason was retried: %d fetches" % len(fetches))
+        self.assertEqual(rc, 1, "a fetch failure that is no lock loss did not stop the lane: " + text)
+        self.assertEqual(pass_lines(text), [], "a fetch failure that is no lock loss printed a PASS line: " + text)
+        self.assertRegex(text, r"(?i)unknown", "a fetch failure that is no lock loss does not stop as unknown: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran past a failed fetch of every branch head: " + text)
+
+    def test_a_ref_lock_loss_on_every_try_of_the_fetch_of_every_branch_head_stops_unknown_after_one_retry(self):
+        self.own_lane_with_one_more_pr()
+        fetches = self.script_all_refs_fetch([self.LOCK_LOSS, self.LOCK_LOSS])
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertGreaterEqual(len(fetches), 1, "precondition: the fetch of every branch head never ran, so the lock loss was not injected: " + text)
+        self.assertEqual(len(fetches), 2, "the fetch of every branch head ran %d time(s) against two lock losses, want 2: one retry, then a stop" % len(fetches))
+        self.assertEqual(rc, 1, "two lock losses on the fetch of every branch head did not stop the lane: " + text)
+        self.assertEqual(pass_lines(text), [], "two lock losses on the fetch of every branch head printed a PASS line: " + text)
+        self.assertRegex(text, r"(?i)unknown", "two lock losses on the fetch of every branch head do not stop as unknown: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran past two lock losses on the fetch of every branch head: " + text)
+
 
 BATCH = "batch-lint-flags"  # the batch the case lints: a pushed branch whose checks job holds the four CI steps below
 BATCH_MISSING = "batch-lint-flags-no-red-run"  # the same batch with the Red-run trailer's script left out

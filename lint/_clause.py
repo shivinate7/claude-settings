@@ -27,7 +27,7 @@ ADVERBS = ("even", "yet", "currently", "actually", "really", "still", "also", "j
            "unfortunately")
 # Any other adverb in -ly ("temporarily", "honestly") is read as an adverb where the grammar allows one: between a subject
 # and its verb, after not, and before the act.
-ADVERB_PATTERN = "(?:%s|[a-z]{3,}ly)" % "|".join(ADVERBS)
+ADVERB_PATTERN = "(?:%s|[a-z]{2,}ly)" % "|".join(ADVERBS)
 CONDITIONALS = ("if", "unless", "whether", "would")
 REASON_LINKS = ("because",)
 DETERMINERS = ("a", "an", "the", "this", "that", "these", "those", "its", "their", "his", "her", "our", "my", "your")
@@ -213,6 +213,7 @@ _NEGATOR_RE = re.compile(r"\b(?:%s)\b|n['’]t\b" % "|".join(w for w in NEGATORS
 # its subject. I and we are the writer wherever they sit just before a phrase; the cloud and this session too, unless a
 # preposition (PREPOSITIONS) sits just before them: "The builder in this session is unable to push." is the builder's line.
 _WRITER = r"(?:I|we)(?:\s+(?:myself|ourselves))?"
+WRITER_PATTERN = _WRITER  # the same pattern, public for a guard that reads the writer's own act
 _PLACE = r"(?:the\s+cloud(?:\s+session)?|this\s+session)"
 _LEAD = "|".join(JOINERS + REASON_LINKS + SUBORDINATORS)
 _LEAD_RE = re.compile(r"^\W*(?:(?:%s)\b\W*)?" % _LEAD, re.I)

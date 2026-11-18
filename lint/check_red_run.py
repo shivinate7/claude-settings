@@ -33,7 +33,7 @@ could not read the range or no base was given. Unknown is never 0 here: a green 
 import os
 import re
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 SELF_REL = "lint/check_red_run.py"
