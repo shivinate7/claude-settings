@@ -82,7 +82,6 @@ NO_MD = [
     'Stall watch fixture suite',
     'Stall watch stop suite',
     'Simulator boot-record fixture suite',
-    'Session start notice suite',
     'Start check suite',
     'Directory before a segment suite',
     'Refusal settle fixture suite',
@@ -161,6 +160,8 @@ MUST_STAY_UNSCOPED = [
     'Guard wrappers fixture suite',  # runs test_guard.py through drive_test_guard
     'Guard cases from base fixture suite',  # runs test_guard.py's listing, whose section files read skills/impeccable/SKILL.md
     'Skill model rows fixture suite',  # its checks job step has no `if:` (test_check_skill_model_rows.py pins it)
+    'Project-ops roles check',  # reads the session-tiers record and the project-ops templates at run time (audit hook, run-time open)
+    'Project-ops roles fixture suite',  # its real-repo case reads the same record and templates at run time
     'Reply judge fixture suite',  # reads CLAUDE.md at run time (hooks/test_reply_judge.py), so a CLAUDE.md-only pull request must run it
     'Nightly skip fixture suite',  # not audited yet, so it stays unscoped (fail safe)
     'Proc env read suite',  # not audited yet, so it stays unscoped (fail safe)
@@ -192,6 +193,7 @@ DOC_STEPS = {
     'SendMessage state fixture suite': ("decisions",),
     'Stop-hook owner-safe reason suite': ("decisions",),
     'Settings matcher fixture suite': ("decisions",),
+    'Session start notice suite': ("decisions",),  # its test class SessionStartRolePickTests reads docs/decisions/session-tiers.md
     'Stop-hook review-record fixture suite': ("rules",),
     'CLAUDE.md size (warns, never fails)': ("rules",),
     'Landed-directory manifest agreement': ("skills",),
@@ -464,6 +466,8 @@ MAIN_STEPS = [
     'Agent push form fixture suite',
     'Skill model rows check',
     'Skill model rows fixture suite',
+    'Project-ops roles check',
+    'Project-ops roles fixture suite',
     'Python 3.9 floor check',
     'Python 3.9 floor fixture suite',
     'No-window spawn check',

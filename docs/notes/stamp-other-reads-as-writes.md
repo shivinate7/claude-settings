@@ -1,0 +1,1 @@
+- stamp-other-reads-as-writes: Other reads outside READ_TOOLS in hooks/precompact_handoff.py behave the same way as the get_check_run case: ArtifactData, the Artifact read action and NotebookRead (PR #2480).

@@ -1,0 +1,1 @@
+- todo-two-kinds-of-undo: docs/todo.md line 20 says the silent-undo check reads two kinds of undo. The check now has four reads (#2289).

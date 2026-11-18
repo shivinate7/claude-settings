@@ -1,1 +1,0 @@
-- lane-confirm-flags-unguarded: What: a lane's `--confirm` can carry --base-red-ok, --undo-check-unknown-ok and --express with no guard. Where: unverified (the merge tool's lane-tagged --confirm path; not read by triage). Decision: unverified. Retire: when a lane-tagged --confirm refuses those flags, proved by a test that goes red without the guard.

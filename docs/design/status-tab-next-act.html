@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Status tab next act</title>
+<style>
+/* Harness only: the toolbar and frames around the drawn screen. The screen is the page's own CSS (#pagecss), the new CSS (#newcss) and the picked options' CSS. */
+:root { --h-bg: #eef0f3; --h-ink: #161b22; --h-muted: #565f6b; --h-line: #cfd5dd; --h-btn: #ffffff; --h-on: #161b22; --h-on-ink: #ffffff; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; } }
+:root[data-theme="dark"] { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.sample { background: #5b21b6; color: #fff; font-weight: 700; text-align: center; padding: 8px 16px; }
+.tool { display: grid; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--h-line); }
+.tool h1 { margin: 0; font-size: 17px; }
+.tool .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tool .row > span { color: var(--h-muted); font-size: 13px; min-width: 64px; }
+.tool button { min-height: 32px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--h-line); background: var(--h-btn); color: var(--h-ink); font: inherit; font-size: 13.5px; cursor: pointer; }
+.tool button[aria-pressed="true"] { background: var(--h-on); color: var(--h-on-ink); border-color: var(--h-on); }
+.tool button.hide { border-style: dashed; color: var(--h-muted); }
+.tool p { margin: 0; font-size: 13.5px; color: var(--h-muted); max-width: 90ch; }
+.tool code { overflow-wrap: anywhere; }
+#stage { display: grid; gap: 24px; padding: 16px; justify-items: center; }
+.fr { display: grid; gap: 6px; width: 100%; justify-items: center; }
+.fr > b { font-size: 13px; color: var(--h-muted); }
+.fw { overflow: hidden; border: 1px solid var(--h-line); border-radius: 8px; background: var(--h-btn); max-width: 100%; }
+.fw iframe { border: 0; display: block; transform-origin: 0 0; }
+</style>
+</head>
+<body>
+<div class="sample" id="sampleBanner">Sample. No pull request, title, branch, act, owner, age or time on this page is real.</div>
+<header class="tool">
+  <h1>Waiting page Status tab: each open pull request with its next act</h1>
+  <div class="row"><span>State</span>
+    <button data-s="live">Acts read</button>
+    <button data-s="lanes">Lanes not read</button>
+    <button data-s="stale">Acts too old</button>
+  </div>
+  <div class="row"><span>Red row</span>
+    <button data-red="mark">Edge and mark</button>
+    <button data-red="word">Word tag</button>
+    <button class="hide" data-hide="mark" data-name="Edge and mark">Hide Edge and mark</button>
+    <button class="hide" data-hide="word" data-name="Word tag">Hide Word tag</button>
+  </div>
+  <div class="row"><span>Old acts</span>
+    <button data-why="row">Reason on each row</button>
+    <button data-why="head">Reason once at the head</button>
+    <button class="hide" data-hide="row" data-name="Reason on each row">Hide Reason on each row</button>
+    <button class="hide" data-hide="head" data-name="Reason once at the head">Hide Reason once at the head</button>
+  </div>
+  <div class="row"><span>Size</span>
+    <button data-w="all">All</button><button data-w="1440">Wide 1440</button><button data-w="820">Tablet 820</button><button data-w="390">Phone 390</button>
+  </div>
+  <div class="row"><span>Theme</span>
+    <button data-t="both">Both</button><button data-t="light">Light</button><button data-t="dark">Dark</button>
+    <button id="labBtn">Labels on</button>
+  </div>
+  <p>Deep links: <code>#s=live|lanes|stale, &amp;red=mark|word, &amp;why=row|head, &amp;w=all|1440|820|390, &amp;t=both|light|dark, &amp;lab=off, &amp;hide=word,head</code>. Focus ids: <code>pick-red</code> (the first red row's mark), <code>pick-why</code> (the reason for old acts, state "Acts too old"). The page CSS is an excerpt of skills/waiting-page/page.html at e88dac4d5, default brand. The Live work box is drawn open and alone, not in the tab's full layout. 1440, 820 and 390 are the brief's sizes; this repo's device list is unknown. The roadmap page (skills/roadmap/page/index.html) shows the same row text in its own CSS. Notes: the file of the same name ending -notes.md.</p>
+</header>
+<main id="stage"></main>
+<script type="text/plain" id="pagecss">
+/* Excerpt of skills/waiting-page/page.html at e88dac4d5: tokens, base, the Status tab's Live work box, tags and the unknown ring. Verbatim, but for the dark set keyed on data-theme alone. */
+:root {
+  --surface: #ffffff; --ink: #161b22; --muted: #565f6b; --faint: #5b6470; --line: #d9dee5; --chip: #eef1f4;
+  --holds: var(--r-holds-l, #b3261e); --on-holds: var(--r-on-holds-l, #ffffff); --due: var(--r-due-l, #8a5300); --due-soft: #fbefd9; --calm: #56606e;
+  --good: var(--r-good-l, #1d7445); --good-soft: #e0f2e7; --gold-soft: #fbf3d6; --gold-ink: #6b5000;
+  --ground: var(--r-ground-l, #f3f4f6); --hdr: var(--r-hdr-l, #4b5a6b); --on-hdr: var(--r-on-hdr-l, #ffffff);
+  --acc: var(--r-ink-l, #4b5a6b); --on-acc: #ffffff; --acc-soft: var(--r-soft-l, #eceff3);
+  --body: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --r: 10px;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35); color-scheme: dark }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 16px/1.55 var(--body); }
+a { color: var(--acc); }
+:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.in { max-width: 1160px; margin: 0 auto; padding-left: 16px; padding-right: 16px; }
+.svwrap { container-type: inline-size; padding-block: 18px 40px; }
+.sv { display: grid; gap: 16px; min-width: 0; }
+.sv h2, .sv h3, .sv h4, .sv p { margin: 0; }
+.sv .id, .sv .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.unk { color: var(--due); font-weight: 600; }
+.sv summary { list-style: none; }
+.sv summary::-webkit-details-marker { display: none; }
+.sv summary::before { content: "\25B8"; flex: none; width: 1em; color: var(--muted); }
+.sv details[open] > summary::before { content: "\25BE"; }
+.rg.unk { display: inline-block; width: 12px; height: 12px; vertical-align: -1px; border: 2px dashed var(--due); border-radius: 50%; }
+.live { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.live summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 14px; min-height: 44px; font-size: 14.5px; }
+.live summary .lh { font-weight: 700; }
+.live summary .asof { margin-left: auto; font-size: 13px; color: var(--muted); padding: 0; }
+.live h4 { padding: 8px 14px 4px; font-size: 13px; font-weight: 600; color: var(--muted); border-top: 1px solid var(--line); }
+.live ul { list-style: none; margin: 0; padding: 0; }
+.live li { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px; padding: 7px 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.live li .nm { display: block; font: 13px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.live a { color: var(--acc); text-decoration: none; }
+.live a:hover { text-decoration: underline; }
+@container (max-width: 559px) { .live li { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+.tag { font-size: 12.5px; font-weight: 600; padding: 0 8px; border-radius: 999px; border: 1.5px solid currentColor; line-height: 19px; white-space: nowrap; }
+.tag.st-working { color: var(--acc); }
+.tag.ic { display: inline-grid; place-items: center; min-width: 26px; padding: 0 4px; }
+.tag.ic svg { width: 12px; height: 12px; }
+.asof { font-size: 13px; color: var(--muted); padding: 0 14px 8px; }
+</script>
+<script type="text/plain" id="newcss">
+/* New: the list head holds the per-owner counts and the acts-read time. The parent spaces its children (ux-gap-on-parent); the time is pushed to the end with margin-left: auto, as the summary's .asof is. */
+.live h4.prh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+.live h4.prh .cts { font-weight: 400; }
+.live h4.prh .cts .rd { color: var(--holds); font-weight: 600; }
+.live h4.prh .asof { margin-left: auto; padding: 0; font-weight: 400; }
+/* .asof comes after .unk in the page, so an unknown line would read muted; the new unknown lines keep --due. Today's "Skipped" line is left as it is. */
+.live .prwhy, .live h4.prh .asof.unk { color: var(--due); }
+.live .prwhy { padding: 0 14px 8px; font-weight: 600; }
+/* New: the act line under today's branch and checks line. The act is in ink; owner and age are muted, as the branch line is. */
+.live li .act { display: block; font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere; }
+.live li .act b { color: var(--ink); font-weight: 600; }
+.live li .act .tag { margin-right: 6px; vertical-align: 1px; }
+</script>
+<script type="text/plain" id="css-mark">
+/* New, option Edge and mark: a red row carries the stalled band's red edge and a red mark; the word "red" shows once, in the head count (ux-label-once). */
+.live li.red { box-shadow: inset 3px 0 0 var(--holds); }
+.live li .tag.redm { color: var(--holds); }
+.live li .tag.redw { display: none; }
+</script>
+<script type="text/plain" id="css-word">
+/* New, option Word tag: a red row carries a "red" word tag in --holds, and no edge. */
+.live li .tag.redm { display: none; }
+.live li .tag.redw { color: var(--holds); }
+</script>
+<script type="text/plain" id="css-row">
+/* New, option Reason on each row: each row says why its act is unknown. */
+.live .prwhy:not(.prlane) { display: none; }
+</script>
+<script type="text/plain" id="css-head">
+/* New, option Reason once at the head: one line under the head says why; each row reads "act unknown" alone. */
+.live li .act .why { display: none; }
+</script>
+<script type="text/plain" id="labcss">
+/* Harness labels only: dashed "Today:" and "New:" marks. They are not part of the screen. */
+[data-new], [data-today] { position: relative; outline: 2px dashed #7c3aed; outline-offset: -2px; }
+[data-today] { outline-color: #0f766e; }
+[data-new]::after, [data-today]::after { position: absolute; z-index: 6; right: 8px; top: -8px; padding: 0 6px; border-radius: 4px; font: 600 10.5px/1.5 system-ui, sans-serif; color: #fff; white-space: nowrap; pointer-events: none; }
+[data-new]::after { content: "New: " attr(data-new); background: #6d28d9; }
+[data-today]::after { content: "Today: " attr(data-today); background: #0f766e; }
+html.nolab [data-new], html.nolab [data-today] { outline: none; }
+html.nolab [data-new]::after, html.nolab [data-today]::after { display: none; }
+</script>
+<script>
+const SCREEN_NAME = "Waiting page Status tab";
+const WIDTHS = [1440, 820, 390], WNAME = { 1440: "Wide", 820: "Tablet", 390: "Phone" };
+const OPTS = { red: ["mark", "word"], why: ["row", "head"] };
+const STATES = ["live", "lanes", "stale"];
+const DEF = { s: "live", red: "mark", why: "row", w: "all", t: "both", lab: "on", hide: [] };
+const P = { ...DEF };
+const NAME = { mark: "edge and mark", word: "word tag", row: "reason on each row", head: "reason once at the head" };
+
+/* A fixed clock, so every screenshot reads the same. 13:30Z is 07:30 CST. */
+const NOW = Date.parse("2026-11-18T13:30:00Z");
+const ACTS_READ = { live: "2026-11-18T13:22:00Z", lanes: "2026-11-18T13:22:00Z", stale: "2026-11-18T11:42:00Z" };
+const STALE_LIVE_MINUTES = 60; // skills/roadmap/build.py STALE_LIVE_MINUTES
+
+/* The page's own time helpers: page.html fmt and span, verbatim at e88dac4d5. */
+function fmt(iso, withDay = true) {
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  const p = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "short" }).formatToParts(d);
+  const g = (t) => (p.find((x) => x.type === t) || {}).value;
+  return (withDay ? g("month") + " " + g("day") + ", " : "") + g("hour") + ":" + g("minute") + " " + g("timeZoneName");
+}
+const span = (ms) => { const hrs = Math.round(Math.abs(ms) / 36e5); if (hrs < 1) return "under an hour"; if (hrs < 24) return hrs + (hrs === 1 ? " hour" : " hours"); const d = Math.round(hrs / 24); return d + (d === 1 ? " day" : " days"); };
+
+/* A red mark: a filled circle in --holds with a bar and a dot. New glyph, one meaning: red. */
+const RED_GLY = '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6.5" fill="currentColor"/><path d="M7 3.4v4.4" stroke="var(--surface)" stroke-width="1.9" stroke-linecap="round"/><circle cx="7" cy="10.3" r="1.1" fill="var(--surface)"/></svg>';
+
+/* Sample pulls in REST order. act/owner/ageHours/red are the shape of one ledger row (pr_next_act in merge/merge.py), joined by number.
+   act null: no ledger row. lane: "held" (a live lane holds the branch) or "none" (no live lane), read only for a "lane round 1" draft: the build then
+   replaces that act (see built below). */
+const PULLS = [
+  { n: 2962, draft: true, title: "Sample: draft that no lane is working on", branch: "sample-orphan-draft", checks: "", act: "lane round 1", owner: "lane", age: 20, red: false, lane: "none" },
+  { n: 2960, title: "Sample: show the next act on the Status tab", branch: "sample-status-tab-act", checks: "green", act: "lane round 2", owner: "lane", age: 5, red: false },
+  { n: 2958, title: "Sample: stacked on the batch pull request", branch: "sample-stacked-fix", checks: "green", act: "blocked on #2951", owner: "lane", age: 4, red: true, why: "red while #2951 is red" },
+  { n: 2957, title: "Sample: waits on the owner's page item", branch: "sample-waits-owner", checks: "green", act: "waits on page:412", owner: "owner", age: 50, red: false },
+  { n: 2955, title: "Sample: opened after the acts were read", branch: "sample-new-pull", checks: "pending", act: null },
+  { n: 2951, title: "Sample: batch of three lane pull requests", branch: "batch/sample-2951", checks: "green", act: "batch run", owner: "batch runner", age: 31, red: true, why: "waited past its 24-hour limit" },
+  { n: 2948, title: "Sample: held with no Waits on line", branch: "sample-held-no-waits", checks: "red", act: "none", owner: "triage", age: 52, red: true, why: "a hold label with no Waits on line" },
+  { n: 2943, draft: true, title: "Sample: draft a live lane is working on", branch: "sample-live-draft", checks: "", act: "lane round 1", owner: "lane", age: 9, red: false, lane: "held" },
+  { n: 2940, title: "Sample: done, waits for its lane lint", branch: "sample-needs-lint", checks: "green", act: "lane lint", owner: "lane", age: 1, red: false }
+];
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const RING = '<span class="rg unk" aria-hidden="true"></span>';
+
+function staleWhy() {
+  const ago = NOW - Date.parse(ACTS_READ.stale);
+  return `read ${span(ago)} ago, past the ${STALE_LIVE_MINUTES}-minute limit`;
+}
+/* The row's act and owner after the lane join (plan item e), as live_ledger bakes them. With no lane hold readable (#s=lanes) a round-1 draft reads
+   "lane unknown", owner unknown. With the holds read, a round-1 draft no live lane holds reads "no live lane", owner coordinator, and is never red. */
+const LANE_WHY = "the live file has no sessions list";
+const built = (p, s) => {
+  if (!p.lane) return p;
+  if (s === "lanes") return { ...p, act: "lane unknown", owner: "unknown" };
+  return p.lane === "none" ? { ...p, act: "no live lane", owner: "coordinator" } : p;
+};
+const shownOwner = (p, s) => built(p, s).owner;
+
+function actLine(p, s, firstRed, labels) {
+  if (s === "stale") {
+    const pick = labels.why ? ' id="pick-why"' : "";
+    const lab = labels.why ? ` data-new="act unknown, ${NAME[P.why]}"` : "";
+    labels.why = false;
+    return `<span class="act"${lab}><span class="unk"${P.why === "row" ? pick : ""}>${RING} act unknown<span class="why">: ${esc(staleWhy())}</span></span></span>`;
+  }
+  if (p.act == null) return `<span class="act"${labels.unk ? ' data-new="act unknown, one row"' : ""}><span class="unk">${RING} act unknown: no ledger row for this pull request</span></span>`;
+  const b = built(p, s), lane = b.act === "lane unknown";
+  const parts = [lane ? `<span class="unk" title="${esc(LANE_WHY)}">${RING} lane unknown</span>` : `<b>${esc(b.act)}</b>`];
+  let lab = "";
+  if (lane) lab = "lane unknown";
+  else if (b.act === "no live lane") lab = "no live lane, owner coordinator";
+  parts.push("owner " + esc(b.owner), "waited " + span(p.age * 36e5));
+  const mark = p.red
+    ? (P.red === "mark" ? `<span class="tag ic redm" role="img" aria-label="Red: ${esc(p.why)}" title="Red: ${esc(p.why)}">${RED_GLY}</span>` : `<span class="tag redw" title="${esc(p.why)}">red</span>`)
+    : "";
+  if (!lab && p.red && firstRed) lab = "red row, " + NAME[P.red];
+  if (!lab && !p.red && labels.act) { lab = "next act, owner, age"; labels.act = false; }
+  return `<span class="act"${lab ? ` data-new="${lab}"` : ""}>${mark}${parts.join(", ")}</span>`;
+}
+
+function prList(s) {
+  const stale = s === "stale";
+  // Red rows first; the rest keep REST order. With old acts nothing is red, so REST order holds.
+  const rows = stale ? PULLS.slice() : [...PULLS.filter((p) => p.red), ...PULLS.filter((p) => !p.red)];
+  const labels = { act: true, unk: true, why: true };
+  let firstRed = true, firstToday = true;
+  const lis = rows.map((p) => {
+    const fr = !stale && p.red && firstRed; if (fr) firstRed = false;
+    const today = firstToday ? ' data-today="number, draft, title, branch, checks"' : ""; firstToday = false;
+    const nm = [p.branch || "", p.checks ? "checks " + p.checks : ""].filter(Boolean).map(esc).join(", ");
+    return `<li class="${!stale && p.red ? "red" : ""}"${fr ? ' id="pick-red"' : ""}><span class="num"${today}>#${p.n}${p.draft ? " draft" : ""}</span><span><a href="#" onclick="return false">${esc(p.title)}</a><span class="nm">${nm}</span>${actLine(p, s, fr, labels)}</span></li>`;
+  }).join("");
+  let cts;
+  if (stale) cts = `<span class="cts unk" data-new="per-owner counts">owners unknown</span>`;
+  else {
+    const by = {};
+    rows.forEach((p) => { const o = p.act == null ? "unknown" : shownOwner(p, s); by[o] = (by[o] || 0) + 1; });
+    const red = rows.filter((p) => p.red).length;
+    const list = Object.entries(by).sort((a, b) => (a[0] === "unknown") - (b[0] === "unknown") || b[1] - a[1] || a[0].localeCompare(b[0])).map(([o, n]) => `${o} ${n}`).join(", ");
+    cts = `<span class="cts" data-new="per-owner counts">${red ? `<span class="rd">${red} red</span>; ` : ""}${list}</span>`;
+  }
+  const at = fmt(ACTS_READ[s]);
+  const asof = stale ? `<span class="asof unk" data-new="old acts read time">${RING} acts read <span class="num">${at}</span></span>` : `<span class="asof" data-new="acts read time">acts read <span class="num">${at}</span></span>`;
+  const why = stale
+    ? `<p class="asof unk prwhy"${P.why === "head" ? ' id="pick-why"' : ""}>Every act is unknown: the acts were ${esc(staleWhy())}.</p>`
+    : s === "lanes" ? `<p class="asof unk prwhy prlane">Lane holds unknown: ${esc(LANE_WHY)}.</p>` : "";
+  return `<h4 class="prh"><span>Open pull requests</span>${cts}${asof}</h4>${why}<ul>${lis}</ul>`;
+}
+
+function screen() {
+  const s = P.s;
+  return `<div class="in svwrap"><div class="sv"><details class="live" open><summary><span class="lh">Live work</span><span class="tag st-working">2 working</span><span>${PULLS.length} open pull requests</span><span class="asof">read <span class="num">${fmt("2026-11-18T13:22:00Z")}</span></span></summary>`
+    + `<h4>Threads</h4><ul><li><span><span class="tag st-working">Working</span></span><span>Sample lane: show the next act on the Status tab<span class="nm">step sample-41, #2960, active ${fmt("2026-11-18T13:10:00Z")}</span></span></li>`
+    + `<li><span><span class="tag st-working">Working</span></span><span>Sample lane: draft a live lane is working on<span class="nm">step sample-39, #2943, active ${fmt("2026-11-18T12:55:00Z")}</span></span></li></ul>`
+    + prList(s) + `</details></div></div>`;
+}
+
+function readHash() {
+  Object.assign(P, { ...DEF, hide: [] });
+  new URLSearchParams(location.hash.slice(1)).forEach((v, k) => { if (k === "hide") P.hide = v.split(",").filter(Boolean); else if (k in P) P[k] = v; });
+  Object.keys(OPTS).forEach((g) => { if (!OPTS[g].includes(P[g])) P[g] = DEF[g]; });
+  if (!STATES.includes(P.s)) P.s = DEF.s;
+  if (!["both", "light", "dark"].includes(P.t)) P.t = "both";
+  if (!["all", "1440", "820", "390"].includes(P.w)) P.w = "all";
+}
+function writeHash() {
+  const q = new URLSearchParams({ s: P.s, red: P.red, why: P.why, w: P.w, t: P.t });
+  if (P.lab === "off") q.set("lab", "off"); if (P.hide.length) q.set("hide", P.hide.join(","));
+  const h = "#" + q; if (location.hash !== h) history.replaceState(null, "", h);
+}
+const css = (id) => document.getElementById(id).textContent;
+function docFor(th) {
+  const opt = css("newcss") + css("css-" + P.red) + css("css-" + P.why) + css("labcss");
+  return `<!doctype html><html lang="en" data-theme="${th}" class="${P.lab === "off" ? "nolab" : ""}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css("pagecss")}${opt}</style></head><body>${screen()}</body></html>`;
+}
+function frame(w, th) {
+  const box = document.createElement("div"); box.className = "fr";
+  const cap = document.createElement("b"); cap.textContent = WNAME[w] + " " + w + ", " + th;
+  const wrap = document.createElement("div"); wrap.className = "fw";
+  const f = document.createElement("iframe"); f.title = SCREEN_NAME + " at " + w + " wide, " + th; f.style.width = w + "px"; f.dataset.w = w; f.dataset.th = th;
+  wrap.append(f); box.append(cap, wrap); document.getElementById("stage").append(box);
+  const fit = () => {
+    const avail = Math.min(document.getElementById("stage").clientWidth - 32, w), sc = avail / w;
+    let hgt = 600;
+    try { hgt = f.contentDocument.documentElement.scrollHeight; } catch (e) {}
+    f.style.height = hgt + "px"; f.style.transform = "scale(" + sc + ")";
+    wrap.style.width = Math.ceil(w * sc) + 2 + "px"; wrap.style.height = Math.ceil(hgt * sc) + 2 + "px";
+  };
+  f.addEventListener("load", () => { fit(); setTimeout(fit, 250); });
+  f.srcdoc = docFor(th);
+  addEventListener("resize", fit);
+}
+function render() {
+  // A hidden option is never drawn: the other one in its group takes its place.
+  Object.keys(OPTS).forEach((g) => { if (P.hide.includes(P[g])) { const v = OPTS[g].find((x) => !P.hide.includes(x)); if (v) P[g] = v; } });
+  writeHash();
+  const sys = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  document.documentElement.dataset.theme = P.t === "both" ? sys : P.t;
+  Object.keys(OPTS).forEach((g) => document.querySelectorAll(`[data-${g}]`).forEach((b) => { const v = b.dataset[g]; b.hidden = P.hide.includes(v); b.setAttribute("aria-pressed", String(v === P[g])); }));
+  document.querySelectorAll("[data-hide]").forEach((b) => { const off = P.hide.includes(b.dataset.hide); b.textContent = (off ? "Show " : "Hide ") + b.dataset.name; b.setAttribute("aria-pressed", String(off)); });
+  document.querySelectorAll("[data-s]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.s === P.s)));
+  document.querySelectorAll("[data-w]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.w === P.w)));
+  document.querySelectorAll("[data-t]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.t === P.t)));
+  const lb = document.getElementById("labBtn"); lb.textContent = P.lab === "off" ? "Labels off" : "Labels on"; lb.setAttribute("aria-pressed", String(P.lab !== "off"));
+  document.getElementById("stage").replaceChildren();
+  const themes = P.t === "both" ? ["light", "dark"] : [P.t];
+  (P.w === "all" ? WIDTHS : [Number(P.w)]).forEach((w) => themes.forEach((th) => frame(w, th)));
+}
+document.querySelector(".tool").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  Object.keys(OPTS).forEach((g) => { if (b.dataset[g]) P[g] = b.dataset[g]; });
+  if (b.dataset.s) P.s = b.dataset.s;
+  if (b.dataset.w) P.w = b.dataset.w;
+  if (b.dataset.t) P.t = b.dataset.t;
+  if (b.id === "labBtn") P.lab = P.lab === "off" ? "on" : "off";
+  if (b.dataset.hide) { const id = b.dataset.hide; P.hide = P.hide.includes(id) ? P.hide.filter((i) => i !== id) : [...P.hide, id]; }
+  render();
+});
+addEventListener("hashchange", () => { readHash(); render(); });
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (P.t === "both") render(); });
+readHash(); render();
+</script>
+</body>
+</html>

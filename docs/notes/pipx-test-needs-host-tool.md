@@ -1,0 +1,1 @@
+- pipx-test-needs-host-tool: The batch-build-log-kept-r2 check at commit c730fe6f has no Windows-only failure (44 PASS, 14 SKIP, 1 unknown). SmallBaseMove.test_the_suites_a_doc_hits_come_from_the_checks_jobs fails on any host without pipx (bin/ci-job --lint --plan exits 2, "tool missing: pipx") and passes with a stand-in pipx. A note, not a debt, unless it reddens CI.

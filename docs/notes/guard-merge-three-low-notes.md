@@ -1,0 +1,1 @@
+- guard-merge-three-low-notes: In hooks/guard_merge.py (#1763), `--subject "--disable-auto"` is an attacker-only form. `gh api -X PUT .../merge --help` is a false alarm. The remedy names merge --confirm in repos with no merge tool.
