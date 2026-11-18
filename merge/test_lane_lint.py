@@ -40,6 +40,9 @@ import test_merge as tm  # noqa: E402  the git half's fixture and fakes; importi
 from test_merge import LANE_LINT_MARKER, NOT_OWNER, lint_comment  # noqa: E402  the lint comment's one form, in test_merge.py (decision lanes-run-no-full-ci-job)
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import merge  # noqa: E402
+sys.path.append(os.path.join(HERE, "..", "janitor"))  # noqa: E402  janitor/sweep.py: the sweep a lane lint runs under a full floor
+import sweep  # noqa: E402
+REAL_SWEEP_REPO = sweep.sweep_repo  # read before any case patches it: the real-sweep case puts it back
 import guard  # noqa: E402  the full-disk floor's constants: hooks/guard.py LOAD_FULL_DISK_SHARE and LOAD_FULL_DISK_GB
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
@@ -470,6 +473,24 @@ class WallClock:
         self.t += seconds
 
 
+class NoAnswer:
+    """A stdin that records each read and gives nothing back. A sweep that asks a question reads its answer here."""
+    def __init__(self, reads):
+        self.reads = reads
+
+    def read(self, *args):
+        self.reads.append("read")
+        return ""
+
+    def readline(self, *args):
+        self.reads.append("readline")
+        return ""
+
+    def __iter__(self):
+        self.reads.append("iter")
+        return iter(())
+
+
 class LaneFixture(CiJobStub, tm.CloudSession):
     """The lane-lint fixture: the repo pair, the stub ci-job and the run helpers. LaneLint and CrossMeasure share it."""
     @classmethod
@@ -483,6 +504,19 @@ class LaneFixture(CiJobStub, tm.CloudSession):
         self.lock = NoLock()
         self.init_stub()
         self.mutate_log = os.path.join(self.t, MUTATE_LOG)
+        self.sweep_runs = []  # each sweep_repo call a lane lint makes; the stand-in reaps nothing, so no case sweeps a fixture tree
+        sweep_patch = unittest.mock.patch.object(sweep, "sweep_repo", side_effect=self.record_sweep)
+        self.sweep_mock = sweep_patch.start()
+        self.addCleanup(sweep_patch.stop)
+
+    def record_sweep(self, root, confirm, restore_log_path, mode="full", attended=False):
+        """The stand-in for janitor/sweep.py's sweep_repo: it records the call with where stdout stands, and reaps nothing. -> sweep_repo's result shape.
+        The same stand-in as test_merge.py's, kept here so the lane lint cases do not depend on that module's fixture."""
+        out = sys.stdout
+        self.sweep_runs.append({"root": root, "confirm": confirm, "mode": mode, "attended": attended,
+                                "stdout_at": len(out.getvalue()) if hasattr(out, "getvalue") else None})
+        return {"root": root, "refused": None, "branches": [], "worktrees": [], "listeners": [], "pruned": None,
+                "husks": [], "strays": [], "trash": []}
 
     def run_lane(self, *argv, cloud=False):
         """-> (rc, stdout and stderr together) of merge in the lane checkout. A refused command line fails the case with its reason."""
@@ -6119,6 +6153,113 @@ class LaneLintDiskFloor(LaneFixture):
                                 "held %s GiB, under its floor: %s" % (REFUSE_GIB, text))
         self.assertRegex(text, r"(?i)\bdisk\b", "the refusal does not name the disk: " + text)
         self.assertEqual(adds, [], "the lane lint made a tree under the full temp folder before it refused: %r" % (adds,))
+        self.assertEqual(self.lint_calls(), [], "the refused lane lint ran the lint anyway: " + text)
+
+    @contextlib.contextmanager
+    def floor_disk(self, free_gib, freed_gib=0.0):
+        """A drive of DISK_GIB GiB with `free_gib` free, read through shutil.disk_usage. Each sweep the block runs frees `freed_gib` more, so the
+        lint's re-read sees what the sweep reclaimed. Yields the state dict, whose "free" key holds the reading now."""
+        state = {"free": free_gib}
+
+        def usage(path):
+            return types.SimpleNamespace(total=int(DISK_GIB * GIB), used=int((DISK_GIB - state["free"]) * GIB), free=int(state["free"] * GIB))
+
+        def sweep_then_record(root, confirm, restore_log_path, mode="full", attended=False):
+            state["free"] += freed_gib
+            return self.record_sweep(root, confirm, restore_log_path, mode, attended)
+
+        previous = self.sweep_mock.side_effect
+        self.sweep_mock.side_effect = sweep_then_record
+        try:
+            with unittest.mock.patch.object(shutil, "disk_usage", side_effect=usage):
+                yield state
+        finally:
+            self.sweep_mock.side_effect = previous
+
+    def assert_one_sweep_on_the_checkout(self, text):
+        """The sweep ran once, in this process, on the lane checkout, with confirm on and attended off: the same args the confirm's sweep takes
+        (test_merge.py, PerLaneMerge)."""
+        self.assertEqual(len(self.sweep_runs), 1, "the lane lint ran the sweep %d times, want once: %s" % (len(self.sweep_runs), text))
+        run = self.sweep_runs[0]
+        self.assertEqual(os.path.realpath(run["root"]), os.path.realpath(self.co), "the sweep ran on %s, not on the lane checkout" % run["root"])
+        self.assertIs(run["confirm"], True, "the sweep did not reap: confirm is %r" % (run["confirm"],))
+        self.assertIs(run["attended"], False, "the sweep ran attended, which skips the merged and idle keeps")
+
+    def test_a_floor_refusal_runs_the_sweep_once_and_the_lint_goes_ahead_when_it_frees_enough(self):
+        self.use_ci_job(PASSING, 0)
+        with self.floor_disk(free_gib=REFUSE_GIB, freed_gib=6.0):
+            rc, out = self.run_lane("--lane-lint", "7", cloud=True)
+        self.assert_one_sweep_on_the_checkout(out)
+        self.assertEqual(rc, 0, "the lane lint refused though the sweep left 9 GiB free, over the floor of %s GiB: %s" % (full_floor_gib(DISK_GIB), out))
+        self.assertEqual(len(self.lint_calls()), 1, "the lane lint did not run the lint once after the sweep freed space: " + out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_a_floor_refusal_whose_sweep_frees_too_little_refuses_and_names_the_bytes_freed(self):
+        self.use_ci_job(PASSING, 0)
+        with self.floor_disk(free_gib=REFUSE_GIB, freed_gib=1.0), self.worktree_adds() as adds:
+            rc, text = self.run_lane("--lane-lint", "7", cloud=True)
+        self.assert_one_sweep_on_the_checkout(text)
+        self.assertEqual(rc, 1, "the lane lint went ahead with 4 GiB free after the sweep, under the floor of %s GiB: %s" % (full_floor_gib(DISK_GIB), text))
+        self.assertRegex(text, r"\b1\.0 ?(GB|GiB)\b", "the refusal does not name the 1.0 GB the sweep freed: " + text)
+        self.assertRegex(text, r"sweep\.py'? --root \S+ --confirm", "the refusal does not name the sweep command: " + text)
+        self.assertEqual(adds, [], "the refused lane lint made a worktree before it refused: %r" % (adds,))
+        self.assertEqual(self.lint_calls(), [], "the refused lane lint ran the lint anyway: " + text)
+
+    def test_a_floor_refusal_whose_sweep_frees_nothing_names_zero_bytes(self):  # the empty state of the case above
+        self.use_ci_job(PASSING, 0)
+        with self.floor_disk(free_gib=REFUSE_GIB, freed_gib=0.0), self.worktree_adds() as adds:
+            rc, text = self.run_lane("--lane-lint", "7", cloud=True)
+        self.assert_one_sweep_on_the_checkout(text)
+        self.assertEqual(rc, 1, "the lane lint went ahead with 3 GiB free after an empty sweep, under the floor: " + text)
+        self.assertRegex(text, r"\b0\.0 ?(GB|GiB)\b", "the refusal does not name the 0.0 GB an empty sweep freed: " + text)
+        self.assertEqual(adds, [], "the refused lane lint made a worktree before it refused: %r" % (adds,))
+
+    def test_a_lane_lint_above_the_floor_runs_no_sweep(self):  # the control: the drive is not under its floor, so no sweep has a reason to run
+        self.use_ci_job(PASSING, 0)
+        with self.floor_disk(free_gib=50.0):
+            rc, out = self.lint_run("--lane-lint", "7", cloud=True)
+        self.assertEqual(rc, 0, "50 GiB free on a %d GiB drive was refused: %s" % (DISK_GIB, out))
+        self.assertEqual(self.sweep_runs, [], "the lane lint ran the sweep %d times with 50 GiB free, over the floor: %s" % (len(self.sweep_runs), out))
+
+    def test_a_floor_sweep_reaps_only_the_removable_tree_and_asks_no_question(self):
+        """The real janitor sweep runs on the lane checkout under a full floor, not the stand-in. Of five worktrees only the one merged into main,
+        clean, unlocked, idle and with no process inside goes. The dirty, locked, unmerged and process-inside trees stay. The sweep asks nothing
+        and reads no answer from stdin."""
+        tm.sh(self.co, "git", "remote", "set-head", "origin", "-a")
+        self.assertEqual(tm.sh(self.co, "git", "rev-parse", "--abbrev-ref", "origin/HEAD"), "origin/main",
+                         "scope first: the sweep's default base is not origin/main")  # fast mode needs an origin default base
+        self.assertEqual(subprocess.run(["git", "merge-base", "--is-ancestor", "origin/feat", "origin/main"], cwd=self.co,
+                                        capture_output=True).returncode, 1,
+                         "scope first: the lane branch lies in main, so its tree would read as merged")
+        folder = os.path.realpath(tempfile.mkdtemp(prefix="floor-trees-", dir=RUN_FOLDER))
+        self.addCleanup(shutil.rmtree, folder, True)
+        trees = {name: os.path.join(folder, name) for name in ("merged", "dirty", "locked", "unmerged", "busy")}
+        tm.sh(self.co, "git", "worktree", "add", "-q", "--detach", trees["merged"], "origin/main")
+        tm.sh(self.co, "git", "worktree", "add", "-q", "--detach", trees["dirty"], "origin/main")
+        tm.put(os.path.join(trees["dirty"], "scratch.txt"), "not committed\n")
+        tm.sh(self.co, "git", "worktree", "add", "-q", "--detach", "--lock", "--reason", "held by a test", trees["locked"], "origin/main")
+        tm.sh(self.co, "git", "worktree", "add", "-q", "--detach", trees["unmerged"], "origin/feat")
+        tm.sh(self.co, "git", "worktree", "add", "-q", "--detach", trees["busy"], "origin/main")
+        busy = os.path.realpath(trees["busy"])
+
+        def process_inside(path):
+            return ([4242] if os.path.realpath(path) == busy else []), []
+
+        asked, reads = [], []
+        self.use_ci_job(PASSING, 0)
+        with self.floor_disk(free_gib=REFUSE_GIB), \
+                unittest.mock.patch.object(sweep, "sweep_repo", REAL_SWEEP_REPO), \
+                unittest.mock.patch.object(sweep, "worktree_idle_seconds", return_value=7200.0), \
+                unittest.mock.patch.object(sweep, "processes_in", side_effect=process_inside), \
+                unittest.mock.patch("builtins.input", side_effect=lambda prompt="": asked.append(prompt) or ""), \
+                unittest.mock.patch.object(sys, "stdin", NoAnswer(reads)):
+            rc, text = self.run_lane("--lane-lint", "7", cloud=True)
+        self.assertFalse(os.path.exists(trees["merged"]), "the sweep kept the removable tree, merged into main and clean: " + text)
+        for name in ("dirty", "locked", "unmerged", "busy"):
+            self.assertTrue(os.path.isdir(trees[name]), "the sweep reaped the %s tree, which it must keep: %s" % (name, text))
+        self.assertEqual(asked, [], "the sweep asked a question: %r" % (asked,))
+        self.assertEqual(reads, [], "the sweep read an answer from stdin: %r" % (reads,))
+        self.assertEqual(rc, 1, "the lane lint went ahead under the floor, though the disk reading is unchanged: " + text)
         self.assertEqual(self.lint_calls(), [], "the refused lane lint ran the lint anyway: " + text)
 
     # The cases below load merge.py as a fresh process does: from a copy of the repo's tree, after the case sets the config dir. A fix may
