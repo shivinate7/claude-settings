@@ -10,8 +10,8 @@ The store is the folder roadmap/rulings on origin/roadmap of REPO, one JSON file
 `at` (ISO 8601 with a zone), `ruling`, `source`, `status` ("open" or "closed"), `supersedes` (a list of
 {"kind", "ref"}) or `supersedes_none` (the reason it supersedes nothing; a reason that starts with "unread" means
 triage has not read it yet), and optionally `quote` (the owner's own words), `step` (the roadmap step that lands the
-ruling), `lands_in` ({"path", "contains"}) and `scope` ({"visibility": "public" or "private", "repos": [names]}: the repos the
-ruling governs; check_entry refuses any other shape, and in_scope(entry, repo) reads the visibility).
+ruling), `lands_in` ({"path", "contains"}) and `scope` ({"visibility": "public" or "private", "repos": [names]}).
+check_entry validates the whole scope. in_scope(entry, repo) reads only the visibility; no reader uses `repos` yet.
 
 An entry is open until its ruling is on main. It closes when `status` is "closed", or when the text of
 `lands_in.contains` is found, whitespace-normalised, in the blob of `lands_in.path` on origin/main. Triage writes
@@ -332,19 +332,16 @@ def in_scope(entry, repo_dir):
     REPO_DIR. A repo whose visibility is unread, an entry with no scope or a scope check_entry refuses all stay
     in scope: nothing is hidden on a guess."""
     scope = entry.get("scope")
-    if not isinstance(scope, dict) or "visibility" not in scope:
+    if not isinstance(scope, dict) or "visibility" not in scope or _scope_problems(scope):
         return True
+    import layout
     try:
-        import layout
         mapped = layout.layout()["visibility-caution"]
         level = layout.caution(repo_dir)["level"]
-    except Exception:
-        return True
-    wanted = mapped.get(scope["visibility"]) if isinstance(scope["visibility"], str) else None
-    if wanted is None or scope["visibility"] == "default":
+    except (layout.LayoutError, OSError):
         return True
     known = {v for k, v in mapped.items() if k != "default"}
-    return level not in known or level == wanted
+    return level not in known or level == mapped[scope["visibility"]]
 
 
 def is_unchecked(entry):
