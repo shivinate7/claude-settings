@@ -666,6 +666,33 @@ class RecordSlugsTests(unittest.TestCase):
         self.commit_change()
         self.assert_passes()
 
+    def test_note_file_with_empty_text_after_its_slug_is_refused(self):
+        # `- <slug>: ` with nothing after the colon and space is a note with no text. The form check reads the slug only.
+        self.roll_out()
+        self.commit_base()
+        self.put(NOTE % "empty-note", "- empty-note: \n")
+        self.put(NOTE % "valid-note", NOTE_TEXT % "valid-note")
+        self.commit_change()
+        statuses = self.git_out("diff", "--name-status", "origin/main", "HEAD").splitlines()
+        self.assertIn("A\t" + NOTE % "empty-note", statuses, statuses)  # scope: the empty note is in the diff
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [NOTE % "empty-note"], out)
+
+    def test_note_file_in_a_nested_folder_of_the_note_folder_is_refused(self):
+        # Notes are flat: one file per note, directly under the note folder. The valid flat note beside it passes.
+        self.roll_out()
+        self.commit_base()
+        nested = NOTE_DIR + "/sub/nested-note.md"
+        self.put(nested, NOTE_TEXT % "nested-note")
+        self.put(NOTE % "flat-note", NOTE_TEXT % "flat-note")
+        self.commit_change()
+        statuses = self.git_out("diff", "--name-status", "origin/main", "HEAD").splitlines()
+        self.assertIn("A\t" + nested, statuses, statuses)  # scope: the nested note is in the diff
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [nested], out)
+
     # Section files. Git merges two branches' new section files clean, so the check reads the whole
     # tree. Each red names its cause alone.
 
