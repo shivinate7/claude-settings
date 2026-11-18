@@ -331,10 +331,12 @@ def verdict(sha, runs):
 
 def no_workflows(cwd, repo):
     """True only when `gh workflow list` reads cleanly and shows no active workflow: no CI, so no
-    watch. A failed or non-JSON read is unknown, not "no workflows" (the watch runs)."""
+    watch. gh 2.89.0 prints 0 bytes and exits 0 for a repo with no workflow, never "[]", so empty output
+    with exit 0 counts as none. A failed or non-JSON read is unknown, not "no workflows" (the watch runs)."""
     try:
-        return gh_json(["workflow", "list", *(["-R", repo] if repo else []), "--json", "id"], cwd) == []
-    except (Unknown, NoPR):
+        rc, out, _ = gh(["workflow", "list", *(["-R", repo] if repo else []), "--json", "id"], cwd)
+        return rc == 0 and (not out.strip() or json.loads(out) == [])
+    except (Unknown, ValueError):
         return False
 
 
