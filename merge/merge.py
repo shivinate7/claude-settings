@@ -39,8 +39,8 @@
                           sha. Posts nothing: the lane posts it as a PR comment. --fix-check adds the optional `Fix check:` line after
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
                           unless HEAD is the Head of the newest earlier record on the PR, read from the PR's issue comments since the PR opened, and that record
-                          has no Fix check line or a PASS one (owner item 741); after a PASS one, when SHA is a merge commit (a fix after a merge of main), that record reads done and SHA's first
-                          parent is HEAD and its second parent is on the base, with no edit beyond git's own merge (a merge that conflicts may edit its conflicted paths only).
+                          has no Fix check line or a PASS one (owner item 741); after a PASS one, when SHA is a merge commit (a fix after a merge of main), that record reads done and HEAD is an ancestor of SHA
+                          (the fix check reviews every commit since HEAD) and SHA's second parent is on the base, with no edit beyond git's own merge (a merge that conflicts may edit its conflicted paths only).
                           The fix check's MODEL must be sonnet (exit 2 otherwise), and a reviewer's later rounds must equal their round row's model.
                           The first round takes its row's model (the `1 guard` row with --guard yes, else the `1 other` row), or `unknown`; a first-round model
                           below its row prints with a stderr flag and is not refused.
@@ -6868,9 +6868,10 @@ def main(argv, host=None, lock=None, hosts=None):
                     ok = plain or (len(parents) == 2 and h.holds_head_gh(parents[1], info["base"]))
                     if ok and plain and ancestor(h.cwd or ".", last["head"], a.head) is False:  # the verifier reads Head..head, so a head that git reads as not holding the Head is refused (real fix commits may lie between). Unknown keeps the rule that held before: a plain head takes the fix check
                         ok = False
-                    if ok and not plain and parents[0] != a.fix_check[0]:  # clean merges of main may sit between the Head and the last merge: the record survives them
+                    if ok and not plain and parents[0] != a.fix_check[0]:  # the start may be the earlier reviewed Head with any commits after it (owner, page item 949 A): git's ancestry decides, and the fix diff reads every commit since that Head. When git cannot tell, the old walk over clean merges of main decides
                         try:
-                            ok = clean_merges_after(h, a.fix_check[0], parents[0], info["base"])
+                            held = ancestor(h.cwd or ".", a.fix_check[0], a.head)
+                            ok = clean_merges_after(h, a.fix_check[0], parents[0], info["base"]) if held is None else held
                         except (Stop, subprocess.TimeoutExpired, OSError) as e:
                             print(f"merge: --fix-check: whether only clean merges of main sit between {a.fix_check[0][:9]} and {a.head[:9]} is unknown ({' '.join(str(e).split())[:300]}), so the fix verifier is refused. " + REVIEW_CITE, file=sys.stderr)
                             return 2
@@ -6887,7 +6888,7 @@ def main(argv, host=None, lock=None, hosts=None):
                             print(f"merge: --fix-check: whether {a.head[:9]} is git's own merge of the base is unknown ({unread}), so the fix verifier is refused. Fetch both parents of that head into this checkout, then run again. " + REVIEW_CITE, file=sys.stderr)
                             return 2
                 if not ok:
-                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line or a PASS one. After a PASS one, a head that is a plain commit must descend from that Head, and a head that is a merge must be a merge of the base into that Head, and the log must read done, with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
+                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line or a PASS one. After a PASS one, the head must descend from that Head (the fix check reviews every commit since it). A head that is a merge must also be a merge of the base, and the log must read done, with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant, accepted=a.accepted).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
