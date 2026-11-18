@@ -29,15 +29,15 @@ import datetime
 import os
 import re
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
 import _guard_sections  # noqa: E402  the one home of the guard test's section header and faults
 import rule_audit  # noqa: E402  section_dir(): the folder hooks/test_guard.py's SECTION_DIR names
 
 MAX = 32
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 
 
 class Unknown(Exception):

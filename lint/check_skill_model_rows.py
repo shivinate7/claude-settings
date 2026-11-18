@@ -16,8 +16,8 @@ import os
 import re
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
 
 RECORD = os.path.join(ROOT, *layout.path(ROOT, "decisions").split("/"), "agent-model-cap.md")

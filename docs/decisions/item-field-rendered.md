@@ -18,6 +18,14 @@ A field on a waiting item is for the owner to read. A field the page does not dr
   - Known limit: the guard sees that a field is listed, not that the page draws it well. A name added to the block with no drawing passes. Review catches it.
   - Known limit: the guard reads the template `page.html`, not the live page. A page published before this change lacks the block, so the stale-page check (`stale_pages.py`) is the backstop.
   - Known limit: it cannot see a stored field. An item written before the rule keeps its fields, and the page warns on them.
+- The same rule refuses a write whose `n` the page cannot read (step `item-n-must-be-number`; `item_n_hit`, `page_number` in `hooks/question_form.py`).
+  - The page's own test is `typeof it.n === "number" && isFinite(it.n)` (`problem()` in `skills/waiting-page/page.html`); `page_number` follows it, and a case reads that line of the page.
+  - A `set` with no `n`, a `set` or `update` whose `n` is text, a bool, null, a list, an object, NaN or infinity, and a `str_replace` on `n` are refused. An `update` that does not name `n` passes.
+  - It reads the parsed value, never the text of the write. It reads each write in a batch and data read from `file_path`.
+  - The posted reason (`n_reason` in `hooks/question_form.py`, which opens with the item id and the bad `n`, then `PAGE_REASONS["item-n-number"]`) names the item and says `n` is a number such as 929, not "929". It names no other rule's remedy.
+  - Incident: 2026-11-17 09:43 CST, triage wrote items 928 and 929 with `n` as text. The page showed "This item has no number, so it cannot be answered", and the owner could not answer.
+  - Cost: no new process and no file read. It runs in `item_hit`, inside the guard process that every `ArtifactData` call already starts.
+  - Known limit: it sees the write, not the stored item. An update that leaves a stored text `n` alone passes.
 - The fields `reply`, `lastAnswer` and `lane` are listed, and the page draws each on an open item (`docs/design/last-answer-notes.md`).
 
 Incident:
