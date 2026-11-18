@@ -237,8 +237,8 @@ archive_refuse("a target read untagged, then tagged lane, is refused: the newest
 archive_refuse("a payload with no transcript_path is refused", None, fake_gh_path(ARCHOPEN))
 # The containment read. An open draft lane pull request whose head is already in main has landed through the integration
 # pull request, so it no longer blocks the archive. Only a draft is released; a read that fails refuses, and says so.
-# The owner's ruling (page item 937 a, 13:11 CST Nov 17; 14:20 CST Nov 17 for the route): a 403 or 404 on a repo's read names
-# add_repo access push, then retry. OLD_READ_PIN is the "(read)" scope that ruling rules out, so the pins lack it.
+# A 403 or 404 on a repo's read names add_repo access push, then retry. OLD_READ_PIN is the "(read)" scope, which that
+# fix does not name, so the pins lack it.
 OLD_READ_PIN = ("(read)",)
 
 
@@ -290,10 +290,10 @@ archive_refuse("a lane whose q_max default-branch read answers 403 names add_rep
 archive_refuse("a lane whose q_max compare of its branch answers 403 names add_repo for q_max, not claude-settings",
                role_path("archive-inc"), fake_gh_path(ARCHINC_COMPARE403),
                carries=(add_repo_pin(ARCH_REPO_QMAX),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_SETTINGS,) + OLD_READ_PIN)
-# The owner's ruling (page item 937 b, 14:20 CST Nov 17) drops its anonymous-read half. The guard reads a repo's open pull
-# requests with the session's token only, and a 403 or 404 on that read names add_repo for the repo, with access push, then
-# retry. No anonymous read runs. ANON_API stands in for the host an anonymous read reached (GITHUB_API_URL). It lists the
-# lane's own open pull request, so a guard that still read anonymously would refuse as open, and these cases would show it.
+# The guard reads a repo's open pull requests with the session's token only, and a 403 or 404 on that read names add_repo
+# for the repo, with access push, then retry. No anonymous read runs. ANON_API stands in for the host an anonymous read
+# would reach (GITHUB_API_URL). It lists the lane's own open pull request, so an anonymous read would refuse as open, and
+# these cases catch a guard that makes one.
 import atexit
 import http.server
 ANON_SLUG_ROW = {"number": 13, "state": "open", "draft": False, "merged": False, "head": {"ref": ARCHIVE_SLUG, "sha": "d" * 40},

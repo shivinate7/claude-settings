@@ -3,7 +3,7 @@
 # refused once, under the first broken rule's name, with a count line and one line per broken rule in judge order. An
 # override lifts only the rule it is spent on, and the call then goes on to the next broken rule. A call that breaks one
 # rule keeps its own refusal, with no count line. Change 4: only a 403 or 404 on a repo's read names the fix (add_repo
-# access push, then retry). Any other failed read says "Retry once gh answers" and names no act (owner ruling 937 a).
+# access push, then retry). Any other failed read says "Retry once gh answers" and names no act.
 #
 # Every case starts from section 43100's passing lane start (TITLE_START) and section 29666's title (LANE_TITLE), and
 # changes only the fields it breaks. The override cases use section 36421's helpers, and the archive cases section
