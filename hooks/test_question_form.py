@@ -2177,7 +2177,7 @@ def case_past_ruling_owner_sentences_added_text_is_capped():
 
 
 # A markdown table row is judged alone. Run on together, the rows of a long table form one unit bigger than a record's
-# whole ruling budget, and an owner ruling in the table's last row would be lost with that unit.
+# whole ruling budget, and a ruling by the owner in the table's last row would be lost with that unit.
 TABLE_FILLER_ROWS = 90  # joined, these rows run well past one record's whole ruling budget
 
 
@@ -2202,7 +2202,7 @@ def case_past_ruling_owner_row_after_a_long_table_reaches_the_line():
           len(text) <= question_form.INDEX_CAP + question_form.RULING_EXTRA_CAP, "%d characters" % len(text))
 
 
-# Owner ruling sentences that do not all fit are taken newest date stamp first (question_form._owner_sentences). So a
+# Sentences that state a ruling by the owner that do not all fit are taken newest date stamp first (question_form._owner_sentences). So a
 # newer ruling beats an older one that sits earlier in the section, and an undated one sorts after the dated ones, so
 # it is the one dropped when the newer ruling fills the budget.
 NEWEST_LEAD = "Owner ruling, 2026-11-17 19:45 CST: keep the new review budget"
