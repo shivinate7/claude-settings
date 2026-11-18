@@ -15,7 +15,7 @@ import os
 import re
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 from test_windows_split import (ALL_JOBS_PASSED_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_OFF_JOBS, PUSH_SKIP_JOB, RECORDS_ONLY_CONDITION, all_jobs, draft_guard_only, drop_condition, eval_if,  # noqa: E402,F401  the one home of the scope condition and scalar parsers
                                 job_if_without_records, push_guard_only, push_off_only, shard_base, shard_push_off, unwrap, yaml_scalar)  # NIGHTLY_SKIP_JOB and PUSH_SKIP_JOB are read from here by actions/push-skip/push-skip.py

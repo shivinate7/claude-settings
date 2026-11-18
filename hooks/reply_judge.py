@@ -55,7 +55,7 @@ import os
 import re
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 from shared_names import GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN  # noqa: E402  stdlib only; the one home of the gh logins
@@ -149,6 +149,8 @@ INSTRUCTIONS = (
     "style-question-form: flag a reply whose recommended option widens what a shared tool accepts, "
     "such as a second accepted form, an allow-list entry or a per-repo exception. "
     + WIDENS_LABEL_SENTENCE +
+    "Widening means a shared tool is made so that one repo's differing form passes. "
+    "Never flag a change to the shared tool that every repo gets alike, with no repo named as its reason. "
     "Never flag an option where the repo changes to match the shared format. "
     "Judge only options the reply offers the owner to pick; never flag a reply that describes the rule itself. "
     "verification-counts-from-rest: flag a reply that names a search's total, such as total_count or a search result total, "

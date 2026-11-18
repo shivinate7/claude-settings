@@ -1,0 +1,1 @@
+- brief-scope-no-mutant: hooks/mutate_guard.py has no mutant for `brief-scope-diff`. Fix: add one.

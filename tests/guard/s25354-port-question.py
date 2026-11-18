@@ -68,7 +68,7 @@ def with_shown(data):
 
 
 def pq_item(departs=False, **over):
-    item = {"id": "suspense-cards", "kind": "decision", "status": "open", "title": PQ_TITLE,
+    item = {"id": "suspense-cards", "n": 928, "kind": "decision", "status": "open", "title": PQ_TITLE,
             "context": PQ_CTX, "holds": PQ_HOLDS}
     if item.get("kind") == "decision":
         item.update({"options": [dict(o) for o in PQ_OPTIONS], "recommended": "a", "why": "A keeps the port as it is."})

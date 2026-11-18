@@ -1,0 +1,1 @@
+- mail-body-file-missing-raises: (#2519) a missing `--body-file` path still raises FileNotFoundError (pre-existing).

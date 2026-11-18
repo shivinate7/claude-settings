@@ -2,8 +2,8 @@
 # The lane start in one pass (branch lane-start-one-pass). Change 1: a lane start that breaks several lane-start rules is
 # refused once, under the first broken rule's name, with a count line and one line per broken rule in judge order. An
 # override lifts only the rule it is spent on, and the call then goes on to the next broken rule. A call that breaks one
-# rule keeps its own refusal, with no count line. Change 4: the archive read refusals name the fix (attach the repo
-# read-only with add_repo) and never name "Retry once gh answers" as their only remedy.
+# rule keeps its own refusal, with no count line. Change 4: only a 403 or 404 on a repo's read names the fix (add_repo
+# access push, then retry). Any other failed read says "Retry once gh answers" and names no act.
 #
 # Every case starts from section 43100's passing lane start (TITLE_START) and section 29666's title (LANE_TITLE), and
 # changes only the fields it breaks. The override cases use section 36421's helpers, and the archive cases section
@@ -33,7 +33,6 @@ LSP_BAD_TITLE = "Thermostat fan settings (Resideo)"  # breaks lane-title-slug
 LSP_TOPIC_LINE = "Lane brief: lane-start-pass. Topic: other-topic."  # with a cs-topic:one-topic tag, breaks lane-one-topic
 LSP_BARE_ID_LINE = "Do the task, then report to session_4711."  # a bare session id in the brief, breaks brief-ids-in-roster
 LSP_ADD_REPO = "add_repo"
-LSP_READ_ONLY = ("read-only", "read only")  # any-of: the fix names the access in one of these spellings
 LSP_RETRY = "Retry once gh answers"
 LSP_ONE_TOPIC = "cs-topic:one-topic"
 
@@ -244,18 +243,18 @@ add(LSP_TOKEN + ": a send_message brief that names a bare session id is refused 
 # ---- The helper's output, through the guard. A missing or wrong helper fails here, by its exit and its output.
 _lsp_log(LSP_TOKEN + ": the output of bin/lane-start is allowed as a create_session", _lsp_round_trip_check)
 
-# ---- Change 4. The archive read refusals name the fix: attach the lane's repo read-only with add_repo, then retry.
+# ---- Change 4. Only a 403 or 404 on a repo's read names add_repo (page item 937 b, 14:20 CST Nov 17). Any other failed read says to retry.
 FAMILY = "lane-closes-after-records"
-# The open-list read fails (a broken gh). The lane's one repo is o/r (ARCH_LANE_TAGS), and the refusal names it.
-archive_refuse(LSP_TOKEN + ": a lane whose open pull requests cannot be read names add_repo, read-only and its repo",
+# The open-list read fails (a broken gh): no 403 or 404, so the remedy is the retry alone.
+archive_refuse(LSP_TOKEN + ": a lane whose open pull requests cannot be read says retry once gh answers, and no add_repo",
                role_path("archive-lane"), fake_gh_path(GHBROKEN),
-               carries=(LSP_ADD_REPO, LSP_READ_ONLY, "o/r", ARCHIVE_READ_PIN), lacks=(LSP_RETRY,))
+               carries=(LSP_RETRY, ARCHIVE_READ_PIN), lacks=(LSP_ADD_REPO,))
 # The branch read fails (a source that is a string, not a list), so the branch reason is the one that refuses.
-archive_refuse(LSP_TOKEN + ": a lane whose branch read cannot run names add_repo and read-only, not the retry alone",
+archive_refuse(LSP_TOKEN + ": a lane whose branch read cannot run says retry once gh answers, and no add_repo",
                role_path("archive-inc-sources-str"), fake_gh_path(ARCHINC_BEHIND),
-               carries=(LSP_ADD_REPO, LSP_READ_ONLY, ARCHIVE_READ_PIN), lacks=(LSP_RETRY,))
-# No gh on the path: the open-list read cannot run at all.
-archive_refuse(LSP_TOKEN + ": a lane with no gh on the path names add_repo and read-only",
+               carries=(LSP_RETRY, ARCHIVE_READ_PIN), lacks=(LSP_ADD_REPO,))
+# No gh on the path: the open-list read cannot run at all, and it has no HTTP status to name a repo by.
+archive_refuse(LSP_TOKEN + ": a lane with no gh on the path says retry once gh answers, and no add_repo",
                role_path("archive-lane"), GHNONE_PATH,
-               carries=(LSP_ADD_REPO, LSP_READ_ONLY, ARCHIVE_READ_PIN), lacks=(LSP_RETRY,))
+               carries=(LSP_RETRY, ARCHIVE_READ_PIN), lacks=(LSP_ADD_REPO,))
 FAMILY = _lsp_prior_family

@@ -1,0 +1,1 @@
+- gh-open-web-refused: the gh PR-open command with its --web flag is refused on main and in #2462, though it opens only a browser form and creates nothing.

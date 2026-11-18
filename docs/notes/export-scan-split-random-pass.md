@@ -1,0 +1,1 @@
+- export-scan-split-random-pass: random digit-free lower-case values split by `-` or `_` pass the export credential-name scan about 24% of the time. Claude is unlikely to write one, so this is a note, not a debt.

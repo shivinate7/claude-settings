@@ -1,0 +1,1 @@
+- update-ref-held-branch: `git update-ref` of a branch another worktree holds raised no error in a 2026-11-07 test, but the test left the branch in place, so whether it can move a held branch is unproven. `git branch -f` is refused by git itself. Becomes a debt on an incident (step one-worktree-per-branch).

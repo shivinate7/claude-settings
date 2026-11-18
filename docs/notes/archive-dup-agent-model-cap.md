@@ -1,0 +1,1 @@
+- archive-dup-agent-model-cap: archive/agent-model-cap-string-false-alarm and archive/agent-model-cap-string-false-alarm-tests are redundant copies; the same tips sit under archive/lane/.

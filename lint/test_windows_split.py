@@ -85,6 +85,34 @@ LINUX_SWEEP = "needs.scope.outputs.sweep == 'true'"
 LINUX_MODS = "!cancelled() && needs.scope.outputs.mods == 'true'"
 # The scope condition on a step that reads no .md file, unwrapped as unwrap() reads an `if:`. lint/test_checks_step_scope.py pins which steps take it.
 NO_MD_SCOPE_CONDITION = "needs.scope.outputs.code == 'true' || github.event_name != 'pull_request'"
+# The scope condition of a step that reads the doc groups in `groups` (ci-scope.sh's doc_<group> flags): code, those flags, and a
+# non-pull_request event. No group gives NO_MD_SCOPE_CONDITION. The flags come in DOC_GROUPS order, so a group tuple in any order
+# builds one string. lint/test_checks_step_scope.py shares these constants.
+DOC_GROUPS = ("decisions", "rules", "skills", "agents", "glossary", "map", "other", "any")
+
+
+def doc_scope_condition(groups):
+    """The inner expression of the scope condition for the doc groups `groups`. A name outside DOC_GROUPS is an error."""
+    unknown = [g for g in groups if g not in DOC_GROUPS]
+    if unknown:
+        raise ValueError("not a doc group: %s" % unknown)
+    flags = "".join("needs.scope.outputs.doc_%s == 'true' || " % g for g in DOC_GROUPS if g in groups)
+    return "needs.scope.outputs.code == 'true' || %sgithub.event_name != 'pull_request'" % flags
+
+
+# One constant per distinct group set that a doc step reads (the set of lint/test_checks_step_scope.py DOC_STEPS).
+SCOPE_DOC_ANY = doc_scope_condition(("any",))
+SCOPE_DOC_DECISIONS = doc_scope_condition(("decisions",))
+SCOPE_DOC_RULES = doc_scope_condition(("rules",))
+SCOPE_DOC_SKILLS = doc_scope_condition(("skills",))
+SCOPE_DOC_AGENTS = doc_scope_condition(("agents",))
+SCOPE_DOC_DECISIONS_RULES = doc_scope_condition(("decisions", "rules"))
+SCOPE_DOC_DECISIONS_OTHER = doc_scope_condition(("decisions", "other"))
+SCOPE_DOC_DECISIONS_MAP_OTHER = doc_scope_condition(("decisions", "map", "other"))
+SCOPE_DOC_DECISIONS_RULES_OTHER = doc_scope_condition(("decisions", "rules", "other"))
+SCOPE_DOC_SKILLS_OTHER = doc_scope_condition(("skills", "other"))
+SCOPE_DOC_SKILLS_DECISIONS = doc_scope_condition(("skills", "decisions"))
+SCOPE_DOC_SKILLS_AGENTS = doc_scope_condition(("skills", "agents"))
 LINUX_SUITES = {
     "python3 actions/test_action_metadata.py": (LINUX_CODE, None),
     "python3 actions/code-check/test_action.py": (LINUX_CODE, None),
@@ -101,13 +129,13 @@ LINUX_SUITES = {
     "python3 hooks/test_decision_watch.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_reply_judge.py": (None, None),
     "python3 hooks/test_prose_judge.py": (NO_MD_SCOPE_CONDITION, None),
-    "python3 hooks/test_sendmessage_state.py": (None, None),
+    "python3 hooks/test_sendmessage_state.py": (SCOPE_DOC_DECISIONS, None),
     "python3 hooks/test_refusal_note.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_call_judge.py": (NO_MD_SCOPE_CONDITION, None),
-    "python3 hooks/test_question_form.py": (None, None),
+    "python3 hooks/test_question_form.py": (SCOPE_DOC_ANY, None),
     "python3 hooks/test_rm_prompt_answer.py": (NO_MD_SCOPE_CONDITION, None),
-    "python3 hooks/test_agent_brief.py": (None, None),
-    "python3 hooks/test_blind_brief.py": (None, None),
+    "python3 hooks/test_agent_brief.py": (SCOPE_DOC_AGENTS, None),
+    "python3 hooks/test_blind_brief.py": (SCOPE_DOC_SKILLS_AGENTS, None),
     "python3 hooks/test_local_time.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_probe.py": (None, None),
     "python3 hooks/test_ci_wake.py": (NO_MD_SCOPE_CONDITION, None),
@@ -128,12 +156,13 @@ LINUX_SUITES = {
     "python3 lint/test_claude_role.py": (None, None),
     "python3 lint/test_guard_merge_imports.py": (None, None),
     "python3 lint/test_refusal_route.py": (None, None),
-    "python3 lint/test_report_guard.py": (None, None),
+    "python3 lint/test_report_guard.py": (SCOPE_DOC_ANY, None),
+    "python3 lint/test_report_guard_cannot.py": (SCOPE_DOC_DECISIONS_RULES, None),  # its slug check stats docs/decisions/<id>.md
     "python3 lint/test_ste_autofix.py": (LINUX_CODE, None),
     "python3 hooks/test_ruling_home.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_ruling_census.py": (NO_MD_SCOPE_CONDITION, None),
-    "python3 lint/test_rule_audit.py": (None, None),
-    "python3 lint/test_stale_cites.py": (None, None),
+    "python3 lint/test_rule_audit.py": (SCOPE_DOC_DECISIONS_RULES, None),
+    "python3 lint/test_stale_cites.py": (SCOPE_DOC_ANY, None),
     "python3 lint/test_guard_log_report.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_verdict.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_wait_pid.py": (NO_MD_SCOPE_CONDITION, None),
@@ -145,13 +174,14 @@ LINUX_SUITES = {
     "python3 lint/test_all_jobs_passed.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_ci_scope.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_checks_step_scope.py": (None, None),
+    "python3 lint/test_guard_inputs.py": (None, None),
     "python3 lint/test_rm_shim.py": (LINUX_CODE, None),
     "python3 hooks/test_mutate_shared.py": (None, None),
     "python3 hooks/test_mutate_report.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_mutate_js.py": (None, None),
     "python3 hooks/test_mutate_replay.py": (None, None),
-    "python3 lint/test_check_landed_dirs.py": (None, None),
-    "python3 lint/test_settings_matcher.py": (None, None),
+    "python3 lint/test_check_landed_dirs.py": (SCOPE_DOC_SKILLS_DECISIONS, None),  # its helper-home case opens a decision record
+    "python3 lint/test_settings_matcher.py": (SCOPE_DOC_DECISIONS, None),
     "python3 lint/test_hook_platform_exit.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_check_hook_stubs.py": (None, None),
     "python3 lint/test_check_hook_dup_names.py": (NO_MD_SCOPE_CONDITION, None),
@@ -160,37 +190,37 @@ LINUX_SUITES = {
     "python3 lint/test_find_copies.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_find_time_pinned.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_check_mod_versions.py": (None, None),
-    "python3 lint/test_hook_catalog.py": (None, None),
+    "python3 lint/test_hook_catalog.py": (SCOPE_DOC_ANY, None),
     "python3 lint/test_layout.py": (None, None),
     "python3 lint/test_label_once.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_repo_colour.py": (NO_MD_SCOPE_CONDITION, None),
-    "python3 lint/test_retired_repos.py": (None, None),
+    "python3 lint/test_retired_repos.py": (SCOPE_DOC_ANY, None),
     "python3 skills/waiting-page/test_stale_pages.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 skills/waiting-page/test_splice.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_check_artifact_cites.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 skills/roadmap/test_build.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_check_shared_resources.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_check_ios_mockup.py": (NO_MD_SCOPE_CONDITION, None),
-    "python3 lint/test_compliance_probes.py": (None, None),
+    "python3 lint/test_compliance_probes.py": (SCOPE_DOC_ANY, None),
     "python3 lint/test_check_claude_md_size.py": (None, None),
-    "python3 lint/test_check_glossary.py": (None, None),
-    "python3 lint/test_retired_names.py": (None, None),
-    "python3 skills/project-ops/tests/test_scaffold.py": (None, None),
-    "python3 skills/ios-apps/tests/test_new_app.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 lint/test_check_glossary.py": (SCOPE_DOC_ANY, None),
+    "python3 lint/test_retired_names.py": (SCOPE_DOC_ANY, None),
+    "python3 skills/project-ops/tests/test_scaffold.py": (SCOPE_DOC_SKILLS, None),
+    "python3 skills/ios-apps/tests/test_new_app.py": (SCOPE_DOC_SKILLS, None),
     "python3 lint/test_check_ruling_kind.py": (None, None),
-    "python3 lint/test_check_silent_undo.py": (None, None),
+    "python3 lint/test_check_silent_undo.py": (SCOPE_DOC_ANY, None),
     "python3 lint/test_check_comment_narration.py": (None, None),
     "python3 lint/test_check_unknown_reads_contract.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/check_unknown_reads_contract.py": (LINUX_CODE, None),
-    "python3 lint/test_check_agent_models.py": (None, None),
-    "python3 lint/test_agent_push_form.py": (None, None),
+    "python3 lint/test_check_agent_models.py": (SCOPE_DOC_ANY, None),
+    "python3 lint/test_agent_push_form.py": (SCOPE_DOC_ANY, None),
     "python3 lint/test_check_skill_model_rows.py": (None, None),
     "python3 lint/test_no_window_spawn.py": (None, None),
     "pwsh -NoProfile -File install.test.ps1": (LINUX_CODE, None),
     "python3 janitor/test_session_end_sweep.py": (LINUX_CODE, None),
     "python3 janitor/test_install_launchd.py": (LINUX_CODE, None),
     "python3 janitor/test_install_schtasks.py": (LINUX_CODE, None),
-    "python3 actions/ste-lint/test_action.py": (None, None),
+    "python3 actions/ste-lint/test_action.py": (SCOPE_DOC_ANY, None),
     "python3 actions/playwright-setup/test_action.py": (NO_MD_SCOPE_CONDITION, None),
     "node actions/stamp/test_stamp.mjs": (None, None),
     "node lint/test_scanner_traps.mjs": (None, None),
@@ -323,6 +353,10 @@ def all_jobs(text):
             if not isinstance(job["steps"][-1].get("env"), dict):
                 job["steps"][-1]["env"] = {}
             job["steps"][-1]["env"][m.group(1)] = m.group(2)
+    # The red-job wake step (a `job:` input) ends every job and is no suite step (decision ci-wait-reads-run-status).
+    for job in jobs.values():
+        job["steps"] = [st for st in job["steps"]
+                        if not ("actions/ci-done-comment" in st.get("uses", "") and "job" in (st.get("env") or {}))]
     return jobs
 
 
@@ -440,8 +474,9 @@ IF_PIN = {"python janitor/mutate_sweep.py":
           "${{ !cancelled() && needs.scope.outputs.sweep == 'true' }}",
           # The full merge suite runs on a ready pull_request whatever the flags say, and on push when code changed (R62).
           "python merge/test_merge.py": "${{ !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}",
-          # The full guard suite: the same rule as the merge suite (R62). Neither suite has a slice step.
-          GUARD_CMD: "${{ !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}"}
+          # The full guard suite: the same rule as the merge suite (R62), and the guard-inputs gate: a diff that touches no guard input
+          # (windows_guard, .github/guard-inputs.txt) runs no guard shard, a ready pull_request included. No slice step.
+          GUARD_CMD: "${{ !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && needs.scope.outputs.windows_guard == 'true' }}"}
 
 
 FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows",
@@ -490,7 +525,7 @@ def unwrap(raw):
 # The records-only skip (ci-scope.sh's records_only_skip output, read as needs.scope.outputs.records_only_skip) turns off some
 # run steps. A step that takes the condition ends in it: `(E) && RECORDS_ONLY_CONDITION`, or `success() && RECORDS_ONLY_CONDITION` when it has no if:. Which steps take it:
 #   CONDITIONED_JOBS: every run step. A static trace found the Windows guard suite reads no records page.
-#   SPLIT_CONDITIONED_JOBS: only the run steps named by scope_named_steps(), each with the scope condition as its if:.
+#   SPLIT_CONDITIONED_JOBS: only the run steps named by scope_named_steps(), each with the scope condition as its if:. Its doc steps take none.
 #   UNCONDITIONED_JOBS: no run step.
 RECORDS_ONLY_CONDITION = "needs.scope.outputs.records_only_skip != 'true'"
 CONDITIONED_JOBS = ("checks-windows-guard", "checks-windows-guard-2", "checks-windows-guard-3", "checks-windows-merge",
@@ -502,8 +537,9 @@ SPEC_JOBS = CONDITIONED_JOBS + SPLIT_CONDITIONED_JOBS + UNCONDITIONED_JOBS
 
 
 def scope_named_steps():
-    """The step names that take the condition in SPLIT_CONDITIONED_JOBS: NO_MD and NAMES_ONLY of lint/test_checks_step_scope.py, the one
-    home of those lists. Imported here, not at the top, because that module imports this one."""
+    """The step names that take the condition in SPLIT_CONDITIONED_JOBS: NO_MD and NAMES_ONLY of lint/test_checks_step_scope.py, the
+    one home of those lists. Imported here, not at the top, because that module imports this one. A doc step is not named:
+    a records-only push still runs the steps that read a .md file (decision records-index-at-merge)."""
     from test_checks_step_scope import NAMES_ONLY, NO_MD
     return set(NO_MD) | set(NAMES_ONLY)
 
@@ -713,8 +749,10 @@ def full_suite_problems(name, job):
         flags = set(re.findall(r"needs\.scope\.outputs\.(\w+)", rest))
         if name in (GUARD_JOB, "checks-windows-merge") and "code" not in flags:
             problems.append(f"{name}: step {label} does not read code, so a push runs the suite with no code change: {expr}")
-        if flags - {"code"}:
-            problems.append(f"{name}: step {label} reads scope flags {sorted(flags - {'code'})}, want only code: {expr}")
+        # The guard family (the base and its shards) also reads windows_guard, the guard-inputs gate. No other suite reads it.
+        want = {"code", "windows_guard"} if (shard_base(name) or name) == GUARD_JOB else {"code"}
+        if flags - want:
+            problems.append(f"{name}: step {label} reads scope flags {sorted(flags - want)}, want only {sorted(want)}: {expr}")
     return problems
 
 
@@ -1429,6 +1467,19 @@ class WindowsSplit(unittest.TestCase):
         self.assertEqual(guard_problems(self.text), [])
         guard_jobs = [n for n in CONDITIONED_JOBS if n.startswith(GUARD_JOB)]
         self.assertEqual(condition_problems(self.text, guard_jobs), [], "a guard job's run step does not end in the records-only condition")
+
+    # The guard-inputs gate: each of the three guard shard steps reads windows_guard in its own condition, so a shard runs only for a
+    # diff that touches a guard input. Named failure: a shard step runs on every pull request, and the gate saves nothing.
+    def test_each_guard_shard_step_reads_windows_guard(self):
+        jobs = windows_jobs(self.text)
+        for name in (GUARD_JOB, GUARD_JOB + "-2", GUARD_JOB + "-3"):
+            with self.subTest(job=name):
+                job = jobs.get(name)
+                self.assertIsNotNone(job, f"no windows-latest job named {name}")
+                steps = [st for st in job["steps"] if key(st) == GUARD_CMD]
+                self.assertEqual(len(steps), 1, f"{name} has {len(steps)} full guard steps, want 1")
+                self.assertEqual(step_rest(steps[0], read_scope_condition(job)), unwrap(IF_PIN[GUARD_CMD]),
+                                 f"{name}: the full guard step's condition is not the pinned text (it lacks windows_guard)")
 
     def test_checks_sets_no_guard_family(self):
         self.assertEqual([p for p in guard_problems(self.text) if "GUARD_FAMILY" in p], [])
@@ -2271,6 +2322,15 @@ def eval_with(expr, event, values, default="false", draft=False):
     return eval_if(rewritten, event, default, draft=draft)
 
 
+def runs_with_values(job, st, event, values, draft=False):
+    """runs_on with one value per scope output (eval_with), the job's own if counted too. It reads the step's raw `if:`, so a
+    records-only value in `values` counts."""
+    if job["if"] is not None and not eval_with(job["if"], event, values, draft=draft):
+        return False
+    expr = st.get("if")
+    return expr is None or eval_with(expr, event, values, draft=draft)
+
+
 class SweepOnReadyPull(unittest.TestCase):
     """R62, "each suite once per batch, on the batch PR", on checks.yml. The two janitor sweep mutation steps (macOS and Windows)
     run on a ready pull_request, as they do on push, schedule and dispatch. Each case reads the real file."""
@@ -2390,10 +2450,10 @@ class ReadyPullShards(unittest.TestCase):
 
 
 class ReadyPullFullSuite(unittest.TestCase):
-    """R62, "each suite once per batch, on the batch PR", with its lean: the Windows guard and merge shards and the rest jobs run
-    on a ready pull_request whatever the scope flags say, so a docs-only ready PR runs them too. A draft pull_request with no
-    flag set runs none of their steps, and a shard's draft guard stays on its job. Push, schedule and dispatch keep their
-    flag rules. Each case reads the real file, so it is red until the change lands."""
+    """R62, "each suite once per batch, on the batch PR", with its lean: the Windows merge and rest jobs run on a ready pull_request
+    whatever the scope flags say. The guard shards run there too, but only with windows_guard set (the guard-inputs gate). A draft
+    pull_request with no flag set runs none of their steps, and a shard's draft guard stays on its job. Push, schedule and dispatch
+    keep their flag rules. Each case reads the real file."""
 
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
@@ -2407,19 +2467,37 @@ class ReadyPullFullSuite(unittest.TestCase):
             self.assertIn(base, names, f"no {base} job in the full Windows suite")
         return names
 
+    # R62 re-pointed for windows_guard: the owner granted the narrowing (waiting-page item 901 a, 18:20 CST Nov 15).
     def test_a_docs_only_ready_pull_request_runs_every_step_of_the_full_suite_jobs(self):
         # Named failure: a step of a full-suite job is conditioned on a scope flag or on code, which a docs-only PR leaves false.
+        # The guard shards read windows_guard, so this case sets it true; the sibling case below sets it false.
         # The records-only condition is the one a ready pull_request does not meet: with it shut, no run step runs.
         for name in self.suite_jobs():
             job = self.jobs[name]
+            values = {"windows_guard": "true"} if (shard_base(name) or name) == GUARD_JOB else {}
             for st in job["steps"]:
                 with self.subTest(job=name, step=step_label(st)):
-                    self.assertTrue(runs_on(job, st, "pull_request", "false", draft=False),
-                                    f"{name} step {step_label(st)!r} does not run on a ready pull_request with every scope flag false")
+                    self.assertTrue(runs_with_values(job, st, "pull_request", values),
+                                    f"{name} step {step_label(st)!r} does not run on a ready pull_request with {values or 'no flag set'}")
                 if "run" in st:
                     with self.subTest(job=name, step=step_label(st), condition="shut"):
-                        self.assertFalse(runs_with_condition(job, st, "pull_request", "false", draft=False, skip_value="true"),
+                        self.assertFalse(runs_with_values(job, st, "pull_request", dict(values, records_only_skip="true")),
                                          f"{name} step {step_label(st)!r} runs on a ready pull_request with the records-only condition shut")
+
+    def test_a_docs_only_ready_pull_request_keeps_the_guard_shard_steps_off_without_windows_guard(self):
+        # The off side of the gate on the same kind of PR: with windows_guard false, each guard shard's run step is off, and the
+        # steps that only check out and set up still run.
+        for name in self.suite_jobs():
+            if (shard_base(name) or name) != GUARD_JOB:
+                continue
+            job = self.jobs[name]
+            for st in job["steps"]:
+                with self.subTest(job=name, step=step_label(st)):
+                    runs = runs_with_values(job, st, "pull_request", {"windows_guard": "false"})
+                    if "run" in st:
+                        self.assertFalse(runs, f"{name} step {step_label(st)!r} runs on a ready pull_request with windows_guard false")
+                    else:
+                        self.assertTrue(runs, f"{name} step {step_label(st)!r} is a checkout or setup step and does not run on a ready PR")
 
     def test_a_shard_job_skips_a_draft_pull_request_at_job_level_and_runs_a_ready_one(self):
         # Control, green on the old code: the draft skip is the shard job's own if, and it stays.

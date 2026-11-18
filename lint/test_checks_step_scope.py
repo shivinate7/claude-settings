@@ -14,13 +14,20 @@ Pinned here:
   5. the entry file of each scoped step names no tracked .md file, unless ALLOWED lists that name with a reason.
   6. no file a scoped step reaches within TRANSITIVE_DEPTH hops reads test_guard.py or a tracked .md file
      (TRANSITIVE_MD_READERS), unless TRANSITIVE_ALLOWED lists that name for the file with a reason.
+  7. each doc step (DOC_STEPS) carries the scope condition of its doc groups, one constant per group set, and the .md names
+     its entry names are under a doc flag its `if:` reads (ALLOWED names aside).
+  8. a docs-only change runs exactly the doc steps that list its group, or `any`, with no other step's change.
 
 Steps are read by lint/workflow_steps.py. The `if:` evaluator is eval_if in lint/test_windows_split.py.
-Item 5 reads the entry file only, and a name split across arguments is not seen. Item 6 follows imports and read
-calls (open, run, join and the like), so a read one or two files down is seen. A comment names nothing in Python.
+Item 5 reads the entry file only. Item 7 reads each name as md_names_reached reads it: a whole path, or the constant
+arguments of an os.path.join, so join(ROOT, "docs", "decisions", "x.md") reads docs/decisions/x.md. A leading `..` segment
+is folded, so join(HERE, "..", "docs", "x.md") reads docs/x.md. A join through pathlib `/` or an f-string is not read: a
+stated limit. Item 6 follows imports
+and read calls (open, run, join and the like), so a read one or two files down is seen. A comment names nothing in Python.
 """
 import ast
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -32,8 +39,11 @@ sys.path.insert(0, HERE)
 
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import workflow_steps as ws  # noqa: E402  the one home of the step parser
-from test_ci_scope import run as scope_run  # noqa: E402  ci-scope.sh run in a temp repo: the one home of the scope run
-from test_windows_split import NO_MD_SCOPE_CONDITION, eval_if, drop_condition, unwrap  # noqa: E402  the one home of the `if:` evaluator, the scope condition and the condition's form
+from test_ci_scope import DOC_CASES, DOC_FLAGS, doc_groups, run as scope_run  # noqa: E402  ci-scope.sh run in a temp repo, and the doc groups
+from test_windows_split import (  # noqa: E402  the one home of the `if:` evaluator, the scope conditions and the doc condition builder
+    NO_MD_SCOPE_CONDITION, SCOPE_DOC_AGENTS, SCOPE_DOC_ANY, SCOPE_DOC_DECISIONS, SCOPE_DOC_DECISIONS_MAP_OTHER, SCOPE_DOC_DECISIONS_OTHER,
+    SCOPE_DOC_DECISIONS_RULES, SCOPE_DOC_DECISIONS_RULES_OTHER, SCOPE_DOC_RULES, SCOPE_DOC_SKILLS, SCOPE_DOC_SKILLS_AGENTS,
+    SCOPE_DOC_SKILLS_DECISIONS, SCOPE_DOC_SKILLS_OTHER, doc_scope_condition, drop_condition, eval_if, run_lines, unwrap, LINUX_SUITES)
 
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
 WORKFLOW = ".github/workflows/checks.yml"
@@ -97,6 +107,7 @@ NO_MD = [
     'Debt notes union merge fixture suite',
     'all-jobs-passed needs every pull-request job',
     'Scope detector fixture suite',
+    'install.sh shard pins',
     'Touched-test selector fixture suite',
     'Mutation report-mode fixture suite',
     'Hook platform exit fixture suite',
@@ -119,7 +130,6 @@ NO_MD = [
     'Shared resource declaration fixture suite',
     'Shared resource declaration check',
     'iPhone mockup check fixture suite',
-    'ios-apps skill starter suite',
     'Unknown-read contract fixture suite',
     'Python 3.9 floor check',
     'Playwright setup action suite',
@@ -132,53 +142,17 @@ NAMES_ONLY = [
 ]
 
 # The audit's MUST-STAY-UNSCOPED steps: each reads a .md file at run time, or is not audited yet (fail safe), so each stays unscoped.
+# The doc steps are not listed here: DOC_STEPS below gives each one the scope condition of the doc groups it reads.
 MUST_STAY_UNSCOPED = [
-    'STE lint',
-    'Rule mechanization audit',
-    'Glossary fixture suite',
-    'Glossary homes and avoided names',
-    'Retired names, one word per meaning',
-    'Map check',
-    'Record slug length',
-    'Cost line pins',
-    'Artifact cite check',
-    'Hook catalog fixture suite',
-    'Hook catalog check',
-    'CLAUDE.md size (warns, never fails)',
-    'Stop-hook guard fixture suite',
-    'Stop-hook cannot-claim suite',
-    'Stop-hook owner-safe reason suite',
-    'Stop-hook review-record fixture suite',
-    'Rule audit fixture suite',
-    'Stale prose check fixture suite',
-    'Agent and skill model floor',
-    'Agent and skill model floor fixture suite',
-    'Agent push form fixture suite',
     'Skill model rows check',
-    'Retired repo fixture suite',
-    'project-ops skill scaffold suite',
-    'Compliance probes fixture suite',
-    'Waiting page park relay prose suite',
-    'Settings matcher fixture suite',
-    'Route judge measure fixture suite',
-    'Question form fixture suite',
-    'Agent brief fixture suite',
-    'Blind brief fixture suite',
-    'SendMessage state fixture suite',
     'Precompact handoff fixture suite',
     'Handoff wave-2 fixture suite',
-    'Git mailbox wait suite',
     'Daily note fixture suite',
-    'Now-central helper fixture suite',
-    'Landed-directory check fixture suite',
-    'Python 3.9 floor fixture suite',
-    'STE lint action fixture suite',
     'Layout fixture suite',
     'Mod version fixture suite',
     'Mod version bump',
     'Code check',
     'Workflow supply-chain audit (zizmor)',
-    'Silent undo fixture suite',
     'Debt retire fixture suite',
     'Comment narration fixture suite',
     'Ruling kind fixture suite',
@@ -205,6 +179,116 @@ MUST_STAY_UNSCOPED = [
     'Scanner trap lint',  # not audited: a multi-line, node or bash run that the in-process audit hook could not watch (fail safe)
     'Record stamp action fixture suite',  # not audited: a multi-line, node or bash run that the in-process audit hook could not watch (fail safe)
 ]
+
+# The doc steps. Each reads the doc groups listed (ci-scope.sh's doc_<group> flags), so its `if:` is the scope condition of those
+# groups. A step whose read is wider than its groups, or not verified, takes ("any",): it runs on every docs-only pull request.
+# Each entry script is read to pin its groups. Not pinned here, and left in MUST_STAY_UNSCOPED as on main:
+#   'Mod version fixture suite' and 'Mod version bump': the map gives them code and doc_other, but their reads are mods/ paths.
+#   'CLAUDE.md size fixture suite': the #3408 list keeps it unscoped on purpose (it opens CLAUDE.md at run time).
+#   'Skill model rows check': its `if:` stays absent (test_check_skill_model_rows.py pins it).
+DOC_STEPS = {
+    # One group.
+    'SendMessage state fixture suite': ("decisions",),
+    'Stop-hook owner-safe reason suite': ("decisions",),
+    'Settings matcher fixture suite': ("decisions",),
+    'Stop-hook review-record fixture suite': ("rules",),
+    'CLAUDE.md size (warns, never fails)': ("rules",),
+    'Landed-directory manifest agreement': ("skills",),
+    'project-ops skill scaffold suite': ("skills",),
+    'ios-apps skill starter suite': ("skills",),
+    'Agent brief fixture suite': ("agents",),
+    # Several groups.
+    'Blind brief fixture suite': ("skills", "agents"),
+    'Git mailbox wait suite': ("skills", "decisions"),
+    'Stop-hook cannot-claim suite': ("decisions", "rules"),  # its slug check stats docs/decisions/<id>.md (lint/report_guard.py _names_rule_id)
+    'Rule audit fixture suite': ("decisions", "rules"),
+    'Rule mechanization audit': ("decisions", "rules"),
+    'Route judge measure fixture suite': ("decisions", "rules", "other"),
+    'Landed-directory check fixture suite': ("skills", "decisions"),  # HelperHomeRecordTests reads the helper-home decision record
+    'Artifact cite check': ("decisions", "other"),
+    'Waiting page park relay prose suite': ("skills", "other"),
+    'Map check': ("decisions", "map", "other"),  # reads the map pages and debt records; map.config.json sets no decisionsDir, so no decision record is read
+    # Any .md: the read is wider than the groups above, or not verified.
+    # lint/report_guard.py reaches hooks/question_form.py past_rulings, which opens docs/decisions and docs/debts; whether its verdict
+    # depends on their content is unmeasured, so the step fails safe on every doc group.
+    'Stop-hook guard fixture suite': ("any",),
+    'Glossary homes and avoided names': ("any",),  # reads every home (decisions, rule anchors, agents, debts) and any .md path
+    'Glossary fixture suite': ("any",),
+    'STE lint': ("any",),
+    'STE lint action fixture suite': ("any",),
+    'Retired names, one word per meaning': ("any",),
+    'Retired repo fixture suite': ("any",),
+    'Record slug length': ("any",),
+    'Cost line pins': ("any",),
+    'Cost line pin fixture suite': ("any",),
+    'Hook catalog fixture suite': ("any",),
+    'Hook catalog check': ("any",),
+    'Stale prose check fixture suite': ("any",),
+    'Compliance probes fixture suite': ("any",),
+    'Now-central helper fixture suite': ("any",),
+    'Python 3.9 floor fixture suite': ("any",),
+    'Silent undo fixture suite': ("any",),
+    'Question form fixture suite': ("any",),
+    'Agent and skill model floor': ("any",),
+    'Agent and skill model floor fixture suite': ("any",),
+    'Agent push form fixture suite': ("any",),
+}
+
+# One constant per distinct group set of DOC_STEPS (lint/test_windows_split.py builds each one from its groups).
+SCOPE_OF = {
+    frozenset(["any"]): SCOPE_DOC_ANY,
+    frozenset(["decisions"]): SCOPE_DOC_DECISIONS,
+    frozenset(["rules"]): SCOPE_DOC_RULES,
+    frozenset(["skills"]): SCOPE_DOC_SKILLS,
+    frozenset(["agents"]): SCOPE_DOC_AGENTS,
+    frozenset(["skills", "agents"]): SCOPE_DOC_SKILLS_AGENTS,
+    frozenset(["decisions", "rules"]): SCOPE_DOC_DECISIONS_RULES,
+    frozenset(["decisions", "rules", "other"]): SCOPE_DOC_DECISIONS_RULES_OTHER,
+    frozenset(["decisions", "other"]): SCOPE_DOC_DECISIONS_OTHER,
+    frozenset(["decisions", "map", "other"]): SCOPE_DOC_DECISIONS_MAP_OTHER,
+    frozenset(["skills", "other"]): SCOPE_DOC_SKILLS_OTHER,
+    frozenset(["skills", "decisions"]): SCOPE_DOC_SKILLS_DECISIONS,
+}
+DOC_FLAG = re.compile(r"needs\.scope\.outputs\.doc_(\w+)")
+
+
+def expected_if(groups):
+    """The `if:` a doc step carries: the scope condition of its groups, as the workflow writes it. The one builder of that string."""
+    return "${{ %s }}" % SCOPE_OF[frozenset(groups)]
+
+
+def doc_flags_of(expr):
+    """The doc groups an `if:` reads: the doc_<group> flags it names."""
+    return set(DOC_FLAG.findall(expr or ""))
+
+
+def tracked_groups(tok, tracked):
+    """The doc groups of the tracked .md file a name stands for: the file itself, or each file the name is the end of."""
+    full = [tok] if tok in tracked else [n for n in tracked if n.endswith("/" + tok)]
+    return set().union(*[doc_groups(n) for n in full]) if full else set()
+
+
+def doc_name_problems(entry, flags, text, tracked):
+    """The .md names in an entry's text that no flag in `flags` covers, as "name (groups)". A name ALLOWED for the entry is
+    written or named there, not read, so it is not counted. The `any` flag covers every name."""
+    allowed = set(ALLOWED.get(entry, ([], ""))[0])
+    problems = []
+    for tok in sorted(md_names_reached(text, tracked) - allowed):
+        groups = tracked_groups(tok, tracked)
+        if "any" in flags or (groups - {"any"}) & flags:
+            continue
+        problems.append("%s (%s)" % (tok, ", ".join(sorted(groups - {"any"})) or "any only"))
+    return problems
+
+
+def runs_on(expr, flags):
+    """Whether a step runs on a pull request whose output is `flags` (each doc flag and `code`; a flag it lacks reads 'false').
+    A step with no `if:` runs."""
+    if expr is None:
+        return True
+    e = re.sub(r"needs\.scope\.outputs\.(\w+) == 'true'", lambda m: "'%s' == 'true'" % flags.get(m.group(1), "false"), expr)
+    return eval_if(e, "pull_request", "false")
+
 
 # The steps that run only on a pull request, each with its own `if:`. The scope condition does not touch them.
 PR_ONLY = [
@@ -304,6 +388,7 @@ MAIN_STEPS = [
     'Windows split guard',
     'all-jobs-passed needs every pull-request job',
     'Scope detector fixture suite',
+    'install.sh shard pins',
     'Touched-test selector fixture suite',
     'Nightly skip fixture suite',
     'rm shim fixture suite',
@@ -398,22 +483,26 @@ MAIN_STEPS = [
 ALLOWED = {
     "hooks/test_call_judge.py": (["README.md", "docs/design/last-answer-notes.md"], "README.md is written into a temp repo; the other name is in comments"),
     "hooks/test_decision_watch.py": (["CLAUDE.md", "decisions/reply-judge-samples-never-refuses.md"], "CLAUDE.md is written into temp repos; the record name is in a comment"),
-    "hooks/test_feedback_inbox.py": ([".claude/CLAUDE.md", "CLAUDE.md", "README.md", "docs/todo.md"], "fixture repos track or write these names in temp dirs"),
+    "hooks/test_feedback_inbox.py": ([".claude/CLAUDE.md", "CLAUDE.md", "README.md", "docs/debts/notes.md", "docs/notes/README.md", "docs/todo.md"], "fixture repos track or write these names in temp dirs; docs/notes/README.md is written into a temp repo, and the suite never reads the root copy; the frozen notes file is named by the case that checks the home judge refuses it"),
     "hooks/test_prose_judge.py": (["README.md", "decisions/test-strategy-reset.md"], "a hook payload's file path and edit text"),
     "hooks/test_question_form_letters_frozen.py": (["docs/decisions/option-keys-are-letters.md"], "named in the module docstring"),
     "hooks/test_session_start.py": ([".claude/CLAUDE.md", "CLAUDE.md"], "written into temp config and checkout dirs"),
     "hooks/test_page_link_check.py": (["README.md"], "the shared fixture writes it into a temp repo; it is never read"),
     "hooks/test_waiting_export.py": (["README.md"], "a fixture tool result line"),
     "lint/check_python_floor.py": (["README.md"], "named in the module docstring; the check does not open it"),
+    "hooks/test_sendmessage_state.py": (["CLAUDE.md", "README.md"], "written into a temp CLAUDE_CONFIG_DIR and a temp repo"),
+    "skills/project-ops/tests/test_scaffold.py": (["CLAUDE.md"], "written into temp folders; the scaffold's own file list names it"),
     "lint/test_all_jobs_passed.py": (["README.md"], "a changed path handed to the scope detector as a fixture; the file is never read"),
     "lint/test_ci_scope.py": ([
         "README.md", "reference/copies-and-accounts.md", "reference/repo-pages.md", "skills/ci-hygiene/SKILL.md",
-        "CLAUDE.md", "output-styles/shiv-stylisms.md", "skills/waiting-page/SKILL.md", "skills/waiting-page/reference/copies-and-accounts.md",
+        "CLAUDE.md", ".claude/CLAUDE.md", "AGENTS.md", "GLOSSARY.md", "output-styles/shiv-stylisms.md", "skills/waiting-page/SKILL.md",
+        "skills/waiting-page/reference/copies-and-accounts.md",
         "skills/waiting-page/reference/designs.md", "skills/waiting-page/reference/repo-pages.md",
         "skills/waiting-page/reference/republish.md", "skills/waiting-page/reference/routing-and-sessions.md",
         "tests/fixture/docs/map/core.md", "tests/fixture/docs/map/traces/home.md", "docs/records.md",
-    ], "paths that run() commits into temp git repos; the records-only skip fixtures name the generated page as the one file a records "
-       "push changes; the file reads no tracked .md at run time"),
+        "agents/builder.md", "docs/decisions/agent-model-cap.md", "skills/impeccable/SKILL.md",
+    ], "paths that run() commits into temp git repos, the doc-group cases' rule and glossary paths and the guard-inputs cases' three modified .md files included; the records-only skip "
+       "fixtures name the generated page as the one file a records push changes; the file reads no tracked .md at run time"),
     "lint/test_find_copies.py": ([
         ".github/pull_request_template.md", "reference/document.md", "skills/impeccable/SKILL.md",
         "skills/impeccable/reference/document.md", "skills/plain-english-map/SKILL.md",
@@ -496,11 +585,43 @@ def tracked_md():
     return out.split()
 
 
+def folded_path(run):
+    """The path a run of constant join arguments names. `.` and `..` segments fold, and a leading `..` is dropped: the repo's
+    readers start in lint/ or hooks/, so join(HERE, "..", "docs", "x.md") names docs/x.md. "" when nothing is left."""
+    p = posixpath.normpath("/".join(run))
+    while p.startswith("../"):
+        p = p[3:]
+    return "" if p in (".", "..") else p
+
+
+def split_join_names(text):
+    """The paths that os.path.join builds from runs of constant arguments: join(ROOT, "docs", "x.md") is docs/x.md (folded_path).
+    A non-constant argument ends a run. A join through pathlib `/` or an f-string is not read: a stated limit. Empty when
+    `text` does not parse as Python: its joins are then read as text."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return set()
+    out = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and callee(node) == "join":
+            run = []
+            for arg in node.args + [None]:  # None closes the last run
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    run.append(arg.value)
+                    continue
+                path = folded_path(run) if run else ""
+                if path:
+                    out.add(path)
+                run = []
+    return out
+
+
 def md_names_reached(text, tracked):
     """The tokens of `text` that name a tracked .md file: the same path, or a path that ends in one. A name written
-    whole is seen; a name split across arguments, such as os.path.join(root, "docs", "x.md"), is not."""
+    whole is seen, and so is a path split across the constant arguments of os.path.join (split_join_names)."""
     reached = set()
-    for tok in MD_TOKEN.findall(text):
+    for tok in MD_TOKEN.findall(text) + sorted(split_join_names(text)):
         for name in tracked:
             if tok == name or ("/" in tok and name.endswith("/" + tok)):
                 reached.add(tok)
@@ -699,12 +820,12 @@ class StepNames(ChecksStepBase):
                 self.assertNotIn("needs.scope.outputs", expr, "unlisted step %r reads a scope output: %r" % (name, expr))
 
     def test_each_hard_coded_list_names_a_main_step(self):
-        for name in NO_MD + NAMES_ONLY + MUST_STAY_UNSCOPED + PR_ONLY:
+        for name in NO_MD + NAMES_ONLY + MUST_STAY_UNSCOPED + PR_ONLY + list(DOC_STEPS):
             with self.subTest(step=name):
                 self.assertIn(name, MAIN_STEPS, "a pinned list names a step main does not have")
 
     def test_no_step_is_on_two_lists(self):
-        listed = NO_MD + NAMES_ONLY + MUST_STAY_UNSCOPED + PR_ONLY
+        listed = NO_MD + NAMES_ONLY + MUST_STAY_UNSCOPED + PR_ONLY + list(DOC_STEPS)
         twice = sorted({n for n in listed if listed.count(n) > 1})
         self.assertEqual(twice, [], "a step is on two pinned lists")
 
@@ -723,11 +844,12 @@ class DocsOnlyPullRequest(ChecksStepBase):
                 self.assertFalse(runs_on_pull_request_with(self.named(steps, name), got["code"]),
                                  "step %r still runs on a docs-only pull request" % name)
 
-    def test_ste_lint_stays_unscoped_so_it_runs_on_that_pull_request(self):
+    def test_ste_lint_runs_on_a_docs_only_pull_request_through_doc_any(self):
         got = scope_run([DOC])
-        self.assertEqual(got["code"], "false", "a docs-only change set code: %r" % got)
+        self.assertIn("doc_any", got, "output doc_any missing: %r" % got)
         st = self.named(self.steps(), STE_LINT)
-        self.assertTrue(runs_on_pull_request_with(st, got["code"]), "STE lint carries the scope condition: if %r" % if_of(st))
+        self.assertEqual(if_of(st), expected_if(("any",)), "STE lint: if is %r, want the doc_any scope condition" % if_of(st))
+        self.assertTrue(runs_on(if_of(st), got), "STE lint does not run on a docs-only pull request: %r" % got)
 
 
 class MdNamesInText(unittest.TestCase):
@@ -752,6 +874,21 @@ class MdNamesInText(unittest.TestCase):
 
     def test_a_dotted_claude_path_is_its_own_name(self):
         self.assertEqual(md_names_reached('"(.claude/CLAUDE.md)"', self.TRACKED), {".claude/CLAUDE.md"})
+
+    def test_a_path_split_across_join_arguments_is_reached(self):
+        text = 'path = os.path.join(ROOT, "docs", "decisions", "x.md")\n'
+        self.assertEqual(md_names_reached(text, self.TRACKED), {"docs/decisions/x.md"})
+
+    # A parent segment at the front of a join: the repo's own reads climb from lint/ to the repo root this way.
+    def test_a_join_through_a_parent_segment_is_reached(self):
+        text = 'path = os.path.join(HERE, "..", "docs", "decisions", "x.md")\n'
+        self.assertEqual(md_names_reached(text, self.TRACKED), {"docs/decisions/x.md"})
+
+    # Control: a name between two constants ends the run, so the two pieces are not joined into a tracked path. The joined
+    # path "docs/catalog.md" is tracked, so a run that is not reset (the over-join mutant) reaches it and goes red.
+    def test_a_join_with_a_name_between_its_constants_joins_nothing(self):
+        text = 'path = os.path.join("docs", SUB, "catalog.md")\n'
+        self.assertEqual(md_names_reached(text, self.TRACKED + ["docs/catalog.md"]), set())
 
     def test_an_untracked_name_is_not_reached(self):
         self.assertEqual(md_names_reached('open("missing.md")', self.TRACKED), set())
@@ -786,6 +923,7 @@ class ScopedEntriesNameNoUnlistedMd(ChecksStepBase):
         steps = self.steps()
         tracked = tracked_md()
         scoped = {entry for _, st in scoped_steps(steps) for entry in entries(st)}
+        scoped |= {entry for name in DOC_STEPS for entry in entries(self.named(steps, name))}  # a doc step's ALLOWED names are not read
         for entry, (names, reason) in ALLOWED.items():
             with self.subTest(entry=entry):
                 self.assertIn(entry, scoped, "%s is allowed, but no scoped step runs it" % entry)
@@ -877,6 +1015,138 @@ class TransitiveWalkFixtures(unittest.TestCase):
         for i in range(TRANSITIVE_CAP + 1):
             files["a/m%d.py" % i] = "x = 1\n"
         self.assertTrue(self.walk(files)[1], "a walk past TRANSITIVE_CAP files reports no cut")
+
+class WholeTreeReadersOnAModsChange(ChecksStepBase):
+    """The whole-tree readers run on a mods-only pull request. A non-.md path under mods/ sets `code` (lint/test_ci_scope.py pins the
+    flags), and each reader runs on `code` or a doc flag. Named failure: a mods-only change skips the retired-names, retired-repo,
+    glossary and hook-catalog readers, which read every tracked file."""
+    PATH = "mods/plain-diff/check.mjs"
+    READERS = ("Retired repo fixture suite", "Retired names, one word per meaning", "Glossary homes and avoided names", "Hook catalog check")
+
+    def test_each_whole_tree_reader_runs_on_a_mods_only_change(self):
+        got = scope_run([self.PATH], existing=[self.PATH])
+        self.assertEqual(got.get("mods"), "true", "the mods change did not set mods: %r" % got)
+        # Scope first: which steps run means nothing without the flags. A mods-only change must set code, or these readers skip it.
+        self.assertEqual(got.get("code"), "true", "the mods-only change does not set code, so the whole-tree readers skip it: %r" % got)
+        steps = self.steps()
+        for name in self.READERS:
+            with self.subTest(step=name):
+                self.assertTrue(runs_on(if_of(self.named(steps, name)), got), "step %r skips a mods-only change: %r" % (name, got))
+
+
+class DocStepScopeConditions(ChecksStepBase):
+    # A records-only push still runs each doc step, since each reads a .md file (decision records-index-at-merge).
+    def test_each_doc_step_carries_the_scope_condition_of_its_groups(self):
+        steps = self.steps()
+        for name, groups in DOC_STEPS.items():
+            with self.subTest(step=name):
+                got = if_of(self.named(steps, name))
+                self.assertEqual(got, expected_if(groups), "step %r: if is %r, want the scope condition of %s alone" % (name, got, groups))
+
+    def test_each_doc_step_group_set_has_one_constant_built_from_its_groups(self):
+        for groups in sorted({tuple(g) for g in DOC_STEPS.values()}):
+            with self.subTest(groups=groups):
+                self.assertIn(frozenset(groups), SCOPE_OF, "no constant for the groups %r" % (groups,))
+        for key, constant in SCOPE_OF.items():
+            with self.subTest(groups=sorted(key)):
+                self.assertEqual(constant, doc_scope_condition(tuple(sorted(key))), "the constant is not built from its groups")
+
+
+class DocStepEntriesReadOnlyTheirFlags(ChecksStepBase):
+    def test_each_doc_step_entry_names_only_files_its_if_reads(self):
+        steps, tracked = self.steps(), tracked_md()
+        for name in DOC_STEPS:
+            st = self.named(steps, name)
+            flags = doc_flags_of(if_of(st))
+            for entry in entries(st):
+                with self.subTest(step=name, entry=entry):
+                    problems = doc_name_problems(entry, flags, read_repo(entry), tracked)
+                    self.assertEqual(problems, [], "%s names .md files its if: does not read: %s" % (name, ", ".join(problems)))
+
+    def test_a_name_under_a_flag_the_if_does_not_read_is_reported(self):
+        # Control: the Blind brief suite names a skill file, so a flag set without `skills` must report it.
+        entry = "hooks/test_blind_brief.py"
+        got = doc_name_problems(entry, {"agents"}, read_repo(entry), tracked_md())
+        self.assertTrue(any(p.startswith("skills/design-explore/SKILL.md") for p in got), got)
+
+    # Named failure: a decision record read through os.path.join arguments is not reported when the step's if does not read the
+    # decisions group, so a docs-only edit to that record skips a step that reads it. The entry is in no ALLOWED list.
+    def test_a_split_join_read_of_a_decision_record_is_reported_without_its_flag(self):
+        entry = "fixture/split_read.py"
+        text = 'import os\nROOT = "."\nRECORD = os.path.join(ROOT, "docs", "decisions", "x.md")\n'
+        tracked = ["docs/decisions/x.md", "skills/a/SKILL.md"]
+        self.assertEqual(doc_name_problems(entry, {"skills"}, text, tracked), ["docs/decisions/x.md (decisions)"],
+                         "the split read of a decision record is not reported when the if reads only skills")
+
+    # Control beside it: the same read is no problem once the if reads the decisions group.
+    def test_a_split_join_read_of_a_decision_record_with_its_flag_is_no_problem(self):
+        entry = "fixture/split_read.py"
+        text = 'import os\nROOT = "."\nRECORD = os.path.join(ROOT, "docs", "decisions", "x.md")\n'
+        tracked = ["docs/decisions/x.md", "skills/a/SKILL.md"]
+        self.assertEqual(doc_name_problems(entry, {"decisions"}, text, tracked), [])
+
+
+class DocStepsAgreeWithLinuxSplit(ChecksStepBase):
+    def test_each_doc_step_run_in_the_linux_split_has_its_groups_condition(self):
+        steps = self.steps()
+        for name, groups in DOC_STEPS.items():
+            for cmd in run_lines(self.named(steps, name)):
+                if cmd not in LINUX_SUITES:
+                    continue
+                with self.subTest(step=name, cmd=cmd):
+                    want = doc_scope_condition(tuple(groups))
+                    self.assertEqual(LINUX_SUITES[cmd][0], want, "%r: row condition is %r, want %r" % (cmd, LINUX_SUITES[cmd][0], want))
+
+
+class DocsOnlyPullRequestSteps(ChecksStepBase):
+    def assert_steps_run_by_groups(self, path):
+        got = scope_run([path], existing=[path])
+        for f in DOC_FLAGS:  # the flags come first: which steps run means nothing without them
+            self.assertIn(f, got, "output %s missing for %s: %r" % (f, path, got))
+        self.assertEqual(got["code"], "false", "%s set code: %r" % (path, got))
+        steps = self.steps()
+        ran = {name for name in DOC_STEPS if runs_on(if_of(self.named(steps, name)), got)}
+        want = {name for name, groups in DOC_STEPS.items() if set(groups) & doc_groups(path)}
+        self.assertEqual(sorted(ran), sorted(want), "%s: the doc steps that run are not the ones that list its groups" % path)
+
+    def test_a_decision_doc_change_runs_exactly_the_steps_that_list_decisions_or_any(self):
+        self.assert_steps_run_by_groups("docs/decisions/x.md")
+
+    def test_each_doc_path_runs_exactly_the_steps_that_list_its_groups(self):
+        for path, _ in DOC_CASES:
+            with self.subTest(path=path):
+                self.assert_steps_run_by_groups(path)
+
+    # Named failure: a new decision record does not run the cannot-claim suite. Its slug check stats the record, so a record
+    # that names a rule id (the pre-push-hook record) turns that suite's cannot-claim case red, and the step skipped it.
+    def test_a_new_decision_record_runs_the_cannot_claim_suite(self):
+        path = "docs/decisions/pre-push-hook.md"
+        got = scope_run([path])
+        self.assertEqual(got.get("doc_decisions"), "true", f"doc_decisions is not on for {path}: {got}")
+        self.assertEqual(got.get("code"), "false", f"{path} set code: {got}")
+        step = self.named(self.steps(), "Stop-hook cannot-claim suite")
+        self.assertTrue(runs_on(if_of(step), got),
+                        f"the cannot-claim suite skips a docs-only edit to {path}: its if is {if_of(step)!r}")
+
+    # Named failure: a docs-only edit to the helper-home decision record skips the landed-dirs suite, which opens that record. The
+    # flags are read first (P7): the record's decisions flag is on and code is off, then the step's `if:` decides.
+    def test_a_docs_only_edit_to_the_helper_home_record_runs_the_landed_dirs_suite(self):
+        path = "docs/decisions/builders-cannot-edit-tests.md"
+        got = scope_run([path], existing=[path])
+        self.assertEqual(got.get("doc_decisions"), "true", f"doc_decisions is not on for {path}: {got}")
+        self.assertEqual(got.get("code"), "false", f"{path} set code: {got}")
+        step = self.named(self.steps(), "Landed-directory check fixture suite")
+        self.assertTrue(runs_on(if_of(step), got),
+                        f"the landed-dirs suite skips a docs-only edit to {path}: its if is {if_of(step)!r}")
+
+    # Control beside it: a docs-only edit to a doc that no skill or decision group holds skips the landed-dirs suite, as before.
+    def test_a_docs_only_edit_outside_the_skill_and_decision_groups_skips_the_landed_dirs_suite(self):
+        path = "docs/notes.md"
+        got = scope_run([path], existing=[path])
+        self.assertEqual(got.get("doc_other"), "true", f"doc_other is not on for {path}: {got}")
+        self.assertEqual(got.get("code"), "false", f"{path} set code: {got}")
+        step = self.named(self.steps(), "Landed-directory check fixture suite")
+        self.assertFalse(runs_on(if_of(step), got), f"the landed-dirs suite runs for a docs-only edit to {path}: its if is {if_of(step)!r}")
 
 
 if __name__ == "__main__":

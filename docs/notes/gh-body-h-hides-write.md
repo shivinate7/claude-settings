@@ -1,0 +1,1 @@
+- gh-body-h-hides-write: `--body -h` hides a write from the reader. Fix: treat a value after --body as a value, not a flag.

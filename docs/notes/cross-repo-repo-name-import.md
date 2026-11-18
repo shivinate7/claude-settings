@@ -1,0 +1,1 @@
+- cross-repo-repo-name-import: hooks/question_form.py cross_repo_hit imports stale_pages.REPO_NAME with no ImportError guard; with skills/ missing beside hooks the guard fails open and later page rules skip that write. Decision: cross-repo-question-checked.

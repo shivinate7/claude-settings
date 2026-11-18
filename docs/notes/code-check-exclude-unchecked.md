@@ -1,0 +1,1 @@
+- code-check-exclude-unchecked: the rule that a repo's code-check exclude holds only vendored or generated files lives only as a comment in check.yml. A debt after a real incident.

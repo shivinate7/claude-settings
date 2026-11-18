@@ -61,7 +61,7 @@ import subprocess
 import sys
 import time
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
 sys.path.insert(0, HERE)
 import git_reads  # noqa: E402

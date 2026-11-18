@@ -1,0 +1,1 @@
+- brief-pin-cherry-picks-word: (#2538) dropping only the word "cherry-picks" from the builder rule sentence still passes its pin.

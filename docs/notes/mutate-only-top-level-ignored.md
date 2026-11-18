@@ -1,0 +1,1 @@
+- mutate-only-top-level-ignored: Note: mutate_guard.py ignores a top-level MUTATE_ONLY, so a brief's one-mutant command runs the whole table.

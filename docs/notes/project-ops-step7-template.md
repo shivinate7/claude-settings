@@ -1,0 +1,1 @@
+- project-ops-step7-template: skills/project-ops/SKILL.md step 7 tests only the exact PR template path, and does not say who merges the PR it opens.

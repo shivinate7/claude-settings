@@ -165,7 +165,7 @@ import posixpath
 import re
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
@@ -175,6 +175,7 @@ if LINT not in sys.path:
 
 import _transcript  # noqa: E402  the one home of the transcript readers and the owner-record test
 import local_time  # noqa: E402  the one home of the inbox paths
+import report_guard  # noqa: E402  the one home of the Stop output and its correction line
 import override  # noqa: E402  the one home of the roadmap record ref and folder
 import ruling_home  # noqa: E402  the one home of "a branch's tree holds this file"
 import precompact_handoff  # noqa: E402  the one home of the handoff path
@@ -226,7 +227,8 @@ EXAMPLE_HOME = "noted"
 OPEN_KINDS = ("[ruling]", "[task]", "[standing]")
 # Layout keys (lint/layout.json, or a repo's extras file) whose paths may hold each kind's home.
 HOME_KINDS = {"ruling": ("decisions", "rules", "claude-md", "agents-md"),
-              "task": ("todo", "debts", "debt-notes", "notes")}
+              "task": ("todo", "debts", "notes")}
+OLD_NOTES_KEY = "debt-notes"  # the frozen notes file: read for backlog lines and own-home drops, never a task home
 NOTES_README = "README.md"  # the notes folder's own file, never a note
 FAIL_OPEN = "Feedback guard: ruling and task homes not checked (%s)."
 FAIL_OPEN_SENDS = "Feedback guard: %s sends not checked (%s)."  # label: page or repo
@@ -523,6 +525,9 @@ class Homes:
     @staticmethod
     def _judge(layout, item_id, kind, root, rel, grant):
         """None when the home `rel` is good in the repo at `root`, else the reason text."""
+        if kind == "task" and OLD_NOTES_KEY in layout.kinds(root) and rel == layout.path(root, OLD_NOTES_KEY).strip("/"):
+            return ("%s [task]: %s is the frozen old notes file, which takes deletes only. A new note is a file in the "
+                    "notes folder, or name a todo or debt file or `step:<slug>`" % (item_id, rel))
         if not (grant and kind == "ruling" and rel in GRANT_ROOT_HOMES):
             homes = kind_homes(layout, root, kind)
             keys = ", ".join(HOME_KINDS[kind])
@@ -1158,16 +1163,16 @@ def backlog_candidates(root):
     file and the old notes file (`note:<line>`). A missing or unreadable file is skipped."""
     import layout  # lint/layout.py, the one home of where each kind lives
     out, known = [], layout.kinds(root)
-    where = {key: os.path.join(root, *layout.path(root, key).split("/")) for key in HOME_KINDS["task"]
-             if key in known}
-    for key, prefix in (("todo", "todo"), ("debts", "debt"), ("debt-notes", "note"), ("notes", "note")):
+    where = {key: os.path.join(root, *layout.path(root, key).split("/"))
+             for key in HOME_KINDS["task"] + (OLD_NOTES_KEY,) if key in known}
+    for key, prefix in (("todo", "todo"), ("debts", "debt"), (OLD_NOTES_KEY, "note"), ("notes", "note")):
         try:
             if key not in where:
                 continue
             if os.path.isdir(where[key]):
                 for name in sorted(os.listdir(where[key])):
                     path = os.path.join(where[key], name)
-                    if (name.endswith(".md") and path != where.get("debt-notes") and os.path.isfile(path)
+                    if (name.endswith(".md") and path != where.get(OLD_NOTES_KEY) and os.path.isfile(path)
                             and not (key == "notes" and name == NOTES_README)):
                         with open(path, encoding="utf-8", errors="replace") as f:
                             text = squash(f.read(4 * REPEAT_CUT).lstrip("# "))
@@ -1262,10 +1267,11 @@ def own_refs(rest, root, own_block, found):
             home = posixpath.normpath(home_path(rest).replace("\\", "/")).strip("/")
             folder, _, name = home.rpartition("/")
             known = layout.kinds(root)
-            at = {key: layout.path(root, key).strip("/") for key in HOME_KINDS["task"] if key in known}
+            at = {key: layout.path(root, key).strip("/") for key in HOME_KINDS["task"] + (OLD_NOTES_KEY,)
+                  if key in known}
             if home == at.get("todo"):
                 own |= {r for r in found if r.startswith("todo:")}
-            elif home == at.get("debt-notes"):
+            elif home == at.get(OLD_NOTES_KEY):
                 # Only the old file's `note:<line>` refs: a note file is its own, distinct home.
                 own |= {r for r in found if re.fullmatch(r"note:\d+", r)}
             elif name.endswith(".md") and name != NOTES_README and folder == at.get("notes"):
@@ -1623,8 +1629,7 @@ def main():
             out.update(decision="block", reason=lead + ln_reason + LINK_CITE)
         if notes:
             out["systemMessage"] = " ".join(filter(None, [out.get("systemMessage")] + notes))
-        if out:
-            print(json.dumps(out))
+        report_guard.emit_stop(out)
     except Exception as e:  # advisory: a crash passes, and says so on stderr
         print("feedback_guard: %s" % e, file=sys.stderr)
     return 0

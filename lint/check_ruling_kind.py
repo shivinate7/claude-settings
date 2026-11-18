@@ -25,15 +25,15 @@ import os
 import re
 import subprocess
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 except ImportError:  # actions/ruling-kind runs this file in a tree without hooks/
     _nowindow = subprocess
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 DIR = None  # the records folder: the layout's decisions folder under ROOT; --dir replaces it
 RULE_FILES = ("CLAUDE.md", "output-styles/shiv-stylisms.md")
 ANCHOR_RE = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")

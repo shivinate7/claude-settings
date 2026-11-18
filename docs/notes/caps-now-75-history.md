@@ -1,0 +1,1 @@
+- caps-now-75-history: (#2557 round 3) checks.yml:81,950,1370,1652 "Now 75, above..." narrates history in a comment (rule building-comments-say-why); judgment only.
