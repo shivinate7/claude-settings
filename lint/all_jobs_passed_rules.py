@@ -18,7 +18,7 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 from test_windows_split import (ALL_JOBS_PASSED_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_OFF_JOBS, PUSH_SKIP_JOB, RECORDS_ONLY_CONDITION, all_jobs, draft_guard_only, drop_condition, eval_if,  # noqa: E402,F401  the one home of the scope condition and scalar parsers
-                                job_if_without_records, push_guard_only, push_off_only, shard_base, shard_push_off, unwrap, yaml_scalar)  # NIGHTLY_SKIP_JOB and PUSH_SKIP_JOB are read from here by actions/push-skip/push-skip.py
+                                daily_only_expr, eval_with, job_if_without_records, push_guard_only, push_off_only, shard_base, shard_push_off, unwrap, yaml_scalar)  # NIGHTLY_SKIP_JOB and PUSH_SKIP_JOB are read from here by actions/push-skip/push-skip.py
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
 
 ALL_JOBS_PASSED_USES = "$/actions/all-jobs-passed"
@@ -180,7 +180,7 @@ def shard_records_only_if(expr):
 
 
 def off_problems(text):
-    """Only a shard job or a macOS job (daily and dispatch only, owner 01:33 CST Nov 16) may stay off all-jobs-passed. A needed job has no job-level if, except scope (its draft rule),
+    """Only a shard job or a daily-only job (a macOS job, owner 01:33 CST Nov 16, or a slow leg: a Windows guard shard or a guard mutation shard, R62 and R63, owner 15:55 CST Nov 12, and goal v11 F1 and F2, owner 15:52 CST Nov 18; daily_only_expr) may stay off all-jobs-passed. A needed job has no job-level if, except scope (its draft rule),
     a Windows full shard (the draft guard), a job on the R61 push-off list
     whose if is the push guard alone (owner page item 880, 11:53 CST Nov 15), and the records-only skip (RECORDS_ONLY_CONDITION alone,
     or after a shard's draft guard or push guard): check.sh passes the skip it makes, and no wider condition. all-jobs-passed runs on
@@ -189,8 +189,8 @@ def off_problems(text):
     jobs = all_jobs(text)
     needed, off, problems = split_jobs(text)
     for name in off:
-        if not shard_base(name) and name not in MACOS_JOBS:
-            problems.append(f"{name} is off all-jobs-passed but is not a shard or a macOS job: its job-level if skips it on a PR")
+        if not shard_base(name) and not daily_only_expr(job_if_without_records(jobs[name]["if"])):
+            problems.append(f"{name} is off all-jobs-passed but is not a shard or a daily-only job: its job-level if skips it on a PR")
     for name in needed:
         if shard_base(name):
             # R62: a Windows full shard runs on a ready pull request, so it is needed. Its job-level if is the draft guard only.
@@ -231,10 +231,32 @@ def scope_skips_map(text):
     return {name: flags for name, flags in got.items() if isinstance(flags, list) and flags}
 
 
+def expected_scope_skips(text):
+    """{job: [flag, ...]} for each needed job whose job-level if reads a scope flag and skips a ready pull_request when each flag it
+    reads is false (a fast Windows job, R62 and R63: it starts on a pull request only with its own flag). The records-only condition is
+    taken off. check.sh passes such a skip only when the job is named here with every flag it reads."""
+    needed, _, _ = split_jobs(text)
+    jobs = all_jobs(text)
+    expected = {}
+    for name in needed:
+        rest = job_if_without_records(jobs[name]["if"]) if jobs[name]["if"] is not None else None
+        if rest is None:
+            continue
+        flags = sorted(set(re.findall(r"needs\.scope\.outputs\.(\w+)", rest)))
+        try:
+            skips = bool(flags) and not eval_with(rest, "pull_request", {f: "false" for f in flags})
+        except Exception:
+            skips = False
+        if skips:
+            expected[name] = flags
+    return expected
+
+
 def scope_skips_problems(text):
-    """No job has a scope skip now (the macOS jobs run on a dispatch and a daily that runs, never on a pull request), so
-    all-jobs-passed's scope-skips input must be the empty map: check.sh would pass a skipped job on any entry, and reads a
-    records-only run as green only when the input is set."""
+    """all-jobs-passed's scope-skips input is the object {job: [flag, ...]} that expected_scope_skips derives from the job-level ifs:
+    a fast Windows job skips a pull request that sets none of its flags, and check.sh passes that skip only when the job is named with
+    every flag it reads. A job the input names without such an if, or with other flags, is flagged: check.sh would pass its skip as green.
+    The macOS jobs and the slow legs are off the rollup, so they have no entry. An input with no map at all reads a records-only run as red."""
     block = job_block(text, ALL_JOBS_PASSED_JOB)
     if block is None:
         return [f"no {ALL_JOBS_PASSED_JOB} job in checks.yml"]
@@ -247,7 +269,16 @@ def scope_skips_problems(text):
         return [f"scope-skips is not JSON: {raw!r}"]
     if not isinstance(got, dict) or not all(isinstance(v, list) for v in got.values()):
         return [f"scope-skips is not one object of job: [flag, ...]: {raw!r}"]
-    return [f"scope-skips names {name}, which has no scope skip" for name in sorted(got)]
+    want = expected_scope_skips(text)
+    problems = []
+    for name in sorted(got):
+        if name not in want:
+            problems.append(f"scope-skips names {name}, which has no scope skip")
+        elif sorted(got[name]) != want[name]:
+            problems.append(f"scope-skips names {name} with flags {sorted(got[name])}, but its job-level if reads {want[name]}")
+    for name in sorted(set(want) - set(got)):
+        problems.append(f"scope-skips lacks {name}: its job-level if skips a pull request with {want[name]} false, and check.sh reads that skip as red")
+    return problems
 
 
 def scope_if_problems(text):
