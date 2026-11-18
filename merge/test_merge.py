@@ -1346,6 +1346,22 @@ class ConfirmIdleLanes(Env):
         self.assertEqual(len(checks), 1, "the fallback printed %d check-this-lane lines, not one: %r" % (len(checks), out + err))
         self.assertIn("session_a", checks[0], "the check line does not name the step's lane: %r" % checks[0])
 
+    def test_mixed_lane_and_unknown_report_prints_one_owed_line_that_names_the_command(self):
+        # A fresh file whose report holds a lane to archive beside an unknown line is only partly read. The owed line prints beside
+        # those lines, so the reader knows to run the pass again once the file is fixed. The second lane's archive slug is not a plain
+        # name, so its line reads unknown. Control: the merge lands, and the lane line prints as it does today.
+        self.step_commit("c1")
+        bad = roadmap.session_row("session_bad", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1", "cs-repo:owner/fixture",
+                                  "cs-archive-ready:a/b", status_bucket=roadmap.BUCKET_COMPLETED)
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE, bad))
+        self.assert_landed(rc, out, err)
+        # Scope first: the fresh read ran and printed a lane line beside an unknown line.
+        self.assertTrue([line for line in out if line.startswith("session_a (")], "scope: no lane line printed: %r" % out)
+        self.assertTrue([line for line in out if line.startswith("unknown (archive slug")], "scope: no unknown line printed: %r" % out)
+        owed = [line for line in out + err if OWED_WORD.search(line)]
+        self.assertEqual(len(owed), 1, "the mixed case printed %d owed lines, not one: %r" % (len(owed), out + err))
+        self.assertIn("merge --idle-lanes --live FILE", owed[0], "the mixed case's owed line does not name the fixing command: %r" % owed[0])
+
     def test_stale_live_file_prints_the_owed_line(self):
         # readAt one minute before the merge commit: the file was read before the batch landed.
         rc, out, err = self.confirm(live_at=lambda at: live_json((at - _timedelta(seconds=60)).isoformat(), IDLE_LANE))
