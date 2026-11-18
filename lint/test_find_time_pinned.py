@@ -1660,17 +1660,17 @@ class KeepMarkerOutputTest(FinderCase):
         self.assertIn("kept 50", out_lines[-1], "the summary does not count all 50 kept lines")
 
 
-# ---- gate mode: --gate fails on a sleep, an elapsed-assert or an unread file only ---------------------
+# ---- check mode: --check fails on a sleep, an elapsed-assert or an unread file only ---------------------
 
-class GateModeTest(FinderCase):
-    """--gate fails on a sleep, an elapsed-assert or an unread file. It does not fail on a wait-cap or a
-    test-cap. The flag is new, so an unknown flag prints nothing. Each gate run asserts the listing first,
+class CheckModeTest(FinderCase):
+    """--check fails on a sleep, an elapsed-assert or an unread file. It does not fail on a wait-cap or a
+    test-cap. The flag is new, so an unknown flag prints nothing. Each check run asserts the listing first,
     which names that cause and keeps every red a failure, never a crash."""
 
-    def gated(self):
-        proc = run(self.root, "--gate", "--json")
+    def checked(self):
+        proc = run(self.root, "--check", "--json")
         self.assertTrue(proc.stdout.strip(),
-                        "--gate printed no listing (exit %d, stderr %r): the flag is not recognised"
+                        "--check printed no listing (exit %d, stderr %r): the flag is not recognised"
                         % (proc.returncode, proc.stderr[-200:]))
         return proc.returncode, json.loads(proc.stdout)
 
@@ -1687,17 +1687,17 @@ class GateModeTest(FinderCase):
         self.put("tests/test_caps_only.py", text)
         return text
 
-    def test_gate_fails_on_a_sleep(self):
+    def test_check_fails_on_a_sleep(self):
         text = src("import time", "", "def test_wait():", "    time.sleep(1)")
         self.put("tests/test_wait.py", text)
         _, plain = self.report()
         sleep_row = ("tests/test_wait.py", lineno(text, "time.sleep(1)"), "sleep")
-        self.assertIn(sleep_row, self.rows(plain), "scope: the sleep is not listed without --gate")
-        code, out = self.gated()
-        self.assertEqual(code, 1, "--gate exits %d on a sleep, not 1" % code)
-        self.assertIn(sleep_row, self.rows(out), "--gate does not list the sleep")
+        self.assertIn(sleep_row, self.rows(plain), "scope: the sleep is not listed without --check")
+        code, out = self.checked()
+        self.assertEqual(code, 1, "--check exits %d on a sleep, not 1" % code)
+        self.assertIn(sleep_row, self.rows(out), "--check does not list the sleep")
 
-    def test_gate_fails_on_an_elapsed_assert(self):
+    def test_check_fails_on_an_elapsed_assert(self):
         text = src(
             "import time",
             "",
@@ -1708,33 +1708,33 @@ class GateModeTest(FinderCase):
         self.put("tests/test_budget.py", text)
         _, plain = self.report()
         row = ("tests/test_budget.py", lineno(text, "assert time.monotonic() - t0 < 1"), "elapsed-assert")
-        self.assertIn(row, self.rows(plain), "scope: the elapsed-assert is not listed without --gate")
-        code, out = self.gated()
-        self.assertEqual(code, 1, "--gate exits %d on an elapsed-assert, not 1" % code)
-        self.assertIn(row, self.rows(out), "--gate does not list the elapsed-assert")
+        self.assertIn(row, self.rows(plain), "scope: the elapsed-assert is not listed without --check")
+        code, out = self.checked()
+        self.assertEqual(code, 1, "--check exits %d on an elapsed-assert, not 1" % code)
+        self.assertIn(row, self.rows(out), "--check does not list the elapsed-assert")
 
-    def test_gate_fails_on_an_unread_file(self):
+    def test_check_fails_on_an_unread_file(self):
         self.put("tests/test_bad.py", "def broken(:\n    pass\n")
         plain = json.loads(run(self.root, "--json").stdout)
         self.assertEqual([u["path"] for u in plain["unread"]], ["tests/test_bad.py"],
-                         "scope: the file is not listed unread without --gate")
-        code, out = self.gated()
-        self.assertEqual(code, 2, "--gate exits %d on an unread file alone, not 2" % code)
+                         "scope: the file is not listed unread without --check")
+        code, out = self.checked()
+        self.assertEqual(code, 2, "--check exits %d on an unread file alone, not 2" % code)
         self.assertEqual([u["path"] for u in out["unread"]], ["tests/test_bad.py"],
-                         "--gate does not list the unread file")
+                         "--check does not list the unread file")
 
-    def test_gate_passes_when_only_wait_caps_and_test_caps_are_listed(self):
+    def test_check_passes_when_only_wait_caps_and_test_caps_are_listed(self):
         self.put_cap_only()
         _, plain = self.report()
         self.assertEqual({cat for _, _, cat in self.rows(plain)}, {"wait-cap", "test-cap"},
-                         "scope: the caps are not listed without --gate")
-        code, _ = self.gated()
-        self.assertEqual(code, 0, "--gate fails on a wait-cap or a test-cap (exit %d)" % code)
+                         "scope: the caps are not listed without --check")
+        code, _ = self.checked()
+        self.assertEqual(code, 0, "--check fails on a wait-cap or a test-cap (exit %d)" % code)
 
-    def test_without_the_gate_a_cap_only_fixture_still_exits_1(self):
+    def test_without_the_check_a_cap_only_fixture_still_exits_1(self):
         text = self.put_cap_only()
         code, out = self.report()
-        self.assertEqual(code, 1, "without --gate a wait-cap or a test-cap exits %d, not 1" % code)
+        self.assertEqual(code, 1, "without --check a wait-cap or a test-cap exits %d, not 1" % code)
         self.assertEqual(self.rows(out), pinned(
             "tests/test_caps_only.py", text,
             ("@pytest.mark.timeout(30)", "test-cap"), ("subprocess.run(cmd, timeout=5)", "wait-cap"),
