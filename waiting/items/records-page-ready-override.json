@@ -56,8 +56,8 @@
   "owner": "triage (session_013NEJKzyLYRTQKeLpis8JKJ)",
   "recommended": "b",
   "ref": "coordinator relay 13:27 CST Nov 18: ready mark refused on the two PRs",
-  "replied": "2026-11-18T16:00:37-06:00",
-  "reply": "Closed on your 'none of these' (16:00 CST): you typed no override on this page and none is needed from you now. Read by REST at 16:00 CST: pull request 3658 is no longer a draft (it is open, ready, checks unstable), so its ready mark went through. Pull request 3667 is still a draft. I asked the coordinator to retry its ready mark and to tell me the refusal text if it is refused again; a new item goes up only if it is.",
+  "replied": "2026-11-18T16:03:00-06:00",
+  "reply": "Closed on your 'none of these' (16:00 CST): you typed no override on this page and none is needed from you. Read by REST at 16:00 CST: pull request 3658 is no longer a draft (open, ready), so its ready mark went through. Pull request 3667 is still a draft on purpose (corrected 16:03 CST from the coordinator's reply: batch runner 10 holds it because it shares two files with 3658, and marks and merges it after 3658 lands). No refusal exists; nothing is waiting on you.",
   "repo": "shivinate7/claude-settings",
   "short": "Override the ready-mark refusal?",
   "shown": [
