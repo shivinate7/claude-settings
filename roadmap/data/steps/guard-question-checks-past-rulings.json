@@ -5,10 +5,10 @@
  "lane": "",
  "owner": "triage",
  "blockedBy": [],
- "updatedAt": "2026-11-18T10:23:47-06:00",
+ "updatedAt": "2026-11-18T10:43:22-06:00",
  "source": "triage 11, own mistake; owner frustration relayed by the consultant 10:22 CST Nov 18",
  "id": "guard-question-checks-past-rulings",
- "title": "Posting an owner question first reads the decision record for a past ruling on the same topic",
+ "title": "A page item's cited ruling time must match a ruling record; the word-overlap past-ruling check on main does not catch a wrong time",
  "why": "Item 965 (round-1 model) was posted although the owner ruled Haiku at 19:45 CST Nov 15, and it gave the wrong date; the consultant caught it at 10:21 CST Nov 18.",
- "note": "Own mistake. Guard idea: a page item whose Based-on (ruling) cites a time must match a record in docs/decisions or the page answers; an item with no ruling line searches decision titles for its home. Next: a lane brief with a test-author first; mover: the coordinator's say-so."
+ "note": "Own mistake. Guard idea: a page item whose Based-on (ruling) cites a time must match a record in docs/decisions or the page answers; an item with no ruling line searches decision titles for its home. Next: a lane brief with a test-author first; mover: the coordinator's say-so. 10:43 CST Nov 18 (triage 11, prior-work search by a read-only Explore agent): PARTLY COVERED. Main has a past-ruling check (decision question-form, hooks/question_form.py past_rulings about line 2313, rule PAST_RULING_RULE about line 2107) that searches decision and debt records and the ruled store by word overlap, and a model read of the Based-on (ruling) line (hooks/call_judge.py PAST_RULING_ITEM). Code checks ids only (ruling_cite about line 2374), not the cited time. Item 965's wrong date (Nov 17, true Nov 15) passed it. Narrowed scope: match the cited ruling time against records, reuse the stamp parser lint/report_guard.py _ruling_stamp (rule rewrite-cite-predates-ruling) and the ruled store lint/ruled_store.py (each entry has `at`); also read open ruled-store entries, since a ruling may not be on main yet. Do not write a second parser. Lines are the agent's reading, not rechecked by triage 11. No PR or branch exists for this idea; unmerged branch lane/page-item-past-ruling is a judge debt, not this check."
 }
