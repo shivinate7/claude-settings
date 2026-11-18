@@ -6922,15 +6922,18 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
     taken, reason = "", SCRATCHPAD_OVERWRITE_REASON
     for full in files:
         writer = scratchpad_writer_of(full, session)
-        if writer and writer != agent and not taken:
-            taken = "agent %s writes over a scratchpad file agent %s wrote: %s" % (agent, writer, full)
-        elif full in removed and not taken:
+        if writer and writer != agent:
+            if not taken:
+                taken = "agent %s writes over a scratchpad file agent %s wrote: %s" % (agent, writer, full)
+        elif full in removed:
             # An `rm` or `mv` that names a folder, the scratchpad itself or a glob removes each file under it, and
-            # only a file has a record: read the files (`scratchpad_folder_writer`).
+            # only a file has a record: read the files (`scratchpad_folder_writer`). A folder is a deny and a file
+            # an ask, so the folder wins whatever its place in the call: a file listed first must not hide it.
             held = scratchpad_folder_writer(full, session, agent)
             if held:
                 taken = "agent %s removes a scratchpad folder holding a file agent %s wrote: %s" % (agent, held[1], held[0])
                 reason = SCRATCHPAD_FOLDER_REASON
+                break
 
     def record_writers():
         for full in files:
