@@ -763,9 +763,11 @@ class UpkeepFixture(Fixture):
     def replay_pull(self):
         return self.draft(999, self.REPLAY, self.created_before(736), self.REPLAY_TITLE)
 
-    def draft(self, number, branch, created=None, title=None):
-        """An open draft pull row. The createdAt key is left out when created is None."""
+    def draft(self, number, branch, created=None, title=None, no_branch=False):
+        """An open draft pull row. The createdAt key is left out when created is None; the branch key too when no_branch."""
         row = {"number": number, "title": title or "lane " + branch, "branch": branch, "draft": True}
+        if no_branch:
+            del row["branch"]
         if created is not None:
             row["createdAt"] = created
         return row
@@ -1120,6 +1122,82 @@ class LedgerActs(UpkeepFixture):
         self.assertEqual(len(acts), count, "scope: the baked pulls are the %d open pulls" % count)
         missing = [n for n, act in acts.items() if act != "batch"]
         self.assertEqual(missing, [], "%d of %d baked pulls do not read act 'batch' (first: %s)" % (len(missing), count, missing[:3]))
+
+    # The reasons a lane unknown row can give, pinned for the renderers too (skill roadmap: the lane unknown reason).
+    SKIPPED_ROW_WHY = "unknown (a session row was skipped)"
+    NO_NAME_WHY = "unknown (the repo's GitHub name could not be read)"
+
+    def test_a_draft_with_no_branch_key_reads_lane_unknown_and_a_branch_a_live_lane_holds_keeps_its_act(self):
+        # The branch key is optional (skills/roadmap/SKILL.md, the pull row). With no branch, no lane's hold can be told, so the
+        # draft reads lane unknown, never no live lane. The control's branch is the one the live lane holds.
+        ledger = {"readAt": self.FRESH, "rows": [ledger_row(5, "lane round 1", owner="lane")]}
+        lane = session_row("session_test01", "SESSION_STATUS_RUNNING", self.REPO, "cs-step:foo", status_bucket=BUCKET_WORKING)
+        keyless = self.draft(5, "lane/foo", no_branch=True)
+        for name, pull, sessions in (
+            ("no branch key, and a live lane holds step foo", keyless, [lane]),
+            ("branch null, and a live lane holds step foo", dict(keyless, branch=None), [lane]),
+            ("no branch key, and the sessions list is empty", keyless, []),
+        ):
+            with self.subTest(case=name):
+                self.publish_read([pull], ledger, sessions=sessions)
+                row = self.baked(self.build())
+                self.assertEqual(sorted(row), [5], "scope: the baked pulls are the one draft")
+                self.assertEqual(row[5].get("act"), "lane unknown", f"#5 has no branch and reads act {row[5].get('act')!r}, not 'lane unknown'")
+                self.assertEqual(row[5].get("owner"), "unknown", f"#5 has no branch and reads owner {row[5].get('owner')!r}, not 'unknown'")
+        with self.subTest(control="branch lane/foo, which the live lane holds"):
+            self.publish_read([self.draft(5, "lane/foo")], ledger, sessions=[lane])
+            row = self.baked(self.build())
+            self.assertEqual(sorted(row), [5], "scope: the baked pulls are the one draft")
+            self.assertEqual(row[5].get("act"), "lane round 1", f"control: #5's live lane holds its branch and reads act {row[5].get('act')!r}, not 'lane round 1'")
+            self.assertEqual(row[5].get("owner"), "lane", f"control: #5's live lane holds its branch and reads owner {row[5].get('owner')!r}, not 'lane'")
+
+    def test_a_draft_lane_unknown_for_a_skipped_session_row_gives_the_skipped_row_reason_not_the_missing_list(self):
+        # The reason is the list-head key laneWhy, shaped like ledgerWhy. A skipped session row is the list read with a row left
+        # out, so its reason never says the list is missing. With no GitHub name no sessions are read at all: that reason is the build's own.
+        draft = self.draft(7, "feat-seven", title="Draft seven")
+        ledger = {"readAt": self.FRESH, "rows": [ledger_row(7, "lane round 1", owner="lane")]}
+        held = session_row("session_test01", "SESSION_STATUS_RUNNING", self.REPO, "cs-step:feat-seven", status_bucket=BUCKET_WORKING)
+        with self.subTest(control="a well-formed row holds the branch: no lane reason"):
+            self.publish_read([draft], ledger, sessions=[held])
+            page = self.build()
+            self.assertEqual(sorted(self.baked(page)), [7], "scope: the baked pulls are the one draft")
+            self.assertEqual(self.baked(page)[7].get("act"), "lane round 1", f"control: #7 has a live lane and reads act {self.baked(page)[7].get('act')!r}")
+            self.assertIsNone(build_info(page)["live"].get("laneWhy"), f"control: a well-formed lane row gives a lane reason {build_info(page)['live'].get('laneWhy')!r}")
+        with self.subTest(sessions="a row with no session_status is skipped, and the list is read"):
+            self.publish_read([draft], ledger, sessions=[{"id": "s2"}])
+            page = self.build()
+            live = build_info(page)["live"]
+            self.assertIn("session 1", live.get("skipped") or [], f"scope: the sessions row was not skipped: {live.get('skipped')!r}")
+            self.assertEqual(self.baked(page)[7].get("act"), "lane unknown", f"#7 has a skipped row and reads act {self.baked(page)[7].get('act')!r}, not 'lane unknown'")
+            self.assertEqual(live.get("laneWhy"), self.SKIPPED_ROW_WHY, f"#7's lane reads reason {live.get('laneWhy')!r}, not {self.SKIPPED_ROW_WHY!r}")
+        with self.subTest(github="the repo's GitHub name cannot be read"):
+            git(self.repo, "remote", "remove", "origin")
+            self.publish_read([draft], ledger, sessions=[held])
+            page = self.build()
+            live = build_info(page)["live"]
+            self.assertEqual(live.get("staleWhy"), self.NO_NAME_WHY, f"scope: the GitHub name was read: {live.get('staleWhy')!r}")
+            self.assertEqual(self.baked(page)[7].get("act"), "lane unknown", f"#7 has no GitHub name and reads act {self.baked(page)[7].get('act')!r}, not 'lane unknown'")
+            self.assertEqual(live.get("laneWhy"), self.NO_NAME_WHY, f"#7's lane reads reason {live.get('laneWhy')!r}, not {self.NO_NAME_WHY!r}")
+
+    def test_a_ledger_age_not_finite_or_negative_reads_act_unknown_and_no_page_value_is_nan(self):
+        # JSON reads NaN and Infinity as numbers, and a negative age is no age. Each such row is a wrong-shaped row: it is skipped,
+        # named, and its pull reads act unknown with no age, so no renderer prints NaN or a negative wait.
+        pulls = [{"number": n, "title": "pull %d" % n, "branch": "feat-%d" % n} for n in (3, 9)]
+        block = re.compile(r"window\.ROADMAP_BUILD = (\{.*\});\n</script>")
+        for name, age in (("NaN", float("nan")), ("Infinity", float("inf")), ("minus Infinity", float("-inf")), ("minus 1 hour", -1.0)):
+            with self.subTest(ageHours=name):
+                self.publish_read(pulls, {"readAt": self.FRESH, "rows": [ledger_row(3, "batch", age=age), ledger_row(9, "batch", age=2.0)]})
+                page = self.build()
+                live = build_info(page)["live"]
+                row = self.baked(page)
+                self.assertEqual(sorted(row), [3, 9], "scope: the baked pulls are the two open pulls")
+                self.assertEqual(row[9].get("act"), "batch", f"control: #9 has a finite age and reads act {row[9].get('act')!r}, not 'batch'")
+                self.assertEqual(row[3].get("act"), "act unknown", f"#3 has ageHours {name} and reads act {row[3].get('act')!r}, not 'act unknown'")
+                self.assertIsNone(row[3].get("ageHours"), f"#3 has ageHours {name} and carries {row[3].get('ageHours')!r}, not none")
+                self.assertIn("ledger row 1", live.get("skipped") or [], f"#3's ledger row with ageHours {name} is not in skipped: {live.get('skipped')!r}")
+                match = block.search(page)
+                self.assertIsNotNone(match, "scope: the built page has no ROADMAP_BUILD block")
+                self.assertIsNone(re.search(r"\b(NaN|-?Infinity)\b", match.group(1)), f"the page's build block carries {name} for ageHours, which a renderer prints")
 
 
 class LandedPulls(UpkeepFixture):
