@@ -3,7 +3,7 @@
 The fixture is tests/review_layer_recall/fixture.json: committed data, no network. The scorer is
 lint/review_layer_recall.py, run as
 
-  python3 lint/review_layer_recall.py --fixture <fixture.json> --findings <verdicts.json>
+  python3 lint/review_layer_recall.py --fixture <fixture.json> --findings <findings.json>
 
 and it prints one JSON report:
 
@@ -12,7 +12,7 @@ and it prints one JSON report:
                         "cost": {"status": "unknown"}}}}
 
 `of` is the number of incidents whose answer key names the layer. Recall is "measured" only when the
-verdicts hold a verdict for each of those incidents. Otherwise it is "unknown", never 0. A verdicts
+findings hold a verdict for each of those incidents. Otherwise it is "unknown", never 0. A findings
 file is a JSON list of {"pr": int, "layer": str, "verdict": "PASS" | "FAIL" | "PARTIAL"}; a FAIL by a
 layer on an incident's PR counts as caught. A PARTIAL row, a null, or any other value makes its layer
 unknown, never a miss, and a row never counts for another layer. An incident labelled "unknown" or "ci" counts
