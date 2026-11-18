@@ -70,14 +70,12 @@ def cite_form(cwd):
 def note_rules(cwd):
     """The note rules for the brief, each filled from the layout of the session's repo at `cwd`. They come from
     check_record_slugs.AGENT_FORM_RULES, the list that check prints on a refusal: the brief holds no copy of the text.
-    Empty when that repo's layout has no notes kind or cannot be read. Raises when the list cannot be read."""
+    Empty when that repo's layout cannot be read. Raises when the list cannot be read."""
     lint = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lint")
     sys.path.append(lint)  # appended: a module already in sys.modules wins
     import check_record_slugs  # noqa: E402
     import layout  # noqa: E402  the one home of where records live
     try:
-        if "notes" not in layout.kinds(cwd):
-            return []
         return [layout.fill_note_paths(cwd, rule) for rule in check_record_slugs.AGENT_FORM_RULES]
     except layout.LayoutError:  # a repo whose layout does not read gets no note line, never the hook's own paths
         return []
