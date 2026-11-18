@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """List the tests whose verdict depends on wall-clock speed. Read-only. Standard library only.
 
-    python3 lint/find_time_pinned.py <root> [--json]
+    python3 lint/find_time_pinned.py <root> [--json] [--gate]
 
 Decision test-strategy-reset, point 2: no test waits on a fixed sleep or a wall-clock bound. This
 tool lists the tests that do. It fixes none, and it writes nothing. Each finding has one category:
@@ -54,6 +54,10 @@ findings only, and its counts leave kept findings out. A file that cannot be rea
 never clean.
 Exit 0: nothing listed, nothing unread (kept findings alone leave it 0). Exit 1: findings listed. Exit 2:
 the root cannot be read, or nothing listed but some file unread, so the result is unknown.
+With `--gate` the listing is the same, but the exit is 1 only when a sleep or an elapsed-assert is listed,
+2 when only an unread file remains, and 0 when nothing else is listed: a wait-cap or a test-cap is a hang
+guard the owner keeps (item 345), so it never fails the gate.
+An `.elapsed` attribute read in an assert is an elapsed-assert. A file of any size is read.
 Cost: one `git ls-files` (or one folder walk outside a git tree) and one read of each test file. No
 process stays running.
 """
@@ -71,8 +75,8 @@ from bisect import bisect_right
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
-MAX_BYTES = 1_000_000
 CATEGORIES = ("sleep", "elapsed-assert", "test-cap", "wait-cap")
+GATE_FAILS = ("sleep", "elapsed-assert")  # the categories --gate fails on, besides an unread file
 WALK_SKIP = {".git", "node_modules", ".build", "DerivedData", "venv", ".venv"}
 JS_EXTS = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts", ".cts")
 TEXT_MAX = 120
@@ -569,6 +573,8 @@ def scan_python(text):
                 durations and any(holds_difference(p, tainted) for p in args))
         if isinstance(node, ast.Name):
             return isinstance(node.ctx, ast.Load) and node.id in tainted
+        if isinstance(node, ast.Attribute) and node.attr == "elapsed" and isinstance(node.ctx, ast.Load):
+            return True  # a result's measured duration, such as `run_child().elapsed`
         return any(holds_clock(c, tainted, durations) for c in ast.iter_child_nodes(node))
 
     def holds_difference(node, tainted):
@@ -1196,8 +1202,6 @@ def scan_file(root, rel, kind):
     try:
         if not os.path.isfile(path):
             return None, "not a regular file", set()
-        if os.path.getsize(path) > MAX_BYTES:
-            return None, f"over {MAX_BYTES} bytes", set()
         with open(path, "rb") as f:
             data = f.read()
     except OSError as e:
@@ -1220,6 +1224,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("root", help="the repo root, or any folder")
     ap.add_argument("--json", action="store_true", help="print one JSON object")
+    ap.add_argument("--gate", action="store_true",
+                    help="exit non-zero only on a sleep, an elapsed-assert or an unread file")
     args = ap.parse_args(argv)
     root = os.path.abspath(args.root)
     if not os.path.isdir(root):
@@ -1256,6 +1262,11 @@ def main(argv=None):
         print(f"{len(findings)} time-pinned in {nfiles} files (sleep {counts['sleep']}, "
               f"elapsed-assert {counts['elapsed-assert']}, test-cap {counts['test-cap']}, "
               f"wait-cap {counts['wait-cap']}); {len(unread)} unread" + (f"; kept {kept_total}" if kept_total else ""))
+    if args.gate:
+        # A wait-cap or a test-cap is a hang guard the owner keeps (item 345), so it never fails the gate.
+        if any(f["category"] in GATE_FAILS for f in findings):
+            return 1
+        return 2 if unread else 0
     if findings:
         return 1
     return 2 if unread else 0
