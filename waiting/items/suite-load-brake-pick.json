@@ -1,5 +1,6 @@
 {
   "added": "2026-11-18T15:23:13-06:00",
+  "closed": "2026-11-18T15:46:31-06:00",
   "context": "Goal: several full test suites running at once stop slowing each other down.\nProblem (rule): a fixed limit goes against your ruling of no fixed numbers (22 Oct, and 12:54 CST on 11 Nov), so the way the brake should count is your call.\nBased on (read): the tile-windows session's report you forwarded: 3 to 5 suites at once turned a 9-minute run into 16 to 18 minutes (not re-read by triage).\nDeparts from: main \u2014 the load brake reads memory and disk only \u2014 it also refuses a new suite start while the machine reads busy.\nWaiting on: nothing is stopped; the consultant builds step suite-load-brake on your answer.",
   "home": "step suite-load-brake",
   "kind": "decision",
@@ -33,6 +34,8 @@
   "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ)",
   "recommended": "a",
   "ref": "consultant message 15:23 CST Nov 18, from your 14:54 CST review list (feedback from the local tile-windows session)",
+  "replied": "2026-11-18T15:46:31-06:00",
+  "reply": "Closed on your pick c (15:46 CST, in the consultant's chat): no change to the load brake. Step suite-load-brake is set to dropped. The 9 to 18 minute slowdowns from parallel suites stay.",
   "repo": "shivinate7/claude-settings",
   "short": "Load brake: stop parallel suites",
   "shown": [
@@ -52,7 +55,7 @@
       "label": "Nothing"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "How should the machine's load brake stop several full test suites from slowing each other?",
   "why": "a follows your no-fixed-numbers ruling; b breaks it and c leaves the slowdown. Recommended by the consultant, not owner-typed."
 }
