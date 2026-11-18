@@ -53,6 +53,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | skill `ios-apps` | no model pin; runs on the caller's model | none |
 | skill `roadmap` | no model pin; runs on the caller's model | none |
 | skill `waiting-page` | no model pin; runs on the caller's model | none |
+| skill `verify-hooks` | no model pin; runs on the caller's model | none |
 | cloud routines | sonnet | default |
 | Claude GitHub Action, if added | haiku | xhigh |
 | teammates, Workflow `agent()` | the role table, by `agentType` | the role table |
