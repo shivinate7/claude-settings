@@ -17,7 +17,7 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
    read. Code outside main's page, other than the host's document skeleton, is `behind`. Then it prints one
    `wait:` line per open item with `waits` (`ended`, `waiting` or `unknown`), and one `waiting` lane line per open item with
    `lane` and `lastAnswer` and no `waits`. Last, one `kept-answer:` line per closed item whose `answers/<id>` is still kept
-   (never an open item, an arbiter ruling, a park answer or a routed closed item). A closed item with `waits` gets a line that says it is closed with waits. The exit code stays the page's.
+   (never an arbiter ruling, a park answer or a routed closed item; an open item only when its answer is older than its `added`). A closed item with `waits` gets a line that says it is closed with waits; an open item with an older answer gets a line that says it is open. The exit code stays the page's.
 3. Keep a copy of the page in the repo, from the same file ("Keep a copy in the repo"). Do it before any
    republish, so the copy holds the page as it was.
 4. Before any republish, check the pictures of the open items, against the file about to be published (`<out>`, the `--write` output of
@@ -62,8 +62,8 @@ live page.
    the JSON of `page/designData.json`. Write each `<` as `\u003c`, so no string can close the script. Publish
    it to the new URL, as "Keep the page on main's code" step 4 says.
 6. Read the new page's items back. Their count must equal the count of files in the copy's `items` folder.
-7. Write the new URL into the repo's extras file, in a pull request. Set the `url` of the `waiting-page` role entry
-   in `artifacts`. If the repo has no such entry, set the `waiting-page` key.
+7. Write the new URL into the repo's extras file, in a pull request. Write the account's link in the `links`
+   of the `waiting-page` role entry in `artifacts`, never a `url` field. If the repo has no such entry, set the `waiting-page` key.
 
 ## Merge a copy into a live page
 

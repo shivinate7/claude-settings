@@ -57,7 +57,7 @@ def route_flag(tool, tool_input):
 
 def main():
     try:
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
         import shared_names
         data = json.loads(sys.stdin.read() or "{}")
         if not isinstance(data, dict):

@@ -13,6 +13,7 @@ Output names pinned (the `scope` job re-exports them as job outputs):
   LINT_FLAGS lint_red_run, lint_plan_refuter, lint_ruling_kind, lint_comment_narration (the four pull-request lint steps of
              the `checks` job; LintStepScope and LintStepWorkflow pin them)
   records_only_skip  true exactly when the records-only shortcut forced the 13 flags off (RecordsOnlyPush pins it)
+  DOC_FLAGS  doc_decisions, doc_rules, doc_skills, doc_agents, doc_glossary, doc_map, doc_other, doc_any (DocGroups pins them)
 
 Run with:  python3 lint/test_ci_scope.py -v
 """
@@ -64,9 +65,10 @@ REAL_GUARD_INPUTS = "real"  # run()'s guard_inputs default: the repo's own list 
 
 
 def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref="", green=None,
-        green_sibling=False, green_head=None, contents=None, facts=None, merged=None, guard_inputs=REAL_GUARD_INPUTS):
+        green_sibling=False, green_head=None, contents=None, facts=None, merged=None, moves=None, guard_inputs=REAL_GUARD_INPUTS):
     """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit. `head_ref` is HEAD_REF,
-    empty when not given, so no HEAD_REF of the caller's environment reaches the script.
+    empty when not given, so no HEAD_REF of the caller's environment reaches the script. `moves` maps an old path to its new
+    one, or to None for a delete: the old path is in the base, and a move keeps the content, so git sees a rename.
     `guard_inputs` is the text of .github/guard-inputs.txt in the base: the repo's own list by default (none when the repo has
     no list yet), a text in its place, or None for no list at all (the gate's unreadable case).
     `green` (a list of paths) is the pull request's earlier head, committed before the head commit, so the whole diff against
@@ -79,6 +81,7 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
     (git diff --name-only --no-renames GREEN_HEAD HEAD), `delta_pr_head` (the same to the head commit) and `ancestor`
     (GREEN_HEAD is an ancestor of HEAD)."""
     contents = contents or {}
+    moves = moves or {}
     with tempfile.TemporaryDirectory(dir=RUN_DIR) as d:
         git(d, "init", "-q")
         git(d, "config", "user.email", "t@t")
@@ -99,12 +102,17 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
         if guard_inputs is not None:
             os.makedirs(os.path.join(d, ".github"), exist_ok=True)
             open(os.path.join(d, GUARD_INPUTS_REL), "w").write(guard_inputs)
-        for p in existing:  # in the base commit, so the head commit modifies them
+        for p in list(existing) + list(moves):  # in the base commit, so the head commit modifies, moves or deletes them
             os.makedirs(os.path.dirname(os.path.join(d, p)), exist_ok=True)
             open(os.path.join(d, p), "w").write("old\n")
         git(d, "add", "-A")
         git(d, "commit", "-qm", "base")
         sha = git(d, "rev-parse", "HEAD")
+        for old, new in moves.items():
+            os.remove(os.path.join(d, old))
+            if new is not None:
+                os.makedirs(os.path.dirname(os.path.join(d, new)), exist_ok=True)
+                open(os.path.join(d, new), "w").write("old\n")
         def write(names):
             for p in names:
                 full = os.path.join(d, p)
@@ -444,10 +452,22 @@ class Scope(unittest.TestCase):
                 self.assertEqual(run([p]).get("mods"), "true")
         self.assertEqual(run(["README.md", "mods/plain-diff/check.mjs"]).get("mods"), "true")
 
-    def test_a_mods_only_diff_sets_the_mod_jobs_and_no_other_flag(self):
+    # A non-.md path under mods/ also sets `code`: the whole-tree readers (retired names, retired repo, glossary, hook catalog) run on
+    # `code` or a doc flag, so a mods-only pull request must start them. A .md path under mods/ keeps `code` off.
+    def test_a_mods_only_diff_sets_the_mod_jobs_code_and_no_other_flag(self):
         got = run(["mods/plain-diff/check.mjs"])
-        self.assertFlags(got, want_true=["mods"] + self.MOD_JOBS,
-                         want_false=[n for n in ALL if n not in ["mods"] + self.MOD_JOBS])
+        self.assertFlags(got, want_true=["mods", "code"] + self.MOD_JOBS,
+                         want_false=[n for n in ALL if n not in ["mods", "code"] + self.MOD_JOBS])
+
+    def test_a_non_md_mods_path_sets_code(self):
+        for p in ("mods/x/y/z.mjs", "mods/x/data.json", "mods/x/y/check.test.mjs"):
+            with self.subTest(path=p):
+                self.assertEqual(run([p])["code"], "true", f"{p} does not set code, so the whole-tree readers skip it")
+
+    def test_a_md_path_under_mods_keeps_code_off(self):
+        for p in ("mods/x/README.md", "mods/x/y/notes.md"):
+            with self.subTest(path=p):
+                self.assertEqual(run([p])["code"], "false", f"{p} sets code")
 
     def test_a_docs_only_diff_leaves_the_mods_flag_off(self):
         self.assertEqual(run(["README.md", "decisions/some-record.md"]).get("mods"), "false")
@@ -468,7 +488,7 @@ class Scope(unittest.TestCase):
     def test_each_mods_arm_starts_the_windows_and_macos_jobs(self):
         for p in self.MOD_ARMS:
             with self.subTest(path=p, edit=True):
-                code_arm = p.startswith("lint/") or p == ".gitignore"
+                code_arm = p.startswith("lint/") or (p.startswith("mods/") and not p.endswith(".md")) or p == ".gitignore"
                 want = {"mods", "checks_windows", "checks_macos"} | ({"code"} if code_arm else set())
                 self.assertEqual(self.true_set(run([p], existing=[p])), want,
                                  msg=f"{p}: the mods arm must start the CI step and both mod jobs, and keep code")
@@ -760,15 +780,18 @@ class RecordsOnlyPush(unittest.TestCase):
         keep = list(LINT_FLAGS)
         self.assertEqual(differing(got, whole, keep), [], f"a lint flag moved for a hand-edited page: {got}")
 
-    # A push never reads GREEN_HEAD: every flag is on, as it was before the change.
-    def test_records_only_push_event_runs_everything(self):
+    # A push past a fully green head skips the same 13 flags as a pull request. Ruling 830 c (every job on a records-only
+    # push after a green head), widened by item 857 pick b (19:48 CST Nov 15). Named failure: a records-only push keeps a job
+    # flag on, so its job still runs.
+    # The delta is asserted before the flags (P7).
+    def test_records_only_push_after_green_head_turns_the_jobs_off(self):
         facts = {}
         got = run([self.RECORDS], green=self.CODE, event="push", facts=facts)
+        self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
         self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta is not docs/records.md alone: {facts}")
-        for n in JOB_FLAGS + DERIVED_FLAGS + STEP_FLAGS + list(LINT_FLAGS):
-            self.assertEqual(got.get(n), "true", f"a push runs {n} whatever GREEN_HEAD says: {got}")
-        self.assertEqual(got.get("mutation_report"), "true", f"a push turns mutation_report on: {got}")
-        self.assertSkipFlag(got, False)
+        for n in self.OFF:
+            self.assertEqual(got.get(n), "false", f"{n} stays on after a records-only push past a green head: {got}")
+        self.assertSkipFlag(got, True)
 
     # An empty delta (no commit past GREEN_HEAD) is not records-only, so the whole PR diff decides.
     def test_records_only_empty_delta_runs_as_before(self):
@@ -846,15 +869,289 @@ class RecordsOnlyPush(unittest.TestCase):
         self.assertSkipFlag(got, False)
         self.assertEqual(got.get("mutation_report"), "true", f"a batch pull request with no green head turns mutation_report off: {got}")
 
-    # The control: a push never takes the shortcut, so mutation_report is on for a push even with GREEN_HEAD set. The scope
-    # is asserted before the flag (P7).
-    def test_records_only_mutation_report_push_with_green_head_is_true(self):
+    # Ruling 830 c, widened by item 857 pick b (19:48 CST Nov 15): a records-only push past a green head turns
+    # mutation_report off too. Named failure: the
+    # mutation-report job starts on a records-only push. The scope is asserted before the flag (P7).
+    def test_records_only_push_after_green_head_turns_mutation_report_off(self):
         facts = {}
         got = run([self.RECORDS], green=self.CODE, event="push", facts=facts)
         self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
         self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta is not docs/records.md alone: {facts}")
+        self.assertSkipFlag(got, True)
+        self.assertEqual(got.get("mutation_report"), "false", f"a records-only push past a green head turns mutation_report on: {got}")
+
+    # Controls for the wider skip: a push with no earlier green head, or with a second delta path, runs every
+    # flag as before. Named failure: the skip reads a GREEN_HEAD or a delta it must not.
+    def test_records_only_push_with_no_earlier_green_head_runs_everything(self):
+        facts = {}
+        got = run([self.RECORDS], green=self.CODE, green_head="", event="push", facts=facts)
+        self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta is not docs/records.md alone: {facts}")
         self.assertSkipFlag(got, False)
-        self.assertEqual(got.get("mutation_report"), "true", f"a push with GREEN_HEAD set turns mutation_report off: {got}")
+        for n in JOB_FLAGS + DERIVED_FLAGS + STEP_FLAGS:
+            self.assertEqual(got.get(n), "true", f"a push with no green head runs {n} as before: {got}")
+        self.assertEqual(got.get("mutation_report"), "true", f"a push with no green head turns mutation_report off: {got}")
+
+    def test_records_only_push_with_a_second_path_runs_everything(self):
+        other = "hooks/extra.py"
+        facts = {}
+        got = run([self.RECORDS, other], green=self.CODE, event="push", facts=facts)
+        self.assertEqual(facts.get("delta"), sorted([self.RECORDS, other]), f"scope: the delta is not the two paths: {facts}")
+        self.assertSkipFlag(got, False)
+        for n in JOB_FLAGS + DERIVED_FLAGS + STEP_FLAGS:
+            self.assertEqual(got.get(n), "true", f"a push with a second delta path runs {n} as before: {got}")
+
+    # A schedule and a dispatch never take the shortcut, whatever the delta and GREEN_HEAD: the nightly run and a manual run keep
+    # every job on. Named failure: the wider skip reaches a run that is neither a push nor a pull request.
+    def test_records_only_schedule_and_dispatch_run_everything(self):
+        for event in ("schedule", "workflow_dispatch"):
+            with self.subTest(event=event):
+                facts = {}
+                got = run([self.RECORDS], green=self.CODE, event=event, facts=facts)
+                self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta is not docs/records.md alone: {facts}")
+                self.assertSkipFlag(got, False)
+                for n in JOB_FLAGS + DERIVED_FLAGS + STEP_FLAGS:
+                    self.assertEqual(got.get(n), "true", f"a {event} run turns {n} off: {got}")
+
+    # The records-only skip drops the 13 job and suite flags and keeps the doc_* flags: the Hook catalog, Glossary and Retired repo
+    # steps read them on a records-only push. The facts and the skip are read before the doc flags (P7).
+    def test_records_only_skip_keeps_the_doc_flags(self):
+        whole = self.whole_pr(self.CODE + [self.RECORDS])
+        self.assertEqual(whole.get("code"), "true", f"scope: the whole PR diff must turn code on: {whole}")
+        self.assertEqual(whole.get("doc_any"), "true", f"scope: the whole PR diff must set doc_any: {whole}")
+        facts = {}
+        got = run([self.RECORDS], green=self.CODE, facts=facts)
+        self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+        self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta from GREEN_HEAD to HEAD is not docs/records.md alone: {facts}")
+        self.assertSkipFlag(got, True)
+        self.assertEqual(differing(got, whole, DOC_FLAGS), [], f"the records-only skip moved a doc flag off the whole PR diff: {got}")
+
+
+# The job-level half of the wider skip. A job that holds its steps back with a step-level if still starts a runner, so the skip
+# is read where a job starts: its job-level if, evaluated on the outputs the scope job wrote for the run. _IfParser reads the
+# forms checks.yml's job-level ifs use (names, string literals, ==, !=, !, &&, ||, parentheses, always(), cancelled(),
+# success()). Any other text fails the case; it never reads as true.
+_IF_TOKEN = re.compile(r"==|!=|&&|\|\||\(|\)|!|'[^']*'|[A-Za-z_][\w.\-]*(?:\(\))?")
+_IF_FUNCTIONS = {"always()": True, "cancelled()": False, "success()": True}
+
+
+def _as_text(value):
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def _truthy(value):
+    return value if isinstance(value, bool) else _as_text(value) != ""
+
+
+class _IfParser:
+    """Recursive descent over one if: expression, without its ${{ }} wrapper. Precedence as GitHub's: ! binds first, then
+    == and !=, then &&, then ||. A name the env does not hold reads as empty, as a missing scope output does."""
+
+    def __init__(self, src, env):
+        self.toks = _IF_TOKEN.findall(src)
+        if re.sub(r"\s+", "", src) != "".join(self.toks):
+            raise ValueError(f"an if: form this reader does not know: {src!r}")
+        self.env = env
+        self.i = 0
+
+    def peek(self):
+        return self.toks[self.i] if self.i < len(self.toks) else None
+
+    def take(self):
+        tok = self.peek()
+        if tok is None:
+            raise ValueError("an if: ends early")
+        self.i += 1
+        return tok
+
+    def parse(self):
+        value = self.disjunction()
+        if self.peek() is not None:
+            raise ValueError(f"an if: has text after its end: {self.peek()!r}")
+        return _truthy(value)
+
+    # Both operands are parsed before they combine: a short-circuit would leave the right side's tokens unread.
+    def disjunction(self):
+        value = self.conjunction()
+        while self.peek() == "||":
+            self.take()
+            right = self.conjunction()
+            value = _truthy(value) or _truthy(right)
+        return value
+
+    def conjunction(self):
+        value = self.comparison()
+        while self.peek() == "&&":
+            self.take()
+            right = self.comparison()
+            value = _truthy(value) and _truthy(right)
+        return value
+
+    def comparison(self):
+        value = self.unary()
+        if self.peek() in ("==", "!="):
+            op = self.take()
+            same = _as_text(value).lower() == _as_text(self.unary()).lower()
+            return same if op == "==" else not same
+        return value
+
+    def unary(self):
+        if self.peek() == "!":
+            self.take()
+            return not _truthy(self.unary())
+        return self.primary()
+
+    def primary(self):
+        tok = self.take()
+        if tok == "(":
+            value = self.disjunction()
+            if self.take() != ")":
+                raise ValueError("an if: has an open parenthesis")
+            return value
+        if tok.startswith("'"):
+            return tok[1:-1]
+        if tok in _IF_FUNCTIONS:
+            return _IF_FUNCTIONS[tok]
+        if tok.endswith("()"):
+            raise ValueError(f"an if: calls {tok}, which this reader does not know")
+        return self.env.get(tok, "")
+
+
+def if_env(outs, event):
+    """The names an if: reads: the event, the pull request's draft flag, and each scope output of the run."""
+    env = {"github.event_name": event, "github.event.pull_request.draft": False if event == "pull_request" else None}
+    env.update({f"needs.scope.outputs.{name}": value for name, value in outs.items()})
+    return env
+
+
+def job_names(text):
+    """The job keys of checks.yml, in file order: the lines under `jobs:` that open a job."""
+    return re.findall(r"^  ([A-Za-z0-9_-]+):\s*$", text.split("\njobs:\n", 1)[-1], re.M)
+
+
+def job_if(text, job):
+    """A job's job-level if: expression, without its ${{ }} wrapper. None when the job has no job-level if."""
+    m = re.search(r"^    if: (.*)$", job_block(text, job) or "", re.M)
+    if m is None:
+        return None
+    raw = m.group(1).strip()
+    wrapped = re.fullmatch(r"\$\{\{(.*)\}\}", raw)
+    return (wrapped.group(1) if wrapped else raw).strip()
+
+
+def job_runs(expr, outs, event):
+    """True when the job starts on this run: it has no job-level if, or its if: is true on the run's outputs."""
+    return True if expr is None else _IfParser(expr, if_env(outs, event)).parse()
+
+
+def running_jobs(text, outs, event):
+    """The jobs of checks.yml that start on this run, sorted."""
+    return sorted(job for job in job_names(text) if job_runs(job_if(text, job), outs, event))
+
+
+def rollup_needs(text):
+    """The jobs all-jobs-passed lists under needs:, in file order."""
+    m = re.search(r"^    needs:\n((?:      - [\w-]+\n)+)", job_block(text, "all-jobs-passed") or "", re.M)
+    return re.findall(r"^      - ([\w-]+)$", m.group(1), re.M) if m else []
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class RecordsOnlyEveryJob(unittest.TestCase):
+    """The wider skip, ruling 830 c widened by item 857 pick b (19:48 CST Nov 15): a records-only run starts no job
+    except the decision jobs, which decide or read the skip, and the rollup on a pull request. A step-level skip still starts
+    a runner, so each job's job-level if is read on the outputs ci-scope.sh wrote for a real records-only run."""
+    RECORDS = RecordsOnlyPush.RECORDS
+    CODE = RecordsOnlyPush.CODE
+    EARLIER = ["README.md"]  # an earlier head's change that no job reads: a markdown file, not records
+    EVENTS = ("pull_request", "push")
+    # Decide the skip (scope), or read it on every run (the two skip jobs). The rollup joins them on a pull request only.
+    DECISION_JOBS = ("scope", "nightly-skip", "push-skip")
+    # A records change beside one of these must start every job the file alone starts.
+    CONTROL_EXTRAS = (
+        ("a code file", "hooks/extra.py"),
+        ("a test file", "lint/test_ci_scope.py"),
+        ("a guard file", "hooks/guard.py"),
+        ("a workflow file", ".github/workflows/checks.yml"),
+        ("the scope script", ".github/scripts/ci-scope.sh"),
+    )
+
+    def workflow(self):
+        path, why = job_workflow(os.path.join(HERE, ".."), "checks")
+        if why:
+            self.fail(why)
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+
+    # Named failure: a job starts on a records-only run. One subtest per job and event, so each job reports its own if:.
+    # The delta is asserted before the jobs (P7).
+    def test_every_job_but_the_decision_jobs_is_off_on_a_records_only_run(self):
+        text = self.workflow()
+        self.assertIn("\njobs:\n", text, "checks.yml has no jobs: section")
+        jobs = job_names(text)
+        self.assertIn("checks", jobs, f"checks.yml names no checks job: {jobs}")
+        for event in self.EVENTS:
+            with self.subTest(event=event):
+                facts = {}
+                got = run([self.RECORDS], green=self.CODE, event=event, facts=facts)
+                self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+                self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta is not docs/records.md alone: {facts}")
+                skip = {*self.DECISION_JOBS, "all-jobs-passed"}
+                for job in jobs:
+                    if job in skip:
+                        continue
+                    with self.subTest(job=job):
+                        expr = job_if(text, job)
+                        self.assertFalse(job_runs(expr, got, event),
+                                         f"{job} starts on a records-only {event} run; its job-level if is {expr or 'absent'}")
+
+    # Control: the decision jobs and, on a pull request, the rollup start on a records-only run.
+    def test_the_decision_jobs_and_the_rollup_start_on_a_records_only_run(self):
+        text = self.workflow()
+        for event in self.EVENTS:
+            with self.subTest(event=event):
+                facts = {}
+                got = run([self.RECORDS], green=self.CODE, event=event, facts=facts)
+                self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+                self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta is not docs/records.md alone: {facts}")
+                jobs = list(self.DECISION_JOBS) + (["all-jobs-passed"] if event == "pull_request" else [])
+                for job in jobs:
+                    with self.subTest(job=job):
+                        expr = job_if(text, job)
+                        self.assertTrue(job_runs(expr, got, event),
+                                        f"{job} does not start on a records-only {event} run; its job-level if is {expr}")
+
+    # Control: the reader reads the wider skip's form as off when records_only_skip is 'true' and on when it is
+    # 'false', and refuses a form it does not know rather than reading it as true.
+    def test_the_if_reader_reads_the_records_only_skip_and_refuses_an_unknown_form(self):
+        expr = "needs.scope.outputs.records_only_skip != 'true'"
+        self.assertFalse(_IfParser(expr, {"needs.scope.outputs.records_only_skip": "true"}).parse(),
+                         "the reader reads a records-only skip as on")
+        self.assertTrue(_IfParser(expr, {"needs.scope.outputs.records_only_skip": "false"}).parse(),
+                        "the reader reads a run with no records-only skip as off")
+        with self.assertRaises(ValueError, msg="the reader accepts a form it does not know"):
+            _IfParser("github.event_name == 'push' ? 'a' : 'b'", {}).parse()
+
+    # Controls: a records change beside another file starts the jobs that file starts alone, and a workflow
+    # change beside records starts every job the rollup needs. The delta is asserted before the jobs (P7).
+    def test_a_records_change_beside_another_file_starts_the_jobs_that_file_starts_alone(self):
+        text = self.workflow()
+        for label, extra in self.CONTROL_EXTRAS:
+            with self.subTest(extra=label):
+                facts = {}
+                got = run([self.RECORDS, extra], green=self.EARLIER, facts=facts)
+                self.assertEqual(facts.get("delta"), sorted([self.RECORDS, extra]),
+                                 f"scope: the delta is not the records file and {extra}: {facts}")
+                self.assertEqual(got.get("records_only_skip"), "false", f"scope: a records change beside {extra} reads as records-only: {got}")
+                alone = running_jobs(text, run(self.EARLIER + [self.RECORDS, extra]), "pull_request")
+                together = running_jobs(text, got, "pull_request")
+                self.assertIn("checks", together, f"the lint job does not start for a records change beside {extra}: {together}")
+                self.assertEqual(together, alone, f"a records change beside {extra} starts other jobs than {extra} alone: {together}")
+                if extra == ".github/workflows/checks.yml":
+                    missing = sorted(set(rollup_needs(text)) - set(together))
+                    self.assertEqual(missing, [], f"a workflow change beside records leaves rollup jobs off: {missing}")
 
 
 # The mod phase must run each mods check script (mods/**/check.mjs), not only *.test.mjs. The script cds to its own
@@ -1089,6 +1386,164 @@ class LintStepWorkflow(unittest.TestCase):
         self.assertEqual(conjuncts(raw), {"github.event_name == 'pull_request'"}, f"the Silent undo check's if: is {raw!r}")
 
 
+# The doc groups. ci-scope.sh sets one doc_<group> flag per group, and a docs-only step's scope condition reads the flags of the
+# groups it reads (lint/test_checks_step_scope.py DOC_STEPS). The flags are not job flags: no doc flag turns a job on.
+DOC_GROUPS = ("decisions", "rules", "skills", "agents", "glossary", "map", "other", "any")
+DOC_FLAGS = ["doc_" + g for g in DOC_GROUPS]
+# Each docs-only path with the groups it sets. Explicit, so the script is checked against this table, not against doc_groups.
+DOC_CASES = [
+    ("docs/decisions/x.md", {"decisions", "any"}),
+    ("docs/decisions/sub/x.md", {"decisions", "any"}),  # a nested path: bash's `*` matches `/`, so the arm still holds
+    ("skills/foo/SKILL.md", {"skills", "any"}),
+    ("skills/a/b/c.md", {"skills", "any"}),
+    ("agents/x.md", {"agents", "any"}),
+    ("agents/x/y.md", {"any"}),  # the empty agents/*/*.md arm: deleted, it falls to agents/*.md and sets doc_agents
+    ("CLAUDE.md", {"rules", "any"}),
+    (".claude/CLAUDE.md", {"rules", "any"}),
+    (".claude/rules/x.md", {"any"}),  # no group arm names it: `any` only
+    ("AGENTS.md", {"any"}),  # no group arm names it: `any` only
+    ("output-styles/shiv-stylisms.md", {"rules", "any"}),
+    ("GLOSSARY.md", {"glossary", "any"}),
+    ("README.md", {"glossary", "any"}),
+    ("docs/map/x.md", {"map", "any"}),
+    ("docs/debts/x.md", {"other", "any"}),
+    ("docs/notes.md", {"other", "any"}),
+    ("mods/x/README.md", {"other", "any"}),
+    ("mods/x/y/README.md", {"any"}),  # the empty mods/*/*/*.md arm: deleted, it falls to mods/*/README.md and sets doc_other
+    ("unlisted/x.md", {"any"}),
+]
+
+
+def doc_groups(path):
+    """The doc groups a path sets, by the rules of ci-scope.sh: every .md is in `any`, and a path in no other group sets `any` only.
+    Read by lint/test_checks_step_scope.py to check the names a step's entry reads against the flags its `if:` reads."""
+    if not path.endswith(".md"):
+        return set()
+    g = {"any"}
+    if path.startswith("docs/decisions/"):
+        g.add("decisions")
+    elif path in ("CLAUDE.md", ".claude/CLAUDE.md") or path.startswith("output-styles/"):
+        g.add("rules")
+    elif path.startswith("skills/"):
+        g.add("skills")
+    elif path.startswith("agents/") and "/" not in path[len("agents/"):]:
+        g.add("agents")
+    elif path in ("GLOSSARY.md", "README.md"):
+        g.add("glossary")
+    elif path.startswith("docs/map/"):
+        g.add("map")
+    elif path.startswith("docs/") or (path.startswith("mods/") and path.count("/") == 2 and path.endswith("/README.md")):
+        g.add("other")
+    return g
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class DocGroups(unittest.TestCase):
+    """The doc_* flags: each exists, is true for its paths and false for the others, and leaves `code` and every job flag alone.
+    Each case is an edit to a tracked file (existing), so a new file under a landed dir (agents/, skills/) sets code by its own rule."""
+
+    def assertDocFlags(self, got, want, path):
+        for f in DOC_FLAGS:
+            self.assertIn(f, got, f"output {f} missing for {path}: {got}")
+        for g in DOC_GROUPS:
+            self.assertEqual(got["doc_" + g], "true" if g in want else "false", f"doc_{g} for {path}: {got}")
+
+    def assertJobFlagsOff(self, got, path):
+        for n in ALL:
+            self.assertIn(n, got, f"output {n} missing for {path}: {got}")
+            self.assertEqual(got[n], "false", f"{n} set by {path}: {got}")
+
+    def assertDocFlagsOn(self, got, what):
+        for f in DOC_FLAGS:
+            self.assertIn(f, got, f"output {f} missing for {what}: {got}")
+            self.assertEqual(got[f], "true", f"{f} for {what}: {got}")
+
+    def test_each_doc_flag_is_true_for_its_paths_and_false_for_the_rest(self):
+        for path, want in DOC_CASES:
+            with self.subTest(path=path):
+                self.assertDocFlags(run([path], existing=[path]), want, path)
+
+    def test_a_decision_doc_sets_doc_decisions_and_doc_any_only(self):
+        got = run(["docs/decisions/x.md"], existing=["docs/decisions/x.md"])
+        self.assertDocFlags(got, {"decisions", "any"}, "docs/decisions/x.md")
+
+    def test_a_docs_notes_change_sets_doc_other_and_doc_any_only(self):
+        got = run(["docs/notes.md"], existing=["docs/notes.md"])
+        self.assertDocFlags(got, {"other", "any"}, "docs/notes.md")
+
+    # A move keeps the content, so git reads it as a rename. --no-renames lists the old path, which sets doc_decisions; the new
+    # path sets only doc_any. Named failure: a diff that shows only the new name of a move sets no doc_decisions.
+    def test_a_move_out_of_docs_decisions_sets_doc_decisions_through_the_old_path(self):
+        path = "docs/decisions/x.md"
+        got = run([], moves={path: "unlisted/moved.md"})  # no `paths`: the moved file keeps its content
+        self.assertDocFlags(got, {"decisions", "any"}, f"{path} moved to unlisted/moved.md")
+        self.assertJobFlagsOff(got, f"{path} moved to unlisted/moved.md")
+
+    # Named failure: a diff that drops deleted files (--diff-filter) sets no doc flag for a decision doc that is removed.
+    def test_a_delete_of_a_decision_doc_sets_doc_decisions(self):
+        path = "docs/decisions/x.md"
+        got = run([], moves={path: None})
+        self.assertDocFlags(got, {"decisions", "any"}, f"deleted {path}")
+        self.assertJobFlagsOff(got, f"deleted {path}")
+
+    # Control, the fail-safe: the doc arms match a lower-case .md only. An upper-case .MD name falls to the catch-all arm, so every
+    # flag is on. That is a false alarm, never a skipped step. It is not a DOC_CASES row: that loop expects a docs-only change.
+    def test_an_upper_case_md_name_takes_the_fail_safe_arm(self):
+        path = "docs/decisions/x.MD"
+        got = run([path], existing=[path])
+        self.assertDocFlags(got, set(DOC_GROUPS), path)
+        for n in ALL:
+            self.assertEqual(got.get(n), "true", f"{n} is off for {path}, so the catch-all arm no longer covers it: {got}")
+
+    def test_a_new_decision_doc_sets_its_flags_and_no_job_flag(self):
+        # docs/decisions is in no landed dir, so a new file there sets nothing but its doc flags.
+        got = run(["docs/decisions/new.md"])
+        self.assertDocFlags(got, {"decisions", "any"}, "docs/decisions/new.md")
+        self.assertJobFlagsOff(got, "docs/decisions/new.md")
+
+    def test_every_doc_flag_is_true_on_push_schedule_and_dispatch(self):
+        for ev in ("push", "schedule", "workflow_dispatch"):
+            with self.subTest(event=ev):
+                self.assertDocFlagsOn(run(["docs/decisions/x.md"], event=ev), f"event {ev}")
+
+    def test_every_doc_flag_is_true_on_an_unreadable_diff(self):
+        for base in ("0" * 40, ""):
+            with self.subTest(base=base):
+                self.assertDocFlagsOn(run(["docs/decisions/x.md"], base=base), "an unreadable diff")
+
+    def test_every_doc_flag_is_true_when_the_scope_script_or_the_workflow_changes(self):
+        for p in (".github/scripts/ci-scope.sh", ".github/workflows/checks.yml"):
+            with self.subTest(path=p):
+                self.assertDocFlagsOn(run([p]), p)
+
+    def test_a_docs_only_change_leaves_code_false_whatever_its_doc_flags(self):
+        for path, _ in DOC_CASES:
+            with self.subTest(path=path):
+                got = run([path], existing=[path])
+                self.assertIn("code", got, got)
+                self.assertEqual(got["code"], "false", f"{path} set code: {got}")
+        # Control: a code change still sets code, so the check above can fail.
+        self.assertEqual(run(["hooks/guard.py"])["code"], "true")
+
+    def test_a_docs_only_change_turns_no_job_or_suite_flag_on(self):
+        for path in ("docs/decisions/x.md", "docs/notes.md"):
+            with self.subTest(path=path):
+                self.assertJobFlagsOff(run([path], existing=[path]), path)
+
+    # Empty state: a diff with no paths reads as unreadable, so every doc flag is on (the fail-safe).
+    def test_an_empty_diff_sets_every_doc_flag(self):
+        self.assertDocFlagsOn(run([]), "an empty diff")
+
+    # Full size: a diff of many docs files sets the union of their groups and no job flag. The three rule and agent files are
+    # edits (existing), since a new file under agents/ sets code by its own rule.
+    def test_a_full_size_docs_diff_sets_the_union_of_its_groups(self):
+        existing = ["agents/x.md", "CLAUDE.md", "docs/decisions/x.md"]
+        paths = [f"docs/notes/{i}.md" for i in range(60)] + existing
+        got = run(paths, existing=existing)
+        self.assertDocFlags(got, {"other", "decisions", "rules", "agents", "any"}, "a 63-file docs diff")
+        self.assertJobFlagsOff(got, "a 63-file docs diff")
+
+
 @unittest.skipUnless(BASH, "bash not on PATH")
 class MutationReport(unittest.TestCase):
     """The mutation_report output: on a pull request only from a `batch-` branch, and on every other event."""
@@ -1111,10 +1566,10 @@ GUARD_SHARDS = ("checks-windows-guard", "checks-windows-guard-2", "checks-window
 # Flags the old script sets true for SNAPSHOT_DIFFS, each run() with its default arguments. windows_guard is left out of the
 # comparison: it is the one output the gate adds. Recorded on the script before the gate existed.
 SNAPSHOT_DIFFS = [
-    (["docs/x.md"], {}, []),
-    (["README.md"], {}, []),
+    (["docs/x.md"], {}, ["doc_any", "doc_other"]),
+    (["README.md"], {}, ["doc_any", "doc_glossary"]),
     (["docs/records.md"], {"green": ["hooks/guard.py"]},
-     ["lint_comment_narration", "lint_plan_refuter", "lint_red_run", "records_only_skip"]),
+     ["doc_any", "doc_other", "lint_comment_narration", "lint_plan_refuter", "lint_red_run", "records_only_skip"]),
     (["hooks/guard.py"], {}, ["checks_guard", "checks_macos", "checks_windows", "checks_windows_rest", "checks_windows_rest_2",
                               "checks_windows_sweep", "code", "guard", "lint_comment_narration", "lint_plan_refuter",
                               "lint_red_run", "shell_macos", "shoot", "sweep"]),
@@ -1126,9 +1581,10 @@ SNAPSHOT_DIFFS = [
                              "lint_red_run", "sweep"]),
     (["merge/merge.py"], {}, ["checks_guard", "checks_macos", "checks_windows", "checks_windows_merge", "code", "guard",
                               "lint_comment_narration", "lint_red_run"]),
-    (["agents/builder.md"], {"existing": ["agents/builder.md"]}, []),
-    (["docs/decisions/agent-model-cap.md"], {"existing": ["docs/decisions/agent-model-cap.md"]}, ["lint_ruling_kind"]),
-    (["skills/impeccable/SKILL.md"], {"existing": ["skills/impeccable/SKILL.md"]}, []),
+    (["agents/builder.md"], {"existing": ["agents/builder.md"]}, ["doc_agents", "doc_any"]),
+    (["docs/decisions/agent-model-cap.md"], {"existing": ["docs/decisions/agent-model-cap.md"]},
+     ["doc_any", "doc_decisions", "lint_ruling_kind"]),
+    (["skills/impeccable/SKILL.md"], {"existing": ["skills/impeccable/SKILL.md"]}, ["doc_any", "doc_skills"]),
 ]
 
 

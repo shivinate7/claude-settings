@@ -19,7 +19,8 @@ def pl_opt(label, how, key="a", **more):
 
 
 def pl_item(**over):
-    item = {"id": WP_DOC, "kind": "decision", "status": "open", "title": "Merge home#374 yourself or wait?",
+    item = {"id": WP_DOC, "n": 928, "kind": "decision", "status": "open", "title": "Merge home#374 yourself or wait?",
+            "recommended": "b", "why": "Leaving it open costs nothing yet.",
             "context": "The home pull request is ready for review.", "options": [PL_BAD_OPT, PL_KEEP_OPT]}
     item.update(over)
     return with_stake({k: v for k, v in item.items() if v is not None})
@@ -27,7 +28,7 @@ def pl_item(**over):
 
 def pl_task(steps, links=None, **over):
     # The Why yours line keeps each case on the press-link rule; task-names-check reads it (TN_WHY).
-    task = {"id": WP_DOC, "kind": "task", "status": "open", "title": "Merge home#374", "steps": steps,
+    task = {"id": WP_DOC, "n": 928, "kind": "task", "status": "open", "title": "Merge home#374", "steps": steps,
             "links": links, "context": TN_WHY}
     task.update(over)
     return {k: v for k, v in task.items() if v is not None}

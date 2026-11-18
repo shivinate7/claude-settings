@@ -22,11 +22,14 @@ key. It never reuses main's.
    `waiting-page-colour` (#rrggbb) and `waiting-page-icon` (an .svg or .png path in the repo) first,
    then `docs/design/repo-colours.json`. Exit 2 means the colour is unknown: leave `brand` out. Never
    invent a colour. The page still checks each text colour for 4.5:1 contrast.
-4. Set the URL once: `python3 ~/.claude/lint/layout.py set-waiting-page <repo root> <url>`. It writes the
-   `waiting-page` key of the repo's extras file, `.claude/layout-extras.json`. Exit 0 wrote it. Exit 1 means
-   the key is already set: it prints the URL and writes nothing. Exit 2 means the URL is not an artifact
-   link, or the extras file cannot be read or written. The file alone does not mark the repo as rolled
-   out; that is its own key, `"rolled-out": true`, added only in the repo's roll-out.
+4. Set the URL: `python3 ~/.claude/lint/layout.py set-waiting-page <repo root> <url> <label>`. `label` is a
+   required, plain name for your Claude account, such as `current`, never an email. When the repo's extras file,
+   `.claude/layout-extras.json`, has a `waiting-page` role entry in `artifacts`, it sets that account's link in the
+   entry's `links`: it replaces the account's link, or adds one beside the others. With no such entry, it writes the
+   old `waiting-page` key once. Exit 0 wrote it. Exit 1 means nothing changed: the account's link names the same
+   artifact, or the old key is already set. It prints the URL and writes nothing. Exit 2 means the URL is not an
+   artifact link, the account is not a plain label, or the extras file cannot be read or written. The file alone
+   does not mark the repo as rolled out; that is its own key, `"rolled-out": true`, added only in the repo's roll-out.
 5. Check with `python3 ~/.claude/lint/layout.py waiting-page <repo root>`.
 
 A local session can write to the database (measured on the Mac, Oct 26). A Windows session is
@@ -40,10 +43,11 @@ The Status tab draws each phase id that its steps use, and a step with no phase 
 
 1. Build the roadmap block: `python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --block --out <block file>`
    (add `--live <file>` as the skill roadmap says). The live file's pull rows carry `createdAt` (GitHub's
-   `created_at`), `held` and `reviewLog`. A pull is `held` when the batch runner's hand-in or hold list names it.
+   `created_at`), `held` and `reviewLog`. Only the joint line (`stale_draft_pull`) reads `createdAt`.
+   A pull is `held` when the batch runner's hand-in or hold list names it.
    A pull is `reviewLog` when it has a posted review log. Both are JSON bools, omitted when false or unknown.
    Its item rows carry `lane` when the page item has one. Its `landedPulls` rows are the pull requests
-   closed in the last 14 days with the default branch as base, each with `number`, `branch`, `head` and `merged`. Exit 1 with `todo step with an open PR`
+   closed in the last 14 days with the default branch as base, each with `number`, `branch`, `head` and `merged`, and `replacedBy` on a pull the tool closed as replaced (the number in its newest pointer comment, `Replaced by #N`). Exit 1 with `todo step with an open PR`
    lines still writes a valid block: splice and publish as usual, then set each named step to `doing`. Exit 1
    with `stalled step:` lines does the same: splice, publish, then dispose each one (a step: set it `todo` or
    `done`, or write its `paused` field; an item: re-route it, close it, or resume its lane). The unknown
@@ -67,8 +71,8 @@ Page URL keys and the retired roadmap URL: skill `roadmap`, first paragraph.
 ## Update a repo's pages
 
 A batch that changes `page.html` republishes each waiting page this account can reach, before the
-batch report. The pages are the `waiting-page` keys of the repos' extras files, read by
-`live_pages()` in `~/.claude/lint/layout.py`.
+batch report. The pages are the first links of the waiting-page entries in the repos' extras files,
+else their old `waiting-page` keys, read by `live_pages()` in `~/.claude/lint/layout.py`.
 
 1. Fetch each page with `Artifact` action `read` into one folder, as `<artifact id>.html`. A page
    that cannot be read gets an empty `<artifact id>.unreadable`. A read that gives a summary, not

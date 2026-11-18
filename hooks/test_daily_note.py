@@ -408,6 +408,43 @@ class ReaderPathTests(NoteCase):
         short = "guard.log cannot be read (%s): its state is unknown." % err
         self.assert_short_head_kept(lines[0], short, tail, keep="unknown")
 
+    def linked_config(self):
+        """A config folder laid out as a cloud install lays it (decision install-hooks-whole): hooks/ and lint/ are
+        real folders whose files are links through .cs-current, a link to installs/<id>/, the one generation."""
+        cfg = self.scratch("claude")
+        gen = os.path.join(cfg, "installs", "20261115101010303")
+        os.makedirs(gen)
+        tracked_tree.copy_tracked(gen, "hooks", "lint")  # the note and every module it reaches
+        os.symlink(os.path.join("installs", os.path.basename(gen)), os.path.join(cfg, ".cs-current"))
+        for sub in ("hooks", "lint"):
+            os.makedirs(os.path.join(cfg, sub))
+            for name in sorted(os.listdir(os.path.join(gen, sub))):
+                os.symlink(os.path.join(cfg, ".cs-current", sub, name), os.path.join(cfg, sub, name))
+        return cfg
+
+    def test_a_note_run_through_a_generation_link_names_the_stable_reader_path(self):
+        # A refresh removes the generation a link resolves to, so the Read: path names the link's own folder, not
+        # the generation. The hook runs through its link, as a SessionStart hook runs it.
+        try:
+            self.config = self.linked_config()
+        except OSError as err:
+            self.skipTest("this platform cannot make the links a cloud install lays down: %s" % err)
+        hook = os.path.join(self.config, "hooks", "daily_note.py")
+        stable = os.path.join(self.config, "hooks")
+        self.require_file(hook)
+        self.assertTrue(os.path.islink(hook), "scope: the hook is not a link, so the run does not go through a generation")
+        self.assertNotEqual(os.path.realpath(hook), os.path.abspath(hook),
+                            "scope: the hook resolves to its own path, so there is no generation path to avoid")
+        self.assertTrue(os.path.isfile(reader_path(stable)), "scope: the stable reader path does not exist")
+        generation = os.path.normpath(os.path.join(os.path.dirname(os.path.realpath(hook)), "..", "lint",
+                                                   "guard_log_report.py"))
+        self.write_log(healthy_log() + [guard_crash(CRASH_AT)])
+        lines = self.failure_lines(self.run_note(MORNING, script=hook))
+        self.assertEqual(len(lines), 1, "want one crash line, got %r" % lines)
+        self.assertNotIn(os.path.normcase(generation), os.path.normcase(lines[0]),
+                         "the Read: path is the generation's copy, which a refresh removes: %r" % lines[0])
+        self.assert_names_reader(lines[0], stable)
+
 
 class CrashTests(NoteCase):
     def test_a_crash_in_the_note_exits_zero_with_one_stderr_line(self):
