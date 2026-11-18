@@ -1011,7 +1011,7 @@ def live_ledger(path, work):
     Every row of work["pulls"] gains `act`, `owner`, `ageHours` and `red`; `work` gains `ledgerAt` (the ledger's readAt, when it is a
     time), `ledgerWhy` (None, or why every act reads unknown: said once, for the list head, never on a row) and `laneWhy` (None, or why
     a draft reads `lane unknown`, shaped like ledgerWhy). A pull with no ledger row reads act `act unknown`, owner None; one whose row has
-    the wrong shape reads the same, with `actWhy` naming that. A draft whose ledger act is `lane round 1` is the parked mark: with the sessions list read,
+    the wrong shape reads the same, with `actWhy` naming that. A draft whose ledger act is the lane's first act (merge.py pr_next_act sets it for a draft) is the parked mark: with the sessions list read,
     no live lane holding its branch (live_lane_holds) reads act `no live lane`, owner `coordinator`, never red; with the sessions list
     unread, a session row skipped, or no branch on the draft, it reads act `lane unknown`, owner `unknown`. A ledger row with the wrong shape is added to `skipped`. A live file that gave
     no pulls list (work has no `pulls`) is left alone. The ledger comes from `merge --reviewed --json`; this reads the live file again

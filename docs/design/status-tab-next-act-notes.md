@@ -101,7 +101,7 @@ Deep links: `#s=live|lanes|stale`, `&red=mark|word`, `&why=row|head`, `&w=1440|8
   page's CSS. Fixed for the new lines only (`.live .prwhy`, the head's old acts-read time). Today's
   "Skipped, wrong shape" line keeps the same fault; it is out of this step.
 - The detector (`impeccable detect`) found nothing, on the mockup file or on the rendered live and
-  stale screens. The run was single-context: no sub-agent tool was exposed.
+  stale screens. The run was single-context: no agent tool was exposed.
 - `label_once.py` on the rendered screens: "working" twice (today's thread tags, data) and, in the
   stale state, "act unknown" nine times. Each row must read unknown, never blank (plan test case),
   so the per-row words stay; the reason sentence shows once with item 7's pick.
