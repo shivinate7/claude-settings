@@ -1,0 +1,1 @@
+- plain-merge-forms-span: the plain_merge_forms helper in merge/test_merge.py matches a span that holds both forms. Fix: match each form on its own. Not a hold.

@@ -367,6 +367,11 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
         self.assertEqual(problem, "", "%s: 1a the reason holds a session phrase or an order to the session: %r"
                          % (name, problem))
 
+    def check_correction_tail(self, name, reason):
+        tail = getattr(RG, "CORRECTION_TAIL", "")
+        self.assertTrue(tail, "%s: 1a report_guard holds no shared CORRECTION_TAIL constant" % name)
+        self.assertIn(tail, reason, "%s: 1a the refusal lacks the shared correction tail: %r" % (name, reason))
+
     def check_cites_record(self, name, reason):
         self.assertIn(CITE, reason, "%s: 1b the reason does not cite %s" % (name, CITE))
 
@@ -525,17 +530,17 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
                                  "3 the record holds no step heading and step line for the check %r" % name)
 
     def test_3_record_holds_the_correction_step_in_shared_tails(self):
-        # The refusals hold no correction text, so the one step that asks for the corrected lines lives in the record's
-        # shared tails. The section must exist first; the two phrases are then read inside it.
+        # Each reply refusal ends with report_guard.CORRECTION_TAIL. The record's shared
+        # tails must state that line. The section must exist first; the line is then read inside it.
         with open(RECORD, encoding="utf-8") as handle:
             record = handle.read()
         scope = re.search(r"(?m)^## Shared tails\n", record)
         self.assertTrue(scope, "3 the record has no Shared tails section")
         end = SECTION_END.search(record, scope.end())
         tails = record[scope.end():end.start() if end else len(record)].lower()
-        for phrase in trg.CORRECTION_STEP:
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, tails, "3 the record's Shared tails hold no correction step with %r" % phrase)
+        tail = getattr(RG, "CORRECTION_TAIL", "")
+        self.assertTrue(tail, "3 report_guard holds no shared CORRECTION_TAIL to find in the record")
+        self.assertIn(tail.lower(), tails, "3 the record's Shared tails hold no correction line with %r" % tail)
 
     def test_3_section_with_no_step_line_is_flagged(self):
         # A section that holds its heading and prose, and no step, is a problem. A section with a step is not.
@@ -549,6 +554,9 @@ def _case_1a(name):
     def test(self):
         reason, _ = self.refusal_for(name)
         self.check_no_session_problem(name, reason)
+        # A missing report asks for the report itself, so it gets no tail.
+        if name != "missing_report":
+            self.check_correction_tail(name, reason)
     return test
 
 

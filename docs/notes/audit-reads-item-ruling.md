@@ -1,0 +1,1 @@
+- audit-reads-item-ruling: triage's idle-lane audit called owner item 166's ruling missing from main, but item 166 was a one-time re-run, not a standing rule; the coordinator briefly planned a rebuild on that line. Fix: an audit reads the page item's own answer before it reports a ruling as not landed.

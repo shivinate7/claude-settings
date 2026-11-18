@@ -1,0 +1,1 @@
+- gh-write-ansi-c-quote: shlex fails open on `$'..'` bodies. Fix: on a shlex error in a gh command, refuse (fail closed) in cloud.

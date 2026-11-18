@@ -1,0 +1,1 @@
+- guard-inputs-trace-dir-opens: the traced seed holds absolute file opens from a Linux strace; it has no directory listings or git-object reads (package-lock.json was one such read, found in review). A new listing of a real-repo folder outside hooks/, agents/ and tests/guard/ would go unseen. No Windows trace exists. Round 3 review, 2026-11-15.

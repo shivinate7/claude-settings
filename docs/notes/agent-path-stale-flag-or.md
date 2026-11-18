@@ -1,0 +1,1 @@
+- agent-path-stale-flag-or: hooks/guard_merge.py brief_hit ORs the stale flag (set_session_tags after a record) across the main and agent files, so an agent's own get_session re-read cannot clear a flag raised in the main transcript; only the orchestrator's re-read clears it.

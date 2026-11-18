@@ -1,0 +1,1 @@
+- page-form-cost-line: the Cost line at feedback_guard.py:94-96 leaves out that layout.waiting_page runs up to two `git show` when the checkout has no extras file (lint/layout.py:345-357).

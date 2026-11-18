@@ -1,0 +1,1 @@
+- branch-worktree-dead-reason: the REASON_MAY_NAME entry for this rule in hooks/test_guard.py still allows `git switch`, which the remedy no longer names, so the entry would hide a regression. Fix: delete the entry.

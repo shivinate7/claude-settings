@@ -1,0 +1,1 @@
+- stamp-quoted-gt-write: (#2480) a quoted `&gt;`, or a redirect onto a scratch log, reads as a write. Family: stamp-read-false-alarms.

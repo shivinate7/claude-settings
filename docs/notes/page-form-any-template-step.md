@@ -1,0 +1,1 @@
+- page-form-any-template-step: (#2556 round 1) feedback_guard.py:531 passes any step file that contains skills/waiting-page; 53 of 1320 steps name it (probe: step ask-dismiss passes). Reachable by mistake; a note until a real wrong route.

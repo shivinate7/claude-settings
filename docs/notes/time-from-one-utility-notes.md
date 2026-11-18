@@ -1,0 +1,1 @@
+- time-from-one-utility-notes: notes: (1) the `.claude` exemption in REASON_MAY_NAME passes an echoed `added` naming ~/.claude, which echoes Claude's own write. (2) The now-central path is a literal in 4 places: local_time NOW_CENTRAL_POINTER, two guard_merge reasons, and a test constant.

@@ -1,0 +1,1 @@
+- archive-push-octopus-refused: an archive push `branch:archive/branch` of a never-pushed octopus merge is refused; the owner's override lifts it.
