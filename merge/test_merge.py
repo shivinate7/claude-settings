@@ -18977,7 +18977,7 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
         self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (fx.fixed, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS"),
                          "the printed record does not carry the fix check from the older head")
 
-    def test_a_fix_verifier_from_an_older_record_head_is_refused_when_that_records_fix_check_failed(self):
+    def test_a_fix_verifier_from_an_older_record_head_is_refused_when_that_records_fix_verifier_failed(self):
         # The control for the case above: an older record whose fix check FAILed names no start, even while the newest record names another head.
         fx = self.real_commits()
         older = self.prior_text(fx, verdict="FAIL")
