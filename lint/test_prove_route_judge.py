@@ -222,14 +222,17 @@ class Base(unittest.TestCase):
 class ControlTests(Base):
     """Green on the old code. They prove the fixture, the stub and the homes the other cases rely on."""
 
-    def test_labelled_file_has_the_six_labels_distinct_texts_and_readable_revs(self):
+    def test_labelled_file_has_the_six_labels_distinct_texts_and_well_formed_revs(self):
         rows = labelled_rows()
         self.assertEqual(sorted({r["label"] for r in rows}), sorted(LABELS), "the labels in the file are not the six the score maps")
         self.assertEqual(len({" ".join(r["text"].split()) for r in rows}), len(rows),
                          "two rows share a text once whitespace is collapsed, so a text cannot key a model answer")
-        missing = [rev for rev in {r["rev"] for r in rows}
-                   if subprocess.run(["git", "cat-file", "-e", rev + "^{commit}"], cwd=ROOT, capture_output=True).returncode]
-        self.assertEqual(missing, [], "the labelled revs are not in this clone, so the file cannot be read at them")
+        bad = [r["file"] + ":" + r["line"] for r in rows if r.get("rev") and not re.fullmatch(r"[0-9a-f]{40}", r["rev"])]
+        self.assertEqual(bad, [], "a labelled row's rev is not a 40-hex commit id")
+        repo, rows_at_fixture = labelled_fixture()
+        unreadable = [r["file"] + ":" + r["line"] for r in rows_at_fixture if r.get("rev") and
+                      " ".join((fixture_text_at(repo, r) or "").split()) != " ".join(r["text"].split())]
+        self.assertEqual(unreadable, [], "the fixture tree does not hold a row's text at its line, so a judge call cannot read it")
 
     def test_labelled_file_has_its_pinned_row_count(self):
         self.assertEqual(len(labelled_rows()), 38, "the labelled file's row count moved: pin it here if the change is on purpose")
@@ -444,6 +447,46 @@ def labelled_rows():
         return json.load(f)
 
 
+_FIXTURE = []
+
+
+def labelled_fixture():
+    """(repo, rows) for the labelled file, built here so no case reads a clone's history. One commit per distinct rev in
+    the file holds each of that rev's files with the row's text at its first line; a row's rev is swapped for its
+    commit's sha. Built once per run. -> (repo path, rows)."""
+    if _FIXTURE:
+        return _FIXTURE[0]
+    rows = labelled_rows()
+    revs = list(dict.fromkeys(r["rev"] for r in rows if r.get("rev")))
+    commits = []
+    for rev in revs:
+        files = {}
+        for r in rows:
+            if r.get("rev") != rev:
+                continue
+            first, _, last = str(r["line"]).strip().partition("-")
+            lines = files.setdefault(r["file"], {})
+            span = int(last or first) - int(first) + 1
+            parts = r["text"].split("\n")
+            parts = parts[:span - 1] + ["\n".join(parts[span - 1:])] if len(parts) > span else parts + [""] * (span - len(parts))
+            lines.update({int(first) + i: part.replace("\n", " ") for i, part in enumerate(parts)})
+        commits.append({path: doc(lines) for path, lines in files.items()})
+    repo, shas = make_repo(tempfile.mkdtemp(prefix="labelled-", dir=RUN_FOLDER), commits)
+    by_rev = dict(zip(revs, shas))
+    fixture_rows = [dict(r, rev=by_rev[r["rev"]]) if r.get("rev") else dict(r) for r in rows]
+    _FIXTURE.append((repo, fixture_rows))
+    return _FIXTURE[0]
+
+
+def fixture_text_at(repo, r):
+    """The text at the row's first line in the row's file at its rev, read through git. None when absent."""
+    first, _, last = str(r["line"]).strip().partition("-")
+    first, last = int(first), int(last or first)
+    shown = subprocess.run(["git", "show", r["rev"] + ":" + r["file"]], cwd=repo, capture_output=True, text=True)
+    lines = shown.stdout.split("\n") if shown.returncode == 0 else []
+    return " ".join(x.strip() for x in lines[first - 1:last]) if last <= len(lines) else None
+
+
 def scored_rows(rows):
     """The rows the score counts: a holds or stale-family label, with a rev. The rest are skipped."""
     return [r for r in rows if r["label"] in HOLDS_LABELS + FLAGGED_LABELS and r.get("rev")]
@@ -452,7 +495,8 @@ def scored_rows(rows):
 def full_file_run(case, answer_for):
     """Run the script on the whole labelled file, each row answered by answer_for(row). -> Run."""
     answers = {" ".join(r["text"].split()): answer_for(r) for r in labelled_rows()}
-    return judge(case, ROOT, answers, labelled=LABELLED)
+    repo, fixture_rows = labelled_fixture()
+    return judge(case, repo, answers, rows=fixture_rows)
 
 
 class FullFileTests(Base):

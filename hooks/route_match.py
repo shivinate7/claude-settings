@@ -24,7 +24,7 @@ import os
 import re
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 
 ROUTE_ROWS_SEAM = "GUARD_ROUTE_ROWS"

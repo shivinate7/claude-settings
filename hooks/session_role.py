@@ -17,7 +17,7 @@ import pathlib
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from guard_shared_tree import SESSION_ID_RE  # noqa: E402  the one home of the session id's shape
 
 SESSION_ROLES = ("coordinator", "triage", "batch-runner")  # what bin/claude-role may start; a lane is never launched
