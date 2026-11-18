@@ -1,6 +1,6 @@
 {
-  "about": "Eval fixture for the review-layer recall scorer. Incidents are reverts and red-main reverts on main, and merged PRs that a later fix PR found to be a reviewer miss. A revert incident names the PR the revert undid. A fix-found miss names its head and the fix PR (fixed_by) and has no revert. Each incident gives the review layer that should have caught it and a one-line answer key. Controls are merged PRs that no revert names and no fix names as a miss. The layer is the author's judgment from the revert message, the changed files and the PR title. It is not a recorded review verdict. A layer of 'unknown' means the revert gives no cause to judge: the incident stays in the fixture and in n.incidents, and in no layer's count.",
-  "read": "2026-11-17 CST. Reverts from git log on main (subjects and 'This reverts commit' lines). PRs from REST commits/<sha>/pulls or pulls/<n>. Controls from REST pulls/<n>, with commits checked against every reverted commit. 2026-11-18 CST: fix-found misses and their heads from git log on main (a fix PR's merge commit and the miss PR's second parent). Controls added from git log on main merge commits; merged_at is the merge commit's time in UTC, and each title is the PR title on the merge commit.",
+  "about": "Eval fixture for the review-layer recall scorer. Incidents are reverts and red-main reverts on main, and merged PRs that a later fix PR found to be a reviewer miss. A revert incident names the PR the revert undid. A fix-found miss names its head and the fix PR (fixed_by) and has no revert. Each incident gives the review layer that should have caught it and a one-line answer key. Controls are merged PRs that no revert names and no fix names as a miss. The layer is the author's judgment from the revert message, the changed files and the PR title. It is not a recorded review verdict. A layer of 'unknown' means the revert gives no cause to judge: the incident stays in the fixture and in n.incidents, and in no layer's count. A layer of 'ci' means CI caught the defect after merge: no review layer replays CI suites, so the incident stays in n.incidents and in no layer's count.",
+  "read": "2026-11-17 CST. Reverts from git log on main (subjects and 'This reverts commit' lines). PRs from REST commits/<sha>/pulls or pulls/<n>. Controls from REST pulls/<n>, with commits checked against every reverted commit. 2026-11-18 CST: fix-found misses and their heads from git log on main (a fix PR's merge commit and the miss PR's second parent). Controls added from git log on main merge commits; merged_at is the merge commit's time in UTC, and each title is the PR title on the merge commit. 2026-11-18 CST: PR 3542 relabelled 'ci' (owner pick a: count true reviewer misses only). PR 3628's evidence is its review-log comment on the PR, read from the PR's comments.",
   "layers": ["reviewer", "refuter", "fix_verifier", "design_reviewer"],
   "incidents": [
     {
@@ -90,8 +90,8 @@
       "pr": 3542,
       "reverted": null,
       "reverts": ["91ab71af93"],
-      "layer": "reviewer",
-      "note": "reviewer never replays CI suites",
+      "layer": "ci",
+      "note": "CI caught it after merge; no review layer replays CI suites (owner pick a: count true reviewer misses only).",
       "basis": "revert message",
       "answer_key": "Adding merge --ready to permissions.allow turned the CloudAllow test red on three CI jobs; the reviewer should run the allow-list change against CloudAllow."
     },
@@ -122,6 +122,7 @@
       "fixed_by": {"pr": 3629, "merge_sha": "4d2ff66076ba1a6f32c9f1d7c14680c146766404"},
       "layer": "reviewer",
       "note": "Found by a later fix PR, not a revert: a docs reword changed owner rule d.",
+      "evidence": {"kind": "review log", "url": "https://github.com/shivinate7/claude-settings/pull/3628#issuecomment-6960195091", "head": "4379292559c85bc39093093827aa665075174b05", "layer": "reviewer", "verdict": "PASS", "quote": "Round 1: reviewer, sonnet, PASS", "created_at": "2026-11-17T20:33:03Z", "pr_merged_at": "2026-11-17T22:10:51Z"},
       "basis": "fix PR title and changed files",
       "answer_key": "A docs reword of owner rule d changed the owner's words; the reviewer should check a rule reword against the owner's recorded words before the merge."
     }

@@ -3,7 +3,7 @@
 The fixture is tests/review_layer_recall/fixture.json: committed data, no network. The scorer is
 lint/review_layer_recall.py, run as
 
-  python3 lint/review_layer_recall.py --fixture <fixture.json> --findings <findings.json>
+  python3 lint/review_layer_recall.py --fixture <fixture.json> --findings <verdicts.json>
 
 and it prints one JSON report:
 
@@ -12,10 +12,10 @@ and it prints one JSON report:
                         "cost": {"status": "unknown"}}}}
 
 `of` is the number of incidents whose answer key names the layer. Recall is "measured" only when the
-findings hold a verdict for each of those incidents. Otherwise it is "unknown", never 0. A findings
+verdicts hold a verdict for each of those incidents. Otherwise it is "unknown", never 0. A verdicts
 file is a JSON list of {"pr": int, "layer": str, "verdict": "PASS" | "FAIL" | "PARTIAL"}; a FAIL by a
 layer on an incident's PR counts as caught. A PARTIAL row, a null, or any other value makes its layer
-unknown, never a miss, and a row never counts for another layer. An incident labelled "unknown" counts
+unknown, never a miss, and a row never counts for another layer. An incident labelled "unknown" or "ci" counts
 in n.incidents and in no layer's of. Cost stays unknown: the review record stores no cost.
 """
 import json
@@ -34,13 +34,13 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the
 FIXTURE = os.path.join(ROOT, "tests", "review_layer_recall", "fixture.json")
 SCORER = os.path.join(HERE, "review_layer_recall.py")
 LAYERS = ("reviewer", "refuter", "fix_verifier", "design_reviewer")
-INCIDENT_LABELS = LAYERS + ("unknown",)  # an incident whose revert gives no cause to judge: kept, counted in no layer
+INCIDENT_LABELS = LAYERS + ("unknown", "ci")  # kept, counted in no layer: "unknown" gives no cause to judge; "ci" is a defect CI caught after merge
 BASES = ("revert message", "revert subject and changed files", "revert message and PR title", "fix PR title and changed files")
-ROUND_MISSES = (  # (PR, head sha, fix PR) of each miss a later fix PR found; no revert names these
+EVAL_MISSES = (  # (PR, head sha, fix PR) of each miss a later fix PR found; no revert names these
     (3293, "4686e4b478ac5e86198bc79236a4917c36d7b290", 3641),
     (3628, "4379292559c85bc39093093827aa665075174b05", 3629),
 )
-ROUND_CONTROLS = (3395, 3401, 3382, 3433, 3461, 3488, 3494, 3455)
+EVAL_CONTROLS = (3395, 3401, 3382, 3433, 3461, 3488, 3494, 3455)
 SCORER_MISSING = "scorer missing: lint/review_layer_recall.py is not in the tree"
 SCORER_TIMEOUT = 120  # hang guard, well above one local run of the scorer
 SHA_SHORT = re.compile(r"[0-9a-f]{7,40}")
@@ -53,14 +53,14 @@ def load_fixture():
 
 
 def run_scorer(test, run, rows, fixture_path):
-    """Runs the scorer on one fixture and the findings rows, and returns its parsed report. The one home of a scorer run."""
+    """Runs the scorer on one fixture and the verdict rows, and returns its parsed report. The one home of a scorer run."""
     if not os.path.isfile(SCORER):
         test.fail(SCORER_MISSING)
-    findings = os.path.join(run, "findings.json")
-    with open(findings, "w", encoding="utf-8") as fh:
+    verdicts = os.path.join(run, "verdicts.json")
+    with open(verdicts, "w", encoding="utf-8") as fh:
         json.dump(rows, fh)
     proc = subprocess.run(
-        [sys.executable, SCORER, "--fixture", fixture_path, "--findings", findings],
+        [sys.executable, SCORER, "--fixture", fixture_path, "--findings", verdicts],
         capture_output=True, text=True, timeout=SCORER_TIMEOUT, cwd=ROOT, env=clean_env())
     test.assertEqual(proc.returncode, 0, "scorer exited %d" % proc.returncode)
     try:
@@ -74,8 +74,8 @@ def clean_env():
     return {k: v for k, v in os.environ.items() if not k.startswith("GH_") and k != "GITHUB_TOKEN"}
 
 
-def synthetic_findings(fixture):
-    """Findings for the scorer cases. The reviewer FAILs every other reviewer incident, in PR order.
+def synthetic_verdicts(fixture):
+    """Verdict rows for the scorer cases. The reviewer FAILs every other reviewer incident, in PR order.
     The fix verifier FAILs each of its incidents. The refuter and the design reviewer have no record.
     Each control gets a reviewer PASS, which must not move any recall."""
     rows = []
@@ -102,7 +102,7 @@ class FixtureShape(unittest.TestCase):
 
     def test_incident_layers_are_in_the_layer_set(self):
         for inc in self.fixture["incidents"]:
-            self.assertIn(inc["layer"], INCIDENT_LABELS, "incident #%s names a label outside the layers and unknown" % inc["pr"])
+            self.assertIn(inc["layer"], INCIDENT_LABELS, "incident #%s names a label outside the layers, unknown and ci" % inc["pr"])
 
     def test_incident_prs_are_positive_and_unique(self):
         prs = [inc["pr"] for inc in self.fixture["incidents"]]
@@ -149,16 +149,36 @@ class FixtureShape(unittest.TestCase):
         control_prs = {ctl["pr"] for ctl in self.fixture["controls"]}
         self.assertEqual(incident_prs & control_prs, set(), "a PR is both an incident and a control")
 
-    def test_this_rounds_misses_and_controls_are_in_the_fixture(self):
+    def test_eval_misses_and_controls_are_in_the_fixture(self):
         incidents = {inc["pr"]: inc for inc in self.fixture["incidents"]}
-        for pr, head, fix_pr in ROUND_MISSES:
+        for pr, head, fix_pr in EVAL_MISSES:
             inc = incidents.get(pr)
             self.assertIsNotNone(inc, "PR #%d is not an incident" % pr)
             self.assertEqual(inc["layer"], "reviewer", "PR #%d is not a reviewer miss" % pr)
             self.assertEqual(inc.get("head"), head, "PR #%d head is not %s" % (pr, head[:10]))
             self.assertEqual(inc.get("fixed_by", {}).get("pr"), fix_pr, "PR #%d is not fixed by PR #%d" % (pr, fix_pr))
         control_prs = {ctl["pr"] for ctl in self.fixture["controls"]}
-        self.assertEqual(sorted(set(ROUND_CONTROLS) - control_prs), [], "a round control is missing from the controls")
+        self.assertEqual(sorted(set(EVAL_CONTROLS) - control_prs), [], "an eval control is missing from the controls")
+
+    def test_a_ci_caught_revert_counts_in_no_review_layer(self):
+        incidents = {inc["pr"]: inc for inc in self.fixture["incidents"]}
+        self.assertIn(3542, incidents, "PR #3542 is gone from the fixture; its revert stays in n.incidents")
+        self.assertNotIn(incidents[3542]["layer"], LAYERS,
+                         "PR #3542 is counted in a review layer; CI caught it after merge, and no review layer replays CI")
+
+    def test_the_3628_miss_cites_the_review_log_that_passed_it(self):
+        incidents = {inc["pr"]: inc for inc in self.fixture["incidents"]}
+        self.assertIn(3628, incidents, "PR #3628 is not an incident")
+        inc = incidents[3628]
+        evidence = inc.get("evidence")
+        self.assertIsInstance(evidence, dict, "PR #3628 has no review-log evidence for its reviewer miss")
+        self.assertTrue(evidence.get("url", "").startswith("https://github.com/shivinate7/claude-settings/pull/3628#issuecomment-"),
+                        "PR #3628 evidence is not a comment on PR #3628")
+        self.assertEqual(evidence.get("head"), inc.get("head"), "PR #3628 evidence names a head other than the miss's head")
+        self.assertEqual((evidence.get("layer"), evidence.get("verdict")), ("reviewer", "PASS"),
+                         "PR #3628 evidence does not read reviewer PASS")
+        created, merged = evidence.get("created_at", ""), evidence.get("pr_merged_at", "")
+        self.assertTrue(created and merged and created < merged, "PR #3628 review log was not written before its merge")
 
 
 class ScorerReport(unittest.TestCase):
@@ -175,7 +195,7 @@ class ScorerReport(unittest.TestCase):
 
     def test_report_names_every_layer_with_n_from_the_fixture(self):
         fixture = load_fixture()
-        report = self.scorer_report(synthetic_findings(fixture))
+        report = self.scorer_report(synthetic_verdicts(fixture))
         self.assertEqual(report["n"]["incidents"], len(fixture["incidents"]), "n.incidents is not the fixture's incident count")
         self.assertEqual(report["n"]["controls"], len(fixture["controls"]), "n.controls is not the fixture's control count")
         self.assertEqual(sorted(report["layers"]), sorted(LAYERS), "the report names the wrong layer set")
@@ -185,9 +205,9 @@ class ScorerReport(unittest.TestCase):
             self.assertIn("cost", entry, "%s has no cost block" % layer)
             self.assertEqual(entry["cost"].get("status"), "unknown", "%s cost is not unknown; the review record stores no cost" % layer)
 
-    def test_recall_is_exact_per_layer_for_synthetic_findings(self):
+    def test_recall_is_exact_per_layer_for_synthetic_verdicts(self):
         fixture = load_fixture()
-        report = self.scorer_report(synthetic_findings(fixture))
+        report = self.scorer_report(synthetic_verdicts(fixture))
         scope = {layer: sorted(i["pr"] for i in fixture["incidents"] if i["layer"] == layer) for layer in LAYERS}
         for layer in LAYERS:
             self.assertEqual(report["layers"][layer]["recall"]["of"], len(scope[layer]), "%s: of is not its incident count in the fixture" % layer)
