@@ -2828,7 +2828,7 @@ jobs:
         with:
           job: checks-windows-rest-2
 
-  # The one check branch protection requires. It fails on a needed job that failed, was cancelled or was
+  # The rollup check. Main requires no check (merge.requiredChecks "none"); a repo set up with protect.py requires this one. It fails on a needed job that failed, was cancelled or was
   # skipped, so every needed job runs on a ready PR and puts its scope condition on its steps, never on the job. There are two
   # exceptions. The three macOS jobs start on a dispatch and a daily that runs only (owner, 01:33 CST Nov 16), so a PR skips
   # them and this job does not need them. The second is the job-level `if: needs.scope.outputs.records_only_skip != 'true'` on the
