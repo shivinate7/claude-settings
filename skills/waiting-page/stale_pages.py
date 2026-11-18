@@ -315,7 +315,6 @@ def fetched_text(url, fetched):
 
 def verdict(url, fetched, template):
     """(word, why) for one page: current, behind, unknown or not-found."""
-    import layout  # batch mode only
     found = marker(url, fetched)
     if found == "notfound":
         target = refile_target(fetched)
