@@ -1,7 +1,7 @@
 {
   "id": "review-layer-recall-eval",
   "title": "Measure what each review layer catches: reviewer, refuter, fix verifier and design reviewer scored against past incidents",
-  "status": "doing",
+  "status": "ready",
   "repo": "shivinate7/claude-settings",
   "phase": "next",
   "lane": "",
@@ -9,7 +9,7 @@
   "blockedBy": [],
   "why": "Owner, 19:45 CST Nov 17 (relayed by the consultant): review the Claude Code team blogs https://claude.dev/blog/how-the-claude-code-team-thinks-about-verification/ and https://claude.dev/blog/solving-code-review-at-anthropic/ and land their findings. Triage read both through a page summary, not word for word. Finding: Verification blog: score reviewers against past incidents with one-sentence answer keys and merged changes as controls; measure raw, post-verification and final recall separately. Code-review blog: past incidents become an eval set that scores every reviewer change; one tuned primary reviewer beats stacking a second expensive one.",
   "source": "owner words 19:45 CST Nov 17 via the consultant; blogs read through a page summary",
-  "note": "Test-author (haiku) 392af73556, builder a3bf0e4755 (lane/review-layer-recall-eval). Round-1 reviewer (sonnet, 21:16 CST) FAIL: the new checks.yml step is missing from lint/test_checks_step_scope.py MAIN_STEPS (CI red); the scorer reads a PARTIAL or unreadable verdict as a measured miss, and mutants 2 to 4 survive; 8 of 10 incidents were reverted inside their PR before merge (not escapes), 6 are batch PRs, 4 layer labels are guesses. Round 2: test-author (haiku) is adding the red cases, listing the step and marking guessed labels unknown on lane/review-layer-recall-eval-tests2; a builder then fixes the scorer and renames findings to verdicts. Owner choices to file after round 2: whether batch and pre-record incidents stay in the fixture, and where a catch is read from (parse review-record comments, or add refuter and cost fields to the record).",
-  "updatedAt": "2026-11-17T21:24:35-06:00",
+  "note": "Round 2 done 21:29 CST: fix check (sonnet) PASS on lane/review-layer-recall-eval-r2 head 0ed1ae48e1 (tests by test-author haiku 64fbbbb6d8, scorer by builder 0ed1ae48e1; six mutants red). 18 tests pass; fixture keeps 10 incidents, 4 guessed labels now unknown. Left as notes: the non-list-file exit-2 guard has no test; the CLI flag is still --findings (the test names it); reverted_before_merge and batch are data only, the scorer ignores them. Owner choice on where a catch is read from: page item 953 (recommended a). Ready for a runner to open the pull request. Not yet in a pull request.",
+  "updatedAt": "2026-11-17T21:31:20-06:00",
   "ask": "Lane brief: measure what each review layer catches (reviewer, refuter, fix verifier, design reviewer).\nGoverning: decision pr-review-record, roles-review-cap-three. Harm: four layers stack with no measure of what each catches.\n1. test-author first (own worktree): write the eval fixture in the repo's test folder: incident list from reverts and red-main reverts (read from git and REST), an answer key per incident, and merged controls (PRs that merged clean). Show it red on main.\n2. builder: make the scorer run and report per-layer recall and cost, with n.\n3. reviewer (model per agent-model-cap).\nProof command: `~/.claude/bin/verdict <scorer command>`, plus the report file. Report cap: 25 lines. Prior work: none found by grep of roadmap steps."
 }
