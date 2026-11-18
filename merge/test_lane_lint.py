@@ -58,6 +58,7 @@ LOG, STEPS, RC, STEP_LOG, SLEEP, PARENT = __LOG__, __STEPS__, __RC__, __STEP_LOG
 DETAILS = __DETAILS__  # step name -> the text after its verdict word; a step not named here reads `stub step`
 WATCH = __WATCH__  # paths, relative to the cwd (the lint tree), whose text this run logs; a path the tree lacks logs null
 FILE_FAILS = __FILE_FAILS__  # step name -> a path: the step FAILs when the path exists in the tree the run reads (its cwd)
+RUNS = __RUNS__  # step name -> a script path, relative to the cwd: the step runs it with this interpreter in that tree, and FAILs on a nonzero exit
 def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
 def watched(path):
@@ -81,6 +82,9 @@ if "--plan" in sys.argv:
         print("would run " + name)
     sys.exit(0)
 FIRED = [name for name, path in FILE_FAILS.items() if os.path.exists(path)]  # a path the run's tree holds: its step FAILs
+RAN = {name: subprocess.run([sys.executable, path], capture_output=True, text=True) for name, path in RUNS.items()}  # captured: the program's output is not the stub's
+FIRED += [name for name, done in RAN.items() if done.returncode]
+DETAILS.update({name: ((done.stdout + done.stderr).strip().splitlines() or ["exit %d" % done.returncode])[-1] for name, done in RAN.items()})  # the last output line
 STEPS = [("FAIL" if name in FIRED else state, name) for state, name in STEPS]
 RC = 1 if FIRED else RC
 end = time.time() + SLEEP  # a lint that runs long: it ends after SLEEP s, or at once when the run that started it is gone
@@ -180,25 +184,28 @@ class CiJobStub:
         self.stub = os.path.join(self.t, "ci-job-stub.py")
         self.step_log = os.path.join(self.t, "ci-job-step.log")
 
-    def stub_text(self, steps, rc, sleep=0, details=None, file_fails=None, watch=()):
+    def stub_text(self, steps, rc, sleep=0, details=None, file_fails=None, watch=(), runs=None):
         """The stub ci-job's source, filled from STUB for the arguments write_stub takes. The one fill of STUB: write_stub and progress_run use it."""
         text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
         return (text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(sleep))
-                .replace("__DETAILS__", repr(details or {})).replace("__FILE_FAILS__", repr(file_fails or {})).replace("__WATCH__", repr(list(watch))))
+                .replace("__DETAILS__", repr(details or {})).replace("__FILE_FAILS__", repr(file_fails or {})).replace("__WATCH__", repr(list(watch)))
+                .replace("__RUNS__", repr(runs or {})))
 
-    def write_stub(self, steps, rc, sleep=0, details=None, file_fails=None, watch=()):
+    def write_stub(self, steps, rc, sleep=0, details=None, file_fails=None, watch=(), runs=None):
         """Write the stub ci-job: it prints `steps` ((state, step name) pairs), exits with `rc`, and runs `sleep` s first when it is set.
         `details` maps a step name to the text its line prints after the verdict word (default `stub step`). `file_fails` maps a step
         name to a path: that step FAILs (and the run exits 1) when the path exists in the stub's cwd, the tree the run reads. `watch` names paths,
         relative to the lint tree the stub runs in; each call's log line carries their text under "files", null for a path the tree lacks.
+        `runs` maps a step name to a script path relative to that tree: the step runs the script with this interpreter, FAILs on a nonzero exit,
+        and prints the script's last output line as its detail. A script that is not a check, such as a suite, is run the same way.
         `steps` and `rc` may each be a dict keyed by job id (the run's first argument): a run of job J prints steps[J] and exits rc[J],
         and a job the dict does not name prints no step and exits 0."""
-        tm.put(self.stub, self.stub_text(steps, rc, sleep, details, file_fails, watch))
+        tm.put(self.stub, self.stub_text(steps, rc, sleep, details, file_fails, watch, runs))
         return self.stub
 
-    def use_ci_job(self, steps, rc, details=None, file_fails=None, watch=()):
-        """merge.CI_JOB becomes a stub that prints `steps` ((state, step name) pairs) and exits with `rc`. Either may be a dict keyed by job (see write_stub). `watch`: see write_stub."""
-        self.write_stub(steps, rc, details=details, file_fails=file_fails, watch=watch)
+    def use_ci_job(self, steps, rc, details=None, file_fails=None, watch=(), runs=None):
+        """merge.CI_JOB becomes a stub that prints `steps` ((state, step name) pairs) and exits with `rc`. Either may be a dict keyed by job (see write_stub). `watch` and `runs`: see write_stub."""
+        self.write_stub(steps, rc, details=details, file_fails=file_fails, watch=watch, runs=runs)
         patch = unittest.mock.patch.object(merge, "CI_JOB", self.stub)
         patch.start()
         self.addCleanup(patch.stop)
@@ -5116,6 +5123,59 @@ class LintCheckRollup(unittest.TestCase):
                 self.lint_refusal(host, info, "a lane PR whose all-jobs-passed read fails")
 
 
+# The judged-by-main fixture (MergedLintTree's judged_by_main cases): a check that refuses a list longer than its limit, and its suite.
+# Main holds the limit at 3. The lane's honest mistake raises it to 4 in the check and in its suite, with a fourth item in the same commit.
+ITEMS_FILE, ITEMS_CHECK, ITEMS_SUITE = "items.txt", "lint/check_items.py", "lint/test_check_items.py"
+ITEMS_STEPS = [("PASS", "items check suite"), ("PASS", "items check")]  # the stub prints each step's state from its script's exit (runs below)
+ITEMS_RUNS = {"items check suite": ITEMS_SUITE, "items check": ITEMS_CHECK}
+ITEMS_CHECK_TEXT = '''import sys
+
+MAX = __MAX__
+
+
+def over(count):
+    return count > MAX
+
+
+def main():
+    with open("items.txt", encoding="utf-8") as f:
+        count = len(f.read().splitlines())
+    print("items.txt holds %d items, the limit is %d" % (count, MAX))
+    return 1 if over(count) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+'''
+ITEMS_SUITE_TEXT = '''import os, sys, unittest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import check_items
+
+
+class CheckItems(unittest.TestCase):
+    def test_a_list_over_the_limit_is_refused(self):
+        self.assertTrue(check_items.over(__OVER__))
+
+    def test_a_list_at_the_limit_is_not_refused(self):
+        self.assertFalse(check_items.over(__AT__))
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+
+
+def items_check(limit):
+    """The items check with its limit set to `limit`: main's copy is items_check(3), a lane that raises the limit ships items_check(4)."""
+    return ITEMS_CHECK_TEXT.replace("__MAX__", str(limit))
+
+
+def items_suite(limit):
+    """The items check's suite for a limit of `limit`: one case over it, one at it."""
+    return ITEMS_SUITE_TEXT.replace("__OVER__", str(limit + 1)).replace("__AT__", str(limit))
+
+
 class MergedLintTree(LaneFixture):
     """The lint runs in the tree the head merges into main, not the head's own copy: a head branched before main fixed a file lints main's fix
     (decision lanes-run-no-full-ci-job). HEAD stays the head, so the lint's commits and trailers are the head's, and only the files hold the merge.
@@ -5388,6 +5448,36 @@ class MergedLintTree(LaneFixture):
         self.assertEqual(rc, 1, "--lint-unknown-ok lifted a failed fetch of main: " + text)
         self.assertEqual(pass_lines(text), [], "--lint-unknown-ok printed a PASS line for a failed fetch of main: " + text)
         self.assertEqual(self.lint_calls(), [], "the lint ran past a failed fetch of main, with a reason: " + text)
+
+    def items_on_main(self):
+        """Main gains the items check at limit 3, its suite and three items. The head merges main in, as shared_file does, so the lane's
+        commit edits the check and its suite from main's copy and merges clean. The lint's steps run the scripts in the tree it merges."""
+        self.commit_on("main", {ITEMS_CHECK: items_check(3), ITEMS_SUITE: items_suite(3), ITEMS_FILE: "one\ntwo\nthree\n"}, "origin/main")
+        self.merge_into_feat("origin/main")
+
+    def test_judged_by_main_a_lane_that_loosens_the_check_and_its_suite_together_is_refused_by_main_s_copy(self):
+        self.items_on_main()
+        self.own_writes({ITEMS_FILE: "one\ntwo\nthree\nfour\n", ITEMS_CHECK: items_check(4), ITEMS_SUITE: items_suite(4)})
+        self.assertEqual(self.file_on("main", ITEMS_CHECK), items_check(3), "precondition: main does not hold its limit of 3, so the case probes nothing")
+        self.assertEqual(self.file_on("feat", ITEMS_CHECK), items_check(4), "precondition: the head does not hold its raised limit, so the case probes nothing")
+        self.assertEqual(self.clash(self.head("feat"), "origin/main"), "clean", "precondition: the head does not merge clean with main, so the case probes nothing")
+        self.use_ci_job(ITEMS_STEPS, 0, runs=ITEMS_RUNS)
+        rc, text = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 1, "lane lint passed four items, though main's copy of the items check refuses more than 3: the lint ran the lane's "
+                                "raised limit of 4 in lint/check_items.py instead of main's: " + text)
+        self.assertEqual(pass_lines(text), [], "lane lint printed a PASS for four items against main's limit of 3: " + text)
+        self.assertTrue(any(line.startswith("FAIL") and "items check" in line for line in text.splitlines()),
+                        "the refusal has no FAIL line that names the items check: " + text)
+
+    def test_judged_by_main_control_a_fourth_item_with_the_check_left_alone_is_refused(self):  # control: green on the old code
+        self.items_on_main()
+        self.own_writes({ITEMS_FILE: "one\ntwo\nthree\nfour\n"})
+        self.assertEqual(self.file_on("feat", ITEMS_CHECK), items_check(3), "precondition: the head's check is not main's, so the case probes nothing")
+        self.use_ci_job(ITEMS_STEPS, 0, runs=ITEMS_RUNS)
+        rc, text = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 1, "lane lint passed four items with the check left alone, so main's limit of 3 did not refuse them: " + text)
+        self.assertTrue(any(line.startswith("FAIL") and "items check" in line for line in text.splitlines()),
+                        "the refusal has no FAIL line that names the items check: " + text)
 
 
 class ReplacedAtHandIn(LaneFixture):
