@@ -5,7 +5,7 @@
 # Why stderr: a pipe on stdout (`verdict ... | grep`) hides the line, and the background output file keeps stderr. A quiet verdict over 300 s then draws a false STALL (decision stall-watch, "Tools that are quiet by design"). Why the file too: `2>&1 | grep` or `2>/dev/null` hides stderr as well, and the stall watch reads that file.
 # Exit 0 is FAIL if the output holds a runner marker, no test ran, or a test run read no test count (a test success marker at a line start, or `xcodebuild test` or `swift test` as typed), else SKIP (`SKIP <cmd>, N skipped (<secs>s)`, exit 0) if N > 0 tests skipped, else PASS.
 # N is the larger of two counts: the sum of the runner summaries in the run (`skipped=N`, `N skipped`, node's `# skipped N` and `ℹ skipped N`), and the lines that start `SKIP `, `SKIPPED` or `SKIP:`. A summary line `SKIP: N check` is not one of them, so it never counts on top of its cases. XCTest `Executed N tests, with M tests skipped` lines nest (class, bundle, All tests), so their max is one term of the sum. Colour codes (SGR) are ignored. A count of 10 or more digits reads as 10**9. A count of 0 is PASS. Why: a test that always skips must not read as a pass.
-# Exit 0 is also FAIL (`cut`) if a line starts with pytest's session header and no line starts with its summary: the run stopped early.
+# Exit 0 is also FAIL (`cut`) for a pytest argv (`pytest`, `py.test`, `python -m pytest`) with `-q` or a line-start session header, and no line-start summary: the run stopped early.
 # A run with no $VERDICT_LOG deletes verdict-*.log files older than 1 day from the temp folder: regular files whose first line is our own header only; errors skipped.
 # Killed by signal N: exit 128+N. Ctrl-C: exit 130. Windows: bin/verdict.cmd.
 import os, re, shutil, subprocess, sys, tempfile, time
@@ -33,8 +33,17 @@ def test_argv(argv):  # read from the argv as typed, before which() rewrites arg
 HUGE = 10 ** 9  # the count for a run of 10 or more digits; any such count still means skips
 def count(digits): return int(digits) if len(digits) < 10 else HUGE
 SKIP_LINE = re.compile(rb"^(?:" + SGR + rb")*SKIP(?:" + SGR + rb")*(?: |PED|:(?! *\d+ check(?:s|\(s\))?(?![A-Za-z])))", re.M)  # a runner may print one such line per skip, with or without a summary; `SKIP: <case>` counts, a `SKIP: N check` summary does not
-PY_START = re.compile(rb"^(?:" + SGR + rb")*={3,}[^\n]*test session starts", re.M)  # pytest's session header; at a line start only, so a quoted one is no header
-PY_SUMMARY = re.compile(rb"^(?:" + SGR + rb")*={3,}[^\n]* in \d[\d.]*s\b[^\n]*={3,}", re.M)  # pytest's summary line: bars around "<counts> in <N>s"
+# pytest's session header and summary, each at a line start (a quoted one is no marker). Every gap is bounded, so one 1 MiB line of `=` scans in linear time.
+# The summary is the bare `<counts> in <N>s` that `-q` prints, with or without `=` bars around it.
+PY_START = re.compile(rb"^(?:" + SGR + rb")*={3,}(?:" + SGR + rb"| ){0,64}test session starts", re.M)
+PY_SUMMARY = re.compile(rb"^(?:" + SGR + rb")*(?:={3,}(?:" + SGR + rb"| ){0,64})?\d{1,9}(?:" + SGR + rb")* (?:" + SGR + rb")*(?:passed|failed|skipped|errors?|warnings?|deselected|xfailed|xpassed)\b[^\n]{0,200}? in \d[\d.]{0,20}s\b", re.M)
+def pytest_argv(argv):  # (is pytest, is quiet), read from the argv as typed; only `pytest`, `py.test` and `python -m pytest` count
+    exe = re.split(r"[\\/]", argv[0])[-1].lower()
+    if exe.endswith(".exe"): exe = exe[:-4]
+    if exe in ("pytest", "py.test"): rest = argv[1:]
+    elif re.fullmatch(r"py(?:thon[\d.]*)?", exe) and "-m" in argv[1:-1] and argv[argv.index("-m") + 1] == "pytest": rest = argv[argv.index("-m") + 2:]
+    else: return False, False
+    return True, any(a == "--quiet" or re.fullmatch(r"-[a-zA-Z]*q[a-zA-Z]*", a) for a in rest)
 TAIL = 1 << 20  # read at most the last 1 MiB of this run's output for the excerpt
 def prune(folder, own):
     try:
@@ -53,6 +62,7 @@ def main(argv):
     if not argv: sys.exit("usage: verdict <cmd...>")
     name = " ".join(argv)
     by_argv = test_argv(argv)
+    is_pytest, quiet = pytest_argv(argv)
     argv = [shutil.which(argv[0]) or argv[0]] + argv[1:]  # finds .cmd/.bat shims on Windows
     log = os.environ.get("VERDICT_LOG")
     if not log:
@@ -129,7 +139,7 @@ def main(argv):
         if fail: rc, note = 1, " runner failure marker"
         elif zero and not ran: rc, note = 1, " no tests ran"
         elif not (zero or ran) and (marked or by_argv): rc, note = 1, " no test count"
-        elif started and not summed: rc, note = 1, " cut before the pytest summary"
+        elif is_pytest and (started or quiet) and not summed: rc, note = 1, " cut before the pytest summary"
         else:
             skips = max(sum(summaries.values()) + max(xct.values(), default=0), len(marks))
             if skips: print(f"SKIP {name}, {skips} skipped ({secs})")
