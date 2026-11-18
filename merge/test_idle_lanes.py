@@ -659,7 +659,8 @@ class IdleLanesCli(unittest.TestCase):
 
     def hand_run_shapes(self):
         """(name, prepare(repo, live)) for each bad file or repo that the hand run reads as unknown, then the stale file as the
-        control: its unknown line already names the step to take (read it again)."""
+        control: its unknown line already names the step to take (read it again). A file with no threads list is valid for this
+        list (skills/roadmap/build.py, live_work's docstring): only the upkeep's threads row reads unknown, so it has no row here."""
         def readable(**changes):
             """The file's text for a readable file with one lane, with `changes` set; a None value leaves its key out."""
             value = {"readAt": roadmap.iso_ago(5), "threads": [], "pulls": [], "items": [], "sessions": [lane("session_a", "c1")]}
@@ -688,7 +689,6 @@ class IdleLanesCli(unittest.TestCase):
             ("the file has no sessions list", lambda repo, live: write(live, readable(sessions=None))),
             ("the file has no pulls list", lambda repo, live: write(live, readable(pulls=None))),
             ("the file has no items list", lambda repo, live: write(live, readable(items=None))),
-            ("the file has no threads list", lambda repo, live: write(live, readable(threads=None))),
             ("an items row is not an object", lambda repo, live: write(live, readable(items=["junk"]))),
             ("keepSessions is a bare string", lambda repo, live: write(live, readable(keepSessions="session_a"))),
             ("a session row is not an object", lambda repo, live: write(live, readable(
