@@ -2677,13 +2677,35 @@ def builder_rename_only(rel: str, tool_input, target: str, cwd: str) -> bool:
     """True when a builder's write to the python test path `rel` renames tests or edits comments and docstrings
     only: the parsed bodies and the count of distinct test names stay (decision builders-cannot-edit-tests). A mutation test, test config, a file that is not python, a file that is not on
     disk, and text that does not parse are not. The rule reads the file once and parses both texts."""
-    if not rel.lower().endswith(".py") or is_mutation_test_rel(rel) or is_test_config_rel(rel):
+    if not python_test_rel(rel):
         return False
     texts = write_result_texts(tool_input, _expanded(target, cwd))
-    if texts is None:
+    return texts is not None and same_test_shape(*texts)
+
+
+def python_test_rel(rel: str) -> bool:
+    """True for a python file the rename route reads: no mutation test, no test config."""
+    return rel.lower().endswith(".py") and not is_mutation_test_rel(rel) and not is_test_config_rel(rel)
+
+
+def same_test_shape(before, after) -> bool:
+    """True when two texts hold the same python test file but for test names, comments and docstrings. A text that
+    is None (a file that does not exist there) or does not parse is not."""
+    if before is None or after is None:
         return False
-    before, after = test_shape(texts[0]), test_shape(texts[1])
-    return before is not None and before == after
+    left, right = test_shape(before), test_shape(after)
+    return left is not None and left == right
+
+
+def builder_rename_diff(root: str, top: str, rel: str, names, old: str, new=None) -> bool:
+    """True when the builder's change of the test path `rel`, from `old` to `new` (see `own_changes`), renames
+    tests or edits comments and docstrings only (`same_test_shape`). The path must read the same through symlinks.
+    Cost: two `git show` or one working-tree read, and two `ast` parses, for each changed python test path."""
+    if not python_test_rel(rel) or any(norm(n) != norm(rel) for n in names):
+        return False
+    before, after = text_at(root, old, rel, top, missing=None), text_at(root, new, rel, top, missing=None)
+    # Equal texts mean the change is a mode or a byte the text read hides, so it is no rename.
+    return before != after and same_test_shape(before, after)
 
 
 def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:
@@ -3370,6 +3392,8 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None, con
             bad = any(is_builder_test_rel(n) for n in names) or (is_test_config_rel(rel) and disables_tests(
                 text_at(root, new, rel, top).splitlines(), text_at(root, old, rel, top).splitlines())) or (
                 is_workflow_rel(rel) and workflow_builder_refused(text_at(root, old, rel, top), text_at(root, new, rel, top)))
+            if bad and builder_rename_diff(root, top, rel, names, old, new):
+                bad = False
         why = ""
         if role == BUILDER_ROLE and builder_merge_test_path(rel, names, conflicts):
             # The merge route: a builder resolves a conflict in a test file when no test case of either parent
