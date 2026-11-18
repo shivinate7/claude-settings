@@ -91,8 +91,11 @@ import subprocess
 import sys
 import tempfile
 import time
+from unittest import mock
 
 from case_runner_test import Skip, run_cases
+
+import ci_wake  # noqa: E402  the one home of the no-workflows read (hooks/ci_wake.py), beside this file
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lint"))
@@ -1937,8 +1940,15 @@ def expect_block(source, pr=CI_PR, not_named=(), base=None, stop_hook_active=Fal
     """The check prints one block that tells the session to set a send_later check-in and names pr. pr None: the
     wait names no PR number, so the reason is not checked for one. No number in not_named appears in the reason."""
     problems, out = ci_run(source, stop_hook_active, base)
+    return problems + block_problems(out, pr, not_named)
+
+
+def block_problems(out, pr=CI_PR, not_named=()):
+    """The problems with out as the CI check's one block line (see expect_block). It also serves the in-process
+    cases, which read out without a subprocess."""
     if out.strip() == "":
-        return problems + ["no CI block printed, want one%s" % ("" if pr is None else f" naming PR {pr}")]
+        return ["no CI block printed, want one%s" % ("" if pr is None else f" naming PR {pr}")]
+    problems = []
     reason = block_reason(out, problems)
     if reason is None:
         return problems
@@ -3021,6 +3031,130 @@ def CI97_branch_named_wait_closes_on_a_merge_of_any_pr():
     closes it, as a bare wait does: passes. Control: the wait alone blocks"""
     wait = [ready(command="gh pr ready my-branch")]
     return expect_silent(wait + [merge_bin(CI_PR)]) + ["control: " + p for p in expect_block(wait, pr="my-branch")]
+
+
+NO_CI_REPO = "%s/no-ci-repo" % CI_OWNER  # a repo with no active workflow, as the fake gh answers for it
+HAS_CI_REPO = "%s/%s" % (CI_OWNER, CI_REPO)  # a repo with a workflow
+WITH_WORKFLOW = ('[{"id":1}]\n', 0, "")  # the default answer: a call that names no repo, or a repo not in the rows
+
+
+def ready_in(repo, number=CI_PR):
+    """A Bash call of `gh pr ready -R <repo> <number>`: the call names the PR's repo."""
+    return ready(command="gh pr ready -R %s %s" % (repo, number))
+
+
+def repo_flag(args):
+    """The repo a gh call names with -R, or None when it names none."""
+    return args[args.index("-R") + 1] if "-R" in args else None
+
+
+def workflow_list_gh(answers, default):
+    """A stand-in for ci_wake.gh. It answers a call by the repo its -R names, else by default. Each answer is
+    (rc, stdout, stderr). Return (gh, calls): calls collects the args of each call."""
+    calls = []
+
+    def gh(args, cwd, timeout=None):
+        calls.append(list(args))
+        return answers.get(repo_flag(args), default)
+    return gh, calls
+
+
+@contextlib.contextmanager
+def gh_repo_unset():
+    """GH_REPO out of the environment for the block, so each gh call reads the repo it names, and the restore is
+    the caller's environment again."""
+    with mock.patch.dict(os.environ):
+        os.environ.pop("GH_REPO", None)
+        yield
+
+
+def stop_with_workflow_list(path, answers, default):
+    """Run the Stop check in this process, with ci_wake's gh read answered by workflow_list_gh. Return (rc, out,
+    calls): the exit code, what the check printed, and the gh calls it made."""
+    gh, calls = workflow_list_gh(answers, default)
+    with gh_repo_unset(), mock.patch.object(ci_wake, "gh", gh):
+        rc, out, _, _ = stop_in_process(path)
+    return rc, out, calls
+
+
+def asked_workflow_list(calls, repo):
+    """True when the check asked gh for the workflow list of repo (None: the call named no repo)."""
+    return any(c[:2] == ["workflow", "list"] and repo_flag(c) == repo for c in calls)
+
+
+def no_ci_spy(answer, asked):
+    """Stands in for ci_wake.no_workflows. It records the repo it is asked for in asked, and answers answer."""
+    def spy(cwd, repo):
+        asked.append(repo)
+        return answer
+    return spy
+
+
+@case
+def CI98_no_ci_check_is_the_shared_no_workflows_read():
+    """CI98. the CI wait asks ci_wake.no_workflows, the one home of the no-CI read, for the PR's repo. Scope first:
+    the shared check is asked for the repo that gh pr ready -R names. Subject: the check says no workflow, so the
+    Stop prints nothing. Control: the check says the repo has one, so the Stop blocks and names the PR. A copy of
+    the check inside stall_watch never asks the shared one, so it fails the scope line"""
+    path = transcript([prompt("merge when green"), ready_in(NO_CI_REPO)])
+    asked = []
+    with gh_repo_unset(), mock.patch.object(ci_wake, "no_workflows", no_ci_spy(True, asked)):
+        rc, out, _, _ = stop_in_process(path)
+    problems = expect(asked == [NO_CI_REPO], f"scope: the shared check was asked {asked!r}, want [{NO_CI_REPO!r}]")
+    if problems:
+        return problems
+    problems += expect(rc == 0, f"exit {rc}, want 0")
+    problems += expect(out.strip() == "",
+                       f"subject: the Stop blocked a repo the shared check reads as no workflow: {out[:200]!r}")
+    with gh_repo_unset(), mock.patch.object(ci_wake, "no_workflows", no_ci_spy(False, [])):
+        rc, out, _, _ = stop_in_process(path)
+    return problems + ["control: " + p for p in block_problems(out)]
+
+
+@case
+def CI99_no_ci_repo_opens_no_wait_on_empty_or_empty_list_answers():
+    """CI99. a repo with no active workflow opens no wait. The answers are gh's: 0 bytes on stdout with exit 0 (gh
+    2.89.0, probed on shivinate7/session-mailbox, which has no workflow), and "[]". Rows: the PR's repo named by -R,
+    with each answer; and the incident form with no repo flag, which reads the folder's repo. Scope first: the check
+    asked gh for the workflow list of that repo. Subject: the Stop prints nothing"""
+    rows = (
+        ("empty stdout, -R", ready_in(NO_CI_REPO), {NO_CI_REPO: ("", 0, "")}, NO_CI_REPO),
+        ("[], -R", ready_in(NO_CI_REPO), {NO_CI_REPO: ("[]\n", 0, "")}, NO_CI_REPO),
+        ("empty stdout, no repo flag", ready(), {None: ("", 0, "")}, None),
+    )
+    problems = []
+    for label, command, answers, repo in rows:
+        path = transcript([prompt("merge when green"), command])
+        rc, out, calls = stop_with_workflow_list(path, answers, default=WITH_WORKFLOW)
+        if not asked_workflow_list(calls, repo):
+            problems.append(f"{label}: scope: no workflow list read for {repo or 'the folder repo'}, calls {calls!r}")
+            continue
+        problems += [f"{label}: {p}" for p in expect(rc == 0, f"exit {rc}, want 0")]
+        if out.strip():
+            problems.append(f"{label}: subject: the Stop blocked a repo with no workflow: {out[:200]!r}")
+    return problems
+
+
+@case
+def CI100_a_workflow_or_an_unreadable_answer_still_opens_the_wait():
+    """CI100. control: a repo with workflows, and a failed or non-JSON workflow list, still open the wait and block
+    with the PR named, as they do today. Rows: one workflow; seven workflows (full size); exit 1 and non-JSON, read
+    from the repo with no workflow, so only an answer read as no workflows could hide the wait. Green on the old
+    code: it shows the check is live, so CI99 cannot pass by silence alone"""
+    seven = json.dumps([{"id": n} for n in range(1, 8)]) + "\n"
+    rows = (
+        ("one workflow", ready_in(HAS_CI_REPO), {HAS_CI_REPO: ('[{"id":1}]\n', 0, "")}),
+        ("seven workflows", ready_in(HAS_CI_REPO), {HAS_CI_REPO: (seven, 0, "")}),
+        ("exit 1", ready_in(NO_CI_REPO), {NO_CI_REPO: ("", 1, "HTTP 401: Bad credentials\n")}),
+        ("non-JSON", ready_in(NO_CI_REPO), {NO_CI_REPO: ("<html>not json</html>\n", 0, "")}),
+    )
+    problems = []
+    for label, command, answers in rows:
+        path = transcript([prompt("merge when green"), command])
+        rc, out, _ = stop_with_workflow_list(path, answers, default=WITH_WORKFLOW)
+        problems += [f"{label}: exit {rc}, want 0"] if rc != 0 else []
+        problems += [f"{label}: control: {p}" for p in block_problems(out)]
+    return problems
 
 
 def paused_job(job_id, command):
