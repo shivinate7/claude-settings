@@ -40,8 +40,9 @@ it still counts when it is an operand of `-` or the receiver or argument of `.ti
 hole are masked.
 
 Keep marker: a comment on the finding's own line, `# time-pinned-ok: <reason>` (Python) or
-`// time-pinned-ok: <reason>` (JS, TS, Swift), keeps that finding out of the listing. It applies to every
-category alike. The reason must not be blank. A marker on another line, or marker text inside a string,
+`// time-pinned-ok: <reason>` (JS, TS, Swift), keeps that finding out of the listing. It keeps every
+category except an elapsed-assert, which stays listed: a timed test uses a synthetic clock, and the marker
+never keeps a hang guard's elapsed read. The reason must not be blank. A marker on another line, or marker text inside a string,
 keeps nothing. It is read from real comments only: Python from tokenizer comment tokens, JS and Swift from
 the `//` comment spans the masker blanks (a block comment is not a marker). A kept finding is counted,
 never listed.
@@ -1211,7 +1212,7 @@ def scan_file(root, rel, kind):
         return None, f"syntax error at line {e.lineno}: {e.msg}", set()
     except (ValueError, RecursionError, MemoryError) as e:
         return None, f"cannot be parsed: {type(e).__name__}: {e}", set()
-    held = {f for f in found if f[0] in kept}
+    held = {f for f in found if f[0] in kept and f[1] != "elapsed-assert"}
     return found - held, re.split(r"\r\n|\r|\n", text), held
 
 
