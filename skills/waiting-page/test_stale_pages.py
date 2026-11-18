@@ -315,7 +315,8 @@ class Stale(unittest.TestCase):
                         "the carry did not keep the shipped page's empty roadmap block")
         self.fetch("JJJ", carried)
         code, out = self.run_cmd(self.repo("before", "JJJ"))
-        self.assertEqual(code, 1, out)  # today: the empty block is flagged, and the verdict word stays current
+        # Exit 1: the carried page's roadmap block is empty. Source: stale_pages.py docstring; no owner ruling or decision found.
+        self.assertEqual(code, 1, out)
         self.assertIn(self.empty_block_line("before"), out.splitlines(), out)
         self.assertIn("current: before", out)
 
