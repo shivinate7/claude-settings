@@ -401,10 +401,69 @@ def roster_session_lines(where):
     return lines
 
 
+# The roster rows whose session holds the standing merge role (decision session-tiers): the coordinator, triage and the
+# consultant. A batch runner or the arbiter row holds none. The match is the row's whole role word, case-insensitive.
+STANDING_ROSTER_ROLES = frozenset({"coordinator", "triage", "consultant"})
+STANDING_MERGE_ROLE = "standing"  # the role word merge/merge.py (STANDING_ROLE) reads from the role file
+
+
+def sync_standing_merge_role(where):
+    """Make this cloud session's merge role file agree with the roster of the checkout `where`. Returns "written",
+    "removed" or "" (nothing changed). Cloud sessions only (CLAUDE_CODE_REMOTE is "true", with a cse_ record id in
+    CLAUDE_CODE_REMOTE_SESSION_ID, read by hooks/override.py remote_session_id). The roster is the roadmap ref the checkout
+    last fetched, so a ref older than a new row gives no role until it is fetched: it fails closed. Writes
+    <config dir>/state/merge-role.json with the env value as the session, the form merge/merge.py read_merge_record compares.
+    Removes that file only when it names this session as standing and the roster, read, no longer does; any other role's
+    file (a batch runner's, a lane's) and an unreadable roster leave it alone. No network. Cost: one local git read, at
+    most one small file write or delete."""
+    if os.environ.get("CLAUDE_CODE_REMOTE") != "true":
+        return ""
+    from override import remote_session_id
+    own, raw = remote_session_id(), os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
+    text = roster_record(where)
+    if not own or not raw or text is None:
+        return ""
+    standing = any(sid == own and role.casefold() in STANDING_ROSTER_ROLES for role, _title, sid in roster_rows(text))
+    path = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude"),
+                        "state", "merge-role.json")
+    if standing:
+        tmp = "%s.%d.tmp" % (path, os.getpid())  # replace, so a reader never sees half a file
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(tmp, "w", encoding="utf-8") as handle:
+                json.dump({"session": raw, "role": STANDING_MERGE_ROLE}, handle)
+            os.replace(tmp, path)
+        except OSError:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            return ""
+        return "written"
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return ""
+    if isinstance(data, dict) and data.get("session") == raw and data.get("role") == STANDING_MERGE_ROLE:
+        try:
+            os.remove(path)
+        except OSError:
+            return ""
+        return "removed"
+    return ""
+
+
 if __name__ == "__main__":
     # `own_session.py roster-lines <checkout>`: the SessionStart roster block. Silent on any failure.
     if len(sys.argv) == 3 and sys.argv[1] == "roster-lines":
         try:
             print("\n".join(roster_session_lines(sys.argv[2])))
+        except Exception:
+            pass
+    # `own_session.py merge-role <checkout>`: the SessionStart standing merge role write. Prints nothing; silent on any failure.
+    elif len(sys.argv) == 3 and sys.argv[1] == "merge-role":
+        try:
+            sync_standing_merge_role(sys.argv[2])
         except Exception:
             pass

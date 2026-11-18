@@ -95,7 +95,8 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     or closed, names a path: relative to the repo of the payload's cwd, or absolute. The file sits
     under a home of its kind in lint/layout.json, read through lint/layout.py: ruling under the
     keys decisions, rules, claude-md or agents-md; task under todo, debts or
-    debt-notes. Some branch's tree in that file's repo holds it. Else the reason names the id. The
+    notes, the notes folder. The frozen debt-notes file is refused. Some branch's tree in that
+    file's repo holds it. Else the reason names the id. The
     handoff never counts for these two kinds. A repo with no home of the kind gets a reason that
     names the layout keys, todo first for a task.
   - Step homes. A task item, open or closed, may instead name `step:<slug>`: it passes when
@@ -2121,7 +2122,7 @@ def grant_repo():
 def step_repo(debts=True):
     """A repo whose step file sits on a lane branch only: some branch's tree holds it, main's does not. With
     `debts` it tracks a debt, so the repo has a task home of its own, and a task's refusal then comes from its
-    step home. Without it, the repo has no todo, debts or debt-notes home at all."""
+    step home. Without it, the repo has no todo, debts or notes home at all."""
     key = "steps" if debts else "steps-bare"
 
     def build():
@@ -2464,9 +2465,9 @@ def expect_step_on_lane_only(name, root):
 
 
 def case_task_open_step_home_passes():
-    """An open task whose home is `step:<slug>` passes when the step file is a blob on a lane branch. Red
-    today: a task's home is read as a path under todo, debts or debt-notes, so the step home is refused as
-    not a tracked task home. The step is on a lane branch only, so the pass proves the branch read."""
+    """An open task whose home is `step:<slug>` passes when the step file is a blob on a lane branch. The step
+    home is read before the task paths under todo, debts or notes. The step is on a lane branch only, so the
+    pass proves the branch read."""
     repo = step_repo()
     expect_step_on_lane_only("task step home", repo)
     p = homed(new_cfg(), "task-step", ("- fb-0958-7 [task] -> step:%s" % STEP_SLUG,), cwd=repo)
@@ -2537,7 +2538,7 @@ def case_closed_note_backtick_step_home_passes():
 
 
 def case_task_step_home_without_a_task_layout_passes():
-    """A task whose home is `step:<slug>` passes in a repo with no todo, debts or debt-notes home, when the step
+    """A task whose home is `step:<slug>` passes in a repo with no todo, debts or notes home, when the step
     file is a blob on a lane branch. Green control: the step file is read before the layout's task homes."""
     repo = step_repo(debts=False)
     expect_step_on_lane_only("bare task step home", repo)
@@ -4043,16 +4044,19 @@ NOTE_FILE_REF = "note:" + NOTE_FILE_SLUG
 NOTES_README_TEXT = "# Notes\n\nOne note per file.\n"
 
 
-def backlog_repo(name, notes=()):
-    """A rolled-out repo whose backlog holds each candidate kind, untracked: the todo file, the notes file and
-    two debts. `notes` (slug, text) pairs add one note file each to the notes folder. A case names one of
-    them as its item's home."""
+def backlog_repo(name, notes=(), commit=False):
+    """A rolled-out repo whose backlog holds each candidate kind: the todo file, the notes file and two debts,
+    untracked unless `commit`. `notes` (slug, text) pairs add one note file each to the notes folder. A case names
+    one of them as its item's home. `commit` puts the whole backlog on main, so a home read finds each file tracked."""
     root = repeat_repo(name, debt=True)
     write_file(os.path.join(root, "docs", "todo.md"), BACKLOG_TODO)
     write_file(os.path.join(root, "docs", "debts", "notes.md"), BACKLOG_NOTES)
     write_file(os.path.join(root, "docs", "debts", SECOND_DEBT_SLUG + ".md"), SECOND_DEBT_TEXT)
     for slug, text in notes:
         write_file(os.path.join(root, "docs", "notes", slug + ".md"), text)
+    if commit:
+        git(root, "add", "-A")
+        git(root, "commit", "-q", "-m", "backlog")
     return root
 
 
@@ -4210,6 +4214,30 @@ def case_notes_folder_absent_still_reads_the_old_notes_file():
     check("no notes folder: one model call on the Stop", len(calls) == 1, p.desc())
     check("no notes folder: the old notes file's line still reads as note:<line>",
           candidate_ref_of(prompt, OLD_NOTE_PHRASE) == NOTE_REF, prompt[-300:])
+
+
+def case_task_homes_drop_the_frozen_notes_file_and_keep_the_notes_folder():
+    """One file per note (decision notes-merge-union): the frozen notes file is refused as a task home, and a file in
+    the notes folder is accepted. Scope first: git tracks both files, so a refusal can only be the home rule, never an
+    untracked file. Subject: `_judge` refuses the frozen path. Controls: the same call accepts a note file, the notes
+    folder is still a task home, and a notes-folder file still reads as `note:<slug>` in the backlog."""
+    import layout  # lint/layout.py, the one home of where each kind lives
+    root = backlog_repo("task-homes-frozen-notes", notes=[(NOTE_FILE_SLUG, NOTE_FILE_TEXT)], commit=True)
+    frozen = "docs/debts/notes.md"
+    note = "docs/notes/%s.md" % NOTE_FILE_SLUG
+    check("task homes scope: the frozen notes file is on disk", os.path.isfile(os.path.join(root, *frozen.split("/"))),
+          root)
+    mod = guard_module()
+    check("task homes scope: git tracks the frozen notes file", mod.ruling_home.value_resolves(frozen, root), frozen)
+    check("task homes scope: git tracks the note file", mod.ruling_home.value_resolves(note, root), note)
+    refused = mod.Homes._judge(layout, "fb-1", "task", root, frozen, False)
+    check("task homes: the frozen notes file is refused as a task home", refused is not None, refused)
+    accepted = mod.Homes._judge(layout, "fb-1", "task", root, note, False)
+    check("task homes control: a note file is accepted as a task home", accepted is None, accepted)
+    homes = mod.kind_homes(layout, root, "task")
+    check("task homes control: the notes folder is still a task home", "docs/notes" in homes, homes)
+    refs = [ref for ref, label, text in mod.backlog_candidates(root)]
+    check("task homes control: a notes-folder file still reads as note:<slug>", NOTE_FILE_REF in refs, refs)
 
 
 def case_one_shot_grant_passes_with_its_home_and_blocks_without_one():
@@ -4945,6 +4973,7 @@ CASES = (
     case_repeat_note_file_is_a_backlog_candidate_under_its_own_ref,
     case_repeat_note_file_is_never_a_candidate_for_its_own_item,
     case_notes_folder_absent_still_reads_the_old_notes_file,
+    case_task_homes_drop_the_frozen_notes_file_and_keep_the_notes_folder,
     case_one_shot_grant_passes_with_its_home_and_blocks_without_one,
     case_guard_ruling_home_is_judged_in_the_repo_the_session_worked_in,
     case_step_path_is_derived_from_override_step_dir,

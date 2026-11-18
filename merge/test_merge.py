@@ -12290,12 +12290,13 @@ class MainRunsHost(FakeHost, merge.Host):
     `texts`: head sha -> the workflow file's text on that head (a head not in it reads as NO_IF_WORKFLOW). `text_fail`: every file read fails with this text.
     `pulls`: {number: REST row} of the pull requests the page holds (None: the own one only). `heads`: head sha -> the checks state head_state reads for it.
     `changed`: the (path, status, additions) triples of the own pull request's diff (pr_files reads them); None keeps FakeHost's README.md.
-    `named_checks`: the (name, state, head) rows check_state reads. `job_logs`: job id -> the text `actions/jobs/N/logs` returns; a job with none is a 404."""
+    `named_checks`: the (name, state, head) rows check_state reads. `job_logs`: job id -> the text `actions/jobs/N/logs` returns; a job with none is a 404. `required`: the merge.requiredChecks the real Host holds, "protection" by default."""
     base_state = getattr(merge.Host, "base_state", None)
 
     def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None, jobs_fail_of=None, texts=None, text_fail=None, pulls=None, heads=None, changed=None,
-                 named_checks=None, job_logs=None):
+                 named_checks=None, job_logs=None, required="protection"):
         FakeHost.__init__(self, root, other)
+        self.required = required  # base_state branches on it; "protection" is what the real Host gets for a protected main (merge.MERGE_DEFAULTS)
         self.ignore, self.cwd, self.warned = {}, root, set()
         self.main_runs, self.jobs, self.runs_fail, self.jobs_fail, self.reads = main_runs, jobs, runs_fail, jobs_fail, []
         self.jobs_fail_of = jobs_fail_of or {}
