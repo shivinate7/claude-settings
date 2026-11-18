@@ -34,9 +34,9 @@ HUGE = 10 ** 9  # the count for a run of 10 or more digits; any such count still
 def count(digits): return int(digits) if len(digits) < 10 else HUGE
 SKIP_LINE = re.compile(rb"^(?:" + SGR + rb")*SKIP(?:" + SGR + rb")*(?: |PED|:(?! *\d+ check(?:s|\(s\))?(?![A-Za-z])))", re.M)  # a runner may print one such line per skip, with or without a summary; `SKIP: <case>` counts, a `SKIP: N check` summary does not
 # pytest's session header and summary, each at a line start (a quoted one is no marker). Every gap is bounded, so one 1 MiB line of `=` scans in linear time.
-# The summary is the bare `<counts> in <N>s` that `-q` prints, with or without `=` bars around it.
+# The summary is `<counts> in <N>s`, with or without `=` bars around it (`-q` prints none). `N tests collected` (--collect-only) and `no tests ran` count as counts.
 PY_START = re.compile(rb"^(?:" + SGR + rb")*={3,}(?:" + SGR + rb"| ){0,64}test session starts", re.M)
-PY_SUMMARY = re.compile(rb"^(?:" + SGR + rb")*(?:={3,}(?:" + SGR + rb"| ){0,64})?\d{1,9}(?:" + SGR + rb")* (?:" + SGR + rb")*(?:passed|failed|skipped|errors?|warnings?|deselected|xfailed|xpassed)\b[^\n]{0,200}? in \d[\d.]{0,20}s\b", re.M)
+PY_SUMMARY = re.compile(rb"^(?:" + SGR + rb")*(?:={3,}(?:" + SGR + rb"| ){0,64})?(?:\d{1,9}(?:" + SGR + rb")* (?:" + SGR + rb")*(?:passed|failed|skipped|errors?|warnings?|deselected|xfailed|xpassed|tests? collected)|no tests ran)\b[^\n]{0,200}? in \d[\d.]{0,20}s\b", re.M)
 def pytest_argv(argv):  # (is pytest, is quiet), read from the argv as typed; only `pytest`, `py.test` and `python -m pytest` count
     exe = re.split(r"[\\/]", argv[0])[-1].lower()
     if exe.endswith(".exe"): exe = exe[:-4]
