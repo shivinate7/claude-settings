@@ -6826,7 +6826,7 @@ def idle_lanes(live, repo_dir=None):
         else:
             tail = "Run get_session on each lane in one message, then archive them in the next message."
         entries = [*entries, f"merge: {count}. {tail}"]
-    # No unknown line ends bare: each names what to fix and to read the live file again (owner, 2026-11-18 11:49 CST). The checks above read the raw entries.
+    # No unknown line ends bare: each names what to fix and to read the live file again, so a reader never meets a dead end. The checks above read the raw entries.
     entries = [x + IDLE_UNKNOWN_FIX if x.startswith("unknown (") and not IDLE_FIX_NAMED.search(x) else x for x in entries]
     say(*entries)
     return 1 if unread else 0
