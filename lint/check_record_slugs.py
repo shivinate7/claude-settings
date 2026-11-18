@@ -142,21 +142,21 @@ def unchecked_feel_debts(root, moved):
     return out
 
 
+# The note form, as a refusal clause: the guard's write-time log (hooks/guard.py note_form_hit) reads it from here, and
+# the log cuts a long match, so it stays short. %s: the note folder with its slash. The first agent rule below builds on it.
+NEW_NOTE_REFUSAL = "a new or edited note is its own file, %s<slug>.md, as `- <slug>: <text>`"
 # The note rules an agent must follow, one list for the refusal below and the SubagentStart brief (hooks/agent_brief.py
 # imports it). {folder} is the note folder with its slash, {old} the old notes file; layout.fill_note_paths fills both.
 # The first entry holds the note form, and the refusal for a bad new note prints it.
 AGENT_FORM_RULES = (
-    "A new or edited note is its own file, {folder}<slug>.md, one line `- <slug>: <text>`: the slug is the file name, "
-    "32 characters or fewer, and not digits only.",
+    NEW_NOTE_REFUSAL[0].upper() + NEW_NOTE_REFUSAL[1:].replace("%s", "{folder}")
+    + ". The slug is the file name, 32 characters or fewer, and not digits only.",
     "The old notes file {old} takes deletes only: add no line to it and edit none.",
 )
 NOTE_LINE = re.compile(r"^- ([a-z0-9-]+): +\S")  # the one line a note file holds: `- <slug>: <text>`, text not empty
 DIGITS = re.compile(r"[0-9]+")  # a digits-only slug reads as an old `note:<digits>` ref (hooks/feedback_guard.py)
 NOTE_README = "README.md"  # the note folder's own description: not a note
 CLIP = 60  # characters of a refused line that a message shows
-# The refusal text is the note form rule itself, with {folder} turned to %s, so the guard's write-time log
-# (hooks/guard.py note_form_hit) and the refusal below read the one entry of AGENT_FORM_RULES.
-NEW_NOTE_REFUSAL = AGENT_FORM_RULES[0].replace("{folder}", "%s")
 
 
 def note_dir(root):

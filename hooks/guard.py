@@ -7980,8 +7980,8 @@ def judge(payload) -> None:
 
 def note_form_hit(tool: str, tool_input: dict, target: str, cwd: str) -> str:
     """The log text (the checker's refusal, then the old notes file) when this Write, Edit or MultiEdit adds a line to the
-    old notes file, else "". The file is the debt-notes kind of lint/layout.json at its layout path and its legacy path, the
-    two lint/check_record_slugs.py reads as frozen; the text is that checker's NEW_NOTE_REFUSAL. A line is added when
+    old notes file, else "". The file is one of layout.candidates(root, "debt-notes"), the paths lint/check_record_slugs.py
+    reads as frozen; the folder is layout.path(root, "notes"); the text is that checker's NEW_NOTE_REFUSAL. A line is added when
     its count after the write is over its count before, blank lines apart: the checker's own test, so a delete, a
     reorder and a blank line add none. Cost: a `.md` target reads lint/layout.json; a match reads the old file once
     more. No process starts. Fails open: anything unread returns "".
@@ -7990,12 +7990,16 @@ def note_form_hit(tool: str, tool_input: dict, target: str, cwd: str) -> str:
         return ""
     try:
         import collections
-        data = _layout_module().layout()
-        legacy = data.get("legacy") or {}
-        old = data["kinds"]["debt-notes"]["path"].strip("/")
+        layout = _layout_module()
         full = os.path.abspath(_absolute(target, cwd)).replace("\\", "/")
-        rel = next((f for f in dict.fromkeys((old, legacy.get(old, old)))
-                    if full.endswith("/" + f) and os.path.exists(full[:-len(f)] + ".git")), "")
+        root = os.path.dirname(full)
+        while not os.path.exists(os.path.join(root, ".git")):
+            up = os.path.dirname(root)
+            if up == root:
+                return ""
+            root = up
+        root = root.replace("\\", "/")
+        rel = next((f for f in layout.candidates(root, "debt-notes") if full == root.rstrip("/") + "/" + f), "")
         if not rel:
             return ""
         try:
@@ -8011,8 +8015,7 @@ def note_form_hit(tool: str, tool_input: dict, target: str, cwd: str) -> str:
                 was, now = edit.get("old_string"), edit.get("new_string")
                 if not isinstance(was, str) or not isinstance(now, str) or (was and was not in after) or (not was and after):
                     return ""
-                after = (now if not was else after.replace(was, now, None if edit.get("replace_all") else 1)
-                         ) if True else after
+                after = now if not was else after.replace(was, now, -1 if edit.get("replace_all") else 1)
         if not isinstance(after, str):
             return ""
         held = collections.Counter(l.rstrip("\r") for l in before.split("\n") if l.strip())
@@ -8020,8 +8023,7 @@ def note_form_hit(tool: str, tool_input: dict, target: str, cwd: str) -> str:
             held[line] -= 1
             if held[line] < 0:
                 import check_record_slugs
-                notes = data["kinds"]["notes"]["path"].strip("/")
-                return "%s; %s" % (check_record_slugs.NEW_NOTE_REFUSAL % (legacy.get(notes, notes) + "/"), rel)
+                return "%s; %s" % (check_record_slugs.NEW_NOTE_REFUSAL % (layout.path(root, "notes") + "/"), rel)
     except Exception:
         return ""
     return ""
