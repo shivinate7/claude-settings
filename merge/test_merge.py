@@ -15344,13 +15344,20 @@ class MergeRoleCheck(CloudSession):
 OWN_SESSION_LINK ="https://claude.ai/code/session_" + ROLE_SESSION[len("cse_"):]  # the link a session's pull request ends with: session_<x> for cse_<x> (hooks/override.py remote_session_id)
 OWN_PR_BODY = "Small edit.\n\n" + OWN_SESSION_LINK + "\n"
 OTHER_PR_BODY = "Small edit.\n\nhttps://claude.ai/code/session_another_session\n"
+CARRIED_BODY = OTHER_PR_BODY + "Carried by: " + OWN_SESSION_LINK + "\n"  # another session's pull request, carried here by a line that names this session (owner pick a, standing-merges-stragglers)
+CARRIED_ELSEWHERE_BODY = OTHER_PR_BODY + "Carried by: https://claude.ai/code/session_third_session\n"  # the same, with the carry line naming a third session
+BARE_MENTION_BODY = "Small edit, raised in " + OWN_SESSION_LINK + ".\n\nhttps://claude.ai/code/session_another_session\n"  # this session's link named in the text, with no carry line; the closing link is another session's
 
 class StandingMergeRole(CloudSession):
     """Ruling own-tiny-fixes-b: a standing session (a coordinator, a triage or a consultant, decision session-tiers)
-    records the `standing` merge role and merges its OWN pull request through the merge tool, on green. The gate sits after the pull request
-    read and before the lock or any claim. The pull request is this session's own when its body names this session's link. CI is green.
-    A docs-only pull request with no guard path needs no record. Any other pull request needs one passing reviewer record on the live
-    head, whatever its model (owner, pick A). No pull request is bounded by line or file counts. The batch runner is not judged by this gate. A refusal names no tier word and no command."""
+    records the `standing` merge role and merges a pull request through the merge tool, on green. The gate sits after the pull request
+    read and before the lock or any claim. The pull request is this session's when its body names this session's link anywhere: its closing link,
+    a `Carried by:` line that a carrying session adds (owner pick a, standing-merges-stragglers), or any other mention. The owner's messages of
+    10:27 CST say a straggling pull request may be merged under any standing session's purview, by whichever route is faster, and that the
+    batch runner, consultant, triage or coordinator may merge one whose opening lane ended. A body that names another session's link only,
+    or no link, is refused. CI is green. A docs-only pull request with no guard path needs no
+    record. Any other pull request needs one passing reviewer record on the live head, whatever its model (owner, pick A). No pull request is
+    bounded by line or file counts. The batch runner is not judged by this gate. A refusal names no tier word and no command."""
 
     def own_pr(self, changed, body=OWN_PR_BODY):
         """Make pull request 7 a case's pull request: its body is `body`, its files are `changed`, and this session records standing."""
@@ -15435,7 +15442,7 @@ class StandingMergeRole(CloudSession):
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(getattr(self.host, "merged", False), out + err)
 
-    # ---- the gate refuses: not this session's pull request
+    # ---- the gate refuses: a body that names another session's link only, or no link
     def test_another_sessions_pr_is_refused_under_standing(self):
         self.own_pr([("docs/notes.md", "modified", 1)], body=OTHER_PR_BODY)
         self.assert_standing_refused()
@@ -15444,6 +15451,83 @@ class StandingMergeRole(CloudSession):
         # no link is no proof that the pull request is this session's
         self.own_pr([("docs/notes.md", "modified", 1)], body="Small edit.\n")
         self.assert_standing_refused()
+
+    # ---- a carried pull request: a `Carried by:` line naming this session stands for its own link (owner pick a, standing-merges-stragglers;
+    # the owner's messages of 10:27 CST, straggling pull requests merged by whichever standing session is faster)
+    def assert_carried_scope(self, body):
+        """P7, the scope before the gate reads it: `body` holds a carry line for this session, and its closing link is another session's, so a
+        pass comes from the carry line. Read from the strings, not from the gate's own reader, so the verdict stays the gate's."""
+        self.assertIn("Carried by: " + OWN_SESSION_LINK, body, "the case's body holds no carry line for this session")
+        self.assertNotIn(OWN_SESSION_LINK, OTHER_PR_BODY, "the case's closing link is this session's, so the pass is not the carry line's")
+
+    def test_carried_docs_pr_merges_under_standing(self):
+        # owner pick a, standing-merges-stragglers: a carry line naming this session passes as the session's own closing link does
+        self.commit_feat({"docs/notes.md": "Notes.\n"})
+        self.own_pr([("docs/notes.md", "modified", 1)], body=CARRIED_BODY)
+        self.assert_carried_scope(CARRIED_BODY)
+        rc, out, err = self.standing_confirm()
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+    def test_carried_code_pr_with_a_passing_sonnet_record_merges_under_standing(self):
+        self.commit_feat({"tools/note.py": "X = 1\n"})
+        changed = [("tools/note.py", "added", 1)]
+        self.own_pr(changed, body=CARRIED_BODY)
+        self.assert_carried_scope(CARRIED_BODY)
+        self.assert_standing_merges(changed, record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, PASS",)))
+
+    def test_a_bare_mention_of_this_session_link_merges_under_standing(self):
+        # the gate reads the whole body for this session's link, so a link named in the text passes with no carry line (own_session_link)
+        self.commit_feat({"docs/notes.md": "Notes.\n"})
+        self.own_pr([("docs/notes.md", "modified", 1)], body=BARE_MENTION_BODY)
+        self.assertNotIn("Carried by:", BARE_MENTION_BODY, "the case's body holds a carry line, so the pass is not a bare mention's")
+        self.assertIn(OWN_SESSION_LINK, BARE_MENTION_BODY, "the case's body does not name this session")
+        self.assertTrue(BARE_MENTION_BODY.rstrip().endswith("session_another_session"), "the case's closing link is this session's, so the pass is not the bare mention's")
+        rc, out, err = self.standing_confirm()
+        self.assertEqual(rc, 0, (err.strip().splitlines() or [out])[-1])  # the refusal is the last line; the stamp warning comes first
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+    # ---- a carry line that names another session, and the other checks on a carried pull request still refuse
+    def test_carried_pr_naming_another_session_is_refused_under_standing(self):
+        # owner pick, option a: a carry line naming another session is no proof that this session carries the pull request
+        self.own_pr([("docs/notes.md", "modified", 1)], body=CARRIED_ELSEWHERE_BODY)
+        self.assertNotIn(OWN_SESSION_LINK, CARRIED_ELSEWHERE_BODY, "P7, the scope before the subject: the case's body names this session")
+        err = self.assert_standing_refused()
+        self.assertIn("this session did not open this pull request, so it may not merge it.", err)
+
+    def test_carried_docs_pr_with_red_ci_is_refused_under_standing(self):
+        self.commit_feat({"docs/notes.md": "Notes.\n"})
+        self.own_pr([("docs/notes.md", "modified", 1)], body=CARRIED_BODY)
+        self.assert_carried_scope(CARRIED_BODY)
+        self.host.checks = (False, "a check is red: checks: fail")
+        self.host.state = "red: checks: fail"  # the head reads red, as the red-head cases above set it (head_state reads this)
+        err = self.assert_standing_refused()
+        # the gate's own words, "not green: <state>.": confirm's head check words the same fact with a comma, so this line holds the gate's refusal alone
+        self.assertIn("the head's own checks are not green: ", err)
+
+    def assert_carried_code_refused_without_record(self, *bodies):
+        """The record check still runs on a carried code pull request: `bodies` are its only records, and none passes on the live head. Each
+        case is its own fixture, because a merge that slips past the gate moves the head, and a later read would see no head at all."""
+        self.own_pr([("tools/note.py", "added", 1)], body=CARRIED_BODY)
+        self.assert_carried_scope(CARRIED_BODY)
+        self.scripted_records(*bodies)
+        err = self.assert_standing_refused()
+        self.assertIn("its head has no passing review record", err)
+
+    def test_carried_code_pr_with_no_record_is_refused_under_standing(self):
+        self.assert_carried_code_refused_without_record()
+
+    def test_carried_code_pr_with_a_sonnet_record_on_an_old_head_is_refused_under_standing(self):
+        self.assert_carried_code_refused_without_record(record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+
+    def test_carried_code_pr_with_a_failing_sonnet_record_is_refused_under_standing(self):
+        self.assert_carried_code_refused_without_record(record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, FAIL",)))
+
+    def test_carried_pr_with_no_changed_file_is_refused_under_standing(self):
+        self.own_pr([], body=CARRIED_BODY)
+        self.assert_carried_scope(CARRIED_BODY)
+        err = self.assert_standing_refused()
+        self.assertIn("this pull request changes no file.", err)
 
     # ---- a code pull request, guard paths included, merges under standing with one passing reviewer
     # record on the live head, whatever its model. Without that record it is refused, whatever its size.
