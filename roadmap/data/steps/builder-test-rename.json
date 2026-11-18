@@ -1,0 +1,14 @@
+{
+ "id": "builder-test-rename",
+ "title": "F4: a builder may rename a test and edit test comments and docstrings",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "consultant",
+ "blockedBy": [],
+ "why": "Owner 15:50 CST Nov 18, word for word to the consultant: 'One question is still open: may builders rename tests and edit test comments (F4)? yes they can'.",
+ "source": "consultant relay 15:50 CST Nov 18",
+ "note": "Ruling for F4, narrows item 437 a: a builder may rename a test and edit test comments and docstrings when the parsed test bodies and the test count are unchanged. Home: decision builders-cannot-edit-tests (the consultant lands it). Prior-work search first.",
+ "updatedAt": "2026-11-18T15:51:05-06:00"
+}
