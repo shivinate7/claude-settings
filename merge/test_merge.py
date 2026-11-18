@@ -15337,15 +15337,16 @@ OWN_PR_BODY = "Small edit.\n\n" + OWN_SESSION_LINK + "\n"
 OTHER_PR_BODY = "Small edit.\n\nhttps://claude.ai/code/session_another_session\n"
 CARRIED_BODY = OTHER_PR_BODY + "Carried by: " + OWN_SESSION_LINK + "\n"  # another session's pull request, carried here by a line that names this session (owner pick, 2026-11-18 10:29 CST, option a)
 CARRIED_ELSEWHERE_BODY = OTHER_PR_BODY + "Carried by: https://claude.ai/code/session_third_session\n"  # the same, with the carry line naming a third session
+BARE_MENTION_BODY = "Small edit, raised in " + OWN_SESSION_LINK + ".\n\nhttps://claude.ai/code/session_another_session\n"  # this session's link named in the text, with no carry line; the closing link is another session's
 
 class StandingMergeRole(CloudSession):
     """Ruling own-tiny-fixes-b: a standing session (a coordinator, a triage or a consultant, decision session-tiers)
     records the `standing` merge role and merges a pull request through the merge tool, on green. The gate sits after the pull request
-    read and before the lock or any claim. The pull request is this session's when its body names this session's link: its closing link,
-    or a `Carried by:` line that a carrying session adds (owner pick, 2026-11-18 10:29 CST, option a). The owner's messages of 2026-11-18
+    read and before the lock or any claim. The pull request is this session's when its body names this session's link anywhere: its closing link,
+    a `Carried by:` line that a carrying session adds (owner pick, 2026-11-18 10:29 CST, option a), or any other mention. The owner's messages of 2026-11-18
     10:27 CST say a straggling pull request may be merged under any standing session's purview, by whichever route is faster, and that the
-    batch runner, consultant, triage or coordinator may merge one whose opening lane ended. The carry line is the proof that the session carries
-    it. A body that names another session's link only, or no link, is refused. CI is green. A docs-only pull request with no guard path needs no
+    batch runner, consultant, triage or coordinator may merge one whose opening lane ended. A body that names another session's link only,
+    or no link, is refused. CI is green. A docs-only pull request with no guard path needs no
     record. Any other pull request needs one passing reviewer record on the live head, whatever its model (owner, pick A). No pull request is
     bounded by line or file counts. The batch runner is not judged by this gate. A refusal names no tier word and no command."""
 
@@ -15466,8 +15467,19 @@ class StandingMergeRole(CloudSession):
         self.assert_carried_scope(CARRIED_BODY)
         self.assert_standing_merges(changed, record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, PASS",)))
 
+    def test_a_bare_mention_of_this_session_link_merges_under_standing(self):
+        # the gate reads the whole body for this session's link, so a link named in the text passes with no carry line (own_session_link)
+        self.commit_feat({"docs/notes.md": "Notes.\n"})
+        self.own_pr([("docs/notes.md", "modified", 1)], body=BARE_MENTION_BODY)
+        self.assertNotIn("Carried by:", BARE_MENTION_BODY, "the case's body holds a carry line, so the pass is not a bare mention's")
+        self.assertIn(OWN_SESSION_LINK, BARE_MENTION_BODY, "the case's body does not name this session")
+        self.assertTrue(BARE_MENTION_BODY.rstrip().endswith("session_another_session"), "the case's closing link is this session's, so the pass is not the bare mention's")
+        rc, out, err = self.standing_confirm()
+        self.assertEqual(rc, 0, (err.strip().splitlines() or [out])[-1])  # the refusal is the last line; the stamp warning comes first
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
     # ---- a carry line that names another session, and the other checks on a carried pull request still refuse
-    def test_carried_pr_naming_another_session_is_refused_under_standing_with_today_text(self):
+    def test_carried_pr_naming_another_session_is_refused_under_standing(self):
         # owner pick, option a: a carry line naming another session is no proof that this session carries the pull request
         self.own_pr([("docs/notes.md", "modified", 1)], body=CARRIED_ELSEWHERE_BODY)
         self.assertNotIn(OWN_SESSION_LINK, CARRIED_ELSEWHERE_BODY, "P7, the scope before the subject: the case's body names this session")
